@@ -115,6 +115,25 @@ export function createPostgresNotificationsRepository(db: AppDb): NotificationsR
       return row?.total ?? 0;
     },
 
+    async countUnreadForUsers(params) {
+      const counts = new Map<string, number>(params.userIds.map((userId) => [userId, 0]));
+      if (params.userIds.length === 0) {
+        return counts;
+      }
+      const result = await db
+        .prepare(
+          `SELECT user_id, COUNT(*)::int AS total FROM notifications
+             WHERE organization_id = ? AND user_id = ANY(?::text[]) AND read_at IS NULL
+             GROUP BY user_id`
+        )
+        .bind(params.organizationId, params.userIds)
+        .all<{ user_id: string; total: number }>();
+      for (const row of result.results) {
+        counts.set(row.user_id, row.total);
+      }
+      return counts;
+    },
+
     async markRead(params) {
       // Idempotent: re-marking an already-read row still matches (and keeps its
       // original read_at); a nonexistent/foreign id matches nothing → false.

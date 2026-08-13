@@ -1,4 +1,5 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
+import { NOTIFICATION_CATEGORIES, NOTIFICATION_CHANNELS } from "@sdp/types";
 import { z } from "zod";
 
 import { errorResponseSchema, pageQuerySchema, pageSizeQuerySchema } from "../schemas";
@@ -6,6 +7,8 @@ import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 
 // In-app notification endpoints (dashboard bell). Personal scope: rows belong to the
 // authenticated (org, user) pair; API-key callers see an empty inbox.
+// (GET /v1/notifications/stream is deliberately NOT documented: it is a
+// dashboard-internal SSE endpoint, unusable with API-key auth.)
 export function registerNotificationPaths(registry: OpenAPIRegistry) {
   const notificationSchema = z
     .object({
@@ -129,6 +132,60 @@ export function registerNotificationPaths(registry: OpenAPIRegistry) {
     responses: {
       200: { description: "All marked read", content: jsonContent(okResponse) },
       ...errorResponses(errorResponseSchema, [401, 500]),
+    },
+  });
+
+  const preferenceSchema = z
+    .object({
+      category: z.enum(NOTIFICATION_CATEGORIES),
+      channel: z.enum(NOTIFICATION_CHANNELS),
+      enabled: z.boolean(),
+    })
+    .openapi("NotificationPreference");
+  // Always the EFFECTIVE matrix: every category × channel with defaults applied.
+  const preferencesResponse = envelope(
+    z.object({ preferences: z.array(preferenceSchema), emailEnabled: z.boolean() }),
+    "NotificationPreferencesResponse"
+  );
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/notifications/preferences",
+    tags: ["Notifications"],
+    summary: "Notification preferences",
+    operationId: "getNotificationPreferences",
+    description:
+      "The authenticated user's effective notification preference matrix (category × channel; unset cells default to enabled).",
+    security: [{ apiKeyAuth: [] }],
+    request: { headers: projectScopeHeaders },
+    responses: {
+      200: { description: "Effective preferences", content: jsonContent(preferencesResponse) },
+      ...errorResponses(errorResponseSchema, [401, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "put",
+    path: "/v1/notifications/preferences",
+    tags: ["Notifications"],
+    summary: "Update notification preferences",
+    operationId: "updateNotificationPreferences",
+    description:
+      "Upserts the preference cells sent (partial update) and returns the new effective matrix.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      body: {
+        content: jsonContent(
+          z
+            .object({ preferences: z.array(preferenceSchema).min(1) })
+            .openapi("UpdateNotificationPreferencesRequest")
+        ),
+      },
+    },
+    responses: {
+      200: { description: "Effective preferences", content: jsonContent(preferencesResponse) },
+      ...errorResponses(errorResponseSchema, [400, 401, 500]),
     },
   });
 }

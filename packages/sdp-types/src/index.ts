@@ -12,6 +12,7 @@ export * from "./custody";
 export * from "./earn";
 export * from "./generated/ramp-support.generated";
 export * from "./kyc";
+export * from "./notifications";
 export * from "./organizations";
 export * from "./pagination";
 export * from "./payment-rails";

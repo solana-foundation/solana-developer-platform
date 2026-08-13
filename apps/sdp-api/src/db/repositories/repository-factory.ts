@@ -17,6 +17,10 @@ import type { KycWalletsRepository } from "./kyc-wallet.repository";
 import { createPostgresKycWalletsRepository } from "./kyc-wallet.repository.postgres";
 import type { NotificationsRepository } from "./notification.repository";
 import { createPostgresNotificationsRepository } from "./notification.repository.postgres";
+import type { NotificationDeliveriesRepository } from "./notification-delivery.repository";
+import { createPostgresNotificationDeliveriesRepository } from "./notification-delivery.repository.postgres";
+import type { NotificationPreferencesRepository } from "./notification-preference.repository";
+import { createPostgresNotificationPreferencesRepository } from "./notification-preference.repository.postgres";
 import type { PaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository.postgres";
 import type { PaymentRequestsRepository } from "./payment-requests.repository";
@@ -216,6 +220,16 @@ export function createWorkflowSecretRetirementsRepository(
 
 export function createNotificationsRepository(env: Env): NotificationsRepository {
   return createPostgresNotificationsRepository(getDb(env));
+}
+
+export function createNotificationPreferencesRepository(
+  env: Env
+): NotificationPreferencesRepository {
+  return createPostgresNotificationPreferencesRepository(getDb(env));
+}
+
+export function createNotificationDeliveriesRepository(env: Env): NotificationDeliveriesRepository {
+  return createPostgresNotificationDeliveriesRepository(getDb(env));
 }
 
 export function createWebhookEndpointsRepository(env: Env): WebhookEndpointsRepository {
