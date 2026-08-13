@@ -429,7 +429,10 @@ describe("runEarnDepositSweepIfDue", () => {
     mocks.resolveEarnProviderClient.mockReturnValue(
       makeClient(
         vi.fn(async () => {
-          throw new SdpEarnError("BAD_REQUEST", "unknown cursor");
+          throw new SdpEarnError("BAD_REQUEST", "unknown cursor", {
+            provider: "veda",
+            providerStatus: 400,
+          });
         })
       )
     );
@@ -438,6 +441,68 @@ describe("runEarnDepositSweepIfDue", () => {
     await expect(runEarnDepositSweepIfDue(env)).resolves.toBe("swept");
 
     expect(mocks.del).toHaveBeenCalledWith("cron:earn-deposit-sweep:cursor:earn_provider_wallet_1");
+  });
+
+  it.each([
+    ["an expired key (401)", 401],
+    ["a revoked scope (403)", 403],
+    ["a deleted wallet (404)", 404],
+  ])(
+    "KEEPS a resumed cursor on %s — every non-409/429 4xx shares one error code",
+    async (_label, providerStatus) => {
+      // classifyProviderStatus collapses the whole non-409/429 4xx space into
+      // BAD_REQUEST, so keying cursor invalidation off the CODE would throw away valid
+      // pagination progress on an outage that says nothing about the cursor.
+      mocks.scanProviderWallets.mockImplementation(
+        async ({ environment }: { environment: string }) =>
+          environment === "sandbox" ? [makeWallet()] : []
+      );
+      mocks.get.mockImplementation(async (key: string) =>
+        key === "cron:earn-deposit-sweep:cursor:earn_provider_wallet_1" ? "deep_in_history" : null
+      );
+      mocks.resolveEarnProviderClient.mockReturnValue(
+        makeClient(
+          vi.fn(async () => {
+            throw new SdpEarnError("BAD_REQUEST", "not the cursor's fault", {
+              provider: "veda",
+              providerStatus,
+            });
+          })
+        )
+      );
+
+      await expect(runEarnDepositSweepIfDue(env)).resolves.toBe("swept");
+
+      expect(mocks.del).not.toHaveBeenCalledWith(
+        "cron:earn-deposit-sweep:cursor:earn_provider_wallet_1"
+      );
+    }
+  );
+
+  it("KEEPS a resumed cursor when the error carries no provider status at all", async () => {
+    // A directly-constructed BAD_REQUEST never touched the provider, so it is no
+    // evidence about the cursor. Keeping a possibly-good cursor costs one wedged
+    // pass that its own TTL clears; discarding a good one loses observed history.
+    mocks.scanProviderWallets.mockImplementation(
+      async ({ environment }: { environment: string }) =>
+        environment === "sandbox" ? [makeWallet()] : []
+    );
+    mocks.get.mockImplementation(async (key: string) =>
+      key === "cron:earn-deposit-sweep:cursor:earn_provider_wallet_1" ? "deep_in_history" : null
+    );
+    mocks.resolveEarnProviderClient.mockReturnValue(
+      makeClient(
+        vi.fn(async () => {
+          throw new SdpEarnError("BAD_REQUEST", "constructed locally");
+        })
+      )
+    );
+
+    await expect(runEarnDepositSweepIfDue(env)).resolves.toBe("swept");
+
+    expect(mocks.del).not.toHaveBeenCalledWith(
+      "cron:earn-deposit-sweep:cursor:earn_provider_wallet_1"
+    );
   });
 
   it.each([

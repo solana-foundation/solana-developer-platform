@@ -169,15 +169,40 @@ function decodeScanCursor(value: string | null): { createdAt: string; id: string
 }
 
 /**
+ * Statuses that mean "the provider read this request and rejected its INPUT" — the
+ * only evidence that the cursor we sent is the problem.
+ *
+ * 401/403 (credentials), 404 (the wallet itself is gone) and 429/5xx say nothing
+ * about the cursor, so they must never cost us pagination progress.
+ */
+const CURSOR_REJECTION_STATUSES: ReadonlySet<number> = new Set([400, 422]);
+
+/**
  * Whether the provider rejected the CURSOR, as opposed to failing the request.
  *
- * `classifyProviderStatus` maps 409 to CONFLICT, 429 to RATE_LIMITED and 5xx to
- * PROVIDER_UNAVAILABLE, leaving BAD_REQUEST as "the provider read this request and
- * refused it" — the only class that is evidence about the cursor we sent. A raw
- * transport error is not an SdpEarnError at all and is transient by definition.
+ * Discriminates on the provider's ACTUAL HTTP status, not on the SdpEarnError code.
+ * That distinction is load-bearing: `classifyProviderStatus` collapses the entire
+ * non-409/429 4xx space into BAD_REQUEST, so an auth failure, a revoked key and a
+ * deleted wallet all arrive under the same code as a malformed cursor. Keying off
+ * the code would therefore delete valid pagination progress on an outage that has
+ * nothing to do with the cursor — and for a wallet whose history exceeds the
+ * per-pass page cap that means restarting at the feed head every time and never
+ * reaching the end.
+ *
+ * `providerStatus` is set by the provider fetch layer on every non-ok response and
+ * is documented there as this layer's own fact, which a per-provider normalizer may
+ * not overwrite — so it is the reliable signal. Its ABSENCE (a directly-constructed
+ * error, or a raw transport failure that is not an SdpEarnError at all) is treated
+ * as "not the cursor's fault", because keeping a possibly-good cursor costs one
+ * wedged pass that the cursor's own TTL eventually clears, while discarding a
+ * good one silently loses observed history.
  */
 function isRejectedCursor(error: unknown): boolean {
-  return error instanceof SdpEarnError && error.code === "BAD_REQUEST";
+  if (!(error instanceof SdpEarnError)) {
+    return false;
+  }
+  const status = error.details?.providerStatus;
+  return typeof status === "number" && CURSOR_REJECTION_STATUSES.has(status);
 }
 
 function skippableCode(error: unknown): string | undefined {
