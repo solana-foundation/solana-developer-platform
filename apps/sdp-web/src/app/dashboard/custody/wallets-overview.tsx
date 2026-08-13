@@ -2,6 +2,7 @@
 
 import type { CustodyWalletSummary } from "@sdp/types";
 import { Plus, SearchIcon, XIcon } from "lucide-react";
+import Link from "next/link";
 import { type ReactNode, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   CUSTODY_CAPABILITY_LABEL_KEYS,
@@ -18,10 +19,8 @@ import {
 import { WalletCardBalanceValue } from "@/app/dashboard/custody/wallet-card-balance-value";
 import { formatPurpose, formatWalletMeta } from "@/app/dashboard/custody/wallet-format-utils";
 import { WalletLabelInlineEditor } from "@/app/dashboard/custody/wallet-label-inline-editor";
-import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { useDebounce } from "@/lib/use-debounce";
@@ -67,7 +66,7 @@ function CreateWalletTile({ onClick }: { onClick: () => void }) {
       type="button"
       onClick={onClick}
       data-wallet-create-tile
-      className="flex min-h-[340px] cursor-pointer items-center justify-center rounded-2xl border border-dashed border-border-strong bg-surface-raised text-tertiary transition-colors hover:border-primary/40 hover:text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default focus-visible:ring-offset-2"
+      className="flex cursor-pointer items-center justify-center rounded-2xl border border-dashed border-border-strong bg-surface-raised text-tertiary transition-colors hover:border-primary/40 hover:text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default focus-visible:ring-offset-2"
       aria-label={t("DashboardCustody.createWallet")}
     >
       <Plus className="h-6 w-6" />
@@ -144,59 +143,66 @@ function WalletCard({
 
   return (
     <article
-      className="flex min-h-[340px] flex-col rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)]"
+      className="relative flex flex-col rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)] transition hover:border-primary/30 hover:shadow-[0_4px_16px_rgba(28,28,29,0.08)]"
       data-wallet-card={wallet.walletId}
     >
-      <div className="mb-4">
-        {provider ? (
-          <WalletProviderMark provider={provider} />
-        ) : (
-          <div className="flex h-14 w-14 items-center justify-center rounded-full border border-border-default bg-surface-raised text-lg font-semibold text-tertiary">
-            {(wallet.label?.trim() || "W").slice(0, 1).toUpperCase()}
+      <Link
+        href={`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`}
+        className="absolute inset-0 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default"
+      >
+        <span className="sr-only">{t("DashboardCustody.manage")}</span>
+      </Link>
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-3">
+          {provider ? (
+            <WalletProviderMark provider={provider} />
+          ) : (
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-border-default bg-surface-raised text-lg font-semibold text-tertiary">
+              {(wallet.label?.trim() || "W").slice(0, 1).toUpperCase()}
+            </div>
+          )}
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-medium tracking-wide text-tertiary uppercase">
+                {provider ? formatCustodyProviderName(provider) : t("DashboardCustody.wallet")}
+              </p>
+              {purposeLabel ? (
+                <span className="rounded-full border border-border-default bg-fill-subtle px-2 py-0.5 text-[11px] font-medium text-secondary">
+                  {purposeLabel}
+                </span>
+              ) : null}
+            </div>
+            <div className="relative mt-0.5 min-w-0 text-2xl leading-tight font-medium tracking-tight text-primary">
+              <WalletLabelInlineEditor
+                walletId={wallet.walletId}
+                label={wallet.label}
+                canEdit={canManageCustody}
+              />
+            </div>
           </div>
-        )}
-      </div>
-
-      <p className="text-sm font-medium tracking-wide text-tertiary uppercase">
-        {provider ? formatCustodyProviderName(provider) : t("DashboardCustody.wallet")}
-      </p>
-      <div className="mt-1 min-w-0 text-[30px] leading-[1.1] font-medium tracking-[-0.03em] text-primary">
-        <div className="min-w-0">
-          <WalletLabelInlineEditor
-            walletId={wallet.walletId}
-            label={wallet.label}
-            canEdit={canManageCustody}
-          />
         </div>
-      </div>
-
-      <div className="mt-6 space-y-2 rounded-xl border border-border-subtle bg-fill-subtle p-3">
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-tertiary">{t("DashboardCustody.balance")}</span>
+        <div className="shrink-0 text-xl tracking-tight">
           <WalletCardBalanceValue
             walletId={wallet.walletId}
             initialBalances={wallet.balances ?? []}
           />
         </div>
-        {purposeLabel ? (
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-tertiary">{t("DashboardCustody.purpose")}</span>
-            <span className="font-medium text-primary">{purposeLabel}</span>
-          </div>
-        ) : null}
-        <div className="flex items-center justify-between gap-3 text-sm">
+      </div>
+
+      <div className="mt-5 space-y-1.5">
+        <div className="flex h-6 items-center justify-between gap-3 text-xs">
           <span className="text-tertiary">{t("DashboardCustody.address")}</span>
-          <div className="flex min-w-0 items-center gap-2">
+          <div className="relative flex min-w-0 items-center gap-1">
             <WalletMetaValue
               value={wallet.publicKey}
               displayValue={formatWalletMeta(wallet.publicKey)}
             />
-            <WalletAddressCopyButton address={wallet.publicKey} />
+            <WalletAddressCopyButton address={wallet.publicKey} tooltip={wallet.publicKey} />
           </div>
         </div>
-        <div className="flex items-center justify-between gap-3 text-sm">
+        <div className="flex h-6 items-center justify-between gap-3 text-xs">
           <span className="text-tertiary">{t("DashboardCustody.walletId")}</span>
-          <div className="flex min-w-0 items-center gap-2">
+          <div className="relative flex min-w-0 items-center gap-1">
             <WalletMetaValue
               value={wallet.walletId}
               displayValue={formatWalletMeta(wallet.walletId, 10, 6)}
@@ -204,17 +210,10 @@ function WalletCard({
             <WalletMetadataCopyButton
               value={wallet.walletId}
               label={t("DashboardCustody.walletId")}
+              tooltip={wallet.walletId}
             />
           </div>
         </div>
-      </div>
-
-      <div className="mt-auto pt-3">
-        <Button asChild variant="outline" className="h-11 w-full rounded-[10px]">
-          <Link href={`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`}>
-            {t("DashboardCustody.manage")}
-          </Link>
-        </Button>
       </div>
     </article>
   );
@@ -430,13 +429,11 @@ export function WalletsOverview({
             </Button>
           </div>
         ) : (
-          <TooltipProvider>
-            <WalletCardsGrid wallets={walletsWithProvider} canManageCustody={canManageCustody}>
-              {!normalizedSearch && canManageCustody && enabledProviderEntries.length > 0 ? (
-                <CreateWalletTile onClick={() => onCreateWallet(null)} />
-              ) : null}
-            </WalletCardsGrid>
-          </TooltipProvider>
+          <WalletCardsGrid wallets={walletsWithProvider} canManageCustody={canManageCustody}>
+            {!normalizedSearch && canManageCustody && enabledProviderEntries.length > 0 ? (
+              <CreateWalletTile onClick={() => onCreateWallet(null)} />
+            ) : null}
+          </WalletCardsGrid>
         )}
       </div>
     </div>
@@ -445,16 +442,9 @@ export function WalletsOverview({
 
 function WalletMetaValue({ value, displayValue }: { value: string; displayValue: string }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="block max-w-[18ch] truncate font-mono text-xs text-secondary">
-          <span aria-hidden="true">{displayValue}</span>
-          <span className="sr-only">{value}</span>
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="top" align="end" className="max-w-[32rem] break-all text-xs">
-        {value}
-      </TooltipContent>
-    </Tooltip>
+    <span className="block truncate font-mono text-xs text-secondary">
+      <span aria-hidden="true">{displayValue}</span>
+      <span className="sr-only">{value}</span>
+    </span>
   );
 }

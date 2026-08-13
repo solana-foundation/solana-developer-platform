@@ -1,6 +1,5 @@
 import { normalizePrivyWalletId } from "@sdp/custody";
 import { SigningError } from "@sdp/custody/signing";
-import { hashString } from "@sdp/payments/hash";
 import type { Context } from "hono";
 import { type DatabaseClient, getDb } from "@/db";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
@@ -24,11 +23,16 @@ import {
   type StoredCredentialSecret,
 } from "@/services/credential-secret-store";
 import {
+  getPrivyProviderAccountFingerprint,
+  PRIVY_RUNTIME_ENV_FIELDS,
+} from "@/services/custody/privy-credential";
+import {
   findPrivyWalletByExternalId,
+  type PrivyCredentialAuthentication,
   type ProvisionPrivyResult,
   provisionPrivyWallet,
 } from "@/services/custody/provisioning";
-import { isStoredCustodySetupEnabled } from "@/services/provider-availability.service";
+import { isPersistedCustodyCompletionEnabled } from "@/services/provider-availability.service";
 import {
   decideInstallation,
   type InstallationConflictReason,
@@ -93,11 +97,6 @@ interface LoadedInstallation {
   decisions: InstallationDecisions;
 }
 
-interface PrivyCredential {
-  appId: string;
-  appSecret: string;
-}
-
 type ProviderOutcome =
   | { kind: "success"; wallet: ProvisionPrivyResult }
   | {
@@ -132,9 +131,20 @@ export async function completeProviderCredentialInstallation(
     throw installationConflict(loaded.decisions.complete.reason);
   }
 
-  const secretStore = createPersistedSecretStore(c.env, loaded.target.credential_storage_backend);
+  const secretStore = createPersistedSecretStore(
+    context.c.env,
+    loaded.target.credential_storage_backend
+  );
   const credential = await readPrivyCredential(secretStore, context.organizationId, loaded.target);
-  const auditIntent = await context.audit.beginCritical(c, {
+  if (
+    loaded.target.credential_source === "runtime" &&
+    loaded.target.provider_account_fingerprint &&
+    (await getPrivyProviderAccountFingerprint(credential.appId)) !==
+      loaded.target.provider_account_fingerprint
+  ) {
+    throw conflict("Custody runtime credential does not match the connected Provider account");
+  }
+  const auditIntent = await context.audit.beginCritical(context.c, {
     organizationId: context.organizationId,
     userId: context.userId,
     action: "check",
@@ -149,13 +159,7 @@ export async function completeProviderCredentialInstallation(
   let canRecordFailureOutcome = true;
 
   try {
-    const leaseToken = await context.store.acquireInstallationLease({
-      connectionId,
-      providerCredentialId: loaded.target.provider_credential_id,
-      expectedStatus: loaded.target.status as "pending" | "checking",
-      expectedLastCheckStatus: loaded.target.last_check_status,
-      expectedLastCheckAt: loaded.target.last_check_at,
-    });
+    const leaseToken = await acquireCompletionLease(context, loaded.target);
     if (!leaseToken) {
       canRecordFailureOutcome = false;
       await completeInstallationCriticalNoop(
@@ -219,7 +223,7 @@ export async function completeProviderCredentialInstallation(
     return completionResult(completed);
   } catch (error) {
     if (canRecordFailureOutcome) {
-      await context.audit.completeCritical(c, auditIntent, {
+      await context.audit.completeCritical(context.c, auditIntent, {
         status: "failure",
         metadata: { event: "provider_credential_installation_completion_failed" },
       });
@@ -265,6 +269,7 @@ export async function cancelProviderCredentialInstallation(
         return new ProviderCredentialStore(tx).cancelInstallation({
           connectionId,
           providerCredentialId: loaded.target.provider_credential_id,
+          credentialSource: loaded.target.credential_source,
           expectedStatus: loaded.target.status as "pending" | "checking",
           expectedLastCheckStatus: loaded.target.last_check_status,
           expectedLastCheckAt: loaded.target.last_check_at,
@@ -354,18 +359,24 @@ async function loadInstallation(
   connectionId: string
 ): Promise<LoadedInstallation> {
   try {
-    const [target, nowMs, fullCompletionEnabled] = await Promise.all([
+    const [target, nowMs] = await Promise.all([
       context.store.findInstallationConnection(
         context.organizationId,
         context.projectId,
         connectionId
       ),
       context.store.getDatabaseNowMs(),
-      isStoredCustodySetupEnabled(context.c.env, context.db, context.organizationId, "privy"),
     ]);
     if (!target) {
       throw notFound("Custody Connection");
     }
+    const fullCompletionEnabled = await isPersistedCustodyCompletionEnabled(
+      context.c.env,
+      context.db,
+      context.organizationId,
+      target.provider,
+      target.credential_source
+    );
     return {
       target,
       decisions: decideInstallation(
@@ -470,7 +481,7 @@ async function readPrivyCredential(
   store: CredentialSecretStore,
   organizationId: string,
   row: InstallationConnectionState
-): Promise<PrivyCredential> {
+): Promise<PrivyCredentialAuthentication> {
   let payload: CredentialSecretPayload;
   try {
     payload = await store.read({ orgId: organizationId, stored: toStoredCredentialSecret(row) });
@@ -495,17 +506,24 @@ function toStoredCredentialSecret(row: InstallationConnectionState): StoredCrede
     secretRef: row.credential_secret_ref ?? undefined,
     secretVersionRef: row.credential_secret_version_ref ?? undefined,
     encryptedSecretPayload: row.credential_encrypted_secret_payload ?? undefined,
+    ...(row.credential_storage_backend === "runtime_env"
+      ? { runtimeEnvFields: PRIVY_RUNTIME_ENV_FIELDS }
+      : {}),
   };
 }
 
 async function executeCompletionMode(
   context: InstallationContext,
   target: InstallationConnectionState,
-  credential: PrivyCredential,
+  credential: PrivyCredentialAuthentication,
   leaseToken: string,
   mode: "full" | "reconcile_only"
 ): Promise<ProviderOutcome> {
   const externalId = `sdp_${target.id}`;
+  const fingerprint = await getPrivyProviderAccountFingerprint(credential.appId);
+  if (target.provider_account_fingerprint && target.provider_account_fingerprint !== fingerprint) {
+    return { kind: "failed", code: "wallet_conflict" };
+  }
   if (mode === "reconcile_only") {
     return lookupProviderWallet(context.c.env, externalId, credential);
   }
@@ -517,10 +535,6 @@ async function executeCompletionMode(
       : { kind: "retry_unknown" };
   }
 
-  const fingerprint = `sha256:${await hashString(credential.appId)}`;
-  if (target.provider_account_fingerprint && target.provider_account_fingerprint !== fingerprint) {
-    return { kind: "failed", code: "wallet_conflict" };
-  }
   if (!target.provider_account_fingerprint) {
     try {
       const reserved = await context.store.reserveProviderAccountFingerprint({
@@ -562,7 +576,7 @@ async function executeCompletionMode(
 async function lookupProviderWallet(
   env: Env,
   externalId: string,
-  credential: PrivyCredential
+  credential: PrivyCredentialAuthentication
 ): Promise<ProviderOutcome> {
   try {
     const wallet = await findPrivyWalletByExternalId(env, externalId, credential);
@@ -587,9 +601,48 @@ function providerErrorOutcome(error: unknown): ProviderOutcome {
   return { kind: "retry_unknown" };
 }
 
+async function acquireCompletionLease(
+  context: InstallationContext,
+  target: InstallationConnectionState
+): Promise<string | null> {
+  if (target.status === "failed") {
+    const failureCode = target.last_check_failure_code;
+    const expectedLastCheckAt = target.last_check_at;
+    if (
+      target.credential_source !== "runtime" ||
+      !expectedLastCheckAt ||
+      (failureCode !== "invalid_credentials" &&
+        failureCode !== "provider_account_already_connected")
+    ) {
+      return null;
+    }
+    return context.db.transaction(async (tx) => {
+      const store = new ProviderCredentialStore(tx);
+      if (!(await store.lockProject(context.organizationId, context.projectId))) {
+        return null;
+      }
+      return store.acquireRuntimeFailureRetryLease({
+        connectionId: target.id,
+        providerCredentialId: target.provider_credential_id,
+        expectedLastCheckAt,
+        expectedFailureCode: failureCode,
+      });
+    });
+  }
+
+  return context.store.acquireInstallationLease({
+    connectionId: target.id,
+    providerCredentialId: target.provider_credential_id,
+    credentialSource: target.credential_source,
+    expectedStatus: target.status as "pending" | "checking",
+    expectedLastCheckStatus: target.last_check_status,
+    expectedLastCheckAt: target.last_check_at,
+  });
+}
+
 async function validatePrivyCredential(
   env: Env,
-  credential: PrivyCredential
+  credential: PrivyCredentialAuthentication
 ): Promise<"success" | "failed" | "retry_unknown"> {
   const baseUrl = (env.PRIVY_API_BASE_URL ?? "https://api.privy.io/v1").replace(/\/+$/, "");
   try {
@@ -627,7 +680,11 @@ async function persistSuccess(
 ): Promise<LoadedInstallation | null> {
   try {
     await context.db.transaction(async (tx) => {
-      const updated = await new ProviderCredentialStore(tx).recordInstallationSuccess({
+      const store = new ProviderCredentialStore(tx);
+      if (!(await store.lockProject(context.organizationId, context.projectId))) {
+        throw new Error("Project disappeared during installation success persistence");
+      }
+      const updated = await store.recordInstallationSuccess({
         providerCredentialId: target.provider_credential_id,
         connectionId: target.id,
         leaseToken,

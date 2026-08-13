@@ -9,6 +9,7 @@ import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import type { TokenService } from "@/services/token.service";
+import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
 import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
@@ -362,6 +363,15 @@ export const freezeAccount = async (c: AppContext) => {
       reason: parsed.data.reason,
     });
 
+    emitTokenOperationCompleted(c, {
+      organizationId: orgId,
+      projectId,
+      tokenId,
+      operation: "freeze",
+      signature: result.signature,
+      slot: result.slot.toString(),
+    });
+
     const response: FrozenAccountResponse = {
       frozenAccount: {
         ...frozenAccount,
@@ -569,6 +579,15 @@ export const unfreezeAccount = async (c: AppContext) => {
       accountAddress: tokenAccount,
       state: "unfrozen",
       actorId: auth.id,
+    });
+
+    emitTokenOperationCompleted(c, {
+      organizationId: orgId,
+      projectId,
+      tokenId,
+      operation: "unfreeze",
+      signature: result.signature,
+      slot: result.slot.toString(),
     });
 
     const response: FrozenAccountResponse = {

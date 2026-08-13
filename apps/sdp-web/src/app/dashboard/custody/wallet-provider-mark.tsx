@@ -83,7 +83,7 @@ export function WalletProviderMark({ provider, size = "md" }: WalletProviderMark
   return (
     <div
       className={[
-        "inline-flex items-center justify-center overflow-hidden border border-border-subtle",
+        "inline-flex shrink-0 items-center justify-center overflow-hidden border border-border-subtle",
         logo?.backgroundClassName ?? "bg-fill-subtle",
         dimensionClass,
       ].join(" ")}

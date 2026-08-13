@@ -21,6 +21,7 @@ import { resolvePolicyCustodyWallet } from "@/services/policy/enforcement.servic
 import { createOrgSigner } from "@/services/solana";
 import type { TokenService } from "@/services/token.service";
 import { resolveMintOperationAmount } from "@/services/token-operation.service";
+import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
 import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
@@ -538,6 +539,7 @@ export async function extractMintPolicyCandidate(c: AppContext): Promise<PolicyG
             amount: input.mint.amount,
             destination: input.mint.destination,
           }),
+    legs: [],
     body: input,
     resolved: {
       tokenId,
@@ -703,6 +705,18 @@ export const executeMint = async (c: AppContext) => {
             addedToAllowlist,
           },
         }),
+    });
+
+    // This handler now takes its inputs from the policy gate, whose `auth.projectId` is
+    // nullable; the emit needs the resolved project scope, as every other one does.
+    const { projectId } = requireProjectScope(c);
+    emitTokenOperationCompleted(c, {
+      organizationId: auth.organizationId,
+      projectId,
+      tokenId,
+      operation: "mint",
+      signature: result.signature,
+      slot: result.slot.toString(),
     });
 
     return success(c, {

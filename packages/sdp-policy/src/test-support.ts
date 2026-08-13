@@ -1,6 +1,7 @@
 import type {
   EffectiveApiKeyPolicy,
   EffectiveWalletPolicy,
+  PolicyCandidate,
   PolicyDefaultAction,
   PolicyRule,
   WalletOperationEnvelope,
@@ -28,6 +29,17 @@ export const operation: WalletOperationEnvelope = {
   createdAt: "2026-06-18T00:00:00.000Z",
   updatedAt: "2026-06-18T00:00:00.000Z",
 };
+
+/**
+ * Build a per-leg policy candidate derived from the shared operation envelope.
+ *
+ * @param overrides - The candidate fields the leg overrides.
+ * @returns The leg candidate.
+ */
+export function leg(overrides: Partial<PolicyCandidate>): PolicyCandidate {
+  const { id, rawPayload, idempotencyKey, status, createdAt, updatedAt, ...candidate } = operation;
+  return { ...candidate, ...overrides };
+}
 
 /**
  * Build an active wallet policy holding the given rules.

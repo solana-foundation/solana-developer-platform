@@ -42,9 +42,6 @@ export function ReviewStep({
     state.maxTransferAmount.trim()
       ? t("DashboardCustody.policyReviewPerTransaction", { amount: state.maxTransferAmount })
       : null,
-    state.maxDailyAmount.trim()
-      ? t("DashboardCustody.policyReviewDailyTotal", { amount: state.maxDailyAmount })
-      : null,
   ].filter((value): value is string => Boolean(value));
 
   const reviewRows: Array<{

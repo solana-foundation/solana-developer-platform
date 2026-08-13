@@ -1,5 +1,79 @@
 # Changelog
 
+## [0.60.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.59.0...v0.60.0) (2026-08-13)
+
+### Features
+
+* **earn:** make the withdrawal preview the authority on available liquidity (PRO-1675) ([#1283](https://github.com/solana-foundation/solana-developer-platform/pull/1283)) ([a703867](https://github.com/solana-foundation/solana-developer-platform/commit/a703867d2e4b234a8c951b103cf453cd59088f42))
+* **custody:** Add Connection wallet API parity ([#1250](https://github.com/solana-foundation/solana-developer-platform/pull/1250)) ([8fcdef0](https://github.com/solana-foundation/solana-developer-platform/commit/8fcdef0bd33ddf84be3646c655c125096825ec5c))
+* **api:** add provider setup registry ([#1276](https://github.com/solana-foundation/solana-developer-platform/pull/1276)) ([6b50197](https://github.com/solana-foundation/solana-developer-platform/commit/6b501970b836bf7b8f017c91f3889002da43e332))
+* enforce dynamic Kora sponsorship budgets ([#1060](https://github.com/solana-foundation/solana-developer-platform/pull/1060)) ([58e0e44](https://github.com/solana-foundation/solana-developer-platform/commit/58e0e44d0372069d9f429927823d23a808cc980d))
+* **web:** surface Clerk org id in workspace switcher ([#1271](https://github.com/solana-foundation/solana-developer-platform/pull/1271)) ([540bc74](https://github.com/solana-foundation/solana-developer-platform/commit/540bc7409d6222018c1007664c6496a4c997b122))
+* **web:** simplify Earn strategy selection ([#1267](https://github.com/solana-foundation/solana-developer-platform/pull/1267)) ([78242cf](https://github.com/solana-foundation/solana-developer-platform/commit/78242cf72fc13bf95f10e0c59ca4cfa6ee050655))
+* **helius:** add simple dtos for helius operations ([#1241](https://github.com/solana-foundation/solana-developer-platform/pull/1241)) ([4184c3e](https://github.com/solana-foundation/solana-developer-platform/commit/4184c3ed043922574244dfc9ab4fbac3846ecea2))
+* **earn:** many concurrent single-vault programs per provider (PRO-1670) ([#1256](https://github.com/solana-foundation/solana-developer-platform/pull/1256)) ([97716b6](https://github.com/solana-foundation/solana-developer-platform/commit/97716b67adb2cc2bc650fa286d6dd6167f3b66de))
+* **web:** move integrations family filters into header tabs ([#1251](https://github.com/solana-foundation/solana-developer-platform/pull/1251)) ([3ff1003](https://github.com/solana-foundation/solana-developer-platform/commit/3ff1003784cc5fd863ad0fe1dd2d1dabc696236e))
+* **web:** give platform.solana.com real social-card metadata ([#1253](https://github.com/solana-foundation/solana-developer-platform/pull/1253)) ([1333dba](https://github.com/solana-foundation/solana-developer-platform/commit/1333dba9497fc9930361e54588b66198efc60c99))
+* **web:** install Privy from stored credentials in the setup flow ([#1126](https://github.com/solana-foundation/solana-developer-platform/pull/1126)) ([a7a076b](https://github.com/solana-foundation/solana-developer-platform/commit/a7a076b4f848906805c94553d351c13a1256efe5))
+* **issuance:** Workflow Builder — event-driven automations for asset profiles (Phase 5) ([#1099](https://github.com/solana-foundation/solana-developer-platform/pull/1099)) ([912e8c9](https://github.com/solana-foundation/solana-developer-platform/commit/912e8c9e7fbbee9f629ff6011c5e11fdffca75c0))
+
+### Bug Fixes
+
+* **payments:** judge the fee-payer policy by its values, not by its shape ([#1295](https://github.com/solana-foundation/solana-developer-platform/pull/1295)) ([9d5f938](https://github.com/solana-foundation/solana-developer-platform/commit/9d5f938776d369a2c5e8f34060c2d2112e18524c))
+* **sponsorship:** recognise the previous ownership format when admitting a retry ([#1284](https://github.com/solana-foundation/solana-developer-platform/pull/1284)) ([74290c0](https://github.com/solana-foundation/solana-developer-platform/commit/74290c0b85afcd116090c0024b3f1087d1bab791))
+* **cron:** log every underlying cause of a failed reconciliation tick ([#1281](https://github.com/solana-foundation/solana-developer-platform/pull/1281)) ([a2a8484](https://github.com/solana-foundation/solana-developer-platform/commit/a2a84840107908bd7d09435bd0f2a6b7a5815022))
+* **sponsorship:** close budget bypass, phantom charge, and double-count in admission ([#1280](https://github.com/solana-foundation/solana-developer-platform/pull/1280)) ([698bba5](https://github.com/solana-foundation/solana-developer-platform/commit/698bba58b37d3b307d7befe4d949a7d40ed9d012))
+* **i18n:** recover stalled translation sync ([#1273](https://github.com/solana-foundation/solana-developer-platform/pull/1273)) ([a146175](https://github.com/solana-foundation/solana-developer-platform/commit/a14617582b5febc84f0e6aa66e8e7503ccd9398d))
+* **api:** HOO-1004 isolate custody wallets and configuration by tenant (HOO-1004) ([#1246](https://github.com/solana-foundation/solana-developer-platform/pull/1246)) ([969e360](https://github.com/solana-foundation/solana-developer-platform/commit/969e360d0062b3f32f084dc11cd37203f802a0be))
+* **earn:** list and store Solana-hosted vaults only ([#1265](https://github.com/solana-foundation/solana-developer-platform/pull/1265)) ([c6e2352](https://github.com/solana-foundation/solana-developer-platform/commit/c6e2352799361dce92fca3d2d866875ba8ab13cc))
+* **sdp-web:** make clerk colorMuted opaque to stop modal navbar bleed-through ([#1257](https://github.com/solana-foundation/solana-developer-platform/pull/1257)) ([132e1d2](https://github.com/solana-foundation/solana-developer-platform/commit/132e1d2202474e0a7ca3b99cb1eb8fd56f665a3b))
+* HOO-1010 Deepsec: enforce fail-closed limits on metered dashboard proxies ([#1215](https://github.com/solana-foundation/solana-developer-platform/pull/1215)) ([14ca057](https://github.com/solana-foundation/solana-developer-platform/commit/14ca057a9841cd97e6901a377981fdbf5858df2a))
+
+### Maintenance
+
+* remove Hacktron review configuration ([#1294](https://github.com/solana-foundation/solana-developer-platform/pull/1294)) ([7b672bf](https://github.com/solana-foundation/solana-developer-platform/commit/7b672bfd524e95fa83082f685d3d3bdb74760aed))
+* promote sdp-api and sdp-web to prod on release publish ([#1248](https://github.com/solana-foundation/solana-developer-platform/pull/1248)) ([a655234](https://github.com/solana-foundation/solana-developer-platform/commit/a6552341e1435512bd1092736f4016ca8bc40ef5))
+
+### Other Changes
+
+* Sort Earn programs newest first ([#1270](https://github.com/solana-foundation/solana-developer-platform/pull/1270)) ([e1fc10d](https://github.com/solana-foundation/solana-developer-platform/commit/e1fc10d72ab6d36cc8f9ee7d770d2261dc5f0827))
+
+## [0.59.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.58.0...v0.59.0) (2026-08-12)
+
+### Features
+
+* Runtime env connection ([#1238](https://github.com/solana-foundation/solana-developer-platform/pull/1238)) ([00ece43](https://github.com/solana-foundation/solana-developer-platform/commit/00ece43737094178734ab414dd7e3d41a419e498))
+* **policy:** drop legacy payment_wallet_policies and cut over to control profiles (PRO-1617) ([#1232](https://github.com/solana-foundation/solana-developer-platform/pull/1232)) ([65bb807](https://github.com/solana-foundation/solana-developer-platform/commit/65bb807fd2bce9ee8055442e77b6046a51df9010))
+* **earn:** single-vault V1 — one allocation entry per token group (PRO-1667) ([#1243](https://github.com/solana-foundation/solana-developer-platform/pull/1243)) ([b4b3478](https://github.com/solana-foundation/solana-developer-platform/commit/b4b3478b455942593443fe9edb3f8da262be571a))
+* **earn:** withdrawal ledger + live-only positions — ledger vs live decided (PRO-1628) ([#1239](https://github.com/solana-foundation/solana-developer-platform/pull/1239)) ([025c7ac](https://github.com/solana-foundation/solana-developer-platform/commit/025c7acf4e44a8e6a12bcf13b495fce80ea04112))
+* **helius:** add helius rings feature entry ([#1234](https://github.com/solana-foundation/solana-developer-platform/pull/1234)) ([9b287d3](https://github.com/solana-foundation/solana-developer-platform/commit/9b287d3bb1ac082d3c1c464ecbc075e47c237e9c))
+
+## [0.58.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.57.0...v0.58.0) (2026-08-11)
+
+### Features
+
+* **sdp-web:** general improvements on ux ([#1221](https://github.com/solana-foundation/solana-developer-platform/pull/1221)) ([9aa7e46](https://github.com/solana-foundation/solana-developer-platform/commit/9aa7e46d73d7cbd0128f913cfc050d3e7200686a))
+* **sdp-api:** run the gated Earn catalogue sync in the managed Cloud Run job (PRO-1655) ([#1211](https://github.com/solana-foundation/solana-developer-platform/pull/1211)) ([10e80a7](https://github.com/solana-foundation/solana-developer-platform/commit/10e80a7c2b23e189b59b16e6ad8ec87f06652428))
+* **sdp-api:** gate ramps, transfer batches, issuance, and signer-check through policyGate (PRO-1657) ([#1209](https://github.com/solana-foundation/solana-developer-platform/pull/1209)) ([a7c9f0d](https://github.com/solana-foundation/solana-developer-platform/commit/a7c9f0d89a418de551120f7597e5848eecdde447))
+* **sdp-api:** resolve session environment from the selected project (PRO-1641) ([#1204](https://github.com/solana-foundation/solana-developer-platform/pull/1204)) ([83001e8](https://github.com/solana-foundation/solana-developer-platform/commit/83001e88dc8548aec8f1aa6c4dc705ff9447bb40))
+* support multiple Privy connections ([#1148](https://github.com/solana-foundation/solana-developer-platform/pull/1148)) ([debe33a](https://github.com/solana-foundation/solana-developer-platform/commit/debe33af2d5eb912689d2c9606af000d1593ee8e))
+
+### Bug Fixes
+
+* **api:** allow tenant callers to mutate counterparty provider data ([#1235](https://github.com/solana-foundation/solana-developer-platform/pull/1235)) ([8748ed7](https://github.com/solana-foundation/solana-developer-platform/commit/8748ed712ba758f5c0a402910f926900cb526e2b))
+
+### Maintenance
+
+* **deps:** bump the actions group across 1 directory with 3 updates ([#1205](https://github.com/solana-foundation/solana-developer-platform/pull/1205)) ([83883d9](https://github.com/solana-foundation/solana-developer-platform/commit/83883d9bbb86c6be40e09a77282f4f124f6eb6ca))
+* **deps:** bump pino from 9.14.0 to 10.3.1 ([#1192](https://github.com/solana-foundation/solana-developer-platform/pull/1192)) ([913097d](https://github.com/solana-foundation/solana-developer-platform/commit/913097dcf1e636125fc4e13a86beb6eb33a65258))
+* pin direct dependency versions ([#1225](https://github.com/solana-foundation/solana-developer-platform/pull/1225)) ([6309ad6](https://github.com/solana-foundation/solana-developer-platform/commit/6309ad67c7ca550a343f190ff0e8e2cdaa152c52))
+* pin nanoid version ([#1223](https://github.com/solana-foundation/solana-developer-platform/pull/1223)) ([39b3e28](https://github.com/solana-foundation/solana-developer-platform/commit/39b3e289aa7dc8d523184f9f2e285e414e89d2e5))
+* **deps:** bump nanoid from 5.1.11 to 6.0.0 ([#1191](https://github.com/solana-foundation/solana-developer-platform/pull/1191)) ([49dd02d](https://github.com/solana-foundation/solana-developer-platform/commit/49dd02de431d5116773d56760ace85289b19a097))
+* **deps:** bump the solana group with 15 updates ([#1187](https://github.com/solana-foundation/solana-developer-platform/pull/1187)) ([40d651f](https://github.com/solana-foundation/solana-developer-platform/commit/40d651fbab72c3863d15d7755ca6227891d965a5))
+* **deps-dev:** bump @types/node from 25.9.2 to 26.1.2 ([#1189](https://github.com/solana-foundation/solana-developer-platform/pull/1189)) ([0982541](https://github.com/solana-foundation/solana-developer-platform/commit/0982541569bf72308edb7fc33d1aa5afe231a748))
+* **deps:** bump ioredis from 5.11.1 to 6.0.0 ([#1190](https://github.com/solana-foundation/solana-developer-platform/pull/1190)) ([6d0b8e1](https://github.com/solana-foundation/solana-developer-platform/commit/6d0b8e14843181c1d354d0fbc856b59930d09ddf))
+* remove AlphaLedger tokenization engine code and feature flag ([#1203](https://github.com/solana-foundation/solana-developer-platform/pull/1203)) ([3eba05e](https://github.com/solana-foundation/solana-developer-platform/commit/3eba05e571c915ef4f80f7f478cc6b17e6eb068e))
+
 ## [0.57.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.56.0...v0.57.0) (2026-08-10)
 
 ### Features

@@ -1,7 +1,7 @@
 import { PERMISSIONS } from "@sdp/types";
 import {
   apiKeyControlProfileCreateSchema as apiKeyControlProfileCreateSchemaBase,
-  apiKeyControlProfileRevisionCreateSchema as apiKeyControlProfileRevisionCreateSchemaBase,
+  apiKeyControlProfileRevisionCreateBaseSchema as apiKeyControlProfileRevisionCreateSchemaBase,
   apiKeyCreateSchema as apiKeyCreateSchemaBase,
   apiKeyRotateSchema as apiKeyRotateSchemaBase,
   apiKeyUpdateSchema as apiKeyUpdateSchemaBase,

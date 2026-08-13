@@ -3,7 +3,7 @@
 import type { PaymentWalletPolicy } from "@sdp/types";
 import { ArrowLeft, ArrowRight, MoreHorizontal, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
@@ -18,7 +18,6 @@ import {
 import { WizardFrame } from "@/components/wizard-frame";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
-import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { DestinationsAndOperationsStep } from "./destinations-operations-step";
 import { DisableControlsDialog } from "./disable-controls-dialog";
 import { IntentStep } from "./intent-step";
@@ -76,7 +75,7 @@ export function WalletPolicyStartingProfileFlow({
 }: WalletPolicyStartingProfileFlowProps) {
   const t = useTranslations();
   const { mutate } = useSWRConfig();
-  const router = useDashboardRouter();
+  const router = useRouter();
   const pathname = usePathname();
   const { sdpEnvironment } = useDashboardWorkspace();
   const assetOptions = useMemo(
@@ -175,9 +174,7 @@ export function WalletPolicyStartingProfileFlow({
   function stepHasErrors(step: PolicyFlowStep): boolean {
     if (step === "intent") return Boolean(validation.intent);
     if (step === "limits-assets") {
-      return Boolean(
-        validation.maxTransferAmount || validation.maxDailyAmount || validation.assets
-      );
+      return Boolean(validation.maxTransferAmount || validation.assets);
     }
     if (step === "destinations-operations") {
       return Boolean(validation.operations);
@@ -232,7 +229,7 @@ export function WalletPolicyStartingProfileFlow({
         t,
         commitMessage,
         // Stale base 409s instead of replacing another session's controls.
-        { expectedPolicyVersionId: currentPolicy.policyVersionId ?? null }
+        { expectedRevisionId: currentPolicy.controlProfile?.revisionId ?? null }
       );
       const returnedState = createPolicyAuthoringState(updated);
       setCurrentPolicy(updated);
@@ -270,7 +267,7 @@ export function WalletPolicyStartingProfileFlow({
         buildDisabledPolicyPayload(wallet.walletId),
         t,
         undefined,
-        { expectedPolicyVersionId: currentPolicy.policyVersionId ?? null }
+        { expectedRevisionId: currentPolicy.controlProfile?.revisionId ?? null }
       );
       const returnedState = createPolicyAuthoringState(updated);
       setCurrentPolicy(updated);

@@ -178,35 +178,37 @@ export const walletPolicyRuleSchema: z.ZodType<PolicyRule> = z.discriminatedUnio
   }),
 ]);
 
-// Patch semantics (see mergeWalletPolicyPatch): omitted = keep current, null = clear.
 export const updateWalletPolicyBaseSchema = z.object({
-  destinationAllowlist: z
-    .array(solanaAddressSchema("destinationAllowlist entry"))
-    .max(500)
-    .optional(),
   commitMessage: z.string().trim().min(1).max(500).optional(),
-  maxTransferAmount: z
-    .string()
-    .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
-    .nullable()
-    .optional(),
-  maxDailyAmount: z
-    .string()
-    .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
-    .nullable()
-    .optional(),
-  defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).optional(),
-  rules: z.array(walletPolicyRuleSchema).max(100).optional(),
-  // Unlike a revision id, this token also advances on limit/allowlist-only updates.
-  expectedPolicyVersionId: z.string().min(1).max(120).nullable().optional(),
+  defaultAction: z.enum(["allow", "deny", "approval_required", "review"]),
+  rules: z.array(walletPolicyRuleSchema).max(100),
+  // Stale-write guard. Every update activates a revision, so the active
+  // revision id versions the whole policy; null means "expect no profile yet".
+  expectedRevisionId: z.string().min(1).max(120).nullable().optional(),
 });
 
-export const updateWalletPolicySchema = updateWalletPolicyBaseSchema.superRefine((policy, ctx) => {
-  if (policy.rules === undefined) {
-    return;
-  }
+/**
+ * Cross-rule constraints shared by every policy-rules payload: unique rule
+ * ids, and amount rules keyed by asset mint (a bound is meaningless across
+ * tokens, so an asset-less amount rule is rejected rather than blanket-applied).
+ *
+ * @param rules - The parsed rules array.
+ * @param ctx - The zod refinement context to report issues on.
+ */
+export function refinePolicyRules(rules: PolicyRule[], ctx: z.RefinementCtx): void {
   const seen = new Set<string>();
-  for (const rule of policy.rules) {
+  for (const [index, rule] of rules.entries()) {
+    if (
+      rule.kind === "amount" &&
+      rule.asset === undefined &&
+      (rule.assets === undefined || rule.assets.length === 0)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["rules", index],
+        message: "Amount rules must name the asset mint(s) they bound",
+      });
+    }
     if (rule.id === undefined) {
       continue;
     }
@@ -219,7 +221,11 @@ export const updateWalletPolicySchema = updateWalletPolicyBaseSchema.superRefine
     }
     seen.add(rule.id);
   }
-});
+}
+
+export const updateWalletPolicySchema = updateWalletPolicyBaseSchema.superRefine((policy, ctx) =>
+  refinePolicyRules(policy.rules, ctx)
+);
 
 export const paymentAmountSchema = z
   .string()

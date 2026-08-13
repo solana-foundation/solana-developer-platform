@@ -237,32 +237,6 @@ export async function fetchWalletAggregate(
   return body.data.aggregate;
 }
 
-export async function fetchWalletPolicy(walletId: string, t: Translate): Promise<WalletPolicy> {
-  const response = await fetch(
-    `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/policies`,
-    {
-      method: "GET",
-      cache: "no-store",
-    }
-  );
-  const body = (await response.json().catch(() => ({}))) as WalletPolicyEnvelope;
-  if (!response.ok) {
-    throw new Error(
-      getApiError(
-        body,
-        t("DashboardPayments.workspace.walletPolicyRequestFailed", { status: response.status })
-      )
-    );
-  }
-
-  return (
-    body.data?.policy ?? {
-      walletId,
-      destinationAllowlist: [],
-    }
-  );
-}
-
 interface TransferListEnvelope {
   data?: TransferRecord[];
   error?: {
@@ -507,16 +481,16 @@ export async function fetchWalletBalances(
 
 export async function updateWalletPolicy(
   walletId: string,
-  policy: WalletPolicy,
+  policy: Pick<WalletPolicy, "defaultAction" | "rules">,
   t: Translate,
   commitMessage?: string,
   options?: {
     /**
-     * policyVersionId of the server-read base policy (null when it carried
-     * none). Omit only without a server-read base — the API then skips the
-     * stale-write check.
+     * Active revision id of the server-read policy this edit was based on
+     * (null when no profile was active). Omit only without a server-read
+     * base — the API then skips the stale-write check.
      */
-    expectedPolicyVersionId?: string | null;
+    expectedRevisionId?: string | null;
   }
 ): Promise<WalletPolicy> {
   const trimmedCommitMessage = commitMessage?.trim();
@@ -528,17 +502,12 @@ export async function updateWalletPolicy(
       headers: {
         "Content-Type": "application/json",
       },
-      // The API patches (omitted = keep current) while this editor replaces,
-      // so cleared limits must be explicit nulls.
       body: JSON.stringify({
-        destinationAllowlist: policy.destinationAllowlist,
+        defaultAction: policy.defaultAction,
+        rules: policy.rules,
         ...(trimmedCommitMessage ? { commitMessage: trimmedCommitMessage } : {}),
-        maxTransferAmount: policy.maxTransferAmount ?? null,
-        maxDailyAmount: policy.maxDailyAmount ?? null,
-        ...(policy.defaultAction ? { defaultAction: policy.defaultAction } : {}),
-        ...(policy.rules ? { rules: policy.rules } : {}),
-        ...(options?.expectedPolicyVersionId !== undefined
-          ? { expectedPolicyVersionId: options.expectedPolicyVersionId }
+        ...(options?.expectedRevisionId !== undefined
+          ? { expectedRevisionId: options.expectedRevisionId }
           : {}),
       }),
     }

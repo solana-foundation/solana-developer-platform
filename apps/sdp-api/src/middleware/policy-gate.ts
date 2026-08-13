@@ -22,6 +22,8 @@ type GateContext = Context<{ Bindings: Env }>;
 
 export interface PolicyGateExtraction {
   candidate: PolicyCandidate | null;
+  /** Per-leg evaluation views of a multi-leg operation (batch recipients); empty otherwise. */
+  legs: PolicyCandidate[];
   body: Record<string, unknown>;
   resolved: unknown;
   rawPayload: Record<string, unknown>;
@@ -87,7 +89,7 @@ export interface PolicyGateContext<
 export function policyGate(config: PolicyGateConfig): MiddlewareHandler<{ Bindings: Env }> {
   return async (c: GateContext, next: Next) => {
     const extraction = await config.extract(c);
-    const { candidate, body, resolved, rawPayload } = extraction;
+    const { candidate, legs, body, resolved, rawPayload } = extraction;
     const scope = getRequestTenantScope(c);
 
     if (isDryRunRequest(c)) {
@@ -95,7 +97,7 @@ export function policyGate(config: PolicyGateConfig): MiddlewareHandler<{ Bindin
         c,
         candidate === null
           ? UNGOVERNED_POLICY_DRY_RUN_RESULT
-          : await dryRunPolicyCandidate(c.env, scope, candidate)
+          : await dryRunPolicyCandidate(c.env, scope, candidate, legs)
       );
     }
 
@@ -117,6 +119,7 @@ export function policyGate(config: PolicyGateConfig): MiddlewareHandler<{ Bindin
       scope,
       {
         ...candidate,
+        legs,
         rawPayload: {
           ...rawPayload,
           executionRequest: walletOperationExecutionRequest(c, body),

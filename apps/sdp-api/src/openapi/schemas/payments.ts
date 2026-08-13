@@ -69,19 +69,16 @@ export const tokenAmountSchema = z.string().openapi({
   example: "100.00",
 });
 
-export const policyRuleSchema = withOpenApi(
-  updateWalletPolicySchemaBase.shape.rules.unwrap().element,
-  {
-    description:
-      "Wallet control profile rule. Supported kinds include operation_family, operation_type, asset, destination, amount, approval, and always.",
-    example: {
-      id: "deny-raw-signing",
-      kind: "operation_family",
-      family: "raw_sign",
-      action: "deny",
-    },
-  }
-);
+export const policyRuleSchema = withOpenApi(updateWalletPolicySchemaBase.shape.rules.element, {
+  description:
+    "Wallet control profile rule. Supported kinds include operation_family, operation_type, asset, destination, amount, approval, and always.",
+  example: {
+    id: "deny-raw-signing",
+    kind: "operation_family",
+    family: "raw_sign",
+    action: "deny",
+  },
+});
 
 const walletControlProfileSummarySchema = z
   .object({
@@ -338,50 +335,23 @@ export const walletPolicyEvaluationResponseSchema = z.object({
 export const walletPolicySchema = z
   .object({
     walletId: walletIdParamSchema,
-    destinationAllowlist: z
-      .array(solanaAddressSchema)
-      .max(500)
-      .openapi({
-        description:
-          "Allowed destination addresses. An empty array means no destination restrictions. Maximum 500 entries per wallet.",
-        example: ["7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"],
-      }),
-    maxTransferAmount: tokenAmountSchema
-      .optional()
-      .openapi({ description: "Maximum amount allowed per transfer." }),
-    maxDailyAmount: tokenAmountSchema
-      .optional()
-      .openapi({ description: "Maximum total amount allowed per day." }),
-    defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).optional().openapi({
-      description: "Active wallet control profile default action when no rule matches.",
+    defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).openapi({
+      description:
+        "Wallet control profile default action when no rule matches. A wallet without an active profile is implicitly allow.",
     }),
     rules: z
       .array(policyRuleSchema)
-      .optional()
-      .openapi({ description: "Active wallet control profile rules." }),
-    controlProfile: walletControlProfileSummarySchema.optional().openapi({
-      description: "Active wallet control profile metadata.",
+      .openapi({ description: "Active wallet control profile rules; empty without a profile." }),
+    controlProfile: walletControlProfileSummarySchema.nullable().openapi({
+      description: "Active wallet control profile metadata, or null when none is active.",
     }),
     audit: walletPolicyAuditSchema.optional().openapi({
       description: "Recent wallet operation policy decisions for customer/support audit review.",
     }),
-    policyVersionId: z.string().optional().openapi({
-      description:
-        "Opaque token that changes on every policy update, including limit and allowlist changes. Pass back as expectedPolicyVersionId to detect stale writes. Absent until the policy is first written by a version-aware update.",
-      example: "pwv_example",
-    }),
-    createdAt: isoDateTimeSchema.openapi({
-      description: "Timestamp when the policy was created.",
-      example: "2025-01-01T00:00:00.000Z",
-    }),
-    updatedAt: isoDateTimeSchema.openapi({
-      description: "Timestamp when the policy was last updated.",
-      example: "2025-01-02T00:00:00.000Z",
-    }),
   })
   .openapi({
     description:
-      "Payment policy configuration for a custody-managed wallet. Wallet lifecycle belongs to /v1/wallets, while payment controls are internally stored as typed policy records.",
+      "Policy configuration for a custody-managed wallet: the active control profile's rules and default action.",
   });
 
 export const paymentWalletIdParamsSchema = walletIdParamsSchemaBase
@@ -433,33 +403,17 @@ export const paymentTransferBatchIdParamsSchema = transferBatchIdParamsSchemaBas
 
 export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
   .extend({
-    destinationAllowlist: withOpenApi(updateWalletPolicySchemaBase.shape.destinationAllowlist, {
-      description:
-        "Allowed destination addresses. Omit to keep the wallet's current allowlist; an empty array removes all destination restrictions. Maximum 500 entries per wallet.",
-      example: ["7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"],
-    }),
     commitMessage: withOpenApi(updateWalletPolicySchemaBase.shape.commitMessage, {
       description: "Optional message describing the wallet policy revision changes.",
       example: "Require approval for transfers above 10,000 USDC.",
     }),
-    maxTransferAmount: withOpenApi(updateWalletPolicySchemaBase.shape.maxTransferAmount, {
-      description:
-        "Maximum amount allowed per transfer. Omit to keep the current limit; set null to remove it.",
-      example: "100.00",
-    }),
-    maxDailyAmount: withOpenApi(updateWalletPolicySchemaBase.shape.maxDailyAmount, {
-      description:
-        "Maximum total amount allowed per day. Omit to keep the current limit; set null to remove it.",
-      example: "1000.00",
-    }),
     defaultAction: withOpenApi(updateWalletPolicySchemaBase.shape.defaultAction, {
-      description:
-        "Default action for the activated wallet control profile revision. Omit to keep the active revision's default action.",
+      description: "Default action for the activated wallet control profile revision.",
       example: "allow",
     }),
     rules: withOpenApi(updateWalletPolicySchemaBase.shape.rules, {
       description:
-        "Rules for a new immutable wallet control profile revision. When provided, the revision is activated after validation. Omit to keep the active revision's rules.",
+        "Rules for the new immutable wallet control profile revision, activated after validation.",
       example: [
         {
           id: "deny-raw-signing",
@@ -469,18 +423,15 @@ export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
         },
       ],
     }),
-    expectedPolicyVersionId: withOpenApi(
-      updateWalletPolicySchemaBase.shape.expectedPolicyVersionId,
-      {
-        description:
-          "Optimistic-concurrency precondition. When set, the update only applies if this matches the wallet policy's current policyVersionId — a token that changes on every policy update, including limit and allowlist changes (use null to require that the policy has never been written with a version); otherwise the request fails with 409. Omit to skip the check.",
-        example: "pwv_example",
-      }
-    ),
+    expectedRevisionId: withOpenApi(updateWalletPolicySchemaBase.shape.expectedRevisionId, {
+      description:
+        "Optimistic-concurrency precondition. When set, the update only applies if this matches the wallet's active control-profile revision id (use null to require that no profile is active); otherwise the request fails with 409. Omit to skip the check and overwrite unconditionally.",
+      example: "wcpr_example",
+    }),
   })
   .openapi({
     description:
-      "Update wallet policy request payload with patch semantics: omitted fields keep the wallet's current values, and null clears a clearable limit. Controls map to typed internal policy records for provider-specific extensibility.",
+      "Update wallet policy request payload: the full rule set and default action of the revision to activate.",
   });
 
 export const tokenBalanceSchema = z

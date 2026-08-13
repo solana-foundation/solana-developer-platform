@@ -80,15 +80,16 @@ export const organizationOnboarding = flag<boolean, DashboardFlagEntities>({
   ],
 });
 
-export const alphaledgerTokenizationEngine = flag<boolean, DashboardFlagEntities>({
-  key: "alphaledger-tokenization-engine",
+export const privyByok = flag<boolean, DashboardFlagEntities>({
+  key: "privy-byok",
   adapter: vercelAdapter(),
   identify: identifyDashboardEntities,
-  defaultValue: flagDefault("SDP_FLAG_ALPHALEDGER_TOKENIZATION_ENGINE", false),
-  description: "Offer the AlphaLedger tokenization engine as an issuance provider option.",
+  defaultValue: flagDefault("SDP_FLAG_PRIVY_BYOK", false),
+  description:
+    "Install Privy from stored project credentials instead of the legacy env-backed initialize path. Requires PRIVY_BYOK_ENABLED on the API.",
   options: [
-    { value: false, label: "Mosaic only" },
-    { value: true, label: "AlphaLedger available" },
+    { value: false, label: "Legacy initialize" },
+    { value: true, label: "Stored credentials" },
   ],
 });
 
@@ -111,6 +112,19 @@ export const privateChannels = flag<boolean, DashboardFlagEntities>({
   defaultValue: flagDefault("PRIVATE_CHANNELS_ENABLED", false),
   description:
     "Show the Private Channels payments workspace (instance, channels, members, deposits, transfers, withdrawals).",
+  options: [
+    { value: false, label: "Hidden" },
+    { value: true, label: "Enabled" },
+  ],
+});
+
+export const heliusRings = flag<boolean, DashboardFlagEntities>({
+  key: "helius-rings",
+  adapter: vercelAdapter(),
+  identify: identifyDashboardEntities,
+  defaultValue: flagDefault("HELIUS_RINGS_ENABLED", false),
+  description:
+    "Show the Helius Rings devnet workspace (shielded wallets, private transfers, zones, timelocks).",
   options: [
     { value: false, label: "Hidden" },
     { value: true, label: "Enabled" },
