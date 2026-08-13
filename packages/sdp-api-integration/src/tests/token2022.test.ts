@@ -32,7 +32,12 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token2022Service 
 
   it("creates mint using service directly", { timeout: 60000 }, async () => {
     const signer = await createOrgSigner(env as ApiTestEnv, TEST_ORG.id, TEST_PROJECT.id);
-    const token2022 = createToken2022Service(env as ApiTestEnv, signer);
+    const token2022 = createToken2022Service(env as ApiTestEnv, signer, {
+      environment: TEST_PROJECT.environment,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      actor: { type: "project", id: TEST_PROJECT.id },
+    });
 
     const result = await token2022.createMint({
       metadata: {

@@ -48,6 +48,14 @@ type ProviderAvailabilityDefinitions = {
   earn: Record<EarnProviderId, ProviderAvailabilityDefinition>;
 };
 
+type ProviderIdByFamily = {
+  custody: CustodyProvider;
+  rpc: OrganizationRpcProvider;
+  compliance: ComplianceProviderId;
+  ramps: RampProviderId;
+  earn: EarnProviderId;
+};
+
 function hasEnv(env: Env, key: keyof Env): boolean {
   const value = env[key];
   return typeof value === "string" && value.trim().length > 0;
@@ -281,6 +289,24 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
     ground: keyPairCredentialDefinition("Ground", "GROUND"),
   },
 } as const satisfies ProviderAvailabilityDefinitions;
+
+/**
+ * Reuse the deployment configuration checks without exposing credential values.
+ * Setup/status surfaces use this for side-effect-free checks; provider runtimes
+ * continue to enforce availability through getProviderAvailability.
+ */
+export function isProviderConfigured<Family extends OrganizationProviderFamily>(
+  env: Env,
+  family: Family,
+  providerId: ProviderIdByFamily[Family],
+  testMode?: boolean
+): boolean {
+  const definitions = PROVIDER_AVAILABILITY_DEFINITIONS[family] as Record<
+    string,
+    ProviderAvailabilityDefinition
+  >;
+  return definitions[providerId]?.isConfigured(env, testMode) ?? false;
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object") {
