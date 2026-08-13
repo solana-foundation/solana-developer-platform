@@ -604,6 +604,235 @@ describe("SponsorshipBudgetRedis", () => {
     expect(await raw.hget(hourKey, "__reservation:res_b:1")).toBeNull();
   });
 
+  it("settles a reservation left behind by the previous ownership format", async () => {
+    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
+    const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";
+    for (const key of [hourKey, dayKey]) {
+      await raw.hset(
+        key,
+        "global",
+        "10",
+        "__initialized:global",
+        "1",
+        "organization:org_1",
+        "10",
+        "__initialized:organization:org_1",
+        "1",
+        "__reservation:res_legacy:1",
+        "10"
+      );
+    }
+
+    await expect(
+      budget.settle({
+        network: "devnet",
+        organizationId: "org_1",
+        projectId: null,
+        hourBucket: "2026-08-03T10:00:00.000Z",
+        dayBucket: "2026-08-03T00:00:00.000Z",
+        reservationId: "res_legacy",
+        attempt: 1,
+        reservedLamports: 10,
+        actualLamports: 4,
+        detectMissingReservation: true,
+      })
+    ).resolves.toBe(-6);
+
+    expect(await raw.hget(hourKey, "global")).toBe("4");
+    expect(await raw.hget(hourKey, "organization:org_1")).toBe("4");
+    expect(await raw.hget(dayKey, "global")).toBe("4");
+    expect(await raw.hget(hourKey, "__reservation:res_legacy:1")).toBeNull();
+  });
+
+  it("cancels a reservation left behind by the previous ownership format", async () => {
+    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
+    const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";
+    for (const key of [hourKey, dayKey]) {
+      await raw.hset(
+        key,
+        "global",
+        "10",
+        "__initialized:global",
+        "1",
+        "organization:org_1",
+        "10",
+        "__initialized:organization:org_1",
+        "1",
+        "__reservation:res_legacy_cancel:1",
+        "10"
+      );
+    }
+
+    await budget.cancel({
+      network: "devnet",
+      organizationId: "org_1",
+      projectId: null,
+      hourBucket: "2026-08-03T10:00:00.000Z",
+      dayBucket: "2026-08-03T00:00:00.000Z",
+      reservationId: "res_legacy_cancel",
+      attempt: 1,
+    });
+
+    expect(await raw.hget(hourKey, "global")).toBe("0");
+    expect(await raw.hget(dayKey, "organization:org_1")).toBe("0");
+    expect(await raw.hget(hourKey, "__reservation:res_legacy_cancel:1")).toBeNull();
+  });
+
+  it("counts a tenant once when its field is seeded into an already warm window", async () => {
+    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
+    const policies = [policy("global", 1, true, 1000), policy("organization", 1, true, 1000)];
+    const window = {
+      network: "devnet" as const,
+      hourBucket: "2026-08-03T10:00:00.000Z",
+      dayBucket: "2026-08-03T00:00:00.000Z",
+      projectId: null,
+      policies,
+    };
+
+    await expect(
+      budget.reserve({
+        ...window,
+        organizationId: "org_a",
+        reservationId: "res_a",
+        attempt: 1,
+        amount: 5,
+        usage: EMPTY_USAGE,
+        liveReservations: { hour: [], day: [] },
+      })
+    ).resolves.toBe("admitted");
+
+    const liveB2 = {
+      id: "res_b2",
+      attempt: 1,
+      reservedLamports: 10,
+      organizationId: "org_b",
+      projectId: null,
+    };
+    await expect(
+      budget.reserve({
+        ...window,
+        organizationId: "org_b",
+        reservationId: "res_b1",
+        attempt: 1,
+        amount: 10,
+        usage: {
+          hour: { global: 15, organization: 10, project: 0 },
+          day: { global: 15, organization: 10, project: 0 },
+        },
+        liveReservations: { hour: [liveB2], day: [liveB2] },
+      })
+    ).resolves.toBe("admitted");
+
+    const liveB1 = {
+      id: "res_b1",
+      attempt: 1,
+      reservedLamports: 10,
+      organizationId: "org_b",
+      projectId: null,
+    };
+    await expect(
+      budget.reserve({
+        ...window,
+        organizationId: "org_b",
+        reservationId: "res_b2",
+        attempt: 1,
+        amount: 10,
+        usage: {
+          hour: { global: 15, organization: 10, project: 0 },
+          day: { global: 15, organization: 10, project: 0 },
+        },
+        liveReservations: { hour: [liveB1], day: [liveB1] },
+      })
+    ).resolves.toBe("admitted");
+
+    expect(await raw.hget(hourKey, "organization:org_b")).toBe("20");
+  });
+
+  it("denies an adopted reservation that exceeds the per-transaction limit", async () => {
+    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
+
+    await expect(
+      budget.reserve({
+        network: "devnet",
+        organizationId: "org_1",
+        projectId: null,
+        hourBucket: "2026-08-03T10:00:00.000Z",
+        dayBucket: "2026-08-03T00:00:00.000Z",
+        reservationId: "res_self",
+        attempt: 1,
+        amount: 11,
+        policies: [policy("global", 1, true, 10), policy("organization", 1, true, 10)],
+        usage: {
+          hour: { global: 11, organization: 11, project: 0 },
+          day: { global: 11, organization: 11, project: 0 },
+        },
+        liveReservations: {
+          hour: [
+            {
+              id: "res_self",
+              attempt: 1,
+              reservedLamports: 11,
+              organizationId: "org_1",
+              projectId: null,
+            },
+          ],
+          day: [
+            {
+              id: "res_self",
+              attempt: 1,
+              reservedLamports: 11,
+              organizationId: "org_1",
+              projectId: null,
+            },
+          ],
+        },
+      })
+    ).resolves.toBe("denied");
+
+    expect(await raw.get("sdp:sponsorship:{devnet}:reservation:res_self:1")).toBeNull();
+    expect(await raw.hget(hourKey, "global")).toBe("11");
+  });
+
+  it("denies an adopted reservation once the seeded window already exceeds its limit", async () => {
+    await expect(
+      budget.reserve({
+        network: "devnet",
+        organizationId: "org_1",
+        projectId: null,
+        hourBucket: "2026-08-03T10:00:00.000Z",
+        dayBucket: "2026-08-03T00:00:00.000Z",
+        reservationId: "res_over",
+        attempt: 1,
+        amount: 5,
+        policies: [policy("global", 1, true, 20), policy("organization", 1, true, 20)],
+        usage: {
+          hour: { global: 25, organization: 25, project: 0 },
+          day: { global: 25, organization: 25, project: 0 },
+        },
+        liveReservations: {
+          hour: [
+            {
+              id: "res_over",
+              attempt: 1,
+              reservedLamports: 5,
+              organizationId: "org_1",
+              projectId: null,
+            },
+          ],
+          day: [
+            {
+              id: "res_over",
+              attempt: 1,
+              reservedLamports: 5,
+              organizationId: "org_1",
+              projectId: null,
+            },
+          ],
+        },
+      })
+    ).resolves.toBe("denied");
+  });
+
   it("adopts a reconstruction-seeded reservation instead of double-counting its own reserve", async () => {
     const base = {
       network: "devnet" as const,
