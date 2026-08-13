@@ -1,6 +1,8 @@
 import { hashString } from "@sdp/payments/hash";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { createPostgresCounterpartiesRepository } from "@/db/repositories/counterparty.repository.postgres";
 import app from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
@@ -400,6 +402,145 @@ describe("Counterparties Routes", () => {
           }),
         ])
       );
+    });
+  });
+
+  describe("POST /v1/counterparties/:counterpartyId/requirements", () => {
+    beforeEach(() => {
+      env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID = "lightspark_client_id";
+      env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = "lightspark_client_secret";
+      env.BVNK_SANDBOX_WALLET_ID = "bvnk_wallet_id";
+      env.BVNK_SANDBOX_HAWK_AUTH_ID = "bvnk_hawk_auth_id";
+      env.BVNK_SANDBOX_HAWK_SECRET_KEY = "bvnk_hawk_secret_key";
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID = undefined;
+      env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = undefined;
+      env.BVNK_SANDBOX_WALLET_ID = undefined;
+      env.BVNK_SANDBOX_HAWK_AUTH_ID = undefined;
+      env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
+    });
+
+    it("persists the Lightspark customer pointer after advancing requirements", async () => {
+      const created = await createCounterparty({ externalId: "requirements_lightspark" });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      vi.spyOn(RAMP_PROVIDER_CLIENTS.lightspark, "getOrCreateCustomer").mockResolvedValue({
+        id: "Customer:lightspark_requirements_1",
+      });
+
+      const res = await app.request(
+        `/v1/counterparties/${counterparty.id}/requirements`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({ provider: "lightspark", direction: "onramp" }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).data).toEqual({
+        provider: "lightspark",
+        direction: "onramp",
+        status: "ready",
+      });
+
+      const stored = await createPostgresCounterpartiesRepository(
+        getDb(env),
+        env.counterpartyPiiCipher
+      ).getCounterpartyById({
+        counterpartyId: counterparty.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      });
+      if (!stored) {
+        throw new Error("Expected the Lightspark counterparty to remain readable");
+      }
+      expect(stored.provider_data).toMatchObject({
+        lightspark: { customerId: "Customer:lightspark_requirements_1" },
+      });
+    });
+
+    it("persists the BVNK customer reference while verification is pending", async () => {
+      const created = await createCounterparty({ externalId: "requirements_bvnk" });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createAgreementSession").mockResolvedValue({
+        reference: "agreement_requirements_1",
+        agreements: [],
+      });
+      vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "signAgreement").mockResolvedValue(undefined);
+      vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createBvnkCustomer").mockResolvedValue({
+        reference: "bvnk_customer_requirements_1",
+        status: "PENDING",
+        verificationStatus: "pending",
+      });
+      vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getBvnkCustomer").mockResolvedValue({
+        reference: "bvnk_customer_requirements_1",
+        status: "PENDING",
+        verificationStatus: "pending",
+      });
+
+      const res = await app.request(
+        `/v1/counterparties/${counterparty.id}/requirements`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({
+            provider: "bvnk",
+            direction: "onramp",
+            cryptoToken: "USDC_SOLANA",
+            destinationWallet: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
+            fiatCurrency: "USD",
+            collectedData: {
+              "taxIdentification.number": "123-45-6789",
+              "taxIdentification.taxResidenceCountryCode": "US",
+              nationality: "US",
+              birthCountryCode: "US",
+              "cdd.employmentStatus": "SALARIED",
+              "cdd.sourceOfFunds": "SALARY",
+              "cdd.pepStatus": "NOT_PEP",
+              "cdd.intendedUseOfAccount": "TRANSFERS_OWN_WALLET",
+              "cdd.expectedMonthlyVolume.amount": "1000",
+              "cdd.estimatedYearlyIncome": "INCOME_100K_TO_250K",
+              "cdd.employmentIndustrySector": "INFORMATION",
+              "address.stateCode": "CA",
+            },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).data).toEqual({
+        provider: "bvnk",
+        direction: "onramp",
+        status: "customer_verifying",
+      });
+
+      const stored = await createPostgresCounterpartiesRepository(
+        getDb(env),
+        env.counterpartyPiiCipher
+      ).getCounterpartyById({
+        counterpartyId: counterparty.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      });
+      if (!stored) {
+        throw new Error("Expected the BVNK counterparty to remain readable");
+      }
+      expect(stored.provider_data).toMatchObject({
+        bvnk: {
+          customer: {
+            customerReference: "bvnk_customer_requirements_1",
+            status: "PENDING",
+            verificationStatus: "pending",
+          },
+        },
+      });
     });
   });
 

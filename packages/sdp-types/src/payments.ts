@@ -43,12 +43,9 @@ export interface PaymentsWalletAggregateEnvelope {
 
 export interface PaymentWalletPolicy {
   walletId: string;
-  destinationAllowlist: string[];
-  maxTransferAmount?: string;
-  maxDailyAmount?: string;
-  defaultAction?: PolicyDefaultAction;
-  rules?: PolicyRule[];
-  controlProfile?: PaymentWalletControlProfileSummary;
+  defaultAction: PolicyDefaultAction;
+  rules: PolicyRule[];
+  controlProfile: PaymentWalletControlProfileSummary | null;
   audit?: PaymentWalletPolicyAudit;
 }
 

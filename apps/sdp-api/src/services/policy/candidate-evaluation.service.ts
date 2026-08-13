@@ -26,18 +26,21 @@ export const UNGOVERNED_POLICY_DRY_RUN_RESULT: PolicyDryRunResult = {
  * @param env - The runtime environment.
  * @param scope - The trusted tenant scope of the request.
  * @param candidate - The candidate operation to evaluate.
+ * @param legs - The candidate's per-leg views; empty for single-leg operations.
  * @returns The verdict plus every rule in both scopes, matched or not.
  */
 export async function dryRunPolicyCandidate(
   env: Env,
   scope: TenantScope,
-  candidate: PolicyCandidate
+  candidate: PolicyCandidate,
+  legs: PolicyCandidate[]
 ): Promise<PolicyDryRunResult> {
   assertTenantClaim(scope, candidate, "dryRunPolicyCandidate");
   const store = new PostgresPolicyEnforcementStore(createPolicyRepository(env, scope), scope);
   const policies = await store.loadEffectivePolicies(candidate);
   const evaluation = evaluateCandidatePolicies({
     candidate,
+    legs,
     walletPolicy: policies.walletPolicy,
     apiKeyPolicy: policies.apiKeyPolicy,
   });
@@ -46,10 +49,10 @@ export async function dryRunPolicyCandidate(
     decision: evaluation.decision,
     reason: evaluation.reason,
     criteria: [
-      ...describeCandidateRuleCriteria("wallet", policies.walletPolicy, candidate),
+      ...describeCandidateRuleCriteria("wallet", policies.walletPolicy, candidate, legs),
       ...(policies.apiKeyPolicy === null
         ? []
-        : describeCandidateRuleCriteria("api_key", policies.apiKeyPolicy, candidate)),
+        : describeCandidateRuleCriteria("api_key", policies.apiKeyPolicy, candidate, legs)),
     ],
     walletPolicyRevisionId: evaluation.walletPolicyRevisionId,
     apiKeyPolicyRevisionId: evaluation.apiKeyPolicyRevisionId,

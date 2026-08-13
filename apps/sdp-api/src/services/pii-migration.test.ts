@@ -1,10 +1,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
+import { createCounterpartiesRepository } from "@/db/repositories";
 import { createPostgresCounterpartiesRepository } from "@/db/repositories/counterparty.repository.postgres";
 import {
   acquireCounterpartyPiiWriteLock,
   getCounterpartyPiiMigrationPhase,
 } from "@/db/repositories/counterparty-pii.repository";
+import { createTenantScope } from "@/lib/tenant-scope";
 import type { PiiCipher } from "@/services/pii-cipher/pii-cipher";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
@@ -215,6 +217,35 @@ describe("counterparty PII migration lifecycle", () => {
     expect(updated?.provider_data).toMatchObject({
       providerA: { status: "ready" },
       providerB: { status: "active" },
+    });
+  });
+
+  it("allows tenant-bound repositories to mutate provider data within their own scope", async () => {
+    const repo = createCounterpartiesRepository(
+      env,
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: PROJECT_ID })
+    );
+    const scope = {
+      counterpartyId: COUNTERPARTY_ID,
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT_ID,
+    };
+
+    const mutated = await repo.mutateProviderData({
+      ...scope,
+      mutate: (current) => ({ ...current, lightspark: { customerId: "grid-customer-1" } }),
+    });
+    expect(mutated?.provider_data).toMatchObject({
+      lightspark: { customerId: "grid-customer-1" },
+    });
+
+    await repo.upsertBvnkCustomerProviderData({
+      ...scope,
+      customer: { customerReference: "bvnk-customer-2" },
+    });
+    const updated = await repo.getCounterpartyById(scope);
+    expect(updated?.provider_data).toMatchObject({
+      bvnk: { customer: { customerReference: "bvnk-customer-2" } },
     });
   });
 

@@ -6,9 +6,11 @@ import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
  * so callers never juggle conversions at render time.
  */
 
-export function formatApy(apy: string | undefined): string {
+export function formatApy(apy: string | number | undefined): string {
+  // Deliberately falsy, not just undefined: an APY of literal 0 (or "0") is a
+  // rate nothing publishes — it means "no rate", and "—" beats a claimed 0.0%.
   if (!apy) return "—";
-  const value = Number(apy);
+  const value = typeof apy === "string" ? Number(apy) : apy;
   if (!Number.isFinite(value)) return "—";
   return `${(value * 100).toFixed(1)}%`;
 }

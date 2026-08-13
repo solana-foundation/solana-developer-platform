@@ -174,9 +174,7 @@ export function WalletPolicyStartingProfileFlow({
   function stepHasErrors(step: PolicyFlowStep): boolean {
     if (step === "intent") return Boolean(validation.intent);
     if (step === "limits-assets") {
-      return Boolean(
-        validation.maxTransferAmount || validation.maxDailyAmount || validation.assets
-      );
+      return Boolean(validation.maxTransferAmount || validation.assets);
     }
     if (step === "destinations-operations") {
       return Boolean(validation.operations);

@@ -521,23 +521,29 @@ export async function getProviderAvailability(
   };
 }
 
-export async function isStoredCustodySetupEnabled(
+export async function isPersistedCustodyCompletionEnabled(
   env: Env,
   db: DatabaseClient,
   organizationId: string,
-  provider: CustodyProvider
+  provider: CustodyProvider,
+  source: "stored" | "runtime"
 ): Promise<boolean> {
-  // Stored credential setup remains managed-only. Further task adds explicit self-hosted opt-in.
+  if (!isCustodyConnectionRuntimeEnabled(env, provider)) {
+    return false;
+  }
+
   if (
-    isSelfHostedDeployment(env) ||
-    !isCustodyConnectionRuntimeEnabled(env, provider) ||
+    source === "stored" &&
     CUSTODY_PROVIDER_CATALOG_BY_ID[provider].storedCredentialSetup.mode !== "self_service"
   ) {
     return false;
   }
 
   const availability = await getProviderAvailability(env, db, organizationId);
-  return availability.providers.custody[provider]?.entitled === true;
+  const providerAvailability = availability.providers.custody[provider];
+  return source === "runtime"
+    ? providerAvailability?.enabled === true
+    : providerAvailability?.entitled === true;
 }
 
 function getAvailabilityMessage(

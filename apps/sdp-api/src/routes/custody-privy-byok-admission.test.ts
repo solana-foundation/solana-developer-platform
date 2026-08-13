@@ -82,21 +82,42 @@ async function request(path: "initialize" | "switch"): Promise<Response> {
 }
 
 async function seedLegacyConfig(status: "active" | "inactive"): Promise<void> {
-  await getDb(env)
-    .prepare(
-      `INSERT INTO custody_configs (
-         id, organization_id, project_id, provider, config_encrypted,
-         encryption_version, default_wallet_id, status
-       ) VALUES (?, ?, ?, 'privy', 'legacy', 'test', ?, ?)`
-    )
-    .bind(
-      "cust_privy_byok_admission",
-      ORGANIZATION_ID,
-      PROJECT_ID,
-      status === "active" ? "privy_wallet_admission" : null,
-      status
-    )
-    .run();
+  const db = getDb(env);
+  const statements = [
+    db
+      .prepare(
+        `INSERT INTO custody_configs (
+           id, organization_id, project_id, provider, config_encrypted,
+           encryption_version, default_wallet_id, status
+         ) VALUES (?, ?, ?, 'privy', 'legacy', 'test', ?, ?)`
+      )
+      .bind(
+        "cust_privy_byok_admission",
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        status === "active" ? "privy_wallet_admission" : null,
+        status
+      ),
+  ];
+  if (status === "active") {
+    // The config's default_wallet_id FK is deferred, so the default wallet
+    // must land in the same transaction.
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO custody_wallets (
+             id, custody_config_id, wallet_id, public_key, label, status
+           ) VALUES (?, ?, ?, ?, 'Legacy wallet', 'active')`
+        )
+        .bind(
+          "cwlt_privy_byok_admission",
+          "cust_privy_byok_admission",
+          "privy_wallet_admission",
+          "LegacyPublicKey"
+        )
+    );
+  }
+  await db.batch(statements);
 }
 
 async function seedBlockingConnection(): Promise<void> {
@@ -129,12 +150,27 @@ async function seedBlockingConnection(): Promise<void> {
   ]);
 }
 
+async function getConnectionSetupRowCounts() {
+  const counts = await getDb(env)
+    .prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM provider_credentials) AS credentials,
+         (SELECT COUNT(*) FROM custody_connections) AS connections,
+         (SELECT COUNT(*) FROM custody_wallets) AS wallets`
+    )
+    .first<{ credentials: number; connections: number; wallets: number }>();
+  if (!counts) throw new Error("Connection setup row count query returned no row");
+  return counts;
+}
+
 describe("legacy Privy setup admission", () => {
   const original = {
     flag: env.PRIVY_BYOK_ENABLED,
     appId: env.PRIVY_APP_ID,
     appSecret: env.PRIVY_APP_SECRET,
     encryptionKey: env.CUSTODY_ENCRYPTION_KEY,
+    deploymentMode: env.SDP_DEPLOYMENT_MODE,
+    selfHostedStoredSetup: env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED,
   };
 
   beforeEach(async () => {
@@ -152,6 +188,8 @@ describe("legacy Privy setup admission", () => {
     env.PRIVY_APP_ID = original.appId;
     env.PRIVY_APP_SECRET = original.appSecret;
     env.CUSTODY_ENCRYPTION_KEY = original.encryptionKey;
+    env.SDP_DEPLOYMENT_MODE = original.deploymentMode;
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = original.selfHostedStoredSetup;
     await clearKVStores(env);
   });
 
@@ -173,6 +211,44 @@ describe("legacy Privy setup admission", () => {
       expect(configs?.count).toBe(0);
     }
   );
+
+  it("rejects fresh self-hosted runtime setup through public initialize without writes", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = "false";
+    env.PRIVY_APP_ID = "runtime-app-id";
+    env.PRIVY_APP_SECRET = "runtime-app-secret";
+    const before = await getConnectionSetupRowCounts();
+
+    const response = await request("initialize");
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "FORBIDDEN",
+        message: "New Privy setup must use stored credentials",
+      },
+    });
+    expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+    expect(await getConnectionSetupRowCounts()).toEqual(before);
+  });
+
+  it("rejects public initialize when an active Config coexists with a pending Connection", async () => {
+    await seedLegacyConfig("active");
+    await seedBlockingConnection();
+    const before = await getConnectionSetupRowCounts();
+
+    const response = await request("initialize");
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "CONFLICT",
+        message: "Privy custody setup already exists for this project",
+      },
+    });
+    expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+    expect(await getConnectionSetupRowCounts()).toEqual(before);
+  });
 
   it("treats inactive Config reactivation as fresh setup", async () => {
     await seedLegacyConfig("inactive");
@@ -258,19 +334,6 @@ describe("legacy Privy setup admission", () => {
       .bind("csd_privy_byok_admission", ORGANIZATION_ID, PROJECT_ID, "cust_privy_byok_admission")
       .run();
     await seedBlockingConnection();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets (
-           id, custody_config_id, wallet_id, public_key, label, status
-         ) VALUES (?, ?, ?, ?, 'Legacy wallet', 'active')`
-      )
-      .bind(
-        "cwlt_privy_byok_admission",
-        "cust_privy_byok_admission",
-        "privy_wallet_admission",
-        "LegacyPublicKey"
-      )
-      .run();
 
     const response = await request("switch");
 
