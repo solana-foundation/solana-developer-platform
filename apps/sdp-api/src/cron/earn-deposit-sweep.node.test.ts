@@ -64,6 +64,7 @@ vi.mock("@/services/earn-deposit-ledger.service", async (importOriginal) => {
 
 import {
   EARN_DEPOSIT_SWEEP_CRON,
+  EARN_DEPOSIT_SWEEP_DEADLINE_SECONDS,
   EARN_DEPOSIT_SWEEP_MONITOR,
   EARN_DEPOSIT_SWEEP_SLOT_TTL_SECONDS,
   runEarnDepositSweepIfDue,
@@ -379,6 +380,37 @@ describe("runEarnDepositSweepIfDue", () => {
     expect(mocks.del).toHaveBeenCalledWith("cron:earn-deposit-sweep:cursor:earn_provider_wallet_1");
   });
 
+  it.each([
+    ["a rate limit", new SdpEarnError("RATE_LIMITED", "slow down")],
+    ["a provider outage", new SdpEarnError("PROVIDER_UNAVAILABLE", "502")],
+    ["a transport failure", new Error("socket hang up")],
+  ])("KEEPS a resumed cursor when the failure is %s, not a rejection", async (_label, thrown) => {
+    // None of these say anything about the cursor's validity, and discarding it on
+    // them would throw away real pagination progress — for a wallet with more pages
+    // than the per-pass cap that means the walk restarts at the head every time and
+    // can never reach the end.
+    mocks.scanProviderWallets.mockImplementation(
+      async ({ environment }: { environment: string }) =>
+        environment === "sandbox" ? [makeWallet()] : []
+    );
+    mocks.get.mockImplementation(async (key: string) =>
+      key === "cron:earn-deposit-sweep:cursor:earn_provider_wallet_1" ? "deep_in_history" : null
+    );
+    mocks.resolveEarnProviderClient.mockReturnValue(
+      makeClient(
+        vi.fn(async () => {
+          throw thrown;
+        })
+      )
+    );
+
+    await expect(runEarnDepositSweepIfDue(env)).resolves.toBe("swept");
+
+    expect(mocks.del).not.toHaveBeenCalledWith(
+      "cron:earn-deposit-sweep:cursor:earn_provider_wallet_1"
+    );
+  });
+
   it("keeps a cursor minted during THIS pass when a later page fails", async () => {
     // Only a cursor carried over from a previous pass can be stale. Deleting a
     // fresh one on any mid-walk failure would throw away real progress on a long
@@ -462,6 +494,73 @@ describe("runEarnDepositSweepIfDue", () => {
     expect(mocks.scanProviderWallets.mock.calls[1]?.[0]).toMatchObject({
       environment: "production",
     });
+  });
+
+  it("advances the wallet-scan checkpoint only AFTER the batch is processed", async () => {
+    // Checkpointing on fetch would point past wallets nothing swept if the pass ends
+    // early (its deadline, the job's execution cap, or a kill), skipping those
+    // programs until the scan wrapped all the way around. Ordering is the assertion:
+    // the checkpoint write must come after the last observation of the batch.
+    const wallets = Array.from({ length: 200 }, (_unused, index) =>
+      makeWallet({
+        id: `earn_provider_wallet_${index}`,
+        created_at: `2026-08-12T00:00:0${index % 10}.000Z`,
+      })
+    );
+    mocks.scanProviderWallets.mockImplementation(
+      async ({ environment }: { environment: string }) => (environment === "sandbox" ? wallets : [])
+    );
+    mocks.resolveEarnProviderClient.mockReturnValue(makeClient(onePage([DEPOSIT])));
+
+    await runEarnDepositSweepIfDue(env);
+
+    const scanPut = mocks.put.mock.calls.find(
+      (call) => call[0] === "cron:earn-deposit-sweep:wallet-scan:sandbox"
+    );
+    expect(scanPut).toBeDefined();
+    // Every observation in the batch happened before the checkpoint moved.
+    const lastObservation = Math.max(...mocks.applyEarnDepositObservation.mock.invocationCallOrder);
+    const checkpointOrder = Math.min(
+      ...mocks.put.mock.invocationCallOrder.filter(
+        (_order, index) =>
+          mocks.put.mock.calls[index]?.[0] === "cron:earn-deposit-sweep:wallet-scan:sandbox"
+      )
+    );
+    expect(checkpointOrder).toBeGreaterThan(lastObservation);
+  });
+
+  it("never checkpoints a batch the deadline cut short", async () => {
+    // The interruption that actually happens: the pass hits its deadline (or the
+    // job's execution cap) partway through the batch. Because the checkpoint write
+    // sits AFTER the wallet loop, it simply never runs — so the next pass re-walks
+    // this batch instead of skipping the wallets nothing reached. Re-walking is free:
+    // every observation is idempotent.
+    vi.useFakeTimers();
+    try {
+      const wallets = Array.from({ length: 200 }, (_unused, index) =>
+        makeWallet({ id: `earn_provider_wallet_${index}` })
+      );
+      mocks.scanProviderWallets.mockImplementation(
+        async ({ environment }: { environment: string }) =>
+          environment === "sandbox" ? wallets : []
+      );
+      const never = new Promise<never>(() => {});
+      mocks.resolveEarnProviderClient.mockReturnValue(makeClient(vi.fn(() => never)));
+
+      const tick = runEarnDepositSweepIfDue(env);
+      const assertion = expect(tick).rejects.toThrow(
+        `exceeded its ${EARN_DEPOSIT_SWEEP_DEADLINE_SECONDS}s deadline`
+      );
+      await vi.advanceTimersByTimeAsync(EARN_DEPOSIT_SWEEP_DEADLINE_SECONDS * 1000);
+      await assertion;
+
+      expect(mocks.put).not.toHaveBeenCalledWith(
+        "cron:earn-deposit-sweep:wallet-scan:sandbox",
+        expect.anything()
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("clears the wallet-scan cursor when the scan comes back under the cap", async () => {

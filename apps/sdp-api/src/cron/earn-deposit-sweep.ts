@@ -154,6 +154,18 @@ function decodeScanCursor(value: string | null): { createdAt: string; id: string
   return { createdAt: value.slice(0, separator), id: value.slice(separator + 1) };
 }
 
+/**
+ * Whether the provider rejected the CURSOR, as opposed to failing the request.
+ *
+ * `classifyProviderStatus` maps 409 to CONFLICT, 429 to RATE_LIMITED and 5xx to
+ * PROVIDER_UNAVAILABLE, leaving BAD_REQUEST as "the provider read this request and
+ * refused it" — the only class that is evidence about the cursor we sent. A raw
+ * transport error is not an SdpEarnError at all and is transient by definition.
+ */
+function isRejectedCursor(error: unknown): boolean {
+  return error instanceof SdpEarnError && error.code === "BAD_REQUEST";
+}
+
 function skippableCode(error: unknown): string | undefined {
   return error instanceof SdpEarnError && SKIPPABLE_SWEEP_ERROR_CODES.has(error.code)
     ? error.code
@@ -199,18 +211,6 @@ async function sweepEnvironment(
     limit: MAX_WALLETS_PER_RUN,
   });
 
-  if (wallets.length < MAX_WALLETS_PER_RUN) {
-    // The scan reached the end of the collection, so the next pass starts over at
-    // the head. Clearing here (rather than only on an empty page) is what keeps a
-    // platform with fewer programs than the cap from carrying a stale cursor.
-    await cache.delete(scanKey);
-  } else {
-    const last = wallets[wallets.length - 1];
-    if (last) {
-      await cache.put(scanKey, encodeScanCursor(last));
-    }
-  }
-
   // Capability and credentials are a property of (provider, environment), not of
   // a wallet, so resolve the decision ONCE per provider per tick. Without this an
   // un-credentialed environment logs one skip per program — noise that drowns real
@@ -252,6 +252,33 @@ async function sweepEnvironment(
         "sweepEarnDeposits: wallet pass failed"
       );
     }
+  }
+
+  // The scan checkpoint advances only AFTER this batch has been processed, never
+  // before it.
+  //
+  // Checkpointing on fetch looks equivalent and is not: the pass can end early at
+  // any point — its own deadline, the managed job's 120s execution cap, or the
+  // process simply being killed — and a checkpoint written up front would then
+  // point PAST wallets nothing swept. Those programs would be skipped until the
+  // environment scan wrapped all the way around, leaving their deposit history
+  // stale for several cadence windows with nothing reporting it.
+  //
+  // Advancing here inverts the failure: an interrupted pass leaves the checkpoint
+  // where it was, so the next one re-walks this batch. Re-walking is free of
+  // consequence — every observation is idempotent, and a re-observed terminal row
+  // costs one indexed SELECT and zero writes — so replay is strictly better than
+  // a silent skip.
+  if (wallets.length < MAX_WALLETS_PER_RUN) {
+    // Reached the end of the collection: next pass starts over at the head.
+    // Clearing here (rather than only on an empty page) is what keeps a platform
+    // with fewer programs than the cap from carrying a stale cursor.
+    await cache.delete(scanKey);
+    return;
+  }
+  const last = wallets[wallets.length - 1];
+  if (last) {
+    await cache.put(scanKey, encodeScanCursor(last));
   }
 }
 
@@ -329,7 +356,15 @@ async function sweepWallet(
       // the cursor is only deleted on a complete walk, so every later pass would
       // replay the identical failing request while the sweep still reports a
       // healthy check-in. Drop it so the failure costs one pass, not all of them.
-      if (resuming && skippableCode(error) === undefined) {
+      //
+      // Narrowed to a REJECTED cursor specifically. A network outage, a 429, or a
+      // provider 5xx says nothing about the cursor's validity, and discarding it on
+      // those would throw away real pagination progress — for a wallet with more
+      // than MAX_PAGES_PER_WALLET pages of history that means the walk restarts at
+      // the head every time and can never reach the end. Only a client-side
+      // rejection (a 4xx that is not 409/429, which the provider fetch layer
+      // classifies as BAD_REQUEST) is evidence about the cursor itself.
+      if (resuming && isRejectedCursor(error)) {
         await cache.delete(cursorKey);
         getLogger().warn(
           { walletId: wallet.id, provider: wallet.provider },
