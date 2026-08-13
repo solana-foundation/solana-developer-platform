@@ -118,6 +118,23 @@ path-filtered to this directory. It is the crate's only correctness gate: Biome 
 `typecheck` job resolves this directory and then no-ops via `--if-present`, and CodeQL has no Rust
 analysis.
 
+Under compose it is behind an opt-in profile, because it is a Rust release build that would push the
+`docker_compose_smoke` CI job past its timeout, and because it is useless without a reachable indexer
+and prover:
+
+```bash
+docker compose --profile rings up sdp-helius-gateway
+```
+
+Compose supplies both HMAC secrets as local-only placeholders. Because the gateway verifies each route
+against its own caller's secret, a client configured with only one of them can reach only that caller's
+half of the API — which is the behaviour to expect when testing against it, not a misconfiguration.
+
+**On Apple Silicon, build natively.** The image is amd64-only, because Cloud Run is amd64 and
+cross-building the Groth16 and Poseidon dependencies under QEMU is impractically slow. Building
+`--platform linux/amd64` locally on an M-series Mac is emulated and just as slow; use `cargo run`
+or build for your native architecture.
+
 ## Timeout ladder
 
 Every budget below is a number this service chooses. That is the whole point of the section: **nothing
@@ -288,6 +305,13 @@ which would move a secret for no reason. Re-checked on every rev bump, on the sa
   this gateway, which does not exist yet; declaring keys nothing reads would be speculative. The
   gateway's own variables are read by this process and belong in compose and Cloud Run config, not in
   the API's `Env` interface.
+
+- **Not added to `.github/workflows/release-images.yml`.** That workflow hardcodes `context: .` and
+  builds amd64 + arm64 before a multi-arch push, and this crate needs a crate-directory context and
+  amd64 only. Wiring it in requires per-service `context` and `platforms` in the matrix, which is a
+  change to the release path for three production images. It should land with the deploy decision — and
+  it is worth asking first whether a Cloud Run service with SDP-internal IAM belongs in the self-hosted
+  GHCR bundle at all.
 
 ## Open questions
 
