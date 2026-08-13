@@ -70,7 +70,7 @@ export interface SafeProviderCredential {
   displayMetadata: { appIdSuffix?: string };
 }
 
-interface ProviderCredentialSubmissionResult {
+export interface ProviderCredentialSubmissionResult {
   providerCredential: SafeProviderCredential;
   connectionId: string;
 }

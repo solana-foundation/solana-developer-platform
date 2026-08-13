@@ -1,6 +1,29 @@
 import { describe, expect, it } from "vitest";
 import { createOpenApiDocument, createPublicOpenApiDocument } from "./spec";
 
+interface TestJsonSchema {
+  example?: unknown;
+  items?: TestJsonSchema;
+  not?: { required?: string[] };
+  oneOf?: TestJsonSchema[];
+  properties?: Record<string, TestJsonSchema>;
+  required?: string[];
+}
+
+function getJsonSchema(value: unknown): TestJsonSchema {
+  return (value as { content: Record<string, { schema: TestJsonSchema }> }).content[
+    "application/json"
+  ].schema;
+}
+
+function getWalletResponseSchema(value: unknown): TestJsonSchema {
+  return getJsonSchema(value).properties?.data?.properties?.wallet ?? {};
+}
+
+function getWalletListItemSchema(value: unknown): TestJsonSchema {
+  return getJsonSchema(value).properties?.data?.properties?.wallets?.items ?? {};
+}
+
 describe("OpenAPI spec", () => {
   it("documents path-based versioning policy", () => {
     const doc = createOpenApiDocument();
@@ -94,6 +117,85 @@ describe("OpenAPI spec", () => {
     expect(JSON.stringify(includeBalance)).toContain("Defaults to true");
     expect(JSON.stringify(operation?.responses?.["200"])).toContain(
       "Omitted when includeBalance=false"
+    );
+  });
+
+  it("documents exact Connection wallet creation without requiring provider", () => {
+    const doc = createOpenApiDocument();
+    const operation = doc.paths?.["/v1/wallets"]?.post;
+    const requestSchema = getJsonSchema(operation?.requestBody);
+
+    expect(requestSchema.properties?.connectionId).toMatchObject({
+      type: "string",
+      minLength: 1,
+    });
+    expect(requestSchema.properties?.connectionId?.example).toBeUndefined();
+    expect(requestSchema.required ?? []).not.toContain("connectionId");
+    expect(requestSchema.required ?? []).not.toContain("provider");
+    expect(requestSchema.example).toEqual({
+      provider: "privy",
+      label: "Mint authority wallet",
+      purpose: "mint_authority",
+      setDefault: true,
+    });
+  });
+
+  it("documents exact-one wallet ownership and request-time runtime admission", () => {
+    const doc = createOpenApiDocument();
+    const createWallet = getWalletResponseSchema(
+      doc.paths?.["/v1/wallets"]?.post?.responses?.["201"]
+    );
+    const listWallet = getWalletListItemSchema(doc.paths?.["/v1/wallets"]?.get?.responses?.["200"]);
+    const updateWallet = getWalletResponseSchema(
+      doc.paths?.["/v1/wallets/{walletId}"]?.patch?.responses?.["200"]
+    );
+    const detailWallet = getWalletResponseSchema(
+      doc.paths?.["/v1/wallets/{walletId}"]?.get?.responses?.["200"]
+    );
+    const ownerConstraint = [
+      {
+        required: ["custodyConfigId"],
+        not: { required: ["custodyConnectionId"] },
+      },
+      {
+        required: ["custodyConnectionId"],
+        not: { required: ["custodyConfigId"] },
+      },
+    ];
+
+    for (const walletSchema of [createWallet, listWallet, updateWallet, detailWallet]) {
+      expect(walletSchema.properties).toHaveProperty("custodyConfigId");
+      expect(walletSchema.properties).toHaveProperty("custodyConnectionId");
+      expect(walletSchema.oneOf).toEqual(ownerConstraint);
+      expect(walletSchema.required).toContain("isRuntimeExecutionAllowed");
+      expect(walletSchema.example).toMatchObject({
+        custodyConfigId: "cfg_example",
+        isRuntimeExecutionAllowed: true,
+        walletId: "privy_wallet_123",
+      });
+    }
+
+    for (const walletSchema of [createWallet, listWallet, updateWallet]) {
+      expect(walletSchema.required ?? []).not.toContain("provider");
+    }
+    expect(detailWallet.required).toContain("provider");
+    expect(detailWallet.required ?? []).not.toContain("balance");
+  });
+
+  it("documents Connection-aware wallet resolution failures", () => {
+    const doc = createOpenApiDocument();
+
+    expect(doc.paths?.["/v1/wallets"]?.post?.responses).toHaveProperty("404");
+    expect(doc.paths?.["/v1/wallets"]?.post?.responses).toHaveProperty("503");
+    expect(doc.paths?.["/v1/wallets"]?.get?.responses).toHaveProperty("400");
+    expect(doc.paths?.["/v1/wallets"]?.get?.responses).toHaveProperty("409");
+    expect(doc.paths?.["/v1/wallets/aggregate"]?.get?.responses).toHaveProperty("400");
+    expect(doc.paths?.["/v1/wallets/aggregate"]?.get?.responses).toHaveProperty("409");
+    expect(doc.paths?.["/v1/wallets/public-key"]?.get?.responses).toHaveProperty("409");
+    expect(doc.paths?.["/v1/wallets/{walletId}"]?.get?.responses).toHaveProperty("409");
+    expect(doc.paths?.["/v1/wallets/{walletId}"]?.patch?.responses).toHaveProperty("409");
+    expect(doc.paths?.["/v1/payments/wallets/{walletId}/balances"]?.get?.responses).toHaveProperty(
+      "409"
     );
   });
 

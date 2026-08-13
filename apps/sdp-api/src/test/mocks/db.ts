@@ -6,11 +6,14 @@
  */
 
 import { getDb } from "@/db";
-import { createKVStoreSet } from "@/runtime/kv-redis";
+import { createKVStoreSet, getRedisClient } from "@/runtime/kv-redis";
 import { AUDIT_LEDGER_CHECKPOINT_KEY } from "@/services/audit.service";
 import type { Env } from "@/types/env";
 
 const POSTGRES_TEST_TABLES = [
+  "sponsorship_budget_policy_revisions",
+  "sponsorship_budget_reservations",
+  "sponsorship_budget_policies",
   "earn_program_withdrawals",
   "earn_provider_wallets",
   "earn_strategies",
@@ -77,6 +80,34 @@ const POSTGRES_TEST_TABLES = [
   "allowlist",
 ] as const;
 
+async function seedSponsorshipBudgetPolicies(env: Env): Promise<void> {
+  const db = getDb(env);
+  await db.execute(
+    `INSERT INTO sponsorship_budget_policies (
+       id, network, scope_type, scope_id, enabled,
+       per_transaction_lamports, hourly_lamports, daily_lamports,
+       version, updated_by, update_reason
+     ) VALUES
+       ('sbp_devnet_global', 'devnet', 'global', NULL, TRUE, 10000000, 2000000000, 10000000000, 1, 'test-seed', 'Reset devnet sponsorship controls'),
+       ('sbp_devnet_org_default', 'devnet', 'organization', NULL, TRUE, 10000000, 1000000000, 5000000000, 1, 'test-seed', 'Reset devnet organization default'),
+       ('sbp_devnet_project_default', 'devnet', 'project', NULL, TRUE, 10000000, 1000000000, 3000000000, 1, 'test-seed', 'Reset devnet project default'),
+       ('sbp_mainnet_global', 'mainnet', 'global', NULL, FALSE, 10000000, 500000000, 1000000000, 1, 'test-seed', 'Reset mainnet sponsorship controls'),
+       ('sbp_mainnet_org_default', 'mainnet', 'organization', NULL, TRUE, 10000000, 250000000, 500000000, 1, 'test-seed', 'Reset mainnet organization default'),
+       ('sbp_mainnet_project_default', 'mainnet', 'project', NULL, TRUE, 10000000, 100000000, 250000000, 1, 'test-seed', 'Reset mainnet project default')`
+  );
+  await db.execute(
+    `INSERT INTO sponsorship_budget_policy_revisions (
+       id, policy_id, network, scope_type, scope_id, enabled,
+       per_transaction_lamports, hourly_lamports, daily_lamports,
+       version, changed_by, change_reason
+     )
+     SELECT 'sbpr_' || id || '_1', id, network, scope_type, scope_id, enabled,
+            per_transaction_lamports, hourly_lamports, daily_lamports,
+            version, updated_by, update_reason
+     FROM sponsorship_budget_policies`
+  );
+}
+
 /**
  * Resets this worker's database to empty by truncating every test table.
  * Call from beforeEach; there is deliberately no afterEach counterpart —
@@ -93,6 +124,11 @@ export async function seedTestDatabase(env: Env): Promise<void> {
       .prepare(`TRUNCATE TABLE ${POSTGRES_TEST_TABLES.join(", ")} RESTART IDENTITY CASCADE`)
       .run();
     await createKVStoreSet(env).cache.delete(AUDIT_LEDGER_CHECKPOINT_KEY);
+    const redis = await getRedisClient(env);
+    const sponsorshipKeys = await redis.keys("sdp:sponsorship:*");
+    if (sponsorshipKeys.length > 0) {
+      await redis.del(...sponsorshipKeys);
+    }
   } catch (error) {
     throw new Error(
       "Postgres schema is not bootstrapped. Run `pnpm infra:up` and `pnpm --filter @sdp/api db:postgres:bootstrap` first.",
@@ -101,4 +137,6 @@ export async function seedTestDatabase(env: Env): Promise<void> {
       }
     );
   }
+
+  await seedSponsorshipBudgetPolicies(env);
 }
