@@ -205,6 +205,12 @@ export function notifyMemberInviteRevoked(
 
 // The removed member is excluded alongside the actor: their inbox in this org is
 // unreachable once the membership row is gone.
+//
+// Both call sites (API removal and the Clerk webhook sync) are transition-guarded —
+// each only calls this when ITS status update actually flipped the row to 'removed' —
+// so exactly one fires per removal. That frees the eventKey to carry a timestamp for
+// per-occurrence uniqueness: a member who is re-invited and later removed again
+// notifies again (unlike a static (org, user) key, which went silent forever).
 export function notifyMemberRemoved(
   c: AppContext,
   input: {
@@ -223,7 +229,7 @@ export function notifyMemberRemoved(
     dispatchNotification(c.env, {
       organizationId: input.organizationId,
       type: "member_removed",
-      eventKey: `member_removed:${input.organizationId}:${input.removedUserId}`,
+      eventKey: `member_removed:${input.organizationId}:${input.removedUserId}:${new Date().toISOString()}`,
       title: "Member removed",
       body: `${input.email ?? "A member"} was removed from the organization.`,
       resourceType: "member",
@@ -243,12 +249,14 @@ function formatAmount(amount?: string | null, currency?: string | null): string 
 
 // Internal admin notification + (when the transfer has a counterparty with a contact
 // email) an external settlement receipt to that counterparty. Same shape as
-// emitRampSettled and wired at the same call sites.
+// emitRampSettled and wired at the same call sites — but unlike the emit (rules are
+// project-scoped), the admin notification also fires for project-less transfers; only
+// the counterparty receipt needs a project (the tenant-scoped lookup pins to it).
 export function notifyRampSettled(
   c: AppContext,
   input: {
     organizationId: string;
-    projectId: string;
+    projectId: string | null;
     direction: "onramp" | "offramp";
     transferId: string;
     provider?: string | null;
@@ -279,7 +287,7 @@ export function notifyRampSettled(
         cryptoToken: input.cryptoToken ?? null,
       },
     }),
-    input.counterpartyId
+    input.counterpartyId && input.projectId
       ? dispatchCounterpartyEmail(c.env, {
           organizationId: input.organizationId,
           projectId: input.projectId,
@@ -359,7 +367,13 @@ export async function notifyKycOutcome(
           projectId: input.kycWallet.project_id,
           counterpartyId: input.kycWallet.counterparty_id,
           type,
-          eventKey,
+          // Keyed on the COUNTERPARTY, not the wallet: a provider webhook that verifies
+          // a multi-wallet counterparty calls this once per wallet, and the external
+          // recipient must get one receipt, not one per wallet. status_changed_at is
+          // set by a single UPDATE (now() is transaction-stable), so every wallet in
+          // that batch carries the identical timestamp and the claim collapses them —
+          // while a genuine later re-transition still re-fires.
+          eventKey: `${type}:${input.kycWallet.counterparty_id}:${input.kycWallet.status_changed_at}`,
           title: `Your identity verification was ${outcomeLabel}`,
           body:
             input.status === "verified"

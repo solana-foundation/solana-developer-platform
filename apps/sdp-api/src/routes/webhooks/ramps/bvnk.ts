@@ -265,7 +265,7 @@ async function handleProviderOnrampSettlementWebhook(
   // carry no settlement-event shape), so it emits here directly — previously this path
   // emitted nothing and BVNK settlements were invisible to workflow rules. Gated on the
   // guarded claim so a replayed webhook can't re-fire.
-  if (claimed && transfer.project_id) {
+  if (claimed) {
     const settled = {
       organizationId: transfer.organization_id,
       projectId: transfer.project_id,
@@ -277,7 +277,10 @@ async function handleProviderOnrampSettlementWebhook(
       fiatCurrency: transfer.fiat_currency,
       cryptoToken: transfer.token,
     };
-    emitRampSettled(c, settled);
+    // Rules are project-scoped; a project-less transfer still notifies admins below.
+    if (transfer.project_id) {
+      emitRampSettled(c, { ...settled, projectId: transfer.project_id });
+    }
     // Admin notification + counterparty settlement receipt (idempotent on transferId).
     notifyRampSettled(c, settled);
   }
@@ -527,7 +530,7 @@ async function handleProviderOfframpSettlementWebhook(
   // so it emits here directly — previously this path emitted nothing and BVNK off-ramp
   // settlements were invisible to workflow rules. The RETURNING row doubles as the
   // this-request-claimed-it guard (the terminal-status filter blocks replays).
-  if (status === "completed" && updated?.project_id) {
+  if (status === "completed" && updated) {
     const settled = {
       organizationId: updated.organization_id,
       projectId: updated.project_id,
@@ -539,7 +542,10 @@ async function handleProviderOfframpSettlementWebhook(
       fiatCurrency: updated.fiat_currency,
       cryptoToken: updated.token,
     };
-    emitRampSettled(c, settled);
+    // Rules are project-scoped; a project-less transfer still notifies admins below.
+    if (updated.project_id) {
+      emitRampSettled(c, { ...settled, projectId: updated.project_id });
+    }
     // Admin notification + counterparty settlement receipt (idempotent on transferId).
     notifyRampSettled(c, settled);
   }

@@ -1,10 +1,44 @@
 import type { RampSettlementEvent } from "@sdp/payments/ramps";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import type { PaymentsRepository } from "@/db/repositories";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { AppContext } from "./processor";
 import { applyRampSettlementEvent } from "./settlements";
+
+const { notifyRampSettledMock, emitRampSettledMock, paymentsRepoWrap } = vi.hoisted(() => ({
+  notifyRampSettledMock: vi.fn(),
+  emitRampSettledMock: vi.fn(),
+  // Lets a test intercept the guarded update to simulate a concurrent writer landing
+  // between the pre-read and the claim — the interleave that can't be forced otherwise.
+  paymentsRepoWrap: {
+    current: null as null | ((repo: PaymentsRepository) => PaymentsRepository),
+  },
+}));
+
+vi.mock("@/services/notifications", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/notifications")>()),
+  notifyRampSettled: notifyRampSettledMock,
+}));
+
+vi.mock("@/services/workflows/payment-events", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/workflows/payment-events")>()),
+  emitRampSettled: emitRampSettledMock,
+}));
+
+vi.mock("@/db/repositories", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/db/repositories")>();
+  return {
+    ...actual,
+    createSystemPaymentsRepository: (
+      repoEnv: Parameters<typeof actual.createSystemPaymentsRepository>[0]
+    ) => {
+      const real = actual.createSystemPaymentsRepository(repoEnv);
+      return paymentsRepoWrap.current ? paymentsRepoWrap.current(real) : real;
+    },
+  };
+});
 
 const ORG_ID = "org_ramp_settlement_test";
 const PROJECT_ID = "prj_ramp_settlement_test";
@@ -19,6 +53,7 @@ async function seedTransfer(input: {
   reference: string;
   status: string;
   type?: "onramp" | "offramp" | "transfer";
+  projectId?: string | null;
 }) {
   const type = input.type ?? "onramp";
   await getDb(env)
@@ -33,7 +68,7 @@ async function seedTransfer(input: {
     .bind(
       input.id,
       ORG_ID,
-      PROJECT_ID,
+      input.projectId === undefined ? PROJECT_ID : input.projectId,
       "wallet_ramp_settlement_test",
       type === "offramp" ? "source" : null,
       type === "onramp" ? "destination" : "destination",
@@ -75,6 +110,9 @@ async function readTransfer(id: string) {
 
 describe("applyRampSettlementEvent", () => {
   beforeEach(async () => {
+    notifyRampSettledMock.mockReset();
+    emitRampSettledMock.mockReset();
+    paymentsRepoWrap.current = null;
     await seedTestDatabase(env);
     await getDb(env).batch([
       getDb(env)
@@ -163,6 +201,84 @@ describe("applyRampSettlementEvent", () => {
     expect(await readTransfer("xfr_retry")).toMatchObject({
       status: "completed",
       amount: "9",
+    });
+  });
+
+  it("emits and notifies exactly once per settlement, replay included", async () => {
+    await seedTransfer({ id: "xfr_signal", reference: "order_signal", status: "settling" });
+    const event: RampSettlementEvent = {
+      provider: "coinbase",
+      kind: "settled",
+      reference: "order_signal",
+      receivedAmount: "9",
+    };
+
+    await applyRampSettlementEvent(context(), event);
+    await applyRampSettlementEvent(context(), event);
+
+    expect(emitRampSettledMock).toHaveBeenCalledTimes(1);
+    expect(notifyRampSettledMock).toHaveBeenCalledTimes(1);
+    expect(notifyRampSettledMock.mock.calls[0]?.[1]).toMatchObject({
+      organizationId: ORG_ID,
+      projectId: PROJECT_ID,
+      transferId: "xfr_signal",
+      direction: "onramp",
+    });
+  });
+
+  it("fires no settlement signals when the guarded update loses the row", async () => {
+    await seedTransfer({ id: "xfr_lost", reference: "order_lost", status: "settling" });
+    // Simulate a concurrent `failed` committing between this handler's pre-read and
+    // its guarded update: the pre-read saw `settling`, but the claim finds `failed`.
+    paymentsRepoWrap.current = (real) => ({
+      ...real,
+      updateTransferStatusGuarded: async (input) => {
+        await getDb(env)
+          .prepare(
+            "UPDATE payment_transfers SET status = 'failed', error = 'declined' WHERE id = ?"
+          )
+          .bind("xfr_lost")
+          .run();
+        return real.updateTransferStatusGuarded(input);
+      },
+    });
+
+    await applyRampSettlementEvent(context(), {
+      provider: "coinbase",
+      kind: "settled",
+      reference: "order_lost",
+      receivedAmount: "9",
+    });
+
+    // The losing `settled` must not overwrite the terminal state, emit a workflow
+    // event, or send the counterparty a "payment settled" receipt for a failed payment.
+    expect(await readTransfer("xfr_lost")).toMatchObject({ status: "failed" });
+    expect(emitRampSettledMock).not.toHaveBeenCalled();
+    expect(notifyRampSettledMock).not.toHaveBeenCalled();
+  });
+
+  it("notifies admins for a project-less transfer without emitting a workflow event", async () => {
+    await seedTransfer({
+      id: "xfr_no_project",
+      reference: "order_no_project",
+      status: "settling",
+      projectId: null,
+    });
+
+    await applyRampSettlementEvent(context(), {
+      provider: "coinbase",
+      kind: "settled",
+      reference: "order_no_project",
+      receivedAmount: "9",
+    });
+
+    // Workflow rules are project-scoped, so there is nothing to emit — but the
+    // settlement itself is still org news.
+    expect(emitRampSettledMock).not.toHaveBeenCalled();
+    expect(notifyRampSettledMock).toHaveBeenCalledTimes(1);
+    expect(notifyRampSettledMock.mock.calls[0]?.[1]).toMatchObject({
+      projectId: null,
+      transferId: "xfr_no_project",
     });
   });
 });

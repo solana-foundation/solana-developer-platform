@@ -3,13 +3,16 @@ import { getDb } from "@/db";
 import {
   createNotificationPreferencesRepository,
   createSystemCounterpartiesRepository,
+  type KycWalletRow,
+  type NotificationDeliveriesRepository,
 } from "@/db/repositories";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { dispatchCounterpartyEmail, dispatchNotification } from "./dispatcher";
+import { notifyKycOutcome } from "./producers";
 
-const { sendMock, emailConfiguredMock, publishMock } = vi.hoisted(() => ({
+const { sendMock, emailConfiguredMock, publishMock, deliveriesWrap } = vi.hoisted(() => ({
   sendMock: vi.fn(),
   emailConfiguredMock: vi.fn(() => true),
   publishMock: vi.fn(
@@ -20,7 +23,27 @@ const { sendMock, emailConfiguredMock, publishMock } = vi.hoisted(() => ({
       _nudge: { unread: number; ts: string }
     ) => {}
   ),
+  // Lets a test inject repository faults (e.g. markSent failing after a delivered
+  // send) that a real database can't produce on cue.
+  deliveriesWrap: {
+    current: null as
+      | null
+      | ((repo: NotificationDeliveriesRepository) => NotificationDeliveriesRepository),
+  },
 }));
+
+vi.mock("@/db/repositories", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/db/repositories")>();
+  return {
+    ...actual,
+    createNotificationDeliveriesRepository: (
+      repoEnv: Parameters<typeof actual.createNotificationDeliveriesRepository>[0]
+    ) => {
+      const real = actual.createNotificationDeliveriesRepository(repoEnv);
+      return deliveriesWrap.current ? deliveriesWrap.current(real) : real;
+    },
+  };
+});
 
 vi.mock("@/services/email", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/email")>();
@@ -54,6 +77,7 @@ describe("dispatchNotification (postgres)", () => {
     sendMock.mockReset().mockResolvedValue({ messageId: "msg_1", acceptedAt: "now" });
     emailConfiguredMock.mockReset().mockReturnValue(true);
     publishMock.mockReset().mockResolvedValue(undefined);
+    deliveriesWrap.current = null;
 
     const db = getDb(env);
     for (const table of [
@@ -234,6 +258,40 @@ describe("dispatchNotification (postgres)", () => {
     expect(result).toEqual({ resolved: 2, inserted: 2, emailed: 0 });
     expect(sendMock).not.toHaveBeenCalled();
   });
+
+  it("never lets a markSent failure re-open a delivered send", async () => {
+    // The mail leaves Resend successfully, then the bookkeeping write dies (pool
+    // timeout). Marking the claim `failed` here would make it reclaimable — the next
+    // producer run would email everyone a duplicate.
+    deliveriesWrap.current = (real) => ({
+      ...real,
+      markSent: async () => {
+        throw new Error("timeout exceeded when trying to connect");
+      },
+    });
+    const first = await dispatchNotification(env, baseInput());
+    expect(first.emailed).toBe(2);
+    expect(sendMock).toHaveBeenCalledTimes(2);
+
+    const rows = await getDb(env)
+      .prepare("SELECT status FROM notification_deliveries WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .all<{ status: string }>();
+    expect(rows.results.map((row) => row.status)).toEqual(["pending", "pending"]);
+
+    // Recovered bookkeeping, retried producer: the pending claims refuse a re-send.
+    deliveriesWrap.current = null;
+    sendMock.mockClear();
+    const second = await dispatchNotification(env, baseInput());
+    expect(second.emailed).toBe(0);
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it("loses only the nudge when the Redis publish rejects", async () => {
+    publishMock.mockRejectedValue(new Error("redis down"));
+    const result = await dispatchNotification(env, baseInput());
+    expect(result).toEqual({ resolved: 2, inserted: 2, emailed: 2 });
+  });
 });
 
 describe("dispatchCounterpartyEmail (postgres)", () => {
@@ -251,6 +309,7 @@ describe("dispatchCounterpartyEmail (postgres)", () => {
     sendMock.mockReset().mockResolvedValue({ messageId: "msg_cp", acceptedAt: "now" });
     emailConfiguredMock.mockReset().mockReturnValue(true);
     publishMock.mockReset().mockResolvedValue(undefined);
+    deliveriesWrap.current = null;
 
     const db = getDb(env);
     for (const table of [
@@ -345,5 +404,55 @@ describe("dispatchCounterpartyEmail (postgres)", () => {
     const result = await dispatchCounterpartyEmail(env, receipt());
     expect(result.emailed).toBe(0);
     expect(result.error).toContain("provider down");
+  });
+
+  it("no-ops for a non-active counterparty", async () => {
+    await getDb(env)
+      .prepare("UPDATE counterparties SET status = 'archived' WHERE id = ?")
+      .bind(counterpartyId)
+      .run();
+    expect(await dispatchCounterpartyEmail(env, receipt())).toEqual({ emailed: 0 });
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it("sends ONE receipt when a multi-wallet counterparty verifies in one transition", async () => {
+    // A provider webhook that verifies a counterparty updates every linked wallet in
+    // one statement (identical status_changed_at) and the caller loops per wallet —
+    // the external recipient must still get exactly one email per transition.
+    const transitionAt = "2026-08-13T10:00:00.000Z";
+    const wallet = (id: string, address: string, statusChangedAt: string) =>
+      ({
+        id,
+        organization_id: TEST_ORG.id,
+        project_id: PROJECT_ID,
+        counterparty_id: counterpartyId,
+        wallet_address: address,
+        status: "verified",
+        status_changed_at: statusChangedAt,
+        kyc_provider: "mural",
+      }) as unknown as KycWalletRow;
+
+    await notifyKycOutcome(env, {
+      kycWallet: wallet("kyw_multi_1", "Wallet111", transitionAt),
+      status: "verified",
+    });
+    await notifyKycOutcome(env, {
+      kycWallet: wallet("kyw_multi_2", "Wallet222", transitionAt),
+      status: "verified",
+    });
+
+    const receipts = sendMock.mock.calls.filter(
+      (call) => call[0].to[0] === "finance@acme.example.com"
+    );
+    expect(receipts).toHaveLength(1);
+
+    // A genuine LATER transition (new status_changed_at) re-fires the receipt.
+    await notifyKycOutcome(env, {
+      kycWallet: wallet("kyw_multi_1", "Wallet111", "2026-08-14T09:00:00.000Z"),
+      status: "verified",
+    });
+    expect(
+      sendMock.mock.calls.filter((call) => call[0].to[0] === "finance@acme.example.com")
+    ).toHaveLength(2);
   });
 });

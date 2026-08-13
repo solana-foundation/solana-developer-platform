@@ -3,7 +3,11 @@ import {
   createNotificationDeliveriesRepository,
   createNotificationPreferencesRepository,
 } from "@/db/repositories";
-import { createTransactionalEmailService, isEmailConfigured } from "@/services/email";
+import {
+  createTransactionalEmailService,
+  isEmailConfigured,
+  TransactionalEmailError,
+} from "@/services/email";
 import { renderNotificationEmail } from "@/services/email/templates/notification";
 import {
   dispatchNotification,
@@ -21,6 +25,24 @@ type Audience = "admins" | "members";
 // only offer admins/members.
 function parseAudience(value: string | null): Audience {
   return value === "members" ? "members" : "admins";
+}
+
+// Retry only what a retry can fix. Typed classification — never regex the message
+// string: transport errors routinely embed 4xx-looking substrings (`ECONNREFUSED
+// 10.0.0.5:465`), and config errors carry fixed English text that no pattern can
+// reliably separate from provider rejections. Exported for its unit test.
+export function isPermanentEmailError(error: unknown): boolean {
+  if (!(error instanceof TransactionalEmailError)) {
+    // Unknown shape (network, DNS, undici) — transport-flavored, worth the budget.
+    return false;
+  }
+  if (error.code === "misconfigured" || error.code === "invalid_message") {
+    return true;
+  }
+  // Provider 4xx = rejected payload/recipient, except 429 which is pure backpressure.
+  return (
+    error.status !== undefined && error.status >= 400 && error.status < 500 && error.status !== 429
+  );
 }
 
 // notify: deliver an in-app notification (and, when email is configured, an email) to a
@@ -42,8 +64,9 @@ export async function runNotify(
     `A ${triggerLabel} event triggered an automation on this asset.`;
 
   // Targeting one specific mailbox (no in-app row — the row belongs to the inbox, and
-  // this branch is about reaching an address).
-  const specificEmail = resolveParam(action, "email");
+  // this branch is about reaching an address). Trimmed: the member lookup compares
+  // exactly, and a rule author's stray padding must not read as "not an org member".
+  const specificEmail = resolveParam(action, "email")?.trim();
   if (specificEmail) {
     if (!isEmailConfigured(env)) {
       return permanentFail("EMAIL_NOT_CONFIGURED");
@@ -81,30 +104,36 @@ export async function runNotify(
     if (!claimId) {
       return succeeded({ emailedTo: 0, alreadyDelivered: true });
     }
+    let delivery: { messageId: string | null };
     try {
       const { html, text } = await renderNotificationEmail({
         title,
         body,
         managePreferencesUrl: managePreferencesLink(env),
       });
-      const delivery = await createTransactionalEmailService(env).send({
+      delivery = await createTransactionalEmailService(env).send({
         to: [specificEmail],
         subject: title,
         html,
         text,
       });
-      await deliveries.markSent({ id: claimId, providerMessageId: delivery.messageId });
-      return succeeded({ emailedTo: 1 });
     } catch (error) {
       // A rejected address or a malformed payload won't fix itself; only transport
       // failures deserve the retry budget. The failed claim is reclaimable, so a retry
       // re-attempts the send.
       const message = errorMessage(error);
       await deliveries.markFailed({ id: claimId, error: message }).catch(() => undefined);
-      return /\b4\d\d\b|invalid|rejected/i.test(message)
+      return isPermanentEmailError(error)
         ? permanentFail(message)
         : { status: "failed", retryable: true, result: {}, error: message };
     }
+    // The mail is delivered; a markSent failure must not mark the claim `failed` — the
+    // engine would classify it retryable, reclaim, and send a duplicate. Left
+    // `pending`, the claim keeps blocking re-sends.
+    await deliveries
+      .markSent({ id: claimId, providerMessageId: delivery.messageId })
+      .catch(() => undefined);
+    return succeeded({ emailedTo: 1 });
   }
 
   // Audience fan-out through the shared dispatcher: in-app rows dedupe on the execution
@@ -114,6 +143,10 @@ export async function runNotify(
     organizationId: execution.organization_id,
     projectId: execution.project_id,
     type: "workflow_execution",
+    // Bare execution id (no type prefix) so rows shipped before the dispatcher existed
+    // keep their dedupe keys. Collision-safe only because execution ids are
+    // `workflow_execution_<uuid>` — the id format carries what the prefix convention
+    // does elsewhere.
     eventKey: execution.id,
     title,
     body,

@@ -89,11 +89,13 @@ export async function applyRampSettlementEvent(c: AppContext, event: RampSettlem
     update.providerData = { settlement: event.settlement };
   }
 
-  await repo.updateTransferStatusGuarded(update);
+  const claimed = await repo.updateTransferStatusGuarded(update);
 
-  // Workflow trigger seam: a settled ramp fires onramp_settled / offramp_settled.
-  // Rules are project-scoped, so a transfer without a project has nothing to match.
-  if (event.kind === "settled" && transfer.project_id) {
+  // Gated on the guarded claim: a `settled` that lost the row to a concurrent
+  // conflicting event (e.g. `failed`) must not fire settlement signals — the
+  // counterparty receipt in particular would be wrong AND permanent (its delivery
+  // claim blocks a corrective send under the same transferId key).
+  if (event.kind === "settled" && claimed) {
     const settled = {
       organizationId: transfer.organization_id,
       projectId: transfer.project_id,
@@ -105,7 +107,11 @@ export async function applyRampSettlementEvent(c: AppContext, event: RampSettlem
       fiatCurrency: transfer.fiat_currency,
       cryptoToken: transfer.token,
     };
-    emitRampSettled(c, settled);
+    // Workflow trigger seam: rules are project-scoped, so a transfer without a project
+    // has nothing to match — but admins are still notified below.
+    if (transfer.project_id) {
+      emitRampSettled(c, { ...settled, projectId: transfer.project_id });
+    }
     // Admin notification + counterparty settlement receipt (idempotent on transferId).
     notifyRampSettled(c, settled);
   }

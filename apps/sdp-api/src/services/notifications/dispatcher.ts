@@ -97,20 +97,31 @@ async function sendClaimedEmail(params: {
     // Already sent (or in flight) for this event — a retried producer lands here.
     return false;
   }
+  let delivery: { messageId: string | null };
   try {
-    const delivery = await params.emailService.send({
+    delivery = await params.emailService.send({
       to: [params.recipient],
       subject: params.subject,
       html: params.html,
       text: params.text,
     });
-    await params.deliveries.markSent({ id: claimId, providerMessageId: delivery.messageId });
-    return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await params.deliveries.markFailed({ id: claimId, error: message }).catch(() => undefined);
     throw error;
   }
+  // The mail is delivered; a bookkeeping failure here must NOT mark the claim `failed`
+  // (that's the reclaimable state — the next producer run would send a duplicate).
+  // Swallowed, the claim stays `pending`, which blocks re-sends: the at-most-once side.
+  await params.deliveries
+    .markSent({ id: claimId, providerMessageId: delivery.messageId })
+    .catch((error) =>
+      getLogger().warn(
+        { error: error instanceof Error ? error.message : String(error) },
+        "notification email sent but markSent failed; claim left pending"
+      )
+    );
+  return true;
 }
 
 async function resolveRecipients(
@@ -334,7 +345,7 @@ export async function dispatchCounterpartyEmail(
       organizationId: input.organizationId,
       projectId: input.projectId,
     });
-    if (!counterparty || counterparty.status !== "active") {
+    if (counterparty?.status !== "active") {
       return { emailed: 0 };
     }
     const recipient = counterparty.email.trim();
@@ -365,21 +376,31 @@ export async function dispatchCounterpartyEmail(
       externalRecipientNote: `You are receiving this because ${orgName} processed a transaction involving your account on the Solana Developer Platform.`,
     });
     const deliveries = createNotificationDeliveriesRepository(env);
+    let delivery: { messageId: string | null };
     try {
-      const delivery = await createTransactionalEmailService(env).send({
+      delivery = await createTransactionalEmailService(env).send({
         to: [recipient],
         subject: input.emailSubject ?? input.title,
         html,
         text,
       });
-      await deliveries.markSent({ id: claimId, providerMessageId: delivery.messageId });
-      return { emailed: 1 };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await deliveries.markFailed({ id: claimId, error: message }).catch(() => undefined);
       getLogger().error({ error: message }, "counterparty receipt email failed");
       return { emailed: 0, error: message };
     }
+    // Delivered; a markSent failure must not make the claim reclaimable (see
+    // sendClaimedEmail) — left `pending`, replays stay blocked.
+    await deliveries
+      .markSent({ id: claimId, providerMessageId: delivery.messageId })
+      .catch((error) =>
+        getLogger().warn(
+          { error: error instanceof Error ? error.message : String(error) },
+          "counterparty receipt sent but markSent failed; claim left pending"
+        )
+      );
+    return { emailed: 1 };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     getLogger().error({ error: message, type: input.type }, "counterparty dispatch failed");

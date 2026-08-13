@@ -32,6 +32,11 @@ export interface ClaimNotificationDeliveryInput {
   userId: string | null;
   channel: "email";
   recipient: string;
+  // CONTRACT: must embed a GLOBALLY unique id (invitation/transfer/execution/wallet id
+  // etc.), never an org-local value. The unique index is (channel, dedupe_key) with no
+  // org column, so a cross-org key collision would let one org's claim adopt — and
+  // rewrite the recipient of — another org's delivery row. Every current producer keys
+  // on a `<prefix>_<uuid>` entity id; keep it that way.
   dedupeKey: string;
 }
 
