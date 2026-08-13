@@ -40,6 +40,32 @@ function requireRedisUrl(env: Env): string {
   return url;
 }
 
+// Bounded wait for the subscriber connection: smooths the cold-boot window (first SSE
+// request can land before ioredis finishes connecting) without re-introducing the
+// unbounded parking that the disabled offline queue exists to prevent.
+const SUBSCRIBER_READY_TIMEOUT_MS = 3_000;
+
+function waitForReady(client: Redis, timeoutMs: number): Promise<void> {
+  if (client.status === "ready") {
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    const onReady = () => {
+      cleanup();
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("notification subscriber connection is not ready"));
+    }, timeoutMs);
+    const cleanup = () => {
+      clearTimeout(timer);
+      client.off("ready", onReady);
+    };
+    client.on("ready", onReady);
+  });
+}
+
 function ensureSubscriber(url: string): SubscriberState {
   const existing = subscribersByUrl.get(url);
   if (existing) return existing;
@@ -49,9 +75,14 @@ function ensureSubscriber(url: string): SubscriberState {
     const { default: IORedis } = await import("ioredis");
     const client = new IORedis(url, {
       lazyConnect: false,
-      // Subscriber must survive Redis restarts: never fail queued SUBSCRIBEs, and let
-      // ioredis auto-resubscribe its tracked channels after reconnect.
+      // Survive Redis restarts (ioredis auto-resubscribes tracked channels after
+      // reconnect) — but FAIL FAST while disconnected: with the offline queue on, a
+      // SUBSCRIBE issued during an outage parks forever, wedging the SSE request that
+      // awaits it (and, at shutdown, the whole drain). Rejected fast, the stream closes
+      // and the client's reconnect + the bell's polling carry the gap — the intended
+      // degraded mode.
       maxRetriesPerRequest: null,
+      enableOfflineQueue: false,
     });
     client.on("message", (channel: string, message: string) => {
       const listeners = listenersByChannel.get(channel);
@@ -111,6 +142,11 @@ export async function publishInboxNudge(
  * Subscribe a listener to one (org, user) inbox channel. Returns an async unsubscribe.
  * The channel's SUBSCRIBE is issued on the first listener and UNSUBSCRIBE after the
  * last one leaves (refcounted via the listener set).
+ *
+ * THROWS when the SUBSCRIBE cannot be established (Redis down/misconfigured), after
+ * rolling the listener back out of the refcount map. A silently dead subscription
+ * would look healthy to the stream (heartbeats still flow) while never delivering —
+ * failing lets the caller close the stream and the client retry into a working one.
  */
 export async function subscribeInbox(
   env: Env,
@@ -131,12 +167,21 @@ export async function subscribeInbox(
   listeners.add(listener);
 
   if (isFirstListener) {
-    const client = await state.clientPromise;
-    // May reject while Redis is down; ioredis re-subscribes tracked channels on
-    // reconnect, and the bell's polling covers any window with no live subscription.
-    await client.subscribe(channel).catch((error: Error) => {
-      getLogger().error({ channel, error: error.message }, "notification subscribe failed");
-    });
+    try {
+      const client = await state.clientPromise;
+      await waitForReady(client, SUBSCRIBER_READY_TIMEOUT_MS);
+      await client.subscribe(channel);
+    } catch (error) {
+      listeners.delete(listener);
+      if (listeners.size === 0) {
+        state.listenersByChannel.delete(channel);
+      }
+      getLogger().error(
+        { channel, error: error instanceof Error ? error.message : String(error) },
+        "notification subscribe failed"
+      );
+      throw error;
+    }
   }
 
   return async () => {
@@ -145,15 +190,17 @@ export async function subscribeInbox(
     current.delete(listener);
     if (current.size > 0) return;
     state.listenersByChannel.delete(channel);
-    try {
-      const client = await state.clientPromise;
-      await client.unsubscribe(channel);
-    } catch (error) {
-      getLogger().warn(
-        { channel, error: error instanceof Error ? error.message : String(error) },
-        "notification unsubscribe failed"
-      );
-    }
+    const client = await state.clientPromise.catch(() => null);
+    if (!client) return;
+    // Re-check: a new stream may have re-subscribed the channel while we awaited the
+    // client — sending UNSUBSCRIBE now would kill its live subscription.
+    if (state.listenersByChannel.has(channel)) return;
+    // Fire-and-forget: never block stream teardown (or process shutdown) on a Redis
+    // round-trip. With the offline queue off this rejects fast during an outage, and
+    // dropping the UNSUBSCRIBE costs one idle channel until reconnect at worst.
+    client.unsubscribe(channel).catch((error: Error) => {
+      getLogger().warn({ channel, error: error.message }, "notification unsubscribe failed");
+    });
   };
 }
 

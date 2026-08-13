@@ -78,4 +78,15 @@ describe("notification pub/sub (redis)", () => {
     });
     await unsub();
   });
+
+  it("rejects fast (never parks) when Redis is unreachable", async () => {
+    // A dead endpoint: nothing listens on this port. With the offline queue on, the
+    // SUBSCRIBE would queue forever and this promise would never settle — the exact
+    // wedge that blocked SSE requests and the shutdown drain during an outage.
+    const downEnv = { ...env, REDIS_URL: "redis://127.0.0.1:6399" };
+    const started = Date.now();
+    await expect(subscribeInbox(downEnv, "org_down", "usr_down", () => {})).rejects.toBeDefined();
+    // Bounded by the readiness timeout (3s) plus slack — not the 60s test timeout.
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
 });

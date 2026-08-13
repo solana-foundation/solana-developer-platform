@@ -62,27 +62,42 @@ export const streamNotifications = (c: AppContext) => {
     const unregister = registerSseStream(finish);
     stream.onAbort(finish);
 
-    const unsubscribe = await subscribeInbox(c.env, user.organizationId, user.userId, (nudge) => {
-      void stream.writeSSE({ event: "notification", data: JSON.stringify(nudge) });
-    });
+    let unsubscribe: (() => Promise<void>) | null = null;
+    let heartbeat: ReturnType<typeof setInterval> | null = null;
+    let maxAge: ReturnType<typeof setTimeout> | null = null;
+    try {
+      // Throws when the subscription can't be established (Redis down/misconfigured):
+      // the stream ends, the finally below releases the quota slot, and the client's
+      // reconnect + polling carry the outage. streamSSE swallows the throw after us.
+      unsubscribe = await subscribeInbox(c.env, user.organizationId, user.userId, (nudge) => {
+        void stream.writeSSE({ event: "notification", data: JSON.stringify(nudge) });
+      });
 
-    // `retry:` tunes EventSource's native reconnect delay for the expected 4-minute
-    // self-close cadence.
-    await stream.writeSSE({ event: "ready", data: "{}", retry: 3_000 });
+      // `retry:` tunes EventSource's native reconnect delay for the expected 4-minute
+      // self-close cadence. Jittered per connection: a deploy closes every stream on
+      // the replica at the same instant, and a fixed value would reconnect them all
+      // at the same instant too — against a cold new revision.
+      const retryMs = 3_000 + Math.floor(Math.random() * 5_000);
+      await stream.writeSSE({ event: "ready", data: "{}", retry: retryMs });
 
-    const heartbeat = setInterval(() => {
-      // Comment frames keep intermediaries from timing out an idle connection.
-      void stream.write(": hb\n\n");
-    }, HEARTBEAT_MS);
-    const maxAge = setTimeout(finish, MAX_AGE_MS);
+      heartbeat = setInterval(() => {
+        // Comment frames keep intermediaries from timing out an idle connection.
+        void stream.write(": hb\n\n");
+      }, HEARTBEAT_MS);
+      maxAge = setTimeout(finish, MAX_AGE_MS);
 
-    await finished;
-
-    clearInterval(heartbeat);
-    clearTimeout(maxAge);
-    unregister();
-    untrack();
-    await unsubscribe();
+      await finished;
+    } finally {
+      // Reached on every exit — normal finish, subscribe failure, or a write throw —
+      // so the per-user quota and the shutdown registry can never leak a slot.
+      if (heartbeat !== null) clearInterval(heartbeat);
+      if (maxAge !== null) clearTimeout(maxAge);
+      unregister();
+      untrack();
+      // Non-blocking under the hood (fire-and-forget UNSUBSCRIBE): teardown and
+      // shutdown never wait on a Redis round-trip.
+      await unsubscribe?.();
+    }
     // streamSSE closes the response when this callback resolves.
   });
 };
