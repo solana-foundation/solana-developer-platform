@@ -5,7 +5,9 @@ import { filterWallets } from "./wallet-search";
 const wallets: CustodyWalletSummary[] = [
   {
     id: "wallet-row-1",
+    custodyConfigId: "custody-config-1",
     provider: "privy",
+    isRuntimeExecutionAllowed: true,
     walletId: "privy_treasury_01",
     publicKey: "TreasuryPublicKey1111111111111111111111111",
     label: "Operations Treasury",
@@ -15,7 +17,9 @@ const wallets: CustodyWalletSummary[] = [
   },
   {
     id: "wallet-row-2",
+    custodyConfigId: "custody-config-2",
     provider: "coinbase_cdp",
+    isRuntimeExecutionAllowed: true,
     walletId: "coinbase_authority_02",
     publicKey: "MintAuthorityPublicKey222222222222222222222",
     label: "Primary Issuer",

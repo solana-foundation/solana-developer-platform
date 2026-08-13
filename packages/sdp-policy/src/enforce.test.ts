@@ -84,6 +84,7 @@ const enforcementInput: CreateWalletOperationInput = {
   walletId: operation.walletId,
   operationFamily: operation.operationFamily,
   operationType: operation.operationType,
+  legs: [],
 };
 
 describe("enforceWalletOperationPolicy", () => {

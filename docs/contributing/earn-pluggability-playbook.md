@@ -102,9 +102,10 @@ catalogue and cannot be undone by a sync pass.
 `active | paused | deprecated`:
 
 - `paused` — reversible stop. The strategy cannot be selected as a program
-  allocation target (`PUT /program` validates against the *active* catalogue);
-  withdrawals and all reads keep working (the row leaves the default catalogue
-  list, which filters to `active`, but stays fetchable by id).
+  allocation target (program create and re-target both validate against the
+  *active* catalogue); withdrawals and all reads keep working (the row leaves
+  the default catalogue list, which filters to `active`, but stays fetchable by
+  id).
 - `deprecated` — terminal wind-down. Same runtime semantics as `paused`;
   the difference is intent (the strategy will not come back).
 
@@ -119,9 +120,10 @@ continue either way.
 
 The asymmetry is the ADR 0002 exit-safety invariant — **money out always
 beats money off**: money-in requires an *active* strategy plus the full
-entitled+configured provider gate (`PUT /program` via
-`assertProviderAvailable` + `assertKnownYieldSources`), while withdrawals
-ignore strategy status and need only provider credentials
+entitled+configured provider gate (`POST /programs` and
+`PUT /programs/:programId` via `assertProviderAvailable` +
+`assertKnownYieldSources`), while withdrawals ignore strategy status and need
+only provider credentials
 (`assertEarnProviderConfigured`) — and the withdrawal-ledger list needs not
 even that. Both halves are covered by route tests
 (`apps/sdp-api/src/routes/earn-program.test.ts`). Never delete a strategy
@@ -202,19 +204,35 @@ single-vault targets until weights are re-enabled post-V1.
    for the environment (devnet rail in sandbox, mainnet in production) and
    pin withdrawal/preview destination chains the same way, even if the
    provider is multi-chain internally.
-4. **Idempotency.** A withdrawal requires EXACTLY one caller-supplied key —
-   `requestId` (UUIDv4) or the `Idempotency-Key` header — and 400s on both or
-   neither, because no precedence rule can tell which one a caller's retry
-   holds stable. The key is not forwarded as given: `deriveProviderRequestId`
-   hashes it against the program wallet, so two organizations sharing one
-   provider account cannot collide on the same pasted value. Create/update is
-   looser and may generate a UUIDv4 when omitted. A provider
+4. **Idempotency.** A withdrawal **and a program create** each require EXACTLY
+   one caller-supplied key — `requestId` (UUIDv4) or the `Idempotency-Key`
+   header — and 400 on both or neither, because no precedence rule can tell
+   which one a caller's retry holds stable. Only the re-target is looser
+   (it moves no money and re-applying the same allocations is a provider
+   no-op), and the client may still generate a UUIDv4 there when omitted;
+   `EarnPortfolioWalletCreateInput.requestId` is a REQUIRED field precisely so
+   no client can silently mint one on the create path (PRO-1670).
+   The key is never forwarded as given: `deriveProviderRequestId` hashes it
+   against a scope, so two organizations sharing one provider account cannot
+   collide on the same pasted value. The scope differs by operation and that is
+   the interesting part — a withdrawal and a re-target derive against the
+   program wallet (which also stops one caller key used against two of an org's
+   own programs from collapsing into one mutation), while a create has no wallet
+   yet and derives against `(organization, environment, provider)`. A provider
    requestId-conflict error surfaces as `CONFLICT`.
-5. **Persistence.** One shared wallet per org+environment+provider:
-   `earn_provider_wallets` (migration `0049_earn_provider_wallets.sql`), via
-   `EarnRepository.getProviderWallet` / `insertProviderWallet` — the unique
-   constraint makes double-provisioning a first-writer-wins race, not a
-   duplicate.
+5. **Persistence.** N programs per org+environment+provider, each one link row
+   in `earn_provider_wallets` (migration `0049_earn_provider_wallets.sql`;
+   `0056_earn_multi_program.sql` lifted the original one-per-org cap), via
+   `EarnRepository.listProviderWallets` / `getProviderWalletById` /
+   `getProviderWalletByRef` / `insertProviderWallet`. The surviving uniqueness
+   is GLOBAL on `(provider, provider_wallet_ref)`: a provider wallet holds real
+   funds, so exactly one link row anywhere in the platform may claim it. That
+   constraint is also the create path's replay anchor — the provider answers a
+   retried create with the ORIGINAL wallet ref, so the second insert lands on it
+   and the handler reads the row back and serves it (200). Treating that
+   violation as a conflict would turn the required idempotency key into the
+   double-provisioning it exists to prevent; a ref held by a *different* org or
+   environment is the one case that really is a conflict.
 6. **Tests.** No-network fetch-stub harness, same pattern as
    `packages/sdp-earn/src/fetch.test.ts`; Ground's
    `providers/ground/client.test.ts` covers mappings, filtering, pagination,

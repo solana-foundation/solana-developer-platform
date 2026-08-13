@@ -1,7 +1,15 @@
 "use client";
 
 import { useClerk, useOrganization, useOrganizationList } from "@clerk/nextjs";
-import { ChevronsUpDownIcon, LockIcon, PlusIcon, Settings2Icon } from "lucide-react";
+import {
+  CheckIcon,
+  ChevronsUpDownIcon,
+  CopyIcon,
+  LockIcon,
+  type LucideIcon,
+  PlusIcon,
+  Settings2Icon,
+} from "lucide-react";
 import { useState } from "react";
 import {
   DropdownMenu,
@@ -14,7 +22,33 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
+
+function OrganizationHeaderAction({
+  label,
+  icon: Icon,
+  onSelect,
+}: {
+  label: string;
+  icon: LucideIcon;
+  onSelect: () => void;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <DropdownMenuItem
+          aria-label={label}
+          onSelect={onSelect}
+          className="size-6 justify-center p-0 text-tertiary focus:text-primary"
+        >
+          <Icon className="size-3.5" />
+        </DropdownMenuItem>
+      </TooltipTrigger>
+      <TooltipContent side="top">{label}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 function OrgAvatar({ name, imageUrl }: { name: string; imageUrl: string | null }) {
   if (imageUrl) {
@@ -52,6 +86,7 @@ export function WorkspaceSwitcher({
   const { projects, selectedProjectId, selectProject, isProjectSwitching } =
     useDashboardWorkspace();
   const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
+  const { copied, copy, value: copiedValue } = useCopy(1200);
 
   const memberships = userMemberships.data ?? [];
   const activeProject = projects.find((project) => project.id === selectedProjectId) ?? null;
@@ -86,70 +121,84 @@ export function WorkspaceSwitcher({
           )}
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" sideOffset={6} className="w-64">
-        <DropdownMenuLabel className="text-xs font-medium normal-case tracking-normal text-secondary">
-          {t("Shared.SharedComponents.organizations")}
-        </DropdownMenuLabel>
-        {memberships.map((membership) => {
-          const org = membership.organization;
-          const isActive = org.id === activeOrg?.id;
-
-          return (
-            <DropdownMenuItem
-              key={org.id}
-              disabled={isOrganizationSwitching || isProjectSwitching}
-              onSelect={() => {
-                if (!isActive && setActive) {
-                  setOrganizationSwitching(true);
-                  onOrganizationSwitchingChange?.(true);
-                  const finishSwitch = () => {
-                    setOrganizationSwitching(false);
-                    onOrganizationSwitchingChange?.(false);
-                  };
-                  void setActive({ organization: org.id }).then(finishSwitch, finishSwitch);
-                }
-              }}
-              className="gap-2 text-xs"
-            >
-              <OrgAvatar name={org.name} imageUrl={org.imageUrl} />
-              <span className="min-w-0 flex-1 truncate">{org.name}</span>
-              {isActive ? (
-                <span className="shrink-0 rounded-full bg-fill-subtle px-1.5 py-0.5 text-[10px] font-medium text-secondary">
-                  {t("Shared.SharedComponents.current")}
-                </span>
+      <TooltipProvider>
+        <DropdownMenuContent align="start" sideOffset={6} className="w-64">
+          <DropdownMenuLabel className="flex items-center justify-between text-xs font-medium normal-case tracking-normal text-secondary">
+            <span>{t("Shared.SharedComponents.organizations")}</span>
+            <span className="flex items-center gap-0.5">
+              <OrganizationHeaderAction
+                label={t("Shared.SharedComponents.createOrganization")}
+                icon={PlusIcon}
+                onSelect={() => openCreateOrganization()}
+              />
+              {activeOrg ? (
+                <OrganizationHeaderAction
+                  label={t("Shared.SharedComponents.manageOrganization")}
+                  icon={Settings2Icon}
+                  onSelect={() => openOrganizationProfile()}
+                />
               ) : null}
-            </DropdownMenuItem>
-          );
-        })}
-        {isLoaded && memberships.length === 0 ? (
-          <p className="px-2.5 py-2 text-xs text-tertiary">
-            {t("Shared.SharedComponents.noOrganizations")}
-          </p>
-        ) : null}
-        {activeOrg ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-xs font-medium normal-case tracking-normal text-secondary">
-              {t("Shared.SharedComponents.projects")}
-            </DropdownMenuLabel>
-            {projects.length === 0 ? (
-              <p className="px-2.5 py-2 text-xs text-tertiary">
-                {t("Shared.SharedComponents.noProjects")}
-              </p>
-            ) : (
-              projects.map((project) => {
-                const isActive = project.id === selectedProjectId;
-                const isProduction = project.environment === "production";
-                return (
-                  <DropdownMenuItem
-                    key={project.id}
-                    disabled={isProduction || isOrganizationSwitching || isProjectSwitching}
-                    onSelect={() => selectProject(project.id)}
-                    className="gap-2 text-xs"
-                  >
-                    <span className="min-w-0 flex-1 truncate">{project.name}</span>
-                    {isProduction ? (
-                      <TooltipProvider>
+            </span>
+          </DropdownMenuLabel>
+          {memberships.map((membership) => {
+            const org = membership.organization;
+            const isActive = org.id === activeOrg?.id;
+
+            return (
+              <DropdownMenuItem
+                key={org.id}
+                disabled={isOrganizationSwitching || isProjectSwitching}
+                onSelect={() => {
+                  if (!isActive && setActive) {
+                    setOrganizationSwitching(true);
+                    onOrganizationSwitchingChange?.(true);
+                    const finishSwitch = () => {
+                      setOrganizationSwitching(false);
+                      onOrganizationSwitchingChange?.(false);
+                    };
+                    void setActive({ organization: org.id }).then(finishSwitch, finishSwitch);
+                  }
+                }}
+                className="gap-2 text-xs"
+              >
+                <OrgAvatar name={org.name} imageUrl={org.imageUrl} />
+                <span className="min-w-0 flex-1 truncate">{org.name}</span>
+                {isActive ? (
+                  <span className="shrink-0 rounded-full bg-fill-subtle px-1.5 py-0.5 text-[10px] font-medium text-secondary">
+                    {t("Shared.SharedComponents.current")}
+                  </span>
+                ) : null}
+              </DropdownMenuItem>
+            );
+          })}
+          {isLoaded && memberships.length === 0 ? (
+            <p className="px-2.5 py-2 text-xs text-tertiary">
+              {t("Shared.SharedComponents.noOrganizations")}
+            </p>
+          ) : null}
+          {activeOrg ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-xs font-medium normal-case tracking-normal text-secondary">
+                {t("Shared.SharedComponents.projects")}
+              </DropdownMenuLabel>
+              {projects.length === 0 ? (
+                <p className="px-2.5 py-2 text-xs text-tertiary">
+                  {t("Shared.SharedComponents.noProjects")}
+                </p>
+              ) : (
+                projects.map((project) => {
+                  const isActive = project.id === selectedProjectId;
+                  const isProduction = project.environment === "production";
+                  return (
+                    <DropdownMenuItem
+                      key={project.id}
+                      disabled={isProduction || isOrganizationSwitching || isProjectSwitching}
+                      onSelect={() => selectProject(project.id)}
+                      className="gap-2 text-xs"
+                    >
+                      <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                      {isProduction ? (
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <span className="pointer-events-auto shrink-0 text-tertiary">
@@ -168,36 +217,43 @@ export function WorkspaceSwitcher({
                             </span>
                           </TooltipContent>
                         </Tooltip>
-                      </TooltipProvider>
-                    ) : isActive ? (
-                      <span className="shrink-0 rounded-full bg-fill-subtle px-1.5 py-0.5 text-[10px] font-medium text-secondary">
-                        {t("Shared.SharedComponents.current")}
-                      </span>
-                    ) : null}
-                  </DropdownMenuItem>
-                );
-              })
-            )}
-          </>
-        ) : null}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onSelect={() => openCreateOrganization()}
-          className="gap-2 text-xs text-secondary"
-        >
-          <PlusIcon className="size-4" />
-          <span>{t("Shared.SharedComponents.createOrganization")}</span>
-        </DropdownMenuItem>
-        {activeOrg ? (
-          <DropdownMenuItem
-            onSelect={() => openOrganizationProfile()}
-            className="gap-2 text-xs text-secondary"
-          >
-            <Settings2Icon className="size-4" />
-            <span>{t("Shared.SharedComponents.manageOrganization")}</span>
-          </DropdownMenuItem>
-        ) : null}
-      </DropdownMenuContent>
+                      ) : isActive ? (
+                        <span className="shrink-0 rounded-full bg-fill-subtle px-1.5 py-0.5 text-[10px] font-medium text-secondary">
+                          {t("Shared.SharedComponents.current")}
+                        </span>
+                      ) : null}
+                    </DropdownMenuItem>
+                  );
+                })
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={(event) => {
+                  event.preventDefault();
+                  void copy(activeOrg.id);
+                }}
+                aria-label={t("Shared.SharedComponents.copyOrganizationId")}
+                title={activeOrg.id}
+                className="group flex-col items-start gap-0.5"
+              >
+                <span className="text-[10px] font-medium text-secondary">
+                  {t("Shared.SharedComponents.organizationId")}
+                </span>
+                <span className="flex w-full items-center gap-1.5 text-tertiary transition-colors group-hover:text-secondary group-focus:text-secondary">
+                  <span className="min-w-0 flex-1 truncate font-mono text-[10px]">
+                    {activeOrg.id}
+                  </span>
+                  {copied && copiedValue === activeOrg.id ? (
+                    <CheckIcon className="size-3 shrink-0" />
+                  ) : (
+                    <CopyIcon className="size-3 shrink-0 opacity-0 transition-opacity group-focus:opacity-100 group-hover:opacity-100" />
+                  )}
+                </span>
+              </DropdownMenuItem>
+            </>
+          ) : null}
+        </DropdownMenuContent>
+      </TooltipProvider>
     </DropdownMenu>
   );
 }

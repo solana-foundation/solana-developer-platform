@@ -49,10 +49,15 @@ export interface EarnStrategyRow {
 }
 
 /**
- * Link to the ONE provider-managed wallet an organization shares per
- * environment (UNIQUE (organization_id, environment, provider) in
- * 0049_earn_provider_wallets.sql). project_id records the provisioning
- * project only — it is not part of the wallet's scope.
+ * Link to ONE provider-managed wallet — an Earn "program". An organization may
+ * hold N of them per (environment, provider) since PRO-1670; each pins a single
+ * vault and nothing rebalances across them. The uniqueness that used to cap this
+ * at one row per (organization, environment, provider) is gone (migration 0056),
+ * replaced by a GLOBAL UNIQUE (provider, provider_wallet_ref): a provider-side
+ * wallet holds real funds, so exactly one link row may claim it platform-wide.
+ *
+ * project_id records the provisioning project only — it is not part of the
+ * program's scope, and every project in an environment reaches every program.
  */
 export interface EarnProviderWalletRow {
   id: string;
@@ -120,6 +125,31 @@ export interface UpsertEarnStrategyInput {
   environment: SdpEnvironment;
 }
 
+/**
+ * Provider-reference prefix the dev seed stamps on every fixture row it writes
+ * (apps/sdp-api/scripts/seed-earn-demo.ts). Canonical HERE, not in the script,
+ * because it partitions this table's key space and the delist pass has to honour
+ * that partition: providers only ever list their own bare ids, so a prefixed row
+ * is by construction not a row any provider can confirm or deny.
+ */
+export const EARN_SEED_REFERENCE_PREFIX = "seed-demo-";
+
+/**
+ * Delist pass input: everything the provider still lists for (provider,
+ * environment). Anything else the table holds is stale — a vault the provider
+ * delisted, or one a tightened catalogue gate now refuses (the
+ * `not_solana_hosted` case) — and is deleted.
+ *
+ * `listedProviderReferences` is the KEEP set, never the delete set, so the
+ * caller cannot enumerate stale rows it does not know about: the provider's
+ * live list is the only input, and the DB decides what that leaves behind.
+ */
+export interface DeleteUnlistedEarnStrategiesInput {
+  provider: EarnProviderId;
+  environment: SdpEnvironment;
+  listedProviderReferences: readonly string[];
+}
+
 export interface ListEarnStrategiesInput {
   environment: SdpEnvironment;
   sourceKind?: EarnStrategySourceKind;
@@ -143,6 +173,20 @@ export interface InsertEarnProviderWalletInput {
   providerWalletRef: string;
   label: string | null;
   createdBy: string;
+}
+
+export interface ListEarnProviderWalletsInput {
+  organizationId: string;
+  environment: SdpEnvironment;
+  /** Optional filter; omitted lists every provider's programs. */
+  provider?: EarnProviderId;
+  limit: number;
+  offset: number;
+}
+
+export interface ListEarnProviderWalletsResult {
+  rows: EarnProviderWalletRow[];
+  total: number;
 }
 
 /** Insert-at-intent: the row exists before the provider call is accepted. */
@@ -204,12 +248,50 @@ export interface EarnRepository {
   upsertStrategy(input: UpsertEarnStrategyInput): Promise<EarnStrategyRow | null>;
   getStrategyById(strategyId: string): Promise<EarnStrategyRow | null>;
   listStrategies(input: ListEarnStrategiesInput): Promise<ListEarnStrategiesResult>;
+  /**
+   * DELETE every `active` strategy for (provider, environment) that the provider
+   * no longer lists. Returns the deleted provider references so the caller can
+   * log exactly what left the catalogue. Idempotent: a second pass over the same
+   * keep set matches nothing.
+   *
+   * Deleted, not flagged: this table is a cache of the provider catalogue (the
+   * sync is its only writer besides the dev seed) and nothing references a
+   * strategy id — no foreign key, and a program's allocations carry the
+   * PROVIDER's reference, resolved against Ground's live response. A status flag
+   * would leave rows SDP must not carry sitting in the table indefinitely.
+   */
+  deleteUnlistedStrategies(input: DeleteUnlistedEarnStrategiesInput): Promise<string[]>;
 
-  /** The org's single shared wallet for a provider+environment, if provisioned. */
-  getProviderWallet(params: {
+  /**
+   * One program by its own id, scoped to (organization, environment). The
+   * program id is caller-supplied on every `/programs/:programId` route, so both
+   * scopes are load-bearing: without organization_id a guessed id reads another
+   * tenant's program, and without environment a sandbox id resolves for a
+   * production session (the pre-PRO-1670 (org, environment, provider) lookup made
+   * both structurally impossible; an addressable id does not).
+   */
+  getProviderWalletById(params: {
     organizationId: string;
     environment: SdpEnvironment;
+    walletId: string;
+  }): Promise<EarnProviderWalletRow | null>;
+  /**
+   * Every program for an (organization, environment), oldest first. The order is
+   * a stability requirement, not a preference — see migration 0056's header.
+   */
+  listProviderWallets(input: ListEarnProviderWalletsInput): Promise<ListEarnProviderWalletsResult>;
+  /**
+   * Lookup by the provider-side wallet ref, keyed on 0056's global unique. Two
+   * callers need it and neither has an organization to scope by: the create path
+   * resolves a provider replay (the provider answers a retried create with the
+   * ORIGINAL ref, so the insert lands on that unique and the row it collided with
+   * IS the caller's program), and the dev seed asks whether the shared sandbox
+   * wallet is already linked anywhere. Callers assert ownership after the fetch,
+   * exactly as getProgramWithdrawalByProviderReference does.
+   */
+  getProviderWalletByRef(params: {
     provider: EarnProviderId;
+    providerWalletRef: string;
   }): Promise<EarnProviderWalletRow | null>;
   insertProviderWallet(input: InsertEarnProviderWalletInput): Promise<EarnProviderWalletRow | null>;
 

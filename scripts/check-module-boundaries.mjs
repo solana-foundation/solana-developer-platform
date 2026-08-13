@@ -343,6 +343,57 @@ export function forbiddenPackageSourceImport({ module, filePath, specifier, appS
   return undefined;
 }
 
+const FEE_PAYMENT_CONSTRUCTORS = new Set([
+  "createFeePaymentAdapter",
+  "createKoraAdapter",
+  "KoraAdapter",
+]);
+
+export function forbiddenFeePaymentConstructorImport({ filePath, source, apiSourceRoot }) {
+  if (!isWithin(filePath, apiSourceRoot)) return undefined;
+  const relative = toPosixPath(path.relative(apiSourceRoot, filePath));
+  if (
+    relative === "services/sponsorship.service.ts" ||
+    relative.startsWith("test/") ||
+    relative.includes("/test/") ||
+    relative.endsWith(".test.ts") ||
+    relative.endsWith(".spec.ts")
+  ) {
+    return undefined;
+  }
+
+  const feePaymentSpecifier = "@sdp/payments/fee-payment(?:/[^\"']*)?";
+  const opaqueImportPatterns = [
+    new RegExp(String.raw`import\s+\*\s+as\s+[\w$]+\s+from\s+["']${feePaymentSpecifier}["']`),
+    new RegExp(String.raw`import\s+(?!type\b)[\w$]+\s+from\s+["']${feePaymentSpecifier}["']`),
+    new RegExp(
+      String.raw`import\s+(?!type\b)[\w$]+\s*,[^;]*\sfrom\s+["']${feePaymentSpecifier}["']`
+    ),
+    new RegExp(String.raw`export\s+\*(?:\s+as\s+[\w$]+)?\s+from\s+["']${feePaymentSpecifier}["']`),
+    new RegExp(String.raw`require\(\s*["']${feePaymentSpecifier}["']\s*\)`),
+    new RegExp(String.raw`import\(\s*["']${feePaymentSpecifier}["']\s*\)`),
+  ];
+  if (opaqueImportPatterns.some((pattern) => pattern.test(source))) {
+    return "uses an opaque fee-payment import that can bypass the owned sponsorship boundary";
+  }
+
+  const importPattern =
+    /(?:import|export)\s*{([^}]+)}\s*from\s*["']@sdp\/payments\/fee-payment(?:\/[^"']*)?["']/g;
+  for (const match of source.matchAll(importPattern)) {
+    const importedNames = match[1].split(",").map(
+      (entry) =>
+        entry
+          .trim()
+          .replace(/^type\s+/, "")
+          .split(/\s+as\s+/)[0]
+    );
+    const constructorName = importedNames.find((name) => FEE_PAYMENT_CONSTRUCTORS.has(name));
+    if (constructorName)
+      return `imports fee-payment constructor ${constructorName} outside the owned sponsorship boundary`;
+  }
+  return undefined;
+}
+
 export function validateModuleBoundaries({ modules, sourceImports, appSourceRoots }) {
   const errors = [];
   const moduleNames = new Set(modules.map((module) => module.name));
@@ -461,6 +512,15 @@ export function checkModuleBoundaries(repositoryRoot = REPOSITORY_ROOT, { write 
       appSourceRoots,
     }),
   ];
+  const apiSourceRoot = path.join(repositoryRoot, "apps/sdp-api/src");
+  for (const filePath of listFiles(apiSourceRoot)) {
+    const violation = forbiddenFeePaymentConstructorImport({
+      filePath,
+      source: readFileSync(filePath, "utf8"),
+      apiSourceRoot,
+    });
+    if (violation) errors.push(`${toPosixPath(filePath)} ${violation}.`);
+  }
   const moduleMapPath = path.join(repositoryRoot, MODULE_MAP_PATH);
 
   if (write) {

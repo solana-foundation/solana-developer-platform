@@ -38,6 +38,7 @@ export interface CustodyConnectionRow {
   provider_credential_scope_key: string;
   default_custody_wallet_id: string | null;
   provider_account_fingerprint: string | null;
+  request_delay_ms: number | null;
   status: CustodyConnectionStatus;
   setup_metadata: unknown;
   last_check_status: string | null;
@@ -136,6 +137,7 @@ export class ProviderCredentialStore {
       `SELECT c.id, c.organization_id, c.project_id, c.provider, c.scope,
               c.provider_credential_id, c.provider_credential_scope_key,
               c.default_custody_wallet_id, c.provider_account_fingerprint,
+              c.request_delay_ms,
               c.status, c.setup_metadata,
               c.last_check_status, c.last_check_at, c.last_check_failure_code,
               c.activated_at, c.deactivated_at, c.created_at,
@@ -264,6 +266,7 @@ export class ProviderCredentialStore {
       `SELECT c.id, c.organization_id, c.project_id, c.provider, c.scope,
               c.provider_credential_id, c.provider_credential_scope_key,
               c.default_custody_wallet_id, c.provider_account_fingerprint,
+              c.request_delay_ms,
               c.status, c.setup_metadata, c.last_check_status, c.last_check_at,
               c.last_check_failure_code, c.activated_at, c.deactivated_at, c.created_at,
               pc.label AS credential_label,
@@ -310,6 +313,7 @@ export class ProviderCredentialStore {
   async acquireInstallationLease(params: {
     connectionId: string;
     providerCredentialId: string;
+    credentialSource: "stored" | "runtime";
     expectedStatus: "pending" | "checking";
     expectedLastCheckStatus: string | null;
     expectedLastCheckAt: string | null;
@@ -345,7 +349,7 @@ export class ProviderCredentialStore {
            SELECT 1 FROM provider_credentials pc
            WHERE pc.id = c.provider_credential_id
              AND pc.status = 'pending'
-             AND pc.source = 'stored'
+             AND pc.source = ?
              AND pc.scope = 'project'
              AND pc.project_id = c.project_id
          )
@@ -356,9 +360,92 @@ export class ProviderCredentialStore {
         params.expectedStatus,
         params.expectedLastCheckStatus,
         params.expectedLastCheckAt,
+        params.credentialSource,
       ]
     );
     return row?.last_check_at ?? null;
+  }
+
+  async acquireRuntimeFailureRetryLease(params: {
+    connectionId: string;
+    providerCredentialId: string;
+    expectedLastCheckAt: string;
+    expectedFailureCode: "invalid_credentials" | "provider_account_already_connected";
+  }): Promise<string | null> {
+    const row = await this.db.queryOne<{ last_check_at: string }>(
+      `UPDATE custody_connections c
+       SET status = 'checking',
+           last_check_status = 'running',
+           last_check_at = GREATEST(
+             sdp_iso_now(),
+             to_char(
+               timezone('UTC', c.last_check_at::timestamptz + interval '1 millisecond'),
+               'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+             )
+           ),
+           last_check_failure_code = NULL,
+           updated_at = sdp_iso_now()
+       WHERE c.id = ?
+         AND c.provider_credential_id = ?
+         AND c.status = 'failed'
+         AND c.last_check_status = 'failed'
+         AND c.last_check_at = ?
+         AND c.last_check_failure_code = ?
+         AND c.provider_account_fingerprint IS NULL
+         AND c.default_custody_wallet_id IS NULL
+         AND c.activated_at IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM custody_wallets owned
+           WHERE owned.custody_connection_id = c.id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM custody_connections sibling
+           WHERE sibling.organization_id = c.organization_id
+             AND sibling.project_id = c.project_id
+             AND sibling.provider = c.provider
+             AND sibling.id <> c.id
+             AND sibling.status IN ('pending', 'checking')
+         )
+         AND EXISTS (
+           SELECT 1 FROM provider_credentials pc
+           WHERE pc.id = c.provider_credential_id
+             AND pc.status = 'failed_validation'
+             AND pc.last_failure_code = ?
+             AND pc.source = 'runtime'
+             AND pc.storage_backend = 'runtime_env'
+             AND pc.scope = 'project'
+             AND pc.project_id = c.project_id
+         )
+       RETURNING c.last_check_at`,
+      [
+        params.connectionId,
+        params.providerCredentialId,
+        params.expectedLastCheckAt,
+        params.expectedFailureCode,
+        params.expectedFailureCode,
+      ]
+    );
+    if (!row) {
+      return null;
+    }
+
+    const resetCredential = await this.db.execute(
+      `UPDATE provider_credentials
+       SET status = 'pending',
+           last_failure_code = NULL,
+           updated_at = sdp_iso_now()
+       WHERE id = ?
+         AND status = 'failed_validation'
+         AND last_failure_code = ?
+         AND source = 'runtime'
+         AND storage_backend = 'runtime_env'
+         AND scope = 'project'`,
+      [params.providerCredentialId, params.expectedFailureCode]
+    );
+    if (resetCredential !== 1) {
+      throw new Error("Runtime installation Credential changed during retry admission");
+    }
+    return row.last_check_at;
   }
 
   async reserveProviderAccountFingerprint(params: {
@@ -527,6 +614,7 @@ export class ProviderCredentialStore {
   async cancelInstallation(params: {
     connectionId: string;
     providerCredentialId: string;
+    credentialSource: "stored" | "runtime";
     expectedStatus: "pending" | "checking";
     expectedLastCheckStatus: string | null;
     expectedLastCheckAt: string | null;
@@ -579,9 +667,9 @@ export class ProviderCredentialStore {
            updated_at = sdp_iso_now()
        WHERE id = ?
          AND status = 'pending'
-         AND source = 'stored'
+         AND source = ?
          AND scope = 'project'`,
-      [params.providerCredentialId]
+      [params.providerCredentialId, params.credentialSource]
     );
     if (updatedCredential !== 1) {
       throw new Error("Installation Credential changed during cancellation");
@@ -595,6 +683,7 @@ export class ProviderCredentialStore {
     projectId: string | null;
     label: string;
     scope: "organization" | "project";
+    source: "stored" | "runtime";
     stored: StoredCredentialSecret;
     displayMetadata: Record<string, string>;
     version: number;
@@ -612,7 +701,7 @@ export class ProviderCredentialStore {
          rotated_from_provider_credential_id, idempotency_key,
          idempotency_fingerprint, created_by
        ) VALUES (
-         ?, ?, ?, 'privy', ?, ?, 'stored',
+         ?, ?, ?, 'privy', ?, ?, ?,
          ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?
        )
        RETURNING id, organization_id, project_id, provider, label, scope, scope_key,
@@ -625,6 +714,7 @@ export class ProviderCredentialStore {
         params.projectId,
         params.label,
         params.scope,
+        params.source,
         params.stored.storageBackend,
         params.stored.secretRef ?? null,
         params.stored.secretVersionRef ?? null,
@@ -650,6 +740,7 @@ export class ProviderCredentialStore {
     projectId: string;
     providerCredentialId: string;
     providerCredentialScopeKey: string;
+    requestDelayMs?: number;
     pendingWalletLabel?: string;
     createdBy: string;
   }): Promise<CustodyConnectionRow> {
@@ -657,11 +748,12 @@ export class ProviderCredentialStore {
       `INSERT INTO custody_connections (
        id, organization_id, project_id, provider, scope,
          provider_credential_id, provider_credential_scope_key,
-         setup_metadata, status, created_by
-       ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, ?, 'pending', ?)
+         request_delay_ms, setup_metadata, status, created_by
+       ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, ?, ?, 'pending', ?)
        RETURNING id, organization_id, project_id, provider, scope,
                  provider_credential_id, provider_credential_scope_key,
                  default_custody_wallet_id, provider_account_fingerprint,
+                 request_delay_ms,
                  status, setup_metadata,
                  last_check_status, last_check_at, last_check_failure_code,
                  activated_at, deactivated_at, created_at`,
@@ -671,6 +763,7 @@ export class ProviderCredentialStore {
         params.projectId,
         params.providerCredentialId,
         params.providerCredentialScopeKey,
+        params.requestDelayMs ?? null,
         JSON.stringify(
           params.pendingWalletLabel ? { pendingWalletLabel: params.pendingWalletLabel } : {}
         ),
@@ -688,12 +781,14 @@ export class ProviderCredentialStore {
     expectedProviderCredentialId: string;
     providerCredentialId: string;
     providerCredentialScopeKey: string;
+    requestDelayMs?: number;
     pendingWalletLabel?: string;
   }): Promise<CustodyConnectionRow | null> {
     return this.db.queryOne<CustodyConnectionRow>(
       `UPDATE custody_connections
        SET provider_credential_id = ?,
            provider_credential_scope_key = ?,
+           request_delay_ms = ?,
            status = 'pending',
            setup_metadata = CAST(? AS jsonb),
            last_check_status = NULL,
@@ -726,12 +821,14 @@ export class ProviderCredentialStore {
        RETURNING id, organization_id, project_id, provider, scope,
                  provider_credential_id, provider_credential_scope_key,
                  default_custody_wallet_id, provider_account_fingerprint,
+                 request_delay_ms,
                  status, setup_metadata,
                  last_check_status, last_check_at, last_check_failure_code,
                  activated_at, deactivated_at, created_at`,
       [
         params.providerCredentialId,
         params.providerCredentialScopeKey,
+        params.requestDelayMs ?? null,
         JSON.stringify(
           params.pendingWalletLabel ? { pendingWalletLabel: params.pendingWalletLabel } : {}
         ),

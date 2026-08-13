@@ -29,6 +29,7 @@ export interface ApiKeyAuthoringDraft {
   operationTypes: string;
   assets: string;
   maximumAmount: string;
+  maximumAmountAssets: string;
   destinations: string;
   approvalRequired: boolean;
 }
@@ -89,6 +90,7 @@ export function createApiKeyAuthoringDraft(): ApiKeyAuthoringDraft {
     operationTypes: "",
     assets: "",
     maximumAmount: "",
+    maximumAmountAssets: "",
     destinations: "",
     approvalRequired: false,
   };
@@ -143,13 +145,17 @@ export function buildApiKeyPolicyRules(draft: ApiKeyAuthoringDraft): PolicyRule[
     });
   }
 
+  // Amount bounds are always keyed by asset mint; without assets the
+  // constraint cannot be expressed and the form blocks continuing instead.
   const maximumAmount = draft.maximumAmount.trim();
-  if (maximumAmount) {
+  const maximumAmountAssets = splitPolicyValues(draft.maximumAmountAssets);
+  if (maximumAmount && maximumAmountAssets.length > 0) {
     rules.push({
       id: "additional-amount-constraint",
       name: "Additional restriction: amount constraints",
       kind: "amount",
       max: maximumAmount,
+      assets: maximumAmountAssets,
       action: "allow",
     });
   }

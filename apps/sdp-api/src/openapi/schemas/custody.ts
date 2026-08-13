@@ -49,9 +49,13 @@ export const orgCustodyProviderSchema = z
 
 export const createCustodyWalletRequestSchema = createWalletSchemaBase
   .extend({
+    connectionId: withOpenApi(createWalletSchemaBase.shape.connectionId, {
+      description:
+        "Optional exact Custody Connection target. When present, it is authoritative and provider is only a consistency assertion.",
+    }),
     provider: orgCustodyProviderSchema.optional().openapi({
       description:
-        "Optional provider target. Defaults to the currently resolved default provider for the scope.",
+        "Optional provider target. With connectionId it must match that Connection; otherwise the effective/provider-only target is resolved for the scope.",
       example: "privy",
     }),
     label: withOpenApi(createWalletSchemaBase.shape.label, {
@@ -67,17 +71,25 @@ export const createCustodyWalletRequestSchema = createWalletSchemaBase
       example: true,
     }),
   })
-  .openapi({ description: "Create wallet request body." });
+  .openapi({
+    description: "Create wallet request body.",
+    example: {
+      provider: "privy",
+      label: "Mint authority wallet",
+      purpose: "mint_authority",
+      setDefault: true,
+    },
+  });
 
 export const setDefaultWalletRequestSchema = setDefaultWalletSchemaBase
   .extend({
     provider: orgCustodyProviderSchema.optional().openapi({
       description:
-        "Optional provider target. Defaults to the currently resolved default provider for the scope.",
+        "Optional consistency assertion for the Provider of the wallet resolved by walletId.",
       example: "privy",
     }),
     walletId: walletIdParamSchema.openapi({
-      description: "Wallet ID to set as default for the active wallet signing config.",
+      description: "Provider wallet ID to set as the default for its exact owning target.",
       example: "privy_wallet_123",
     }),
   })
@@ -86,12 +98,11 @@ export const setDefaultWalletRequestSchema = setDefaultWalletSchemaBase
 export const deleteWalletRequestSchema = deleteWalletSchemaBase
   .extend({
     provider: orgCustodyProviderSchema.optional().openapi({
-      description:
-        "Optional provider target. Defaults to the currently resolved default provider for the scope.",
+      description: "Optional consistency assertion for the Provider of the wallet being deleted.",
       example: "anchorage",
     }),
     walletId: walletIdParamSchema.openapi({
-      description: "Wallet ID to delete from the selected provider configuration.",
+      description: "Provider wallet ID to delete from its exact owning target.",
       example: "anchorage_wallet_123",
     }),
   })
@@ -148,15 +159,52 @@ export const switchSigningResponseSchema = z
     },
   });
 
+const custodyWalletOwnerConstraint = {
+  oneOf: [
+    {
+      required: ["custodyConfigId"],
+      not: { required: ["custodyConnectionId"] },
+    },
+    {
+      required: ["custodyConnectionId"],
+      not: { required: ["custodyConfigId"] },
+    },
+  ],
+};
+
+const custodyWalletExample = {
+  id: "cw_example",
+  custodyConfigId: "cfg_example",
+  provider: "privy",
+  isDefaultProvider: true,
+  isRuntimeExecutionAllowed: true,
+  walletId: "privy_wallet_123",
+  publicKey: "So11111111111111111111111111111111111111112",
+  label: "Root Signing Wallet",
+  purpose: "root",
+  status: "active",
+  createdAt: "2025-01-01T00:00:00.000Z",
+};
+
 const custodyWalletBaseSchema = z.object({
   id: z.string().openapi({ description: "Wallet record ID.", example: "cw_example" }),
   custodyConfigId: z.string().optional().openapi({
     description: "Owning custody configuration ID.",
     example: "cfg_example",
   }),
+  custodyConnectionId: z.string().optional().openapi({
+    description: "Owning Custody Connection ID.",
+    example: "cconn_example",
+  }),
   provider: orgCustodyProviderSchema.optional(),
   isDefaultProvider: z.boolean().optional().openapi({
-    description: "Whether this wallet belongs to the current default provider config.",
+    description:
+      "Whether this wallet's exact Config or Connection owner is the effective custody target for the requested scope.",
+    example: true,
+  }),
+  isRuntimeExecutionAllowed: z.boolean().openapi({
+    description:
+      "Whether SDP currently permits attempting runtime execution through this wallet's owner. This is request-time admission, not Provider health or a success guarantee.",
     example: true,
   }),
   walletId: walletIdParamSchema.openapi({
@@ -218,8 +266,10 @@ export const custodyWalletSchema = custodyWalletBaseSchema
       description: "Optional tracked token balances for the wallet.",
     }),
   })
+  .meta(custodyWalletOwnerConstraint)
   .openapi({
     description: "Wallet details.",
+    example: custodyWalletExample,
   });
 
 export const custodyWalletResponseSchema = z
@@ -254,10 +304,6 @@ export const custodyWalletByIdResponseSchema = z
   .object({
     wallet: custodyWalletBaseSchema
       .extend({
-        custodyConfigId: z.string().openapi({
-          description: "Owning custody configuration ID.",
-          example: "cfg_example",
-        }),
         provider: orgCustodyProviderSchema.openapi({
           description: "Wallet custody provider.",
           example: "privy",
@@ -291,7 +337,11 @@ export const custodyWalletByIdResponseSchema = z
               "Current SOL balance for the wallet public key. Omitted when includeBalance=false.",
           }),
       })
-      .openapi({ description: "Wallet details with provider and optional SOL balance." }),
+      .meta(custodyWalletOwnerConstraint)
+      .openapi({
+        description: "Wallet details with provider and optional SOL balance.",
+        example: custodyWalletExample,
+      }),
   })
   .openapi({ description: "Wallet details by ID response payload." });
 

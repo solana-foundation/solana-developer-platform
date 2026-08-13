@@ -42,6 +42,26 @@ export function isCustodyConnectionRuntimeEnabled(
   return provider === "privy" && isPrivyByokEnabled(env);
 }
 
+export type CustodySetupMethod = "legacy_config" | "stored_credentials" | "deployment_credentials";
+
+export function resolveNewCustodySetupMethod(
+  env: Pick<
+    Env,
+    "PRIVY_BYOK_ENABLED" | "SDP_DEPLOYMENT_MODE" | "SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED"
+  >,
+  provider: CustodyProvider
+): CustodySetupMethod {
+  if (!isCustodyConnectionRuntimeEnabled(env, provider)) {
+    return "legacy_config";
+  }
+  if (!isSelfHostedDeployment(env)) {
+    return "stored_credentials";
+  }
+  return isTruthyFlag(env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED)
+    ? "stored_credentials"
+    : "deployment_credentials";
+}
+
 export function isMarketsEnabled(env: Pick<Env, "MARKETS_ENABLED">): boolean {
   return isTruthyFlag(env.MARKETS_ENABLED);
 }
