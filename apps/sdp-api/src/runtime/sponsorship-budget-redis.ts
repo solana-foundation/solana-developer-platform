@@ -87,6 +87,16 @@ if existing or redis.call('GET', KEYS[5]) then return {2, tonumber(existing or '
 local ownership_field = ARGV[4 + count * 6]
 local counted_hour = {}
 local counted_day = {}
+local function counts(hash_key, field)
+  if redis.call('HGET', hash_key, ownership_field .. ':' .. field) then return true end
+  if not redis.call('HGET', hash_key, ownership_field) then return false end
+  for i = 1, count do
+    if redis.call('HGET', hash_key, ownership_field .. ':' .. ARGV[2 + ((i - 1) * 6) + 1]) then
+      return false
+    end
+  end
+  return true
+end
 for i = 1, count do
   local offset = 2 + ((i - 1) * 6)
   local field = ARGV[offset + 1]
@@ -94,8 +104,8 @@ for i = 1, count do
   local hour_limit = tonumber(ARGV[offset + 3])
   local day_limit = tonumber(ARGV[offset + 4])
   if amount > per_tx then return {0, i} end
-  counted_hour[i] = redis.call('HGET', KEYS[1], ownership_field .. ':' .. field)
-  counted_day[i] = redis.call('HGET', KEYS[2], ownership_field .. ':' .. field)
+  counted_hour[i] = counts(KEYS[1], field)
+  counted_day[i] = counts(KEYS[2], field)
   local hour_used = tonumber(redis.call('HGET', KEYS[1], field) or '0')
   if counted_hour[i] then
     if hour_used > hour_limit then return {0, i} end
