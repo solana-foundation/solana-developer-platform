@@ -52,8 +52,12 @@ describe("signing.service provider reuse", () => {
     expect(result.configId).toBe(configId);
     expect(mockedProvisionPrivyWallet).not.toHaveBeenCalled();
     expect(configStore.createWallet).not.toHaveBeenCalled();
-    expect(configStore.upsert).toHaveBeenCalledWith(orgId, undefined, {
+    expect(configStore.upsert).not.toHaveBeenCalled();
+    expect(configStore.saveProviderConfig).toHaveBeenCalledWith({
+      orgId,
+      projectId: undefined,
       provider: "privy",
+      configJson: expect.objectContaining({ provider: "privy" }),
       defaultWalletId: wallet.walletId,
     });
     expect(configStore.setDefaultConfig).toHaveBeenCalledWith(orgId, undefined, configId);
@@ -91,8 +95,12 @@ describe("signing.service provider reuse", () => {
     expect(result.configId).toBe(configId);
     expect(mockedProvisionCoinbaseCdpAccount).not.toHaveBeenCalled();
     expect(configStore.createWallet).not.toHaveBeenCalled();
-    expect(configStore.upsert).toHaveBeenCalledWith(orgId, undefined, {
+    expect(configStore.upsert).not.toHaveBeenCalled();
+    expect(configStore.saveProviderConfig).toHaveBeenCalledWith({
+      orgId,
+      projectId: undefined,
       provider: "coinbase_cdp",
+      configJson: expect.objectContaining({ provider: "coinbase_cdp" }),
       defaultWalletId: wallet.walletId,
     });
     expect(configStore.setDefaultConfig).toHaveBeenCalledWith(orgId, undefined, configId);
@@ -126,8 +134,12 @@ describe("signing.service provider reuse", () => {
     expect(result.configId).toBe(configId);
     expect(mockedProvisionUtilaWallet).not.toHaveBeenCalled();
     expect(configStore.createWallet).not.toHaveBeenCalled();
-    expect(configStore.upsert).toHaveBeenCalledWith(orgId, undefined, {
+    expect(configStore.upsert).not.toHaveBeenCalled();
+    expect(configStore.saveProviderConfig).toHaveBeenCalledWith({
+      orgId,
+      projectId: undefined,
       provider: "utila",
+      configJson: expect.objectContaining({ provider: "utila" }),
       defaultWalletId: wallet.walletId,
     });
     expect(configStore.setDefaultConfig).toHaveBeenCalledWith(orgId, undefined, configId);
@@ -262,6 +274,7 @@ function createService(params: {
     setDefaultConfig: ReturnType<typeof vi.fn>;
     getById: ReturnType<typeof vi.fn>;
     upsert: ReturnType<typeof vi.fn>;
+    saveProviderConfig: ReturnType<typeof vi.fn>;
     createWallet: ReturnType<typeof vi.fn>;
     getWallets: ReturnType<typeof vi.fn>;
     deactivateWalletIfNotLast: ReturnType<typeof vi.fn>;
@@ -277,6 +290,7 @@ function createService(params: {
     setDefaultConfig: vi.fn().mockResolvedValue(undefined),
     getById: vi.fn().mockResolvedValue(params.configRecord),
     upsert: vi.fn().mockResolvedValue(params.configRecord.id),
+    saveProviderConfig: vi.fn().mockResolvedValue({ configId: params.configRecord.id }),
     createWallet: vi.fn(),
     getWallets: vi.fn().mockResolvedValue(params.wallets),
     deactivateWalletIfNotLast: vi.fn(),

@@ -2,10 +2,9 @@ import type { EarnStrategy } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import {
   availableTokens,
-  EARN_DEPOSIT_PROFILES,
+  defaultStrategyFilters,
+  EARN_SHORT_SETTLEMENT_DAYS,
   matchesFilters,
-  profileFilters,
-  profileSummaries,
   singleStrategyAllocation,
   visibleStrategies,
 } from "./earn-deposit-model";
@@ -32,61 +31,44 @@ function strategy(partial: Partial<EarnStrategy> & { id: string }): EarnStrategy
   };
 }
 
-describe("profileFilters", () => {
-  it("maps liquidity-first to instant-only redemption", () => {
-    expect(profileFilters("liquidity").maxSettlementDays).toBe(0);
-  });
-
-  it("maps balanced to a short settlement ceiling", () => {
-    expect(profileFilters("balanced").maxSettlementDays).toBe(3);
-  });
-
-  it("leaves yield-first unconstrained on both axes", () => {
-    const filters = profileFilters("yield");
+describe("defaultStrategyFilters", () => {
+  it("shows the full catalogue ranked by APY", () => {
+    const filters = defaultStrategyFilters();
     expect(filters.maxSettlementDays).toBeNull();
-    expect(filters.minPoolUsd).toBeNull();
-  });
-
-  it("starts every profile sorted by rate and open to any stablecoin", () => {
-    for (const profile of EARN_DEPOSIT_PROFILES) {
-      expect(profileFilters(profile).sort).toBe("apy");
-      expect(profileFilters(profile).token).toBeNull();
-    }
+    expect(filters.sourceKind).toBeNull();
+    expect(filters.token).toBeNull();
+    expect(filters.sort).toBe("apy");
   });
 });
 
 describe("matchesFilters", () => {
-  it("excludes a delayed strategy from an instant-only filter", () => {
+  it("includes delayed strategies by default and excludes them only when instant is chosen", () => {
     const delayed = strategy({ id: "a", liquidityTerm: "delayed", redemptionDelayDays: 2 });
-    expect(matchesFilters(delayed, profileFilters("liquidity"))).toBe(false);
-    expect(matchesFilters(delayed, profileFilters("balanced"))).toBe(true);
+    expect(matchesFilters(delayed, defaultStrategyFilters())).toBe(true);
+    expect(matchesFilters(delayed, { ...defaultStrategyFilters(), maxSettlementDays: 0 })).toBe(
+      false
+    );
+    expect(
+      matchesFilters(delayed, {
+        ...defaultStrategyFilters(),
+        maxSettlementDays: EARN_SHORT_SETTLEMENT_DAYS,
+      })
+    ).toBe(true);
   });
 
   it("treats a delayed strategy with no day count as T+1", () => {
     const delayed = strategy({ id: "a", liquidityTerm: "delayed" });
-    expect(matchesFilters(delayed, { ...profileFilters("yield"), maxSettlementDays: 0 })).toBe(
+    expect(matchesFilters(delayed, { ...defaultStrategyFilters(), maxSettlementDays: 0 })).toBe(
       false
     );
-    expect(matchesFilters(delayed, { ...profileFilters("yield"), maxSettlementDays: 1 })).toBe(
+    expect(matchesFilters(delayed, { ...defaultStrategyFilters(), maxSettlementDays: 1 })).toBe(
       true
     );
   });
 
-  it("excludes a pool smaller than the floor", () => {
-    const small = strategy({ id: "a", riskMetadata: { tvlUsd: 1_000 } });
-    expect(matchesFilters(small, profileFilters("liquidity"))).toBe(false);
-  });
-
-  it("never excludes on an unreported pool size", () => {
-    // Ground's sandbox routinely omits tvlUsd; a floor must not empty the
-    // catalogue just because the provider stayed silent.
-    const unknownPool = strategy({ id: "a", riskMetadata: {} });
-    expect(matchesFilters(unknownPool, profileFilters("liquidity"))).toBe(true);
-  });
-
   it("filters on backing kind and stablecoin", () => {
     const rwa = strategy({ id: "a", sourceKind: "rwa" });
-    const base = profileFilters("yield");
+    const base = defaultStrategyFilters();
     expect(matchesFilters(rwa, { ...base, sourceKind: "rwa" })).toBe(true);
     expect(matchesFilters(rwa, { ...base, sourceKind: "defi" })).toBe(false);
     expect(matchesFilters(rwa, { ...base, token: "usdc" })).toBe(true);
@@ -106,8 +88,8 @@ describe("visibleStrategies", () => {
   const noRate = strategy({ id: "no-rate", currentApy: undefined });
   const catalogue = [instantLow, delayedTop, noRate, instantHigh];
 
-  it("sorts by rate descending with unrated strategies last", () => {
-    const visible = visibleStrategies(catalogue, profileFilters("yield"));
+  it("shows instant and delayed strategies together, sorted by rate", () => {
+    const visible = visibleStrategies(catalogue, defaultStrategyFilters());
     expect(visible.map((entry) => entry.id)).toEqual([
       "delayed-top",
       "instant-high",
@@ -118,7 +100,7 @@ describe("visibleStrategies", () => {
 
   it("sorts by fastest access, breaking ties on rate", () => {
     const visible = visibleStrategies(catalogue, {
-      ...profileFilters("yield"),
+      ...defaultStrategyFilters(),
       sort: "access",
     });
     expect(visible.map((entry) => entry.id)).toEqual([
@@ -129,52 +111,26 @@ describe("visibleStrategies", () => {
     ]);
   });
 
-  it("drops the highest rate when the profile requires instant access", () => {
-    const visible = visibleStrategies(catalogue, profileFilters("liquidity"));
+  it("drops the highest rate when the user filters for instant access", () => {
+    const visible = visibleStrategies(catalogue, {
+      ...defaultStrategyFilters(),
+      maxSettlementDays: 0,
+    });
     expect(visible.map((entry) => entry.id)).not.toContain("delayed-top");
   });
 
   it("omits strategies whose deposit mint is not a routable stablecoin", () => {
     const visible = visibleStrategies(
       [strategy({ id: "unroutable", depositMints: [UNROUTABLE_MINT] })],
-      profileFilters("yield")
+      defaultStrategyFilters()
     );
     expect(visible).toHaveLength(0);
   });
 
   it("does not mutate the input array", () => {
     const input = [instantLow, instantHigh];
-    visibleStrategies(input, profileFilters("yield"));
+    visibleStrategies(input, defaultStrategyFilters());
     expect(input.map((entry) => entry.id)).toEqual(["instant-low", "instant-high"]);
-  });
-});
-
-describe("profileSummaries", () => {
-  it("reports the live count and best rate reachable per profile", () => {
-    const summaries = profileSummaries([
-      strategy({ id: "instant", currentApy: "0.04" }),
-      strategy({
-        id: "delayed",
-        currentApy: "0.11",
-        liquidityTerm: "delayed",
-        redemptionDelayDays: 10,
-      }),
-    ]);
-    const byProfile = new Map(summaries.map((entry) => [entry.profile, entry]));
-
-    expect(byProfile.get("liquidity")).toMatchObject({ count: 1, topApy: 0.04 });
-    expect(byProfile.get("yield")).toMatchObject({ count: 2, topApy: 0.11 });
-    expect(byProfile.get("liquidity")?.fastestSettlementDays).toBe(0);
-    expect(byProfile.get("yield")?.fastestSettlementDays).toBe(0);
-  });
-
-  it("reports an empty profile without inventing a rate", () => {
-    const summaries = profileSummaries([
-      strategy({ id: "delayed", liquidityTerm: "delayed", redemptionDelayDays: 30 }),
-    ]);
-    const liquidity = summaries.find((entry) => entry.profile === "liquidity");
-    expect(liquidity).toMatchObject({ count: 0, topApy: undefined });
-    expect(liquidity?.fastestSettlementDays).toBeUndefined();
   });
 });
 

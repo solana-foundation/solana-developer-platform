@@ -650,4 +650,206 @@ describe("Custody wallet scope routes", () => {
     expect(configIds).toContain(PARA_CONFIG_ID);
     expect(configIds).not.toContain(otherConfigId);
   });
+
+  describe("wallet-scoped key lifecycle mutations", () => {
+    let originalPrivyAppId: string | undefined;
+    let originalPrivyAppSecret: string | undefined;
+
+    beforeEach(() => {
+      originalPrivyAppId = env.PRIVY_APP_ID;
+      originalPrivyAppSecret = env.PRIVY_APP_SECRET;
+      env.PRIVY_APP_ID = "privy_test_app_id";
+      env.PRIVY_APP_SECRET = "privy_test_app_secret";
+    });
+
+    afterEach(() => {
+      env.PRIVY_APP_ID = originalPrivyAppId;
+      env.PRIVY_APP_SECRET = originalPrivyAppSecret;
+    });
+
+    it("lets a wallet-scoped key re-default to a wallet inside its bindings", async () => {
+      await seedCachedKey({
+        projectId: undefined,
+        walletBindings: [{ walletId: "privy_wallet_b", permissions: ["wallets:write"] }],
+      });
+
+      const res = await app.request(
+        "/v1/wallets/default-wallet",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "privy",
+            walletId: "privy_wallet_b",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const config = await getDb(env)
+        .prepare("SELECT default_wallet_id FROM custody_configs WHERE id = ?")
+        .bind(PRIVY_CONFIG_ID)
+        .first<{ default_wallet_id: string | null }>();
+      expect(config?.default_wallet_id).toBe("privy_wallet_b");
+    });
+
+    it("masks re-defaulting to a wallet outside the key bindings as unknown", async () => {
+      await seedCachedKey({
+        projectId: undefined,
+        walletBindings: [{ walletId: "privy_wallet_a", permissions: ["wallets:write"] }],
+      });
+
+      const res = await app.request(
+        "/v1/wallets/default-wallet",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "privy",
+            walletId: "privy_wallet_b",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const config = await getDb(env)
+        .prepare("SELECT default_wallet_id FROM custody_configs WHERE id = ?")
+        .bind(PRIVY_CONFIG_ID)
+        .first<{ default_wallet_id: string | null }>();
+      expect(config?.default_wallet_id).toBe("privy_wallet_a");
+    });
+
+    it("returns 404 when a wallet-scoped key deletes a wallet outside its bindings", async () => {
+      await seedCachedKey({
+        projectId: undefined,
+        walletBindings: [{ walletId: "privy_wallet_a", permissions: ["wallets:write"] }],
+      });
+
+      const res = await app.request(
+        "/v1/wallets",
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "privy",
+            walletId: "privy_wallet_b",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(404);
+      const wallet = await getDb(env)
+        .prepare("SELECT status FROM custody_wallets WHERE wallet_id = ?")
+        .bind("privy_wallet_b")
+        .first<{ status: string }>();
+      expect(wallet?.status).toBe("active");
+    });
+
+    it("lets a bound wallet through the delete binding gate", async () => {
+      await seedCachedKey({
+        projectId: undefined,
+        walletBindings: [{ walletId: "privy_wallet_b", permissions: ["wallets:write"] }],
+      });
+
+      const res = await app.request(
+        "/v1/wallets",
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "privy",
+            walletId: "privy_wallet_b",
+          }),
+        },
+        env
+      );
+
+      // Privy has no wallet deletion: the request passes the binding gate
+      // (no masked 404) and fails on provider capability instead.
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { message: string } };
+      expect(body.error.message).toMatch(/deletion not supported/i);
+    });
+
+    it("rejects wallet creation with a wallet-scoped key", async () => {
+      await seedCachedKey({
+        projectId: undefined,
+        walletBindings: [{ walletId: "privy_wallet_a", permissions: ["*"] }],
+      });
+
+      const res = await app.request(
+        "/v1/wallets",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ provider: "privy" }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+    });
+
+    it("rejects provider initialization with a wallet-scoped key", async () => {
+      await seedCachedKey({
+        projectId: undefined,
+        walletBindings: [{ walletId: "privy_wallet_a", permissions: ["*"] }],
+      });
+
+      const res = await app.request(
+        "/v1/wallets/initialize",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ provider: "privy" }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+    });
+
+    it("rejects provider switching with a wallet-scoped key", async () => {
+      await seedCachedKey({
+        projectId: undefined,
+        walletBindings: [{ walletId: "privy_wallet_a", permissions: ["*"] }],
+      });
+
+      const res = await app.request(
+        "/v1/wallets/switch",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ provider: "para" }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+    });
+  });
 });

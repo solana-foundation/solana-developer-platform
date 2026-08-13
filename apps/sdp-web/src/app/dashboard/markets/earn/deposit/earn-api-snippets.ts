@@ -67,23 +67,25 @@ function requestSnippet({
 export function earnApiSnippets({
   allocations,
   baseUrl,
-  provider,
+  programId,
   withdrawalToken,
 }: {
   allocations: EarnPortfolioAllocationInput;
   baseUrl: string;
-  provider: string;
+  /**
+   * The REAL id of the program this run just wrote, not a `<program_id>`
+   * placeholder — every snippet on this screen is meant to be runnable as
+   * pasted, which is the whole point of showing them here.
+   */
+  programId: string;
   withdrawalToken: string;
 }): readonly EarnSnippet[] {
+  const programPath = `/v1/earn/programs/${programId}`;
   return [
     {
       id: "read",
-      request: `GET /v1/earn/program?provider=${provider}`,
-      code: requestSnippet({
-        baseUrl,
-        method: "GET",
-        path: `/v1/earn/program?provider=${provider}`,
-      }),
+      request: `GET ${programPath}`,
+      code: requestSnippet({ baseUrl, method: "GET", path: programPath }),
     },
     {
       id: "browse",
@@ -96,26 +98,25 @@ export function earnApiSnippets({
     },
     {
       id: "switch",
-      request: "PUT /v1/earn/program",
+      request: `PUT ${programPath}`,
       code: requestSnippet({
         baseUrl,
         // requestId is what makes a retry safe: the provider replays the original
         // response for a matching payload. Mint a NEW one whenever allocations
         // change, or the reused key conflicts.
-        body: { provider, requestId: "<uuid_v4>", allocations },
+        body: { requestId: "<uuid_v4>", allocations },
         method: "PUT",
-        path: "/v1/earn/program",
+        path: programPath,
       }),
     },
     {
       id: "withdraw",
-      request: "POST /v1/earn/program/withdrawals",
+      request: `POST ${programPath}/withdrawals`,
       code: requestSnippet({
         baseUrl,
         // amountUsd is a USD decimal STRING (max 6 dp) on this family — never
         // a number and never base units.
         body: {
-          provider,
           // Required on this route, and the only thing that makes a retry
           // safe: the same value replays the original withdrawal instead of
           // paying out twice. Send the Idempotency-Key header instead if you
@@ -126,7 +127,7 @@ export function earnApiSnippets({
           destinationAddress: "<your_solana_address>",
         },
         method: "POST",
-        path: "/v1/earn/program/withdrawals",
+        path: `${programPath}/withdrawals`,
       }),
     },
   ];

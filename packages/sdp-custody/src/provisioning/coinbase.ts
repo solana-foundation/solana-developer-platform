@@ -3,14 +3,12 @@ import { SigningError } from "../signing";
 import {
   decodeBase64ToBytes,
   encodePkcs8Pem,
-  normalizeProviderNameFragment,
   parseJsonResponse,
   randomHex,
   readErrorResponseText,
   sha256Hex,
   sortJsonKeys,
   toBase64Url,
-  trimTrailingHyphens,
 } from "./common";
 import type { CustodyProvisioningRuntime } from "./runtime";
 
@@ -194,35 +192,49 @@ function requiresCoinbaseCdpWalletAuth(method: string, requestPath: string): boo
   return requestPath.includes("/accounts") || requestPath.includes("/spend-permissions");
 }
 
-export function buildCoinbaseCdpAccountName(
+export interface CoinbaseCdpAccountIdentity {
+  /** Deployment namespace (e.g. environment) separating deployments that share a CDP project. */
+  accountScope?: string;
+  organizationId: string;
+  /** null/undefined designates the organization-level scope. */
+  projectId?: string | null;
+  network: string;
+  /**
+   * Distinguishes additional wallets within one scope. Omitted for the root
+   * account so retries of the initial provisioning resolve to the same slot.
+   */
+  walletSeed?: string;
+}
+
+/**
+ * Derive the CDP account name from the full tenant identity. The digest keeps
+ * every dimension (org, project, network, wallet slot) collision-free within
+ * CDP's 36-char `[a-z0-9-]` name limit — no truncation of tenant identifiers
+ * ever decides which account a tenant receives.
+ */
+export async function deriveCoinbaseCdpAccountName(
   runtime: CustodyProvisioningRuntime,
-  value: string,
-  scope?: string
-): string {
-  let normalized = normalizeProviderNameFragment(value);
-
-  if (!normalized) {
-    normalized = "org";
+  identity: CoinbaseCdpAccountIdentity
+): Promise<string> {
+  if (!identity.organizationId) {
+    throw new SigningError(
+      "Coinbase CDP account provisioning requires an organization id",
+      "INVALID_REQUEST"
+    );
   }
 
-  const normalizedScope = scope ? normalizeProviderNameFragment(scope) : "";
+  const canonical = [
+    "sdp-custody",
+    "coinbase-cdp",
+    identity.accountScope ?? "",
+    identity.organizationId,
+    identity.projectId ?? "__organization__",
+    identity.network,
+    identity.walletSeed ?? "__root__",
+  ].join("|");
 
-  let name = `${normalizedScope ? `sdp-${normalizedScope}` : "sdp"}-${normalized}`.slice(0, 36);
-  name = trimTrailingHyphens(name);
-
-  if (!/^[a-z0-9]/.test(name)) {
-    name = `s${name}`;
-  }
-
-  if (!/[a-z0-9]$/.test(name)) {
-    name = `${name}0`;
-  }
-
-  if (name.length < 2) {
-    name = `sdp-${randomHex(runtime, 2)}`.slice(0, 36);
-  }
-
-  return name;
+  const digest = await sha256Hex(runtime, canonical);
+  return `sdp-${digest.slice(0, 32)}`;
 }
 
 export function extractCoinbaseCdpAccountAddress(response: unknown): string | null {

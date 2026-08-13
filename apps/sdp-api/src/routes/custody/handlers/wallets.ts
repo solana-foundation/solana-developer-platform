@@ -18,6 +18,7 @@ import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { resolveIssuedTokenLabelsByMint } from "@/routes/payments/token-labels";
 import { getLogger } from "@/runtime/logger";
 import {
+  assertApiKeyNotWalletScoped,
   assertApiKeyWalletAccess,
   getAllowedApiKeyWalletIdsForPermissions,
   resolveApiKeySigningWalletId,
@@ -464,6 +465,10 @@ export const createWallet = async (c: AppContext) => {
   const actor = resolveActor(c);
   const projectId = c.get("projectId");
 
+  // A freshly created wallet is by definition outside a wallet-scoped key's
+  // bindings (and setDefault would re-point the scope's default signer).
+  assertApiKeyNotWalletScoped(getAuth(c), "create custody wallets");
+
   const body = await c.req.json();
   const parsed = createWalletSchema.safeParse(body);
 
@@ -521,6 +526,15 @@ export const deleteWallet = async (c: AppContext) => {
     });
   }
 
+  try {
+    assertApiKeyWalletAccess(getAuth(c), parsed.data.walletId, ["wallets:write"]);
+  } catch (error) {
+    if (error instanceof AppError && error.code === "FORBIDDEN") {
+      throw new AppError("NOT_FOUND", "Custody wallet not found");
+    }
+    throw error;
+  }
+
   const projectId = c.get("projectId");
   const signingService = signingServiceModule.createSigningService(c.env, getRequestTenantScope(c));
 
@@ -574,6 +588,17 @@ export const setDefaultWallet = async (c: AppContext) => {
     });
   }
 
+  // A wallet-scoped key may only re-default to a wallet it is bound to.
+  // Unbound wallets are indistinguishable from unknown ones.
+  try {
+    assertApiKeyWalletAccess(getAuth(c), parsed.data.walletId, ["wallets:write"]);
+  } catch (error) {
+    if (error instanceof AppError && error.code === "FORBIDDEN") {
+      throw badRequest("Unknown walletId for this wallet signing configuration");
+    }
+    throw error;
+  }
+
   const projectId = c.get("projectId");
   const signingService = signingServiceModule.createSigningService(c.env, getRequestTenantScope(c));
   const config = await signingService.getConfigurationForMutation(
@@ -594,28 +619,27 @@ export const setDefaultWallet = async (c: AppContext) => {
     config.provider
   );
 
-  const wallet = await getDb(c.env)
-    .prepare(
-      `SELECT id
-     FROM custody_wallets
-     WHERE custody_config_id = ? AND wallet_id = ? AND status = 'active'
-     LIMIT 1`
-    )
-    .bind(config.id, parsed.data.walletId)
-    .first<{ id: string }>();
-
-  if (!wallet) {
-    throw badRequest("Unknown walletId for this wallet signing configuration");
-  }
-
-  await getDb(c.env)
+  // Membership check and pointer update in one conditional statement so a
+  // concurrent wallet delete/deactivate cannot slip between them.
+  const updated = await getDb(c.env)
     .prepare(
       `UPDATE custody_configs
      SET default_wallet_id = ?, updated_at = datetime('now')
-     WHERE id = ?`
+     WHERE id = ?
+       AND EXISTS (
+         SELECT 1
+         FROM custody_wallets w
+         WHERE w.custody_config_id = custody_configs.id
+           AND w.wallet_id = ?
+           AND w.status = 'active'
+       )`
     )
-    .bind(parsed.data.walletId, config.id)
+    .bind(parsed.data.walletId, config.id, parsed.data.walletId)
     .run();
+
+  if (updated === 0) {
+    throw badRequest("Unknown walletId for this wallet signing configuration");
+  }
 
   const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {

@@ -148,7 +148,9 @@ capability slots in without burdening providers that lack it.
   method set, so a half-implemented capability is invisible rather than a
   runtime landmine. Providers that don't opt in keep the exact base contract
   — zero added lift, per the original decision.
-- **Shared-wallet-per-org model.** One provider wallet per
+- **Shared-wallet-per-org model.** *(Superseded — see the 2026-08-11
+  many-programs addendum: an organization now holds N programs, and the
+  uniqueness moved onto the provider wallet itself.)* One provider wallet per
   `(organization, environment, provider)` — DB-enforced by the unique
   constraint in migration `0049_earn_provider_wallets.sql` and read/written
   through `EarnRepository.getProviderWallet`/`insertProviderWallet`.
@@ -316,3 +318,78 @@ multiplicity exists is PRO-1670's design decision.
 arrives as separate single-vault programs — one per strategy (PRO-1670, which
 relaxes the 0049 one-per-org constraint). This addendum caps allocations
 *within* a program; multiplicity lives between programs.
+
+## Addendum — 2026-08-11 Many programs per organization (PRO-1670)
+
+The **Shared-wallet-per-org model** bullet in the 2026-08-03 addendum is
+superseded. Composed with the single-vault cap decided the same day, one program
+per `(organization, environment, provider)` meant a customer could hold exactly
+one strategy and had no path to a second — the multiplicity that addendum
+promised had nowhere to live. It now lives between programs.
+
+- **N programs per (organization, environment, provider).** Each is still one
+  provider wallet pinned to one vault, and nothing rebalances across them:
+  moving money between programs is an explicit withdraw-then-deposit. A program
+  is addressed by its own SDP id (`EarnProgram.id`, first field of the
+  envelope); `provider` survives only on the create body and as a list filter,
+  because the row already names it and a caller-supplied provider that
+  disagreed with the row would have no sensible answer.
+- **The uniqueness moved rather than being dropped.** Migration
+  `0056_earn_multi_program.sql` drops
+  `earn_provider_wallets_org_environment_provider_key` and adds a GLOBAL
+  `UNIQUE (provider, provider_wallet_ref)`. A provider wallet is a provider-side
+  resource holding real funds, so exactly one link row anywhere in the platform
+  may claim it — two organizations pointing at one wallet would each read the
+  other's balance. This mirrors 0055's global withdrawal-reference unique:
+  provider-side identifiers are not tenant-scoped. 0049 stays as applied
+  history; 0056 carries the new reasoning.
+- **Program creation is idempotency-key REQUIRED, and the key is derived.**
+  Exactly one of body `requestId` (UUIDv4) or the `Idempotency-Key` header —
+  both and neither are 400s, the same rule withdrawals already carry. While the
+  org-scoped unique existed, a DB constraint caught a retried create; with N
+  programs legal nothing downstream can tell a retry from a genuine second
+  program, and an unkeyed retry provisions a duplicate wallet the customer may
+  then fund. The key is hashed against `(organization, environment, provider)`
+  before it reaches the provider, so two organizations pasting the same
+  placeholder UUID cannot land on one provider request on the shared account.
+  `EarnPortfolioWalletCreateInput.requestId` became a required contract field
+  and the Ground client's `?? crypto.randomUUID()` fallback on create was
+  deleted — a fallback minted per HTTP attempt guarantees the double-send it
+  appears to guard against. The update path's optional key and its fallback are
+  unchanged: re-targeting moves no money and is naturally idempotent.
+- **A unique violation on create means "already created", answered 200.** The
+  provider dedupes on the derived key and replays a retried create with the
+  ORIGINAL wallet ref, so a legitimate retry lands on the new global unique by
+  design: the handler re-reads by ref and serves the existing program with 200
+  (201 is a real create). Answering 409 there would turn the required key into
+  the duplicate it exists to prevent. A ref held by a different organization or
+  environment is the one genuine conflict — refuse it, never adopt it.
+- **Gate ordering is part of the decision, not an implementation detail.**
+  `POST /programs` resolves the idempotency key LAST: schema → capability (501)
+  → availability (403) → known yield sources (400) → project scope → key (400).
+  An unentitled caller sending no key must still learn it is unentitled.
+- **Listing has a credential gate that fires on an EMPTY list.** `GET /programs`
+  with a `provider` asserts credentials before reading rows. A collection cannot
+  404 for emptiness, so without it a missing provider key would be
+  indistinguishable from "this organization has no programs" — onboarding shown
+  to a customer whose provider is merely unconfigured. The list is ordered
+  oldest-first (`created_at ASC, id ASC`) so the head stays stable for a
+  program's whole life; a newest-first order would silently re-point any
+  consumer that tracks one program across polls.
+- **Cross-program BOLA.** `GET /programs/:programId/withdrawals/:ref` now
+  compares the ledger row's `wallet_id` to the path program, not the caller's
+  organization. An org-only check was complete while an org held one program;
+  with several, asking program A for program B's ref would pass and then drive
+  the provider with mismatched wallet/withdrawal refs. Unknown refs still fall
+  through to the provider's own wallet-scoped read.
+- **Unchanged on purpose.** The withdrawal ledger keeps its schema and its
+  `(wallet_id, request_id)` unique — wallet scoping was already the right shape
+  and now also separates sibling programs' histories. Single-vault (PRO-1667)
+  still caps each token group at one allocation entry; this addendum is about
+  how many programs an org may hold, not what one program may contain.
+- **Path rename.** Every `/v1/earn/program*` path named in the addenda above is
+  now `/v1/earn/programs` (list, create) or
+  `/v1/earn/programs/:programId/...` (get, re-target, deposits, withdrawal
+  preview/create/list/detail). The implicit create-or-update `PUT /program` is
+  gone: it was keyed on the triple that stops being addressable the moment a
+  second program exists.
