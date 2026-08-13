@@ -14,8 +14,7 @@ vi.mock("next/link", () => ({
   default: ({ children, ...props }: ComponentProps<"a">) => <a {...props}>{children}</a>,
 }));
 
-import { profileFilters, profileSummaries, visibleStrategies } from "./earn-deposit-model";
-import { ProfileStep } from "./profile-step";
+import { defaultStrategyFilters, visibleStrategies } from "./earn-deposit-model";
 import { ReviewStep } from "./review-step";
 import { StrategyStep } from "./strategy-step";
 import { WalletStep } from "./wallet-step";
@@ -137,55 +136,10 @@ describe("WalletStep", () => {
   });
 });
 
-describe("ProfileStep", () => {
-  it("states live catalogue figures and disclaims any risk rating", () => {
-    const html = renderToStaticMarkup(
-      <ProfileStep
-        hasError={false}
-        isLoading={false}
-        onSelect={() => {}}
-        selectedProfile="balanced"
-        summaries={profileSummaries(CATALOGUE)}
-      />
-    );
-    // Liquidity-first reaches only the instant 6.1% source; yield-first reaches 10.4%.
-    expect(html).toContain("DashboardEarn.deposit.profileTopApyLabel");
-    expect(html).toContain("6.1%");
-    expect(html).toContain("10.4%");
-    // The meta line carries count + the access constraint — the differentiator
-    // when two profiles tie on top APY.
-    expect(html).toContain(
-      "DashboardEarn.deposit.profileMeta(1,DashboardEarn.deposit.profileLiquidityAccess)"
-    );
-    expect(html).toContain(
-      "DashboardEarn.deposit.profileMeta(2,DashboardEarn.deposit.profileYieldAccess)"
-    );
-    expect(html).toContain("DashboardEarn.deposit.profileBasisBody");
-  });
-
-  it("states an empty profile as a dash and a zero count, never a fabricated rate", () => {
-    const html = renderToStaticMarkup(
-      <ProfileStep
-        hasError={false}
-        isLoading={false}
-        onSelect={() => {}}
-        selectedProfile={null}
-        summaries={profileSummaries([
-          strategy({ id: "slow", liquidityTerm: "delayed", redemptionDelayDays: 30 }),
-        ])}
-      />
-    );
-    expect(html).toContain("—");
-    expect(html).toContain(
-      "DashboardEarn.deposit.profileMeta(0,DashboardEarn.deposit.profileLiquidityAccess)"
-    );
-  });
-});
-
 describe("StrategyStep", () => {
-  const filters = profileFilters("yield");
+  const filters = defaultStrategyFilters();
 
-  it("renders each strategy with rate, access, pool and metadata", () => {
+  it("renders the full catalogue as a selectable comparison table", () => {
     const html = renderToStaticMarkup(
       <StrategyStep
         filters={filters}
@@ -199,15 +153,20 @@ describe("StrategyStep", () => {
         tokens={["usdc"]}
       />
     );
+    expect(html).toContain("<table");
+    expect(html).toContain("<thead");
+    expect(html).toContain("<tbody");
+    expect(html.match(/name="earn-strategy"/g)).toHaveLength(2);
+    expect(html).toContain("Kamino Gauntlet USDC");
+    expect(html).toContain("Ground JTRSY USDC");
     expect(html).toContain("10.4%");
-    // Access and pool share one quiet facts line.
     expect(html).toContain("DashboardEarn.liquidity.delayed(2)");
-    expect(html).toContain("DashboardEarn.deposit.poolMeta($40M)");
+    expect(html).toContain("$40M");
     // Curator survives as metadata only — never as a selection step.
     expect(html).toContain("DashboardEarn.deposit.curatedBy(Gauntlet)");
     expect(html).toContain("DashboardEarn.deposit.resultCount(2)");
-    // Single-stablecoin catalogue: no per-row token chip.
-    expect(html).not.toContain(">USDC<");
+    // Single-stablecoin catalogue: no redundant column.
+    expect(html).not.toContain("DashboardEarn.deposit.strategyStablecoinColumn");
   });
 
   it("hides the stablecoin filter when the catalogue has a single lane", () => {
@@ -259,8 +218,8 @@ describe("StrategyStep", () => {
         tokens={["usdc"]}
       />
     );
-    // An unreported pool is omitted from the facts line, not placeholdered.
-    expect(html).not.toContain("DashboardEarn.deposit.poolMeta");
+    expect(html).toContain('id="earn-strategy-no-pool-pool"');
+    expect(html).toContain(">—</td>");
     expect(html).not.toContain("$0");
   });
 });

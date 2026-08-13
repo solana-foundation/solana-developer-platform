@@ -133,8 +133,8 @@ the body `requestId` form, which is the only one that can get through.
   catalogue at sync time. Preview failures render TRANSLATED copy naming the per-lane
   reality — never the provider's wire text ("ground request failed with status
   409" explains nothing).
-- `deposit/` — the deposit flow: funding wallet → profile → filtered strategy
-  browse → review, then post-confirm outcome screens. See "The deposit flow".
+- `deposit/` — the deposit flow: funding wallet → full strategy catalogue →
+  review, then post-confirm outcome screens. See "The deposit flow".
 - `earn-format.ts` — formatting utilities (APY, USD, token symbols).
 
 ## The deposit flow (`deposit/`)
@@ -151,12 +151,12 @@ program.** With several programs legal, "a program exists" no longer says what
 the user asked for — adding a second strategy and re-targeting the first are
 different intents that look identical from that boolean.
 
-- Add run (no `?program=`): wallet → profile → strategy → review, then
+- Add run (no `?program=`): wallet → strategy → review, then
   `POST /programs`. Serves the first program and every later one identically —
   "Set up Earn" and "Add strategy" are deliberately the same run, since a new
   program always wants funding context.
-- Re-target run (`?program=<id>` resolves to a program): profile → strategy →
-  review, then `PUT /programs/:id` — the wallet step is funding context and a
+- Re-target run (`?program=<id>` resolves to a program): strategy → review,
+  then `PUT /programs/:id` — the wallet step is funding context and a
   re-target moves no funds, so it is omitted, and the review/summary rail show
   no wallet section. An id that does NOT resolve is a full-screen stop notice
   with a back-to-Earn action, never a fallback: silently downgrading "change
@@ -187,10 +187,10 @@ can take hours; small balances may stay as cash on economic minimums. Every
 sentence about timing must trace to one of those.
 
 - `earn-deposit-wizard.tsx` — orchestrator: step state, submit, outcome routing.
-- `earn-deposit-model.ts` — the pure model (profiles, filters, sorting,
+- `earn-deposit-model.ts` — the pure model (filters, sorting,
   `singleStrategyAllocation`). No JSX, unit-tested.
 - `earn-funding-wallets.ts` — org wallets via `/api/dashboard/wallets`.
-- `wallet-step` → `profile-step` → `strategy-step` → `review-step`.
+- `wallet-step` → `strategy-step` → `review-step`.
 - `integration-screen.tsx` + `earn-api-snippets.ts` — the conditional API step;
   the snippets print the just-written program's own
   `/v1/earn/programs/<programId>` paths, so they take a `programId` rather than
@@ -213,22 +213,18 @@ curator grouping without changing this note.
 Omitting a token lane **preserves** it server-side (Ground: "the omitted group
 is not changed"), which is why the review copy promises only the selected lane.
 
-### Profiles are filters, never a risk rating
+### Catalogue controls are filters, never a risk rating
 
 Ground publishes **no** risk tier, rating, grade, or score on a yield source —
 its own docs say so, and `riskMetadata.riskTier` is written only by the local dev
-seed. Profiles therefore compile to transparent filters over observable fields
-(settlement speed, backing kind, pool size) and the UI says as much. Never ship
-copy implying the provider rated anything.
+seed. There is deliberately no profile or bucket step: every active, fundable
+strategy appears once in a comparison table. Liquidity is the explicit
+redemption-speed filter; yield is the APY sort. Neither assigns a synthetic
+category, and copy must never imply that the provider rated anything.
 
-The filter vocabulary intentionally mirrors Ground's
-`POST /v2/wallets/strategy/optimize` constraints so a profile could later be
-handed to that endpoint. That endpoint has **no** SDP surface today (no client
-method, no route, no proxy) — wiring it is a three-layer build, not a swap.
-
-A filter must never exclude on a field the provider left absent (an unreported
-pool size passes every floor); the sandbox omits `tvlUsd` often enough that the
-opposite choice empties the catalogue.
+Changing a filter clears a selected strategy if that row becomes hidden, so the
+review step can never confirm a choice the reader can no longer see. Missing
+pool size remains visible as `—` and sorts after reported values.
 
 ### Confirm is idempotent — keep it that way
 
