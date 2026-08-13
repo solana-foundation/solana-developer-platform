@@ -604,6 +604,76 @@ describe("SponsorshipBudgetRedis", () => {
     expect(await raw.hget(hourKey, "__reservation:res_b:1")).toBeNull();
   });
 
+  it("counts a tenant once when its field is seeded into an already warm window", async () => {
+    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
+    const policies = [policy("global", 1, true, 1000), policy("organization", 1, true, 1000)];
+    const window = {
+      network: "devnet" as const,
+      hourBucket: "2026-08-03T10:00:00.000Z",
+      dayBucket: "2026-08-03T00:00:00.000Z",
+      projectId: null,
+      policies,
+    };
+
+    await expect(
+      budget.reserve({
+        ...window,
+        organizationId: "org_a",
+        reservationId: "res_a",
+        attempt: 1,
+        amount: 5,
+        usage: EMPTY_USAGE,
+        liveReservations: { hour: [], day: [] },
+      })
+    ).resolves.toBe("admitted");
+
+    const liveB2 = {
+      id: "res_b2",
+      attempt: 1,
+      reservedLamports: 10,
+      organizationId: "org_b",
+      projectId: null,
+    };
+    await expect(
+      budget.reserve({
+        ...window,
+        organizationId: "org_b",
+        reservationId: "res_b1",
+        attempt: 1,
+        amount: 10,
+        usage: {
+          hour: { global: 15, organization: 10, project: 0 },
+          day: { global: 15, organization: 10, project: 0 },
+        },
+        liveReservations: { hour: [liveB2], day: [liveB2] },
+      })
+    ).resolves.toBe("admitted");
+
+    const liveB1 = {
+      id: "res_b1",
+      attempt: 1,
+      reservedLamports: 10,
+      organizationId: "org_b",
+      projectId: null,
+    };
+    await expect(
+      budget.reserve({
+        ...window,
+        organizationId: "org_b",
+        reservationId: "res_b2",
+        attempt: 1,
+        amount: 10,
+        usage: {
+          hour: { global: 15, organization: 10, project: 0 },
+          day: { global: 15, organization: 10, project: 0 },
+        },
+        liveReservations: { hour: [liveB1], day: [liveB1] },
+      })
+    ).resolves.toBe("admitted");
+
+    expect(await raw.hget(hourKey, "organization:org_b")).toBe("20");
+  });
+
   it("denies an adopted reservation that exceeds the per-transaction limit", async () => {
     const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
 

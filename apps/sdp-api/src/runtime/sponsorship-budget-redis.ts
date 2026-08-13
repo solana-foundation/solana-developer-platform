@@ -11,24 +11,26 @@ import { getRedisClient } from "./kv-redis";
 
 const INITIALIZE_LUA = `
 local count = tonumber(ARGV[1])
-local hour_existed = redis.call('EXISTS', KEYS[1]) == 1
-local day_existed = redis.call('EXISTS', KEYS[2]) == 1
+local seeded_hour = {}
+local seeded_day = {}
 for i = 1, count do
   local field = ARGV[1 + i]
   local marker = '__initialized:' .. field
   if not redis.call('HGET', KEYS[1], marker) then
     redis.call('HSET', KEYS[1], field, ARGV[1 + count + i])
     redis.call('HSET', KEYS[1], marker, '1')
+    seeded_hour[field] = true
   end
   if not redis.call('HGET', KEYS[2], marker) then
     redis.call('HSET', KEYS[2], field, ARGV[1 + count * 2 + i])
     redis.call('HSET', KEYS[2], marker, '1')
+    seeded_day[field] = true
   end
 end
 redis.call('PEXPIRE', KEYS[1], ARGV[2 + count * 3])
 redis.call('PEXPIRE', KEYS[2], ARGV[3 + count * 3])
 local cursor = 3 + count * 3
-local function reconstruct(hash_key, hash_existed)
+local function reconstruct(hash_key, seeded)
   local reservations = tonumber(ARGV[cursor + 1])
   cursor = cursor + 1
   for i = 1, reservations do
@@ -42,25 +44,23 @@ local function reconstruct(hash_key, hash_existed)
       fields[f] = ARGV[cursor + f]
     end
     cursor = cursor + field_count
-    if not hash_existed then
-      local settled = redis.call('GET', settlement_key)
-      if settled then
-        local delta = tonumber(settled) - reserved
-        if delta ~= 0 then
-          for f = 1, field_count do
-            if redis.call('HGET', hash_key, '__initialized:' .. fields[f]) then
-              redis.call('HINCRBY', hash_key, fields[f], delta)
-            end
-          end
+    local settled = redis.call('GET', settlement_key)
+    for f = 1, field_count do
+      local field = fields[f]
+      if seeded[field] then
+        if settled then
+          local delta = tonumber(settled) - reserved
+          if delta ~= 0 then redis.call('HINCRBY', hash_key, field, delta) end
+        else
+          redis.call('HSET', hash_key, ownership .. ':' .. field, reserved)
+          redis.call('HSET', hash_key, ownership, reserved)
         end
-      elseif not redis.call('HGET', hash_key, ownership) then
-        redis.call('HSET', hash_key, ownership, reserved)
       end
     end
   end
 end
-reconstruct(KEYS[1], hour_existed)
-reconstruct(KEYS[2], day_existed)
+reconstruct(KEYS[1], seeded_hour)
+reconstruct(KEYS[2], seeded_day)
 return 1
 `;
 
@@ -85,8 +85,8 @@ for i = 1, count do
 end
 if existing or redis.call('GET', KEYS[5]) then return {2, tonumber(existing or '0')} end
 local ownership_field = ARGV[4 + count * 6]
-local counted_hour = redis.call('HGET', KEYS[1], ownership_field)
-local counted_day = redis.call('HGET', KEYS[2], ownership_field)
+local counted_hour = {}
+local counted_day = {}
 for i = 1, count do
   local offset = 2 + ((i - 1) * 6)
   local field = ARGV[offset + 1]
@@ -94,31 +94,34 @@ for i = 1, count do
   local hour_limit = tonumber(ARGV[offset + 3])
   local day_limit = tonumber(ARGV[offset + 4])
   if amount > per_tx then return {0, i} end
+  counted_hour[i] = redis.call('HGET', KEYS[1], ownership_field .. ':' .. field)
+  counted_day[i] = redis.call('HGET', KEYS[2], ownership_field .. ':' .. field)
   local hour_used = tonumber(redis.call('HGET', KEYS[1], field) or '0')
-  if counted_hour then
+  if counted_hour[i] then
     if hour_used > hour_limit then return {0, i} end
   elseif hour_used + amount > hour_limit then
     return {0, i}
   end
   local day_used = tonumber(redis.call('HGET', KEYS[2], field) or '0')
-  if counted_day then
+  if counted_day[i] then
     if day_used > day_limit then return {0, i} end
   elseif day_used + amount > day_limit then
     return {0, i}
   end
 end
-if not counted_hour then
-  for i = 1, count do
-    redis.call('HINCRBY', KEYS[1], ARGV[2 + ((i - 1) * 6) + 1], amount)
+for i = 1, count do
+  local field = ARGV[2 + ((i - 1) * 6) + 1]
+  if not counted_hour[i] then
+    redis.call('HINCRBY', KEYS[1], field, amount)
+    redis.call('HSET', KEYS[1], ownership_field .. ':' .. field, amount)
   end
-  redis.call('HSET', KEYS[1], ownership_field, amount)
-end
-if not counted_day then
-  for i = 1, count do
-    redis.call('HINCRBY', KEYS[2], ARGV[2 + ((i - 1) * 6) + 1], amount)
+  if not counted_day[i] then
+    redis.call('HINCRBY', KEYS[2], field, amount)
+    redis.call('HSET', KEYS[2], ownership_field .. ':' .. field, amount)
   end
-  redis.call('HSET', KEYS[2], ownership_field, amount)
 end
+redis.call('HSET', KEYS[1], ownership_field, amount)
+redis.call('HSET', KEYS[2], ownership_field, amount)
 redis.call('SET', KEYS[3], amount, 'PX', ARGV[3 + count * 6])
 return {1, amount}
 `;
@@ -146,8 +149,7 @@ if day_owned and tonumber(day_owned) ~= amount then return -2 end
 for i = 2, #ARGV do
   local field = ARGV[i]
   for key_index = 1, 2 do
-    if redis.call('HGET', KEYS[key_index], ARGV[1]) then
-      if not redis.call('HGET', KEYS[key_index], '__initialized:' .. field) then return -1 end
+    if redis.call('HGET', KEYS[key_index], ARGV[1] .. ':' .. field) then
       local used = tonumber(redis.call('HGET', KEYS[key_index], field) or '0')
       if used < amount then return -1 end
     end
@@ -156,8 +158,10 @@ end
 for i = 2, #ARGV do
   local field = ARGV[i]
   for key_index = 1, 2 do
-    if redis.call('HGET', KEYS[key_index], ARGV[1]) then
+    local covered = ARGV[1] .. ':' .. field
+    if redis.call('HGET', KEYS[key_index], covered) then
       redis.call('HINCRBY', KEYS[key_index], field, -amount)
+      redis.call('HDEL', KEYS[key_index], covered)
     end
   end
 end
@@ -180,41 +184,24 @@ local ownership_field = ARGV[6 + count]
 for key_index = 1, 2 do
   local hash_owned = redis.call('HGET', KEYS[key_index], ownership_field)
   if hash_owned and tonumber(hash_owned) ~= reserved then return {0, 2} end
-  local should_adjust = false
-  if owned_value then
-    should_adjust = redis.call('EXISTS', KEYS[key_index]) == 1
-  else
-    should_adjust = hash_owned ~= false
-  end
-  if should_adjust then
-    if delta < 0 then
-      for i = 4, 3 + count do
-        if redis.call('HGET', KEYS[key_index], '__initialized:' .. ARGV[i]) then
-          local current = tonumber(redis.call('HGET', KEYS[key_index], ARGV[i]) or '0')
-          if current < -delta then return {0, 1} end
-        end
+  if delta < 0 then
+    for i = 4, 3 + count do
+      if redis.call('HGET', KEYS[key_index], ownership_field .. ':' .. ARGV[i]) then
+        local current = tonumber(redis.call('HGET', KEYS[key_index], ARGV[i]) or '0')
+        if current < -delta then return {0, 1} end
       end
     end
   end
 end
 for key_index = 1, 2 do
-  local hash_owned = redis.call('HGET', KEYS[key_index], ownership_field)
-  local should_adjust = false
-  if owned_value then
-    should_adjust = redis.call('EXISTS', KEYS[key_index]) == 1
-  else
-    should_adjust = hash_owned ~= false
-  end
-  if should_adjust then
-    if delta ~= 0 then
-      for i = 4, 3 + count do
-        if redis.call('HGET', KEYS[key_index], '__initialized:' .. ARGV[i]) then
-          redis.call('HINCRBY', KEYS[key_index], ARGV[i], delta)
-        end
-      end
+  for i = 4, 3 + count do
+    local covered = ownership_field .. ':' .. ARGV[i]
+    if redis.call('HGET', KEYS[key_index], covered) then
+      if delta ~= 0 then redis.call('HINCRBY', KEYS[key_index], ARGV[i], delta) end
+      redis.call('HDEL', KEYS[key_index], covered)
     end
-    redis.call('HDEL', KEYS[key_index], ownership_field)
   end
+  redis.call('HDEL', KEYS[key_index], ownership_field)
 end
 redis.call('DEL', KEYS[3])
 redis.call('SET', KEYS[4], actual, 'PX', ARGV[4 + count])
