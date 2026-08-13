@@ -345,6 +345,41 @@ describe("POST /v1/members/accept", () => {
     expect(memberships[0]?.role).toBe("member");
   });
 
+  it("applies the invited role when a membership already exists at a lower one", async () => {
+    // A concurrent Clerk sign-in can win the membership insert at its own role;
+    // the invitation is the explicit grant being consumed and must still deliver.
+    const sessionId = await seedCaller();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES ('mem_acceptance_lower', ?, ?, 'member', 'active')`
+      )
+      .bind(INVITING_ORG_ID, CALLER_USER_ID)
+      .run();
+    await seedInvitation({ role: "admin" });
+
+    expect((await accept(sessionId)).status).toBe(200);
+    expect(await invitationStatus()).toBe("accepted");
+
+    const memberships = await membershipsIn(INVITING_ORG_ID, CALLER_USER_ID);
+    expect(memberships).toHaveLength(1);
+    expect(memberships[0]?.role).toBe("admin");
+  });
+
+  it("never demotes an existing admin over a member-role invitation", async () => {
+    // The stray token case: silently reducing an admin — possibly the last
+    // one — is not what accepting an invitation means.
+    const sessionId = await seedCaller();
+    await seedInvitation({ organizationId: HOME_ORG_ID, role: "member" });
+
+    expect((await accept(sessionId)).status).toBe(200);
+    expect(await invitationStatus()).toBe("accepted");
+
+    const memberships = await membershipsIn(HOME_ORG_ID, CALLER_USER_ID);
+    expect(memberships).toHaveLength(1);
+    expect(memberships[0]?.role).toBe("admin");
+  });
+
   it("spends the invitation without duplicating an existing membership", async () => {
     const sessionId = await seedCaller();
     await seedInvitation({ organizationId: HOME_ORG_ID });

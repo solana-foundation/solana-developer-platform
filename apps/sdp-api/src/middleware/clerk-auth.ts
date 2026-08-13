@@ -406,6 +406,16 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
     );
   }
 
+  // Everything below writes — user provisioning, membership, default projects,
+  // email repair — so the allowlist gates entry here rather than the response
+  // after: a blocked origin must not leave state behind. Only an organization
+  // that already exists can carry a restriction; one first provisioned by this
+  // request cannot have one yet, so the callers need no second check.
+  const knownOrganization = await resolveClerkOrganization(getDb(c.env), payload.org_id as string);
+  if (knownOrganization) {
+    await enforceOrganizationIpAllowlist(c, knownOrganization.organization_id);
+  }
+
   const existingContext = await resolveExistingClerkContext(getDb(c.env), {
     clerkUserId: payload.sub as string,
     clerkOrgId: payload.org_id as string,
@@ -548,9 +558,6 @@ export function clerkAuthMiddleware() {
       DASHBOARD_ACTOR_MAX_REQUESTS
     );
 
-    // Behind the limiter: an uncached Postgres read per request.
-    await enforceOrganizationIpAllowlist(c, clerkContext.organizationId);
-
     c.set("clerk", clerkContext);
 
     await next();
@@ -577,8 +584,6 @@ export function optionalClerkAuth() {
             `user:${clerkContext.userId}:org:${clerkContext.organizationId}`,
             DASHBOARD_ACTOR_MAX_REQUESTS
           );
-          // Before the context is set: a disallowed origin continues as anonymous.
-          await enforceOrganizationIpAllowlist(c, clerkContext.organizationId);
           c.set("clerk", clerkContext);
         }
       }

@@ -705,16 +705,28 @@ export const acceptInvitation = async (c: AppContext) => {
       // in to. Locked because the row is read and then conditionally written.
       const existingMembership = await tx
         .prepare(
-          `SELECT id, status
+          `SELECT id, role, status
            FROM organization_members
           WHERE organization_id = ? AND user_id = ?
             FOR UPDATE`
         )
         .bind(invitation.organization_id, actorUserId)
-        .first<{ id: string; status: string }>();
+        .first<{ id: string; role: string; status: string }>();
 
       if (existingMembership?.status === "active") {
-        // Invitation already spent above; nothing left to grant.
+        // A concurrent Clerk sign-in can win the insert at its own role; the
+        // invitation is the explicit grant being consumed and must still
+        // deliver. Upgrade only — acceptance never demotes an existing admin
+        // (possibly the last one) over a stale member-role token.
+        if (
+          normalizeOrganizationRole(invitation.role) === "admin" &&
+          normalizeOrganizationRole(existingMembership.role) !== "admin"
+        ) {
+          await tx
+            .prepare("UPDATE organization_members SET role = 'admin' WHERE id = ?")
+            .bind(existingMembership.id)
+            .run();
+        }
         return;
       }
 
