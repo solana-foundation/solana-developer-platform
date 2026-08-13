@@ -2,34 +2,22 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { badRequest } from "@/lib/errors";
+import { badRequest, badRequestParams } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { credentialAdminAuthMiddleware } from "@/middleware/credential-admin-auth";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { getCustodySetupStatus } from "@/services/custody-setup-status.service";
-import { checkProviderCredential } from "@/services/provider-credential-check.service";
-import { submitProviderCredential } from "@/services/provider-credential-submission.service";
+import { getProviderCredentialInstallation } from "@/services/provider-credential-installation.service";
+import { getProviderSetupDefinition } from "@/services/provider-setup-registry";
 import {
   getPendingWalletLabel,
   ProviderCredentialStore,
 } from "@/services/stores/provider-credential.store";
 import type { Env } from "@/types/env";
 
-const privyCredentialSubmissionSchema = z
-  .object({
-    provider: z.literal("privy"),
-    walletLabel: z.string().trim().min(1).max(100).optional(),
-    fields: z
-      .object({
-        credentialLabel: z.string().trim().min(1),
-        scope: z.enum(["organization", "project"]),
-        appId: z.string().trim().min(1),
-        appSecret: z.string().min(1),
-      })
-      .strict(),
-  })
-  .strict();
+const connectionParamsSchema = z.object({ connectionId: z.string().trim().min(1) }).strict();
+const privySetup = getProviderSetupDefinition("custody", "privy");
 
 const internalCustody = new Hono<{ Bindings: Env }>();
 
@@ -99,7 +87,7 @@ internalCustody.get("/providers", async (c) => {
 
 internalCustody.post("/provider-credentials", async (c) => {
   const body = await c.req.json().catch(() => null);
-  const parsed = privyCredentialSubmissionSchema.safeParse(body);
+  const parsed = privySetup.validateSetupPayload(body, "submit");
   if (!parsed.success) {
     throw badRequest("Invalid request body", {
       errors: z.flattenError(parsed.error).fieldErrors,
@@ -111,12 +99,72 @@ internalCustody.post("/provider-credentials", async (c) => {
     throw badRequest("Idempotency-Key is required");
   }
 
-  const result = await submitProviderCredential(c, parsed.data, idempotencyKey);
+  const result = await privySetup.storeCredentials({
+    context: c,
+    payload: parsed.data,
+    idempotencyKey,
+  });
   return created(c, result);
 });
 
-internalCustody.post("/provider-credentials/:providerCredentialId/check", async (c) => {
-  return success(c, await checkProviderCredential(c, c.req.param("providerCredentialId")));
+internalCustody.post("/connections/:connectionId/provider-credentials", async (c) => {
+  const params = connectionParamsSchema.safeParse(c.req.param());
+  if (!params.success) {
+    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+  }
+
+  const body = await c.req.json().catch(() => null);
+  const parsed = privySetup.validateSetupPayload(body, "replace");
+  if (!parsed.success) {
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
+    });
+  }
+
+  const idempotencyKey = c.req.header("Idempotency-Key");
+  if (!idempotencyKey) {
+    throw badRequest("Idempotency-Key is required");
+  }
+
+  return created(
+    c,
+    await privySetup.storeCredentials({
+      context: c,
+      connectionId: params.data.connectionId,
+      payload: parsed.data,
+      idempotencyKey,
+    })
+  );
+});
+
+internalCustody.get("/connections/:connectionId", async (c) => {
+  const params = connectionParamsSchema.safeParse(c.req.param());
+  if (!params.success) {
+    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+  }
+  return success(c, await getProviderCredentialInstallation(c, params.data.connectionId));
+});
+
+internalCustody.post("/connections/:connectionId/complete", async (c) => {
+  const params = connectionParamsSchema.safeParse(c.req.param());
+  if (!params.success) {
+    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+  }
+  return success(
+    c,
+    await privySetup.activate({ context: c, connectionId: params.data.connectionId })
+  );
+});
+
+internalCustody.post("/connections/:connectionId/cancel", async (c) => {
+  const params = connectionParamsSchema.safeParse(c.req.param());
+  if (!params.success) {
+    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+  }
+  return success(
+    c,
+    await privySetup.deactivate({ context: c, connectionId: params.data.connectionId })
+  );
 });
 
 export default internalCustody;

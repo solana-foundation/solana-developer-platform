@@ -11,6 +11,8 @@ export {
   createOnrampQuote,
   estimateOfframp,
   estimateOnramp,
+  extractOfframpQuotePolicyCandidate,
+  extractOnrampQuotePolicyCandidate,
   listOfframpCurrencies,
   listOnrampCurrencies,
   simulateSandboxTransfer,
@@ -44,7 +46,15 @@ export {
 export {
   createTransferBatch,
   estimateTransferBatch,
+  extractTransferBatchPolicyCandidate,
+  findTransferBatchIdempotentKeyReplay,
   getTransferBatch,
   listTransferBatches,
 } from "./handlers/transfer-batches";
-export { createTransfer, getTransfer, listTransfers } from "./handlers/transfers";
+export {
+  createTransfer,
+  extractTransferPolicyCandidate,
+  findTransferIdempotentKeyReplay,
+  getTransfer,
+  listTransfers,
+} from "./handlers/transfers";

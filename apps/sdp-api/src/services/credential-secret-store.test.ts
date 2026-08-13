@@ -180,7 +180,7 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
         return new Response(JSON.stringify({ access_token: "metadata-token", expires_in: 300 }));
       }
 
-      expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer metadata-token");
+      expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer metadata-token");
 
       if (
         url.endsWith(

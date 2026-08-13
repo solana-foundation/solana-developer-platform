@@ -2,14 +2,18 @@ import {
   Badge as SolanaBadge,
   type BadgeProps as SolanaBadgeProps,
 } from "@solana/design-system/badge";
+import type { PropsWithChildren } from "react";
 
 import { cn } from "@/lib/utils";
 
 type BadgeVariant = "default" | "primary" | "success" | "warning" | "danger" | "info" | "outline";
 
-type BadgeProps = Omit<SolanaBadgeProps, "variant"> & {
-  variant?: BadgeVariant;
-};
+type BadgeProps = PropsWithChildren<
+  Omit<SolanaBadgeProps, "variant"> & {
+    className?: string;
+    variant?: BadgeVariant;
+  }
+>;
 
 const variantClassNames: Record<BadgeVariant, string> = {
   default: "bg-fill text-primary",

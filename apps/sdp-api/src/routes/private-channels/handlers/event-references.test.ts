@@ -5,11 +5,11 @@ import type {
 } from "@sdp/types";
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 import { listPrivateChannelEventReferences } from "./event-references";
 
@@ -178,10 +178,6 @@ describe("Private Channels event references handler", () => {
       )
       .bind(PROJECT_ID, ORGANIZATION_ID, ISSUED_TOKEN_MINT, USER_ID)
       .run();
-  });
-
-  afterEach(async () => {
-    await clearTestDatabase(env);
   });
 
   it("returns an empty dictionary when the viewer has no user identity", async () => {

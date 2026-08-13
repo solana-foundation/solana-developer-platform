@@ -1,6 +1,7 @@
 "use client";
 
 import type { ComplianceProviderId, Counterparty, PaymentsDashboardWallet } from "@sdp/types";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import useSWR, { preload } from "swr";
 import {
@@ -11,7 +12,6 @@ import {
 } from "@/app/dashboard/payments/payments-workspace.data";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider, type RampProviderAccess } from "@/lib/provider-availability";
-import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { WizardSummaryList } from "../wizard-summary-list";
 import { BatchSendRail } from "./batch-send-rail";
 import { CounterpartyPicker } from "./components/counterparty-picker";
@@ -63,7 +63,7 @@ type RampsPhase = "counterparty" | "method" | "rail";
 export function PaymentsActionPage(props: PaymentsActionPageProps) {
   const t = useTranslations();
   const { mode, rampProviderAccess } = props;
-  const router = useDashboardRouter();
+  const router = useRouter();
 
   const [phase, setPhase] = useState<RampsPhase>("counterparty");
   const [sendMode, setSendMode] = useState<SendMode>("single");

@@ -19,6 +19,7 @@ import {
   RotateCcwIcon,
   WalletIcon,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
@@ -37,7 +38,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
-import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import {
   formatTimestamp,
   isHttpUrl,
@@ -368,7 +368,7 @@ export function RecurringPaymentDetailWorkspace({
   collectionAttemptsError,
 }: RecurringPaymentDetailWorkspaceProps) {
   const t = useTranslations();
-  const router = useDashboardRouter();
+  const router = useRouter();
   const [pendingAction, setPendingAction] = useState<RecurringPaymentAction | null>(null);
   const [actionError, setActionError] = useState<DetailActionError | null>(null);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);

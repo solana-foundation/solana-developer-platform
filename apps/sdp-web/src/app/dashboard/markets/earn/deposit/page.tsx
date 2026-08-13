@@ -53,6 +53,10 @@ export default async function EarnDepositPage({ searchParams }: EarnDepositPageP
 
   const resolved = searchParams ? await searchParams : undefined;
   const initialStrategyId = firstParam(resolved, "strategy");
+  // Which existing program a "Change strategy" run re-targets; absent = add a
+  // new one. Resolved here like `strategy` — this server shell owns search
+  // params, the client wizard receives props.
+  const retargetProgramId = firstParam(resolved, "program");
 
   let apiKeys: EarnApiKeyView[] = [];
   let fireblocksEnabled = false;
@@ -92,6 +96,7 @@ export default async function EarnDepositPage({ searchParams }: EarnDepositPageP
       apiKeys={apiKeys}
       fireblocksEnabled={fireblocksEnabled}
       initialStrategyId={initialStrategyId}
+      retargetProgramId={retargetProgramId}
     />
   );
 }

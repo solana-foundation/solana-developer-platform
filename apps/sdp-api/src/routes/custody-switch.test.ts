@@ -9,7 +9,7 @@ import * as custodyProvisioning from "@/services/custody/provisioning";
 import { parseConfigRecord } from "@/services/domain/signing/provider-config";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const provisionParaWalletMock = vi.spyOn(custodyProvisioning, "provisionParaWallet");
@@ -112,6 +112,20 @@ async function seedAuthAndActiveConfig(): Promise<void> {
       ),
     getDb(env)
       .prepare(
+        `INSERT INTO custody_wallets
+           (id, custody_config_id, wallet_id, public_key, purpose, status)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        `cwlt_${TEST_CONFIG_ID}`,
+        TEST_CONFIG_ID,
+        "privy_wallet_test",
+        "privy_pubkey_test",
+        "root",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
         `INSERT INTO custody_scope_defaults
            (id, organization_id, project_id, default_custody_config_id)
          VALUES (?, ?, ?, ?)`
@@ -140,7 +154,6 @@ describe("Custody switch rollback", () => {
     env.PARA_API_KEY = originalParaApiKey;
     env.PARA_API_BASE_URL = originalParaApiBaseUrl;
     env.CUSTODY_ENCRYPTION_KEY = originalCustodyEncryptionKey;
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 

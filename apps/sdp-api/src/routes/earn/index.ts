@@ -4,22 +4,18 @@ import { isEarnEnabled } from "@/lib/feature-flags";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
-import { getEarnMovement, listEarnMovements } from "./handlers/movements";
-import { getEarnPosition, listEarnPositions } from "./handlers/positions";
 import {
+  createEarnProgram,
   createEarnProgramWithdrawal,
   getEarnProgram,
   getEarnProgramWithdrawal,
   listEarnProgramDeposits,
+  listEarnPrograms,
+  listEarnProgramWithdrawals,
   previewEarnProgramWithdrawal,
-  upsertEarnProgram,
+  retargetEarnProgram,
 } from "./handlers/program";
-import { quoteEarnDeposit, quoteEarnWithdrawal } from "./handlers/quotes";
-import {
-  getEarnStrategy,
-  getEarnStrategyNavHistory,
-  listEarnStrategies,
-} from "./handlers/strategies";
+import { getEarnStrategy, listEarnStrategies } from "./handlers/strategies";
 
 const earn = new Hono<{ Bindings: Env }>();
 
@@ -38,40 +34,45 @@ earn.use("*", requireEarnFeature);
 earn.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 earn.use("*", projectContextMiddleware());
 
-// Strategy catalogue.
+// Strategy catalogue (source: DB, written only by the sync cron + dev seed).
 earn.get("/strategies", requirePermissions("earn:read"), listEarnStrategies);
 earn.get("/strategies/:strategyId", requirePermissions("earn:read"), getEarnStrategy);
-earn.get("/strategies/:strategyId/nav", requirePermissions("earn:read"), getEarnStrategyNavHistory);
 
-// Rate previews. Execution endpoints (POST /deposits, POST /withdrawals) land
-// with the first real provider integration — they additionally need wallet
-// resolution, custody signing, and movement persistence.
-earn.post("/deposits/quote", requirePermissions("earn:read"), quoteEarnDeposit);
-earn.post("/withdrawals/quote", requirePermissions("earn:read"), quoteEarnWithdrawal);
-
-// Shared portfolio program: ONE provider wallet per org+environment+provider.
-// PUT (money in) takes the full availability gate inside the handler; the
-// withdrawal endpoints only require provider credentials (ADR 0002 exit
-// safety — disabling a provider must never trap funds).
-earn.put("/program", requirePermissions("earn:write"), upsertEarnProgram);
-earn.get("/program", requirePermissions("earn:read"), getEarnProgram);
-earn.get("/program/deposits", requirePermissions("earn:read"), listEarnProgramDeposits);
+// Portfolio programs: N provider wallets per org+environment+provider
+// (PRO-1670), each addressed by its own id. Money-in (create, re-target) takes
+// the full availability gate inside the handler; the withdrawal endpoints only
+// require provider credentials (ADR 0002 exit safety — disabling a provider must
+// never trap funds). Source of truth per route: list/get/deposits/
+// withdrawal-detail read the provider LIVE; the withdrawals LIST reads the SDP
+// ledger (earn_program_withdrawals) and takes no provider gate at all — the
+// audit trail outlives credential removal.
+//
+// The collection is declared BEFORE the `:programId` routes so a literal
+// segment can never be captured as an id.
+earn.get("/programs", requirePermissions("earn:read"), listEarnPrograms);
+earn.post("/programs", requirePermissions("earn:write"), createEarnProgram);
+earn.get("/programs/:programId", requirePermissions("earn:read"), getEarnProgram);
+earn.put("/programs/:programId", requirePermissions("earn:write"), retargetEarnProgram);
+earn.get("/programs/:programId/deposits", requirePermissions("earn:read"), listEarnProgramDeposits);
 earn.post(
-  "/program/withdrawal-preview",
+  "/programs/:programId/withdrawal-preview",
   requirePermissions("earn:read"),
   previewEarnProgramWithdrawal
 );
-earn.post("/program/withdrawals", requirePermissions("earn:write"), createEarnProgramWithdrawal);
+earn.post(
+  "/programs/:programId/withdrawals",
+  requirePermissions("earn:write"),
+  createEarnProgramWithdrawal
+);
 earn.get(
-  "/program/withdrawals/:withdrawalRef",
+  "/programs/:programId/withdrawals",
+  requirePermissions("earn:read"),
+  listEarnProgramWithdrawals
+);
+earn.get(
+  "/programs/:programId/withdrawals/:withdrawalRef",
   requirePermissions("earn:read"),
   getEarnProgramWithdrawal
 );
-
-// Positions and the deposit/withdrawal ledger.
-earn.get("/positions", requirePermissions("earn:read"), listEarnPositions);
-earn.get("/positions/:positionId", requirePermissions("earn:read"), getEarnPosition);
-earn.get("/movements", requirePermissions("earn:read"), listEarnMovements);
-earn.get("/movements/:movementId", requirePermissions("earn:read"), getEarnMovement);
 
 export default earn;

@@ -1,4 +1,4 @@
-import type { ApprovalPolicyRule, WalletOperationEnvelope } from "@sdp/types";
+import type { ApprovalPolicyRule, PolicyCandidate } from "@sdp/types";
 import { type RuleEvaluation, ruleValues } from "./helpers";
 
 /**
@@ -11,7 +11,7 @@ import { type RuleEvaluation, ruleValues } from "./helpers";
  */
 export function evaluateApprovalRule(
   rule: ApprovalPolicyRule,
-  operation: WalletOperationEnvelope
+  operation: PolicyCandidate
 ): RuleEvaluation | null {
   const families = ruleValues(undefined, rule.families);
   const operationTypes = ruleValues(undefined, rule.operationTypes);

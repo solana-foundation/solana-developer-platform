@@ -2,10 +2,10 @@
 
 import type { CustodyWalletTokenBalance, PaymentsDashboardWallet, SolanaCluster } from "@sdp/types";
 import { ExternalLink } from "lucide-react";
-import { useState } from "react";
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
 import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
-import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -54,12 +54,36 @@ interface HomeWorkspaceProps {
 const HOME_ACTIVITY_KEY = "dashboard-home-activity";
 const HOME_ACTIVITY_CACHE_TTL_MS = 60_000;
 
+/** Table text that ellipsizes, with a full-value tooltip only while it actually overflows. */
 function TruncatedTableText({ value, className }: { value: string; className?: string }) {
+  const textRef = useRef<HTMLDivElement>(null);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: flipping isOverflowing swaps the div between plain and tooltip-trigger positions (a remount), so the observer must re-attach to the new node; a value change alters scrollWidth without any resize event.
+  useEffect(() => {
+    const node = textRef.current;
+    if (!node) return;
+
+    const measure = () => setIsOverflowing(node.scrollWidth > node.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [value, isOverflowing]);
+
+  const text = (
+    <div ref={textRef} className={className ?? "truncate"}>
+      {value}
+    </div>
+  );
+
+  if (!isOverflowing) {
+    return text;
+  }
+
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <div className={className ?? "truncate"}>{value}</div>
-      </TooltipTrigger>
+      <TooltipTrigger asChild>{text}</TooltipTrigger>
       <TooltipContent side="top" align="start" className="max-w-[32rem] break-all text-xs">
         {value}
       </TooltipContent>
@@ -614,10 +638,10 @@ export function HomeWorkspace({
                   <Table className="min-w-0 [&_table]:table-fixed">
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-[7rem] pl-6">
+                        <TableHead className="w-[8rem] pl-6">
                           {t("Shared.homeWorkspace.time")}
                         </TableHead>
-                        <TableHead className="w-[calc(100%-7rem)] md:hidden">
+                        <TableHead className="w-[calc(100%-8rem)] md:hidden">
                           {t("Shared.homeWorkspace.activity")}
                         </TableHead>
                         <TableHead className="hidden w-[9.5rem] md:table-cell">
@@ -637,6 +661,13 @@ export function HomeWorkspace({
                     <TableBody>
                       {activityRows.map((row) => {
                         const timeLabel = formatRelativeTime(row.createdAt, locale);
+                        const createdAtDate = new Date(row.createdAt);
+                        const timeTooltip = Number.isNaN(createdAtDate.getTime())
+                          ? null
+                          : new Intl.DateTimeFormat(locale, {
+                              dateStyle: "medium",
+                              timeStyle: "short",
+                            }).format(createdAtDate);
                         // `row.token` is already resolved, but only against issued
                         // tokens — anything else arrives as a shortened mint. Re-resolve
                         // from the mint using the balance symbols before falling back.
@@ -656,7 +687,20 @@ export function HomeWorkspace({
 
                         return (
                           <TableRow key={row.id}>
-                            <TableCell className="pl-6 text-secondary">{timeLabel}</TableCell>
+                            <TableCell className="pl-6 text-secondary">
+                              {timeTooltip ? (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="capitalize">{timeLabel}</span>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top" className="text-xs">
+                                    {timeTooltip}
+                                  </TooltipContent>
+                                </Tooltip>
+                              ) : (
+                                timeLabel
+                              )}
+                            </TableCell>
                             <TableCell className="min-w-0 md:hidden">
                               <div className="min-w-0">
                                 <div className="truncate font-medium">{row.type}</div>
@@ -690,7 +734,7 @@ export function HomeWorkspace({
                               </span>
                             </TableCell>
                             <TableCell className="hidden text-right text-secondary tabular-nums md:table-cell">
-                              <TruncatedTableText value={amountLabel} className="truncate" />
+                              <div className="truncate">{amountLabel}</div>
                             </TableCell>
                             <TableCell className="hidden pr-6 font-mono text-xs text-secondary md:table-cell">
                               <ActivityAddress row={row} cluster={cluster} className="truncate" />

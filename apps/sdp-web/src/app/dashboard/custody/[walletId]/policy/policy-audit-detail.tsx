@@ -22,9 +22,9 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
-import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/user-avatar";

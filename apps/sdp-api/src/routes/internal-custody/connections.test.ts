@@ -5,7 +5,7 @@ import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import internalCustody from "./index";
@@ -124,8 +124,8 @@ async function seedCredentialAndConnection(input: {
       `INSERT INTO custody_connections
          (id, organization_id, project_id, provider, scope, provider_credential_id,
           provider_credential_scope_key, status, setup_metadata,
-          last_check_status, last_check_failure_code, activated_at, created_at)
-       VALUES (?, ?, ?, 'privy', 'project', ?, ?, ?, ?::jsonb, ?, ?, ?, ?)`
+          last_check_status, last_check_at, last_check_failure_code, activated_at, created_at)
+       VALUES (?, ?, ?, 'privy', 'project', ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?)`
     )
     .bind(
       input.connectionId,
@@ -138,6 +138,7 @@ async function seedCredentialAndConnection(input: {
         input.pendingWalletLabel ? { pendingWalletLabel: input.pendingWalletLabel } : {}
       ),
       input.failureCode ? "failed" : null,
+      input.failureCode ? input.createdAt : null,
       input.failureCode ?? null,
       input.status === "active" ? input.createdAt : null,
       input.createdAt
@@ -167,7 +168,6 @@ describe("internal custody connections", () => {
   });
 
   afterEach(async () => {
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 
@@ -231,8 +231,9 @@ describe("internal custody connections", () => {
       await seedCredentialAndConnection({
         credentialId: `pcred_read_p${index}`,
         connectionId: `ccon_read_p${index}`,
-        status: "pending",
+        status: "failed",
         createdAt: `2026-08-0${index + 1}T00:00:00.000Z`,
+        failureCode: "pagination_fixture",
       });
     }
 

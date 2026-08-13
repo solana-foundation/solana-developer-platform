@@ -1,9 +1,11 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import type { MuralWebhookEvent } from "@sdp/payments/ramps/providers/mural/client";
+import type { MuralKycStatus } from "@sdp/payments/ramps/providers/mural/provider-data";
 import type { RampWebhookValidationContext } from "@sdp/payments/ramps/types";
-import type { SdpEnvironment } from "@sdp/types";
+import type { KycStatus, SdpEnvironment } from "@sdp/types";
 import { getDb } from "@/db";
 import {
+  createKycWalletsRepository,
   createSystemCounterpartiesRepository,
   createSystemPaymentsRepository,
   type PaymentsRepository,
@@ -14,6 +16,11 @@ import type { CounterpartyRow } from "@/db/repositories/counterparty.repository"
 import { badRequest, providerNotConfigured, unauthorized } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
+import {
+  emitKycApprovedForClearedEnrollments,
+  emitKycRejectedForEnrollments,
+} from "@/services/workflows/clearance";
+import { emitRampSettled } from "@/services/workflows/payment-events";
 import type { AppContext, WebhookProcessor } from "./processor";
 import { applyRampSettlementEvent } from "./settlements";
 
@@ -37,6 +44,24 @@ function readMuralData(transfer: PaymentTransferRow): Record<string, unknown> {
     return {};
   }
   return mural as Record<string, unknown>;
+}
+
+// Map Mural's provider KYC status onto SDP's normalized status. Mural is the first
+// writer into the SDP-owned kyc_wallets.kyc_status; other providers plug in the same way.
+// 'errored' is a provider-side processing failure, NOT a compliance decision — mapping
+// it to 'rejected' would fire kyc_rejected rules (allowlist_remove / freeze) against a
+// holder whose verification was never actually declined.
+function mapMuralKycStatusToSdp(status: MuralKycStatus): KycStatus {
+  switch (status) {
+    case "approved":
+      return "verified";
+    case "rejected":
+      return "rejected";
+    case "pending":
+      return "pending";
+    default:
+      return "unverified";
+  }
 }
 
 function readMuralWebhookPublicKey(
@@ -169,6 +194,22 @@ async function handleAccountCredited(
   getLogger().info(
     `[mural webhook] transfer ${transfer.id} completed (payin ${event.tokenAmount})`
   );
+
+  // Workflow trigger seam: this on-ramp settled (Mural credit path bypasses
+  // applyRampSettlementEvent, so it emits here directly).
+  if (transfer.project_id) {
+    emitRampSettled(c, {
+      organizationId: transfer.organization_id,
+      projectId: transfer.project_id,
+      direction: "onramp",
+      transferId: transfer.id,
+      provider: transfer.provider,
+      counterpartyId: transfer.counterparty_id,
+      amount: String(event.tokenAmount),
+      fiatCurrency: transfer.fiat_currency,
+      cryptoToken: transfer.token,
+    });
+  }
 }
 
 async function handleOrganizationLifecycleEvent(
@@ -187,6 +228,49 @@ async function handleOrganizationLifecycleEvent(
     organizationId: event.organizationId,
     organization,
   });
+
+  // Workflow trigger seam: mirror the KYC status onto the SDP-owned kyc_wallets, then
+  // emit a kyc_approved event for every asset this counterparty's wallets are cleared
+  // for. No-op when the counterparty has no registered kyc_wallets.
+  if (event.kind === "kyc_status") {
+    const status = mapMuralKycStatusToSdp(event.kycStatus);
+    const wallets = await createKycWalletsRepository(c.env).setKycStatusByCounterparty({
+      counterpartyId: counterparty.id,
+      organizationId: counterparty.organization_id,
+      projectId: counterparty.project_id,
+      status,
+      provider: "mural",
+    });
+    // Fire-and-forget off the webhook response path — the per-wallet enrollment,
+    // counterparty and rule lookups shouldn't add latency to the provider's delivery.
+    // Falls back to awaiting inline when no ExecutionContext is available.
+    const emitAll = async () => {
+      if (status === "verified") {
+        for (const wallet of wallets) {
+          await emitKycApprovedForClearedEnrollments(c.env, {
+            kycWallet: wallet,
+            provider: "mural",
+          });
+        }
+      } else if (status === "rejected") {
+        for (const wallet of wallets) {
+          await emitKycRejectedForEnrollments(c.env, { kycWallet: wallet, provider: "mural" });
+        }
+      }
+    };
+    try {
+      c.executionCtx.waitUntil(
+        emitAll().catch((error) => {
+          getLogger().error(
+            { error: error instanceof Error ? error.message : String(error) },
+            "mural webhook: KYC workflow emit failed"
+          );
+        })
+      );
+    } catch {
+      await emitAll();
+    }
+  }
 }
 
 export class MuralWebhookProcessor implements WebhookProcessor<unknown, MuralProcessorEvent> {

@@ -5,7 +5,7 @@ import app from "@/index";
 import { invitationWasRevoked } from "@/lib/invitations";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const CLERK_API_URL = "https://clerk.example.test/v1";
@@ -234,7 +234,6 @@ describe("invitation revocation identity", () => {
 
   afterEach(async () => {
     vi.restoreAllMocks();
-    await clearTestDatabase(env);
     await clearKVStores(env);
     env.CLERK_SECRET_KEY = undefined;
     env.CLERK_API_URL = undefined;

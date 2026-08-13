@@ -19,6 +19,7 @@ import {
   Star,
   Wallet,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { type ReactNode, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -31,7 +32,6 @@ import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
-import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { cn } from "@/lib/utils";
 import { saveApiKeyAuthoringAction } from "./actions";
 import {
@@ -46,6 +46,7 @@ import {
   getPolicyBindingIntent,
   isPositiveDecimal,
   requiredBindingConfirmation,
+  splitPolicyValues,
 } from "./api-key-authoring";
 import type { ApiKeyAuthoringWallet, WalletControlStatus } from "./api-key-authoring.data";
 
@@ -570,6 +571,23 @@ function RestrictionEditor({
           {draft.maximumAmount && !isPositiveDecimal(draft.maximumAmount) ? (
             <p className="mt-2 text-xs text-destructive">
               {t("DashboardCustody.apiKeyRestrictionAmountInvalid")}
+            </p>
+          ) : null}
+          <Label htmlFor="api-key-maximum-amount-assets" className="mt-4 block">
+            {t("DashboardCustody.apiKeyMaximumAmountAssets")}
+          </Label>
+          <Input
+            id="api-key-maximum-amount-assets"
+            className="mt-2"
+            value={draft.maximumAmountAssets}
+            onChange={(event) =>
+              update({ maximumAmountAssets: event.currentTarget.value, restrictionsEdited: true })
+            }
+            placeholder={t("DashboardCustody.apiKeyAssetsPlaceholder")}
+          />
+          {draft.maximumAmount && splitPolicyValues(draft.maximumAmountAssets).length === 0 ? (
+            <p className="mt-2 text-xs text-destructive">
+              {t("DashboardCustody.apiKeyRestrictionAmountAssetsRequired")}
             </p>
           ) : null}
         </RestrictionGroup>
@@ -1117,7 +1135,7 @@ export function ApiKeyAuthoringWorkspace({
   initialKey,
 }: ApiKeyAuthoringWorkspaceProps) {
   const t = useTranslations();
-  const router = useDashboardRouter();
+  const router = useRouter();
   const { sdpEnvironment } = useDashboardWorkspace();
   const [currentStep, setCurrentStep] = useState<ApiKeyAuthoringStep>("details");
   const [draft, setDraft] = useState(() => draftFromInitialKey(initialKey));
@@ -1142,7 +1160,10 @@ export function ApiKeyAuthoringWorkspace({
       : t("DashboardCustody.sandbox");
   const currentStepIndex = API_KEY_AUTHORING_STEPS.indexOf(currentStep);
   const selectedWalletCount = draft.selectedWalletIds.length;
-  const amountValid = !draft.maximumAmount || isPositiveDecimal(draft.maximumAmount);
+  const amountValid =
+    !draft.maximumAmount ||
+    (isPositiveDecimal(draft.maximumAmount) &&
+      splitPolicyValues(draft.maximumAmountAssets).length > 0);
   const canContinue =
     currentStep === "details"
       ? draft.name.trim().length > 0

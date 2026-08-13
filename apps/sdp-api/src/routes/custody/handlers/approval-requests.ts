@@ -199,7 +199,8 @@ export const approveApprovalRequest = async (c: AppContext) => {
     "approve"
   );
   const approvalRequest = await new WalletPolicyEnforcementService(
-    repository
+    repository,
+    getRequestTenantScope(c)
   ).approveApprovalRequest(auth.organizationId, approvalRequestId, actorId(auth), auth.projectId);
 
   if (!approvalRequest) {
@@ -223,7 +224,8 @@ export const rejectApprovalRequest = async (c: AppContext) => {
   const repository = createPolicyRepository(c.env, getRequestTenantScope(c));
   await assertCanResolveApprovalRequest(c, repository, approvalRequestId, "reject");
   const approvalRequest = await new WalletPolicyEnforcementService(
-    repository
+    repository,
+    getRequestTenantScope(c)
   ).rejectApprovalRequest(auth.organizationId, approvalRequestId, actorId(auth), auth.projectId);
 
   if (!approvalRequest) {
@@ -241,7 +243,8 @@ export const cancelApprovalRequest = async (c: AppContext) => {
   const repository = createPolicyRepository(c.env, getRequestTenantScope(c));
   await assertCanResolveApprovalRequest(c, repository, approvalRequestId, "cancel");
   const approvalRequest = await new WalletPolicyEnforcementService(
-    repository
+    repository,
+    getRequestTenantScope(c)
   ).cancelApprovalRequest(auth.organizationId, approvalRequestId, actorId(auth), auth.projectId);
 
   if (!approvalRequest) {

@@ -12,7 +12,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { SessionService } from "@/services/session.service";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
 const WEBHOOK_SECRET = `whsec_${Buffer.from("test_clerk_webhook_secret_1234567890").toString(
@@ -110,7 +110,6 @@ describe("Clerk webhooks", () => {
     env.CLERK_SECRET_KEY = undefined;
     env.CLERK_API_URL = undefined;
     env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 
@@ -958,7 +957,6 @@ describe("BVNK ramp webhook", () => {
 
   afterEach(async () => {
     env.BVNK_SANDBOX_WEBHOOK_SECRET = undefined;
-    await clearTestDatabase(env);
   });
 
   async function readBvnk() {
@@ -1906,7 +1904,6 @@ describe("Lightspark ramp webhook", () => {
 
   afterEach(async () => {
     env.LIGHTSPARK_GRID_SANDBOX_WEBHOOK_PUBLIC_KEY = undefined;
-    await clearTestDatabase(env);
   });
 
   it("marks a lightspark onramp transfer awaiting payment from the quote-time PENDING webhook", async () => {
@@ -2229,7 +2226,6 @@ describe("MoonPay ramp webhook", () => {
 
   afterEach(async () => {
     env.MOONPAY_SANDBOX_WEBHOOK_KEY = undefined;
-    await clearTestDatabase(env);
   });
 
   const completedPayload = {

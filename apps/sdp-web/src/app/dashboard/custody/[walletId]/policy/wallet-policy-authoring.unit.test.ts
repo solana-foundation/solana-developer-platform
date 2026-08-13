@@ -36,7 +36,7 @@ class MemoryStorage {
 }
 
 function emptyPolicy(): PaymentWalletPolicy {
-  return { walletId: WALLET_ID, destinationAllowlist: [] };
+  return { walletId: WALLET_ID, defaultAction: "allow", rules: [], controlProfile: null };
 }
 
 describe("wallet policy authoring", () => {
@@ -51,35 +51,27 @@ describe("wallet policy authoring", () => {
     expect(hasLimitsAndAssetsControls(state)).toBe(true);
   });
 
-  it("validates restriction intent, decimal values, and the daily limit relationship", () => {
+  it("validates restriction intent, decimal values, and the limit's asset scope", () => {
     const state = createPolicyAuthoringState(emptyPolicy());
     expect(validatePolicyState(state).intent).toBe("restriction_required");
 
     state.categories = ["limits"];
-    state.maxTransferAmount = "10.25";
-    state.maxDailyAmount = "10.24";
-    expect(validatePolicyState(state).maxDailyAmount).toBe("daily_below_transaction");
-
     state.maxTransferAmount = "1.2.3";
     expect(validatePolicyState(state).maxTransferAmount).toBe("invalid_decimal");
 
-    state.maxTransferAmount = "100";
-    state.maxDailyAmount = "000";
-    expect(validatePolicyState(state).maxDailyAmount).toBe("invalid_decimal");
+    state.maxTransferAmount = "000";
+    expect(validatePolicyState(state).maxTransferAmount).toBe("invalid_decimal");
 
-    state.maxDailyAmount = "0.00";
-    expect(validatePolicyState(state).maxDailyAmount).toBe("invalid_decimal");
+    state.maxTransferAmount = "0.00";
+    expect(validatePolicyState(state).maxTransferAmount).toBe("invalid_decimal");
 
+    // Amount rules are always keyed by asset mint, so a limit without an
+    // allowed-assets selection cannot be authored.
     state.maxTransferAmount = "0.5";
-    state.maxDailyAmount = "0.75";
-    expect(validatePolicyState(state).maxDailyAmount).toBeUndefined();
+    expect(validatePolicyState(state).maxTransferAmount).toBe("assets_required");
 
-    state.maxDailyAmount = "0.49";
-    expect(validatePolicyState(state).maxDailyAmount).toBe("daily_below_transaction");
-
-    state.maxTransferAmount = "10";
-    state.maxDailyAmount = "5.50";
-    expect(validatePolicyState(state).maxDailyAmount).toBe("daily_below_transaction");
+    state.assets = [ADDRESS_A];
+    expect(validatePolicyState(state).maxTransferAmount).toBeUndefined();
   });
 
   it("parses comma-separated destinations, de-duplicates, and reports invalid entries", () => {
@@ -123,12 +115,32 @@ describe("wallet policy authoring", () => {
     expect(loadPolicyDraft(storage, "another-project", WALLET_ID)).toBeNull();
   });
 
+  it("drops a retired maxDailyAmount field from a draft saved by an older build", () => {
+    const storage = new MemoryStorage();
+    const state = createPolicyAuthoringState(emptyPolicy());
+    state.categories = ["limits"];
+    state.maxTransferAmount = "100";
+    const legacyDraft = {
+      version: 1,
+      projectId: PROJECT_ID,
+      walletId: WALLET_ID,
+      step: "limits-assets",
+      state: { ...state, maxDailyAmount: "500" },
+      updatedAt: "2026-07-15T20:00:00.000Z",
+    };
+    storage.setItem(policyDraftStorageKey(PROJECT_ID, WALLET_ID), JSON.stringify(legacyDraft));
+
+    const loaded = loadPolicyDraft(storage, PROJECT_ID, WALLET_ID);
+
+    expect(loaded?.state).toEqual(state);
+    expect(loaded?.state).not.toHaveProperty("maxDailyAmount");
+  });
+
   it("builds an activation payload for every public authoring capability", () => {
     const state = createPolicyAuthoringState(emptyPolicy());
     state.defaultAction = "approval_required";
     state.categories = ["limits", "assets", "destinations", "operations"];
     state.maxTransferAmount = "100";
-    state.maxDailyAmount = "500";
     state.assets = [ADDRESS_A];
     state.destinationMode = "allowlist";
     state.destinationAllowText = ADDRESS_B;
@@ -139,11 +151,10 @@ describe("wallet policy authoring", () => {
 
     expect(payload).toMatchObject({
       walletId: WALLET_ID,
-      destinationAllowlist: [ADDRESS_B],
-      maxTransferAmount: "100",
-      maxDailyAmount: "500",
       defaultAction: "approval_required",
     });
+    expect(payload).not.toHaveProperty("destinationAllowlist");
+    expect(payload).not.toHaveProperty("maxTransferAmount");
     expect(payload.rules).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -163,7 +174,7 @@ describe("wallet policy authoring", () => {
         }),
         expect.objectContaining({ kind: "asset", assets: [ADDRESS_A], action: "allow" }),
         expect.objectContaining({ kind: "destination", allowlist: [ADDRESS_B] }),
-        expect.objectContaining({ kind: "amount", max: "100" }),
+        expect.objectContaining({ kind: "amount", max: "100", assets: [ADDRESS_A] }),
       ])
     );
   });
@@ -173,10 +184,16 @@ describe("wallet policy authoring", () => {
     state.categories = ["limits"];
     expect(validatePolicyState(state).review).toBe("no_restrictions");
 
-    state.maxDailyAmount = "100";
+    // A limit without an asset scope produces no rule, so the policy still
+    // restricts nothing.
+    state.maxTransferAmount = "100";
+    expect(validatePolicyState(state).review).toBe("no_restrictions");
+
+    state.assets = [ADDRESS_A];
     expect(validatePolicyState(state).review).toBeUndefined();
 
-    state.maxDailyAmount = "";
+    state.maxTransferAmount = "";
+    state.assets = [];
     state.defaultAction = "deny";
     expect(validatePolicyState(state).review).toBeUndefined();
   });
@@ -189,7 +206,6 @@ describe("wallet policy authoring", () => {
 
     const payload = buildPolicyPayload(WALLET_ID, state);
 
-    expect(payload.destinationAllowlist).toEqual([ADDRESS_A]);
     expect(payload.rules).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ kind: "destination", allowlist: [ADDRESS_A], action: "allow" }),
@@ -197,7 +213,7 @@ describe("wallet policy authoring", () => {
       ])
     );
 
-    const roundTripped = createPolicyAuthoringState(payload);
+    const roundTripped = createPolicyAuthoringState({ ...payload, controlProfile: null });
     expect(roundTripped.destinationAllowText).toBe(ADDRESS_A);
     expect(roundTripped.destinationBlockText).toBe(ADDRESS_B);
   });
@@ -205,7 +221,6 @@ describe("wallet policy authoring", () => {
   it("disables controls by returning the wallet to default allow", () => {
     expect(buildDisabledPolicyPayload(WALLET_ID)).toEqual({
       walletId: WALLET_ID,
-      destinationAllowlist: [],
       defaultAction: "allow",
       rules: [],
     });
@@ -214,10 +229,8 @@ describe("wallet policy authoring", () => {
   it("loads existing policies into equivalent form state without dropping rule capabilities", () => {
     const existing: PaymentWalletPolicy = {
       walletId: WALLET_ID,
-      destinationAllowlist: [],
-      maxTransferAmount: "250",
-      maxDailyAmount: "1000",
       defaultAction: "review",
+      controlProfile: null,
       rules: [
         {
           id: "families",
@@ -233,6 +246,13 @@ describe("wallet policy authoring", () => {
         },
         { id: "assets", kind: "asset", assets: [ADDRESS_A], action: "allow" },
         { id: "destinations", kind: "destination", blocklist: [ADDRESS_B] },
+        {
+          id: "per-transaction-limit",
+          kind: "amount",
+          max: "250",
+          assets: [ADDRESS_A],
+          action: "allow",
+        },
         {
           id: "asset-limit",
           kind: "amount",
@@ -251,16 +271,20 @@ describe("wallet policy authoring", () => {
     expect(state).toMatchObject({
       defaultAction: "approval_required",
       maxTransferAmount: "250",
-      maxDailyAmount: "1000",
       assets: [ADDRESS_A],
       destinationMode: "blocklist",
       destinationBlockText: ADDRESS_B,
       familyActions: { transfer: "deny", payment: "deny", ramp: "approval_required" },
       operationTypeRules: [{ value: "payment.create", action: "approval_required" }],
     });
-    expect(rebuilt.destinationAllowlist).toEqual([]);
     expect(rebuilt.rules).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          id: "per-transaction-limit",
+          kind: "amount",
+          max: "250",
+          assets: [ADDRESS_A],
+        }),
         expect.objectContaining({ id: "asset-limit", kind: "amount", assets: [ADDRESS_A] }),
         expect.objectContaining({ id: "always-review", kind: "always", action: "review" }),
         expect.objectContaining({ kind: "destination", blocklist: [ADDRESS_B] }),
@@ -273,10 +297,41 @@ describe("wallet policy authoring", () => {
     );
   });
 
+  it("keeps an amount rule scoped to other assets as a passthrough rule instead of rescoping it", () => {
+    const existing: PaymentWalletPolicy = {
+      walletId: WALLET_ID,
+      defaultAction: "allow",
+      controlProfile: null,
+      rules: [
+        { id: "assets", kind: "asset", assets: [ADDRESS_A], action: "allow" },
+        {
+          id: "per-transaction-limit",
+          kind: "amount",
+          max: "250",
+          assets: [ADDRESS_B],
+          action: "allow",
+        },
+      ],
+    };
+
+    const state = createPolicyAuthoringState(existing);
+
+    expect(state.maxTransferAmount).toBe("");
+    expect(state.passthroughRules).toEqual([
+      expect.objectContaining({ id: "per-transaction-limit", assets: [ADDRESS_B] }),
+    ]);
+    expect(buildPolicyPayload(WALLET_ID, state).rules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "per-transaction-limit", max: "250", assets: [ADDRESS_B] }),
+      ])
+    );
+  });
+
   it("preserves conflicting destination modes without merging their semantics", () => {
     const existing: PaymentWalletPolicy = {
       walletId: WALLET_ID,
-      destinationAllowlist: [ADDRESS_A],
+      defaultAction: "allow",
+      controlProfile: null,
       rules: [
         {
           id: "allowed-destinations",
@@ -295,7 +350,6 @@ describe("wallet policy authoring", () => {
 
     const rebuilt = buildPolicyPayload(WALLET_ID, createPolicyAuthoringState(existing));
 
-    expect(rebuilt.destinationAllowlist).toEqual([ADDRESS_A]);
     expect(rebuilt.rules).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ kind: "destination", allowlist: [ADDRESS_A], action: "allow" }),

@@ -8,8 +8,8 @@ import {
   ShieldCheckIcon,
   UsersIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { Suspense } from "react";
-import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
@@ -93,7 +93,7 @@ async function MoveMoneyActions() {
         {actions.map((action) => {
           const Icon = action.icon;
           return (
-            <DashboardNavigationLink
+            <Link
               key={action.href}
               href={action.href}
               className="group flex min-h-36 min-w-0 flex-col items-center justify-center rounded-md border border-border-default px-3 py-4 text-center transition-colors hover:border-border-strong hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none xl:min-h-44"
@@ -103,7 +103,7 @@ async function MoveMoneyActions() {
               </span>
               <span className="mt-3 text-base font-semibold text-primary">{action.label}</span>
               <span className="mt-1 text-sm leading-5 text-secondary">{action.description}</span>
-            </DashboardNavigationLink>
+            </Link>
           );
         })}
       </div>
@@ -250,18 +250,18 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
     <section className={`${sectionClassName} self-start`} data-payments-overview-section="activity">
       <SectionHeading title={t("DashboardPayments.commandCenter.activity")} />
       <div className="mt-3 flex items-end gap-5 border-b border-border-default text-sm">
-        <DashboardNavigationLink
+        <Link
           href="/dashboard/payments/transactions?type=transfer"
           className="border-b-2 border-primary px-0.5 pb-2 font-medium text-primary"
         >
           {t("DashboardPayments.commandCenter.transfers")}
-        </DashboardNavigationLink>
-        <DashboardNavigationLink
+        </Link>
+        <Link
           href="/dashboard/payments/transactions?type=transfer_batch"
           className="px-0.5 pb-2 text-secondary hover:text-primary"
         >
           {t("DashboardPayments.commandCenter.batches")}
-        </DashboardNavigationLink>
+        </Link>
       </div>
       {!result.ok ? (
         <p className="py-8 text-sm text-tertiary">
@@ -286,7 +286,7 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
               {transfers.map((transfer) => {
                 const counterparty = resolveCommandCenterCounterparty(transfer);
                 return (
-                  <DashboardNavigationLink
+                  <Link
                     key={transfer.id}
                     href={`/dashboard/payments/transactions?search=${encodeURIComponent(transfer.id)}`}
                     className={`grid min-h-12 ${activityColumns} items-center gap-2 px-3 text-sm transition-colors hover:bg-fill-subtle`}
@@ -315,7 +315,7 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
                       {formatTimestamp(transfer.createdAt, t, locale)}
                     </span>
                     <ChevronRightIcon className="size-4 text-tertiary" aria-hidden="true" />
-                  </DashboardNavigationLink>
+                  </Link>
                 );
               })}
             </div>
@@ -324,7 +324,7 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
             {transfers.map((transfer) => {
               const counterparty = resolveCommandCenterCounterparty(transfer);
               return (
-                <DashboardNavigationLink
+                <Link
                   key={transfer.id}
                   href={`/dashboard/payments/transactions?search=${encodeURIComponent(transfer.id)}`}
                   className="block space-y-2 py-3 text-sm"
@@ -344,19 +344,19 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
                       {compactAmount(transfer, issuedTokenSymbolsByMint)}
                     </span>
                   </span>
-                </DashboardNavigationLink>
+                </Link>
               );
             })}
           </div>
         </>
       )}
-      <DashboardNavigationLink
+      <Link
         href="/dashboard/payments/transactions"
         className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-link hover:underline"
       >
         {t("DashboardPayments.viewAllTransactions")}
         <ChevronRightIcon className="size-4" aria-hidden="true" />
-      </DashboardNavigationLink>
+      </Link>
     </section>
   );
 }
@@ -396,7 +396,7 @@ async function UpcomingOpen({ apiClientPromise }: { apiClientPromise: ApiClientP
         {rows.map((row) => {
           const Icon = row.icon;
           return (
-            <DashboardNavigationLink
+            <Link
               key={row.href}
               href={row.href}
               className="flex min-h-14 items-center gap-3 py-2 text-sm hover:bg-fill-subtle"
@@ -409,7 +409,7 @@ async function UpcomingOpen({ apiClientPromise }: { apiClientPromise: ApiClientP
                 {row.label}
               </span>
               <ChevronRightIcon className="size-4 shrink-0 text-tertiary" aria-hidden="true" />
-            </DashboardNavigationLink>
+            </Link>
           );
         })}
       </div>
@@ -473,13 +473,13 @@ async function PaymentNetwork({
           </span>
         </div>
       </div>
-      <DashboardNavigationLink
+      <Link
         href="/dashboard/payments/counterparty"
         className="-mx-4 mt-4 flex h-11 items-center gap-1 border-t border-border-default px-4 text-sm font-medium text-link hover:bg-fill-subtle"
       >
         {t("DashboardPayments.commandCenter.manageCounterparties")}
         <ChevronRightIcon className="size-4" aria-hidden="true" />
-      </DashboardNavigationLink>
+      </Link>
     </section>
   );
 }

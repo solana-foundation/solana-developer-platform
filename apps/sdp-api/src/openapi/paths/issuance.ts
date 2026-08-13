@@ -1007,4 +1007,343 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
     },
   });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Workflows (Phase 5) + Verified holders
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const workflowIdParamSchema = z.string().openapi({ example: "asset_workflow_abc123" });
+  const executionIdParamSchema = z.string().openapi({ example: "workflow_execution_abc123" });
+  const workflowRetryPolicySchema = z.object({
+    maxAttempts: z.number().int().min(1).max(20),
+    retryAfterMinutes: z.number().int().min(1),
+  });
+  const workflowConditionSchema = z
+    .object({
+      all: z.array(
+        z.object({
+          field: z.string(),
+          op: z.enum(["eq", "neq", "in"]),
+          value: z.union([z.string(), z.number(), z.array(z.union([z.string(), z.number()]))]),
+        })
+      ),
+    })
+    .openapi("WorkflowCondition");
+  const workflowActionParamsSchema = z.record(z.string(), z.union([z.string(), z.number()]));
+
+  const createWorkflowRequestSchema = z
+    .object({
+      triggerType: z.string().openapi({ example: "kyc_approved" }),
+      actionType: z.string().openapi({ example: "allowlist_add" }),
+      condition: workflowConditionSchema.nullish(),
+      actionParams: workflowActionParamsSchema.optional(),
+      reviewMode: z.enum(["auto", "manual"]).optional(),
+      retryPolicy: workflowRetryPolicySchema.optional(),
+      enabled: z.boolean().optional(),
+    })
+    .openapi("CreateWorkflowRequest");
+  const updateWorkflowRequestSchema = z
+    .object({
+      condition: workflowConditionSchema.nullish(),
+      actionParams: workflowActionParamsSchema.optional(),
+      reviewMode: z.enum(["auto", "manual"]).optional(),
+      retryPolicy: workflowRetryPolicySchema.optional(),
+      enabled: z.boolean().optional(),
+    })
+    .openapi("UpdateWorkflowRequest");
+  const enrollHolderRequestSchema = z
+    .object({
+      walletAddress: z.string(),
+      counterpartyId: z.string().nullish(),
+      reviewMode: z.enum(["auto", "manual"]).optional(),
+    })
+    .openapi("EnrollHolderRequest");
+
+  const envelope = (inner: z.ZodTypeAny, name: string) =>
+    z.object({ data: inner, meta: z.record(z.string(), z.unknown()).optional() }).openapi(name);
+  const workflowRuleSchema = z.object({
+    id: z.string(),
+    token_id: z.string(),
+    trigger_type: z.string(),
+    action_type: z.string(),
+    enabled: z.boolean(),
+    review_mode: z.enum(["auto", "manual"]),
+    created_at: z.string(),
+  });
+  const workflowExecutionSchema = z.object({
+    id: z.string(),
+    workflow_id: z.string(),
+    trigger_type: z.string(),
+    action_type: z.string(),
+    status: z.enum([
+      "awaiting_review",
+      "pending",
+      "processing",
+      "succeeded",
+      "failed",
+      "cancelled",
+    ]),
+    attempt_count: z.number(),
+    max_attempts: z.number(),
+    error: z.string().nullable(),
+    // Projected server-side to a fixed field list, so a held execution can be reviewed
+    // (which wallet, what amount) without exposing every key an emitter happens to add.
+    trigger_payload: z.record(z.string(), z.unknown()).openapi({
+      description:
+        "What the action will act on: wallet, source, destination, amount, operation, provider, counterpartyKind, fiatCurrency, cryptoToken, attempt.",
+    }),
+    result: z.record(z.string(), z.unknown()).openapi({
+      description:
+        "Outcome of the run: signature, status, notified, emailed, alreadyFrozen, alreadyThawed, mirrorFailed.",
+    }),
+    decided_by: z.string().nullable().openapi({
+      description: "User who approved or rejected this execution; null when auto-applied.",
+    }),
+    decided_at: z.string().nullable(),
+    created_at: z.string(),
+    updated_at: z.string(),
+  });
+  const workflowResponse = envelope(z.object({ workflow: workflowRuleSchema }), "WorkflowResponse");
+  const workflowListResponse = envelope(
+    z.object({ workflows: z.array(workflowRuleSchema) }),
+    "WorkflowListResponse"
+  );
+  const workflowCatalogResponse = envelope(
+    z.object({
+      triggers: z.array(z.record(z.string(), z.unknown())),
+      actions: z.array(z.record(z.string(), z.unknown())),
+    }),
+    "WorkflowCatalogResponse"
+  );
+  const workflowExecutionsResponse = envelope(
+    z.object({
+      executions: z.array(workflowExecutionSchema),
+      total: z.number(),
+      page: z.number(),
+      pageSize: z.number(),
+    }),
+    "WorkflowExecutionsResponse"
+  );
+  const workflowExecutionResponse = envelope(
+    z.object({ execution: workflowExecutionSchema }),
+    "WorkflowExecutionResponse"
+  );
+  const holdersResponse = envelope(
+    z.object({ holders: z.array(z.record(z.string(), z.unknown())) }),
+    "HoldersResponse"
+  );
+  const holderResponse = envelope(
+    z.object({ enrollment: z.record(z.string(), z.unknown()) }),
+    "HolderResponse"
+  );
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/issuance/tokens/{tokenId}/workflows/catalog",
+    tags: ["Issuance"],
+    summary: "List the workflow catalog for an asset",
+    operationId: "listWorkflowCatalog",
+    description:
+      "Returns the available triggers and the actions this asset supports (with a capability-gated support verdict per action).",
+    security: [{ apiKeyAuth: [] }],
+    request: { headers: projectScopeHeaders, params: z.object({ tokenId: tokenIdParamSchema }) },
+    responses: {
+      200: { description: "Workflow catalog", content: jsonContent(workflowCatalogResponse) },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/issuance/tokens/{tokenId}/workflows",
+    tags: ["Issuance"],
+    summary: "List workflow rules",
+    operationId: "listWorkflows",
+    description: "Returns the workflow automation rules configured for an asset.",
+    security: [{ apiKeyAuth: [] }],
+    request: { headers: projectScopeHeaders, params: z.object({ tokenId: tokenIdParamSchema }) },
+    responses: {
+      200: { description: "Workflow rules", content: jsonContent(workflowListResponse) },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/workflows",
+    tags: ["Issuance"],
+    summary: "Create a workflow rule",
+    operationId: "createWorkflow",
+    description:
+      "Creates a WHEN → THEN automation rule. The action is capability-gated at save time; an unsupported action returns 400 with a typed reason.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({ tokenId: tokenIdParamSchema }),
+      body: { required: true, content: jsonContent(createWorkflowRequestSchema) },
+    },
+    responses: {
+      201: { description: "Workflow created", content: jsonContent(workflowResponse) },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "patch",
+    path: "/v1/issuance/tokens/{tokenId}/workflows/{workflowId}",
+    tags: ["Issuance"],
+    summary: "Update a workflow rule",
+    operationId: "updateWorkflow",
+    description:
+      "Updates a rule's condition, action params, review mode, retry policy, or enabled flag.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({ tokenId: tokenIdParamSchema, workflowId: workflowIdParamSchema }),
+      body: { required: true, content: jsonContent(updateWorkflowRequestSchema) },
+    },
+    responses: {
+      200: { description: "Workflow updated", content: jsonContent(workflowResponse) },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "delete",
+    path: "/v1/issuance/tokens/{tokenId}/workflows/{workflowId}",
+    tags: ["Issuance"],
+    summary: "Delete a workflow rule",
+    operationId: "deleteWorkflow",
+    description:
+      "Soft-deletes a rule: it stops matching and disappears from lists, while its execution history is retained.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({ tokenId: tokenIdParamSchema, workflowId: workflowIdParamSchema }),
+    },
+    responses: {
+      200: {
+        description: "Workflow deleted",
+        content: jsonContent(
+          envelope(z.object({ deleted: z.boolean() }), "DeleteWorkflowResponse")
+        ),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/issuance/tokens/{tokenId}/workflows/executions",
+    tags: ["Issuance"],
+    summary: "List workflow executions",
+    operationId: "listWorkflowExecutions",
+    description:
+      "Execution log for an asset's workflows — recent runs with status and retry state.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({ tokenId: tokenIdParamSchema }),
+      query: z.object({
+        workflowId: workflowIdParamSchema.optional(),
+        page: pageQuerySchema.optional(),
+        pageSize: pageSizeQuerySchema.optional(),
+      }),
+    },
+    responses: {
+      200: { description: "Execution log", content: jsonContent(workflowExecutionsResponse) },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/approve",
+    tags: ["Issuance"],
+    summary: "Approve a held execution",
+    operationId: "approveWorkflowExecution",
+    description:
+      "Authorizes an awaiting-review execution: status becomes pending and the engine runs it once. Requires the permission implied by the rule's action tier — tokens:admin for sensitive and irreversible actions. Records the approver on the execution and in the audit log.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({ tokenId: tokenIdParamSchema, executionId: executionIdParamSchema }),
+    },
+    responses: {
+      200: { description: "Execution approved", content: jsonContent(workflowExecutionResponse) },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/retry",
+    tags: ["Issuance"],
+    summary: "Retry a failed execution",
+    operationId: "retryWorkflowExecution",
+    description:
+      "Re-attempts a failed execution: status becomes pending and the attempt counter resets. Approving a held execution is a separate endpoint.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({ tokenId: tokenIdParamSchema, executionId: executionIdParamSchema }),
+    },
+    responses: {
+      200: { description: "Execution re-queued", content: jsonContent(workflowExecutionResponse) },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/reject",
+    tags: ["Issuance"],
+    summary: "Reject a held execution",
+    operationId: "rejectWorkflowExecution",
+    description: "Cancels an awaiting-review execution; the action never runs.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({ tokenId: tokenIdParamSchema, executionId: executionIdParamSchema }),
+    },
+    responses: {
+      200: { description: "Execution cancelled", content: jsonContent(workflowExecutionResponse) },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/issuance/tokens/{tokenId}/holders",
+    tags: ["Issuance"],
+    summary: "List verified holders",
+    operationId: "listHolders",
+    description: "Returns the wallets enrolled for this asset (KYC identity + enrollment state).",
+    security: [{ apiKeyAuth: [] }],
+    request: { headers: projectScopeHeaders, params: z.object({ tokenId: tokenIdParamSchema }) },
+    responses: {
+      200: { description: "Enrolled holders", content: jsonContent(holdersResponse) },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/holders",
+    tags: ["Issuance"],
+    summary: "Enroll a verified holder",
+    operationId: "enrollHolder",
+    description:
+      "Registers a wallet for this asset (upserts its KYC identity + an active enrollment). When the wallet's KYC is approved, matching workflows fire.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({ tokenId: tokenIdParamSchema }),
+      body: { required: true, content: jsonContent(enrollHolderRequestSchema) },
+    },
+    responses: {
+      201: { description: "Holder enrolled", content: jsonContent(holderResponse) },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
 }

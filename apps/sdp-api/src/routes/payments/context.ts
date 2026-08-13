@@ -1,5 +1,4 @@
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
-import type { SdpEnvironment } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import type { Context } from "hono";
 import {
@@ -11,24 +10,14 @@ import {
   createPaymentTransferBatchesRepository,
   createPolicyRepository,
 } from "@/db/repositories";
+import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { createRequestSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 
 export type AppContext = Context<{ Bindings: Env }>;
 
-/**
- * Resolves the product environment for provider credentials.
- * API-key callers are scoped by the key. Dashboard/session callers default to
- * sandbox while that is the only supported dashboard mode.
- */
-export function resolveSdpEnvironment(c: AppContext): SdpEnvironment {
-  const apiKey = c.get("apiKey");
-  if (apiKey) {
-    return apiKey.environment;
-  }
-  return "sandbox";
-}
+export { resolveSdpEnvironment } from "@/lib/sdp-environment";
 
 export function rampRuntime(c: AppContext): RampRuntimeContext {
   return {

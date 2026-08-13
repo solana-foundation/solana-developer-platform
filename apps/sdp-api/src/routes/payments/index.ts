@@ -1,5 +1,7 @@
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { meteredQuota } from "@/middleware/metered-quota";
+import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
 import {
@@ -18,6 +20,12 @@ import {
   estimateOfframp,
   estimateOnramp,
   estimateTransferBatch,
+  extractOfframpQuotePolicyCandidate,
+  extractOnrampQuotePolicyCandidate,
+  extractTransferBatchPolicyCandidate,
+  extractTransferPolicyCandidate,
+  findTransferBatchIdempotentKeyReplay,
+  findTransferIdempotentKeyReplay,
   getRecurringPayment,
   getSubscription,
   getSubscriptionPlan,
@@ -174,7 +182,15 @@ payments.get(
   requirePermissions("payments:read"),
   listSubscriptionCollectionAttempts
 );
-payments.post("/transfers", requirePermissions("payments:write", "wallets:read"), createTransfer);
+payments.post(
+  "/transfers",
+  requirePermissions("payments:write", "wallets:read"),
+  policyGate({
+    extract: extractTransferPolicyCandidate,
+    findIdempotentKeyReplay: findTransferIdempotentKeyReplay,
+  }),
+  createTransfer
+);
 payments.get("/transfers", requirePermissions("payments:read"), listTransfers);
 payments.post(
   "/transfer-batches/estimate",
@@ -184,6 +200,10 @@ payments.post(
 payments.post(
   "/transfer-batches",
   requirePermissions("payments:write", "wallets:read", "counterparties:read"),
+  policyGate({
+    extract: extractTransferBatchPolicyCandidate,
+    findIdempotentKeyReplay: findTransferBatchIdempotentKeyReplay,
+  }),
   createTransferBatch
 );
 payments.get("/transfer-batches", requirePermissions("payments:read"), listTransferBatches);
@@ -197,16 +217,32 @@ payments.post(
 payments.get("/transfers/:transferId", requirePermissions("payments:read"), getTransfer);
 payments.get("/ramps/onramp/currency", requirePermissions("payments:read"), listOnrampCurrencies);
 payments.get("/ramps/offramp/currency", requirePermissions("payments:read"), listOfframpCurrencies);
-payments.post("/ramps/onramp/estimate", requirePermissions("payments:read"), estimateOnramp);
-payments.post("/ramps/offramp/estimate", requirePermissions("payments:read"), estimateOfframp);
+// Estimates fan out one live call per provider on the corridor and quotes
+// create provider-side records, so both carry fail-closed metered quotas.
+payments.post(
+  "/ramps/onramp/estimate",
+  requirePermissions("payments:read"),
+  meteredQuota({ name: "ramp-estimate", actorMax: 30, orgMax: 120 }),
+  estimateOnramp
+);
+payments.post(
+  "/ramps/offramp/estimate",
+  requirePermissions("payments:read"),
+  meteredQuota({ name: "ramp-estimate", actorMax: 30, orgMax: 120 }),
+  estimateOfframp
+);
 payments.post(
   "/ramps/onramp/quote",
   requirePermissions("payments:write", "wallets:read"),
+  meteredQuota({ name: "ramp-quote", actorMax: 20, orgMax: 60 }),
+  policyGate({ extract: extractOnrampQuotePolicyCandidate }),
   createOnrampQuote
 );
 payments.post(
   "/ramps/offramp/quote",
   requirePermissions("payments:write", "wallets:read"),
+  meteredQuota({ name: "ramp-quote", actorMax: 20, orgMax: 60 }),
+  policyGate({ extract: extractOfframpQuotePolicyCandidate }),
   createOfframpQuote
 );
 payments.post(

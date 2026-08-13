@@ -2,11 +2,11 @@
 
 import type { CustodyProvider, PaymentsDashboardWallet } from "@sdp/types";
 import { ArrowUpRight, Copy, KeyRound, type LucideIcon, TriangleAlert, Wallet } from "lucide-react";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { formatCustodyProviderName } from "@/app/dashboard/custody/provider-catalog";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
-import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
@@ -219,10 +219,8 @@ function WalletNameLink({
   );
 }
 
-// New-tab uses a plain anchor rather than DashboardNavigationLink: Next's Link
-// would work (it treats a non-_self target as a modified event and hands the click
-// to the browser without announcing a navigation), but it would still prefetch a
-// route this tab is never going to render.
+// New-tab uses a plain anchor rather than Link: Next's Link would work, but it
+// would still prefetch a route this tab is never going to render.
 function WalletLinkAnchor({
   href,
   target,
@@ -253,9 +251,9 @@ function WalletLinkAnchor({
     );
   }
   return (
-    <DashboardNavigationLink href={href} title={title} aria-label={ariaLabel} className={className}>
+    <Link href={href} title={title} aria-label={ariaLabel} className={className}>
       {children}
-    </DashboardNavigationLink>
+    </Link>
   );
 }
 

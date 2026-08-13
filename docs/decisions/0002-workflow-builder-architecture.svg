@@ -1,0 +1,195 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1340" height="1040" viewBox="0 0 1340 1040" font-family="-apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif">
+  <title>Workflow builder architecture: a WHEN trigger emits an event, a GUARD filters it, and a THEN action runs through the durable execution ledger and cron engine.</title>
+  <defs>
+    <marker id="aSlate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+    <marker id="aGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#16a34a"/></marker>
+    <marker id="aAmber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d97706"/></marker>
+    <marker id="aRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/></marker>
+    <marker id="aIndigo" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6366f1"/></marker>
+  </defs>
+
+  <rect x="0" y="0" width="1340" height="1040" fill="#ffffff"/>
+
+  <!-- Title -->
+  <text x="670" y="44" text-anchor="middle" font-size="24" font-weight="700" fill="#0f172a">Workflow Builder — system map</text>
+  <text x="670" y="68" text-anchor="middle" font-size="13" fill="#64748b">Components and data flow. For a plain-language, step-by-step tour see the companion walkthrough diagram.</text>
+
+  <!-- Legend -->
+  <rect x="60" y="86" width="14" height="14" rx="3" fill="#dcfce7" stroke="#16a34a"/><text x="80" y="98" font-size="12" fill="#334155">automated</text>
+  <rect x="168" y="86" width="14" height="14" rx="3" fill="#fef3c7" stroke="#d97706"/><text x="188" y="98" font-size="12" fill="#334155">sensitive</text>
+  <rect x="272" y="86" width="14" height="14" rx="3" fill="#fee2e2" stroke="#dc2626"/><text x="292" y="98" font-size="12" fill="#334155">requires approval</text>
+  <rect x="430" y="86" width="14" height="14" rx="3" fill="#fef3c7" stroke="#d97706" stroke-dasharray="4 3"/><text x="450" y="98" font-size="12" fill="#334155">code catalog — no migration to add a trigger / action</text>
+  <text x="905" y="98" font-size="11.5" fill="#94a3b8">dashed = reference / validate · solid = data flow</text>
+
+  <!-- ================= CONFIG PATH (left) ================= -->
+  <rect x="60" y="120" width="440" height="100" rx="8" fill="#e0e7ff" stroke="#4f46e5"/>
+  <text x="280" y="146" text-anchor="middle" font-size="14" font-weight="700" fill="#0f172a">Issuer · Dashboard — Workflows tab (sdp-web)</text>
+  <text x="280" y="168" text-anchor="middle" font-size="12" fill="#334155">Controls: When · Then · Review · params · GUARD editor</text>
+  <text x="280" y="188" text-anchor="middle" font-size="12" fill="#334155">Live execution preview (reads catalog):</text>
+  <text x="280" y="207" text-anchor="middle" font-size="11.5" font-weight="600" fill="#4f46e5">trigger → guard → capability → review → action</text>
+
+  <rect x="60" y="252" width="440" height="84" rx="8" fill="#eef2ff" stroke="#6366f1"/>
+  <text x="280" y="278" text-anchor="middle" font-size="13.5" font-weight="700" fill="#0f172a">sdp-api workflow routes  +  workflow-authz.ts</text>
+  <text x="280" y="300" text-anchor="middle" font-size="11.5" fill="#334155">tier → permission</text>
+  <text x="280" y="319" text-anchor="middle" font-size="11.5" fill="#334155">automated = tokens:write · sensitive / approval = tokens:admin</text>
+
+  <line x1="280" y1="220" x2="280" y2="250" stroke="#475569" stroke-width="2" marker-end="url(#aSlate)"/>
+  <text x="290" y="240" font-size="11" fill="#64748b">BFF proxy</text>
+
+  <!-- ================= EVENT PATH (center) ================= -->
+  <rect x="540" y="120" width="440" height="100" rx="8" fill="#eef2f7" stroke="#64748b"/>
+  <text x="760" y="146" text-anchor="middle" font-size="14" font-weight="700" fill="#0f172a">Trigger sources → emit a WorkflowEvent</text>
+  <text x="760" y="170" text-anchor="middle" font-size="11.5" fill="#334155">Mural KYC webhook · ramp settled</text>
+  <text x="760" y="188" text-anchor="middle" font-size="11.5" fill="#334155">recurring-payment failed · token-op completed</text>
+  <text x="760" y="207" text-anchor="middle" font-size="11" fill="#64748b">sources never touch workflow internals</text>
+
+  <rect x="540" y="252" width="440" height="84" rx="8" fill="#eef2ff" stroke="#6366f1"/>
+  <text x="760" y="277" text-anchor="middle" font-size="13.5" font-weight="700" fill="#0f172a">Event bus — dispatchWorkflowEvent</text>
+  <text x="760" y="299" text-anchor="middle" font-size="11.5" fill="#334155">match enabled rules · evaluate GUARD</text>
+  <text x="760" y="318" text-anchor="middle" font-size="11.5" fill="#334155">enqueue one durable row per match (idempotent)</text>
+
+  <line x1="760" y1="220" x2="760" y2="250" stroke="#475569" stroke-width="2" marker-end="url(#aSlate)"/>
+  <text x="788" y="242" font-size="10" fill="#64748b">eligibility-gated (KYC)</text>
+
+  <!-- ================= DB band ================= -->
+  <rect x="60" y="372" width="440" height="96" rx="8" fill="#f1f5f9" stroke="#475569"/>
+  <text x="280" y="396" text-anchor="middle" font-size="13.5" font-weight="700" fill="#0f172a">asset_workflows  (Postgres)</text>
+  <text x="280" y="417" text-anchor="middle" font-size="11.5" fill="#334155">rule = WHEN + THEN + definition JSONB</text>
+  <text x="280" y="435" text-anchor="middle" font-size="11.5" fill="#334155">{ guard · params · retry · secret handle }</text>
+  <text x="280" y="454" text-anchor="middle" font-size="11" fill="#64748b">soft-delete · open-TEXT types validated in app layer</text>
+
+  <rect x="540" y="372" width="440" height="96" rx="8" fill="#f8fafc" stroke="#334155"/>
+  <text x="760" y="395" text-anchor="middle" font-size="13.5" font-weight="700" fill="#0f172a">workflow_executions — durable ledger</text>
+  <text x="760" y="416" text-anchor="middle" font-size="11" fill="#334155">awaiting_review → pending → processing →</text>
+  <text x="760" y="433" text-anchor="middle" font-size="11" fill="#334155">succeeded | failed | cancelled</text>
+  <text x="760" y="452" text-anchor="middle" font-size="10.5" fill="#64748b">written before any side effect · unique (workflow_id, idempotency_key)</text>
+
+  <!-- write rule -->
+  <line x1="280" y1="336" x2="280" y2="372" stroke="#475569" stroke-width="2" marker-end="url(#aSlate)"/>
+  <text x="288" y="358" font-size="10.5" fill="#475569">write rule</text>
+  <!-- enqueue -->
+  <line x1="760" y1="336" x2="760" y2="372" stroke="#6366f1" stroke-width="2" marker-end="url(#aIndigo)"/>
+  <text x="768" y="358" font-size="10.5" fill="#6366f1">enqueue</text>
+  <!-- bus matches rules (dashed, reads asset_workflows) -->
+  <line x1="500" y1="392" x2="540" y2="336" stroke="#475569" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#aSlate)"/>
+  <text x="506" y="356" font-size="10" fill="#64748b">match</text>
+
+  <!-- ================= CRON ENGINE ================= -->
+  <rect x="60" y="556" width="920" height="116" rx="9" fill="#eef2ff" stroke="#6366f1"/>
+  <text x="520" y="582" text-anchor="middle" font-size="14" font-weight="700" fill="#0f172a">Cron engine — runDueWorkflowExecutions   (1×/min · feature-flag-gated · bounded concurrency)</text>
+
+  <rect x="90" y="606" width="150" height="40" rx="6" fill="#ffffff" stroke="#6366f1"/><text x="165" y="631" text-anchor="middle" font-size="11" fill="#0f172a">recover stale</text>
+  <rect x="256" y="606" width="150" height="40" rx="6" fill="#ffffff" stroke="#6366f1"/><text x="331" y="631" text-anchor="middle" font-size="11" fill="#0f172a">claim (guarded)</text>
+  <rect x="422" y="606" width="220" height="40" rx="6" fill="#ffffff" stroke="#6366f1"/><text x="532" y="626" text-anchor="middle" font-size="10.5" fill="#0f172a">guardExecution: revalidate</text><text x="532" y="640" text-anchor="middle" font-size="10.5" fill="#0f172a">rule + capability</text>
+  <rect x="658" y="606" width="120" height="40" rx="6" fill="#ffffff" stroke="#6366f1"/><text x="718" y="631" text-anchor="middle" font-size="11" fill="#0f172a">dispatch</text>
+  <rect x="794" y="606" width="166" height="40" rx="6" fill="#ffffff" stroke="#6366f1"/><text x="877" y="626" text-anchor="middle" font-size="10.5" fill="#0f172a">success | fail</text><text x="877" y="640" text-anchor="middle" font-size="10.5" fill="#0f172a">backoff + jitter</text>
+  <line x1="240" y1="626" x2="255" y2="626" stroke="#475569" stroke-width="1.6" marker-end="url(#aSlate)"/>
+  <line x1="406" y1="626" x2="421" y2="626" stroke="#475569" stroke-width="1.6" marker-end="url(#aSlate)"/>
+  <line x1="642" y1="626" x2="657" y2="626" stroke="#475569" stroke-width="1.6" marker-end="url(#aSlate)"/>
+  <line x1="778" y1="626" x2="793" y2="626" stroke="#475569" stroke-width="1.6" marker-end="url(#aSlate)"/>
+  <text x="520" y="664" text-anchor="middle" font-size="10.5" fill="#64748b">per-tick rule / gate caches · reads params · secret · retry from asset_workflows · single-shot for approval-gated actions</text>
+
+  <!-- ================= SECRET RETIREMENT QUEUE ================= -->
+  <rect x="1010" y="556" width="290" height="116" rx="8" fill="#f8fafc" stroke="#334155"/>
+  <text x="1155" y="580" text-anchor="middle" font-size="12.5" font-weight="700" fill="#0f172a">workflow_action_secret_retirements</text>
+  <text x="1155" y="599" text-anchor="middle" font-size="10.5" fill="#334155">a destroy refused, or a store it cannot reach</text>
+  <text x="1155" y="616" text-anchor="middle" font-size="10.5" fill="#334155">rotation · delete · uncommitted write</text>
+  <text x="1155" y="637" text-anchor="middle" font-size="10.5" fill="#64748b">drained by its OWN cron, behind no flag</text>
+  <text x="1155" y="653" text-anchor="middle" font-size="10.5" fill="#64748b">capped backoff · no FKs: outlives the rule</text>
+  <!-- cron -> retirement queue (sweep). The gap between the panels is only 30px, so the
+       relationship is carried by the arrow and the panel's own label, not by a caption. -->
+  
+  <!-- ledger -> cron (poll) -->
+  <line x1="700" y1="468" x2="700" y2="556" stroke="#475569" stroke-width="2" marker-end="url(#aSlate)"/>
+  <text x="708" y="516" font-size="10.5" fill="#475569">poll due (pending)</text>
+  <!-- rules -> cron (params + revalidate, dashed) -->
+  <line x1="280" y1="468" x2="280" y2="556" stroke="#475569" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#aSlate)"/>
+  <text x="180" y="516" text-anchor="middle" font-size="10.5" fill="#64748b">load params · revalidate</text>
+  <!-- cron -> ledger (update state, dashed) -->
+  <line x1="915" y1="556" x2="915" y2="470" stroke="#475569" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#aSlate)"/>
+  <text x="922" y="516" font-size="10.5" fill="#64748b">update · audit</text>
+
+  <!-- ================= RIGHT RAIL: catalog + approval ================= -->
+  <rect x="1010" y="120" width="290" height="300" rx="8" fill="#fef3c7" stroke="#d97706"/>
+  <text x="1155" y="145" text-anchor="middle" font-size="13.5" font-weight="700" fill="#0f172a">Code catalog</text>
+  <text x="1155" y="163" text-anchor="middle" font-size="11" fill="#334155">@sdp/issuance/workflows</text>
+  <line x1="1028" y1="176" x2="1282" y2="176" stroke="#e0b463" stroke-width="1"/>
+  <text x="1028" y="196" font-size="11" fill="#334155">triggers.ts — 6 triggers + guard fields</text>
+  <text x="1028" y="217" font-size="11" fill="#334155">actions.ts — 13 actions · tiers · reqs</text>
+  <text x="1028" y="238" font-size="11" fill="#334155">resolver.ts — capability gate (pure)</text>
+  <line x1="1028" y1="252" x2="1282" y2="252" stroke="#e0b463" stroke-width="1"/>
+  <text x="1155" y="272" text-anchor="middle" font-size="11" font-weight="700" fill="#b45309">one source of truth for</text>
+  <text x="1028" y="292" font-size="10.5" fill="#334155">· builder + live preview</text>
+  <text x="1028" y="310" font-size="10.5" fill="#334155">· event-bus guard + tier</text>
+  <text x="1028" y="328" font-size="10.5" fill="#334155">· cron revalidation (gate)</text>
+  <text x="1028" y="346" font-size="10.5" fill="#334155">· workflow-authz tier → perm</text>
+  <text x="1155" y="378" text-anchor="middle" font-size="11" font-weight="700" fill="#4f46e5">add one = code change,</text>
+  <text x="1155" y="394" text-anchor="middle" font-size="11" font-weight="700" fill="#4f46e5">no migration</text>
+
+  <rect x="1010" y="444" width="290" height="94" rx="8" fill="#fee2e2" stroke="#dc2626" stroke-dasharray="5 4"/>
+  <text x="1155" y="468" text-anchor="middle" font-size="12.5" font-weight="700" fill="#0f172a">Human approval</text>
+  <text x="1155" y="487" text-anchor="middle" font-size="10.5" fill="#b91c1c">requires_approval held in awaiting_review</text>
+  <text x="1155" y="504" text-anchor="middle" font-size="10.5" fill="#b91c1c">hold-to-confirm approve / reject</text>
+  <text x="1155" y="521" text-anchor="middle" font-size="10.5" fill="#b91c1c">records decided_by · decided_at</text>
+
+  <!-- catalog -> event bus -->
+  <line x1="1010" y1="235" x2="982" y2="298" stroke="#d97706" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#aAmber)"/>
+  <text x="992" y="250" text-anchor="end" font-size="10" fill="#b45309">tier · guard</text>
+  <!-- catalog -> cron -->
+  <line x1="1010" y1="400" x2="965" y2="575" stroke="#d97706" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#aAmber)"/>
+  <text x="1000" y="470" text-anchor="end" font-size="10" fill="#b45309">capability gate</text>
+  <!-- ledger -> approval -->
+  <line x1="980" y1="402" x2="1010" y2="470" stroke="#dc2626" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#aRed)"/>
+  <text x="1004" y="430" text-anchor="end" font-size="10" fill="#b91c1c">held</text>
+  <!-- approval -> cron (approved becomes claimable) -->
+  <line x1="1040" y1="538" x2="835" y2="572" stroke="#475569" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#aSlate)"/>
+  <text x="905" y="556" text-anchor="middle" font-size="10" fill="#64748b">approved → pending</text>
+
+  <!-- ================= HANDLERS ================= -->
+  <rect x="60" y="700" width="400" height="128" rx="8" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="260" y="726" text-anchor="middle" font-size="13" font-weight="700" fill="#0f172a">Automated  →  auto-applies</text>
+  <text x="260" y="749" text-anchor="middle" font-size="11.5" fill="#334155">allowlist_add · allowlist_remove</text>
+  <text x="260" y="769" text-anchor="middle" font-size="11.5" fill="#334155">send_webhook · notify · record</text>
+  <text x="260" y="792" text-anchor="middle" font-size="11" fill="#16a34a">retryable with exponential backoff</text>
+
+  <rect x="484" y="700" width="280" height="128" rx="8" fill="#fef3c7" stroke="#d97706"/>
+  <text x="624" y="726" text-anchor="middle" font-size="13" font-weight="700" fill="#0f172a">Sensitive</text>
+  <text x="624" y="749" text-anchor="middle" font-size="11.5" fill="#334155">pause · unpause</text>
+  <text x="624" y="769" text-anchor="middle" font-size="11.5" fill="#334155">freeze · unfreeze</text>
+  <text x="624" y="792" text-anchor="middle" font-size="11" fill="#b45309">default manual review</text>
+
+  <rect x="788" y="700" width="392" height="128" rx="8" fill="#fee2e2" stroke="#dc2626"/>
+  <text x="984" y="726" text-anchor="middle" font-size="13" font-weight="700" fill="#0f172a">Requires approval — irreversible</text>
+  <text x="984" y="749" text-anchor="middle" font-size="11.5" fill="#334155">mint · burn · seize · force_burn</text>
+  <text x="984" y="769" text-anchor="middle" font-size="11.5" fill="#334155">held → human approves → run once</text>
+  <text x="984" y="792" text-anchor="middle" font-size="11" fill="#b91c1c">single-shot · never auto-retried</text>
+
+  <!-- cron -> handlers -->
+  <line x1="260" y1="672" x2="260" y2="700" stroke="#6366f1" stroke-width="2" marker-end="url(#aIndigo)"/>
+  <line x1="624" y1="672" x2="624" y2="700" stroke="#6366f1" stroke-width="2" marker-end="url(#aIndigo)"/>
+  <line x1="984" y1="672" x2="984" y2="700" stroke="#6366f1" stroke-width="2" marker-end="url(#aIndigo)"/>
+  <text x="644" y="690" font-size="10.5" fill="#6366f1">dispatch by action</text>
+
+  <!-- ================= TARGETS ================= -->
+  <rect x="60" y="860" width="690" height="96" rx="8" fill="#f1f5f9" stroke="#475569"/>
+  <text x="405" y="884" text-anchor="middle" font-size="13" font-weight="700" fill="#0f172a">On-chain execution</text>
+  <text x="405" y="905" text-anchor="middle" font-size="11.5" fill="#334155">createOrgSigner → MosaicService / Token2022Service</text>
+  <text x="405" y="925" text-anchor="middle" font-size="11.5" fill="#b91c1c">PREFLIGHT (shared with manual routes): wallet policy · control-list · maxSupply</text>
+  <text x="405" y="944" text-anchor="middle" font-size="11" fill="#64748b">→ Solana Token-2022</text>
+
+  <rect x="772" y="860" width="408" height="96" rx="8" fill="#f8fafc" stroke="#334155"/>
+  <text x="976" y="884" text-anchor="middle" font-size="13" font-weight="700" fill="#0f172a">Side effects &amp; records</text>
+  <text x="976" y="905" text-anchor="middle" font-size="11.5" fill="#334155">webhook endpoint — HMAC · SSRF-checked</text>
+  <text x="976" y="924" text-anchor="middle" font-size="11.5" fill="#334155">notifications (dashboard bell)</text>
+  <text x="976" y="943" text-anchor="middle" font-size="11" fill="#64748b">audit log (system actor "SDP")</text>
+
+  <!-- handlers -> targets -->
+  <line x1="330" y1="828" x2="820" y2="860" stroke="#16a34a" stroke-width="2" marker-end="url(#aGreen)"/>
+  <line x1="600" y1="828" x2="470" y2="860" stroke="#d97706" stroke-width="2" marker-end="url(#aAmber)"/>
+  <line x1="940" y1="828" x2="560" y2="860" stroke="#dc2626" stroke-width="2" marker-end="url(#aRed)"/>
+
+  <!-- Footnotes -->
+  <text x="670" y="978" text-anchor="middle" font-size="12" fill="#64748b">Two inputs: the issuer builds a rule (left) and a provider event fires (center); they meet in the durable ledger, which the cron drains.</text>
+  <text x="670" y="998" text-anchor="middle" font-size="11.5" fill="#64748b">Holder eligibility (who may hold the asset) is decided upstream at emission — the KYC event fires only for cleared holders; the guard leg carries only operational filters.</text>
+  <text x="670" y="1018" text-anchor="middle" font-size="11" fill="#94a3b8">The whole surface — routes, emitters, and cron — is gated together by ASSET_PROFILES_ENABLED.</text>
+</svg>

@@ -1,7 +1,7 @@
 /**
- * LOCAL DEVELOPMENT ONLY — seeds an Earn strategy catalogue + NAV history into
- * a developer's own Postgres so /v1/earn/strategies and the Earn dashboard have
- * something to render without Ground credentials.
+ * LOCAL DEVELOPMENT ONLY — seeds an Earn strategy catalogue into a developer's
+ * own Postgres so /v1/earn/strategies and the Earn dashboard have something to
+ * render without Ground credentials.
  *
  * This is NOT how deployed catalogue data arrives. The hourly catalogue-sync
  * cron (src/cron/earn-catalogue-sync.ts) pulls each provider's live catalogue
@@ -10,9 +10,15 @@
  *
  * Every row is a FIXTURE that imitates Ground's sandbox yield-source catalogue —
  * ids, names, APYs, source kinds, redemption delays, curators and TVLs copied
- * from a sandbox sync on 2026-08-04 — because a catalogue of invented products
- * teaches local dev the wrong thing. The numbers are frozen snapshots, not live
- * truth; only the sync tracks the real ones.
+ * from the committed inventory snapshot (2026-08-05) — because a catalogue of
+ * invented products teaches local dev the wrong thing. The numbers are frozen
+ * snapshots, not live truth; only the sync tracks the real ones.
+ *
+ * SOLANA-HOSTED ONLY, exactly like the catalogue sync's `not_solana_hosted`
+ * gate. Ground's shelf is majority Ethereum-hosted (Aave, four Morpho vaults,
+ * Syrup and every RWA source) and SDP lists and stores none of it, so no fixture
+ * may reference one either — a seeded EVM row would be a vault the dashboard
+ * offers and the sync would then delist.
  *
  * Fixtures stay distinguishable from synced rows, and that is what the
  * `seed-demo-` provider_reference prefix buys (earn_strategies has no
@@ -23,12 +29,16 @@
  *     `--clean` can never delete one;
  *   - it keeps the deliberately paused fixture paused: every sync pass
  *     re-asserts `active` for the references the provider lists, and Ground
- *     never lists a `seed-demo-` one.
+ *     never lists a `seed-demo-` one;
+ *   - it keeps fixtures out of the sync's DELIST pass, which deprecates rows the
+ *     provider no longer lists. Ground lists no prefixed reference, so without
+ *     the partition every fixture would be deprecated on the next sync — the
+ *     repository excludes the prefix for exactly this reason.
  * Run both and the fixtures show up as twins beside the synced rows — the
  * prefix, and `riskMetadata.seedFixture`, are how you tell them apart.
  *
- * Rows go through the same write API the sync uses (upsertStrategy /
- * insertNavSnapshot) and are checked against the provider registry and its
+ * Rows go through the same write API the sync uses (upsertStrategy) and are
+ * checked against the provider registry and its
  * declared support envelope with the exact helper the sync validates with, so
  * fixtures behave exactly like synced rows.
  *
@@ -42,26 +52,29 @@
  * program — real allocation, real forward APY, a real Solana deposit address —
  * instead of the empty onboarding state a fresh install shows. Consequences
  * worth knowing:
- *   - one org gets one program, mirroring the UNIQUE (organization_id,
- *     environment, provider) product model; other local orgs are left unlinked
- *     rather than handed a sibling wallet that stands in for another org;
+ *   - it links exactly ONE program, and that is a seed choice, not a cap: an
+ *     org may hold N programs since PRO-1670, and the only uniqueness left is
+ *     GLOBAL on (provider, provider_wallet_ref) (migration 0056). One live
+ *     program is all local dev needs, and the wallet it points at can be
+ *     claimed by one link row platform-wide, so other local orgs are left
+ *     unlinked rather than handed a sibling wallet that stands in for another
+ *     org;
  *   - that wallet is SHARED with teammates, so funding it, updating its
  *     allocation through the wizard, or withdrawing from it changes what they
  *     see;
  *   - the seed only records the local link — it never calls Ground;
- *   - an organization that already has a program keeps it (the seed never
- *     repoints a wallet a developer created through the wizard);
+ *   - an organization that already holds THIS wallet keeps it, and a wallet a
+ *     developer attached by hand is never repointed — the seed says so and
+ *     stops rather than colliding on the global wallet-ref unique;
  *   - but a link THIS SEED made follows the primary org on a re-run, so seeding
  *     before your first Clerk sign-in is recoverable — see seedProviderWallets;
  *   - `--clean` removes only links labelled SEED_WALLET_LABEL and leaves the
  *     Ground wallet itself untouched.
  *
  * Idempotent: strategies upsert on (provider, provider_reference, environment)
- * so re-running updates exactly those rows in place (ids stay stable, positions
- * opened against them survive) and NAV points upsert on (strategy_id, as_of).
+ * so re-running updates exactly those rows in place (ids stay stable).
  *
- *   pnpm -C apps/sdp-api db:seed:earn                            # sandbox fixtures + NAV history
- *   pnpm -C apps/sdp-api db:seed:earn -- --days 30               # longer NAV history
+ *   pnpm -C apps/sdp-api db:seed:earn                            # sandbox catalogue fixtures
  *   pnpm -C apps/sdp-api db:seed:earn -- --clean                 # remove the fixtures again
  *
  * Sandbox-only, and the target DATABASE_URL must be a loopback host — anything
@@ -82,11 +95,15 @@ import {
 } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { type AppDb, asTransactionalClient, closeDatabasePools, createDatabaseClient } from "@/db";
-import type { EarnRepository, InsertEarnNavSnapshotInput } from "@/db/repositories";
-import { createPostgresEarnRepository } from "@/db/repositories";
+import type { EarnRepository } from "@/db/repositories";
+import { createPostgresEarnRepository, EARN_SEED_REFERENCE_PREFIX } from "@/db/repositories";
 
-/** Ownership marker for seeded rows — see the header for what it protects. */
-const SEED_REFERENCE_PREFIX = "seed-demo-";
+/**
+ * Ownership marker for seeded rows — see the header for what it protects.
+ * Imported, not redeclared: the delist pass excludes this exact prefix, so a
+ * local copy drifting from it would silently expose fixtures to deprecation.
+ */
+const SEED_REFERENCE_PREFIX = EARN_SEED_REFERENCE_PREFIX;
 // Ground is the only provider with an HTTP integration; the other registered
 // ids are stubs, and a fixture under one of them would advertise a strategy
 // nothing can quote, deposit into, or withdraw from.
@@ -101,8 +118,6 @@ const SEED_DEPOSIT_TOKENS: readonly EarnDepositTokenSymbol[] = ["USDC"];
 // catalogue-sync maps every source to `variable`; fixtures mirror that instead
 // of inventing fixed-rate products.
 const SEED_APY_TYPE: EarnApyType = "variable";
-const DEFAULT_NAV_DAYS = 14;
-const DAY_MS = 86_400_000;
 
 /**
  * Ownership marker for seeded provider-wallet links. `--clean` deletes only
@@ -118,16 +133,18 @@ const SEED_WALLET_LABEL = "Seeded sandbox wallet (local dev)";
  * its true balance, positions, allocations, and Solana deposit address straight
  * from Ground. Sandbox only — never put a production wallet ref here.
  *
- * ONE wallet, linked to ONE organization — the local mirror of the product
- * model. SDP maps each organization to exactly one Ground portfolio wallet
- * (`earn_provider_wallets` UNIQUE (organization_id, environment, provider),
- * migration 0049): choosing a curator re-weights that wallet, it never
- * provisions a second one. Note this is SDP's model, NOT a Ground limit —
- * Ground has no concept of an SDP organization, and one Ground account can hold
+ * ONE wallet, linked to ONE organization — a seed choice, not the product cap.
+ * Since PRO-1670 an organization may hold N programs per (environment,
+ * provider); what the seed must respect is the GLOBAL uniqueness that replaced
+ * the old per-org one (`earn_provider_wallets` UNIQUE (provider,
+ * provider_wallet_ref), migration 0056): a provider wallet holds real funds, so
+ * exactly one link row anywhere in the platform may claim it. Ground has no
+ * concept of an SDP organization, and one Ground account can hold
  * many portfolio wallets (all SDP orgs share a single account per environment;
  * `readGroundConfig` resolves one API key, never a per-org credential). Sibling
  * wallets in the team's sandbox account therefore stand in for OTHER
- * organizations, so the seed must not hand them to yours.
+ * organizations, so the seed must not hand them to yours — and re-pointing
+ * SEED_PROVIDER_WALLET moves the one seeded link rather than adding a second.
  *
  * It is linked so local dev opens onto a live program instead of an empty
  * onboarding screen. Live provider resource, not a fixture:
@@ -171,9 +188,22 @@ const SEED_PROVIDER_WALLET: { ref: string; note: string } = {
 };
 
 // ── Fixture catalogue ───────────────────────────────────────────────────────
-// Ten of Ground's sandbox yield sources, trimmed to a spread the dashboard
-// exercises well: several curators holding more than one opportunity, instant
-// and delayed liquidity, DeFi and tokenized RWA, and a high-APY outlier.
+// Ground's Solana-hosted sandbox shelf — ALL FIVE of it, values from the
+// committed inventory snapshot (docs/earn/ground-catalogue-inventory.md,
+// 2026-08-05). Not a curated spread any more: SDP lists and stores Solana-hosted
+// vaults only (`not_solana_hosted`), so the fixtures ARE the shelf, and seeding
+// anything else would advertise a vault the catalogue sync would refuse.
+//
+// What that costs local dev, so nobody hunts for these:
+//   - every Solana source is `instant`, so DELAYED liquidity is unexercised —
+//     the "defi ⇒ instant" assumption has no fixture to catch it here;
+//   - none classifies `rwa`, so the rwa/defi split is unexercised (the one
+//     Solana source named RWA classifies `defi`; see the RockawayX note below);
+//   - the top rate is 5.85%, so there is no high-APY outlier in the 8% band.
+// All three were previously supplied by Ethereum-hosted fixtures (Syrup, JAAA,
+// JTRSY, Morpho August). Ground's Solana shelf genuinely has no delayed or RWA
+// source, so inventing one here would teach local dev something false; cover
+// those paths in unit tests instead.
 
 interface SeedStrategy {
   /** Ground's real sandbox yield-source id; the seeded reference prefixes it. */
@@ -188,24 +218,13 @@ interface SeedStrategy {
   redemptionDelayDays: number | null;
   /** Open curator id — @sdp/types maps known ones to display labels. */
   curator: string;
-  /** Anchor TVL in USD; NAV snapshots wobble around it. */
+  /** TVL in USD, surfaced through riskMetadata like the sync's copy. */
   tvlUsd: number;
   /** Defaults to active — exactly one fixture is paused on purpose. */
   status?: EarnStrategyStatus;
 }
 
 const SEED_STRATEGIES: readonly SeedStrategy[] = [
-  {
-    groundYieldSourceId: "kamino-superstate-usdc",
-    name: "Kamino Superstate USDC",
-    sourceKind: "defi",
-    underlyingSource: "kamino",
-    apy: "0.0154",
-    liquidityTerm: "instant",
-    redemptionDelayDays: null,
-    curator: "kamino",
-    tvlUsd: 8_400_000,
-  },
   {
     groundYieldSourceId: "kamino-allez-usdc",
     name: "Kamino Allez USDC",
@@ -214,105 +233,62 @@ const SEED_STRATEGIES: readonly SeedStrategy[] = [
     apy: "0.0506",
     liquidityTerm: "instant",
     redemptionDelayDays: null,
-    curator: "kamino",
-    tvlUsd: 15_600_000,
+    curator: "allez",
+    tvlUsd: 15_421_377,
   },
   {
-    groundYieldSourceId: "kamino-steakhouse-usdc",
-    name: "Kamino Steakhouse USDC",
+    // Ground's top Solana rate, and the naming trap worth having locally: it is
+    // *called* RWA (RockawayX's sleeves are OnRe, Huma, Obligate and Figure) but
+    // Ground types every sleeve as a Kamino `reserve`, so distillation classifies
+    // it `defi`. The fixture mirrors the classifier, not the name.
+    groundYieldSourceId: "kamino-rockawayx-rwa-usdc",
+    name: "Kamino RockawayX RWA USDC",
     sourceKind: "defi",
     underlyingSource: "kamino",
-    apy: "0.0392",
+    apy: "0.0585",
     liquidityTerm: "instant",
     redemptionDelayDays: null,
-    curator: "steakhouse",
-    tvlUsd: 20_000_000,
-  },
-  {
-    groundYieldSourceId: "morpho-steakhouse-usdc",
-    name: "Morpho Steakhouse USDC Prime",
-    sourceKind: "defi",
-    underlyingSource: "morpho",
-    apy: "0.0352",
-    liquidityTerm: "instant",
-    redemptionDelayDays: null,
-    curator: "steakhouse",
-    tvlUsd: 76_900_000,
-  },
-  {
-    groundYieldSourceId: "morpho-gauntlet-usdc",
-    name: "Morpho Gauntlet USDC Prime",
-    sourceKind: "defi",
-    underlyingSource: "morpho",
-    apy: "0.037",
-    liquidityTerm: "instant",
-    redemptionDelayDays: null,
-    curator: "gauntlet",
-    tvlUsd: 28_400_000,
+    curator: "rockawayx",
+    tvlUsd: 27_292_892,
   },
   {
     groundYieldSourceId: "kamino-gauntlet-frontier-usdc",
     name: "Kamino Gauntlet USDC Frontier",
     sourceKind: "defi",
     underlyingSource: "kamino",
-    apy: "0.0478",
+    apy: "0.0479",
     liquidityTerm: "instant",
     redemptionDelayDays: null,
     curator: "gauntlet",
-    tvlUsd: 390_000,
+    tvlUsd: 391_667,
   },
   {
-    // The catalogue's high-APY outlier: exercises sorting, the enhanced risk
-    // tier, and the copy that has to sit next to a rate like this.
-    groundYieldSourceId: "morpho-august-usdc-v2",
-    name: "Morpho August USDC V2",
+    groundYieldSourceId: "kamino-steakhouse-usdc",
+    name: "Kamino Steakhouse USDC",
     sourceKind: "defi",
-    underlyingSource: "morpho",
-    apy: "0.0815",
+    underlyingSource: "kamino",
+    apy: "0.0393",
     liquidityTerm: "instant",
     redemptionDelayDays: null,
-    curator: "morpho",
-    tvlUsd: 1_600_000,
+    curator: "steakhouse",
+    tvlUsd: 19_924_793,
   },
   {
-    // DeFi with a redemption delay — the combination that catches code assuming
-    // "defi ⇒ instant".
-    groundYieldSourceId: "syrup-usdc",
-    name: "Syrup USDC",
+    // Paused on purpose — the ADR 0002 exit-safety split (deposits blocked,
+    // withdrawals still quoted) and the `includeInactive` listing path both need
+    // a non-active row. Fixtures can hold a pause because the sync never lists
+    // their prefixed references, so it never re-asserts `active` over them and
+    // the delist pass skips the seed's key space entirely.
+    // Lowest rate on the shelf, so it is the least missed as a deposit target.
+    groundYieldSourceId: "kamino-superstate-usdc",
+    name: "Kamino Superstate USDC",
     sourceKind: "defi",
-    underlyingSource: "maple",
-    apy: "0.0492",
-    liquidityTerm: "delayed",
-    redemptionDelayDays: 1,
-    curator: "maple",
-    tvlUsd: 1_090_000_000,
-  },
-  {
-    groundYieldSourceId: "ground-jaaa-usdc-vault",
-    name: "Janus Henderson JAAA (USDC)",
-    sourceKind: "rwa",
-    underlyingSource: "centrifuge",
-    apy: "0.037",
-    liquidityTerm: "delayed",
-    redemptionDelayDays: 2,
-    curator: "centrifuge",
-    tvlUsd: 685_000_000,
-  },
-  {
-    // Paused on purpose: a delayed tokenized-treasury vault is the sharpest
-    // exit-safety case, so this row exercises the ADR 0002 split (deposits
-    // blocked, T+2 withdrawals still quoted) and the includeInactive listing
-    // path. Fixtures can hold a pause because the sync never lists their
-    // references and so never re-asserts `active` over them.
-    groundYieldSourceId: "ground-jtrsy-usdc-vault",
-    name: "Janus Henderson JTRSY tokenized by Centrifuge",
-    sourceKind: "rwa",
-    underlyingSource: "centrifuge",
-    apy: "0.0328",
-    liquidityTerm: "delayed",
-    redemptionDelayDays: 2,
-    curator: "centrifuge",
-    tvlUsd: 881_000_000,
+    underlyingSource: "kamino",
+    apy: "0.0151",
+    liquidityTerm: "instant",
+    redemptionDelayDays: null,
+    curator: "superstate",
+    tvlUsd: 8_388_125,
     status: "paused",
   },
 ];
@@ -342,8 +318,7 @@ function buildRiskMetadata(strategy: SeedStrategy): EarnStrategyRiskMetadata {
   return {
     curator: strategy.curator,
     riskTier: riskTierForApy(strategy.apy),
-    // Same field the sync copies from Ground, and the anchor the NAV series
-    // wobbles around — held in step so catalogue and NAV never disagree.
+    // Same field the sync copies from Ground.
     tvlUsd: strategy.tvlUsd,
     // Fixture marker, visible everywhere risk metadata is (API payloads, psql),
     // so a seeded row never reads as live truth. --clean keys off the
@@ -369,49 +344,87 @@ function resolveDepositMints(): string[] {
   return mints;
 }
 
-/**
- * Daily midnight-UTC NAV points, oldest first: share price compounds at
- * apy/365 from 1.0 up to today, TVL wobbles mildly around the anchor.
- * Deterministic for a given day, and as_of values repeat across runs so
- * insertNavSnapshot updates the same points in place.
- */
-function buildNavSeries(
-  strategy: SeedStrategy,
-  strategyId: string,
-  days: number,
-  nowMs: number
-): InsertEarnNavSnapshotInput[] {
-  const today = new Date(nowMs);
-  const todayUtcMs = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
-  const dailyRate = Number(strategy.apy) / 365;
-
-  return Array.from({ length: days }, (_, index) => {
-    const age = days - 1 - index;
-    return {
-      strategyId,
-      sharePrice: ((1 + dailyRate) ** index).toFixed(8),
-      apy: strategy.apy,
-      tvl: (strategy.tvlUsd * (1 + 0.03 * Math.sin(index / 2))).toFixed(2),
-      asOf: new Date(todayUtcMs - age * DAY_MS).toISOString(),
-    };
-  });
-}
-
 // ── Database ────────────────────────────────────────────────────────────────
 
 async function deleteSeeded(db: AppDb): Promise<number> {
-  // earn_nav_snapshots cascade from earn_strategies; earn_positions FKs are
-  // RESTRICT, so cleaning fails loudly if positions were opened against
-  // seeded strategies rather than orphaning them.
   return db.execute(
     "DELETE FROM earn_strategies WHERE environment = ? AND provider_reference LIKE ?",
     [SEED_ENVIRONMENT, `${SEED_REFERENCE_PREFIX}%`]
   );
 }
 
+/**
+ * Delete fixtures this script wrote that it no longer defines — the pruning an
+ * upsert-only seed cannot do. Without it, a developer who seeded before the
+ * fixture set changed and then re-runs `db:seed:earn` (no `--clean`) keeps the
+ * dropped rows forever: upsert touches only the five references in
+ * SEED_STRATEGIES and nothing else ever revisits the rest.
+ *
+ * That is what turned the Solana-only change into a trap: the six Ethereum-hosted
+ * fixtures (Morpho ×3, Syrup, JAAA, JTRSY) would survive a re-seed as `active`
+ * rows and keep rendering, and the catalogue sync's delist pass deliberately
+ * skips the seed's key space, so nothing else would ever remove them.
+ *
+ * Scoped to the seed prefix, so it can no more touch a synced row than
+ * `--clean` can.
+ */
+async function pruneStaleSeeded(db: AppDb): Promise<string[]> {
+  const current = SEED_STRATEGIES.map(seededReference);
+  const rows = await db
+    .prepare(
+      `DELETE FROM earn_strategies
+        WHERE environment = ?
+          AND provider_reference LIKE ?
+          AND NOT (provider_reference = ANY(?))
+        RETURNING provider_reference`
+    )
+    .bind(SEED_ENVIRONMENT, `${SEED_REFERENCE_PREFIX}%`, current)
+    .all<{ provider_reference: string }>();
+  return (rows.results ?? []).map((row) => row.provider_reference);
+}
+
+/**
+ * Withdrawal history PINS a wallet link: earn_program_withdrawals FKs the link
+ * row with no cascade (history is undeletable by design — migration 0055 /
+ * PRO-1628), so a seeded link that has been withdrawn against can be neither
+ * cleaned nor moved. Skipping beats crashing on the FK, and keeping the link
+ * where its history lives is the correct outcome anyway.
+ */
+async function countHistoryPinnedSeededWallets(db: AppDb): Promise<number> {
+  const row = await db
+    .prepare(
+      `SELECT COUNT(*)::int AS pinned FROM earn_provider_wallets w
+        WHERE w.environment = ? AND w.provider = ? AND w.label = ?
+          AND EXISTS (SELECT 1 FROM earn_program_withdrawals x WHERE x.wallet_id = w.id)`
+    )
+    .bind(SEED_ENVIRONMENT, SEED_PROVIDER, SEED_WALLET_LABEL)
+    .first<{ pinned: number }>();
+  return row?.pinned ?? 0;
+}
+
+/** Whether ONE wallet row is pinned by withdrawal history (undeletable FK). */
+async function walletHasWithdrawalHistory(db: AppDb, walletId: string): Promise<boolean> {
+  const row = await db
+    .prepare(`SELECT 1 AS hit FROM earn_program_withdrawals WHERE wallet_id = ? LIMIT 1`)
+    .bind(walletId)
+    .first<{ hit: number }>();
+  return row !== null;
+}
+
 async function deleteSeededWallets(db: AppDb): Promise<number> {
+  const pinned = await countHistoryPinnedSeededWallets(db);
+  if (pinned > 0) {
+    console.log(
+      `  keeping ${pinned} seeded link(s) with withdrawal history — history is undeletable by design (PRO-1628).`
+    );
+  }
   return db.execute(
-    "DELETE FROM earn_provider_wallets WHERE environment = ? AND provider = ? AND label = ?",
+    `DELETE FROM earn_provider_wallets
+      WHERE environment = ? AND provider = ? AND label = ?
+        AND NOT EXISTS (
+          SELECT 1 FROM earn_program_withdrawals x
+           WHERE x.wallet_id = earn_provider_wallets.id
+        )`,
     [SEED_ENVIRONMENT, SEED_PROVIDER, SEED_WALLET_LABEL]
   );
 }
@@ -462,9 +475,16 @@ async function findPrimaryLocalOrganization(db: AppDb): Promise<LocalOrganizatio
 }
 
 /**
- * Links the shared sandbox wallet to the primary local organization — one org,
- * one program, mirroring the UNIQUE (organization_id, environment, provider)
- * product model.
+ * Links the shared sandbox wallet to the primary local organization.
+ *
+ * The seed still creates exactly ONE program, but that is now a choice about
+ * how much local state to fabricate rather than a limit: since PRO-1670 an
+ * organization may hold N programs, so the question this function asks changed.
+ * It used to ask "does this org already have a program?" — which after PRO-1670
+ * would refuse to seed for anyone who had made one through the wizard. It now
+ * asks "is the shared sandbox wallet already linked, and to whom?", which the
+ * global UNIQUE (provider, provider_wallet_ref) (migration 0056) makes a
+ * single-row question.
  *
  * Never repoints a program a developer created through the wizard: that link is
  * theirs and silently swapping its provider wallet would strand it. A link this
@@ -488,13 +508,36 @@ async function seedProviderWallets(
     return { linked: 0, kept: 0, moved: false, skipped: true };
   }
 
-  const existing = await repo.getProviderWallet({
-    organizationId: organization.organizationId,
-    environment: SEED_ENVIRONMENT,
+  const linked = await repo.getProviderWalletByRef({
     provider: SEED_PROVIDER,
+    providerWalletRef: SEED_PROVIDER_WALLET.ref,
   });
-  if (existing) {
-    console.log(`  ${organization.slug}: kept existing program (${existing.provider_wallet_ref})`);
+  if (linked?.organization_id === organization.organizationId) {
+    console.log(`  ${organization.slug}: kept existing program (${linked.provider_wallet_ref})`);
+    return { linked: 0, kept: 1, moved: false, skipped: false };
+  }
+
+  // Linked to another org by something other than this seed — a wallet a
+  // developer attached through the wizard. The move below only ever deletes
+  // SEED_WALLET_LABEL rows, so the insert would hit 0056's global unique and
+  // fail with a raw Postgres error. Say what happened instead.
+  if (linked && linked.label !== SEED_WALLET_LABEL) {
+    console.log(
+      `  ${organization.slug}: NOT linked — ${SEED_PROVIDER_WALLET.ref} is already attached to another local organization by hand. Unlink it there first, or point SEED_PROVIDER_WALLET at your own sandbox wallet.`
+    );
+    return { linked: 0, kept: 0, moved: false, skipped: true };
+  }
+
+  // A seeded link with withdrawal history cannot move: its row is the FK
+  // target of that history (undeletable by design), and the history belongs
+  // to the org that withdrew. Scoped to THE ROW HOLDING THIS REF — a stale
+  // seeded link from an earlier SEED_PROVIDER_WALLET rotation may also be
+  // pinned, but it holds a different ref, so it collides with nothing under
+  // 0056's global unique and must not block linking the current one.
+  if (linked && (await walletHasWithdrawalHistory(db, linked.id))) {
+    console.log(
+      `  ${organization.slug}: NOT moved — the seeded link has withdrawal history and stays with the org that withdrew (PRO-1628).`
+    );
     return { linked: 0, kept: 1, moved: false, skipped: false };
   }
 
@@ -507,7 +550,12 @@ async function seedProviderWallets(
     // Only ever removes rows this seed created; a wizard-made link carries a
     // different label and is left alone.
     const removed = await tx.execute(
-      "DELETE FROM earn_provider_wallets WHERE environment = ? AND provider = ? AND label = ?",
+      `DELETE FROM earn_provider_wallets
+        WHERE environment = ? AND provider = ? AND label = ?
+          AND NOT EXISTS (
+            SELECT 1 FROM earn_program_withdrawals x
+             WHERE x.wallet_id = earn_provider_wallets.id
+          )`,
       [SEED_ENVIRONMENT, SEED_PROVIDER, SEED_WALLET_LABEL]
     );
     await txRepo.insertProviderWallet({
@@ -531,10 +579,8 @@ async function seedProviderWallets(
 async function seedStrategy(
   repo: EarnRepository,
   strategy: SeedStrategy,
-  depositMints: string[],
-  days: number,
-  nowMs: number
-): Promise<number> {
+  depositMints: string[]
+): Promise<void> {
   const reference = seededReference(strategy);
 
   // Validate exactly as the catalogue-sync cron would before persisting.
@@ -567,12 +613,6 @@ async function seedStrategy(
   if (!row) {
     throw new Error(`Upsert returned no row for ${reference}`);
   }
-
-  const navPoints = buildNavSeries(strategy, row.id, days, nowMs);
-  for (const navPoint of navPoints) {
-    await repo.insertNavSnapshot(navPoint);
-  }
-  return navPoints.length;
 }
 
 // ── Entry point ─────────────────────────────────────────────────────────────
@@ -597,14 +637,6 @@ function requireLocalDatabase(databaseUrl: string): void {
       `Refusing to touch ${hostname}: db:seed:earn writes local-development fixtures and only runs against a local database (localhost / 127.0.0.1 / ::1).`
     );
   }
-}
-
-function readFlag(name: string): string | undefined {
-  const index = process.argv.indexOf(`--${name}`);
-  if (index === -1) {
-    return undefined;
-  }
-  return process.argv[index + 1];
 }
 
 function summarize(): void {
@@ -644,10 +676,6 @@ async function main(): Promise<void> {
     );
   }
   const cleanOnly = process.argv.includes("--clean");
-  const days = Number(readFlag("days") ?? DEFAULT_NAV_DAYS);
-  if (!Number.isInteger(days) || days < 1 || days > 365) {
-    throw new Error("--days must be an integer between 1 and 365");
-  }
 
   const db = createDatabaseClient(databaseUrl);
   const repo = createPostgresEarnRepository(db);
@@ -662,11 +690,16 @@ async function main(): Promise<void> {
       return;
     }
 
+    const pruned = await pruneStaleSeeded(db);
+    if (pruned.length > 0) {
+      console.log(
+        `Pruned ${pruned.length} fixture(s) this seed no longer defines: ${pruned.join(", ")}`
+      );
+    }
+
     const depositMints = resolveDepositMints();
-    const nowMs = Date.now();
-    let navPointCount = 0;
     for (const strategy of SEED_STRATEGIES) {
-      navPointCount += await seedStrategy(repo, strategy, depositMints, days, nowMs);
+      await seedStrategy(repo, strategy, depositMints);
     }
 
     const { total } = await repo.listStrategies({
@@ -675,9 +708,7 @@ async function main(): Promise<void> {
       limit: 1,
       offset: 0,
     });
-    console.log(
-      `Upserted ${SEED_STRATEGIES.length} strategies with ${navPointCount} NAV points (${days} days each).`
-    );
+    console.log(`Upserted ${SEED_STRATEGIES.length} strategies.`);
     summarize();
     console.log(`  catalogue now holds ${total} ${SEED_ENVIRONMENT} strategies in total.`);
 
@@ -686,7 +717,9 @@ async function main(): Promise<void> {
     if (wallets.skipped) {
       console.log("  no local organization found — run db:seed:local first, or sign in once.");
     } else {
-      console.log("  one organization, one program — other local orgs stay unlinked by design.");
+      console.log(
+        "  one seeded program on one organization — a seed choice, not a cap (the API takes many); other local orgs stay unlinked by design."
+      );
       if (wallets.moved) {
         console.log(
           "  (moved the seeded link off a previous org to follow the one you sign into.)"

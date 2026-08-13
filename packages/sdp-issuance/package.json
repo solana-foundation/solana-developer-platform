@@ -29,25 +29,15 @@
       "import": "./src/mosaic/utils.ts",
       "default": "./src/mosaic/utils.ts"
     },
-    "./alphaledger/service": {
-      "types": "./src/alphaledger/service.ts",
-      "import": "./src/alphaledger/service.ts",
-      "default": "./src/alphaledger/service.ts"
-    },
-    "./alphaledger/types": {
-      "types": "./src/alphaledger/types.ts",
-      "import": "./src/alphaledger/types.ts",
-      "default": "./src/alphaledger/types.ts"
-    },
-    "./alphaledger/financial-instrument": {
-      "types": "./src/alphaledger/financial-instrument.ts",
-      "import": "./src/alphaledger/financial-instrument.ts",
-      "default": "./src/alphaledger/financial-instrument.ts"
-    },
     "./capabilities": {
       "types": "./src/capabilities/index.ts",
       "import": "./src/capabilities/index.ts",
       "default": "./src/capabilities/index.ts"
+    },
+    "./workflows": {
+      "types": "./src/workflows/index.ts",
+      "import": "./src/workflows/index.ts",
+      "default": "./src/workflows/index.ts"
     },
     "./templates": {
       "types": "./src/templates/index.ts",
@@ -76,10 +66,10 @@
     "@solana/kit": "catalog:",
     "@solana/mosaic-sdk": "catalog:",
     "@solana/signers": "catalog:",
-    "@solana/token-acl-gate-sdk": "0.2.0"
+    "@solana/token-acl-gate-sdk": "0.3.0"
   },
   "devDependencies": {
     "tsx": "4.23.5",
-    "typescript": "^6.0.3"
+    "typescript": "6.0.3"
   }
 }
