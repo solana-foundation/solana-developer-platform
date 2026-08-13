@@ -1,4 +1,5 @@
 import type {
+  EarnMovementObservationSource,
   EarnPortfolioWithdrawal,
   EarnPortfolioWithdrawalStatus,
   EarnProgramMovementRecordStatus,
@@ -31,6 +32,14 @@ import { isTerminalEarnMovementStatus } from "./earn-movement-status";
  * guard closes the read-then-write race (braces), mirroring the two-layer
  * shape of applyRampSettlementEvent.
  */
+/**
+ * Observers of a withdrawal. `sdp_intent` is absent on purpose: the intent insert
+ * stamps that value itself, and anything reaching these appliers is by definition a
+ * later OBSERVATION, not the intent. `chain_indexer` is included because the end
+ * state observes both directions from chain.
+ */
+type ObservationSource = Exclude<EarnMovementObservationSource, "sdp_intent">;
+
 const ALLOWED_EARN_WITHDRAWAL_SOURCE_STATUSES = {
   processing: ["requested", "processing", "pending_approval"],
   pending_approval: ["requested", "processing", "pending_approval"],
@@ -49,8 +58,14 @@ const ALLOWED_EARN_WITHDRAWAL_SOURCE_STATUSES = {
  * is merged into provider_data for drift forensics — that merge is what keeps
  * this table useful without provider-specific columns.
  */
-function observationFields(observed: EarnPortfolioWithdrawal) {
+function observationFields(observed: EarnPortfolioWithdrawal, source: ObservationSource) {
   return {
+    // Stamped for BOTH directions, so `observed_via` means one thing everywhere:
+    // the mechanism that reported the row's CURRENT state. While only the deposit
+    // applier wrote it, a withdrawal advanced by a provider poll still read back
+    // `sdp_intent`, making the field mean "latest observer" for one direction and
+    // "original initiator" for the other.
+    observedVia: source,
     amountPaidUsd: observed.amountPaidUsd,
     feeUsd: observed.feeUsd,
     failureReason: observed.failureReason,
@@ -73,8 +88,10 @@ export async function applyEarnWithdrawalObservationToRow(params: {
   repo: EarnRepository;
   row: EarnProgramWithdrawalRow;
   observed: EarnPortfolioWithdrawal;
+  /** Which mechanism reported this state; defaults to the provider poll. */
+  source?: ObservationSource;
 }): Promise<EarnProgramWithdrawalRow | null> {
-  const { repo, row, observed } = params;
+  const { repo, row, observed, source = "provider_poll" } = params;
 
   if (isTerminalEarnMovementStatus(row.status)) {
     return row;
@@ -86,7 +103,7 @@ export async function applyEarnWithdrawalObservationToRow(params: {
     fromStatuses: ALLOWED_EARN_WITHDRAWAL_SOURCE_STATUSES[observed.status],
     toStatus: observed.status,
     providerReference: observed.withdrawalRef,
-    ...observationFields(observed),
+    ...observationFields(observed, source),
   });
 }
 
@@ -111,8 +128,10 @@ export async function applyEarnWithdrawalObservationByReference(params: {
    */
   walletId?: string;
   observed: EarnPortfolioWithdrawal;
+  /** Which mechanism reported this state; defaults to the provider poll. */
+  source?: ObservationSource;
 }): Promise<EarnProgramWithdrawalRow | null> {
-  const { repo, provider, organizationId, walletId, observed } = params;
+  const { repo, provider, organizationId, walletId, observed, source = "provider_poll" } = params;
 
   const row = await repo.getProgramWithdrawalByProviderReference({
     provider,
@@ -149,6 +168,6 @@ export async function applyEarnWithdrawalObservationByReference(params: {
     organizationId,
     fromStatuses: ALLOWED_EARN_WITHDRAWAL_SOURCE_STATUSES[observed.status],
     toStatus: observed.status,
-    ...observationFields(observed),
+    ...observationFields(observed, source),
   });
 }

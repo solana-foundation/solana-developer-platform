@@ -290,6 +290,15 @@ other's balance.
   `packages/sdp-earn/README.md` → "Withdrawals unwind in reverse").
 - Provider ids from DB rows are open strings — always dispatch via
   `resolveEarnProviderClient`.
+- `observed_via` means the SAME thing for both directions: the mechanism that
+  reported the row's current state. Both ledger services stamp it, so a withdrawal
+  advanced by a provider observation reports `provider_poll` rather than staying at
+  `sdp_intent` — that value survives only on an initiated row nothing has observed
+  yet. Migration 0057 keeps it (and `direction`/`occurred_at`) DEFAULTED, and ships
+  a writable `earn_program_withdrawals` view under the old name, because the deploy
+  runs migrations before updating the service and the runbook requires the previous
+  revision to keep working across the rollback window. Dropping those defaults and
+  the view is a later CONTRACT migration, not this one.
 - Movement-ledger writes happen in exactly four places, and all of them go
   through a ledger service — never a repository call straight from a handler: the
   withdrawal create + detail poll, the live deposits read's side effect, the

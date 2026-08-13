@@ -1992,13 +1992,58 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
       expect(withdrawalsBody.data.total).toBe(1);
       const [withdrawal] = withdrawalsBody.data.movements;
       expect(withdrawal?.direction).toBe("withdrawal");
-      expect(withdrawal?.observedVia).toBe("sdp_intent");
+      // The provider's acceptance response has already been applied by the create
+      // path, so the latest observer is the provider — see the observedVia test below.
+      expect(withdrawal?.observedVia).toBe("provider_poll");
       expect(withdrawal?.counterpartyAddress).toBe(SOLANA_DESTINATION);
       // The intent columns still exist for a movement SDP initiated...
       expect(withdrawal?.amountRequestedUsd).toBeDefined();
       // ...but the derivation internals never reach the wire.
       expect(withdrawal).not.toHaveProperty("requestId");
       expect(withdrawal).not.toHaveProperty("idempotencyFingerprint");
+    });
+
+    it("reports observedVia as the LATEST observer for withdrawals too, not the initiator", async () => {
+      // The wire contract says observedVia is the mechanism that reported the row's
+      // CURRENT state. While only the deposit applier wrote it, a withdrawal advanced
+      // by a provider poll still read back `sdp_intent` — so the field silently meant
+      // "latest observer" for one direction and "original initiator" for the other.
+      await seedAuth();
+      const program = await seedProgramWallet();
+      vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal").mockResolvedValue(
+        WITHDRAWAL
+      );
+      await requestEarn("POST", programPath(program.id, "/withdrawals"), createBody());
+
+      // `sdp_intent` is only ever the state of a row NOTHING has observed yet — the
+      // crash-window row whose provider call never came back. The create path
+      // applies the provider's acceptance response immediately, so by the time a
+      // caller can read this row the provider HAS reported its state.
+      const afterCreate = await requestEarn(
+        "GET",
+        programPath(program.id, "/movements?direction=withdrawal")
+      );
+      const createBody_ = (await afterCreate.json()) as {
+        data: { movements: Array<{ observedVia: string; status: string }> };
+      };
+      expect(createBody_.data.movements[0]?.observedVia).toBe("provider_poll");
+
+      // And a later observation keeps it current rather than reverting to the initiator.
+      vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWithdrawal").mockResolvedValue({
+        ...WITHDRAWAL,
+        status: "completed",
+      });
+      await requestEarn("GET", programPath(program.id, `/withdrawals/${WITHDRAWAL.withdrawalRef}`));
+
+      const afterObservation = await requestEarn(
+        "GET",
+        programPath(program.id, "/movements?direction=withdrawal")
+      );
+      const observedBody = (await afterObservation.json()) as {
+        data: { movements: Array<{ observedVia: string; status: string }> };
+      };
+      expect(observedBody.data.movements[0]?.status).toBe("completed");
+      expect(observedBody.data.movements[0]?.observedVia).toBe("provider_poll");
     });
 
     it("serves history with the provider's credentials removed — the exit-safety rule", async () => {

@@ -283,6 +283,13 @@ export interface UpdateEarnProgramWithdrawalStatusGuardedInput {
   organizationId: string;
   fromStatuses: readonly EarnProgramMovementRecordStatus[];
   toStatus: EarnProgramMovementRecordStatus;
+  /**
+   * Which mechanism reported this state. Present so `observed_via` means the SAME
+   * thing for both directions — the latest observer — rather than "latest observer"
+   * for deposits and "original initiator" for withdrawals, which is what it meant
+   * while only the deposit applier wrote it.
+   */
+  observedVia?: EarnMovementObservationSource;
   providerReference?: string;
   amountPaidUsd?: string | null;
   feeUsd?: string | null;
@@ -410,8 +417,26 @@ export interface EarnProgramMovementSum {
   direction: EarnMovementDirection;
   token: EarnPortfolioToken;
   movementCount: number;
-  /** USD decimal string, summed from the settled amount. */
+  /**
+   * Settled rows whose paid amount the provider never reported. Excluded from both
+   * sums below, because for such a row the amount that moved is UNKNOWN — booking
+   * the requested figure would overstate a partial payout, and booking zero would
+   * understate it. A caller reconciling a period must treat a non-zero count here
+   * as "this period is incomplete", not as an implicit zero.
+   */
+  unknownAmountCount: number;
+  /**
+   * USD decimal string: the money that actually moved, summed from the paid amount
+   * alone. Never falls back to the requested figure.
+   */
   totalUsd: string;
+  /**
+   * USD decimal string: provider fees on those same rows. Real wallet outflow —
+   * a withdrawal reduces the wallet by `totalUsd + totalFeeUsd`, so a period
+   * identity that ignores fees misclassifies every one of them as negative
+   * earnings. Always "0" for deposits, which carry no fee.
+   */
+  totalFeeUsd: string;
 }
 
 /**

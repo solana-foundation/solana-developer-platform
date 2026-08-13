@@ -81,11 +81,15 @@ ALTER TABLE earn_program_movements
                    TO earn_program_movements_status_check;
 
 -- direction: the DEFAULT backfills every existing row -- all of which ARE
--- withdrawals, because this table has never had another writer -- and is then
--- dropped, so no future insert can acquire a direction implicitly.
+-- withdrawals, because this table has never had another writer.
+--
+-- The default is RETAINED for the rollback window rather than dropped (see the
+-- EXPAND/CONTRACT block at the foot of this file): the previously-deployed
+-- revision inserts withdrawals without knowing this column exists, and its insert
+-- must keep working while it is still serving. The contract migration drops it,
+-- after which no insert can acquire a direction implicitly.
 ALTER TABLE earn_program_movements
     ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'withdrawal';
-ALTER TABLE earn_program_movements ALTER COLUMN direction DROP DEFAULT;
 
 ALTER TABLE earn_program_movements
     -- When the MONEY MOVED, as distinct from when SDP wrote the row (created_at).
@@ -102,11 +106,16 @@ ALTER TABLE earn_program_movements
     --
     -- WRITE-ONCE: no applier may update it. Every list and window sorts on it, and
     -- a mutable sort key re-shuffles pages under a reader (0056's header owns that
-    -- lesson). Deliberately NO DEFAULT even though it ends up NOT NULL: a default
-    -- would let a forgetful deposit writer silently record "now" instead of the
-    -- movement's own time, which is the exact bug this column exists to prevent.
-    -- The intent path names sdp_iso_now() inline in its INSERT instead, so
-    -- DB-stamping is preserved without making the mistake cheap.
+    -- lesson).
+    --
+    -- The DEFAULT is a rollback-window compatibility artifact, NOT the design: a
+    -- default lets a forgetful observed-movement writer silently record "now"
+    -- instead of the movement's own time, which is the exact bug this column exists
+    -- to prevent. It is here only because the previously-deployed revision inserts
+    -- withdrawals without this column, and for an INITIATED movement "now" is
+    -- correct anyway (intent IS the moment it began). The contract migration drops
+    -- it; the deposit insert path already supplies the value explicitly and a test
+    -- pins that, so dropping it changes no behaviour.
     --
     -- Provider timestamps MUST be normalized to the fixed-width shape
     -- sdp_iso_now() emits (0001: YYYY-MM-DDTHH24:MI:SS.MSZ) before they are
@@ -114,10 +123,12 @@ ALTER TABLE earn_program_movements
     -- "2026-08-12T00:00:00Z" (no milliseconds) or an offset would silently corrupt
     -- both range filters and page ordering.
     ADD COLUMN IF NOT EXISTS occurred_at TEXT,
-    -- Which MECHANISM reported this row's current state. Open TEXT, no CHECK --
-    -- see the header. Written once at insert and overwritten by each observation;
-    -- the DISCOVERING mechanism is preserved in provider_data.discoveredVia, which
-    -- the shallow JSONB merge never clobbers.
+    -- Which MECHANISM reported this row's current state, for EITHER direction.
+    -- Open TEXT, no CHECK -- see the header. Written at insert and overwritten by
+    -- each observation; the DISCOVERING mechanism is preserved in
+    -- provider_data.discoveredVia, which the shallow JSONB merge never clobbers.
+    -- The DEFAULT is retained for the rollback window (see the foot of this file):
+    -- an insert from the previous revision is by definition SDP intent.
     ADD COLUMN IF NOT EXISTS observed_via TEXT NOT NULL DEFAULT 'sdp_intent',
     -- A movement has two ends. destination_address was the only one a withdrawal
     -- needed; a deposit needs the other. Kept as two columns rather than collapsed
@@ -140,7 +151,7 @@ ALTER TABLE earn_program_movements
 
 UPDATE earn_program_movements SET occurred_at = created_at WHERE occurred_at IS NULL;
 ALTER TABLE earn_program_movements ALTER COLUMN occurred_at SET NOT NULL;
-ALTER TABLE earn_program_movements ALTER COLUMN observed_via DROP DEFAULT;
+ALTER TABLE earn_program_movements ALTER COLUMN occurred_at SET DEFAULT sdp_iso_now();
 
 -- A deposit is a customer-initiated SPL transfer: there is no SDP intent moment
 -- and no SDP actor, so request_id / idempotency_fingerprint / destination_address
@@ -209,7 +220,13 @@ ALTER TABLE earn_program_movements
     -- request_id and collide with a withdrawal on the intent unique.
     ADD CONSTRAINT earn_program_movements_deposit_has_no_intent
         CHECK (direction <> 'deposit'
-               OR (request_id IS NULL AND idempotency_fingerprint IS NULL)),
+               OR (request_id IS NULL
+                   AND idempotency_fingerprint IS NULL
+                   AND project_id IS NULL
+                   AND amount_requested_usd IS NULL
+                   AND destination_address IS NULL
+                   AND created_by IS NULL
+                   AND initiated_by_key_id IS NULL)),
 
     -- 'requested' is SDP-only pre-provider intent state. Only a movement SDP
     -- initiates has one; a deposit is born from an observation, and may even be
@@ -308,3 +325,72 @@ CREATE INDEX IF NOT EXISTS idx_earn_program_movements_wallet_occurred
 -- sequential scan is correct and cheaper than maintaining another index on a table
 -- that only grows by explicit program creation. If program count ever reaches
 -- thousands, add (environment, created_at, id) THEN -- not now.
+
+-- ============================================================================
+-- EXPAND/CONTRACT: keeping the PREVIOUS revision working across the rollback
+-- window (docs/ops/release-operations.md -> "Schema compatibility").
+-- ============================================================================
+--
+-- The deploy runs the migration job and THEN updates the Cloud Run service, so
+-- between those two steps the previously-built image is still serving against this
+-- schema — and the runbook requires a release to stay compatible for the whole
+-- rollback window: "avoid deleting or renaming data that the previous release
+-- reads", and "separate destructive cleanup into a later release".
+--
+-- This migration renames a table that revision reads and writes, which on its own
+-- would break withdrawal create/detail/list the moment it commits and would make
+-- the documented image rollback unusable. Feature flags are NOT the answer here:
+-- whether the old revision touches the table depends on MARKETS_ENABLED and
+-- EARN_ENABLED being off in a given environment, which is a runtime fact this
+-- migration cannot assert — and PRO-1655 exists precisely to run Earn work in a
+-- deployed environment.
+--
+-- So the EXPAND half ships here:
+--
+-- 1. A compatibility VIEW under the OLD NAME, presenting exactly 0055's column
+--    list over this table's withdrawal rows. It is a simple single-table view with
+--    no aggregate, DISTINCT, GROUP BY or window function, so PostgreSQL makes it
+--    AUTO-UPDATABLE: the old revision's SELECT, INSERT, UPDATE and DELETE all keep
+--    working through it unchanged, with no trigger machinery to get wrong.
+-- 2. The three new NOT NULL columns keep their DEFAULTS (above), because the old
+--    revision's INSERT does not mention them. Their defaults are exactly right for
+--    an initiated movement: direction 'withdrawal', observed_via 'sdp_intent', and
+--    occurred_at = now (intent IS when the movement began).
+-- 3. WITH CHECK OPTION so a write through the view cannot create a row that falls
+--    outside it — a row this view could insert but never read back would be a
+--    withdrawal invisible to the very revision that wrote it.
+--
+-- The CONTRACT half is a LATER migration, once the rollback window for this
+-- release has expired: DROP VIEW earn_program_withdrawals, then drop the three
+-- defaults. Nothing in the new revision reads the view — it targets
+-- earn_program_movements directly — so the contract step is pure cleanup.
+--
+-- Note the view deliberately does NOT expose the new columns. The old revision
+-- cannot use them, and a narrower surface is what keeps it auto-updatable and
+-- keeps `SELECT *` in that revision returning the shape it was compiled against.
+DROP VIEW IF EXISTS earn_program_withdrawals;
+CREATE VIEW earn_program_withdrawals AS
+    SELECT id,
+           organization_id,
+           project_id,
+           wallet_id,
+           provider,
+           status,
+           amount_requested_usd,
+           amount_paid_usd,
+           fee_usd,
+           token,
+           destination_address,
+           failure_reason,
+           request_id,
+           idempotency_fingerprint,
+           provider_reference,
+           provider_data,
+           created_by,
+           initiated_by_key_id,
+           created_at,
+           updated_at,
+           completed_at
+      FROM earn_program_movements
+     WHERE direction = 'withdrawal'
+    WITH CHECK OPTION;

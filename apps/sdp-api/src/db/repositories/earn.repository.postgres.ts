@@ -498,6 +498,10 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       // updated_at is DB-stamped (earn convention), never caller-supplied.
       const assignments = ["status = ?", "updated_at = sdp_iso_now()"];
       const assignmentValues: unknown[] = [input.toStatus];
+      if (input.observedVia !== undefined) {
+        assignments.push("observed_via = ?");
+        assignmentValues.push(input.observedVia);
+      }
       if (input.providerReference !== undefined) {
         assignments.push("provider_reference = ?");
         assignmentValues.push(input.providerReference);
@@ -790,11 +794,33 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       // own mappers.
       const page = await db
         .prepare(
+          // The SETTLED WALLET-FLOW definition, and the only one any period
+          // accounting may use:
+          //   * `total_usd` sums amount_paid_usd ALONE — what the provider says
+          //     actually moved. It never falls back to the requested figure,
+          //     because for a partially_completed row the request is precisely the
+          //     amount that did NOT move.
+          //   * `total_fee_usd` is summed SEPARATELY and is real wallet outflow: a
+          //     withdrawal reduces the wallet by paid + fee, so omitting fees
+          //     misclassifies every one of them as negative earnings in
+          //     "delta balance - net movements = earnings". Deposits carry no fee.
+          //   * a settled row whose paid amount is missing is UNKNOWN, not zero and
+          //     not the request. Those rows are excluded from both sums and counted
+          //     in `unknown_amount_count`, so a caller can see that a period is
+          //     incomplete instead of silently reporting a wrong total.
           `SELECT direction,
                   token,
                   COUNT(*)::int AS movement_count,
-                  COALESCE(SUM(COALESCE(amount_paid_usd, amount_requested_usd)::numeric), 0)::text
-                    AS total_usd
+                  COUNT(*) FILTER (WHERE amount_paid_usd IS NULL)::int
+                    AS unknown_amount_count,
+                  COALESCE(
+                    SUM(amount_paid_usd::numeric) FILTER (WHERE amount_paid_usd IS NOT NULL),
+                    0
+                  )::text AS total_usd,
+                  COALESCE(
+                    SUM(COALESCE(fee_usd, '0')::numeric) FILTER (WHERE amount_paid_usd IS NOT NULL),
+                    0
+                  )::text AS total_fee_usd
              FROM earn_program_movements
             WHERE organization_id = ?
               AND wallet_id = ?
@@ -820,7 +846,9 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         direction: row.direction as EarnMovementDirection,
         token: row.token as EarnPortfolioToken,
         movementCount: row.movement_count as number,
+        unknownAmountCount: row.unknown_amount_count as number,
         totalUsd: row.total_usd as string,
+        totalFeeUsd: row.total_fee_usd as string,
       }));
     },
 

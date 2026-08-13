@@ -1775,6 +1775,103 @@ describe("EarnRepository (postgres)", () => {
       });
     });
 
+    it("rejects a raw deposit carrying ANY intent or actor column", async () => {
+      // The advertised invariant is that a deposit carries no intent and no SDP
+      // actor. Proving the WRITER omits them is not the same as proving the row
+      // shape is unrepresentable — mapProgramDepositRow hard-codes these to null on
+      // read, so without a DB constraint a corrupt row would be silently hidden from
+      // every caller. Raw SQL on purpose: it bypasses the writer entirely.
+      const intentColumns = [
+        ["request_id", "'r_x'"],
+        ["idempotency_fingerprint", "'f_x'"],
+        ["project_id", `'${TEST_PROJECT_ID}'`],
+        ["amount_requested_usd", "'10.00'"],
+        ["destination_address", `'${DESTINATION}'`],
+        ["created_by", `'${TEST_USER.id}'`],
+        ["initiated_by_key_id", "'key_x'"],
+      ] as const;
+
+      for (const [column, value] of intentColumns) {
+        await expect(
+          getDb(env)
+            .prepare(
+              `INSERT INTO earn_program_movements
+                 (id, organization_id, wallet_id, provider, direction, status,
+                  observed_via, occurred_at, amount_paid_usd, token, provider_reference, ${column})
+               VALUES (?, ?, ?, 'veda', 'deposit', 'processing', 'provider_poll',
+                       '2026-08-12T09:00:00.000Z', '1.00', 'usdc', ?, ${value})`
+            )
+            .bind(`earn_program_deposit_bad_${column}`, TEST_ORG.id, wallet.id, `dep_bad_${column}`)
+            .run(),
+          `a deposit must not be writable with ${column}`
+        ).rejects.toThrow();
+      }
+    });
+
+    it("keeps the previous revision's withdrawal SQL working through the compatibility view", async () => {
+      // Deploy runs migrations BEFORE updating the service, and the release runbook
+      // requires compatibility across the rollback window. 0057 renames the table
+      // the previous revision reads and writes, so it also ships a writable view
+      // under the OLD name. This pins that the old revision's three operations —
+      // its INSERT (which does not mention the new columns), its replay SELECT, and
+      // its guarded CAS UPDATE — all still work, and that deposits stay invisible to it.
+      const db = getDb(env);
+      const oldShapeId = `earn_program_withdrawal_${crypto.randomUUID()}`;
+
+      await db
+        .prepare(
+          `INSERT INTO earn_program_withdrawals
+             (id, organization_id, project_id, wallet_id, provider,
+              amount_requested_usd, token, destination_address,
+              request_id, idempotency_fingerprint, provider_data, created_by, initiated_by_key_id)
+           VALUES (?, ?, ?, ?, 'veda', '100.00', 'usdc', ?, ?, '{}', ?::jsonb, ?, NULL)`
+        )
+        .bind(
+          oldShapeId,
+          TEST_ORG.id,
+          TEST_PROJECT_ID,
+          wallet.id,
+          DESTINATION,
+          `req_${oldShapeId}`,
+          "{}",
+          TEST_USER.id
+        )
+        .run();
+
+      const replay = await db
+        .prepare(
+          `SELECT id, status FROM earn_program_withdrawals
+             WHERE organization_id = ? AND wallet_id = ? AND request_id = ?`
+        )
+        .bind(TEST_ORG.id, wallet.id, `req_${oldShapeId}`)
+        .first<{ id: string; status: string }>();
+      expect(replay).toEqual({ id: oldShapeId, status: "requested" });
+
+      const advanced = await db
+        .prepare(
+          `UPDATE earn_program_withdrawals
+              SET status = 'processing', updated_at = sdp_iso_now(), provider_reference = 'wd_old'
+            WHERE organization_id = ? AND status = ANY(?) AND id = ?
+            RETURNING status`
+        )
+        .bind(TEST_ORG.id, ["requested"], oldShapeId)
+        .first<{ status: string }>();
+      expect(advanced?.status).toBe("processing");
+
+      // The new columns were defaulted correctly for an INITIATED movement.
+      const underlying = await readRawRow(oldShapeId);
+      expect(underlying).toMatchObject({ direction: "withdrawal", observed_via: "sdp_intent" });
+      expect(underlying?.occurred_at).toBeTruthy();
+
+      // ...and a deposit is not visible through the withdrawal-shaped view.
+      await seedDeposit({ providerReference: "dep_invisible_to_old_revision" });
+      const oldRevisionSees = await db
+        .prepare("SELECT COUNT(*)::int AS total FROM earn_program_withdrawals WHERE wallet_id = ?")
+        .bind(wallet.id)
+        .first<{ total: number }>();
+      expect(oldRevisionSees?.total).toBe(1);
+    });
+
     describe("sumProgramMovementsByDirection", () => {
       it("nets BOTH directions per token, counting partially_completed and the requested fallback", async () => {
         // The movement half of PRO-1672's identity (delta balance - net movements
@@ -1815,6 +1912,7 @@ describe("EarnRepository (postgres)", () => {
           fromStatuses: ["requested"],
           toStatus: "completed",
           amountPaidUsd: "118.00",
+          feeUsd: "1.00",
         });
 
         // partially_completed moved REAL money and must be counted.
@@ -1838,6 +1936,7 @@ describe("EarnRepository (postgres)", () => {
           fromStatuses: ["requested"],
           toStatus: "partially_completed",
           amountPaidUsd: "30.00",
+          feeUsd: "0.50",
         });
 
         // Terminal but moved NOTHING — must be excluded from the net.
@@ -1879,11 +1978,34 @@ describe("EarnRepository (postgres)", () => {
         });
 
         expect(sums).toEqual([
-          { direction: "deposit", token: "usdc", movementCount: 1, totalUsd: "300.00" },
-          { direction: "deposit", token: "usdt", movementCount: 1, totalUsd: "50.00" },
+          {
+            direction: "deposit",
+            token: "usdc",
+            movementCount: 1,
+            unknownAmountCount: 0,
+            totalUsd: "300.00",
+            totalFeeUsd: "0",
+          },
+          {
+            direction: "deposit",
+            token: "usdt",
+            movementCount: 1,
+            unknownAmountCount: 0,
+            totalUsd: "50.00",
+            totalFeeUsd: "0",
+          },
           // 118.00 paid + 30.00 partially paid; the failed 999.00 is excluded, and
-          // the settled figures win over the requested ones.
-          { direction: "withdrawal", token: "usdc", movementCount: 2, totalUsd: "148.00" },
+          // the settled figures win over the requested ones. Fees are summed
+          // SEPARATELY and are real wallet outflow: the wallet fell by 148.00 + 1.50,
+          // and folding the fee into earnings instead would misreport every payout.
+          {
+            direction: "withdrawal",
+            token: "usdc",
+            movementCount: 2,
+            unknownAmountCount: 0,
+            totalUsd: "148.00",
+            totalFeeUsd: "1.50",
+          },
         ]);
       });
 
@@ -1912,7 +2034,14 @@ describe("EarnRepository (postgres)", () => {
 
         expect(august).toEqual([]);
         expect(september).toEqual([
-          { direction: "deposit", token: "usdc", movementCount: 1, totalUsd: "10.00" },
+          {
+            direction: "deposit",
+            token: "usdc",
+            movementCount: 1,
+            unknownAmountCount: 0,
+            totalUsd: "10.00",
+            totalFeeUsd: "0",
+          },
         ]);
       });
 
@@ -1946,7 +2075,14 @@ describe("EarnRepository (postgres)", () => {
         });
 
         expect(sums).toEqual([
-          { direction: "deposit", token: "usdc", movementCount: 1, totalUsd: "100.00" },
+          {
+            direction: "deposit",
+            token: "usdc",
+            movementCount: 1,
+            unknownAmountCount: 0,
+            totalUsd: "100.00",
+            totalFeeUsd: "0",
+          },
         ]);
       });
     });

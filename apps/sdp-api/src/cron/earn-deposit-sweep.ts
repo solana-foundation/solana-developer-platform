@@ -372,19 +372,22 @@ async function sweepWallet(
       return;
     }
     cursor = page.nextCursor;
-  }
 
-  // Hit the cap mid-walk. Persist where we stopped so the next pass makes forward
-  // progress instead of re-walking the same pages forever.
-  if (cursor !== undefined) {
+    // Persist after EVERY completed page, not once at the end of the loop.
+    // Otherwise a deterministic failure on page 2 is unrecoverable: the wallet-level
+    // catch swallows it, nothing was persisted, and every later tick restarts at
+    // page 1 and dies in the same place — so no deposit beyond page 1 can ever
+    // reach the audit ledger. Writing here converts that into forward progress:
+    // the next tick resumes past the pages that DID succeed.
     await cache.put(cursorKey, cursor, {
       expirationTtl: EARN_DEPOSIT_SWEEP_CURSOR_TTL_SECONDS,
     });
-    getLogger().info(
-      { walletId: wallet.id, pages },
-      "sweepEarnDeposits: page cap reached, resuming next pass"
-    );
   }
+
+  getLogger().info(
+    { walletId: wallet.id, pages },
+    "sweepEarnDeposits: page cap reached, resuming next pass"
+  );
 }
 
 export interface EarnDepositSweepDeps {

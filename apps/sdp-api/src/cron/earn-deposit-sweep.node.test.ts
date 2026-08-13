@@ -395,9 +395,40 @@ describe("runEarnDepositSweepIfDue", () => {
 
     await expect(runEarnDepositSweepIfDue(env)).resolves.toBe("swept");
 
+    // The point is FORWARD PROGRESS, so assert the put, not merely the absence of a
+    // delete: page 1 succeeded, so its nextCursor must be persisted even though
+    // page 2 then failed. Without it a deterministic page-2 failure would restart at
+    // page 1 on every future tick and no later deposit could ever be recorded.
+    expect(mocks.put).toHaveBeenCalledWith(
+      "cron:earn-deposit-sweep:cursor:earn_provider_wallet_1",
+      "page2",
+      { expirationTtl: expect.any(Number) }
+    );
     expect(mocks.del).not.toHaveBeenCalledWith(
       "cron:earn-deposit-sweep:cursor:earn_provider_wallet_1"
     );
+  });
+
+  it("persists each completed page's cursor as it walks, not once at the end", async () => {
+    mocks.scanProviderWallets.mockImplementation(
+      async ({ environment }: { environment: string }) =>
+        environment === "sandbox" ? [makeWallet()] : []
+    );
+    const listPortfolioDeposits = vi
+      .fn()
+      .mockResolvedValueOnce({ deposits: [DEPOSIT], nextCursor: "page2" })
+      .mockResolvedValueOnce({ deposits: [DEPOSIT], nextCursor: "page3" })
+      .mockResolvedValueOnce({ deposits: [DEPOSIT], nextCursor: null });
+    mocks.resolveEarnProviderClient.mockReturnValue(makeClient(listPortfolioDeposits));
+
+    await runEarnDepositSweepIfDue(env);
+
+    const cursorsPersisted = mocks.put.mock.calls
+      .filter((call) => call[0] === "cron:earn-deposit-sweep:cursor:earn_provider_wallet_1")
+      .map((call) => call[1]);
+    expect(cursorsPersisted).toEqual(["page2", "page3"]);
+    // ...and the completed walk clears it, so the next pass starts at the head.
+    expect(mocks.del).toHaveBeenCalledWith("cron:earn-deposit-sweep:cursor:earn_provider_wallet_1");
   });
 
   it("resumes a wallet from its persisted cursor", async () => {

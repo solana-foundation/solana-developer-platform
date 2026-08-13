@@ -443,7 +443,12 @@ export interface EarnProgramMovementRecord {
   /** Provider-side id: the withdrawal ref, or the provider's own deposit id. */
   providerReference?: string;
   failureReason?: string;
-  /** Which mechanism reported this row's current state. */
+  /**
+   * Which mechanism reported this row's CURRENT state — the same meaning for both
+   * directions. `sdp_intent` therefore appears only on an initiated movement no
+   * observer has reached yet (the crash-window row whose provider call never
+   * returned); once anything observes it, this names that observer.
+   */
   observedVia: EarnMovementObservationSource;
   /**
    * When the money moved — NOT when SDP recorded it. This is the ordering key and
