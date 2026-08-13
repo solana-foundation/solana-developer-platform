@@ -3,7 +3,7 @@ import type { Context, Next } from "hono";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
 import { verifyClerkJwtForRequest } from "@/lib/clerk-token";
 import { getClientIp } from "@/lib/client-ip";
-import { rateLimited } from "@/lib/errors";
+import { rateLimited, serviceUnavailable } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { matchesFreePath } from "./path-match";
@@ -21,6 +21,14 @@ export const RATE_LIMIT_TIERS = {
 const ANONYMOUS_MAX_REQUESTS = 20;
 
 /**
+ * Per-user-per-org ceiling for dashboard traffic (Clerk JWT or cookie
+ * session). Dashboard pages fan out many BFF calls in parallel, so this sits
+ * well above interactive use while still bounding a scripted session; costly
+ * endpoints layer tighter metered quotas on top (see metered-quota.ts).
+ */
+export const DASHBOARD_ACTOR_MAX_REQUESTS = 300;
+
+/**
  * Per-IP ceiling for requests that present an sk_-shaped credential. Keyed
  * traffic gets its real limit per key id after auth (enforceRateLimit in the
  * auth middleware), so the anonymous limit must not apply — it would cap
@@ -28,6 +36,14 @@ const ANONYMOUS_MAX_REQUESTS = 20;
  * IP ceiling still bounds invalid-key spray against the KV/DB lookup in auth.
  */
 export const KEYED_IP_BACKSTOP_MAX_REQUESTS = Math.max(...Object.values(RATE_LIMIT_TIERS)) * 5;
+
+/**
+ * Per-user ceiling for verified Clerk dashboard traffic. Set well above what a person
+ * driving the UI produces — a dashboard page can fan out to a dozen endpoints, and the
+ * notification bell polls on a timer — so this is a runaway-loop backstop, not a
+ * throttle anyone should meet while using the product.
+ */
+export const CLERK_USER_MAX_REQUESTS = 600;
 
 /**
  * Builds the KV key for one identifier's counter in one window bucket.
@@ -134,12 +150,24 @@ function looksLikeClerkJwt(token: string, env: Env): boolean {
  * @param token - JWT-shaped bearer token.
  * @returns True when verification succeeds; false on any verification error.
  */
-async function isVerifiedClerkJwt(c: Context<{ Bindings: Env }>, token: string): Promise<boolean> {
+/**
+ * The verified Clerk user id, or null when the token isn't a valid Clerk JWT.
+ *
+ * Dashboard traffic used to skip rate limiting entirely, which left every authenticated
+ * endpoint unbounded per user: a signed-in caller could loop rule creation or execution
+ * decisions (each several queries plus a write), and a `notify` rule turns that into
+ * unbounded outbound email. Verification is already cached per request by
+ * `verifyClerkJwtForRequest`, so keying on the user costs nothing extra.
+ */
+async function verifiedClerkUserId(
+  c: Context<{ Bindings: Env }>,
+  token: string
+): Promise<string | null> {
   try {
-    await verifyClerkJwtForRequest(c, token);
-    return true;
+    const payload = await verifyClerkJwtForRequest(c, token);
+    return payload.sub ?? null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -158,25 +186,43 @@ async function isVerifiedClerkJwt(c: Context<{ Bindings: Env }>, token: string):
  * Side effects: sets the X-RateLimit-Limit/-Remaining/-Reset response headers
  * (Remaining reserves one slot for the in-flight request), and on admission
  * increments the current bucket's counter with a 2x-window TTL so it survives
- * long enough to serve as the next bucket's "previous". A failed counter
- * write logs and fails open. Rejected requests do not increment the counter.
+ * long enough to serve as the next bucket's "previous". Rejected requests do
+ * not increment the counter.
+ *
+ * Storage failure semantics are chosen per call site: by default a failed
+ * counter read/write logs and fails open, keeping cheap traffic flowing
+ * through a KV outage. Costly or side-effecting operations pass
+ * `failClosed: true`, which turns a missing KV binding or a storage error
+ * into a 503 — an unmetered request to a paid upstream is worse than a
+ * refused one.
  *
  * @param c - Request context; c.var.kv must be populated by kvStoreMiddleware.
  * @param identifier - Counter scope: client IP for anonymous traffic, API key
  *   id for keyed traffic.
  * @param maxRequests - Maximum admitted requests per window; the auth
  *   middleware passes RATE_LIMIT_TIERS[key.rateLimitTier].
+ * @param options - failClosed: reject with 503 instead of admitting when the
+ *   counter store is unavailable.
  * @returns Resolves once the request is admitted and the counter incremented.
  * @throws AppError RATE_LIMITED (429) with a Retry-After header when the
- *   estimated count has reached maxRequests.
+ *   estimated count has reached maxRequests; AppError SERVICE_UNAVAILABLE
+ *   (503) when failClosed is set and the counter store is unavailable.
  */
 export async function enforceRateLimit(
   c: Context<{ Bindings: Env }>,
   identifier: string,
-  maxRequests: number
+  maxRequests: number,
+  options: { failClosed?: boolean } = {}
 ): Promise<void> {
   const kv = c.var.kv?.rateLimits;
   if (!kv) {
+    if (options.failClosed) {
+      getLogger().error(
+        { event: "sdp_api_rate_limit_unavailable", identifier, reason: "kv_missing" },
+        "Rate limit store unavailable; failing closed"
+      );
+      throw serviceUnavailable("Rate limiting is unavailable; request refused");
+    }
     return;
   }
 
@@ -197,11 +243,18 @@ export async function enforceRateLimit(
       expirationTtl: Math.ceil((RATE_LIMIT_WINDOW_MS * 2) / 1000),
     })
     .catch((err) => {
-      getLogger().error({ error: err }, "Failed to update rate limit");
+      getLogger().error({ error: err, identifier }, "Failed to update rate limit");
       return null;
     });
 
   if (!admission) {
+    if (options.failClosed) {
+      getLogger().error(
+        { event: "sdp_api_rate_limit_unavailable", identifier, reason: "storage_error" },
+        "Rate limit store unavailable; failing closed"
+      );
+      throw serviceUnavailable("Rate limiting is unavailable; request refused");
+    }
     return;
   }
 
@@ -226,10 +279,11 @@ export async function enforceRateLimit(
  * Pre-auth rate limiting middleware. Paths matching an exempt pattern pass
  * straight through (exact, segment-prefix, or single-segment `*` wildcard —
  * see matchesFreePath; bare `startsWith` would mis-skip the whole API when
- * `/` is listed). For everything else: verified Clerk dashboard JWTs are
- * exempt, sk_-shaped requests get the high per-IP backstop (their real limit
- * is enforced per key after auth via enforceRateLimit), and everything else
- * gets the anonymous per-IP limit.
+ * `/` is listed). For everything else: verified Clerk dashboard JWTs get a
+ * generous per-user limit (not an exemption — see CLERK_USER_MAX_REQUESTS),
+ * sk_-shaped requests get the high per-IP backstop (their real limit is
+ * enforced per key after auth via enforceRateLimit), and everything else gets
+ * the anonymous per-IP limit.
  *
  * Requires c.var.kv to be populated (by kvStoreMiddleware) on non-exempt
  * paths, so every path kv-store skips must be listed here too — the
@@ -249,11 +303,16 @@ export function skipRateLimitPaths(...paths: string[]) {
 
     const bearerToken = extractBearerToken(c);
     if (bearerToken && looksLikeJwt(bearerToken) && looksLikeClerkJwt(bearerToken, c.env)) {
-      const isClerkToken = await isVerifiedClerkJwt(c, bearerToken);
-      if (isClerkToken) {
+      const clerkUserId = await verifiedClerkUserId(c, bearerToken);
+      if (clerkUserId) {
+        // Per user, not per IP: an office behind one NAT address is many people, and
+        // the dashboard's own background polling would otherwise pool against them.
+        await enforceRateLimit(c, `clerk:${clerkUserId}`, CLERK_USER_MAX_REQUESTS);
         await next();
         return;
       }
+      // A JWT-shaped token that fails verification falls through to the anonymous
+      // limit below, which is what bounds signature-spray against the JWKS check.
     }
 
     const apiKey = extractApiKey(c);

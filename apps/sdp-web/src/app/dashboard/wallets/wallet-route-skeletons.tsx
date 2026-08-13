@@ -48,20 +48,26 @@ function MetadataRows({ count = 4 }: { count?: 3 | 4 }) {
 
 function WalletCardSkeleton() {
   return (
-    <article className="flex min-h-[340px] flex-col rounded-2xl border border-border-default bg-surface-raised p-5">
-      <Pulse className="size-14 rounded-full" />
-      <Pulse className="mt-4 h-3 w-20" />
-      <Pulse className="mt-2 h-8 w-40" />
-      <div className="mt-6 space-y-3 rounded-xl border border-border-subtle bg-fill-subtle p-3">
-        {FOUR_ITEMS.map((row) => (
-          <div key={row} className="flex items-center justify-between gap-4">
-            <Pulse className="h-3.5 w-16" />
-            <Pulse className="h-3.5 w-24" />
+    <article className="flex flex-col rounded-2xl border border-border-default bg-surface-raised p-5">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <Pulse className="size-14 rounded-full" />
+          <div>
+            <Pulse className="h-3 w-20" />
+            <Pulse className="mt-2 h-7 w-36" />
           </div>
-        ))}
+        </div>
+        <Pulse className="h-6 w-20" />
       </div>
-      <div className="mt-auto pt-3">
-        <Pulse className="h-11 w-full rounded-[10px]" />
+      <div className="mt-5 space-y-1.5">
+        <div className="flex h-6 items-center justify-between gap-3">
+          <Pulse className="h-3 w-14" />
+          <Pulse className="h-3 w-28" />
+        </div>
+        <div className="flex h-6 items-center justify-between gap-3">
+          <Pulse className="h-3 w-16" />
+          <Pulse className="h-3 w-32" />
+        </div>
       </div>
     </article>
   );

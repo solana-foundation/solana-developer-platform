@@ -5,13 +5,13 @@ import { conflict } from "@/lib/errors";
  * Turn a caller's `Idempotency-Key` into the stable request id a provider
  * dedupes on.
  *
- * For a keyed insert SDP owns (payments transfers), replay is resolved against
- * our own row and its fingerprint. A provider-executed money movement that SDP
- * stores no row for has no such anchor — the PROVIDER is the only party that
- * can collapse a duplicate, and it does so on the request id it was sent. So
- * the caller's key has to survive into that id unchanged across retries, which
- * `crypto.randomUUID()` by definition cannot: a fresh id per attempt is a fresh
- * money movement.
+ * For a keyed insert SDP owns (payments transfers, earn withdrawal intents),
+ * replay is resolved against our own row and its fingerprint. For a
+ * provider-executed money movement the provider ALSO dedupes on the request id
+ * it was sent — that second layer is what closes the crash window between our
+ * insert and the provider's acceptance. So the caller's key has to survive
+ * into that id unchanged across retries, which `crypto.randomUUID()` by
+ * definition cannot: a fresh id per attempt is a fresh money movement.
  *
  * Derivation is a SHA-256 over the scope plus the key. Scope parts keep the
  * same key in two different places from colliding into one provider request;
@@ -135,5 +135,27 @@ export const buildTransferBatchFingerprint = (input: TransferBatchFingerprintInp
       token: input.token,
       recipients: input.recipients,
       options: input.options ?? null,
+    })
+  );
+
+export interface EarnWithdrawalFingerprintInput {
+  providerWalletRef: string;
+  amountUsd: string;
+  token: string;
+  destinationAddress: string;
+}
+
+export const buildEarnWithdrawalFingerprint = (input: EarnWithdrawalFingerprintInput): string =>
+  JSON.stringify(
+    normalizeForFingerprint({
+      scope: "earn_program_withdrawal",
+      providerWalletRef: input.providerWalletRef,
+      // Normalized exactly as the provider wire is: portfolio clients send
+      // amountUsd as a JSON number, so '100' and '100.00' are one request to
+      // the provider and must be one fingerprint — SDP's conflict judgment
+      // must never be stricter than the provider request it guards.
+      amountUsd: String(Number(input.amountUsd)),
+      token: input.token,
+      destinationAddress: input.destinationAddress,
     })
   );

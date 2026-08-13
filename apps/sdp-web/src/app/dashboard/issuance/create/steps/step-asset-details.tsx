@@ -22,6 +22,7 @@ import { CustomFieldRows, DetailField, FormCard, TextField } from "../form-primi
 import type { DraftState } from "../issuance-draft-wizard.types";
 import { MetadataJsonPanel, MetadataJsonToggle } from "../metadata-json";
 import { useIssuanceDraft } from "../use-issuance-draft";
+import { WorkflowPreview } from "../workflow-preview";
 
 const TAB_IDS = ["overview", "compliance", "operational", "custom"] as const;
 
@@ -274,6 +275,12 @@ export function StepAssetDetails({
             onAccessControlChange={(accessControl) => updateDraft({ accessControl })}
             accessControlDocsHref={ACCESS_CONTROL_DOCS_HREF}
             deployConfig={deployConfig}
+          />
+          <WorkflowPreview
+            category={draft.assetCategory}
+            type={draft.assetType}
+            settings={draft.advancedSettings}
+            accessControl={draft.accessControl}
           />
         </div>
       ) : null}

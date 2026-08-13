@@ -2,11 +2,12 @@
 
 import { UserButton } from "@clerk/nextjs";
 import { ArrowLeftIcon, PanelRightIcon } from "lucide-react";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
-import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
 import { LanguagePicker } from "@/components/language-picker";
+import { NotificationBell } from "@/components/notification-bell";
 import { Badge } from "@/components/ui/badge";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
@@ -33,6 +34,8 @@ type DashboardTopBarProps = {
   centeredTitle?: string;
   topBarLeadingContent?: ReactNode;
   hasHeaderTabs?: boolean;
+  // Notifications ship with the asset-profiles feature (its only producer today).
+  showNotifications?: boolean;
 };
 
 export function HeaderBackAction({
@@ -45,7 +48,7 @@ export function HeaderBackAction({
   compactOnMobile?: boolean;
 }) {
   return (
-    <DashboardNavigationLink
+    <Link
       href={href}
       className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary"
     >
@@ -58,7 +61,7 @@ export function HeaderBackAction({
       >
         {label}
       </span>
-    </DashboardNavigationLink>
+    </Link>
   );
 }
 
@@ -165,6 +168,7 @@ export function DashboardTopBar({
   centeredTitle,
   topBarLeadingContent,
   hasHeaderTabs = false,
+  showNotifications = false,
 }: DashboardTopBarProps) {
   const t = useTranslations();
   const { sdpEnvironment } = useDashboardWorkspace();
@@ -176,6 +180,14 @@ export function DashboardTopBar({
     </>
   ) : null;
   const centersPageTitle = !hasHeaderTabs && !hideTitle;
+  const trailingContent = (
+    <>
+      <LanguagePicker />
+      {showNotifications ? <NotificationBell /> : null}
+      <UserButton />
+      {sandboxBadge}
+    </>
+  );
 
   if (centeredTitle || centersPageTitle) {
     return (
@@ -190,13 +202,7 @@ export function DashboardTopBar({
             {topBarLeadingContent}
           </>
         }
-        trailingContent={
-          <>
-            <LanguagePicker />
-            <UserButton />
-            {sandboxBadge}
-          </>
-        }
+        trailingContent={trailingContent}
       />
     );
   }
@@ -215,13 +221,7 @@ export function DashboardTopBar({
           {topBarLeadingContent}
         </>
       }
-      trailingContent={
-        <>
-          <LanguagePicker />
-          <UserButton />
-          {sandboxBadge}
-        </>
-      }
+      trailingContent={trailingContent}
     />
   );
 }
@@ -508,7 +508,22 @@ function getIntegrationsPageConfig(
   if (pathname.startsWith("/dashboard/integrations")) {
     // Card-grid page: fill the shell's wide container instead of stacking a
     // second max-width inside the centered default and stranding gutters.
-    return { title: t("Shared.dashboardShell.integrations"), contentWidthClass: "max-w-7xl" };
+    return {
+      title: t("Shared.dashboardShell.integrations"),
+      // The family axis rides the header tabs like policies; the catalog keeps
+      // status and search as its own secondary filters.
+      headerTabs: {
+        tabs: [
+          { id: "all", label: t("Shared.integrations.filterAllFamilies") },
+          { id: "custody", label: t("Shared.integrations.custodyTitle") },
+          { id: "rpc", label: t("Shared.integrations.rpcTitle") },
+          { id: "ramps", label: t("Shared.integrations.rampsTitle") },
+          { id: "compliance", label: t("Shared.integrations.complianceTitle") },
+        ],
+        hideOnMobile: false,
+      },
+      contentWidthClass: "max-w-7xl",
+    };
   }
   return null;
 }

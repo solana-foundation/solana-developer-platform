@@ -29,7 +29,7 @@ The supported public API areas are health, API keys, wallets, projects, issuance
 
 Prerequisites:
 
-- Node.js 22+
+- Node.js 24+
 - pnpm 10.16+
 - Git
 - Docker or another Compose-compatible container runtime for local Postgres and Redis

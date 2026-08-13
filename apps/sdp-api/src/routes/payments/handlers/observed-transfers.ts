@@ -9,12 +9,20 @@ import type {
   PaymentTransferRow as TransferRow,
   PaymentTransferStatus as TransferStatus,
 } from "@/db/repositories/payments.repository";
+import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import type { AppContext } from "../context";
 import * as tokenAccounts from "../token-accounts";
 
 export const SIGNATURE_HISTORY_LOOKUP_CONCURRENCY = 5;
+
+/**
+ * Cap on token-account addresses added to the signature search alongside the
+ * owner address. A wallet's token-account count is unbounded external data;
+ * without the cap it directly scales the getSignaturesForAddress fan-out.
+ */
+export const MAX_TOKEN_ACCOUNT_SIGNATURE_LOOKUPS = 24;
 
 interface ParsedInstructionPayload {
   info?: Record<string, unknown>;
@@ -259,39 +267,6 @@ export function dedupeSignatureHistory(
   }
 
   return Array.from(bySignature.values()).sort(compareSignatureHistoryDesc).slice(0, limit);
-}
-
-export async function mapSettledWithConcurrency<T, U>(
-  items: T[],
-  concurrency: number,
-  mapper: (item: T) => Promise<U>
-): Promise<Array<PromiseSettledResult<U>>> {
-  const results = new Array<PromiseSettledResult<U>>(items.length);
-  let nextIndex = 0;
-  const workerCount = Math.min(concurrency, items.length);
-
-  await Promise.all(
-    Array.from({ length: workerCount }, async () => {
-      while (nextIndex < items.length) {
-        const currentIndex = nextIndex;
-        nextIndex += 1;
-
-        try {
-          results[currentIndex] = {
-            status: "fulfilled",
-            value: await mapper(items[currentIndex] as T),
-          };
-        } catch (reason) {
-          results[currentIndex] = {
-            status: "rejected",
-            reason,
-          };
-        }
-      }
-    })
-  );
-
-  return results;
 }
 
 export async function resolveWalletTokenAccountAddresses(
@@ -651,8 +626,13 @@ export async function buildObservedTransfersForSignatures(
     return [];
   }
 
-  const settled = await Promise.allSettled(
-    signatures.map(async (signatureInfo) => {
+  // Bounded: the signature list is capped at historyLimit (200), and a bare
+  // Promise.allSettled would open that many concurrent getTransaction calls
+  // against the billed RPC per request.
+  const settled = await mapSettledWithConcurrency(
+    signatures,
+    SIGNATURE_HISTORY_LOOKUP_CONCURRENCY,
+    async (signatureInfo) => {
       const parsedTransaction = await fetchParsedTransaction(env, String(signatureInfo.signature));
       return buildObservedTransferRows(
         parsedTransaction,
@@ -660,7 +640,7 @@ export async function buildObservedTransfersForSignatures(
         signatureInfo.blockTime,
         context
       );
-    })
+    }
   );
 
   return settled.flatMap((result) => (result.status === "fulfilled" ? result.value : []));

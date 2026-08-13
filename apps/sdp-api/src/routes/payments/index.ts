@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { meteredQuota } from "@/middleware/metered-quota";
 import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
@@ -216,17 +217,31 @@ payments.post(
 payments.get("/transfers/:transferId", requirePermissions("payments:read"), getTransfer);
 payments.get("/ramps/onramp/currency", requirePermissions("payments:read"), listOnrampCurrencies);
 payments.get("/ramps/offramp/currency", requirePermissions("payments:read"), listOfframpCurrencies);
-payments.post("/ramps/onramp/estimate", requirePermissions("payments:read"), estimateOnramp);
-payments.post("/ramps/offramp/estimate", requirePermissions("payments:read"), estimateOfframp);
+// Estimates fan out one live call per provider on the corridor and quotes
+// create provider-side records, so both carry fail-closed metered quotas.
+payments.post(
+  "/ramps/onramp/estimate",
+  requirePermissions("payments:read"),
+  meteredQuota({ name: "ramp-estimate", actorMax: 30, orgMax: 120 }),
+  estimateOnramp
+);
+payments.post(
+  "/ramps/offramp/estimate",
+  requirePermissions("payments:read"),
+  meteredQuota({ name: "ramp-estimate", actorMax: 30, orgMax: 120 }),
+  estimateOfframp
+);
 payments.post(
   "/ramps/onramp/quote",
   requirePermissions("payments:write", "wallets:read"),
+  meteredQuota({ name: "ramp-quote", actorMax: 20, orgMax: 60 }),
   policyGate({ extract: extractOnrampQuotePolicyCandidate }),
   createOnrampQuote
 );
 payments.post(
   "/ramps/offramp/quote",
   requirePermissions("payments:write", "wallets:read"),
+  meteredQuota({ name: "ramp-quote", actorMax: 20, orgMax: 60 }),
   policyGate({ extract: extractOfframpQuotePolicyCandidate }),
   createOfframpQuote
 );

@@ -1,8 +1,8 @@
 "use client";
 
 import { Plus, Search } from "lucide-react";
+import Link from "next/link";
 import type { ReactNode } from "react";
-import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useLocale, useTranslations } from "@/i18n/provider";

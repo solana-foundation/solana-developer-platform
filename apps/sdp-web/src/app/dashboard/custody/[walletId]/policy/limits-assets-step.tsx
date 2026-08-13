@@ -34,7 +34,7 @@ export function LimitsAndAssetsStep({
           title={t("DashboardCustody.policyTransferLimits")}
           description={t("DashboardCustody.policyTransferLimitsHint")}
         >
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="sm:max-w-xs">
             <AmountField
               id="policy-per-transaction"
               label={t("DashboardCustody.policyPerTransaction")}
@@ -42,15 +42,6 @@ export function LimitsAndAssetsStep({
               error={errors.maxTransferAmount}
               onChange={(value) =>
                 setPolicyState((current) => ({ ...current, maxTransferAmount: value }))
-              }
-            />
-            <AmountField
-              id="policy-daily-total"
-              label={t("DashboardCustody.policyDailyTotal")}
-              value={state.maxDailyAmount}
-              error={errors.maxDailyAmount}
-              onChange={(value) =>
-                setPolicyState((current) => ({ ...current, maxDailyAmount: value }))
               }
             />
           </div>
@@ -79,7 +70,7 @@ function AmountField({
   id: string;
   label: string;
   value: string;
-  error?: "invalid_decimal" | "daily_below_transaction";
+  error?: "invalid_decimal" | "assets_required";
   onChange: (value: string) => void;
 }) {
   const t = useTranslations();
@@ -97,8 +88,8 @@ function AmountField({
       />
       {error ? (
         <span className="mt-2 block text-sm text-error">
-          {error === "daily_below_transaction"
-            ? t("DashboardCustody.policyDailyBelowTransaction")
+          {error === "assets_required"
+            ? t("DashboardCustody.policyLimitRequiresAssets")
             : t("DashboardCustody.policyInvalidDecimal")}
         </span>
       ) : null}
