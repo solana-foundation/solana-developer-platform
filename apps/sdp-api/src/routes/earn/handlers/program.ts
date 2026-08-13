@@ -40,9 +40,11 @@ import {
 } from "@/services/provider-availability.service";
 import { type AppContext, earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
 import {
+  earnProgramCreateSchema,
   earnProgramDepositsQuerySchema,
-  earnProgramQuerySchema,
-  earnProgramUpsertSchema,
+  earnProgramParamsSchema,
+  earnProgramRetargetSchema,
+  earnProgramsListQuerySchema,
   earnProgramWithdrawalCreateSchema,
   earnProgramWithdrawalParamsSchema,
   earnProgramWithdrawalPreviewSchema,
@@ -51,10 +53,21 @@ import {
 import { listResponse, pageWindow, parseBody, parseParams, parseQuery } from "./shared";
 
 /**
- * The shared earn "program": ONE provider-managed portfolio wallet per
- * (organization, environment, provider). PUT is idempotent create-or-update —
- * first call provisions the provider wallet and persists the link row, later
- * calls rewrite the wallet's strategy weights.
+ * Earn "programs": provider-managed portfolio wallets, N per (organization,
+ * environment, provider) since PRO-1670, each pinned to a single vault with
+ * nothing rebalancing across them. Moving money between programs is explicit —
+ * withdraw from one, deposit into the other.
+ *
+ * Addressing: a program is named by its OWN id. POST creates one, PUT
+ * /:programId re-targets that program's vault in place. The pre-PRO-1670
+ * `PUT /program` was an implicit create-or-update keyed on (organization,
+ * environment, provider), which stops being addressable the moment a second
+ * program exists.
+ *
+ * Because the id is now caller-supplied, every `:programId` lookup carries its
+ * own tenancy proof (`getProviderWalletById` scopes to organization AND
+ * environment). The old triple lookup made a guessed id structurally
+ * impossible; an addressable id does not, so the scoping is explicit.
  *
  * Source of truth per surface (PRO-1628): balances/positions/yield/deposits
  * are NEVER persisted — every read is a live provider fetch. Withdrawals are
@@ -64,16 +77,18 @@ import { listResponse, pageWindow, parseBody, parseParams, parseQuery } from "./
  * create/get answer with the provider's live object and update the ledger as
  * a side effect; the list answers from the ledger alone.
  *
- * Gate asymmetry (ADR 0002 exit safety): PUT is money-in and takes the full
- * entitled+configured availability gate; withdrawal endpoints only require
- * provider credentials so disabling a provider can never trap funds; plain
- * reads also only require credentials (they hit the provider's API); the
- * ledger list takes no provider gate at all — the audit trail outlives even
- * credential removal.
+ * Gate asymmetry (ADR 0002 exit safety): create and re-target are money-in and
+ * take the full entitled+configured availability gate; withdrawal endpoints
+ * only require provider credentials so disabling a provider can never trap
+ * funds; plain reads also only require credentials (they hit the provider's
+ * API); the ledger list takes no provider gate at all — the audit trail
+ * outlives even credential removal.
  */
 
 // Response envelopes (route-owned until a second surface needs them in @sdp/types).
 export interface EarnProgram {
+  /** SDP's own program id — how every `/programs/:programId` route names it. */
+  id: string;
   provider: string;
   label: string | null;
   createdAt: string;
@@ -90,8 +105,11 @@ export interface EarnProgramResponse {
   program: EarnProgram;
 }
 
-export interface EarnProgramUpsertResponse extends EarnProgramResponse {
-  created: boolean;
+export interface ListEarnProgramsResponse {
+  programs: EarnProgram[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 export type EarnProgramDepositsResponse = EarnPortfolioDepositsPage;
@@ -110,6 +128,7 @@ function mapProgram(
   portfolioYield?: EarnPortfolioYield
 ): EarnProgram {
   return {
+    id: row.id,
     provider: row.provider,
     label: row.label,
     createdAt: row.created_at,
@@ -146,8 +165,14 @@ async function loadProgramState(
  * Capability gate: the portfolio-wallet contract is optional per provider, so
  * narrow via the method-presence guard — never by matching provider ids — and
  * fail with a clean 501 for providers that only implement the vault contract.
+ *
+ * Takes a plain string because on every `:programId` route the provider now
+ * comes from the stored row, and stored provider ids are open TEXT (ADR 0002
+ * drift rule): a row can outlive its provider's registry entry.
+ * `resolveEarnProviderClient` is the fail-closed dispatch for exactly that —
+ * an unregistered id raises PROVIDER_NOT_CONFIGURED rather than a 500.
  */
-function requirePortfolioClient(provider: EarnProviderId): EarnPortfolioWalletProvider {
+function requirePortfolioClient(provider: string): EarnPortfolioWalletProvider {
   const client = resolveEarnProviderClient(provider);
   if (!supportsPortfolioWallets(client)) {
     throw notImplemented(client.provider, "portfolio wallets");
@@ -155,14 +180,17 @@ function requirePortfolioClient(provider: EarnProviderId): EarnPortfolioWalletPr
   return client;
 }
 
-async function requireProgramWallet(
-  c: AppContext,
-  provider: EarnProviderId
-): Promise<EarnProviderWalletRow> {
-  const row = await getEarnRepository(c).getProviderWallet({
+/**
+ * Resolve the path program, scoped to the caller's organization AND
+ * environment. A miss is 404 in every case — a foreign organization's id, a
+ * sandbox id presented by a production session, and a plain typo are
+ * indistinguishable to the caller on purpose.
+ */
+async function requireProgram(c: AppContext, programId: string): Promise<EarnProviderWalletRow> {
+  const row = await getEarnRepository(c).getProviderWalletById({
     organizationId: getAuth(c).organizationId,
     environment: resolveSdpEnvironment(c),
-    provider,
+    walletId: programId,
   });
 
   if (!row) {
@@ -170,6 +198,23 @@ async function requireProgramWallet(
   }
 
   return row;
+}
+
+/**
+ * The `:programId` preamble every per-program route shares: row, client, and
+ * the sandbox/production mode the credential checks key off — resolved once
+ * here so handlers cannot drift on which environment they assert against.
+ */
+async function requireProgramContext(
+  c: AppContext,
+  programId: string
+): Promise<{ row: EarnProviderWalletRow; client: EarnPortfolioWalletProvider; testMode: boolean }> {
+  const row = await requireProgram(c, programId);
+  return {
+    row,
+    client: requirePortfolioClient(row.provider),
+    testMode: row.environment === "sandbox",
+  };
 }
 
 /**
@@ -215,8 +260,189 @@ async function assertKnownYieldSources(
   }
 }
 
-export const upsertEarnProgram = async (c: AppContext) => {
-  const body = await parseBody(c, earnProgramUpsertSchema);
+/**
+ * The caller's retry-stable idempotency key, from AT MOST one of body
+ * `requestId` or the `Idempotency-Key` header; undefined when neither is sent.
+ *
+ * Two sources cannot be ranked safely: a client whose retry layer preserves
+ * headers while its request layer mints a fresh body id per attempt would keep
+ * `Idempotency-Key` stable and vary `requestId`, and any precedence rule
+ * silently follows the varying one — a second operation, not a replay. So
+ * ambiguity fails loud at integration time. Every route in this family that
+ * takes a key resolves it HERE, so the header is honored (or refused) the same
+ * way everywhere — the platform middleware validates and echoes it on every
+ * /v1/* response, and a route that silently dropped it would look keyed while
+ * being fresh per attempt.
+ */
+function resolveCallerIdempotencyKey(
+  c: AppContext,
+  requestId: string | undefined,
+  consequence: string
+): string | undefined {
+  const headerKey = c.req.header(IDEMPOTENCY_KEY_HEADER);
+  if (requestId && headerKey) {
+    throw badRequest(
+      `Send requestId or the ${IDEMPOTENCY_KEY_HEADER} header, not both: SDP cannot tell which one your retry keeps stable, and following the wrong one would ${consequence}.`
+    );
+  }
+  return requestId ?? headerKey;
+}
+
+/**
+ * The required form: neither source is likewise refused, because a
+ * server-minted fallback is fresh per HTTP attempt and would guarantee exactly
+ * the double-send it appears to guard against.
+ */
+function requireCallerIdempotencyKey(
+  c: AppContext,
+  requestId: string | undefined,
+  subject: string,
+  consequence: string
+): string {
+  const callerKey = resolveCallerIdempotencyKey(c, requestId, consequence);
+  if (!callerKey) {
+    throw badRequest(
+      `${subject} needs an idempotency key that is stable across retries: send requestId (UUIDv4) or the ${IDEMPOTENCY_KEY_HEADER} header. Without one, a retried request would ${consequence}.`
+    );
+  }
+  return callerKey;
+}
+
+/**
+ * The key the provider dedupes a program CREATE on.
+ *
+ * Scoped by (organization, environment, provider) — exactly the triple whose DB
+ * unique constraint used to catch a retried create before PRO-1670 made N
+ * programs legal. Every SDP organization shares one provider account, so a raw
+ * caller key is not tenant-unique: two organizations pasting the same
+ * placeholder UUID would otherwise land on one provider request, and the second
+ * would be answered with a replay of the FIRST organization's wallet — which SDP
+ * would then link to the wrong tenant.
+ *
+ * Deliberately NOT in scope: `projectId`, because sibling projects in one
+ * environment share programs and two retries arriving through different projects
+ * must derive the same id (project_id is provisioning audit only). And not the
+ * allocations or label — scope separates tenants, payload equality is a
+ * different question, and mixing payload in would turn a retry with a corrected
+ * allocation into a second program instead of a conflict.
+ */
+function resolveProgramCreateRequestId(
+  c: AppContext,
+  requestId: string | undefined,
+  scope: { organizationId: string; environment: string; provider: string }
+): string {
+  const callerKey = requireCallerIdempotencyKey(
+    c,
+    requestId,
+    "Creating an Earn program",
+    "provision a second program the first deposit would not reach"
+  );
+  return deriveProviderRequestId(
+    ["earn_program_create", scope.organizationId, scope.environment, scope.provider],
+    callerKey
+  );
+}
+
+/**
+ * Provider-side name for a program with no caller-supplied label.
+ *
+ * The suffix comes from the DERIVED request id rather than the row id, and that
+ * ordering is the whole point: the label is part of the create payload, so a
+ * provider replay of a retried create must reproduce the same string. A row id
+ * only exists after the insert — i.e. after the provider call — so using it
+ * would make a retry's payload differ from the original and could turn a replay
+ * into a payload conflict.
+ */
+function defaultProgramLabel(
+  organizationId: string,
+  environment: string,
+  requestId: string
+): string {
+  return `sdp-earn-${organizationId}-${environment}-${requestId.slice(0, 8)}`;
+}
+
+/**
+ * The program collection for the caller's (organization, environment), oldest
+ * first — a stable head matters to consumers that track one program across polls
+ * (migration 0056's header).
+ *
+ * The credential gate runs even when the caller has ZERO programs, which is a
+ * deliberate behaviour change: the pre-PRO-1670 `GET /program` resolved the row
+ * first, so "no program AND no credentials" answered 404. A collection cannot
+ * 404 for emptiness, so without this assert a missing provider key would read as
+ * "this organization has no programs" — and a dashboard would show onboarding
+ * instead of its provider-unconfigured notice. Only assertable when the caller
+ * named a provider; an unfiltered empty list has no provider to check.
+ */
+/**
+ * Live reads per list page are capped: each program costs two provider calls
+ * (wallet + yield), so an uncapped page of 100 would fire 200 concurrent
+ * requests at Ground per read — a self-inflicted burst against a shared
+ * account. Eight programs in flight keeps a default page fast (one or two
+ * waves) without the burst.
+ */
+const LIST_LIVE_READ_CONCURRENCY = 8;
+
+export const listEarnPrograms = async (c: AppContext) => {
+  const query = parseQuery(c, earnProgramsListQuerySchema);
+  const environment = resolveSdpEnvironment(c);
+  const testMode = environment === "sandbox";
+
+  if (query.provider) {
+    requirePortfolioClient(query.provider);
+    assertEarnProviderConfigured(c.env, query.provider, testMode);
+  }
+
+  const { rows, total } = await getEarnRepository(c).listProviderWallets({
+    organizationId: getAuth(c).organizationId,
+    environment,
+    ...(query.provider !== undefined && { provider: query.provider }),
+    ...pageWindow(query),
+  });
+
+  // Capability + credentials resolve ONCE per distinct provider, before any
+  // live read. Stored provider ids are open strings (a row can outlive its
+  // provider's registry entry), so a de-registered or vault-only provider fails
+  // the whole list HERE with a clean 503/501 rather than mid-fan-out —
+  // deliberately loud: hiding a program that holds funds is strictly worse than
+  // an honest error, de-registration only ever happens after a provider is
+  // drained (ADR 0002), and the caller can re-ask filtered to a live provider.
+  const clients = new Map<string, EarnPortfolioWalletProvider>();
+  for (const row of rows) {
+    if (!clients.has(row.provider)) {
+      const client = requirePortfolioClient(row.provider);
+      assertEarnProviderConfigured(c.env, client.provider, testMode);
+      clients.set(row.provider, client);
+    }
+  }
+
+  // Each program carries a LIVE wallet snapshot; reads run in bounded waves. A
+  // read that fails fails the whole list rather than silently omitting a
+  // program, for the same reason as above.
+  const programs: EarnProgram[] = [];
+  for (let i = 0; i < rows.length; i += LIST_LIVE_READ_CONCURRENCY) {
+    const wave = rows.slice(i, i + LIST_LIVE_READ_CONCURRENCY);
+    programs.push(
+      ...(await Promise.all(
+        wave.map(async (row) => {
+          const client = clients.get(row.provider) as EarnPortfolioWalletProvider;
+          const { wallet, portfolioYield } = await loadProgramState(
+            c,
+            client,
+            row.provider_wallet_ref
+          );
+          return mapProgram(row, wallet, portfolioYield);
+        })
+      ))
+    );
+  }
+
+  const response: ListEarnProgramsResponse = listResponse(query, total, { programs });
+  return success(c, response);
+};
+
+export const createEarnProgram = async (c: AppContext) => {
+  const body = await parseBody(c, earnProgramCreateSchema);
   const client = requirePortfolioClient(body.provider);
   const auth = getAuth(c);
   const environment = resolveSdpEnvironment(c);
@@ -232,75 +458,130 @@ export const upsertEarnProgram = async (c: AppContext) => {
   );
   await assertKnownYieldSources(c, client.provider, body.allocations);
 
-  const repo = getEarnRepository(c);
-  const existing = await repo.getProviderWallet({
+  if (!auth.projectId) {
+    throw internalError("Could not resolve project scope");
+  }
+
+  // Key resolution runs LAST on purpose: an unentitled caller still gets 403 and
+  // a provider without the portfolio capability still gets 501, rather than a
+  // generic "missing idempotency key" that hides why the call could never work.
+  const requestId = resolveProgramCreateRequestId(c, body.requestId, {
     organizationId: auth.organizationId,
     environment,
     provider: client.provider,
   });
 
-  let row = existing;
-  if (row) {
-    await client.updatePortfolioStrategy(earnRuntime(c), {
-      providerWalletRef: row.provider_wallet_ref,
-      allocations: body.allocations,
-      // Forwarded so a double-submitted confirm re-applies the SAME strategy
-      // change instead of firing two independent provider mutations. Absent
-      // means the client accepted non-idempotent behaviour (see the schema).
-      requestId: body.requestId,
-    });
-  } else {
-    if (!auth.projectId) {
-      throw internalError("Could not resolve project scope");
-    }
-    const createdWallet = await client.createPortfolioWallet(earnRuntime(c), {
-      label: body.label ?? `sdp-earn-${auth.organizationId}-${environment}`,
-      allocations: body.allocations,
-      // Same key on the create branch: without it a retried first PUT can
-      // provision a second provider wallet that the unique constraint then
-      // orphans.
-      requestId: body.requestId,
-    });
+  const repo = getEarnRepository(c);
+  const createdWallet = await client.createPortfolioWallet(earnRuntime(c), {
+    label: body.label ?? defaultProgramLabel(auth.organizationId, environment, requestId),
+    allocations: body.allocations,
+    requestId,
+  });
 
-    try {
-      row = await repo.insertProviderWallet({
-        organizationId: auth.organizationId,
-        projectId: auth.projectId,
-        environment,
-        provider: client.provider,
-        providerWalletRef: createdWallet.providerWalletRef,
-        label: body.label ?? null,
-        createdBy: await resolveCreatorUserId(c),
-      });
-    } catch (err) {
-      if (isPostgresUniqueViolation(err)) {
-        // Concurrent first-PUT race: another request won the unique
-        // (org, environment, provider) slot. The losing provider wallet holds
-        // no funds (nothing can be deposited before a ref is returned).
-        throw conflict("Earn program was provisioned concurrently; retry to update its strategy");
-      }
+  let row: EarnProviderWalletRow | null;
+  let replayed = false;
+  try {
+    row = await repo.insertProviderWallet({
+      organizationId: auth.organizationId,
+      projectId: auth.projectId,
+      environment,
+      provider: client.provider,
+      providerWalletRef: createdWallet.providerWalletRef,
+      label: body.label ?? null,
+      createdBy: await resolveCreatorUserId(c),
+    });
+  } catch (err) {
+    if (!isPostgresUniqueViolation(err)) {
       throw err;
     }
-    if (!row) {
-      throw internalError("Failed to persist earn program wallet");
+    // A REPLAY, not a race — and the distinction is load-bearing. The provider
+    // dedupes on the derived key and answers a retried create with the ORIGINAL
+    // wallet ref, so a legitimate retry lands here by design; answering 409
+    // would make the required idempotency key produce the very failure it exists
+    // to prevent. The colliding row is this caller's own earlier program.
+    row = await repo.getProviderWalletByRef({
+      provider: client.provider,
+      providerWalletRef: createdWallet.providerWalletRef,
+    });
+    if (!row || row.organization_id !== auth.organizationId || row.environment !== environment) {
+      // The ref is claimed by a DIFFERENT tenant or environment. Deriving the
+      // key against (organization, environment, provider) should make this
+      // unreachable; if it happens the provider handed us someone else's wallet,
+      // and linking it would expose their funds. Refuse rather than adopt it.
+      throw conflict("Earn program wallet is already linked to another account");
     }
+    replayed = true;
+  }
+  if (!row) {
+    throw internalError("Failed to persist earn program wallet");
   }
 
   const { wallet, portfolioYield } = await loadProgramState(c, client, row.provider_wallet_ref);
 
-  const response: EarnProgramUpsertResponse = {
-    program: mapProgram(row, wallet, portfolioYield),
-    created: !existing,
-  };
-  return success(c, response, existing ? 200 : 201);
+  const response: EarnProgramResponse = { program: mapProgram(row, wallet, portfolioYield) };
+  return success(c, response, replayed ? 200 : 201);
+};
+
+/**
+ * Re-target this program's single vault in place (money-in: it points the
+ * balance at a different strategy). Kept as a first-class verb rather than
+ * forcing withdraw → wait for settlement → re-deposit for what the provider
+ * supports natively.
+ */
+export const retargetEarnProgram = async (c: AppContext) => {
+  const { programId } = parseParams(c, earnProgramParamsSchema);
+  const body = await parseBody(c, earnProgramRetargetSchema);
+  const { row, client } = await requireProgramContext(c, programId);
+  const auth = getAuth(c);
+  const environment = resolveSdpEnvironment(c);
+
+  await assertProviderAvailable(
+    c.env,
+    getDb(c.env),
+    auth.organizationId,
+    "earn",
+    client.provider,
+    environment === "sandbox"
+  );
+  await assertKnownYieldSources(c, client.provider, body.allocations);
+
+  // Same two accepted key sources as create and withdrawals — a header-keyed
+  // retarget must be honored, not silently dropped, because the platform
+  // middleware echoes the header on every response and a caller reads that as
+  // "this key counted". Optional here (unlike create's): re-targeting moves no
+  // money and re-applying the same allocations is a provider no-op, so an
+  // absent key costs a duplicate provider mutation rather than a duplicate
+  // wallet.
+  const callerKey = resolveCallerIdempotencyKey(
+    c,
+    body.requestId,
+    "apply the strategy change twice"
+  );
+
+  await client.updatePortfolioStrategy(earnRuntime(c), {
+    providerWalletRef: row.provider_wallet_ref,
+    allocations: body.allocations,
+    // Derived against the program wallet like the withdrawal path, so one
+    // caller key used against two programs cannot collapse into one provider
+    // mutation on the shared account. Absent means the caller accepted
+    // non-idempotent behaviour (see the schema).
+    ...(callerKey !== undefined && {
+      requestId: deriveProviderRequestId(
+        ["earn_program_retarget", row.provider_wallet_ref],
+        callerKey
+      ),
+    }),
+  });
+
+  const { wallet, portfolioYield } = await loadProgramState(c, client, row.provider_wallet_ref);
+
+  const response: EarnProgramResponse = { program: mapProgram(row, wallet, portfolioYield) };
+  return success(c, response);
 };
 
 export const getEarnProgram = async (c: AppContext) => {
-  const { provider } = parseQuery(c, earnProgramQuerySchema);
-  const client = requirePortfolioClient(provider);
-  const row = await requireProgramWallet(c, provider);
-
-  const testMode = resolveSdpEnvironment(c) === "sandbox";
+  const { programId } = parseParams(c, earnProgramParamsSchema);
+  const { row, client, testMode } = await requireProgramContext(c, programId);
   assertEarnProviderConfigured(c.env, client.provider, testMode);
 
   const { wallet, portfolioYield } = await loadProgramState(c, client, row.provider_wallet_ref);
@@ -310,11 +591,9 @@ export const getEarnProgram = async (c: AppContext) => {
 };
 
 export const listEarnProgramDeposits = async (c: AppContext) => {
+  const { programId } = parseParams(c, earnProgramParamsSchema);
   const query = parseQuery(c, earnProgramDepositsQuerySchema);
-  const client = requirePortfolioClient(query.provider);
-  const row = await requireProgramWallet(c, query.provider);
-
-  const testMode = resolveSdpEnvironment(c) === "sandbox";
+  const { row, client, testMode } = await requireProgramContext(c, programId);
   assertEarnProviderConfigured(c.env, client.provider, testMode);
 
   const response: EarnProgramDepositsResponse = await client.listPortfolioDeposits(earnRuntime(c), {
@@ -326,12 +605,12 @@ export const listEarnProgramDeposits = async (c: AppContext) => {
 };
 
 export const previewEarnProgramWithdrawal = async (c: AppContext) => {
+  const { programId } = parseParams(c, earnProgramParamsSchema);
   const body = await parseBody(c, earnProgramWithdrawalPreviewSchema);
-  const client = requirePortfolioClient(body.provider);
-  const row = await requireProgramWallet(c, body.provider);
+  const { row, client, testMode } = await requireProgramContext(c, programId);
 
   // Money-out path: credentials only, never the entitlement gate.
-  assertEarnProviderConfigured(c.env, client.provider, resolveSdpEnvironment(c) === "sandbox");
+  assertEarnProviderConfigured(c.env, client.provider, testMode);
 
   const preview = await client.previewPortfolioWithdrawal(earnRuntime(c), {
     providerWalletRef: row.provider_wallet_ref,
@@ -355,52 +634,29 @@ export const previewEarnProgramWithdrawal = async (c: AppContext) => {
  * any provider call, and the provider's own dedupe closes whatever a crash
  * window leaves open.
  *
- * A server-minted random id therefore cannot be the fallback: it is fresh per
- * HTTP attempt, so it guarantees exactly the double-send it appears to guard
- * against. Callers get two ways to supply a stable key — an explicit
- * `requestId`, or the platform-wide `Idempotency-Key` header — and a request
- * carrying neither is refused rather than silently made unsafe.
- *
  * Whichever way it arrives, the caller's key is DERIVED against the program
  * wallet rather than forwarded as given. Every SDP organization shares one
  * provider account, so a key is only unique to a tenant once something tenant-
  * specific is mixed in: two organizations pasting the same placeholder UUID
  * would otherwise land on one provider request, and the second would either be
  * refused or answered with a replay of the first organization's withdrawal.
- * The wallet ref is unique per (organization, environment, provider) by DB
- * constraint, so it separates them and names the thing the money leaves.
+ * The wallet ref carries that separation directly — one link row may claim a
+ * given provider wallet platform-wide (UNIQUE (provider, provider_wallet_ref),
+ * migration 0056) — and it names the thing the money leaves. Since PRO-1670 an
+ * organization can hold several programs, so this scope also keeps one caller
+ * key used against two of its OWN programs from collapsing into one payout.
  *
  * Deriving costs the caller nothing: the same key still reproduces the same
  * provider request on a retry, which is the only property they rely on. The
  * value SDP returns for tracking is the provider's own withdrawal ref, never
  * this id.
- *
- * Exactly ONE source is accepted, and sending both is refused rather than
- * resolved by precedence. Two sources cannot be ranked safely: a client whose
- * retry layer preserves headers while its request layer mints a fresh body id
- * per attempt would keep `Idempotency-Key` stable and vary `requestId`, and
- * any precedence rule silently follows the varying one — a second withdrawal,
- * not a replay. That is the exact failure this function exists to prevent, so
- * ambiguity fails loud at integration time instead of paying out twice in
- * production. Neither source is likewise refused, for the same reason.
  */
 function resolveWithdrawalRequestId(
   c: AppContext,
   requestId: string | undefined,
   providerWalletRef: string
 ): string {
-  const headerKey = c.req.header(IDEMPOTENCY_KEY_HEADER);
-  if (requestId && headerKey) {
-    throw badRequest(
-      `Send requestId or the ${IDEMPOTENCY_KEY_HEADER} header, not both: SDP cannot tell which one your retry keeps stable, and following the wrong one would pay out twice.`
-    );
-  }
-  const callerKey = requestId ?? headerKey;
-  if (!callerKey) {
-    throw badRequest(
-      `A withdrawal needs an idempotency key that is stable across retries: send requestId (UUIDv4) or the ${IDEMPOTENCY_KEY_HEADER} header. Without one, a retried request would pay out twice.`
-    );
-  }
+  const callerKey = requireCallerIdempotencyKey(c, requestId, "A withdrawal", "pay out twice");
   return deriveProviderRequestId(["earn_program_withdrawal", providerWalletRef], callerKey);
 }
 
@@ -442,12 +698,12 @@ async function persistWithdrawalObservation(
 }
 
 export const createEarnProgramWithdrawal = async (c: AppContext) => {
+  const { programId } = parseParams(c, earnProgramParamsSchema);
   const body = await parseBody(c, earnProgramWithdrawalCreateSchema);
-  const client = requirePortfolioClient(body.provider);
-  const row = await requireProgramWallet(c, body.provider);
+  const { row, client, testMode } = await requireProgramContext(c, programId);
 
   // Money-out path: credentials only, never the entitlement gate.
-  assertEarnProviderConfigured(c.env, client.provider, resolveSdpEnvironment(c) === "sandbox");
+  assertEarnProviderConfigured(c.env, client.provider, testMode);
 
   const auth = getAuth(c);
   const requestId = resolveWithdrawalRequestId(c, body.requestId, row.provider_wallet_ref);
@@ -553,27 +809,32 @@ export const createEarnProgramWithdrawal = async (c: AppContext) => {
 };
 
 export const getEarnProgramWithdrawal = async (c: AppContext) => {
-  const { withdrawalRef } = parseParams(c, earnProgramWithdrawalParamsSchema);
-  const { provider } = parseQuery(c, earnProgramQuerySchema);
-  const client = requirePortfolioClient(provider);
-  const row = await requireProgramWallet(c, provider);
+  const { programId, withdrawalRef } = parseParams(c, earnProgramWithdrawalParamsSchema);
+  const { row, client, testMode } = await requireProgramContext(c, programId);
 
-  assertEarnProviderConfigured(c.env, client.provider, resolveSdpEnvironment(c) === "sandbox");
+  assertEarnProviderConfigured(c.env, client.provider, testMode);
 
   const repo = getEarnRepository(c);
 
   // BOLA guard, defense in depth: every SDP organization shares one provider
-  // account, so a foreign org's withdrawal ref must 404 HERE — before any
-  // provider call — regardless of how the provider scopes its own lookup
-  // (Ground's read is wallet-scoped, but that is the provider's promise, not
-  // ours). The ledger knows who owns every ref it has seen; a ref it has
-  // never seen (pre-ledger withdrawals) falls through to the provider's
+  // account, so a withdrawal ref this program does not own must 404 HERE —
+  // before any provider call — regardless of how the provider scopes its own
+  // lookup (Ground's read is wallet-scoped, but that is the provider's promise,
+  // not ours). The ledger knows which program owns every ref it has seen; a ref
+  // it has never seen (pre-ledger withdrawals) falls through to the provider's
   // wallet-scoped read, which cannot name another wallet's withdrawal.
+  //
+  // The comparison is the PROGRAM, not the organization. An org-only check was
+  // complete while an org held one program; with several, asking program A for
+  // program B's ref would pass it and then drive the provider with A's wallet
+  // ref and B's withdrawal ref — a mismatch whose answer is entirely the
+  // provider's to decide. wallet_id is strictly stronger and still lets an
+  // unknown ref fall through.
   const ledgerRow = await repo.getProgramWithdrawalByProviderReference({
     provider: client.provider,
     providerReference: withdrawalRef,
   });
-  if (ledgerRow && ledgerRow.organization_id !== getAuth(c).organizationId) {
+  if (ledgerRow && ledgerRow.wallet_id !== row.id) {
     throw notFound("Earn withdrawal");
   }
 
@@ -590,6 +851,7 @@ export const getEarnProgramWithdrawal = async (c: AppContext) => {
       repo,
       provider: client.provider,
       organizationId: getAuth(c).organizationId,
+      walletId: row.id,
       observed: withdrawal,
     });
   } catch (error) {
@@ -626,14 +888,16 @@ function mapToEarnProgramWithdrawalRecord(
 /**
  * The withdrawal LEDGER list (source: earn_program_withdrawals, never the
  * provider). Deliberately takes NO provider gate — not even the credential
- * check — because the audit trail must survive credential removal and
- * entitlement disablement. The registry-gated provider query param is request
- * validation, not availability. Wallet-scoped like the ledger itself: every
- * project in the environment shares the program, so one program = one history.
+ * check, and note it resolves the program WITHOUT requirePortfolioClient —
+ * because the audit trail must survive credential removal, entitlement
+ * disablement, and a provider losing its registry entry entirely. Scoped to the
+ * path program, like the ledger itself: every project in the environment reaches
+ * the same program, so one program = one history.
  */
 export const listEarnProgramWithdrawals = async (c: AppContext) => {
+  const { programId } = parseParams(c, earnProgramParamsSchema);
   const query = parseQuery(c, earnProgramWithdrawalsListQuerySchema);
-  const row = await requireProgramWallet(c, query.provider);
+  const row = await requireProgram(c, programId);
 
   const { rows, total } = await getEarnRepository(c).listProgramWithdrawals({
     organizationId: getAuth(c).organizationId,

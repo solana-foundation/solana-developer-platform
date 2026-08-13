@@ -82,21 +82,42 @@ async function request(path: "initialize" | "switch"): Promise<Response> {
 }
 
 async function seedLegacyConfig(status: "active" | "inactive"): Promise<void> {
-  await getDb(env)
-    .prepare(
-      `INSERT INTO custody_configs (
-         id, organization_id, project_id, provider, config_encrypted,
-         encryption_version, default_wallet_id, status
-       ) VALUES (?, ?, ?, 'privy', 'legacy', 'test', ?, ?)`
-    )
-    .bind(
-      "cust_privy_byok_admission",
-      ORGANIZATION_ID,
-      PROJECT_ID,
-      status === "active" ? "privy_wallet_admission" : null,
-      status
-    )
-    .run();
+  const db = getDb(env);
+  const statements = [
+    db
+      .prepare(
+        `INSERT INTO custody_configs (
+           id, organization_id, project_id, provider, config_encrypted,
+           encryption_version, default_wallet_id, status
+         ) VALUES (?, ?, ?, 'privy', 'legacy', 'test', ?, ?)`
+      )
+      .bind(
+        "cust_privy_byok_admission",
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        status === "active" ? "privy_wallet_admission" : null,
+        status
+      ),
+  ];
+  if (status === "active") {
+    // The config's default_wallet_id FK is deferred, so the default wallet
+    // must land in the same transaction.
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO custody_wallets (
+             id, custody_config_id, wallet_id, public_key, label, status
+           ) VALUES (?, ?, ?, ?, 'Legacy wallet', 'active')`
+        )
+        .bind(
+          "cwlt_privy_byok_admission",
+          "cust_privy_byok_admission",
+          "privy_wallet_admission",
+          "LegacyPublicKey"
+        )
+    );
+  }
+  await db.batch(statements);
 }
 
 async function seedBlockingConnection(): Promise<void> {
@@ -313,19 +334,6 @@ describe("legacy Privy setup admission", () => {
       .bind("csd_privy_byok_admission", ORGANIZATION_ID, PROJECT_ID, "cust_privy_byok_admission")
       .run();
     await seedBlockingConnection();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets (
-           id, custody_config_id, wallet_id, public_key, label, status
-         ) VALUES (?, ?, ?, ?, 'Legacy wallet', 'active')`
-      )
-      .bind(
-        "cwlt_privy_byok_admission",
-        "cust_privy_byok_admission",
-        "privy_wallet_admission",
-        "LegacyPublicKey"
-      )
-      .run();
 
     const response = await request("switch");
 

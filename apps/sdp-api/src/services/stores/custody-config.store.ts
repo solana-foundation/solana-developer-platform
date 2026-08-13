@@ -6,6 +6,7 @@
  */
 
 import type { SignStatus } from "@sdp/custody/signing";
+import type { PreparedStatement } from "@/db";
 import type { SigningConfigRecord, SigningProviderType } from "@/services/adapters/signing";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import { selectCustodyConfigTarget } from "@/services/domain/signing/custody-runtime-target";
@@ -283,63 +284,118 @@ export class CustodyConfigStore implements SigningConfigStore {
     projectId: string | undefined,
     config: SigningConfiguration
   ): Promise<string> {
-    const normalizedProjectId = projectId ?? null;
-    const provider = config.provider;
+    const { encryptedConfig, encryptionVersion } = await this.encryptConfigJson(
+      orgId,
+      JSON.stringify(config)
+    );
 
-    // Check if config exists
-    const existing = await this.db
-      .prepare(
-        normalizedProjectId
-          ? "SELECT id FROM custody_configs WHERE organization_id = ? AND project_id = ? AND provider = ?"
-          : "SELECT id FROM custody_configs WHERE organization_id = ? AND project_id IS NULL AND provider = ?"
-      )
-      .bind(...(normalizedProjectId ? [orgId, normalizedProjectId, provider] : [orgId, provider]))
-      .first<{ id: string }>();
-
-    const configJson = JSON.stringify(config);
-    const encryptedConfig = await this.getCustodyCipher().encrypt(orgId, configJson);
-    const encryptionVersion = encryptedConfig.startsWith("v2.")
-      ? "sdp-custody-kms-v2"
-      : "sdp-custody-encryption-v1";
-
-    if (existing) {
-      await this.db
-        .prepare(
-          `UPDATE custody_configs
-           SET provider = ?, config_encrypted = ?, encryption_version = ?, default_wallet_id = ?, status = 'active', updated_at = datetime('now')
-           WHERE id = ?`
-        )
-        .bind(
-          config.provider,
-          encryptedConfig,
-          encryptionVersion,
-          config.defaultWalletId ?? null,
-          existing.id
-        )
-        .run();
-
-      return existing.id;
-    }
-
-    const id = `cust_${crypto.randomUUID()}`;
-
-    await this.db
-      .prepare(
-        `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'active')`
-      )
+    const row = await this.db
+      .prepare(this.buildConfigUpsertSql())
       .bind(
-        id,
+        `cust_${crypto.randomUUID()}`,
         orgId,
-        normalizedProjectId,
+        projectId ?? null,
         config.provider,
         encryptedConfig,
         encryptionVersion,
         config.defaultWalletId ?? null
       )
-      .run();
+      .first<{ id: string }>();
 
-    return id;
+    if (!row) {
+      throw new Error("Failed to upsert custody config");
+    }
+
+    return row.id;
+  }
+
+  /**
+   * Persist a provider configuration and (optionally) its wallet record in a
+   * single transaction: the config row never becomes readable with a partial
+   * payload, and the default-wallet pointer lands together with the wallet it
+   * references.
+   */
+  async saveProviderConfig(params: {
+    orgId: string;
+    projectId: string | undefined;
+    provider: SigningProviderType;
+    configJson: object;
+    defaultWalletId: string | null;
+    wallet?: CreateWalletParams;
+  }): Promise<{ configId: string }> {
+    const { encryptedConfig, encryptionVersion } = await this.encryptConfigJson(
+      params.orgId,
+      JSON.stringify(params.configJson)
+    );
+
+    return this.db.transaction(async (tx) => {
+      const row = await tx
+        .prepare(this.buildConfigUpsertSql())
+        .bind(
+          `cust_${crypto.randomUUID()}`,
+          params.orgId,
+          params.projectId ?? null,
+          params.provider,
+          encryptedConfig,
+          encryptionVersion,
+          params.defaultWalletId
+        )
+        .first<{ id: string }>();
+
+      if (!row) {
+        throw new Error("Failed to upsert custody config");
+      }
+
+      if (params.wallet) {
+        await tx
+          .prepare(
+            `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, label, purpose, status, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'active', STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`
+          )
+          .bind(
+            `cwlt_${crypto.randomUUID()}`,
+            row.id,
+            params.wallet.walletId,
+            params.wallet.publicKey,
+            params.wallet.label ?? null,
+            params.wallet.purpose ?? null
+          )
+          .run();
+      }
+
+      return { configId: row.id };
+    });
+  }
+
+  /**
+   * Atomic per-scope config upsert. Relies on the NULLS NOT DISTINCT unique
+   * constraint on (organization_id, project_id, provider) so org-level scopes
+   * (project_id IS NULL) race-resolve to a single row too.
+   */
+  private buildConfigUpsertSql(): string {
+    return `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'active')
+       ON CONFLICT (organization_id, project_id, provider)
+       DO UPDATE SET
+         config_encrypted = EXCLUDED.config_encrypted,
+         encryption_version = EXCLUDED.encryption_version,
+         default_wallet_id = EXCLUDED.default_wallet_id,
+         status = 'active',
+         updated_at = datetime('now')
+       RETURNING id`;
+  }
+
+  private async encryptConfigJson(
+    orgId: string,
+    configJson: string
+  ): Promise<{ encryptedConfig: string; encryptionVersion: string }> {
+    const encryptedConfig = await this.getCustodyCipher().encrypt(orgId, configJson);
+    return {
+      encryptedConfig,
+      encryptionVersion: encryptedConfig.startsWith("v2.")
+        ? "sdp-custody-kms-v2"
+        : "sdp-custody-encryption-v1",
+    };
   }
 
   /**
@@ -359,34 +415,55 @@ export class CustodyConfigStore implements SigningConfigStore {
   // ═══════════════════════════════════════════════════════════════════════════
 
   /**
-   * Create a wallet record associated with a custody config.
+   * Create a wallet record associated with a custody config. With
+   * `setDefault`, the insert and the config's default-wallet promotion land
+   * in one atomic batch.
    */
-  async createWallet(configId: string, params: CreateWalletParams): Promise<CustodyWallet> {
+  async createWallet(
+    configId: string,
+    params: CreateWalletParams,
+    options: { setDefault?: boolean } = {}
+  ): Promise<CustodyWallet> {
     const id = `cwlt_${crypto.randomUUID()}`;
 
-    await this.db
-      .prepare(
-        `INSERT INTO custody_wallets (
-           id,
-           custody_config_id,
-           wallet_id,
-           public_key,
-           label,
-           purpose,
-           status,
-           updated_at
-         )
-         VALUES (?, ?, ?, ?, ?, ?, 'active', STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`
-      )
-      .bind(
-        id,
-        configId,
-        params.walletId,
-        params.publicKey,
-        params.label ?? null,
-        params.purpose ?? null
-      )
-      .run();
+    const statements: PreparedStatement[] = [
+      this.db
+        .prepare(
+          `INSERT INTO custody_wallets (
+             id,
+             custody_config_id,
+             wallet_id,
+             public_key,
+             label,
+             purpose,
+             status,
+             updated_at
+           )
+           VALUES (?, ?, ?, ?, ?, ?, 'active', STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`
+        )
+        .bind(
+          id,
+          configId,
+          params.walletId,
+          params.publicKey,
+          params.label ?? null,
+          params.purpose ?? null
+        ),
+    ];
+
+    if (options.setDefault) {
+      statements.push(
+        this.db
+          .prepare(
+            `UPDATE custody_configs
+             SET default_wallet_id = ?, updated_at = datetime('now')
+             WHERE id = ?`
+          )
+          .bind(params.walletId, configId)
+      );
+    }
+
+    await this.db.batch(statements);
 
     const row = await this.db
       .prepare("SELECT * FROM custody_wallets WHERE id = ?")
@@ -693,18 +770,6 @@ export class CustodyConfigStore implements SigningConfigStore {
     return row ? this.mapWalletRow(row) : null;
   }
 
-  /**
-   * Get a wallet by public key.
-   */
-  async getWalletByPublicKey(publicKey: string): Promise<CustodyWallet | null> {
-    const row = await this.db
-      .prepare(`SELECT * FROM custody_wallets WHERE public_key = ? AND status = 'active'`)
-      .bind(publicKey)
-      .first<CustodyWalletRow>();
-
-    return row ? this.mapWalletRow(row) : null;
-  }
-
   // ═══════════════════════════════════════════════════════════════════════════
   // Row Mappers
   // ═══════════════════════════════════════════════════════════════════════════
@@ -738,11 +803,11 @@ export class CustodyConfigStore implements SigningConfigStore {
     return this.db
       .prepare(
         projectId
-          ? `SELECT id, organization_id, project_id, default_custody_config_id, created_at, updated_at
+          ? `SELECT id, organization_id, project_id, default_custody_config_id, default_custody_connection_id, created_at, updated_at
              FROM custody_scope_defaults
              WHERE organization_id = ? AND project_id = ?
              LIMIT 1`
-          : `SELECT id, organization_id, project_id, default_custody_config_id, created_at, updated_at
+          : `SELECT id, organization_id, project_id, default_custody_config_id, default_custody_connection_id, created_at, updated_at
              FROM custody_scope_defaults
              WHERE organization_id = ? AND project_id IS NULL
              LIMIT 1`

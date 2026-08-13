@@ -2,7 +2,7 @@ import type { EarnStrategy } from "@sdp/types";
 import type { ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { EarnProgramState } from "./earn-program-data";
+import type { EarnProgramsState } from "./earn-program-data";
 
 // Values-aware identity translations, so assertions can pin interpolations
 // (e.g. a delayed liquidity label rendering its settlement-day count).
@@ -20,7 +20,7 @@ vi.mock("next/link", () => ({
 // drive them directly instead of stubbing fetch + SWR plumbing.
 const data = vi.hoisted(() => ({
   program: {
-    state: undefined as EarnProgramState | undefined,
+    state: undefined as EarnProgramsState | undefined,
     error: undefined as Error | undefined,
     isLoading: false,
     refresh: () => {},
@@ -33,7 +33,13 @@ const data = vi.hoisted(() => ({
 }));
 
 vi.mock("./earn-program-data", () => ({
-  useEarnProgram: () => data.program,
+  useEarnPrograms: () => data.program,
+  // Re-implemented rather than imported: the factory replaces the WHOLE module,
+  // so anything the workspace imports from it must exist here.
+  hasPrograms: (state: EarnProgramsState | undefined) =>
+    state?.kind === "ready" && state.programs.length > 0,
+  findProgram: (state: EarnProgramsState | undefined, id: string | undefined) =>
+    state?.kind === "ready" ? state.programs.find((p) => p.id === id) : undefined,
   useEarnStrategies: () => data.strategies,
   // Completion toasts are behaviour of their own; earn-wallet-activity covers
   // them against provider state transitions, so the workspace only has to
@@ -131,7 +137,7 @@ describe("EarnWorkspace while the program is still loading", () => {
 
 describe("EarnWorkspace with no program yet", () => {
   beforeEach(() => {
-    data.program.state = { kind: "none" };
+    data.program.state = { kind: "ready", programs: [] };
   });
 
   it("renders the empty program state and a single deposit entry point", () => {
@@ -163,41 +169,44 @@ describe("EarnWorkspace with no program yet", () => {
 describe("EarnWorkspace with an active program", () => {
   beforeEach(() => {
     data.program.state = {
-      kind: "active",
-      program: {
-        provider: "ground",
-        label: "Treasury earn",
-        createdAt: TIMESTAMP,
-        yield: { currentApy: "0.058", earnedUsd: "1250.75", positions: [] },
-        wallet: {
-          providerWalletRef: "wallet-ref-1",
-          status: "ready",
-          solanaDepositAddress: "7M6bFdwsXQZX9MjoD4PDxQJb9FZbwdQh6VS8sK7F3WcQ",
-          balance: {
-            totalUsd: "125000.50",
-            withdrawableUsd: "120000.00",
-            reservedUsd: "5000.50",
-            earnedUsd: "1250.75",
-          },
-          // The V1 shape: one vault per token lane. Freshly funded, so most
-          // value still sits as cash awaiting the provider's deploy — and the
-          // provider still reports `pct` on the wire; the workspace ignores it.
-          positions: [
-            {
-              kind: "yield_source",
-              label: "Morpho Gauntlet USDC",
-              valueUsd: "20000.50",
-              pct: 16,
-              yieldSourceId: "morpho-gauntlet-usdc",
-              token: "usdc",
+      kind: "ready",
+      programs: [
+        {
+          id: "earn_provider_wallet_1",
+          provider: "ground",
+          label: "Treasury earn",
+          createdAt: TIMESTAMP,
+          yield: { currentApy: "0.058", earnedUsd: "1250.75", positions: [] },
+          wallet: {
+            providerWalletRef: "wallet-ref-1",
+            status: "ready",
+            solanaDepositAddress: "7M6bFdwsXQZX9MjoD4PDxQJb9FZbwdQh6VS8sK7F3WcQ",
+            balance: {
+              totalUsd: "125000.50",
+              withdrawableUsd: "120000.00",
+              reservedUsd: "5000.50",
+              earnedUsd: "1250.75",
             },
-            { kind: "cash", label: "Cash (USDC)", valueUsd: "105000.00", pct: 84, token: "usdc" },
-          ],
-          allocations: {
-            usdc: [{ yieldSourceId: "morpho-gauntlet-usdc", weightBps: 10_000 }],
+            // The V1 shape: one vault per token lane. Freshly funded, so most
+            // value still sits as cash awaiting the provider's deploy — and the
+            // provider still reports `pct` on the wire; the workspace ignores it.
+            positions: [
+              {
+                kind: "yield_source",
+                label: "Morpho Gauntlet USDC",
+                valueUsd: "20000.50",
+                pct: 16,
+                yieldSourceId: "morpho-gauntlet-usdc",
+                token: "usdc",
+              },
+              { kind: "cash", label: "Cash (USDC)", valueUsd: "105000.00", pct: 84, token: "usdc" },
+            ],
+            allocations: {
+              usdc: [{ yieldSourceId: "morpho-gauntlet-usdc", weightBps: 10_000 }],
+            },
           },
         },
-      },
+      ],
     };
   });
 
@@ -232,8 +241,10 @@ describe("EarnWorkspace with an active program", () => {
   describe("wallet status chip", () => {
     const withWallet = (patch: Record<string, unknown>) => {
       const state = data.program.state;
-      if (state?.kind !== "active") throw new Error("expected an active program");
-      Object.assign(state.program.wallet, patch);
+      if (state?.kind !== "ready" || !state.programs[0]) {
+        throw new Error("expected an active program");
+      }
+      Object.assign(state.programs[0].wallet, patch);
       return renderToStaticMarkup(<EarnWorkspace />);
     };
 
@@ -298,7 +309,8 @@ describe("EarnWorkspace with an active program", () => {
     // Ground keeps reporting a drained lane's cash bucket at $0 (e.g. the
     // Sepolia USDT lane once emptied) — residue, not a holding. A $0 strategy
     // slice stays: it carries the forward allocation story.
-    const program = data.program.state?.kind === "active" ? data.program.state.program : undefined;
+    const state = data.program.state;
+    const program = state?.kind === "ready" ? state.programs[0] : undefined;
     program?.wallet.positions.push(
       { kind: "cash", label: "Cash (USDT)", valueUsd: "0.000000", token: "usdt" },
       { kind: "bridge", label: "In transit (USDC)", valueUsd: "0.000000", token: "usdc" },
@@ -361,5 +373,128 @@ describe("EarnWorkspace when the program read fails", () => {
     const html = renderToStaticMarkup(<EarnWorkspace />);
     expect(html).toContain("DashboardEarn.overview.programLoadError");
     expect(html).toContain("Shared.SharedComponents.retry");
+  });
+});
+
+/**
+ * Multi-program is the point of PRO-1670, and it is where a "renders the first
+ * one" regression would hide: with one program on screen everything looks
+ * right, and the second program's money is simply invisible.
+ */
+describe("EarnWorkspace with several programs", () => {
+  function programAt(id: string, ref: string, totalUsd: string, apy: string | undefined) {
+    return {
+      id,
+      provider: "ground",
+      label: null,
+      createdAt: TIMESTAMP,
+      ...(apy ? { yield: { currentApy: apy, earnedUsd: "0", positions: [] } } : {}),
+      wallet: {
+        providerWalletRef: ref,
+        status: "ready",
+        solanaDepositAddress: "7M6bFdwsXQZX9MjoD4PDxQJb9FZbwdQh6VS8sK7F3WcQ",
+        balance: {
+          totalUsd,
+          withdrawableUsd: totalUsd,
+          reservedUsd: "0",
+          earnedUsd: "10.00",
+        },
+        positions: [
+          {
+            kind: "yield_source",
+            label: `Slice ${id}`,
+            valueUsd: totalUsd,
+            pct: 100,
+            yieldSourceId: id === "p1" ? "morpho-gauntlet-usdc" : "ground-jaaa-usdc-vault",
+            token: "usdc",
+          },
+        ],
+        allocations: {
+          usdc: [
+            {
+              yieldSourceId: id === "p1" ? "morpho-gauntlet-usdc" : "ground-jaaa-usdc-vault",
+              weightBps: 10_000,
+            },
+          ],
+        },
+      },
+    };
+  }
+
+  beforeEach(() => {
+    data.program.state = {
+      kind: "ready",
+      programs: [
+        programAt("p1", "wallet-ref-1", "100.00", "0.05"),
+        programAt("p2", "wallet-ref-2", "300.00", "0.09"),
+      ],
+    } as never;
+  });
+
+  it("renders every program, not just the first", () => {
+    const html = renderToStaticMarkup(<EarnWorkspace />);
+    expect(html).toContain("$100.00");
+    expect(html).toContain("$300.00");
+  });
+
+  it("names each program after the vault it targets", () => {
+    const html = renderToStaticMarkup(<EarnWorkspace />);
+    expect(html).toContain("Morpho Gauntlet USDC");
+    expect(html).toContain("Ground JAAA USDC");
+  });
+
+  /** The portfolio strip's own APY value — never another card's tile. */
+  const blendedApyTile = (html: string) => html.match(/blendedApy<\/dt><dd[^>]*>([^<]*)</)?.[1];
+
+  it("adds a portfolio strip totalling the programs, with a balance-weighted rate", () => {
+    const html = renderToStaticMarkup(<EarnWorkspace />);
+    expect(html).toContain("$400.00");
+    // 100 @ 5% + 300 @ 9% = 8%, not the 7% a per-program average would show.
+    expect(blendedApyTile(html)).toBe("8.0%");
+  });
+
+  it("offers a per-program change-strategy link, addressed by program id", () => {
+    const html = renderToStaticMarkup(<EarnWorkspace />);
+    expect(html).toContain("/dashboard/markets/earn/deposit?program=p1");
+    expect(html).toContain("/dashboard/markets/earn/deposit?program=p2");
+  });
+
+  it("offers adding another strategy, unaddressed so it creates a new program", () => {
+    const html = renderToStaticMarkup(<EarnWorkspace />);
+    expect(html).toContain("DashboardEarn.overview.addStrategy");
+    expect(html).toContain('href="/dashboard/markets/earn/deposit"');
+  });
+
+  it("never shows the onboarding hero while programs exist", () => {
+    const html = renderToStaticMarkup(<EarnWorkspace />);
+    expect(html).not.toContain("DashboardEarn.overview.startTitle");
+  });
+
+  // The strip only earns its place once there is something to add up; with one
+  // program it would restate that program's own tiles directly above them.
+  it("omits the portfolio strip for a single program", () => {
+    data.program.state = {
+      kind: "ready",
+      programs: [programAt("p1", "wallet-ref-1", "100.00", "0.05")],
+    } as never;
+    const html = renderToStaticMarkup(<EarnWorkspace />);
+    expect(html).not.toContain("DashboardEarn.overview.blendedApy");
+    expect(html).toContain("$100.00");
+  });
+
+  /**
+   * Weighting over only the programs that publish a rate would quote the small
+   * funded strategy's APY as the whole portfolio's.
+   */
+  it("reports no blended rate when a funded program has none", () => {
+    data.program.state = {
+      kind: "ready",
+      programs: [
+        programAt("p1", "wallet-ref-1", "100.00", "0.05"),
+        programAt("p2", "wallet-ref-2", "300.00", undefined),
+      ],
+    } as never;
+    const html = renderToStaticMarkup(<EarnWorkspace />);
+    expect(blendedApyTile(html)).toBe("—");
   });
 });

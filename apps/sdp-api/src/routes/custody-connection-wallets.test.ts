@@ -7,6 +7,7 @@ import app from "@/index";
 import { getLogger } from "@/runtime/logger";
 import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
 import * as custodyProvisioning from "@/services/custody/provisioning";
+import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
@@ -380,6 +381,37 @@ describe("Connection-owned wallet control plane", () => {
         .bind(CONNECTION_ID)
         .first()
     ).toEqual({ default_custody_wallet_id: DEFAULT_WALLET_RECORD_ID });
+  });
+
+  it("does not default a Connection wallet deactivated after resolution", async () => {
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+    const wallet = await targets.findOperationalWallet({
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      walletId: SECOND_WALLET_ID,
+    });
+    expect(wallet).not.toBeNull();
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
+      .bind(SECOND_WALLET_RECORD_ID)
+      .run();
+    const lookup = vi
+      .spyOn(CustodyRuntimeTargets.prototype, "findOperationalWallet")
+      .mockResolvedValueOnce(wallet);
+
+    try {
+      const response = await request("/default-wallet", "POST", { walletId: SECOND_WALLET_ID });
+
+      expect(response.status).toBe(409);
+      expect(
+        await getDb(env)
+          .prepare("SELECT default_custody_wallet_id FROM custody_connections WHERE id = ?")
+          .bind(CONNECTION_ID)
+          .first()
+      ).toEqual({ default_custody_wallet_id: DEFAULT_WALLET_RECORD_ID });
+    } finally {
+      lookup.mockRestore();
+    }
   });
 
   it("returns static unsupported deletion before Connection runtime gates", async () => {

@@ -212,6 +212,59 @@ test("uses the Eve structured session API and preserves placeholders", async () 
   assert.equal(result.translations[0].value, "Bonjour {name}");
 });
 
+test("translates more than 500 keys in bounded batches", async () => {
+  const missing = Array.from({ length: 501 }, (_, index) => ({
+    locale: "fr",
+    sourceFile: "en.json",
+    targetFile: "fr.json",
+    key: `Bulk.key${index}`,
+    source: `Value ${index}`,
+  }));
+  const pendingBatches = [];
+
+  const result = await translateMissingEntries({
+    missing,
+    agentUrl: "https://translation.example.test",
+    agentUsername: "test-user",
+    agentPassword: "test-password",
+    batchSize: 50,
+    maxRetries: 0,
+    fetchImpl: async (url, options) => {
+      if (url.endsWith("/eve/v1/session")) {
+        const batch = JSON.parse(JSON.parse(options.body).message).translations;
+        pendingBatches.push(batch);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ sessionId: `session-${pendingBatches.length}` }),
+        };
+      }
+
+      const batch = pendingBatches.shift();
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          `${JSON.stringify({
+            type: "result.completed",
+            data: {
+              result: {
+                translations: batch.map(({ file, key, source }) => ({
+                  file,
+                  key,
+                  translation: source,
+                })),
+              },
+            },
+          })}\n`,
+      };
+    },
+  });
+
+  assert.equal(result.batches, 11);
+  assert.equal(result.translations.length, 501);
+});
+
 test("returns when Eve completes a result without closing the stream", {
   timeout: 1_000,
 }, async () => {
@@ -405,6 +458,63 @@ test("rejects locale-specific literal terminology from Eve", async () => {
     }),
     /use Token \/ Tokens/
   );
+});
+
+test("feeds validation failures back to Eve before retrying a batch", async () => {
+  const sessionMessages = [];
+  let streams = 0;
+  const result = await translateMissingEntries({
+    missing: [
+      {
+        locale: "fr",
+        sourceFile: "en.json",
+        targetFile: "fr.json",
+        key: "Home.token",
+        source: "Token",
+      },
+    ],
+    guidance,
+    agentUrl: "https://translation.example.test",
+    agentUsername: "test-user",
+    agentPassword: "test-password",
+    maxRetries: 1,
+    fetchImpl: async (url, options) => {
+      if (url.endsWith("/eve/v1/session")) {
+        sessionMessages.push(JSON.parse(JSON.parse(options.body).message));
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ sessionId: `session-${sessionMessages.length}` }),
+        };
+      }
+
+      streams += 1;
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          `${JSON.stringify({
+            type: "result.completed",
+            data: {
+              result: {
+                translations: [
+                  {
+                    file: "en.json",
+                    key: "Home.token",
+                    translation: streams === 1 ? "Jeton" : "Token",
+                  },
+                ],
+              },
+            },
+          })}\n`,
+      };
+    },
+  });
+
+  assert.equal(result.translations[0].value, "Token");
+  assert.equal("retryFeedback" in sessionMessages[0], false);
+  assert.match(sessionMessages[1].retryFeedback.reason, /jeton \/ jetons/);
+  assert.match(sessionMessages[1].retryFeedback.instruction, /Regenerate the full batch/);
 });
 
 test("validates approved locale terminology independently", () => {

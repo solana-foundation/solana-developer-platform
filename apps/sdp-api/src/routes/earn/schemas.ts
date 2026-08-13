@@ -12,16 +12,27 @@ export const earnStrategyIdParamsSchema = z.object({
   strategyId: z.string().min(1),
 });
 
-export const listEarnStrategiesQuerySchema = z.object({
+/** The page window every earn list shares (see handlers/shared.ts pageWindow). */
+const earnPageQueryShape = {
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
+};
+
+export const listEarnStrategiesQuerySchema = z.object({
+  ...earnPageQueryShape,
   sourceKind: z.enum(EARN_STRATEGY_SOURCE_KINDS).optional(),
   apyType: z.enum(EARN_APY_TYPES).optional(),
   liquidityTerm: z.enum(EARN_LIQUIDITY_TERMS).optional(),
 });
 
 // ---------------------------------------------------------------------------
-// Shared portfolio program (ONE provider wallet per organization+environment).
+// Portfolio programs. An organization holds N per (environment, provider)
+// since PRO-1670 — each pinned to one vault, addressed by its own id.
+//
+// `provider` appears ONLY on the create body and as an optional list filter.
+// Every `/programs/:programId` route takes it from the stored row instead: the
+// id already identifies the program, and a caller-supplied provider that
+// disagreed with the row would have no sensible answer.
 // ---------------------------------------------------------------------------
 
 /** Writes stay closed to registered provider ids (ADR 0002 drift rule). */
@@ -77,27 +88,57 @@ const earnProgramAllocationsSchema = z
     message: "allocations must include at least one deposit token group",
   });
 
-export const earnProgramUpsertSchema = z.object({
+export const earnProgramCreateSchema = z.object({
   provider: earnProviderSchema,
   label: z.string().trim().min(1).max(120).optional(),
   allocations: earnProgramAllocationsSchema,
   /**
-   * Caller-owned idempotency key (UUIDv4), forwarded to the provider so a
-   * retried confirm cannot provision a second wallet or apply a strategy twice.
-   * Same contract as the withdrawal path: the provider replays the original
-   * response for a matching payload and conflicts on a mismatch, so callers must
-   * mint a NEW id whenever the allocation changes. The server mints one per call
-   * when absent, which is not idempotent — send your own to get that guarantee.
+   * Caller-owned idempotency key (UUIDv4). Optional HERE only because the
+   * `Idempotency-Key` header is the other accepted source — the handler requires
+   * EXACTLY one and refuses both neither and both, identically to the withdrawal
+   * path and for the same reason: no precedence rule can tell which of two
+   * sources a caller's retry keeps stable.
+   *
+   * Creation became key-REQUIRED with PRO-1670. While an organization could hold
+   * only one program per (environment, provider), a DB unique constraint caught a
+   * retried create; now that N programs are legal, nothing downstream can tell a
+   * retry from a genuine second program, and an unkeyed retry provisions a
+   * duplicate wallet the customer may then fund.
    */
   requestId: z.uuidv4().optional(),
 });
 
-export const earnProgramQuerySchema = z.object({
-  provider: earnProviderSchema,
+/**
+ * Re-target the program's single vault in place. No `provider` (the row owns
+ * it) and no `label` (write-once by design — the update path has never
+ * forwarded it and there is no repository update path, so accepting one here
+ * would silently no-op).
+ */
+export const earnProgramRetargetSchema = z.object({
+  allocations: earnProgramAllocationsSchema,
+  /**
+   * Optional, unlike create's: re-targeting moves no money and is naturally
+   * idempotent on the provider (the same allocations re-applied are a no-op),
+   * so an absent key costs a duplicate provider mutation rather than a duplicate
+   * wallet. Send one anyway — the provider replays a matching payload and 409s a
+   * reused key with changed allocations, which is what makes a double-submitted
+   * confirm safe. The `Idempotency-Key` header is the other accepted source,
+   * exactly as on create and withdrawals; sending both is a 400.
+   */
+  requestId: z.uuidv4().optional(),
+});
+
+export const earnProgramParamsSchema = z.object({
+  programId: z.string().min(1),
+});
+
+/** The collection list: `provider` narrows it, absent lists every provider. */
+export const earnProgramsListQuerySchema = z.object({
+  provider: earnProviderSchema.optional(),
+  ...earnPageQueryShape,
 });
 
 export const earnProgramDepositsQuerySchema = z.object({
-  provider: earnProviderSchema,
   cursor: z.string().min(1).optional(),
 });
 
@@ -116,7 +157,6 @@ const solanaDestinationSchema = z.preprocess(
 );
 
 export const earnProgramWithdrawalPreviewSchema = z.object({
-  provider: earnProviderSchema,
   amountUsd: usdAmountSchema,
   token: z.enum(EARN_PORTFOLIO_TOKENS),
 });
@@ -136,18 +176,14 @@ export const earnProgramWithdrawalCreateSchema = earnProgramWithdrawalPreviewSch
   destinationAddress: solanaDestinationSchema,
 });
 
-export const earnProgramWithdrawalParamsSchema = z.object({
+export const earnProgramWithdrawalParamsSchema = earnProgramParamsSchema.extend({
   withdrawalRef: z.string().min(1),
 });
 
 /**
- * Withdrawal-ledger list (DB read). The provider param stays registry-gated
- * like every program read — ADR 0002's open-string rule governs stored values
- * and dispatch, not query validation, and de-registration only ever happens
- * after a provider is drained.
+ * Withdrawal-ledger list (DB read). Scoped by the path program alone — the
+ * provider comes from that row, so there is no query param left to registry-gate
+ * and this route keeps taking no provider gate whatsoever (ADR 0002: the audit
+ * trail outlives credential removal).
  */
-export const earnProgramWithdrawalsListQuerySchema = z.object({
-  provider: earnProviderSchema,
-  page: z.coerce.number().int().positive().default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(20),
-});
+export const earnProgramWithdrawalsListQuerySchema = z.object(earnPageQueryShape);

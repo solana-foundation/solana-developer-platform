@@ -37,8 +37,7 @@ Release automation also reads these repository variables:
 
 - `TRANSLATION_AGENT_URL` — required when a release has missing UI translations
 - `TRANSLATION_AGENT_MODEL` — optional model name included in the release summary; the translation agent defaults to `deepseek/deepseek-v4-flash`
-- `TRANSLATION_AGENT_MAX_KEYS` — optional translation budget; defaults to `500`
-- `TRANSLATION_AGENT_BATCH_SIZE` — optional request batch size; defaults to `50`
+- `TRANSLATION_AGENT_BATCH_SIZE` — optional request batch size; defaults to `50`; all missing keys are processed in batches of this size
 - `TRANSLATION_AGENT_MAX_RETRIES` — optional retry count; defaults to `2`
 
 ### Repository secrets

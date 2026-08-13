@@ -11,6 +11,7 @@ import type {
 import type { AppDb } from "@/db";
 import type {
   CreateEarnProgramWithdrawalInput,
+  DeleteUnlistedEarnStrategiesInput,
   EarnProgramWithdrawalRow,
   EarnProviderWalletRow,
   EarnRepository,
@@ -18,12 +19,15 @@ import type {
   InsertEarnProviderWalletInput,
   ListEarnProgramWithdrawalsInput,
   ListEarnProgramWithdrawalsResult,
+  ListEarnProviderWalletsInput,
+  ListEarnProviderWalletsResult,
   ListEarnStrategiesInput,
   ListEarnStrategiesResult,
   UpdateEarnProgramWithdrawalStatusGuardedInput,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
 import {
+  EARN_SEED_REFERENCE_PREFIX,
   generateEarnProgramWithdrawalId,
   generateEarnProviderWalletId,
   generateEarnStrategyId,
@@ -98,13 +102,21 @@ function mapProgramWithdrawalRow(row: Record<string, unknown>): EarnProgramWithd
  * id as the deterministic tiebreaker — bulk catalogue syncs write many rows in
  * the same instant, so created_at alone would make pages unstable.
  */
+/**
+ * `order` picks the direction of the (created_at, id) sort — id is always the
+ * tiebreaker because bulk rows share sdp_iso_now(). DESC (newest first) is the
+ * default every history list wants. Programs pass ASC deliberately: the head of
+ * that list must not move when a new program is created (migration 0056's
+ * header explains what breaks if it does).
+ */
 async function selectPage<Row>(
   db: AppDb,
-  table: "earn_strategies" | "earn_program_withdrawals",
+  table: "earn_strategies" | "earn_program_withdrawals" | "earn_provider_wallets",
   conditions: string[],
   bindings: unknown[],
   window: { limit: number; offset: number },
-  mapRow: (row: Record<string, unknown>) => Row
+  mapRow: (row: Record<string, unknown>) => Row,
+  order: "ASC" | "DESC" = "DESC"
 ): Promise<{ rows: Row[]; total: number }> {
   const where = conditions.join(" AND ");
 
@@ -113,7 +125,7 @@ async function selectPage<Row>(
       .prepare(
         `SELECT * FROM ${table}
            WHERE ${where}
-           ORDER BY created_at DESC, id DESC
+           ORDER BY created_at ${order}, id ${order}
            LIMIT ? OFFSET ?`
       )
       .bind(...bindings, window.limit, window.offset)
@@ -199,6 +211,48 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       return row ? mapStrategyRow(row) : null;
     },
 
+    async deleteUnlistedStrategies(input: DeleteUnlistedEarnStrategiesInput) {
+      // Only `active` rows are deleted. An operator `paused`/`deprecated` is a
+      // deliberate human record, and it is load-bearing: upsertStrategy refuses
+      // to overwrite it precisely so a vault stopped for an exploit or depeg
+      // cannot be silently reactivated by a sync. Deleting such a row would
+      // discard that guard — the next time the provider listed the reference, it
+      // would be inserted fresh as `active`. So an operator-stopped row is the
+      // one thing this pass leaves behind; it is invisible to every read anyway
+      // (the catalogue and program-creation paths both filter `status = 'active'`).
+      //
+      // Dev-seed fixtures are outside every provider's key space (providers list
+      // bare ids, fixtures carry the prefix), so "the provider did not list it"
+      // says nothing about them — the seed relies on exactly that to keep its
+      // deliberately-paused fixture paused, and prunes its own stale rows.
+      //
+      // An empty keep set would match EVERY active row (`= ANY('{}')` is false,
+      // so `NOT` admits everything) and delete the provider's whole shelf.
+      // "The provider listed nothing" is indistinguishable from a misconfigured
+      // account or a silently-empty response, so it can never trigger a
+      // catalogue-wide teardown.
+      if (input.listedProviderReferences.length === 0) {
+        return [];
+      }
+
+      const rows = await db
+        .prepare(
+          `DELETE FROM earn_strategies
+            WHERE provider = ?
+              AND environment = ?
+              AND status = 'active'
+              AND provider_reference NOT LIKE ?
+              AND NOT (provider_reference = ANY(?))
+            RETURNING provider_reference`
+        )
+        .bind(input.provider, input.environment, `${EARN_SEED_REFERENCE_PREFIX}%`, [
+          ...input.listedProviderReferences,
+        ])
+        .all<{ provider_reference: string }>();
+
+      return (rows.results ?? []).map((row) => row.provider_reference);
+    },
+
     async listStrategies(input: ListEarnStrategiesInput): Promise<ListEarnStrategiesResult> {
       const conditions = ["environment = ?"];
       const bindings: unknown[] = [input.environment];
@@ -222,13 +276,48 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       return selectPage(db, "earn_strategies", conditions, bindings, input, mapStrategyRow);
     },
 
-    async getProviderWallet(params) {
+    async getProviderWalletById(params) {
       const row = await db
         .prepare(
           `SELECT * FROM earn_provider_wallets
-             WHERE organization_id = ? AND environment = ? AND provider = ?`
+             WHERE organization_id = ? AND environment = ? AND id = ?`
         )
-        .bind(params.organizationId, params.environment, params.provider)
+        .bind(params.organizationId, params.environment, params.walletId)
+        .first<Record<string, unknown>>();
+      return row ? mapProviderWalletRow(row) : null;
+    },
+
+    async listProviderWallets(
+      input: ListEarnProviderWalletsInput
+    ): Promise<ListEarnProviderWalletsResult> {
+      const conditions = ["organization_id = ?", "environment = ?"];
+      const bindings: unknown[] = [input.organizationId, input.environment];
+
+      if (input.provider) {
+        conditions.push("provider = ?");
+        bindings.push(input.provider);
+      }
+
+      // ASC: oldest first, so the head of the list is stable for a program's
+      // whole life (migration 0056).
+      return selectPage(
+        db,
+        "earn_provider_wallets",
+        conditions,
+        bindings,
+        input,
+        mapProviderWalletRow,
+        "ASC"
+      );
+    },
+
+    async getProviderWalletByRef(params) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM earn_provider_wallets
+             WHERE provider = ? AND provider_wallet_ref = ?`
+        )
+        .bind(params.provider, params.providerWalletRef)
         .first<Record<string, unknown>>();
       return row ? mapProviderWalletRow(row) : null;
     },
@@ -378,8 +467,10 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
     async listProgramWithdrawals(
       input: ListEarnProgramWithdrawalsInput
     ): Promise<ListEarnProgramWithdrawalsResult> {
-      // Wallet-scoped, not (org, project): the program wallet is shared by
-      // every project in the environment, so one program = one history.
+      // Wallet-scoped, not (org, project): every project in the environment
+      // reaches the same programs, and since PRO-1670 an organization may hold
+      // several — so the wallet id is what both joins sibling projects' history
+      // and keeps a sibling PROGRAM's payouts out. One program = one history.
       const conditions = ["organization_id = ?", "wallet_id = ?"];
       const bindings: unknown[] = [input.organizationId, input.walletId];
 

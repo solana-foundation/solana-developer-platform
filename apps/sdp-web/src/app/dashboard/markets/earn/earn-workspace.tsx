@@ -22,13 +22,18 @@ import { formatApy, formatUsd } from "./earn-format";
 import {
   EARN_PORTFOLIO_PROVIDER,
   type EarnProgram,
-  useEarnProgram,
+  findProgram,
+  hasPrograms,
+  useEarnPrograms,
   useEarnStrategies,
   useEarnWalletActivityToasts,
   useEarnWithdrawalOutcomeToast,
 } from "./earn-program-data";
 import {
+  portfolioTotals,
+  programTitle,
   settlementDays,
+  strategiesByReference,
   strategyApy,
   strategySourceLabel,
   useLiquidityLabel,
@@ -86,15 +91,8 @@ interface HoldingRow {
  */
 function buildHoldings(
   positions: readonly EarnPortfolioPosition[],
-  provider: string,
-  strategies: readonly EarnStrategy[]
+  byReference: ReadonlyMap<string, EarnStrategy>
 ): readonly HoldingRow[] {
-  const byReference = new Map(
-    strategies
-      .filter((strategy) => strategy.provider === provider)
-      .map((strategy) => [strategy.providerReference, strategy] as const)
-  );
-
   return positions
     .filter(
       // Ground keeps reporting a lane's residual cash bucket at $0 after it
@@ -118,11 +116,11 @@ function buildHoldings(
     });
 }
 
-function WalletStatusBadge({ program }: { program: EarnProgram | undefined }) {
+function WalletStatusBadge({ program }: { program: EarnProgram }) {
   const t = useTranslations();
-  const wallet = program?.wallet;
-  const badge = wallet ? WALLET_STATUS_BADGES[wallet.status] : undefined;
-  if (!wallet || !badge) return null;
+  const wallet = program.wallet;
+  const badge = WALLET_STATUS_BADGES[wallet.status];
+  if (!badge) return null;
   const key = wallet.activity ? WALLET_ACTIVITY_KEYS[wallet.activity] : badge.key;
   return <Badge variant={badge.variant}>{t(key)}</Badge>;
 }
@@ -234,151 +232,310 @@ function DepositAddressRow({ address }: { address: string | undefined }) {
   );
 }
 
-function ProgramSection() {
+/**
+ * The four money figures every strip shows. One builder, because the portfolio
+ * strip and each program card must never drift on which figures render or on
+ * the missing-rate rule: an undefined APY (all-cash program, failed yield
+ * lookup, or an unratable blend) renders "—", never a fabricated 0%.
+ */
+function useMoneyTiles() {
   const t = useTranslations();
-  const { state, error, isLoading, refresh } = useEarnProgram();
+  return (
+    balance: {
+      totalUsd: number | string;
+      earnedUsd: number | string;
+      withdrawableUsd: number | string;
+    },
+    apy: { label: string; value: string | number | undefined }
+  ) => [
+    {
+      id: "total",
+      label: t("DashboardEarn.overview.totalBalance"),
+      value: formatUsd(balance.totalUsd),
+    },
+    {
+      id: "earned",
+      label: t("DashboardEarn.overview.totalEarned"),
+      value: formatUsd(balance.earnedUsd),
+    },
+    {
+      id: "withdrawable",
+      label: t("DashboardEarn.overview.withdrawableBalance"),
+      value: formatUsd(balance.withdrawableUsd),
+    },
+    { id: "apy", label: apy.label, value: apy.value === undefined ? "—" : formatApy(apy.value) },
+  ];
+}
+
+/** A stat strip — the same four figures, whether portfolio-wide or per program. */
+function MoneyTiles({
+  tiles,
+  size,
+}: {
+  tiles: readonly { id: string; label: string; value: string }[];
+  size: "lg" | "sm";
+}) {
+  return (
+    <dl className="mt-6 grid gap-x-8 gap-y-4 sm:grid-cols-2 xl:grid-cols-4">
+      {tiles.map((tile) => (
+        <div className="min-w-0 border-t border-border-subtle pt-3" key={tile.id}>
+          <dt className="text-xs text-tertiary">{tile.label}</dt>
+          <dd
+            className={`mt-1 font-medium tracking-tight text-primary tabular-nums ${
+              size === "lg" ? "text-2xl" : "text-xl"
+            }`}
+          >
+            {tile.value}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/**
+ * ONE program: its own money, its own holdings, its own funding address, and the
+ * two verbs that manage it. Rendered as a repeated record, so several stack
+ * without a switcher — hiding a funded program behind a tab would make a reader
+ * hunt for money they hold.
+ */
+function ProgramCard({
+  program,
+  strategies,
+  onWithdraw,
+}: {
+  program: EarnProgram;
+  strategies: readonly EarnStrategy[];
+  onWithdraw: () => void;
+}) {
+  const t = useTranslations();
+  const moneyTiles = useMoneyTiles();
+  // One provider-filtered reference map serves both the title and the holdings
+  // join — built per catalogue change, not per render, and filtered so another
+  // provider's reference can never cross-match this program's slices.
+  const catalogueByRef = useMemo(
+    () => strategiesByReference(program.provider, strategies),
+    [program.provider, strategies]
+  );
+  const holdings = useMemo(
+    () => buildHoldings(program.wallet.positions, catalogueByRef),
+    [program, catalogueByRef]
+  );
+  const title = programTitle(
+    program.wallet.allocations,
+    program.label,
+    catalogueByRef,
+    t("DashboardEarn.overview.programUntitled")
+  );
+
+  return (
+    <article className="rounded-xl border border-border-default bg-surface-raised p-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          {/* Polite live region: the badge appears and clears on its own as the
+              provider's status changes, so a screen-reader user would otherwise
+              never learn a withdrawal started or settled. Not atomic — only the
+              badge is announced, never the re-read heading. */}
+          <div aria-live="polite" className="flex flex-wrap items-center gap-2">
+            <h3 className="truncate text-base font-medium tracking-tight text-primary">{title}</h3>
+            <WalletStatusBadge program={program} />
+          </div>
+        </div>
+        {/* The two verbs that MANAGE this program. Depositing needs no wizard at
+            all — it is the address row below — so nothing here says "deposit". */}
+        <div className="flex w-full gap-2 sm:w-auto sm:shrink-0">
+          <Button
+            className="flex-1 sm:flex-none"
+            disabled={Number(program.wallet.balance.withdrawableUsd) <= 0}
+            onClick={onWithdraw}
+            variant="secondary"
+          >
+            {t("DashboardEarn.overview.withdraw")}
+          </Button>
+          <Button asChild className="flex-1 sm:flex-none" variant="secondary">
+            {/* The attribute VALUE scopes the withdraw modal's focus-return
+                fallback to THIS program's card — a bare attribute would make
+                the modal's querySelector land on whichever card renders
+                first. */}
+            <Link
+              data-earn-withdraw-focus-fallback={program.id}
+              href={`${DEPOSIT_PATH}?program=${encodeURIComponent(program.id)}`}
+            >
+              {t("DashboardEarn.overview.changeStrategy")}
+            </Link>
+          </Button>
+        </div>
+      </div>
+
+      <MoneyTiles
+        size="sm"
+        tiles={moneyTiles(program.wallet.balance, {
+          label: t("DashboardEarn.overview.currentApy"),
+          value: program.yield?.currentApy,
+        })}
+      />
+
+      {holdings.length > 0 ? (
+        <HoldingsList allocations={program.wallet.allocations} rows={holdings} />
+      ) : (
+        <p className="mt-6 text-sm leading-6 text-secondary">
+          {t("DashboardEarn.overview.holdingsEmpty")}
+        </p>
+      )}
+
+      <DepositAddressRow address={program.wallet.solanaDepositAddress} />
+    </article>
+  );
+}
+
+/**
+ * Renders nothing; exists because hooks are per-instance. Mounting one per
+ * submitted withdrawal is what lets N in-flight withdrawals each poll to their
+ * own terminal status and announce exactly once — and `onSettled` is how one
+ * retires afterwards, so settled watchers do not accumulate as dead SWR
+ * subscriptions over a long session.
+ */
+function WithdrawalOutcomeWatcher({
+  programId,
+  withdrawalRef,
+  onSettled,
+}: {
+  programId: string;
+  withdrawalRef: string;
+  onSettled: () => void;
+}) {
+  useEarnWithdrawalOutcomeToast(programId, withdrawalRef, onSettled);
+  return null;
+}
+
+function ProgramsSection() {
+  const t = useTranslations();
+  const moneyTiles = useMoneyTiles();
+  const { state, error, isLoading, refresh } = useEarnPrograms();
   // Owned here, not in the hook: the program read runs in several components,
   // and a toast per consumer would announce one completion several times.
   useEarnWalletActivityToasts(state);
   const { strategies } = useEarnStrategies();
-  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [withdrawProgramId, setWithdrawProgramId] = useState<string | undefined>(undefined);
   // Held past the modal's lifetime on purpose: the outcome lands well after
   // the user dismisses it, and it is the withdrawal — not the wallet — that
-  // knows whether the money arrived.
-  const [watchedWithdrawalRef, setWatchedWithdrawalRef] = useState<string | undefined>(undefined);
-  useEarnWithdrawalOutcomeToast(watchedWithdrawalRef);
-
-  const program = state?.kind === "active" ? state.program : undefined;
-  const holdings = useMemo(
-    () =>
-      program
-        ? buildHoldings(program.wallet.positions, program.provider, strategies ?? [])
-        : ([] as readonly HoldingRow[]),
-    [program, strategies]
+  // knows whether the money arrived. A LIST, not a slot: with several programs
+  // a user can submit a second withdrawal while the first still processes, and
+  // a single slot would orphan the first watch — its outcome toast (including a
+  // failure) would simply never fire. Each entry carries its program, since a
+  // withdrawal is only addressable through the program that made it. Entries
+  // retire themselves once announced (the watcher's onSettled), so the list
+  // holds only in-flight watches.
+  const [watched, setWatched] = useState<readonly { programId: string; withdrawalRef: string }[]>(
+    []
   );
 
+  const programs = state?.kind === "ready" ? state.programs : [];
+  const catalogue = strategies ?? [];
+  const withdrawProgram = findProgram(state, withdrawProgramId);
+  const totals = useMemo(() => portfolioTotals(programs), [programs]);
+
+  // The portfolio strip only earns its place once there is something to add up.
+  // With a single program it would restate that program's own tiles directly
+  // above them.
+  const showPortfolio = programs.length > 1;
+
   return (
-    <section className="rounded-xl border border-border-default bg-surface-raised p-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          {/* Polite live region: the badge now appears and clears on its own
-              as the provider's status changes, so a screen-reader user would
-              otherwise never learn a withdrawal started or settled. Not atomic
-              — only the badge is announced, never the re-read heading. */}
-          <div aria-live="polite" className="flex items-center gap-2">
+    <>
+      <section className="rounded-xl border border-border-default bg-surface-raised p-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
             <h2 className="text-base font-medium tracking-tight text-primary">
               {t("DashboardEarn.overview.programTitle")}
             </h2>
-            <WalletStatusBadge program={program} />
+            <p className="mt-1 max-w-xl text-sm leading-6 text-secondary">
+              {t(
+                programs.length > 0
+                  ? "DashboardEarn.overview.programDescription"
+                  : "DashboardEarn.overview.programEmpty"
+              )}
+            </p>
           </div>
-          <p className="mt-1 max-w-xl text-sm leading-6 text-secondary">
-            {t(
-              program
-                ? "DashboardEarn.overview.programDescription"
-                : "DashboardEarn.overview.programEmpty"
-            )}
-          </p>
+          {programs.length > 0 ? (
+            <div className="flex w-full sm:w-auto sm:shrink-0">
+              <Button asChild className="flex-1 sm:flex-none">
+                <Link href={DEPOSIT_PATH}>{t("DashboardEarn.overview.addStrategy")}</Link>
+              </Button>
+            </div>
+          ) : null}
         </div>
-        {program ? (
-          // The two verbs that MANAGE the pot. Depositing needs no wizard at
-          // all — it is the address row below — so nothing here says "deposit".
-          <div className="flex w-full gap-2 sm:w-auto sm:shrink-0">
-            <Button
-              className="flex-1 sm:flex-none"
-              disabled={Number(program.wallet.balance.withdrawableUsd) <= 0}
-              onClick={() => setWithdrawOpen(true)}
-              variant="secondary"
-            >
-              {t("DashboardEarn.overview.withdraw")}
-            </Button>
-            <Button asChild className="flex-1 sm:flex-none">
-              <Link data-earn-withdraw-focus-fallback href={DEPOSIT_PATH}>
-                {t("DashboardEarn.overview.changeStrategy")}
-              </Link>
+
+        {isLoading ? <ProgramSkeleton /> : null}
+
+        {error ? (
+          <div className="mt-4 flex items-center gap-3 rounded-md border border-border-subtle bg-fill-subtle p-3">
+            <p className="flex-1 text-sm text-secondary">
+              {t("DashboardEarn.overview.programLoadError")}
+            </p>
+            <Button onClick={refresh} size="sm" variant="secondary">
+              {t("Shared.SharedComponents.retry")}
             </Button>
           </div>
         ) : null}
-      </div>
 
-      {isLoading ? <ProgramSkeleton /> : null}
-
-      {error ? (
-        <div className="mt-4 flex items-center gap-3 rounded-md border border-border-subtle bg-fill-subtle p-3">
-          <p className="flex-1 text-sm text-secondary">
-            {t("DashboardEarn.overview.programLoadError")}
+        {state?.kind === "unconfigured" ? (
+          <p className="mt-4 rounded-md border border-border-subtle bg-fill-subtle p-3 text-sm leading-6 text-secondary">
+            {t("DashboardEarn.overview.providerNotConfigured")}
           </p>
-          <Button onClick={refresh} size="sm" variant="secondary">
-            {t("Shared.SharedComponents.retry")}
-          </Button>
-        </div>
-      ) : null}
+        ) : null}
 
-      {state?.kind === "unconfigured" ? (
-        <p className="mt-4 rounded-md border border-border-subtle bg-fill-subtle p-3 text-sm leading-6 text-secondary">
-          {t("DashboardEarn.overview.providerNotConfigured")}
-        </p>
-      ) : null}
+        {showPortfolio ? (
+          <MoneyTiles
+            size="lg"
+            tiles={moneyTiles(totals, {
+              label: t("DashboardEarn.overview.blendedApy"),
+              value: totals.blendedApy,
+            })}
+          />
+        ) : null}
+      </section>
 
-      {program ? (
-        <>
-          <dl className="mt-6 grid gap-x-8 gap-y-4 sm:grid-cols-2 xl:grid-cols-4">
-            {[
-              {
-                id: "total",
-                label: t("DashboardEarn.overview.totalBalance"),
-                value: formatUsd(program.wallet.balance.totalUsd),
-              },
-              {
-                id: "earned",
-                label: t("DashboardEarn.overview.totalEarned"),
-                value: formatUsd(program.wallet.balance.earnedUsd),
-              },
-              {
-                id: "withdrawable",
-                label: t("DashboardEarn.overview.withdrawableBalance"),
-                value: formatUsd(program.wallet.balance.withdrawableUsd),
-              },
-              {
-                id: "apy",
-                label: t("DashboardEarn.overview.currentApy"),
-                // Undefined rate (all-cash program, or a yield lookup that
-                // failed) reads as "no rate yet" — never a misleading 0%.
-                value: program.yield?.currentApy ? formatApy(program.yield.currentApy) : "—",
-              },
-            ].map((tile) => (
-              <div className="min-w-0 border-t border-border-subtle pt-3" key={tile.id}>
-                <dt className="text-xs text-tertiary">{tile.label}</dt>
-                <dd className="mt-1 text-2xl font-medium tracking-tight text-primary tabular-nums">
-                  {tile.value}
-                </dd>
-              </div>
-            ))}
-          </dl>
+      {programs.map((program) => (
+        <ProgramCard
+          key={program.id}
+          onWithdraw={() => setWithdrawProgramId(program.id)}
+          program={program}
+          strategies={catalogue}
+        />
+      ))}
 
-          {holdings.length > 0 ? (
-            <HoldingsList allocations={program.wallet.allocations} rows={holdings} />
-          ) : (
-            <p className="mt-6 text-sm leading-6 text-secondary">
-              {t("DashboardEarn.overview.holdingsEmpty")}
-            </p>
-          )}
+      {watched.map((entry) => (
+        <WithdrawalOutcomeWatcher
+          key={`${entry.programId}:${entry.withdrawalRef}`}
+          {...entry}
+          onSettled={() =>
+            setWatched((current) =>
+              current.filter(
+                (candidate) =>
+                  candidate.programId !== entry.programId ||
+                  candidate.withdrawalRef !== entry.withdrawalRef
+              )
+            )
+          }
+        />
+      ))}
 
-          <DepositAddressRow address={program.wallet.solanaDepositAddress} />
-        </>
-      ) : null}
-
-      {withdrawOpen && program ? (
+      {withdrawProgram ? (
         <EarnWithdrawModal
-          balance={program.wallet.balance}
-          positions={program.wallet.positions}
-          onClose={() => setWithdrawOpen(false)}
+          // Remount per program so no draft amount, destination, or minted
+          // idempotency key can survive a switch between programs.
+          key={withdrawProgram.id}
+          balance={withdrawProgram.wallet.balance}
+          onClose={() => setWithdrawProgramId(undefined)}
           onWithdrawalCreated={(withdrawalRef) => {
-            setWatchedWithdrawalRef(withdrawalRef);
+            setWatched((current) => [...current, { programId: withdrawProgram.id, withdrawalRef }]);
             refresh();
           }}
+          positions={withdrawProgram.wallet.positions}
+          programId={withdrawProgram.id}
         />
       ) : null}
-    </section>
+    </>
   );
 }
 
@@ -390,15 +547,15 @@ function ProgramSection() {
  */
 function StartSection() {
   const t = useTranslations();
-  const { state } = useEarnProgram();
+  const { state } = useEarnPrograms();
   const { strategies, error, isLoading } = useEarnStrategies();
 
   // Nothing until the program read RESOLVES. `undefined` is in-flight, not
-  // "no program": rendering the hero on it flashed onboarding at every reader
-  // who already has a program, then yanked it away when the response landed.
-  // Resolved non-active states (none / unconfigured) still get the hero, and
-  // a failed read shows ProgramSection's error instead of guessing.
-  if (state === undefined || state.kind === "active") {
+  // "no programs": rendering the hero on it flashed onboarding at every reader
+  // who already has one, then yanked it away when the response landed. A
+  // resolved-but-empty list and `unconfigured` still get the hero, and a failed
+  // read shows ProgramsSection's error instead of guessing.
+  if (state === undefined || hasPrograms(state)) {
     return null;
   }
 
@@ -489,7 +646,7 @@ export function EarnWorkspace() {
   return (
     // No root padding: the dashboard shell already pads non-viewport-locked routes.
     <div className="grid content-start gap-6">
-      <ProgramSection />
+      <ProgramsSection />
       <StartSection />
     </div>
   );

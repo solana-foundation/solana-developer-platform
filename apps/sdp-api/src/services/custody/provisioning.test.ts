@@ -28,21 +28,26 @@ describe("coinbase account provisioning", () => {
     vi.restoreAllMocks();
   });
 
-  it("creates a CDP account using an environment-scoped name", async () => {
-    const fetchMock = vi
+  function mockCreateCapturingNames(names: string[]) {
+    return vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
         const url = toUrlString(input);
 
         if (url.endsWith("/platform/v2/solana/accounts") && init?.method === "POST") {
           const body = JSON.parse(String(init.body ?? "{}")) as { name?: string };
-          expect(body.name).toBe("sdp-production-acme-labs");
+          names.push(body.name ?? "");
 
           return jsonResponse({ address: CREATED_ADDRESS }, 200);
         }
 
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
+  }
+
+  it("creates a CDP account with a digest name that fits CDP constraints", async () => {
+    const names: string[] = [];
+    const fetchMock = mockCreateCapturingNames(names);
 
     const result = await provisionCoinbaseCdpAccount(
       createCoinbaseEnv({
@@ -50,30 +55,81 @@ describe("coinbase account provisioning", () => {
       }),
       {
         orgId: "org_abc",
-        orgSlug: "Acme Labs",
+        projectId: "proj_1",
       }
     );
 
     expect(result.address).toBe(CREATED_ADDRESS);
     expect(result.network).toBe("solana-devnet");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(names[0]).toMatch(/^sdp-[0-9a-f]{32}$/);
   });
 
-  it("reuses the existing CDP account when create returns already_exists", async () => {
-    const expectedName = "sdp-local-acme-labs";
-    const expectedByNamePath = `/platform/v2/solana/accounts/by-name/${encodeURIComponent(expectedName)}`;
+  it("scopes the account identity by org, project, network, namespace, and wallet seed", async () => {
+    const names: string[] = [];
+    mockCreateCapturingNames(names);
 
+    const base = { orgId: "org_abc", projectId: "proj_1" };
+    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), base);
+    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), base);
+    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, orgId: "org_other" });
+    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, projectId: "proj_2" });
+    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, projectId: null });
+    await provisionCoinbaseCdpAccount(createCoinbaseEnv({ COINBASE_CDP_NETWORK: "solana" }), base);
+    await provisionCoinbaseCdpAccount(
+      createCoinbaseEnv({ COINBASE_CDP_ACCOUNT_NAMESPACE: "staging" }),
+      base
+    );
+    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, walletSeed: "seed-1" });
+    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, walletSeed: "seed-2" });
+
+    // Retries of the same identity are deterministic…
+    expect(names[1]).toBe(names[0]);
+    // …while every scope dimension yields a distinct account.
+    const distinct = [names[0], ...names.slice(2)];
+    expect(new Set(distinct).size).toBe(distinct.length);
+    for (const name of names) {
+      expect(name).toMatch(/^sdp-[0-9a-f]{32}$/);
+    }
+  });
+
+  it("does not derive the identity from truncatable tenant identifiers", async () => {
+    const names: string[] = [];
+    mockCreateCapturingNames(names);
+
+    const longPrefix = `org_${"a".repeat(60)}`;
+    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+      orgId: `${longPrefix}x`,
+      projectId: "proj_1",
+    });
+    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+      orgId: `${longPrefix}y`,
+      projectId: "proj_1",
+    });
+
+    expect(names[0]).not.toBe(names[1]);
+  });
+
+  it("reuses the existing CDP account on already_exists when the caller opts in", async () => {
+    let requestedName = "";
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
         const url = toUrlString(input);
 
         if (url.endsWith("/platform/v2/solana/accounts") && init?.method === "POST") {
+          const body = JSON.parse(String(init.body ?? "{}")) as { name?: string };
+          requestedName = body.name ?? "";
           return jsonResponse({ errorType: "already_exists" }, 409);
         }
 
-        if (url.endsWith(expectedByNamePath) && init?.method === "GET") {
-          return jsonResponse({ address: EXISTING_ADDRESS, name: expectedName }, 200);
+        if (
+          url.endsWith(
+            `/platform/v2/solana/accounts/by-name/${encodeURIComponent(requestedName)}`
+          ) &&
+          init?.method === "GET"
+        ) {
+          return jsonResponse({ address: EXISTING_ADDRESS, name: requestedName }, 200);
         }
 
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
@@ -85,12 +141,37 @@ describe("coinbase account provisioning", () => {
       }),
       {
         orgId: "org_abc",
-        orgSlug: "Acme Labs",
+        projectId: "proj_1",
+        reuseExisting: true,
       }
     );
 
     expect(result.address).toBe(EXISTING_ADDRESS);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails closed on already_exists when the caller does not opt into reuse", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = toUrlString(input);
+
+        if (url.endsWith("/platform/v2/solana/accounts") && init?.method === "POST") {
+          return jsonResponse({ errorType: "already_exists" }, 409);
+        }
+
+        throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
+      });
+
+    await expect(
+      provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+        orgId: "org_abc",
+        projectId: "proj_1",
+        walletSeed: "seed-1",
+      })
+    ).rejects.toThrowError(/already exists and this operation does not reuse/i);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("reads data.address when resolving an already-created account by name", async () => {
@@ -112,7 +193,7 @@ describe("coinbase account provisioning", () => {
 
     const result = await provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
       orgId: "org_abc",
-      orgSlug: "Acme Labs",
+      reuseExisting: true,
     });
 
     expect(result.address).toBe(EXISTING_ADDRESS);
@@ -139,7 +220,7 @@ describe("coinbase account provisioning", () => {
     await expect(
       provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
         orgId: "org_abc",
-        orgSlug: "Acme Labs",
+        reuseExisting: true,
       })
     ).rejects.toThrowError(/could not be resolved by name/i);
 
@@ -166,7 +247,7 @@ describe("coinbase account provisioning", () => {
     await expect(
       provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
         orgId: "org_abc",
-        orgSlug: "Acme Labs",
+        reuseExisting: true,
       })
     ).rejects.toThrowError(/could not be resolved by name/i);
 
