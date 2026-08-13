@@ -100,12 +100,24 @@ export async function runCronJob(): Promise<void> {
   }
 }
 
+export function describeCronFailure(error: unknown): Record<string, unknown> {
+  if (!(error instanceof AggregateError)) return { error };
+  return {
+    error,
+    causes: error.errors.map((cause: unknown) =>
+      cause instanceof Error
+        ? { message: cause.message, stack: cause.stack }
+        : { message: String(cause) }
+    ),
+  };
+}
+
 const invokedPath = process.argv[1];
 if (invokedPath && import.meta.url === pathToFileURL(invokedPath).href) {
   runCronJob()
     .then(() => process.exit(0))
     .catch((err: unknown) => {
-      getLogger().error({ error: err }, "Reconciliation job failed");
+      getLogger().error(describeCronFailure(err), "Reconciliation job failed");
       process.exit(1);
     });
 }

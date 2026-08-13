@@ -12,7 +12,7 @@ import { runDueWorkflowExecutions } from "@/services/jobs/run-workflow-execution
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
-import { runCronJob } from "./job";
+import { describeCronFailure, runCronJob } from "./job";
 
 vi.mock("@sentry/node", () => ({
   close: vi.fn(async () => true),
@@ -281,5 +281,32 @@ describe("runCronJob", () => {
     await expect(runCronJob()).rejects.toThrow("transfers down");
 
     expect(reconcileSponsorshipBudgets).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports every underlying cause when a tick fails on more than one task", () => {
+    const failure = new AggregateError(
+      [new Error("transfers down"), new Error("sponsorship down")],
+      "pending-transfers tick had multiple failures"
+    );
+
+    expect(describeCronFailure(failure)).toEqual({
+      error: failure,
+      causes: [
+        { message: "transfers down", stack: expect.any(String) },
+        { message: "sponsorship down", stack: expect.any(String) },
+      ],
+    });
+  });
+
+  it("keeps a single failure unchanged", () => {
+    const failure = new Error("transfers down");
+    expect(describeCronFailure(failure)).toEqual({ error: failure });
+  });
+
+  it("describes a rejected non-error value", () => {
+    expect(describeCronFailure(new AggregateError(["boom"], "tick"))).toEqual({
+      error: expect.any(AggregateError),
+      causes: [{ message: "boom" }],
+    });
   });
 });
