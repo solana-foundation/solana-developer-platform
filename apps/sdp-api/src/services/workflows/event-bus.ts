@@ -4,6 +4,7 @@ import {
   createAssetWorkflowsRepository,
   createWorkflowExecutionsRepository,
 } from "@/db/repositories";
+import { notifyApprovalRequested } from "@/services/notifications";
 import type { Env } from "@/types/env";
 
 // A normalized domain event. Trigger *sources* (Mural webhook today, external API
@@ -109,6 +110,12 @@ export async function dispatchWorkflowEvent(env: Env, event: WorkflowEvent): Pro
     });
     if (created) {
       enqueued += 1;
+      if (created.status === "awaiting_review") {
+        // Tell the reviewers a human decision is waiting. Idempotent on the execution
+        // id, and createExecution already returned null for a redelivered event, so a
+        // re-delivery can't re-notify. Never throws.
+        await notifyApprovalRequested(env, created);
+      }
     }
   }
 

@@ -14,4 +14,16 @@ export {
   type NotificationDispatchInput,
   type NotificationDispatchResult,
 } from "./dispatcher";
+export {
+  notifyApprovalDecided,
+  notifyApprovalRequested,
+  notifyKycOutcome,
+  notifyMemberInvited,
+  notifyMemberInviteRevoked,
+  notifyMemberJoined,
+  notifyMemberRemoved,
+  notifyRampSettled,
+  notifyRecurringPaymentFailed,
+  notifyWorkflowRunFailed,
+} from "./producers";
 export { managePreferencesLink, resourceLink } from "./resource-links";

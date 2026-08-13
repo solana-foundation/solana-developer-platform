@@ -13,6 +13,7 @@ import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import type { StoredCredentialSecret } from "@/services/credential-secret-store";
+import { notifyWorkflowRunFailed } from "@/services/notifications";
 import { dispatchWorkflowAction } from "@/services/workflows/actions";
 import { type AssetGateContext, resolveAssetGateContext } from "@/services/workflows/asset-gate";
 import type { Env } from "@/types/env";
@@ -283,8 +284,11 @@ export async function runDueWorkflowExecutions(
   // terminal states are audited — transient reschedules would be noise. metadata.tokenId
   // surfaces the event in the per-asset audit feed. Never throws — an audit write
   // failure must not break the tick, so persistence errors are logged and swallowed.
-  const auditTerminal: AuditTerminal = (row, status, extra) =>
-    audit
+  // Terminal FAILURES also notify the org's admins (fires once per execution — a
+  // fail → manual retry → fail sequence dedupes to one notification; successes are the
+  // normal case and stay silent).
+  const auditTerminal: AuditTerminal = async (row, status, extra) => {
+    await audit
       .logSystem({
         organizationId: row.organization_id,
         action: status === "success" ? "workflow_action_executed" : "workflow_action_failed",
@@ -305,6 +309,11 @@ export async function runDueWorkflowExecutions(
           "workflow engine: system audit write failed"
         );
       });
+    if (status === "failure") {
+      const reason = typeof extra.reason === "string" ? extra.reason : null;
+      await notifyWorkflowRunFailed(env, row, reason);
+    }
+  };
 
   const nowIso = now.toISOString();
   const staleBefore = new Date(now.getTime() - STALE_AFTER_MS).toISOString();
