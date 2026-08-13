@@ -7,7 +7,7 @@ import {
   type EarnPortfolioWithdrawalPreview,
 } from "@sdp/types";
 import { Loader2Icon } from "lucide-react";
-import { type ChangeEvent, useEffect, useRef, useState } from "react";
+import { type ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -148,6 +148,21 @@ type LaneLiquidity =
   | { phase: "loading" }
   | { phase: "ready"; withdrawableUsd: string }
   | { phase: "error" };
+
+/**
+ * Precedence rule for the two writers of the lane ceiling: a response may write
+ * only if no LATER-dispatched response already has.
+ *
+ * `lastWrittenSeq` is the last sequence that actually wrote — not the last
+ * dispatched — and the difference is the whole point. A later response carrying
+ * no liquidity information (a network failure, or a 409 with no balance) simply
+ * does not write, so it must not veto an earlier response that does have a
+ * figure; comparing against the last DISPATCH would strand the available line
+ * on "checking…" whenever the second request came back empty.
+ */
+export function liquidityWriteWins(seq: number, lastWrittenSeq: number): boolean {
+  return seq >= lastWrittenSeq;
+}
 
 /**
  * The reported ceiling floored to whole cents, as an exact decimal string.
@@ -490,6 +505,32 @@ export function EarnWithdrawModal({
   }, [submitting, contentRef]);
 
   /**
+   * Order the two writers of `laneLiquidity`.
+   *
+   * BOTH previews report the lane's `withdrawableUsd`, and they race: the
+   * on-open liquidity read is undebounced while the amount-specific one waits
+   * out `PREVIEW_DEBOUNCE_MS`. A reader who types immediately can therefore have
+   * the FIRST request land second — and Ground takes ~500ms on this endpoint, so
+   * that ordering is real, not theoretical. Left alone, a stale response
+   * overwrites a fresh ceiling and `Max` goes back to offering an amount the
+   * provider refuses, or validation rejects an amount that is currently fine.
+   * Each effect's `AbortController` cannot help: it only cancels its OWN
+   * request, and these are two independent effects.
+   *
+   * Precedence is by DISPATCH order, not arrival. The ref tracks the last
+   * sequence that actually WROTE, not the last dispatched — deliberately: a
+   * later response carrying no liquidity information must not veto an earlier
+   * one that has some, which would strand the line on "checking…" forever.
+   */
+  const dispatchSeqRef = useRef(0);
+  const liquidityWriteSeqRef = useRef(0);
+  const commitLaneLiquidity = useCallback((seq: number, next: LaneLiquidity) => {
+    if (!liquidityWriteWins(seq, liquidityWriteSeqRef.current)) return;
+    liquidityWriteSeqRef.current = seq;
+    setLaneLiquidity(next);
+  }, []);
+
+  /**
    * The liquidity read: one AMOUNT-LESS preview per (program, token), fired on
    * open rather than on the keystroke path.
    *
@@ -502,12 +543,15 @@ export function EarnWithdrawModal({
   useEffect(() => {
     if (created) return;
     const controller = new AbortController();
-    setLaneLiquidity({ phase: "loading" });
+    // A fresh dispatch, so `loading` legitimately outranks anything older still
+    // in flight — the token just changed and no stale response may un-blank it.
+    const seq = ++dispatchSeqRef.current;
+    commitLaneLiquidity(seq, { phase: "loading" });
     void (async () => {
       const result = await previewEarnWithdrawal(programId, { token }, controller.signal);
       if (controller.signal.aborted) return;
       if (result.ok) {
-        setLaneLiquidity({
+        commitLaneLiquidity(seq, {
           phase: "ready",
           withdrawableUsd: result.data.data.preview.withdrawableUsd,
         });
@@ -519,14 +563,15 @@ export function EarnWithdrawModal({
       // arrives on the error path. Treating that as "unknown" would discard
       // the very payload PRO-1675 exists to stop discarding.
       const laneCeilingUsd = laneCeilingFromErrorBody(result.body);
-      setLaneLiquidity(
+      commitLaneLiquidity(
+        seq,
         laneCeilingUsd === undefined
           ? { phase: "error" }
           : { phase: "ready", withdrawableUsd: laneCeilingUsd }
       );
     })();
     return () => controller.abort();
-  }, [programId, token, created]);
+  }, [programId, token, created, commitLaneLiquidity]);
 
   // The amount-specific preview — fee, resulting portfolio, processing window —
   // which needs only amount + token, so it refreshes as those settle. Every
@@ -540,6 +585,9 @@ export function EarnWithdrawModal({
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setPreview({ phase: "loading" });
+      // Sequenced at REQUEST time, not at effect time: the debounce means this
+      // dispatch is genuinely later than the on-open read it may overtake.
+      const seq = ++dispatchSeqRef.current;
       const result = await previewEarnWithdrawal(
         programId,
         { amountUsd: amount, token },
@@ -548,7 +596,7 @@ export function EarnWithdrawModal({
       if (controller.signal.aborted) return;
       if (result.ok) {
         setPreview({ phase: "ready", preview: result.data.data.preview });
-        setLaneLiquidity({
+        commitLaneLiquidity(seq, {
           phase: "ready",
           withdrawableUsd: result.data.data.preview.withdrawableUsd,
         });
@@ -560,14 +608,14 @@ export function EarnWithdrawModal({
       const laneCeilingUsd = laneCeilingFromErrorBody(result.body);
       setPreview({ phase: "error", ...(laneCeilingUsd !== undefined && { laneCeilingUsd }) });
       if (laneCeilingUsd !== undefined) {
-        setLaneLiquidity({ phase: "ready", withdrawableUsd: laneCeilingUsd });
+        commitLaneLiquidity(seq, { phase: "ready", withdrawableUsd: laneCeilingUsd });
       }
     }, PREVIEW_DEBOUNCE_MS);
     return () => {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [amount, amountValid, token, created, programId]);
+  }, [amount, amountValid, token, created, programId, commitLaneLiquidity]);
 
   const submit = async () => {
     if (!amountValid || !destinationValid || submitting) return;
@@ -591,7 +639,13 @@ export function EarnWithdrawModal({
         setSubmitError(result.error);
         return;
       }
-      setLaneLiquidity({ phase: "ready", withdrawableUsd: laneCeilingUsd });
+      // Sequenced last on purpose: a refusal of a real payout attempt is the
+      // most authoritative liquidity signal there is, so no preview still in
+      // flight may overwrite it.
+      commitLaneLiquidity(++dispatchSeqRef.current, {
+        phase: "ready",
+        withdrawableUsd: laneCeilingUsd,
+      });
       setSubmitError(
         t("DashboardEarn.withdraw.previewInsufficientCeiling", {
           token: token.toUpperCase(),

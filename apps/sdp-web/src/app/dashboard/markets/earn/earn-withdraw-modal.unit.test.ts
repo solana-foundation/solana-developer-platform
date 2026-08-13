@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { floorUsdToCents, laneCeilingFromErrorBody } from "./earn-withdraw-modal";
+import {
+  floorUsdToCents,
+  laneCeilingFromErrorBody,
+  liquidityWriteWins,
+} from "./earn-withdraw-modal";
 
 /**
  * The two helpers that carry PRO-1675's provider-quirk handling. Both exist
@@ -37,6 +41,82 @@ describe("floorUsdToCents", () => {
 
   it("tolerates surrounding whitespace from a provider string", () => {
     expect(floorUsdToCents(" 20.001241 ")).toBe("20.00");
+  });
+});
+
+/**
+ * The ordering contract for the lane ceiling, replayed as the interleaving that
+ * produced the bug (PR #1283 review, greptile P1).
+ *
+ * Two previews both report `withdrawableUsd`: the on-open liquidity read is
+ * undebounced while the amount-specific one waits out PREVIEW_DEBOUNCE_MS, so a
+ * reader who types immediately can have the FIRST request resolve LAST. Ground
+ * takes ~500ms on this endpoint, so the window is real.
+ *
+ * Modelled here as a tiny writer over the rule, so the interleavings are
+ * explicit. (The rendered behaviour was verified in the browser separately.)
+ */
+function liquidityWriter() {
+  let lastWrittenSeq = 0;
+  let value: string | undefined;
+  return {
+    commit(seq: number, next: string | undefined) {
+      if (!liquidityWriteWins(seq, lastWrittenSeq)) return;
+      lastWrittenSeq = seq;
+      value = next;
+    },
+    /** A response that carries no figure declines to write at all. */
+    declineToWrite(_seq: number) {},
+    get current() {
+      return value;
+    },
+  };
+}
+
+describe("liquidityWriteWins", () => {
+  it("keeps a stale on-open response from overwriting a fresher amount preview", () => {
+    const w = liquidityWriter();
+    const openSeq = 1; // amount-less read, dispatched first
+    const amountSeq = 2; // amount preview, dispatched after the debounce
+
+    // The amount preview comes back first with the current ceiling…
+    w.commit(amountSeq, "20.001241");
+    // …and the slower on-open read lands afterwards carrying an older figure.
+    w.commit(openSeq, "999.00");
+
+    // Without the rule this would read "999.00": Max would offer an amount the
+    // provider refuses, or validation would reject one that is currently fine.
+    expect(w.current).toBe("20.001241");
+  });
+
+  it("lets a later dispatch overwrite an earlier one — the normal case", () => {
+    const w = liquidityWriter();
+    w.commit(1, "20.00");
+    w.commit(2, "18.50");
+    expect(w.current).toBe("18.50");
+  });
+
+  it("lets the same dispatch write twice: loading, then its own result", () => {
+    // The on-open effect commits `loading` and its response under one sequence.
+    const w = liquidityWriter();
+    w.commit(1, undefined);
+    w.commit(1, "20.00");
+    expect(w.current).toBe("20.00");
+  });
+
+  it("does not let a later EMPTY response veto an earlier real figure", () => {
+    // The regression the last-WRITER (not last-dispatch) counter prevents: a
+    // failed second request must not strand the line on "checking…".
+    const w = liquidityWriter();
+    w.declineToWrite(2); // amount preview failed, carries no balance
+    w.commit(1, "20.00"); // on-open read lands afterwards with a real figure
+    expect(w.current).toBe("20.00");
+  });
+
+  it("is a plain dispatch-order comparison", () => {
+    expect(liquidityWriteWins(2, 1)).toBe(true);
+    expect(liquidityWriteWins(1, 1)).toBe(true);
+    expect(liquidityWriteWins(1, 2)).toBe(false);
   });
 });
 
