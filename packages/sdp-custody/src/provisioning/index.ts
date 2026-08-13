@@ -9,8 +9,8 @@ import { ApiKeyStamper } from "@solana/keychain-turnkey";
 import { importPKCS8, SignJWT } from "jose";
 import { SigningError } from "../signing";
 import {
-  buildCoinbaseCdpAccountName,
   coinbaseCdpRequest,
+  deriveCoinbaseCdpAccountName,
   extractCoinbaseCdpAccountAddress,
   isCoinbaseCdpAlreadyExistsError,
 } from "./coinbase";
@@ -127,7 +127,21 @@ export interface ProvisionPrivyResult {
 
 export interface ProvisionCoinbaseCdpOptions {
   orgId: string;
-  orgSlug: string;
+  /** null/undefined designates the organization-level scope. */
+  projectId?: string | null;
+  /**
+   * Unique seed for additional wallets beyond the scope's root account.
+   * Omitted for the root account so retries resolve to the same slot.
+   */
+  walletSeed?: string;
+  /**
+   * Allow resolving a 409 name collision to the existing account. Only safe
+   * for deterministic identities (root account retries); the derived name
+   * encodes the full tenant scope, so the existing account can only belong to
+   * the same scope. Defaults to false: collisions fail instead of silently
+   * handing out an existing account.
+   */
+  reuseExisting?: boolean;
   accountPolicy?: string;
 }
 
@@ -410,11 +424,13 @@ export async function provisionCoinbaseCdpAccount(
   const apiBaseUrl = config.apiBaseUrl ?? DEFAULT_COINBASE_CDP_API_BASE_URL;
   const network = config.network ?? DEFAULT_COINBASE_CDP_NETWORK;
 
-  const name = buildCoinbaseCdpAccountName(
-    runtime,
-    options.orgSlug || options.orgId,
-    config.accountScope
-  );
+  const name = await deriveCoinbaseCdpAccountName(runtime, {
+    accountScope: config.accountScope,
+    organizationId: options.orgId,
+    projectId: options.projectId,
+    network,
+    walletSeed: options.walletSeed,
+  });
 
   try {
     const created = await coinbaseCdpRequest<CoinbaseCdpSolanaAccountResponse>(runtime, {
@@ -440,6 +456,14 @@ export async function provisionCoinbaseCdpAccount(
   } catch (error) {
     if (!isCoinbaseCdpAlreadyExistsError(error)) {
       throw error;
+    }
+
+    if (!options.reuseExisting) {
+      throw new SigningError(
+        `Coinbase CDP account '${name}' already exists and this operation does not reuse existing accounts`,
+        "PROVIDER_NOT_CONFIGURED",
+        error
+      );
     }
 
     try {
