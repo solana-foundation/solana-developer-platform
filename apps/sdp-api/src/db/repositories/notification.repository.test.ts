@@ -62,6 +62,47 @@ describe("NotificationsRepository (postgres)", () => {
     ).toBe(0);
   });
 
+  it("lists strictly newest-first, unmoved by read state", async () => {
+    const db = getDb(env);
+    for (const [id, createdAt] of [
+      ["ntf_ord_1", "2026-08-01T00:00:00.000Z"],
+      ["ntf_ord_2", "2026-08-02T00:00:00.000Z"],
+      ["ntf_ord_3", "2026-08-03T00:00:00.000Z"],
+    ] as const) {
+      await db
+        .prepare(
+          `INSERT INTO notifications (id, organization_id, user_id, type, title, dedupe_key, created_at)
+           VALUES (?, ?, ?, 'workflow_execution', 'T', ?, ?)`
+        )
+        .bind(id, TEST_ORG.id, TEST_USER.id, `${id}:key`, createdAt)
+        .run();
+    }
+    const before = await repo.listForUser({
+      organizationId: TEST_ORG.id,
+      userId: TEST_USER.id,
+      unreadOnly: false,
+      limit: 10,
+      offset: 0,
+    });
+    expect(before.rows.map((row) => row.id)).toEqual(["ntf_ord_3", "ntf_ord_2", "ntf_ord_1"]);
+
+    // Reading the newest row must NOT re-sort: the bell pages by offset, and a
+    // read-state sort key shifted rows between pages, silently skipping some.
+    await repo.markRead({
+      notificationId: "ntf_ord_3",
+      organizationId: TEST_ORG.id,
+      userId: TEST_USER.id,
+    });
+    const after = await repo.listForUser({
+      organizationId: TEST_ORG.id,
+      userId: TEST_USER.id,
+      unreadOnly: false,
+      limit: 10,
+      offset: 0,
+    });
+    expect(after.rows.map((row) => row.id)).toEqual(["ntf_ord_3", "ntf_ord_2", "ntf_ord_1"]);
+  });
+
   it("countUnreadForUsers groups per user and zero-fills absentees", async () => {
     await repo.createMany([
       input(TEST_USER.id, "a:1"),

@@ -27,12 +27,17 @@ export async function GET(request: Request) {
       signal: request.signal,
     });
     if (!upstream.ok || !upstream.body) {
+      // Release the pooled connection: an unread body keeps the undici socket checked
+      // out until GC, and a client in a 401/429 retry loop would strand one per attempt.
+      void upstream.body?.cancel().catch(() => undefined);
       const status =
         upstream.status === 401 || upstream.status === 403 || upstream.status === 429
           ? upstream.status
           : 502;
       return proxyFailure(trace, status, "Notification stream unavailable");
     }
+    // No Connection header: it's hop-by-hop (Node's http2 rejects it outright under
+    // h2c); no-transform + X-Accel-Buffering do the actual anti-buffering work.
     return new Response(upstream.body, {
       status: 200,
       headers: {
@@ -41,7 +46,6 @@ export async function GET(request: Request) {
         // the stream (it honors the directive); X-Accel-Buffering covers nginx-style
         // proxies in front of the deployment.
         "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive",
         "X-Accel-Buffering": "no",
         "X-SDP-Trace-ID": trace.traceId,
       },

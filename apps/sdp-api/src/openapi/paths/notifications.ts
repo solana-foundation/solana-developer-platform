@@ -56,7 +56,7 @@ export function registerNotificationPaths(registry: OpenAPIRegistry) {
     summary: "List notifications",
     operationId: "listNotifications",
     description:
-      "The authenticated user's in-app notifications for the current organization, unread first, newest first.",
+      "The authenticated user's in-app notifications for the current organization, newest first.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

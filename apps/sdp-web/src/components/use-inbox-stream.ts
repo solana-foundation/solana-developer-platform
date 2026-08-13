@@ -29,7 +29,7 @@ export function useInboxStream(onNudge: (nudge: InboxNudge) => void): void {
     let disposed = false;
 
     const connect = () => {
-      if (disposed) return;
+      if (disposed || document.hidden) return;
       source = new EventSource("/api/dashboard/notifications/stream");
       source.addEventListener("ready", () => {
         attempts = 0;
@@ -54,9 +54,27 @@ export function useInboxStream(onNudge: (nudge: InboxNudge) => void): void {
       };
     };
 
+    // Backgrounded tabs drop the stream instead of pinning a browser connection slot
+    // (six per origin on HTTP/1.1) plus a server request slot for a badge nobody can
+    // see — matching the poll loop, which already skips hidden ticks. Returning to the
+    // tab reconnects immediately (and the poll's visibility refresh covers the gap).
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        if (retryTimer) clearTimeout(retryTimer);
+        retryTimer = null;
+        source?.close();
+        source = null;
+      } else if (!source) {
+        attempts = 0;
+        connect();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
     connect();
     return () => {
       disposed = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       if (retryTimer) clearTimeout(retryTimer);
       source?.close();
     };

@@ -87,11 +87,15 @@ export function createPostgresNotificationsRepository(db: AppDb): NotificationsR
       }
       const where = filters.join(" AND ");
 
-      // Unread first, then newest first (matches the bell inbox expectation).
+      // Strictly newest-first. Deliberately NOT unread-first: mark-read must not
+      // re-sort the list, because the bell pages by offset — a leading read-state sort
+      // key shifted rows between pages as the user read them, silently skipping
+      // notifications. Chronological order is also served by idx_notifications_user
+      // ((org, user, created_at DESC)); the partition sort was a full re-sort before.
       const rowsResult = await db
         .prepare(
           `SELECT * FROM notifications WHERE ${where}
-             ORDER BY (read_at IS NULL) DESC, created_at DESC LIMIT ? OFFSET ?`
+             ORDER BY created_at DESC LIMIT ? OFFSET ?`
         )
         .bind(...bindings, params.limit, params.offset)
         .all<Record<string, unknown>>();

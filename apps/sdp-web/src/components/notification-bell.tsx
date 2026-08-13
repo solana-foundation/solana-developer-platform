@@ -64,9 +64,11 @@ const TYPE_ICON: Record<string, LucideIcon> = {
 // Humanize any snake_case system key left in server-composed text (e.g. an older row
 // that stored `token_operation_completed`): "token_operation_completed" → "Token
 // operation completed". A display-time safety net so no raw event key ever reaches a
-// reader, regardless of when/where the row was written.
+// reader, regardless of when/where the row was written. The lookarounds skip tokens
+// touching '@' or '.', so email addresses survive — member_invited bodies ARE an
+// address, and "john_doe@acme.com" must not become "John doe@acme.com".
 function humanizeKeys(text: string): string {
-  return text.replace(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g, (key) => {
+  return text.replace(/(?<![\w@.])[a-z][a-z0-9]*(?:_[a-z0-9]+)+(?![\w@.])/g, (key) => {
     const spaced = key.replace(/_/g, " ");
     return `${spaced.charAt(0).toUpperCase()}${spaced.slice(1)}`.replace(/\bkyc\b/gi, "KYC");
   });
@@ -113,6 +115,15 @@ export function NotificationBell() {
   const triggerRef = useRef<HTMLButtonElement>(null);
   // Drops out-of-order responses (rapid open/close, slow network).
   const listGeneration = useRef(0);
+  // Deepest page currently loaded — the next "Show more" fetches pageRef + 1. Derived
+  // page math (items.length / PAGE_SIZE) broke as soon as merges deduped a row.
+  const pageRef = useRef(1);
+  // Ordering guard for nudges: two concurrent dispatches can publish counts read
+  // around each other's inserts, so a later frame may carry the older count.
+  const lastNudgeTs = useRef("");
+  // Right after a local optimistic mutation, an in-flight nudge's count predates the
+  // mark-read and would resurrect the badge; refreshCount reconciles instead.
+  const suppressNudgeUntil = useRef(0);
 
   // Translate with a safe fallback — a missing key must degrade, not crash the shell.
   const safeT = useCallback(
@@ -147,6 +158,18 @@ export function NotificationBell() {
       }
       return item.title;
     }
+    if (item.type === "workflow_approval_decided") {
+      // The generic key says "decided", flattening the one fact the reader cares
+      // about; the producer records it in params.decision — use the variant keys.
+      const decision = params.decision;
+      if (decision === "approved" || decision === "rejected") {
+        return safeT(
+          `Shared.notifications.types.workflow_approval_decided_${decision}`,
+          undefined,
+          item.title
+        );
+      }
+    }
     return safeT(`Shared.notifications.types.${item.type}`, undefined, item.title);
   };
 
@@ -157,7 +180,10 @@ export function NotificationBell() {
     }
   }, []);
 
-  const loadList = useCallback(async (page: number) => {
+  // merge=true (nudge refresh of an open panel): fold page 1 into the loaded list —
+  // prepend unseen rows, refresh overlapping ones in place — instead of resetting a
+  // user who has paged deeper back to 15 rows and yanking their scroll position.
+  const loadList = useCallback(async (page: number, merge = false) => {
     const generation = ++listGeneration.current;
     setLoading(true);
     setLoadError(false);
@@ -172,7 +198,26 @@ export function NotificationBell() {
       setLoading(false);
       return;
     }
-    setItems((prev) => (page === 1 ? data.notifications : [...prev, ...data.notifications]));
+    setItems((prev) => {
+      if (page === 1 && !merge) {
+        return data.notifications;
+      }
+      // Dedupe by id in both directions: rows inserted after page 1 shift offsets, so
+      // an appended page can overlap the loaded tail (the old derived-page math turned
+      // that into duplicate React keys).
+      const incoming = data.notifications;
+      if (page === 1) {
+        const byId = new Map(incoming.map((n) => [n.id, n]));
+        const known = new Set(prev.map((n) => n.id));
+        const refreshed = prev.map((n) => byId.get(n.id) ?? n);
+        return [...incoming.filter((n) => !known.has(n.id)), ...refreshed];
+      }
+      const known = new Set(prev.map((n) => n.id));
+      return [...prev, ...incoming.filter((n) => !known.has(n.id))];
+    });
+    if (!merge) {
+      pageRef.current = page;
+    }
     setTotal(data.total);
     setLoading(false);
   }, []);
@@ -183,21 +228,50 @@ export function NotificationBell() {
   }, []);
 
   // Realtime nudges over SSE: the badge updates instantly from the pushed count, and
-  // an open panel refetches its first page. Purely additive — the polling below stays
-  // as the fallback whenever the stream is down.
+  // an open panel folds in fresh rows. Purely additive — the polling below stays as
+  // the fallback whenever the stream is down.
   const openRef = useRef(open);
   openRef.current = open;
+  const nudgeRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useInboxStream(
     useCallback(
       (nudge) => {
-        setUnread(nudge.unread);
+        // Ordering guard: drop frames older than the last applied one.
+        if (nudge.ts && nudge.ts < lastNudgeTs.current) {
+          return;
+        }
+        if (nudge.ts) {
+          lastNudgeTs.current = nudge.ts;
+        }
+        // The badge write yields to a fresh local mutation (its count predates it);
+        // the list refresh below is unaffected — rows carry their own read state.
+        if (Date.now() >= suppressNudgeUntil.current) {
+          setUnread(nudge.unread);
+        }
         if (openRef.current) {
-          void loadList(1);
+          // Trailing debounce: a burst of dispatches (batch settlement, failing cron
+          // tick) must coalesce into one refetch, not one per nudge.
+          if (nudgeRefreshTimer.current) {
+            clearTimeout(nudgeRefreshTimer.current);
+          }
+          nudgeRefreshTimer.current = setTimeout(() => {
+            nudgeRefreshTimer.current = null;
+            if (openRef.current) {
+              void loadList(1, true);
+            }
+          }, 750);
         }
       },
       [loadList]
     )
   );
+  useEffect(() => {
+    return () => {
+      if (nudgeRefreshTimer.current) {
+        clearTimeout(nudgeRefreshTimer.current);
+      }
+    };
+  }, []);
 
   // Poll the unread count so the badge stays live without a socket. Hidden tabs skip
   // the tick; returning to the tab refreshes immediately.
@@ -258,49 +332,61 @@ export function NotificationBell() {
     };
   }, [open, close]);
 
+  // Bounded POST — a wedged API must fail the mutation into rollback, not hang it.
+  const postWithTimeout = async (url: string) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, { method: "POST", signal: controller.signal });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
   const markRead = async (id: string) => {
-    const previousItems = items;
-    const previousUnread = unread;
+    suppressNudgeUntil.current = Date.now() + 2_000;
     setItems((prev) =>
       prev.map((n) => (n.id === id ? { ...n, read_at: n.read_at ?? new Date().toISOString() } : n))
     );
     setUnread((prev) => Math.max(0, prev - 1));
     try {
-      const response = await fetch(`/api/dashboard/notifications/${encodeURIComponent(id)}/read`, {
-        method: "POST",
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      await postWithTimeout(`/api/dashboard/notifications/${encodeURIComponent(id)}/read`);
       // Server truth for the badge (the optimistic decrement can drift when more than
       // one page of unread rows exists).
       void refreshCount();
     } catch {
-      setItems(previousItems);
-      setUnread(previousUnread);
+      // Revert ONLY this row, functionally — a wholesale restore of a captured array
+      // would clobber whatever the stream merged in while the POST was in flight.
+      setItems((prev) => prev.map((n) => (n.id === id ? { ...n, read_at: null } : n)));
+      void refreshCount();
     }
   };
 
   const markAllRead = async () => {
-    const previousItems = items;
-    const previousUnread = unread;
-    setItems((prev) => prev.map((n) => ({ ...n, read_at: n.read_at ?? new Date().toISOString() })));
+    suppressNudgeUntil.current = Date.now() + 2_000;
+    // One shared timestamp doubles as the marker for which rows THIS action touched,
+    // so the failure path can revert exactly those and nothing else.
+    const stampedAt = new Date().toISOString();
+    setItems((prev) => prev.map((n) => (n.read_at ? n : { ...n, read_at: stampedAt })));
     setUnread(0);
     try {
-      const response = await fetch("/api/dashboard/notifications/read-all", { method: "POST" });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      await postWithTimeout("/api/dashboard/notifications/read-all");
       void refreshCount();
     } catch {
-      setItems(previousItems);
-      setUnread(previousUnread);
+      setItems((prev) => prev.map((n) => (n.read_at === stampedAt ? { ...n, read_at: null } : n)));
+      void refreshCount();
     }
   };
 
-  const onItemClick = async (item: NotificationItem) => {
+  const onItemClick = (item: NotificationItem) => {
+    // Navigation never waits on the mark-read POST: it's best-effort bookkeeping with
+    // its own timeout/rollback, and gating the click on it made a slow API feel like
+    // a dead button.
     if (!item.read_at) {
-      await markRead(item.id);
+      void markRead(item.id);
     }
     const href = hrefFor(item);
     if (href) {
@@ -343,7 +429,7 @@ export function NotificationBell() {
             <span id={titleId} className="text-sm font-semibold text-primary">
               {t("Shared.notifications.title")}
             </span>
-            {items.some((n) => !n.read_at) ? (
+            {unread > 0 ? (
               <button
                 type="button"
                 onClick={() => void markAllRead()}
@@ -368,8 +454,9 @@ export function NotificationBell() {
             locale={locale}
             t={t}
             displayTitle={displayTitle}
-            onItemClick={(item) => void onItemClick(item)}
-            onLoadPage={(page) => void loadList(page)}
+            onItemClick={onItemClick}
+            onRetryInitial={() => void loadList(1)}
+            onShowMore={() => void loadList(pageRef.current + 1)}
           />
         </div>
       ) : null}
@@ -386,10 +473,21 @@ function NotificationPanelBody(props: {
   t: ReturnType<typeof useTranslations>;
   displayTitle: (item: NotificationItem) => string;
   onItemClick: (item: NotificationItem) => void;
-  onLoadPage: (page: number) => void;
+  onRetryInitial: () => void;
+  onShowMore: () => void;
 }) {
-  const { items, total, loading, loadError, locale, t, displayTitle, onItemClick, onLoadPage } =
-    props;
+  const {
+    items,
+    total,
+    loading,
+    loadError,
+    locale,
+    t,
+    displayTitle,
+    onItemClick,
+    onRetryInitial,
+    onShowMore,
+  } = props;
 
   if (loading && items.length === 0) {
     return (
@@ -404,7 +502,7 @@ function NotificationPanelBody(props: {
         <p className="text-sm text-secondary">{t("Shared.notifications.error")}</p>
         <button
           type="button"
-          onClick={() => onLoadPage(1)}
+          onClick={onRetryInitial}
           className="mt-2 text-xs font-medium text-primary underline-offset-2 hover:underline"
         >
           {t("Shared.notifications.retry")}
@@ -461,15 +559,28 @@ function NotificationPanelBody(props: {
           );
         })}
       </ul>
-      {items.length < total ? (
+      {loadError ? (
+        // A failed "Show more" was previously silent (the empty-state branch above
+        // only renders with no items): say so inline, where the click happened.
+        <div className="flex items-center justify-center gap-2 border-t border-border-subtle px-4 py-2.5 text-xs text-secondary">
+          {t("Shared.notifications.error")}
+          <button
+            type="button"
+            onClick={onShowMore}
+            className="font-medium text-primary underline-offset-2 hover:underline"
+          >
+            {t("Shared.notifications.retry")}
+          </button>
+        </div>
+      ) : items.length < total ? (
         <button
           type="button"
           disabled={loading}
-          onClick={() => onLoadPage(Math.floor(items.length / PAGE_SIZE) + 1)}
+          onClick={onShowMore}
           className="flex w-full items-center justify-center gap-2 border-t border-border-subtle px-4 py-2.5 text-xs font-medium text-secondary transition-colors hover:bg-fill-subtle hover:text-primary disabled:opacity-60"
         >
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-          {t("Shared.notifications.showMore")}
+          {t("Shared.notifications.showMoreCount", { loaded: items.length, total })}
         </button>
       ) : null}
     </div>
