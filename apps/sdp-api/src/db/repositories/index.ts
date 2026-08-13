@@ -9,6 +9,15 @@ export type {
   UpdateAssetProfileInput,
 } from "./asset-profile.repository";
 export { createPostgresAssetProfilesRepository } from "./asset-profile.repository.postgres";
+export type {
+  AssetWorkflowDefinition,
+  AssetWorkflowRow,
+  AssetWorkflowsRepository,
+  CreateAssetWorkflowInput,
+  UpdateAssetWorkflowInput,
+} from "./asset-workflow.repository";
+export { generateAssetWorkflowId } from "./asset-workflow.repository";
+export { createPostgresAssetWorkflowsRepository } from "./asset-workflow.repository.postgres";
 export type { RepositoryDbClient } from "./base";
 export type {
   ArchiveCounterpartyInput,
@@ -34,6 +43,7 @@ export type {
 export { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 export type {
   CreateEarnProgramWithdrawalInput,
+  DeleteUnlistedEarnStrategiesInput,
   EarnProgramWithdrawalRow,
   EarnProviderWalletRow,
   EarnRepository,
@@ -46,8 +56,27 @@ export type {
   UpdateEarnProgramWithdrawalStatusGuardedInput,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
-export { generateEarnProgramWithdrawalId, generateEarnStrategyId } from "./earn.repository";
+export {
+  EARN_SEED_REFERENCE_PREFIX,
+  generateEarnProgramWithdrawalId,
+  generateEarnStrategyId,
+} from "./earn.repository";
 export { createPostgresEarnRepository } from "./earn.repository.postgres";
+export type {
+  KycWalletRow,
+  KycWalletsRepository,
+  SetKycStatusByCounterpartyInput,
+  SetKycStatusInput,
+  UpsertKycWalletInput,
+} from "./kyc-wallet.repository";
+export { createPostgresKycWalletsRepository } from "./kyc-wallet.repository.postgres";
+export type {
+  CreateNotificationInput,
+  ListNotificationsInput,
+  NotificationRow,
+  NotificationsRepository,
+} from "./notification.repository";
+export { createPostgresNotificationsRepository } from "./notification.repository.postgres";
 export type {
   CreatePaymentRecurringPaymentActivationAttemptInput,
   CreatePaymentRecurringPaymentInput,
@@ -132,10 +161,7 @@ export type {
   PaymentTransferRow,
   PaymentTransferStatus,
   PaymentTransferType,
-  PaymentWalletPolicyRow,
-  PaymentWalletPolicyType,
   UpdatePaymentTransferInput,
-  UpsertPaymentWalletPolicyInput,
 } from "./payments.repository";
 export {
   isRampTransferType,
@@ -309,9 +335,12 @@ export type {
 export { createPostgresProjectUserRepository } from "./project-user.repository.postgres";
 export {
   createAssetProfilesRepository,
+  createAssetWorkflowsRepository,
   createCounterpartiesRepository,
   createCounterpartyAccountsRepository,
   createEarnRepository,
+  createKycWalletsRepository,
+  createNotificationsRepository,
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
@@ -334,6 +363,9 @@ export {
   createSystemPaymentsRepository,
   createSystemPaymentTransferBatchesRepository,
   createTokenRepository,
+  createWalletAssetEnrollmentsRepository,
+  createWorkflowExecutionsRepository,
+  createWorkflowSecretRetirementsRepository,
 } from "./repository-factory";
 export type {
   ListTokensOptions,
@@ -341,3 +373,23 @@ export type {
   TokenRepositoryContext,
 } from "./token.repository";
 export { createPostgresTokenRepository } from "./token.repository.postgres";
+export type {
+  EnrolledWalletRow,
+  UpsertWalletAssetEnrollmentInput,
+  WalletAssetEnrollmentRow,
+  WalletAssetEnrollmentsRepository,
+} from "./wallet-asset-enrollment.repository";
+export { createPostgresWalletAssetEnrollmentsRepository } from "./wallet-asset-enrollment.repository.postgres";
+export type {
+  CreateWorkflowExecutionInput,
+  ListWorkflowExecutionsInput,
+  WorkflowExecutionRow,
+  WorkflowExecutionsRepository,
+} from "./workflow-execution.repository";
+export { createPostgresWorkflowExecutionsRepository } from "./workflow-execution.repository.postgres";
+export type {
+  RecordWorkflowSecretRetirementInput,
+  WorkflowSecretRetirementRow,
+  WorkflowSecretRetirementsRepository,
+} from "./workflow-secret-retirement.repository";
+export { createPostgresWorkflowSecretRetirementsRepository } from "./workflow-secret-retirement.repository.postgres";

@@ -19,6 +19,7 @@ import {
   TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
+import { seedRateLimit } from "@/test/mocks/kv";
 
 describe("Payments routes — list transfers", () => {
   installPaymentsRouteTestHooks();
@@ -151,6 +152,47 @@ describe("Payments routes — list transfers", () => {
       expect(body.data).toHaveLength(2);
       const statuses = body.data.map((t) => t.status).sort();
       expect(statuses).toEqual(["confirmed", "pending"]);
+    });
+
+    it("does not pull on-chain history for a walletAddress the org does not own", async () => {
+      await seedTransfer({ id: "xfr_db_only_1", status: "pending" });
+
+      const res = await app.request(
+        `/v1/payments/transfers?walletAddress=${TEST_SOLANA_ADDRESSES.wallet3}`,
+        { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(getSignaturesForAddressMock).not.toHaveBeenCalled();
+    });
+
+    it("still pulls on-chain history for a tenant-owned walletAddress", async () => {
+      const res = await app.request(
+        `/v1/payments/transfers?walletAddress=${TEST_SOLANA_ADDRESSES.wallet1}`,
+        { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(getSignaturesForAddressMock).toHaveBeenCalled();
+    });
+
+    it("429s the observed-transfer path before any RPC call once the metered quota is exhausted", async () => {
+      await seedRateLimit(
+        env,
+        `metered:observed-transfers:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`,
+        30
+      );
+
+      const res = await app.request(
+        `/v1/payments/transfers?wallet=${TEST_WALLET_ID}`,
+        { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(429);
+      expect(getSignaturesForAddressMock).not.toHaveBeenCalled();
     });
 
     it("surfaces observed inbound transfers for wallet history even without a DB record", async () => {

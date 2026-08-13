@@ -10,7 +10,7 @@ import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useCopy } from "@/lib/use-copy";
 import { formatApy, formatUsd } from "../earn-format";
-import { useEarnProgram, useEarnProgramDeposits } from "../earn-program-data";
+import { findProgram, useEarnProgramDeposits, useEarnPrograms } from "../earn-program-data";
 import { strategyToken, useLiquidityLabel } from "../earn-program-presentation";
 import { SKELETON_ROW_IDS, StepNotice, StepSection, SummaryRow } from "./earn-deposit-chrome";
 import { OutcomeFrame } from "./earn-deposit-outcome";
@@ -67,10 +67,10 @@ function DepositAddressCard({ address, token }: { address: string; token: string
   );
 }
 
-function RecentDepositsCard() {
+function RecentDepositsCard({ programId }: { programId: string }) {
   const t = useTranslations();
   const locale = useLocale();
-  const { page, error, isLoading } = useEarnProgramDeposits();
+  const { page, error, isLoading } = useEarnProgramDeposits(programId);
   const dateFormatter = useMemo(
     () => new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }),
     [locale]
@@ -150,17 +150,20 @@ export function ProgramLiveScreen({
   created,
   fundingWalletLabel,
   onDone,
+  programId,
   strategy,
 }: {
   created: boolean;
   fundingWalletLabel: string | undefined;
   onDone: () => void;
+  /** The program this run wrote — never "whichever program is first". */
+  programId: string;
   strategy: EarnStrategy;
 }) {
   const t = useTranslations();
   const liquidityLabel = useLiquidityLabel();
-  const { state } = useEarnProgram();
-  const program = state?.kind === "active" ? state.program : undefined;
+  const { state } = useEarnPrograms();
+  const program = findProgram(state, programId);
   const wallet = program?.wallet;
   const address = wallet?.solanaDepositAddress;
   const statusBadge = wallet ? WALLET_STATUS_BADGES[wallet.status] : undefined;
@@ -224,7 +227,7 @@ export function ProgramLiveScreen({
             </section>
           )}
 
-          {address ? <RecentDepositsCard /> : null}
+          {address ? <RecentDepositsCard programId={programId} /> : null}
         </div>
 
         <aside className="h-fit">

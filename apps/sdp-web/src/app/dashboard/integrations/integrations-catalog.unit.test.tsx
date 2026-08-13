@@ -13,6 +13,13 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/dashboard/integrations",
 }));
 
+// The family axis rides the shell's header tabs through `?tab=`; the catalog
+// only reads the resolved value, so the hook stands in for the URL here.
+const urlState = vi.hoisted(() => ({ tab: null as string | null }));
+vi.mock("@/lib/dashboard-url-state", () => ({
+  useDashboardTab: () => urlState.tab,
+}));
+
 function renderCatalog(overrides: Partial<Parameters<typeof IntegrationsCatalog>[0]> = {}) {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
@@ -50,6 +57,7 @@ function visibleRowLabels(): string[] {
 describe("IntegrationsCatalog filtering", () => {
   beforeEach(() => {
     cleanup();
+    urlState.tab = null;
   });
 
   it("shows every family until a filter narrows it", () => {
@@ -62,14 +70,37 @@ describe("IntegrationsCatalog filtering", () => {
     expect(labels).toContain("Range");
   });
 
-  it("narrows to one family from the pills and shows counts", async () => {
-    const user = userEvent.setup();
+  it("narrows to the family the header tab selects", () => {
+    urlState.tab = "rpc";
     renderCatalog();
 
-    await user.click(screen.getByRole("button", { name: /RPC · 2/ }));
+    expect(visibleRowLabels()).toEqual(["Helius", "Alchemy"]);
+    // The family pills are gone: the header tabs own that axis now, so the
+    // page keeps a single secondary row of status pills.
+    expect(screen.queryByRole("button", { name: /RPC/ })).toBeNull();
+  });
+
+  it("shows every family when the tab value is not a family", () => {
+    urlState.tab = "not-a-family";
+    renderCatalog();
 
     const labels = visibleRowLabels();
-    expect(labels).toEqual(["Helius", "Alchemy"]);
+    expect(labels).toContain("Privy");
+    expect(labels).toContain("MoonPay");
+  });
+
+  it("keeps the tab narrowing when the in-page filters clear", async () => {
+    const user = userEvent.setup();
+    urlState.tab = "rpc";
+    renderCatalog();
+
+    await user.click(screen.getByRole("button", { name: "Connected" }));
+    expect(visibleRowLabels()).toEqual(["Helius"]);
+
+    // The status control owns only what this page controls; the header tab
+    // is navigation and stays put.
+    await user.click(screen.getByRole("button", { name: "All" }));
+    expect(visibleRowLabels()).toEqual(["Helius", "Alchemy"]);
   });
 
   it("narrows by status across families", async () => {
@@ -142,7 +173,7 @@ describe("IntegrationsCatalog filtering", () => {
     await user.type(screen.getByRole("searchbox"), "moon");
     expect(visibleRowLabels()).toEqual(["MoonPay"]);
 
-    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    await user.clear(screen.getByRole("searchbox"));
     expect(visibleRowLabels().length).toBeGreaterThan(5);
   });
 
@@ -175,6 +206,13 @@ describe("IntegrationsCatalog filtering", () => {
     renderCatalog();
 
     expect(screen.getByText("Use Helius infrastructure for Solana RPC requests.")).toBeTruthy();
+  });
+
+  it("keeps the custody-unknown alert off other family tabs", () => {
+    urlState.tab = "rpc";
+    renderCatalog({ custody: null });
+
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("still renders the custody-unknown alert alongside the filters", () => {

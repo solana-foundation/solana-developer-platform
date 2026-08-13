@@ -23,15 +23,21 @@ import { type DashboardFetchResult, dashboardFetch } from "@/lib/dashboard-fetch
 
 /**
  * Live Earn data access for the dashboard, over the /api/dashboard/markets/earn
- * BFF proxies. The overview keys everything off ONE shared portfolio program
- * per (organization, environment) — provider is pinned to Ground until a
- * second portfolio-capable provider ships and provider selection becomes a
- * product surface.
+ * BFF proxies. Provider is pinned to Ground until a second portfolio-capable
+ * provider ships and provider selection becomes a product surface.
+ *
+ * The API returns a LIST of programs since PRO-1670 — an organization may hold
+ * several, each pinned to one vault — and every surface here is program-scoped:
+ * deposits, previews, withdrawals and the outcome watcher all take a programId.
+ * The list is ordered oldest-first by the API, so a program keeps its position
+ * for life rather than shifting when a sibling is created.
  */
 export const EARN_PORTFOLIO_PROVIDER: EarnProviderId = "ground";
 
 /** Mirrors the sdp-api program envelope (route-owned there, thin enough to pin here). */
 export interface EarnProgram {
+  /** SDP program id — every per-program BFF path is built from it. */
+  id: string;
   provider: string;
   label: string | null;
   createdAt: string;
@@ -41,14 +47,31 @@ export interface EarnProgram {
 }
 
 /**
- * Program read outcome. `none` (upstream 404) drives the onboarding hero;
+ * Program read outcome. `ready` carries the list and MAY be empty — an empty
+ * array is how "this organization holds no programs" arrives, and it drives the
+ * onboarding hero. There is deliberately no separate `none` state: with a
+ * collection the emptiness is already in the data, and a second way to say it
+ * is a second thing that can drift.
+ *
  * `unconfigured` (upstream 503, provider credentials missing) renders a quiet
  * notice instead of crashing the overview.
  */
-export type EarnProgramState =
-  | { kind: "active"; program: EarnProgram }
-  | { kind: "none" }
+export type EarnProgramsState =
+  | { kind: "ready"; programs: readonly EarnProgram[] }
   | { kind: "unconfigured" };
+
+/** True once the read resolved AND the organization holds at least one program. */
+export function hasPrograms(state: EarnProgramsState | undefined): boolean {
+  return state?.kind === "ready" && state.programs.length > 0;
+}
+
+export function findProgram(
+  state: EarnProgramsState | undefined,
+  programId: string | undefined
+): EarnProgram | undefined {
+  if (!programId || state?.kind !== "ready") return undefined;
+  return state.programs.find((program) => program.id === programId);
+}
 
 async function requestJson<T>(path: string): Promise<{ status: number; body: T | undefined }> {
   const response = await fetch(path);
@@ -69,16 +92,58 @@ function errorMessage(body: unknown, status: number): string {
   return `Request failed (${status})`;
 }
 
-async function fetchEarnProgramState(): Promise<EarnProgramState> {
-  const { status, body } = await requestJson<{ data: { program: EarnProgram } }>(
-    `/api/dashboard/markets/earn/program?provider=${EARN_PORTFOLIO_PROVIDER}`
-  );
-  if (status === 404) return { kind: "none" };
-  if (status === 503) return { kind: "unconfigured" };
-  if (status < 200 || status >= 300 || !body) {
-    throw new Error(errorMessage(body, status));
+/** BFF path for one program's sub-resources — the one place it is spelled. */
+function programPath(programId: string, suffix = ""): string {
+  return `/api/dashboard/markets/earn/programs/${encodeURIComponent(programId)}${suffix}`;
+}
+
+const PROGRAMS_PAGE_SIZE = 100;
+
+/**
+ * Hard stop on the paging loop, same reason as STRATEGY_PAGE_LIMIT: a bad
+ * `total` must never spin forever. 20 pages × 100 = 2,000 programs, far past
+ * anything an organization can plausibly hold.
+ */
+const PROGRAMS_PAGE_LIMIT = 20;
+
+/**
+ * There is deliberately NO 404 branch. A collection cannot 404 for emptiness,
+ * so "this organization has no programs" is a 200 with an empty array — and if
+ * a 404 were still mapped to `none`, a retired path, a typo'd proxy path, or a
+ * missing Next route (which answers with HTML, not our envelope) would all read
+ * as "no programs" and show onboarding to a customer with funds deployed.
+ * Letting those throw surfaces the retry UI, which is the honest outcome.
+ *
+ * PAGES the collection to the end, exactly like fetchEarnStrategies and for the
+ * same reason: a single request silently drops everything past the API's page
+ * window, and a hidden program is hidden MONEY — the totals under-report, its
+ * card never renders, and its deep links stop resolving.
+ */
+export async function fetchEarnProgramsState(): Promise<EarnProgramsState> {
+  const programs: EarnProgram[] = [];
+
+  for (let page = 1; page <= PROGRAMS_PAGE_LIMIT; page += 1) {
+    const { status, body } = await requestJson<{
+      data: { programs: EarnProgram[]; total: number };
+    }>(
+      `/api/dashboard/markets/earn/programs?provider=${EARN_PORTFOLIO_PROVIDER}&page=${page}&pageSize=${PROGRAMS_PAGE_SIZE}`
+    );
+    // Checked before the range test: a 503 carries no usable body and would
+    // otherwise fall into the throw.
+    if (status === 503) return { kind: "unconfigured" };
+    if (status < 200 || status >= 300 || !body) {
+      throw new Error(errorMessage(body, status));
+    }
+
+    programs.push(...body.data.programs);
+    // Stop on a short page as well as on the reported total: either one alone
+    // can be wrong, and agreeing on "done" beats trusting one of them.
+    if (body.data.programs.length < PROGRAMS_PAGE_SIZE || programs.length >= body.data.total) {
+      break;
+    }
   }
-  return { kind: "active", program: body.data.program };
+
+  return { kind: "ready", programs };
 }
 
 /**
@@ -100,12 +165,23 @@ const WALLET_POLL_MS: Partial<Record<EarnPortfolioWalletStatus, number>> = {
 };
 
 /**
- * Poll cadence for a given program read; 0 means stop. Exported so the rule is
+ * Poll cadence for the program read; 0 means stop. Exported so the rule is
  * assertable — a browser cannot prove it, because SWR suspends the interval
  * whenever the tab is hidden.
+ *
+ * One read serves every program, so the cadence is the FASTEST any single
+ * program asks for (a `creating` program among settled ones must still converge
+ * on its deposit address, and a `busy` one must not sit frozen while money
+ * moves). Taking the first program's cadence, or the slowest, would strand
+ * exactly the program that is mid-operation.
  */
-export function earnProgramRefreshInterval(state: EarnProgramState | undefined): number {
-  return state?.kind === "active" ? (WALLET_POLL_MS[state.program.wallet.status] ?? 0) : 0;
+export function earnProgramsRefreshInterval(state: EarnProgramsState | undefined): number {
+  if (state?.kind !== "ready") return 0;
+  return state.programs.reduce((fastest, program) => {
+    const cadence = WALLET_POLL_MS[program.wallet.status] ?? 0;
+    if (cadence === 0) return fastest;
+    return fastest === 0 ? cadence : Math.min(fastest, cadence);
+  }, 0);
 }
 
 /**
@@ -129,101 +205,151 @@ export const EARN_PROGRAM_DEDUPING_MS = 2_000;
  * Never fires on first observation — a program that is already busy when the
  * page opens is a state, not an event — and only from the ONE caller that owns
  * the surface, since the hook it observes runs in several components.
+ *
+ * Snapshots are remembered PER PROGRAM ID, never as one previous wallet. With
+ * several programs, a single remembered snapshot would compare whichever
+ * program happened to be looked at last against a different program this pass —
+ * reading a busy→settled transition that never happened and announcing money
+ * that never moved.
  */
-export function useEarnWalletActivityToasts(state: EarnProgramState | undefined) {
+export function useEarnWalletActivityToasts(state: EarnProgramsState | undefined) {
   const t = useTranslations();
-  const previous = useRef<EarnPortfolioWalletSnapshot | undefined>(undefined);
+  const previous = useRef<Map<string, EarnPortfolioWalletSnapshot>>(new Map());
 
   useEffect(() => {
-    const wallet = state?.kind === "active" ? state.program.wallet : undefined;
-    const before = previous.current;
-    previous.current = wallet;
+    if (state?.kind !== "ready") {
+      // An unconfigured or errored interlude breaks the observation chain: by
+      // the time the read recovers, a program that was busy may have settled
+      // minutes ago, and pairing the stale snapshot with the fresh read would
+      // announce a completion nobody watched happen. Forget everything and
+      // treat recovery like a first mount, which never announces.
+      previous.current.clear();
+      return;
+    }
 
-    // Nothing to compare against yet, or the wallet was never busy, or it is
-    // still busy — no completion has been observed.
-    if (!before || !wallet || before.status !== "busy" || wallet.status === "busy") {
-      return;
+    const seen = new Set<string>();
+    for (const program of state.programs) {
+      seen.add(program.id);
+      const wallet = program.wallet;
+      const before = previous.current.get(program.id);
+      previous.current.set(program.id, wallet);
+
+      // Nothing to compare against yet, or the wallet was never busy, or it is
+      // still busy — no completion has been observed.
+      if (before?.status !== "busy" || wallet.status === "busy") {
+        continue;
+      }
+      if (wallet.status === "failed") {
+        toast.error(t("DashboardEarn.overview.activityFailed"));
+        continue;
+      }
+      // A withdrawal is NOT announced here. This transition only says the
+      // provider stopped working — a failed or partial payout leaves the wallet
+      // exactly as idle as a settled one — so the outcome comes from
+      // `useEarnWithdrawalOutcomeToast`, which reads the withdrawal itself.
+      if (before.activity === "withdrawing") {
+        continue;
+      }
+      announceCompletion(t, before.activity);
     }
-    if (wallet.status === "failed") {
-      toast.error(t("DashboardEarn.overview.activityFailed"));
-      return;
+
+    // Drop programs that vanished, so a re-created id cannot inherit a stale
+    // snapshot and fire a transition on first sight.
+    for (const id of previous.current.keys()) {
+      if (!seen.has(id)) previous.current.delete(id);
     }
-    // A withdrawal is NOT announced here. This transition only says the
-    // provider stopped working — a failed or partial payout leaves the wallet
-    // exactly as idle as a settled one — so the outcome comes from
-    // `useEarnWithdrawalOutcomeToast`, which reads the withdrawal itself.
-    if (before.activity === "withdrawing") {
-      return;
-    }
-    toast.success(
-      t(
-        before.activity === "rebalancing"
-          ? "DashboardEarn.overview.activityRebalanceComplete"
-          : // A busy state this build does not recognize still completed; say
-            // so without claiming which operation it was, and without
-            // claiming anything about money.
-            "DashboardEarn.overview.activityComplete"
-      )
-    );
   }, [state, t]);
 }
 
-export function useEarnProgram() {
+function announceCompletion(
+  t: ReturnType<typeof useTranslations>,
+  activity: EarnPortfolioWalletSnapshot["activity"]
+) {
+  toast.success(
+    t(
+      activity === "rebalancing"
+        ? "DashboardEarn.overview.activityRebalanceComplete"
+        : // A busy state this build does not recognize still completed; say
+          // so without claiming which operation it was, and without
+          // claiming anything about money.
+          "DashboardEarn.overview.activityComplete"
+    )
+  );
+}
+
+export function useEarnPrograms() {
   const { data, error, isLoading, mutate } = useSWR(
-    "dashboard-earn-program",
-    () => fetchEarnProgramState(),
+    "dashboard-earn-programs",
+    () => fetchEarnProgramsState(),
     {
-      refreshInterval: earnProgramRefreshInterval,
+      refreshInterval: earnProgramsRefreshInterval,
       dedupingInterval: EARN_PROGRAM_DEDUPING_MS,
     }
   );
   return { state: data, error, isLoading, refresh: () => void mutate() };
 }
 
-export interface EarnProgramUpsertInput {
+export interface EarnProgramWriteInput {
   /** Weights per token group, keyed to provider yield-source ids. */
   allocations: EarnPortfolioAllocationInput;
   label?: string;
   /**
    * Client-minted UUIDv4 so a retried confirm can neither provision a second
-   * provider wallet nor apply the same strategy change twice. Must be re-minted
-   * whenever `allocations` changes — the provider conflicts on a reused key with
-   * a different payload.
+   * program nor apply the same strategy change twice. Must be re-minted whenever
+   * `allocations` changes — the provider conflicts on a reused key with a
+   * different payload.
+   *
+   * REQUIRED on create since PRO-1670: with several programs legal, nothing
+   * downstream can tell a retry from a genuine second program, so the API
+   * refuses a create that carries no key.
    */
-  requestId?: string;
+  requestId: string;
 }
 
-export interface EarnProgramUpsertResult {
+export interface EarnProgramWriteResult {
   program: EarnProgram;
-  created: boolean;
 }
 
-/** Create the shared program wallet or replace its target allocation (idempotent PUT). */
-export function upsertEarnProgram(
-  input: EarnProgramUpsertInput
-): Promise<DashboardFetchResult<{ data: EarnProgramUpsertResult }>> {
-  return dashboardFetch("/api/dashboard/markets/earn/program", {
-    method: "PUT",
+/** Provision a new program. 201 on create, 200 when the provider replayed. */
+export function createEarnProgram(
+  input: EarnProgramWriteInput
+): Promise<DashboardFetchResult<{ data: EarnProgramWriteResult }>> {
+  return dashboardFetch("/api/dashboard/markets/earn/programs", {
+    method: "POST",
     body: { provider: EARN_PORTFOLIO_PROVIDER, ...input },
   });
 }
 
-async function fetchEarnProgramDeposits(): Promise<EarnPortfolioDepositsPage> {
+/** Re-target an existing program's single vault in place. */
+export function retargetEarnProgram(
+  programId: string,
+  input: EarnProgramWriteInput
+): Promise<DashboardFetchResult<{ data: EarnProgramWriteResult }>> {
+  return dashboardFetch(programPath(programId), { method: "PUT", body: input });
+}
+
+export async function fetchEarnProgramDeposits(
+  programId: string
+): Promise<EarnPortfolioDepositsPage> {
   const { status, body } = await requestJson<{ data: EarnPortfolioDepositsPage }>(
-    `/api/dashboard/markets/earn/program/deposits?provider=${EARN_PORTFOLIO_PROVIDER}`
+    programPath(programId, "/deposits")
   );
-  // No program wallet yet — an empty feed, not an error.
-  if (status === 404) return { deposits: [], nextCursor: null };
+  // No 404 branch, same reasoning as the programs read: the id always comes
+  // from a program resolved through the live list in this org+environment, so a
+  // 404 here is a broken proxy path or a scoping regression — mapping it to an
+  // empty feed would render a routing bug as "no deposits yet" on a funded
+  // program. The card's error state is the honest rendering.
   if (status < 200 || status >= 300 || !body) {
     throw new Error(errorMessage(body, status));
   }
   return body.data;
 }
 
-export function useEarnProgramDeposits(options: { enabled?: boolean } = {}) {
+/** Passing no programId issues no request — the honest form of "not ready yet". */
+export function useEarnProgramDeposits(programId: string | undefined) {
   const { data, error, isLoading } = useSWR(
-    options.enabled === false ? null : "dashboard-earn-program-deposits",
-    () => fetchEarnProgramDeposits(),
+    programId ? ["dashboard-earn-program-deposits", programId] : null,
+    () => fetchEarnProgramDeposits(programId as string),
     // Deposits land on-chain outside the dashboard, so keep the feed fresh.
     { refreshInterval: 15_000 }
   );
@@ -280,12 +406,13 @@ export interface EarnWithdrawalPreviewInput {
 }
 
 export function previewEarnWithdrawal(
+  programId: string,
   input: EarnWithdrawalPreviewInput,
   signal?: AbortSignal
 ): Promise<DashboardFetchResult<{ data: { preview: EarnPortfolioWithdrawalPreview } }>> {
-  return dashboardFetch("/api/dashboard/markets/earn/program/withdrawal-preview", {
+  return dashboardFetch(programPath(programId, "/withdrawal-preview"), {
     method: "POST",
-    body: { provider: EARN_PORTFOLIO_PROVIDER, ...input },
+    body: input,
     signal,
   });
 }
@@ -297,19 +424,18 @@ export interface EarnWithdrawalCreateInput extends EarnWithdrawalPreviewInput {
 }
 
 export function createEarnWithdrawal(
+  programId: string,
   input: EarnWithdrawalCreateInput
 ): Promise<DashboardFetchResult<{ data: { withdrawal: EarnPortfolioWithdrawal } }>> {
-  return dashboardFetch("/api/dashboard/markets/earn/program/withdrawals", {
-    method: "POST",
-    body: { provider: EARN_PORTFOLIO_PROVIDER, ...input },
-  });
+  return dashboardFetch(programPath(programId, "/withdrawals"), { method: "POST", body: input });
 }
 
 export function fetchEarnWithdrawal(
+  programId: string,
   withdrawalRef: string
 ): Promise<DashboardFetchResult<{ data: { withdrawal: EarnPortfolioWithdrawal } }>> {
   return dashboardFetch(
-    `/api/dashboard/markets/earn/program/withdrawals/${encodeURIComponent(withdrawalRef)}?provider=${EARN_PORTFOLIO_PROVIDER}`
+    programPath(programId, `/withdrawals/${encodeURIComponent(withdrawalRef)}`)
   );
 }
 
@@ -345,17 +471,30 @@ const WITHDRAWAL_OUTCOME_KEYS: Record<EarnPortfolioWithdrawal["status"], Message
  * status, and that is the only thing that knows.
  *
  * Polls until the status is terminal (`pending_approval` keeps waiting — it
- * resolves once someone signs), then announces once. Passing `undefined` — no
- * withdrawal submitted this session — does nothing and issues no requests.
+ * resolves once someone signs), then announces once. Passing `undefined` for
+ * either argument — no withdrawal submitted this session, or the program read
+ * has not resolved — does nothing and issues no requests.
+ *
+ * `onSettled` fires once, right after the announcement, so the caller can
+ * retire the watch: a settled watcher has nothing left to do, and keeping it
+ * mounted would accumulate dead SWR subscriptions over a long session.
  */
-export function useEarnWithdrawalOutcomeToast(withdrawalRef: string | undefined): void {
+export function useEarnWithdrawalOutcomeToast(
+  programId: string | undefined,
+  withdrawalRef: string | undefined,
+  onSettled?: () => void
+): void {
   const t = useTranslations();
   const announced = useRef<string | undefined>(undefined);
+  // A ref so a re-created callback identity can never re-trigger the effect —
+  // the announcement (and therefore the retire signal) must fire exactly once.
+  const onSettledRef = useRef(onSettled);
+  onSettledRef.current = onSettled;
 
   const { data } = useSWR(
-    withdrawalRef ? ["dashboard-earn-withdrawal", withdrawalRef] : null,
+    programId && withdrawalRef ? ["dashboard-earn-withdrawal", programId, withdrawalRef] : null,
     async () => {
-      const result = await fetchEarnWithdrawal(withdrawalRef as string);
+      const result = await fetchEarnWithdrawal(programId as string, withdrawalRef as string);
       return result.ok ? result.data.data.withdrawal : undefined;
     },
     {
@@ -377,10 +516,12 @@ export function useEarnWithdrawalOutcomeToast(withdrawalRef: string | undefined)
     const message = t(WITHDRAWAL_OUTCOME_KEYS[data.status]);
     if (data.status === "completed") {
       toast.success(message);
-      return;
+    } else {
+      // Partial counts as a problem, not a success: some of the money did not
+      // arrive, and saying "complete" would be the lie this hook exists to
+      // avoid.
+      toast.error(message);
     }
-    // Partial counts as a problem, not a success: some of the money did not
-    // arrive, and saying "complete" would be the lie this hook exists to avoid.
-    toast.error(message);
+    onSettledRef.current?.();
   }, [data, t]);
 }

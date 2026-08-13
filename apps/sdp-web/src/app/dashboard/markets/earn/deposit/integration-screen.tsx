@@ -37,7 +37,7 @@ export function IntegrationScreen({
   apiBaseUrl,
   apiKeys,
   onDone,
-  provider,
+  programId,
   withdrawalToken,
 }: {
   allocations: EarnPortfolioAllocationInput;
@@ -46,13 +46,13 @@ export function IntegrationScreen({
   /** Both footer actions land here — this screen is informational, so skipping
    *  and continuing are the same transition. */
   onDone: () => void;
-  provider: string;
+  programId: string;
   withdrawalToken: string;
 }) {
   const t = useTranslations();
   const snippets = useMemo(
-    () => earnApiSnippets({ allocations, baseUrl: apiBaseUrl, provider, withdrawalToken }),
-    [allocations, apiBaseUrl, provider, withdrawalToken]
+    () => earnApiSnippets({ allocations, baseUrl: apiBaseUrl, programId, withdrawalToken }),
+    [allocations, apiBaseUrl, programId, withdrawalToken]
   );
 
   return (

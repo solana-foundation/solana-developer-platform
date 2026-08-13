@@ -276,7 +276,9 @@ describe("assertGrantableApiKeyPermissions", () => {
   });
 });
 
-function createApiKeyAuth(overrides: Partial<ApiKeyContext> = {}): ApiKeyContext {
+function createApiKeyAuth(
+  overrides: Partial<Omit<ApiKeyContext, "authType" | "apiKeyId" | "userId">> = {}
+): ApiKeyContext {
   return {
     id: "key_scope_test",
     organizationId: "org_scope_test",

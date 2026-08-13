@@ -7,10 +7,13 @@ import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { isSentryEnabled } from "@/runtime/observability";
 import { nodeObservability } from "@/runtime/observability-node";
 import { reconcileRevokedApiKeyCache } from "@/services/jobs/reconcile-revoked-api-key-cache";
+import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
+import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
+import { runDueWorkflowExecutions } from "@/services/jobs/run-workflow-executions";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
-import { runCronJob } from "./job";
+import { describeCronFailure, runCronJob } from "./job";
 
 vi.mock("@sentry/node", () => ({
   close: vi.fn(async () => true),
@@ -27,11 +30,24 @@ vi.mock("@/cron/pending-transfers", () => ({
   PENDING_TRANSFERS_MONITOR: "sdp-api-track-pending-transfers",
 }));
 
+vi.mock("@/cron/workflow-executions", () => ({
+  WORKFLOW_EXECUTIONS_CRON: "* * * * *",
+  WORKFLOW_EXECUTIONS_MONITOR: "sdp-api-run-workflow-executions",
+}));
+
+vi.mock("@/cron/workflow-secret-retirements", () => ({
+  WORKFLOW_SECRET_RETIREMENTS_CRON: "*/5 * * * *",
+  WORKFLOW_SECRET_RETIREMENTS_MONITOR: "sdp-api-retire-workflow-secrets",
+}));
+
 vi.mock("@/db/client", () => ({
   closeDatabasePools: vi.fn(async () => {}),
 }));
 
-vi.mock("@/lib/runtime-env", () => ({
+// `isAssetProfilesEnabled` (real, via feature-flags) needs the real
+// `isSelfHostedDeployment`; only the env lookup itself is stubbed.
+vi.mock("@/lib/runtime-env", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/runtime-env")>()),
   getProcessEnv: vi.fn(),
 }));
 
@@ -53,12 +69,24 @@ vi.mock("@/runtime/observability-node", () => ({
   },
 }));
 
-vi.mock("@/services/jobs/reconcile-revoked-api-key-cache", () => ({
-  reconcileRevokedApiKeyCache: vi.fn(async () => ({ scanned: 0, repaired: 0 })),
+vi.mock("@/services/jobs/retire-workflow-secrets", () => ({
+  retireOrphanedActionSecrets: vi.fn(async () => ({ retired: 0, failed: 0 })),
+}));
+
+vi.mock("@/services/jobs/run-workflow-executions", () => ({
+  runDueWorkflowExecutions: vi.fn(async () => {}),
 }));
 
 vi.mock("@/services/jobs/track-pending-transfers", () => ({
   trackPendingTransfers: vi.fn(async () => {}),
+}));
+
+vi.mock("@/services/jobs/reconcile-revoked-api-key-cache", () => ({
+  reconcileRevokedApiKeyCache: vi.fn(async () => ({ scanned: 0, repaired: 0 })),
+}));
+
+vi.mock("@/services/jobs/reconcile-sponsorship-budgets", () => ({
+  reconcileSponsorshipBudgets: vi.fn(async () => {}),
 }));
 
 vi.mock("@/services/policy/approved-operation-replay", () => ({
@@ -77,16 +105,23 @@ describe("runCronJob", () => {
   beforeEach(() => {
     vi.mocked(getProcessEnv).mockReset().mockReturnValue(makeEnv());
     vi.mocked(isSentryEnabled).mockReset().mockReturnValue(false);
-    vi.mocked(reconcileRevokedApiKeyCache)
-      .mockReset()
-      .mockResolvedValue({ scanned: 0, repaired: 0 });
     vi.mocked(trackPendingTransfers)
       .mockReset()
       .mockResolvedValue(undefined as never);
     vi.mocked(recoverApprovedWalletOperations)
       .mockReset()
       .mockResolvedValue(undefined as never);
+    vi.mocked(reconcileSponsorshipBudgets)
+      .mockReset()
+      .mockResolvedValue(undefined as never);
+    vi.mocked(reconcileRevokedApiKeyCache)
+      .mockReset()
+      .mockResolvedValue({ scanned: 0, repaired: 0 });
     vi.mocked(runEarnCatalogueSyncIfDue).mockReset().mockResolvedValue("synced");
+    vi.mocked(runDueWorkflowExecutions)
+      .mockReset()
+      .mockResolvedValue(undefined as never);
+    vi.mocked(retireOrphanedActionSecrets).mockReset().mockResolvedValue({ retired: 0, failed: 0 });
     vi.mocked(nodeObservability.withMonitor)
       .mockReset()
       .mockImplementation((_slug, fn) => fn());
@@ -103,19 +138,73 @@ describe("runCronJob", () => {
     await expect(runCronJob()).rejects.toThrow(/REDIS_URL is required/);
 
     expect(trackPendingTransfers).not.toHaveBeenCalled();
+    expect(reconcileSponsorshipBudgets).not.toHaveBeenCalled();
   });
 
-  it("runs only the ungated pair when the Earn flags are off", async () => {
+  it("runs the ungated pair and the workflow tick when the Earn flags are off", async () => {
     await runCronJob();
 
-    // The revoked-key cache sweep is ungated and leads the chain.
+    // The revoked-key cache sweep is ungated and leads the transfers chain.
     expect(reconcileRevokedApiKeyCache).toHaveBeenCalledTimes(1);
+    const sweepOrder = vi.mocked(reconcileRevokedApiKeyCache).mock.invocationCallOrder[0];
+    const transfersOrder = vi.mocked(trackPendingTransfers).mock.invocationCallOrder[0];
+    expect(sweepOrder).toBeLessThan(transfersOrder);
     expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
     expect(recoverApprovedWalletOperations).toHaveBeenCalledTimes(1);
+    expect(reconcileSponsorshipBudgets).toHaveBeenCalledTimes(1);
+    // Managed deployments always have asset profiles on, so the workflow tick runs.
+    expect(runDueWorkflowExecutions).toHaveBeenCalledTimes(1);
     expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
     expect(closeAllRedisClients).toHaveBeenCalledTimes(1);
     expect(Sentry.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips the workflow tick on a self-hosted deployment without the asset-profiles flag", async () => {
+    vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ SDP_DEPLOYMENT_MODE: "self_hosted" }));
+
+    await runCronJob();
+
+    expect(runDueWorkflowExecutions).not.toHaveBeenCalled();
+    expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
+  });
+
+  // This job is the ONLY tick a Cloud Run deployment gets — the in-process scheduler
+  // returns null under K_SERVICE — and Cloud Run is also where GCP Secret Manager is the
+  // default backend, so it is exactly where retirements are queued. Omitting the sweep
+  // here left every queued version orphaned in managed production, readable forever.
+  it("sweeps secret retirements, and does so behind no flag", async () => {
+    const env = makeEnv();
+    vi.mocked(getProcessEnv).mockReturnValue(env);
+
+    await runCronJob();
+
+    expect(retireOrphanedActionSecrets).toHaveBeenCalledExactlyOnceWith(env);
+
+    // …and still when the feature that fills the queue is off: the rows outlive it.
+    const selfHosted = makeEnv({ SDP_DEPLOYMENT_MODE: "self_hosted" });
+    vi.mocked(getProcessEnv).mockReturnValue(selfHosted);
+    vi.mocked(retireOrphanedActionSecrets).mockClear();
+    // Cleared too, or the managed run above would still count against the assertion that
+    // the gated tick stays off.
+    vi.mocked(runDueWorkflowExecutions).mockClear();
+
+    await runCronJob();
+
+    expect(runDueWorkflowExecutions).not.toHaveBeenCalled();
+    expect(retireOrphanedActionSecrets).toHaveBeenCalledExactlyOnceWith(selfHosted);
+  });
+
+  // The sweep is cleanup, not the reconciliation this job exists for. A queued row is
+  // never abandoned, so the next run retries it — failing the whole job instead would
+  // strand the transfer reconciliation that already succeeded.
+  it("does not fail the job when the retirement sweep throws", async () => {
+    vi.mocked(retireOrphanedActionSecrets).mockRejectedValue(new Error("secret store down"));
+
+    await expect(runCronJob()).resolves.toBeUndefined();
+
+    expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
+    expect(closeDatabasePools).toHaveBeenCalledTimes(1);
   });
 
   it("requires both flags — the parent flag alone never runs the earn tick", async () => {
@@ -136,7 +225,7 @@ describe("runCronJob", () => {
 
     // Sentry disabled: no observability handed to the earn tick.
     expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledExactlyOnceWith(env, undefined);
-    const pairOrder = vi.mocked(recoverApprovedWalletOperations).mock.invocationCallOrder[0];
+    const pairOrder = vi.mocked(reconcileSponsorshipBudgets).mock.invocationCallOrder[0];
     const earnOrder = vi.mocked(runEarnCatalogueSyncIfDue).mock.invocationCallOrder[0];
     expect(earnOrder).toBeGreaterThan(pairOrder);
   });
@@ -148,9 +237,21 @@ describe("runCronJob", () => {
 
     await runCronJob();
 
-    // The job-level monitor wraps only the ungated pair, exactly as before.
-    expect(nodeObservability.withMonitor).toHaveBeenCalledExactlyOnceWith(
+    // The pair keeps the transfers monitor; the workflow tick and the retirement sweep
+    // each report to their own, so neither masquerades as a reconciliation failure.
+    expect(nodeObservability.withMonitor).toHaveBeenCalledTimes(3);
+    expect(nodeObservability.withMonitor).toHaveBeenCalledWith(
+      "sdp-api-retire-workflow-secrets",
+      expect.any(Function),
+      { schedule: { type: "crontab", value: "*/5 * * * *" } }
+    );
+    expect(nodeObservability.withMonitor).toHaveBeenCalledWith(
       "sdp-api-track-pending-transfers",
+      expect.any(Function),
+      { schedule: { type: "crontab", value: "* * * * *" } }
+    );
+    expect(nodeObservability.withMonitor).toHaveBeenCalledWith(
+      "sdp-api-run-workflow-executions",
       expect.any(Function),
       { schedule: { type: "crontab", value: "* * * * *" } }
     );
@@ -168,6 +269,7 @@ describe("runCronJob", () => {
     await expect(runCronJob()).rejects.toThrow("sync exploded");
 
     expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
+    expect(reconcileSponsorshipBudgets).toHaveBeenCalledTimes(1);
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
     expect(closeAllRedisClients).toHaveBeenCalledTimes(1);
     expect(Sentry.close).toHaveBeenCalledTimes(1);
@@ -177,11 +279,47 @@ describe("runCronJob", () => {
     vi.mocked(getProcessEnv).mockReturnValue(
       makeEnv({ MARKETS_ENABLED: "true", EARN_ENABLED: "true" })
     );
-    vi.mocked(trackPendingTransfers).mockRejectedValue(new Error("reconciliation down"));
+    vi.mocked(reconcileSponsorshipBudgets).mockRejectedValue(new Error("sponsorship down"));
 
-    await expect(runCronJob()).rejects.toThrow("reconciliation down");
+    await expect(runCronJob()).rejects.toThrow("sponsorship down");
 
+    expect(runDueWorkflowExecutions).not.toHaveBeenCalled();
     expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
+  });
+
+  it("reconciles sponsorship budgets even when pending-transfer tracking fails", async () => {
+    vi.mocked(trackPendingTransfers).mockRejectedValue(new Error("transfers down"));
+
+    await expect(runCronJob()).rejects.toThrow("transfers down");
+
+    expect(reconcileSponsorshipBudgets).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports every underlying cause when a tick fails on more than one task", () => {
+    const failure = new AggregateError(
+      [new Error("transfers down"), new Error("sponsorship down")],
+      "pending-transfers tick had multiple failures"
+    );
+
+    expect(describeCronFailure(failure)).toEqual({
+      error: failure,
+      causes: [
+        { message: "transfers down", stack: expect.any(String) },
+        { message: "sponsorship down", stack: expect.any(String) },
+      ],
+    });
+  });
+
+  it("keeps a single failure unchanged", () => {
+    const failure = new Error("transfers down");
+    expect(describeCronFailure(failure)).toEqual({ error: failure });
+  });
+
+  it("describes a rejected non-error value", () => {
+    expect(describeCronFailure(new AggregateError(["boom"], "tick"))).toEqual({
+      error: expect.any(AggregateError),
+      causes: [{ message: "boom" }],
+    });
   });
 });

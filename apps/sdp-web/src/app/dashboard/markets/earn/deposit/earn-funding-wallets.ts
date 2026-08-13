@@ -8,10 +8,11 @@ import { portfolioTokenForMint } from "../earn-program-presentation";
  * Funding wallets for the deposit flow: the org's own SDP wallets, plus the
  * display helpers every surface that names one needs.
  *
- * Earn's program wallet is provisioned and custodied by the provider (Ground),
- * so an SDP wallet is never the program itself — it is where the stablecoins are
- * sent FROM. The selection is deliberately NOT persisted: `PUT /v1/earn/program`
- * has no source-wallet field and no API moves funds from an SDP wallet into the
+ * Earn's program wallets are provisioned and custodied by the provider (Ground),
+ * so an SDP wallet is never a program itself — it is where the stablecoins are
+ * sent FROM. The selection is deliberately NOT persisted: neither
+ * `POST /v1/earn/programs` nor `PUT /v1/earn/programs/:programId` has a
+ * source-wallet field and no API moves funds from an SDP wallet into a
  * program, so recording it would only look like state that means something.
  * Funding is a transfer the operator makes to the provider's Solana address; the
  * choice here shapes the instructions for that, and nothing else.

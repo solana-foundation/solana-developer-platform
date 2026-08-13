@@ -100,6 +100,7 @@ const wallet: CustodyWalletByIdResponse["wallet"] = {
   id: "custody-wallet-1",
   custodyConfigId: "custody-config-1",
   provider: "dfns",
+  isRuntimeExecutionAllowed: true,
   walletId: "wallet-1",
   publicKey: "wallet-public-key",
   label: "Mobile overflow proof signer",

@@ -3,6 +3,7 @@
 import {
   EARN_PORTFOLIO_TOKENS,
   type EarnPortfolioPosition,
+  type EarnPortfolioTargetAllocations,
   type EarnPortfolioToken,
   type EarnStrategy,
   earnCuratorLabel,
@@ -135,4 +136,109 @@ export function withdrawLanes(
     else unattributedUsd += value;
   }
   return { totals, unattributedUsd };
+}
+
+/**
+ * The catalogue keyed by provider reference, filtered to ONE provider — the
+ * join every per-program surface performs (holdings, title, withdraw lanes'
+ * cousin). Filtering is part of the contract: provider references are only
+ * unique within a provider, so an unfiltered map could cross-match another
+ * provider's strategy onto this program's slices. Build it once per catalogue
+ * change and pass it down, not once per consumer.
+ */
+export function strategiesByReference(
+  provider: string,
+  strategies: readonly EarnStrategy[]
+): ReadonlyMap<string, EarnStrategy> {
+  return new Map(
+    strategies
+      .filter((strategy) => strategy.provider === provider)
+      .map((strategy) => [strategy.providerReference, strategy] as const)
+  );
+}
+
+/**
+ * A program's display name, derived from the vault it targets rather than the
+ * program id.
+ *
+ * Nobody thinks of a program as `earn_provider_wallet_<uuid>` — they think of it
+ * as "the Kamino USDC one". V1 pins each program to a single vault per token
+ * lane, so the target allocation IS the identity. Falls back to the operator's
+ * own label, and only then to something id-shaped, because an unnamed row is
+ * still better than a blank one.
+ */
+export function programTitle(
+  allocations: EarnPortfolioTargetAllocations,
+  label: string | null,
+  byReference: ReadonlyMap<string, EarnStrategy>,
+  fallback: string
+): string {
+  const names: string[] = [];
+  for (const token of EARN_PORTFOLIO_TOKENS) {
+    for (const entry of allocations[token] ?? []) {
+      if (entry.yieldSourceId === "cash" || entry.weightBps <= 0) continue;
+      const name = byReference.get(entry.yieldSourceId)?.name;
+      if (name && !names.includes(name)) names.push(name);
+    }
+  }
+  if (names.length > 0) return names.join(" · ");
+  return label ?? fallback;
+}
+
+/** Aggregate money across every program the organization holds. */
+export interface PortfolioTotals {
+  totalUsd: number;
+  earnedUsd: number;
+  withdrawableUsd: number;
+  /**
+   * Balance-weighted APY as a decimal, or undefined when it cannot be stated
+   * honestly — see {@link portfolioTotals}.
+   */
+  blendedApy: number | undefined;
+}
+
+/**
+ * Portfolio-level totals across programs.
+ *
+ * The blended APY is deliberately all-or-nothing: it is reported only when
+ * EVERY program holding money also reports a rate. Weighting over just the
+ * programs that happen to publish one would quote the rate of a small funded
+ * strategy as though it were the whole portfolio's — the module's standing rule
+ * is that a missing number renders as "—", never as a fabricated or partial
+ * one.
+ */
+export function portfolioTotals(
+  programs: readonly {
+    wallet: { balance: { totalUsd: string; earnedUsd: string; withdrawableUsd: string } };
+    yield?: { currentApy?: string };
+  }[]
+): PortfolioTotals {
+  let totalUsd = 0;
+  let earnedUsd = 0;
+  let withdrawableUsd = 0;
+  let weightedApy = 0;
+  let ratedUsd = 0;
+  let ratesComplete = true;
+
+  for (const program of programs) {
+    const balance = Number(program.wallet.balance.totalUsd) || 0;
+    totalUsd += balance;
+    earnedUsd += Number(program.wallet.balance.earnedUsd) || 0;
+    withdrawableUsd += Number(program.wallet.balance.withdrawableUsd) || 0;
+
+    const apy = program.yield?.currentApy ? Number(program.yield.currentApy) : undefined;
+    if (apy !== undefined && Number.isFinite(apy)) {
+      weightedApy += apy * balance;
+      ratedUsd += balance;
+    } else if (balance > 0) {
+      ratesComplete = false;
+    }
+  }
+
+  return {
+    totalUsd,
+    earnedUsd,
+    withdrawableUsd,
+    blendedApy: ratesComplete && ratedUsd > 0 ? weightedApy / ratedUsd : undefined,
+  };
 }

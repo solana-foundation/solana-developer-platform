@@ -68,8 +68,13 @@ const WITHDRAWAL_STATUS_BADGES: Record<
   cancelled: { variant: "danger", key: "DashboardEarn.withdraw.statusCancelled" },
 };
 
-/** Scope focus to the portaled Earn dialog and return it to the trigger on close. */
-function useEarnModalFocus() {
+/**
+ * Scope focus to the portaled Earn dialog and return it to the trigger on
+ * close. The fallback (trigger unmounted by a re-render) is scoped to THIS
+ * program's card via the attribute value — with several cards on screen, an
+ * unscoped query would land focus on whichever card renders first.
+ */
+function useEarnModalFocus(programId: string) {
   const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -113,11 +118,13 @@ function useEarnModalFocus() {
       window.requestAnimationFrame(() => {
         const focusTarget = returnFocus?.isConnected
           ? returnFocus
-          : document.querySelector<HTMLElement>("[data-earn-withdraw-focus-fallback]");
+          : document.querySelector<HTMLElement>(
+              `[data-earn-withdraw-focus-fallback="${CSS.escape(programId)}"]`
+            );
         focusTarget?.focus();
       });
     };
-  }, []);
+  }, [programId]);
 
   return contentRef;
 }
@@ -254,6 +261,8 @@ function WithdrawalCreatedView({
 }
 
 interface EarnWithdrawModalProps {
+  /** The program the money leaves. One modal instance serves one program. */
+  programId: string;
   balance: EarnPortfolioBalance;
   /** Live portfolio slices; power the per-stablecoin available figures. */
   positions: readonly EarnPortfolioPosition[];
@@ -267,19 +276,20 @@ interface EarnWithdrawModalProps {
 }
 
 /**
- * Portfolio-level withdrawal against the shared Ground program wallet: one
- * USD amount + stablecoin + Solana destination. A live preview (fees and the
- * provider's typical processing window) precedes confirmation; the accepted
- * withdrawal stays on screen in its processing state.
+ * Withdrawal from ONE program's provider wallet: one USD amount + stablecoin +
+ * Solana destination. A live preview (fees and the provider's typical
+ * processing window) precedes confirmation; the accepted withdrawal stays on
+ * screen in its processing state.
  */
 export function EarnWithdrawModal({
+  programId,
   balance,
   positions,
   onClose,
   onWithdrawalCreated,
 }: EarnWithdrawModalProps) {
   const t = useTranslations();
-  const contentRef = useEarnModalFocus();
+  const contentRef = useEarnModalFocus(programId);
   const { strategies } = useEarnStrategies();
   const [amountInput, setAmountInput] = useState("");
   // Always USDC: the one stablecoin Ground pays out on Solana, so it is the
@@ -329,8 +339,13 @@ export function EarnWithdrawModal({
    * A ref, not `useMemo`: React may discard a memo cache and recompute, which
    * would hand the same parameters a fresh key and reintroduce the
    * double-withdraw risk on retry.
+   *
+   * `programId` is part of the signature because one modal instance can be
+   * re-pointed at another program without unmounting. Without it, a key minted
+   * for a withdrawal from program A would be carried into an identical-looking
+   * withdrawal from program B.
    */
-  const requestSignature = `${amount}|${token}|${destination}`;
+  const requestSignature = `${programId}|${amount}|${token}|${destination}`;
   const requestRef = useRef<{ signature: string; id: string } | null>(null);
   if (requestRef.current?.signature !== requestSignature) {
     requestRef.current = { signature: requestSignature, id: crypto.randomUUID() };
@@ -350,7 +365,11 @@ export function EarnWithdrawModal({
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setPreview({ phase: "loading" });
-      const result = await previewEarnWithdrawal({ amountUsd: amount, token }, controller.signal);
+      const result = await previewEarnWithdrawal(
+        programId,
+        { amountUsd: amount, token },
+        controller.signal
+      );
       if (controller.signal.aborted) return;
       setPreview(
         result.ok ? { phase: "ready", preview: result.data.data.preview } : { phase: "error" }
@@ -360,13 +379,13 @@ export function EarnWithdrawModal({
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [amount, amountValid, token, created]);
+  }, [amount, amountValid, token, created, programId]);
 
   const submit = async () => {
     if (!amountValid || !destinationValid || submitting) return;
     setSubmitting(true);
     setSubmitError(null);
-    const result = await createEarnWithdrawal({
+    const result = await createEarnWithdrawal(programId, {
       requestId,
       amountUsd: amount,
       token,
