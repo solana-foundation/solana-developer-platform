@@ -288,7 +288,6 @@ async function tripBreaker(
   reason: string
 ): Promise<void> {
   const policy = await repository.tripGlobalBreaker(network, reason);
-  if (policy) await budgetRedis.syncPolicy(policy);
   logEvent("error", {
     event: "sdp_api_sponsorship_breaker_tripped",
     network,
@@ -296,6 +295,7 @@ async function tripBreaker(
     already_tripped: policy === null,
     source: "reconciliation",
   });
+  if (policy) await budgetRedis.syncPolicy(policy);
 }
 
 async function persistAmbiguousCharge(input: {

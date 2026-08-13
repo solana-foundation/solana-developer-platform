@@ -667,7 +667,6 @@ export class BudgetedFeePayment implements FeePaymentPort {
 
   private async tripBreaker(network: SponsorshipNetwork, reason: string): Promise<void> {
     const policy = await this.repository.tripGlobalBreaker(network, reason);
-    if (policy) await this.budgetRedis.syncPolicy(policy);
     logEvent("error", {
       event: "sdp_api_sponsorship_breaker_tripped",
       network,
@@ -676,6 +675,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
       organization_id: this.scope.organizationId,
       project_id: this.scope.projectId,
     });
+    if (policy) await this.budgetRedis.syncPolicy(policy);
   }
 
   private async durablyAdvanced(

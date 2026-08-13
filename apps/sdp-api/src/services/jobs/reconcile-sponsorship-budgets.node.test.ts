@@ -403,4 +403,29 @@ describe("reconcileSponsorshipBudgets", () => {
     );
     expect(budgetRedis.settle).not.toHaveBeenCalled();
   });
+
+  it("reports the breaker even when the Redis policy sync fails afterwards", async () => {
+    const { repository, budgetRedis, getTransaction, run } = harness(reservation());
+    logEvent.mockClear();
+    budgetRedis.syncPolicy.mockRejectedValue(new Error("redis offline"));
+    getTransaction.mockResolvedValueOnce({
+      slot: 1n,
+      err: null,
+      fee: 1n,
+      preBalances: [20n],
+      postBalances: [10n],
+      instructions: [],
+    });
+
+    await expect(run()).rejects.toThrow("failed reconciliation");
+
+    expect(repository.tripGlobalBreaker).toHaveBeenCalled();
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_sponsorship_breaker_tripped",
+        source: "reconciliation",
+      })
+    );
+  });
 });
