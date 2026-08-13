@@ -412,10 +412,20 @@ export async function dispatchCounterpartyEmail(
       return { emailed: 0 };
     }
     const organization = await getDb(env)
-      .prepare(`SELECT name FROM organizations WHERE id = ?`)
+      .prepare(`SELECT name, slug FROM organizations WHERE id = ?`)
       .bind(input.organizationId)
-      .first<{ name: string | null }>();
-    const orgName = organization?.name?.trim() || "your counterparty";
+      .first<{ name: string | null; slug: string | null }>();
+    // The footer's entire job is telling an external recipient WHO sent this — a note
+    // that names nobody fails the requirement, so an unnameable org sends nothing.
+    // (No replyTo either: organizations carry no contact email column to point at.)
+    const orgName = organization?.name?.trim() || organization?.slug?.trim();
+    if (!orgName) {
+      getLogger().warn(
+        { organizationId: input.organizationId, type: input.type },
+        "counterparty receipt skipped: organization has no usable name"
+      );
+      return { emailed: 0 };
+    }
 
     const claimId = await createNotificationDeliveriesRepository(env).claim({
       organizationId: input.organizationId,

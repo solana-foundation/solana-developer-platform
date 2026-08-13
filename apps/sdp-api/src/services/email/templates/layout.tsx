@@ -30,12 +30,12 @@ const styles = {
     textTransform: "uppercase" as const,
   },
   footer: {
+    borderTop: "1px solid #e4e4e7",
     color: "#a1a1aa",
     fontSize: "12px",
     lineHeight: "18px",
-    margin: "24px auto 0",
-    maxWidth: "520px",
-    padding: "0 32px",
+    marginTop: "24px",
+    paddingTop: "16px",
   },
 } as const;
 
@@ -50,14 +50,23 @@ export interface EmailLayoutProps {
 export function EmailLayout({ preview, children, footer }: EmailLayoutProps) {
   return (
     <Html lang="en">
-      <Head />
+      <Head>
+        {/* Declare the (light-only) palette: clients that honor the meta stop
+            force-inverting the hardcoded colors into dark-on-dark. */}
+        <meta name="color-scheme" content="light" />
+        <meta name="supported-color-schemes" content="light" />
+      </Head>
       <Preview>{preview}</Preview>
       <Body style={styles.body}>
-        <Container style={styles.container}>
+        {/* width attribute alongside the max-width style: Outlook's Word engine
+            ignores max-width on tables and would render the card edge-to-edge. */}
+        <Container width={520} style={styles.container}>
           <Text style={styles.brand}>Solana Developer Platform</Text>
           {children}
+          {/* Inside the Container: centering an outside Section relies on auto
+              margins, which Outlook also ignores. */}
+          {footer ? <Section style={styles.footer}>{footer}</Section> : null}
         </Container>
-        {footer ? <Section style={styles.footer}>{footer}</Section> : null}
       </Body>
     </Html>
   );

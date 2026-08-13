@@ -3,10 +3,19 @@
 // Keep the map tiny and in lockstep with the bell's hrefFor map in
 // apps/sdp-web/src/components/notification-bell.tsx.
 
+import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 
+let warnedMissingFrontendUrl = false;
+
 function frontendBase(env: Env): string | null {
-  const base = env.FRONTEND_URL?.replace(/\/$/, "");
+  const base = env.FRONTEND_URL?.replace(/\/+$/, "");
+  if (!base && !warnedMissingFrontendUrl) {
+    warnedMissingFrontendUrl = true;
+    // Without a base URL every email ships with no CTA and no manage-preferences
+    // footer — a recipient has no in-email path to stop the mail. Loud once, not fatal.
+    getLogger().warn("FRONTEND_URL is unset: notification emails carry no links");
+  }
   return base || null;
 }
 
@@ -33,11 +42,16 @@ export function resourceLink(
     case "invitation":
       return `${base}/dashboard/members`;
     case "payment_transfer":
-      return `${base}/dashboard/payments`;
+      // The transfer list lives on the transactions sub-page, not the payments hub.
+      return `${base}/dashboard/payments/transactions`;
     case "recurring_payment":
-      return `${base}/dashboard/payments/recurring`;
+      return params.resourceId
+        ? `${base}/dashboard/payments/recurring/${encodeURIComponent(params.resourceId)}`
+        : `${base}/dashboard/payments/recurring`;
     case "counterparty":
-      return `${base}/dashboard/payments/counterparty`;
+      return params.resourceId
+        ? `${base}/dashboard/payments/counterparty/${encodeURIComponent(params.resourceId)}`
+        : `${base}/dashboard/payments/counterparty`;
     default:
       return null;
   }
@@ -45,5 +59,7 @@ export function resourceLink(
 
 export function managePreferencesLink(env: Env): string | null {
   const base = frontendBase(env);
-  return base ? `${base}/dashboard/settings` : null;
+  // The fragment lands on the notifications card (it is the last of four sections on
+  // the settings page); the card carries the matching id.
+  return base ? `${base}/dashboard/settings#notifications` : null;
 }
