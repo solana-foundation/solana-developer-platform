@@ -51,24 +51,25 @@ export type EarnStrategyStatus = (typeof EARN_STRATEGY_STATUSES)[number];
  * makes "onboarding a curator is a data change" literally true.
  */
 export const EARN_KNOWN_CURATOR_LABELS: Readonly<Record<string, string>> = {
-  // Curator houses.
+  // Curator houses. A house is chain-agnostic — it can curate a Solana vault
+  // whether or not it curates one today — so an entry stays as long as the house
+  // could plausibly appear on a Solana shelf, even with no current source.
   gauntlet: "Gauntlet",
   steakhouse: "Steakhouse Financial",
   sentora: "Sentora",
   smokehouse: "Smokehouse",
-  morpho: "Morpho",
   allez: "Allez Labs",
   rockawayx: "RockawayX",
   august: "August",
   superstate: "Superstate",
-  // Ids Ground reports when a protocol or fund curates its own vaults;
-  // `g<ticker>` is Ground's own wrapper of a Superstate fund.
-  kamino: "Kamino",
   maple: "Maple",
   centrifuge: "Centrifuge",
-  aave_v3: "Aave V3",
-  gustb: "Superstate USTB",
-  guscc: "Superstate USCC",
+  // Ids a provider reports when a protocol curates its own vaults.
+  kamino: "Kamino",
+  // No EVM-only ids here: SDP lists Solana-hosted vaults only, so `morpho`,
+  // `aave_v3` and Ground's `gustb`/`guscc` Superstate wrappers can no longer
+  // reach a catalogue row. Unknown ids render as-is, so re-adding one is a
+  // one-line data change if a Solana deployment ever surfaces it.
 };
 
 export function earnCuratorLabel(curator: string): string {

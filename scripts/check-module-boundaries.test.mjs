@@ -2,11 +2,77 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   findWorkspaceDependencyCycles,
+  forbiddenFeePaymentConstructorImport,
   forbiddenPackageSourceImport,
   validateModuleBoundaries,
   workspaceImportName,
   workspaceImportPath,
 } from "./check-module-boundaries.mjs";
+
+test("restricts fee-payment constructors to the owned sponsorship boundary", () => {
+  const apiSourceRoot = "/repo/apps/sdp-api/src";
+  assert.match(
+    forbiddenFeePaymentConstructorImport({
+      filePath: `${apiSourceRoot}/routes/unsafe.ts`,
+      source:
+        'import { createFeePaymentAdapter, type FeePaymentPort } from "@sdp/payments/fee-payment";',
+      apiSourceRoot,
+    }),
+    /createFeePaymentAdapter/
+  );
+  assert.match(
+    forbiddenFeePaymentConstructorImport({
+      filePath: `${apiSourceRoot}/routes/namespace-bypass.ts`,
+      source:
+        'import * as feePayment from "@sdp/payments/fee-payment";\nfeePayment.createFeePaymentAdapter(env);',
+      apiSourceRoot,
+    }),
+    /opaque fee-payment import/
+  );
+  for (const [name, source] of [
+    ["default", 'import feePayment from "@sdp/payments/fee-payment";'],
+    [
+      "default-plus-named",
+      'import feePayment, { type FeePaymentPort } from "@sdp/payments/fee-payment";',
+    ],
+    ["require", 'const feePayment = require("@sdp/payments/fee-payment");'],
+    ["dynamic", 'const feePayment = await import("@sdp/payments/fee-payment");'],
+    ["star-export", 'export * from "@sdp/payments/fee-payment";'],
+  ]) {
+    assert.match(
+      forbiddenFeePaymentConstructorImport({
+        filePath: `${apiSourceRoot}/routes/${name}-bypass.ts`,
+        source,
+        apiSourceRoot,
+      }),
+      /opaque fee-payment import/
+    );
+  }
+  assert.equal(
+    forbiddenFeePaymentConstructorImport({
+      filePath: `${apiSourceRoot}/services/budget.ts`,
+      source: 'import { FeePaymentError, type FeePaymentPort } from "@sdp/payments/fee-payment";',
+      apiSourceRoot,
+    }),
+    undefined
+  );
+  assert.equal(
+    forbiddenFeePaymentConstructorImport({
+      filePath: `${apiSourceRoot}/test/integration-support.ts`,
+      source: 'import { createFeePaymentAdapter } from "@sdp/payments/fee-payment";',
+      apiSourceRoot,
+    }),
+    undefined
+  );
+  assert.equal(
+    forbiddenFeePaymentConstructorImport({
+      filePath: `${apiSourceRoot}/services/sponsorship.service.ts`,
+      source: 'import { createFeePaymentAdapter } from "@sdp/payments/fee-payment";',
+      apiSourceRoot,
+    }),
+    undefined
+  );
+});
 
 const api = {
   name: "@sdp/api",

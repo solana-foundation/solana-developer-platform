@@ -520,6 +520,7 @@ export type SwitchSigningRequest =
 
 export interface CreateWalletRequest {
   projectId?: string;
+  connectionId?: string;
   provider?: CustodyProvider;
   label?: string;
   purpose?: CustodyWalletPurpose;
@@ -554,11 +555,15 @@ export interface CustodyConfigSummary {
   createdAt: string;
 }
 
-export interface CustodyWalletSummary {
+export type CustodyWalletOwner =
+  | { custodyConfigId: string; custodyConnectionId?: never }
+  | { custodyConfigId?: never; custodyConnectionId: string };
+
+export type CustodyWalletSummary = CustodyWalletOwner & {
   id: string;
-  custodyConfigId?: string;
   provider?: CustodyProvider;
   isDefaultProvider?: boolean;
+  isRuntimeExecutionAllowed: boolean;
   walletId: string;
   publicKey: string;
   label: string | null;
@@ -566,7 +571,7 @@ export interface CustodyWalletSummary {
   status: CustodyWalletStatus;
   createdAt: string;
   balances?: CustodyWalletTokenBalance[];
-}
+};
 
 export interface CustodyWalletBalance {
   token: "SOL";
@@ -588,14 +593,13 @@ export interface CustodyWalletTokenBalance {
   usdValue?: number;
 }
 
-export interface CustodyWalletMetadata extends CustodyWalletSummary {
-  custodyConfigId: string;
+export type CustodyWalletMetadata = CustodyWalletSummary & {
   provider: CustodyProvider;
-}
+};
 
-export interface CustodyWalletWithBalance extends CustodyWalletMetadata {
+export type CustodyWalletWithBalance = CustodyWalletMetadata & {
   balance: CustodyWalletBalance;
-}
+};
 
 export interface CustodyConfigWithDefault extends CustodyConfigSummary {
   isDefault: boolean;

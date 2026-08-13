@@ -83,6 +83,8 @@
     "mainnetSoon": "Mainnet support coming soon.",
     "createOrganization": "Create organization",
     "manageOrganization": "Manage organization",
+    "copyOrganizationId": "Copy organization ID",
+    "organizationId": "Organization ID",
     "clear": "Clear",
     "chooseDate": "Choose date",
     "chooseDateAndTime": "Choose date and time",

@@ -125,6 +125,8 @@ const channels: PrivateChannelMembershipChannelDto[] = [
 const sourceWallets: CustodyWalletSummary[] = [
   {
     id: "custody_sender",
+    custodyConfigId: "custody-config-1",
+    isRuntimeExecutionAllowed: true,
     walletId: "wallet_sender",
     publicKey: "Sender1111111111111111111111111111111111",
     label: "Treasury",
@@ -134,6 +136,8 @@ const sourceWallets: CustodyWalletSummary[] = [
   },
   {
     id: "custody_operations",
+    custodyConfigId: "custody-config-1",
+    isRuntimeExecutionAllowed: true,
     walletId: "wallet_operations",
     publicKey: "Operations22222222222222222222222222222222",
     label: "Operations",

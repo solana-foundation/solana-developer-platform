@@ -20,6 +20,7 @@ import type {
   ListEarnProviderWalletsResult,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
+import { EARN_SEED_REFERENCE_PREFIX } from "./earn.repository";
 import { createPostgresEarnRepository } from "./earn.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_earn_repo_test";
@@ -217,6 +218,93 @@ describe("EarnRepository (postgres)", () => {
         expect(total).toBe(1);
         expect(rows[0]?.id).toBe(expectedId);
       }
+    });
+  });
+
+  describe("deleteUnlistedStrategies", () => {
+    it("deletes only active rows the provider no longer lists, scoped to (provider, environment)", async () => {
+      const kept = await seedStrategy({
+        provider: "ground",
+        providerReference: "kamino-allez-usdc",
+      });
+      const stale = await seedStrategy({
+        provider: "ground",
+        providerReference: "morpho-gauntlet-usdc",
+      });
+      const otherEnvironment = await seedStrategy({
+        providerReference: "morpho-gauntlet-usdc",
+        environment: "production",
+      });
+
+      const deleted = await repo.deleteUnlistedStrategies({
+        provider: "ground",
+        environment: "sandbox",
+        listedProviderReferences: ["kamino-allez-usdc"],
+      });
+
+      expect(deleted).toEqual(["morpho-gauntlet-usdc"]);
+      expect((await repo.getStrategyById(kept.id))?.status).toBe("active");
+      expect(await repo.getStrategyById(stale.id)).toBeNull();
+      // Environment scope is load-bearing: a sandbox pass must never touch
+      // production rows carrying the same provider reference.
+      expect((await repo.getStrategyById(otherEnvironment.id))?.status).toBe("active");
+    });
+
+    it("is idempotent and leaves operator-paused rows alone", async () => {
+      const paused = await seedStrategy({
+        providerReference: "morpho-smokehouse-usdc",
+        status: "paused",
+      });
+      await seedStrategy({ provider: "ground", providerReference: "aave-v3-usdc" });
+
+      const first = await repo.deleteUnlistedStrategies({
+        provider: "ground",
+        environment: "sandbox",
+        listedProviderReferences: ["kamino-allez-usdc"],
+      });
+      expect(first).toEqual(["aave-v3-usdc"]);
+      // An operator pause outranks the catalogue, exactly as in upsertStrategy.
+      expect((await repo.getStrategyById(paused.id))?.status).toBe("paused");
+
+      const second = await repo.deleteUnlistedStrategies({
+        provider: "ground",
+        environment: "sandbox",
+        listedProviderReferences: ["kamino-allez-usdc"],
+      });
+      expect(second).toEqual([]);
+    });
+
+    it("never touches dev-seed fixtures, which no provider lists", async () => {
+      const fixture = await seedStrategy({
+        providerReference: `${EARN_SEED_REFERENCE_PREFIX}kamino-allez-usdc`,
+      });
+
+      const deleted = await repo.deleteUnlistedStrategies({
+        provider: "ground",
+        environment: "sandbox",
+        listedProviderReferences: ["kamino-steakhouse-usdc"],
+      });
+
+      expect(deleted).toEqual([]);
+      expect((await repo.getStrategyById(fixture.id))?.status).toBe("active");
+    });
+
+    it("refuses an empty keep set rather than deleting the whole shelf", async () => {
+      // "The provider listed nothing" is indistinguishable from a misconfigured
+      // account, so it can never tear down a catalogue.
+      const row = await seedStrategy({
+        provider: "ground",
+        providerReference: "kamino-allez-usdc",
+      });
+
+      const deleted = await repo.deleteUnlistedStrategies({
+        provider: "ground",
+        environment: "sandbox",
+        listedProviderReferences: [],
+      });
+
+      expect(deleted).toEqual([]);
+      expect((await repo.getStrategyById(row.id))?.status).toBe("active");
     });
   });
 

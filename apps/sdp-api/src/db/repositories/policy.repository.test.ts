@@ -1332,42 +1332,43 @@ async function seedPolicyFoundationFixtures(): Promise<void> {
     .bind(TEST_API_KEY.id, TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id, TEST_API_KEY.prefix)
     .run();
 
-  await db
-    .prepare(
-      `INSERT INTO custody_configs (
-         id,
-         organization_id,
-         project_id,
-         provider,
-         config_encrypted,
-         default_wallet_id,
-         status
-       ) VALUES (?, ?, ?, 'local', 'encrypted', ?, 'active')`
-    )
-    .bind(TEST_CUSTODY_CONFIG.id, TEST_ORG.id, TEST_PROJECT.id, TEST_CUSTODY_WALLET.walletId)
-    .run();
-
-  await db
-    .prepare(
-      `INSERT INTO custody_wallets (
-         id,
-         custody_config_id,
-         wallet_id,
-         public_key,
-         label,
-         purpose,
-         status
-       ) VALUES (?, ?, ?, ?, ?, ?, 'active')`
-    )
-    .bind(
-      TEST_CUSTODY_WALLET.id,
-      TEST_CUSTODY_CONFIG.id,
-      TEST_CUSTODY_WALLET.walletId,
-      TEST_CUSTODY_WALLET.publicKey,
-      TEST_CUSTODY_WALLET.label,
-      TEST_CUSTODY_WALLET.purpose
-    )
-    .run();
+  // The config's default_wallet_id FK is deferred, so the config and its
+  // default wallet must land in one transaction.
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO custody_configs (
+           id,
+           organization_id,
+           project_id,
+           provider,
+           config_encrypted,
+           default_wallet_id,
+           status
+         ) VALUES (?, ?, ?, 'local', 'encrypted', ?, 'active')`
+      )
+      .bind(TEST_CUSTODY_CONFIG.id, TEST_ORG.id, TEST_PROJECT.id, TEST_CUSTODY_WALLET.walletId),
+    db
+      .prepare(
+        `INSERT INTO custody_wallets (
+           id,
+           custody_config_id,
+           wallet_id,
+           public_key,
+           label,
+           purpose,
+           status
+         ) VALUES (?, ?, ?, ?, ?, ?, 'active')`
+      )
+      .bind(
+        TEST_CUSTODY_WALLET.id,
+        TEST_CUSTODY_CONFIG.id,
+        TEST_CUSTODY_WALLET.walletId,
+        TEST_CUSTODY_WALLET.publicKey,
+        TEST_CUSTODY_WALLET.label,
+        TEST_CUSTODY_WALLET.purpose
+      ),
+  ]);
 }
 
 async function seedAdditionalCustodyWallet(): Promise<void> {
@@ -1401,47 +1402,48 @@ async function seedAdditionalCustodyWallet(): Promise<void> {
  */
 async function seedDuplicateProviderCustodyWallet(): Promise<void> {
   const db = getDb(env);
-  await db
-    .prepare(
-      `INSERT INTO custody_configs (
-         id,
-         organization_id,
-         project_id,
-         provider,
-         config_encrypted,
-         default_wallet_id,
-         status
-       ) VALUES (?, ?, ?, 'privy', 'encrypted', ?, 'active')`
-    )
-    .bind(
-      DUPLICATE_PROVIDER_CUSTODY_CONFIG_ID,
-      TEST_ORG.id,
-      TEST_PROJECT.id,
-      DUPLICATE_PROVIDER_CUSTODY_WALLET.walletId
-    )
-    .run();
-
-  await db
-    .prepare(
-      `INSERT INTO custody_wallets (
-         id,
-         custody_config_id,
-         wallet_id,
-         public_key,
-         label,
-         purpose,
-         status
-       ) VALUES (?, ?, ?, ?, ?, ?, 'active')`
-    )
-    .bind(
-      DUPLICATE_PROVIDER_CUSTODY_WALLET.id,
-      DUPLICATE_PROVIDER_CUSTODY_CONFIG_ID,
-      DUPLICATE_PROVIDER_CUSTODY_WALLET.walletId,
-      DUPLICATE_PROVIDER_CUSTODY_WALLET.publicKey,
-      DUPLICATE_PROVIDER_CUSTODY_WALLET.label,
-      DUPLICATE_PROVIDER_CUSTODY_WALLET.purpose
-    )
-    .run();
+  // The config's default_wallet_id FK is deferred, so the config and its
+  // default wallet must land in one transaction.
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO custody_configs (
+           id,
+           organization_id,
+           project_id,
+           provider,
+           config_encrypted,
+           default_wallet_id,
+           status
+         ) VALUES (?, ?, ?, 'privy', 'encrypted', ?, 'active')`
+      )
+      .bind(
+        DUPLICATE_PROVIDER_CUSTODY_CONFIG_ID,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        DUPLICATE_PROVIDER_CUSTODY_WALLET.walletId
+      ),
+    db
+      .prepare(
+        `INSERT INTO custody_wallets (
+           id,
+           custody_config_id,
+           wallet_id,
+           public_key,
+           label,
+           purpose,
+           status
+         ) VALUES (?, ?, ?, ?, ?, ?, 'active')`
+      )
+      .bind(
+        DUPLICATE_PROVIDER_CUSTODY_WALLET.id,
+        DUPLICATE_PROVIDER_CUSTODY_CONFIG_ID,
+        DUPLICATE_PROVIDER_CUSTODY_WALLET.walletId,
+        DUPLICATE_PROVIDER_CUSTODY_WALLET.publicKey,
+        DUPLICATE_PROVIDER_CUSTODY_WALLET.label,
+        DUPLICATE_PROVIDER_CUSTODY_WALLET.purpose
+      ),
+  ]);
 }
 
 async function seedOtherProjectCustodyWallet(): Promise<void> {
@@ -1462,47 +1464,48 @@ async function seedOtherProjectCustodyWallet(): Promise<void> {
     )
     .run();
 
-  await db
-    .prepare(
-      `INSERT INTO custody_configs (
-         id,
-         organization_id,
-         project_id,
-         provider,
-         config_encrypted,
-         default_wallet_id,
-         status
-       ) VALUES (?, ?, ?, 'local', 'encrypted', ?, 'active')`
-    )
-    .bind(
-      OTHER_PROJECT_CUSTODY_CONFIG_ID,
-      TEST_ORG.id,
-      OTHER_PROJECT.id,
-      OTHER_PROJECT_CUSTODY_WALLET.walletId
-    )
-    .run();
-
-  await db
-    .prepare(
-      `INSERT INTO custody_wallets (
-         id,
-         custody_config_id,
-         wallet_id,
-         public_key,
-         label,
-         purpose,
-         status
-       ) VALUES (?, ?, ?, ?, ?, ?, 'active')`
-    )
-    .bind(
-      OTHER_PROJECT_CUSTODY_WALLET.id,
-      OTHER_PROJECT_CUSTODY_CONFIG_ID,
-      OTHER_PROJECT_CUSTODY_WALLET.walletId,
-      OTHER_PROJECT_CUSTODY_WALLET.publicKey,
-      OTHER_PROJECT_CUSTODY_WALLET.label,
-      OTHER_PROJECT_CUSTODY_WALLET.purpose
-    )
-    .run();
+  // The config's default_wallet_id FK is deferred, so the config and its
+  // default wallet must land in one transaction.
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO custody_configs (
+           id,
+           organization_id,
+           project_id,
+           provider,
+           config_encrypted,
+           default_wallet_id,
+           status
+         ) VALUES (?, ?, ?, 'local', 'encrypted', ?, 'active')`
+      )
+      .bind(
+        OTHER_PROJECT_CUSTODY_CONFIG_ID,
+        TEST_ORG.id,
+        OTHER_PROJECT.id,
+        OTHER_PROJECT_CUSTODY_WALLET.walletId
+      ),
+    db
+      .prepare(
+        `INSERT INTO custody_wallets (
+           id,
+           custody_config_id,
+           wallet_id,
+           public_key,
+           label,
+           purpose,
+           status
+         ) VALUES (?, ?, ?, ?, ?, ?, 'active')`
+      )
+      .bind(
+        OTHER_PROJECT_CUSTODY_WALLET.id,
+        OTHER_PROJECT_CUSTODY_CONFIG_ID,
+        OTHER_PROJECT_CUSTODY_WALLET.walletId,
+        OTHER_PROJECT_CUSTODY_WALLET.publicKey,
+        OTHER_PROJECT_CUSTODY_WALLET.label,
+        OTHER_PROJECT_CUSTODY_WALLET.purpose
+      ),
+  ]);
 }
 
 async function seedEndpointWalletPermission(id: string, walletId: string): Promise<void> {
