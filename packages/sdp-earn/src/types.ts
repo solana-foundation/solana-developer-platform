@@ -117,8 +117,15 @@ export interface EarnPortfolioDepositsInput {
 
 export interface EarnPortfolioWithdrawalPreviewInput {
   providerWalletRef: string;
-  /** USD amount as a decimal string. */
-  amountUsd: string;
+  /**
+   * USD amount as a decimal string. OPTIONAL: omit it to ask the provider what
+   * the lane can pay right now, which is the preview's liquidity-read form
+   * (PRO-1675). With an amount the preview also validates feasibility; without
+   * one it answers `withdrawableUsd` alone and leaves `amountRequestedUsd`
+   * unset. A provider must OMIT the field from its wire call when absent —
+   * never substitute `0`, which asks a different question.
+   */
+  amountUsd?: string;
   token: EarnPortfolioToken;
 }
 
