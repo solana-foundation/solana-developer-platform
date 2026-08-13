@@ -16,11 +16,11 @@ import type { CounterpartyRow } from "@/db/repositories/counterparty.repository"
 import { badRequest, providerNotConfigured, unauthorized } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
+import { notifyRampSettled } from "@/services/notifications";
 import {
   emitKycApprovedForClearedEnrollments,
   emitKycRejectedForEnrollments,
 } from "@/services/workflows/clearance";
-import { notifyRampSettled } from "@/services/notifications";
 import { emitRampSettled } from "@/services/workflows/payment-events";
 import type { AppContext, WebhookProcessor } from "./processor";
 import { applyRampSettlementEvent } from "./settlements";

@@ -8,15 +8,15 @@ import { created, noContent, success } from "@/lib/response";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import {
+  type ClerkOrganizationInvitation,
+  ClerkOrganizationsService,
+} from "@/services/clerk-organizations.service";
+import {
   notifyMemberInvited,
   notifyMemberInviteRevoked,
   notifyMemberJoined,
   notifyMemberRemoved,
 } from "@/services/notifications";
-import {
-  type ClerkOrganizationInvitation,
-  ClerkOrganizationsService,
-} from "@/services/clerk-organizations.service";
 import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
 import { acceptSchema, inviteSchema } from "./schemas";

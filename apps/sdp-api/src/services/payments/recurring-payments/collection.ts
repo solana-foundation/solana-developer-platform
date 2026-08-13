@@ -37,10 +37,10 @@ import {
   resolveSourceTokenAccountOrAta,
 } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
+import { notifyRecurringPaymentFailed } from "@/services/notifications";
 import * as solanaServices from "@/services/solana";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
-import { notifyRecurringPaymentFailed } from "@/services/notifications";
 import { emitRecurringPaymentFailed } from "@/services/workflows/payment-events";
 import type { Env } from "@/types/env";
 import {
