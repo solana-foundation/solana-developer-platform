@@ -29,8 +29,9 @@ import { type DashboardFetchResult, dashboardFetch } from "@/lib/dashboard-fetch
  * The API returns a LIST of programs since PRO-1670 — an organization may hold
  * several, each pinned to one vault — and every surface here is program-scoped:
  * deposits, previews, withdrawals and the outcome watcher all take a programId.
- * The list is ordered oldest-first by the API, so a program keeps its position
- * for life rather than shifting when a sibling is created.
+ * The list is ordered oldest-first by the API, so the cached collection keeps
+ * a stable head. The overview sorts a copy newest-first only at its card-render
+ * boundary, after every page has loaded.
  */
 export const EARN_PORTFOLIO_PROVIDER: EarnProviderId = "ground";
 
