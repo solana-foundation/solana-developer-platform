@@ -69,6 +69,19 @@ function dbReturning(row: Record<string, unknown> | null): DatabaseClient {
   } as unknown as DatabaseClient;
 }
 
+/** A DB whose key-row reads return each row in sequence (last one repeats). */
+function dbReturningSequence(rows: Array<Record<string, unknown> | null>): DatabaseClient {
+  let call = 0;
+  return {
+    prepare: () => ({
+      bind: () => ({
+        first: async () => rows[Math.min(call++, rows.length - 1)] ?? null,
+        all: async () => ({ results: [] }),
+      }),
+    }),
+  } as unknown as DatabaseClient;
+}
+
 function dbThatMustNotBeRead(): DatabaseClient {
   return {
     prepare: () => {
@@ -209,6 +222,61 @@ describe("fillApiKeyCache under CAS exhaustion", () => {
     const kv = {
       ...contendedStore(null),
       get: async () => JSON.stringify(revoked),
+      compareAndSet: async (_key: string, expected: string | null) => expected === null,
+      put: async () => {},
+    } as KVStore;
+    const activeRow = { ...revokedRow(), status: "active" };
+
+    const adopted = await fillApiKeyCache(dbReturning(activeRow), kv, KEY_HASH, {
+      ...entryWithStatus("active"),
+      // Distinct from what the DB returns so the verify takes the drift path.
+      permissions: [],
+    });
+
+    expect(adopted.status).toBe("revoked");
+  });
+
+  it("re-reads Postgres when the publish loses and the terminal entry was evicted", async () => {
+    // The publish CAS loses to a revocation's terminal write — and Redis
+    // evicts that entry before the slot can be fenced. The cache holds no
+    // evidence, but the lost CAS proves the competing write postdates the
+    // install, so Postgres (which cannot be evicted) must be re-read: that
+    // read provably postdates the revocation commit that caused the loss.
+    let casCalls = 0;
+    const kv = {
+      ...contendedStore(null),
+      get: async () => null, // evicted: the slot never shows the terminal entry
+      compareAndSet: async () => {
+        casCalls += 1;
+        return casCalls === 1; // install wins, publish loses
+      },
+      put: async () => {},
+    } as KVStore;
+    const activeRow = { ...revokedRow(), status: "active" };
+
+    const adopted = await fillApiKeyCache(
+      dbReturningSequence([activeRow, revokedRow()]),
+      kv,
+      KEY_HASH,
+      entryWithStatus("active")
+    );
+
+    expect(adopted.status).toBe("revoked");
+  });
+
+  it("keeps the terminal entry it observed when a drift repair defers to it", async () => {
+    // Drifted verify: the terminal-sticky overwrite sees a revocation's
+    // entry and keeps it — then Redis evicts it before any later fence
+    // read. The value observed at overwrite time must be what the fill
+    // authenticates against, not a lucky second look at the slot.
+    const revoked = entryWithStatus("revoked");
+    let reads = 0;
+    const kv = {
+      ...contendedStore(null),
+      get: async () => {
+        reads += 1;
+        return reads === 1 ? JSON.stringify(revoked) : null; // observed once, then evicted
+      },
       compareAndSet: async (_key: string, expected: string | null) => expected === null,
       put: async () => {},
     } as KVStore;

@@ -222,10 +222,26 @@ export async function fillApiKeyCache(
   // Slot empty or legacy even now. The CAS losses prove competing writes
   // landed after this fill's DB read, and the slot's current emptiness (TTL
   // expiry, cache eviction) says nothing about what they contained — this
-  // fill's own snapshot is too old to trust. Re-read Postgres so the state
-  // this request authenticates against postdates every lost race. No cache
-  // write: a plain put could clobber a revocation landing right after this
-  // read; the next miss re-fills through the write-if-absent path above.
+  // fill's own snapshot is too old to trust.
+  return await resolveContendedFill(db, kv, cacheKey, keyHash, entry);
+}
+
+/**
+ * Authoritative resolution for a fill that lost a race it cannot decode
+ * from the cache alone (CAS exhaustion, a lost publish whose competing
+ * write may already be evicted): re-read Postgres — which cannot be
+ * evicted — so the state this request authenticates against postdates
+ * every lost race. No cache write: a plain put could clobber a revocation
+ * landing right after this read; the next miss re-fills through the
+ * write-if-absent path.
+ */
+async function resolveContendedFill(
+  db: DatabaseClient,
+  kv: KVStore,
+  cacheKey: string,
+  keyHash: string,
+  entry: CachedApiKey
+): Promise<CachedApiKey> {
   const authoritative = await loadCachedApiKeyFromDb(db, keyHash);
   if (authoritative) {
     if (!isTerminalStatus(authoritative.status)) {
@@ -294,16 +310,18 @@ async function verifyInstalledFill(
     }
     // Losing the publish is a signal, not noise: something replaced our
     // pending marker after the verify read — possibly a revocation whose
-    // commit that read predates. Any terminal state in the slot now wins.
-    return (await readTerminalSlotEntry(kv, cacheKey)) ?? entry;
+    // commit that read predates, and whose terminal entry eviction may
+    // already have erased. Only Postgres can say what that write meant.
+    return await resolveContendedFill(db, kv, cacheKey, keyHash, entry);
   }
 
-  await overwriteWithAuthoritativeState(kv, cacheKey, fresh);
-  if (isTerminalStatus(fresh.status)) {
-    return fresh;
+  const kept = await overwriteWithAuthoritativeState(kv, cacheKey, fresh);
+  if (kept) {
+    // The overwrite deferred to a stickier terminal entry; authenticate
+    // against the state it observed there and then.
+    return kept;
   }
-  // The overwrite defers to stickier terminal entries; honor what it kept.
-  return (await readTerminalSlotEntry(kv, cacheKey)) ?? fresh;
+  return fresh;
 }
 
 /** Read the slot and return the terminal entry it holds, if any. */
@@ -378,12 +396,18 @@ async function writeRevokedTombstone(kv: KVStore, cacheKey: string): Promise<voi
   });
 }
 
-/** Overwrite the slot with fresh Postgres state; terminal states are sticky. */
+/**
+ * Overwrite the slot with fresh Postgres state; terminal states are sticky.
+ * Returns the terminal entry it deferred to when stickiness kept the slot —
+ * captured at observation time, because eviction could erase it before any
+ * later look — and null when the fresh state was written (or the slot left
+ * to a newer non-terminal winner).
+ */
 async function overwriteWithAuthoritativeState(
   kv: KVStore,
   cacheKey: string,
   fresh: CachedApiKey
-): Promise<void> {
+): Promise<CachedApiKey | null> {
   const value = JSON.stringify(fresh);
   const freshIsTerminal = isTerminalStatus(fresh.status);
 
@@ -393,8 +417,10 @@ async function overwriteWithAuthoritativeState(
       const currentStatus = tryParseStatus(current);
       if (currentStatus !== null && isTerminalStatus(currentStatus)) {
         // Terminal states are sticky: this refresh raced a revocation whose
-        // DB write our own read pre-dated. Keep the revoked entry.
-        return;
+        // DB write our own read pre-dated. Keep the revoked entry. Legacy
+        // and pending terminal payloads reject via a synthesized entry.
+        const kept = tryParseAuthoritativeEntry(current);
+        return kept && isTerminalStatus(kept.status) ? kept : { ...fresh, status: currentStatus };
       }
     }
     if (
@@ -402,7 +428,7 @@ async function overwriteWithAuthoritativeState(
         expirationTtl: API_KEY_CACHE_TTL_SECONDS,
       })
     ) {
-      return;
+      return null;
     }
   }
 
@@ -413,4 +439,5 @@ async function overwriteWithAuthoritativeState(
   // Non-terminal refresh that lost every round: leave the cache as-is.
   // Whatever won those races was written later than our DB read, and TTL
   // bounds any residual staleness.
+  return null;
 }
