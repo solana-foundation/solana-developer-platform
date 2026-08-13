@@ -235,12 +235,9 @@ export async function fillApiKeyCache(
       // the same stickiness every other path honors. (A terminal entry
       // appearing after our active re-read can only mean a commit newer
       // than that re-read.)
-      const fencedRaw = await kv.get(cacheKey);
-      if (fencedRaw !== null) {
-        const fenced = tryParseAuthoritativeEntry(fencedRaw);
-        if (fenced && isTerminalStatus(fenced.status)) {
-          return fenced;
-        }
+      const fenced = await readTerminalSlotEntry(kv, cacheKey);
+      if (fenced) {
+        return fenced;
       }
     }
     return authoritative;
@@ -285,17 +282,38 @@ async function verifyInstalledFill(
 
   const trustedValue = JSON.stringify(entry);
   if (JSON.stringify(fresh) === trustedValue) {
-    // Clean verify: publish the trusted entry over our own pending install.
-    // Losing this CAS means a newer write claimed the slot after the
-    // install — leave it in place; pending entries read as misses anyway.
-    await kv.compareAndSet(cacheKey, pendingValue, trustedValue, {
-      expirationTtl: API_KEY_CACHE_TTL_SECONDS,
-    });
-    return entry;
+    if (
+      await kv.compareAndSet(cacheKey, pendingValue, trustedValue, {
+        expirationTtl: API_KEY_CACHE_TTL_SECONDS,
+      })
+    ) {
+      // The slot went pending → trusted untouched: no competing write — in
+      // particular no revocation's terminal write — landed since the
+      // install.
+      return entry;
+    }
+    // Losing the publish is a signal, not noise: something replaced our
+    // pending marker after the verify read — possibly a revocation whose
+    // commit that read predates. Any terminal state in the slot now wins.
+    return (await readTerminalSlotEntry(kv, cacheKey)) ?? entry;
   }
 
   await overwriteWithAuthoritativeState(kv, cacheKey, fresh);
-  return fresh;
+  if (isTerminalStatus(fresh.status)) {
+    return fresh;
+  }
+  // The overwrite defers to stickier terminal entries; honor what it kept.
+  return (await readTerminalSlotEntry(kv, cacheKey)) ?? fresh;
+}
+
+/** Read the slot and return the terminal entry it holds, if any. */
+async function readTerminalSlotEntry(kv: KVStore, cacheKey: string): Promise<CachedApiKey | null> {
+  const raw = await kv.get(cacheKey);
+  if (raw === null) {
+    return null;
+  }
+  const parsed = tryParseAuthoritativeEntry(raw);
+  return parsed && isTerminalStatus(parsed.status) ? parsed : null;
 }
 
 function tryParseStatus(raw: string): ApiKeyStatus | null {

@@ -171,6 +171,58 @@ describe("fillApiKeyCache under CAS exhaustion", () => {
     expect(last.status).toBe("active");
   });
 
+  it("adopts the revocation that replaced its pending marker before the publish", async () => {
+    // Clean verify, but the publish CAS loses: a revocation's terminal
+    // write replaced the pending marker between the verify read and the
+    // publish. The lost CAS is a signal, not noise — the fill must fence
+    // the slot and authenticate against the terminal state instead of its
+    // earlier active snapshot.
+    const revoked = entryWithStatus("revoked");
+    let casCalls = 0;
+    const kv = {
+      ...contendedStore(null),
+      get: async () => JSON.stringify(revoked),
+      compareAndSet: async () => {
+        casCalls += 1;
+        return casCalls === 1; // install wins, publish loses
+      },
+      put: async () => {},
+    } as KVStore;
+    const activeRow = { ...revokedRow(), status: "active" };
+
+    const adopted = await fillApiKeyCache(
+      dbReturning(activeRow),
+      kv,
+      KEY_HASH,
+      entryWithStatus("active")
+    );
+
+    expect(adopted.status).toBe("revoked");
+  });
+
+  it("honors a stickier terminal entry when repairing a drifted install", async () => {
+    // Drifted verify (fresh differs from the installed snapshot) while the
+    // slot already holds a revocation's terminal entry: the terminal-sticky
+    // overwrite keeps that entry, and the fill must return it rather than
+    // the fresh active state it read moments before the revocation.
+    const revoked = entryWithStatus("revoked");
+    const kv = {
+      ...contendedStore(null),
+      get: async () => JSON.stringify(revoked),
+      compareAndSet: async (_key: string, expected: string | null) => expected === null,
+      put: async () => {},
+    } as KVStore;
+    const activeRow = { ...revokedRow(), status: "active" };
+
+    const adopted = await fillApiKeyCache(dbReturning(activeRow), kv, KEY_HASH, {
+      ...entryWithStatus("active"),
+      // Distinct from what the DB returns so the verify takes the drift path.
+      permissions: [],
+    });
+
+    expect(adopted.status).toBe("revoked");
+  });
+
   it("fences the fallback re-read against a revocation landing during it", async () => {
     // Exhaustion path: every loop read sees an empty slot (reads 1-4), the
     // Postgres re-read returns an active snapshot — and in the gap before
