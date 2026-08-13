@@ -96,7 +96,7 @@ Each preflight read is bounded in-process. The agave client retries a `429` five
 ## Running it
 
 ```bash
-cargo test                 # 22 unit + 16 contract tests
+cargo test                 # 32 unit + 16 contract tests
 cargo clippy --all-targets --locked -- -D warnings
 cargo fmt --check
 
@@ -226,6 +226,61 @@ reason but only `solana-address = { version = "2.6", … }` — a caret range th
 their committed lockfile is holding their own build together; `cargo update` on their side reproduces
 this failure.
 
+### The security model checks out at compile time
+
+`RequestAuthority` implements the full `WalletAuthority` trait **without any Ed25519 signing key**.
+`ShieldedAddress` has public fields and needs only `PublicKey::from_ed25519` (a *public* key), so the
+shielded identity is derived, never transported. The gateway can decrypt notes and derive nullifiers
+and still cannot move funds, because a spend additionally requires an Ed25519 signature on the outer
+transaction, which stays in `@sdp/custody`.
+
+This refutes the objection that a sidecar must hold spend authority in order to prove. Spend
+authorization is not in-circuit: the circuit commits *which* addresses must sign, and the Solana
+runtime is what enforces that they did. So the two gates are separable, and this service holds exactly
+one of them — a fully compromised gateway means total privacy loss and zero fund movement.
+
+### A nullifier secret is 31 bytes, a viewing key is 32
+
+`NullifierKey::from_secret` takes `[u8; 31]` — it is a BN254 field element and must stay below the
+field modulus. The compiler caught this against a contract that had assumed 32. Both widths are now
+named constants, because the asymmetry is an easy source of silent bugs.
+
+### Merge's custodian path runs through `Merge::new`, not the SDK action
+
+`create_merge` takes a concrete `&ShieldedKeypair`, whose `signing_key` field is a `SigningKey` that
+only constructs from a **secret** (`from_bytes`, `from_ed25519`, `new`), so that entry point is
+unreachable from a service holding no Ed25519 secret — even though merge's own documentation says it
+proves ownership in-circuit from the nullifier secret and therefore needs no owner signature.
+
+One level down it is reachable. `Merge::new` and `validate_merge_inputs` are generic over
+`ShieldedKeypairTrait`, and every method the merge path actually calls — signing *pubkey*, curve,
+address derivation, nullifier derivation — is satisfiable from public material plus the nullifier
+secret. `MergeKeypair` in [`src/zolana/authority.rs`](src/zolana/authority.rs) is that adapter, and a
+unit test drives `Merge::new` through it in a process holding no signing key at all.
+
+The cost is one method. `ShieldedKeypairTrait::sign` returns `[u8; 64]` with no error channel, so an
+implementation without a signing key cannot decline — only panic. Merge never calls it at the pinned
+rev, which makes the panic unreachable **by inspection of upstream's call graph rather than by the type
+system**, so it is re-checked on every rev bump.
+
+Submission is the other half, and upstream already did the harder part of it:
+`submit_merge_transaction` takes a `MergeMaterial { signing_pubkey, viewing_pubkey, nullifier_key }`
+rather than a keypair, explicitly "leaving every signing/viewing/funding secret behind" — which is
+exactly this service's shape. What remains is that it also takes a raw fee-payer `Keypair` and submits
+directly, which a remote signer such as Kora cannot satisfy.
+
+### `sign_p256` is a documented dead end, not pending work
+
+`RequestAuthority::sign_p256` is `unimplemented!`. At the pinned rev the only real invocation in the
+tree is inside `key_binding_proof`, which returns `Ok(None)` before reaching it when the signing pubkey
+is Ed25519 — and every SDP custody wallet is Ed25519. Every other occurrence is a trait declaration, a
+blanket impl, a test double, or the CLI.
+
+It **is** satisfiable from the viewing key this authority holds, since that is a P256 secret. So if a
+future rev starts calling it, the fix is to implement it here rather than route it to the key authority,
+which would move a secret for no reason. Re-checked on every rev bump, on the same footing as the merge
+`sign` panic.
+
 ## Omissions
 
 - **No SDP-side env vars added** to `apps/sdp-api/src/types/env.d.ts`, `scripts/secret-keys.mjs`,
@@ -250,4 +305,8 @@ this failure.
 
 - **P0: add `inputs: Option<Vec<[u8; 32]>>` to `TransferParams` and `WithdrawalParams`.** One field.
   Without it no integrator can build an idempotent custodial flow in any language.
+- **Move `sign` off `ShieldedKeypairTrait`**, into a signing-only trait, or make it return `Result`. Then
+  a proof-only custodian satisfies the trait honestly instead of declaring a method it can only panic in.
+- **Provide a custodian submission path for merge** alongside `submit_merge_transaction`, which takes a
+  raw fee-payer `Keypair` and submits directly. `MergeMaterial` already has the right shape.
 - Pin `solana-address` exactly, as `solana-reward-info` already is. See the finding above.
