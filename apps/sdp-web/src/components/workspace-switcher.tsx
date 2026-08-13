@@ -86,7 +86,7 @@ export function WorkspaceSwitcher({
   const { projects, selectedProjectId, selectProject, isProjectSwitching } =
     useDashboardWorkspace();
   const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
-  const { copied, copy } = useCopy(1200);
+  const { copied, copy, value: copiedValue } = useCopy(1200);
 
   const memberships = userMemberships.data ?? [];
   const activeProject = projects.find((project) => project.id === selectedProjectId) ?? null;
@@ -243,7 +243,7 @@ export function WorkspaceSwitcher({
                   <span className="min-w-0 flex-1 truncate font-mono text-[10px]">
                     {activeOrg.id}
                   </span>
-                  {copied ? (
+                  {copied && copiedValue === activeOrg.id ? (
                     <CheckIcon className="size-3 shrink-0" />
                   ) : (
                     <CopyIcon className="size-3 shrink-0 opacity-0 transition-opacity group-focus:opacity-100 group-hover:opacity-100" />
