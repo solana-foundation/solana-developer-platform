@@ -10,6 +10,7 @@ import {
   getAccountInfoMock,
   getSplTokenBalancesMock,
   installPaymentsRouteTestHooks,
+  seedCachedKey,
   seedCounterparty,
   TEST_API_KEY,
   TEST_BVNK_API_BASE_URL,
@@ -26,6 +27,7 @@ import {
 import { seedRateLimit } from "@/test/mocks/kv";
 
 const TEST_BVNK_OFFRAMP_WALLET_ID = "a:99887766554433:OffRmpW:1";
+const TEST_CONNECTION_WALLET_ID = "privy_payments_connection_wallet";
 
 const MOONPAY_PARAM_BASE_CURRENCY_AMOUNT = "baseCurrencyAmount";
 
@@ -42,6 +44,64 @@ function assertMoonPaySignature(url: URL): void {
     .update(unsignedUrl.search)
     .digest("base64");
   expect(signature).toBe(expectedSignature);
+}
+
+async function seedActiveConnectionWallet(): Promise<void> {
+  const credentialId = "pcred_payments_connection_balance";
+  const connectionId = "cconn_payments_connection_balance";
+  const custodyWalletId = "cwlt_payments_connection_balance";
+
+  await getDb(env).batch([
+    getDb(env)
+      .prepare(
+        `INSERT INTO provider_credentials (
+           id, organization_id, project_id, provider, label, scope, source,
+           storage_backend, encrypted_secret_payload, status, credential_version, created_by
+         ) VALUES (?, ?, ?, 'privy', 'Payments Connection', 'project', 'stored',
+                   'encrypted_db', 'not-read', 'active', 1, ?)`
+      )
+      .bind(credentialId, TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_connections (
+           id, organization_id, project_id, provider, scope,
+           provider_credential_id, provider_credential_scope_key, status, created_by
+         ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?)`
+      )
+      .bind(
+        connectionId,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        credentialId,
+        TEST_PROJECT.id,
+        TEST_USER.id
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets (
+           id, custody_connection_id, wallet_id, public_key, label, purpose, status
+         ) VALUES (?, ?, ?, ?, 'Connection balance wallet', 'transfer', 'active')`
+      )
+      .bind(
+        custodyWalletId,
+        connectionId,
+        TEST_CONNECTION_WALLET_ID,
+        TEST_SOLANA_ADDRESSES.wallet2
+      ),
+    getDb(env)
+      .prepare(
+        `UPDATE custody_connections
+         SET default_custody_wallet_id = ?,
+             provider_account_fingerprint = 'sha256:payments-connection-balance',
+             status = 'active',
+             last_check_status = 'success',
+             last_check_at = sdp_iso_now(),
+             activated_at = sdp_iso_now(),
+             updated_at = sdp_iso_now()
+         WHERE id = ?`
+      )
+      .bind(custodyWalletId, connectionId),
+  ]);
 }
 
 async function seedRampEventTransfer(params: {
@@ -91,6 +151,54 @@ async function seedRampEventTransfer(params: {
 
 describe("Payments routes — ramps", () => {
   installPaymentsRouteTestHooks();
+
+  it("reads an active Connection wallet balance and preserves API-key wallet scope", async () => {
+    await seedActiveConnectionWallet();
+    await seedCachedKey({
+      walletBindings: [{ walletId: TEST_CONNECTION_WALLET_ID, permissions: ["wallets:read"] }],
+    });
+
+    const res = await app.request(
+      `/v1/payments/wallets/${TEST_CONNECTION_WALLET_ID}/balances`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      data: {
+        walletBalances: {
+          walletId: TEST_CONNECTION_WALLET_ID,
+          address: TEST_SOLANA_ADDRESSES.wallet2,
+        },
+      },
+    });
+    expect(getAccountInfoMock).toHaveBeenCalledWith(
+      expect.anything(),
+      TEST_SOLANA_ADDRESSES.wallet2
+    );
+
+    await seedCachedKey({
+      walletBindings: [{ walletId: TEST_WALLET_ID, permissions: ["wallets:read"] }],
+    });
+    const forbiddenRes = await app.request(
+      `/v1/payments/wallets/${TEST_CONNECTION_WALLET_ID}/balances`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(forbiddenRes.status).toBe(403);
+  });
 
   it("falls back to a zero SOL balance when RPC balance lookups fail", async () => {
     getAccountInfoMock.mockRejectedValueOnce(new Error("rpc unavailable"));

@@ -204,7 +204,10 @@ flowchart LR
   (`assertSolanaRoutable`) agree on one stablecoin. Deposits are tracked via
   Ground's cursor-paginated deposits API. No custody signing in V1.
 - **Withdrawals.** Portfolio-level: preview
-  (`POST .../withdrawal-preview`) then create
+  (`POST .../withdrawal-preview`) — whose `amountUsd` is **optional**, so the
+  same call serves two jobs: omitted it is the LIQUIDITY read (what the lane can
+  pay right now, PRO-1675), present it also validates that amount and quotes its
+  fee — then create
   (`POST .../withdrawals`, caller-owned requestId — a 409
   `request_id_conflict` surfaces as `CONFLICT`), pinned to the environment's
   Solana rail, then status-polled over `EARN_PORTFOLIO_WITHDRAWAL_STATUSES`

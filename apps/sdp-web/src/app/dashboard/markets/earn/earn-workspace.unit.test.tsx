@@ -382,12 +382,18 @@ describe("EarnWorkspace when the program read fails", () => {
  * right, and the second program's money is simply invisible.
  */
 describe("EarnWorkspace with several programs", () => {
-  function programAt(id: string, ref: string, totalUsd: string, apy: string | undefined) {
+  function programAt(
+    id: string,
+    ref: string,
+    totalUsd: string,
+    apy: string | undefined,
+    createdAt = TIMESTAMP
+  ) {
     return {
       id,
       provider: "ground",
       label: null,
-      createdAt: TIMESTAMP,
+      createdAt,
       ...(apy ? { yield: { currentApy: apy, earnedUsd: "0", positions: [] } } : {}),
       wallet: {
         providerWalletRef: ref,
@@ -425,8 +431,8 @@ describe("EarnWorkspace with several programs", () => {
     data.program.state = {
       kind: "ready",
       programs: [
-        programAt("p1", "wallet-ref-1", "100.00", "0.05"),
-        programAt("p2", "wallet-ref-2", "300.00", "0.09"),
+        programAt("p1", "wallet-ref-1", "100.00", "0.05", "2026-07-18T09:00:00.000Z"),
+        programAt("p2", "wallet-ref-2", "300.00", "0.09", "2026-07-19T09:00:00.000Z"),
       ],
     } as never;
   });
@@ -435,6 +441,15 @@ describe("EarnWorkspace with several programs", () => {
     const html = renderToStaticMarkup(<EarnWorkspace />);
     expect(html).toContain("$100.00");
     expect(html).toContain("$300.00");
+  });
+
+  it("lists the most recently created program first", () => {
+    const html = renderToStaticMarkup(<EarnWorkspace />);
+    const newer = html.indexOf("Ground JAAA USDC");
+    const older = html.indexOf("Morpho Gauntlet USDC");
+    expect(newer).toBeGreaterThan(-1);
+    expect(older).toBeGreaterThan(-1);
+    expect(newer).toBeLessThan(older);
   });
 
   it("names each program after the vault it targets", () => {

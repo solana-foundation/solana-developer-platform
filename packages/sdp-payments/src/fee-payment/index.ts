@@ -14,6 +14,7 @@ export type {
   FeePaymentEnv,
   FeePaymentErrorCode,
   FeePaymentPort,
+  SponsorshipProviderConfiguration,
 } from "./port";
 export { FeePaymentError } from "./port";
 
