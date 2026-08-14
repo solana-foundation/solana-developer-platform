@@ -605,6 +605,11 @@ async function seedStrategy(
     redemptionDelayDays: strategy.redemptionDelayDays,
     riskMetadata: buildRiskMetadata(strategy),
     status: strategy.status ?? "active",
+    // Fixtures stand in for Ground sources, which are only ever catalogued on
+    // the environment's own cluster — so these are devnet-hosted and fundable,
+    // matching what the sync would write. A fixture claiming another cluster
+    // would be an un-fundable row the dashboard silently filters away.
+    hostCluster: CLUSTER_BY_SDP_ENVIRONMENT[SEED_ENVIRONMENT],
     environment: SEED_ENVIRONMENT,
   });
   if (!row) {
