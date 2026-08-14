@@ -5,6 +5,7 @@ import {
   isHttpUrl,
   resolveTokenByMint,
   resolveTransferTokenLabel,
+  statusMessageKey,
 } from "./payments-overview.utils";
 
 const UNCATALOGUED_MINT = "BmA22WnK8p5Ai5mkzJhk64DCxMiUiii69tgSmUGMWPSh";
@@ -121,5 +122,18 @@ describe("isHttpUrl", () => {
   it("rejects unparseable values", () => {
     expect(isHttpUrl("not-a-url")).toBe(false);
     expect(isHttpUrl("")).toBe(false);
+  });
+});
+
+describe("statusMessageKey", () => {
+  it("maps known statuses to the transactions catalog keys", () => {
+    expect(statusMessageKey("failed")).toBe("DashboardPayments.transactions.failed");
+    expect(statusMessageKey("awaiting_payment")).toBe(
+      "DashboardPayments.transactions.awaitingPayment"
+    );
+  });
+
+  it("returns null for a status the catalog does not name", () => {
+    expect(statusMessageKey("some_new_status")).toBeNull();
   });
 });
