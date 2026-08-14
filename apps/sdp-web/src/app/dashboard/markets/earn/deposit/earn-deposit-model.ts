@@ -1,10 +1,15 @@
-import type { EarnPortfolioAllocationInput, EarnPortfolioToken, EarnStrategy } from "@sdp/types";
+import type {
+  EarnPortfolioAllocationInput,
+  EarnPortfolioToken,
+  EarnProviderId,
+  EarnStrategy,
+} from "@sdp/types";
 import { strategyApy, strategyPoolUsd, strategyToken } from "../earn-program-presentation";
 
 /**
- * Pure model for the Earn deposit flow: full catalogue → ranked fundable rows
- * (APY by default, or whichever column the reader ranked by) → ONE strategy →
- * a 100% allocation.
+ * Pure model for the Earn deposit flow: full catalogue → ranked comparison
+ * rows (APY by default, or whichever column the reader ranked by) → ONE
+ * deposit-eligible strategy → a 100% allocation.
  *
  * Every value is derived from a field the provider actually reports. For Ground
  * (the only live provider) the catalogue row is mapped from
@@ -24,9 +29,67 @@ import { strategyApy, strategyPoolUsd, strategyToken } from "../earn-program-pre
  * a strategy to a synthetic liquidity/yield category.
  */
 
-/** Strategies that can actually be funded — i.e. their deposit mint is routable. */
+/**
+ * Strategies that can actually be funded: their deposit mint is routable AND
+ * the API says the instrument exists on this environment's cluster.
+ *
+ * The `fundable` half is not decoration. The catalogue lists what EXISTS, which
+ * since Kamino is a larger set than what can take a deposit here — Kamino's
+ * K-Vaults are mainnet-only and are catalogued into sandbox too, so an
+ * integrator can browse the real shelf. Making one of those rows selectable in
+ * the wizard would walk a user to a confirm step that provisions nothing.
+ *
+ * The API derives the flag per request (`hostCluster` vs. the caller's
+ * environment) and its own `assertKnownYieldSources` refuses the allocation
+ * regardless, so this is the second of two independent guards, not the only
+ * one. Never invert it into "hide unless known-bad".
+ */
 export function fundableStrategies(strategies: readonly EarnStrategy[]): readonly EarnStrategy[] {
-  return strategies.filter((strategy) => strategyToken(strategy) !== undefined);
+  // `!== false`, NOT a truthiness check. The API is a separate deployable, so
+  // the type's promise that `fundable` is always present describes the CURRENT
+  // API, not necessarily the one answering: a Vercel preview (web-only, pointed
+  // at the deployed API) and any rollout where web ships ahead of API both see
+  // responses without the field. Truthiness there reads `undefined` as "not
+  // fundable" and blanks the ENTIRE catalogue — which is exactly what happened
+  // on the first preview of this branch.
+  //
+  // Absent is safe to admit: an API old enough to omit `fundable` is an API
+  // without a mainnet-only provider registered, so its catalogue holds no row
+  // this filter would need to hide. Once the API ships, the field is always
+  // present and the strict comparison does the real work.
+  return strategies.filter(
+    (strategy) => strategy.fundable !== false && strategyToken(strategy) !== undefined
+  );
+}
+
+/** Why a catalogue row cannot advance through this portfolio-deposit flow. */
+export type StrategyDepositEligibility =
+  | "eligible"
+  | "environment-mismatch"
+  | "provider-unsupported"
+  | "asset-unsupported";
+
+/**
+ * Keep catalogue visibility separate from deposit eligibility.
+ *
+ * The comparison table shows every active strategy the API returns. Selection
+ * is narrower: the instrument must exist on this project's cluster, the
+ * provider must implement the portfolio flow this wizard drives, and its mint
+ * must map to one of Earn's supported stablecoin lanes.
+ *
+ * Environment mismatch wins when more than one reason applies. That gives a
+ * sandbox reader the most actionable explanation for a mainnet-only Kamino
+ * row, while the provider-capability guard still prevents that row from being
+ * selected in production until a real Kamino deposit path exists.
+ */
+export function strategyDepositEligibility(
+  strategy: EarnStrategy,
+  portfolioProvider: EarnProviderId
+): StrategyDepositEligibility {
+  if (strategy.fundable === false) return "environment-mismatch";
+  if (strategy.provider !== portfolioProvider) return "provider-unsupported";
+  if (strategyToken(strategy) === undefined) return "asset-unsupported";
+  return "eligible";
 }
 
 /** The reported columns a reader may rank the comparison table by. */
@@ -99,12 +162,17 @@ export function rankedFundableStrategies(
   return sortStrategies(fundableStrategies(strategies), DEFAULT_STRATEGY_SORT);
 }
 
-/** Stablecoins the catalogue can fund; used to avoid a redundant table column. */
+/** The full visible catalogue in its initial comparison order. */
+export function rankedStrategies(strategies: readonly EarnStrategy[]): readonly EarnStrategy[] {
+  return sortStrategies(strategies, DEFAULT_STRATEGY_SORT);
+}
+
+/** Stablecoins represented in the visible catalogue; avoids a redundant column. */
 export function availableTokens(
   strategies: readonly EarnStrategy[]
 ): readonly EarnPortfolioToken[] {
   const tokens = new Set<EarnPortfolioToken>();
-  for (const strategy of fundableStrategies(strategies)) {
+  for (const strategy of strategies) {
     const token = strategyToken(strategy);
     if (token) tokens.add(token);
   }

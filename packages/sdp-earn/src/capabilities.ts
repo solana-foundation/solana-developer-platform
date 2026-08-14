@@ -1,4 +1,5 @@
 import type {
+  EarnLiveMetricsProvider,
   EarnPortfolioWalletProvider,
   EarnVaultProvider,
   EarnWithdrawalApprovalProvider,
@@ -62,4 +63,21 @@ export function supportsWithdrawalApprovals(
     Record<(typeof WITHDRAWAL_APPROVAL_METHODS)[number], unknown>
   >;
   return WITHDRAWAL_APPROVAL_METHODS.every((method) => typeof candidate[method] === "function");
+}
+
+const LIVE_METRICS_METHODS = ["listStrategyMetrics"] as const satisfies readonly Exclude<
+  keyof EarnLiveMetricsProvider,
+  keyof EarnVaultProvider
+>[];
+
+/**
+ * Capability discovery for the optional live-metrics contract — same
+ * method-presence rule as the guards above. Opting in is a promise about COST
+ * as much as capability: the refresh pass runs an order of magnitude more often
+ * than the catalogue sync, so a provider should only implement it when its
+ * whole shelf's figures come back in a call or two.
+ */
+export function supportsLiveMetrics(client: EarnVaultProvider): client is EarnLiveMetricsProvider {
+  const candidate = client as Partial<Record<(typeof LIVE_METRICS_METHODS)[number], unknown>>;
+  return LIVE_METRICS_METHODS.every((method) => typeof candidate[method] === "function");
 }
