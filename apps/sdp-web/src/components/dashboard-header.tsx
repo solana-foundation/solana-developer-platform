@@ -301,13 +301,20 @@ function getPrivateChannelsRoutePageConfig(
       contentWidthClass: "max-w-none",
     };
   }
+  // The segment layout draws the Private Channels tab strip — and its bottom
+  // rule — directly under the top bar. `backAction` would add the top bar's own
+  // divider above it and double the rule, so the back link rides as plain
+  // leading content instead, the same way header-tab pages suppress that border.
   return {
     title: privateChannelsSubPageTitle(t, pathname.split("/")[4] ?? ""),
     contentWidthClass: "max-w-none",
-    backAction: {
-      href: "/dashboard/payments/private-channels/overview",
-      label: t("Shared.dashboardShell.backToPrivateChannels"),
-    },
+    topBarLeadingContent: (
+      <HeaderBackAction
+        href="/dashboard/payments/private-channels/overview"
+        label={t("Shared.dashboardShell.backToPrivateChannels")}
+        compactOnMobile
+      />
+    ),
   };
 }
 
