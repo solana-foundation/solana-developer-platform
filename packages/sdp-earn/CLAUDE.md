@@ -180,7 +180,8 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
 | `POST /v1/earn/programs` → 400 "needs an idempotency key" | creation is key-REQUIRED since PRO-1670: send exactly one of body `requestId` (UUIDv4) or the `Idempotency-Key` header — never both |
 | Local total ≠ Ground console total | Ground sums the whole shared account; SDP shows only the wallets your org holds (§4b) |
 | Catalogue empty right after boot | sync cron runs on the hour — seed instead of waiting |
-| Kamino rows listed but the dashboard never offers them | correct: they are `fundable: false` in sandbox AND the wizard is pinned to `EARN_PORTFOLIO_PROVIDER` |
+| Kamino rows show in the strategy table but cannot be selected | correct: the table lists the whole catalogue and marks what it cannot fund. In sandbox the chip reads "Mainnet only" (`fundable: false`); in production "Browse only" (Kamino is outside `EARN_PROGRAM_PROVIDERS` because it has no portfolio-wallet capability). See the web CLAUDE.md → "THE catalogue rule" |
+| Kamino rows missing from the strategy table entirely | the API is older than the row's provider — or the deposit mint has no routable stablecoin lane, which drops it from `browsableStrategies` |
 | Kamino APY looks stale | the 5-minute metrics refresh is a separate cron — check it registered (`isEarnEnabled`), not the hourly sync |
 | Local API boots on 8787 despite `PORT=…` | the dev wrapper reads **`SDP_API_PORT`**, not `PORT` (scripts/dev-local.mjs) |
 | Need devnet USDC to fund a program | Circle's faucet: <https://faucet.circle.com/> — USDC + Solana Devnet (§4b) |
