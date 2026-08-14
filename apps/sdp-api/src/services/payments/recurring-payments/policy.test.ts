@@ -185,6 +185,37 @@ describe("enforceRecurringPaymentPolicy (collection approvals)", () => {
     expect(operations[0]).toMatchObject({ status: "pending_approval" });
   });
 
+  it("does not file a second approval once the cycle's approval is granted", async () => {
+    const first = await expectSigningPending(
+      enforceRecurringPaymentPolicy(collectionPolicyInput(FIRST_DUE_AT))
+    );
+    const operationId = first.details?.walletOperationId as string;
+    const approvalId = first.details?.approvalRequestId as string;
+
+    // What granting an approval leaves behind: the request is approved and
+    // the operation moves to executing while it waits to run.
+    await getDb(env)
+      .prepare("UPDATE approval_requests SET status = 'approved' WHERE id = ?")
+      .bind(approvalId)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE wallet_operations SET status = 'executing' WHERE id = ?")
+      .bind(operationId)
+      .run();
+
+    const retry = await expectSigningPending(
+      enforceRecurringPaymentPolicy(collectionPolicyInput(FIRST_DUE_AT))
+    );
+
+    expect(retry.details?.approvalRequestId).toBe(approvalId);
+    expect(retry.details?.walletOperationId).toBe(operationId);
+
+    const allApprovals = await getDb(env)
+      .prepare("SELECT id FROM approval_requests")
+      .all<{ id: string }>();
+    expect(allApprovals.results).toHaveLength(1);
+  });
+
   it("still files a new approval for a new due cycle", async () => {
     const first = await expectSigningPending(
       enforceRecurringPaymentPolicy(collectionPolicyInput(FIRST_DUE_AT))

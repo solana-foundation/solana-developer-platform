@@ -26,7 +26,11 @@ interface PendingCollectionApprovalRow {
  * The pending approval already filed for a collection cycle, if any. A due
  * collection is retried until it settles, so without this lookup every retry
  * would record a fresh operation and file a duplicate approval request for
- * the same recurring payment + due cycle.
+ * the same recurring payment + due cycle. Matches both a still-pending
+ * decision and one already approved but not yet executed, since a cycle whose
+ * approval was granted is still in flight and must not spawn a second
+ * request. A rejected or cancelled cycle does not match, so a legitimate
+ * later retry can still reach a fresh decision.
  *
  * @param input - The tenant and the collection cycle to look up.
  * @returns The pending decision's rows, or null when none is pending.
@@ -50,13 +54,13 @@ async function findPendingCollectionApproval(input: {
          FROM wallet_operations wo
          JOIN approval_requests ar
            ON ar.wallet_operation_id = wo.id
-          AND ar.status = 'pending'
+          AND ar.status IN ('pending', 'approved')
          JOIN policy_evaluations pe
            ON pe.approval_request_id = ar.id
         WHERE wo.organization_id = ?
           AND wo.project_id = ?
           AND wo.operation_type = 'recurring_payment_collection'
-          AND wo.status = 'pending_approval'
+          AND wo.status IN ('pending_approval', 'executing')
           AND wo.raw_payload->>'recurringPaymentId' = ?
           AND wo.raw_payload->>'collectionDueAt' = ?
         ORDER BY pe.created_at DESC
@@ -73,9 +77,10 @@ async function findPendingCollectionApproval(input: {
  * error (403 deny / 202 approval-pending), which a collection run records as
  * the attempt's failure.
  *
- * A collection retry for a cycle whose approval is still pending rethrows
- * that existing decision instead of filing a duplicate approval request, so
- * each due cycle holds at most one pending approval across retries.
+ * A collection retry for a cycle whose decision is still outstanding, whether
+ * pending or approved-but-unexecuted, rethrows that existing decision instead
+ * of filing a duplicate approval request, so each due cycle holds at most one
+ * approval across retries.
  *
  * @param input - The operation's tenant, wallet, transfer shape, and initiator.
  * @returns The recorded operation and its evaluation when allowed.
