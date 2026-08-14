@@ -122,7 +122,7 @@ Handle `estimates` as a partial result. A provider can be registered, serve the 
 
 | Field | Required | Notes |
 | --- | --- | --- |
-| `assetRail` | yes | Crypto rail, for example `usdc.solana`. Use a value from the `destinations` array. |
+| `assetRail` | yes | Crypto rail, for example `usdc.solana`. Use a value from the `destinations` array. The quote step names the same asset differently, as a bare `cryptoToken` symbol, so you cannot forward this value straight through. |
 | `fiatCurrency` | yes | ISO 4217 code from the `sources` array. |
 | `fiatAmount` | on-ramp | Decimal string greater than zero. |
 | `cryptoAmount` | off-ramp | Decimal string greater than zero. |
@@ -241,7 +241,7 @@ const { data } = await response.json();
 | `counterpartyId` | yes | Must be `ready` for this provider and corridor. |
 | `destinationWallet` | on-ramp | The `walletId` from `GET /v1/wallets`, for example `privy_...`, or that wallet's public key. Either must resolve to a wallet in your list. An unrelated Solana address is rejected with `must reference an SDP wallet`. Note this is looser than `POST /v1/payments/transfers`, where only the `walletId` is accepted. |
 | `sourceWallet` | off-ramp | The wallet you are cashing out from, same forms and the same restriction. |
-| `cryptoToken` | yes | Token symbol, for example `USDC`. |
+| `cryptoToken` | yes | Token **symbol**, for example `USDC`. Not the `assetRail` you passed to `estimate`. Take the part before the dot and upper-case it, so `usdc.solana` becomes `USDC`. Passing the rail form is rejected with a 400 on `cryptoToken`. |
 | `fiatCurrency` | on-ramp, and in practice on off-ramp | Required on on-ramp. The off-ramp schema marks it optional, but Lightspark and BVNK both reject an off-ramp quote without it, so treat it as required unless you have checked your provider. |
 | `fiatAmount` | on-ramp | Decimal string. |
 | `cryptoAmount` | off-ramp | Decimal string. |
