@@ -6,8 +6,10 @@ import {
   fundableStrategies,
   nextStrategySort,
   rankedFundableStrategies,
+  rankedStrategies,
   singleStrategyAllocation,
   sortStrategies,
+  strategyDepositEligibility,
 } from "./earn-deposit-model";
 
 const TIMESTAMP = "2026-07-18T09:00:00.000Z";
@@ -90,6 +92,44 @@ describe("fundableStrategies", () => {
     const refused = strategy({ id: "mainnet-only", fundable: false });
 
     expect(fundableStrategies([refused])).toEqual([]);
+  });
+});
+
+describe("strategyDepositEligibility", () => {
+  it("keeps a mainnet-only Kamino row visible but reports the environment mismatch", () => {
+    const kamino = strategy({
+      id: "kamino-mainnet",
+      provider: "kamino",
+      hostCluster: "mainnet-beta",
+      fundable: false,
+    });
+
+    expect(strategyDepositEligibility(kamino, "ground")).toBe("environment-mismatch");
+    expect(rankedStrategies([kamino])).toEqual([kamino]);
+  });
+
+  it("keeps a catalogue-only provider ineligible even when its cluster matches", () => {
+    const kamino = strategy({
+      id: "kamino-production",
+      provider: "kamino",
+      hostCluster: "mainnet-beta",
+      fundable: true,
+    });
+
+    expect(strategyDepositEligibility(kamino, "ground")).toBe("provider-unsupported");
+  });
+
+  it("accepts the pinned provider when its cluster and asset are supported", () => {
+    expect(strategyDepositEligibility(strategy({ id: "ground-devnet" }), "ground")).toBe(
+      "eligible"
+    );
+  });
+
+  it("refuses an unsupported deposit asset without hiding its catalogue row", () => {
+    const unknownAsset = strategy({ id: "unknown-asset", depositMints: [UNROUTABLE_MINT] });
+
+    expect(strategyDepositEligibility(unknownAsset, "ground")).toBe("asset-unsupported");
+    expect(rankedStrategies([unknownAsset])).toEqual([unknownAsset]);
   });
 });
 
@@ -214,14 +254,14 @@ describe("nextStrategySort", () => {
 });
 
 describe("availableTokens", () => {
-  it("returns only stablecoins the catalogue can actually fund", () => {
+  it("returns routable stablecoins from both selectable and browse-only rows", () => {
     expect(
       availableTokens([
         strategy({ id: "a", depositMints: [USDC] }),
-        strategy({ id: "b", depositMints: [USDC] }),
+        strategy({ id: "b", depositMints: [USDT], fundable: false }),
         strategy({ id: "c", depositMints: [UNROUTABLE_MINT] }),
       ])
-    ).toEqual(["usdc"]);
+    ).toEqual(["usdc", "usdt"]);
   });
 
   it("reports both lanes when both are present", () => {

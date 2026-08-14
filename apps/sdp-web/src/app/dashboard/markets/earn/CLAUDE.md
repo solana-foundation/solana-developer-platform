@@ -102,8 +102,10 @@ the body `requestId` form, which is the only one that can get through.
   `programId` and builds its path from it; none may fall back to "whichever
   program is first". `requestId` is REQUIRED on the write input — the API
   refuses a create carrying no idempotency key (PRO-1670).
-  `EARN_PORTFOLIO_PROVIDER` is the single deliberate Ground pin — widening to
-  multi-provider selection happens HERE, not by scattering provider ids.
+  `EARN_PORTFOLIO_PROVIDER` is the single deliberate Ground selection/execution
+  pin — widening to multi-provider deposits happens HERE, not by scattering
+  provider ids. It is not a catalogue-visibility filter: browse-only providers
+  still render in the strategy comparison table with disabled readiness states.
   `fetchEarnStrategies()` AND `fetchEarnProgramsState()` both **page to the
   end**: the API caps `pageSize` at 100, and a single request silently drops
   everything past the window — for programs that is hidden MONEY (totals
@@ -312,23 +314,23 @@ funding instructions and nothing else — never imply a transfer happens.
   appearing in the UI as a provider-client bug, not something to patch here.
   A `cash` position can be a token the org never deposited on Solana, so do not
   assume positions imply a Solana deposit — only the addresses do.
-- **The catalogue now holds strategies this module deliberately never shows.**
+- **The catalogue shows strategies this module deliberately cannot select.**
   Kamino is a catalogue-only provider: its K-Vaults are non-custodial (the
   customer's own wallet deposits) and mainnet-only, and SDP catalogues them into
-  BOTH environments so API integrators can browse the real shelf. They reach
-  `GET /v1/earn/strategies` and they must not reach the wizard, because there is
-  no program to create for them. TWO independent filters keep them out, and both
-  are intentional:
-  - `EARN_PORTFOLIO_PROVIDER` — the existing Ground pin, which already excluded
-    every non-portfolio provider.
-  - `strategy.fundable` in `fundableStrategies` — the API's per-request answer
-    to "does this instrument exist on the caller's cluster". A sandbox Kamino
-    row is `hostCluster: "mainnet-beta", fundable: false`.
+  BOTH environments so readers can compare the real shelf. They reach
+  `GET /v1/earn/strategies` and the wizard's comparison table, but they must not
+  advance to review because there is no program to create for them. TWO
+  independent eligibility checks disable them, and both are intentional:
+  - `EARN_PORTFOLIO_PROVIDER` — the existing Ground pin, which refuses selection
+    for every non-portfolio provider while leaving its catalogue row visible.
+  - `strategy.fundable` — the API's per-request answer to "does this instrument
+    exist on the caller's cluster". A sandbox Kamino row is
+    `hostCluster: "mainnet-beta", fundable: false` and renders "Mainnet only".
 
-  Do not collapse these into one. The pin is about which provider the flow can
-  create a program with; `fundable` is about whether an instrument exists here
-  at all, and it is what stops devnet money being pointed at a mainnet vault if
-  the pin is ever widened. Neither may be inverted into "hide unless known-bad".
+  Do not collapse visibility and eligibility. The pin is about which provider
+  the flow can create a program with; `fundable` is about whether an instrument
+  exists here at all, and it stops devnet money being pointed at a mainnet vault
+  if the pin is ever widened. Neither should hide a real catalogue row.
 - **A POSITION may name a vault the catalogue does not show, and that is not a
   bug here.** The two come from different places: positions are read live from
   Ground's wallet response, while the strategy table comes from
