@@ -1,4 +1,4 @@
-import type { WellKnownTokenSymbol } from "./well-known-tokens";
+import type { SolanaCluster, WellKnownTokenSymbol } from "./well-known-tokens";
 
 /**
  * Solana Earn (SDP Markets V1) — shared wire contracts.
@@ -51,25 +51,27 @@ export type EarnStrategyStatus = (typeof EARN_STRATEGY_STATUSES)[number];
  * makes "onboarding a curator is a data change" literally true.
  */
 export const EARN_KNOWN_CURATOR_LABELS: Readonly<Record<string, string>> = {
-  // Curator houses. A house is chain-agnostic — it can curate a Solana vault
-  // whether or not it curates one today — so an entry stays as long as the house
-  // could plausibly appear on a Solana shelf, even with no current source.
+  // Curator houses. A house is chain-agnostic because Ground can route Solana
+  // USDC into sources it hosts elsewhere.
   gauntlet: "Gauntlet",
   steakhouse: "Steakhouse Financial",
   sentora: "Sentora",
   smokehouse: "Smokehouse",
+  morpho: "Morpho",
   allez: "Allez Labs",
   rockawayx: "RockawayX",
   august: "August",
   superstate: "Superstate",
   maple: "Maple",
   centrifuge: "Centrifuge",
-  // Ids a provider reports when a protocol curates its own vaults.
+  // Ids Ground reports when a protocol or fund curates its own vaults;
+  // `g<ticker>` is Ground's own wrapper of a Superstate fund. Some stored rows
+  // (Aave/Morpho) are hidden by strategy API policy, but inventory tooling still
+  // renders their metadata.
   kamino: "Kamino",
-  // No EVM-only ids here: SDP lists Solana-hosted vaults only, so `morpho`,
-  // `aave_v3` and Ground's `gustb`/`guscc` Superstate wrappers can no longer
-  // reach a catalogue row. Unknown ids render as-is, so re-adding one is a
-  // one-line data change if a Solana deployment ever surfaces it.
+  aave_v3: "Aave V3",
+  gustb: "Superstate USTB",
+  guscc: "Superstate USCC",
 };
 
 export function earnCuratorLabel(curator: string): string {
@@ -116,6 +118,42 @@ export interface EarnStrategy {
   redemptionDelayDays?: number;
   riskMetadata?: EarnStrategyRiskMetadata;
   status: EarnStrategyStatus;
+  /**
+   * The cluster the strategy's INSTRUMENT actually lives on — not the cluster
+   * of the environment that catalogued it, and the two can differ.
+   *
+   * Kamino's K-Vaults are deployed on mainnet only (`/kvaults/*` takes no env
+   * parameter and there is no devnet deployment), yet SDP catalogues them in
+   * both environments so sandbox integrators can browse the real shelf. Such a
+   * row names a live mainnet vault and a mainnet mint while sitting in a
+   * sandbox catalogue: everything about it is true, and none of it is fundable
+   * from devnet.
+   *
+   * `status: "active"` cannot express that — it is the operator's stop switch,
+   * and reusing it here would both lie about why and collide with the
+   * repository's refusal to overwrite an operator pause. So the row states the
+   * cluster and every gate reads it. `fundable` below is the derived answer
+   * callers should branch on.
+   */
+  hostCluster: SolanaCluster;
+  /**
+   * Whether this strategy's instrument exists on **the caller's environment's
+   * cluster** — derived per request from `hostCluster`, never stored.
+   *
+   * `false` is the load-bearing half and is definitive: the instrument does not
+   * exist on your cluster, so a deposit cannot succeed. Read it rather than
+   * assuming a listed strategy is fundable — the catalogue lists what EXISTS,
+   * which is a larger set.
+   *
+   * `true` is necessary but NOT sufficient. It answers only the cluster
+   * question; a deposit additionally needs the provider to expose SDP a
+   * money-movement surface (a catalogue-only provider like Kamino answers 501
+   * on `POST /v1/earn/programs`) and your organization to be entitled to that
+   * provider. Those are deliberately not folded in here: this field describes
+   * the INSTRUMENT, and entitlement in particular is a property of the caller,
+   * not of a platform-global catalogue row.
+   */
+  fundable: boolean;
   createdAt: string;
   updatedAt: string;
 }

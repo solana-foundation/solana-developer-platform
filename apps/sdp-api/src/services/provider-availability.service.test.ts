@@ -549,11 +549,17 @@ describe("provider-availability.service", () => {
     expect(individual.providers.earn.upshift).toBe(false);
 
     const enterprise = resolveOrganizationProviderEntitlements({ tier: "enterprise" });
+    // Exhaustive on purpose: a new earn provider must show up here as a failing
+    // assertion, so nobody adds one that a tier silently entitles. `kamino`
+    // defaults false like the rest even though it needs no credential —
+    // entitlement and configuration are separate gates, and only money-in
+    // consults entitlement (a catalogue-only provider never reaches it).
     expect(enterprise.providers.earn).toEqual({
       veda: false,
       upshift: false,
       perena: false,
       ground: false,
+      kamino: false,
     });
   });
 

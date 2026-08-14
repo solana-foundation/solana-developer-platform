@@ -34,6 +34,15 @@ import ptDashboardPolicies from "../../messages/pt/dashboard-policies.json";
 import ptDashboardPrivateChannels from "../../messages/pt/dashboard-private-channels.json";
 import ptShared from "../../messages/pt/shared.json";
 import pt from "../../messages/pt.json";
+import viDashboardApprovals from "../../messages/vi/dashboard-approvals.json";
+import viDashboardCustody from "../../messages/vi/dashboard-custody.json";
+import viDashboardEarn from "../../messages/vi/dashboard-earn.json";
+import viDashboardIssuance from "../../messages/vi/dashboard-issuance.json";
+import viDashboardPayments from "../../messages/vi/dashboard-payments.json";
+import viDashboardPolicies from "../../messages/vi/dashboard-policies.json";
+import viDashboardPrivateChannels from "../../messages/vi/dashboard-private-channels.json";
+import viShared from "../../messages/vi/shared.json";
+import vi from "../../messages/vi.json";
 
 const enMessages = {
   ...en,
@@ -118,6 +127,20 @@ const ptCatalog = {
 
 const ptMessages = mergeLocalizedMessages(enMessages, ptCatalog);
 
+const viCatalog = {
+  ...vi,
+  ...viDashboardApprovals,
+  ...viDashboardCustody,
+  ...viDashboardEarn,
+  ...viDashboardIssuance,
+  ...viDashboardPayments,
+  ...viDashboardPolicies,
+  ...viDashboardPrivateChannels,
+  Shared: viShared,
+} satisfies LocalizedMessages<Messages>;
+
+const viMessages = mergeLocalizedMessages(enMessages, viCatalog);
+
 export type MessageKeyFor<TValue> = TValue extends string
   ? ""
   : {
@@ -134,6 +157,7 @@ const messagesByLocale: Record<AppLocale, Messages> = {
   es: esMessages,
   fr: frMessages,
   pt: ptMessages,
+  vi: viMessages,
 };
 
 export function getMessages(locale: AppLocale): Messages {
