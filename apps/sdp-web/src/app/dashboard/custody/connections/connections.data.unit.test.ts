@@ -79,6 +79,34 @@ describe("resolveConnectionsPage", () => {
     expect(request).toHaveBeenCalledTimes(2);
   });
 
+  it("falls back to page 1 when the total shrinks between the two reads", async () => {
+    const empty = (offset: number, total: number) =>
+      jsonResponse({ data: { connections: [], pagination: { limit: 20, offset, total } } });
+    const request = vi
+      .fn()
+      // Requested page 5: empty, total says 4 pages exist.
+      .mockResolvedValueOnce(empty(80, 70))
+      // Clamped page 4: rows were deleted meanwhile, still empty past the end.
+      .mockResolvedValueOnce(empty(60, 20))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            connections: [{ id: "conn-1" }],
+            pagination: { limit: 20, offset: 0, total: 20 },
+          },
+        })
+      );
+
+    const { result, filters } = await resolveConnectionsPage(request, { page: 5 });
+
+    expect(filters.page).toBe(1);
+    expect(result.connections).toHaveLength(1);
+    expect(request).toHaveBeenCalledTimes(3);
+    expect(request).toHaveBeenLastCalledWith(
+      "/internal/dashboard/custody/connections?limit=20&offset=0"
+    );
+  });
+
   it("returns a genuinely empty last page untouched", async () => {
     const request = vi.fn(async () =>
       jsonResponse({ data: { connections: [], pagination: { limit: 20, offset: 0, total: 0 } } })

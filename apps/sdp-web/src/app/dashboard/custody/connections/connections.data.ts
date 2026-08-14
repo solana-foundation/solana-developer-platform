@@ -88,23 +88,36 @@ export async function fetchConnectionsPage(
   return json.data;
 }
 
+function isSettledPage(result: ConnectionsPageResult, page: number): boolean {
+  const pageCount = Math.max(1, Math.ceil(result.pagination.total / CONNECTIONS_PAGE_SIZE));
+  return result.connections.length > 0 || result.pagination.total === 0 || page <= pageCount;
+}
+
 /**
  * A stale or hand-edited `?page=` past the end returns an empty slice with a
  * nonzero total, which would render an empty table with no pager to escape
- * through. Clamp to the last real page and refetch instead.
+ * through. Clamp to the last real page and refetch; if the total shrank again
+ * between the two reads, fall back to page 1, which is always in range.
  */
 export async function resolveConnectionsPage(
   request: SdpApiClient["request"],
   filters: ConnectionsFilters
 ): Promise<{ result: ConnectionsPageResult; filters: ConnectionsFilters }> {
   const result = await fetchConnectionsPage(request, filters);
-  const { total } = result.pagination;
-  const pageCount = Math.max(1, Math.ceil(total / CONNECTIONS_PAGE_SIZE));
-  if (result.connections.length > 0 || total === 0 || filters.page <= pageCount) {
+  if (isSettledPage(result, filters.page)) {
     return { result, filters };
   }
-  const clamped = { page: pageCount };
-  return { result: await fetchConnectionsPage(request, clamped), filters: clamped };
+
+  const clamped = {
+    page: Math.max(1, Math.ceil(result.pagination.total / CONNECTIONS_PAGE_SIZE)),
+  };
+  const clampedResult = await fetchConnectionsPage(request, clamped);
+  if (isSettledPage(clampedResult, clamped.page)) {
+    return { result: clampedResult, filters: clamped };
+  }
+
+  const firstPage = { page: 1 };
+  return { result: await fetchConnectionsPage(request, firstPage), filters: firstPage };
 }
 
 /**
