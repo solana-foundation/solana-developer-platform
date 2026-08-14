@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.63.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.62.0...v0.63.0) (2026-08-14)
+
+### Features
+
+* **earn:** add Kamino as a catalogue-only vault provider ([#1300](https://github.com/solana-foundation/solana-developer-platform/pull/1300)) ([8397212](https://github.com/solana-foundation/solana-developer-platform/commit/83972128e6e325ea0e3731494f519798dcf588f2))
+* **earn:** sort the strategy catalogue by pool size and APY ([#1334](https://github.com/solana-foundation/solana-developer-platform/pull/1334)) ([e8e7ad5](https://github.com/solana-foundation/solana-developer-platform/commit/e8e7ad5c84f09b2c3e0f51e55e94b617a75b480e))
+* **earn:** surface wallet USDC and curate strategies ([#1299](https://github.com/solana-foundation/solana-developer-platform/pull/1299)) ([f27f6f3](https://github.com/solana-foundation/solana-developer-platform/commit/f27f6f34121c51c6a08e707a179eacd00116ec5f))
+
 ## [0.62.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.61.0...v0.62.0) (2026-08-14)
 
 ### Features
