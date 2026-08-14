@@ -201,9 +201,8 @@ async function syncProviderCatalogue(
 /**
  * Delete catalogue rows the provider no longer lists — the other half of
  * keeping `earn_strategies` truthful. Upserting alone only ever adds: a vault
- * the provider delists, or one a tightened gate now refuses (Ground's
- * `not_solana_hosted`), would otherwise keep its `active` row and stay
- * depositable forever.
+ * the provider delists, or one a tightened gate now refuses, would otherwise
+ * keep its `active` row and stay depositable forever.
  *
  * Deliberately conservative — it skips rather than deletes whenever this
  * pass cannot prove what the provider currently lists:

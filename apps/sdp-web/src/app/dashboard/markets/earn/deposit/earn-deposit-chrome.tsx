@@ -109,12 +109,23 @@ export function StepNote({
   );
 }
 
-/** One label/value line. The label wraps first so short values stay intact. */
+/**
+ * One label/value line: the label keeps its width, the value takes the slack and
+ * wraps inside it.
+ *
+ * The inverse — a `shrink-0 whitespace-nowrap` value — is what put "Janus
+ * Henderson JTRSY tokenized by Centrifuge" straight through the "Strategy"
+ * label. A value that refuses to shrink does not merely overflow the row:
+ * `justify-between` distributes NEGATIVE free space too, so it slid back OVER
+ * the label. Hence `ml-auto` for the right edge rather than `justify-between`,
+ * and `break-words` so an unbroken value (an API base URL) breaks instead of
+ * escaping. Mirrors `payments/wizard-summary-list`.
+ */
 export function SummaryRow({ label, value }: { label: ReactNode; value: ReactNode }) {
   return (
-    <div className="flex items-baseline justify-between gap-4 border-b border-border-subtle py-2.5 text-sm last:border-b-0">
-      <span className="min-w-0 text-secondary">{label}</span>
-      <span className="shrink-0 text-right whitespace-nowrap text-primary">{value}</span>
+    <div className="flex items-baseline gap-4 border-b border-border-subtle py-2.5 text-sm last:border-b-0">
+      <span className="shrink-0 text-secondary">{label}</span>
+      <span className="ml-auto min-w-0 break-words text-right text-primary">{value}</span>
     </div>
   );
 }

@@ -12,6 +12,7 @@ import {
   type StoredPolicyDraft,
   savePolicyDraft,
   validatePolicyState,
+  WALLET_OPERATION_FAMILIES,
 } from "./wallet-policy-authoring";
 
 const WALLET_ID = "wallet_test";
@@ -40,6 +41,10 @@ function emptyPolicy(): PaymentWalletPolicy {
 }
 
 describe("wallet policy authoring", () => {
+  it("offers only operation families with active enforcement call sites", () => {
+    expect(WALLET_OPERATION_FAMILIES).toEqual(["payment", "ramp", "issuance"]);
+  });
+
   it("identifies whether the limits and assets step has selected controls", () => {
     const state = createPolicyAuthoringState(emptyPolicy());
     expect(hasLimitsAndAssetsControls(state)).toBe(false);
@@ -51,27 +56,32 @@ describe("wallet policy authoring", () => {
     expect(hasLimitsAndAssetsControls(state)).toBe(true);
   });
 
-  it("validates restriction intent, decimal values, and the limit's asset scope", () => {
+  it("validates limit rows in asset, duplicate, then decimal priority order", () => {
     const state = createPolicyAuthoringState(emptyPolicy());
     expect(validatePolicyState(state).intent).toBe("restriction_required");
 
     state.categories = ["limits"];
-    state.maxTransferAmount = "1.2.3";
-    expect(validatePolicyState(state).maxTransferAmount).toBe("invalid_decimal");
+    state.limits = [
+      { asset: "not-a-mint", max: "1.2.3" },
+      { asset: "not-a-mint", max: "100" },
+    ];
+    expect(validatePolicyState(state).limits).toBe("invalid_asset");
 
-    state.maxTransferAmount = "000";
-    expect(validatePolicyState(state).maxTransferAmount).toBe("invalid_decimal");
+    state.limits = [
+      { asset: ADDRESS_A, max: "100" },
+      { asset: ADDRESS_A, max: "1.2.3" },
+    ];
+    expect(validatePolicyState(state).limits).toBe("duplicate_asset");
 
-    state.maxTransferAmount = "0.00";
-    expect(validatePolicyState(state).maxTransferAmount).toBe("invalid_decimal");
+    state.limits = [{ asset: ADDRESS_A, max: "1.2.3" }];
+    expect(validatePolicyState(state).limits).toBe("invalid_decimal");
 
-    // Amount rules are always keyed by asset mint, so a limit without an
-    // allowed-assets selection cannot be authored.
-    state.maxTransferAmount = "0.5";
-    expect(validatePolicyState(state).maxTransferAmount).toBe("assets_required");
+    state.limits = [{ asset: ADDRESS_A, max: "0.5" }];
+    expect(validatePolicyState(state).limits).toBeUndefined();
 
-    state.assets = [ADDRESS_A];
-    expect(validatePolicyState(state).maxTransferAmount).toBeUndefined();
+    state.categories = [];
+    state.limits = [{ asset: "not-a-mint", max: "1.2.3" }];
+    expect(validatePolicyState(state).limits).toBeUndefined();
   });
 
   it("parses comma-separated destinations, de-duplicates, and reports invalid entries", () => {
@@ -119,7 +129,7 @@ describe("wallet policy authoring", () => {
     const storage = new MemoryStorage();
     const state = createPolicyAuthoringState(emptyPolicy());
     state.categories = ["limits"];
-    state.maxTransferAmount = "100";
+    state.limits = [{ asset: ADDRESS_A, max: "100" }];
     const legacyDraft = {
       version: 1,
       projectId: PROJECT_ID,
@@ -136,15 +146,64 @@ describe("wallet policy authoring", () => {
     expect(loaded?.state).not.toHaveProperty("maxDailyAmount");
   });
 
+  it("rejects an old-shape draft carrying maxTransferAmount", () => {
+    const storage = new MemoryStorage();
+    const state = createPolicyAuthoringState(emptyPolicy());
+    const { limits: _limits, ...stateWithoutLimits } = state;
+    const legacyDraft = {
+      version: 1,
+      projectId: PROJECT_ID,
+      walletId: WALLET_ID,
+      step: "limits-assets",
+      state: { ...stateWithoutLimits, maxTransferAmount: "100" },
+      updatedAt: "2026-07-15T20:00:00.000Z",
+    };
+    const key = policyDraftStorageKey(PROJECT_ID, WALLET_ID);
+    storage.setItem(key, JSON.stringify(legacyDraft));
+
+    expect(loadPolicyDraft(storage, PROJECT_ID, WALLET_ID)).toBeNull();
+    expect(storage.getItem(key)).toBeNull();
+  });
+
+  it("filters erased rules out of a stale draft's passthrough", () => {
+    const storage = new MemoryStorage();
+    const liveRule: PaymentWalletPolicy["rules"][number] = {
+      id: "bounded",
+      kind: "amount",
+      asset: ADDRESS_A,
+      min: "1",
+      max: "100",
+    };
+    const state = createPolicyAuthoringState(emptyPolicy());
+    state.passthroughRules = [
+      { id: "dead-families", kind: "operation_family", families: ["transfer", "provider_admin"] },
+      { id: "dead-approval", kind: "approval", families: ["raw_sign"] },
+      { id: "asset-less-cap", kind: "amount", max: "150", action: "allow" },
+      liveRule,
+    ];
+    savePolicyDraft(storage, {
+      version: 1,
+      projectId: PROJECT_ID,
+      walletId: WALLET_ID,
+      step: "review",
+      state,
+      updatedAt: "2026-07-15T20:00:00.000Z",
+    });
+
+    expect(loadPolicyDraft(storage, PROJECT_ID, WALLET_ID)?.state.passthroughRules).toEqual([
+      liveRule,
+    ]);
+  });
+
   it("builds an activation payload for every public authoring capability", () => {
     const state = createPolicyAuthoringState(emptyPolicy());
     state.defaultAction = "approval_required";
     state.categories = ["limits", "assets", "destinations", "operations"];
-    state.maxTransferAmount = "100";
+    state.limits = [{ asset: ADDRESS_A, max: "100" }];
     state.assets = [ADDRESS_A];
     state.destinationMode = "allowlist";
     state.destinationAllowText = ADDRESS_B;
-    state.familyActions = { transfer: "deny", payment: "approval_required" };
+    state.familyActions = { payment: "deny", ramp: "approval_required" };
     state.operationTypeRules = [{ value: "payment.create", action: "approval_required" }];
 
     const payload = buildPolicyPayload(WALLET_ID, state);
@@ -159,12 +218,12 @@ describe("wallet policy authoring", () => {
       expect.arrayContaining([
         expect.objectContaining({
           kind: "operation_family",
-          families: ["transfer"],
+          families: ["payment"],
           action: "deny",
         }),
         expect.objectContaining({
           kind: "operation_family",
-          families: ["payment"],
+          families: ["ramp"],
           action: "approval_required",
         }),
         expect.objectContaining({
@@ -174,9 +233,48 @@ describe("wallet policy authoring", () => {
         }),
         expect.objectContaining({ kind: "asset", assets: [ADDRESS_A], action: "allow" }),
         expect.objectContaining({ kind: "destination", allowlist: [ADDRESS_B] }),
-        expect.objectContaining({ kind: "amount", max: "100", assets: [ADDRESS_A] }),
+        expect.objectContaining({ kind: "amount", max: "100", asset: ADDRESS_A }),
       ])
     );
+  });
+
+  it("builds one single-asset amount rule per configured limit", () => {
+    const state = createPolicyAuthoringState(emptyPolicy());
+    state.categories = ["limits"];
+    state.limits = [
+      { asset: ADDRESS_A, max: "100" },
+      { asset: ADDRESS_B, max: " 25.5 " },
+    ];
+
+    expect(buildPolicyPayload(WALLET_ID, state).rules).toEqual([
+      {
+        id: `per-transaction-limit-${ADDRESS_A}`,
+        kind: "amount",
+        asset: ADDRESS_A,
+        max: "100",
+        action: "allow",
+        name: "Per transaction limit",
+      },
+      {
+        id: `per-transaction-limit-${ADDRESS_B}`,
+        kind: "amount",
+        asset: ADDRESS_B,
+        max: "25.5",
+        action: "allow",
+        name: "Per transaction limit",
+      },
+    ]);
+  });
+
+  it("does not emit amount rules for empty maximums", () => {
+    const state = createPolicyAuthoringState(emptyPolicy());
+    state.categories = ["limits"];
+    state.limits = [
+      { asset: ADDRESS_A, max: "" },
+      { asset: ADDRESS_B, max: "   " },
+    ];
+
+    expect(buildPolicyPayload(WALLET_ID, state).rules).toEqual([]);
   });
 
   it("flags allow-by-default policies that restrict nothing", () => {
@@ -184,16 +282,13 @@ describe("wallet policy authoring", () => {
     state.categories = ["limits"];
     expect(validatePolicyState(state).review).toBe("no_restrictions");
 
-    // A limit without an asset scope produces no rule, so the policy still
-    // restricts nothing.
-    state.maxTransferAmount = "100";
+    state.limits = [{ asset: ADDRESS_A, max: "" }];
     expect(validatePolicyState(state).review).toBe("no_restrictions");
 
-    state.assets = [ADDRESS_A];
+    state.limits = [{ asset: ADDRESS_A, max: "100" }];
     expect(validatePolicyState(state).review).toBeUndefined();
 
-    state.maxTransferAmount = "";
-    state.assets = [];
+    state.limits = [];
     state.defaultAction = "deny";
     expect(validatePolicyState(state).review).toBeUndefined();
   });
@@ -235,7 +330,7 @@ describe("wallet policy authoring", () => {
         {
           id: "families",
           kind: "operation_family",
-          families: ["transfer", "payment"],
+          families: ["payment", "issuance"],
           action: "deny",
         },
         {
@@ -270,20 +365,20 @@ describe("wallet policy authoring", () => {
 
     expect(state).toMatchObject({
       defaultAction: "approval_required",
-      maxTransferAmount: "250",
+      limits: [{ asset: ADDRESS_A, max: "250" }],
       assets: [ADDRESS_A],
       destinationMode: "blocklist",
       destinationBlockText: ADDRESS_B,
-      familyActions: { transfer: "deny", payment: "deny", ramp: "approval_required" },
+      familyActions: { payment: "deny", ramp: "approval_required", issuance: "deny" },
       operationTypeRules: [{ value: "payment.create", action: "approval_required" }],
     });
     expect(rebuilt.rules).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          id: "per-transaction-limit",
+          id: `per-transaction-limit-${ADDRESS_A}`,
           kind: "amount",
           max: "250",
-          assets: [ADDRESS_A],
+          asset: ADDRESS_A,
         }),
         expect.objectContaining({ id: "asset-limit", kind: "amount", assets: [ADDRESS_A] }),
         expect.objectContaining({ id: "always-review", kind: "always", action: "review" }),
@@ -297,18 +392,17 @@ describe("wallet policy authoring", () => {
     );
   });
 
-  it("keeps an amount rule scoped to other assets as a passthrough rule instead of rescoping it", () => {
+  it("expands a grouped legacy amount rule into one limit row per asset", () => {
     const existing: PaymentWalletPolicy = {
       walletId: WALLET_ID,
       defaultAction: "allow",
       controlProfile: null,
       rules: [
-        { id: "assets", kind: "asset", assets: [ADDRESS_A], action: "allow" },
         {
           id: "per-transaction-limit",
           kind: "amount",
           max: "250",
-          assets: [ADDRESS_B],
+          assets: [ADDRESS_A, ADDRESS_B],
           action: "allow",
         },
       ],
@@ -316,15 +410,182 @@ describe("wallet policy authoring", () => {
 
     const state = createPolicyAuthoringState(existing);
 
-    expect(state.maxTransferAmount).toBe("");
-    expect(state.passthroughRules).toEqual([
-      expect.objectContaining({ id: "per-transaction-limit", assets: [ADDRESS_B] }),
+    expect(state.limits).toEqual([
+      { asset: ADDRESS_A, max: "250" },
+      { asset: ADDRESS_B, max: "250" },
     ]);
-    expect(buildPolicyPayload(WALLET_ID, state).rules).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: "per-transaction-limit", max: "250", assets: [ADDRESS_B] }),
-      ])
+    expect(state.passthroughRules).toEqual([]);
+  });
+
+  it("round-trips canonical single-asset amount rules exactly", () => {
+    const rules: PaymentWalletPolicy["rules"] = [
+      {
+        id: `per-transaction-limit-${ADDRESS_A}`,
+        kind: "amount",
+        asset: ADDRESS_A,
+        max: "250",
+        action: "allow",
+        name: "Per transaction limit",
+      },
+      {
+        id: `per-transaction-limit-${ADDRESS_B}`,
+        kind: "amount",
+        asset: ADDRESS_B,
+        max: "50",
+        action: "allow",
+        name: "Per transaction limit",
+      },
+    ];
+    const existing: PaymentWalletPolicy = {
+      walletId: WALLET_ID,
+      defaultAction: "allow",
+      controlProfile: null,
+      rules,
+    };
+
+    expect(buildPolicyPayload(WALLET_ID, createPolicyAuthoringState(existing)).rules).toEqual(
+      rules
     );
+  });
+
+  it("preserves non-editable amount rules as passthrough", () => {
+    const rules: PaymentWalletPolicy["rules"] = [
+      { id: "bounded", kind: "amount", asset: ADDRESS_A, min: "1", max: "100" },
+      { id: "denied", kind: "amount", asset: ADDRESS_B, max: "50", action: "deny" },
+    ];
+    const state = createPolicyAuthoringState({
+      walletId: WALLET_ID,
+      defaultAction: "allow",
+      controlProfile: null,
+      rules,
+    });
+
+    expect(state.limits).toEqual([]);
+    expect(state.passthroughRules).toEqual(rules);
+  });
+
+  it("drops asset-less amount rules so the policy stays writable", () => {
+    const state = createPolicyAuthoringState({
+      walletId: WALLET_ID,
+      defaultAction: "allow",
+      controlProfile: null,
+      rules: [
+        { id: "cap-1", kind: "amount", max: "1", action: "allow" },
+        { id: "scoped", kind: "amount", asset: ADDRESS_A, max: "10", action: "allow" },
+      ],
+    });
+
+    expect(state.limits).toEqual([{ asset: ADDRESS_A, max: "10" }]);
+    expect(state.passthroughRules).toEqual([]);
+    expect(state.categories).toContain("limits");
+    expect(buildPolicyPayload(WALLET_ID, state).rules).toEqual([
+      {
+        id: `per-transaction-limit-${ADDRESS_A}`,
+        kind: "amount",
+        asset: ADDRESS_A,
+        max: "10",
+        action: "allow",
+        name: "Per transaction limit",
+      },
+    ]);
+  });
+
+  it("preserves a whole later rule when any named asset already has an editable limit", () => {
+    const overlappingRule: PaymentWalletPolicy["rules"][number] = {
+      id: "overlapping",
+      kind: "amount",
+      assets: [ADDRESS_A, ADDRESS_B],
+      max: "50",
+      action: "allow",
+    };
+    const state = createPolicyAuthoringState({
+      walletId: WALLET_ID,
+      defaultAction: "allow",
+      controlProfile: null,
+      rules: [
+        { id: "first", kind: "amount", asset: ADDRESS_A, max: "100", action: "allow" },
+        overlappingRule,
+      ],
+    });
+
+    expect(state.limits).toEqual([{ asset: ADDRESS_A, max: "100" }]);
+    expect(state.passthroughRules).toEqual([overlappingRule]);
+  });
+
+  it.each([
+    { label: "raw_sign", families: ["raw_sign"] },
+    { label: "payment + raw_sign", families: ["payment", "raw_sign"] },
+  ] as const)("erases retired families from an operation-family rule: $label", ({ families }) => {
+    const rule: PaymentWalletPolicy["rules"][number] = {
+      id: `historical-${families.join("-")}`,
+      kind: "operation_family",
+      families: [...families],
+      action: "deny",
+    };
+    const state = createPolicyAuthoringState({
+      walletId: WALLET_ID,
+      defaultAction: "allow",
+      controlProfile: null,
+      rules: [rule],
+    });
+
+    const authorable = families.filter((family) => family === "payment");
+    expect(state.familyActions).toEqual(authorable.length ? { payment: "deny" } : {});
+    expect(state.passthroughRules).toEqual([]);
+    expect(buildPolicyPayload(WALLET_ID, state).rules).toEqual(
+      authorable.length
+        ? [
+            {
+              id: "operation-families-deny",
+              kind: "operation_family",
+              families: ["payment"],
+              action: "deny",
+              name: "Operation families: deny",
+            },
+          ]
+        : []
+    );
+  });
+
+  it("drops a family-only approval rule naming only retired families", () => {
+    const rule: PaymentWalletPolicy["rules"][number] = {
+      id: "historical-raw-sign-approval",
+      kind: "approval",
+      families: ["raw_sign"],
+      action: "approval_required",
+    };
+    const state = createPolicyAuthoringState({
+      walletId: WALLET_ID,
+      defaultAction: "allow",
+      controlProfile: null,
+      rules: [rule],
+    });
+
+    expect(state.familyActions).toEqual({});
+    expect(state.passthroughRules).toEqual([]);
+    expect(state.categories).toEqual([]);
+    expect(buildPolicyPayload(WALLET_ID, state).rules).toEqual([]);
+  });
+
+  it("sanitizes non-authorable family actions from a stored draft", () => {
+    const storage = new MemoryStorage();
+    const state = createPolicyAuthoringState(emptyPolicy());
+    const draft = {
+      version: 1,
+      projectId: PROJECT_ID,
+      walletId: WALLET_ID,
+      step: "destinations-operations",
+      state: {
+        ...state,
+        familyActions: { payment: "deny", raw_sign: "approval_required" },
+      },
+      updatedAt: "2026-07-15T20:00:00.000Z",
+    };
+    storage.setItem(policyDraftStorageKey(PROJECT_ID, WALLET_ID), JSON.stringify(draft));
+
+    const loaded = loadPolicyDraft(storage, PROJECT_ID, WALLET_ID);
+
+    expect(loaded?.state.familyActions).toEqual({ payment: "deny" });
   });
 
   it("preserves conflicting destination modes without merging their semantics", () => {
