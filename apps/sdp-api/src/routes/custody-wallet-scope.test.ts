@@ -210,6 +210,59 @@ async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
   });
 }
 
+async function seedActiveConnectionWallet(
+  suffix: string,
+  walletId: string,
+  publicKey: string
+): Promise<void> {
+  const credentialId = `pcred_scope_${suffix}`;
+  const connectionId = `cconn_scope_${suffix}`;
+  const walletRecordId = `cwlt_scope_${suffix}`;
+
+  await getDb(env).batch([
+    getDb(env)
+      .prepare(
+        `INSERT INTO provider_credentials (
+           id, organization_id, project_id, provider, label, scope, source,
+           storage_backend, encrypted_secret_payload, status, created_by
+         ) VALUES (?, ?, ?, 'privy', ?, 'project', 'stored',
+                   'encrypted_db', 'not-read', 'active', ?)`
+      )
+      .bind(credentialId, TEST_ORG.id, TEST_PROJECT.id, suffix, TEST_USER.id),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_connections (
+           id, organization_id, project_id, provider, scope,
+           provider_credential_id, provider_credential_scope_key, status, created_by
+         ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?)`
+      )
+      .bind(
+        connectionId,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        credentialId,
+        TEST_PROJECT.id,
+        TEST_USER.id
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets (
+           id, custody_connection_id, wallet_id, public_key, status
+         ) VALUES (?, ?, ?, ?, 'active')`
+      )
+      .bind(walletRecordId, connectionId, walletId, publicKey),
+    getDb(env)
+      .prepare(
+        `UPDATE custody_connections
+         SET default_custody_wallet_id = ?, status = 'active',
+             last_check_status = 'success', last_check_at = sdp_iso_now(),
+             provider_account_fingerprint = ?, activated_at = sdp_iso_now()
+         WHERE id = ?`
+      )
+      .bind(walletRecordId, `sha256:${suffix}`, connectionId),
+  ]);
+}
+
 describe("Custody wallet scope routes", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -658,6 +711,65 @@ describe("Custody wallet scope routes", () => {
     );
 
     expect(response.status).toBe(404);
+  });
+
+  it("fails closed when Config and Connection wallets share a selected wallet ID", async () => {
+    await seedActiveConnectionWallet(
+      "config_connection_ambiguous",
+      "privy_wallet_a",
+      "connection_duplicate_pubkey"
+    );
+    await getDb(env)
+      .prepare(
+        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+         VALUES ('akw_scope_cross_model_ambiguous', ?, 'privy_wallet_a', '["wallets:read"]')`
+      )
+      .bind(TEST_API_KEY.id)
+      .run();
+    await clearKVStores(env);
+
+    const response = await app.request(
+      "/v1/wallets/public-key?walletId=privy_wallet_a",
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+
+    expect(response.status).toBe(404);
+  });
+
+  it("keeps a legacy signing wallet selected only while it resolves uniquely", async () => {
+    await getDb(env)
+      .prepare("UPDATE api_keys SET signing_wallet_id = 'privy_wallet_b' WHERE id = ?")
+      .bind(TEST_API_KEY.id)
+      .run();
+
+    const listWalletIds = async (): Promise<string[]> => {
+      await clearKVStores(env);
+      const response = await app.request(
+        "/v1/wallets?includeAllProviders=true&view=summary",
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: { wallets: Array<{ walletId: string }> };
+      };
+      return body.data.wallets.map((wallet) => wallet.walletId);
+    };
+
+    expect(await listWalletIds()).toEqual(["privy_wallet_b"]);
+
+    await seedActiveConnectionWallet(
+      "legacy_ambiguous",
+      "privy_wallet_b",
+      "legacy_duplicate_pubkey"
+    );
+    expect(await listWalletIds()).toEqual([]);
+
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE wallet_id = 'privy_wallet_b'")
+      .run();
+    expect(await listWalletIds()).toEqual([]);
   });
 
   it("returns 404 when the requested wallet is outside the API key bindings", async () => {
