@@ -5,6 +5,13 @@ import type { Env } from "@/types/env";
 import { sponsorshipProviderConfigFingerprint } from "../sponsorship-budget.service";
 import { reconcileSponsorshipBudgets } from "./reconcile-sponsorship-budgets";
 
+const logEvent = vi.hoisted(() => vi.fn());
+
+vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/runtime/money-path-events")>()),
+  logEvent,
+}));
+
 const ZERO_OUTFLOW_FEE_PAYER_POLICY = {
   system: {
     allow_transfer: false,
@@ -368,5 +375,57 @@ describe("reconcileSponsorshipBudgets", () => {
       expect.stringContaining("lost its durable transition")
     );
     expect(budgetRedis.syncPolicy).toHaveBeenCalledOnce();
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_sponsorship_breaker_tripped",
+        network: "devnet",
+        source: "reconciliation",
+      })
+    );
+  });
+
+  it("reports a tick that found nothing, so silence is distinguishable from a dead job", async () => {
+    const { repository, budgetRedis, run } = harness(reservation());
+    logEvent.mockClear();
+    repository.listReconciliationCandidates.mockResolvedValue([]);
+
+    await expect(run()).resolves.toBeUndefined();
+
+    expect(logEvent).toHaveBeenCalledWith(
+      "info",
+      expect.objectContaining({
+        event: "sdp_api_sponsorship_reconciliation_tick",
+        network: "devnet",
+        candidates: 0,
+        failed: 0,
+      })
+    );
+    expect(budgetRedis.settle).not.toHaveBeenCalled();
+  });
+
+  it("reports the breaker even when the Redis policy sync fails afterwards", async () => {
+    const { repository, budgetRedis, getTransaction, run } = harness(reservation());
+    logEvent.mockClear();
+    budgetRedis.syncPolicy.mockRejectedValue(new Error("redis offline"));
+    getTransaction.mockResolvedValueOnce({
+      slot: 1n,
+      err: null,
+      fee: 1n,
+      preBalances: [20n],
+      postBalances: [10n],
+      instructions: [],
+    });
+
+    await expect(run()).rejects.toThrow("failed reconciliation");
+
+    expect(repository.tripGlobalBreaker).toHaveBeenCalled();
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_sponsorship_breaker_tripped",
+        source: "reconciliation",
+      })
+    );
   });
 });

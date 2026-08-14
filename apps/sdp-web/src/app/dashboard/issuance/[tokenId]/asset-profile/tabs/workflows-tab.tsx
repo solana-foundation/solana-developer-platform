@@ -58,7 +58,6 @@ import {
   enrollHolder,
   fetchExecutions,
   fetchHolders,
-  fetchNotificationConfig,
   fetchWorkflowCatalog,
   fetchWorkflows,
   type GuardClause,
@@ -450,13 +449,6 @@ function useWorkflowsData(tokenId: string, executionsPageSize: number) {
     { revalidateOnFocus: true, revalidateIfStale: true },
     { key: `token.${tokenId}.workflow-holders`, ttlMs: 30_000 }
   );
-  const configSwr = usePersistedDashboardSWR(
-    ["notification-config"] as const,
-    () => fetchNotificationConfig(),
-    { revalidateOnFocus: false },
-    { key: "notification-config", ttlMs: 300_000 }
-  );
-
   const catalog = catalogSwr.data ?? null;
   const rules = rulesSwr.data ?? [];
   return {
@@ -469,8 +461,6 @@ function useWorkflowsData(tokenId: string, executionsPageSize: number) {
     executions: executionsSwr.data?.executions ?? [],
     executionsTotal: executionsSwr.data?.total ?? 0,
     holders: holdersSwr.data?.holders ?? [],
-    // null = config unreachable → don't claim email is unavailable.
-    emailEnabled: configSwr.data === null ? null : (configSwr.data?.emailEnabled ?? null),
     initialLoading:
       (catalogSwr.isLoading && !catalog) || (rulesSwr.isLoading && rules.length === 0),
     loadFailed: Boolean((catalogSwr.error && !catalog) || (rulesSwr.error && !rulesSwr.data)),
@@ -510,7 +500,6 @@ export function WorkflowsTab({
     executions,
     executionsTotal,
     holders,
-    emailEnabled,
     initialLoading,
     loadFailed,
   } = useWorkflowsData(tokenId, executionsPageSize);
@@ -860,7 +849,6 @@ export function WorkflowsTab({
               selectedAction={selectedAction}
               conditionFields={conditionFields}
               guards={guards}
-              emailEnabled={emailEnabled}
               validation={validation}
               showValidation={showValidation}
               paramSummary={paramSummary}
@@ -957,7 +945,6 @@ interface LayoutArgs {
   tierNotice: ReactNode;
   reviewField: ReactNode;
   paramsBlock: ReactNode;
-  emailWarning: ReactNode;
   validationMessage: ReactNode;
   submitRow: ReactNode;
 }
@@ -1053,29 +1040,6 @@ function ParamsBlock({
           onChange={(value) => onParamChange(field.key, value)}
         />
       ))}
-    </div>
-  );
-}
-
-function EmailWarning({
-  actionType,
-  emailEnabled,
-  params,
-  wf,
-}: {
-  actionType: string | null;
-  emailEnabled: boolean | null;
-  params: Record<string, string>;
-  wf: ReturnType<typeof makeWf>;
-}) {
-  // Only an explicit `false` warns — an unreachable config endpoint stays silent. A
-  // specific-email rule can't fall back to in-app, so its warning is stronger.
-  if (!(actionType === "notify" && emailEnabled === false)) {
-    return null;
-  }
-  return (
-    <div className="rounded-lg border border-warning-border bg-warning-bg px-3 py-2 text-xs text-warning">
-      {(params.email ?? "").trim() ? wf("emailUnavailableSpecific") : wf("emailUnavailable")}
     </div>
   );
 }
@@ -1343,7 +1307,6 @@ function WizardRowLayout(args: LayoutArgs) {
         <div className="space-y-2">{args.flowPanel}</div>
       </div>
       {args.tierNotice}
-      {args.emailWarning}
       {args.validationMessage}
       {args.submitRow}
     </div>
@@ -1368,7 +1331,6 @@ function WorkflowBuilder(props: {
   selectedAction: CatalogActionView | null;
   conditionFields: string[];
   guards: GuardDraft[];
-  emailEnabled: boolean | null;
   validation: BuilderValidation;
   showValidation: boolean;
   paramSummary: string;
@@ -1460,14 +1422,6 @@ function WorkflowBuilder(props: {
         showValidation={props.showValidation}
         validation={props.validation}
         onParamChange={props.onParamChange}
-      />
-    ),
-    emailWarning: (
-      <EmailWarning
-        actionType={props.actionType}
-        emailEnabled={props.emailEnabled}
-        params={props.params}
-        wf={wf}
       />
     ),
     validationMessage: (

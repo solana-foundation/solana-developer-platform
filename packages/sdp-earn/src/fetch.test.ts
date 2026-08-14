@@ -204,6 +204,57 @@ describe("providerFetchJson", () => {
     );
   });
 
+  it("surfaces a bare string error, the shape Ground rejects writes with", async () => {
+    // Verbatim from Ground sandbox 2026-08-14. Reading only `error.message`
+    // dropped this sentence and left the caller staring at the bare status.
+    mock.method(globalThis, "fetch", async () =>
+      jsonResponse(400, {
+        error: "Invalid query params: unknown parameter(s)",
+        code: "unknown_parameters",
+        unknownKeys: ["limit"],
+        allowedKeys: [],
+      })
+    );
+
+    await assert.rejects(
+      providerFetchJson("ground", "https://ground.test/v2/wallets", { method: "POST" }),
+      earnError("BAD_REQUEST", /^Invalid query params: unknown parameter\(s\)$/)
+    );
+  });
+
+  it("falls back when a string error is blank rather than reporting an empty reason", async () => {
+    mock.method(globalThis, "fetch", async () => jsonResponse(400, { error: "   " }));
+
+    await assert.rejects(
+      providerFetchJson("ground", "https://ground.test/v2/wallets", { method: "POST" }),
+      earnError("BAD_REQUEST", /^ground request failed with status 400$/)
+    );
+  });
+
+  it("skips a blank error in favour of an explanation the body does carry", async () => {
+    // The first NON-BLANK candidate wins. Taking the first PRESENT one would
+    // pick `error` here and then fall back, throwing away the real reason.
+    mock.method(globalThis, "fetch", async () =>
+      jsonResponse(400, { error: "", message: "Yield source is not fundable on this chain" })
+    );
+
+    await assert.rejects(
+      providerFetchJson("ground", "https://ground.test/v2/wallets", { method: "POST" }),
+      earnError("BAD_REQUEST", /^Yield source is not fundable on this chain$/)
+    );
+  });
+
+  it("falls through a blank error AND a blank message to reason", async () => {
+    mock.method(globalThis, "fetch", async () =>
+      jsonResponse(409, { error: { message: "  " }, message: "", reason: "Wallet is rebalancing" })
+    );
+
+    await assert.rejects(
+      providerFetchJson("ground", "https://ground.test/v2/wallets", { method: "POST" }),
+      earnError("CONFLICT", /^Wallet is rebalancing$/)
+    );
+  });
+
   it("falls back to a status message when the failure body is not JSON", async () => {
     mock.method(globalThis, "fetch", async () => new Response("Bad Gateway", { status: 502 }));
 

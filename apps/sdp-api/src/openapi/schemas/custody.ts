@@ -263,7 +263,8 @@ const custodyWalletTokenBalanceSchema = z
 export const custodyWalletSchema = custodyWalletBaseSchema
   .extend({
     balances: z.array(custodyWalletTokenBalanceSchema).optional().openapi({
-      description: "Optional tracked token balances for the wallet.",
+      description:
+        "Tracked token balances when requested and successfully observed. Omitted when the balance lookup is unavailable; an empty array is a successful zero-token result.",
     }),
   })
   .meta(custodyWalletOwnerConstraint)

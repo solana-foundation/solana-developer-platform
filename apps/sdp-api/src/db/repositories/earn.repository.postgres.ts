@@ -272,6 +272,17 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         conditions.push("liquidity_term = ?");
         bindings.push(input.liquidityTerm);
       }
+      for (const rawTerm of input.excludeRelatedTerms ?? []) {
+        const term = rawTerm.trim().toLowerCase();
+        if (!term) continue;
+        const pattern = `%${term}%`;
+        conditions.push(
+          `(LOWER(provider_reference) NOT LIKE ?
+            AND LOWER(name) NOT LIKE ?
+            AND LOWER(COALESCE(underlying_source, '')) NOT LIKE ?)`
+        );
+        bindings.push(pattern, pattern, pattern);
+      }
 
       return selectPage(db, "earn_strategies", conditions, bindings, input, mapStrategyRow);
     },
