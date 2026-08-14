@@ -279,8 +279,16 @@ CREATE TABLE IF NOT EXISTS helius_rings_operations (
 );
 
 -- The idempotency contract. This index is what makes retry-safety real:
--- reserveIntent() is an INSERT ... ON CONFLICT (intent_key) DO NOTHING that
--- returns the pre-existing row, and that only works because of this index.
+-- reserveIntent() inserts with ON CONFLICT (intent_key), and on a replay it has
+-- to hand back the operation already reserved rather than a second one.
+--
+-- Note for whoever writes that query: the conflict action must be a no-op
+-- DO UPDATE, not DO NOTHING. `ON CONFLICT DO NOTHING ... RETURNING *` emits
+-- zero rows on conflict, so a retry would read back null and look like a failure
+-- instead of an already-reserved intent. The idiom the repo already uses for
+-- this is `DO UPDATE SET updated_at = helius_rings_operations.updated_at
+-- RETURNING *` — see the approval_requests insert in
+-- db/repositories/policy.repository.postgres.ts.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_helius_rings_operations_intent_key
     ON helius_rings_operations(intent_key);
 
