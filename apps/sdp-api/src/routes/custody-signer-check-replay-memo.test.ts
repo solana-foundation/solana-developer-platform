@@ -160,4 +160,67 @@ describe("Approved signer check replay memo", () => {
       },
     });
   });
+
+  it("refuses a legacy caller-supplied memo on replay instead of publishing it", async () => {
+    await seedApproverSession();
+    await seedWalletControlProfile({
+      rules: [
+        { id: "approve-signer-check", kind: "approval", operationTypes: ["custody_signer_check"] },
+      ],
+    });
+    await seedCachedKey({
+      signingWalletId: TEST_WALLET_ID,
+      walletBindings: [{ walletId: TEST_WALLET_ID, permissions: ["wallets:write"] }],
+    });
+    await getDb(env)
+      .prepare("UPDATE api_keys SET signing_wallet_id = ? WHERE id = ?")
+      .bind(TEST_WALLET_ID, TEST_API_KEY.id)
+      .run();
+
+    const pendingResponse = await app.request(
+      "/v1/wallets/signer-check",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({ walletId: TEST_WALLET_ID }),
+      },
+      env
+    );
+    expect(pendingResponse.status).toBe(202);
+    const pendingBody = (await pendingResponse.json()) as {
+      error: { details: { approvalRequestId: string; walletOperationId: string } };
+    };
+    const { approvalRequestId, walletOperationId } = pendingBody.error.details;
+
+    // An approval filed by the old handler, which took the memo from the body.
+    await getDb(env)
+      .prepare(
+        `UPDATE wallet_operations
+            SET raw_payload = jsonb_set(raw_payload::jsonb, '{memo}', '"attacker chosen text"')
+          WHERE id = ?`
+      )
+      .bind(walletOperationId)
+      .run();
+
+    const approvedResponse = await app.request(
+      `/v1/wallets/approval-requests/${approvalRequestId}/approve`,
+      {
+        method: "POST",
+        headers: {
+          Cookie: `sdp_session=${APPROVER_SESSION_ID}`,
+          "x-project-id": TEST_PROJECT.id,
+        },
+      },
+      env
+    );
+    expect(approvedResponse.status).toBe(200);
+    const approvedBody = (await approvedResponse.json()) as ApprovedOperationBody;
+    expect(approvedBody.data.approvalRequest.operation.status).not.toBe("completed");
+    expect(approvedBody.data.approvalRequest.operation.executionError).toContain(
+      "does not match replayed action"
+    );
+  });
 });
