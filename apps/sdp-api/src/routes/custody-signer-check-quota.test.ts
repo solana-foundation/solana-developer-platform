@@ -19,6 +19,8 @@ const TEST_API_KEY = {
 
 const ACTOR_COUNTER = `metered:signer-check:org:${TEST_ORG_ID}:key:${TEST_API_KEY.id}`;
 const ORG_COUNTER = `metered:signer-check:org:${TEST_ORG_ID}`;
+const ATTEMPT_ACTOR_COUNTER = `metered:signer-check-attempt:org:${TEST_ORG_ID}:key:${TEST_API_KEY.id}`;
+const ATTEMPT_ORG_COUNTER = `metered:signer-check-attempt:org:${TEST_ORG_ID}`;
 
 function cachedKey(permissions: CachedApiKey["permissions"]): CachedApiKey {
   return {
@@ -96,8 +98,28 @@ describe("Signer check route — metered quota", () => {
 
     const res = await requestSignerCheck();
 
-    // Exhausted counters no longer reject a call that was never going to
-    // broadcast; the ceiling applies at the handler, where fees are spent.
+    // An exhausted fee ceiling no longer rejects a call that was never going
+    // to broadcast; that ceiling applies at the handler, where fees are spent.
     expect(res.status).toBe(400);
+  });
+
+  it("429s once the attempt ceiling is exhausted, before any policy work", async () => {
+    await seedKey(["wallets:write"]);
+    await seedRateLimit(env, ATTEMPT_ACTOR_COUNTER, 30);
+
+    const res = await requestSignerCheck();
+
+    expect(res.status).toBe(429);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("RATE_LIMITED");
+  });
+
+  it("429s once the org-wide attempt ceiling is exhausted", async () => {
+    await seedKey(["wallets:write"]);
+    await seedRateLimit(env, ATTEMPT_ORG_COUNTER, 90);
+
+    const res = await requestSignerCheck();
+
+    expect(res.status).toBe(429);
   });
 });

@@ -6,6 +6,7 @@
 
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { meteredQuota } from "@/middleware/metered-quota";
 import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
@@ -47,12 +48,15 @@ wallets.post("/default-wallet", requirePermissions("custody:admin"), setDefaultW
 wallets.patch("/:walletId", requirePermissions("custody:admin"), updateWallet);
 // Each signer check broadcasts a fee-paying memo transaction, so it carries
 // the fail-closed metered quota like other paid-side-effect routes.
-// The quota is charged inside the handler rather than here: only a request
-// that clears the policy gate reaches the fee-paying broadcast, and metering
-// ahead of the gate would let policy-denied calls drain the shared org quota.
+// Two ceilings for two different costs. This one is fail-closed on the
+// attempt: reaching the gate persists an operation and an evaluation, so a
+// caller probing policy still has to pay for the database work. The narrower
+// fee ceiling is charged inside the handler, past the gate, so denied calls
+// cannot drain the budget that exists to bound lamports.
 wallets.post(
   "/signer-check",
   requirePermissions("wallets:write"),
+  meteredQuota({ name: "signer-check-attempt", actorMax: 30, orgMax: 90 }),
   policyGate({ extract: extractSignerCheckPolicyCandidate }),
   signerCheck
 );
