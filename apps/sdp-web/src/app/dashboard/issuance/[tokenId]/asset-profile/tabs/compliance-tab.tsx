@@ -1,15 +1,11 @@
 "use client";
 
 import { DEFAULT_SDP_DOCS_URL, type Token } from "@sdp/types";
-import { type LucideIcon, ShieldCheck, Snowflake, Terminal } from "lucide-react";
-import Link from "next/link";
+import { type LucideIcon, ShieldCheck, Snowflake } from "lucide-react";
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { AdvancedSettingsEditor } from "../../../create/advanced-settings-editor";
-import { buildDeployConfigPreview } from "../../../create/draft-mapping";
 import type { AdminAction } from "../../token-management-workspace.types";
-import { playgroundHrefForAction } from "../playground-links";
 import type { AssetProfileForm } from "../use-asset-profile-form";
 import type { TokenOperations } from "../use-token-operations";
 import { ActionPills } from "./action-pills";
@@ -96,8 +92,6 @@ export function ComplianceTab({
           onAccessControlChange={(accessControl) => updateDraft({ accessControl })}
           accessControlReadOnly={isDeployed}
           accessControlDocsHref={ACCESS_CONTROL_DOCS_HREF}
-          // Deploy-payload preview is pre-deploy only; null hides the button.
-          deployConfig={isDeployed ? null : buildDeployConfigPreview(draft)}
           // Scenario presets are creation-only.
           showScenarios={false}
           // The compliance tab is the config home; the wizard keeps capacities
@@ -114,28 +108,18 @@ export function ComplianceTab({
         // One card for the whole controls column; the form renders "bare" so it
         // doesn't draw a second box inside this one.
         <div className="rounded-2xl border border-border-default bg-surface-raised p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-base font-medium text-primary">
-                {singleAction ? singleAction.label : t("DashboardIssuance.compliance.controls")}
-              </p>
-              <p className="mt-0.5 text-sm text-tertiary">
-                {singleAction
-                  ? (ops.controlListCopy?.description ??
-                    t("DashboardIssuance.compliance.controlsDescription"))
-                  : t("DashboardIssuance.compliance.controlsDescription")}
-              </p>
-              {singleActionDisabledReason ? (
-                <p className="mt-1 text-sm text-tertiary">{singleActionDisabledReason}</p>
-              ) : null}
-            </div>
-            {activeAction ? (
-              <Button variant="outline" size="sm" className="shrink-0" asChild>
-                <Link href={playgroundHrefForAction(token.id, activeAction)}>
-                  <Terminal className="h-4 w-4" />
-                  {t("DashboardIssuance.playground.viewApiContext")}
-                </Link>
-              </Button>
+          <div className="min-w-0">
+            <p className="text-base font-medium text-primary">
+              {singleAction ? singleAction.label : t("DashboardIssuance.compliance.controls")}
+            </p>
+            <p className="mt-0.5 text-sm text-tertiary">
+              {singleAction
+                ? (ops.controlListCopy?.description ??
+                  t("DashboardIssuance.compliance.controlsDescription"))
+                : t("DashboardIssuance.compliance.controlsDescription")}
+            </p>
+            {singleActionDisabledReason ? (
+              <p className="mt-1 text-sm text-tertiary">{singleActionDisabledReason}</p>
             ) : null}
           </div>
           <div className="mt-4 space-y-3">

@@ -3,10 +3,11 @@
 import {
   Anchor,
   ArrowLeftRight,
+  CalendarClock,
   CircleAlert,
   CircleCheck,
   ClipboardList,
-  Clock,
+  Coins,
   DollarSign,
   ExternalLink,
   FileText,
@@ -16,13 +17,36 @@ import {
   type LucideIcon,
   ShieldCheck,
   Tag,
+  Undo2,
+  UserCheck,
 } from "lucide-react";
-import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { accessControlLabel, getPegSummary } from "./asset-details-config";
 import { getAssetTypeLabel, getCategoryLabelKey } from "./asset-taxonomy";
 import { safeLinkHref } from "./draft-mapping";
-import type { DraftState } from "./issuance-draft-wizard.types";
+import { CAPACITY_KEYS, type CapacityKey, type DraftState } from "./issuance-draft-wizard.types";
+
+const CAPACITY_ROWS = {
+  kyc: { icon: UserCheck, labelKey: "DashboardIssuance.config.kyc" },
+  issueRetireControls: { icon: Coins, labelKey: "DashboardIssuance.config.issueRetireControls" },
+  restrictTradingHours: {
+    icon: CalendarClock,
+    labelKey: "DashboardIssuance.config.restrictTradingHours",
+  },
+  redemptionApprovals: {
+    icon: Undo2,
+    labelKey: "DashboardIssuance.config.redemptionApprovals",
+  },
+  investorReporting: {
+    icon: ClipboardList,
+    labelKey: "DashboardIssuance.config.investorReporting",
+  },
+  transferApprovals: {
+    icon: ArrowLeftRight,
+    labelKey: "DashboardIssuance.config.transferApprovals",
+  },
+} as const satisfies Record<CapacityKey, { icon: LucideIcon; labelKey: string }>;
 
 export interface RailReviewProps {
   blockers: string[];
@@ -30,7 +54,6 @@ export interface RailReviewProps {
 
 interface DraftSummaryRailProps {
   draft: DraftState;
-  updatedAt: string | null;
   review?: RailReviewProps;
 }
 
@@ -73,32 +96,11 @@ function SummaryRow({ icon: Icon, label, value, href }: SummaryRowProps) {
   );
 }
 
-function formatUpdatedAt(updatedAt: string | null, locale: string): string | null {
-  if (!updatedAt) {
-    return null;
-  }
-  const date = new Date(updatedAt);
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-  return date.toLocaleString(locale, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
-export function DraftSummaryRail({ draft, updatedAt, review }: DraftSummaryRailProps) {
+export function DraftSummaryRail({ draft, review }: DraftSummaryRailProps) {
   const t = useTranslations();
-  const locale = useLocale();
   const categoryLabelKey = getCategoryLabelKey(draft.assetCategory);
   const categoryLabel = categoryLabelKey ? t(categoryLabelKey) : null;
   const typeLabel = getAssetTypeLabel(draft.assetCategory, draft.assetType, t);
-  const transferRestrictionsEnabled =
-    draft.accessControl === "allowlist" ||
-    draft.accessControl === "blocklist" ||
-    draft.capacities.transferApprovals.enabled;
   const website = draft.website.trim();
   const pegSummary = getPegSummary(draft);
 
@@ -148,30 +150,19 @@ export function DraftSummaryRail({ draft, updatedAt, review }: DraftSummaryRailP
             label={t("DashboardIssuance.summary.accessControl")}
             value={accessControlLabel(draft.accessControl, t)}
           />
-          <SummaryRow
-            icon={ArrowLeftRight}
-            label={t("DashboardIssuance.summary.transferRestrictions")}
-            value={transferRestrictionsEnabled ? t("DashboardIssuance.summary.enabled") : null}
-          />
-          <SummaryRow
-            icon={ClipboardList}
-            label={t("DashboardIssuance.summary.investorReporting")}
-            value={
-              draft.capacities.investorReporting.enabled
-                ? t("DashboardIssuance.summary.enabled")
-                : null
-            }
-          />
+          {CAPACITY_KEYS.filter((key) => draft.capacities[key].enabled).map((key) => (
+            <SummaryRow
+              key={key}
+              icon={CAPACITY_ROWS[key].icon}
+              label={t(CAPACITY_ROWS[key].labelKey)}
+              value={t("DashboardIssuance.summary.enabled")}
+            />
+          ))}
           <SummaryRow
             icon={Globe}
             label={t("DashboardIssuance.assetDetails.website")}
             value={website || null}
             href={safeLinkHref(website) ?? null}
-          />
-          <SummaryRow
-            icon={Clock}
-            label={t("DashboardIssuance.summary.lastUpdated")}
-            value={formatUpdatedAt(updatedAt, locale)}
           />
         </div>
 

@@ -13,7 +13,6 @@ import { AdvancedSettingsEditor } from "../advanced-settings-editor";
 import { getDetailSections } from "../asset-details-config";
 import { DocumentRows } from "../document-rows";
 import {
-  buildDeployConfigPreview,
   buildIssuanceMetadata,
   getAssetDetailsErrors,
   getRequiredAssetDetailKeys,
@@ -53,7 +52,6 @@ export function StepAssetDetails({
   const [jsonOpen, setJsonOpen] = useState(false);
   const sections = getDetailSections(draft.assetCategory, draft.assetType);
   const metadata = buildIssuanceMetadata(draft);
-  const deployConfig = buildDeployConfigPreview(draft);
   const errors = getAssetDetailsErrors(draft, t);
   const requiredKeys = getRequiredAssetDetailKeys(draft);
   const hasErrors = Object.keys(errors).length > 0;
@@ -274,7 +272,6 @@ export function StepAssetDetails({
             accessControl={draft.accessControl}
             onAccessControlChange={(accessControl) => updateDraft({ accessControl })}
             accessControlDocsHref={ACCESS_CONTROL_DOCS_HREF}
-            deployConfig={deployConfig}
           />
           <WorkflowPreview
             category={draft.assetCategory}

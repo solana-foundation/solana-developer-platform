@@ -128,6 +128,7 @@ describe("policy audit presentation", () => {
           revisionHistory={revisionHistory}
           apiKeyNames={{}}
           userNames={{}}
+          issuedTokensByMint={{}}
           locale="en-US"
           t={t}
         />

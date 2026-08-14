@@ -217,19 +217,6 @@ export async function deleteWorkflow(tokenId: string, workflowId: string): Promi
   );
 }
 
-// Whether the email channel is available. Exposes only a boolean — no provider details.
-// Returns null when the config itself can't be loaded, so a transient failure is NOT
-// rendered as "email is deliberately unconfigured".
-export async function fetchNotificationConfig(): Promise<{ emailEnabled: boolean } | null> {
-  try {
-    return await readEnvelope<{ emailEnabled: boolean }>(
-      await fetch("/api/dashboard/notifications/config", { cache: "no-store" })
-    );
-  } catch {
-    return null;
-  }
-}
-
 export async function setWorkflowEnabled(
   tokenId: string,
   workflowId: string,
