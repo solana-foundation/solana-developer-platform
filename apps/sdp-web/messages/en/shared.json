@@ -279,6 +279,8 @@
     "send": "Send",
     "receive": "Receive",
     "transfer": "Transfer",
+    "categoryPayments": "Payments",
+    "categoryIssuance": "Issuance",
     "untitledToken": "Untitled token",
     "unableToLoadIssuanceTokens": "Unable to load issuance tokens",
     "someIssuanceActivityUnavailable": "Some issuance activity could not be loaded.",
