@@ -19,22 +19,27 @@ test("manual production deploy requires an immutable SHA-tagged image", () => {
   assert.match(workflow, /\^sha256:\[0-9a-f\]\{64\}\$/);
 });
 
-test("production deploys are triggered by release publication, not push", () => {
-  assert.match(workflow, /release:\n\s+types: \[published\]/);
-  assert.doesNotMatch(workflow, /push:/);
-  assert.doesNotMatch(workflow, /head_commit\.message/);
+test("automatic production deploys are called from the protected main release flow", () => {
+  assert.match(workflow, /workflow_call:\n\s+inputs:/);
+  assert.match(workflow, /release_sha:\n\s+description:/);
+  assert.match(workflow, /release_tag:\n\s+description:/);
+  assert.doesNotMatch(workflow, /\n\s+release:\n/);
+  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /\.github\/scripts\/verify-release-identity\.sh/);
 });
 
 test("manual production redeploy always skips builds and migrations", () => {
   assert.doesNotMatch(workflow, /run_migrations:/);
   assert.match(
     workflow,
-    /- name: Build and push image\n\s+if: \$\{\{ github\.event_name == 'release' \}\}/
+    /- name: Build and push image\n\s+if: \$\{\{ inputs\.release_sha != '' \}\}/
   );
   assert.match(
     workflow,
-    /- name: Run database migrations\n\s+if: \$\{\{ github\.event_name == 'release' \}\}/
+    /- name: Run database migrations\n\s+if: \$\{\{ inputs\.release_sha != '' \}\}/
   );
+  assert.match(workflow, /--build-arg GIT_SHA="\$\{DEPLOY_IMAGE_SHA\}"/);
+  assert.match(workflow, /sdp-api-public:\$\{DEPLOY_IMAGE_SHA\}/);
 });
 
 test("candidate is revision-specific and Cloud Run-ready before promotion", () => {

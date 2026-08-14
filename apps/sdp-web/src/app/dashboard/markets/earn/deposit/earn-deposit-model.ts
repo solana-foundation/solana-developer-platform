@@ -1,19 +1,10 @@
-import type {
-  EarnPortfolioAllocationInput,
-  EarnPortfolioToken,
-  EarnStrategy,
-  EarnStrategySourceKind,
-} from "@sdp/types";
-import {
-  settlementDays,
-  strategyApy,
-  strategyPoolUsd,
-  strategyToken,
-} from "../earn-program-presentation";
+import type { EarnPortfolioAllocationInput, EarnPortfolioToken, EarnStrategy } from "@sdp/types";
+import { strategyApy, strategyPoolUsd, strategyToken } from "../earn-program-presentation";
 
 /**
- * Pure model for the Earn deposit flow: profile → filtered catalogue → ONE
- * strategy → a 100% allocation.
+ * Pure model for the Earn deposit flow: full catalogue → ranked fundable rows
+ * (APY by default, or whichever column the reader ranked by) → ONE strategy →
+ * a 100% allocation.
  *
  * Every value is derived from a field the provider actually reports. For Ground
  * (the only live provider) the catalogue row is mapped from
@@ -28,118 +19,87 @@ import {
  * | `tvlUsd`                    | `riskMetadata.tvlUsd`                  |
  * | `protocol`                  | `underlyingSource`                     |
  *
- * Ground publishes **no** risk tier, rating, or grade on a yield source, so a
- * profile is a transparent FILTER over the observable fields above — never an
- * invented score. The filter vocabulary deliberately mirrors Ground's own
- * `POST /v2/wallets/strategy/optimize` constraints (a settlement ceiling and a
- * pool floor), so a profile can later be handed to that endpoint unchanged.
+ * Ground publishes **no** risk tier, rating, or grade on a yield source. The UI
+ * therefore exposes the observable fields above directly instead of assigning
+ * a strategy to a synthetic liquidity/yield category.
  */
-
-/** Deposit profiles, ordered from most liquid to highest rate. */
-export const EARN_DEPOSIT_PROFILES = ["liquidity", "balanced", "yield"] as const;
-export type EarnDepositProfile = (typeof EARN_DEPOSIT_PROFILES)[number];
-
-/** How a filtered catalogue is ordered. */
-export const EARN_STRATEGY_SORTS = ["apy", "size", "access"] as const;
-export type EarnStrategySort = (typeof EARN_STRATEGY_SORTS)[number];
-
-/** The settlement ceiling the "balanced" profile and its filter chip share. */
-export const EARN_SHORT_SETTLEMENT_DAYS = 3;
-
-/**
- * Catalogue filters. `null` always means "no constraint" so an absent provider
- * field can never silently exclude a strategy.
- */
-export interface EarnStrategyFilters {
-  /** Longest acceptable redemption wait, in whole days. `0` = instant only. */
-  maxSettlementDays: number | null;
-  /** Minimum reported pool size in USD. */
-  minPoolUsd: number | null;
-  /** Restrict to one backing kind. */
-  sourceKind: EarnStrategySourceKind | null;
-  /** Restrict to one funding stablecoin. */
-  token: EarnPortfolioToken | null;
-  sort: EarnStrategySort;
-}
-
-/**
- * Profile presets. The pool floors are deliberately modest — they exist to keep
- * thinly-capitalised sources out of the liquidity-led profiles, not to curate
- * the catalogue. A strategy whose provider reports no pool size is never
- * excluded by a floor (see `matchesFilters`).
- */
-const PROFILE_FILTERS: Record<
-  EarnDepositProfile,
-  Pick<EarnStrategyFilters, "maxSettlementDays" | "minPoolUsd" | "sourceKind">
-> = {
-  liquidity: { maxSettlementDays: 0, minPoolUsd: 10_000_000, sourceKind: null },
-  balanced: {
-    maxSettlementDays: EARN_SHORT_SETTLEMENT_DAYS,
-    minPoolUsd: 5_000_000,
-    sourceKind: null,
-  },
-  yield: { maxSettlementDays: null, minPoolUsd: null, sourceKind: null },
-};
-
-/** The filter set a profile starts the browse step with. */
-export function profileFilters(profile: EarnDepositProfile): EarnStrategyFilters {
-  return { ...PROFILE_FILTERS[profile], token: null, sort: "apy" };
-}
 
 /** Strategies that can actually be funded — i.e. their deposit mint is routable. */
 export function fundableStrategies(strategies: readonly EarnStrategy[]): readonly EarnStrategy[] {
   return strategies.filter((strategy) => strategyToken(strategy) !== undefined);
 }
 
+/** The reported columns a reader may rank the comparison table by. */
+export type EarnStrategySortColumn = "apy" | "pool";
+
+export interface EarnStrategySort {
+  column: EarnStrategySortColumn;
+  direction: "asc" | "desc";
+}
+
+/** Highest indicative APY first — the order the comparison table opens in. */
+export const DEFAULT_STRATEGY_SORT: EarnStrategySort = { column: "apy", direction: "desc" };
+
+/** The reported figure behind each sortable column; `undefined` = unreported. */
+const SORT_VALUES: Record<EarnStrategySortColumn, (strategy: EarnStrategy) => number | undefined> =
+  {
+    apy: strategyApy,
+    pool: strategyPoolUsd,
+  };
+
 /**
- * A filter only excludes on what the provider reported. An unknown pool size
- * passes every floor — the alternative silently empties the catalogue whenever
- * a provider omits `tvlUsd`, which Ground's sandbox routinely does.
+ * Rank the catalogue by one reported column. The ONE comparator in this module —
+ * the default order below is this function, so re-ranking an already-ranked list
+ * with {@link DEFAULT_STRATEGY_SORT} is a no-op rather than a second opinion.
+ *
+ * Two rules hold in BOTH directions:
+ * - **Unreported sorts last.** A strategy with no pool size or no rate renders
+ *   "—", and floating those to the top of an ascending pass would rank the rows
+ *   we know least about above every row the reader can actually compare.
+ * - **Ties break on name.** The catalogue arrives in provider order and is
+ *   re-read on revalidation, so two strategies reporting the same figure (5.1%
+ *   and 5.1%) would otherwise be free to swap places under the reader's cursor.
  */
-export function matchesFilters(strategy: EarnStrategy, filters: EarnStrategyFilters): boolean {
-  if (filters.maxSettlementDays !== null && settlementDays(strategy) > filters.maxSettlementDays) {
-    return false;
-  }
-  if (filters.minPoolUsd !== null) {
-    const poolUsd = strategyPoolUsd(strategy);
-    if (poolUsd !== undefined && poolUsd < filters.minPoolUsd) return false;
-  }
-  if (filters.sourceKind !== null && strategy.sourceKind !== filters.sourceKind) return false;
-  if (filters.token !== null && strategyToken(strategy) !== filters.token) return false;
-  return true;
-}
-
-function descendingUnknownLast(left: number | undefined, right: number | undefined): number {
-  if (left === undefined && right === undefined) return 0;
-  if (left === undefined) return 1;
-  if (right === undefined) return -1;
-  return right - left;
-}
-
-function compareByApy(left: EarnStrategy, right: EarnStrategy): number {
-  return descendingUnknownLast(strategyApy(left), strategyApy(right));
-}
-
-/** Sort comparators. Rows missing the sorted-on value always fall to the end. */
-const COMPARATORS: Record<EarnStrategySort, (a: EarnStrategy, b: EarnStrategy) => number> = {
-  apy: compareByApy,
-  size: (left, right) => descendingUnknownLast(strategyPoolUsd(left), strategyPoolUsd(right)),
-  access: (left, right) =>
-    settlementDays(left) - settlementDays(right) || compareByApy(left, right),
-};
-
-/** The browse step's list: fundable, filtered, sorted. Never mutates the input. */
-export function visibleStrategies(
+export function sortStrategies(
   strategies: readonly EarnStrategy[],
-  filters: EarnStrategyFilters
+  sort: EarnStrategySort
 ): readonly EarnStrategy[] {
-  const matching = fundableStrategies(strategies).filter((strategy) =>
-    matchesFilters(strategy, filters)
-  );
-  return [...matching].sort(COMPARATORS[filters.sort]);
+  const reportedValue = SORT_VALUES[sort.column];
+  return [...strategies].sort((left, right) => {
+    const leftValue = reportedValue(left);
+    const rightValue = reportedValue(right);
+    if (leftValue === undefined || rightValue === undefined) {
+      if (leftValue === rightValue) return left.name.localeCompare(right.name);
+      return leftValue === undefined ? 1 : -1;
+    }
+    if (leftValue !== rightValue) {
+      return sort.direction === "asc" ? leftValue - rightValue : rightValue - leftValue;
+    }
+    return left.name.localeCompare(right.name);
+  });
 }
 
-/** The stablecoins the catalogue can actually fund, for the token filter chips. */
+/**
+ * What clicking a column header does: the active column flips direction, and a
+ * newly clicked column opens descending — for both pool size and APY the end
+ * worth landing on first is the large one.
+ */
+export function nextStrategySort(
+  current: EarnStrategySort,
+  column: EarnStrategySortColumn
+): EarnStrategySort {
+  if (current.column !== column) return { column, direction: "desc" };
+  return { column, direction: current.direction === "desc" ? "asc" : "desc" };
+}
+
+/** The browse step's short list in its default order, highest APY first. */
+export function rankedFundableStrategies(
+  strategies: readonly EarnStrategy[]
+): readonly EarnStrategy[] {
+  return sortStrategies(fundableStrategies(strategies), DEFAULT_STRATEGY_SORT);
+}
+
+/** Stablecoins the catalogue can fund; used to avoid a redundant table column. */
 export function availableTokens(
   strategies: readonly EarnStrategy[]
 ): readonly EarnPortfolioToken[] {
@@ -149,38 +109,6 @@ export function availableTokens(
     if (token) tokens.add(token);
   }
   return [...tokens];
-}
-
-export interface ProfileSummary {
-  profile: EarnDepositProfile;
-  count: number;
-  /** Best rate the profile can reach right now, as a decimal. */
-  topApy: number | undefined;
-  /** Fastest settlement any matching strategy offers, in whole days. */
-  fastestSettlementDays: number | undefined;
-}
-
-/**
- * Live headline figures per profile, so the profile cards state what the
- * catalogue actually holds instead of static marketing copy.
- */
-export function profileSummaries(strategies: readonly EarnStrategy[]): readonly ProfileSummary[] {
-  const fundable = fundableStrategies(strategies);
-  return EARN_DEPOSIT_PROFILES.map((profile) => {
-    const matching = fundable.filter((strategy) =>
-      matchesFilters(strategy, profileFilters(profile))
-    );
-    const apys = matching
-      .map((strategy) => strategyApy(strategy))
-      .filter((apy): apy is number => apy !== undefined);
-    return {
-      profile,
-      count: matching.length,
-      topApy: apys.length > 0 ? Math.max(...apys) : undefined,
-      fastestSettlementDays:
-        matching.length > 0 ? Math.min(...matching.map(settlementDays)) : undefined,
-    };
-  });
 }
 
 /**

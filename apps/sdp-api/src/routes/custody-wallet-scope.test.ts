@@ -5,6 +5,7 @@ import { address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import * as signingServiceModule from "@/services/domain/signing.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -389,6 +390,35 @@ describe("Custody wallet scope routes", () => {
     expect(getSplTokenBalancesMock).not.toHaveBeenCalled();
   });
 
+  it("omits and does not cache balances when an RPC leg fails", async () => {
+    clearWalletCaches();
+    getSplTokenBalancesMock.mockRejectedValue(new Error("temporary RPC failure"));
+
+    const request = () =>
+      app.request(
+        "/v1/wallets?includeAllProviders=true&view=summary&includeBalances=true",
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await request();
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: { wallets: Array<{ balances?: unknown[] }> };
+      };
+      expect(body.data.wallets).toHaveLength(3);
+      expect(body.data.wallets.every((wallet) => wallet.balances === undefined)).toBe(true);
+    }
+
+    // Every retry re-observes every wallet instead of replaying synthetic zeros
+    // from the short-lived balance cache.
+    expect(getSplTokenBalancesMock).toHaveBeenCalledTimes(6);
+  });
+
   it("filters aggregate wallets to the API key bindings", async () => {
     await seedCachedKey({
       walletBindings: [{ walletId: "privy_wallet_b", permissions: ["wallets:read"] }],
@@ -420,6 +450,97 @@ describe("Custody wallet scope routes", () => {
       token: "USDC",
       uiAmount: "1",
       usdValue: 1,
+    });
+  });
+
+  it("keeps balances distinct when two Connections share a Provider wallet ID", async () => {
+    const sharedWalletId = "privy_shared_provider_wallet";
+    for (const [suffix, publicKey] of [
+      ["a", TEST_SOLANA_ADDRESSES.wallet2],
+      ["b", TEST_SOLANA_ADDRESSES.wallet3],
+    ] as const) {
+      const credentialId = `pcred_scope_shared_${suffix}`;
+      const connectionId = `cconn_scope_shared_${suffix}`;
+      const walletRecordId = `cwlt_scope_shared_${suffix}`;
+      await getDb(env).batch([
+        getDb(env)
+          .prepare(
+            `INSERT INTO provider_credentials (
+               id, organization_id, project_id, provider, label, scope, source,
+               storage_backend, encrypted_secret_payload, status, created_by
+             ) VALUES (?, ?, ?, 'privy', ?, 'project', 'stored',
+                       'encrypted_db', 'not-read', 'active', ?)`
+          )
+          .bind(credentialId, TEST_ORG.id, TEST_PROJECT.id, suffix, TEST_USER.id),
+        getDb(env)
+          .prepare(
+            `INSERT INTO custody_connections (
+               id, organization_id, project_id, provider, scope,
+               provider_credential_id, provider_credential_scope_key, status, created_by
+             ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?)`
+          )
+          .bind(
+            connectionId,
+            TEST_ORG.id,
+            TEST_PROJECT.id,
+            credentialId,
+            TEST_PROJECT.id,
+            TEST_USER.id
+          ),
+        getDb(env)
+          .prepare(
+            `INSERT INTO custody_wallets (
+               id, custody_connection_id, wallet_id, public_key, status
+             ) VALUES (?, ?, ?, ?, 'active')`
+          )
+          .bind(walletRecordId, connectionId, sharedWalletId, publicKey),
+        getDb(env)
+          .prepare(
+            `UPDATE custody_connections
+             SET default_custody_wallet_id = ?, status = 'active',
+                 last_check_status = 'success', last_check_at = sdp_iso_now(),
+                 provider_account_fingerprint = ?,
+                 activated_at = sdp_iso_now()
+             WHERE id = ?`
+          )
+          .bind(walletRecordId, `sha256:${suffix}`, connectionId),
+      ]);
+    }
+    getSplTokenBalancesMock.mockResolvedValue([]);
+    getAccountInfoMock.mockImplementation(
+      async (_rpc, publicKey) =>
+        ({
+          lamports:
+            publicKey === TEST_SOLANA_ADDRESSES.wallet2
+              ? 1_000_000_000n
+              : publicKey === TEST_SOLANA_ADDRESSES.wallet3
+                ? 2_000_000_000n
+                : 0n,
+          owner: "11111111111111111111111111111111",
+        }) as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>
+    );
+
+    const response = await app.request(
+      "/v1/wallets/aggregate?includeAllProviders=true",
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+      },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: {
+        aggregate: {
+          walletCount: number;
+          balances: Array<{ token: string; uiAmount: string }>;
+        };
+      };
+    };
+    expect(body.data.aggregate.walletCount).toBe(5);
+    expect(body.data.aggregate.balances.find((balance) => balance.token === "SOL")).toMatchObject({
+      uiAmount: "3",
     });
   });
 
@@ -649,5 +770,207 @@ describe("Custody wallet scope routes", () => {
     expect(configIds).toContain(PRIVY_CONFIG_ID);
     expect(configIds).toContain(PARA_CONFIG_ID);
     expect(configIds).not.toContain(otherConfigId);
+  });
+
+  describe("wallet-scoped key lifecycle mutations", () => {
+    let originalPrivyAppId: string | undefined;
+    let originalPrivyAppSecret: string | undefined;
+
+    beforeEach(() => {
+      originalPrivyAppId = env.PRIVY_APP_ID;
+      originalPrivyAppSecret = env.PRIVY_APP_SECRET;
+      env.PRIVY_APP_ID = "privy_test_app_id";
+      env.PRIVY_APP_SECRET = "privy_test_app_secret";
+    });
+
+    afterEach(() => {
+      env.PRIVY_APP_ID = originalPrivyAppId;
+      env.PRIVY_APP_SECRET = originalPrivyAppSecret;
+    });
+
+    it("lets a wallet-scoped key re-default to a wallet inside its bindings", async () => {
+      await seedCachedKey({
+        projectId: undefined,
+        walletBindings: [{ walletId: "privy_wallet_b", permissions: ["wallets:write"] }],
+      });
+
+      const res = await app.request(
+        "/v1/wallets/default-wallet",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "privy",
+            walletId: "privy_wallet_b",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const config = await getDb(env)
+        .prepare("SELECT default_wallet_id FROM custody_configs WHERE id = ?")
+        .bind(PRIVY_CONFIG_ID)
+        .first<{ default_wallet_id: string | null }>();
+      expect(config?.default_wallet_id).toBe("privy_wallet_b");
+    });
+
+    it("masks re-defaulting to a wallet outside the key bindings as unknown", async () => {
+      await seedCachedKey({
+        projectId: undefined,
+        walletBindings: [{ walletId: "privy_wallet_a", permissions: ["wallets:write"] }],
+      });
+
+      const res = await app.request(
+        "/v1/wallets/default-wallet",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "privy",
+            walletId: "privy_wallet_b",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const config = await getDb(env)
+        .prepare("SELECT default_wallet_id FROM custody_configs WHERE id = ?")
+        .bind(PRIVY_CONFIG_ID)
+        .first<{ default_wallet_id: string | null }>();
+      expect(config?.default_wallet_id).toBe("privy_wallet_a");
+    });
+
+    it("returns 404 when a wallet-scoped key deletes a wallet outside its bindings", async () => {
+      await seedCachedKey({
+        projectId: undefined,
+        walletBindings: [{ walletId: "privy_wallet_a", permissions: ["wallets:write"] }],
+      });
+
+      const res = await app.request(
+        "/v1/wallets",
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "privy",
+            walletId: "privy_wallet_b",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(404);
+      const wallet = await getDb(env)
+        .prepare("SELECT status FROM custody_wallets WHERE wallet_id = ?")
+        .bind("privy_wallet_b")
+        .first<{ status: string }>();
+      expect(wallet?.status).toBe("active");
+    });
+
+    it("lets a bound wallet through the delete binding gate", async () => {
+      await seedCachedKey({
+        projectId: undefined,
+        walletBindings: [{ walletId: "privy_wallet_b", permissions: ["wallets:write"] }],
+      });
+
+      const res = await app.request(
+        "/v1/wallets",
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "privy",
+            walletId: "privy_wallet_b",
+          }),
+        },
+        env
+      );
+
+      // Privy has no wallet deletion: the request passes the binding gate
+      // (no masked 404) and fails on provider capability instead.
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { message: string } };
+      expect(body.error.message).toMatch(/deletion not supported/i);
+    });
+
+    it("rejects wallet creation with a wallet-scoped key", async () => {
+      await seedCachedKey({
+        projectId: undefined,
+        walletBindings: [{ walletId: "privy_wallet_a", permissions: ["*"] }],
+      });
+
+      const res = await app.request(
+        "/v1/wallets",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ provider: "privy" }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+    });
+
+    it("rejects provider initialization with a wallet-scoped key", async () => {
+      await seedCachedKey({
+        projectId: undefined,
+        walletBindings: [{ walletId: "privy_wallet_a", permissions: ["*"] }],
+      });
+
+      const res = await app.request(
+        "/v1/wallets/initialize",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ provider: "privy" }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+    });
+
+    it("rejects provider switching with a wallet-scoped key", async () => {
+      await seedCachedKey({
+        projectId: undefined,
+        walletBindings: [{ walletId: "privy_wallet_a", permissions: ["*"] }],
+      });
+
+      const res = await app.request(
+        "/v1/wallets/switch",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ provider: "para" }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+    });
   });
 });

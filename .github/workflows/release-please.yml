@@ -76,7 +76,6 @@ jobs:
           TRANSLATION_AGENT_USERNAME: ${{ secrets.TRANSLATION_AGENT_USERNAME }}
           TRANSLATION_AGENT_PASSWORD: ${{ secrets.TRANSLATION_AGENT_PASSWORD }}
           TRANSLATION_AGENT_MODEL: ${{ vars.TRANSLATION_AGENT_MODEL }}
-          TRANSLATION_AGENT_MAX_KEYS: ${{ vars.TRANSLATION_AGENT_MAX_KEYS }}
           TRANSLATION_AGENT_BATCH_SIZE: ${{ vars.TRANSLATION_AGENT_BATCH_SIZE }}
           TRANSLATION_AGENT_MAX_RETRIES: ${{ vars.TRANSLATION_AGENT_MAX_RETRIES }}
         run: |
@@ -95,6 +94,9 @@ jobs:
   publish-release:
     if: "${{ startsWith(github.event.head_commit.message, 'chore(main): release ') }}"
     runs-on: ubuntu-latest
+    outputs:
+      release_sha: ${{ steps.release.outputs.release_sha }}
+      release_tag: ${{ steps.release.outputs.release_tag }}
     concurrency:
       group: release-flow-main
       cancel-in-progress: false
@@ -111,7 +113,7 @@ jobs:
         uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
-          ref: main
+          ref: ${{ github.sha }}
           token: ${{ steps.release-app.outputs.token }}
 
       - name: Setup Node
@@ -124,3 +126,82 @@ jobs:
           GITHUB_TOKEN: ${{ steps.release-app.outputs.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: node .github/scripts/release-flow.mjs publish
+
+      - name: Resolve published release
+        id: release
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          release_tag="v${version}"
+          release_sha="$(git rev-parse "${release_tag}^{commit}")"
+
+          if [[ "${release_sha}" != "${GITHUB_SHA}" ]]; then
+            echo "${release_tag} resolves to ${release_sha}, expected ${GITHUB_SHA}." >&2
+            exit 1
+          fi
+
+          echo "release_sha=${release_sha}" >> "${GITHUB_OUTPUT}"
+          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+
+  deploy-api-production:
+    needs: publish-release
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/deploy-sdp-api-gcp-prod.yml
+    with:
+      release_sha: ${{ needs.publish-release.outputs.release_sha }}
+      release_tag: ${{ needs.publish-release.outputs.release_tag }}
+
+  # Keep this as a normal job so production environment secrets do not cross a reusable-workflow boundary.
+  deploy-web-production:
+    needs: publish-release
+    if: >-
+      needs.publish-release.result == 'success' &&
+      github.repository == 'solana-foundation/solana-developer-platform' &&
+      github.ref == 'refs/heads/main' &&
+      needs.publish-release.outputs.release_sha != '' &&
+      needs.publish-release.outputs.release_tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    concurrency:
+      group: sdp-web-vercel-deploy-prod
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.publish-release.outputs.release_sha }}
+
+      - name: Verify release identity
+        run: >-
+          .github/scripts/verify-release-identity.sh
+          "${{ needs.publish-release.outputs.release_tag }}"
+          "${{ needs.publish-release.outputs.release_sha }}"
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@58.9.4
+
+      - name: Build and deploy production artifact
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          : "${VERCEL_ORG_ID:?VERCEL_ORG_ID is not configured in the production environment}"
+          : "${VERCEL_PROJECT_ID:?VERCEL_PROJECT_ID is not configured in the production environment}"
+          : "${VERCEL_TOKEN:?VERCEL_TOKEN is not configured in the production environment}"
+
+          vercel pull --yes --environment=production --token="${VERCEL_TOKEN}"
+          vercel build --prod --token="${VERCEL_TOKEN}"
+          vercel deploy --prebuilt --prod --token="${VERCEL_TOKEN}"

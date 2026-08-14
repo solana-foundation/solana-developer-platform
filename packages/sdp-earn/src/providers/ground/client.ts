@@ -7,6 +7,7 @@ import {
   type EarnPortfolioAllocationInput,
   type EarnPortfolioDeposit,
   type EarnPortfolioDepositsPage,
+  type EarnPortfolioLiquidityBalance,
   type EarnPortfolioPosition,
   type EarnPortfolioPositionKind,
   type EarnPortfolioProcessingEstimate,
@@ -20,7 +21,7 @@ import {
   type EarnPortfolioYield,
   type EarnStrategySourceKind,
   isWellKnownTokenSymbol,
-  type SolanaCluster,
+  type SdpEnvironment,
   wellKnownMint,
 } from "@sdp/types";
 import { badRequest, providerNotConfigured } from "../../errors";
@@ -166,14 +167,10 @@ export interface GroundYieldSource {
   /** Documented: active | buy_only | sell_only | emergency_freeze — kept open. */
   mode: string;
   /**
-   * Where the yield source ITSELF sits — provider plumbing, deliberately NOT a
-   * catalogue gate. SDP's Solana-only mandate is about the rails the customer
-   * touches (deposit address, payout address, `depositToken`), not about where
-   * Ground routes the capital afterwards: it bridges internally, which is what
-   * the `bridge` position kind represents. So an Ethereum-hosted source funded
-   * by USDC on Solana is catalogued on purpose. Surfaced for the inventory
-   * script, which reports it because "how much of this shelf actually lives on
-   * Solana" is a product question the gates alone do not answer.
+   * Where the yield source itself is hosted. This is inventory metadata, not a
+   * persistence gate: Ground may bridge Solana USDC to a source it hosts on a
+   * different chain. Product visibility belongs at the API read boundary so
+   * the database retains a truthful copy of Ground's routable catalogue.
    */
   chain?: string | null;
   apyBps?: number | null;
@@ -458,6 +455,10 @@ const GROUND_CURATOR_HOUSES = [
  * string — an unlisted curator still resolves), then the hosting protocol.
  * Exported for the catalogue-inventory script, which attributes sources
  * distillation drops.
+ *
+ * Morpho remains part of this parser because these rows are still indexed even
+ * when an API surface chooses not to return them. Persistence and presentation
+ * policy are deliberately separate.
  */
 export function deriveCurator(source: GroundYieldSource): string | undefined {
   const id = source.id.toLowerCase();
@@ -496,8 +497,11 @@ export type GroundYieldSourceDistillation =
  */
 export function distillGroundYieldSource(
   source: GroundYieldSource,
-  cluster: SolanaCluster
+  environment: SdpEnvironment
 ): GroundYieldSourceDistillation {
+  // The API environment selects the cluster whose well-known mint makes this
+  // source fundable; the source's host chain remains provider-routing metadata.
+  const cluster = CLUSTER_BY_SDP_ENVIRONMENT[environment];
   // Only fully tradable sources enter the catalogue. buy_only would let
   // deposits into an exit-frozen source — trapped funds, which the Earn
   // pluggability constraint forbids; sell_only/emergency_freeze cannot
@@ -732,6 +736,68 @@ function parseUsdAmount(value: string): number {
 }
 
 /**
+ * Read one USD field off an error body as a decimal STRING.
+ *
+ * Ground sends these as JSON numbers here even though the success payload uses
+ * strings, so normalize to the contract's decimal-string convention rather than
+ * letting a raw double leak out through `details` (ADR 0002 invariant 5:
+ * provider vocabulary is re-synthesized before it reaches wire types or UI).
+ */
+function readUsdErrorField(source: Record<string, unknown>, key: string): string | undefined {
+  const value = source[key];
+  if (typeof value === "string" && USD_AMOUNT_PATTERN.test(value.trim())) {
+    return value.trim();
+  }
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return String(value);
+  }
+  return undefined;
+}
+
+/**
+ * Lift the lane balance out of Ground's `409 insufficient_funds` body.
+ *
+ * That response is the only one that says exactly HOW short a request is —
+ * `{totalUsd, withdrawableUsd, reservedUsd}` scoped to the destination lane —
+ * and `providerFetchJson` otherwise keeps just the message, so an over-request
+ * surfaced as "ground request failed with status 409" (PRO-1675). Routed
+ * through `SdpEarnError.details`, which the API already serializes into
+ * `error.details`, so the dashboard can name the real ceiling.
+ *
+ * Tolerant on purpose: an unrecognized body yields `undefined` and the original
+ * error stands unchanged. A preview must never fail differently for want of a
+ * nicety, and Ground nests the payload inconsistently across endpoints.
+ */
+function groundWithdrawalLiquidityDetails(
+  parsed: unknown,
+  status: number
+): Record<string, unknown> | undefined {
+  if (status !== 409 || !parsed || typeof parsed !== "object") return undefined;
+  const record = parsed as { balance?: unknown; error?: unknown };
+  const nested =
+    record.error && typeof record.error === "object"
+      ? (record.error as { balance?: unknown }).balance
+      : undefined;
+  const balance = nested ?? record.balance;
+  if (!balance || typeof balance !== "object") return undefined;
+
+  const source = balance as Record<string, unknown>;
+  const totalUsd = readUsdErrorField(source, "totalUsd");
+  const withdrawableUsd = readUsdErrorField(source, "withdrawableUsd");
+  const reservedUsd = readUsdErrorField(source, "reservedUsd");
+  if (totalUsd === undefined && withdrawableUsd === undefined && reservedUsd === undefined) {
+    return undefined;
+  }
+
+  const lane: EarnPortfolioLiquidityBalance = {
+    ...(totalUsd !== undefined && { totalUsd }),
+    ...(withdrawableUsd !== undefined && { withdrawableUsd }),
+    ...(reservedUsd !== undefined && { reservedUsd }),
+  };
+  return { balance: lane };
+}
+
+/**
  * Ground vault-infra client (docs.groundtech.co). Implements the live
  * strategy catalogue plus the full portfolio-wallet capability against
  * Ground's Portfolio Wallets API, and the withdrawal-approval capability
@@ -781,10 +847,9 @@ export class GroundEarnClient
   }
 
   override async listStrategies(ctx: EarnRuntimeContext): Promise<ProviderStrategySnapshot[]> {
-    const cluster = CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment];
     const snapshots: ProviderStrategySnapshot[] = [];
     for await (const source of this._iterateYieldSources(ctx)) {
-      const distilled = distillGroundYieldSource(source, cluster);
+      const distilled = distillGroundYieldSource(source, ctx.environment);
       if (distilled.outcome === "catalogued") {
         snapshots.push(distilled.snapshot);
       }
@@ -804,7 +869,11 @@ export class GroundEarnClient
       method: "POST",
       headers: config.headers,
       body: {
-        requestId: input.requestId ?? crypto.randomUUID(),
+        // No mint-when-absent fallback: a server-minted id is fresh per attempt,
+        // so it guarantees the double-provision it appears to guard against. The
+        // key is required by the input type (PRO-1670) precisely so this cannot
+        // silently degrade.
+        requestId: input.requestId,
         label: input.label,
         strategy: { allocations: input.allocations },
       },
@@ -916,7 +985,7 @@ export class GroundEarnClient
     const config = readGroundConfig(ctx);
     const preview = await providerFetchJson<
       GroundWithdrawalPreview,
-      { destinationChain: string; token: string; amountUsd: number }
+      { destinationChain: string; token: string; amountUsd?: number }
     >(
       this.provider,
       `${config.baseUrl}/v2/wallets/${pathSegment(input.providerWalletRef, "wallet reference")}/withdrawal-preview`,
@@ -926,8 +995,16 @@ export class GroundEarnClient
         body: {
           destinationChain: config.chain,
           token: input.token,
-          amountUsd: parseUsdAmount(input.amountUsd),
+          // OMITTED, not nulled or zeroed, when the caller asks the liquidity
+          // question ("what can this lane pay right now?") rather than the
+          // feasibility one. Ground keys the two forms off the field's
+          // PRESENCE; `0` is a third, different question and `null` is off
+          // `parseUsdAmount`'s pattern entirely.
+          ...(input.amountUsd !== undefined && {
+            amountUsd: parseUsdAmount(input.amountUsd),
+          }),
         },
+        errorDetails: groundWithdrawalLiquidityDetails,
       }
     );
     return {
@@ -969,6 +1046,12 @@ export class GroundEarnClient
           amountUsd: parseUsdAmount(input.amountUsd),
           destinationAddress: input.destinationAddress,
         },
+        // Same lift as the preview: a create can still lose a race with a
+        // rebalance and 409 on funds, and that is the worst moment to answer
+        // with wire text. Ground's OTHER 409 here (`request_id_conflict`)
+        // carries no `balance`, so the normalizer declines it and the
+        // idempotency error surfaces unchanged.
+        errorDetails: groundWithdrawalLiquidityDetails,
       }
     );
     return mapWithdrawal(withdrawal);

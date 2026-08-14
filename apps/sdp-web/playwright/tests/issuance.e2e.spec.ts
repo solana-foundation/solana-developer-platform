@@ -401,12 +401,9 @@ test.describe
 
       const deployRow = page.getByTestId("fund-management-row-deploy");
       await expect(deployRow.getByRole("button", { name: "Deploy" })).toBeVisible();
-      await deployRow.getByRole("button", { name: "Deploy" }).click();
-      await expect(
-        page.getByText("This will deploy the token onchain so operations can run.")
-      ).toBeVisible();
       const successCount = await page.getByText("Deploy transaction finalized.").count();
-      await page.getByRole("button", { name: "Deploy with Wallet", exact: true }).click();
+      // No modal: the row button submits the Kora-sponsored deploy directly.
+      await deployRow.getByRole("button", { name: "Deploy" }).click();
       await waitForToast(page, "Deploy transaction finalized.", successCount);
       await expect
         .poll(

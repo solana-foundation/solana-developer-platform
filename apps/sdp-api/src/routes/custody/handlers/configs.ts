@@ -2,6 +2,7 @@ import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
+import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
 import { type AppContext, getPreferredWalletForConfig, resolveActor } from "../context";
 import type { CustodyConfigResponse, CustodyConfigsResponse } from "../schemas";
@@ -10,8 +11,12 @@ export const getConfig = async (c: AppContext) => {
   const actor = resolveActor(c);
   const projectId = c.get("projectId");
 
-  const signingService = createSigningService(c.env, getRequestTenantScope(c));
-  const config = await signingService.getConfiguration(actor.organizationId, projectId);
+  const target = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).resolve({
+    kind: "effective",
+    organizationId: actor.organizationId,
+    projectId,
+  });
+  const config = target?.kind === "config" ? target.config : null;
 
   if (!config) {
     throw new AppError("NOT_FOUND", "No wallet signing configuration found for this organization");
@@ -42,10 +47,15 @@ export const getConfigs = async (c: AppContext) => {
   const actor = resolveActor(c);
   const projectId = c.get("projectId");
   const signingService = createSigningService(c.env, getRequestTenantScope(c));
-  const { configs, defaultConfigId } = await signingService.getConfigurations(
-    actor.organizationId,
-    projectId
-  );
+  const [{ configs }, target] = await Promise.all([
+    signingService.getConfigurations(actor.organizationId, projectId),
+    new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).resolve({
+      kind: "effective",
+      organizationId: actor.organizationId,
+      projectId,
+    }),
+  ]);
+  const defaultConfigId = target?.kind === "config" ? target.config.id : null;
 
   const resolvedConfigs = (
     await Promise.all(

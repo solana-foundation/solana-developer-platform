@@ -4,7 +4,8 @@ Investigation record for [PRO-1638](https://linear.app/solana-fndn/issue/PRO-163
 Companion data: [ground-catalogue-inventory.md](./ground-catalogue-inventory.md)
 (auto-generated; refresh with `pnpm --filter @sdp/api earn:inventory`).
 
-**Status: sandbox inventoried 2026-08-05. Production inventory pending** — it
+**Status: host-chain persistence gate reversed 2026-08-13 (see "Where these
+sources live" below). Sandbox re-inventory pending. Production inventory pending** — it
 requires `GROUND_API_KEY` from an approved environment (never a laptop;
 `packages/sdp-earn/CLAUDE.md`: provider sandbox only), or Ground answering the
 questions below directly. Sandbox is the best proxy observable today, and
@@ -14,8 +15,9 @@ everything below should be re-read against the production run when it lands.
 
 The raw, unfiltered `GET /v2/wallets/yield-sources` catalogue, distilled with
 the **same `distillGroundYieldSource` the hourly catalogue sync uses** — so
-"catalogued" below is exactly what SDP surfaces, and "dropped" is exactly what
-the pipeline's gates silently remove. The product doc names ten candidate RWA
+"catalogued" below is exactly what the sync persists, and "dropped" is exactly
+what the pipeline's gates remove before persistence. The strategy API applies
+its Aave/Morpho visibility policy after this step. The product doc names ten candidate RWA
 sources (BUIDL, BENJI, SWEEP, OUSG, USDY, BAGEY, USDe, Figure PRIME, Syrup
 USDC, AAA CLO) plus two later arrivals (JPM JOLT, BlackRock B-reserves); the
 inventory matches each against every raw source, dropped ones included.
@@ -37,32 +39,31 @@ label. Note USTB redeems on an **elapsed-seconds** basis, not banking days —
 the catalogue rounds it up to the T+1 the dashboard shows, so the displayed
 term is conservative rather than exact.
 
-**This is a single measurement, not a trend.** The dev seed's 10 fixtures
-(2 `rwa`) are a hand-picked spread chosen to exercise the dashboard — the
-script says so itself — not a snapshot of the 2026-08-04 catalogue, so nothing
-here supports a claim that coverage grew or is improving. Establishing
-direction needs a second inventory run; the committed snapshot exists to make
-that comparison possible from now on. What can be said today is the level: a
-shelf of treasuries plus one CLO fund and one carry fund, and none of the
-marquee issuer names the doc leads with.
+**This is a single measurement, not a trend.** The dev seed's five fixtures are
+a compact deterministic subset for dashboard work, not a complete snapshot of
+the live catalogue, so nothing here supports a claim that coverage grew or is
+improving. Establishing direction needs another inventory run. What can be said
+today is the level: a shelf of treasuries plus one CLO fund and one carry fund,
+and none of the marquee issuer names the doc leads with.
 
-## Where these sources actually live (and why it is not a filter)
+## Where these sources live — persistence is not API visibility
 
-Of the 15 catalogued sources, **only 5 are hosted on Solana — all Kamino, all
-DeFi. Every one of the 4 RWA sources sits on Ethereum**, as do Morpho, Aave and
-Syrup. That is not a bug in the catalogue: SDP's Solana-only mandate governs the
-rails the **customer** touches — they send USDC to a Solana address and are paid
-out to one — while Ground routes the capital onward internally, which is exactly
-what the `bridge` position kind represents. A source hosted off Solana but
-funded by Solana USDC is therefore catalogued on purpose.
+**Updated 2026-08-13: the sync again stores every active Ground source that can
+be funded and exited over SDP's Solana USDC rail, regardless of where Ground
+hosts it.** Of the 15 persisted sandbox sources, 5 are hosted on Solana and 10
+on Ethereum. All 4 RWA sources are in the Ethereum-hosted group.
 
-It is worth stating plainly because it is easy to assume otherwise, and because
-it sets the price of a decision nobody has been asked to make yet: **narrowing
-V1 to Solana-hosted sources would take RWA coverage to zero** and leave a
-five-source, all-Kamino, all-DeFi shelf — the precise outcome the product doc
-says to avoid. If "Solana Earn" is ever meant to imply Solana-hosted yield
-rather than Solana-rail access, that is a V1-scope question for the epic, not a
-catalogue-mapping fix.
+This keeps the database a truthful provider inventory while preserving
+Solana-only customer rails: customers send USDC to a Solana address and are
+paid out to one, and Ground handles any internal bridge represented by the
+`bridge` position kind. Host chain is metadata, not a distillation gate.
+
+Product visibility is enforced later. Earn strategy list and detail reads omit
+every Aave- or Morpho-related row, even though the sync indexes those rows. That
+policy removes five DeFi options from the customer catalogue without erasing
+them from the DB and without reducing the four-source RWA shelf.
+
+Production remains unmeasured; everything quantified here is sandbox data.
 
 ## Delta against the doc's named RWA list
 

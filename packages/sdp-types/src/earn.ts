@@ -51,7 +51,8 @@ export type EarnStrategyStatus = (typeof EARN_STRATEGY_STATUSES)[number];
  * makes "onboarding a curator is a data change" literally true.
  */
 export const EARN_KNOWN_CURATOR_LABELS: Readonly<Record<string, string>> = {
-  // Curator houses.
+  // Curator houses. A house is chain-agnostic because Ground can route Solana
+  // USDC into sources it hosts elsewhere.
   gauntlet: "Gauntlet",
   steakhouse: "Steakhouse Financial",
   sentora: "Sentora",
@@ -61,11 +62,13 @@ export const EARN_KNOWN_CURATOR_LABELS: Readonly<Record<string, string>> = {
   rockawayx: "RockawayX",
   august: "August",
   superstate: "Superstate",
-  // Ids Ground reports when a protocol or fund curates its own vaults;
-  // `g<ticker>` is Ground's own wrapper of a Superstate fund.
-  kamino: "Kamino",
   maple: "Maple",
   centrifuge: "Centrifuge",
+  // Ids Ground reports when a protocol or fund curates its own vaults;
+  // `g<ticker>` is Ground's own wrapper of a Superstate fund. Some stored rows
+  // (Aave/Morpho) are hidden by strategy API policy, but inventory tooling still
+  // renders their metadata.
+  kamino: "Kamino",
   aave_v3: "Aave V3",
   gustb: "Superstate USTB",
   guscc: "Superstate USCC",
@@ -124,11 +127,13 @@ export interface EarnStrategy {
  *
  * Some vault-infra providers front a managed multi-source portfolio (one
  * omnibus wallet whose funds are spread across yield sources by a target
- * strategy) instead of per-strategy vault positions. SDP keeps ONE shared
- * portfolio wallet per (organization, environment); choosing a curator
- * rewrites that wallet's strategy weights. All USD figures are decimal
- * strings; allocation weights are percent on the way in (what strategies are
- * authored in) and basis points on the way out (what providers report back).
+ * strategy) instead of per-strategy vault positions. Each such wallet is one
+ * SDP "program"; an organization may hold several per environment (PRO-1670),
+ * each pinned to a single vault, with nothing rebalancing across them.
+ * Selecting a strategy re-targets one program's weights. All USD figures are
+ * decimal strings; allocation weights are percent on the way in (what
+ * strategies are authored in) and basis points on the way out (what providers
+ * report back).
  */
 
 /** Deposit tokens a portfolio strategy is keyed by (provider-neutral lowercase). */
@@ -373,12 +378,29 @@ export interface EarnPortfolioYield {
 }
 
 export interface EarnPortfolioWithdrawalPreview {
-  /** USD decimal strings. */
+  /**
+   * USD decimal strings. Absent when the preview was asked WITHOUT an amount —
+   * the liquidity-read form, which answers `withdrawableUsd` for the lane and
+   * validates no particular request (PRO-1675).
+   */
   amountRequestedUsd?: string;
   feeUsd: string;
   withdrawableUsd: string;
   totalUsdAfterWithdrawal: string;
   processingEstimate?: EarnPortfolioProcessingEstimate;
+}
+
+/**
+ * A destination lane's balance breakdown, as reported alongside a provider's
+ * refusal to pay out more than it holds. Carried on `error.details.balance` of
+ * a 409 so the caller can say how short the request was instead of echoing
+ * provider wire text; every field is optional because it reflects whatever the
+ * provider actually sent. USD decimal strings, like every other Earn amount.
+ */
+export interface EarnPortfolioLiquidityBalance {
+  totalUsd?: string;
+  withdrawableUsd?: string;
+  reservedUsd?: string;
 }
 
 // API response envelopes (mirrors the asset-profiles response naming).
