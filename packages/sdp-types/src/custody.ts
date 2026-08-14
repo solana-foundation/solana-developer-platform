@@ -539,8 +539,8 @@ export interface DeleteWalletRequest {
   walletId: string;
 }
 
+/** The memo is generated server-side; callers cannot supply one. */
 export interface SignerCheckRequest {
-  memo?: string;
   walletId?: string;
 }
 
