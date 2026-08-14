@@ -261,14 +261,16 @@ function BalanceAllocation({
                         className={cn("size-6 shrink-0 rounded-full", segment.fill)}
                       />
                     )}
-                    <span className="min-w-0 truncate text-[15px] font-medium text-primary">
-                      {segment.label}
+                    <span className="flex min-w-0 items-baseline gap-2">
+                      <span className="min-w-0 truncate text-[15px] font-medium text-primary">
+                        {segment.label}
+                      </span>
+                      {resolved?.tokenId ? (
+                        <Badge variant="outline" className="shrink-0">
+                          {t("Shared.SharedComponents.sdpMintedToken")}
+                        </Badge>
+                      ) : null}
                     </span>
-                    {resolved?.tokenId ? (
-                      <Badge variant="outline" className="shrink-0">
-                        {t("Shared.SharedComponents.sdpMintedToken")}
-                      </Badge>
-                    ) : null}
                     <span className="min-w-0 flex-1" />
                     <span className="shrink-0 text-[15px] text-tertiary tabular-nums">
                       {Math.round(segment.percent)}%
@@ -302,14 +304,16 @@ function BalanceAllocation({
                   logoUrl={resolved.metadataImageUrl}
                   size="sm"
                 />
-                <span className="min-w-0 truncate text-[15px] font-medium text-primary">
-                  {symbol}
+                <span className="flex min-w-0 items-baseline gap-2">
+                  <span className="min-w-0 truncate text-[15px] font-medium text-primary">
+                    {symbol}
+                  </span>
+                  {resolved.tokenId ? (
+                    <Badge variant="outline" className="shrink-0">
+                      {t("Shared.SharedComponents.sdpMintedToken")}
+                    </Badge>
+                  ) : null}
                 </span>
-                {resolved.tokenId ? (
-                  <Badge variant="outline" className="shrink-0">
-                    {t("Shared.SharedComponents.sdpMintedToken")}
-                  </Badge>
-                ) : null}
                 <span className="min-w-0 flex-1" />
                 <span className="shrink-0 text-[15px] text-secondary tabular-nums">
                   {formatDisplayAmount(slice.uiAmount, symbol)}
@@ -647,7 +651,7 @@ export function HomeWorkspace({
                         <TableHead className="hidden w-[9.5rem] md:table-cell">
                           {t("Shared.homeWorkspace.type")}
                         </TableHead>
-                        <TableHead className="hidden w-[12rem] md:table-cell">
+                        <TableHead className="hidden w-[15rem] md:table-cell">
                           {t("Shared.homeWorkspace.token")}
                         </TableHead>
                         <TableHead className="hidden w-[9rem] text-right md:table-cell">
@@ -725,12 +729,14 @@ export function HomeWorkspace({
                                   logoUrl={resolvedToken?.metadataImageUrl}
                                   size="xs"
                                 />
-                                <TruncatedTableText value={tokenSymbol} className="truncate" />
-                                {resolvedToken?.tokenId ? (
-                                  <Badge variant="outline" className="shrink-0">
-                                    {t("Shared.SharedComponents.sdpMintedToken")}
-                                  </Badge>
-                                ) : null}
+                                <span className="flex min-w-0 items-baseline gap-2">
+                                  <TruncatedTableText value={tokenSymbol} className="truncate" />
+                                  {resolvedToken?.tokenId ? (
+                                    <Badge variant="outline" className="shrink-0">
+                                      {t("Shared.SharedComponents.sdpMintedToken")}
+                                    </Badge>
+                                  ) : null}
+                                </span>
                               </span>
                             </TableCell>
                             <TableCell className="hidden text-right text-secondary tabular-nums md:table-cell">

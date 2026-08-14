@@ -16,7 +16,6 @@ import {
   ChevronRight,
   ClipboardCheck,
   Clock,
-  Code2,
   Coins,
   ExternalLink,
   FileText,
@@ -52,7 +51,6 @@ import {
   summarizeCapacityConfig,
 } from "./asset-details-config";
 import { CapacityConfigModal } from "./capacity-config-modal";
-import type { DeployConfigPreview } from "./draft-mapping";
 import {
   type AccessControlMode,
   type AdvancedSettingsDraft,
@@ -60,7 +58,6 @@ import {
   type CapacityKey,
   type CapacitySelection,
 } from "./issuance-draft-wizard.types";
-import { JsonCodeBlock } from "./metadata-json";
 import { SegmentedControl } from "./segmented-control";
 import {
   applyCombo,
@@ -165,8 +162,6 @@ interface AdvancedSettingsEditorProps {
   onAccessControlChange?: (mode: AccessControlMode | "") => void;
   accessControlReadOnly?: boolean;
   accessControlDocsHref?: string;
-  // Deploy-config preview (technical mode only). Built by parent, not wired here.
-  deployConfig?: DeployConfigPreview | null;
   // Collapse the inner grids on the editor's own width (container query) instead
   // of the viewport — for the compliance tab's narrow two-column layout.
   containerResponsive?: boolean;
@@ -369,12 +364,10 @@ export function AdvancedSettingsEditor({
   onAccessControlChange,
   accessControlReadOnly,
   accessControlDocsHref,
-  deployConfig,
   containerResponsive,
 }: AdvancedSettingsEditorProps) {
   const t = useTranslations();
   const [showTechnical, setShowTechnical] = useState(false);
-  const [showDeployConfig, setShowDeployConfig] = useState(false);
   const [configuringCapacity, setConfiguringCapacity] = useState<CapacityKey | null>(null);
 
   if (!category || !type) {
@@ -484,7 +477,7 @@ export function AdvancedSettingsEditor({
         </button>
       </div>
 
-      {/* Quick-fill presets — creation-only, and hidden once on-chain settings are locked. */}
+      {/* Add-on bundles — creation-only, and hidden once on-chain settings are locked. */}
       {showScenarios && !settingsReadOnly && combos.length > 0 ? (
         <section className="mt-5">
           <p className="text-xs font-semibold uppercase tracking-wide text-secondary">
@@ -530,50 +523,20 @@ export function AdvancedSettingsEditor({
 
       {/* Permanent · on-chain, set at creation --------------------------- */}
       <section className="mt-6">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-wide text-secondary">
-              {t(
-                showTechnical
-                  ? "DashboardIssuance.config.settingsOnchainTitle"
-                  : "DashboardIssuance.config.settingsPermanentTitle"
-              )}
-            </p>
-            <p className="mt-0.5 text-xs text-tertiary">
-              {t(
-                settingsReadOnly
-                  ? "DashboardIssuance.config.settingsPermanentLockedSubtitle"
-                  : "DashboardIssuance.config.settingsPermanentSubtitle"
-              )}
-            </p>
-          </div>
-          {showTechnical && deployConfig ? (
-            <button
-              type="button"
-              aria-pressed={showDeployConfig}
-              onClick={() => setShowDeployConfig((value) => !value)}
-              className={cn(
-                "inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border-default px-3 py-1 text-xs font-medium transition-colors",
-                showDeployConfig
-                  ? "bg-fill-subtle text-primary"
-                  : "text-tertiary hover:text-primary"
-              )}
-            >
-              <Code2 className="h-3.5 w-3.5" />
-              {t("DashboardIssuance.config.deployPreview")}
-            </button>
-          ) : null}
-        </div>
-
-        {/* Deploy payload preview in technical mode. */}
-        {showTechnical && showDeployConfig && deployConfig ? (
-          <div className="mt-3">
-            <p className="mb-2 text-xs text-tertiary">
-              {t("DashboardIssuance.assetDetails.deployConfigAuthorityNote")}
-            </p>
-            <JsonCodeBlock value={deployConfig} />
-          </div>
-        ) : null}
+        <p className="text-xs font-semibold uppercase tracking-wide text-secondary">
+          {t(
+            showTechnical
+              ? "DashboardIssuance.config.settingsOnchainTitle"
+              : "DashboardIssuance.config.settingsPermanentTitle"
+          )}
+        </p>
+        <p className="mt-0.5 text-xs text-tertiary">
+          {t(
+            settingsReadOnly
+              ? "DashboardIssuance.config.settingsPermanentLockedSubtitle"
+              : "DashboardIssuance.config.settingsPermanentSubtitle"
+          )}
+        </p>
 
         <div className="mt-3 grid gap-2.5">
           {onAccessControlChange ? (

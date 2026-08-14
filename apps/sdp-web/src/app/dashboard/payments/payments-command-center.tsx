@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
+import { TokenMark } from "@/components/token-mark";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
@@ -29,7 +30,7 @@ import {
   formatDirection,
   formatTimestamp,
   normalizeAggregateBalances,
-  resolveAggregateBalanceDisplayToken,
+  resolveTokenByMint,
   resolveTotalBalance,
   resolveTransferTokenLabel,
   resolveTransferTypeLabel,
@@ -38,6 +39,7 @@ import {
   shortenAddress,
 } from "./payments-overview.utils";
 import {
+  fetchIssuedTokensByMint,
   fetchPaymentsAggregate,
   fetchPaymentsIssuedTokenSymbols,
   fetchPaymentTransfers,
@@ -118,10 +120,13 @@ async function AvailableBalance({ apiClientPromise }: { apiClientPromise: ApiCli
     getRequestLocale(),
   ]);
   const trace = createTimedTrace("dashboard.payments.overview.balance");
-  const result = await trace.step("fetch_aggregate", () => fetchPaymentsAggregate(request));
+  const [result, issuedTokensByMint] = await Promise.all([
+    trace.step("fetch_aggregate", () => fetchPaymentsAggregate(request)),
+    trace.step("fetch_issued_token_symbols", () => fetchIssuedTokensByMint(request)),
+  ]);
   trace.log({
     ok: result.ok,
-    requestCount: 1,
+    requestCount: 2,
     responseBytes: new TextEncoder().encode(JSON.stringify(result.data ?? null)).byteLength,
   });
   if (!result.ok || !result.data) {
@@ -153,7 +158,8 @@ async function AvailableBalance({ apiClientPromise }: { apiClientPromise: ApiCli
       </p>
       <div className="mt-4 divide-y divide-border-subtle border-t border-border-default">
         {topBalances.map((balance) => {
-          const label = resolveAggregateBalanceDisplayToken(balance, {});
+          const resolved = resolveTokenByMint(balance.mint, issuedTokensByMint, balance.token);
+          const label = resolved.tokenName;
           const usdValue = resolveUsdBalanceValue(balance);
           return (
             <div
@@ -161,11 +167,21 @@ async function AvailableBalance({ apiClientPromise }: { apiClientPromise: ApiCli
               className="flex min-w-0 items-center justify-between gap-3 py-2.5 text-sm"
             >
               <span className="flex min-w-0 items-center gap-2 font-medium text-primary">
-                <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-fill-subtle text-[11px] font-semibold text-secondary">
-                  {label.slice(0, 1).toUpperCase()}
-                </span>
-                <span className="truncate" title={label}>
-                  {label.length > 12 ? shortenAddress(label) : label}
+                <TokenMark
+                  mint={resolved.mint}
+                  symbol={label}
+                  logoUrl={resolved.metadataImageUrl}
+                  size="sm"
+                />
+                <span className="flex min-w-0 items-baseline gap-2">
+                  <span className="truncate" title={label}>
+                    {label.length > 12 ? shortenAddress(label) : label}
+                  </span>
+                  {resolved.tokenId ? (
+                    <Badge variant="outline" className="shrink-0">
+                      {t("Shared.SharedComponents.sdpMintedToken")}
+                    </Badge>
+                  ) : null}
                 </span>
               </span>
               <span className="shrink-0 text-secondary">
