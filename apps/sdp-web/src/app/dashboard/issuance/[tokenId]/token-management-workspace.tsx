@@ -1227,6 +1227,8 @@ export function TokenManagementWorkspace({
     }
 
     setFundManagementModalAction(null);
+    setMintForm(createInitialMintForm);
+    setBurnForm(createInitialBurnForm);
   };
 
   const submitFundManagementAction = (action: FundManagementModalAction) => {
