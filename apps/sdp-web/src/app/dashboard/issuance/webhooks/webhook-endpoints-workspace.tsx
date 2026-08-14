@@ -2,7 +2,9 @@
 
 import { LockIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { HeaderBackAction } from "@/components/dashboard-header";
 import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,9 +39,22 @@ function formatDate(value: string, locale: string): string {
 
 const PAGE_SIZE = 25;
 
-export function WebhookEndpointsWorkspace({ canManage }: { canManage: boolean }) {
+function endpointHref(endpointId: string): string {
+  return `/dashboard/issuance/webhooks/${encodeURIComponent(endpointId)}`;
+}
+
+export function WebhookEndpointsWorkspace({
+  canManage,
+  back,
+}: {
+  canManage: boolean;
+  // Resolved server-side from `?from=`, so the page always has a way back even though it
+  // is deliberately absent from the sidebar.
+  back: { href: string; label: string };
+}) {
   const t = useTranslations();
   const locale = useLocale();
+  const router = useRouter();
   const [page, setPage] = useState(1);
   const swr = usePersistedDashboardSWR<WebhookEndpointsPage>(
     ["webhook-endpoints", page, PAGE_SIZE],
@@ -63,8 +78,13 @@ export function WebhookEndpointsWorkspace({ canManage }: { canManage: boolean })
     <div className="h-full overflow-y-auto px-3 pb-8 md:px-6">
       <div className="mx-auto w-full max-w-[1200px] py-6">
         <header className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-medium text-primary">{t("DashboardWebhooks.title")}</h1>
+          <div className="min-w-0">
+            {/* The shared back action, unrestyled — only moved onto the title's line and
+                centred with it. */}
+            <div className="flex items-center gap-3">
+              <HeaderBackAction href={back.href} label={back.label} />
+              <h1 className="text-2xl font-medium text-primary">{t("DashboardWebhooks.title")}</h1>
+            </div>
             <p className="mt-1 text-sm text-secondary">{t("DashboardWebhooks.description")}</p>
           </div>
           <div className="flex items-center gap-2">
@@ -138,11 +158,23 @@ export function WebhookEndpointsWorkspace({ canManage }: { canManage: boolean })
               </TableHeader>
               <TableBody>
                 {endpoints.map((endpoint) => (
-                  <TableRow key={endpoint.id}>
+                  <TableRow
+                    key={endpoint.id}
+                    className="group cursor-pointer transition-colors hover:bg-fill-subtle"
+                    // Row-wide click for convenience; the label keeps a real <Link> so the
+                    // route is still keyboard-reachable and openable in a new tab. Clicks
+                    // that land on that link (or the actions menu) are left alone rather
+                    // than navigated twice.
+                    onClick={(event) => {
+                      if (!(event.target as HTMLElement).closest("a,button,[role='menuitem']")) {
+                        router.push(endpointHref(endpoint.id));
+                      }
+                    }}
+                  >
                     <TableCell>
                       <Link
-                        href={`/dashboard/webhooks/${encodeURIComponent(endpoint.id)}`}
-                        className="text-primary underline-offset-2 hover:underline"
+                        href={endpointHref(endpoint.id)}
+                        className="text-primary underline-offset-2 group-hover:underline"
                       >
                         {endpoint.label}
                       </Link>

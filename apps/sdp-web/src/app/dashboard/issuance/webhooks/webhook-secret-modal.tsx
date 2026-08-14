@@ -57,11 +57,17 @@ export function WebhookSecretModal({
           {t("DashboardWebhooks.secretLabel")}
         </span>
         <div className="mt-1 flex items-center gap-2">
-          <GeneratedApiKeyInput value={revealed.secret} />
+          {/* The DS TextInput is inline-flex (intrinsic width) and takes no className
+              here, so the row is stretched from the wrapper: the input root AND its
+              inner field span both need w-full or the secret stays truncated. */}
+          <div className="min-w-0 flex-1 [&>*>span:first-child]:w-full [&>*]:w-full">
+            <GeneratedApiKeyInput value={revealed.secret} />
+          </div>
           <Button
             type="button"
             variant="outline"
             size="sm"
+            className="shrink-0"
             onClick={() => copy(revealed.secret)}
             iconLeft={copied ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}
           >

@@ -185,7 +185,7 @@ export function WebhookDeliveryLog({
                 return (
                   <Fragment key={delivery.id}>
                     <TableRow
-                      className="cursor-pointer"
+                      className="cursor-pointer transition-colors hover:bg-fill-subtle"
                       onClick={() => setExpandedId(expanded ? null : delivery.id)}
                     >
                       <TableCell className="w-8">

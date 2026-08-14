@@ -1,6 +1,7 @@
 "use client";
 
 import { Select as BaseSelect } from "@base-ui/react/select";
+import { Tooltip as BaseTooltip } from "@base-ui/react/tooltip";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -54,19 +55,131 @@ export const ACTION_ICONS: Record<string, LucideIcon> = {
   mint: Coins,
 };
 
+// Status pills elsewhere in the dashboard are fully round; the shared Badge hard-codes
+// `!rounded-sm`, so the workflow surfaces opt back into the project's pill shape. Applied
+// here rather than in badge.tsx, which has call sites across every dashboard section.
+export const WORKFLOW_PILL_CLASS = "!rounded-full";
+
 // ── Card select (a dropdown whose options ARE the cards) ─────────────────────────────
+
+// A status tone, kept to the four the workflow tiers need so the marker can map it to
+// both a dot colour and a tinted tooltip without a 7-key table.
+export type CardOptionTone = "default" | "success" | "warning" | "danger";
 
 export interface CardSelectOption {
   value: string;
   icon: LucideIcon;
   label: string;
   description?: string | null;
-  badge?: ReactNode;
+  // The tier, as text + tone rather than a ready-made pill: it renders as a marker on
+  // the icon tile with the text on its tooltip, which a caller-built node can't do.
+  badgeText?: string;
+  badgeTone?: CardOptionTone;
   note?: string;
   disabled?: boolean;
   // Optional heading this option groups under (e.g. a tier). Consecutive options that
   // share a group render under one heading; order is preserved.
   group?: string;
+}
+
+// The same tokens the badges use. A marker often sits on the row as an Enabled/guard pill,
+// and the base status hues (`#00a066`…) are a visibly different green from the badge's
+// `--green-tx`, so parity with the pills wins over a brighter dot.
+// The `-mark` tokens: each status's border hue at full opacity. `-tx` is darkened for
+// text contrast on light surfaces (amber lands on brown) and `-brd` is that hue at 20%,
+// which is too faint for a mark this small to carry status on its own.
+const TONE_DOT_CLASS: Record<CardOptionTone, string> = {
+  default: "bg-fill-strong",
+  success: "bg-success-mark",
+  warning: "bg-warning-mark",
+  danger: "bg-error-mark",
+};
+
+// Split in two because the tint is the tooltip's problem: in light mode every `*-bg`
+// token is an 8%-alpha wash, so a bubble painted only in it let the row borders behind it
+// show straight through. The bubble takes an opaque surface and the tint rides on top.
+const TONE_TIP_BORDER_CLASS: Record<CardOptionTone, string> = {
+  default: "border-border-strong",
+  success: "border-success-border",
+  warning: "border-warning-border",
+  danger: "border-error-border",
+};
+
+const TONE_TIP_FILL_CLASS: Record<CardOptionTone, string> = {
+  default: "bg-fill text-primary",
+  success: "bg-success-bg text-success",
+  warning: "bg-warning-bg text-warning",
+  danger: "bg-error-bg text-error",
+};
+
+// The tier marker: a tone dot on the icon tile's corner, so stating the tier costs the
+// text column nothing (the label ellipsised when a pill shared its line). Base UI's
+// tooltip directly rather than the shared one — the shared wrapper styles only the text
+// inside a fixed bubble, and the colored variant needs the bubble itself.
+export function ToneMarker({
+  label,
+  tone,
+  className,
+}: {
+  label: string;
+  tone: CardOptionTone;
+  className?: string;
+}) {
+  return (
+    <BaseTooltip.Root>
+      <BaseTooltip.Trigger
+        // A span, not the default button: these markers sit inside a select option and
+        // inside the select's own trigger button, where nested buttons are invalid.
+        render={
+          // No cut-out ring behind the dot: in light mode the surface token it would be
+          // drawn in is near-white, which read as a hole punched in the icon tile.
+          <span
+            role="img"
+            aria-label={label}
+            className={cn(
+              "absolute -top-0.5 -right-0.5 size-2.5 rounded-full",
+              TONE_DOT_CLASS[tone],
+              className
+            )}
+          />
+        }
+      />
+      <BaseTooltip.Portal>
+        <BaseTooltip.Positioner className="z-[60]" side="top" sideOffset={6}>
+          {/* Tinted to the marker's own tone: the bubble is what connects the dot's
+              colour to the words, so a neutral bubble would leave the dot undecodable. */}
+          <BaseTooltip.Popup
+            className={cn(
+              "overflow-hidden rounded-lg border bg-surface-raised text-xs font-medium shadow-lg",
+              TONE_TIP_BORDER_CLASS[tone]
+            )}
+          >
+            <span className={cn("block px-2 py-1", TONE_TIP_FILL_CLASS[tone])}>{label}</span>
+          </BaseTooltip.Popup>
+        </BaseTooltip.Positioner>
+      </BaseTooltip.Portal>
+    </BaseTooltip.Root>
+  );
+}
+
+// The label/description stack inside one option card. The tier is not in here at all: the
+// marker on the icon tile and the group heading carry it, which is what lets the action
+// name have the full width of the column.
+function OptionBody({ option }: { option: CardSelectOption }) {
+  return (
+    <span className="min-w-0 flex-1 space-y-0.5">
+      <BaseSelect.ItemText className="block text-sm font-medium text-primary">
+        {option.label}
+      </BaseSelect.ItemText>
+      {option.description ? (
+        <span className="block text-xs leading-4 text-tertiary">{option.description}</span>
+      ) : null}
+      {option.note ? <span className="block text-xs text-secondary">{option.note}</span> : null}
+      {/* A group heading is not announced as part of the option and a tooltip is
+          hover-only, so the tier still needs to be in the accessible name. */}
+      {option.badgeText ? <span className="sr-only">{option.badgeText}</span> : null}
+    </span>
+  );
 }
 
 // A compact select trigger (icon + label) that opens a popover of rich cards. Built on
@@ -134,18 +247,20 @@ export function CardSelect({
       >
         <span className="pointer-events-none absolute inset-0 rounded-[inherit] bg-fill-subtle group-[[data-popup-open]]/cardselect:shadow-[0_0_0_2px_var(--input-focus-ring)]" />
         {selected ? (
-          // The trigger mirrors the chosen option's card content (icon + label + badge +
+          // The trigger mirrors the chosen option's card content (icon + marker + label +
           // info line) so the selection reads the same closed as it does in the list.
           <>
             {SelectedIcon ? (
               <span className="relative flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-raised text-secondary">
                 <SelectedIcon className="size-[18px]" />
+                {selected.badgeText ? (
+                  <ToneMarker label={selected.badgeText} tone={selected.badgeTone ?? "default"} />
+                ) : null}
               </span>
             ) : null}
             <span className="relative min-w-0 flex-1 space-y-0.5">
-              <span className="flex flex-wrap items-center gap-1.5">
-                <span className="text-sm font-medium text-primary">{selected.label}</span>
-                {selected.badge}
+              <span className="block truncate text-sm font-medium text-primary">
+                {selected.label}
               </span>
               {selected.description ? (
                 <span className="block truncate text-xs text-tertiary">{selected.description}</span>
@@ -163,13 +278,23 @@ export function CardSelect({
       </BaseSelect.Trigger>
       <BaseSelect.Portal>
         <BaseSelect.Positioner className="z-50" sideOffset={4} alignItemWithTrigger={false}>
-          <BaseSelect.Popup className="max-h-[var(--available-height)] w-[max(var(--anchor-width),20rem)] space-y-2 overflow-y-auto rounded-xl border border-border-default bg-surface-raised p-1.5 shadow-lg outline-none">
+          <BaseSelect.Popup className="max-h-[var(--available-height)] w-[var(--anchor-width)] min-w-[15rem] space-y-2 overflow-y-auto rounded-xl border border-border-default bg-surface-raised p-1.5 shadow-lg outline-none">
             {groups.flatMap((group) => [
               group.key ? (
                 <div
                   key={`heading-${group.key}`}
-                  className="px-2 pt-1 text-[11px] font-semibold uppercase tracking-wide text-tertiary"
+                  className="flex items-center gap-1.5 px-2 pt-1 text-[11px] font-semibold uppercase tracking-wide text-tertiary"
                 >
+                  {/* The heading is where the tier is spelled out, so it takes the same
+                      tone dot the options carry — the marker's colour is only decodable
+                      if something states it in words nearby. */}
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "size-2 shrink-0 rounded-full",
+                      TONE_DOT_CLASS[group.items[0]?.badgeTone ?? "default"]
+                    )}
+                  />
                   {group.key}
                 </div>
               ) : null,
@@ -185,7 +310,9 @@ export function CardSelect({
                     value={option.value}
                     disabled={option.disabled}
                     className={cn(
-                      "flex cursor-pointer items-start gap-3 rounded-lg border px-2.5 py-2 outline-none transition-colors",
+                      // Centred, not top-aligned: the icon tile and the check ring read as
+                      // floating when a two- or three-line description sits between them.
+                      "flex cursor-pointer items-center gap-3 rounded-lg border px-2.5 py-2 outline-none transition-colors",
                       isSelected
                         ? "border-primary bg-fill-subtle/50"
                         : "border-transparent data-[highlighted]:border-border-default data-[highlighted]:bg-fill-subtle",
@@ -194,31 +321,19 @@ export function CardSelect({
                   >
                     <span
                       className={cn(
-                        "flex size-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle",
+                        "relative flex size-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle",
                         isSelected ? "text-primary" : "text-tertiary"
                       )}
                     >
                       <Icon className="size-[18px]" />
-                    </span>
-                    <span className="min-w-0 flex-1 space-y-0.5">
-                      <span className="flex flex-wrap items-center gap-1.5">
-                        <BaseSelect.ItemText className="text-sm font-medium text-primary">
-                          {option.label}
-                        </BaseSelect.ItemText>
-                        {option.badge}
-                      </span>
-                      {option.description ? (
-                        <span className="block text-xs leading-4 text-tertiary">
-                          {option.description}
-                        </span>
-                      ) : null}
-                      {option.note ? (
-                        <span className="block text-xs text-secondary">{option.note}</span>
+                      {option.badgeText ? (
+                        <ToneMarker label={option.badgeText} tone={option.badgeTone ?? "default"} />
                       ) : null}
                     </span>
+                    <OptionBody option={option} />
                     <span
                       className={cn(
-                        "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border transition-colors",
+                        "flex size-5 shrink-0 items-center justify-center rounded-full border transition-colors",
                         isSelected
                           ? "border-primary bg-primary text-on-primary"
                           : "border-border-default text-transparent"

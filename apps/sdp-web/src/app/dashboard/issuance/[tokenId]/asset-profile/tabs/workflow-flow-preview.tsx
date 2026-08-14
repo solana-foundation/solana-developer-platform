@@ -15,7 +15,6 @@ import {
   Zap,
 } from "lucide-react";
 import { Fragment, type ReactNode } from "react";
-import { Badge } from "@/components/ui/badge";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import {
@@ -25,7 +24,12 @@ import {
   type GuardDraft,
   humanizeType,
 } from "../workflows.data";
-import { ACTION_ICONS, ConnectorBadge } from "./workflow-builder-cards";
+import {
+  ACTION_ICONS,
+  type CardOptionTone,
+  ConnectorBadge,
+  ToneMarker,
+} from "./workflow-builder-cards";
 
 // Read-only "exactly what happens" panel for the rule currently being built. Computed
 // live from the same catalog the controls use — no backend call. It surfaces the
@@ -277,8 +281,11 @@ export function WorkflowFlowGraph({
     return graph;
   }
 
+  // h-full: this panel sits beside the settings panel in a two-column grid, and both are
+  // grid items that stretch to the row. Without it the border stopped at the content and
+  // the two panels' bottom edges did not line up.
   return (
-    <div className="rounded-xl border border-border-default bg-fill-subtle/30 p-4">
+    <div className="h-full rounded-xl border border-border-default bg-fill-subtle/30 p-4">
       <h4 className="text-sm font-semibold text-primary">{wf("flowTitle")}</h4>
       <p className="mt-0.5 text-xs text-secondary">{wf("flowIntro")}</p>
       <div className="mt-4">{graph}</div>
@@ -300,7 +307,7 @@ function FlowNode({
   title: string;
   detail?: ReactNode;
   badge?: string;
-  badgeVariant?: "success" | "warning" | "danger";
+  badgeVariant?: CardOptionTone;
   orientation: "vertical" | "horizontal";
 }) {
   const StatusIcon = STATUS_ICON[tone];
@@ -311,21 +318,17 @@ function FlowNode({
         orientation === "horizontal" && "min-w-[11rem] flex-1 basis-[11rem]"
       )}
     >
+      {/* Not aria-hidden when it carries the tier marker: the marker's label is the only
+          place the tier is stated now that the pill is gone. */}
       <span
-        className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-secondary"
-        aria-hidden
+        className="relative flex size-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-secondary"
+        aria-hidden={badge ? undefined : true}
       >
-        <Icon className="size-[18px]" />
+        <Icon className="size-[18px]" aria-hidden />
+        {badge ? <ToneMarker label={badge} tone={badgeVariant ?? "default"} /> : null}
       </span>
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-          <span className="text-sm font-medium text-primary">{title}</span>
-          {badge ? (
-            <Badge variant={badgeVariant} className="align-middle">
-              {badge}
-            </Badge>
-          ) : null}
-        </div>
+        <span className="block text-sm font-medium text-primary">{title}</span>
         {detail ? <p className="mt-0.5 truncate text-xs text-secondary">{detail}</p> : null}
       </div>
       <StatusIcon className={cn("size-4 shrink-0 self-center", STATUS_TONE[tone])} aria-hidden />

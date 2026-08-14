@@ -23,7 +23,6 @@ const t = ((key: string) => key) as Translate;
 function navOptions(flags: { marketsEnabled: boolean; earnEnabled: boolean }) {
   return {
     canReadApprovals: false,
-    canReadWebhooks: false,
     heliusRingsEnabled: false,
     pendingApprovalCount: null,
     privateChannelsEnabled: false,

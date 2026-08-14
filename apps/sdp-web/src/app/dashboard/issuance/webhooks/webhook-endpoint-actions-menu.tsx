@@ -1,8 +1,8 @@
 "use client";
 
 import {
-  ChevronDown,
   EyeIcon,
+  MoreHorizontalIcon,
   PencilIcon,
   PowerIcon,
   PowerOffIcon,
@@ -42,20 +42,23 @@ export function WebhookEndpointActionsMenu({
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
+        {/* The row-actions grammar used across the dashboard (members, counterparties,
+            policies): an icon-only overflow trigger, named for assistive tech only. */}
         <Button
           type="button"
-          variant="secondary"
-          size="sm"
-          className="rounded-full px-5 whitespace-nowrap"
-          iconRight={<ChevronDown className="size-4" />}
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t("DashboardWebhooks.actions")}
         >
-          {t("DashboardWebhooks.actions")}
+          <MoreHorizontalIcon className="size-4" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-[220px]">
         <DropdownMenuItem
           className="gap-2"
-          onSelect={() => router.push(`/dashboard/webhooks/${encodeURIComponent(endpoint.id)}`)}
+          onSelect={() =>
+            router.push(`/dashboard/issuance/webhooks/${encodeURIComponent(endpoint.id)}`)
+          }
         >
           <EyeIcon aria-hidden className="size-4 text-secondary" />
           {t("DashboardWebhooks.viewEndpoint")}

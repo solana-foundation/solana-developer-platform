@@ -37,10 +37,10 @@ import { WalletIdentityBadge } from "../../../wallet-identity";
 import { formatDate, formatDateTime } from "../../token-management-workspace.utils";
 import { fetchAssetAuditHistory } from "../asset-audit.data";
 import {
-  auditActionIcon,
-  auditActionLabel,
   auditActorBadgeClass,
   auditActorTypeLabel,
+  auditEventActionIcon,
+  auditEventActionLabel,
 } from "../asset-audit-presentation";
 import type { TokenOperations } from "../use-token-operations";
 
@@ -307,7 +307,7 @@ function RecentActivityCard({ tokenId, onViewAll }: { tokenId: string; onViewAll
           // (subgrid) so pills, actor, badge and time line up across every row.
           <ul className="grid min-h-0 flex-1 auto-rows-fr @xl:grid-cols-[max-content_minmax(0,1fr)_max-content_max-content] @xl:gap-x-3">
             {events.map((event) => {
-              const ActionIcon = auditActionIcon(event.action);
+              const ActionIcon = auditEventActionIcon(event);
               return (
                 <li
                   key={event.id}
@@ -316,7 +316,7 @@ function RecentActivityCard({ tokenId, onViewAll }: { tokenId: string; onViewAll
                   <div className="flex items-center justify-between gap-2 @xl:contents">
                     <span className="inline-flex w-fit min-w-0 items-center gap-1.5 rounded-md bg-fill-subtle px-2 py-1 text-[12px] font-medium text-secondary @xl:col-start-1 @xl:row-start-1 @xl:justify-self-start">
                       <ActionIcon className="h-3.5 w-3.5 shrink-0" />
-                      <span className="truncate">{auditActionLabel(event.action)}</span>
+                      <span className="truncate">{auditEventActionLabel(event, t)}</span>
                     </span>
                     <span className="shrink-0 text-[12px] text-tertiary tabular-nums @xl:col-start-4 @xl:row-start-1 @xl:justify-self-end">
                       {formatDateTime(event.createdAt, locale)}
