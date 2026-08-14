@@ -7,7 +7,7 @@ import type {
   WalletControlProfileRevisionSummary,
 } from "@sdp/types";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
-import { ArrowUpCircle, ChevronRight, ExternalLink } from "lucide-react";
+import { ArrowUpCircle, ChevronRight, ExternalLink, KeyRound } from "lucide-react";
 import { AnimatePresence } from "motion/react";
 import { useState } from "react";
 import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
@@ -140,7 +140,7 @@ export function PolicyRevisionExplorer({
                     </div>
                   </div>
                   <div className="mt-3 flex items-center gap-2">
-                    <UserAvatar name={creatorName} />
+                    <RevisionCreatorMark createdBy={revision.createdBy} name={creatorName} />
                     {revision.commitMessage ? (
                       <p className="min-w-0 break-words text-sm text-secondary">
                         {revision.commitMessage}
@@ -166,6 +166,39 @@ export function PolicyRevisionExplorer({
       />
     </div>
   );
+}
+
+/**
+ * Whether a revision's creator identifier belongs to an API key rather than a
+ * dashboard user.
+ *
+ * @param createdBy - The revision's creator identifier.
+ * @returns True when the identifier is an API key id.
+ */
+function isApiKeyCreator(createdBy: string | null): boolean {
+  return createdBy?.startsWith("key_") === true;
+}
+
+/**
+ * The creator marker for a revision: a key icon labelled "API key" when the
+ * revision was committed by an API key, the person initials avatar otherwise.
+ *
+ * @param props.createdBy - The revision's creator identifier.
+ * @param props.name - The creator's display label the avatar derives from.
+ * @returns The marker element.
+ */
+function RevisionCreatorMark({ createdBy, name }: { createdBy: string | null; name: string }) {
+  const t = useTranslations();
+  if (isApiKeyCreator(createdBy)) {
+    return (
+      <KeyRound
+        role="img"
+        aria-label={t("DashboardCustody.policyAuditApiKeyActor")}
+        className="size-4 shrink-0 text-secondary"
+      />
+    );
+  }
+  return <UserAvatar name={name} />;
 }
 
 function RevisionStatusBadge({ revision }: { revision: WalletControlProfileRevisionSummary }) {
@@ -210,12 +243,25 @@ function RevisionSnapshot({
             {formatPolicyDateTime(revision.createdAt, locale)}
           </time>
           <div className="flex min-w-0 items-center gap-2">
-            <UserAvatar name={creatorName} />
-            <span className="min-w-0 truncate">{creatorName}</span>
+            <RevisionCreatorMark createdBy={revision.createdBy} name={creatorName} />
+            {isApiKeyCreator(revision.createdBy) ? (
+              <>
+                <span className="min-w-0 truncate">
+                  {t("DashboardCustody.policyAuditApiKeyActor")}
+                </span>
+                <span className="shrink-0 text-xs text-tertiary">{creatorName}</span>
+              </>
+            ) : (
+              <span className="min-w-0 truncate">{creatorName}</span>
+            )}
             {revision.createdBy ? (
               <WalletMetadataCopyButton
                 value={revision.createdBy}
-                label={t("DashboardCustody.policyAuditUserId")}
+                label={t(
+                  isApiKeyCreator(revision.createdBy)
+                    ? "DashboardCustody.policyAuditApiKeyId"
+                    : "DashboardCustody.policyAuditUserId"
+                )}
                 tooltip={revision.createdBy}
               />
             ) : null}

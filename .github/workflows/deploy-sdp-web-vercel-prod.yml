@@ -1,14 +1,22 @@
 name: Deploy sdp-web to Vercel (prod)
 
 on:
+  workflow_call:
+    inputs:
+      release_sha:
+        description: "Exact release commit to build and deploy"
+        type: string
+        required: true
+      release_tag:
+        description: "Version tag that must resolve to release_sha"
+        type: string
+        required: true
   workflow_dispatch:
     inputs:
       ref:
         description: "Git ref (tag or SHA) to deploy"
         type: string
         required: true
-  release:
-    types: [published]
 
 permissions:
   contents: read
@@ -20,7 +28,11 @@ concurrency:
 jobs:
   deploy:
     name: Deploy production build
-    if: github.repository == 'solana-foundation/solana-developer-platform'
+    if: >-
+      github.repository == 'solana-foundation/solana-developer-platform' &&
+      github.ref == 'refs/heads/main' &&
+      ((inputs.release_sha != '' && inputs.release_tag != '') ||
+       (github.event_name == 'workflow_dispatch' && inputs.ref != ''))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: production
@@ -31,7 +43,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+          fetch-depth: 0
+          ref: ${{ inputs.release_sha != '' && inputs.release_sha || inputs.ref }}
+
+      - name: Verify release identity
+        if: ${{ inputs.release_sha != '' }}
+        run: .github/scripts/verify-release-identity.sh "${{ inputs.release_tag }}" "${{ inputs.release_sha }}"
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
