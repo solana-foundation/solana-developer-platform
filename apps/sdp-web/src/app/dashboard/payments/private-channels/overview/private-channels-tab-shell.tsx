@@ -1,8 +1,8 @@
 "use client";
 
 import { AnimatePresence, motion } from "motion/react";
+import { useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
-import { useDashboardTab } from "@/lib/dashboard-url-state";
 
 const tabTransition = { duration: 0.2, ease: "easeOut" } as const;
 
@@ -20,7 +20,10 @@ export function PrivateChannelsTabShell({
   overview: ReactNode;
   playground: ReactNode;
 }) {
-  const isPlaygroundTab = useDashboardTab() === "playground";
+  // Router state, not `useDashboardTab`, for the same reason as the tab strip:
+  // a cross-route push arriving with `?tab=playground` must mount straight on
+  // the playground pane instead of flashing the overview for a frame.
+  const isPlaygroundTab = useSearchParams().get("tab") === "playground";
   return (
     <div className="relative h-full min-h-0 w-full">
       <AnimatePresence mode="wait">

@@ -1,9 +1,9 @@
 "use client";
 
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "@/i18n/provider";
-import { replaceDashboardSearchParams, useDashboardTab } from "@/lib/dashboard-url-state";
+import { replaceDashboardSearchParams } from "@/lib/dashboard-url-state";
 import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "./private-channels-routes";
 
 // Adding a new sub-page (transfers, channels, members, …):
@@ -69,7 +69,12 @@ interface Props {
 export function PrivateChannelsHeaderTabs({ isConnected }: Props) {
   const router = useRouter();
   const pathname = usePathname();
-  const urlTab = useDashboardTab();
+  // Router state, not `useDashboardTab`: its window snapshot is only re-read
+  // after the commit, so a cross-route push landing here with `?tab=` preset
+  // (e.g. Members → API Playground) would paint one frame with Overview
+  // highlighted. Router-provided search params are correct at render time and
+  // stay in sync with the shallow history writes below, which Next patches.
+  const urlTab = useSearchParams().get("tab");
   const t = useTranslations();
 
   // Keep the always-visible destinations available before an instance is connected.
