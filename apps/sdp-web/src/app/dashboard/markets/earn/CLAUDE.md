@@ -56,7 +56,7 @@ the body `requestId` form, which is the only one that can get through.
   Deliberately **not** grouped by curator — see "One strategy, no curator step"
   below.
 - `earn-opportunities-table.tsx` — the Opportunities tab's catalogue table (Deposit per row).
-- `earn-playground.tsx` / `earn-playground-config.ts` — the API Playground tab.
+- `earn-playground.tsx` / `earn-playground-config.ts` — the Integrate tab.
 - `earn-surfacing.ts` — `SURFACED_CUSTODIAL_EARN_PROVIDERS`,
   `EARN_PROGRAM_CREATION_ENABLED`, `EARN_PROGRAM_CREATE_PROVIDER`, all DERIVED
   from `@sdp/types` — no provider id is hand-set here. Deliberately has **no
@@ -339,14 +339,16 @@ panels rather than fire actions):
   catalogue, ranked, with a Deposit link per row. It renders what the API
   handed it and NEVER re-applies a visibility rule; per-row depositability is a
   different question, answered by `opportunityDepositability`.
-- **Positions** — `EarnPositionsPanel` (the old `ProgramsSection`): one card per
+- **Active** — `EarnPositionsPanel` (the old `ProgramsSection`): one card per
   program, aggregate strip above when there is more than one, withdraw modal.
-  The tab label carries the count.
+  The tab label carries the count. Labelled "Active", keyed `positions`: the
+  label is copy, the key names the concept the panel renders.
   The tab strip implements the FULL ARIA tabs contract — roving `tabIndex` **and**
   arrow/Home/End key handling with focus following selection. Half of it is worse
   than none: `tabIndex={-1}` alone takes the inactive tabs out of the Tab order,
   making them unreachable rather than merely skipped (`earn-tabs.unit.test.tsx`).
-- **API Playground** — `earn-playground.tsx`, modelled on
+- **Integrate** — `earn-playground.tsx` (labelled "Integrate", keyed
+  `playground`), modelled on
   `payments/counterparty/counterparty-playground.tsx` down to
   `ApiPlaygroundShell` + `PlaygroundApiKeySelector`. **Permanent reference, not
   a step in a flow** — it replaces the integration screen the wizard showed once
@@ -375,7 +377,7 @@ Never re-derive it from a provider id, and never add a second flag beside it:
 | Surface | Creation enabled | Creation disabled |
 |---|---|---|
 | Opportunities tab | rows depositable per `opportunityDepositability` | unchanged — the catalogue is browse, not create, so it never gates on this |
-| Positions section header | "Add strategy" | hidden |
+| Active section header | "Add strategy" | hidden |
 | Program card | Withdraw + "Change strategy" | Withdraw only |
 | `/deposit` route | the wizard | `EarnDepositUnavailable` notice, returned by the server shell before it fetches anything |
 

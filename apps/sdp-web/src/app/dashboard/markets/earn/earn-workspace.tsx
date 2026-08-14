@@ -585,6 +585,10 @@ function EarnTabBar({
   const labels: Record<EarnTab, string> = {
     opportunities: t("DashboardEarn.tabs.opportunities"),
     playground: t("DashboardEarn.tabs.playground"),
+    // Labelled "Active" but keyed `positions`: the label is copy, the key names
+    // the concept this panel renders (the org's programs and their positions),
+    // and only one of those two is a translator's to change.
+    //
     // The count is the point of the tab — it answers "do I hold anything"
     // without switching to find out. Undefined while the read is in flight; a
     // zero rendered during load would read as "you hold nothing".

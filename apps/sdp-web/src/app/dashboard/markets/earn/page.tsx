@@ -28,7 +28,7 @@ export default async function EarnPage() {
 
   // Playground context, resolved server-side like every other module's
   // playground. Best-effort: the API-key read failing must cost the reader the
-  // playground's key selector, never the Opportunities and Positions tabs beside it.
+  // playground's key selector, never the Opportunities and Active tabs beside it.
   let apiKeys: PlaygroundApiKeyView[] = [];
   try {
     const { projectClient } = await createRequestScopedSdpApiClients();

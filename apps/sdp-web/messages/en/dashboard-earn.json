@@ -2,8 +2,8 @@
   "DashboardEarn": {
     "overview": {
       "programTitle": "Your strategies",
-      "programDescription": "Each strategy runs in its own provider-managed wallet, funded and withdrawn separately. Balances are read live from the provider.",
-      "programEmpty": "No strategies yet.",
+      "programDescription": "What you have earning right now. Each one is funded and withdrawn on its own, and every balance is read live.",
+      "programEmpty": "Nothing earning yet.",
       "programUntitled": "Unnamed strategy",
       "addStrategy": "Add strategy",
       "blendedApy": "Blended APY",
@@ -90,8 +90,8 @@
     },
     "tabs": {
       "opportunities": "Opportunities",
-      "positions": "Positions",
-      "playground": "API Playground"
+      "positions": "Active",
+      "playground": "Integrate"
     },
     "playground": {
       "productName": "Earn",
@@ -109,7 +109,7 @@
     },
     "opportunities": {
       "title": "Opportunities",
-      "description": "Every strategy SDP lists today, with the rates and access terms their providers publish. Rank by pool size or APY.",
+      "description": "Ways to put idle stablecoins to work. Compare what each one pays, how it's backed, and how fast you can withdraw \u2014 rank by pool size or APY.",
       "deposit": "Deposit",
       "depositDirectOnly": "Deposit direct, outside SDP",
       "depositProviderClosed": "Not open for deposits",
