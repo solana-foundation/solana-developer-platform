@@ -35,8 +35,31 @@ it("keeps unresolved wallet selectors selected and fail-closed", () => {
     )
   ).toEqual({
     walletScope: "selected",
-    signingWalletId: null,
+    signingWalletId: "wallet_ambiguous",
     signingWalletIds: [],
     walletBindings: [],
+  });
+});
+
+it("does not replace an unresolved preferred wallet with another binding", () => {
+  expect(
+    hydrateApiKeyWalletAuthorization(
+      [
+        { wallet_id: "wallet_preferred", custody_wallet_id: null, permissions: ["*"] },
+        { wallet_id: "wallet_other", custody_wallet_id: "cwlt_other", permissions: ["*"] },
+      ],
+      "wallet_preferred"
+    )
+  ).toEqual({
+    walletScope: "selected",
+    signingWalletId: "wallet_preferred",
+    signingWalletIds: ["wallet_other"],
+    walletBindings: [
+      {
+        walletId: "wallet_other",
+        custodyWalletId: "cwlt_other",
+        permissions: ["*"],
+      },
+    ],
   });
 });

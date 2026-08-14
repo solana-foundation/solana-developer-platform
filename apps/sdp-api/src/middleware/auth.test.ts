@@ -568,6 +568,34 @@ describe("Auth Middleware", () => {
           },
         ],
       });
+
+      await getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted,
+              encryption_version, status)
+           VALUES ('cust_auth_ambiguous', ?, NULL, 'local', 'test-config',
+                   'sdp-custody-encryption-v1', 'active')`
+        )
+        .bind(TEST_ORG.id)
+        .run();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, status)
+           VALUES ('cwlt_auth_ambiguous', 'cust_auth_ambiguous', 'wallet_resolved',
+                   'wallet_ambiguous_public_key', 'active')`
+        )
+        .run();
+      await clearKVStores(env);
+
+      const unresolved = await app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+      expect(unresolved.status).toBe(200);
+      expect(await createKVStoreSet(env).apiKeys.get(`key:${validKeyHash}`, "json")).toBeNull();
     });
   });
 

@@ -433,6 +433,10 @@ export function resolveApiKeySigningWalletId(
     return preferredBinding.walletId;
   }
 
+  if (auth.signingWalletId) {
+    throw new AppError("FORBIDDEN", "API key has no usable wallet bindings");
+  }
+
   if (bindings.length === 1) {
     assertApiKeyWalletAccess(auth, bindings[0].walletId, requiredPermissions);
     return bindings[0].walletId;

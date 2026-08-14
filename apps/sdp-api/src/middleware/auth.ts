@@ -176,10 +176,12 @@ async function getFromDatabaseAndCache(
     rotationDeadline: result.rotation_deadline,
   };
 
-  // Cache to KV
-  await kv.put(`key:${keyHash}`, JSON.stringify(cached), {
-    expirationTtl: KV_TTL_SECONDS,
-  });
+  // Older readers interpret an empty binding list as unrestricted.
+  if (walletScope !== "selected" || walletBindings.length > 0) {
+    await kv.put(`key:${keyHash}`, JSON.stringify(cached), {
+      expirationTtl: KV_TTL_SECONDS,
+    });
+  }
 
   return cached;
 }
@@ -303,10 +305,7 @@ function normalizeWalletBindings(cachedKey: CachedApiKey): {
     }));
 
   const signingWalletIds = walletBindings.map((binding) => binding.walletId);
-  const signingWalletId =
-    walletBindings.find((binding) => binding.walletId === cachedKey.signingWalletId)?.walletId ??
-    signingWalletIds[0] ??
-    null;
+  const signingWalletId = cachedKey.signingWalletId ?? signingWalletIds[0] ?? null;
 
   return {
     walletScope: cachedKey.walletScope as ApiKeyWalletScope,

@@ -144,6 +144,29 @@ describe("api key scope service", () => {
     expect(() => resolveApiKeySigningWalletId(auth, undefined)).toThrowError(AppError);
   });
 
+  it("requires an explicit wallet when the preferred binding is unresolved", () => {
+    const auth = createApiKeyAuth({
+      walletScope: "selected",
+      signingWalletId: "wal_preferred",
+      walletBindings: [
+        {
+          walletId: "wal_other",
+          custodyWalletId: "cwal_other",
+          permissions: ["wallets:read"],
+        },
+      ],
+    });
+
+    expect(() => resolveApiKeySigningWalletId(auth, undefined, ["wallets:read"])).toThrowError(
+      AppError
+    );
+    expect(() => resolveApiKeyCustodyWalletId(auth, undefined, ["wallets:read"])).toThrowError(
+      AppError
+    );
+    expect(resolveApiKeySigningWalletId(auth, "wal_other", ["wallets:read"])).toBe("wal_other");
+    expect(resolveApiKeyCustodyWalletId(auth, "wal_other", ["wallets:read"])).toBe("cwal_other");
+  });
+
   it("supports legacy single signingWalletId payloads", () => {
     const parsed = parseWalletBindingPatch({
       signingWalletId: "wal_legacy",

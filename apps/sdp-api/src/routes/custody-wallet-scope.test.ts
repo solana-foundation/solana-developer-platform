@@ -772,6 +772,46 @@ describe("Custody wallet scope routes", () => {
     expect(await listWalletIds()).toEqual([]);
   });
 
+  it("does not replace an ambiguous preferred wallet during cold or warm auth", async () => {
+    await seedActiveConnectionWallet(
+      "preferred_ambiguous",
+      "privy_wallet_a",
+      "preferred_duplicate_pubkey"
+    );
+    await getDb(env).batch([
+      getDb(env)
+        .prepare("UPDATE api_keys SET signing_wallet_id = 'privy_wallet_a' WHERE id = ?")
+        .bind(TEST_API_KEY.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+           VALUES ('akw_scope_preferred_a', ?, 'privy_wallet_a', '["wallets:read"]')`
+        )
+        .bind(TEST_API_KEY.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+           VALUES ('akw_scope_preferred_b', ?, 'privy_wallet_b', '["wallets:read"]')`
+        )
+        .bind(TEST_API_KEY.id),
+    ]);
+    await clearKVStores(env);
+
+    const requestPublicKey = (walletId = "") =>
+      app.request(
+        `/v1/wallets/public-key${walletId ? `?walletId=${walletId}` : ""}`,
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+
+    expect((await requestPublicKey()).status).toBe(404);
+    expect((await requestPublicKey()).status).toBe(404);
+
+    const explicit = await requestPublicKey("privy_wallet_b");
+    expect(explicit.status).toBe(200);
+    expect(await explicit.json()).toMatchObject({ data: { publicKey: "privy_pubkey_b" } });
+  });
+
   it("returns 404 when the requested wallet is outside the API key bindings", async () => {
     await seedCachedKey({
       walletBindings: [{ walletId: "privy_wallet_a", permissions: ["wallets:read"] }],

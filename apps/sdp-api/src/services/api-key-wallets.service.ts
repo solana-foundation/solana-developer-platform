@@ -66,10 +66,7 @@ export function hydrateApiKeyWalletAuthorization(
   return {
     walletScope:
       permissionRows.length > 0 || preferredSigningWalletId !== null ? "selected" : "all",
-    signingWalletId:
-      walletBindings.find((binding) => binding.walletId === preferredSigningWalletId)?.walletId ??
-      signingWalletIds[0] ??
-      null,
+    signingWalletId: preferredSigningWalletId ?? signingWalletIds[0] ?? null,
     signingWalletIds,
     walletBindings,
   };
