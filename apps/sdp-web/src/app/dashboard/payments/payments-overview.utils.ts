@@ -439,11 +439,15 @@ export function aggregateBalancesFromWallets(wallets: WalletRecord[]): CustodyWa
   }));
 }
 
+/**
+ * Native SOL is a balance row like any other: wallets hold it, the API prices
+ * it, and hiding it made the Available balance card disagree with the total on
+ * the home page. Only balances without a resolvable USD value are dropped.
+ */
 export function normalizeAggregateBalances(
   balances: CustodyWalletTokenBalance[]
 ): CustodyWalletTokenBalance[] {
   return balances
-    .filter((balance) => !isSolBalance(balance))
     .filter((balance) => resolveUsdBalanceValue(balance) !== null)
     .sort((left, right) => {
       const leftIsUsdc = left.token.trim().toUpperCase() === "USDC";
