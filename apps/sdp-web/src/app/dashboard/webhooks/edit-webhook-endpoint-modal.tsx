@@ -1,5 +1,6 @@
 "use client";
 
+import { CheckIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -104,7 +105,13 @@ export function EditWebhookEndpointModal({
         <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={pending}>
           {t("DashboardWebhooks.cancel")}
         </Button>
-        <Button type="button" size="sm" onClick={handleSubmit} disabled={pending}>
+        <Button
+          type="button"
+          size="sm"
+          iconLeft={<CheckIcon className="size-3.5" />}
+          onClick={handleSubmit}
+          disabled={pending}
+        >
           {pending ? t("DashboardWebhooks.saving") : t("DashboardWebhooks.saveChanges")}
         </Button>
       </div>

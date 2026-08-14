@@ -6,6 +6,7 @@ import {
   ChevronRightIcon,
   CopyIcon,
   RefreshCwIcon,
+  SendIcon,
 } from "lucide-react";
 import { Fragment, useState } from "react";
 import { toast } from "sonner";
@@ -43,6 +44,18 @@ function formatWhen(value: string, locale: string): { text: string; tooltip: str
     text: date.toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" }),
     tooltip: date.toLocaleString(locale, { dateStyle: "medium", timeStyle: "medium" }),
   };
+}
+
+// The pure label when the row carries one; otherwise the translated status — the
+// fallback lives here so the row map stays a plain projection.
+function resultLabel(delivery: WebhookDeliveryView, t: ReturnType<typeof useTranslations>): string {
+  const label = deliveryResultLabel(delivery);
+  if (label !== null) {
+    return label;
+  }
+  return delivery.status === "succeeded"
+    ? t("DashboardWebhooks.deliverySucceeded")
+    : t("DashboardWebhooks.deliveryFailed");
 }
 
 function CopyableBody({ label, body }: { label: string; body: string }) {
@@ -203,7 +216,7 @@ export function WebhookDeliveryLog({
                           <Badge
                             variant={deliveryTone(delivery) === "success" ? "success" : "danger"}
                           >
-                            {deliveryResultLabel(delivery)}
+                            {resultLabel(delivery, t)}
                           </Badge>
                           {delivery.manual && (
                             <Badge variant="info">{t("DashboardWebhooks.deliveryManualTag")}</Badge>
@@ -252,6 +265,7 @@ export function WebhookDeliveryLog({
                                   type="button"
                                   variant="outline"
                                   size="sm"
+                                  iconLeft={<SendIcon className="size-3.5" />}
                                   disabled={
                                     !endpointEnabled ||
                                     delivery.requestBodyTruncated ||
@@ -280,7 +294,7 @@ export function WebhookDeliveryLog({
                                   label={t("DashboardWebhooks.deliveryResponseBody")}
                                   body={delivery.responseBody}
                                 />
-                                {delivery.responseBody.length >= 4_096 && (
+                                {delivery.responseBodyTruncated && (
                                   <p className="mt-1 text-xs text-tertiary">
                                     {t("DashboardWebhooks.deliveryResponseTruncated")}
                                   </p>

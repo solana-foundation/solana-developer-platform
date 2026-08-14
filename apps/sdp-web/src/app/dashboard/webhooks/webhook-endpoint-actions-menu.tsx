@@ -1,6 +1,14 @@
 "use client";
 
-import { ChevronDown } from "lucide-react";
+import {
+  ChevronDown,
+  EyeIcon,
+  PencilIcon,
+  PowerIcon,
+  PowerOffIcon,
+  RefreshCwIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,28 +54,38 @@ export function WebhookEndpointActionsMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-[220px]">
         <DropdownMenuItem
+          className="gap-2"
           onSelect={() => router.push(`/dashboard/webhooks/${encodeURIComponent(endpoint.id)}`)}
         >
+          <EyeIcon aria-hidden className="size-4 text-secondary" />
           {t("DashboardWebhooks.viewEndpoint")}
         </DropdownMenuItem>
         {canManage && (
           <>
-            <DropdownMenuItem onSelect={() => onEdit(endpoint)}>
+            <DropdownMenuItem className="gap-2" onSelect={() => onEdit(endpoint)}>
+              <PencilIcon aria-hidden className="size-4 text-secondary" />
               {t("DashboardWebhooks.editEndpoint")}
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => onRotate(endpoint)}>
+            <DropdownMenuItem className="gap-2" onSelect={() => onRotate(endpoint)}>
+              <RefreshCwIcon aria-hidden className="size-4 text-secondary" />
               {t("DashboardWebhooks.rotateSecret")}
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => onToggle(endpoint)}>
+            <DropdownMenuItem className="gap-2" onSelect={() => onToggle(endpoint)}>
+              {endpoint.status === "active" ? (
+                <PowerOffIcon aria-hidden className="size-4 text-secondary" />
+              ) : (
+                <PowerIcon aria-hidden className="size-4 text-secondary" />
+              )}
               {endpoint.status === "active"
                 ? t("DashboardWebhooks.disable")
                 : t("DashboardWebhooks.enable")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
-              className="text-destructive focus:bg-destructive/10 focus:text-destructive"
+              className="gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
               onSelect={() => onDelete(endpoint)}
             >
+              <Trash2Icon aria-hidden className="size-4" />
               {t("DashboardWebhooks.delete")}
             </DropdownMenuItem>
           </>

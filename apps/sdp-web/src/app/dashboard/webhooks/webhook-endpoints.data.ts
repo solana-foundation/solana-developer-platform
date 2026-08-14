@@ -29,6 +29,7 @@ export interface WebhookDeliveryView {
   status: "succeeded" | "failed";
   responseStatus: number | null;
   responseBody: string | null;
+  responseBodyTruncated: boolean;
   error: string | null;
   durationMs: number | null;
   createdAt: string;
@@ -44,6 +45,13 @@ export interface RotateWebhookSecretResult {
   endpoint: WebhookEndpointView;
   secret: string;
   previousSecretExpiresAt: string | null;
+}
+
+export interface WebhookEndpointsPage {
+  endpoints: WebhookEndpointView[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 export interface WebhookDeliveriesPage {
@@ -73,13 +81,15 @@ export function deliveryTone(delivery: Pick<WebhookDeliveryView, "status">): Web
 
 // The one-cell summary of an attempt: the HTTP status when the receiver answered,
 // otherwise the failure code (BLOCKED_URL:*, SECRET_UNAVAILABLE, timeout message…).
+// Null when the row carries neither — the caller owns the translated fallback (this
+// module is pure, so the raw untranslated status enum must not leak into the UI).
 export function deliveryResultLabel(
   delivery: Pick<WebhookDeliveryView, "responseStatus" | "error" | "status">
-): string {
+): string | null {
   if (delivery.responseStatus !== null) {
     return `HTTP ${delivery.responseStatus}`;
   }
-  return delivery.error ?? delivery.status;
+  return delivery.error;
 }
 
 export function formatDeliveryDuration(durationMs: number | null): string | null {

@@ -3,6 +3,7 @@
 import { LockIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,7 +22,8 @@ import { EditWebhookEndpointModal } from "./edit-webhook-endpoint-modal";
 import { useWebhookEndpointActions } from "./use-webhook-endpoint-actions";
 import { WebhookEndpointActionsMenu } from "./webhook-endpoint-actions-menu";
 import { fetchWebhookEndpoints } from "./webhook-endpoints.client";
-import type { WebhookEndpointView } from "./webhook-endpoints.data";
+import type { WebhookEndpointsPage, WebhookEndpointView } from "./webhook-endpoints.data";
+import { deliveriesPageCount } from "./webhook-endpoints.data";
 import { WebhookEndpointsListSkeleton } from "./webhook-page-skeletons";
 import { WebhookSecretModal } from "./webhook-secret-modal";
 
@@ -33,20 +35,25 @@ function formatDate(value: string, locale: string): string {
   return date.toLocaleDateString(locale, { month: "short", day: "2-digit", year: "numeric" });
 }
 
+const PAGE_SIZE = 25;
+
 export function WebhookEndpointsWorkspace({ canManage }: { canManage: boolean }) {
   const t = useTranslations();
   const locale = useLocale();
-  const swr = usePersistedDashboardSWR<WebhookEndpointView[]>(
-    ["webhook-endpoints"],
-    fetchWebhookEndpoints,
-    { revalidateOnFocus: true, revalidateIfStale: true },
-    { key: "webhook-endpoints", ttlMs: 15_000 }
+  const [page, setPage] = useState(1);
+  const swr = usePersistedDashboardSWR<WebhookEndpointsPage>(
+    ["webhook-endpoints", page, PAGE_SIZE],
+    () => fetchWebhookEndpoints(page, PAGE_SIZE),
+    { revalidateOnFocus: true, revalidateIfStale: true, keepPreviousData: true },
+    { key: `webhook-endpoints-p${page}`, ttlMs: 15_000 }
   );
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<WebhookEndpointView | null>(null);
   const actions = useWebhookEndpointActions({ onChanged: () => void swr.mutate() });
 
-  const endpoints = swr.data;
+  const endpoints = swr.data?.endpoints;
+  const total = swr.data?.total ?? 0;
+  const pageCount = deliveriesPageCount(total, PAGE_SIZE);
 
   if (swr.isLoading && !endpoints) {
     return <WebhookEndpointsListSkeleton />;
@@ -175,6 +182,20 @@ export function WebhookEndpointsWorkspace({ canManage }: { canManage: boolean })
                 ))}
               </TableBody>
             </Table>
+            {pageCount > 1 && (
+              <div className="border-t border-border-default px-4 py-3">
+                <ArrowPagination
+                  page={page}
+                  pageCount={pageCount}
+                  onPageChange={setPage}
+                  disabled={swr.isValidating}
+                  summary={t("DashboardWebhooks.endpointsSummary", {
+                    count: endpoints?.length ?? 0,
+                    total,
+                  })}
+                />
+              </div>
+            )}
           </div>
         )}
       </div>

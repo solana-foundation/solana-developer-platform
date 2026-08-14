@@ -106,6 +106,7 @@
     "redelivering": "Redelivering…",
     "expandRow": "Show details",
     "collapseRow": "Hide details",
-    "deliveriesSummary": "{count} of {total} deliveries"
+    "deliveriesSummary": "{count} of {total} deliveries",
+    "endpointsSummary": "{count} of {total} endpoints"
   }
 }
