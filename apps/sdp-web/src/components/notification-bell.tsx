@@ -551,7 +551,9 @@ function NotificationPanelBody(props: {
     );
   }
   return (
-    <div className="max-h-96 overflow-y-auto">
+    // overflow-x-hidden is the backstop: the panel is a fixed 320px, so nothing in a
+    // row is ever allowed to scroll it sideways, whatever a future body interpolates.
+    <div className="max-h-96 overflow-y-auto overflow-x-hidden">
       <ul className="divide-y divide-border-subtle">
         {items.map((item) => {
           const TypeIcon = TYPE_ICON[item.type] ?? Bell;
@@ -580,7 +582,10 @@ function NotificationPanelBody(props: {
                   {humanizeKeys(displayTitle(item))}
                 </span>
                 {item.body ? (
-                  <span className="mt-0.5 block text-xs text-secondary">
+                  // Bodies quote raw identifiers (wallet addresses, provider ids) with
+                  // no break opportunity in them, which otherwise widens the row past
+                  // the panel and gives the list a horizontal scrollbar.
+                  <span className="mt-0.5 block break-words text-xs text-secondary">
                     {humanizeKeys(item.body)}
                   </span>
                 ) : null}
