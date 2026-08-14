@@ -486,16 +486,19 @@ describe("privy wallet provisioning", () => {
     [401, "PROVIDER_CREDENTIAL_INVALID"],
     [400, "PROVIDER_NOT_CONFIGURED"],
     [503, "NETWORK_ERROR"],
-  ] as const)("classifies bounded credential HTTP %s create failures as %s", async (status, code) => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(jsonResponse({ error: "rejected" }, status));
+  ] as const)(
+    "classifies bounded credential HTTP %s create failures as %s",
+    async (status, code) => {
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(jsonResponse({ error: "rejected" }, status));
 
-    await expect(provisionTestPrivyWallet({ credentialRequest: true })).rejects.toMatchObject({
-      code,
-    });
-    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeDefined();
-  });
+      await expect(provisionTestPrivyWallet({ credentialRequest: true })).rejects.toMatchObject({
+        code,
+      });
+      expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeDefined();
+    }
+  );
 
   it("classifies a malformed bounded credential create response as ambiguous", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({}, 200));

@@ -194,25 +194,25 @@ describe("CustodyRuntimeTargets", () => {
     ).resolves.toMatchObject({ kind: "config", config: { id: config.id } });
   });
 
-  it.each([
-    "success",
-    "retry_unknown",
-  ] as const)("keeps an active matching Project Config ahead of an unselected Connection with %s status", async (lastCheckStatus) => {
-    const effectiveConfig = await seedConfig({ provider: "turnkey" });
-    const matchingConfig = await seedConfig({ provider: "privy" });
-    await seedConnection({ lastCheckStatus });
-    await setProjectDefault(effectiveConfig.id, null);
-    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+  it.each(["success", "retry_unknown"] as const)(
+    "keeps an active matching Project Config ahead of an unselected Connection with %s status",
+    async (lastCheckStatus) => {
+      const effectiveConfig = await seedConfig({ provider: "turnkey" });
+      const matchingConfig = await seedConfig({ provider: "privy" });
+      await seedConnection({ lastCheckStatus });
+      await setProjectDefault(effectiveConfig.id, null);
+      const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
-    await expect(
-      targets.resolve({
-        kind: "provider",
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
-        provider: "privy",
-      })
-    ).resolves.toMatchObject({ kind: "config", config: { id: matchingConfig.id } });
-  });
+      await expect(
+        targets.resolve({
+          kind: "provider",
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+          provider: "privy",
+        })
+      ).resolves.toMatchObject({ kind: "config", config: { id: matchingConfig.id } });
+    }
+  );
 
   it("does not fall back to an Organization Config when matching Connection state is unusable", async () => {
     const effectiveConfig = await seedConfig({ provider: "turnkey" });

@@ -2,16 +2,12 @@ import { describe, expect, it } from "vitest";
 import { isClientIpAllowed, isValidIpAllowlistEntry } from "./ip-allowlist";
 
 describe("isValidIpAllowlistEntry", () => {
-  it.each([
-    "203.0.113.42",
-    "203.0.113.0/24",
-    "0.0.0.0/0",
-    "2001:db8::42",
-    "2001:db8::/48",
-    "::/0",
-  ])("accepts a valid IP address or CIDR range: %s", (value) => {
-    expect(isValidIpAllowlistEntry(value)).toBe(true);
-  });
+  it.each(["203.0.113.42", "203.0.113.0/24", "0.0.0.0/0", "2001:db8::42", "2001:db8::/48", "::/0"])(
+    "accepts a valid IP address or CIDR range: %s",
+    (value) => {
+      expect(isValidIpAllowlistEntry(value)).toBe(true);
+    }
+  );
 
   it.each([
     "",

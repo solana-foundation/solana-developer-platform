@@ -77,15 +77,12 @@ describe("validateActionParams", () => {
 });
 
 describe("secret redaction", () => {
-  it.each([
-    "secret",
-    "apiKey",
-    "api_key",
-    "authToken",
-    "password",
-  ])("treats %s as a credential", (key) => {
-    expect(isSecretParamKey(key)).toBe(true);
-  });
+  it.each(["secret", "apiKey", "api_key", "authToken", "password"])(
+    "treats %s as a credential",
+    (key) => {
+      expect(isSecretParamKey(key)).toBe(true);
+    }
+  );
 
   it.each(["url", "amount", "wallet", "audience"])("leaves %s alone", (key) => {
     expect(isSecretParamKey(key)).toBe(false);

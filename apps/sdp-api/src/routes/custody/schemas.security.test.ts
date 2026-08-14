@@ -38,25 +38,27 @@ describe.each([
     }
   });
 
-  it.each(
-    existingProviderObjectRequests
-  )("does not include an existing $provider object selector", (request) => {
-    const parsed = schema.parse(request);
-    expect(parsed).not.toHaveProperty("walletAddress");
-    expect(parsed).not.toHaveProperty("walletId");
-    expect(parsed).not.toHaveProperty("privateKeyId");
-    expect(parsed).not.toHaveProperty("signingKeyId");
-  });
+  it.each(existingProviderObjectRequests)(
+    "does not include an existing $provider object selector",
+    (request) => {
+      const parsed = schema.parse(request);
+      expect(parsed).not.toHaveProperty("walletAddress");
+      expect(parsed).not.toHaveProperty("walletId");
+      expect(parsed).not.toHaveProperty("privateKeyId");
+      expect(parsed).not.toHaveProperty("signingKeyId");
+    }
+  );
 });
 
 describe("hosted custody provider object selection", () => {
-  it.each(
-    existingProviderObjectRequests
-  )("rejects client selection of an existing $provider object", (request) => {
-    expect(() => assertNoExistingProviderObjectSelector(request)).toThrow(
-      /cannot select an existing wallet/
-    );
-  });
+  it.each(existingProviderObjectRequests)(
+    "rejects client selection of an existing $provider object",
+    (request) => {
+      expect(() => assertNoExistingProviderObjectSelector(request)).toThrow(
+        /cannot select an existing wallet/
+      );
+    }
+  );
 
   it("preserves ordinary platform-managed provisioning requests", () => {
     expect(() =>
@@ -68,14 +70,14 @@ describe("hosted custody provider object selection", () => {
     ).not.toThrow();
   });
 
-  it.each([
-    "__proto__",
-    "constructor",
-  ])("defers the unknown provider %s to schema validation", (provider) => {
-    const request = { provider, walletId: "wallet_from_another_tenant" };
+  it.each(["__proto__", "constructor"])(
+    "defers the unknown provider %s to schema validation",
+    (provider) => {
+      const request = { provider, walletId: "wallet_from_another_tenant" };
 
-    expect(() => assertNoExistingProviderObjectSelector(request)).not.toThrow();
-    expect(initializeSigningSchema.safeParse(request).success).toBe(false);
-    expect(switchSigningSchema.safeParse(request).success).toBe(false);
-  });
+      expect(() => assertNoExistingProviderObjectSelector(request)).not.toThrow();
+      expect(initializeSigningSchema.safeParse(request).success).toBe(false);
+      expect(switchSigningSchema.safeParse(request).success).toBe(false);
+    }
+  );
 });

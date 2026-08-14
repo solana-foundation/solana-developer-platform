@@ -182,20 +182,17 @@ describe("workflow authorization (routes)", () => {
     expect(Number(stored?.count ?? 0)).toBe(0);
   });
 
-  it.each([
-    "mint",
-    "burn",
-    "force_burn",
-    "pause",
-    "freeze",
-  ])("refuses a tokens:write principal a %s rule", async (actionType) => {
-    const res = await post(MEMBER_KEY, base, {
-      triggerType: "kyc_approved",
-      actionType,
-      actionParams: actionType === "pause" || actionType === "freeze" ? {} : { amount: "1" },
-    });
-    expect(res.status).toBe(403);
-  });
+  it.each(["mint", "burn", "force_burn", "pause", "freeze"])(
+    "refuses a tokens:write principal a %s rule",
+    async (actionType) => {
+      const res = await post(MEMBER_KEY, base, {
+        triggerType: "kyc_approved",
+        actionType,
+        actionParams: actionType === "pause" || actionType === "freeze" ? {} : { amount: "1" },
+      });
+      expect(res.status).toBe(403);
+    }
+  );
 
   it("lets a tokens:write principal author an automated rule", async () => {
     const res = await post(MEMBER_KEY, base, {
