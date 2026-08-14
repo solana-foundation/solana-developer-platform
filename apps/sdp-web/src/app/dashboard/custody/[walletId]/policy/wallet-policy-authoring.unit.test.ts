@@ -161,6 +161,36 @@ describe("wallet policy authoring", () => {
     expect(storage.getItem(key)).toBeNull();
   });
 
+  it("filters erased rules out of a stale draft's passthrough", () => {
+    const storage = new MemoryStorage();
+    const liveRule: PaymentWalletPolicy["rules"][number] = {
+      id: "bounded",
+      kind: "amount",
+      asset: ADDRESS_A,
+      min: "1",
+      max: "100",
+    };
+    const state = createPolicyAuthoringState(emptyPolicy());
+    state.passthroughRules = [
+      { id: "dead-families", kind: "operation_family", families: ["transfer", "provider_admin"] },
+      { id: "dead-approval", kind: "approval", families: ["raw_sign"] },
+      { id: "asset-less-cap", kind: "amount", max: "150", action: "allow" },
+      liveRule,
+    ];
+    savePolicyDraft(storage, {
+      version: 1,
+      projectId: PROJECT_ID,
+      walletId: WALLET_ID,
+      step: "review",
+      state,
+      updatedAt: "2026-07-15T20:00:00.000Z",
+    });
+
+    expect(loadPolicyDraft(storage, PROJECT_ID, WALLET_ID)?.state.passthroughRules).toEqual([
+      liveRule,
+    ]);
+  });
+
   it("builds an activation payload for every public authoring capability", () => {
     const state = createPolicyAuthoringState(emptyPolicy());
     state.defaultAction = "approval_required";

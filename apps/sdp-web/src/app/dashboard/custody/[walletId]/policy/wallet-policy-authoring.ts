@@ -728,6 +728,41 @@ export function savePolicyDraft(storage: StorageLike, draft: StoredPolicyDraft):
  * @param state - The parsed draft state, possibly carrying retired fields.
  * @returns The state restricted to the current schema.
  */
+/**
+ * Whether a stored rule is one `createPolicyAuthoringState` erases: an
+ * asset-less amount rule, or a rule scoped only to retired operation
+ * families. Drafts saved by older builds captured such rules in
+ * `passthroughRules` before erasure existed, so loading filters them with the
+ * same decisions the parser applies to the stored policy.
+ *
+ * @param rule - The stored rule to classify.
+ * @returns True when the rule must not survive a draft load.
+ */
+function isErasedStoredRule(rule: PolicyRule): boolean {
+  switch (rule.kind) {
+    case "amount":
+      return amountRuleAssets(rule).length === 0;
+    case "operation_family": {
+      const families = operationFamiliesFromRule(rule);
+      return families.length > 0 && !families.some(isAuthorableOperationFamily);
+    }
+    case "approval": {
+      const families = rule.families;
+      return (
+        families !== undefined &&
+        families.length > 0 &&
+        !rule.operationTypes?.length &&
+        !rule.assets?.length &&
+        !rule.approvalGroupId &&
+        (!rule.action || rule.action === "approval_required") &&
+        !families.some(isAuthorableOperationFamily)
+      );
+    }
+    default:
+      return false;
+  }
+}
+
 function sanitizeStoredPolicyState(state: PolicyAuthoringState): PolicyAuthoringState {
   const familyActions: PolicyAuthoringState["familyActions"] = {};
   for (const family of WALLET_OPERATION_FAMILIES) {
@@ -745,7 +780,7 @@ function sanitizeStoredPolicyState(state: PolicyAuthoringState): PolicyAuthoring
     destinationBlockText: state.destinationBlockText,
     familyActions,
     operationTypeRules: state.operationTypeRules,
-    passthroughRules: state.passthroughRules,
+    passthroughRules: state.passthroughRules.filter((rule) => !isErasedStoredRule(rule)),
   };
 }
 
