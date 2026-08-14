@@ -420,7 +420,7 @@ describe("value-moving authorization and replay conformance", () => {
       testApp.request("/signer-check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ walletId: "wal_conformance", memo: "conformance" }),
+        body: JSON.stringify({ walletId: "wal_conformance" }),
       })
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     expect(handler).not.toHaveBeenCalled();

@@ -183,8 +183,9 @@ export type DeleteWalletRequest = z.infer<typeof deleteWalletSchema>;
 // Signer Check (API key flow)
 // ═══════════════════════════════════════════════════════════════════════════
 
+// The memo text is generated server-side (fixed prefix + request nonce); the
+// org wallet must never sign caller-chosen text from a connectivity check.
 export const signerCheckSchema = z.object({
-  memo: z.string().max(256).optional(),
   walletId: z.string().min(1).optional(),
 });
 
