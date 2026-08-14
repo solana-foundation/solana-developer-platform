@@ -12,7 +12,6 @@ type PlaygroundAction = AdminAction | FundManagementModalAction;
 
 const ACTION_PLAYGROUND_ENDPOINTS: Record<PlaygroundAction, string> = {
   "update-metadata": "update-token",
-  deploy: "deploy-token",
   mint: "mint-execute",
   burn: "burn-execute",
   seize: "seize-execute",

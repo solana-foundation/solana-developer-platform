@@ -9,14 +9,14 @@ catalog:
   '@solana-program/token-2022': 0.14.0
   '@solana/addresses': 6.9.0
   '@solana/codecs': 6.8.0
-  '@solana/instructions': 6.8.0
-  '@solana/keys': 6.8.0
+  '@solana/instructions': 6.10.0
+  '@solana/keys': 6.10.0
   '@solana/kit': 6.8.0
   '@solana/mosaic-sdk': 0.1.1
-  '@solana/programs': 6.8.0
-  '@solana/rpc': 6.8.0
+  '@solana/programs': 6.10.0
+  '@solana/rpc': 6.10.0
   '@solana/signers': 6.9.0
-  '@solana/sysvars': 6.8.0
+  '@solana/sysvars': 6.10.0
   '@solana/transactions': 6.9.0
 
 # Relaxed for the keychain v1 peer trial; flip back to true once its peer
