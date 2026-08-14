@@ -121,37 +121,52 @@ export async function extractSignerCheckPolicyCandidate(
   };
 }
 
-export const signerCheck = async (c: AppContext) => {
-  const {
-    resolved: { auth, resolvedWalletId, memo },
-  } = getPolicyGateContext<SignerCheckBody, SignerCheckPolicyResolved>(c);
-
-  // Metered here rather than as route middleware: reaching this handler is
-  // what proves the request cleared the policy gate and will actually spend
-  // fees, so a denied call cannot drain the org's shared quota.
-  //
-  // An approved replay is metered but never refused. Its spend still counts,
-  // and an approval-required check reaches the broadcast only through this
-  // path, so exempting it outright would let those fees escape the budget.
-  // Refusing it is worse than overshooting: the original request stopped at
-  // the gate, a human then approved it, and recovery only retries operations
-  // still marked executing, so a transient ceiling would strand it for good.
+/**
+ * Charge the fee ceiling for a signer check.
+ *
+ * Called from the handler rather than as route middleware: arriving here is
+ * what proves the request cleared the policy gate and will actually spend
+ * fees, so a denied call cannot drain the org's shared quota.
+ *
+ * An approved replay is metered but never refused. Its spend still counts, and
+ * an approval-required check reaches the broadcast only through this path, so
+ * exempting it outright would let those fees escape the budget. Refusing it is
+ * worse than overshooting: the original request stopped at the gate, a human
+ * then approved it, and recovery only retries operations still marked
+ * executing, so a refusal here would strand it for good. That covers both ways
+ * the quota can refuse, exhausted or failing closed on an unreachable store.
+ *
+ * @param c - Request context.
+ * @param auth - The resolved API key context, for the log line.
+ */
+async function chargeSignerCheckQuota(c: AppContext, auth: ApiKeyContext): Promise<void> {
   const isApprovedReplay = approvedWalletOperationId(c) !== undefined;
   try {
     await enforceMeteredQuota(c, SIGNER_CHECK_QUOTA);
   } catch (error) {
-    const exhausted = error instanceof AppError && error.code === "RATE_LIMITED";
-    if (!isApprovedReplay || !exhausted) {
+    const quotaRefused =
+      error instanceof AppError &&
+      (error.code === "RATE_LIMITED" || error.code === "SERVICE_UNAVAILABLE");
+    if (!isApprovedReplay || !quotaRefused) {
       throw error;
     }
     getLogger().warn(
       {
         event: "sdp_api_signer_check_replay_over_quota",
         organization_id: auth.organizationId,
+        reason: error instanceof AppError ? error.code : "unknown",
       },
-      "Approved signer check replay proceeded past an exhausted fee quota"
+      "Approved signer check replay proceeded past a refused fee quota"
     );
   }
+}
+
+export const signerCheck = async (c: AppContext) => {
+  const {
+    resolved: { auth, resolvedWalletId, memo },
+  } = getPolicyGateContext<SignerCheckBody, SignerCheckPolicyResolved>(c);
+
+  await chargeSignerCheckQuota(c, auth);
 
   try {
     const signer = await createOrgSigner(
