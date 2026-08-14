@@ -114,7 +114,18 @@ function VaultRow({ strategy }: { strategy: EarnStrategy }) {
         })
       : depositable.kind === "asset-unsupported"
         ? t("DashboardEarn.deposit.strategyAssetUnavailableLabel")
-        : null;
+        : depositable.kind === "no-sdp-route"
+          ? // Names the REASON, which differs by provider shape: a vault-direct
+            // vault takes deposits from the customer's own wallet and SDP simply
+            // does not route them yet, while a custodial one is not being offered
+            // at all. "Browse only" for both would tell a reader nothing about
+            // whether waiting or looking elsewhere is the move.
+            t(
+              depositable.style === "vault_direct"
+                ? "DashboardEarn.vaults.depositDirectOnly"
+                : "DashboardEarn.vaults.depositProviderClosed"
+            )
+          : null;
 
   return (
     <TableRow>
@@ -175,7 +186,9 @@ function VaultRow({ strategy }: { strategy: EarnStrategy }) {
         ) : (
           // Disabled rather than absent: the row still explains itself through
           // the badge beside its name, and a missing verb reads as an oversight.
-          <Button disabled size="sm" variant="secondary">
+          // `title` carries the reason to a pointer, since the badge sits in a
+          // different column.
+          <Button disabled size="sm" title={blockedLabel ?? undefined} variant="secondary">
             {t("DashboardEarn.vaults.deposit")}
           </Button>
         )}

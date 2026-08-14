@@ -9,7 +9,7 @@ import type {
 } from "@sdp/types";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { type KeyboardEvent, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
@@ -594,6 +594,39 @@ function EarnTabBar({
         : `${t("DashboardEarn.tabs.positions")} (${positionCount})`,
   };
 
+  /**
+   * Roving tabindex, the other half of the ARIA tabs pattern.
+   *
+   * Only the active tab is in the Tab order (`tabIndex={-1}` on the rest), which
+   * is correct — but it is only HALF the contract, and without the other half
+   * the inactive tabs become unreachable rather than merely skipped: Tab jumps
+   * past them and, with no key handler, nothing else reaches them either. A
+   * keyboard-only reader could not open Positions or the playground at all.
+   *
+   * Arrow keys wrap, Home/End jump to the ends. Selection follows focus (the
+   * automatic-activation variant), which is right here because switching panels
+   * is cheap and reads as one action rather than "move, then confirm".
+   */
+  const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    const current = EARN_TABS.indexOf(active);
+    let next: number | null = null;
+    if (event.key === "ArrowRight") next = (current + 1) % EARN_TABS.length;
+    else if (event.key === "ArrowLeft") next = (current - 1 + EARN_TABS.length) % EARN_TABS.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = EARN_TABS.length - 1;
+    if (next === null) return;
+
+    // The browser would otherwise scroll the tab strip / page on these keys.
+    event.preventDefault();
+    const target = EARN_TABS[next];
+    if (!target) return;
+    onChange(target);
+    // Focus must FOLLOW selection, not just precede it: the newly active tab is
+    // the only one left in the Tab order, so leaving focus on the old one would
+    // strand a reader whose next Tab press lands somewhere unrelated.
+    document.getElementById(`earn-tab-${target}`)?.focus();
+  };
+
   return (
     <div
       className="flex items-stretch overflow-x-auto border-b border-border-default [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
@@ -614,6 +647,7 @@ function EarnTabBar({
             id={`earn-tab-${tab}`}
             key={tab}
             onClick={() => onChange(tab)}
+            onKeyDown={onKeyDown}
             role="tab"
             tabIndex={isActive ? 0 : -1}
             type="button"

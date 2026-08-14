@@ -111,6 +111,8 @@
       "title": "Vaults",
       "description": "Every strategy SDP lists today, with the rates and access terms their providers publish. Rank by pool size or APY.",
       "deposit": "Deposit",
+      "depositDirectOnly": "Deposit direct on the vault",
+      "depositProviderClosed": "Not open for deposits",
       "columnAction": "Action"
     },
     "deposit": {

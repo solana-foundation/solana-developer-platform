@@ -10,6 +10,7 @@ import {
   singleStrategyAllocation,
   sortStrategies,
   strategyDepositEligibility,
+  vaultDepositability,
 } from "./earn-deposit-model";
 
 const TIMESTAMP = "2026-07-18T09:00:00.000Z";
@@ -92,6 +93,53 @@ describe("fundableStrategies", () => {
     const refused = strategy({ id: "mainnet-only", fundable: false });
 
     expect(fundableStrategies([refused])).toEqual([]);
+  });
+});
+
+/**
+ * The Vaults tab's per-row verb. Greptile caught the gap these pin: checking
+ * only cluster + token let a PRODUCTION Kamino row render an enabled Deposit
+ * link straight into `EarnDepositUnavailable`, because the route it points at
+ * creates custodial programs only. Sandbox hid it — every Kamino row is
+ * `wrong-cluster` there — so the third check has to be asserted, not eyeballed.
+ */
+describe("vaultDepositability", () => {
+  it("refuses a fundable vault-direct vault: SDP has no route for its deposit", () => {
+    const kamino = strategy({
+      id: "kamino-production",
+      provider: "kamino",
+      hostCluster: "mainnet-beta",
+      // The exact shape that used to slip through: on-cluster and USDC.
+      fundable: true,
+    });
+
+    expect(vaultDepositability(kamino)).toEqual({ kind: "no-sdp-route", style: "vault_direct" });
+  });
+
+  it("refuses a custodial vault while no custodial provider is offered", () => {
+    // Ground is un-surfaced, so EARN_PROGRAM_CREATION_ENABLED is false and the
+    // deposit route answers with its unavailable notice.
+    expect(vaultDepositability(strategy({ id: "ground-devnet" }))).toEqual({
+      kind: "no-sdp-route",
+      style: "custodial",
+    });
+  });
+
+  it("reports the cluster before anything else — the most actionable answer", () => {
+    const kamino = strategy({
+      id: "kamino-sandbox",
+      provider: "kamino",
+      hostCluster: "mainnet-beta",
+      fundable: false,
+    });
+
+    expect(vaultDepositability(kamino)).toEqual({ kind: "wrong-cluster" });
+  });
+
+  it("reports an unroutable mint once the cluster is fine", () => {
+    expect(vaultDepositability(strategy({ id: "odd", depositMints: [UNROUTABLE_MINT] }))).toEqual({
+      kind: "asset-unsupported",
+    });
   });
 });
 

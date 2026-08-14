@@ -342,6 +342,10 @@ panels rather than fire actions):
 - **Positions** — `EarnPositionsPanel` (the old `ProgramsSection`): one card per
   program, aggregate strip above when there is more than one, withdraw modal.
   The tab label carries the count.
+  The tab strip implements the FULL ARIA tabs contract — roving `tabIndex` **and**
+  arrow/Home/End key handling with focus following selection. Half of it is worse
+  than none: `tabIndex={-1}` alone takes the inactive tabs out of the Tab order,
+  making them unreachable rather than merely skipped (`earn-tabs.unit.test.tsx`).
 - **API Playground** — `earn-playground.tsx`, modelled on
   `payments/counterparty/counterparty-playground.tsx` down to
   `ApiPlaygroundShell` + `PlaygroundApiKeySelector`. **Permanent reference, not
@@ -375,13 +379,21 @@ Never re-derive it from a provider id, and never add a second flag beside it:
 | Program card | Withdraw + "Change strategy" | Withdraw only |
 | `/deposit` route | the wizard | `EarnDepositUnavailable` notice, returned by the server shell before it fetches anything |
 
-Note the Vaults row: a vault's Deposit button is gated by `vaultDepositability`
-(cluster + token — a fact about the INSTRUMENT), not by
-`EARN_PROGRAM_CREATION_ENABLED` (a fact about the PROVIDER). Today every Kamino
-row is `wrong-cluster` in sandbox and so renders "Mainnet only" with Deposit
-disabled, which is why the tab looks inert locally. Do not collapse the two
-checks — the wizard they lead into is what needs the provider, and that is
-already refused at the route.
+Note the Vaults row: `vaultDepositability` asks THREE questions in order —
+cluster, then token (both facts about the INSTRUMENT), then whether SDP has a
+deposit path for the provider's shape at all (`no-sdp-route`).
+
+**That third check is not optional, and omitting it shipped a dead end.** With
+only cluster + token, a PRODUCTION Kamino row is fundable, holds USDC, renders an
+enabled Deposit link — and lands on `EarnDepositUnavailable`, because the route
+creates custodial programs only. Sandbox hides it, since every Kamino row is
+`wrong-cluster` there, so this must be asserted in the model rather than checked
+by hand (`earn-deposit-model.unit.test.ts`). Caught in review on #1340.
+
+`no-sdp-route` carries the provider's `style` so the badge can name the real
+reason: a `vault_direct` vault takes deposits from the customer's own wallet and
+SDP does not route them yet, while a `custodial` one is simply not being offered.
+Both answer "no" today.
 
 **Withdraw is never gated on surfacing** (ADR 0002 — money out beats money off),
 and the withdraw modal's focus-return fallback

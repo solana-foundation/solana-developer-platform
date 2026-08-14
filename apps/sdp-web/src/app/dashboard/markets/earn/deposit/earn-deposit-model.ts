@@ -1,10 +1,13 @@
-import type {
-  EarnPortfolioAllocationInput,
-  EarnPortfolioToken,
-  EarnProviderId,
-  EarnStrategy,
+import {
+  type EarnDepositStyle,
+  type EarnPortfolioAllocationInput,
+  type EarnPortfolioToken,
+  type EarnProviderId,
+  type EarnStrategy,
+  earnDepositStyle,
 } from "@sdp/types";
 import { strategyApy, strategyPoolUsd, strategyToken } from "../earn-program-presentation";
+import { EARN_PROGRAM_CREATION_ENABLED } from "../earn-surfacing";
 
 /**
  * Pure model for the Earn deposit flow: full catalogue → ranked comparison
@@ -63,24 +66,41 @@ export function fundableStrategies(strategies: readonly EarnStrategy[]): readonl
 }
 
 /**
- * Whether a catalogue row can start a deposit run, and if not, why.
+ * Whether a catalogue row can start a deposit run that can actually FINISH, and
+ * if not, why.
  *
- * This asks a question about the INSTRUMENT and the caller's environment — not
- * about which provider the dashboard can create a program with. That distinction
- * is what lets one table serve both provider shapes: a `vault_direct` vault is
- * depositable without SDP holding anything, and a `custodial` one is depositable
- * because SDP can provision a fundable address. Neither needs a provider-id
- * check here; `earnDepositStyle` answers it at the step that actually differs.
+ * Three questions, in the order that gives the reader the most actionable
+ * answer:
  *
- * `wrong-cluster` wins over `asset-unsupported` because it is the more
- * actionable explanation: a sandbox reader looking at a mainnet-only Kamino row
- * needs to know the instrument does not exist here at all before they wonder
- * about its token.
+ * 1. Does the instrument exist on this cluster (`wrong-cluster`)? Definitive and
+ *    environment-specific, so it wins — a sandbox reader looking at a
+ *    mainnet-only Kamino row needs that before they wonder about its token.
+ * 2. Does its mint map to a supported stablecoin lane (`asset-unsupported`)?
+ * 3. **Does SDP have a deposit path for this provider's shape at all
+ *    (`no-sdp-route`)?**
+ *
+ * The third check is the one that is easy to omit and was: without it, a
+ * production Kamino row is fundable, has a supported token, renders an enabled
+ * Deposit link — and lands on `EarnDepositUnavailable`, because the route it
+ * points at only creates custodial programs. Sandbox hides that (every Kamino
+ * row is `wrong-cluster` there), which is exactly why the check belongs in the
+ * model rather than in a manual pass.
+ *
+ * It answers differently per provider shape, and today both answer "no":
+ *
+ * - `custodial` — needs a surfaced provider with a program model. With Ground
+ *   un-surfaced there is none, so `EARN_PROGRAM_CREATION_ENABLED` is false.
+ * - `vault_direct` — needs the wallet -> amount -> hand-off run, which is not
+ *   built. SDP moves no money into a K-Vault and holds no address to point at.
+ *
+ * Re-enabling is therefore a real change in both cases, not a flag flip, and
+ * this predicate is where the compiler will bring you.
  */
 export type VaultDepositability =
   | { kind: "depositable" }
   | { kind: "wrong-cluster" }
-  | { kind: "asset-unsupported" };
+  | { kind: "asset-unsupported" }
+  | { kind: "no-sdp-route"; style: EarnDepositStyle };
 
 export function vaultDepositability(strategy: EarnStrategy): VaultDepositability {
   // `=== false`, not falsy: an API old enough to omit `fundable` predates any
@@ -88,7 +108,12 @@ export function vaultDepositability(strategy: EarnStrategy): VaultDepositability
   // than blanking every row. Same rule as `fundableStrategies` above.
   if (strategy.fundable === false) return { kind: "wrong-cluster" };
   if (strategyToken(strategy) === undefined) return { kind: "asset-unsupported" };
-  return { kind: "depositable" };
+
+  const style = earnDepositStyle(strategy.provider);
+  if (style === "custodial" && EARN_PROGRAM_CREATION_ENABLED) {
+    return { kind: "depositable" };
+  }
+  return { kind: "no-sdp-route", style };
 }
 
 /** Why a catalogue row cannot advance through this portfolio-deposit flow. */
