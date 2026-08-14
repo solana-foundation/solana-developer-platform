@@ -50,6 +50,18 @@ describe.skipIf(!KORA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Kora Fee Payment", 
       expect(config.validation_config.allowed_programs).toBeDefined();
     });
 
+    it("reports zero fee-payer outflow, so sponsorship reserves only the network fee", async () => {
+      const configuration = await adapter.getSponsorshipConfiguration?.();
+
+      expect(configuration).toBeDefined();
+      // A false here is what keeps the reservation ceiling at the network fee.
+      // When it flips, admission reserves fee + max_allowed_lamports instead,
+      // which exceeds the per-transaction limit and denies every request — the
+      // deployed Kora having grown an authority this code does not recognise is
+      // enough to cause it, without any change to this repository.
+      expect(configuration?.feePayerMayTransferLamports).toBe(false);
+    });
+
     it("gets fee payer address", async () => {
       // Note: Kora API returns signer_address/payment_address, not payerSigner
       const response = await client.getPayerSigner();

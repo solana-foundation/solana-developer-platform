@@ -376,12 +376,29 @@ export interface EarnPortfolioYield {
 }
 
 export interface EarnPortfolioWithdrawalPreview {
-  /** USD decimal strings. */
+  /**
+   * USD decimal strings. Absent when the preview was asked WITHOUT an amount —
+   * the liquidity-read form, which answers `withdrawableUsd` for the lane and
+   * validates no particular request (PRO-1675).
+   */
   amountRequestedUsd?: string;
   feeUsd: string;
   withdrawableUsd: string;
   totalUsdAfterWithdrawal: string;
   processingEstimate?: EarnPortfolioProcessingEstimate;
+}
+
+/**
+ * A destination lane's balance breakdown, as reported alongside a provider's
+ * refusal to pay out more than it holds. Carried on `error.details.balance` of
+ * a 409 so the caller can say how short the request was instead of echoing
+ * provider wire text; every field is optional because it reflects whatever the
+ * provider actually sent. USD decimal strings, like every other Earn amount.
+ */
+export interface EarnPortfolioLiquidityBalance {
+  totalUsd?: string;
+  withdrawableUsd?: string;
+  reservedUsd?: string;
 }
 
 // API response envelopes (mirrors the asset-profiles response naming).

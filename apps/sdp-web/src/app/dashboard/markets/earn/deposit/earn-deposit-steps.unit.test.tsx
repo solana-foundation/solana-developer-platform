@@ -40,9 +40,12 @@ function strategy(partial: Partial<EarnStrategy> & { id: string }): EarnStrategy
   };
 }
 
-function wallet(partial: Partial<CustodyWalletSummary> = {}): CustodyWalletSummary {
+function wallet(
+  partial: Partial<Omit<CustodyWalletSummary, "custodyConfigId" | "custodyConnectionId">> = {}
+): CustodyWalletSummary {
   return {
     id: "cw_1",
+    custodyConfigId: "custody-config-1",
     walletId: "wallet_1",
     publicKey: "7M6bFdwsXQZX9MjoD4PDxQJb9FZbwdQh6VS8sK7F3WcQ",
     label: "Treasury Ops",
@@ -50,6 +53,7 @@ function wallet(partial: Partial<CustodyWalletSummary> = {}): CustodyWalletSumma
     status: "active",
     createdAt: TIMESTAMP,
     provider: "fireblocks",
+    isRuntimeExecutionAllowed: true,
     ...partial,
   };
 }

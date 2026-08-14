@@ -149,11 +149,12 @@ Practical notes:
 - **Don't "fix" the $0 by pointing the seed at a funded sandbox wallet.** The
   funded ones hold USDT cash on a non-Solana rail, and Ground enforces the lane
   split at the API: USDC→Solana returns `409 insufficient_funds` (lane
-  withdrawable `0`) while USDT is refused on Solana entirely. Because
-  `balance.withdrawableUsd` is a wallet-level total and the withdraw modal caps on
-  it, such a wallet shows a withdrawable balance SDP cannot withdraw and a "max"
-  button that 409s — which reads as an SDP bug and is not one. A zero you can act
+  withdrawable `0`) while USDT is refused on Solana entirely. A zero you can act
   on beats a balance you cannot.
+  Since PRO-1675 the withdraw modal no longer *compounds* this by capping on the
+  wallet-level `balance.withdrawableUsd`: it asks the provider per lane and
+  quotes that. The "max button that 409s" this note used to warn about is gone —
+  if you see one again, the client-side estimate has been reintroduced.
 
 ### 5. The last gate: org entitlement
 
@@ -231,6 +232,22 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
   mock USDT and Ground's sandbox faucet (`POST /v2/sandbox/faucets/usdt`) are
   Sepolia-only, so exercising the Solana lane locally means devnet USDC to the
   wallet's deposit address (§4b).
+- **The withdrawal preview takes an OPTIONAL amount** (PRO-1675).
+  `EarnPortfolioWithdrawalPreviewInput.amountUsd` may be omitted to ask the
+  liquidity question; a provider client must then OMIT the field from its wire
+  call, never send `null` or `0`. Two Ground sandbox behaviours were measured on
+  2026-08-13 and **neither matches its published contract** — do not "fix" them
+  without re-measuring:
+  1. The docs say omitting `amountUsd` returns the maximum withdrawable. Sandbox
+     instead answers **409** — but carries the lane's `balance` breakdown, so
+     the number still arrives, on the error path. That is why
+     `groundWithdrawalLiquidityDetails` lifts it onto `SdpEarnError.details` and
+     why the dashboard treats a 409-with-balance as a resolved read rather than
+     a failure.
+  2. `withdrawableUsd` is a **balance, not a fillable amount**. A lane reporting
+     `20.001241` answers 200 for `20.00` and **409 for `20.001241` itself**.
+     Anything offering a one-click max must floor to whole cents; the dashboard
+     does (`floorUsdToCents`) while still permitting a hand-typed larger amount.
 - Withdrawal approval is **policy-conditional, not default** (resolved
   2026-08-05 — README → "Withdrawals unwind in reverse"). A payout leg parked
   in `pending_customer_approval` must surface as the `pending_approval` wire

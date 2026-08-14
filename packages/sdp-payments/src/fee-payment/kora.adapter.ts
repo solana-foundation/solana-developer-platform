@@ -11,11 +11,16 @@ import {
   getTransactionDecoder,
   type Signature,
 } from "@solana/kit";
-import { KoraClient, type KoraClientOptions } from "@solana/kora";
-import type { FeePaymentPort } from "./port";
+import {
+  type Config,
+  type FeePayerPolicy,
+  KoraClient,
+  type KoraClientOptions,
+  type SignAndSendTransactionRequest,
+  type SignTransactionRequest,
+} from "@solana/kora";
+import type { FeePaymentPort, SponsorshipProviderConfiguration } from "./port";
 import { FeePaymentError } from "./port";
-
-type SignRequest = { transaction: string; user_id: string };
 
 interface KoraClientTransport {
   getPayerSigner(): Promise<{
@@ -23,15 +28,16 @@ interface KoraClientTransport {
     payment_address?: string;
     payerSigner?: string;
   }>;
-  signTransaction(request: SignRequest): Promise<{ signed_transaction: string }>;
+  signTransaction(request: SignTransactionRequest): Promise<{ signed_transaction: string }>;
   signAndSendTransaction(
-    request: SignRequest
+    request: SignAndSendTransactionRequest
   ): Promise<{ signature?: string; signed_transaction: string }>;
   estimateTransactionFee(request: {
     transaction: string;
     fee_token: string;
   }): Promise<{ fee_in_lamports: number | string }>;
   getSupportedTokens(): Promise<{ tokens: string[] }>;
+  getConfig(): Promise<Config>;
 }
 
 export type KoraAdapterConfig = KoraClientOptions & {
@@ -148,7 +154,7 @@ export class KoraAdapter implements FeePaymentPort {
       const base64Tx = encodeBase64(transaction);
 
       const { signed_transaction } = await this.client.signTransaction(
-        this.buildSignRequest(base64Tx)
+        await this.buildSignRequest(base64Tx)
       );
 
       return decodeBase64(signed_transaction);
@@ -172,7 +178,7 @@ export class KoraAdapter implements FeePaymentPort {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         const { signature: submittedSignature, signed_transaction } =
-          await this.client.signAndSendTransaction(this.buildSignRequest(base64Tx));
+          await this.client.signAndSendTransaction(await this.buildSendRequest(base64Tx));
 
         if (submittedSignature) {
           return submittedSignature as Signature;
@@ -235,13 +241,48 @@ export class KoraAdapter implements FeePaymentPort {
     }
   }
 
+  async getSponsorshipConfiguration(): Promise<SponsorshipProviderConfiguration> {
+    try {
+      const [signerAddress, config] = await Promise.all([
+        this.getFeePayer(),
+        this.client.getConfig(),
+      ]);
+      const validationConfig = config?.validation_config;
+      if (!validationConfig) {
+        throw new Error("Kora getConfig omitted validation_config");
+      }
+      const { max_allowed_lamports, fee_payer_policy } = validationConfig;
+      if (max_allowed_lamports === undefined || max_allowed_lamports === null) {
+        throw new Error("Kora getConfig omitted validation_config.max_allowed_lamports");
+      }
+      const maxAllowedLamports = BigInt(max_allowed_lamports);
+      if (maxAllowedLamports < 0n) {
+        throw new Error("Kora returned a negative max_allowed_lamports");
+      }
+      return {
+        signerAddress,
+        maxAllowedLamports,
+        feePayerMayTransferLamports: policyMaySpendLamports(fee_payer_policy),
+        feePayerPolicy: fee_payer_policy,
+      };
+    } catch (error) {
+      if (error instanceof FeePaymentError) throw error;
+      throw this.wrapError(error, "Failed to read Kora sponsorship configuration");
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // Private Methods
   // ═══════════════════════════════════════════════════════════════════════════
 
   /** Always attach a quota identity to signing requests. */
-  private buildSignRequest(transaction: string): { transaction: string; user_id: string } {
-    return { transaction, user_id: this.userId };
+  private async buildSignRequest(transaction: string): Promise<SignTransactionRequest> {
+    return { transaction, user_id: this.userId, signer_key: await this.getFeePayer() };
+  }
+
+  /** Send requests additionally pin the earliest durable response milestone. */
+  private async buildSendRequest(transaction: string): Promise<SignAndSendTransactionRequest> {
+    return { ...(await this.buildSignRequest(transaction)), respond_after: "sent" };
   }
 
   private async resolveFeeToken(): Promise<string> {
@@ -304,6 +345,61 @@ function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown error";
 }
 
+// Managed sponsorship assumes zero additional lamport outflow only when every
+// authority Kora reports is explicitly disabled. Checking the values rather than
+// pinning the schema keeps a newly added authority meaningful: one that arrives
+// disabled is still proof of zero outflow, while one that arrives enabled fails
+// closed even though this code has never heard of it.
+function policyMaySpendLamports(policy: FeePayerPolicy): boolean {
+  return !(reportsRequiredAuthorities(policy) && everyAuthorityDisabled(policy));
+}
+
+// Kora reports its policy as JSON, so anything that is not a plain object with
+// its authorities as own properties is not a policy this code can vouch for.
+// Reading inherited or hidden members would let an empty-looking payload pass
+// as proof of zero outflow while carrying an enabled authority out of sight.
+function isPlainRecord(value: unknown): value is Record<PropertyKey, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+const REQUIRED_DISABLED_AUTHORITIES = [
+  ["system", "allow_transfer"],
+  ["system", "allow_assign"],
+  ["system", "allow_create_account"],
+  ["system", "allow_allocate"],
+  ["system", "nonce", "allow_withdraw"],
+  ["spl_token", "allow_transfer"],
+  ["spl_token", "allow_close_account"],
+  ["token_2022", "allow_transfer"],
+  ["token_2022", "allow_close_account"],
+] as const;
+
+// A policy Kora truncated, or one this code failed to parse, must not read as
+// proof of zero outflow: the authorities that move lamports have to be present
+// and explicitly disabled before the rest of the report is worth checking.
+function reportsRequiredAuthorities(policy: FeePayerPolicy): boolean {
+  return REQUIRED_DISABLED_AUTHORITIES.every((path) => {
+    let current: unknown = policy;
+    for (const key of path) {
+      if (!isPlainRecord(current) || !Object.hasOwn(current, key)) return false;
+      current = current[key];
+    }
+    return current === false;
+  });
+}
+
+function everyAuthorityDisabled(value: unknown): boolean {
+  if (typeof value === "boolean") return value === false;
+  if (!isPlainRecord(value)) return false;
+  const keys: PropertyKey[] = [
+    ...Object.getOwnPropertyNames(value),
+    ...Object.getOwnPropertySymbols(value),
+  ];
+  return keys.every((key) => everyAuthorityDisabled(value[key]));
+}
+
 function extractRpcErrorCode(error: unknown): number | undefined {
   if (!(error instanceof Error)) return undefined;
   const match = /RPC Error (-?\d+):/.exec(error.message);
@@ -346,7 +442,6 @@ function mapKoraErrorCode(code: number): import("./port").FeePaymentErrorCode {
       return "RATE_LIMITED";
     case -32002:
       return "INSUFFICIENT_BALANCE";
-    case -32000:
     case -32600:
     case -32602:
       return "SIGNING_FAILED";
@@ -374,14 +469,14 @@ class AuthorizedKoraClient implements KoraClientTransport {
     );
   }
 
-  signTransaction(request: SignRequest) {
+  signTransaction(request: SignTransactionRequest) {
     return this.rpcRequest<Awaited<ReturnType<KoraClientTransport["signTransaction"]>>>(
       "signTransaction",
       request
     );
   }
 
-  signAndSendTransaction(request: SignRequest) {
+  signAndSendTransaction(request: SignAndSendTransactionRequest) {
     return this.rpcRequest<Awaited<ReturnType<KoraClientTransport["signAndSendTransaction"]>>>(
       "signAndSendTransaction",
       request
@@ -399,6 +494,10 @@ class AuthorizedKoraClient implements KoraClientTransport {
     return this.rpcRequest<Awaited<ReturnType<KoraClientTransport["getSupportedTokens"]>>>(
       "getSupportedTokens"
     );
+  }
+
+  getConfig() {
+    return this.rpcRequest<Config>("getConfig");
   }
 
   private async rpcRequest<T>(method: string, params?: unknown): Promise<T> {
