@@ -7,6 +7,22 @@ architecture is deliberately multi-provider — every Ground-specific detail
 lives behind a provider-neutral seam so that adding infra provider #2 (or new
 curators, or new vaults) is a contained, checklist-driven change.
 
+Two provider SHAPES now live here, and the difference decides which seams a new
+integration touches:
+
+| | **Custodial portfolio** (Ground) | **Catalogue-only** (Kamino) |
+|---|---|---|
+| Money model | SDP provisions an omnibus wallet; the provider spreads funds across sources | Non-custodial — the customer's own wallet deposits into an on-chain vault |
+| Contract | `EarnVaultProvider` + `EarnPortfolioWalletProvider` (+ approvals) | `EarnVaultProvider` + `EarnLiveMetricsProvider` |
+| `/v1/earn/programs` | the whole flow | **501** by capability detection |
+| Credential | `GROUND_API_KEY` / `GROUND_SANDBOX_API_KEY` | none — public data API |
+| Clusters | catalogued per environment's own cluster | **mainnet only**, catalogued into both |
+| Dashboard | the deposit wizard | not shown — API surface only |
+
+A catalogue-only provider is a complete integration, not a partial one: there is
+no wallet to provision, so `supportsPortfolioWallets` returning false is the
+answer, not a TODO. See CLAUDE.md → "Two provider shapes".
+
 Companion docs:
 
 - [ADR 0002 — Earn provider pluggability](../../docs/decisions/0002-earn-provider-pluggability.md)
@@ -318,9 +334,49 @@ apps/sdp-web/src/app/
   api/dashboard/markets/earn/      BFF proxies to /v1/earn/*.
 ```
 
-## Catalogue data: the sync cron vs the dev seed
+## Catalogue data: the sync cron vs the metrics refresh vs the dev seed
 
-Two things write `earn_strategies`, and only one of them is a production path.
+Three things write `earn_strategies`; two of them are production paths, and they
+split by how fast the thing they write actually moves.
+
+### The metrics refresh — the fast half
+
+`apps/sdp-api/src/cron/earn-metrics-refresh.ts`
+
+- **What it does:** for every provider implementing the optional live-metrics
+  capability (`supportsLiveMetrics`), pulls the whole shelf's current figures in
+  one or two calls and rewrites `current_apy` plus volatile `risk_metadata`
+  (TVL, holders) on rows the catalogue already holds.
+- **When it runs:** every 5 minutes (`EARN_METRICS_REFRESH_CRON`), on both
+  schedulers behind the same `isEarnEnabled` gate. Unslotted on the managed job
+  — that job's own five-minute schedule IS the cadence — and entered through
+  `runEarnMetricsRefreshTick` so it reports to its own Sentry cron monitor.
+  That monitor is the point: "the refresh silently stopped running" is this
+  pass's worst failure (rates quietly go stale) and is invisible from the
+  catalogue sync's monitor.
+- **Ordered BEFORE the catalogue sync in the managed job**, which also protects
+  the sync: `runEarnCatalogueSyncIfDue` claims its hourly Redis slot before any
+  provider call, and a stall after that claim would hold the slot for its full
+  TTL (~59 min). Running the unslotted half first means a provider stall happens
+  before any slot exists to burn.
+- **What it cannot do**, and this is the whole safety argument:
+  - **Insert.** `updateStrategyMetrics` matches on
+    (provider, provider_reference, environment) and no-ops otherwise, so a
+    provider reporting figures for a vault the catalogue refused cannot admit
+    it. Every admission gate stays in the hourly sync below. Kamino reports 173
+    vaults each pass and 21 rows update — that gap is expected, not a warning.
+  - **Change what a strategy IS.** Its input carries the rate and volatile
+    metadata only; the metadata is MERGED, so `curator` survives.
+- **Why not read live at request time:** `GET /strategies` reads exactly one
+  source for the state it reports (ADR 0002, 2026-08-11 addendum), and an
+  overlay would blend two. Freshness comes from cadence, so every consumer —
+  API, dashboard, a partner's own cache — sees the same numbers.
+- **Ground does not implement it** on purpose: its rates arrive on the same
+  paged yield-sources endpoint the catalogue uses, so a five-minute pass would
+  re-pay the entire catalogue cost for the rate alone. Opting in is a promise
+  about cost as much as capability.
+
+### The sync cron and the dev seed
 
 ### The sync cron — the production path
 
