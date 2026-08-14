@@ -305,6 +305,21 @@ export async function fetchDashboardPaymentTransfersForWallets(
   };
 }
 
+/**
+ * Fetches the org's issued tokens keyed by mint address — the lookup shape
+ * `resolveTokenByMint` takes. A failed fetch degrades to an empty map so
+ * balance surfaces still render with well-known symbols.
+ *
+ * @param request - The authenticated SDP API request function.
+ * @returns The issued tokens keyed by mint address.
+ */
+export async function fetchIssuedTokensByMint(
+  request: SdpApiClient["request"]
+): Promise<Record<string, PaymentsIssuedTokenSymbol>> {
+  const result = await fetchPaymentsIssuedTokenSymbols(request);
+  return Object.fromEntries((result.data ?? []).map((token) => [token.mintAddress, token]));
+}
+
 export async function fetchPaymentsIssuedTokenSymbols(
   request: SdpApiClient["request"],
   pageSize = 100

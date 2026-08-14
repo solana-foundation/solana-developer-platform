@@ -46,6 +46,9 @@ Release automation also reads these repository variables:
 - `RELEASE_APP_ID` — GitHub App ID used by release automation
 - `RELEASE_APP_PRIVATE_KEY` — corresponding GitHub App private key
 - `TRANSLATION_AGENT_USERNAME` and `TRANSLATION_AGENT_PASSWORD` — HTTP Basic credentials required when a release has missing UI translations
+
+### Production environment secrets
+
 - `VERCEL_TOKEN`, `VERCEL_ORG_ID`, and `VERCEL_PROJECT_ID` — Vercel CLI credentials used by the sdp-web production deployment
 
 The release GitHub App needs `contents: write` and `pull_requests: write`, and it must be allowed to maintain the generated release branch and enable auto-merge.
@@ -109,12 +112,12 @@ Auto-merge is enabled, but branch protection still requires review approval and 
 
 ### 3. Deploy and publish production
 
-Merging the release pull request creates a `chore(main): release X.Y.Z` commit on `main`. That push runs [`release-please.yml`](../../.github/workflows/release-please.yml), which creates the `vX.Y.Z` tag, publishes the GitHub release, resolves the tag to the exact `main` commit, and then calls two independent production deployments with that immutable tag and SHA:
+Merging the release pull request creates a `chore(main): release X.Y.Z` commit on `main`. That push runs [`release-please.yml`](../../.github/workflows/release-please.yml), which creates the `vX.Y.Z` tag, publishes the GitHub release, resolves the tag to the exact `main` commit, and then starts two independent production deployments with that immutable tag and SHA:
 
 - [`deploy-sdp-api-gcp-prod.yml`](../../.github/workflows/deploy-sdp-api-gcp-prod.yml) deploys the production API.
-- [`deploy-sdp-web-vercel-prod.yml`](../../.github/workflows/deploy-sdp-web-vercel-prod.yml) deploys sdp-web to Vercel production.
+- The `deploy-web-production` job in [`release-please.yml`](../../.github/workflows/release-please.yml) deploys sdp-web to Vercel production. [`deploy-sdp-web-vercel-prod.yml`](../../.github/workflows/deploy-sdp-web-vercel-prod.yml) remains the manual recovery path.
 
-Both called workflows retain the `main` event context required by the `production` environment. Before using production credentials, they verify that the checked-out SHA matches the published tag, belongs to `origin/main`, and has the matching version in `package.json`.
+Both deployments retain the `main` event context required by the `production` environment. Before using production credentials, they verify that the checked-out SHA matches the published tag, belongs to `origin/main`, and has the matching version in `package.json`. The web deployment is a normal job in the release workflow so its Vercel credentials remain scoped to the protected `production` environment; they are not inherited across a reusable-workflow boundary.
 
 The production deploy workflow:
 

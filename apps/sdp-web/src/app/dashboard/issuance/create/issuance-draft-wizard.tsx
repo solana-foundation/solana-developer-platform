@@ -109,7 +109,7 @@ function renderStep(
 function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardProps) {
   const t = useTranslations();
   const router = useRouter();
-  const { draft, updateDraft, currentStep, updatedAt, advance, goBack, reset, clearStoredDraft } =
+  const { draft, updateDraft, currentStep, advance, goBack, reset, clearStoredDraft } =
     useIssuanceDraft();
   const [submitting, setSubmitting] = useState(false);
   // Gates the Create-draft action behind a confirmation dialog, so it never
@@ -310,7 +310,7 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
               </p>
             </div>
           ) : null}
-          <div className={showRail ? "grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px]" : undefined}>
+          <div className={showRail ? "grid gap-8 lg:grid-cols-[minmax(0,1fr)_420px]" : undefined}>
             <div className="min-w-0">
               <AnimatePresence mode="wait">
                 {renderStep(currentStep, signerWallets, signerWalletsError, attemptedAdvance)}
@@ -322,11 +322,7 @@ function WizardShell({ signerWallets, signerWalletsError }: IssuanceDraftWizardP
                 {/* On Review the rail surfaces blockers / readiness state, so it
                     must stay visible below `lg` too — only the Asset-details
                     step's summary card hides on small screens. */}
-                <DraftSummaryRail
-                  draft={draft}
-                  updatedAt={updatedAt}
-                  review={isReview ? { blockers } : undefined}
-                />
+                <DraftSummaryRail draft={draft} review={isReview ? { blockers } : undefined} />
               </div>
             ) : null}
           </div>

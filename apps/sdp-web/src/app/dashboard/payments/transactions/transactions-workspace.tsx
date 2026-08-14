@@ -230,7 +230,7 @@ function AdvancedFilters({
 
   return (
     <div
-      className="grid gap-2 border-t border-border-default bg-fill-subtle p-3 sm:grid-cols-2 xl:grid-cols-4"
+      className="grid gap-2 bg-fill-subtle p-3 sm:grid-cols-2 xl:grid-cols-4"
       data-transaction-advanced-filters
     >
       <SelectFilter
