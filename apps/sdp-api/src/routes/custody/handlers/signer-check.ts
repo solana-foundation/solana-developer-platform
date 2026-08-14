@@ -18,6 +18,7 @@ import { getDb } from "@/db";
 import { type ApiKeyContext, getAuth } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
@@ -35,6 +36,9 @@ import { type SignerCheckResponse, signerCheckSchema } from "../schemas";
 const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr" as Address;
 const KORA_MEMO_ALLOWED_PROGRAM_HINT =
   "Add MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr to Kora validation.allowed_programs.";
+
+/** Fail-closed ceilings for the fee-paying signer check, per actor and per org. */
+const SIGNER_CHECK_QUOTA = { name: "signer-check", actorMax: 10, orgMax: 30 } as const;
 
 type SignerCheckBody = z.output<typeof signerCheckSchema>;
 
@@ -117,6 +121,11 @@ export const signerCheck = async (c: AppContext) => {
   const {
     resolved: { auth, resolvedWalletId, memo },
   } = getPolicyGateContext<SignerCheckBody, SignerCheckPolicyResolved>(c);
+
+  // Metered here rather than as route middleware: reaching this handler is
+  // what proves the request cleared the policy gate and will actually spend
+  // fees, so a denied call cannot drain the org's shared quota.
+  await enforceMeteredQuota(c, SIGNER_CHECK_QUOTA);
 
   try {
     const signer = await createOrgSigner(

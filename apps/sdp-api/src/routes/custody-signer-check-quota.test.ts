@@ -75,23 +75,29 @@ describe("Signer check route — metered quota", () => {
     expect(await readRateLimitCount(env, ORG_COUNTER)).toBe(0);
   });
 
-  it("429s an authorized caller once the actor quota is exhausted", async () => {
+  // A caller that clears the permission gate but never reaches the fee-paying
+  // handler (here an unbound signing wallet, the same shape as a policy
+  // denial) must not spend the shared quota, or one misconfigured key could
+  // lock every other key in the org out of signer checks.
+  it("does not charge quota counters when the request never reaches the handler", async () => {
     await seedKey(["wallets:write"]);
-    await seedRateLimit(env, ACTOR_COUNTER, 10);
 
     const res = await requestSignerCheck();
 
-    expect(res.status).toBe(429);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("RATE_LIMITED");
+    expect(res.status).toBe(400);
+    expect(await readRateLimitCount(env, ACTOR_COUNTER)).toBe(0);
+    expect(await readRateLimitCount(env, ORG_COUNTER)).toBe(0);
   });
 
-  it("429s an authorized caller once the org-wide quota is exhausted", async () => {
+  it("does not 429 a request that stops before the fee-paying handler", async () => {
     await seedKey(["wallets:write"]);
+    await seedRateLimit(env, ACTOR_COUNTER, 10);
     await seedRateLimit(env, ORG_COUNTER, 30);
 
     const res = await requestSignerCheck();
 
-    expect(res.status).toBe(429);
+    // Exhausted counters no longer reject a call that was never going to
+    // broadcast; the ceiling applies at the handler, where fees are spent.
+    expect(res.status).toBe(400);
   });
 });
