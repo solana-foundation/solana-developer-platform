@@ -644,13 +644,15 @@ export function validatePolicyState(state: PolicyAuthoringState): PolicyValidati
     }
   }
 
-  const limitAssets = state.limits.map((limit) => limit.asset.trim());
-  if (state.limits.some((limit) => !isValidSolanaAddress(limit.asset))) {
-    errors.limits = "invalid_asset";
-  } else if (new Set(limitAssets).size !== limitAssets.length) {
-    errors.limits = "duplicate_asset";
-  } else if (state.limits.some((limit) => !isValidDecimal(limit.max))) {
-    errors.limits = "invalid_decimal";
+  if (categories.has("limits")) {
+    const limitAssets = state.limits.map((limit) => limit.asset.trim());
+    if (state.limits.some((limit) => !isValidSolanaAddress(limit.asset))) {
+      errors.limits = "invalid_asset";
+    } else if (new Set(limitAssets).size !== limitAssets.length) {
+      errors.limits = "duplicate_asset";
+    } else if (state.limits.some((limit) => !isValidDecimal(limit.max))) {
+      errors.limits = "invalid_decimal";
+    }
   }
 
   if (categories.has("assets") && state.assets.some((asset) => !isValidSolanaAddress(asset))) {

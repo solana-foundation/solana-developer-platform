@@ -804,6 +804,7 @@
     "onboardingDoneGoToDashboard": "Go to dashboard",
     "onboardingDoneViewWallets": "View wallets",
     "providerRequestAccess": "Request access",
-    "byokRetrySubmit": "Retry submission"
+    "byokRetrySubmit": "Retry submission",
+    "policyAmountPlaceholder": "0.00"
   }
 }

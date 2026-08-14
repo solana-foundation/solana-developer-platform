@@ -177,7 +177,7 @@ function PolicyLimitRow({
         <Input
           value={limit.max}
           inputMode="decimal"
-          placeholder="0.00"
+          placeholder={t("DashboardCustody.policyAmountPlaceholder")}
           className="w-32 text-right"
           aria-label={`${t("DashboardCustody.policyPerTransaction")} ${label}`}
           aria-invalid={invalidMax}

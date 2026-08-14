@@ -78,6 +78,10 @@ describe("wallet policy authoring", () => {
 
     state.limits = [{ asset: ADDRESS_A, max: "0.5" }];
     expect(validatePolicyState(state).limits).toBeUndefined();
+
+    state.categories = [];
+    state.limits = [{ asset: "not-a-mint", max: "1.2.3" }];
+    expect(validatePolicyState(state).limits).toBeUndefined();
   });
 
   it("parses comma-separated destinations, de-duplicates, and reports invalid entries", () => {
