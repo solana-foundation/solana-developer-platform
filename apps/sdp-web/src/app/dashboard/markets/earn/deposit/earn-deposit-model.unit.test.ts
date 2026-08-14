@@ -5,12 +5,12 @@ import {
   DEFAULT_STRATEGY_SORT,
   fundableStrategies,
   nextStrategySort,
+  opportunityDepositability,
   rankedFundableStrategies,
   rankedStrategies,
   singleStrategyAllocation,
   sortStrategies,
   strategyDepositEligibility,
-  vaultDepositability,
 } from "./earn-deposit-model";
 
 const TIMESTAMP = "2026-07-18T09:00:00.000Z";
@@ -97,13 +97,14 @@ describe("fundableStrategies", () => {
 });
 
 /**
- * The Vaults tab's per-row verb. Greptile caught the gap these pin: checking
+ * The Opportunities tab's per-row verb. Greptile caught the gap these pin:
+ * checking
  * only cluster + token let a PRODUCTION Kamino row render an enabled Deposit
  * link straight into `EarnDepositUnavailable`, because the route it points at
  * creates custodial programs only. Sandbox hid it — every Kamino row is
  * `wrong-cluster` there — so the third check has to be asserted, not eyeballed.
  */
-describe("vaultDepositability", () => {
+describe("opportunityDepositability", () => {
   it("refuses a fundable vault-direct vault: SDP has no route for its deposit", () => {
     const kamino = strategy({
       id: "kamino-production",
@@ -113,13 +114,16 @@ describe("vaultDepositability", () => {
       fundable: true,
     });
 
-    expect(vaultDepositability(kamino)).toEqual({ kind: "no-sdp-route", style: "vault_direct" });
+    expect(opportunityDepositability(kamino)).toEqual({
+      kind: "no-sdp-route",
+      style: "vault_direct",
+    });
   });
 
   it("refuses a custodial vault while no custodial provider is offered", () => {
     // Ground is un-surfaced, so EARN_PROGRAM_CREATION_ENABLED is false and the
     // deposit route answers with its unavailable notice.
-    expect(vaultDepositability(strategy({ id: "ground-devnet" }))).toEqual({
+    expect(opportunityDepositability(strategy({ id: "ground-devnet" }))).toEqual({
       kind: "no-sdp-route",
       style: "custodial",
     });
@@ -133,11 +137,13 @@ describe("vaultDepositability", () => {
       fundable: false,
     });
 
-    expect(vaultDepositability(kamino)).toEqual({ kind: "wrong-cluster" });
+    expect(opportunityDepositability(kamino)).toEqual({ kind: "wrong-cluster" });
   });
 
   it("reports an unroutable mint once the cluster is fine", () => {
-    expect(vaultDepositability(strategy({ id: "odd", depositMints: [UNROUTABLE_MINT] }))).toEqual({
+    expect(
+      opportunityDepositability(strategy({ id: "odd", depositMints: [UNROUTABLE_MINT] }))
+    ).toEqual({
       kind: "asset-unsupported",
     });
   });

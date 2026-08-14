@@ -20,8 +20,8 @@ import {
   type EarnStrategySort,
   type EarnStrategySortColumn,
   nextStrategySort,
+  opportunityDepositability,
   sortStrategies,
-  vaultDepositability,
 } from "./deposit/earn-deposit-model";
 import { formatApy, formatUsdCompact } from "./earn-format";
 import {
@@ -86,15 +86,15 @@ function SortableColumnHeader({
  * `?strategy=<id>`, so a row is shareable, middle-clickable, and the wizard can
  * be entered directly without this table having to hand state across a route.
  */
-function VaultRow({ strategy }: { strategy: EarnStrategy }) {
+function OpportunityRow({ strategy }: { strategy: EarnStrategy }) {
   const t = useTranslations();
   const liquidityLabel = useLiquidityLabel();
-  const nameId = `earn-vault-${strategy.id}-name`;
+  const nameId = `earn-opportunity-${strategy.id}-name`;
   const token = strategyToken(strategy);
   const poolUsd = strategyPoolUsd(strategy);
   const sourceLabel = strategySourceLabel(strategy);
   const curatorLabel = strategyCuratorLabel(strategy);
-  const depositable = vaultDepositability(strategy);
+  const depositable = opportunityDepositability(strategy);
 
   // Provider metadata, not a gate: protocol and curating house are deduped,
   // because "Maple · Curated by Maple" says one thing twice.
@@ -122,8 +122,8 @@ function VaultRow({ strategy }: { strategy: EarnStrategy }) {
             // whether waiting or looking elsewhere is the move.
             t(
               depositable.style === "vault_direct"
-                ? "DashboardEarn.vaults.depositDirectOnly"
-                : "DashboardEarn.vaults.depositProviderClosed"
+                ? "DashboardEarn.opportunities.depositDirectOnly"
+                : "DashboardEarn.opportunities.depositProviderClosed"
             )
           : null;
 
@@ -180,7 +180,7 @@ function VaultRow({ strategy }: { strategy: EarnStrategy }) {
         {depositable.kind === "depositable" ? (
           <Button asChild size="sm" variant="secondary">
             <Link href={`${DEPOSIT_PATH}?strategy=${encodeURIComponent(strategy.id)}`}>
-              {t("DashboardEarn.vaults.deposit")}
+              {t("DashboardEarn.opportunities.deposit")}
             </Link>
           </Button>
         ) : (
@@ -189,7 +189,7 @@ function VaultRow({ strategy }: { strategy: EarnStrategy }) {
           // `title` carries the reason to a pointer, since the badge sits in a
           // different column.
           <Button disabled size="sm" title={blockedLabel ?? undefined} variant="secondary">
-            {t("DashboardEarn.vaults.deposit")}
+            {t("DashboardEarn.opportunities.deposit")}
           </Button>
         )}
       </TableCell>
@@ -198,15 +198,15 @@ function VaultRow({ strategy }: { strategy: EarnStrategy }) {
 }
 
 /**
- * The Vaults tab: every strategy SDP currently lists, ranked, each with the verb
- * that deposits into it.
+ * The Opportunities tab: every strategy SDP currently lists, ranked, each with
+ * the verb that deposits into it.
  *
  * The catalogue arrives already filtered by the API — un-surfaced providers and
  * hidden sources never reach the browser — so this renders what it is handed and
  * never re-applies a visibility rule. What it DOES decide is per-row
- * depositability, which is a different question (`vaultDepositability`).
+ * depositability, which is a different question (`opportunityDepositability`).
  */
-export function EarnVaultsTable({ strategies }: { strategies: readonly EarnStrategy[] }) {
+export function EarnOpportunitiesTable({ strategies }: { strategies: readonly EarnStrategy[] }) {
   const t = useTranslations();
   const [sort, setSort] = useState<EarnStrategySort>(DEFAULT_STRATEGY_SORT);
   const rows = useMemo(() => sortStrategies(strategies, sort), [strategies, sort]);
@@ -251,13 +251,13 @@ export function EarnVaultsTable({ strategies }: { strategies: readonly EarnStrat
               sort={sort}
             />
             <TableHead align="right" className="w-[12%]">
-              <span className="sr-only">{t("DashboardEarn.vaults.columnAction")}</span>
+              <span className="sr-only">{t("DashboardEarn.opportunities.columnAction")}</span>
             </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {rows.map((strategy) => (
-            <VaultRow key={strategy.id} strategy={strategy} />
+            <OpportunityRow key={strategy.id} strategy={strategy} />
           ))}
         </TableBody>
       </Table>

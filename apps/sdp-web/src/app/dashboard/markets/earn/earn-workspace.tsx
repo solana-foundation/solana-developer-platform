@@ -19,6 +19,7 @@ import { useCopy } from "@/lib/use-copy";
 import type { PlaygroundApiKeyView } from "../../playground-api-data";
 import { shortenAddress } from "./deposit/earn-funding-wallets";
 import { formatApy, formatUsd } from "./earn-format";
+import { EarnOpportunitiesTable } from "./earn-opportunities-table";
 import { EarnPlayground } from "./earn-playground";
 import {
   EARN_PROGRAM_CREATION_ENABLED,
@@ -36,7 +37,6 @@ import {
   strategySourceLabel,
   useLiquidityLabel,
 } from "./earn-program-presentation";
-import { EarnVaultsTable } from "./earn-vaults-table";
 import { EarnWithdrawModal } from "./earn-withdraw-modal";
 
 const DEPOSIT_PATH = "/dashboard/markets/earn/deposit";
@@ -562,14 +562,14 @@ export function EarnPositionsPanel() {
 
 /**
  * The two things a reader comes to Earn for: what they could hold, and what they
- * do hold. Vaults leads because it is the only one that is never empty.
+ * do hold. Opportunities leads because it is the only one that is never empty.
  *
  * Real `tablist`/`tab` semantics, unlike the `aria-pressed` action pills this
  * borrows its look from — these switch between two panels rather than firing an
  * action, so arrow-key roving and `aria-controls` are what a screen reader
  * expects.
  */
-const EARN_TABS = ["vaults", "positions", "playground"] as const;
+const EARN_TABS = ["opportunities", "positions", "playground"] as const;
 export type EarnTab = (typeof EARN_TABS)[number];
 
 function EarnTabBar({
@@ -583,7 +583,7 @@ function EarnTabBar({
 }) {
   const t = useTranslations();
   const labels: Record<EarnTab, string> = {
-    vaults: t("DashboardEarn.tabs.vaults"),
+    opportunities: t("DashboardEarn.tabs.opportunities"),
     playground: t("DashboardEarn.tabs.playground"),
     // The count is the point of the tab — it answers "do I hold anything"
     // without switching to find out. Undefined while the read is in flight; a
@@ -661,28 +661,28 @@ function EarnTabBar({
 }
 
 /**
- * Vaults — the shelf. Renders whatever the API returned, which is already
+ * Opportunities — the shelf. Renders whatever the API returned, which is already
  * filtered to surfaced providers and visible sources; this never re-applies a
  * visibility rule (a browser-side copy is what drifts).
  */
-export function EarnVaultsPanel() {
+export function EarnOpportunitiesPanel() {
   const t = useTranslations();
   const { strategies, error, isLoading } = useEarnStrategies();
 
   return (
     <section
-      aria-labelledby="earn-tab-vaults"
+      aria-labelledby="earn-tab-opportunities"
       className="rounded-xl border border-border-default bg-surface-raised p-6"
-      id="earn-panel-vaults"
+      id="earn-panel-opportunities"
       role="tabpanel"
     >
       <h2 className="text-base font-medium tracking-tight text-primary">
-        {t("DashboardEarn.vaults.title")}
+        {t("DashboardEarn.opportunities.title")}
       </h2>
       {/* No max-width: the panel is already the measure, and a `max-w-*` here
           wrapped a line with half the panel still empty beside it. */}
       <p className="mt-1 text-sm leading-6 text-secondary">
-        {t("DashboardEarn.vaults.description")}
+        {t("DashboardEarn.opportunities.description")}
       </p>
 
       <div className="mt-6">
@@ -693,7 +693,7 @@ export function EarnVaultsPanel() {
             {t("DashboardEarn.overview.catalogueLoadError")}
           </p>
         ) : (
-          <EarnVaultsTable strategies={strategies ?? []} />
+          <EarnOpportunitiesTable strategies={strategies ?? []} />
         )}
       </div>
 
@@ -711,7 +711,7 @@ export function EarnWorkspace({
   apiBaseUrl?: string | null;
   apiKeys?: readonly PlaygroundApiKeyView[];
 } = {}) {
-  const [tab, setTab] = useState<EarnTab>("vaults");
+  const [tab, setTab] = useState<EarnTab>("opportunities");
   const { state } = useEarnPrograms();
   const positionCount = state?.kind === "ready" ? state.programs.length : undefined;
 
@@ -719,7 +719,7 @@ export function EarnWorkspace({
     // No root padding: the dashboard shell already pads non-viewport-locked routes.
     <div className="grid content-start gap-6">
       <EarnTabBar active={tab} onChange={setTab} positionCount={positionCount} />
-      {tab === "vaults" ? <EarnVaultsPanel /> : null}
+      {tab === "opportunities" ? <EarnOpportunitiesPanel /> : null}
       {tab === "positions" ? (
         <div
           aria-labelledby="earn-tab-positions"

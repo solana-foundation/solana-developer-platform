@@ -55,7 +55,7 @@ the body `requestId` form, which is the only one that can get through.
   V1 is single-vault (PRO-1667) — and the provider-reported `pct` is ignored.
   Deliberately **not** grouped by curator — see "One strategy, no curator step"
   below.
-- `earn-vaults-table.tsx` — the Vaults tab's catalogue table (Deposit per row).
+- `earn-opportunities-table.tsx` — the Opportunities tab's catalogue table (Deposit per row).
 - `earn-playground.tsx` / `earn-playground-config.ts` — the API Playground tab.
 - `earn-surfacing.ts` — `SURFACED_CUSTODIAL_EARN_PROVIDERS`,
   `EARN_PROGRAM_CREATION_ENABLED`, `EARN_PROGRAM_CREATE_PROVIDER`, all DERIVED
@@ -166,7 +166,7 @@ the body `requestId` form, which is the only one that can get through.
 
 ## The deposit flow (`deposit/`)
 
-ONE route, TWO run shapes, THREE user verbs. The verbs: **Deposit** (a Vaults
+ONE route, TWO run shapes, THREE user verbs. The verbs: **Deposit** (an Opportunities
 tab row — carries `?strategy=`), **Add strategy** (Positions section button,
 once one exists), and **Change strategy** (program card button — the only one
 that carries a `?program=`). The onboarding hero's "Set up Earn" is gone with
@@ -174,7 +174,7 @@ the hero.
 
 **Nothing in the UI may call this wizard a deposit that MOVES money** — it never
 does. It provisions a program; funding is the customer sending stablecoins to
-the address on the program card afterwards. The Vaults tab's Deposit verb is
+the address on the program card afterwards. The Opportunities tab's Deposit verb is
 named for what the reader wants, not for what the route executes, and the
 simplified wallet → amount → summary → hand-off flow that would make that name
 literal is NOT built yet (see the note at the end of this section).
@@ -186,7 +186,7 @@ different intents that look identical from that boolean.
 
 - Add run (no `?program=`): wallet → strategy → review, then
   `POST /programs`. Serves the first program and every later one identically —
-  "Deposit" (from a Vaults row, which pre-selects via `?strategy=`) and "Add
+  "Deposit" (from an Opportunities row, which pre-selects via `?strategy=`) and "Add
   strategy" are deliberately the same run, since a new program always wants
   funding context.
 - Re-target run (`?program=<id>` resolves to a program): strategy → review,
@@ -238,7 +238,7 @@ sentence about timing must trace to one of those.
 ### NOT BUILT: the simplified deposit run
 
 The intended shape is **Deposit → wallet → amount → summary → hand-off**, and it
-is not written. The Vaults tab's Deposit link still enters the wizard above
+is not written. The Opportunities tab's Deposit link still enters the wizard above
 (wallet → strategy → review). Two things constrain the design, both discovered
 rather than assumed:
 
@@ -335,10 +335,10 @@ funding instructions and nothing else — never imply a transfer happens.
 `issuance/.../action-pills.tsx`, but real tab semantics because these switch
 panels rather than fire actions):
 
-- **Vaults** (default) — `EarnVaultsPanel` → `earn-vaults-table.tsx`. The
+- **Opportunities** (default) — `EarnOpportunitiesPanel` → `earn-opportunities-table.tsx`. The
   catalogue, ranked, with a Deposit link per row. It renders what the API
   handed it and NEVER re-applies a visibility rule; per-row depositability is a
-  different question, answered by `vaultDepositability`.
+  different question, answered by `opportunityDepositability`.
 - **Positions** — `EarnPositionsPanel` (the old `ProgramsSection`): one card per
   program, aggregate strip above when there is more than one, withdraw modal.
   The tab label carries the count.
@@ -374,12 +374,12 @@ Never re-derive it from a provider id, and never add a second flag beside it:
 
 | Surface | Creation enabled | Creation disabled |
 |---|---|---|
-| Vaults tab | rows depositable per `vaultDepositability` | unchanged — the catalogue is browse, not create, so it never gates on this |
+| Opportunities tab | rows depositable per `opportunityDepositability` | unchanged — the catalogue is browse, not create, so it never gates on this |
 | Positions section header | "Add strategy" | hidden |
 | Program card | Withdraw + "Change strategy" | Withdraw only |
 | `/deposit` route | the wizard | `EarnDepositUnavailable` notice, returned by the server shell before it fetches anything |
 
-Note the Vaults row: `vaultDepositability` asks THREE questions in order —
+Note the Opportunities row: `opportunityDepositability` asks THREE questions in order —
 cluster, then token (both facts about the INSTRUMENT), then whether SDP has a
 deposit path for the provider's shape at all (`no-sdp-route`).
 
@@ -401,7 +401,7 @@ and the withdraw modal's focus-return fallback
 not on "Change strategy" which disappears with it.
 
 The onboarding hero (`StartSection`) that used to own the "Set up Earn" CTA is
-GONE — the Vaults tab is the landing surface now, so there is no empty state to
+GONE — the Opportunities tab is the landing surface now, so there is no empty state to
 route through. Its `startTitle`/`startStat*`/`browse*` message keys were removed
 with it; do not reintroduce them without reintroducing the component.
 

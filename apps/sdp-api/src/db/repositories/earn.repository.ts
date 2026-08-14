@@ -201,6 +201,23 @@ export interface ListEarnStrategiesInput {
    * caller can actually see.
    */
   providers?: readonly string[];
+  /**
+   * Server-owned per-vault denylist, as `<provider>:<providerReference>` keys.
+   *
+   * Keyed on the provider REFERENCE — a vault address — never on the name.
+   * Kamino's vault registry is permissionless and the name is free text chosen
+   * by whoever created the vault, so a name-keyed rule is one an outsider can
+   * dodge (rename) or trip (impersonate a curated vault's name).
+   */
+  excludeProviderKeys?: readonly string[];
+  /**
+   * Per-provider allowlists: `{ kamino: [ref, ...] }` shows ONLY those
+   * references for that provider and hides the rest of its shelf. A provider
+   * absent from this map is unrestricted; a provider mapped to an EMPTY array
+   * shows nothing, which is the literal reading of an empty allowlist and is
+   * pinned by a repository test.
+   */
+  allowedProviderReferences?: Readonly<Record<string, readonly string[]>>;
   limit: number;
   offset: number;
 }

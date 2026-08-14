@@ -51,10 +51,10 @@ describe("Earn tab strip keyboard navigation", () => {
     const user = userEvent.setup();
     render(<EarnWorkspace />);
 
-    const vaults = tab("DashboardEarn.tabs.vaults");
-    expect(vaults.getAttribute("aria-selected")).toBe("true");
+    const opportunities = tab("DashboardEarn.tabs.opportunities");
+    expect(opportunities.getAttribute("aria-selected")).toBe("true");
 
-    vaults.focus();
+    opportunities.focus();
     await user.keyboard("{ArrowRight}");
     expect(selected("DashboardEarn.tabs.positions")).toBe("true");
 
@@ -63,7 +63,7 @@ describe("Earn tab strip keyboard navigation", () => {
 
     // Wraps forward off the end...
     await user.keyboard("{ArrowRight}");
-    expect(selected("DashboardEarn.tabs.vaults")).toBe("true");
+    expect(selected("DashboardEarn.tabs.opportunities")).toBe("true");
 
     // ...and backward off the start.
     await user.keyboard("{ArrowLeft}");
@@ -74,12 +74,12 @@ describe("Earn tab strip keyboard navigation", () => {
     const user = userEvent.setup();
     render(<EarnWorkspace />);
 
-    tab("DashboardEarn.tabs.vaults").focus();
+    tab("DashboardEarn.tabs.opportunities").focus();
     await user.keyboard("{End}");
     expect(selected("DashboardEarn.tabs.playground")).toBe("true");
 
     await user.keyboard("{Home}");
-    expect(selected("DashboardEarn.tabs.vaults")).toBe("true");
+    expect(selected("DashboardEarn.tabs.opportunities")).toBe("true");
   });
 
   /**
@@ -91,22 +91,22 @@ describe("Earn tab strip keyboard navigation", () => {
     const user = userEvent.setup();
     render(<EarnWorkspace />);
 
-    tab("DashboardEarn.tabs.vaults").focus();
+    tab("DashboardEarn.tabs.opportunities").focus();
     await user.keyboard("{ArrowRight}");
 
     const positions = tab("DashboardEarn.tabs.positions");
     expect(document.activeElement).toBe(positions);
     expect(positions.getAttribute("tabindex")).toBe("0");
-    expect(tab("DashboardEarn.tabs.vaults").getAttribute("tabindex")).toBe("-1");
+    expect(tab("DashboardEarn.tabs.opportunities").getAttribute("tabindex")).toBe("-1");
   });
 
   it("switches the rendered panel, not just the tab state", async () => {
     const user = userEvent.setup();
     render(<EarnWorkspace />);
 
-    expect(screen.getByRole("tabpanel").getAttribute("id")).toBe("earn-panel-vaults");
+    expect(screen.getByRole("tabpanel").getAttribute("id")).toBe("earn-panel-opportunities");
 
-    tab("DashboardEarn.tabs.vaults").focus();
+    tab("DashboardEarn.tabs.opportunities").focus();
     await user.keyboard("{End}");
     expect(screen.queryByTestId("playground-panel")).not.toBeNull();
   });

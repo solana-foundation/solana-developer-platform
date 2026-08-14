@@ -18,7 +18,7 @@ balance with a live one.
   by the hourly sync cron, the 5-minute metrics refresh
   (`cron/earn-metrics-refresh.ts`, figures only — it can never insert a row),
   and the local dev seed.
-  - **TWO visibility filters, both server-side, both in `handlers/strategies.ts`.**
+  - **FOUR visibility filters, all server-side, all in `handlers/strategies.ts`.**
     `EARN_PROVIDER_SURFACING` (@sdp/types) hides every row of a provider SDP does
     not currently OFFER — Ground today, so the shipped catalogue is Kamino only;
     `HIDDEN_STRATEGY_TERMS` hides individual Aave/Morpho-related rows. The list
@@ -27,9 +27,22 @@ balance with a live one.
     caller can see; `isHiddenStrategy` applies the same two rules to the detail
     route, which has no query to push them into. Keep them in that one predicate
     — a detail route that drifts from the list route leaks a row by id.
-  - Neither filter is entitlement and neither is `fundable`. The sync keeps
-    STORING everything a provider reports, so the DB stays a truthful inventory
-    and re-surfacing is a deploy rather than an hour's wait.
+  - **Per-vault curation** sits beside them, and is the knob for an opinionated
+    shelf: `HIDDEN_VAULTS` (subtractive — drop one vault, the rest keeps flowing
+    in) and `CURATED_VAULTS` (a hand-picked allowlist — a provider listed there
+    shows ONLY those vaults, so a newly created one does not appear until someone
+    adds it). Both push into SQL so `total` moves with the rows.
+  - **Curation keys on the vault ADDRESS, never the name.** Kamino's registry is
+    permissionless and the name is free text chosen by whoever created the vault,
+    so a name-keyed rule can be dodged by renaming and tripped by impersonating a
+    curated vault's name. `HIDDEN_STRATEGY_TERMS` is name-based only because it
+    can exclusively REMOVE rows; the same trick pointed the other way would be an
+    admission hole.
+  - None of these is entitlement and none is `fundable`. The sync keeps STORING
+    everything a provider reports, so the DB stays a truthful inventory and
+    un-curating is a deploy rather than an hour's wait. None is an allocation
+    gate either — `assertKnownYieldSources` reads the stored catalogue, so an
+    existing program pointed at a curated-away vault keeps working.
   - Each row carries `hostCluster` (the cluster the INSTRUMENT lives on, stored)
     and `fundable` (derived per request from `hostCluster` against the caller's
     environment, never stored). **Catalogued is not the same as fundable**:

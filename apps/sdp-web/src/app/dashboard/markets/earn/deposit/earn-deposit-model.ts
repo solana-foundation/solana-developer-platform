@@ -96,13 +96,13 @@ export function fundableStrategies(strategies: readonly EarnStrategy[]): readonl
  * Re-enabling is therefore a real change in both cases, not a flag flip, and
  * this predicate is where the compiler will bring you.
  */
-export type VaultDepositability =
+export type OpportunityDepositability =
   | { kind: "depositable" }
   | { kind: "wrong-cluster" }
   | { kind: "asset-unsupported" }
   | { kind: "no-sdp-route"; style: EarnDepositStyle };
 
-export function vaultDepositability(strategy: EarnStrategy): VaultDepositability {
+export function opportunityDepositability(strategy: EarnStrategy): OpportunityDepositability {
   // `=== false`, not falsy: an API old enough to omit `fundable` predates any
   // mainnet-only provider, so absent must read as "no cluster objection" rather
   // than blanking every row. Same rule as `fundableStrategies` above.

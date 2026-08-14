@@ -89,7 +89,7 @@
       "previewNoSolanaPayout": "{token} doesn't pay out on Solana — the provider settles {token} withdrawals on Ethereum only. Withdraw USDC instead."
     },
     "tabs": {
-      "vaults": "Vaults",
+      "opportunities": "Opportunities",
       "positions": "Positions",
       "playground": "API Playground"
     },
@@ -107,11 +107,11 @@
       "amountOptional": "Optional. Omit to ask what this lane can pay right now.",
       "requestIdRequired": "Required UUIDv4 idempotency key — a retry must reuse it."
     },
-    "vaults": {
-      "title": "Vaults",
+    "opportunities": {
+      "title": "Opportunities",
       "description": "Every strategy SDP lists today, with the rates and access terms their providers publish. Rank by pool size or APY.",
       "deposit": "Deposit",
-      "depositDirectOnly": "Deposit direct on the vault",
+      "depositDirectOnly": "Deposit direct, outside SDP",
       "depositProviderClosed": "Not open for deposits",
       "columnAction": "Action"
     },

@@ -1,5 +1,6 @@
 import { isClusterFundableInEnvironment } from "@sdp/earn";
 import {
+  type EarnProviderId,
   type EarnStrategy,
   type EarnStrategyResponse,
   isEarnProviderSurfaced,
@@ -28,6 +29,45 @@ import { listResponse, pageWindow, parseParams, parseQuery } from "./shared";
 const HIDDEN_STRATEGY_TERMS = ["aave", "morpho"] as const;
 
 /**
+ * ── CATALOGUE CURATION ──────────────────────────────────────────────────────
+ * The knob for a more opinionated shelf. Edit the two lists below; nothing else
+ * needs to change, and both take effect on the next request (no sync, no
+ * migration, no cache to bust).
+ *
+ * **Always key on the vault ADDRESS (`providerReference`), never the name.**
+ * Kamino's registry is permissionless and the name is free text chosen by
+ * whoever created the vault, so a name-keyed rule can be dodged by renaming and
+ * tripped by impersonating a curated vault's name. `HIDDEN_STRATEGY_TERMS`
+ * above is name-based on purpose and is safe only because it can only ever
+ * REMOVE rows — the same trick pointed the other way would be an admission
+ * hole. Addresses are in `docs/earn/kamino-catalogue-inventory.md`, or
+ * `pnpm --filter @sdp/api earn:inventory:kamino` regenerates it.
+ *
+ * Which to reach for:
+ * - `HIDDEN_VAULTS` — subtractive. Drop a specific vault (dust, a duplicate, one
+ *   we do not want to stand behind) while the rest of the shelf keeps flowing in
+ *   as the provider lists it. Start here.
+ * - `CURATED_VAULTS` — a hand-picked shelf. A provider listed here shows ONLY
+ *   these vaults, so a newly created vault does NOT appear until someone adds it.
+ *   That is the point: maximum editorial control, at the cost of a deploy per
+ *   addition. A provider mapped to an empty array shows nothing at all.
+ *
+ * Neither list touches what the sync STORES, so a curated-away vault stays in
+ * `earn_strategies` and un-curating it is a deploy rather than an hour's wait.
+ * Neither is an allocation gate either: `assertKnownYieldSources` reads the
+ * stored catalogue, so an existing program pointed at a curated-away vault keeps
+ * working — hiding a shelf is a browse decision, and freezing a customer's own
+ * position over it would not be.
+ */
+const HIDDEN_VAULTS: readonly `${EarnProviderId}:${string}`[] = [
+  // "kamino:8F2mL9wLbYcQ1t2WcTgAsD5nDgQ1XjqK8kY7z4Q9example",
+];
+
+const CURATED_VAULTS: Partial<Record<EarnProviderId, readonly string[]>> = {
+  // kamino: ["<vault address>", "<vault address>"],
+};
+
+/**
  * Rows absent from every public strategy read, for either of TWO independent
  * reasons — kept in one predicate so the detail route can never drift from the
  * list route's filters:
@@ -44,6 +84,15 @@ const HIDDEN_STRATEGY_TERMS = ["aave", "morpho"] as const;
  */
 function isHiddenStrategy(row: EarnStrategyRow): boolean {
   if (!isEarnProviderSurfaced(row.provider)) {
+    return true;
+  }
+
+  if (HIDDEN_VAULTS.includes(`${row.provider}:${row.provider_reference}` as never)) {
+    return true;
+  }
+
+  const curated = CURATED_VAULTS[row.provider as EarnProviderId];
+  if (curated !== undefined && !curated.includes(row.provider_reference)) {
     return true;
   }
 
@@ -116,6 +165,8 @@ export const listEarnStrategies = async (c: AppContext) => {
     // the rows the caller can see. `isHiddenStrategy` applies the same two rules
     // to the detail route, which has no query to push them into.
     providers: SURFACED_EARN_PROVIDERS,
+    excludeProviderKeys: HIDDEN_VAULTS,
+    allowedProviderReferences: CURATED_VAULTS,
     excludeRelatedTerms: HIDDEN_STRATEGY_TERMS,
     ...pageWindow(query),
   });

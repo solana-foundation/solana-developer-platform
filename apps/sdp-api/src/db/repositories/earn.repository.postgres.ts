@@ -334,6 +334,26 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
           bindings.push(...input.providers);
         }
       }
+      if (input.excludeProviderKeys?.length) {
+        const placeholders = input.excludeProviderKeys.map(() => "?").join(", ");
+        // Concatenated so one binding list covers both halves of the key; a bare
+        // provider_reference match could hide another provider's vault that
+        // happens to share a reference.
+        conditions.push(`(provider || ':' || provider_reference) NOT IN (${placeholders})`);
+        bindings.push(...input.excludeProviderKeys);
+      }
+      for (const [provider, references] of Object.entries(input.allowedProviderReferences ?? {})) {
+        if (references.length === 0) {
+          conditions.push("provider <> ?");
+          bindings.push(provider);
+          continue;
+        }
+        // Scoped to the one provider: every other provider's rows pass through,
+        // so adding an allowlist for one shelf never silently curates another.
+        const placeholders = references.map(() => "?").join(", ");
+        conditions.push(`(provider <> ? OR provider_reference IN (${placeholders}))`);
+        bindings.push(provider, ...references);
+      }
       for (const rawTerm of input.excludeRelatedTerms ?? []) {
         const term = rawTerm.trim().toLowerCase();
         if (!term) continue;
