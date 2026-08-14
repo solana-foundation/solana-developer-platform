@@ -21,11 +21,7 @@ import type {
 import { getPermissionsForApiKeyRole, type Permission } from "@sdp/types";
 import type { Context, Next } from "hono";
 import { getDb } from "@/db";
-import {
-  parseOptionalPostgresJson,
-  parsePostgresJson,
-  parsePostgresJsonOr,
-} from "@/db/postgres-utils";
+import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
 import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
 import { getClientIp } from "@/lib/client-ip";
@@ -33,6 +29,7 @@ import { AppError } from "@/lib/errors";
 import { isClientIpAllowed } from "@/lib/ip-allowlist";
 import type { KVStore } from "@/runtime/kv";
 import { getLogger } from "@/runtime/logger";
+import { loadApiKeyWalletAuthorization } from "@/services/api-key-wallets.service";
 import { tryApprovedOperationReplayAuth } from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
 import { enforceRateLimit, RATE_LIMIT_TIERS } from "./rate-limit";
@@ -150,38 +147,8 @@ async function getFromDatabaseAndCache(
     return null;
   }
 
-  const walletBindingsResult = await db
-    .prepare(
-      `SELECT wallet_id, custody_wallet_id, permissions
-       FROM api_key_wallet_permissions
-       WHERE api_key_id = ?
-       ORDER BY created_at ASC`
-    )
-    .bind(result.id)
-    .all<{ wallet_id: string; custody_wallet_id: string | null; permissions: string }>();
-
-  const permissionRows = walletBindingsResult.results ?? [];
-  const walletScope: ApiKeyWalletScope =
-    permissionRows.length > 0 || result.signing_wallet_id !== null ? "selected" : "all";
-  const walletBindings = permissionRows.flatMap((row) => {
-    if (!row.custody_wallet_id) {
-      return [];
-    }
-    const parsed = safeParsePermissionsArray(row.permissions);
-    return [
-      {
-        walletId: row.wallet_id,
-        custodyWalletId: row.custody_wallet_id,
-        permissions: parsed.length > 0 ? parsed : (["*"] as Permission[]),
-      },
-    ];
-  });
-
-  const signingWalletIds = walletBindings.map((binding) => binding.walletId);
-  const signingWalletId =
-    walletBindings.find((binding) => binding.walletId === result.signing_wallet_id)?.walletId ??
-    signingWalletIds[0] ??
-    null;
+  const { walletScope, signingWalletId, signingWalletIds, walletBindings } =
+    await loadApiKeyWalletAuthorization(db, result.id, result.signing_wallet_id);
 
   const cached: CachedApiKey = {
     id: result.id,
@@ -303,19 +270,6 @@ export function scheduleApiKeyLastUsedUpdate(
   state.inFlight = pending;
   cache.writes.set(keyId, state);
   return pending;
-}
-
-function safeParsePermissionsArray(value: string | null | undefined): Permission[] {
-  if (!value) {
-    return [];
-  }
-
-  const parsed = parsePostgresJsonOr<unknown>(value, []);
-  if (!Array.isArray(parsed)) {
-    return [];
-  }
-
-  return parsed.filter((entry): entry is Permission => typeof entry === "string");
 }
 
 function normalizeWalletBindings(cachedKey: CachedApiKey): {

@@ -1,4 +1,4 @@
-import type { Permission } from "@sdp/types";
+import type { ApiKeyWalletScope, Permission } from "@sdp/types";
 import type { PreparedStatement } from "@/db";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
 
@@ -15,6 +15,12 @@ export interface ApiKeyWalletBindingForKey extends ApiKeyWalletBinding {
   apiKeyId: string;
 }
 
+export interface ApiKeyWalletPermissionRow {
+  wallet_id: string;
+  custody_wallet_id: string | null;
+  permissions: unknown;
+}
+
 export const DEFAULT_API_KEY_WALLET_PERMISSIONS: Permission[] = ["*"];
 
 export function normalizeApiKeyWalletPermissions(permissions?: Permission[] | null): Permission[] {
@@ -28,6 +34,58 @@ export function normalizeApiKeyWalletPermissions(permissions?: Permission[] | nu
   }
 
   return deduped;
+}
+
+export function hydrateApiKeyWalletAuthorization(
+  permissionRows: ApiKeyWalletPermissionRow[],
+  preferredSigningWalletId: string | null
+): {
+  walletScope: ApiKeyWalletScope;
+  signingWalletId: string | null;
+  signingWalletIds: string[];
+  walletBindings: ExactApiKeyWalletBinding[];
+} {
+  const walletBindings = permissionRows.flatMap((row) =>
+    row.custody_wallet_id
+      ? [
+          {
+            walletId: row.wallet_id,
+            custodyWalletId: row.custody_wallet_id,
+            permissions: normalizeApiKeyWalletPermissions(safeParsePermissions(row.permissions)),
+          },
+        ]
+      : []
+  );
+  const signingWalletIds = walletBindings.map((binding) => binding.walletId);
+
+  return {
+    walletScope:
+      permissionRows.length > 0 || preferredSigningWalletId !== null ? "selected" : "all",
+    signingWalletId:
+      walletBindings.find((binding) => binding.walletId === preferredSigningWalletId)?.walletId ??
+      signingWalletIds[0] ??
+      null,
+    signingWalletIds,
+    walletBindings,
+  };
+}
+
+export async function loadApiKeyWalletAuthorization(
+  db: DatabaseClient,
+  apiKeyId: string,
+  preferredSigningWalletId: string | null
+) {
+  const result = await db
+    .prepare(
+      `SELECT wallet_id, custody_wallet_id, permissions
+       FROM api_key_wallet_permissions
+       WHERE api_key_id = ?
+       ORDER BY created_at ASC`
+    )
+    .bind(apiKeyId)
+    .all<ApiKeyWalletPermissionRow>();
+
+  return hydrateApiKeyWalletAuthorization(result.results ?? [], preferredSigningWalletId);
 }
 
 export async function listApiKeyWalletBindings(
