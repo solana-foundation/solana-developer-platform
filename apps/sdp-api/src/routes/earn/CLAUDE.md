@@ -26,6 +26,16 @@ balance with a live one.
     `hostCluster: "mainnet-beta", fundable: false`. `fundable` is the wire-level
     warning — partners must branch on it rather than assume a listed strategy
     takes deposits.
+  - **`fundable` answers the CLUSTER question only, and its two sides are not
+    symmetric.** `false` is definitive (the instrument does not exist on your
+    cluster). `true` is necessary but not sufficient: a deposit additionally
+    needs the provider to expose a money-movement surface — a catalogue-only
+    provider like Kamino reads `fundable: true` in production and still answers
+    501 on `POST /programs` — and the org to be entitled. Those are deliberately
+    NOT folded in: the field describes the instrument, while entitlement is a
+    property of the caller, not of a platform-global catalogue row. The
+    capability answer is delivered first and by name (`requirePortfolioClient`),
+    which is what the gate order below exists to guarantee.
   - `mapToEarnStrategy` therefore takes the environment. It is the only place
     `fundable` is computed; the rule itself is
     `isClusterFundableInEnvironment` in `@sdp/earn`.

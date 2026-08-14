@@ -229,13 +229,20 @@ answers `mainnet-beta`, in sandbox too.
 A sandbox Kamino row therefore names a live mainnet vault and a mainnet mint.
 Everything about it is true and none of it is fundable from devnet, so ONE
 predicate decides — `isClusterFundableInEnvironment` (src/support.ts) — and
-three places call it, none of which may re-derive the comparison:
+three gates enforce its answer, none of which may re-derive the comparison:
 
-1. `assertKnownYieldSources` in the API, the last gate before a provider
-   mutation, on both program create and re-target.
-2. `mapToEarnStrategy`, which emits `hostCluster` plus a per-request `fundable`
-   boolean — the machine-readable warning a partner reads.
-3. `fundableStrategies` in the dashboard's deposit model.
+1. `assertKnownYieldSources` in the API **calls it**, the last gate before a
+   provider mutation, on both program create and re-target.
+2. `mapToEarnStrategy` **calls it** to emit `hostCluster` plus a per-request
+   `fundable` boolean — the machine-readable warning a partner reads.
+3. `fundableStrategies` in the dashboard's deposit model **consumes that
+   answer** over the wire (`strategy.fundable`). It deliberately does not
+   recompute it: a browser-side copy of the cluster comparison is the second
+   thing that can drift toward permissive.
+
+Note `fundable` answers the cluster question ALONE. `true` does not promise a
+deposit will succeed — a catalogue-only provider still answers 501, and the org
+still needs entitlement. See the field's doc comment in `@sdp/types`.
 
 `status` cannot express this: it is the operator's stop switch, and reusing it
 would misstate the reason AND collide with the repository's refusal to overwrite
