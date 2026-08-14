@@ -14,7 +14,7 @@ vi.mock("next/link", () => ({
   default: ({ children, ...props }: ComponentProps<"a">) => <a {...props}>{children}</a>,
 }));
 
-import { rankedFundableStrategies } from "./earn-deposit-model";
+import { rankedStrategies } from "./earn-deposit-model";
 import { ReviewStep } from "./review-step";
 import { StrategyStep } from "./strategy-step";
 import { WalletStep } from "./wallet-step";
@@ -34,6 +34,8 @@ function strategy(partial: Partial<EarnStrategy> & { id: string }): EarnStrategy
     liquidityTerm: "instant",
     riskMetadata: { tvlUsd: 40_000_000, curator: "gauntlet" },
     status: "active",
+    hostCluster: "devnet",
+    fundable: true,
     createdAt: TIMESTAMP,
     updatedAt: TIMESTAMP,
     ...partial,
@@ -59,7 +61,14 @@ function wallet(
 }
 
 const CATALOGUE = [
-  strategy({ id: "Kamino Gauntlet USDC", currentApy: "0.061", underlyingSource: "kamino" }),
+  strategy({
+    id: "Kamino Gauntlet USDC",
+    currentApy: "0.061",
+    underlyingSource: "kamino",
+    provider: "kamino",
+    hostCluster: "mainnet-beta",
+    fundable: false,
+  }),
   strategy({
     id: "Ground JTRSY USDC",
     currentApy: "0.104",
@@ -68,6 +77,7 @@ const CATALOGUE = [
     redemptionDelayDays: 2,
   }),
 ];
+const GROUND_STRATEGY = CATALOGUE[1];
 
 describe("WalletStep", () => {
   it("renders a wallet row with its name first and address second", () => {
@@ -169,14 +179,15 @@ describe("WalletStep", () => {
 });
 
 describe("StrategyStep", () => {
-  it("renders the full catalogue as a selectable comparison table", () => {
+  it("renders the full catalogue and marks an environment mismatch unavailable", () => {
     const html = renderToStaticMarkup(
       <StrategyStep
         hasError={false}
         isLoading={false}
         onSelect={() => {}}
+        portfolioProvider="ground"
         selectedStrategyId={null}
-        strategies={rankedFundableStrategies(CATALOGUE)}
+        strategies={rankedStrategies(CATALOGUE)}
         tokens={["usdc"]}
       />
     );
@@ -186,6 +197,8 @@ describe("StrategyStep", () => {
     expect(html.match(/name="earn-strategy"/g)).toHaveLength(2);
     expect(html).toContain("Kamino Gauntlet USDC");
     expect(html).toContain("Ground JTRSY USDC");
+    expect(html).toContain("DashboardEarn.deposit.strategyEnvironmentOnly(Mainnet)");
+    expect(html.match(/disabled=""/g)).toHaveLength(1);
     expect(html).toContain("10.4%");
     expect(html).toContain("DashboardEarn.liquidity.delayed(2)");
     expect(html).toContain("$40M");
@@ -203,8 +216,9 @@ describe("StrategyStep", () => {
         hasError={false}
         isLoading={false}
         onSelect={() => {}}
+        portfolioProvider="ground"
         selectedStrategyId={null}
-        strategies={rankedFundableStrategies(CATALOGUE)}
+        strategies={rankedStrategies(CATALOGUE)}
         tokens={["usdc"]}
       />
     );
@@ -218,6 +232,7 @@ describe("StrategyStep", () => {
         hasError={false}
         isLoading={false}
         onSelect={() => {}}
+        portfolioProvider="ground"
         selectedStrategyId={null}
         strategies={[]}
         tokens={["usdc"]}
@@ -239,6 +254,7 @@ describe("StrategyStep", () => {
         hasError={false}
         isLoading={false}
         onSelect={() => {}}
+        portfolioProvider="ground"
         selectedStrategyId={null}
         strategies={[
           strategy({ id: "long", name: "Janus Henderson JTRSY tokenized by Centrifuge" }),
@@ -265,6 +281,7 @@ describe("StrategyStep", () => {
         hasError={false}
         isLoading={false}
         onSelect={() => {}}
+        portfolioProvider="ground"
         selectedStrategyId={null}
         strategies={[strategy({ id: "no-pool", riskMetadata: {} })]}
         tokens={["usdc"]}
@@ -284,7 +301,7 @@ describe("ReviewStep", () => {
         onEditWallet={() => {}}
         programExists={false}
         providerUnconfigured={false}
-        strategy={CATALOGUE[0]}
+        strategy={GROUND_STRATEGY}
         submitError={null}
         wallet={wallet()}
       />
@@ -301,7 +318,7 @@ describe("ReviewStep", () => {
         onEditWallet={() => {}}
         programExists
         providerUnconfigured={false}
-        strategy={CATALOGUE[0]}
+        strategy={GROUND_STRATEGY}
         submitError={null}
         wallet={undefined}
       />
@@ -318,7 +335,7 @@ describe("ReviewStep", () => {
         onEditWallet={() => {}}
         programExists
         providerUnconfigured={false}
-        strategy={CATALOGUE[0]}
+        strategy={GROUND_STRATEGY}
         submitError={null}
         wallet={wallet()}
       />
@@ -334,7 +351,7 @@ describe("ReviewStep", () => {
         onEditWallet={() => {}}
         programExists={false}
         providerUnconfigured
-        strategy={CATALOGUE[0]}
+        strategy={GROUND_STRATEGY}
         submitError={null}
         wallet={wallet()}
       />
@@ -372,7 +389,7 @@ describe("ReviewStep", () => {
         onEditWallet={() => {}}
         programExists={false}
         providerUnconfigured={false}
-        strategy={CATALOGUE[0]}
+        strategy={GROUND_STRATEGY}
         submitError="Ground requires manual activation for this organization."
         wallet={wallet()}
       />

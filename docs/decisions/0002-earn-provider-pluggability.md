@@ -393,3 +393,57 @@ promised had nowhere to live. It now lives between programs.
   preview/create/list/detail). The implicit create-or-update `PUT /program` is
   gone: it was keyed on the triple that stops being addressable the moment a
   second program exists.
+
+## Addendum (2026-08-13) — catalogue-only providers, and the cluster a strategy lives on
+
+Earn V1 was designed around one provider shape: a **custodial** partner (Ground)
+fronting an omnibus portfolio wallet SDP provisions and moves money through.
+Serving the communal vaults — Kamino now, Jupiter Lend next — introduces a
+second shape that the pluggability constraint has to absorb without a rewrite.
+
+- **A provider may front a catalogue and no money movement, and that is a
+  complete integration.** Kamino's K-Vaults are non-custodial: the customer's
+  own wallet deposits on-chain, so there is no wallet for SDP to provision, fund
+  or pay out from. It implements the base `EarnVaultProvider` contract and none
+  of the portfolio-wallet capability, and every program route answers 501 for it
+  through `supportsPortfolioWallets` — the capability seam doing exactly the job
+  it was built for. This is NOT a partial integration to be finished later;
+  per-vault execution is a different money model (PRO-1634 territory).
+- **A provider may need no credential at all.** Kamino's data API is public.
+  `keyPairCredentialDefinition` assumed `<PREFIX>_API_KEY`/`_SANDBOX_API_KEY`
+  for every earn provider, in its parameter type and in a drift test that
+  expanded `EARN_PROVIDERS` by naming convention. Both now derive from what the
+  availability definitions actually READ (`credentialEnvKeys`), with
+  `publicApiDefinition` for the keyless case. Declaring a placeholder
+  `KAMINO_API_KEY` was rejected: `scripts/secret-keys.mjs` is "every env key the
+  SDP API reads", and a declared secret nothing reads is a standing question for
+  whoever next provisions the service. The drift test gained an inverse guard so
+  a credentialed provider cannot slip through by declaring nothing.
+- **The environment no longer implies the cluster; `hostCluster` states it.**
+  Kamino is deployed on mainnet only and is catalogued into BOTH environments,
+  so a sandbox row honestly names a live mainnet vault and a mainnet mint.
+  `status` could not carry this — it is the operator's stop switch, and reusing
+  it would both misstate the reason and collide with the sync's refusal to
+  overwrite an operator pause. So every `ProviderStrategySnapshot` states the
+  cluster its instrument lives on (migration 0057), and ONE predicate,
+  `isClusterFundableInEnvironment`, decides fundability at all three gates: the
+  API's `assertKnownYieldSources` before any provider mutation, the derived
+  `fundable` on the strategies wire shape, and the dashboard's strategy filter.
+  **Being catalogued and being fundable are now different questions, and the
+  wire says which.**
+- **A catalogue is admitted by an explicit, reviewable floor.** Kamino's vault
+  registry is permissionless, so its API is a census of everything ever created
+  — 170 vaults, ~90 of the stablecoin ones dust or literal test vaults.
+  `KAMINO_MIN_TVL_USD` admits 21. The floor is data, not judgement, and
+  `earn:inventory:kamino` commits the census (including the largest near-misses)
+  so raising or lowering it is reviewed against what it admits and refuses —
+  the same argument that produced the Ground inventory.
+- **Rates get their own cadence, and the one-source rule survives.** The hourly
+  catalogue sync is right for catalogue drift and wrong for APY. Rather than
+  overlay live figures onto stored rows at read time — which would blend two
+  sources on the one surface the 2026-08-11 addendum says must not — a second
+  pass (`EarnLiveMetricsProvider` / `supportsLiveMetrics`, every 5 minutes)
+  refreshes figures IN PLACE. It is UPDATE-only and cannot insert, and its input
+  type carries figures only, so it can neither admit a vault the catalogue
+  refused nor change what a strategy is. Freshness is cadence, not blending.
+  A provider whose rates cost one request per vault should not implement it.
