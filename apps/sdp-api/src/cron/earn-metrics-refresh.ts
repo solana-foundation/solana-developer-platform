@@ -22,6 +22,12 @@
  * change and never a named list. For why this is a write pass rather than a
  * live read, and which providers should not implement it, see
  * `EarnLiveMetricsProvider` in @sdp/earn/types.
+ *
+ * **Every provider read is bounded** (`EARN_PROVIDER_METRICS_DEADLINE_MS`).
+ * `src/job.ts` runs this pass first and awaits it before the catalogue sync
+ * inside a 120s Cloud Run task, so an unbounded read here would not just cost
+ * this pass its rates — it would spend the execution and take the catalogue
+ * sync down with it, every tick, for as long as the provider stayed slow.
  */
 
 import { EARN_PROVIDER_CLIENTS, SdpEarnError, supportsLiveMetrics } from "@sdp/earn";
@@ -60,6 +66,51 @@ const SKIPPABLE_REFRESH_ERROR_CODES: ReadonlySet<string> = new Set([
   "PROVIDER_NOT_CONFIGURED",
 ]);
 
+/**
+ * Outer bound on ONE provider's read, per environment.
+ *
+ * Provider clients cap each HTTP request of their own (Kamino:
+ * `KAMINO_REQUEST_TIMEOUT_MS`), but a per-request cap does not bound a read
+ * that makes many requests — a server echoing a pagination token forever is
+ * twenty prompt responses, not one slow one. This is the bound on the pass.
+ *
+ * Sized against the job, not the provider. `src/job.ts` runs this pass FIRST
+ * and AWAITS it, then runs `runEarnCatalogueSyncIfDue`, inside a Cloud Run task
+ * whose timeout is 120s (`sdp_api_cron_timeout`, both environments). With two
+ * environments and one live-metrics provider today, 20s each caps the refresh
+ * at 40s and leaves the catalogue sync the larger half. Measured, a real pass
+ * is ~1.4s — this is a backstop, not a budget anything runs near.
+ *
+ * Raising the provider count means re-checking that
+ * `providers × environments × this` still clears the job timeout.
+ */
+export const EARN_PROVIDER_METRICS_DEADLINE_MS = 20_000;
+
+/**
+ * Resolve to `undefined` if `work` outruns the deadline, so the caller can move
+ * on to the next provider instead of inheriting its stall.
+ *
+ * The loser is deliberately not cancelled: `listStrategyMetrics` takes no
+ * signal (the provider contract has no cancellation seam, and adding one for a
+ * backstop would put it in every client). The abandoned request is already
+ * capped by the client's own per-request timeout and the process is a
+ * short-lived job, so it expires on its own — but its rejection is swallowed
+ * here, or an orphan would surface as an unhandled rejection well after the
+ * pass that started it has been logged and moved past.
+ */
+async function withDeadline<T>(work: Promise<T>, deadlineMs: number): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expiry = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), deadlineMs);
+  });
+  work.catch(() => undefined);
+  try {
+    return await Promise.race([work, expiry]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function refreshEarnStrategyMetrics(env: Env): Promise<void> {
   const repo = createEarnRepository(env);
   const providerEnv = env as unknown as Record<string, string | undefined>;
@@ -83,9 +134,12 @@ async function refreshProviderMetrics(
 ): Promise<void> {
   const logContext = { provider: client.provider, environment: ctx.environment };
 
-  let metrics: ProviderStrategyMetrics[];
+  let metrics: ProviderStrategyMetrics[] | undefined;
   try {
-    metrics = await client.listStrategyMetrics(ctx);
+    metrics = await withDeadline(
+      client.listStrategyMetrics(ctx),
+      EARN_PROVIDER_METRICS_DEADLINE_MS
+    );
   } catch (err) {
     if (err instanceof SdpEarnError && SKIPPABLE_REFRESH_ERROR_CODES.has(err.code)) {
       getLogger().info(
@@ -100,6 +154,18 @@ async function refreshProviderMetrics(
     getLogger().error(
       { ...logContext, error: err instanceof Error ? err.message : String(err) },
       "refreshEarnStrategyMetrics: failed to list provider metrics"
+    );
+    return;
+  }
+
+  if (metrics === undefined) {
+    // Logged at error, not warn: the whole point of this pass is that a rate is
+    // never more than five minutes old, and a provider that cannot answer
+    // inside the deadline is not meeting that — even though the rows keep their
+    // last-known figures and every other provider still refreshes.
+    getLogger().error(
+      { ...logContext, deadlineMs: EARN_PROVIDER_METRICS_DEADLINE_MS },
+      "refreshEarnStrategyMetrics: provider metrics exceeded the deadline"
     );
     return;
   }

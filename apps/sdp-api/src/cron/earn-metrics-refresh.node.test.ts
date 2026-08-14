@@ -6,7 +6,10 @@ import type {
 } from "@sdp/earn/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "@/types/env";
-import { refreshEarnStrategyMetrics } from "./earn-metrics-refresh";
+import {
+  EARN_PROVIDER_METRICS_DEADLINE_MS,
+  refreshEarnStrategyMetrics,
+} from "./earn-metrics-refresh";
 
 // Mutable registry the module reads through the mocked @sdp/earn binding —
 // tests install providers per case, proving the refresh is capability-driven
@@ -117,6 +120,38 @@ describe("refreshEarnStrategyMetrics", () => {
     expect(mocks.updateStrategyMetrics).toHaveBeenCalledWith(
       expect.objectContaining({ provider: "kamino" })
     );
+  });
+
+  /**
+   * The job runs this pass FIRST and awaits it, then runs the catalogue sync,
+   * inside a 120s Cloud Run task. A provider that never answers therefore does
+   * not merely lose its own rates — without a deadline it spends the execution
+   * and the catalogue sync never runs, every tick, for as long as it stays
+   * slow. Fake timers, so this pins the behaviour without a real 20s wait.
+   */
+  it("gives up on a provider that outruns the deadline and refreshes the rest", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.providerClients.hung = liveMetricsProvider(
+        "hung",
+        () => new Promise(() => {}) // never settles
+      );
+      mocks.providerClients.kamino = liveMetricsProvider("kamino", async () => [
+        metrics("vault-a", "0.051"),
+      ]);
+
+      const pass = refreshEarnStrategyMetrics(env);
+      // Two environments × the hung provider — each waits out its own deadline.
+      await vi.advanceTimersByTimeAsync(EARN_PROVIDER_METRICS_DEADLINE_MS * 2 + 1);
+
+      await expect(pass).resolves.toBeUndefined();
+      expect(mocks.updateStrategyMetrics).toHaveBeenCalledTimes(2);
+      expect(mocks.updateStrategyMetrics).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: "kamino" })
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("treats NOT_IMPLEMENTED and PROVIDER_NOT_CONFIGURED as quiet skips", async () => {

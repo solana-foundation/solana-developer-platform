@@ -219,6 +219,19 @@ page it links is fetchable as raw markdown):
   against `pnpm --filter @sdp/api earn:inventory:kamino`, which regenerates
   docs/earn/kamino-catalogue-inventory.md including the largest near-misses.
 
+  Permissionless also means **the vault NAME is attacker-controlled** — free
+  text chosen by whoever called `createVaultIxs`. SDP may quote it (it is the
+  strategy's name) but never PARSE it into a claim. Concretely: Kamino
+  snapshots carry **no `curator`** and are **always `sourceKind: "defi"`**, and
+  `declaredSupport.sourceKinds` is `["defi"]` to match. An earlier revision
+  matched a curator-house list and an RWA regex against the name, which let
+  anyone mint "Steakhouse USDC Prime" or "RWA USDC", clear the floor for one
+  sync, and borrow a real house's name or the `sourceKind=rwa` filter. The floor
+  is a cost, not an authorization. Populating either field needs verified
+  authority/address data or an audited vault-address allowlist — this is the one
+  place Ground's `deriveCurator` precedent does NOT transfer, because Ground's
+  yield-source ids come from Ground, not from the public.
+
 ## `hostCluster` — catalogued is not the same as fundable
 
 Every `ProviderStrategySnapshot` states the cluster its INSTRUMENT lives on, and

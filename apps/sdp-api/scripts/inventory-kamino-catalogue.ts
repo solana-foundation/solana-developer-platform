@@ -38,7 +38,7 @@ import {
   KaminoEarnClient,
   kaminoTvlUsd,
 } from "@sdp/earn/providers/kamino/client";
-import { earnCuratorLabel, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import { z } from "zod";
 
 const INVENTORY_ROOT = path.resolve(process.cwd(), ".earn-catalogue");
@@ -70,7 +70,6 @@ const vaultRowSchema = z.object({
   outcome: z.enum(["catalogued", "dropped"]),
   dropReason: z.string().max(64).nullable(),
   sourceKind: z.string().max(32).nullable(),
-  curator: z.string().max(64).nullable(),
 });
 
 const inventorySchema = z.object({
@@ -116,10 +115,6 @@ function formatApy(apy: string | null): string {
   return `${(Number(apy) * 100).toFixed(2)}%`;
 }
 
-function formatCurator(curator: string | null): string {
-  return curator === null ? "—" : earnCuratorLabel(curator);
-}
-
 function renderCataloguedTable(rows: readonly VaultRow[]): string {
   const catalogued = rows
     .filter((row) => row.outcome === "catalogued")
@@ -130,8 +125,8 @@ function renderCataloguedTable(rows: readonly VaultRow[]): string {
   }
 
   const lines = [
-    "| Vault | Token | TVL | APY | Holders | Kind | Curator | Address |",
-    "|---|---|---:|---:|---:|---|---|---|",
+    "| Vault | Token | TVL | APY | Holders | Kind | Address |",
+    "|---|---|---:|---:|---:|---|---|",
     ...catalogued.map(
       (row) =>
         `| ${[
@@ -141,7 +136,6 @@ function renderCataloguedTable(rows: readonly VaultRow[]): string {
           formatApy(row.apy),
           row.holders === null ? "—" : String(row.holders),
           row.sourceKind ?? "—",
-          formatCurator(row.curator),
           `\`${row.address}\``,
         ].join(" | ")} |`
     ),
@@ -238,6 +232,14 @@ no devnet deployment, so there is one shelf and it is the mainnet one. SDP
 catalogues it into BOTH the sandbox and production environments — sandbox rows
 carry \`host_cluster = 'mainnet-beta'\` and are never fundable there.
 
+**Every row is \`defi\`, and no row carries a curator.** Permissionless creation
+means the vault NAME is chosen by whoever created it, so SDP quotes it but
+never parses it into a claim. Some catalogued vaults really are RWA-backed and
+really are run by a named house — Kamino publishes no field that establishes
+either, and an assertion anyone could forge by naming a vault is worse than an
+absent one. Both fields return when there is a verified source for them (see
+\`packages/sdp-earn/src/providers/kamino/client.ts\`).
+
 - Fetched: \`${inventory.fetchedAt}\`
 - Vaults in the registry: **${inventory.totalVaults}**
 - Catalogued by SDP: **${catalogued}**
@@ -293,10 +295,6 @@ async function runFetch(): Promise<void> {
       outcome: distilled.outcome,
       dropReason: distilled.outcome === "dropped" ? distilled.reason : null,
       sourceKind: distilled.outcome === "catalogued" ? distilled.snapshot.sourceKind : null,
-      curator:
-        distilled.outcome === "catalogued"
-          ? ((distilled.snapshot.riskMetadata?.curator as string | undefined) ?? null)
-          : null,
     };
   });
 

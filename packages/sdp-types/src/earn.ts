@@ -66,16 +66,6 @@ export const EARN_KNOWN_CURATOR_LABELS: Readonly<Record<string, string>> = {
   centrifuge: "Centrifuge",
   // Ids a provider reports when a protocol curates its own vaults.
   kamino: "Kamino",
-  // Houses curating Solana-hosted vaults on Kamino's shelf.
-  elemental: "Elemental",
-  elaris: "Elaris",
-  mev_capital: "MEV Capital",
-  neutral_trade: "Neutral Trade",
-  hyperithm: "Hyperithm",
-  galaxy: "Galaxy",
-  ethena: "Ethena",
-  marinade: "Marinade",
-  squads: "Squads",
   // No EVM-only ids here: SDP lists Solana-hosted vaults only, so `morpho`,
   // `aave_v3` and Ground's `gustb`/`guscc` Superstate wrappers can no longer
   // reach a catalogue row. Unknown ids render as-is, so re-adding one is a

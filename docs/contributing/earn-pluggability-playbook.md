@@ -30,6 +30,16 @@ catalogue sync; unknown ids render as-is.
 No migration, no deploy ordering. "Removing" a curator is the provider no
 longer reporting it.
 
+**Where the id may come from.** A curator attribution is SDP vouching for who
+runs a vault, so it must trace to something the PROVIDER establishes: a curator
+field, verified authority/address data, or an audited vault-address allowlist.
+It may never be parsed out of a label the public can choose. Ground's
+`deriveCurator` reads Ground's own yield-source ids, which is why that precedent
+is safe and does not generalise: Kamino's registry is permissionless, so its
+vault names carry no authority and its snapshots carry no curator at all (see
+`packages/sdp-earn/CLAUDE.md`). The same test applies to `sourceKind` — an `rwa`
+classification asserts real-world backing, and an integrator filters on it.
+
 ## 2. Add a category value — one registry, zero migration
 
 `source_kind`, `apy_type`, and `liquidity_term` are open TEXT in Postgres
@@ -195,6 +205,35 @@ browse the real shelf. Those rows are true and un-fundable, and one predicate,
 `isClusterFundableInEnvironment`, enforces that everywhere (see ADR 0002's
 2026-08-13 addendum). Do not reach for `status` — it is the operator's stop
 switch and the repository refuses to overwrite it.
+
+### A new catalogue column is EXPAND-ONLY in the release that adds it
+
+If your provider needs a column no existing row has, add it **nullable** and
+backfill it — do not add `NOT NULL` in the same release, however required the
+field is on the TypeScript input.
+
+`deploy-sdp-api-gcp.yml` runs migrations BEFORE it rolls the service and before
+it updates the cron job image, and a rollback restores the previous image over
+the already-applied schema. So the previous release's catalogue writer — whose
+INSERT does not list your column — writes into the new schema in both windows. A
+`NOT NULL` fails every one of those upserts, including the `ON CONFLICT` path,
+which stalls the catalogue refresh for as long as the old image is live.
+
+The contract half (`SET NOT NULL`) belongs in a later release, once no
+deployable writer predates the column. Until then the nullability is not a hole
+in the invariant, provided both halves hold:
+
+- the snapshot/`Upsert…Input` field is REQUIRED, so every writer on this release
+  states it; and
+- the repository's row mapper resolves a NULL to the same value the backfill
+  would have written (see `mapStrategyRow`, which derives `host_cluster` from
+  the row's `environment`). Failing closed there is worse than useless — it
+  would drop live rows out of the product for a condition the writer, not the
+  row, is responsible for.
+
+Pin both halves with a test that INSERTs a row omitting the column and asserts
+the read resolves it (`earn.repository.test.ts` → "admits a row from a writer
+that predates host_cluster").
 
 Tests that enforce the checklist (run them; they fail on the exact step you
 missed):

@@ -1,7 +1,6 @@
 import {
   EARN_DEPOSIT_TOKEN_SYMBOLS,
   type EarnDepositTokenSymbol,
-  type EarnStrategySourceKind,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
 import { providerUnavailable } from "../../errors";
@@ -61,53 +60,37 @@ const KAMINO_HOST_CLUSTER = "mainnet-beta" as const;
  */
 export const KAMINO_MIN_TVL_USD = 100_000;
 
-/**
- * Curator houses Kamino names inside a vault's on-chain `name`, e.g.
- * "Steakhouse High Yield USDG" or "Allez USDT". Kamino publishes no curator
- * field on any endpoint — not on the vault, not on the metrics, not on the
- * share-mint metadata — so the name is the only signal, exactly as Ground's
- * `deriveCurator` parses Ground's id/name vocabulary.
+/*
+ * A K-VAULT NAME IS ATTACKER-CONTROLLED. SDP MUST NOT ASSERT ANYTHING FROM IT.
  *
- * Deliberately NOT `EARN_KNOWN_CURATOR_LABELS`: that registry is display-only,
- * and keeping the two apart is what makes "onboarding a curator is a data
- * change" true. Longest-match-first so "neutral trade" cannot be shadowed by a
- * shorter entry; a house not listed here still resolves to the `kamino`
- * fallback rather than being dropped.
+ * (A standing rule for this file rather than doc for one symbol — the point is
+ * the code that is ABSENT.)
+ *
+ * Vault creation is permissionless — `KaminoManager.createVaultIxs` in Kamino's
+ * own SDK — and the name is a free-text field the creator picks. The live shelf
+ * proves it: "PC Test Vault Dawid" sits there beside the real houses.
+ *
+ * So the name may be RENDERED (it is what Kamino calls the vault, presented as
+ * such) but it may never be PARSED into a structured claim, because a
+ * structured claim is SDP vouching rather than quoting:
+ *
+ * - **No curator derivation.** Kamino publishes no curator field on any
+ *   endpoint, so there is nothing to attribute from. An earlier revision matched
+ *   a house list against the name and fell back to `kamino` — which meant
+ *   anyone could mint a vault called "Steakhouse USDC Prime", clear the TVL
+ *   floor for one hourly sync, and have SDP print Steakhouse's name on it. The
+ *   floor is a cost, not an authorization. `riskMetadata.curator` is therefore
+ *   OMITTED, and the dashboard already renders a missing curator as absent.
+ * - **No RWA classification.** Every vault is catalogued `defi`, which is what a
+ *   K-Vault verifiably is: it allocates into Klend reserves. An earlier revision
+ *   read `rwa`/`private credit`/`commodity` out of the name, which let a chosen
+ *   string move a vault into the `sourceKind=rwa` filter — the one filter an
+ *   integrator uses to find instruments with real-world backing.
+ *
+ * Populating either one needs a source Kamino does not currently expose:
+ * verified authority/address data, or an audited vault-address allowlist. Add
+ * that first; do not re-derive from the name.
  */
-const KAMINO_CURATOR_HOUSES: readonly (readonly [pattern: string, curator: string])[] = [
-  ["neutral trade", "neutral_trade"],
-  ["neutraltrade", "neutral_trade"],
-  ["mev capital", "mev_capital"],
-  ["steakhouse", "steakhouse"],
-  ["smokehouse", "smokehouse"],
-  ["rockawayx", "rockawayx"],
-  ["hyperithm", "hyperithm"],
-  ["elemental", "elemental"],
-  ["marinade", "marinade"],
-  ["gauntlet", "gauntlet"],
-  ["sentora", "sentora"],
-  ["ethena", "ethena"],
-  ["elaris", "elaris"],
-  ["galaxy", "galaxy"],
-  ["squads", "squads"],
-  ["allez", "allez"],
-];
-
-/**
- * Vault names that mark real-world assets rather than DeFi lending.
- *
- * Kamino's `vaultAllocationStrategy` names Klend RESERVE pubkeys, not asset
- * classes, so classifying by allocation the way Ground does would mean
- * resolving every reserve against `/v2/kamino-market` on each sync — several
- * hundred extra requests to recover a fact the vault name already states. The
- * four terms below cover every RWA vault on the current shelf: "RWA USDC",
- * "Kamino Private Credit USDC", "Kamino Institutional Commodity Yield",
- * "Honeycomb RWA", "SharpByte RWA USDC Prime".
- *
- * Do not extend this on speculation — check what `earn:inventory:kamino`
- * reports first.
- */
-const KAMINO_RWA_NAME = /\brwa\b|private credit|commodity|treasur/i;
 
 // --- Kamino wire shapes (api.kamino.finance, verified 2026-08-13) ---
 
@@ -163,6 +146,21 @@ const KAMINO_METRICS_PAGE_SIZE = 100;
  */
 const KAMINO_METRICS_MAX_PAGES = 20;
 
+/**
+ * Per-request ceiling. Both of this client's callers are scheduled jobs that
+ * await their steps in sequence, so an unbounded read here is not a slow
+ * failure — it spends the whole execution and the steps after it never run.
+ *
+ * Sized against the tightest of them: the reconciliation job's Cloud Run
+ * timeout is 120s (`sdp_api_cron_timeout`), and the metrics refresh runs FIRST,
+ * before `runEarnCatalogueSyncIfDue`. Measured, the full pass is ~1.4s for four
+ * requests, so 10s is roughly seven times the observed worst case and still
+ * leaves the rest of the job its budget. `EARN_PROVIDER_METRICS_DEADLINE_MS`
+ * (apps/sdp-api/src/cron/earn-metrics-refresh.ts) is the outer bound on the
+ * whole per-provider pass, which is what caps the pagination loop.
+ */
+const KAMINO_REQUEST_TIMEOUT_MS = 10_000;
+
 // --- Normalization helpers ---
 
 /**
@@ -199,16 +197,47 @@ function kaminoUsd(value: string | null | undefined): number | undefined {
 const APY_DECIMAL_PLACES = 6;
 
 /**
- * Kamino sends rates as decimal strings up to 21 places
- * (`"0.05925349346419595"`). Truncate by SLICING, never by `Number()` — the
- * package rule is that no float touches a rate, and a round-trip through a
- * double silently re-renders the tail it cannot hold.
+ * Add one unit at the last retained decimal place of a magnitude, carrying by
+ * hand. `digits` is the integer part concatenated with the fractional part
+ * padded to exactly `APY_DECIMAL_PLACES`, so "0012345" (0.012345) → "0012346",
+ * and "0999999" (0.999999) → "1000000".
  *
- * Truncates rather than rounds so the catalogue never quotes a rate above the
- * one the provider reported. Negative APYs are real (four vaults on the current
- * shelf) and pass through unchanged; a vault genuinely losing value must not be
- * shown as flat. Anything unparseable answers undefined, which renders as "no
- * rate yet" rather than a fabricated 0%.
+ * Long addition on a string, because the whole point is that no float touches a
+ * rate: `0.012345 + 0.000001` is not `0.012346` in a double.
+ */
+function bumpLastPlace(digits: string): string {
+  const out = [...digits];
+  for (let i = out.length - 1; i >= 0; i -= 1) {
+    if (out[i] === "9") {
+      out[i] = "0";
+      continue;
+    }
+    out[i] = String(Number(out[i]) + 1);
+    return out.join("");
+  }
+  // Every digit carried — the magnitude gained a place (0.999999 → 1.000000).
+  return `1${out.join("")}`;
+}
+
+/**
+ * Kamino sends rates as decimal strings up to 21 places
+ * (`"0.05925349346419595"`). Cut them to `APY_DECIMAL_PLACES` by STRING
+ * SURGERY, never by `Number()` — the package rule is that no float touches a
+ * rate, and a round-trip through a double silently re-renders the tail it
+ * cannot hold.
+ *
+ * The invariant is directional, not "truncate": **SDP never quotes a rate above
+ * the one the provider reported.** For a positive rate that means dropping the
+ * tail. For a NEGATIVE rate — four vaults on the current shelf report one, and a
+ * vault genuinely losing value must not be shown as flat — dropping the tail
+ * moves the number UP (`-0.0123456789` → `-0.012345`, and a sub-precision loss
+ * → `0`), which is the opposite of the invariant. So a negative value with a
+ * non-zero discarded tail is floored AWAY from zero instead: `-0.012346`, and
+ * `-0.0000000001` → `-0.000001`, the smallest loss this precision can express.
+ * A negative value whose tail is all zeros is already exact and is left alone.
+ *
+ * Anything unparseable answers undefined, which renders as "no rate yet" rather
+ * than a fabricated 0%.
  */
 export function truncateKaminoApy(value: string | null | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -219,10 +248,23 @@ export function truncateKaminoApy(value: string | null | undefined): string | un
   if (point === -1) {
     return trimmed;
   }
-  const truncated = trimmed.slice(0, point + 1 + APY_DECIMAL_PLACES).replace(/\.?0+$/, "");
-  // A value smaller than the retained precision truncates to "0"/"-0"; report
-  // the zero rather than an empty string or a signed zero.
-  return truncated === "" || truncated === "-" || truncated === "-0" ? "0" : truncated;
+
+  const negative = trimmed.startsWith("-");
+  const magnitude = negative ? trimmed.slice(1) : trimmed;
+  const [whole = "0", fraction = ""] = magnitude.split(".");
+  const kept = fraction.slice(0, APY_DECIMAL_PLACES);
+  const discarded = fraction.slice(APY_DECIMAL_PLACES);
+
+  let digits = whole + kept.padEnd(APY_DECIMAL_PLACES, "0");
+  if (negative && /[1-9]/.test(discarded)) {
+    digits = bumpLastPlace(digits);
+  }
+
+  const cut = digits.length - APY_DECIMAL_PLACES;
+  const rebuilt = `${digits.slice(0, cut)}.${digits.slice(cut)}`.replace(/\.?0+$/, "");
+  // A positive value smaller than the retained precision cuts to "" or "0";
+  // report the zero rather than an empty string or a signed zero.
+  return rebuilt === "" || rebuilt === "0" ? "0" : `${negative ? "-" : ""}${rebuilt}`;
 }
 
 /**
@@ -243,22 +285,6 @@ export function kaminoTvlUsd(metrics: KaminoVaultMetrics): number | undefined {
   }
   const total = parts.reduce<number>((sum, part) => sum + (part ?? 0), 0);
   return Number.isFinite(total) ? total : undefined;
-}
-
-/** Curator is data, not code (ADR 0002): match a house named in the vault's
- * own name, else attribute the vault to Kamino, which curates its own. */
-export function deriveKaminoCurator(name: string): string {
-  const haystack = name.toLowerCase();
-  for (const [pattern, curator] of KAMINO_CURATOR_HOUSES) {
-    if (haystack.includes(pattern)) {
-      return curator;
-    }
-  }
-  return "kamino";
-}
-
-function classifyKaminoSourceKind(name: string): EarnStrategySourceKind {
-  return KAMINO_RWA_NAME.test(name) ? "rwa" : "defi";
 }
 
 // --- Distillation ---
@@ -330,7 +356,10 @@ export function distillKaminoVault(
     snapshot: {
       providerReference: vault.address,
       name,
-      sourceKind: classifyKaminoSourceKind(name),
+      // Always `defi`, never read out of the name — see the trust-boundary note
+      // above. A K-Vault allocates into Klend reserves, which IS DeFi lending;
+      // that is the one classification the vault's own mechanics establish.
+      sourceKind: "defi",
       // Every K-Vault deploys into Klend reserves — that is what a K-Vault is.
       underlyingSource: "klend",
       depositMints: [vault.state.tokenMint],
@@ -346,8 +375,10 @@ export function distillKaminoVault(
       // moment of withdrawal, not a redemption TERM of the vault, and the
       // snapshot has no field that could honestly carry it.
       liquidityTerm: "instant",
+      // No `curator` — Kamino publishes none, and the name cannot stand in for
+      // one (see the trust-boundary note above). Everything here is a figure
+      // the protocol itself reports.
       riskMetadata: {
-        curator: deriveKaminoCurator(name),
         tvlUsd,
         ...(metrics.numberOfHolders == null ? {} : { holders: metrics.numberOfHolders }),
         ...(vault.state.managementFeeBps == null
@@ -386,9 +417,12 @@ export function distillKaminoVault(
 export class KaminoEarnClient extends StubEarnClient implements EarnLiveMetricsProvider {
   readonly provider = "kamino" as const;
   readonly declaredSupport: EarnDeclaredStrategySupport = {
-    // "RWA USDC", "Kamino Private Credit USDC" and "Kamino Institutional
-    // Commodity Yield" are all real rows on the current shelf.
-    sourceKinds: ["defi", "rwa"],
+    // `defi` only. Vaults with real-world backing do exist on the shelf, but
+    // Kamino exposes no field that establishes one — only the permissionless
+    // name, which SDP does not parse (see the trust-boundary note above). The
+    // envelope states what this client can honestly emit, so it stays at one
+    // kind until a verified source for the other lands.
+    sourceKinds: ["defi"],
     // Kamino's vaults span SOL, USDS, PYUSD, cbBTC and more; SDP Earn V1 is a
     // stablecoin deposit facility, so the envelope stays at the three symbols
     // `EARN_DEPOSIT_TOKEN_SYMBOLS` declares. Widening this is a change to that
@@ -409,6 +443,7 @@ export class KaminoEarnClient extends StubEarnClient implements EarnLiveMetricsP
       `${KAMINO_API_URL}/kvaults/vaults`,
       {
         method: "GET",
+        timeoutMs: KAMINO_REQUEST_TIMEOUT_MS,
       }
     );
   }
@@ -440,6 +475,7 @@ export class KaminoEarnClient extends StubEarnClient implements EarnLiveMetricsP
       }
       const response: KaminoMetricsPage = await providerFetchJson(this.provider, url.toString(), {
         method: "GET",
+        timeoutMs: KAMINO_REQUEST_TIMEOUT_MS,
       });
       // A 200 whose body carries no `result` array is a malformed page, not an
       // empty one — providerFetchJson does no schema validation, so `{}` would

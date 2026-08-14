@@ -299,6 +299,40 @@ describe("EarnRepository (postgres)", () => {
       expect(total).toBe(1);
     });
 
+    /**
+     * The expand half of migration 0057 leaves `host_cluster` NULLABLE, because
+     * the deploy applies migrations BEFORE it rolls the service and the cron
+     * image — and a rollback restores the old image over the new schema. So a
+     * writer that predates the column can and will write a NULL row here.
+     *
+     * Both halves of that contract are pinned: the write must be ACCEPTED (a
+     * NOT NULL would fail every upsert in that window, stalling the catalogue
+     * refresh), and the read must resolve the row to the environment's own
+     * cluster so it stays fundable instead of silently leaving the wizard.
+     */
+    it("admits a row from a writer that predates host_cluster, and reads it as this environment's cluster", async () => {
+      const db = getDb(env);
+      const legacyId = "earn_strategy_pre_host_cluster";
+      for (const [id, environment, expected] of [
+        [legacyId, "sandbox", "devnet"],
+        [`${legacyId}_prod`, "production", "mainnet-beta"],
+      ] as const) {
+        await db
+          .prepare(
+            `INSERT INTO earn_strategies
+               (id, provider, provider_reference, name, source_kind, deposit_mints,
+                apy_type, current_apy, liquidity_term, risk_metadata, status, environment)
+             VALUES (?, 'ground', ?, 'Legacy Ground Vault', 'defi', ?::jsonb,
+                     'variable', '0.041', 'instant', '{}'::jsonb, 'active', ?)`
+          )
+          .bind(id, `${id}-ref`, JSON.stringify([USDC_MINT]), environment)
+          .run();
+
+        const row = await repo.getStrategyById(id);
+        expect(row?.host_cluster).toBe(expected);
+      }
+    });
+
     it("keys the sync on environment — one provider reference, separate sandbox/production rows", async () => {
       const sandbox = await seedStrategy();
       const production = await seedStrategy({ environment: "production" });

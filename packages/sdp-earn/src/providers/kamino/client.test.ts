@@ -3,7 +3,6 @@ import { afterEach, describe, it, mock } from "node:test";
 import { wellKnownMint } from "@sdp/types";
 import type { EarnRuntimeContext } from "../../types";
 import {
-  deriveKaminoCurator,
   distillKaminoVault,
   KAMINO_MIN_TVL_USD,
   KaminoEarnClient,
@@ -98,13 +97,53 @@ describe("truncateKaminoApy", () => {
     assert.equal(truncateKaminoApy("0.0599989999"), "0.059998");
   });
 
-  it("keeps negative rates, which real vaults report", () => {
-    assert.equal(truncateKaminoApy("-0.0123456789"), "-0.012345");
+  it("floors negative rates AWAY from zero, so a loss is never understated", () => {
+    // Cutting the tail moves a negative number UP. `-0.012345` would quote a
+    // smaller loss than the vault reported, which is the same failure as
+    // quoting a bigger gain.
+    assert.equal(truncateKaminoApy("-0.0123456789"), "-0.012346");
+    // Carry across every retained place.
+    assert.equal(truncateKaminoApy("-0.9999999"), "-1");
+    // A negative value that already fits is exact — nothing to floor.
+    assert.equal(truncateKaminoApy("-0.012345"), "-0.012345");
+    assert.equal(truncateKaminoApy("-0.0123450000"), "-0.012345");
   });
 
   it("reports a sub-precision rate as zero rather than an empty or signed zero", () => {
     assert.equal(truncateKaminoApy("0.0000000001"), "0");
-    assert.equal(truncateKaminoApy("-0.0000000001"), "0");
+    // Negative: `0` would be ABOVE the provider's value, so it floors to the
+    // smallest loss six places can express instead.
+    assert.equal(truncateKaminoApy("-0.000000000001"), "-0.000001");
+    // Genuinely zero, written long — nothing was discarded, so nothing floors.
+    assert.equal(truncateKaminoApy("-0.0000000000"), "0");
+  });
+
+  /**
+   * The invariant itself, checked numerically rather than by example: whatever
+   * this returns, a customer comparing vaults must never see a rate better than
+   * the one the provider published. Floats are fine HERE — the assertion is
+   * about ordering, and the value under test is still produced by string
+   * surgery.
+   */
+  it("never returns a value above the provider's, on either side of zero", () => {
+    for (const reported of [
+      "0.05925349346419595",
+      "0.0599989999",
+      "0.0000000001",
+      "0",
+      "-0.0000000001",
+      "-0.0123456789",
+      "-0.9999999",
+      "-1.0000005",
+      "-12.3456789",
+    ]) {
+      const quoted = truncateKaminoApy(reported);
+      assert.ok(quoted !== undefined, `expected ${reported} to parse`);
+      assert.ok(
+        Number(quoted) <= Number(reported),
+        `${reported} was quoted as ${quoted}, which is above it`
+      );
+    }
   });
 
   it("passes integers and trims trailing zeros", () => {
@@ -117,25 +156,6 @@ describe("truncateKaminoApy", () => {
     for (const value of [undefined, null, "", "  ", "abc", "1e-8", "NaN", "0.1.2"]) {
       assert.equal(truncateKaminoApy(value), undefined, `expected ${String(value)} to be dropped`);
     }
-  });
-});
-
-describe("deriveKaminoCurator", () => {
-  it("matches a curator house named in the vault name", () => {
-    assert.equal(deriveKaminoCurator("Steakhouse High Yield USDG"), "steakhouse");
-    assert.equal(deriveKaminoCurator("Allez USDT"), "allez");
-    assert.equal(deriveKaminoCurator("Gauntlet Frontier"), "gauntlet");
-    assert.equal(deriveKaminoCurator("MEV Capital USDC"), "mev_capital");
-  });
-
-  it("prefers the longer house name so a shorter entry cannot shadow it", () => {
-    assert.equal(deriveKaminoCurator("Neutral Trade USDC Max Yield"), "neutral_trade");
-    assert.equal(deriveKaminoCurator("NeutralTrade USDC Max Yield"), "neutral_trade");
-  });
-
-  it("attributes an unrecognized vault to Kamino, which curates its own", () => {
-    assert.equal(deriveKaminoCurator("Kamino Private Credit USDC"), "kamino");
-    assert.equal(deriveKaminoCurator("Some House Nobody Listed"), "kamino");
   });
 });
 
@@ -157,11 +177,12 @@ describe("distillKaminoVault", () => {
     });
   });
 
-  it("carries curator, TVL, holders and fees as risk metadata", () => {
+  it("carries TVL, holders and fees as risk metadata — and no curator", () => {
     const result = distillKaminoVault(vault(), metrics());
     assert.equal(result.outcome, "catalogued");
+    // deepEqual, not partial: the ABSENCE of `curator` is the assertion. Every
+    // key here is a figure Kamino itself reports.
     assert.deepEqual(result.outcome === "catalogued" ? result.snapshot.riskMetadata : undefined, {
-      curator: "steakhouse",
       tvlUsd: 10_000_000,
       holders: 42,
       managementFeeBps: 25,
@@ -178,23 +199,37 @@ describe("distillKaminoVault", () => {
     );
   });
 
-  it("classifies the RWA vaults by name", () => {
+  /**
+   * The trust boundary, pinned. K-Vault creation is permissionless
+   * (`KaminoManager.createVaultIxs`) and the name is free text the creator
+   * picks, so a name that reads like a claim must not BECOME one: not a curator
+   * attribution, and not an RWA classification that moves the vault into the
+   * `sourceKind=rwa` filter integrators use to find real-world backing.
+   *
+   * The names below are exactly what an impersonation attempt looks like — a
+   * real curator house and every RWA term the deleted regex matched. Clearing
+   * the TVL floor for one sync is a cost, not an authorization.
+   */
+  it("never derives a curator or an RWA classification from the vault name", () => {
     for (const name of [
+      "Steakhouse High Yield USDG",
+      "Gauntlet Frontier",
+      "MEV Capital USDC",
       "RWA USDC",
       "Kamino Private Credit USDC",
       "Kamino Institutional Commodity Yield",
       "Honeycomb RWA",
+      "US Treasury Yield",
     ]) {
       const result = distillKaminoVault(vault({ name }), metrics());
       assert.equal(result.outcome, "catalogued");
-      assert.equal(result.outcome === "catalogued" ? result.snapshot.sourceKind : undefined, "rwa");
+      const snapshot = result.outcome === "catalogued" ? result.snapshot : undefined;
+      // Catalogued and rendered under its own name — but SDP asserts nothing
+      // from that name beyond quoting it.
+      assert.equal(snapshot?.name, name);
+      assert.equal(snapshot?.sourceKind, "defi");
+      assert.equal(snapshot?.riskMetadata?.curator, undefined);
     }
-  });
-
-  it("does not read 'rwa' out of the middle of a word", () => {
-    const result = distillKaminoVault(vault({ name: "Drwaggon USDC" }), metrics());
-    assert.equal(result.outcome, "catalogued");
-    assert.equal(result.outcome === "catalogued" ? result.snapshot.sourceKind : undefined, "defi");
   });
 
   it("stamps mainnet-beta even for a devnet mint it somehow saw", () => {
@@ -495,8 +530,10 @@ describe("KaminoEarnClient.listStrategyMetrics", () => {
 });
 
 describe("KaminoEarnClient contract surface", () => {
-  it("declares the stablecoin envelope and both source kinds", () => {
-    assert.deepEqual(client.declaredSupport.sourceKinds, ["defi", "rwa"]);
+  it("declares the stablecoin envelope and `defi` alone", () => {
+    // `rwa` is deliberately absent: nothing this client emits can establish it,
+    // because the only signal Kamino offers is the permissionless vault name.
+    assert.deepEqual(client.declaredSupport.sourceKinds, ["defi"]);
     assert.deepEqual(client.declaredSupport.depositTokens, ["USDC", "USDG", "USDT"]);
   });
 
