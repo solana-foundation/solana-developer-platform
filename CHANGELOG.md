@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.62.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.61.0...v0.62.0) (2026-08-14)
+
+### Features
+
+* **sponsorship:** emit structured money-path events ([#1286](https://github.com/solana-foundation/solana-developer-platform/pull/1286)) ([04102b3](https://github.com/solana-foundation/solana-developer-platform/commit/04102b3b2ddf5fc65d04c9a87a3b39f5fba9c320))
+* **i18n:** add complete Vietnamese (vi) UI translation catalogs ([#1154](https://github.com/solana-foundation/solana-developer-platform/pull/1154)) ([3ecc2e3](https://github.com/solana-foundation/solana-developer-platform/commit/3ecc2e3b133e5f02d45fa4f232652f125bef5170))
+
+### Bug Fixes
+
+* **ci:** restore dashboard release deploys ([#1327](https://github.com/solana-foundation/solana-developer-platform/pull/1327)) ([465ed16](https://github.com/solana-foundation/solana-developer-platform/commit/465ed1669488e2c5b8aff7215e60214dcf7113cd))
+
+### Maintenance
+
+* **web:** general dashboard improvements ([#1324](https://github.com/solana-foundation/solana-developer-platform/pull/1324)) ([bf12555](https://github.com/solana-foundation/solana-developer-platform/commit/bf12555482b67a0e5e738b077a071620a53fb9b0))
+
+## [0.61.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.60.0...v0.61.0) (2026-08-14)
+
+### Features
+
+* **policy:** author wallet transfer limits per asset (PRO-1684) ([#1306](https://github.com/solana-foundation/solana-developer-platform/pull/1306)) ([3486b68](https://github.com/solana-foundation/solana-developer-platform/commit/3486b68ceeac9e965954935e4e10cd2dbb3d5e6a))
+* **helius:** add helius statemachine ([#1264](https://github.com/solana-foundation/solana-developer-platform/pull/1264)) ([dcf7b1d](https://github.com/solana-foundation/solana-developer-platform/commit/dcf7b1de7be686257974ee4387de40abdaf25436))
+* **web:** deploy issuance tokens through Kora sponsorship only ([#1302](https://github.com/solana-foundation/solana-developer-platform/pull/1302)) ([eb1f07b](https://github.com/solana-foundation/solana-developer-platform/commit/eb1f07b5a37dc01b5e156da1501b31a1d4717a69))
+
+### Bug Fixes
+
+* **integration:** assert the reservation-ceiling invariant, not zero outflow ([#1316](https://github.com/solana-foundation/solana-developer-platform/pull/1316)) ([9ce567d](https://github.com/solana-foundation/solana-developer-platform/commit/9ce567dbd61924e6a8c5bbf29fda8442a3484b00))
+* **ci:** deploy releases from protected main flow ([#1304](https://github.com/solana-foundation/solana-developer-platform/pull/1304)) ([499d02f](https://github.com/solana-foundation/solana-developer-platform/commit/499d02f4cb94e04428164bbd8549d963ca0c5014))
+
+### Maintenance
+
+* **deps:** bump the solana group with 5 updates ([#1231](https://github.com/solana-foundation/solana-developer-platform/pull/1231)) ([1333b70](https://github.com/solana-foundation/solana-developer-platform/commit/1333b70675e2d3de5d01cb7aa9f35263c2d5fd4f))
+* **deps-dev:** bump jsdom from 26.1.0 to 30.0.1 ([#1193](https://github.com/solana-foundation/solana-developer-platform/pull/1193)) ([5f57dd3](https://github.com/solana-foundation/solana-developer-platform/commit/5f57dd3974c7e49d5edd3e2ada765449ac89b33b))
+
 ## [0.60.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.59.0...v0.60.0) (2026-08-13)
 
 ### Features

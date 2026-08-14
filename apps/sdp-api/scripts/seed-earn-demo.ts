@@ -14,11 +14,9 @@
  * invented products teaches local dev the wrong thing. The numbers are frozen
  * snapshots, not live truth; only the sync tracks the real ones.
  *
- * SOLANA-HOSTED ONLY, exactly like the catalogue sync's `not_solana_hosted`
- * gate. Ground's shelf is majority Ethereum-hosted (Aave, four Morpho vaults,
- * Syrup and every RWA source) and SDP lists and stores none of it, so no fixture
- * may reference one either — a seeded EVM row would be a vault the dashboard
- * offers and the sync would then delist.
+ * The fixture set is intentionally a compact five-source Solana-hosted subset.
+ * The live sync is broader and persists every active Ground source routable over
+ * SDP's Solana USDC rail; API read policy decides which stored rows customers see.
  *
  * Fixtures stay distinguishable from synced rows, and that is what the
  * `seed-demo-` provider_reference prefix buys (earn_strategies has no
@@ -188,11 +186,10 @@ const SEED_PROVIDER_WALLET: { ref: string; note: string } = {
 };
 
 // ── Fixture catalogue ───────────────────────────────────────────────────────
-// Ground's Solana-hosted sandbox shelf — ALL FIVE of it, values from the
+// A compact five-source Solana-hosted sandbox subset, with values from the
 // committed inventory snapshot (docs/earn/ground-catalogue-inventory.md,
-// 2026-08-05). Not a curated spread any more: SDP lists and stores Solana-hosted
-// vaults only (`not_solana_hosted`), so the fixtures ARE the shelf, and seeding
-// anything else would advertise a vault the catalogue sync would refuse.
+// 2026-08-05). This is enough for deterministic local UI work without trying to
+// mirror every row the live catalogue sync persists.
 //
 // What that costs local dev, so nobody hunts for these:
 //   - every Solana source is `instant`, so DELAYED liquidity is unexercised —
