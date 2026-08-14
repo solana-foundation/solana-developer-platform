@@ -23,6 +23,7 @@ function mapDeliveryRow(row: Record<string, unknown>): WebhookDeliveryRow {
     status: row.status as WebhookDeliveryStatus,
     response_status: row.response_status === null ? null : Number(row.response_status),
     response_body: (row.response_body as string | null) ?? null,
+    response_body_truncated: Boolean(row.response_body_truncated),
     error: (row.error as string | null) ?? null,
     duration_ms: row.duration_ms === null ? null : Number(row.duration_ms),
     created_at: row.created_at as string,
@@ -37,8 +38,9 @@ export function createPostgresWebhookDeliveriesRepository(db: AppDb): WebhookDel
           `INSERT INTO webhook_deliveries (
              id, organization_id, project_id, endpoint_id, execution_id, workflow_id,
              trigger_type, attempt, manual, redelivery_of, request_body,
-             request_body_truncated, status, response_status, response_body, error, duration_ms
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             request_body_truncated, status, response_status, response_body,
+             response_body_truncated, error, duration_ms
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            RETURNING *`
         )
         .bind(
@@ -57,6 +59,7 @@ export function createPostgresWebhookDeliveriesRepository(db: AppDb): WebhookDel
           input.status,
           input.responseStatus ?? null,
           input.responseBody ?? null,
+          input.responseBodyTruncated ?? false,
           input.error ?? null,
           input.durationMs ?? null
         )

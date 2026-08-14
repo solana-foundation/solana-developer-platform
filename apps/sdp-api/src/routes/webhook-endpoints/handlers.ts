@@ -66,6 +66,7 @@ function toDeliveryResponse(row: WebhookDeliveryRow) {
     status: row.status,
     responseStatus: row.response_status,
     responseBody: row.response_body,
+    responseBodyTruncated: row.response_body_truncated,
     error: row.error,
     durationMs: row.duration_ms,
     createdAt: row.created_at,
@@ -349,6 +350,7 @@ function outcomeToDeliveryFields(outcome: WebhookSendOutcome): {
   status: "succeeded" | "failed";
   responseStatus: number | null;
   responseBody: string | null;
+  responseBodyTruncated: boolean;
   error: string | null;
   durationMs: number | null;
 } {
@@ -357,6 +359,7 @@ function outcomeToDeliveryFields(outcome: WebhookSendOutcome): {
       status: "failed",
       responseStatus: null,
       responseBody: null,
+      responseBodyTruncated: false,
       error: outcome.kind === "blocked" ? outcome.reason : outcome.error,
       durationMs: outcome.kind === "network" ? outcome.durationMs : null,
     };
@@ -366,6 +369,7 @@ function outcomeToDeliveryFields(outcome: WebhookSendOutcome): {
     status: delivered ? "succeeded" : "failed",
     responseStatus: outcome.status,
     responseBody: outcome.responseBody || null,
+    responseBodyTruncated: outcome.responseBodyTruncated,
     error: delivered ? null : `HTTP_${outcome.status}`,
     durationMs: outcome.durationMs,
   };

@@ -428,6 +428,11 @@ export const updateWorkflow = async (c: AppContext) => {
       // under lock inside the transaction — `previousSecret` above came from a read that
       // predates it, so a concurrent rotation would make it name a version already gone.
       rotateSecretTo: secret ? actionSecret : null,
+      // Endpoint-mode definitions carry no inline key (see `actionSecret` above), and
+      // without this flag the repo would preserve the stored secret — that guard exists
+      // so an edit that doesn't resend the secret can't erase it, but here erasing is
+      // the point. The displaced version is queued under the row lock and swept.
+      dropActionSecret: definitionSupplied && params.endpointId !== undefined && !secret,
     })
     .catch(async (error: unknown) => {
       await destroyActionSecret(c.env, secret ? actionSecret : null, { orgId, workflowId });

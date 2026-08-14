@@ -20,10 +20,14 @@ const webhookUrl = z
     ctx.addIssue({ code: "custom", message });
   });
 
+// Trimmed before the length checks so a whitespace-only label can't slip through as
+// "non-empty" and render an invisible link in the registry table.
+const endpointLabel = z.string().trim().min(1).max(120);
+
 export const createEndpointSchema = z
   .object({
     url: webhookUrl,
-    label: z.string().min(1).max(120),
+    label: endpointLabel,
     description: z.string().max(500).optional(),
   })
   .strict();
@@ -32,7 +36,7 @@ export const createEndpointSchema = z
 // to change it) — silently repointing an endpoint would redirect every rule using it.
 export const updateEndpointSchema = z
   .object({
-    label: z.string().min(1).max(120).optional(),
+    label: endpointLabel.optional(),
     description: z.string().max(500).nullable().optional(),
     status: z.enum(["active", "disabled"]).optional(),
   })

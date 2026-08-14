@@ -53,7 +53,13 @@ export async function signV2(
 
 export type WebhookSendOutcome =
   // `status` may be any non-redirect status; the caller owns retryability mapping.
-  | { ok: true; status: number; responseBody: string; durationMs: number }
+  | {
+      ok: true;
+      status: number;
+      responseBody: string;
+      responseBodyTruncated: boolean;
+      durationMs: number;
+    }
   // SSRF-blocked target or redirect chain: a permanent config error (or an attempt).
   | { ok: false; kind: "blocked"; reason: string }
   // Timeout / socket error: transient, the engine retries with backoff.
@@ -85,21 +91,25 @@ export async function sendWebhook(params: {
         signal: controller.signal,
       });
       if (response.status < 300 || response.status >= 400) {
+        const body = await readTruncatedBody(response);
         return {
           ok: true,
           status: response.status,
-          responseBody: await readTruncatedBody(response),
+          responseBody: body.text,
+          responseBodyTruncated: body.truncated,
           durationMs: Date.now() - started,
         };
       }
       const location = response.headers.get("location");
-      // Drain before abandoning the connection.
-      await response.arrayBuffer().catch(() => undefined);
+      // Abandon the redirect body without reading it — the receiver controls its size,
+      // so draining it into memory hands a hostile endpoint an allocation of its choice.
+      await response.body?.cancel().catch(() => undefined);
       if (!location) {
         return {
           ok: true,
           status: response.status,
           responseBody: "",
+          responseBodyTruncated: false,
           durationMs: Date.now() - started,
         };
       }
@@ -118,11 +128,34 @@ export async function sendWebhook(params: {
   }
 }
 
-async function readTruncatedBody(response: Response): Promise<string> {
-  try {
-    const text = await response.text();
-    return text.length > RESPONSE_BODY_MAX_CHARS ? text.slice(0, RESPONSE_BODY_MAX_CHARS) : text;
-  } catch {
-    return "";
+// Streamed with a hard cap, never buffered whole: the receiver controls the response
+// size, and `response.text()` would hand a hostile endpoint an arbitrarily large
+// allocation inside the send timeout. Reading stops one chunk past the cap (so
+// `truncated` is a fact, not a guess) and the rest of the stream is cancelled.
+async function readTruncatedBody(
+  response: Response
+): Promise<{ text: string; truncated: boolean }> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    return { text: "", truncated: false };
   }
+  const decoder = new TextDecoder();
+  let text = "";
+  try {
+    while (text.length <= RESPONSE_BODY_MAX_CHARS) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+  } catch {
+    // A body that dies mid-read keeps what already arrived.
+  } finally {
+    reader.cancel().catch(() => undefined);
+  }
+  if (text.length > RESPONSE_BODY_MAX_CHARS) {
+    return { text: text.slice(0, RESPONSE_BODY_MAX_CHARS), truncated: true };
+  }
+  return { text, truncated: false };
 }

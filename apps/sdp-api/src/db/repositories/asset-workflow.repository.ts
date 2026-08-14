@@ -84,6 +84,14 @@ export interface UpdateAssetWorkflowInput {
   // cancelled, so the two reachable states are "the row points at the version" and "the
   // version is queued for destruction", never neither.
   rotateSecretTo?: StoredCredentialSecret | null;
+  // The definition this request writes stops referencing an inline signing key without
+  // installing a replacement (a rule migrated onto a registry endpoint — the endpoint's
+  // own key signs now). Without this flag the write preserves the row's stored secret,
+  // which exists so an edit that doesn't resend the secret can't erase it; here erasing
+  // it is the point. The dropped version is queued for destruction by the same
+  // transaction — from the row's value under lock, same as a rotation — and the sweeper
+  // retires it.
+  dropActionSecret?: boolean;
 }
 
 export interface AssetWorkflowsRepositoryContext {

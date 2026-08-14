@@ -502,6 +502,42 @@ describe("webhook endpoint registry (routes)", () => {
     expect(legacy.status).toBe(201);
   });
 
+  it("drops the inline signing key when a legacy rule migrates onto an endpoint", async () => {
+    const { data } = await createEndpoint();
+    const base = `/v1/issuance/tokens/${TOKEN_ID}/workflows`;
+
+    const legacy = await request(WRITE_KEY, "POST", base, {
+      triggerType: "kyc_approved",
+      actionType: "send_webhook",
+      actionParams: { url: "https://example.com/hook", secret: "legacy-secret" },
+    });
+    expect(legacy.status).toBe(201);
+    const legacyBody = (await legacy.json()) as {
+      data: { workflow: { id: string; hasSecret: boolean } };
+    };
+    expect(legacyBody.data.workflow.hasSecret).toBe(true);
+    const workflowId = legacyBody.data.workflow.id;
+
+    // Migrate to registry mode. The rule must stop reporting (and holding) the inline
+    // key: the endpoint's own key signs now, and a later switch back to custom-url mode
+    // must not silently resurrect a secret the operator believes is gone.
+    const migrated = await request(WRITE_KEY, "PATCH", `${base}/${workflowId}`, {
+      actionParams: { endpointId: data.endpoint.id },
+    });
+    expect(migrated.status).toBe(200);
+    const migratedBody = (await migrated.json()) as {
+      data: { workflow: { hasSecret: boolean } };
+    };
+    expect(migratedBody.data.workflow.hasSecret).toBe(false);
+
+    // …and the definition row itself holds no handle, not just the redacted response.
+    const dbRow = await getDb(env)
+      .prepare("SELECT definition FROM asset_workflows WHERE id = ?")
+      .bind(workflowId)
+      .first<{ definition: { actionSecret?: unknown } }>();
+    expect(dbRow?.definition?.actionSecret ?? null).toBeNull();
+  });
+
   it("never returns another org's endpoint", async () => {
     const db = getDb(env);
     await db

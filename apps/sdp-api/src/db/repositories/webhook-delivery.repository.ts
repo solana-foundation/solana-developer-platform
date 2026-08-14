@@ -20,6 +20,7 @@ export interface WebhookDeliveryRow {
   status: WebhookDeliveryStatus;
   response_status: number | null;
   response_body: string | null;
+  response_body_truncated: boolean;
   error: string | null;
   duration_ms: number | null;
   created_at: string;
@@ -43,6 +44,7 @@ export interface CreateWebhookDeliveryInput {
   status: WebhookDeliveryStatus;
   responseStatus?: number | null;
   responseBody?: string | null;
+  responseBodyTruncated?: boolean;
   error?: string | null;
   durationMs?: number | null;
 }

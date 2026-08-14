@@ -47,6 +47,9 @@ export function registerWebhookEndpointPaths(registry: OpenAPIRegistry) {
         .string()
         .nullable()
         .openapi({ description: "Receiver response body, truncated to 4096 characters." }),
+      responseBodyTruncated: z.boolean().openapi({
+        description: "True when the receiver sent more than the stored 4096 characters.",
+      }),
       error: z.string().nullable().openapi({ example: "HTTP_502" }),
       durationMs: z.number().int().nullable(),
       createdAt: z.string(),
