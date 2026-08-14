@@ -313,16 +313,25 @@ funding instructions and nothing else — never imply a transfer happens.
   create a program with; `fundable` is about whether an instrument exists here
   at all, and it is what stops devnet money being pointed at a mainnet vault if
   the pin is ever widened. Neither may be inverted into "hide unless known-bad".
-- **The CATALOGUE is Solana-hosted-only; POSITIONS are not, and that is not a
-  bug here.** Since the `not_solana_hosted` gate (`@sdp/earn`), the strategy
-  catalogue lists and stores only vaults hosted on Solana, so the wizard can no
-  longer offer an EVM vault. But a program whose Ground wallet was pointed at an
-  off-Solana vault BEFORE that gate still renders that vault's name under "Where
-  the money sits" — the position comes from Ground's live wallet response, not
-  from `earn_strategies`, and real value sits in it. Do not filter such a
+- **A POSITION may name a vault the catalogue does not show, and that is not a
+  bug here.** The two come from different places: positions are read live from
+  Ground's wallet response, while the strategy table comes from
+  `earn_strategies` filtered by API policy. So a program pointed at an
+  Ethereum-hosted or an Aave/Morpho source still renders that vault's name under
+  "Where the money sits", and real value sits in it. Do not filter such a
   position out of the UI: hiding a funded position hides customer money, which
-  is worse than naming a vault we would no longer offer. Clearing one means
+  is worse than naming a vault the wizard would not offer. Clearing one means
   re-targeting the allocation in Ground (a money movement), not a web change.
+- **A third visibility rule lives in the API, and this module never sees it.**
+  `/strategies` list and detail omit Aave- and Morpho-related rows entirely
+  (`HIDDEN_STRATEGY_TERMS`), while the sync keeps storing them so the DB stays a
+  truthful provider inventory. That is server-side editorial policy about a
+  SOURCE — distinct from `fundable`, which is a fact about where an instrument
+  lives, and from the provider pin, which is about what the flow can create.
+  Do not reimplement it here: a client-side copy would drift, and a hidden row
+  never reaches the browser to begin with. Same caveat as above applies — a live
+  program POSITION may still name one of those sources, since positions come
+  from Ground's wallet response and may hold real value.
 - Design system: SDP quiet-institutional (see `.claude/skills/sdp-ui-designer`).
   Inter only — monospace is forbidden, including for addresses; use
   `tabular-nums` for numeric alignment. The ONE exception is a genuine code

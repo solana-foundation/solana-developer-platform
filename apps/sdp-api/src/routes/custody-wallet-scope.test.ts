@@ -5,6 +5,7 @@ import { address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import * as signingServiceModule from "@/services/domain/signing.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -387,6 +388,35 @@ describe("Custody wallet scope routes", () => {
     expect(body.data.wallets.every((wallet) => wallet.balances === undefined)).toBe(true);
     expect(getAccountInfoMock).not.toHaveBeenCalled();
     expect(getSplTokenBalancesMock).not.toHaveBeenCalled();
+  });
+
+  it("omits and does not cache balances when an RPC leg fails", async () => {
+    clearWalletCaches();
+    getSplTokenBalancesMock.mockRejectedValue(new Error("temporary RPC failure"));
+
+    const request = () =>
+      app.request(
+        "/v1/wallets?includeAllProviders=true&view=summary&includeBalances=true",
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await request();
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: { wallets: Array<{ balances?: unknown[] }> };
+      };
+      expect(body.data.wallets).toHaveLength(3);
+      expect(body.data.wallets.every((wallet) => wallet.balances === undefined)).toBe(true);
+    }
+
+    // Every retry re-observes every wallet instead of replaying synthetic zeros
+    // from the short-lived balance cache.
+    expect(getSplTokenBalancesMock).toHaveBeenCalledTimes(6);
   });
 
   it("filters aggregate wallets to the API key bindings", async () => {

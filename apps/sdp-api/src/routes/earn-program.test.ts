@@ -230,10 +230,10 @@ async function seedGroundStrategy(overrides: Partial<UpsertEarnStrategyInput> = 
     riskMetadata: { curator: "gauntlet" },
     status: "active",
     // Follows the environment by default because that is what Ground itself
-    // does — its `not_solana_hosted` gate only ever catalogues a source hosted
-    // on the environment's own chain, so a fixture pinned to devnet would be
-    // un-fundable in the production-session cases and fail for the wrong
-    // reason. Tests exercising the cluster gate override it explicitly.
+    // does — it catalogues a source against the environment's own Solana mint,
+    // so a fixture pinned to devnet would be un-fundable in the
+    // production-session cases and fail for the wrong reason. Tests exercising
+    // the cluster gate override it explicitly.
     hostCluster: CLUSTER_BY_SDP_ENVIRONMENT[environment],
     environment,
     ...overrides,

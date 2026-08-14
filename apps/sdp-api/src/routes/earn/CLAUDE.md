@@ -98,14 +98,15 @@ other's balance.
     resolution (400). An unentitled caller sending no key still gets 403, and a
     provider without the portfolio capability still gets 501, rather than a
     generic "missing idempotency key" that hides why the call could never work.
-  - **`assertKnownYieldSources` is what keeps non-Solana vaults out of new
-    programs.** It matches every requested `yieldSourceId` against the
-    `status = 'active'` catalogue for the environment, so the `not_solana_hosted`
-    gate in `@sdp/earn` reaches this route for free: an Ethereum-hosted vault is
-    no longer catalogued, so allocating to one 400s with "Unknown or inactive
-    yield sources". It does NOT re-check existing programs — a wallet pointed at
-    an off-Solana vault before the gate keeps that allocation until someone
-    re-targets it in Ground.
+  - **`assertKnownYieldSources` validates against the STORED active catalogue.**
+    It matches every requested `yieldSourceId` against `status = 'active'` for
+    the environment, so whatever a provider client admits is allocatable and
+    whatever it refuses 400s with "Unknown or inactive yield sources". Note this
+    is a moving line: #1299 removed Ground's `not_solana_hosted` gate, so
+    Ground's off-Solana sources are indexed and allocatable again (Ground
+    bridges internally, and the deposit stays Solana-side). It does NOT re-check
+    existing programs either — a wallet's current allocation stands until
+    someone re-targets it in Ground.
   - **Its keep-set is filtered by `isClusterFundableInEnvironment` too**, and
     that half is separately load-bearing: a mainnet-only provider's vaults ARE
     catalogued in sandbox, so provider scoping alone would let devnet money be
@@ -113,6 +114,14 @@ other's balance.
     last gate before a provider mutation on both create and re-target. The route
     tests pin it with a GROUND row whose cluster is flipped — a Kamino reference
     would pass on provider scoping alone and prove nothing.
+  - **Browse policy is deliberately NOT one of its gates.** `/strategies`
+    list/detail hide Aave- and Morpho-related rows (`HIDDEN_STRATEGY_TERMS`)
+    while the sync keeps storing them, so the DB stays a truthful provider
+    inventory. This gate reads the STORED catalogue, so a hidden row is still a
+    valid allocation target — correct, because hiding is a presentation choice
+    and an existing program may already point at one. Existing program positions
+    are never filtered either; hiding one could hide real customer money.
+
   - **A unique violation on the insert is a REPLAY, not a race.** The provider
     dedupes on the derived key and answers a retried create with the ORIGINAL
     wallet ref, so a legitimate retry lands on 0056's global unique by design:

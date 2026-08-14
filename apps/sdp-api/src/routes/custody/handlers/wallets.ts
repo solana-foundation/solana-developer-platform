@@ -173,7 +173,7 @@ async function getBalancesByWalletId(
 ) {
   const rpc = solanaRpc.createRpc(c.env);
   const tokenLabelsByMint = await resolveIssuedTokenLabelsByMint(c);
-  const balancesByWalletId = await Promise.all(
+  const balanceEntries = await Promise.all(
     walletPublicKeys.map(async (wallet) => {
       const cacheKey = buildWalletBalanceCacheKey(c, wallet.publicKey);
       const cachedBalances = readCache(walletBalanceCache, cacheKey);
@@ -221,6 +221,14 @@ async function getBalancesByWalletId(
         );
       }
 
+      // A partial observation is not a zero balance. Omit this wallet's
+      // balance field entirely so callers can distinguish an RPC failure from
+      // a successful empty account, and never cache a synthetic zero that
+      // would survive the transient failure for the cache TTL.
+      if (solBalanceResult.status === "rejected" || splBalancesResult.status === "rejected") {
+        return null;
+      }
+
       const walletBalances = writeCache(
         walletBalanceCache,
         cacheKey,
@@ -239,6 +247,10 @@ async function getBalancesByWalletId(
 
       return [wallet.id, walletBalances] as const;
     })
+  );
+
+  const balancesByWalletId = balanceEntries.filter(
+    (entry): entry is readonly [string, CustodyWalletTokenBalance[]] => entry !== null
   );
 
   const balancesMap = await attachTokenSymbolsToBalanceMap(c.env, new Map(balancesByWalletId));
@@ -687,14 +699,13 @@ export const listWallets = async (c: AppContext) => {
   }
 
   const response: CustodyWalletsResponse = {
-    wallets: wallets.map((wallet) => ({
-      ...wallet,
-      ...(filters.includeBalances
-        ? {
-            balances: balancesByWalletId.get(wallet.id) ?? [],
-          }
-        : {}),
-    })),
+    wallets: wallets.map((wallet) => {
+      const balances = balancesByWalletId.get(wallet.id);
+      return {
+        ...wallet,
+        ...(filters.includeBalances && balances !== undefined ? { balances } : {}),
+      };
+    }),
   };
 
   return success(c, response);
