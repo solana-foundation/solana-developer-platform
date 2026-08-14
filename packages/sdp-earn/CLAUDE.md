@@ -344,6 +344,17 @@ rates come from the same paged endpoint the catalogue uses.
   missing for an id in `EARN_PROVIDERS`.
 - All HTTP goes through `providerFetch`/`providerFetchJson` (src/fetch.ts) —
   never raw `fetch` in a client.
+- **`error` on a failure body is read as BOTH an object and a bare string**
+  (`extractProviderErrorMessage`). Measured 2026-08-14: Ground rejects a request
+  with `{"error":"Invalid query params: unknown parameter(s)","code":
+  "unknown_parameters",…}` — `error` is a STRING. Reading only `error.message`
+  made every Ground 4xx fall back to `"<provider> request failed with status
+  <n>"`, which names the status and explains nothing, so a refused write reached
+  the dashboard with its reason stripped. Do not narrow these shapes again; the
+  provider's own sentence is the most useful thing on this path. It picks the
+  first NON-BLANK of `error` / `message` / `reason` — the first *present* one
+  would let `error: ""` beside a real `message` select the blank and fall back,
+  discarding an explanation the body did carry.
 - **Chain keys are HARD-SET in `GROUND_SOLANA_CHAINS`**
   (providers/ground/client.ts): sandbox = `solana_devnet`, production =
   `solana`. Ground confirmed (2026-08-05) sandbox supports both Ethereum

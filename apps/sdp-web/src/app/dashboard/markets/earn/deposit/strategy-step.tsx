@@ -1,6 +1,8 @@
 "use client";
 
 import type { EarnPortfolioToken, EarnStrategy } from "@sdp/types";
+import { ArrowDownIcon, ArrowUpIcon, ChevronsUpDownIcon } from "lucide-react";
+import { useMemo, useState } from "react";
 import {
   Table,
   TableBody,
@@ -10,6 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useTranslations } from "@/i18n/provider";
+import { cn } from "@/lib/utils";
 import { formatApy, formatUsdCompact } from "../earn-format";
 import {
   strategyCuratorLabel,
@@ -24,6 +27,60 @@ import {
   StepListSkeleton,
   StepNotice,
 } from "./earn-deposit-chrome";
+import {
+  DEFAULT_STRATEGY_SORT,
+  type EarnStrategySort,
+  type EarnStrategySortColumn,
+  nextStrategySort,
+  sortStrategies,
+} from "./earn-deposit-model";
+
+/**
+ * A numeric column the reader can rank the table by.
+ *
+ * `aria-sort` sits on the `th` and the click target is a real button inside it —
+ * the ARIA sortable-table pattern — so the current ranking is announced with the
+ * column itself rather than through a separate live region. At rest the neutral
+ * chevrons say "this column is clickable"; the active column shows the direction
+ * it is ranked in.
+ */
+function SortableColumnHeader({
+  className,
+  column,
+  label,
+  onSort,
+  sort,
+}: {
+  className: string;
+  column: EarnStrategySortColumn;
+  label: string;
+  onSort: (column: EarnStrategySortColumn) => void;
+  sort: EarnStrategySort;
+}) {
+  const active = sort.column === column;
+  const ascending = active && sort.direction === "asc";
+  const Indicator = active ? (ascending ? ArrowUpIcon : ArrowDownIcon) : ChevronsUpDownIcon;
+
+  return (
+    <TableHead
+      align="right"
+      aria-sort={active ? (ascending ? "ascending" : "descending") : "none"}
+      className={className}
+    >
+      <button
+        className="inline-flex cursor-pointer items-center gap-1.5 rounded-sm transition-colors hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/40"
+        onClick={() => onSort(column)}
+        type="button"
+      >
+        {label}
+        <Indicator
+          aria-hidden="true"
+          className={cn("size-3.5 shrink-0", active ? "text-secondary" : "text-muted")}
+        />
+      </button>
+    </TableHead>
+  );
+}
 
 function StrategyTableRow({
   onSelect,
@@ -91,11 +148,33 @@ function StrategyTableRow({
           <span className="sr-only">{t("DashboardEarn.deposit.selectStrategy")}</span>
         </label>
       </TableCell>
-      <TableCell className="whitespace-normal text-sm font-normal">
-        <span className="block text-primary" id={nameId}>
+      {/*
+        Both lines declare their OWN wrapping and their own clip, and the cell
+        declares neither.
+
+        `TableCell` joins its base classes with the design system's `cn`, which is
+        a plain string join with no tailwind-merge — and `.whitespace-nowrap` is
+        emitted after `.whitespace-normal`, so the `whitespace-normal` this cell
+        used to pass in never applied. Provider names run long ("Janus Henderson
+        JTRSY tokenized by Centrifuge"), and under `table-fixed` a nowrap name
+        overflowed its column and collided with Backing. Declaring it on the
+        spans works because an element's own value beats an inherited one.
+      */}
+      <TableCell className="text-sm font-normal">
+        {/* No `block`: line-clamp-2 sets `display:-webkit-box`, and with no
+            tailwind-merge here the two display utilities would fight. */}
+        <span
+          className="line-clamp-2 break-words whitespace-normal text-primary"
+          id={nameId}
+          title={strategy.name}
+        >
           {strategy.name}
         </span>
-        <span className="mt-1 block text-secondary">{sourceMeta || "—"}</span>
+        {/* Secondary metadata: one line, ellipsis past it — the name is what
+            must stay legible. */}
+        <span className="mt-1 block truncate text-secondary" title={sourceMeta || undefined}>
+          {sourceMeta || "—"}
+        </span>
       </TableCell>
       {showTokenColumn ? (
         <TableCell className="text-sm font-normal text-secondary">
@@ -141,6 +220,20 @@ export function StrategyStep({
   // A lone stablecoin needs no repeated table column; review still names it.
   const showTokenColumn = tokens.length > 1;
 
+  /**
+   * How the reader ranked the table. View state, held here rather than in the
+   * wizard: re-entering this step restores the default order, the same way it
+   * lands pre-scrolled at the top. The selected strategy survives either way —
+   * it is the wizard's, and it stays checked wherever the row moves to.
+   *
+   * Rows arrive already in {@link DEFAULT_STRATEGY_SORT} order, so this is a
+   * no-op until the reader clicks a column (one comparator, see the model).
+   */
+  const [sort, setSort] = useState<EarnStrategySort>(DEFAULT_STRATEGY_SORT);
+  const rows = useMemo(() => sortStrategies(strategies, sort), [sort, strategies]);
+  const sortBy = (column: EarnStrategySortColumn) =>
+    setSort((current) => nextStrategySort(current, column));
+
   return (
     <div className="space-y-4">
       {isLoading ? <StepListSkeleton rowClassName="h-32 w-full rounded-2xl" /> : null}
@@ -165,7 +258,13 @@ export function StrategyStep({
               <TableHead className="w-12">
                 <span className="sr-only">{t("DashboardEarn.deposit.strategySelectColumn")}</span>
               </TableHead>
-              <TableHead className={showTokenColumn ? "w-[25%]" : "w-[31%]"}>
+              {/* Widths follow the content. The name column carries fund names
+                  several words long ("Bitwise Crypto Carry Fund tokenized by
+                  Superstate") plus a curator line, while Backing and Access only
+                  ever hold "DeFi"/"RWA" and "Instant"/"T+n". Measured at the
+                  wizard's 830px: 41% is what lets the longest row in today's
+                  catalogue render both of its lines in full. */}
+              <TableHead className={showTokenColumn ? "w-[33%]" : "w-[41%]"}>
                 {t("DashboardEarn.deposit.strategyColumn")}
               </TableHead>
               {showTokenColumn ? (
@@ -173,22 +272,30 @@ export function StrategyStep({
                   {t("DashboardEarn.deposit.strategyStablecoinColumn")}
                 </TableHead>
               ) : null}
-              <TableHead className={showTokenColumn ? "w-[14%]" : "w-[15%]"}>
+              <TableHead className="w-[12%]">
                 {t("DashboardEarn.deposit.strategyBackingColumn")}
               </TableHead>
-              <TableHead className={showTokenColumn ? "w-[17%]" : "w-[19%]"}>
+              <TableHead className="w-[12%]">
                 {t("DashboardEarn.deposit.strategyAccessColumn")}
               </TableHead>
-              <TableHead align="right" className={showTokenColumn ? "w-[14%]" : "w-[15%]"}>
-                {t("DashboardEarn.deposit.strategyPoolColumn")}
-              </TableHead>
-              <TableHead align="right" className={showTokenColumn ? "w-[14%]" : "w-[15%]"}>
-                {t("DashboardEarn.deposit.strategyApyColumn")}
-              </TableHead>
+              <SortableColumnHeader
+                className={showTokenColumn ? "w-[14%]" : "w-[15%]"}
+                column="pool"
+                label={t("DashboardEarn.deposit.strategyPoolColumn")}
+                onSort={sortBy}
+                sort={sort}
+              />
+              <SortableColumnHeader
+                className={showTokenColumn ? "w-[14%]" : "w-[15%]"}
+                column="apy"
+                label={t("DashboardEarn.deposit.strategyApyColumn")}
+                onSort={sortBy}
+                sort={sort}
+              />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {strategies.map((strategy) => (
+            {rows.map((strategy) => (
               <StrategyTableRow
                 key={strategy.id}
                 onSelect={() => onSelect(strategy.id)}
