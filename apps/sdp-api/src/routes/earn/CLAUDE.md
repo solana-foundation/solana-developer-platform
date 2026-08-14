@@ -15,7 +15,30 @@ then read all of its money live — what it may never do is mix a persisted
 balance with a live one.
 
 - `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Written only
-  by the sync cron + the local dev seed.
+  by the hourly sync cron, the 5-minute metrics refresh
+  (`cron/earn-metrics-refresh.ts`, figures only — it can never insert a row),
+  and the local dev seed.
+  - Each row carries `hostCluster` (the cluster the INSTRUMENT lives on, stored)
+    and `fundable` (derived per request from `hostCluster` against the caller's
+    environment, never stored). **Catalogued is not the same as fundable**:
+    Kamino's K-Vaults are mainnet-only and are catalogued into sandbox too so
+    integrators can browse the real shelf, so a sandbox row may honestly read
+    `hostCluster: "mainnet-beta", fundable: false`. `fundable` is the wire-level
+    warning — partners must branch on it rather than assume a listed strategy
+    takes deposits.
+  - **`fundable` answers the CLUSTER question only, and its two sides are not
+    symmetric.** `false` is definitive (the instrument does not exist on your
+    cluster). `true` is necessary but not sufficient: a deposit additionally
+    needs the provider to expose a money-movement surface — a catalogue-only
+    provider like Kamino reads `fundable: true` in production and still answers
+    501 on `POST /programs` — and the org to be entitled. Those are deliberately
+    NOT folded in: the field describes the instrument, while entitlement is a
+    property of the caller, not of a platform-global catalogue row. The
+    capability answer is delivered first and by name (`requirePortfolioClient`),
+    which is what the gate order below exists to guarantee.
+  - `mapToEarnStrategy` therefore takes the environment. It is the only place
+    `fundable` is computed; the rule itself is
+    `isClusterFundableInEnvironment` in `@sdp/earn`.
 
 **Programs — N per (org, environment, provider) since PRO-1670**, each pinned to
 one vault, nothing rebalancing across them; moving money between programs is
@@ -75,13 +98,30 @@ other's balance.
     resolution (400). An unentitled caller sending no key still gets 403, and a
     provider without the portfolio capability still gets 501, rather than a
     generic "missing idempotency key" that hides why the call could never work.
-  - **`assertKnownYieldSources` validates against stored active catalogue rows.**
+  - **`assertKnownYieldSources` validates against the STORED active catalogue.**
     It matches every requested `yieldSourceId` against `status = 'active'` for
-    the environment. Catalogue browse policy is intentionally separate:
-    `/strategies` list/detail never return Aave- or Morpho-related rows, while
-    the sync still stores them so the DB remains a truthful provider inventory.
-    Existing program positions are never filtered; hiding one could hide real
-    customer money.
+    the environment, so whatever a provider client admits is allocatable and
+    whatever it refuses 400s with "Unknown or inactive yield sources". Note this
+    is a moving line: #1299 removed Ground's `not_solana_hosted` gate, so
+    Ground's off-Solana sources are indexed and allocatable again (Ground
+    bridges internally, and the deposit stays Solana-side). It does NOT re-check
+    existing programs either — a wallet's current allocation stands until
+    someone re-targets it in Ground.
+  - **Its keep-set is filtered by `isClusterFundableInEnvironment` too**, and
+    that half is separately load-bearing: a mainnet-only provider's vaults ARE
+    catalogued in sandbox, so provider scoping alone would let devnet money be
+    allocated to an instrument that does not exist on this cluster. This is the
+    last gate before a provider mutation on both create and re-target. The route
+    tests pin it with a GROUND row whose cluster is flipped — a Kamino reference
+    would pass on provider scoping alone and prove nothing.
+  - **Browse policy is deliberately NOT one of its gates.** `/strategies`
+    list/detail hide Aave- and Morpho-related rows (`HIDDEN_STRATEGY_TERMS`)
+    while the sync keeps storing them, so the DB stays a truthful provider
+    inventory. This gate reads the STORED catalogue, so a hidden row is still a
+    valid allocation target — correct, because hiding is a presentation choice
+    and an existing program may already point at one. Existing program positions
+    are never filtered either; hiding one could hide real customer money.
+
   - **A unique violation on the insert is a REPLAY, not a race.** The provider
     dedupes on the derived key and answers a retried create with the ORIGINAL
     wallet ref, so a legitimate retry lands on 0056's global unique by design:
@@ -246,7 +286,10 @@ other's balance.
 - Zod schemas in schemas.ts; parse/paginate/envelope helpers in
   handlers/shared.ts — don't hand-roll either.
 - Capability gating: `supportsPortfolioWallets(client)` → NOT_IMPLEMENTED for
-  providers lacking the surface.
+  providers lacking the surface. This is how a **catalogue-only** provider is
+  handled: Kamino lists real strategies but moves no money through SDP (its
+  vaults are non-custodial — the customer's own wallet deposits), so every
+  program route answers 501 for it by capability, never by a provider-id check.
 - Withdrawal approval is a SECOND optional capability
   (`supportsWithdrawalApprovals`) with **no public route on purpose**: casting
   a vote needs the account-level Turnkey signer (platform ops — one shared
@@ -259,9 +302,11 @@ other's balance.
 - Provider ids from DB rows are open strings — always dispatch via
   `resolveEarnProviderClient`.
 - Catalogue writes happen ONLY via the sync cron
-  (`src/cron/earn-catalogue-sync.ts` — the production path) and the dev seed
-  (`db:seed:earn` — local only, refuses non-local databases). Cadence, failure
-  behaviour, and which to use: `packages/sdp-earn/README.md` → "Catalogue data".
+  (`src/cron/earn-catalogue-sync.ts` — the production path), the metrics refresh
+  (`src/cron/earn-metrics-refresh.ts` — every 5 minutes, figures only, UPDATE-only
+  so it can never admit a row), and the dev seed (`db:seed:earn` — local only,
+  refuses non-local databases). Cadence, failure behaviour, and which to use:
+  `packages/sdp-earn/README.md` → "Catalogue data".
 - Whole-stack local setup (ports, flags, Ground key, entitlement, troubleshooting):
   `packages/sdp-earn/CLAUDE.md` → "Local development".
 - Tests: vitest; stub `EARN_PROVIDER_CLIENTS.<id>` methods with `vi.spyOn`;

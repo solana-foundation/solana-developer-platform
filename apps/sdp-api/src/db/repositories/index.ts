@@ -54,6 +54,7 @@ export type {
   ListEarnStrategiesInput,
   ListEarnStrategiesResult,
   UpdateEarnProgramWithdrawalStatusGuardedInput,
+  UpdateEarnStrategyMetricsInput,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
 export {

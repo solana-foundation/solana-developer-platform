@@ -114,6 +114,8 @@ function strategy(partial: {
       : { underlyingSource: partial.underlyingSource }),
     riskMetadata: { tvlUsd: 12_000_000 },
     status: "active",
+    hostCluster: "devnet",
+    fundable: true,
     createdAt: TIMESTAMP,
     updatedAt: TIMESTAMP,
   };

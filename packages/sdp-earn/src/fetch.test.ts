@@ -149,6 +149,68 @@ describe("providerFetch", () => {
       earnError("PROVIDER_UNAVAILABLE", /upshift/)
     );
   });
+
+  it("passes no signal when the caller sets no timeout", async () => {
+    // Opt-in: every existing caller keeps its current unbounded behaviour, so
+    // adding the option cannot change a provider's timeout by surprise.
+    const fetchMock = mock.method(
+      globalThis,
+      "fetch",
+      async () => new Response("{}", { status: 200 })
+    );
+
+    await providerFetch("ground", "https://ground.test/sources", { method: "GET" });
+
+    const init = fetchMock.mock.calls[0]?.arguments[1] as RequestInit;
+    assert.equal(init.signal, undefined);
+  });
+
+  it("aborts a hung request at the caller's timeout", async () => {
+    // Honours the signal the way undici does, so this exercises the real
+    // contract rather than a stub that resolves on its own.
+    mock.method(
+      globalThis,
+      "fetch",
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => {
+            reject(new DOMException("aborted", "AbortError"));
+          });
+        })
+    );
+
+    await assert.rejects(
+      providerFetch("kamino", "https://api.kamino.finance/kvaults/vaults", {
+        method: "GET",
+        timeoutMs: 20,
+      }),
+      earnError("PROVIDER_UNAVAILABLE", /Timed out reaching the kamino API after 20ms/)
+    );
+  });
+
+  it("aborts a response that stalls midway through its BODY", async () => {
+    // The failure a headers-only timeout misses: the provider answers promptly
+    // and then never finishes the stream. Both halves ride one signal.
+    mock.method(globalThis, "fetch", async (_url: string, init: RequestInit) => {
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"partial":'));
+          init.signal?.addEventListener("abort", () => {
+            controller.error(new DOMException("aborted", "AbortError"));
+          });
+        },
+      });
+      return new Response(body, { status: 200 });
+    });
+
+    await assert.rejects(
+      providerFetch("kamino", "https://api.kamino.finance/kvaults/vaults", {
+        method: "GET",
+        timeoutMs: 20,
+      }),
+      earnError("PROVIDER_UNAVAILABLE", /Timed out reaching the kamino API/)
+    );
+  });
 });
 
 describe("providerFetchJson", () => {
