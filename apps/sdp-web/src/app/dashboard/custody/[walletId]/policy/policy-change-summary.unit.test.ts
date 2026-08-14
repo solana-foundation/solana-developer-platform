@@ -7,9 +7,16 @@ import {
 } from "./policy-change-summary";
 import type { WalletPolicyWritePayload } from "./wallet-policy-authoring";
 
+const MINT_A = "MintAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const MINT_B = "MintBbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const LIMIT_ID = `per-transaction-limit-${MINT_A}`;
+
 const LABELS: PolicyFieldLabels = {
   defaultAction: "Default decision",
   operationControls: "Operation controls",
+  assetOptions: [],
+  sdpMintedLabel: "SDP-minted",
   operationLabel: (operation) => operation.toUpperCase(),
   actionLabel: (action) => action.replaceAll("_", " "),
   defaultActionLabel: (action) => action.toUpperCase(),
@@ -114,10 +121,10 @@ describe("summarizePolicyChanges", () => {
 
   it("emits removed plus result rows for a fully removed rule", () => {
     const rule: PolicyRule = {
-      id: "per-transaction-limit",
+      id: LIMIT_ID,
       kind: "amount",
       max: "100",
-      assets: ["MintAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+      asset: MINT_A,
       action: "allow",
       name: "Per transaction limit",
     };
@@ -125,13 +132,13 @@ describe("summarizePolicyChanges", () => {
     expect(rows).toEqual([
       {
         direction: "removed",
-        group: "rule:amount:per-transaction-limit",
+        group: "rule:per-transaction-limit",
         label: "Per transaction limit",
-        value: "MintAa…aaaa, allow, max 100",
+        value: "MintAa…aaaa · allow, max 100",
       },
       {
         direction: "result",
-        group: "rule:amount:per-transaction-limit",
+        group: "rule:per-transaction-limit",
         label: "Per transaction limit",
         value: "",
       },
@@ -142,10 +149,10 @@ describe("summarizePolicyChanges", () => {
     const before = payload({
       rules: [
         {
-          id: "per-transaction-limit",
+          id: LIMIT_ID,
           kind: "amount",
           max: "100",
-          assets: ["MintAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+          asset: MINT_A,
           action: "allow",
         },
       ],
@@ -153,10 +160,10 @@ describe("summarizePolicyChanges", () => {
     const after = payload({
       rules: [
         {
-          id: "per-transaction-limit",
+          id: LIMIT_ID,
           kind: "amount",
           max: "50",
-          assets: ["MintAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+          asset: MINT_A,
           action: "allow",
         },
       ],
@@ -165,15 +172,15 @@ describe("summarizePolicyChanges", () => {
     expect(rows).toEqual([
       {
         direction: "removed",
-        group: "rule:amount:per-transaction-limit",
-        label: "per-transaction-limit",
-        value: "allow, max 100",
+        group: "rule:per-transaction-limit",
+        label: LIMIT_ID,
+        value: "MintAa…aaaa · allow, max 100",
       },
       {
         direction: "added",
-        group: "rule:amount:per-transaction-limit",
-        label: "per-transaction-limit",
-        value: "allow, max 50",
+        group: "rule:per-transaction-limit",
+        label: LIMIT_ID,
+        value: "MintAa…aaaa · allow, max 50",
       },
     ]);
   });
@@ -300,7 +307,7 @@ describe("summarizePolicyChanges", () => {
         direction: "added",
         group: "rule:asset:allowed-assets",
         label: "Allowed assets",
-        value: "MintAa…aaaa, allow",
+        value: "MintAa…aaaa · allow",
       },
     ]);
   });
@@ -320,7 +327,7 @@ describe("summarizePolicyChanges", () => {
         direction: "removed",
         group: "rule:asset:allowed-assets",
         label: "Allowed assets",
-        value: "MintAa…aaaa, allow",
+        value: "MintAa…aaaa · allow",
       },
       {
         direction: "result",
@@ -360,7 +367,7 @@ describe("summarizePolicyChanges", () => {
         direction: "removed",
         group: "rule:destination:allowlist-destinations",
         label: "Allowed destinations",
-        value: "Dq73PQ…2KCh, allow",
+        value: "Dq73PQ…2KCh · allow",
       },
       {
         direction: "result",
@@ -372,7 +379,7 @@ describe("summarizePolicyChanges", () => {
         direction: "added",
         group: "rule:asset:allowed-assets",
         label: "Allowed assets",
-        value: "MintAa…aaaa, allow",
+        value: "MintAa…aaaa · allow",
       },
     ]);
   });
@@ -394,10 +401,10 @@ describe("summarizePolicyChanges field coverage", () => {
     const before = payload({
       rules: [
         {
-          id: "per-transaction-limit",
+          id: LIMIT_ID,
           kind: "amount",
           max: "100",
-          assets: ["MintAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+          asset: MINT_A,
           action: "allow",
           name: "Per transaction limit",
         },
@@ -406,10 +413,10 @@ describe("summarizePolicyChanges field coverage", () => {
     const after = payload({
       rules: [
         {
-          id: "per-transaction-limit",
+          id: LIMIT_ID,
           kind: "amount",
           max: "150",
-          assets: ["MintAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+          asset: MINT_A,
           action: "allow",
           name: "Per transaction limit",
         },
@@ -419,15 +426,15 @@ describe("summarizePolicyChanges field coverage", () => {
     expect(rows).toEqual([
       {
         direction: "removed",
-        group: "rule:amount:per-transaction-limit",
+        group: "rule:per-transaction-limit",
         label: "Per transaction limit",
-        value: "allow, max 100",
+        value: "MintAa…aaaa · allow, max 100",
       },
       {
         direction: "added",
-        group: "rule:amount:per-transaction-limit",
+        group: "rule:per-transaction-limit",
         label: "Per transaction limit",
-        value: "allow, max 150",
+        value: "MintAa…aaaa · allow, max 150",
       },
     ]);
   });
@@ -517,7 +524,7 @@ describe("summarizePolicyChanges field coverage", () => {
         direction: "removed",
         group: "rule:asset:sneaky",
         label: "Allowed assets",
-        value: "MintAa…aaaa, allow",
+        value: "MintAa…aaaa · allow",
       },
       { direction: "result", group: "rule:asset:sneaky", label: "Allowed assets", value: "" },
       { direction: "added", group: "rule:always:sneaky", label: "Allowed assets", value: "allow" },
@@ -563,6 +570,109 @@ describe("summarizePolicyChanges field coverage", () => {
 });
 
 describe("groupPolicyChanges", () => {
+  it("collapses per-asset limits and formats known, SDP-issued, and unknown mints", () => {
+    const labels: PolicyFieldLabels = {
+      ...LABELS,
+      assetOptions: [
+        {
+          token: "MYTOK",
+          mint: MINT_B,
+          sdpIssued: true,
+          source: "issued",
+        },
+      ],
+    };
+    const rows = summarizePolicyChanges(
+      payload({}),
+      payload({
+        rules: [
+          {
+            id: `per-transaction-limit-${USDC_MINT}`,
+            kind: "amount",
+            asset: USDC_MINT,
+            max: "10",
+            action: "allow",
+            name: "Per transaction limit",
+          },
+          {
+            id: `per-transaction-limit-${MINT_B}`,
+            kind: "amount",
+            asset: MINT_B,
+            max: "20",
+            action: "allow",
+            name: "Per transaction limit",
+          },
+          {
+            id: LIMIT_ID,
+            kind: "amount",
+            asset: MINT_A,
+            max: "30",
+            action: "allow",
+            name: "Per transaction limit",
+          },
+        ],
+      }),
+      labels
+    );
+
+    expect(groupPolicyChanges(rows)).toEqual([
+      {
+        label: "Per transaction limit",
+        rows: [
+          {
+            direction: "added",
+            group: "rule:per-transaction-limit",
+            label: "Per transaction limit",
+            value: "USDC · allow, max 10",
+          },
+          {
+            direction: "added",
+            group: "rule:per-transaction-limit",
+            label: "Per transaction limit",
+            value: "MYTOK (SDP-minted) · allow, max 20",
+          },
+          {
+            direction: "added",
+            group: "rule:per-transaction-limit",
+            label: "Per transaction limit",
+            value: "MintAa…aaaa · allow, max 30",
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("uses the same SDP-issued marker for assets in other rule kinds", () => {
+    const labels: PolicyFieldLabels = {
+      ...LABELS,
+      assetOptions: [
+        {
+          token: "MYTOK",
+          mint: MINT_B,
+          sdpIssued: true,
+          source: "issued",
+        },
+      ],
+    };
+    const rows = summarizePolicyChanges(
+      payload({}),
+      payload({
+        rules: [
+          {
+            id: "allowed-assets",
+            kind: "asset",
+            assets: [MINT_B],
+            action: "allow",
+            name: "Allowed assets",
+          },
+        ],
+      }),
+      labels
+    );
+
+    expect(rows[0]?.value).toBe("MYTOK (SDP-minted) · allow");
+  });
+
   it("groups rows by their stable key in first-appearance order", () => {
     const rows = summarizePolicyChanges(
       payload({ defaultAction: "allow" }),
