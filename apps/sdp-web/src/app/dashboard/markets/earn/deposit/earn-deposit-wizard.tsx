@@ -11,7 +11,7 @@ import { useTranslations } from "@/i18n/provider";
 import { formatApy } from "../earn-format";
 import {
   createEarnProgram,
-  EARN_PORTFOLIO_PROVIDER,
+  EARN_PROGRAM_CREATE_PROVIDER,
   type EarnProgramWriteInput,
   findProgram,
   retargetEarnProgram,
@@ -192,6 +192,30 @@ function WizardNotice({
   );
 }
 
+/**
+ * The whole route, refused: no surfaced provider can hold a program, so BOTH
+ * run shapes are dead — a create run has nothing to create with, and a
+ * re-target run has no visible catalogue to re-target into.
+ *
+ * Rendered by the server shell (page.tsx) instead of branching inside the
+ * wizard, because it depends on neither the program read nor the URL: the
+ * decision is a build-time constant, so the shell can answer it before it
+ * fetches anything. Reaching this at all means a deep link or a stale tab —
+ * the workspace hides every route into here.
+ */
+export function EarnDepositUnavailable() {
+  const t = useTranslations();
+  const router = useRouter();
+
+  return (
+    <WizardNotice
+      actionLabel={t("DashboardEarn.deposit.programMissingAction")}
+      message={t("DashboardEarn.deposit.creationUnavailable")}
+      onAction={() => router.push(EARN_DASHBOARD_PATH)}
+    />
+  );
+}
+
 function primaryActionLabel({
   retargeting,
   step,
@@ -302,7 +326,8 @@ export function EarnDepositWizard({
   // revalidation must not carry an ineligible row into review.
   const selectedStrategy =
     selectedCatalogueStrategy &&
-    strategyDepositEligibility(selectedCatalogueStrategy, EARN_PORTFOLIO_PROVIDER) === "eligible"
+    strategyDepositEligibility(selectedCatalogueStrategy, EARN_PROGRAM_CREATE_PROVIDER) ===
+      "eligible"
       ? selectedCatalogueStrategy
       : undefined;
 
@@ -310,7 +335,7 @@ export function EarnDepositWizard({
     const candidate = browsable.find((strategy) => strategy.id === candidateId);
     if (
       candidate &&
-      strategyDepositEligibility(candidate, EARN_PORTFOLIO_PROVIDER) === "eligible"
+      strategyDepositEligibility(candidate, EARN_PROGRAM_CREATE_PROVIDER) === "eligible"
     ) {
       setStrategyId(candidate.id);
     }
@@ -470,7 +495,7 @@ export function EarnDepositWizard({
         hasError={Boolean(catalogueError)}
         isLoading={catalogueLoading}
         onSelect={selectStrategy}
-        portfolioProvider={EARN_PORTFOLIO_PROVIDER}
+        portfolioProvider={EARN_PROGRAM_CREATE_PROVIDER}
         selectedStrategyId={selectedStrategy?.id ?? null}
         strategies={browsable}
         tokens={tokens}

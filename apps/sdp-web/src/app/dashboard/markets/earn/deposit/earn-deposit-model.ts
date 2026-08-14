@@ -62,6 +62,35 @@ export function fundableStrategies(strategies: readonly EarnStrategy[]): readonl
   );
 }
 
+/**
+ * Whether a catalogue row can start a deposit run, and if not, why.
+ *
+ * This asks a question about the INSTRUMENT and the caller's environment — not
+ * about which provider the dashboard can create a program with. That distinction
+ * is what lets one table serve both provider shapes: a `vault_direct` vault is
+ * depositable without SDP holding anything, and a `custodial` one is depositable
+ * because SDP can provision a fundable address. Neither needs a provider-id
+ * check here; `earnDepositStyle` answers it at the step that actually differs.
+ *
+ * `wrong-cluster` wins over `asset-unsupported` because it is the more
+ * actionable explanation: a sandbox reader looking at a mainnet-only Kamino row
+ * needs to know the instrument does not exist here at all before they wonder
+ * about its token.
+ */
+export type VaultDepositability =
+  | { kind: "depositable" }
+  | { kind: "wrong-cluster" }
+  | { kind: "asset-unsupported" };
+
+export function vaultDepositability(strategy: EarnStrategy): VaultDepositability {
+  // `=== false`, not falsy: an API old enough to omit `fundable` predates any
+  // mainnet-only provider, so absent must read as "no cluster objection" rather
+  // than blanking every row. Same rule as `fundableStrategies` above.
+  if (strategy.fundable === false) return { kind: "wrong-cluster" };
+  if (strategyToken(strategy) === undefined) return { kind: "asset-unsupported" };
+  return { kind: "depositable" };
+}
+
 /** Why a catalogue row cannot advance through this portfolio-deposit flow. */
 export type StrategyDepositEligibility =
   | "eligible"
@@ -84,10 +113,16 @@ export type StrategyDepositEligibility =
  */
 export function strategyDepositEligibility(
   strategy: EarnStrategy,
-  portfolioProvider: EarnProviderId
+  // `undefined` when no OFFERED provider has a program model. Every row is then
+  // provider-unsupported, which is exactly right: this eligibility answers "can
+  // the portfolio flow create a program for this row", and with no such provider
+  // the answer is no for all of them.
+  portfolioProvider: EarnProviderId | undefined
 ): StrategyDepositEligibility {
   if (strategy.fundable === false) return "environment-mismatch";
-  if (strategy.provider !== portfolioProvider) return "provider-unsupported";
+  if (portfolioProvider === undefined || strategy.provider !== portfolioProvider) {
+    return "provider-unsupported";
+  }
   if (strategyToken(strategy) === undefined) return "asset-unsupported";
   return "eligible";
 }

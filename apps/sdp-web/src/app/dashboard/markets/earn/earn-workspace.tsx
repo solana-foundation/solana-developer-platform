@@ -16,18 +16,14 @@ import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { useCopy } from "@/lib/use-copy";
-import { fundableStrategies } from "./deposit/earn-deposit-model";
+import type { PlaygroundApiKeyView } from "../../playground-api-data";
+import { shortenAddress } from "./deposit/earn-funding-wallets";
+import { formatApy, formatUsd } from "./earn-format";
+import { EarnPlayground } from "./earn-playground";
 import {
-  shortenAddress,
-  totalWalletUsdcAmount,
-  useEarnFundingWallets,
-} from "./deposit/earn-funding-wallets";
-import { formatApy, formatTokenQuantity, formatUsd } from "./earn-format";
-import {
-  EARN_PORTFOLIO_PROVIDER,
+  EARN_PROGRAM_CREATION_ENABLED,
   type EarnProgram,
   findProgram,
-  hasPrograms,
   useEarnPrograms,
   useEarnStrategies,
   useEarnWalletActivityToasts,
@@ -36,12 +32,11 @@ import {
 import {
   portfolioTotals,
   programTitle,
-  settlementDays,
   strategiesByReference,
-  strategyApy,
   strategySourceLabel,
   useLiquidityLabel,
 } from "./earn-program-presentation";
+import { EarnVaultsTable } from "./earn-vaults-table";
 import { EarnWithdrawModal } from "./earn-withdraw-modal";
 
 const DEPOSIT_PATH = "/dashboard/markets/earn/deposit";
@@ -327,6 +322,7 @@ function ProgramCard({
   );
   const title = programTitle(
     program.wallet.allocations,
+    program.wallet.positions,
     program.label,
     catalogueByRef,
     t("DashboardEarn.overview.programUntitled")
@@ -348,26 +344,32 @@ function ProgramCard({
         {/* The two verbs that MANAGE this program. Depositing needs no wizard at
             all — it is the address row below — so nothing here says "deposit". */}
         <div className="flex w-full gap-2 sm:w-auto sm:shrink-0">
+          {/* The attribute VALUE scopes the withdraw modal's focus-return
+              fallback to THIS program's card — a bare attribute would make the
+              modal's querySelector land on whichever card renders first. It
+              lives on Withdraw, the control that opens the modal, because that
+              is the only verb guaranteed to render: "Change strategy" below
+              disappears with the provider's surfacing. */}
           <Button
             className="flex-1 sm:flex-none"
+            data-earn-withdraw-focus-fallback={program.id}
             disabled={Number(program.wallet.balance.withdrawableUsd) <= 0}
             onClick={onWithdraw}
             variant="secondary"
           >
             {t("DashboardEarn.overview.withdraw")}
           </Button>
-          <Button asChild className="flex-1 sm:flex-none" variant="secondary">
-            {/* The attribute VALUE scopes the withdraw modal's focus-return
-                fallback to THIS program's card — a bare attribute would make
-                the modal's querySelector land on whichever card renders
-                first. */}
-            <Link
-              data-earn-withdraw-focus-fallback={program.id}
-              href={`${DEPOSIT_PATH}?program=${encodeURIComponent(program.id)}`}
-            >
-              {t("DashboardEarn.overview.changeStrategy")}
-            </Link>
-          </Button>
+          {/* Re-targeting needs a catalogue to re-target INTO, and an
+              un-surfaced provider has no visible rows — the wizard would open on
+              a table where nothing is selectable. Withdraw above is deliberately
+              NOT gated the same way: the exit never depends on surfacing. */}
+          {EARN_PROGRAM_CREATION_ENABLED ? (
+            <Button asChild className="flex-1 sm:flex-none" variant="secondary">
+              <Link href={`${DEPOSIT_PATH}?program=${encodeURIComponent(program.id)}`}>
+                {t("DashboardEarn.overview.changeStrategy")}
+              </Link>
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -426,7 +428,7 @@ function newestProgramsFirst(programs: readonly EarnProgram[]): EarnProgram[] {
   );
 }
 
-function ProgramsSection() {
+export function EarnPositionsPanel() {
   const t = useTranslations();
   const moneyTiles = useMoneyTiles();
   const { state, error, isLoading, refresh } = useEarnPrograms();
@@ -467,7 +469,9 @@ function ProgramsSection() {
             <h2 className="text-base font-medium tracking-tight text-primary">
               {t("DashboardEarn.overview.programTitle")}
             </h2>
-            <p className="mt-1 max-w-xl text-sm leading-6 text-secondary">
+            {/* No max-width: the panel is the measure. A `max-w-*` here wrapped
+                this line with half the panel still empty beside it. */}
+            <p className="mt-1 text-sm leading-6 text-secondary">
               {t(
                 programs.length > 0
                   ? "DashboardEarn.overview.programDescription"
@@ -475,7 +479,7 @@ function ProgramsSection() {
               )}
             </p>
           </div>
-          {programs.length > 0 ? (
+          {programs.length > 0 && EARN_PROGRAM_CREATION_ENABLED ? (
             <div className="flex w-full sm:w-auto sm:shrink-0">
               <Button asChild className="flex-1 sm:flex-none">
                 <Link href={DEPOSIT_PATH}>{t("DashboardEarn.overview.addStrategy")}</Link>
@@ -557,109 +561,106 @@ function ProgramsSection() {
 }
 
 /**
- * Onboarding hero, shown only while no program exists. States what the live
- * catalogue actually offers — count, best rate, fastest access — and routes
- * straight into the deposit flow. No curator grid: the flow no longer asks the
- * reader to pick a manager before they know what they are buying.
+ * The two things a reader comes to Earn for: what they could hold, and what they
+ * do hold. Vaults leads because it is the only one that is never empty.
+ *
+ * Real `tablist`/`tab` semantics, unlike the `aria-pressed` action pills this
+ * borrows its look from — these switch between two panels rather than firing an
+ * action, so arrow-key roving and `aria-controls` are what a screen reader
+ * expects.
  */
-function StartSection() {
+const EARN_TABS = ["vaults", "positions", "playground"] as const;
+export type EarnTab = (typeof EARN_TABS)[number];
+
+function EarnTabBar({
+  active,
+  onChange,
+  positionCount,
+}: {
+  active: EarnTab;
+  onChange: (tab: EarnTab) => void;
+  positionCount: number | undefined;
+}) {
   const t = useTranslations();
-  const { state } = useEarnPrograms();
-  const { strategies, error, isLoading } = useEarnStrategies();
-  const { wallets, error: walletsError, isLoading: walletsLoading } = useEarnFundingWallets();
-
-  // Nothing until the program read RESOLVES. `undefined` is in-flight, not
-  // "no programs": rendering the hero on it flashed onboarding at every reader
-  // who already has one, then yanked it away when the response landed. A
-  // resolved-but-empty list and `unconfigured` still get the hero, and a failed
-  // read shows ProgramsSection's error instead of guessing.
-  if (state === undefined || hasPrograms(state)) {
-    return null;
-  }
-
-  // Exactly what the deposit flow will offer: the pinned provider's active rows
-  // that map to a fundable stablecoin lane. Counting anything else makes the
-  // hero promise options the flow then filters away.
-  const fundable = fundableStrategies(
-    (strategies ?? []).filter(
-      (strategy) => strategy.provider === EARN_PORTFOLIO_PROVIDER && strategy.status === "active"
-    )
-  );
-  const apys = fundable
-    .map((strategy) => strategyApy(strategy))
-    .filter((apy): apy is number => apy !== undefined);
-  const fastest = fundable.length > 0 ? Math.min(...fundable.map(settlementDays)) : undefined;
-  const availableUsdc = wallets === undefined ? undefined : totalWalletUsdcAmount(wallets);
-
-  const stats = [
-    {
-      id: "available-usdc",
-      label: t("DashboardEarn.overview.startStatAvailableUsdc"),
-      value:
-        walletsLoading || walletsError || availableUsdc === undefined
-          ? "—"
-          : formatTokenQuantity(availableUsdc, "USDC"),
-    },
-    {
-      id: "strategies",
-      label: t("DashboardEarn.overview.startStatStrategies"),
-      value: isLoading ? "—" : String(fundable.length),
-    },
-    {
-      id: "apy",
-      label: t("DashboardEarn.overview.startStatTopApy"),
-      value: apys.length > 0 ? formatApy(String(Math.max(...apys))) : "—",
-    },
-    {
-      id: "access",
-      label: t("DashboardEarn.overview.startStatAccess"),
-      value:
-        fastest === undefined
-          ? "—"
-          : fastest === 0
-            ? t("DashboardEarn.liquidity.instant")
-            : t("DashboardEarn.liquidity.delayed", { days: fastest }),
-    },
-  ];
+  const labels: Record<EarnTab, string> = {
+    vaults: t("DashboardEarn.tabs.vaults"),
+    playground: t("DashboardEarn.tabs.playground"),
+    // The count is the point of the tab — it answers "do I hold anything"
+    // without switching to find out. Undefined while the read is in flight; a
+    // zero rendered during load would read as "you hold nothing".
+    positions:
+      positionCount === undefined
+        ? t("DashboardEarn.tabs.positions")
+        : `${t("DashboardEarn.tabs.positions")} (${positionCount})`,
+  };
 
   return (
-    <section className="rounded-xl border border-border-default bg-surface-raised p-6">
-      <div className="max-w-2xl">
-        <h2 className="text-base font-medium tracking-tight text-primary">
-          {t("DashboardEarn.overview.startTitle")}
-        </h2>
-        <p className="mt-1 text-sm leading-6 text-secondary">
-          {t("DashboardEarn.overview.startDescription")}
-        </p>
-      </div>
+    <div
+      className="flex items-stretch overflow-x-auto border-b border-border-default [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      role="tablist"
+    >
+      {EARN_TABS.map((tab) => {
+        const isActive = active === tab;
+        return (
+          <button
+            aria-controls={`earn-panel-${tab}`}
+            aria-selected={isActive}
+            className={[
+              "inline-flex items-center justify-center gap-2 whitespace-nowrap border-b-2 px-4 pt-1 pb-3 text-sm transition-colors",
+              isActive
+                ? "border-primary font-semibold text-primary"
+                : "border-transparent font-medium text-tertiary hover:text-primary",
+            ].join(" ")}
+            id={`earn-tab-${tab}`}
+            key={tab}
+            onClick={() => onChange(tab)}
+            role="tab"
+            tabIndex={isActive ? 0 : -1}
+            type="button"
+          >
+            {labels[tab]}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
-      <dl className="mt-6 grid gap-x-8 gap-y-4 sm:grid-cols-2 xl:grid-cols-4">
-        {stats.map((stat) => (
-          <div className="min-w-0 border-t border-border-subtle pt-3" key={stat.id}>
-            <dt className="text-xs text-tertiary">{stat.label}</dt>
-            <dd className="mt-1 text-2xl font-medium tracking-tight text-primary tabular-nums">
-              {stat.value}
-            </dd>
-          </div>
-        ))}
-      </dl>
+/**
+ * Vaults — the shelf. Renders whatever the API returned, which is already
+ * filtered to surfaced providers and visible sources; this never re-applies a
+ * visibility rule (a browser-side copy is what drifts).
+ */
+export function EarnVaultsPanel() {
+  const t = useTranslations();
+  const { strategies, error, isLoading } = useEarnStrategies();
 
-      {error ? (
-        <p className="mt-5 text-sm leading-6 text-secondary">
-          {t("DashboardEarn.overview.catalogueLoadError")}
-        </p>
-      ) : null}
-
-      {!isLoading && !error && fundable.length === 0 ? (
-        <p className="mt-5 text-sm leading-6 text-secondary">
-          {t("DashboardEarn.overview.catalogueEmpty")}
-        </p>
-      ) : null}
+  return (
+    <section
+      aria-labelledby="earn-tab-vaults"
+      className="rounded-xl border border-border-default bg-surface-raised p-6"
+      id="earn-panel-vaults"
+      role="tabpanel"
+    >
+      <h2 className="text-base font-medium tracking-tight text-primary">
+        {t("DashboardEarn.vaults.title")}
+      </h2>
+      {/* No max-width: the panel is already the measure, and a `max-w-*` here
+          wrapped a line with half the panel still empty beside it. */}
+      <p className="mt-1 text-sm leading-6 text-secondary">
+        {t("DashboardEarn.vaults.description")}
+      </p>
 
       <div className="mt-6">
-        <Button asChild>
-          <Link href={DEPOSIT_PATH}>{t("DashboardEarn.overview.startAction")}</Link>
-        </Button>
+        {isLoading && strategies === undefined ? (
+          <ProgramSkeleton />
+        ) : error ? (
+          <p className="rounded-md border border-border-subtle bg-fill-subtle p-3 text-sm leading-6 text-secondary">
+            {t("DashboardEarn.overview.catalogueLoadError")}
+          </p>
+        ) : (
+          <EarnVaultsTable strategies={strategies ?? []} />
+        )}
       </div>
 
       <p className="mt-5 max-w-3xl text-xs leading-5 text-muted">
@@ -669,12 +670,37 @@ function StartSection() {
   );
 }
 
-export function EarnWorkspace() {
+export function EarnWorkspace({
+  apiBaseUrl = null,
+  apiKeys = [],
+}: {
+  apiBaseUrl?: string | null;
+  apiKeys?: readonly PlaygroundApiKeyView[];
+} = {}) {
+  const [tab, setTab] = useState<EarnTab>("vaults");
+  const { state } = useEarnPrograms();
+  const positionCount = state?.kind === "ready" ? state.programs.length : undefined;
+
   return (
     // No root padding: the dashboard shell already pads non-viewport-locked routes.
     <div className="grid content-start gap-6">
-      <ProgramsSection />
-      <StartSection />
+      <EarnTabBar active={tab} onChange={setTab} positionCount={positionCount} />
+      {tab === "vaults" ? <EarnVaultsPanel /> : null}
+      {tab === "positions" ? (
+        <div
+          aria-labelledby="earn-tab-positions"
+          className="grid content-start gap-6"
+          id="earn-panel-positions"
+          role="tabpanel"
+        >
+          <EarnPositionsPanel />
+        </div>
+      ) : null}
+      {tab === "playground" ? (
+        <div aria-labelledby="earn-tab-playground" id="earn-panel-playground" role="tabpanel">
+          <EarnPlayground apiBaseUrl={apiBaseUrl} apiKeys={apiKeys} />
+        </div>
+      ) : null}
     </div>
   );
 }
