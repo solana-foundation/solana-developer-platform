@@ -408,6 +408,20 @@ function WithdrawalOutcomeWatcher({
   return null;
 }
 
+/**
+ * The API pages programs oldest-first so its public collection has a stable
+ * head. The overview is a different presentation concern: once every page is
+ * loaded, show the program the user just created first. Sort a copy so SWR's
+ * cached collection is never mutated, and use the id to make timestamp ties
+ * deterministic.
+ */
+function newestProgramsFirst(programs: readonly EarnProgram[]): EarnProgram[] {
+  return [...programs].sort(
+    (left, right) =>
+      right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id)
+  );
+}
+
 function ProgramsSection() {
   const t = useTranslations();
   const moneyTiles = useMoneyTiles();
@@ -431,6 +445,7 @@ function ProgramsSection() {
   );
 
   const programs = state?.kind === "ready" ? state.programs : [];
+  const listedPrograms = useMemo(() => newestProgramsFirst(programs), [programs]);
   const catalogue = strategies ?? [];
   const withdrawProgram = findProgram(state, withdrawProgramId);
   const totals = useMemo(() => portfolioTotals(programs), [programs]);
@@ -495,7 +510,7 @@ function ProgramsSection() {
         ) : null}
       </section>
 
-      {programs.map((program) => (
+      {listedPrograms.map((program) => (
         <ProgramCard
           key={program.id}
           onWithdraw={() => setWithdrawProgramId(program.id)}
