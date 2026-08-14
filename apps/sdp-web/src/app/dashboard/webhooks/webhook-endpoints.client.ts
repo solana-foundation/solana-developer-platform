@@ -8,6 +8,7 @@ import type {
   WebhookDeliveriesPage,
   WebhookDeliveryView,
   WebhookEndpointStatus,
+  WebhookEndpointsPage,
   WebhookEndpointView,
 } from "./webhook-endpoints.data";
 
@@ -27,11 +28,24 @@ function requireField<T>(value: T | null | undefined): T {
   return value;
 }
 
-export async function fetchWebhookEndpoints(): Promise<WebhookEndpointView[]> {
+// `total` travels with every page so callers can tell a full listing from a capped
+// one (the builder picker fetches one page and must say when more exist).
+export async function fetchWebhookEndpoints(
+  page = 1,
+  pageSize = 100
+): Promise<WebhookEndpointsPage> {
   const body = unwrap(
-    await dashboardFetch<{ data?: WebhookEndpointView[] }>(`${BASE}?pageSize=100`)
+    await dashboardFetch<{
+      data?: WebhookEndpointView[];
+      meta?: { total?: number; page?: number; pageSize?: number };
+    }>(`${BASE}?page=${page}&pageSize=${pageSize}`)
   );
-  return body?.data ?? [];
+  return {
+    endpoints: body?.data ?? [],
+    total: body?.meta?.total ?? 0,
+    page: body?.meta?.page ?? page,
+    pageSize: body?.meta?.pageSize ?? pageSize,
+  };
 }
 
 export async function fetchWebhookEndpoint(endpointId: string): Promise<WebhookEndpointView> {
@@ -108,7 +122,10 @@ export async function deleteWebhookEndpoint(
 }
 
 export async function rotateWebhookEndpointSecret(
-  endpointId: string
+  endpointId: string,
+  // Explicit rather than relying on the API default, so the grace the confirm dialog
+  // quotes and the grace the rotation applies can never drift apart.
+  gracePeriodHours: number
 ): Promise<RotateWebhookSecretResult> {
   const body = unwrap(
     await dashboardFetch<{
@@ -117,7 +134,10 @@ export async function rotateWebhookEndpointSecret(
         secret?: string;
         previousSecretExpiresAt?: string | null;
       };
-    }>(`${BASE}/${encodeURIComponent(endpointId)}/rotate-secret`, { method: "POST", body: {} })
+    }>(`${BASE}/${encodeURIComponent(endpointId)}/rotate-secret`, {
+      method: "POST",
+      body: { gracePeriodHours },
+    })
   );
   return {
     endpoint: requireField(body?.data?.endpoint),

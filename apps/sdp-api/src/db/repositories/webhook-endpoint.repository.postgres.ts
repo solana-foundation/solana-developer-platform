@@ -146,7 +146,7 @@ export function createPostgresWebhookEndpointsRepository(db: AppDb): WebhookEndp
         .prepare(
           `SELECT * FROM webhook_endpoints
              WHERE organization_id = ? AND project_id = ? AND deleted_at IS NULL
-             ORDER BY created_at DESC
+             ORDER BY created_at DESC, id DESC
              LIMIT ? OFFSET ?`
         )
         .bind(params.organizationId, params.projectId, params.limit, params.offset)

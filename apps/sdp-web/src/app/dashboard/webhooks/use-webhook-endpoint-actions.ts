@@ -48,7 +48,7 @@ export function useWebhookEndpointActions({
       onConfirm: () =>
         void runConfirmed(async () => {
           try {
-            const result = await rotateWebhookEndpointSecret(endpoint.id);
+            const result = await rotateWebhookEndpointSecret(endpoint.id, ROTATION_GRACE_HOURS);
             toast.success(t("DashboardWebhooks.toastSecretRotated"));
             setRevealedSecret({
               secret: result.secret,

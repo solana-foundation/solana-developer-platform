@@ -40,7 +40,7 @@ describe("deliveryResultLabel", () => {
     );
   });
 
-  it("falls back to the failure code, then the status", () => {
+  it("falls back to the failure code, and to null when neither exists", () => {
     expect(
       deliveryResultLabel({
         responseStatus: null,
@@ -48,9 +48,9 @@ describe("deliveryResultLabel", () => {
         status: "failed",
       })
     ).toBe("BLOCKED_URL:PRIVATE_HOST");
-    expect(deliveryResultLabel({ responseStatus: null, error: null, status: "failed" })).toBe(
-      "failed"
-    );
+    // Null, not the raw status enum: this module is pure, so the translated fallback
+    // ("Failed"/"Delivered") belongs to the component that has `t`.
+    expect(deliveryResultLabel({ responseStatus: null, error: null, status: "failed" })).toBeNull();
   });
 });
 

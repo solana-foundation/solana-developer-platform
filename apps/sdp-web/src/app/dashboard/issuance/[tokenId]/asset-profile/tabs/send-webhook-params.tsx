@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import type { WebhookEndpointView } from "@/app/dashboard/webhooks/webhook-endpoints.data";
+import type { WebhookEndpointsPage } from "@/app/dashboard/webhooks/webhook-endpoints.data";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,7 +25,7 @@ export function SendWebhookParams({
 }: {
   wf: Wf;
   params: Record<string, string>;
-  endpoints: WebhookEndpointView[] | undefined;
+  endpoints: WebhookEndpointsPage | undefined;
   errors: Record<string, string>;
   onParamChange: (key: string, value: string) => void;
 }) {
@@ -48,7 +48,11 @@ export function SendWebhookParams({
     }
   };
 
-  const hasEndpoints = (endpoints?.length ?? 0) > 0;
+  const endpointList = endpoints?.endpoints ?? [];
+  const hasEndpoints = endpointList.length > 0;
+  // The picker holds one page; a registry bigger than that must say so rather than
+  // silently hide endpoints beyond the cap.
+  const moreThanListed = (endpoints?.total ?? 0) > endpointList.length;
 
   return (
     <div className="space-y-3 rounded-xl border border-border-subtle bg-fill-subtle/40 p-3">
@@ -83,7 +87,7 @@ export function SendWebhookParams({
               placeholder={t("webhookEndpointPlaceholder")}
               onValueChange={(value) => onParamChange("endpointId", value ?? "")}
             >
-              {(endpoints ?? []).map((endpoint) => (
+              {endpointList.map((endpoint) => (
                 <SelectItem
                   key={endpoint.id}
                   value={endpoint.id}
@@ -106,6 +110,17 @@ export function SendWebhookParams({
               </Link>
             </p>
           )}
+          {hasEndpoints && moreThanListed ? (
+            <p className="text-xs text-secondary">
+              {t("webhookMoreEndpoints", { count: endpointList.length })}{" "}
+              <Link
+                href="/dashboard/webhooks"
+                className="text-primary underline underline-offset-2"
+              >
+                {t("webhookManageEndpoints")}
+              </Link>
+            </p>
+          ) : null}
           {errors.endpointId ? (
             <span className="text-xs text-error">{errors.endpointId}</span>
           ) : null}
@@ -120,6 +135,9 @@ export function SendWebhookParams({
             <Input
               id="wf-param-url"
               type="text"
+              inputMode="url"
+              spellCheck={false}
+              maxLength={2_000}
               value={params.url ?? ""}
               onChange={(event) => onParamChange("url", event.target.value)}
             />
@@ -133,6 +151,7 @@ export function SendWebhookParams({
               id="wf-param-secret"
               type="password"
               autoComplete="off"
+              maxLength={200}
               value={params.secret ?? ""}
               onChange={(event) => onParamChange("secret", event.target.value)}
             />

@@ -14,7 +14,7 @@ import {
   TriangleAlert,
   Zap,
 } from "lucide-react";
-import { Fragment } from "react";
+import { Fragment, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
@@ -40,7 +40,7 @@ interface FlowStep {
   tone: StepTone;
   kind: StepKind;
   title: string;
-  detail?: string;
+  detail?: ReactNode;
   badge?: ExecutionTier;
   actionType?: string;
 }
@@ -66,7 +66,7 @@ const TIER_VARIANT: Record<ExecutionTier, "success" | "warning" | "danger"> = {
   requires_approval: "danger",
 };
 
-const OP_LABEL_KEY: Record<GuardDraft["op"], string> = {
+export const OP_LABEL_KEY: Record<GuardDraft["op"], string> = {
   eq: "guardIs",
   neq: "guardIsNot",
   in: "guardIsOneOf",
@@ -113,7 +113,7 @@ export function WorkflowFlowGraph({
   action: CatalogActionView | null;
   guards: GuardDraft[];
   reviewMode: "auto" | "manual";
-  paramSummary: string;
+  paramSummary: ReactNode;
   walletGap: boolean;
   orientation?: "vertical" | "horizontal";
   showChrome?: boolean;
@@ -298,7 +298,7 @@ function FlowNode({
   icon: LucideIcon;
   tone: StepTone;
   title: string;
-  detail?: string;
+  detail?: ReactNode;
   badge?: string;
   badgeVariant?: "success" | "warning" | "danger";
   orientation: "vertical" | "horizontal";

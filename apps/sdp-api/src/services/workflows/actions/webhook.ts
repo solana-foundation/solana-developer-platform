@@ -120,6 +120,7 @@ async function runEndpointSendWebhook(
     status: "succeeded" | "failed";
     responseStatus?: number | null;
     responseBody?: string | null;
+    responseBodyTruncated?: boolean;
     error?: string | null;
     durationMs?: number | null;
   }): Promise<void> => {
@@ -187,6 +188,7 @@ async function runEndpointSendWebhook(
     status: delivered ? "succeeded" : "failed",
     responseStatus: outcome.status,
     responseBody: outcome.responseBody || null,
+    responseBodyTruncated: outcome.responseBodyTruncated,
     error: delivered ? null : `HTTP_${outcome.status}`,
     durationMs: outcome.durationMs,
   });

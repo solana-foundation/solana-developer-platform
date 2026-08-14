@@ -62,8 +62,10 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
     request_body_truncated BOOLEAN NOT NULL DEFAULT FALSE,
     status TEXT NOT NULL,
     response_status INTEGER,
-    -- Truncated to 4,096 chars.
+    -- Truncated to 4,096 chars; the flag records that the receiver sent more (the UI
+    -- would otherwise have to guess from the length).
     response_body TEXT,
+    response_body_truncated BOOLEAN NOT NULL DEFAULT FALSE,
     error TEXT,
     duration_ms INTEGER,
     created_at TEXT NOT NULL DEFAULT sdp_iso_now(),
@@ -90,3 +92,14 @@ CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_execution
 CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_redelivery_of
     ON webhook_deliveries(redelivery_of)
     WHERE redelivery_of IS NOT NULL;
+
+-- FK maintenance for the CASCADE paths. The composite listing indexes lead with
+-- organization_id (and the endpoints one is partial on deleted_at), so a project purge
+-- or an endpoint hard-delete couldn't use them and would seq-scan — and deliveries is
+-- the table that grows.
+CREATE INDEX IF NOT EXISTS idx_webhook_endpoints_project
+    ON webhook_endpoints(project_id);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_project
+    ON webhook_deliveries(project_id);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_endpoint
+    ON webhook_deliveries(endpoint_id);

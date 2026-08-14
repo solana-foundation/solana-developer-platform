@@ -1,6 +1,15 @@
 "use client";
 
-import { CheckIcon, CopyIcon, LockIcon } from "lucide-react";
+import {
+  CheckIcon,
+  CopyIcon,
+  LockIcon,
+  PencilIcon,
+  PowerIcon,
+  PowerOffIcon,
+  RefreshCwIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -93,13 +102,20 @@ export function WebhookEndpointDetail({
           </div>
           {canManage && (
             <div className="flex flex-wrap items-center gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                iconLeft={<PencilIcon className="size-3.5" />}
+                onClick={() => setEditOpen(true)}
+              >
                 {t("DashboardWebhooks.editEndpoint")}
               </Button>
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
+                iconLeft={<RefreshCwIcon className="size-3.5" />}
                 onClick={() => actions.requestRotate(endpoint)}
               >
                 {t("DashboardWebhooks.rotateSecret")}
@@ -108,6 +124,13 @@ export function WebhookEndpointDetail({
                 type="button"
                 variant="outline"
                 size="sm"
+                iconLeft={
+                  endpoint.status === "active" ? (
+                    <PowerOffIcon className="size-3.5" />
+                  ) : (
+                    <PowerIcon className="size-3.5" />
+                  )
+                }
                 onClick={() => actions.requestToggle(endpoint)}
               >
                 {endpoint.status === "active"
@@ -118,6 +141,7 @@ export function WebhookEndpointDetail({
                 type="button"
                 variant="destructive"
                 size="sm"
+                iconLeft={<Trash2Icon className="size-3.5" />}
                 onClick={() => actions.requestDelete(endpoint)}
               >
                 {t("DashboardWebhooks.delete")}

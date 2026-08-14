@@ -14,20 +14,23 @@ import {
   type LucideIcon,
   Pencil,
   Play,
+  Plus,
   Power,
   PowerOff,
   RefreshCw,
   Trash2,
   TriangleAlert,
+  UserCheck,
   Wallet,
   X,
   Zap,
 } from "lucide-react";
-import { type ReactNode, useCallback, useMemo, useState } from "react";
+import { Fragment, type ReactNode, useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { formatRelativeTime } from "@/app/dashboard/activity-format-utils";
+import { isValidSolanaAddress } from "@/app/dashboard/custody/[walletId]/policy/wallet-policy-authoring";
 import { fetchWebhookEndpoints } from "@/app/dashboard/webhooks/webhook-endpoints.client";
-import type { WebhookEndpointView } from "@/app/dashboard/webhooks/webhook-endpoints.data";
+import type { WebhookEndpointsPage } from "@/app/dashboard/webhooks/webhook-endpoints.data";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -83,7 +86,7 @@ import {
   ConnectorBadge,
   TRIGGER_ICONS,
 } from "./workflow-builder-cards";
-import { WorkflowFlowGraph } from "./workflow-flow-preview";
+import { OP_LABEL_KEY, WorkflowFlowGraph } from "./workflow-flow-preview";
 
 // ── Static catalog metadata ─────────────────────────────────────────────────────────
 
@@ -186,6 +189,15 @@ const ACTION_WALLET_PARAM: Record<string, string> = {
 };
 
 const AMOUNT_RE = /^\d+(\.\d+)?$/;
+// Params the engine hands to the chain as addresses — validated like the server does.
+const WALLET_PARAM_KEYS = new Set(["wallet", "destination", "source"]);
+// Input caps mirroring the save-time schemas (2,000 is the server's blanket per-param
+// cap; the rest are that field's own tighter bound).
+const PARAM_MAX_LENGTH: Record<string, number> = {
+  secret: 200,
+  email: 254,
+  label: 120,
+};
 
 // ── i18n helpers ────────────────────────────────────────────────────────────────────
 
@@ -213,6 +225,12 @@ function makeLabel(t: TFunc) {
       return humanizeType(type);
     }
   };
+}
+
+// Guard values are scalars, except the `in` operator's list — rendered as a tidy
+// comma-separated run, same as the builder preview.
+function formatGuardValue(value: string | number | Array<string | number>): string {
+  return Array.isArray(value) ? value.map(String).join(", ") : String(value);
 }
 
 // One-line explanation of what a trigger fires on / what an action does, rendered as
@@ -265,6 +283,35 @@ export function failureLabel(error: string, wf: ReturnType<typeof makeWf>): stri
   return detail ? `${wf(key)} (${detail})` : wf(key);
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Format rules for a filled-in param, mirroring the save-time schemas: a bad address /
+// short secret / malformed email is a guaranteed 400, so it surfaces on the field
+// instead of as a failed save. The loose url regex is deliberate — legacy http rules
+// must stay editable in custom mode.
+function paramFormatError(
+  key: string,
+  value: string,
+  wf: ReturnType<typeof makeWf>
+): string | null {
+  if (key === "amount" && (!AMOUNT_RE.test(value) || Number(value) <= 0)) {
+    return wf("validationAmount");
+  }
+  if (key === "url" && !/^https?:\/\/\S+$/i.test(value)) {
+    return wf("validationUrl");
+  }
+  if (WALLET_PARAM_KEYS.has(key) && !isValidSolanaAddress(value)) {
+    return wf("validationAddress");
+  }
+  if (key === "secret" && (value.length < 8 || value.length > 200)) {
+    return wf("validationSecret");
+  }
+  if (key === "email" && !EMAIL_RE.test(value)) {
+    return wf("validationEmail");
+  }
+  return null;
+}
+
 // ── Builder validation ──────────────────────────────────────────────────────────────
 
 interface BuilderValidation {
@@ -294,11 +341,9 @@ export function validateBuilder(input: {
     if (!value) {
       continue;
     }
-    if (field.key === "amount" && (!AMOUNT_RE.test(value) || Number(value) <= 0)) {
-      fieldErrors[field.key] = wf("validationAmount");
-    }
-    if (field.key === "url" && !/^https?:\/\/\S+$/i.test(value)) {
-      fieldErrors[field.key] = wf("validationUrl");
+    const formatError = paramFormatError(field.key, value, wf);
+    if (formatError) {
+      fieldErrors[field.key] = formatError;
     }
   }
 
@@ -531,10 +576,11 @@ export function WorkflowsTab({
     loadFailed,
   } = useWorkflowsData(tokenId, executionsPageSize);
 
-  // Same key as the /dashboard/webhooks registry list, so the cache is shared.
-  const webhookEndpointsSwr = usePersistedDashboardSWR<WebhookEndpointView[]>(
+  // First page only (the picker is a dropdown, not a browser); `total` rides along so
+  // the params block can say when the registry holds more than one page.
+  const webhookEndpointsSwr = usePersistedDashboardSWR<WebhookEndpointsPage>(
     ["webhook-endpoints"],
-    fetchWebhookEndpoints,
+    () => fetchWebhookEndpoints(1, 100),
     { revalidateOnFocus: false },
     { key: "webhook-endpoints", ttlMs: 15_000 }
   );
@@ -588,25 +634,47 @@ export function WorkflowsTab({
 
   // One-line "field: value · …" summary of the collected action params, for the
   // preview. Secrets are masked, option values localized.
-  const paramSummary = paramFields
-    .map((field) => {
+  const summaryParts = paramFields
+    .map((field): { key: string; node: ReactNode } | null => {
       const value = (params[field.key] ?? "").trim();
       if (!value) {
         return null;
       }
       if (field.secret) {
-        return `${wf(field.labelKey)}: ••••`;
+        return { key: field.key, node: `${wf(field.labelKey)}: ••••` };
       }
-      // A raw endpoint id says nothing in a preview — show the endpoint's label.
+      // A raw endpoint id says nothing in a preview — show the endpoint's label, as a
+      // pill so the referenced registry entity reads as an object, not free text.
       if (field.key === "endpointId") {
-        const endpoint = webhookEndpoints?.find((e) => e.id === value);
-        return `${wf(field.labelKey)}: ${endpoint?.label ?? value}`;
+        const endpoint = webhookEndpoints?.endpoints.find((e) => e.id === value);
+        return {
+          key: field.key,
+          node: (
+            <span className="inline-flex items-center gap-1.5">
+              {wf(field.labelKey)}
+              <Badge variant="default">{endpoint?.label ?? value}</Badge>
+            </span>
+          ),
+        };
       }
       const option = field.options?.find((opt) => opt.value === value);
-      return `${wf(field.labelKey)}: ${option ? wf(option.labelKey) : value}`;
+      return {
+        key: field.key,
+        node: `${wf(field.labelKey)}: ${option ? wf(option.labelKey) : value}`,
+      };
     })
-    .filter((entry): entry is string => entry !== null)
-    .join(" · ");
+    .filter((entry): entry is { key: string; node: ReactNode } => entry !== null);
+  // Empty string (not an empty element) so the preview's `paramSummary || undefined`
+  // still reads "no params collected" as falsy.
+  const paramSummary: ReactNode =
+    summaryParts.length === 0
+      ? ""
+      : summaryParts.map((part, index) => (
+          <Fragment key={part.key}>
+            {index > 0 ? " · " : null}
+            {part.node}
+          </Fragment>
+        ));
 
   const resetBuilder = useCallback(() => {
     setEditingRule(null);
@@ -1020,7 +1088,8 @@ function TierNotice({ t, selectedAction }: { t: TFunc; selectedAction: CatalogAc
 }
 
 function ReviewField({
-  wf,
+  // Bound as `t` so the ui-copy audit recognizes the key literals as translated.
+  wf: t,
   reviewMode,
   reviewLocked,
   onChange,
@@ -1030,21 +1099,76 @@ function ReviewField({
   reviewLocked: boolean;
   onChange: (value: "auto" | "manual") => void;
 }) {
+  const value = reviewLocked ? "manual" : reviewMode;
+  // Two choices and a column with room to spare: always-visible toggle cards (the
+  // WHEN/THEN card grammar) instead of a dropdown, stretched to fill the settings
+  // panel so the selection reads at a glance.
+  const options = [
+    {
+      value: "auto" as const,
+      icon: Zap,
+      label: t("autoApply"),
+      description: t("autoApplyDescription"),
+      disabled: reviewLocked,
+    },
+    {
+      value: "manual" as const,
+      icon: UserCheck,
+      label: t("manualReview"),
+      description: t("manualReviewDescription"),
+      disabled: false,
+    },
+  ];
   return (
-    <div className="space-y-1.5 text-sm">
-      <span className="font-medium text-secondary">{wf("review")}</span>
-      <Select
-        ariaLabel={wf("review")}
-        value={reviewLocked ? "manual" : reviewMode}
-        disabled={reviewLocked}
-        onValueChange={(v) => onChange(v === "manual" ? "manual" : "auto")}
-      >
-        <SelectItem value="auto" disabled={reviewLocked}>
-          {wf("autoApply")}
-        </SelectItem>
-        <SelectItem value="manual">{wf("manualReview")}</SelectItem>
-      </Select>
-      {reviewLocked ? <p className="text-secondary text-xs">{wf("reviewLockedNote")}</p> : null}
+    <div className="flex min-h-0 flex-1 flex-col gap-1.5 text-sm">
+      <span className="font-medium text-secondary">{t("review")}</span>
+      <div className="flex flex-1 flex-col gap-2">
+        {options.map((option) => {
+          const Icon = option.icon;
+          const selected = option.value === value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={selected}
+              disabled={option.disabled}
+              onClick={() => onChange(option.value)}
+              className={cn(
+                "flex flex-1 cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors",
+                selected
+                  ? "border-primary bg-fill-subtle/50"
+                  : "border-border-default bg-fill-subtle/20 hover:bg-fill-subtle",
+                "disabled:pointer-events-none disabled:opacity-40"
+              )}
+            >
+              <span
+                className={cn(
+                  "flex size-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle",
+                  selected ? "text-primary" : "text-tertiary"
+                )}
+              >
+                <Icon className="size-[18px]" />
+              </span>
+              <span className="min-w-0 flex-1 space-y-0.5">
+                <span className="block text-sm font-medium text-primary">{option.label}</span>
+                <span className="block text-xs leading-4 text-tertiary">{option.description}</span>
+              </span>
+              <span
+                className={cn(
+                  "flex size-5 shrink-0 items-center justify-center rounded-full border transition-colors",
+                  selected
+                    ? "border-primary bg-primary text-on-primary"
+                    : "border-border-default text-transparent"
+                )}
+                aria-hidden
+              >
+                <Check className="size-3" strokeWidth={3} />
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {reviewLocked ? <p className="text-secondary text-xs">{t("reviewLockedNote")}</p> : null}
     </div>
   );
 }
@@ -1162,7 +1286,15 @@ function SubmitRow({
         size="sm"
         onClick={onSubmit}
         disabled={!canSubmit}
-        iconLeft={busy ? <Loader2 className="size-3.5 animate-spin" /> : undefined}
+        iconLeft={
+          busy ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : editing ? (
+            <Check className="size-3.5" />
+          ) : (
+            <Plus className="size-3.5" />
+          )
+        }
       >
         {editing ? wf("saveChanges") : wf("create")}
       </Button>
@@ -1367,7 +1499,7 @@ function WizardRowLayout(args: LayoutArgs) {
         </BuilderNode>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-3 rounded-xl border border-border-default bg-fill-subtle/10 p-3">
+        <div className="flex flex-col gap-3 rounded-xl border border-border-default bg-fill-subtle/10 p-3">
           <StageHeading heading="Rule settings" />
           {args.reviewField}
           {args.paramsBlock}
@@ -1400,12 +1532,12 @@ function WorkflowBuilder(props: {
   selectedAction: CatalogActionView | null;
   conditionFields: string[];
   guards: GuardDraft[];
-  webhookEndpoints: WebhookEndpointView[] | undefined;
+  webhookEndpoints: WebhookEndpointsPage | undefined;
   editingRuleId: string | null;
   emailEnabled: boolean | null;
   validation: BuilderValidation;
   showValidation: boolean;
-  paramSummary: string;
+  paramSummary: ReactNode;
   busy: boolean;
   canSubmit: boolean;
   canUseAction: (type: string) => boolean;
@@ -1546,7 +1678,7 @@ function BuilderParamsBlock({
   editingRuleId: string | null;
   paramFields: ParamField[];
   params: Record<string, string>;
-  webhookEndpoints: WebhookEndpointView[] | undefined;
+  webhookEndpoints: WebhookEndpointsPage | undefined;
   wf: ReturnType<typeof makeWf>;
   showValidation: boolean;
   validation: BuilderValidation;
@@ -1623,6 +1755,8 @@ function ParamFieldControl({
         id={inputId}
         type={field.secret ? "password" : "text"}
         autoComplete={field.secret ? "off" : undefined}
+        inputMode={field.key === "amount" ? "decimal" : undefined}
+        maxLength={PARAM_MAX_LENGTH[field.key] ?? 2_000}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={field.helpKey ? wf(field.helpKey) : undefined}
@@ -1749,7 +1883,11 @@ function HoldersCard({
               onClick={onEnroll}
               disabled={busyId !== null || !walletAddress.trim()}
               iconLeft={
-                busyId === "enroll" ? <Loader2 className="size-3.5 animate-spin" /> : undefined
+                busyId === "enroll" ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Wallet className="size-3.5" />
+                )
               }
             >
               {wf("enrollWallet")}
@@ -1897,6 +2035,7 @@ function RuleRow({
 }) {
   const ActionIcon = ACTION_ICONS[rule.action_type] ?? Play;
   const tierLabel = wf(`tierLabels.${tier}`);
+  const guardClauses = rule.definition?.condition?.all ?? [];
   return (
     <li className="flex items-center justify-between gap-4 py-3.5">
       <div className="flex min-w-0 items-center gap-3">
@@ -1920,6 +2059,25 @@ function RuleRow({
             {" · "}
             {formatRelativeTime(rule.created_at, locale)}
           </p>
+          {guardClauses.length > 0 && (
+            // The saved rule's guards, in the same chip grammar as the builder preview —
+            // a guarded rule must not read as unconditional in the list.
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              {guardClauses.map((clause) => {
+                const clauseText = `${label("conditionField", clause.field)} ${wf(
+                  OP_LABEL_KEY[clause.op]
+                ).toLocaleLowerCase()} ${formatGuardValue(clause.value)}`;
+                return (
+                  <Badge key={clauseText} variant="outline">
+                    <span className="inline-flex items-center gap-1">
+                      <Filter aria-hidden className="size-3" />
+                      <span>{clauseText}</span>
+                    </span>
+                  </Badge>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2">

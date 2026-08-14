@@ -1,5 +1,6 @@
 "use client";
 
+import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -96,7 +97,10 @@ export function CreateWebhookEndpointModal({
             value={label}
             maxLength={120}
             placeholder={t("DashboardWebhooks.fieldLabelPlaceholder")}
-            onChange={(event) => setLabel(event.target.value)}
+            onChange={(event) => {
+              setLabel(event.target.value);
+              setErrors((prev) => (prev.label ? { ...prev, label: undefined } : prev));
+            }}
             disabled={pending}
           />
           {errors.label && <p className="text-xs text-error">{errors.label}</p>}
@@ -109,8 +113,12 @@ export function CreateWebhookEndpointModal({
             inputMode="url"
             autoComplete="off"
             spellCheck={false}
+            maxLength={2_000}
             placeholder={t("DashboardWebhooks.fieldUrlPlaceholder")}
-            onChange={(event) => setUrl(event.target.value)}
+            onChange={(event) => {
+              setUrl(event.target.value);
+              setErrors((prev) => (prev.url ? { ...prev, url: undefined } : prev));
+            }}
             disabled={pending}
           />
           {errors.url ? (
@@ -137,7 +145,13 @@ export function CreateWebhookEndpointModal({
         <Button type="button" variant="outline" size="sm" onClick={handleClose} disabled={pending}>
           {t("DashboardWebhooks.cancel")}
         </Button>
-        <Button type="button" size="sm" onClick={handleSubmit} disabled={pending}>
+        <Button
+          type="button"
+          size="sm"
+          iconLeft={<PlusIcon className="size-3.5" />}
+          onClick={handleSubmit}
+          disabled={pending}
+        >
           {pending ? t("DashboardWebhooks.creating") : t("DashboardWebhooks.create")}
         </Button>
       </div>
