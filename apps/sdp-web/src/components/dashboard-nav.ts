@@ -18,7 +18,6 @@ import {
   UsersIcon,
   VenetianMaskIcon,
   WalletIcon,
-  WebhookIcon,
 } from "lucide-react";
 import type { useTranslations } from "@/i18n/provider";
 import {
@@ -138,7 +137,6 @@ export function getNavSections(
   t: ReturnType<typeof useTranslations>,
   options: {
     canReadApprovals: boolean;
-    canReadWebhooks: boolean;
     earnEnabled: boolean;
     heliusRingsEnabled: boolean;
     marketsEnabled: boolean;
@@ -207,15 +205,6 @@ export function getNavSections(
           href: DASHBOARD_SIDE_NAV_HREFS.apiKeys,
           icon: KeyRoundIcon,
         },
-        ...(options.canReadWebhooks
-          ? [
-              {
-                label: t("Shared.dashboardShell.webhooks"),
-                href: DASHBOARD_SIDE_NAV_HREFS.webhooks,
-                icon: WebhookIcon,
-              },
-            ]
-          : []),
         {
           label: t("Shared.dashboardShell.policies"),
           href: DASHBOARD_SIDE_NAV_HREFS.policies,

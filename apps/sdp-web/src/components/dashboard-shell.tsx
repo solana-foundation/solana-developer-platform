@@ -29,6 +29,10 @@ import {
   IssuanceDetailSkeleton,
   IssuancePageSkeleton,
 } from "@/app/dashboard/issuance/issuance-page-skeleton";
+import {
+  WebhookEndpointDetailSkeleton,
+  WebhookEndpointsListSkeleton,
+} from "@/app/dashboard/issuance/webhooks/webhook-page-skeletons";
 import DashboardLoading from "@/app/dashboard/loading";
 import {
   EarnDepositSkeleton,
@@ -61,10 +65,6 @@ import {
   WalletSetupSkeleton,
   WalletsOverviewSkeleton,
 } from "@/app/dashboard/wallets/wallet-route-skeletons";
-import {
-  WebhookEndpointDetailSkeleton,
-  WebhookEndpointsListSkeleton,
-} from "@/app/dashboard/webhooks/webhook-page-skeletons";
 import { DashboardBottomNav } from "@/components/dashboard-bottom-nav";
 import {
   DashboardTopBar,
@@ -520,7 +520,6 @@ export function DashboardShell({
   );
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
-    canReadWebhooks: dashboardAccess.capabilities.canReadWebhooks,
     earnEnabled,
     heliusRingsEnabled,
     marketsEnabled,
@@ -587,7 +586,7 @@ export function DashboardShell({
     isWalletSetupRoute ||
     isOrganizationOnboardingRoute ||
     pathname.startsWith("/dashboard/approvals") ||
-    pathname.startsWith("/dashboard/webhooks") ||
+    pathname.startsWith("/dashboard/issuance/webhooks") ||
     isWalletDetailRoute;
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;

@@ -440,15 +440,15 @@ function getAccessControlPageConfig(
       },
     };
   }
-  if (pathname.startsWith("/dashboard/webhooks")) {
+  if (pathname.startsWith("/dashboard/issuance/webhooks")) {
     return {
       title: t("Shared.dashboardShell.webhooks"),
       contentWidthClass: "max-w-none",
-      ...(pathname === "/dashboard/webhooks"
+      ...(pathname === "/dashboard/issuance/webhooks"
         ? {}
         : {
             backAction: {
-              href: "/dashboard/webhooks",
+              href: "/dashboard/issuance/webhooks",
               label: t("Shared.dashboardShell.backToWebhooks"),
             },
           }),

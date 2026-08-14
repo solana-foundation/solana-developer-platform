@@ -3,12 +3,21 @@ import { redirect } from "next/navigation";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { webhooksOriginTokenId } from "./webhook-endpoints.data";
 import { WebhookEndpointsWorkspace } from "./webhook-endpoints-workspace";
 
 export const dynamic = "force-dynamic";
 
-export default async function WebhooksPage() {
-  const [t, { userId, orgId, orgRole }] = await Promise.all([getTranslations(), auth()]);
+export default async function WebhooksPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string }>;
+}) {
+  const [t, { userId, orgId, orgRole }, { from }] = await Promise.all([
+    getTranslations(),
+    auth(),
+    searchParams,
+  ]);
   if (!userId) redirect(await getAuthEntryPath());
   if (!orgId) redirect("/dashboard");
 
@@ -26,7 +35,22 @@ export default async function WebhooksPage() {
     );
   }
 
+  // This section is not in the sidebar, so it carries its own way back: to the asset's
+  // Workflows tab when we know which asset sent us here, else to the issuance list.
+  const originTokenId = webhooksOriginTokenId(from);
+  const back = originTokenId
+    ? {
+        href: `/dashboard/issuance/${encodeURIComponent(originTokenId)}/asset-profile?tab=workflows`,
+        label: t("Shared.dashboardShell.backToWorkflows"),
+      }
+    : { href: "/dashboard/issuance", label: t("Shared.dashboardShell.backToIssuance") };
+
   // No server data fetch: the list is client-SWR (the post-Phase-5 pattern) so
   // mutations refresh in place without a duplicate server fetch path.
-  return <WebhookEndpointsWorkspace canManage={dashboardAccess.capabilities.canManageWebhooks} />;
+  return (
+    <WebhookEndpointsWorkspace
+      back={back}
+      canManage={dashboardAccess.capabilities.canManageWebhooks}
+    />
+  );
 }

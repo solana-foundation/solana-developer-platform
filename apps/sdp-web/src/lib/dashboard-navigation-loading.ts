@@ -8,7 +8,7 @@ export const DASHBOARD_SIDE_NAV_HREFS = {
   apiKeys: "/dashboard/api-keys",
   policies: "/dashboard/policies",
   approvals: "/dashboard/approvals",
-  webhooks: "/dashboard/webhooks",
+  webhooks: "/dashboard/issuance/webhooks",
   settings: "/dashboard/settings",
   integrations: "/dashboard/integrations",
 } as const;
@@ -87,7 +87,7 @@ function resolveWalletLoadingRoute(pathname: string): DashboardLoadingRoute | nu
   return null;
 }
 
-/** The Manage-section access surfaces: keys, policies, approvals and webhooks. */
+/** The Manage-section access surfaces: keys, policies and approvals. */
 function resolveAccessControlLoadingRoute(pathname: string): DashboardLoadingRoute | null {
   if (pathname === "/dashboard/api-keys") return "api-keys-list";
   if (pathname === "/dashboard/api-keys/new") return "api-key-new";
@@ -95,8 +95,6 @@ function resolveAccessControlLoadingRoute(pathname: string): DashboardLoadingRou
   if (pathname === "/dashboard/policies") return "policies";
   if (pathname === "/dashboard/approvals") return "approvals-list";
   if (/^\/dashboard\/approvals\/[^/]+$/.test(pathname)) return "approval-detail";
-  if (pathname === "/dashboard/webhooks") return "webhooks-list";
-  if (/^\/dashboard\/webhooks\/[^/]+$/.test(pathname)) return "webhook-detail";
   return null;
 }
 
@@ -111,6 +109,10 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
 
   if (pathname === "/dashboard/issuance") return "issuance-overview";
   if (pathname === "/dashboard/issuance/create") return "issuance-create";
+  // Both webhook routes precede the token catch-all below: `webhooks` is a static
+  // segment sitting beside `[tokenId]`, so the catch-all would claim it otherwise.
+  if (pathname === "/dashboard/issuance/webhooks") return "webhooks-list";
+  if (/^\/dashboard\/issuance\/webhooks\/[^/]+$/.test(pathname)) return "webhook-detail";
   if (/^\/dashboard\/issuance\/[^/]+$/.test(pathname)) return "issuance-detail";
 
   if (pathname === "/dashboard/markets/earn") return "earn-overview";

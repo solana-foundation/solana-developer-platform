@@ -1,8 +1,10 @@
 "use client";
 
+import { ExternalLinkIcon } from "lucide-react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { useState } from "react";
-import type { WebhookEndpointsPage } from "@/app/dashboard/webhooks/webhook-endpoints.data";
+import type { WebhookEndpointsPage } from "@/app/dashboard/issuance/webhooks/webhook-endpoints.data";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,7 +13,7 @@ import { Select, SelectItem } from "@/components/ui/select";
 type Wf = (key: string, values?: Record<string, string | number>) => string;
 type Mode = "registry" | "custom";
 
-// send_webhook's param block: a registered endpoint from /dashboard/webhooks (the
+// send_webhook's param block: a registered endpoint from /dashboard/issuance/webhooks (the
 // default) or the legacy inline URL + optional secret. The two shapes are mutually
 // exclusive server-side, so switching modes clears the other mode's params. Key this
 // component by the editing rule id — mode is derived from params only on mount.
@@ -29,6 +31,13 @@ export function SendWebhookParams({
   errors: Record<string, string>;
   onParamChange: (key: string, value: string) => void;
 }) {
+  // The webhooks section is not in the sidebar, so it is handed the asset that opened it
+  // and uses it to offer a way back to this tab.
+  const routeTokenId = useParams<{ tokenId?: string }>().tokenId;
+  const endpointsHref = routeTokenId
+    ? `/dashboard/issuance/webhooks?from=${encodeURIComponent(routeTokenId)}`
+    : "/dashboard/issuance/webhooks";
+
   const [mode, setMode] = useState<Mode>(() =>
     !(params.endpointId ?? "").trim() && ((params.url ?? "").trim() || (params.secret ?? "").trim())
       ? "custom"
@@ -77,9 +86,20 @@ export function SendWebhookParams({
 
       {mode === "registry" ? (
         <div className="space-y-1.5 text-sm">
-          <Label htmlFor="wf-param-endpointId" className="text-secondary">
-            {t("paramWebhookEndpoint")}
-          </Label>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Label htmlFor="wf-param-endpointId" className="text-secondary">
+              {t("paramWebhookEndpoint")}
+            </Label>
+            {/* Always reachable, not just when the registry is empty or truncated: the
+                endpoint a rule needs is often created or re-checked mid-authoring. */}
+            <Link
+              href={endpointsHref}
+              className="inline-flex items-center gap-1 text-xs text-secondary underline underline-offset-2 hover:text-primary"
+            >
+              <ExternalLinkIcon aria-hidden className="size-3" />
+              {t("webhookManageEndpoints")}
+            </Link>
+          </div>
           {hasEndpoints ? (
             <Select
               ariaLabel={t("paramWebhookEndpoint")}
@@ -100,25 +120,11 @@ export function SendWebhookParams({
               ))}
             </Select>
           ) : (
-            <p className="text-xs text-secondary">
-              {t("webhookNoEndpoints")}{" "}
-              <Link
-                href="/dashboard/webhooks"
-                className="text-primary underline underline-offset-2"
-              >
-                {t("webhookManageEndpoints")}
-              </Link>
-            </p>
+            <p className="text-xs text-secondary">{t("webhookNoEndpoints")}</p>
           )}
           {hasEndpoints && moreThanListed ? (
             <p className="text-xs text-secondary">
-              {t("webhookMoreEndpoints", { count: endpointList.length })}{" "}
-              <Link
-                href="/dashboard/webhooks"
-                className="text-primary underline underline-offset-2"
-              >
-                {t("webhookManageEndpoints")}
-              </Link>
+              {t("webhookMoreEndpoints", { count: endpointList.length })}
             </p>
           ) : null}
           {errors.endpointId ? (

@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import type { MessageKey } from "@/i18n/messages";
 import { formatDisplayLabel } from "@/lib/utils";
+import { ACTION_ICONS } from "./tabs/workflow-builder-cards";
 
 type Translate = (key: MessageKey) => string;
 
@@ -51,6 +52,40 @@ const AUDIT_ACTION_ICONS: Record<string, LucideIcon> = {
 
 export function auditActionIcon(action: string): LucideIcon {
   return AUDIT_ACTION_ICONS[action] ?? Activity;
+}
+
+// Every engine-run row logs the same two actions, so on their own they read as a wall of
+// "Workflow action executed" — the action that actually ran is in the metadata the engine
+// already writes (`actionType`). The Type column says these came from a workflow, so the
+// Action column is free to name the operation instead of repeating the category.
+const WORKFLOW_AUDIT_ACTIONS = new Set(["workflow_action_executed", "workflow_action_failed"]);
+
+function workflowActionType(event: AssetAuditEvent): string | null {
+  if (!WORKFLOW_AUDIT_ACTIONS.has(event.action)) {
+    return null;
+  }
+  const actionType = event.metadata?.actionType;
+  return typeof actionType === "string" && actionType.length > 0 ? actionType : null;
+}
+
+/** Row label: the workflow's own action when there is one, else the audit action. */
+export function auditEventActionLabel(event: AssetAuditEvent, t: Translate): string {
+  const actionType = workflowActionType(event);
+  if (!actionType) {
+    return auditActionLabel(event.action);
+  }
+  try {
+    // The builder's catalog labels, so one action reads identically in both places.
+    return t(`DashboardIssuance.workflows.actionLabels.${actionType}` as MessageKey);
+  } catch {
+    // An action the client's catalog doesn't know still names itself.
+    return auditActionLabel(actionType);
+  }
+}
+
+export function auditEventActionIcon(event: AssetAuditEvent): LucideIcon {
+  const actionType = workflowActionType(event);
+  return (actionType ? ACTION_ICONS[actionType] : undefined) ?? auditActionIcon(event.action);
 }
 
 // Status carries the only color — SDP semantic badge tokens (borderless pill).

@@ -221,7 +221,9 @@
     "holdings": "Holdings",
     "backToHome": "Back to Home",
     "webhooks": "Webhooks",
-    "backToWebhooks": "Back to webhooks"
+    "backToWebhooks": "Back to webhooks",
+    "backToWorkflows": "Back to workflows",
+    "backToIssuance": "Back to issuance"
   },
   "validation": {
     "allowlistValueRequired": "Allowlist value is required",

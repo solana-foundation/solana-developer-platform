@@ -23,7 +23,6 @@ const t = ((key: string) => key) as Translate;
 function navOptions(overrides: Partial<Parameters<typeof getNavSections>[1]> = {}) {
   return {
     canReadApprovals: false,
-    canReadWebhooks: false,
     earnEnabled: false,
     heliusRingsEnabled: false,
     marketsEnabled: false,

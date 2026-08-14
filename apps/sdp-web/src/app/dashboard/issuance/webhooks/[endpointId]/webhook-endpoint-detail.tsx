@@ -79,7 +79,7 @@ export function WebhookEndpointDetail({
   const [editOpen, setEditOpen] = useState(false);
   const actions = useWebhookEndpointActions({
     onChanged: () => void swr.mutate(),
-    onDeleted: () => router.push("/dashboard/webhooks"),
+    onDeleted: () => router.push("/dashboard/issuance/webhooks"),
   });
 
   const createdAt = new Date(endpoint.createdAt);

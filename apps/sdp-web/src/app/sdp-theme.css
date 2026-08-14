@@ -32,6 +32,14 @@
   --blue-bg: rgba(37, 99, 235, 0.08);
   --blue-brd: rgba(37, 99, 235, 0.2);
 
+  /* Status hues for marks that are *filled* with the colour — a dot, not a letterform.
+     Same hue as the `-brd` tokens but opaque: `-brd` is that hue at 20%, too faint to
+     carry status on its own, and `-tx` is darkened for text contrast on light surfaces,
+     which puts amber at brown (#854d0e). */
+  --green-mark: #00a066;
+  --amber-mark: #eab308;
+  --red-mark: #dc2626;
+
   --crimson: #c71f37;
   --crimson-strong: #9e2b38;
   --crimson-strongest: #8a1f2a;
@@ -89,12 +97,15 @@
   --color-success: var(--green-tx);
   --color-success-bg: var(--green-bg);
   --color-success-border: var(--green-brd);
+  --color-success-mark: var(--green-mark);
   --color-warning: var(--amber-tx);
   --color-warning-bg: var(--amber-bg);
   --color-warning-border: var(--amber-brd);
+  --color-warning-mark: var(--amber-mark);
   --color-error: var(--red-tx);
   --color-error-bg: var(--red-bg);
   --color-error-border: var(--red-brd);
+  --color-error-mark: var(--red-mark);
   --color-info: var(--blue-tx);
   --color-info-bg: var(--blue-bg);
   --color-info-border: var(--blue-brd);
@@ -180,6 +191,11 @@
   --red-tx: oklch(0.8 0.12 25);
   --red-bg: oklch(0.27 0.05 25);
   --red-brd: oklch(0.45 0.1 25);
+  /* Dark mode needs no separate mark hue: its text tones are already bright and
+     saturated against a dark tile, unlike light mode's darkened ones. */
+  --green-mark: var(--green-tx);
+  --amber-mark: var(--amber-tx);
+  --red-mark: var(--red-tx);
   --blue-tx: oklch(0.79 0.1 250);
   --blue-bg: oklch(0.27 0.045 250);
   --blue-brd: oklch(0.43 0.08 250);

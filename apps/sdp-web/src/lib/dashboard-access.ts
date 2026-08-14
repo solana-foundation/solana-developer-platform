@@ -18,7 +18,7 @@ export interface DashboardCapabilities {
   // the same split per action tier; this only decides what the builder offers.
   canManageTokenWrite: boolean;
   canUseWalletSignerCheck: boolean;
-  // The outbound-webhook endpoint registry (/dashboard/webhooks).
+  // The outbound-webhook endpoint registry (/dashboard/issuance/webhooks).
   canReadWebhooks: boolean;
   canManageWebhooks: boolean;
 }
