@@ -94,6 +94,9 @@ jobs:
   publish-release:
     if: "${{ startsWith(github.event.head_commit.message, 'chore(main): release ') }}"
     runs-on: ubuntu-latest
+    outputs:
+      release_sha: ${{ steps.release.outputs.release_sha }}
+      release_tag: ${{ steps.release.outputs.release_tag }}
     concurrency:
       group: release-flow-main
       cancel-in-progress: false
@@ -110,7 +113,7 @@ jobs:
         uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
-          ref: main
+          ref: ${{ github.sha }}
           token: ${{ steps.release-app.outputs.token }}
 
       - name: Setup Node
@@ -123,3 +126,38 @@ jobs:
           GITHUB_TOKEN: ${{ steps.release-app.outputs.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: node .github/scripts/release-flow.mjs publish
+
+      - name: Resolve published release
+        id: release
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          release_tag="v${version}"
+          release_sha="$(git rev-parse "${release_tag}^{commit}")"
+
+          if [[ "${release_sha}" != "${GITHUB_SHA}" ]]; then
+            echo "${release_tag} resolves to ${release_sha}, expected ${GITHUB_SHA}." >&2
+            exit 1
+          fi
+
+          echo "release_sha=${release_sha}" >> "${GITHUB_OUTPUT}"
+          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+
+  deploy-api-production:
+    needs: publish-release
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/deploy-sdp-api-gcp-prod.yml
+    with:
+      release_sha: ${{ needs.publish-release.outputs.release_sha }}
+      release_tag: ${{ needs.publish-release.outputs.release_tag }}
+
+  deploy-web-production:
+    needs: publish-release
+    permissions:
+      contents: read
+    uses: ./.github/workflows/deploy-sdp-web-vercel-prod.yml
+    with:
+      release_sha: ${{ needs.publish-release.outputs.release_sha }}
+      release_tag: ${{ needs.publish-release.outputs.release_tag }}
