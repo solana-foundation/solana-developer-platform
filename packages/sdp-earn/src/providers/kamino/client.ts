@@ -26,16 +26,18 @@ import { listKaminoDevnetVaults } from "./devnet";
 const KAMINO_API_URL = "https://api.kamino.finance";
 
 /**
- * Kamino K-Vaults are deployed on MAINNET ONLY. `/kvaults/*` accepts no `env`
- * parameter and there is no devnet deployment, so this constant is not an SDP
- * preference — it is the whole of Kamino's reality, and every snapshot carries
- * it as `hostCluster` in both environments.
+ * The cluster the REST shelf at `api.kamino.finance` indexes.
  *
- * SDP catalogues the mainnet shelf into sandbox as well, so an integrator
- * building against sandbox sees the real vaults. Those rows are true and
- * un-fundable: `isClusterFundableInEnvironment` is what keeps devnet money away
- * from them, at the API's `assertKnownYieldSources`, on the wire as
- * `fundable: false`, and in the dashboard's strategy filter.
+ * Scoped to the production path ONLY — `_listDevnetStrategies` stamps `devnet`
+ * for every other environment, proving the chain by genesis hash first.
+ *
+ * An earlier revision of this comment asserted "K-Vaults are deployed on
+ * MAINNET ONLY … there is no devnet deployment" as measured fact. It was
+ * wrong (Kamino runs `devkRng…` on devnet with 21 vaults — see ./devnet.ts),
+ * and it cost a sandbox shelf where every row was permanently
+ * `fundable: false`. What made the error durable is that the API ACCEPTS
+ * `?env=devnet` and returns a byte-identical mainnet payload, so the probe that
+ * "confirmed" mainnet-only could not have failed.
  */
 const KAMINO_HOST_CLUSTER = "mainnet-beta" as const;
 
@@ -316,6 +318,19 @@ const KAMINO_DEPOSIT_SYMBOLS: ReadonlySet<string> = new Set(EARN_DEPOSIT_TOKEN_S
  * describe the shelf), then shape, then size. Reordering changes which reason a
  * vault is attributed to, not whether it is admitted.
  */
+/**
+ * Is this mint one SDP Earn actually fronts?
+ *
+ * Shared by both cluster paths so the answer cannot drift between them, and
+ * mint-keyed rather than symbol-keyed because `WELL_KNOWN_TOKEN_BY_MINT` already
+ * carries the per-cluster addresses — devnet USDC and mainnet USDC are different
+ * mints for the same symbol.
+ */
+function isSupportedKaminoDepositMint(mint: string): boolean {
+  const token = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
+  return token !== undefined && KAMINO_DEPOSIT_SYMBOLS.has(token.symbol);
+}
+
 export function distillKaminoVault(
   vault: KaminoVault,
   metrics: KaminoVaultMetrics | undefined
@@ -394,7 +409,7 @@ export function distillKaminoVault(
 }
 
 /**
- * Kamino vault-infra client (api.kamino.finance).
+ * Kamino vault-infra client — REST on mainnet, on-chain on devnet.
  *
  * CATALOGUE-ONLY, and that is the integration, not a stage of it. Kamino is
  * non-custodial: a K-Vault is an on-chain vault the customer's own wallet
@@ -404,16 +419,26 @@ export function distillKaminoVault(
  * answers 501 for it through `supportsPortfolioWallets`, never through a
  * provider-id check.
  *
- * Two facts shape everything else here, both verified against the live API on
- * 2026-08-13:
+ * Two facts shape everything else here (measured 2026-08-14):
  *
- * - **No credential.** The data API is public. Nothing in this file reads
- *   `ctx.env`.
- * - **Mainnet only.** `/kvaults/*` takes no `env` parameter. Both environments
- *   receive the same mainnet-derived snapshots, each stamped
- *   `hostCluster: "mainnet-beta"`, and `ctx.environment` is deliberately unused
- *   for data selection. That costs one duplicate fetch per hourly pass (six
- *   requests an hour in total) — cheaper than carrying cache state to avoid.
+ * - **No API credential.** The REST shelf is public — there is no
+ *   `KAMINO_API_KEY` anywhere. The one `ctx.env` read is `SOLANA_RPC_URL`, on
+ *   the devnet path, and a blank one fails closed with
+ *   PROVIDER_NOT_CONFIGURED rather than silently emptying the shelf.
+ * - **Two clusters, two SOURCES.** `ctx.environment` selects between them:
+ *   production reads the mainnet REST shelf (`hostCluster: "mainnet-beta"`),
+ *   every other environment reads the devnet kvault program on-chain
+ *   (`./devnet.ts`, `hostCluster: "devnet"`). Non-production issues no request
+ *   to api.kamino.finance at all, which is stronger than fetching and
+ *   filtering — and the catalogue sync independently refuses to persist a
+ *   mainnet instrument outside production, so a bug here cannot put one in a
+ *   sandbox database.
+ *
+ * The predecessor of this comment said "mainnet only … `ctx.environment` is
+ * deliberately unused for data selection". Treat that as the cautionary tale it
+ * is: it was recorded as a live-API measurement, and the API's habit of
+ * accepting-and-ignoring `?env=devnet` meant no amount of re-probing it would
+ * have caught the error. The chain would have.
  */
 export class KaminoEarnClient extends StubEarnClient implements EarnLiveMetricsProvider {
   readonly provider = "kamino" as const;
@@ -517,7 +542,7 @@ export class KaminoEarnClient extends StubEarnClient implements EarnLiveMetricsP
    * devnet wallet cannot reach, and before this split every sandbox Kamino row
    * was exactly that — catalogued, permanently `fundable: false`, and useless
    * to an integrator. The catalogue sync enforces the same rule independently
-   * (`assertSnapshotClusterMatchesEnvironment`), so a bug here cannot put
+   * (an inline `hostCluster`/environment check in `syncProviderCatalogue`), so a bug here cannot put
    * mainnet rows in a sandbox database.
    */
   override async listStrategies(ctx: EarnRuntimeContext): Promise<ProviderStrategySnapshot[]> {
@@ -562,21 +587,36 @@ export class KaminoEarnClient extends StubEarnClient implements EarnLiveMetricsP
     const rpcUrl = ctx.env.SOLANA_RPC_URL ?? "";
     const vaults = await listKaminoDevnetVaults(rpcUrl);
 
-    return vaults.map((vault) => ({
-      providerReference: vault.address,
-      name: vault.name,
-      // Same reasoning as mainnet: a K-Vault allocates into Klend reserves, and
-      // that is the one classification its own mechanics establish. Never read
-      // out of the attacker-chosen name.
-      sourceKind: "defi" as const,
-      underlyingSource: "klend",
-      depositMints: [vault.tokenMint],
-      shareMint: vault.sharesMint,
-      hostCluster: "devnet" as const,
-      apyType: "variable" as const,
-      liquidityTerm: "instant" as const,
-      riskMetadata: {},
-    }));
+    return (
+      vaults
+        // Screened HERE rather than left to `isStrategyWithinDeclaredSupport`,
+        // which would also refuse them — same reason the mainnet path screens in
+        // `distillKaminoVault`: the sync logs a warning per out-of-envelope
+        // snapshot, and devnet's shelf is roughly half SOL and bespoke test mints,
+        // so passing them through would emit ~11 warnings every hourly pass in
+        // perpetuity. Provider drift is worth a warning; a vault in an asset SDP
+        // never claimed to front is not drift.
+        .filter((vault) => isSupportedKaminoDepositMint(vault.tokenMint))
+        .map((vault) => ({
+          providerReference: vault.address,
+          name: vault.name,
+          // Same reasoning as mainnet: a K-Vault allocates into Klend reserves, and
+          // that is the one classification its own mechanics establish. Never read
+          // out of the attacker-chosen name.
+          sourceKind: "defi" as const,
+          underlyingSource: "klend",
+          depositMints: [vault.tokenMint],
+          shareMint: vault.sharesMint,
+          // Not derived from `ctx.environment`: `listKaminoDevnetVaults` proves the
+          // chain by genesis hash before returning a single vault, so this states
+          // the cluster we measurably read. Deriving it from the environment is the
+          // silent lie migration 0057 exists to prevent.
+          hostCluster: "devnet" as const,
+          apyType: "variable" as const,
+          liquidityTerm: "instant" as const,
+          riskMetadata: {},
+        }))
+    );
   }
 
   /**

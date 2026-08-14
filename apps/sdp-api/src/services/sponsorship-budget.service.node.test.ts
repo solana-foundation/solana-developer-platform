@@ -126,14 +126,14 @@ describe("BudgetedFeePayment", () => {
     expect(harness().feePayment.providerId).toBe("kora");
   });
 
-  it.each([0, "legacy"] as const)(
-    "admits and persists %s transaction messages",
-    async (version) => {
-      const { feePayment, repository } = harness();
-      await expect(feePayment.signAndSend(buildTransaction(version))).resolves.toBe("signature_1");
-      expect(repository.createReservation).toHaveBeenCalledOnce();
-    }
-  );
+  it.each([
+    0,
+    "legacy",
+  ] as const)("admits and persists %s transaction messages", async (version) => {
+    const { feePayment, repository } = harness();
+    await expect(feePayment.signAndSend(buildTransaction(version))).resolves.toBe("signature_1");
+    expect(repository.createReservation).toHaveBeenCalledOnce();
+  });
 
   it("commits the durable reservation before touching the Redis budget gate", async () => {
     const { feePayment, repository, budgetRedis } = harness();

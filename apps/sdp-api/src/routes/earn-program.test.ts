@@ -795,10 +795,12 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
   });
 
   /**
-   * The devnet-money guard. A mainnet-only provider is catalogued into sandbox
-   * on purpose, so `assertKnownYieldSources` must refuse a reference whose
-   * instrument does not live on this environment's cluster — being listed here
-   * is not the same as being fundable here.
+   * The devnet-money guard. `assertKnownYieldSources` must refuse a reference
+   * whose instrument does not live on this environment's cluster — being listed
+   * is not the same as being fundable. The row is seeded with a flipped cluster
+   * rather than borrowed from a provider: Kamino was the original example and
+   * now catalogues per cluster, so a real provider reference would no longer
+   * exercise this at all.
    *
    * Deliberately uses a GROUND row with its cluster flipped rather than a
    * Kamino row: a Kamino reference is already refused for being another

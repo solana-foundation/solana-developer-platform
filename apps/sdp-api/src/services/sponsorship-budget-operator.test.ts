@@ -9,12 +9,19 @@ import {
 } from "./sponsorship-budget-operator";
 
 describe("sponsorship budget operator validation", () => {
-  it.each(["1e6", "1.0", "+1", "-1", "01", " 1", "1 ", "", undefined])(
-    "rejects non-canonical lamport input %s",
-    (value) => {
-      expect(() => parseLamportAmount(value, "hourly-lamports")).toThrow();
-    }
-  );
+  it.each([
+    "1e6",
+    "1.0",
+    "+1",
+    "-1",
+    "01",
+    " 1",
+    "1 ",
+    "",
+    undefined,
+  ])("rejects non-canonical lamport input %s", (value) => {
+    expect(() => parseLamportAmount(value, "hourly-lamports")).toThrow();
+  });
 
   it("parses canonical decimal strings as bigint without rounding", () => {
     expect(parseLamportAmount("0", "hourly-lamports")).toBe(0n);

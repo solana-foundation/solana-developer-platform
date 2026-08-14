@@ -46,10 +46,14 @@ describe("fundableStrategies", () => {
   });
 
   /**
-   * The devnet-money guard, dashboard side. Kamino's mainnet-only vaults are
-   * catalogued into sandbox so integrators can browse the real shelf; the API
-   * marks them `fundable: false` and the wizard must never offer one, or a user
-   * walks to a confirm step that provisions nothing.
+   * The devnet-money guard, dashboard side. `fundable` is the API's per-request
+   * answer to "does this instrument exist on the caller's cluster", and the
+   * wizard must never offer a `false` one or a user walks to a confirm step
+   * that provisions nothing. Kamino used to be the live example — mainnet
+   * vaults catalogued into sandbox — and no longer is, since each environment
+   * now catalogues its own cluster; the guard still stands for Ground and any
+   * single-cluster provider, which is why this seeds clusters directly rather
+   * than naming a provider.
    */
   it("drops a strategy the API says is not fundable in this environment", () => {
     const local = strategy({ id: "ground-devnet" });

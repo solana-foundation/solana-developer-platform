@@ -274,11 +274,12 @@ environment's own cluster because its deposit is Solana-side there — the row
 carries that cluster's mint, and Ground bridges internally to wherever it hosts
 the source (#1299 removed the old `not_solana_hosted` gate, so off-Solana
 sources are indexed again; the deposit rail is what makes the cluster true, not
-the host chain). Kamino always answers `mainnet-beta`, in sandbox too: its
-K-Vault takes the customer's own deposit at a mainnet address with no bridge in
-front of it.
+the host chain). Kamino answers per data source — `mainnet-beta` from the REST
+shelf in production, `devnet` from the on-chain read elsewhere — and the second
+is MEASURED (genesis hash) before a single vault is returned, not inferred from
+the environment.
 
-A sandbox Kamino row therefore names a live mainnet vault and a mainnet mint.
+A sandbox Kamino row therefore names a live DEVNET vault and a devnet mint.
 Everything about it is true and none of it is fundable from devnet, so ONE
 predicate decides — `isClusterFundableInEnvironment` (src/support.ts) — and
 three gates enforce its answer, none of which may re-derive the comparison:

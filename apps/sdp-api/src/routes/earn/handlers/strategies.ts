@@ -29,28 +29,37 @@ import { listResponse, pageWindow, parseParams, parseQuery } from "./shared";
 const HIDDEN_STRATEGY_TERMS = ["aave", "morpho"] as const;
 
 /**
- * ── CATALOGUE CURATION ──────────────────────────────────────────────────────
- * The knob for a more opinionated shelf. Edit the two lists below; nothing else
+ * ── CATALOGUE CURATION, PER ENVIRONMENT ─────────────────────────────────────
+ * The knob for a more opinionated shelf. Edit the lists below; nothing else
  * needs to change, and both take effect on the next request (no sync, no
  * migration, no cache to bust).
  *
- * **Always key on the vault ADDRESS (`providerReference`), never the name.**
- * Kamino's registry is permissionless and the name is free text chosen by
- * whoever created the vault, so a name-keyed rule can be dodged by renaming and
- * tripped by impersonating a curated vault's name. `HIDDEN_STRATEGY_TERMS`
- * above is name-based on purpose and is safe only because it can only ever
- * REMOVE rows — the same trick pointed the other way would be an admission
- * hole. Addresses are in `docs/earn/kamino-catalogue-inventory.md`, or
- * `pnpm --filter @sdp/api earn:inventory:kamino` regenerates it.
+ * **Keyed by environment, and that is not tidiness — a flat list is a trap.**
+ * A vault is identified by its ADDRESS, and addresses are cluster-specific:
+ * Kamino's mainnet shelf and its devnet shelf share no references at all. A
+ * single `CURATED_VAULTS.kamino` holding mainnet addresses would therefore act
+ * as an allowlist that matches NOTHING in sandbox and blank the entire devnet
+ * shelf — a curation choice about production silently deleting sandbox.
+ * Splitting by environment makes that impossible to express by accident.
+ *
+ * **Always key on the vault ADDRESS, never the name.** Kamino's registry is
+ * permissionless and the name is free text chosen by whoever created the vault,
+ * so a name-keyed rule can be dodged by renaming and tripped by impersonating a
+ * curated vault's name. `HIDDEN_STRATEGY_TERMS` above is name-based on purpose
+ * and is safe only because it can exclusively REMOVE rows; the same trick
+ * pointed the other way would be an admission hole. Mainnet addresses are in
+ * `docs/earn/kamino-catalogue-inventory.md`; devnet ones come from the on-chain
+ * read (`packages/sdp-earn/src/providers/kamino/devnet.ts`).
  *
  * Which to reach for:
  * - `HIDDEN_VAULTS` — subtractive. Drop a specific vault (dust, a duplicate, one
- *   we do not want to stand behind) while the rest of the shelf keeps flowing in
- *   as the provider lists it. Start here.
- * - `CURATED_VAULTS` — a hand-picked shelf. A provider listed here shows ONLY
- *   these vaults, so a newly created vault does NOT appear until someone adds it.
- *   That is the point: maximum editorial control, at the cost of a deploy per
- *   addition. A provider mapped to an empty array shows nothing at all.
+ *   we do not want to stand behind) while the rest of that environment's shelf
+ *   keeps flowing in as the provider lists it. Start here.
+ * - `CURATED_VAULTS` — a hand-picked shelf. An environment/provider pair listed
+ *   here shows ONLY those vaults, so a newly created vault does NOT appear until
+ *   someone adds it. Maximum editorial control, at the cost of a deploy per
+ *   addition. An empty array means that provider shows nothing in that
+ *   environment; an ABSENT key means no allowlist at all.
  *
  * Neither list touches what the sync STORES, so a curated-away vault stays in
  * `earn_strategies` and un-curating it is a deploy rather than an hour's wait.
@@ -59,12 +68,24 @@ const HIDDEN_STRATEGY_TERMS = ["aave", "morpho"] as const;
  * working — hiding a shelf is a browse decision, and freezing a customer's own
  * position over it would not be.
  */
-const HIDDEN_VAULTS: readonly `${EarnProviderId}:${string}`[] = [
-  // "kamino:8F2mL9wLbYcQ1t2WcTgAsD5nDgQ1XjqK8kY7z4Q9example",
-];
+const HIDDEN_VAULTS: Partial<Record<SdpEnvironment, readonly `${EarnProviderId}:${string}`[]>> = {
+  production: [
+    // "kamino:8F2mL9wLbYcQ1t2WcTgAsD5nDgQ1XjqK8kY7z4Q9example",
+  ],
+  sandbox: [
+    // "kamino:7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
+  ],
+};
 
-const CURATED_VAULTS: Partial<Record<EarnProviderId, readonly string[]>> = {
-  // kamino: ["<vault address>", "<vault address>"],
+const CURATED_VAULTS: Partial<
+  Record<SdpEnvironment, Partial<Record<EarnProviderId, readonly string[]>>>
+> = {
+  production: {
+    // kamino: ["<mainnet vault address>"],
+  },
+  sandbox: {
+    // kamino: ["<devnet vault address>"],
+  },
 };
 
 /**
@@ -87,11 +108,13 @@ function isHiddenStrategy(row: EarnStrategyRow): boolean {
     return true;
   }
 
-  if (HIDDEN_VAULTS.includes(`${row.provider}:${row.provider_reference}` as never)) {
+  const environment = row.environment as SdpEnvironment;
+  const hidden = HIDDEN_VAULTS[environment] ?? [];
+  if (hidden.includes(`${row.provider}:${row.provider_reference}` as never)) {
     return true;
   }
 
-  const curated = CURATED_VAULTS[row.provider as EarnProviderId];
+  const curated = CURATED_VAULTS[environment]?.[row.provider as EarnProviderId];
   if (curated !== undefined && !curated.includes(row.provider_reference)) {
     return true;
   }
@@ -165,8 +188,8 @@ export const listEarnStrategies = async (c: AppContext) => {
     // the rows the caller can see. `isHiddenStrategy` applies the same two rules
     // to the detail route, which has no query to push them into.
     providers: SURFACED_EARN_PROVIDERS,
-    excludeProviderKeys: HIDDEN_VAULTS,
-    allowedProviderReferences: CURATED_VAULTS,
+    excludeProviderKeys: HIDDEN_VAULTS[environment] ?? [],
+    allowedProviderReferences: CURATED_VAULTS[environment] ?? {},
     excludeRelatedTerms: HIDDEN_STRATEGY_TERMS,
     ...pageWindow(query),
   });

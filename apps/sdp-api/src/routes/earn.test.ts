@@ -490,9 +490,12 @@ describe("Earn routes — strategy catalogue", () => {
   /**
    * `fundable` is derived per request, so the SAME row answers differently to a
    * sandbox and a production caller. This is the wire-level warning a partner
-   * reads before treating a listed strategy as depositable — a mainnet-only
-   * provider's vaults are listed in sandbox on purpose and must never look
-   * fundable there.
+   * reads before treating a listed strategy as depositable. Kamino used to be
+   * the live example (mainnet vaults listed in sandbox) and no longer is — each
+   * environment catalogues its own cluster, and the sync refuses to store a
+   * mainnet instrument outside production. The derivation still matters for
+   * Ground, for rows written before that guard, and for the next single-cluster
+   * provider, which is why this seeds the cluster directly.
    */
   it("derives fundable from hostCluster against the caller's environment", async () => {
     await seedAuth();

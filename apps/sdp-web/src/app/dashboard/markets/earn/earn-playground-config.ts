@@ -89,11 +89,13 @@ export function buildEarnPlaygroundEndpointConfigs(
             apyType: "variable",
             currentApy: "0.051",
             liquidityTerm: "instant",
-            // The two fields a partner most needs to branch on, and the reason
-            // this response is worth showing in full: catalogued is not the
-            // same as fundable.
+            // The two fields a partner most needs to branch on. Kamino
+            // catalogues per cluster, so both are environment-dependent: a
+            // sandbox caller sees `devnet`/`true`, a production caller
+            // `mainnet-beta`/`true`. `fundable` still answers the CLUSTER
+            // question only — it does not promise a deposit will succeed.
             hostCluster: "mainnet-beta",
-            fundable: false,
+            fundable: true,
             status: "active",
           },
         ],
@@ -123,7 +125,7 @@ export function buildEarnPlaygroundEndpointConfigs(
           name: "Kamino Allez USDC",
           currentApy: "0.051",
           hostCluster: "mainnet-beta",
-          fundable: false,
+          fundable: true,
         },
       },
     },

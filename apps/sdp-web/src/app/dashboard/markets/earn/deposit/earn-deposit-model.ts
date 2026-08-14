@@ -36,11 +36,12 @@ import { EARN_PROGRAM_CREATION_ENABLED } from "../earn-surfacing";
  * Strategies that can actually be funded: their deposit mint is routable AND
  * the API says the instrument exists on this environment's cluster.
  *
- * The `fundable` half is not decoration. The catalogue lists what EXISTS, which
- * since Kamino is a larger set than what can take a deposit here — Kamino's
- * K-Vaults are mainnet-only and are catalogued into sandbox too, so an
- * integrator can browse the real shelf. Making one of those rows selectable in
- * the wizard would walk a user to a confirm step that provisions nothing.
+ * The `fundable` half is not decoration: the catalogue lists what EXISTS, which
+ * can be a larger set than what takes a deposit here, and making one of those
+ * rows selectable would walk a user to a confirm step that provisions nothing.
+ * Kamino was the example (mainnet vaults catalogued into sandbox) and no longer
+ * is — it catalogues per cluster now — but the API still derives the flag per
+ * request, so the filter stays.
  *
  * The API derives the flag per request (`hostCluster` vs. the caller's
  * environment) and its own `assertKnownYieldSources` refuses the allocation

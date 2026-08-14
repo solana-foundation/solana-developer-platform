@@ -45,10 +45,11 @@ export interface EarnStrategyRow {
   risk_metadata: EarnStrategyRiskMetadata;
   status: EarnStrategyStatus;
   /**
-   * Cluster the instrument lives on — NOT implied by `environment`. A
-   * mainnet-only provider (Kamino) is catalogued into both environments, so a
-   * sandbox row may legitimately read `mainnet-beta`; that row is browsable and
-   * never fundable. See migration 0057 and `isClusterFundableInEnvironment`.
+   * Cluster the instrument lives on — NOT implied by `environment`, which is
+   * why it is a column. Note the catalogue sync now REFUSES to write a
+   * `mainnet-beta` row outside production, so a sandbox row reading
+   * `mainnet-beta` is not legitimate: it predates that guard and is waiting for
+   * a delist pass. See migration 0057 and `isClusterFundableInEnvironment`.
    */
   host_cluster: SolanaCluster;
   environment: SdpEnvironment;

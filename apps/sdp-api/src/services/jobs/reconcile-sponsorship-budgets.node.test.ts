@@ -308,19 +308,19 @@ describe("reconcileSponsorshipBudgets", () => {
     expect(repository.markRedisSettled).not.toHaveBeenCalled();
   });
 
-  it.each([{ feePayer: "changed_signer" }, { providerConfigFingerprint: "changed_configuration" }])(
-    "trips the breaker when Kora security identity drifts ($feePayer)",
-    async (override) => {
-      const { repository, budgetRedis, getTransaction, run } = harness(reservation(override));
-      await expect(run()).rejects.toThrow("failed reconciliation");
-      expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
-        "devnet",
-        expect.stringContaining("configuration changed")
-      );
-      expect(budgetRedis.syncPolicy).toHaveBeenCalledOnce();
-      expect(getTransaction).not.toHaveBeenCalled();
-    }
-  );
+  it.each([
+    { feePayer: "changed_signer" },
+    { providerConfigFingerprint: "changed_configuration" },
+  ])("trips the breaker when Kora security identity drifts ($feePayer)", async (override) => {
+    const { repository, budgetRedis, getTransaction, run } = harness(reservation(override));
+    await expect(run()).rejects.toThrow("failed reconciliation");
+    expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
+      "devnet",
+      expect.stringContaining("configuration changed")
+    );
+    expect(budgetRedis.syncPolicy).toHaveBeenCalledOnce();
+    expect(getTransaction).not.toHaveBeenCalled();
+  });
 
   it("trips the breaker when Kora security configuration cannot be read", async () => {
     const candidate = reservation();

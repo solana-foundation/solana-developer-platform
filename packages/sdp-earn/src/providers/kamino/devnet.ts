@@ -61,6 +61,28 @@ const NAME_LENGTH = 40;
 
 const RPC_TIMEOUT_MS = 20_000;
 
+/**
+ * Solana devnet's genesis hash — the chain's own identity, checked before any
+ * vault is read.
+ *
+ * This exists because `EarnRuntimeContext.environment` is a PER-PROJECT
+ * attribute while `ctx.env` is the PROCESS environment, and `syncEarnCatalogue`
+ * walks both environments inside one process with one env object. A production
+ * deployment therefore reaches this code with `SOLANA_RPC_URL` pointing at
+ * MAINNET while syncing the sandbox environment. Without this check the devnet
+ * program id would be queried against mainnet, return zero accounts, and hand
+ * back a confident empty shelf — which is also the one shape that makes the
+ * sync skip its delist pass, so sandbox would silently freeze on whatever it
+ * last held.
+ *
+ * It also makes `hostCluster: "devnet"` a measurement rather than a derivation.
+ * Migration 0057's whole point is that the environment must never be assumed to
+ * imply the cluster; asserting the chain we actually read is how this path
+ * honours that rather than quietly re-introducing the assumption.
+ */
+// biome-ignore lint/security/noSecrets: Solana devnet's public genesis hash
+const DEVNET_GENESIS_HASH = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
+
 export interface KaminoDevnetVault {
   /** Vault account address — the catalogue's `providerReference`. */
   address: string;
@@ -184,51 +206,58 @@ export function decodeVaultState(address: string, data: Uint8Array): KaminoDevne
  * so a partial read would not degrade gracefully — it would delist the vaults
  * whose page went unread. An RPC failure throws and the sync skips its pass.
  */
+async function rpcCall<T>(rpcUrl: string, method: string, params: unknown[]): Promise<T> {
+  const response = await providerFetchJson<RpcResponse<T>, JsonRpcRequest>("kamino", rpcUrl, {
+    method: "POST",
+    body: { jsonrpc: "2.0", id: 1, method, params },
+    timeoutMs: RPC_TIMEOUT_MS,
+  });
+
+  // JSON-RPC reports failure inside a 200 body, so the HTTP layer above cannot
+  // see it. Without this an errored read looks like an empty shelf — the exact
+  // shape that would delist every Kamino row.
+  if (response.error) {
+    throw internalError(
+      `Kamino devnet ${method} failed: ${response.error.message ?? "unknown RPC error"}`
+    );
+  }
+  if (response.result === undefined) {
+    throw internalError(`Kamino devnet ${method} returned no result`);
+  }
+  return response.result;
+}
+
 export async function listKaminoDevnetVaults(rpcUrl: string): Promise<KaminoDevnetVault[]> {
   if (rpcUrl.trim() === "") {
     throw providerNotConfigured("Kamino devnet catalogue needs a Solana RPC URL");
   }
 
-  // `providerFetchJson` serializes the body and sets the JSON headers itself,
-  // so the request object goes in as a value rather than pre-stringified.
-  const response = await providerFetchJson<RpcResponse<RpcAccount[]>, JsonRpcRequest>(
-    "kamino",
-    rpcUrl,
-    {
-      method: "POST",
-      body: {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "getProgramAccounts",
-        params: [
-          KAMINO_DEVNET_KVAULT_PROGRAM_ID,
-          {
-            encoding: "base64",
-            // Server-side size filter: the program also owns smaller bookkeeping
-            // accounts, and shipping only vault states keeps this read at a few
-            // hundred KB instead of the whole program's account set.
-            filters: [{ dataSize: VAULT_STATE_SIZE }],
-          },
-        ],
-      },
-      timeoutMs: RPC_TIMEOUT_MS,
-    }
-  );
-
-  // JSON-RPC reports failure in a 200 body, so the HTTP layer above cannot see
-  // it. Without this check an errored read looks like an empty shelf — the
-  // exact shape that would delist every Kamino row.
-  if (response.error) {
-    throw internalError(
-      `Kamino devnet vault read failed: ${response.error.message ?? "unknown RPC error"}`
+  const genesisHash = await rpcCall<string>(rpcUrl, "getGenesisHash", []);
+  if (genesisHash !== DEVNET_GENESIS_HASH) {
+    throw providerNotConfigured(
+      `Kamino devnet catalogue requires a devnet RPC; ${rpcUrl} reports genesis ${genesisHash}`
     );
   }
-  if (!Array.isArray(response.result)) {
+
+  // `providerFetchJson` serializes the body and sets the JSON headers itself,
+  // so the request object goes in as a value rather than pre-stringified.
+  const accounts = await rpcCall<RpcAccount[]>(rpcUrl, "getProgramAccounts", [
+    KAMINO_DEVNET_KVAULT_PROGRAM_ID,
+    {
+      encoding: "base64",
+      // Server-side size filter: the program also owns smaller bookkeeping
+      // accounts, and shipping only vault states keeps this read at a few
+      // hundred KB instead of the whole program's account set.
+      filters: [{ dataSize: VAULT_STATE_SIZE }],
+    },
+  ]);
+
+  if (!Array.isArray(accounts)) {
     throw internalError("Kamino devnet vault read returned no result array");
   }
 
   const vaults: KaminoDevnetVault[] = [];
-  for (const account of response.result) {
+  for (const account of accounts) {
     const encoded = account.account?.data?.[0];
     if (typeof encoded !== "string") continue;
     const decoded = decodeVaultState(account.pubkey, fromBase64(encoded));
