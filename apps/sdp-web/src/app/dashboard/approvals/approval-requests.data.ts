@@ -161,12 +161,6 @@ export function approvalReason(
   );
 }
 
-export function approvalAmount(request: WalletApprovalRequestSummary): string {
-  const { amount, asset } = request.operation;
-  if (!amount && !asset) return "-";
-  return [amount, asset].filter(Boolean).join(" ");
-}
-
 export function formatApprovalDateTime(value: string | null, locale: string): string {
   if (!value) return "-";
   const date = new Date(value);
