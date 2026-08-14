@@ -1036,6 +1036,8 @@ export function useTokenOperations({
     }
 
     setFundManagementModalAction(null);
+    setMintForm(createInitialMintForm);
+    setBurnForm(createInitialBurnForm);
   };
 
   /**
