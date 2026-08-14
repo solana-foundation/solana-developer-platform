@@ -684,7 +684,10 @@ function ApprovalRequestRows({
                     />
                   </ApprovalCell>
                   <ApprovalCell>
-                    <span title={request.operation.destination ?? undefined}>
+                    <span
+                      className="whitespace-nowrap"
+                      title={request.operation.destination ?? undefined}
+                    >
                       {shortApprovalIdentifier(request.operation.destination)}
                     </span>
                   </ApprovalCell>
