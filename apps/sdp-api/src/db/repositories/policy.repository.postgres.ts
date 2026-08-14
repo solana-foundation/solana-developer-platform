@@ -1855,16 +1855,48 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
       const row = await db
         .prepare(
           `WITH target_api_key AS (
-             SELECT id, organization_id, project_id
+             SELECT id, organization_id, project_id, signing_wallet_id
              FROM api_keys
              WHERE id = ?
                AND status = 'active'
            ),
            endpoint_scope AS (
-             SELECT api_key_id, COUNT(*) AS binding_count
-             FROM api_key_wallet_permissions
-             WHERE api_key_id = ?
-             GROUP BY api_key_id
+             SELECT
+               ak.id AS api_key_id,
+               COUNT(perm.id) AS permission_count,
+               CASE
+                 WHEN COUNT(perm.id) = 0 AND ak.signing_wallet_id IS NOT NULL THEN 1
+                 ELSE COUNT(perm.id)
+               END AS binding_count
+             FROM target_api_key ak
+             LEFT JOIN api_key_wallet_permissions perm ON perm.api_key_id = ak.id
+             GROUP BY ak.id, ak.signing_wallet_id
+           ),
+           wallet_candidates AS (
+             SELECT w.id, w.wallet_id, c.project_id AS wallet_project_id
+             FROM target_api_key ak
+             JOIN custody_configs c
+               ON c.organization_id = ak.organization_id
+              AND (c.project_id IS NOT DISTINCT FROM ak.project_id OR c.project_id IS NULL)
+              AND c.status = 'active'
+             JOIN custody_wallets w ON w.custody_config_id = c.id AND w.status = 'active'
+
+             UNION ALL
+
+             SELECT w.id, w.wallet_id, connection.project_id AS wallet_project_id
+             FROM target_api_key ak
+             JOIN custody_connections connection
+               ON connection.organization_id = ak.organization_id
+              AND connection.project_id IS NOT DISTINCT FROM ak.project_id
+              AND connection.status = 'active'
+             JOIN custody_wallets w
+               ON w.custody_connection_id = connection.id
+              AND w.status = 'active'
+           ),
+           wallet_id_counts AS (
+             SELECT wallet_id, COUNT(*) AS match_count
+             FROM wallet_candidates
+             GROUP BY wallet_id
            )
            SELECT
              ak.id AS api_key_id,
@@ -1872,35 +1904,27 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
              ak.project_id,
              w.wallet_id,
              w.id AS custody_wallet_id,
-             COALESCE(c.project_id, connection.project_id) AS wallet_project_id,
+             w.wallet_project_id,
              COALESCE(es.binding_count, 0) AS endpoint_binding_count,
-             perm.id AS endpoint_wallet_binding_id
+             CASE
+               WHEN counts.match_count = 1 THEN COALESCE(
+                 perm.id,
+                 CASE
+                   WHEN es.permission_count = 0 AND ak.signing_wallet_id = w.wallet_id
+                     THEN 'legacy_signing_wallet'
+                 END
+               )
+             END AS endpoint_wallet_binding_id
            FROM target_api_key ak
-           JOIN custody_wallets w
-             ON w.status = 'active'
-            AND w.id = ?
-           LEFT JOIN custody_configs c ON c.id = w.custody_config_id
-           LEFT JOIN custody_connections connection ON connection.id = w.custody_connection_id
+           JOIN wallet_candidates w ON w.id = ?
+           JOIN wallet_id_counts counts ON counts.wallet_id = w.wallet_id
            LEFT JOIN endpoint_scope es ON es.api_key_id = ak.id
            LEFT JOIN api_key_wallet_permissions perm
              ON perm.api_key_id = ak.id
-            AND perm.custody_wallet_id = w.id
-           WHERE COALESCE(c.organization_id, connection.organization_id) = ak.organization_id
-             AND COALESCE(c.status, connection.status) = 'active'
-             AND (
-               (c.id IS NOT NULL AND (c.project_id IS NOT DISTINCT FROM ak.project_id OR c.project_id IS NULL))
-               OR (connection.id IS NOT NULL AND connection.project_id IS NOT DISTINCT FROM ak.project_id)
-             )
-           ORDER BY
-             CASE
-               WHEN COALESCE(c.project_id, connection.project_id) = ak.project_id THEN 0
-               WHEN c.project_id IS NULL THEN 1
-               ELSE 2
-             END,
-             w.created_at DESC
+            AND perm.wallet_id = w.wallet_id
            LIMIT 1`
         )
-        .bind(apiKeyId, apiKeyId, custodyWalletId)
+        .bind(apiKeyId, custodyWalletId)
         .first<Record<string, unknown>>();
 
       return row ? mapApiKeyWalletPolicyTargetRow(row) : null;

@@ -148,7 +148,13 @@ async function getFromDatabaseAndCache(
   }
 
   const { walletScope, signingWalletId, signingWalletIds, walletBindings } =
-    await loadApiKeyWalletAuthorization(db, result.id, result.signing_wallet_id);
+    await loadApiKeyWalletAuthorization(
+      db,
+      result.id,
+      result.organization_id,
+      result.project_id,
+      result.signing_wallet_id
+    );
 
   const cached: CachedApiKey = {
     id: result.id,

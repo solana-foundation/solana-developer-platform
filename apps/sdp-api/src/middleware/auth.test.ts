@@ -511,9 +511,27 @@ describe("Auth Middleware", () => {
         .run();
       await getDb(env)
         .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted,
+              encryption_version, status)
+           VALUES ('cust_auth_resolved', ?, ?, 'local', 'test-config',
+                   'sdp-custody-encryption-v1', 'active')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id)
+        .run();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, status)
+           VALUES ('cwlt_auth_resolved', 'cust_auth_resolved', 'wallet_resolved',
+                   'wallet_resolved_public_key', 'active')`
+        )
+        .run();
+      await getDb(env)
+        .prepare(
           `INSERT INTO api_key_wallet_permissions
-             (id, api_key_id, wallet_id, custody_wallet_id, permissions)
-           VALUES ('akw_auth_unresolved', ?, 'wallet_unresolved', NULL, '["*"]')`
+             (id, api_key_id, wallet_id, permissions)
+           VALUES ('akw_auth_resolved', ?, 'wallet_resolved', '["*"]')`
         )
         .bind(TEST_API_KEY.id)
         .run();
@@ -524,7 +542,7 @@ describe("Auth Middleware", () => {
           ...TEST_CACHED_API_KEY,
           rotationDeadline: null,
           walletScope: "selected",
-          walletBindings: [{ walletId: "wallet_unresolved", permissions: ["*"] }],
+          walletBindings: [{ walletId: "wallet_resolved", permissions: ["*"] }],
         })
       );
 
@@ -541,7 +559,14 @@ describe("Auth Middleware", () => {
       }>(`key:${validKeyHash}`, "json");
       expect(cached).toMatchObject({
         walletScope: "selected",
-        walletBindings: [],
+        signingWalletId: "wallet_resolved",
+        walletBindings: [
+          {
+            walletId: "wallet_resolved",
+            custodyWalletId: "cwlt_auth_resolved",
+            permissions: ["*"],
+          },
+        ],
       });
     });
   });

@@ -190,7 +190,7 @@ export class ApiKeyService {
       .prepare(
         `SELECT ak.id, ak.name, ak.description, ak.key_prefix, ak.role, p.environment, ak.status,
                 CASE
-                  WHEN EXISTS (
+                  WHEN ak.signing_wallet_id IS NOT NULL OR EXISTS (
                     SELECT 1
                     FROM api_key_wallet_permissions akw
                     WHERE akw.api_key_id = ak.id
@@ -223,7 +223,7 @@ export class ApiKeyService {
         `SELECT ak.id, ak.name, ak.description, ak.key_prefix, ak.role, p.environment, ak.status,
                 ak.project_id, ak.allowed_ips, ak.permissions, ak.signing_wallet_id,
                 CASE
-                  WHEN EXISTS (
+                  WHEN ak.signing_wallet_id IS NOT NULL OR EXISTS (
                     SELECT 1
                     FROM api_key_wallet_permissions akw
                     WHERE akw.api_key_id = ak.id
@@ -477,13 +477,11 @@ export class ApiKeyService {
 
       await tx
         .prepare(
-          `INSERT INTO api_key_wallet_permissions
-             (id, api_key_id, wallet_id, custody_wallet_id, permissions)
+          `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
            SELECT
              'akw_' || md5(random()::text || clock_timestamp()::text),
              ?,
              wallet_id,
-             custody_wallet_id,
              permissions
            FROM api_key_wallet_permissions
            WHERE api_key_id = ?`

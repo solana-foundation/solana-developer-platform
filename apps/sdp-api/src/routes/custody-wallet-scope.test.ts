@@ -623,7 +623,7 @@ describe("Custody wallet scope routes", () => {
     expect(body.data.publicKey).toBe("para_pubkey_a");
   });
 
-  it("keeps an exact Config binding stable after a same-valued Project wallet appears", async () => {
+  it("fails closed when a selected wallet ID becomes ambiguous", async () => {
     await getDb(env).batch([
       getDb(env)
         .prepare(
@@ -640,18 +640,14 @@ describe("Custody wallet scope routes", () => {
            VALUES ('cwlt_scope_privy_project', 'cust_cfg_scope_privy_project',
                    'privy_wallet_a', 'project_duplicate_pubkey', 'active')`
       ),
+      getDb(env)
+        .prepare(
+          `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+           VALUES ('akw_scope_ambiguous', ?, 'privy_wallet_a', '["wallets:read"]')`
+        )
+        .bind(TEST_API_KEY.id),
     ]);
-    await seedCachedKey({
-      walletScope: "selected",
-      signingWalletId: "privy_wallet_a",
-      walletBindings: [
-        {
-          walletId: "privy_wallet_a",
-          custodyWalletId: "cwlt_scope_privy_a",
-          permissions: ["wallets:read"],
-        },
-      ],
-    });
+    await clearKVStores(env);
 
     const response = await app.request(
       "/v1/wallets/public-key?walletId=privy_wallet_a",
@@ -661,8 +657,7 @@ describe("Custody wallet scope routes", () => {
       env
     );
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ data: { publicKey: "privy_pubkey_a" } });
+    expect(response.status).toBe(404);
   });
 
   it("returns 404 when the requested wallet is outside the API key bindings", async () => {

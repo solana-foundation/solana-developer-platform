@@ -3,6 +3,7 @@ import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { loadApiKeyWalletAuthorization } from "@/services/api-key-wallets.service";
 import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { SigningService } from "@/services/domain/signing.service";
@@ -116,7 +117,7 @@ describe("provisionApiKeyWallet", () => {
   );
 
   it.each(["/v1/api-keys", `/v1/projects/${PROJECT_ID}/api-keys`])(
-    "provisions and exactly binds a Connection wallet through %s",
+    "provisions and binds a Connection wallet through %s",
     async (path) => {
       await getDb(env)
         .prepare(
@@ -153,17 +154,34 @@ describe("provisionApiKeyWallet", () => {
       const body = (await response.json()) as { data: { apiKey: { id: string } } };
       const binding = await getDb(env)
         .prepare(
-          `SELECT p.wallet_id, p.custody_wallet_id, w.custody_connection_id
+          `SELECT p.wallet_id, w.id AS resolved_custody_wallet_id, w.custody_connection_id
            FROM api_key_wallet_permissions p
-           JOIN custody_wallets w ON w.id = p.custody_wallet_id
+           JOIN custody_wallets w ON w.wallet_id = p.wallet_id
            WHERE p.api_key_id = ?`
         )
         .bind(body.data.apiKey.id)
         .first();
       expect(binding).toEqual({
         wallet_id: "privy_endpoint_api_key_wallet",
-        custody_wallet_id: expect.any(String),
+        resolved_custody_wallet_id: expect.any(String),
         custody_connection_id: CONNECTION_ID,
+      });
+      await expect(
+        loadApiKeyWalletAuthorization(
+          getDb(env),
+          body.data.apiKey.id,
+          ORGANIZATION_ID,
+          PROJECT_ID,
+          "privy_endpoint_api_key_wallet"
+        )
+      ).resolves.toMatchObject({
+        walletScope: "selected",
+        walletBindings: [
+          {
+            walletId: "privy_endpoint_api_key_wallet",
+            custodyWalletId: binding?.resolved_custody_wallet_id,
+          },
+        ],
       });
       expect(
         await getDb(env)
@@ -302,13 +320,13 @@ describe("provisionApiKeyWallet", () => {
     expect(
       await getDb(env)
         .prepare(
-          `SELECT custody_wallet_id
+          `SELECT wallet_id
            FROM api_key_wallet_permissions
            WHERE api_key_id = ?`
         )
         .bind(body.data.apiKey.id)
         .first()
-    ).toEqual({ custody_wallet_id: "cwlt_api_key_provisioning_default" });
+    ).toEqual({ wallet_id: "privy_api_key_default" });
     expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
   });
 
@@ -355,13 +373,13 @@ describe("provisionApiKeyWallet", () => {
     expect(
       await db
         .prepare(
-          `SELECT custody_wallet_id
+          `SELECT wallet_id
            FROM api_key_wallet_permissions
            WHERE api_key_id = ?`
         )
         .bind(body.data.apiKey.id)
         .first()
-    ).toEqual({ custody_wallet_id: "cwlt_api_key_config_provisioned" });
+    ).toEqual({ wallet_id: "para_api_key_config_provisioned" });
     expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
   });
 });

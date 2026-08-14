@@ -891,11 +891,7 @@ describe("PolicyRepository (postgres)", () => {
       name: "Connection binding controls",
       defaultAction: "review",
     });
-    await seedEndpointWalletPermission(
-      "akw_policy_connection",
-      CONNECTION_CUSTODY_WALLET.walletId,
-      CONNECTION_CUSTODY_WALLET.id
-    );
+    await seedEndpointWalletPermission("akw_policy_connection", CONNECTION_CUSTODY_WALLET.walletId);
 
     const binding = await service.upsertApiKeyWalletPolicyBinding({
       apiKeyId: TEST_API_KEY.id,
@@ -957,6 +953,33 @@ describe("PolicyRepository (postgres)", () => {
     });
   });
 
+  it("fails endpoint authorization closed when a selected wallet ID is ambiguous", async () => {
+    const service = policyStores(repo);
+    await seedDuplicateProviderCustodyWallet();
+    await seedEndpointWalletPermission(
+      "akw_policy_ambiguous_endpoint",
+      TEST_CUSTODY_WALLET.walletId
+    );
+    const { profile } = await createActiveApiKeyControlProfile(repo, {
+      name: "Ambiguous endpoint controls",
+      defaultAction: "review",
+    });
+    await service.upsertApiKeyWalletPolicyBinding({
+      apiKeyId: TEST_API_KEY.id,
+      bindingScope: "all",
+      apiKeyControlProfileId: profile.id,
+    });
+
+    for (const custodyWalletId of [TEST_CUSTODY_WALLET.id, DUPLICATE_PROVIDER_CUSTODY_WALLET.id]) {
+      await expect(
+        service.resolveApiKeyWalletPolicyScope({ apiKeyId: TEST_API_KEY.id, custodyWalletId })
+      ).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        message: "API key is not authorized for the requested wallet",
+      });
+    }
+  });
+
   it("resolves an all-wallet API key policy binding for every in-scope wallet", async () => {
     const service = policyStores(repo);
     await seedAdditionalCustodyWallet();
@@ -997,15 +1020,10 @@ describe("PolicyRepository (postgres)", () => {
   it("resolves selected-wallet API key policy bindings for multiple endpoint-scoped wallets", async () => {
     const service = policyStores(repo);
     await seedAdditionalCustodyWallet();
-    await seedEndpointWalletPermission(
-      "akw_policy_selected_primary",
-      TEST_CUSTODY_WALLET.walletId,
-      TEST_CUSTODY_WALLET.id
-    );
+    await seedEndpointWalletPermission("akw_policy_selected_primary", TEST_CUSTODY_WALLET.walletId);
     await seedEndpointWalletPermission(
       "akw_policy_selected_second",
-      SECOND_CUSTODY_WALLET.walletId,
-      SECOND_CUSTODY_WALLET.id
+      SECOND_CUSTODY_WALLET.walletId
     );
     const { profile } = await createActiveApiKeyControlProfile(repo, {
       name: "Selected wallet controls",
@@ -1122,11 +1140,7 @@ describe("PolicyRepository (postgres)", () => {
   it("fails closed when an all-wallet policy binding would exceed selected endpoint wallet access", async () => {
     const service = policyStores(repo);
     await seedAdditionalCustodyWallet();
-    await seedEndpointWalletPermission(
-      "akw_policy_endpoint_primary",
-      TEST_CUSTODY_WALLET.walletId,
-      TEST_CUSTODY_WALLET.id
-    );
+    await seedEndpointWalletPermission("akw_policy_endpoint_primary", TEST_CUSTODY_WALLET.walletId);
     const { profile } = await createActiveApiKeyControlProfile(repo, {
       name: "All policy selected endpoint",
       defaultAction: "review",
@@ -1267,10 +1281,10 @@ describe("PolicyRepository (postgres)", () => {
     await getDb(env)
       .prepare(
         `INSERT INTO api_key_wallet_permissions
-           (id, api_key_id, wallet_id, custody_wallet_id, permissions)
-         VALUES ('akw_rotate_policy_test', ?, ?, ?, '["payments:write"]')`
+           (id, api_key_id, wallet_id, permissions)
+         VALUES ('akw_rotate_policy_test', ?, ?, '["payments:write"]')`
       )
-      .bind(TEST_API_KEY.id, TEST_CUSTODY_WALLET.walletId, TEST_CUSTODY_WALLET.id)
+      .bind(TEST_API_KEY.id, TEST_CUSTODY_WALLET.walletId)
       .run();
 
     const apiKeyProfile = await repo.createApiKeyControlProfile({
@@ -1315,7 +1329,7 @@ describe("PolicyRepository (postgres)", () => {
     expect(
       await getDb(env)
         .prepare(
-          `SELECT wallet_id, custody_wallet_id
+          `SELECT wallet_id
            FROM api_key_wallet_permissions
            WHERE api_key_id = ?`
         )
@@ -1323,7 +1337,6 @@ describe("PolicyRepository (postgres)", () => {
         .first()
     ).toEqual({
       wallet_id: TEST_CUSTODY_WALLET.walletId,
-      custody_wallet_id: TEST_CUSTODY_WALLET.id,
     });
 
     const clonedBindings = await repo.listApiKeyWalletPolicyBindings(rotation?.apiKey.id ?? "");
@@ -1643,18 +1656,14 @@ async function seedConnectionCustodyWallet(): Promise<void> {
   ]);
 }
 
-async function seedEndpointWalletPermission(
-  id: string,
-  walletId: string,
-  custodyWalletId?: string
-): Promise<void> {
+async function seedEndpointWalletPermission(id: string, walletId: string): Promise<void> {
   await getDb(env)
     .prepare(
       `INSERT INTO api_key_wallet_permissions
-         (id, api_key_id, wallet_id, custody_wallet_id, permissions)
-       VALUES (?, ?, ?, ?, '["payments:write"]')`
+         (id, api_key_id, wallet_id, permissions)
+       VALUES (?, ?, ?, '["payments:write"]')`
     )
-    .bind(id, TEST_API_KEY.id, walletId, custodyWalletId ?? null)
+    .bind(id, TEST_API_KEY.id, walletId)
     .run();
 }
 

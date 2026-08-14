@@ -21,6 +21,11 @@ export interface ApiKeyWalletPermissionRow {
   permissions: unknown;
 }
 
+interface CustodyWalletCandidateRow {
+  custody_wallet_id: string;
+  wallet_id: string;
+}
+
 export const DEFAULT_API_KEY_WALLET_PERMISSIONS: Permission[] = ["*"];
 
 export function normalizeApiKeyWalletPermissions(permissions?: Permission[] | null): Permission[] {
@@ -73,19 +78,71 @@ export function hydrateApiKeyWalletAuthorization(
 export async function loadApiKeyWalletAuthorization(
   db: DatabaseClient,
   apiKeyId: string,
+  organizationId: string,
+  projectId: string,
   preferredSigningWalletId: string | null
 ) {
-  const result = await db
+  const permissionResult = await db
     .prepare(
-      `SELECT wallet_id, custody_wallet_id, permissions
+      `SELECT wallet_id, permissions
        FROM api_key_wallet_permissions
        WHERE api_key_id = ?
        ORDER BY created_at ASC`
     )
     .bind(apiKeyId)
-    .all<ApiKeyWalletPermissionRow>();
+    .all<Omit<ApiKeyWalletPermissionRow, "custody_wallet_id">>();
 
-  return hydrateApiKeyWalletAuthorization(result.results ?? [], preferredSigningWalletId);
+  const permissionRows = permissionResult.results ?? [];
+  if (permissionRows.length === 0 && preferredSigningWalletId) {
+    permissionRows.push({ wallet_id: preferredSigningWalletId, permissions: ["*"] });
+  }
+  if (permissionRows.length === 0) {
+    return hydrateApiKeyWalletAuthorization([], preferredSigningWalletId);
+  }
+
+  const walletIds = permissionRows.map((row) => row.wallet_id);
+  const placeholders = walletIds.map(() => "?").join(", ");
+  const candidates = await db
+    .prepare(
+      `SELECT w.id AS custody_wallet_id, w.wallet_id
+       FROM custody_wallets w
+       JOIN custody_configs c ON c.id = w.custody_config_id
+       WHERE c.organization_id = ?
+         AND (c.project_id IS NULL OR c.project_id = ?)
+         AND c.status = 'active'
+         AND w.status = 'active'
+         AND w.wallet_id IN (${placeholders})
+
+       UNION ALL
+
+       SELECT w.id AS custody_wallet_id, w.wallet_id
+       FROM custody_wallets w
+       JOIN custody_connections c ON c.id = w.custody_connection_id
+       WHERE c.organization_id = ?
+         AND c.project_id = ?
+         AND c.status = 'active'
+         AND w.status = 'active'
+         AND w.wallet_id IN (${placeholders})`
+    )
+    .bind(organizationId, projectId, ...walletIds, organizationId, projectId, ...walletIds)
+    .all<CustodyWalletCandidateRow>();
+
+  const candidatesByWalletId = new Map<string, string[]>();
+  for (const candidate of candidates.results ?? []) {
+    const matches = candidatesByWalletId.get(candidate.wallet_id) ?? [];
+    matches.push(candidate.custody_wallet_id);
+    candidatesByWalletId.set(candidate.wallet_id, matches);
+  }
+
+  const resolvedRows = permissionRows.map((row): ApiKeyWalletPermissionRow => {
+    const matches = candidatesByWalletId.get(row.wallet_id) ?? [];
+    return {
+      ...row,
+      custody_wallet_id: matches.length === 1 ? matches[0] : null,
+    };
+  });
+
+  return hydrateApiKeyWalletAuthorization(resolvedRows, preferredSigningWalletId);
 }
 
 export async function listApiKeyWalletBindings(
@@ -136,7 +193,7 @@ export async function listApiKeyWalletBindingsForApiKeys(
 export async function replaceApiKeyWalletBindings(
   db: DatabaseClient,
   apiKeyId: string,
-  bindings: ExactApiKeyWalletBinding[]
+  bindings: ApiKeyWalletBinding[]
 ): Promise<void> {
   const statements: PreparedStatement[] = [
     db.prepare("DELETE FROM api_key_wallet_permissions WHERE api_key_id = ?").bind(apiKeyId),
@@ -146,15 +203,13 @@ export async function replaceApiKeyWalletBindings(
     statements.push(
       db
         .prepare(
-          `INSERT INTO api_key_wallet_permissions
-             (id, api_key_id, wallet_id, custody_wallet_id, permissions)
-           VALUES (?, ?, ?, ?, ?)`
+          `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+         VALUES (?, ?, ?, ?)`
         )
         .bind(
           `akw_${crypto.randomUUID()}`,
           apiKeyId,
           binding.walletId,
-          binding.custodyWalletId,
           JSON.stringify(normalizeApiKeyWalletPermissions(binding.permissions))
         )
     );
@@ -166,16 +221,14 @@ export async function replaceApiKeyWalletBindings(
 export async function upsertApiKeyWalletBinding(
   db: DatabaseClient,
   apiKeyId: string,
-  binding: ExactApiKeyWalletBinding
+  binding: ApiKeyWalletBinding
 ): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO api_key_wallet_permissions
-         (id, api_key_id, wallet_id, custody_wallet_id, permissions)
-       VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+       VALUES (?, ?, ?, ?)
        ON CONFLICT(api_key_id, wallet_id)
        DO UPDATE SET
-         custody_wallet_id = excluded.custody_wallet_id,
          permissions = excluded.permissions,
          updated_at = sdp_iso_now()`
     )
@@ -183,7 +236,6 @@ export async function upsertApiKeyWalletBinding(
       `akw_${crypto.randomUUID()}`,
       apiKeyId,
       binding.walletId,
-      binding.custodyWalletId,
       JSON.stringify(normalizeApiKeyWalletPermissions(binding.permissions))
     )
     .run();
@@ -196,13 +248,11 @@ export async function cloneApiKeyWalletBindings(
 ): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO api_key_wallet_permissions
-         (id, api_key_id, wallet_id, custody_wallet_id, permissions)
+      `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
         SELECT
          'akw_' || md5(random()::text || clock_timestamp()::text),
          ?,
          wallet_id,
-         custody_wallet_id,
          permissions
        FROM api_key_wallet_permissions
        WHERE api_key_id = ?`

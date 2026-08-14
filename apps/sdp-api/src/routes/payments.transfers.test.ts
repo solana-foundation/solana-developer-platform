@@ -534,7 +534,7 @@ describe("Payments routes — transfers", () => {
     expect(response.status).toBe(400);
   });
 
-  it("executes an approved transfer exactly once after leaving it pending", async () => {
+  it("replays a selected-wallet API key approval exactly once", async () => {
     const sessionId = "ses_ungrouped_payment_approver";
     const approverUserId = "usr_ungrouped_payment_approver";
     await getDb(env).batch([
@@ -566,6 +566,25 @@ describe("Payments routes — transfers", () => {
           id: "approve-payment-execution",
           kind: "approval",
           operationTypes: ["payment_transfer_execute"],
+        },
+      ],
+    });
+    await getDb(env)
+      .prepare(
+        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+         VALUES ('akw_selected_approval_replay', ?, ?, '["*"]')`
+      )
+      .bind(TEST_API_KEY.id, TEST_WALLET_ID)
+      .run();
+    await seedCachedKey({
+      walletScope: "selected",
+      signingWalletId: TEST_WALLET_ID,
+      signingWalletIds: [TEST_WALLET_ID],
+      walletBindings: [
+        {
+          walletId: TEST_WALLET_ID,
+          custodyWalletId: TEST_CUSTODY_WALLET_ID,
+          permissions: ["*"],
         },
       ],
     });

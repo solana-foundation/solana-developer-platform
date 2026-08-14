@@ -244,6 +244,8 @@ async function loadActiveApiKey(
     await loadApiKeyWalletAuthorization(
       db,
       apiKeyId,
+      organizationId,
+      projectId as string,
       (row.signing_wallet_id as string | null | undefined) ?? null
     );
   const { getPermissionsForApiKeyRole } = await import("@sdp/types");

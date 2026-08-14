@@ -26,3 +26,17 @@ it("hydrates exact selected-wallet authorization for API-key readers", () => {
     ],
   });
 });
+
+it("keeps unresolved wallet selectors selected and fail-closed", () => {
+  expect(
+    hydrateApiKeyWalletAuthorization(
+      [{ wallet_id: "wallet_ambiguous", custody_wallet_id: null, permissions: ["*"] }],
+      "wallet_ambiguous"
+    )
+  ).toEqual({
+    walletScope: "selected",
+    signingWalletId: null,
+    signingWalletIds: [],
+    walletBindings: [],
+  });
+});

@@ -341,17 +341,14 @@ describe("API key wallet scope routes", () => {
 
     const bindings = await getDb(env)
       .prepare(
-        `SELECT wallet_id, custody_wallet_id
+        `SELECT wallet_id
          FROM api_key_wallet_permissions
          WHERE api_key_id = ?
          ORDER BY wallet_id`
       )
       .bind(body.data.apiKey.id)
-      .all<{ wallet_id: string; custody_wallet_id: string | null }>();
-    expect(bindings.results).toEqual([
-      { wallet_id: "wal_scope_a", custody_wallet_id: "cwlt_scope_a" },
-      { wallet_id: "wal_scope_b", custody_wallet_id: "cwlt_scope_b" },
-    ]);
+      .all<{ wallet_id: string }>();
+    expect(bindings.results).toEqual([{ wallet_id: "wal_scope_a" }, { wallet_id: "wal_scope_b" }]);
 
     const policyBindings = await getDb(env)
       .prepare("SELECT COUNT(*) AS count FROM api_key_wallet_policy_bindings WHERE api_key_id = ?")
