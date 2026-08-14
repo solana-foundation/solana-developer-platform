@@ -21,7 +21,10 @@ import { success } from "@/lib/response";
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
-import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
+import {
+  approvedWalletOperationId,
+  beginApprovedWalletOperationEffect,
+} from "@/services/policy/approved-operation-replay";
 import {
   resolvePolicyCustodyWallet,
   walletOperationActorFromAuth,
@@ -124,8 +127,13 @@ export const signerCheck = async (c: AppContext) => {
 
   // Metered here rather than as route middleware: reaching this handler is
   // what proves the request cleared the policy gate and will actually spend
-  // fees, so a denied call cannot drain the org's shared quota.
-  await enforceMeteredQuota(c, SIGNER_CHECK_QUOTA);
+  // fees, so a denied call cannot drain the org's shared quota. An approved
+  // replay is exempt for the same reason it skips the attempt ceiling: it is
+  // the completion of work already admitted and approved, and a transient
+  // rejection here would strand it permanently.
+  if (!approvedWalletOperationId(c)) {
+    await enforceMeteredQuota(c, SIGNER_CHECK_QUOTA);
+  }
 
   try {
     const signer = await createOrgSigner(

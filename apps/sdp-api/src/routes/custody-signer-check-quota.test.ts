@@ -122,4 +122,15 @@ describe("Signer check route — metered quota", () => {
 
     expect(res.status).toBe(429);
   });
+
+  it("does not charge either ceiling when a replay is not in play", async () => {
+    await seedKey(["wallets:write"]);
+
+    await requestSignerCheck();
+
+    // The attempt ceiling is charged for a normal caller even when the request
+    // stops before the handler; only an approved replay is exempt.
+    expect(await readRateLimitCount(env, ATTEMPT_ACTOR_COUNTER)).toBe(1);
+    expect(await readRateLimitCount(env, ACTOR_COUNTER)).toBe(0);
+  });
 });
