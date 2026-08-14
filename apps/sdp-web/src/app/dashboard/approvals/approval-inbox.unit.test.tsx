@@ -94,6 +94,15 @@ describe("ApprovalInbox amount/asset column", () => {
       initialRequests: [pendingRequest({ asset: USDC_MINT, amount: "12.5" })],
     });
     expect(markup).toContain("12.50 USDC");
+    expect(markup).toContain("/token-logos/usdc.svg");
+  });
+
+  it("wears the registry logo when the asset is a platform token key, not a mint", () => {
+    const markup = renderInbox({
+      initialRequests: [pendingRequest({ asset: "USDC", amount: "150" })],
+    });
+    expect(markup).toContain("150 USDC");
+    expect(markup).toContain("/token-logos/usdc.svg");
     // The raw mint may only appear inside the hover title, never as cell text.
     expect(markup).not.toContain(`>${USDC_MINT}`);
   });

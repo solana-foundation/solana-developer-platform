@@ -1,9 +1,10 @@
 "use client";
 
-import type {
-  ApprovalRequestStatus,
-  WalletApprovalRequestSummary,
-  WalletOperationFamily,
+import {
+  type ApprovalRequestStatus,
+  type WalletApprovalRequestSummary,
+  type WalletOperationFamily,
+  WELL_KNOWN_TOKENS,
 } from "@sdp/types";
 import {
   ArrowLeftRightIcon,
@@ -746,6 +747,18 @@ function approvalAmountLabel(
   return formatDisplayAmount(amount, tokenName, locale);
 }
 
+/**
+ * Operation payloads carry platform token keys ("USDC") for rail-native
+ * assets rather than mints. Those keys come from our own API, not issuer
+ * metadata, so resolving them to the registry mint does not open the
+ * spoofed-symbol hole TokenMark guards against; either cluster's mint maps
+ * to the same registry entry, so the mainnet address suffices for the mark.
+ */
+function wellKnownMintForAssetKey(asset: string): string | null {
+  const entry = WELL_KNOWN_TOKENS[asset.trim().toUpperCase() as keyof typeof WELL_KNOWN_TOKENS];
+  return entry ? entry.mints["mainnet-beta"].address : null;
+}
+
 function ApprovalAmountAsset({
   request,
   issuedTokensByMint,
@@ -762,7 +775,7 @@ function ApprovalAmountAsset({
   return (
     <span className="flex min-w-0 items-center gap-2" title={asset}>
       <TokenMark
-        mint={resolvedToken.mint}
+        mint={wellKnownMintForAssetKey(asset) ?? resolvedToken.mint}
         symbol={resolvedToken.tokenName}
         logoUrl={resolvedToken.metadataImageUrl}
         size="xs"
