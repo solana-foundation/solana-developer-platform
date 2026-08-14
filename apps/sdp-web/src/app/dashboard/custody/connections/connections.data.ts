@@ -89,6 +89,25 @@ export async function fetchConnectionsPage(
 }
 
 /**
+ * A stale or hand-edited `?page=` past the end returns an empty slice with a
+ * nonzero total, which would render an empty table with no pager to escape
+ * through. Clamp to the last real page and refetch instead.
+ */
+export async function resolveConnectionsPage(
+  request: SdpApiClient["request"],
+  filters: ConnectionsFilters
+): Promise<{ result: ConnectionsPageResult; filters: ConnectionsFilters }> {
+  const result = await fetchConnectionsPage(request, filters);
+  const { total } = result.pagination;
+  const pageCount = Math.max(1, Math.ceil(total / CONNECTIONS_PAGE_SIZE));
+  if (result.connections.length > 0 || total === 0 || filters.page <= pageCount) {
+    return { result, filters };
+  }
+  const clamped = { page: pageCount };
+  return { result: await fetchConnectionsPage(request, clamped), filters: clamped };
+}
+
+/**
  * The connections list itself carries no wallet columns, but every
  * connection-owned wallet knows its connection: `/v1/wallets` rows carry
  * `custodyConnectionId` when a Connection (not a legacy Config) owns them.

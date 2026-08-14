@@ -13,9 +13,9 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import {
-  fetchConnectionsPage,
   fetchWalletsByConnection,
   parseConnectionsFilters,
+  resolveConnectionsPage,
 } from "./connections.data";
 import { ConnectionsList } from "./connections-list";
 
@@ -31,15 +31,15 @@ export default async function CustodyConnectionsPage({
   if (!orgId) redirect("/dashboard");
 
   const [resolvedSearchParams, t] = await Promise.all([searchParams, getTranslations()]);
-  const filters = parseConnectionsFilters(resolvedSearchParams);
+  const requestedFilters = parseConnectionsFilters(resolvedSearchParams);
   const canManageCustody = resolveDashboardAccess(orgRole).capabilities.canManageCustody;
 
   try {
     const apiClient = await createSdpApiClient();
     // Wallet rows are context, not the record of truth here: if the wallet read
     // fails the list still renders and only the wallet column degrades.
-    const [result, walletsResult] = await Promise.all([
-      fetchConnectionsPage(apiClient.request, filters),
+    const [{ result, filters }, walletsResult] = await Promise.all([
+      resolveConnectionsPage(apiClient.request, requestedFilters),
       fetchWalletsByConnection(apiClient.request).then(
         (byConnection) => ({ ok: true as const, byConnection }),
         () => ({ ok: false as const, byConnection: new Map<string, CustodyWalletSummary[]>() })

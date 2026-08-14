@@ -5,6 +5,7 @@ import {
   fetchConnectionsPage,
   fetchWalletsByConnection,
   parseConnectionsFilters,
+  resolveConnectionsPage,
 } from "./connections.data";
 
 function jsonResponse(body: unknown): Response {
@@ -53,6 +54,41 @@ describe("fetchConnectionsPage", () => {
     await expect(fetchConnectionsPage(request, { page: 1 })).rejects.toBeInstanceOf(
       ConnectionsRequestError
     );
+  });
+});
+
+describe("resolveConnectionsPage", () => {
+  it("clamps an out-of-range page to the last real page and refetches", async () => {
+    const request = vi.fn(async (path: string) =>
+      path.includes("offset=20")
+        ? jsonResponse({
+            data: { connections: [], pagination: { limit: 20, offset: 20, total: 4 } },
+          })
+        : jsonResponse({
+            data: {
+              connections: [{ id: "conn-1" }],
+              pagination: { limit: 20, offset: 0, total: 4 },
+            },
+          })
+    );
+
+    const { result, filters } = await resolveConnectionsPage(request, { page: 2 });
+
+    expect(filters.page).toBe(1);
+    expect(result.connections).toHaveLength(1);
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns a genuinely empty last page untouched", async () => {
+    const request = vi.fn(async () =>
+      jsonResponse({ data: { connections: [], pagination: { limit: 20, offset: 0, total: 0 } } })
+    );
+
+    const { result, filters } = await resolveConnectionsPage(request, { page: 1 });
+
+    expect(filters.page).toBe(1);
+    expect(result.pagination.total).toBe(0);
+    expect(request).toHaveBeenCalledTimes(1);
   });
 });
 
