@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.61.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.60.0...v0.61.0) (2026-08-14)
+
+### Features
+
+* **web:** deploy issuance tokens through Kora sponsorship only ([#1302](https://github.com/solana-foundation/solana-developer-platform/pull/1302)) ([eb1f07b](https://github.com/solana-foundation/solana-developer-platform/commit/eb1f07b5a37dc01b5e156da1501b31a1d4717a69))
+
+### Maintenance
+
+* **deps-dev:** bump jsdom from 26.1.0 to 30.0.1 ([#1193](https://github.com/solana-foundation/solana-developer-platform/pull/1193)) ([5f57dd3](https://github.com/solana-foundation/solana-developer-platform/commit/5f57dd3974c7e49d5edd3e2ada765449ac89b33b))
+
 ## [0.60.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.59.0...v0.60.0) (2026-08-13)
 
 ### Features
