@@ -36,7 +36,6 @@ import {
   hasLimitsAndAssetsControls,
   loadPolicyDraft,
   type PolicyFlowStep,
-  parseDestinationText,
   policyStateFingerprint,
   type StoredPolicyDraft,
   savePolicyDraft,
@@ -116,12 +115,6 @@ export function WalletPolicyStartingProfileFlow({
   const currentStepCopy = STEP_COPY[currentStep];
   const validation = useMemo(() => validatePolicyState(state), [state]);
   const visibleValidation = validationRequestedSteps.includes(currentStep) ? validation : {};
-  const destinationCount = useMemo(
-    () =>
-      parseDestinationText(state.destinationAllowText).valid.length +
-      parseDestinationText(state.destinationBlockText).valid.length,
-    [state.destinationAllowText, state.destinationBlockText]
-  );
   const stateFingerprint = useMemo(
     () => policyStateFingerprint(wallet.walletId, state),
     [state, wallet.walletId]
@@ -174,7 +167,7 @@ export function WalletPolicyStartingProfileFlow({
   function stepHasErrors(step: PolicyFlowStep): boolean {
     if (step === "intent") return Boolean(validation.intent);
     if (step === "limits-assets") {
-      return Boolean(validation.maxTransferAmount || validation.assets);
+      return Boolean(validation.limits || validation.assets);
     }
     if (step === "destinations-operations") {
       return Boolean(validation.operations);
@@ -318,7 +311,6 @@ export function WalletPolicyStartingProfileFlow({
             policy={currentPolicy}
             state={state}
             stepIndex={stepIndex}
-            destinationCount={destinationCount}
             assetOptions={assetOptions}
           />
         }
@@ -464,6 +456,7 @@ export function WalletPolicyStartingProfileFlow({
         walletId={wallet.walletId}
         activePolicy={currentPolicy}
         pendingState={state}
+        assetOptions={assetOptions}
         commitMessage={commitMessage}
         onCommitMessageChange={setCommitMessage}
         onConfirm={activateControls}

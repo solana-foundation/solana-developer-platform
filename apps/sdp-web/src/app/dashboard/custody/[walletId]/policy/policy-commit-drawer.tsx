@@ -16,6 +16,7 @@ import {
 import {
   buildPolicyPayload,
   createPolicyAuthoringState,
+  type PolicyAssetOption,
   type PolicyAuthoringState,
 } from "./wallet-policy-authoring";
 
@@ -36,6 +37,7 @@ const ROW_MARKERS = {
  * @param props.walletId - The wallet whose policy is being changed.
  * @param props.activePolicy - The currently active policy.
  * @param props.pendingState - The authoring state about to be activated.
+ * @param props.assetOptions - Asset symbols and SDP-issued metadata available to the wizard.
  * @param props.commitMessage - Controlled commit message value.
  * @param props.onCommitMessageChange - Called with the new commit message on input.
  * @param props.onConfirm - Called when the user confirms activation.
@@ -48,6 +50,7 @@ export function PolicyCommitDrawer({
   walletId,
   activePolicy,
   pendingState,
+  assetOptions,
   commitMessage,
   onCommitMessageChange,
   onConfirm,
@@ -58,6 +61,7 @@ export function PolicyCommitDrawer({
   walletId: string;
   activePolicy: PaymentWalletPolicy;
   pendingState: PolicyAuthoringState;
+  assetOptions: PolicyAssetOption[];
   commitMessage: string;
   onCommitMessageChange: (value: string) => void;
   onConfirm: () => void;
@@ -71,11 +75,11 @@ export function PolicyCommitDrawer({
             summarizePolicyChanges(
               buildPolicyPayload(walletId, createPolicyAuthoringState(activePolicy)),
               buildPolicyPayload(walletId, pendingState),
-              buildPolicyFieldLabels(t)
+              buildPolicyFieldLabels(t, assetOptions)
             )
           )
         : [],
-    [open, walletId, activePolicy, pendingState, t]
+    [open, walletId, activePolicy, pendingState, assetOptions, t]
   );
 
   return (

@@ -3,9 +3,14 @@ import {
   resolveTokenByMint,
   shortenAddress,
 } from "@/app/dashboard/payments/payments-overview.utils";
+import type { PaymentsIssuedTokenSymbol } from "@/app/dashboard/payments/payments-page.data";
 import type { useTranslations } from "@/i18n/provider";
 import { formatDisplayLabel } from "@/lib/utils";
-import type { WalletPolicyWritePayload } from "./wallet-policy-authoring";
+import {
+  PER_TRANSACTION_LIMIT_RULE_ID_PREFIX,
+  type PolicyAssetOption,
+  type WalletPolicyWritePayload,
+} from "./wallet-policy-authoring";
 import {
   DEFAULT_ACTION_LABEL_KEYS,
   FAMILY_LABEL_KEYS,
@@ -29,6 +34,8 @@ export interface PolicyChangeGroup {
 export interface PolicyFieldLabels {
   defaultAction: string;
   operationControls: string;
+  assetOptions: PolicyAssetOption[];
+  sdpMintedLabel: string;
   operationLabel: (operation: string) => string;
   actionLabel: (action: PolicyRuleAction) => string;
   defaultActionLabel: (action: PolicyDefaultAction) => string;
@@ -36,17 +43,31 @@ export interface PolicyFieldLabels {
 
 type PolicyPayload = WalletPolicyWritePayload;
 
+interface PolicyRuleFormatting {
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
+  sdpMintedLabel: string;
+  actionLabel: (action: PolicyRuleAction) => string;
+}
+
+const PER_TRANSACTION_LIMIT_GROUP = `rule:${PER_TRANSACTION_LIMIT_RULE_ID_PREFIX}`;
+
 /**
  * Builds the translated field labels and enum formatters the change summary
  * renders with, from the same label-key maps the policy wizard uses.
  *
  * @param t - The translation function.
+ * @param assetOptions - Asset symbols and SDP-issued metadata available to the wizard.
  * @returns The labels consumed by {@link summarizePolicyChanges}.
  */
-export function buildPolicyFieldLabels(t: Translate): PolicyFieldLabels {
+export function buildPolicyFieldLabels(
+  t: Translate,
+  assetOptions: PolicyAssetOption[]
+): PolicyFieldLabels {
   return {
     defaultAction: t("DashboardCustody.policyDefaultAction"),
     operationControls: t("DashboardCustody.policyReviewOperationControls"),
+    assetOptions,
+    sdpMintedLabel: t("Shared.SharedComponents.sdpMintedToken"),
     operationLabel: (operation) =>
       Object.hasOwn(FAMILY_LABEL_KEYS, operation)
         ? t(FAMILY_LABEL_KEYS[operation as keyof typeof FAMILY_LABEL_KEYS])
@@ -59,6 +80,30 @@ export function buildPolicyFieldLabels(t: Translate): PolicyFieldLabels {
       Object.hasOwn(DEFAULT_ACTION_LABEL_KEYS, action)
         ? t(DEFAULT_ACTION_LABEL_KEYS[action as keyof typeof DEFAULT_ACTION_LABEL_KEYS])
         : formatDisplayLabel(action),
+  };
+}
+
+/**
+ * Builds the per-summary token lookup context from the wizard's asset catalogue.
+ *
+ * @param labels - Translated labels and current asset options.
+ * @returns Token lookup maps and the translated SDP-issued marker.
+ */
+function policyRuleFormatting(labels: PolicyFieldLabels): PolicyRuleFormatting {
+  const issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol> = {};
+  for (const option of labels.assetOptions) {
+    if (!option.sdpIssued) continue;
+    issuedTokensByMint[option.mint] = {
+      id: null,
+      mintAddress: option.mint,
+      symbol: option.token,
+      imageUrl: option.imageUrl === undefined ? null : option.imageUrl,
+    };
+  }
+  return {
+    issuedTokensByMint,
+    sdpMintedLabel: labels.sdpMintedLabel,
+    actionLabel: labels.actionLabel,
   };
 }
 
@@ -131,14 +176,45 @@ function ruleKey(rule: PolicyRule): string {
 }
 
 /**
+ * Identifies wizard-authored per-asset transfer-cap rules.
+ *
+ * @param rule - The policy rule to inspect.
+ * @returns Whether the rule belongs in the shared per-transaction group.
+ */
+function isPerTransactionLimitRule(
+  rule: PolicyRule
+): rule is Extract<PolicyRule, { kind: "amount" }> {
+  return (
+    rule.kind === "amount" &&
+    rule.id !== undefined &&
+    rule.id.startsWith(PER_TRANSACTION_LIMIT_RULE_ID_PREFIX)
+  );
+}
+
+/**
+ * Chooses the display group for a rule without changing its matching identity.
+ *
+ * @param key - The rule's before/after matching key.
+ * @param rule - The policy rule being displayed.
+ * @returns The shared limit group or the rule's existing individual group.
+ */
+function ruleGroup(key: string, rule: PolicyRule): string {
+  return isPerTransactionLimitRule(rule) ? PER_TRANSACTION_LIMIT_GROUP : `rule:${key}`;
+}
+
+/**
  * Mint display via the shared token resolver: well-known token symbol when
  * registered, shortened address otherwise.
  *
  * @param mint - The mint address.
+ * @param formatting - Current asset catalogue and translated issued marker.
  * @returns The human-readable token reference.
  */
-function formatAsset(mint: string): string {
-  return resolveTokenByMint(mint, {}).tokenName;
+function formatAsset(mint: string, formatting: PolicyRuleFormatting): string {
+  const tokenName = resolveTokenByMint(mint, formatting.issuedTokensByMint).tokenName;
+  return Object.hasOwn(formatting.issuedTokensByMint, mint)
+    ? `${tokenName} (${formatting.sdpMintedLabel})`
+    : tokenName;
 }
 
 /**
@@ -147,9 +223,10 @@ function formatAsset(mint: string): string {
  * as their raw identifiers.
  *
  * @param rule - The rule to unpack.
+ * @param formatting - Current asset catalogue and translated issued marker.
  * @returns The rule's items in display form.
  */
-function ruleItems(rule: PolicyRule): string[] {
+function ruleItems(rule: PolicyRule, formatting: PolicyRuleFormatting): string[] {
   switch (rule.kind) {
     case "operation_family":
       return [...orEmpty(rule.families), ...singleton(rule.family)];
@@ -157,7 +234,9 @@ function ruleItems(rule: PolicyRule): string[] {
       return [...orEmpty(rule.operationTypes), ...singleton(rule.operationType)];
     case "asset":
     case "amount":
-      return [...orEmpty(rule.assets), ...singleton(rule.asset)].map(formatAsset);
+      return [...orEmpty(rule.assets), ...singleton(rule.asset)].map((mint) =>
+        formatAsset(mint, formatting)
+      );
     case "destination":
       return [
         ...orEmpty(rule.allowlist),
@@ -169,7 +248,7 @@ function ruleItems(rule: PolicyRule): string[] {
       return [
         ...orEmpty(rule.families),
         ...orEmpty(rule.operationTypes),
-        ...orEmpty(rule.assets).map(formatAsset),
+        ...orEmpty(rule.assets).map((mint) => formatAsset(mint, formatting)),
       ];
     case "always":
       return [];
@@ -187,9 +266,13 @@ function ruleItems(rule: PolicyRule): string[] {
  * last-writer-wins.
  *
  * @param rules - The payload's rules.
+ * @param formatting - Current asset catalogue and translated issued marker.
  * @returns The operation → actions map.
  */
-function operationAssignments(rules: PolicyRule[]): Map<string, Set<PolicyRuleAction>> {
+function operationAssignments(
+  rules: PolicyRule[],
+  formatting: PolicyRuleFormatting
+): Map<string, Set<PolicyRuleAction>> {
   const assignments = new Map<string, Set<PolicyRuleAction>>();
   for (const rule of rules) {
     if (rule.action === undefined) {
@@ -198,7 +281,7 @@ function operationAssignments(rules: PolicyRule[]): Map<string, Set<PolicyRuleAc
     if (rule.kind !== "operation_family" && rule.kind !== "operation_type") {
       continue;
     }
-    for (const operation of ruleItems(rule)) {
+    for (const operation of ruleItems(rule, formatting)) {
       const actions = assignments.get(operation);
       if (actions === undefined) {
         assignments.set(operation, new Set([rule.action]));
@@ -215,12 +298,13 @@ function operationAssignments(rules: PolicyRule[]): Map<string, Set<PolicyRuleAc
  * comparable display string.
  *
  * @param rule - The rule to summarize.
+ * @param formatting - Translated action labels for display.
  * @returns The scalar summary, empty when the rule has no scalar facts.
  */
-function ruleScalarSummary(rule: PolicyRule): string {
+function ruleScalarSummary(rule: PolicyRule, formatting: PolicyRuleFormatting): string {
   const parts: string[] = [];
   if (rule.action !== undefined) {
-    parts.push(rule.action);
+    parts.push(formatting.actionLabel(rule.action));
   }
   if (rule.kind === "amount") {
     if (rule.min !== undefined) {
@@ -241,10 +325,13 @@ function ruleScalarSummary(rule: PolicyRule): string {
  * string, used when a whole rule is added or removed.
  *
  * @param rule - The rule to describe.
+ * @param formatting - Current asset catalogue and translated issued marker.
  * @returns The full display summary.
  */
-function ruleSummary(rule: PolicyRule): string {
-  return [...ruleItems(rule), ruleScalarSummary(rule)].filter((part) => part !== "").join(", ");
+function ruleSummary(rule: PolicyRule, formatting: PolicyRuleFormatting): string {
+  const items = ruleItems(rule, formatting).join(", ");
+  const scalar = ruleScalarSummary(rule, formatting);
+  return [items, scalar].filter((part) => part !== "").join(" · ");
 }
 
 /**
@@ -282,15 +369,17 @@ function pushScalarChange(
  * @param before - The currently active policy payload.
  * @param after - The payload about to be activated.
  * @param labels - Translated display labels.
+ * @param formatting - Current asset catalogue and translated issued marker.
  */
 function pushOperationChanges(
   rows: PolicyChangeRow[],
   before: PolicyPayload,
   after: PolicyPayload,
-  labels: PolicyFieldLabels
+  labels: PolicyFieldLabels,
+  formatting: PolicyRuleFormatting
 ): void {
-  const beforeOperations = operationAssignments(before.rules);
-  const afterOperations = operationAssignments(after.rules);
+  const beforeOperations = operationAssignments(before.rules, formatting);
+  const afterOperations = operationAssignments(after.rules, formatting);
   const removedByAction = new Map<PolicyRuleAction, string[]>();
   const addedByAction = new Map<PolicyRuleAction, string[]>();
   for (const operation of new Set([...beforeOperations.keys(), ...afterOperations.keys()])) {
@@ -326,6 +415,30 @@ function pushOperationChanges(
 }
 
 /**
+ * Emits one whole-rule removal and its empty result when the rule does not
+ * belong to the shared per-transaction group.
+ *
+ * @param rows - The row list to append to.
+ * @param key - The rule's before/after matching key.
+ * @param rule - The removed policy rule.
+ * @param formatting - Current asset catalogue and translated issued marker.
+ * @returns The removed limit group's label, or nothing for another rule kind.
+ */
+function pushRemovedRule(
+  rows: PolicyChangeRow[],
+  key: string,
+  rule: PolicyRule,
+  formatting: PolicyRuleFormatting
+): string | undefined {
+  const group = ruleGroup(key, rule);
+  const label = ruleLabel(rule);
+  rows.push({ direction: "removed", group, label, value: ruleSummary(rule, formatting) });
+  if (isPerTransactionLimitRule(rule)) return label;
+  rows.push({ direction: "result", group, label, value: "" });
+  return undefined;
+}
+
+/**
  * Emits rows for non-operation rule changes: whole-rule additions and
  * removals, per-item membership changes, and scalar-fact changes, matching
  * rules across payloads by id.
@@ -333,11 +446,13 @@ function pushOperationChanges(
  * @param rows - The row list to append to.
  * @param before - The currently active policy payload.
  * @param after - The payload about to be activated.
+ * @param formatting - Current asset catalogue and translated issued marker.
  */
 function pushRuleChanges(
   rows: PolicyChangeRow[],
   before: PolicyPayload,
-  after: PolicyPayload
+  after: PolicyPayload,
+  formatting: PolicyRuleFormatting
 ): void {
   const isOperationRule = (rule: PolicyRule) =>
     rule.kind === "operation_family" || rule.kind === "operation_type";
@@ -347,14 +462,17 @@ function pushRuleChanges(
   const afterRules = new Map(
     after.rules.filter((rule) => !isOperationRule(rule)).map((rule) => [ruleKey(rule), rule])
   );
+  const hasAfterPerTransactionLimits = [...afterRules.values()].some(isPerTransactionLimitRule);
+  let removedPerTransactionLimitLabel: string | undefined;
 
   for (const [key, rule] of beforeRules) {
     if (afterRules.has(key)) {
       continue;
     }
-    const group = `rule:${key}`;
-    rows.push({ direction: "removed", group, label: ruleLabel(rule), value: ruleSummary(rule) });
-    rows.push({ direction: "result", group, label: ruleLabel(rule), value: "" });
+    const removedLimitLabel = pushRemovedRule(rows, key, rule, formatting);
+    if (removedPerTransactionLimitLabel === undefined && removedLimitLabel !== undefined) {
+      removedPerTransactionLimitLabel = removedLimitLabel;
+    }
   }
 
   for (const [key, rule] of afterRules) {
@@ -363,9 +481,9 @@ function pushRuleChanges(
     }
     rows.push({
       direction: "added",
-      group: `rule:${key}`,
+      group: ruleGroup(key, rule),
       label: ruleLabel(rule),
-      value: ruleSummary(rule),
+      value: ruleSummary(rule, formatting),
     });
   }
 
@@ -374,10 +492,20 @@ function pushRuleChanges(
     if (afterRule === undefined) {
       continue;
     }
-    const group = `rule:${key}`;
+    const group = ruleGroup(key, afterRule);
     const label = ruleLabel(afterRule);
-    const beforeItems = ruleItems(beforeRule);
-    const afterItems = ruleItems(afterRule);
+    if (isPerTransactionLimitRule(beforeRule) && isPerTransactionLimitRule(afterRule)) {
+      pushScalarChange(
+        rows,
+        group,
+        label,
+        ruleSummary(beforeRule, formatting),
+        ruleSummary(afterRule, formatting)
+      );
+      continue;
+    }
+    const beforeItems = ruleItems(beforeRule, formatting);
+    const afterItems = ruleItems(afterRule, formatting);
     const removedItems = beforeItems.filter((item) => !afterItems.includes(item));
     const addedItems = afterItems.filter((item) => !beforeItems.includes(item));
     if (removedItems.length > 0) {
@@ -389,8 +517,8 @@ function pushRuleChanges(
     if (removedItems.length > 0 && afterItems.length === 0) {
       rows.push({ direction: "result", group, label, value: "" });
     }
-    const beforeScalar = ruleScalarSummary(beforeRule);
-    const afterScalar = ruleScalarSummary(afterRule);
+    const beforeScalar = ruleScalarSummary(beforeRule, formatting);
+    const afterScalar = ruleScalarSummary(afterRule, formatting);
     pushScalarChange(
       rows,
       group,
@@ -398,6 +526,15 @@ function pushRuleChanges(
       beforeScalar === "" ? undefined : beforeScalar,
       afterScalar === "" ? undefined : afterScalar
     );
+  }
+
+  if (removedPerTransactionLimitLabel !== undefined && !hasAfterPerTransactionLimits) {
+    rows.push({
+      direction: "result",
+      group: PER_TRANSACTION_LIMIT_GROUP,
+      label: removedPerTransactionLimitLabel,
+      value: "",
+    });
   }
 }
 
@@ -419,6 +556,7 @@ export function summarizePolicyChanges(
   labels: PolicyFieldLabels
 ): PolicyChangeRow[] {
   const rows: PolicyChangeRow[] = [];
+  const formatting = policyRuleFormatting(labels);
   pushScalarChange(
     rows,
     "defaultAction",
@@ -426,8 +564,8 @@ export function summarizePolicyChanges(
     labels.defaultActionLabel(before.defaultAction),
     labels.defaultActionLabel(after.defaultAction)
   );
-  pushOperationChanges(rows, before, after, labels);
-  pushRuleChanges(rows, before, after);
+  pushOperationChanges(rows, before, after, labels, formatting);
+  pushRuleChanges(rows, before, after, formatting);
   return rows;
 }
 

@@ -22,17 +22,28 @@ export function collectDestinationAllowlist(rules: PolicyRule[]): string[] {
 }
 
 /**
- * The per-transaction transfer cap authored on the policy: the first "amount"
- * rule carrying a maximum. Amount rules are always keyed by asset mint, so the
- * cap bounds the assets its rule names.
+ * Per-transaction transfer caps keyed by asset mint. Singular and plural asset
+ * fields contribute together, while the first maximum for a repeated mint wins.
  *
  * @param rules - Policy rules to inspect.
- * @returns The cap's maximum, or null when no cap is set.
+ * @returns The deduplicated asset maximums in policy order.
  */
-export function resolveMaxTransferAmount(rules: PolicyRule[]): string | null {
-  const capRule = rules.find(
-    (rule): rule is Extract<PolicyRule, { kind: "amount" }> =>
-      rule.kind === "amount" && rule.max !== undefined
-  );
-  return capRule && capRule.max !== undefined ? capRule.max : null;
+export function resolveTransferCaps(rules: PolicyRule[]): { asset: string; max: string }[] {
+  const caps: { asset: string; max: string }[] = [];
+  const seenAssets = new Set<string>();
+
+  for (const rule of rules) {
+    if (rule.kind !== "amount" || rule.max === undefined) continue;
+    const assets: string[] = [];
+    if (rule.asset !== undefined) assets.push(rule.asset);
+    if (rule.assets !== undefined) assets.push(...rule.assets);
+
+    for (const asset of assets) {
+      if (seenAssets.has(asset)) continue;
+      caps.push({ asset, max: rule.max });
+      seenAssets.add(asset);
+    }
+  }
+
+  return caps;
 }

@@ -36,7 +36,7 @@ import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 import { formatDisplayLabel } from "@/lib/utils";
-import { collectDestinationAllowlist, resolveMaxTransferAmount } from "@/lib/wallet-policy-rules";
+import { collectDestinationAllowlist, resolveTransferCaps } from "@/lib/wallet-policy-rules";
 import {
   formatCurrencyAmount,
   formatDisplayAmount,
@@ -541,12 +541,13 @@ function walletPolicyAssets(policy: PaymentWalletPolicy | null): string[] {
 
 function walletPolicyHasRestrictions(policy: PaymentWalletPolicy | null): boolean {
   if (!policy) return false;
+  const caps = resolveTransferCaps(policy.rules);
   return (
     // A destination allowlist or an amount cap restricts even when its rule
     // carries an "allow" action: the allowlist denies every other address and
     // the cap denies amounts above it.
     collectDestinationAllowlist(policy.rules).length > 0 ||
-    resolveMaxTransferAmount(policy.rules) !== null ||
+    caps.length > 0 ||
     // Operations matching no rule fall through to the policy default, so a
     // non-allow default is itself a restriction.
     policy.defaultAction !== "allow" ||
@@ -571,7 +572,7 @@ async function WalletControlsPanel({
   ]);
   const hasRestrictions = walletPolicyHasRestrictions(policy);
   const destinationCount = policy ? collectDestinationAllowlist(policy.rules).length : 0;
-  const maxTransferAmount = policy ? resolveMaxTransferAmount(policy.rules) : null;
+  const caps = policy ? resolveTransferCaps(policy.rules) : [];
   const allowedAssets = walletPolicyAssets(policy);
   // Names assets this org issued. Without it any mint outside the well-known
   // catalogue renders as a shortened address.
@@ -579,6 +580,9 @@ async function WalletControlsPanel({
   for (const [mint, token] of ownedTokensByMint) {
     if (token.symbol) issuedSymbolsByMint[mint] = token.symbol;
   }
+  const transferCaps = caps
+    .map((cap) => `${cap.max} ${resolveTransferTokenLabel(cap.asset, issuedSymbolsByMint)}`)
+    .join(", ");
   const policyHref = `/dashboard/wallets/${encodeURIComponent(walletId)}/policy`;
 
   return (
@@ -634,7 +638,7 @@ async function WalletControlsPanel({
               />
               <WalletInfoRow
                 label={t("DashboardCustody.perTransfer")}
-                value={maxTransferAmount !== null ? maxTransferAmount : t("DashboardCustody.noCap")}
+                value={transferCaps ? transferCaps : t("DashboardCustody.noCap")}
               />
             </div>
           )}
