@@ -377,9 +377,23 @@
     "error": "Couldn't load notifications.",
     "retry": "Try again",
     "showMore": "Show more",
-    "emailUnavailable": "Email delivery is unavailable at the moment.",
+    "showMoreCount": "Show more ({loaded} of {total})",
+    "unreadItem": "Unread:",
     "types": {
-      "workflow_execution": "Automation ran: {trigger}"
+      "workflow_execution": "Automation ran: {trigger}",
+      "workflow_run_failed": "Workflow run failed",
+      "workflow_approval_requested": "Workflow action awaiting review",
+      "workflow_approval_decided": "Workflow action decided",
+      "workflow_approval_decided_approved": "Workflow action approved",
+      "workflow_approval_decided_rejected": "Workflow action rejected",
+      "member_invited": "Member invited",
+      "member_joined": "Member joined",
+      "member_invite_revoked": "Invitation revoked",
+      "member_removed": "Member removed",
+      "payment_settled": "Payment settled",
+      "recurring_payment_failed": "Recurring payment failed",
+      "kyc_approved": "Holder verification approved",
+      "kyc_rejected": "Holder verification rejected"
     },
     "triggerLabels": {
       "kyc_approved": "KYC approved",
@@ -388,6 +402,32 @@
       "offramp_settled": "Off-ramp settled",
       "recurring_payment_failed": "Recurring payment failed",
       "token_operation_completed": "Token operation completed"
+    },
+    "preferences": {
+      "title": "Notification preferences",
+      "description": "Choose which notifications you receive, per channel. These settings only apply to you.",
+      "categoryColumn": "Category",
+      "channelInApp": "In-app",
+      "channelEmail": "Email",
+      "saved": "Notification preference saved.",
+      "saveFailed": "Couldn't save the notification preference.",
+      "loadError": "Couldn't load notification preferences.",
+      "retry": "Try again",
+      "toggleAria": "{category} notifications via {channel}",
+      "categories": {
+        "workflows": "Workflow automations",
+        "approvals": "Approvals",
+        "members": "Team & members",
+        "payments": "Payments",
+        "compliance": "Compliance"
+      },
+      "categoryHints": {
+        "workflows": "Automation runs and failures on your assets.",
+        "approvals": "Held workflow actions awaiting or receiving a decision.",
+        "members": "Invitations and membership changes in your organization.",
+        "payments": "Settled transfers and failed recurring collections.",
+        "compliance": "Holder identity verification outcomes."
+      }
     }
   }
 }

@@ -24,6 +24,8 @@ describe("workflow engine (postgres)", () => {
 
   beforeEach(async () => {
     const db = getDb(env);
+    await db.prepare("DELETE FROM notification_deliveries").run();
+    await db.prepare("DELETE FROM notifications").run();
     await db.prepare("DELETE FROM workflow_executions").run();
     await db.prepare("DELETE FROM asset_workflows").run();
     await db.prepare("DELETE FROM wallet_asset_enrollments").run();
@@ -365,9 +367,13 @@ describe("workflow engine (postgres)", () => {
     const result = await runDueWorkflowExecutions(env);
     expect(result.succeeded).toBe(1);
 
+    // Scoped to the notify action's own type: the KYC emit above also produces a
+    // kyc_approved producer notification for admins, which is not under test here.
     const countNotifications = async () => {
       const row = await getDb(env)
-        .prepare("SELECT COUNT(*)::int AS n FROM notifications WHERE organization_id = ?")
+        .prepare(
+          "SELECT COUNT(*)::int AS n FROM notifications WHERE organization_id = ? AND type = 'workflow_execution'"
+        )
         .bind(TEST_ORG.id)
         .first<{ n: number }>();
       return row?.n ?? 0;
@@ -397,6 +403,98 @@ describe("workflow engine (postgres)", () => {
     const rerun = await runDueWorkflowExecutions(env);
     expect(rerun.succeeded).toBe(1);
     expect(await countNotifications()).toBe(1);
+  });
+
+  it("notifies admins once when an execution is held for review, deduping redeliveries", async () => {
+    await getDb(env)
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+         VALUES ('om_engine_review', ?, ?, 'admin', 'active')
+         ON CONFLICT (organization_id, user_id) DO UPDATE SET role = 'admin'`
+      )
+      .bind(TEST_ORG.id, TEST_USER.id)
+      .run();
+    // Manual review mode holds the execution at awaiting_review — the approval seam.
+    await createAssetWorkflowsRepository(env).createWorkflow({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      tokenId: TEST_TOKEN_ID,
+      triggerType: "kyc_approved",
+      actionType: "record",
+      definition: {
+        condition: null,
+        action: { type: "record", params: {} },
+        retryPolicy: { maxAttempts: 5, retryAfterMinutes: 5 },
+      },
+      version: 1,
+      reviewMode: "manual",
+      createdBy: TEST_USER.id,
+    });
+    const wallet = await seedVerifiedEnrolledWallet();
+
+    expect(await emitKycApprovedForClearedEnrollments(env, { kycWallet: wallet })).toBe(1);
+    const countApprovalRequests = async () => {
+      const row = await getDb(env)
+        .prepare(
+          `SELECT COUNT(*)::int AS n FROM notifications
+             WHERE organization_id = ? AND type = 'workflow_approval_requested'`
+        )
+        .bind(TEST_ORG.id)
+        .first<{ n: number }>();
+      return row?.n ?? 0;
+    };
+    expect(await countApprovalRequests()).toBe(1);
+
+    // A redelivered event no-ops on the execution's idempotency key — and therefore
+    // never reaches the notification either.
+    expect(await emitKycApprovedForClearedEnrollments(env, { kycWallet: wallet })).toBe(0);
+    expect(await countApprovalRequests()).toBe(1);
+  });
+
+  it("notifies the KYC outcome once per wallet transition, not per enrollment", async () => {
+    await getDb(env)
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+         VALUES ('om_engine_kyc', ?, ?, 'admin', 'active')
+         ON CONFLICT (organization_id, user_id) DO UPDATE SET role = 'admin'`
+      )
+      .bind(TEST_ORG.id, TEST_USER.id)
+      .run();
+    // Two enrolled assets for one wallet: the workflow events fan out per enrollment,
+    // the admin notification must not.
+    const secondTokenId = "tok_workflow_engine_second";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO issued_tokens (id, organization_id, project_id, name, symbol, created_by)
+         VALUES (?, ?, ?, 'Second Token', 'SEC', ?)`
+      )
+      .bind(secondTokenId, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
+      .run();
+    const wallet = await seedVerifiedEnrolledWallet();
+    await createWalletAssetEnrollmentsRepository(env).upsertEnrollment({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      kycWalletId: wallet.id,
+      tokenId: secondTokenId,
+      createdBy: TEST_USER.id,
+    });
+
+    await emitKycApprovedForClearedEnrollments(env, { kycWallet: wallet });
+    const countKycNotifications = async () => {
+      const row = await getDb(env)
+        .prepare(
+          `SELECT COUNT(*)::int AS n FROM notifications
+             WHERE organization_id = ? AND type = 'kyc_approved'`
+        )
+        .bind(TEST_ORG.id)
+        .first<{ n: number }>();
+      return row?.n ?? 0;
+    };
+    expect(await countKycNotifications()).toBe(1);
+
+    // Webhook redelivery of the same transition stays a no-op.
+    await emitKycApprovedForClearedEnrollments(env, { kycWallet: wallet });
+    expect(await countKycNotifications()).toBe(1);
   });
 
   it("does not enqueue when the wallet is enrolled but not yet verified", async () => {

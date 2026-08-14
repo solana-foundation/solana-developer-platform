@@ -24,6 +24,8 @@ import type { CronHandle } from "@/cron/runner";
 import { closeDatabasePools } from "@/db/client";
 import type { BackgroundRunner } from "./background";
 import { closeAllRedisClients } from "./kv-redis";
+import { closeAllSubscribers } from "./pubsub-redis";
+import { closeAllSseStreams } from "./sse-registry";
 
 export interface Closable {
   close(callback: (err?: Error) => void): void;
@@ -44,6 +46,11 @@ export interface ShutdownDeps {
 }
 
 export async function shutdown(deps: ShutdownDeps): Promise<void> {
+  // Release open SSE streams FIRST: each one is an in-flight request, so without this
+  // server.close() below would wait on connections that only end at their max-age
+  // timer — long enough to trip the shutdown watchdog.
+  deps.log("closing SSE streams");
+  closeAllSseStreams();
   deps.log("closing HTTP listener");
   await new Promise<void>((resolve, reject) => {
     deps.server.close((err) => {
@@ -65,6 +72,7 @@ export async function shutdown(deps: ShutdownDeps): Promise<void> {
   deps.log("draining background tasks");
   await deps.bg.awaitAll();
   deps.log("closing Redis clients");
+  await closeAllSubscribers();
   await closeAllRedisClients();
   deps.log("closing database pools");
   await closeDatabasePools();

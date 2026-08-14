@@ -11,6 +11,12 @@ import {
   type ClerkOrganizationInvitation,
   ClerkOrganizationsService,
 } from "@/services/clerk-organizations.service";
+import {
+  notifyMemberInvited,
+  notifyMemberInviteRevoked,
+  notifyMemberJoined,
+  notifyMemberRemoved,
+} from "@/services/notifications";
 import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
 import { acceptSchema, inviteSchema } from "./schemas";
@@ -559,6 +565,14 @@ export const inviteMember = async (c: AppContext) => {
     apiKeyId: apiKeyId || undefined,
   });
 
+  notifyMemberInvited(c, {
+    organizationId,
+    invitationId,
+    email: normalizedEmail,
+    role,
+    actorUserId: inviterUserId,
+  });
+
   const response = {
     invitation: {
       id: invitationId,
@@ -626,6 +640,7 @@ export const acceptInvitation = async (c: AppContext) => {
   // Claiming first and failing afterwards would consume the invitation without
   // producing a membership, and the retry would be rejected as no longer valid
   // — stranding an invitee holding a token that is still rightfully theirs.
+  let joinedUserId: string | null = null;
   await getDb(c.env).transaction(async (tx) => {
     const claimed = await tx
       .prepare(
@@ -670,6 +685,7 @@ export const acceptInvitation = async (c: AppContext) => {
         normalizeOrganizationRole(invitation.role)
       )
       .run();
+    joinedUserId = user.id;
   });
 
   // Audit log
@@ -680,6 +696,17 @@ export const acceptInvitation = async (c: AppContext) => {
     resourceId: invitation.id,
     metadata: { email: invitation.email },
   });
+
+  if (joinedUserId) {
+    // Keyed on (org, user) — the Clerk membership webhook fires the same event for the
+    // same join, and the shared key collapses the pair to one notification.
+    notifyMemberJoined(c, {
+      organizationId: invitation.organization_id,
+      userId: joinedUserId,
+      email: invitation.email,
+      role: normalizeOrganizationRole(invitation.role),
+    });
+  }
 
   return success(c, { success: true });
 };
@@ -778,6 +805,17 @@ export const removeMember = async (c: AppContext) => {
     organizationId,
     userId: userId || undefined,
     apiKeyId: apiKeyId || undefined,
+  });
+
+  const removedUser = await getDb(c.env)
+    .prepare("SELECT email FROM users WHERE id = ?")
+    .bind(member.user_id)
+    .first<{ email: string | null }>();
+  notifyMemberRemoved(c, {
+    organizationId,
+    removedUserId: member.user_id,
+    email: removedUser?.email ?? null,
+    actorUserId: userId,
   });
 
   return noContent(c);
@@ -944,6 +982,13 @@ export const revokeInvitation = async (c: AppContext) => {
     organizationId,
     userId: userId || undefined,
     apiKeyId: apiKeyId || undefined,
+  });
+
+  notifyMemberInviteRevoked(c, {
+    organizationId,
+    invitationId: invitation.id,
+    email: invitation.email,
+    actorUserId: userId,
   });
 
   return noContent(c);

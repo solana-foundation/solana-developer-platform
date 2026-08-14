@@ -33,8 +33,6 @@
   "src/app/dashboard/issuance/[tokenId]/asset-profile/tabs/workflows-tab.tsx:1011:11:autoApply",
   "src/app/dashboard/issuance/[tokenId]/asset-profile/tabs/workflows-tab.tsx:1013:36:manualReview",
   "src/app/dashboard/issuance/[tokenId]/asset-profile/tabs/workflows-tab.tsx:1015:61:reviewLockedNote",
-  "src/app/dashboard/issuance/[tokenId]/asset-profile/tabs/workflows-tab.tsx:1078:7:emailUnavailable",
-  "src/app/dashboard/issuance/[tokenId]/asset-profile/tabs/workflows-tab.tsx:1078:7:emailUnavailableSpecific",
   "src/app/dashboard/issuance/[tokenId]/asset-profile/tabs/workflows-tab.tsx:1097:7:validationFields",
   "src/app/dashboard/issuance/[tokenId]/asset-profile/tabs/workflows-tab.tsx:1097:7:validationGuards",
   "src/app/dashboard/issuance/[tokenId]/asset-profile/tabs/workflows-tab.tsx:1097:7:validationWalletGap",

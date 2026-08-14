@@ -73,6 +73,18 @@ export type {
 } from "./notification.repository";
 export { createPostgresNotificationsRepository } from "./notification.repository.postgres";
 export type {
+  ClaimNotificationDeliveryInput,
+  NotificationDeliveriesRepository,
+  NotificationDeliveryRow,
+} from "./notification-delivery.repository";
+export { createPostgresNotificationDeliveriesRepository } from "./notification-delivery.repository.postgres";
+export type {
+  NotificationPreferenceRow,
+  NotificationPreferencesRepository,
+  UpsertNotificationPreferenceEntry,
+} from "./notification-preference.repository";
+export { createPostgresNotificationPreferencesRepository } from "./notification-preference.repository.postgres";
+export type {
   CreatePaymentRecurringPaymentActivationAttemptInput,
   CreatePaymentRecurringPaymentInput,
   CreatePaymentRecurringPaymentLifecycleAttemptInput,
@@ -335,6 +347,8 @@ export {
   createCounterpartyAccountsRepository,
   createEarnRepository,
   createKycWalletsRepository,
+  createNotificationDeliveriesRepository,
+  createNotificationPreferencesRepository,
   createNotificationsRepository,
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,

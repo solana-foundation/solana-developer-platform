@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import * as Sentry from "@sentry/node";
 import { runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
 import { PENDING_TRANSFERS_CRON, PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
+import { runRetentionPurgeIfDue } from "@/cron/retention-purge";
 import { WORKFLOW_EXECUTIONS_CRON, WORKFLOW_EXECUTIONS_MONITOR } from "@/cron/workflow-executions";
 import {
   WORKFLOW_SECRET_RETIREMENTS_CRON,
@@ -78,6 +79,17 @@ export async function runCronJob(): Promise<void> {
     if (isEarnEnabled(env)) {
       await runEarnCatalogueSyncIfDue(env, sentryEnabled ? nodeObservability : undefined);
     }
+    // Daily retention purge behind a Redis date slot (the job itself ticks every five
+    // minutes). Non-fatal for the same reason as the secret sweep: housekeeping must
+    // never fail the reconciliation this job exists for.
+    await runRetentionPurgeIfDue(env, sentryEnabled ? nodeObservability : undefined).catch(
+      (error: unknown) => {
+        getLogger().error(
+          { error: error instanceof Error ? error.message : String(error) },
+          "reconciliation job: retention purge failed"
+        );
+      }
+    );
   } finally {
     await Promise.allSettled([closeAllRedisClients(), closeDatabasePools()]);
     await Sentry.close(2000);

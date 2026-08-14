@@ -5,6 +5,7 @@ import {
   type KycWalletRow,
 } from "@/db/repositories";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { notifyKycOutcome } from "@/services/notifications";
 import type { Env } from "@/types/env";
 import { dispatchWorkflowEvent } from "./event-bus";
 
@@ -91,6 +92,17 @@ export async function emitKycApprovedForClearedEnrollments(
     return 0;
   }
 
+  // Admin notification + counterparty outcome receipt — ONCE per wallet status
+  // transition, independent of the per-enrollment workflow events below (a multi-asset
+  // wallet must not multi-notify). Keyed on status_changed_at like the events, so a
+  // re-verification re-fires while redeliveries (and the enrollment path re-calling
+  // this for an old verification) collapse on dedupe. Never throws.
+  await notifyKycOutcome(env, {
+    kycWallet: input.kycWallet,
+    status: "verified",
+    provider: input.provider,
+  });
+
   const enrollments = await createWalletAssetEnrollmentsRepository(
     env
   ).listActiveEnrollmentsForWallet({ kycWalletId: input.kycWallet.id });
@@ -127,6 +139,13 @@ export async function emitKycRejectedForEnrollments(
   if (input.kycWallet.kyc_status !== "rejected") {
     return 0;
   }
+
+  // Once per wallet transition — see the approved path's note.
+  await notifyKycOutcome(env, {
+    kycWallet: input.kycWallet,
+    status: "rejected",
+    provider: input.provider,
+  });
 
   const enrollments = await createWalletAssetEnrollmentsRepository(
     env

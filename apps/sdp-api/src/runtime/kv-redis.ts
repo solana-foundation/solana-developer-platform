@@ -247,6 +247,21 @@ export function createKVStoreSet(env: Env): KVStoreSet {
   };
 }
 
+/**
+ * The shared (per-URL) command client for callers outside the KVStore façade —
+ * e.g. pub/sub PUBLISH (legal on a normal connection; only SUBSCRIBE needs the
+ * dedicated subscriber client in pubsub-redis.ts). Fails fast on missing REDIS_URL.
+ */
+export function getRedisClient(env: Env): Promise<Redis> {
+  const url = env.REDIS_URL?.trim();
+  if (!url) {
+    throw new Error(
+      "REDIS_URL is required. Set it in the environment (e.g. redis://localhost:6379)."
+    );
+  }
+  return ensureClient(url);
+}
+
 /** Verify that the configured Redis backend is reachable. */
 export async function pingRedis(env: Env): Promise<void> {
   const url = env.REDIS_URL?.trim();

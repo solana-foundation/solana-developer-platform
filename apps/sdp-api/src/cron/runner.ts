@@ -34,6 +34,7 @@ import {
   RECURRING_PAYMENTS_COLLECTION_CRON,
   runRecurringPaymentsCollection,
 } from "./recurring-payments";
+import { RETENTION_PURGE_CRON, runRetentionPurge } from "./retention-purge";
 import { runWorkflowExecutions, WORKFLOW_EXECUTIONS_CRON } from "./workflow-executions";
 import {
   runWorkflowSecretRetirements,
@@ -198,6 +199,22 @@ export function startCron(deps: CronDeps): CronHandle | null {
         return;
       }
       runWorkflowSecretRetirements({
+        env: deps.env,
+        bg: deps.bg,
+        observability: deps.observability,
+      });
+    })
+  );
+
+  // Daily retention purge (notifications, delivery claims, webhook delivery log).
+  // Unflagged for the same reason as the secret sweep above: the tables accrue rows
+  // regardless of which features are currently on, so cleanup must outlive them.
+  tasks.push(
+    schedule(RETENTION_PURGE_CRON, () => {
+      if (stopping) {
+        return;
+      }
+      runRetentionPurge({
         env: deps.env,
         bg: deps.bg,
         observability: deps.observability,

@@ -29,6 +29,8 @@ import { AppError, badRequest, internalError, providerNotConfigured } from "@/li
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { ensureBvnkPaymentRule } from "@/routes/payments/handlers/ramps/bvnk";
 import { getLogger } from "@/runtime/logger";
+import { notifyRampSettled } from "@/services/notifications";
+import { emitRampSettled } from "@/services/workflows/payment-events";
 import type { AppContext, WebhookProcessor } from "./processor";
 
 export type BvnkWebhookEvent =
@@ -248,7 +250,7 @@ async function handleProviderOnrampSettlementWebhook(
   if (!transfer) {
     return;
   }
-  await payments.updateTransferStatusGuarded({
+  const claimed = await payments.updateTransferStatusGuarded({
     transferId: transfer.id,
     organizationId: transfer.organization_id,
     projectId: transfer.project_id,
@@ -258,6 +260,30 @@ async function handleProviderOnrampSettlementWebhook(
     fiatAmount: paymentAmount,
     updatedAt: new Date().toISOString(),
   });
+
+  // Workflow trigger seam: BVNK bypasses applyRampSettlementEvent (its pay-in events
+  // carry no settlement-event shape), so it emits here directly — previously this path
+  // emitted nothing and BVNK settlements were invisible to workflow rules. Gated on the
+  // guarded claim so a replayed webhook can't re-fire.
+  if (claimed) {
+    const settled = {
+      organizationId: transfer.organization_id,
+      projectId: transfer.project_id,
+      direction: "onramp" as const,
+      transferId: transfer.id,
+      provider: transfer.provider,
+      counterpartyId: transfer.counterparty_id,
+      amount: paymentAmount,
+      fiatCurrency: transfer.fiat_currency,
+      cryptoToken: transfer.token,
+    };
+    // Rules are project-scoped; a project-less transfer still notifies admins below.
+    if (transfer.project_id) {
+      emitRampSettled(c, { ...settled, projectId: transfer.project_id });
+    }
+    // Admin notification + counterparty settlement receipt (idempotent on transferId).
+    notifyRampSettled(c, settled);
+  }
 }
 
 async function applyBvnkCustomerRequirementWebhook(
@@ -472,7 +498,7 @@ async function handleProviderOfframpSettlementWebhook(
   if (status === "completed") {
     fiatAmount = event.walletAmount ?? event.displayAmount;
   }
-  await getDb(c.env)
+  const updated = await getDb(c.env)
     .prepare(
       `UPDATE payment_transfers
        SET status = ?,
@@ -481,7 +507,8 @@ async function handleProviderOfframpSettlementWebhook(
        WHERE id = ?
          AND provider = 'bvnk'
          AND type = 'offramp'
-         AND status NOT IN ('completed', 'failed', 'expired', 'canceled')`
+         AND status NOT IN ('completed', 'failed', 'expired', 'canceled')
+       RETURNING organization_id, project_id, counterparty_id, provider, fiat_currency, token`
     )
     .bind(
       status,
@@ -490,7 +517,38 @@ async function handleProviderOfframpSettlementWebhook(
       new Date().toISOString(),
       event.transferId
     )
-    .run();
+    .first<{
+      organization_id: string;
+      project_id: string | null;
+      counterparty_id: string | null;
+      provider: string;
+      fiat_currency: string | null;
+      token: string | null;
+    }>();
+
+  // Workflow trigger seam: BVNK's channel completion bypasses applyRampSettlementEvent,
+  // so it emits here directly — previously this path emitted nothing and BVNK off-ramp
+  // settlements were invisible to workflow rules. The RETURNING row doubles as the
+  // this-request-claimed-it guard (the terminal-status filter blocks replays).
+  if (status === "completed" && updated) {
+    const settled = {
+      organizationId: updated.organization_id,
+      projectId: updated.project_id,
+      direction: "offramp" as const,
+      transferId: event.transferId,
+      provider: updated.provider,
+      counterpartyId: updated.counterparty_id,
+      amount: fiatAmount ?? null,
+      fiatCurrency: updated.fiat_currency,
+      cryptoToken: updated.token,
+    };
+    // Rules are project-scoped; a project-less transfer still notifies admins below.
+    if (updated.project_id) {
+      emitRampSettled(c, { ...settled, projectId: updated.project_id });
+    }
+    // Admin notification + counterparty settlement receipt (idempotent on transferId).
+    notifyRampSettled(c, settled);
+  }
 }
 
 export class BvnkWebhookProcessor implements WebhookProcessor<unknown, BvnkWebhookEvent> {

@@ -13,6 +13,7 @@ import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import type { StoredCredentialSecret } from "@/services/credential-secret-store";
+import { notifyWorkflowRunFailed } from "@/services/notifications";
 import { dispatchWorkflowAction } from "@/services/workflows/actions";
 import { type AssetGateContext, resolveAssetGateContext } from "@/services/workflows/asset-gate";
 import type { Env } from "@/types/env";
@@ -278,13 +279,18 @@ export async function runDueWorkflowExecutions(
   const audit = new AuditService(getDb(env), createKVStoreSet(env).cache);
   const result: RunWorkflowExecutionsResult = { recovered: 0, succeeded: 0, failed: 0, retried: 0 };
   const caches: TickCaches = { rules: new Map(), gates: new Map() };
+  // Failure notifications started during this tick; drained before returning.
+  const pendingNotifications: Promise<unknown>[] = [];
 
   // Durable audit row for a terminal execution outcome (system actor → "SDP"). Only
   // terminal states are audited — transient reschedules would be noise. metadata.tokenId
   // surfaces the event in the per-asset audit feed. Never throws — an audit write
   // failure must not break the tick, so persistence errors are logged and swallowed.
-  const auditTerminal: AuditTerminal = (row, status, extra) =>
-    audit
+  // Terminal FAILURES also notify the org's admins (fires once per execution — a
+  // fail → manual retry → fail sequence dedupes to one notification; successes are the
+  // normal case and stay silent).
+  const auditTerminal: AuditTerminal = async (row, status, extra) => {
+    await audit
       .logSystem({
         organizationId: row.organization_id,
         action: status === "success" ? "workflow_action_executed" : "workflow_action_failed",
@@ -305,6 +311,14 @@ export async function runDueWorkflowExecutions(
           "workflow engine: system audit write failed"
         );
       });
+    if (status === "failure") {
+      const reason = typeof extra.reason === "string" ? extra.reason : null;
+      // Fired without awaiting: the notification pipeline includes email round-trips,
+      // and a tick with many failures would otherwise serialize the 5-worker pool
+      // behind Resend. Drained before the tick returns so nothing outlives it.
+      pendingNotifications.push(notifyWorkflowRunFailed(env, row, reason));
+    }
+  };
 
   const nowIso = now.toISOString();
   const staleBefore = new Date(now.getTime() - STALE_AFTER_MS).toISOString();
@@ -341,6 +355,10 @@ export async function runDueWorkflowExecutions(
       }
     })
   );
+
+  // Notifications ride out the tick concurrently with the workers; settle them all
+  // before returning (dispatchNotification never throws, so allSettled is a formality).
+  await Promise.allSettled(pendingNotifications);
 
   return result;
 }
