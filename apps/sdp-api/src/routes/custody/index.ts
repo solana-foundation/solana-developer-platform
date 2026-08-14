@@ -6,6 +6,7 @@
 
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { meteredQuota } from "@/middleware/metered-quota";
 import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
@@ -45,9 +46,12 @@ wallets.post("/", requirePermissions("custody:admin"), createWallet);
 wallets.delete("/", requirePermissions("custody:admin"), deleteWallet);
 wallets.post("/default-wallet", requirePermissions("custody:admin"), setDefaultWallet);
 wallets.patch("/:walletId", requirePermissions("custody:admin"), updateWallet);
+// Each signer check broadcasts a fee-paying memo transaction, so it carries
+// the fail-closed metered quota like other paid-side-effect routes.
 wallets.post(
   "/signer-check",
   requirePermissions("wallets:write"),
+  meteredQuota({ name: "signer-check", actorMax: 10, orgMax: 30 }),
   policyGate({ extract: extractSignerCheckPolicyCandidate }),
   signerCheck
 );
