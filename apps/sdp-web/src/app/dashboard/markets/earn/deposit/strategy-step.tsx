@@ -1,8 +1,9 @@
 "use client";
 
-import type { EarnPortfolioToken, EarnStrategy } from "@sdp/types";
+import type { EarnPortfolioToken, EarnProviderId, EarnStrategy } from "@sdp/types";
 import { ArrowDownIcon, ArrowUpIcon, ChevronsUpDownIcon } from "lucide-react";
 import { useMemo, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -33,6 +34,7 @@ import {
   type EarnStrategySortColumn,
   nextStrategySort,
   sortStrategies,
+  strategyDepositEligibility,
 } from "./earn-deposit-model";
 
 /**
@@ -84,11 +86,13 @@ function SortableColumnHeader({
 
 function StrategyTableRow({
   onSelect,
+  portfolioProvider,
   selected,
   showTokenColumn,
   strategy,
 }: {
   onSelect: () => void;
+  portfolioProvider: EarnProviderId;
   selected: boolean;
   showTokenColumn: boolean;
   strategy: EarnStrategy;
@@ -101,10 +105,33 @@ function StrategyTableRow({
   const accessId = `${inputId}-access`;
   const poolId = `${inputId}-pool`;
   const apyId = `${inputId}-apy`;
+  const availabilityId = `${inputId}-availability`;
   const token = strategyToken(strategy);
   const poolUsd = strategyPoolUsd(strategy);
   const sourceLabel = strategySourceLabel(strategy);
   const curatorLabel = strategyCuratorLabel(strategy);
+  const eligibility = strategyDepositEligibility(strategy, portfolioProvider);
+  const selectable = eligibility === "eligible";
+  const hostNetwork = strategy.hostCluster === "mainnet-beta" ? "Mainnet" : "Devnet";
+  const unavailable =
+    eligibility === "environment-mismatch"
+      ? {
+          label: t("DashboardEarn.deposit.strategyEnvironmentOnly", { environment: hostNetwork }),
+          description: t("DashboardEarn.deposit.strategyEnvironmentUnavailable", {
+            environment: hostNetwork,
+          }),
+        }
+      : eligibility === "provider-unsupported"
+        ? {
+            label: t("DashboardEarn.deposit.strategyBrowseOnly"),
+            description: t("DashboardEarn.deposit.strategyProviderUnavailable"),
+          }
+        : eligibility === "asset-unsupported"
+          ? {
+              label: t("DashboardEarn.deposit.strategyAssetUnavailableLabel"),
+              description: t("DashboardEarn.deposit.strategyAssetUnavailable"),
+            }
+          : null;
 
   // Provider metadata, not a gate: protocol and curating house are deduped,
   // because "Maple · Curated by Maple" says one thing twice.
@@ -119,10 +146,12 @@ function StrategyTableRow({
 
   return (
     <TableRow
+      aria-disabled={selectable ? undefined : true}
       aria-selected={selected}
-      className="cursor-pointer"
+      className={selectable ? "cursor-pointer" : "cursor-default"}
       data-state={selected ? "selected" : undefined}
       onClick={(event) => {
+        if (!selectable) return;
         const target = event.target as HTMLElement;
         if (target.closest("input, label")) return;
         onSelect();
@@ -130,10 +159,11 @@ function StrategyTableRow({
     >
       <TableCell className="relative w-12">
         <input
-          aria-describedby={`${backingId} ${accessId} ${poolId} ${apyId}`}
+          aria-describedby={`${backingId} ${accessId} ${poolId} ${apyId}${unavailable ? ` ${availabilityId}` : ""}`}
           aria-labelledby={nameId}
           checked={selected}
           className="peer sr-only"
+          disabled={!selectable}
           id={inputId}
           name="earn-strategy"
           onChange={onSelect}
@@ -141,7 +171,10 @@ function StrategyTableRow({
           value={strategy.id}
         />
         <label
-          className="inline-flex cursor-pointer rounded-full peer-focus-visible:ring-2 peer-focus-visible:ring-primary/40"
+          className={cn(
+            "inline-flex rounded-full peer-focus-visible:ring-2 peer-focus-visible:ring-primary/40",
+            selectable ? "cursor-pointer" : "cursor-not-allowed opacity-40"
+          )}
           htmlFor={inputId}
         >
           <SelectionMark selected={selected} />
@@ -175,6 +208,21 @@ function StrategyTableRow({
         <span className="mt-1 block truncate text-secondary" title={sourceMeta || undefined}>
           {sourceMeta || "—"}
         </span>
+        {unavailable ? (
+          <>
+            <Badge
+              aria-hidden="true"
+              className="mt-2"
+              title={unavailable.description}
+              variant={eligibility === "environment-mismatch" ? "warning" : "default"}
+            >
+              {unavailable.label}
+            </Badge>
+            <span className="sr-only" id={availabilityId}>
+              {unavailable.description}
+            </span>
+          </>
+        ) : null}
       </TableCell>
       {showTokenColumn ? (
         <TableCell className="text-sm font-normal text-secondary">
@@ -204,6 +252,7 @@ export function StrategyStep({
   hasError,
   isLoading,
   onSelect,
+  portfolioProvider,
   selectedStrategyId,
   strategies,
   tokens,
@@ -211,12 +260,17 @@ export function StrategyStep({
   hasError: boolean;
   isLoading: boolean;
   onSelect: (strategyId: string) => void;
+  portfolioProvider: EarnProviderId;
   selectedStrategyId: string | null;
   strategies: readonly EarnStrategy[];
   tokens: readonly EarnPortfolioToken[];
 }) {
   const t = useTranslations();
-  const selected = strategies.find((strategy) => strategy.id === selectedStrategyId);
+  const selected = strategies.find(
+    (strategy) =>
+      strategy.id === selectedStrategyId &&
+      strategyDepositEligibility(strategy, portfolioProvider) === "eligible"
+  );
   // A lone stablecoin needs no repeated table column; review still names it.
   const showTokenColumn = tokens.length > 1;
 
@@ -231,6 +285,9 @@ export function StrategyStep({
    */
   const [sort, setSort] = useState<EarnStrategySort>(DEFAULT_STRATEGY_SORT);
   const rows = useMemo(() => sortStrategies(strategies, sort), [sort, strategies]);
+  const hasUnavailableStrategies = strategies.some(
+    (strategy) => strategyDepositEligibility(strategy, portfolioProvider) !== "eligible"
+  );
   const sortBy = (column: EarnStrategySortColumn) =>
     setSort((current) => nextStrategySort(current, column));
 
@@ -299,13 +356,20 @@ export function StrategyStep({
               <StrategyTableRow
                 key={strategy.id}
                 onSelect={() => onSelect(strategy.id)}
-                selected={strategy.id === selectedStrategyId}
+                portfolioProvider={portfolioProvider}
+                selected={strategy.id === selected?.id}
                 showTokenColumn={showTokenColumn}
                 strategy={strategy}
               />
             ))}
           </TableBody>
         </Table>
+      ) : null}
+
+      {hasUnavailableStrategies ? (
+        <p className="text-xs leading-5 text-secondary">
+          {t("DashboardEarn.deposit.strategyAvailabilityDisclosure")}
+        </p>
       ) : null}
 
       <p className="text-xs leading-5 text-muted">{t("DashboardEarn.deposit.rateDisclosure")}</p>

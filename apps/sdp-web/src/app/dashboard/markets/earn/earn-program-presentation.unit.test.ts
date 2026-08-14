@@ -17,6 +17,8 @@ function strategy(partial: Partial<EarnStrategy> & { providerReference: string }
     liquidityTerm: "instant",
     riskMetadata: {},
     status: "active",
+    hostCluster: "devnet",
+    fundable: true,
     createdAt: TIMESTAMP,
     updatedAt: TIMESTAMP,
     ...partial,

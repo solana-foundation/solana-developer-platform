@@ -537,6 +537,22 @@ export function distillGroundYieldSource(
       sourceKind: classifySourceKind(source.allocations),
       underlyingSource: source.protocol?.trim().toLowerCase() || undefined,
       depositMints: [mint],
+      // The environment's own cluster, and that stays right after #1299 removed
+      // the `not_solana_hosted` gate — for a different reason than before.
+      //
+      // It is no longer "this source is hosted on this Solana chain": Ground may
+      // host a source on another chain entirely and bridge to it internally. It
+      // is that the DEPOSIT is Solana-side on this cluster — `depositMints` is
+      // this cluster's mint (the `no_cluster_mint` gate above proves one exists)
+      // and the rail is `GROUND_SOLANA_ROUTED_TOKENS`. So the derived `fundable`
+      // stays correct: money leaving a wallet on this cluster does reach this
+      // source.
+      //
+      // A non-custodial provider cannot say this — Kamino's K-Vault takes the
+      // customer's own deposit at a mainnet address with no bridge in front of
+      // it, so its sandbox rows are honestly un-fundable. See `hostCluster` on
+      // ProviderStrategySnapshot.
+      hostCluster: cluster,
       apyType: "variable",
       currentApy: source.apyBps == null ? undefined : bpsToDecimalString(source.apyBps),
       ...redeemLiquidity(source.processingPolicies?.redeem),
