@@ -1,6 +1,7 @@
 import * as Sentry from "@sentry/node";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
+import { runEarnMetricsRefreshTick } from "@/cron/earn-metrics-refresh";
 import { closeDatabasePools } from "@/db/client";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
@@ -20,6 +21,17 @@ vi.mock("@sentry/node", () => ({
 
 vi.mock("@/cron/earn-catalogue-sync", () => ({
   runEarnCatalogueSyncIfDue: vi.fn(async () => "synced"),
+}));
+
+// MUST be mocked, like its sibling above: the real implementation walks
+// EARN_PROVIDER_CLIENTS and Kamino's client reaches api.kamino.finance with no
+// credential to stop it. Unmocked, the flags-on cases below fetched the live
+// mainnet shelf and then attempted an UPDATE per vault against the fake
+// `postgres://unit` — a unit test whose runtime depended on a third party's
+// uptime, silent because both the job's `.catch` and the refresh's per-row
+// catch swallow the failures.
+vi.mock("@/cron/earn-metrics-refresh", () => ({
+  runEarnMetricsRefreshTick: vi.fn(async () => {}),
 }));
 
 // Literal constants keep the heavy service graph behind pending-transfers out
@@ -110,6 +122,7 @@ describe("runCronJob", () => {
       .mockReset()
       .mockResolvedValue(undefined as never);
     vi.mocked(runEarnCatalogueSyncIfDue).mockReset().mockResolvedValue("synced");
+    vi.mocked(runEarnMetricsRefreshTick).mockReset().mockResolvedValue(undefined);
     vi.mocked(runDueWorkflowExecutions)
       .mockReset()
       .mockResolvedValue(undefined as never);
@@ -198,10 +211,12 @@ describe("runCronJob", () => {
     vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ MARKETS_ENABLED: "true" }));
     await runCronJob();
     expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
+    expect(runEarnMetricsRefreshTick).not.toHaveBeenCalled();
 
     vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ EARN_ENABLED: "true" }));
     await runCronJob();
     expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
+    expect(runEarnMetricsRefreshTick).not.toHaveBeenCalled();
   });
 
   it("runs the earn tick after the ungated pair when both flags are on", async () => {
@@ -215,6 +230,35 @@ describe("runCronJob", () => {
     const pairOrder = vi.mocked(reconcileSponsorshipBudgets).mock.invocationCallOrder[0];
     const earnOrder = vi.mocked(runEarnCatalogueSyncIfDue).mock.invocationCallOrder[0];
     expect(earnOrder).toBeGreaterThan(pairOrder);
+  });
+
+  it("refreshes metrics on every tick, before the slot-gated catalogue sync", async () => {
+    // The refresh is deliberately unslotted — this job's five-minute schedule
+    // IS its cadence — and ordered first so an unusually slow catalogue pass
+    // cannot eat the tick and leave rates stale. Both halves of that are
+    // asserted here because neither is visible from the sync's own test.
+    const env = makeEnv({ MARKETS_ENABLED: "true", EARN_ENABLED: "true" });
+    vi.mocked(getProcessEnv).mockReturnValue(env);
+
+    await runCronJob();
+
+    // Sentry disabled here, so no observability — same shape as the sync.
+    expect(runEarnMetricsRefreshTick).toHaveBeenCalledExactlyOnceWith(env, undefined);
+    const refreshOrder = vi.mocked(runEarnMetricsRefreshTick).mock.invocationCallOrder[0];
+    const syncOrder = vi.mocked(runEarnCatalogueSyncIfDue).mock.invocationCallOrder[0];
+    expect(refreshOrder).toBeLessThan(syncOrder);
+  });
+
+  it("keeps running the catalogue sync when the metrics refresh throws", async () => {
+    // Rates going one tick stale must never stop the catalogue sync, which
+    // owns admission and the delist pass.
+    const env = makeEnv({ MARKETS_ENABLED: "true", EARN_ENABLED: "true" });
+    vi.mocked(getProcessEnv).mockReturnValue(env);
+    vi.mocked(runEarnMetricsRefreshTick).mockRejectedValue(new Error("kamino unreachable"));
+
+    await expect(runCronJob()).resolves.toBeUndefined();
+
+    expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledExactlyOnceWith(env, undefined);
   });
 
   it("hands the earn tick its own observability while the pair keeps the transfers monitor", async () => {
@@ -242,9 +286,14 @@ describe("runCronJob", () => {
       expect.any(Function),
       { schedule: { type: "crontab", value: "* * * * *" } }
     );
-    // The earn tick monitors itself (EARN_CATALOGUE_SYNC_MONITOR) inside
-    // runEarnCatalogueSyncIfDue — the job just passes observability through.
+    // Both earn ticks monitor themselves inside their own entrypoints
+    // (EARN_CATALOGUE_SYNC_MONITOR / EARN_METRICS_REFRESH_MONITOR) — the job
+    // just passes observability through. The refresh goes through the monitored
+    // tick rather than the bare function precisely so a refresh that silently
+    // stops running trips its own missed-check-in alert; stale rates are its
+    // worst failure and are invisible from the catalogue sync's monitor.
     expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledExactlyOnceWith(env, nodeObservability);
+    expect(runEarnMetricsRefreshTick).toHaveBeenCalledExactlyOnceWith(env, nodeObservability);
   });
 
   it("fails the job on an earn error but still releases pools and clients", async () => {

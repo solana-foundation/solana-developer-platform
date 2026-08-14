@@ -102,8 +102,10 @@ the body `requestId` form, which is the only one that can get through.
   `programId` and builds its path from it; none may fall back to "whichever
   program is first". `requestId` is REQUIRED on the write input — the API
   refuses a create carrying no idempotency key (PRO-1670).
-  `EARN_PORTFOLIO_PROVIDER` is the single deliberate Ground pin — widening to
-  multi-provider selection happens HERE, not by scattering provider ids.
+  `EARN_PORTFOLIO_PROVIDER` is the single deliberate Ground selection/execution
+  pin — widening to multi-provider deposits happens HERE, not by scattering
+  provider ids. It is not a catalogue-visibility filter: browse-only providers
+  still render in the strategy comparison table with disabled readiness states.
   `fetchEarnStrategies()` AND `fetchEarnProgramsState()` both **page to the
   end**: the API caps `pageSize` at 100, and a single request silently drops
   everything past the window — for programs that is hidden MONEY (totals
@@ -312,12 +314,42 @@ funding instructions and nothing else — never imply a transfer happens.
   appearing in the UI as a provider-client bug, not something to patch here.
   A `cash` position can be a token the org never deposited on Solana, so do not
   assume positions imply a Solana deposit — only the addresses do.
-- **Catalogue visibility and stored/provider positions are different.** The
-  sync stores Ground's routable catalogue regardless of host chain, while the
-  strategy API omits Aave- and Morpho-related rows from list and detail reads.
-  A live program position can still name one of those sources because positions
-  come from Ground's wallet response and may hold real value. Do not filter such
-  a position out of the UI: hiding a funded position hides customer money.
+- **The catalogue shows strategies this module deliberately cannot select.**
+  Kamino is a catalogue-only provider: its K-Vaults are non-custodial (the
+  customer's own wallet deposits) and mainnet-only, and SDP catalogues them into
+  BOTH environments so readers can compare the real shelf. They reach
+  `GET /v1/earn/strategies` and the wizard's comparison table, but they must not
+  advance to review because there is no program to create for them. TWO
+  independent eligibility checks disable them, and both are intentional:
+  - `EARN_PORTFOLIO_PROVIDER` — the existing Ground pin, which refuses selection
+    for every non-portfolio provider while leaving its catalogue row visible.
+  - `strategy.fundable` — the API's per-request answer to "does this instrument
+    exist on the caller's cluster". A sandbox Kamino row is
+    `hostCluster: "mainnet-beta", fundable: false` and renders "Mainnet only".
+
+  Do not collapse visibility and eligibility. The pin is about which provider
+  the flow can create a program with; `fundable` is about whether an instrument
+  exists here at all, and it stops devnet money being pointed at a mainnet vault
+  if the pin is ever widened. Neither should hide a real catalogue row.
+- **A POSITION may name a vault the catalogue does not show, and that is not a
+  bug here.** The two come from different places: positions are read live from
+  Ground's wallet response, while the strategy table comes from
+  `earn_strategies` filtered by API policy. So a program pointed at an
+  Ethereum-hosted or an Aave/Morpho source still renders that vault's name under
+  "Where the money sits", and real value sits in it. Do not filter such a
+  position out of the UI: hiding a funded position hides customer money, which
+  is worse than naming a vault the wizard would not offer. Clearing one means
+  re-targeting the allocation in Ground (a money movement), not a web change.
+- **A third visibility rule lives in the API, and this module never sees it.**
+  `/strategies` list and detail omit Aave- and Morpho-related rows entirely
+  (`HIDDEN_STRATEGY_TERMS`), while the sync keeps storing them so the DB stays a
+  truthful provider inventory. That is server-side editorial policy about a
+  SOURCE — distinct from `fundable`, which is a fact about where an instrument
+  lives, and from the provider pin, which is about what the flow can create.
+  Do not reimplement it here: a client-side copy would drift, and a hidden row
+  never reaches the browser to begin with. Same caveat as above applies — a live
+  program POSITION may still name one of those sources, since positions come
+  from Ground's wallet response and may hold real value.
 - Design system: SDP quiet-institutional (see `.claude/skills/sdp-ui-designer`).
   Inter only — monospace is forbidden, including for addresses; use
   `tabular-nums` for numeric alignment. The ONE exception is a genuine code

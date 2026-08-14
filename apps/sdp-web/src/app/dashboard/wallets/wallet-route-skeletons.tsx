@@ -114,7 +114,7 @@ export function WalletsOnboardingSkeleton() {
 export function WalletSetupSkeleton() {
   return (
     <LoadingRegion layout="wallet-setup" className="flex h-full min-h-0 flex-col">
-      <div className="shrink-0 px-4 pt-2 pb-6 md:px-6">
+      <div className="shrink-0 px-4 pt-8 pb-6 md:px-6">
         <div className="mx-auto flex w-full max-w-3xl items-center gap-4">
           <div className="flex items-center gap-1.5">
             <Pulse className="h-1.5 w-5 rounded-full" />

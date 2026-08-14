@@ -14,6 +14,7 @@ import type {
   EarnStrategyRiskMetadata,
   EarnStrategySourceKind,
   SdpEnvironment,
+  SolanaCluster,
 } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 
@@ -57,6 +58,15 @@ export interface ProviderStrategySnapshot {
   liquidityTerm: EarnLiquidityTerm;
   redemptionDelayDays?: number;
   riskMetadata?: EarnStrategyRiskMetadata;
+  /**
+   * The cluster this strategy's instrument lives on. REQUIRED — every provider
+   * must state it rather than let the sync assume the environment's own
+   * cluster, because that assumption is exactly what a mainnet-only provider
+   * catalogued into sandbox would violate silently (see `EarnStrategy` in
+   * @sdp/types). Ground answers with its environment's cluster; Kamino always
+   * answers `mainnet-beta`.
+   */
+  hostCluster: SolanaCluster;
 }
 
 /**
@@ -73,6 +83,54 @@ export interface EarnVaultProvider {
   declaredSupport: EarnDeclaredStrategySupport;
   /** Live strategy catalogue; synced into `earn_strategies` by the API. */
   listStrategies(ctx: EarnRuntimeContext): Promise<ProviderStrategySnapshot[]>;
+}
+
+/**
+ * The volatile half of a catalogue row: the numbers that move on their own
+ * between syncs. Deliberately NOT a whole snapshot — a refresh may only update
+ * figures, never a strategy's identity, mints, or liquidity terms, so nothing
+ * on this shape can admit a vault the catalogue gate would refuse.
+ */
+export interface ProviderStrategyMetrics {
+  /** Must match a `providerReference` the catalogue already holds. */
+  providerReference: string;
+  /** Latest APY as a decimal string; omitted when the provider has no rate. */
+  currentApy?: string;
+  /**
+   * Volatile risk-metadata figures (TVL, holders, utilization). MERGED over the
+   * stored metadata rather than replacing it, so slow-moving fields the
+   * catalogue sync owns — curator above all — survive a refresh that does not
+   * report them.
+   */
+  riskMetadata?: EarnStrategyRiskMetadata;
+}
+
+/**
+ * Optional capability: rates fresh enough to quote.
+ *
+ * The catalogue sync runs hourly because catalogue DRIFT is slow — a provider
+ * onboarding or delisting a vault. Rates are not slow, and an hour-old APY on a
+ * comparison table is a number a customer could act on wrongly. A provider that
+ * can serve its whole shelf's live figures in a call or two implements this,
+ * and a short-cadence pass refreshes only those figures in place.
+ *
+ * Why a write pass and not a live read at request time: the strategies route
+ * reads exactly ONE source for the state it reports (ADR 0002 addendum), and
+ * overlaying live numbers onto DB rows at read time would blend two. Freshness
+ * comes from cadence instead, so the route stays a plain DB read and every
+ * consumer — API, dashboard, a partner's own cache — sees the same figures.
+ *
+ * Discovered via `supportsLiveMetrics` (capabilities.ts), never provider-id
+ * checks. A provider that would need one request per vault should NOT implement
+ * this; the pass would cost more than the staleness it removes.
+ */
+export interface EarnLiveMetricsProvider extends EarnVaultProvider {
+  /**
+   * Current figures for every strategy this provider lists. Returning a
+   * reference the catalogue does not hold is harmless — the refresh updates
+   * existing rows and never inserts.
+   */
+  listStrategyMetrics(ctx: EarnRuntimeContext): Promise<ProviderStrategyMetrics[]>;
 }
 
 export interface EarnPortfolioWalletCreateInput {
