@@ -167,21 +167,10 @@ export interface GroundYieldSource {
   /** Documented: active | buy_only | sell_only | emergency_freeze — kept open. */
   mode: string;
   /**
-   * Where the yield source ITSELF is hosted — and THE catalogue gate for it
-   * (`not_solana_hosted`). SDP lists and stores Solana-hosted vaults only: a
-   * "Solana Earn" shelf means Solana-hosted yield, not merely Solana-rail
-   * access to yield hosted elsewhere.
-   *
-   * This reversed an earlier reading, which gated only the rails the customer
-   * touches (deposit address, payout address, `depositToken`) and catalogued
-   * off-Solana sources on purpose because Ground bridges internally — the
-   * `bridge` position kind. That admitted Aave, four Morpho vaults, Syrup and
-   * every RWA source (all Ethereum-hosted) into the catalogue; see
-   * docs/earn/ground-catalogue-inventory.md for the census that measured it.
-   *
-   * Ground does not document this field as required, so the gate is
-   * FAIL-CLOSED: an absent or unrecognised chain cannot be shown to be Solana,
-   * and an unlabelled source is exactly the drift this gate exists to catch.
+   * Where the yield source itself is hosted. This is inventory metadata, not a
+   * persistence gate: Ground may bridge Solana USDC to a source it hosts on a
+   * different chain. Product visibility belongs at the API read boundary so
+   * the database retains a truthful copy of Ground's routable catalogue.
    */
   chain?: string | null;
   apyBps?: number | null;
@@ -467,11 +456,9 @@ const GROUND_CURATOR_HOUSES = [
  * Exported for the catalogue-inventory script, which attributes sources
  * distillation drops.
  *
- * The `morpho` branch is deliberately KEPT even though no Morpho vault can be
- * catalogued any more (`not_solana_hosted`): this parses Ground's RAW response,
- * which still carries all 18 sources, and the inventory's dropped-source table
- * attributes them. Understanding what we refuse is not the same as listing it —
- * do not "clean up" EVM vocabulary from this layer.
+ * Morpho remains part of this parser because these rows are still indexed even
+ * when an API surface chooses not to return them. Persistence and presentation
+ * policy are deliberately separate.
  */
 export function deriveCurator(source: GroundYieldSource): string | undefined {
   const id = source.id.toLowerCase();
@@ -493,7 +480,6 @@ export function deriveCurator(source: GroundYieldSource): string | undefined {
 export type GroundCatalogueDropReason =
   | "inactive_mode"
   | "not_solana_routable"
-  | "not_solana_hosted"
   | "unknown_token_symbol"
   | "no_cluster_mint";
 
@@ -513,9 +499,8 @@ export function distillGroundYieldSource(
   source: GroundYieldSource,
   environment: SdpEnvironment
 ): GroundYieldSourceDistillation {
-  // Keyed by environment, not cluster, so the host-chain gate below can read
-  // the ONE pinned chain constant (GROUND_SOLANA_CHAINS) rather than a second
-  // cluster-keyed copy of the same fact drifting beside it.
+  // The API environment selects the cluster whose well-known mint makes this
+  // source fundable; the source's host chain remains provider-routing metadata.
   const cluster = CLUSTER_BY_SDP_ENVIRONMENT[environment];
   // Only fully tradable sources enter the catalogue. buy_only would let
   // deposits into an exit-frozen source — trapped funds, which the Earn
@@ -531,14 +516,6 @@ export function distillGroundYieldSource(
   // cluster/mint question like the check below).
   if (!GROUND_SOLANA_ROUTED_TOKENS.has(source.depositToken.toLowerCase())) {
     return { outcome: "dropped", reason: "not_solana_routable" };
-  }
-  // Solana-HOSTED only: where the vault itself lives, not just the rail the
-  // customer funds it over. Ordered after the token gate so a USDT source on
-  // another chain keeps reporting the rail constraint that binds it first
-  // (Ground cannot route USDT on Solana even if the vault were Solana-hosted).
-  // Fail-closed on an absent/unknown chain — see GroundYieldSource.chain.
-  if (source.chain?.trim().toLowerCase() !== GROUND_SOLANA_CHAINS[environment]) {
-    return { outcome: "dropped", reason: "not_solana_hosted" };
   }
   const symbol = source.depositToken.toUpperCase();
   if (!isWellKnownTokenSymbol(symbol)) {

@@ -474,6 +474,162 @@
           "preferred": "mint"
         }
       ]
+    },
+    "vi": {
+      "context": {
+        "localeName": "Tiếng Việt",
+        "audience": "Vietnamese-speaking Web3 developers and institutional finance operators",
+        "conventions": [
+          "Vietnamese Web3 practitioners commonly retain established English product terms.",
+          "Prefer concise UI Vietnamese; avoid literary or overly formal register.",
+          "Wallet and Token stay in English as product nouns; write natural Vietnamese grammar around them.",
+          "Dashboard and API Playground are product surface names and stay in English."
+        ]
+      },
+      "instructions": [
+        "Use natural, concise Vietnamese UI copy. Prefer impersonal phrasing or bạn; avoid quý khách.",
+        "Keep established Web3 terms in English when Vietnamese practitioners normally use the English term.",
+        "Prefer short labels that stay close to English length for layout stability.",
+        "Match the English form per string for enable and disable: action verbs versus state participles."
+      ],
+      "terminology": [
+        {
+          "source": "token / tokens",
+          "preferred": "Token / Tokens",
+          "avoid": "mã thông báo",
+          "note": "Token is the established Web3 product noun. Write natural Vietnamese around it."
+        },
+        {
+          "source": "wallet / wallets",
+          "preferred": "Wallet / Wallets",
+          "avoid": "ví / ví điện tử",
+          "note": "Wallet is the established product noun in this dashboard."
+        },
+        {
+          "source": "mint / burn / freeze",
+          "preferred": "mint / burn / freeze",
+          "note": "Keep protocol action names recognizable; write natural Vietnamese around them."
+        },
+        {
+          "source": "allowlist / blocklist",
+          "preferred": "allowlist / blocklist",
+          "avoid": "danh sách trắng / danh sách đen",
+          "note": "Keep the neutral technical terms used by the product."
+        },
+        {
+          "source": "on-chain / off-chain",
+          "preferred": "on-chain / off-chain"
+        },
+        {
+          "source": "stablecoin, API, RPC, webhook, blockchain, staking, airdrop",
+          "preferred": "Keep these established technical terms unchanged."
+        },
+        {
+          "source": "endpoint / API Playground",
+          "preferred": "endpoint / API Playground",
+          "avoid": "điểm cuối / sân chơi API",
+          "note": "Use the established developer-facing product terms."
+        },
+        {
+          "source": "dashboard",
+          "preferred": "Dashboard",
+          "avoid": "bảng điều khiển",
+          "note": "Dashboard is the product surface name."
+        },
+        {
+          "source": "asset / counterparty",
+          "preferred": "Asset / Counterparty",
+          "note": "Keep as product nouns in this dashboard."
+        },
+        {
+          "source": "transfer / provider / quote",
+          "preferred": "Chuyển / nhà cung cấp / báo giá",
+          "note": "Use short Vietnamese for transfer activity labels; keep Provider as a product noun when it names a ramp provider entity."
+        },
+        {
+          "source": "draft / deploy",
+          "preferred": "bản nháp / deploy or triển khai",
+          "note": "Deploy may stay as a developer loanword when it reads more naturally; otherwise use triển khai."
+        },
+        {
+          "source": "custody",
+          "preferred": "Custody for the product category; lưu ký in explanatory prose",
+          "note": "Choose from context instead of forcing one translation everywhere."
+        },
+        {
+          "source": "resume",
+          "preferred": "Tiếp tục",
+          "note": "Means continue a flow, never curriculum vitae."
+        },
+        {
+          "source": "Private Channels",
+          "preferred": "Private Channels",
+          "note": "Product name — keep in English."
+        },
+        {
+          "source": "Mint Authority / Freeze Authority / Update Authority / Metadata Authority / Permanent Delegate",
+          "preferred": "Keep the whole SPL authority family in English as noun labels; verbs describing the action are written in Vietnamese."
+        },
+        {
+          "source": "Token-2022 extension names (Transfer Fee, Interest Bearing, Scaled UI Amount, Transfer Hook, Non-transferable, Default Account State)",
+          "preferred": "Keep extension names in English as labels; translate their descriptions and helper text."
+        },
+        {
+          "source": "ramp / on-ramp / off-ramp / rails / rent / block explorer",
+          "preferred": "ramp / on-ramp / off-ramp / rails / rent / explorer",
+          "note": "Ramp family, rails and Solana rent stay in English; Solana Explorer stays as the brand name."
+        }
+      ],
+      "forbiddenTerms": [
+        {
+          "label": "ví điện tử",
+          "pattern": "\\bv[ií] điện tử\\b",
+          "flags": "iu",
+          "preferred": "Wallet / Wallets"
+        },
+        {
+          "label": "mã thông báo",
+          "pattern": "\\bmã thông báo\\b",
+          "flags": "iu",
+          "preferred": "Token / Tokens"
+        },
+        {
+          "label": "danh sách trắng / danh sách đen",
+          "pattern": "\\bdanh sách (?:trắng|đen)\\b",
+          "flags": "iu",
+          "preferred": "allowlist / blocklist"
+        },
+        {
+          "label": "điểm cuối",
+          "pattern": "\\bđiểm cuối\\b",
+          "flags": "iu",
+          "preferred": "endpoint / endpoints"
+        },
+        {
+          "label": "sân chơi API",
+          "pattern": "\\bsân chơi API\\b",
+          "flags": "iu",
+          "preferred": "API Playground"
+        },
+        {
+          "label": "bảng điều khiển",
+          "pattern": "\\bbảng điều khiển\\b",
+          "flags": "iu",
+          "preferred": "Dashboard"
+        },
+        {
+          "label": "quý khách",
+          "pattern": "\\bquý khách\\b",
+          "flags": "iu",
+          "preferred": "bạn or impersonal phrasing"
+        },
+        {
+          "label": "allow list",
+          "pattern": "\\ballow list\\b",
+          "flags": "iu",
+          "preferred": "allowlist"
+        }
+      ]
     }
   }
 }

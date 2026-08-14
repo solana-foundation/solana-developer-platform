@@ -3,6 +3,8 @@ import { ChevronRight, ScrollText } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
+import { resolveTokenByMint } from "@/app/dashboard/payments/payments-overview.utils";
+import type { PaymentsIssuedTokenSymbol } from "@/app/dashboard/payments/payments-page.data";
 import { DashboardWorkspaceCard } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
 import { Button } from "@/components/ui/button";
@@ -45,6 +47,7 @@ export function PolicyAuditList({
   revisionHistory,
   apiKeyNames,
   userNames,
+  issuedTokensByMint,
   locale,
   t,
 }: {
@@ -55,6 +58,7 @@ export function PolicyAuditList({
   revisionHistory: WalletControlProfileRevisionHistory;
   apiKeyNames: Record<string, string>;
   userNames: Record<string, string>;
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
   locale: string;
   t: PolicyTranslate;
 }) {
@@ -108,6 +112,7 @@ export function PolicyAuditList({
                     evaluation.policyRevisions.wallet.evaluatedRevisionId,
                     t("DashboardCustody.policyAuditDefaultAllow")
                   )}
+                  issuedTokensByMint={issuedTokensByMint}
                   locale={locale}
                   t={t}
                 />
@@ -184,7 +189,10 @@ export function PolicyAuditList({
                           </div>
                         </AuditCell>
                         <AuditCell>
-                          <AssetAmount evaluation={evaluation} />
+                          <AssetAmount
+                            evaluation={evaluation}
+                            issuedTokensByMint={issuedTokensByMint}
+                          />
                         </AuditCell>
                         <AuditCell>
                           <span title={evaluation.walletOperation.destination ?? undefined}>
@@ -267,12 +275,14 @@ function MobileAuditRow({
   evaluation,
   href,
   revision,
+  issuedTokensByMint,
   locale,
   t,
 }: {
   evaluation: WalletPolicyEvaluationDetail;
   href: string;
   revision: string;
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
   locale: string;
   t: PolicyTranslate;
 }) {
@@ -290,7 +300,7 @@ function MobileAuditRow({
         <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
           <MobileAuditValue
             label={t("DashboardCustody.policyAuditAssetAmount")}
-            value={formatAssetAmount(evaluation, "-")}
+            value={formatAssetAmount(evaluation, "-", issuedTokensByMint)}
           />
           <MobileAuditValue
             label={t("DashboardCustody.policyAuditAppliedRevision")}
@@ -343,14 +353,28 @@ function operationTypeLabel(evaluation: WalletPolicyEvaluationDetail): string {
   );
 }
 
-function AssetAmount({ evaluation }: { evaluation: WalletPolicyEvaluationDetail }) {
+function AssetAmount({
+  evaluation,
+  issuedTokensByMint,
+}: {
+  evaluation: WalletPolicyEvaluationDetail;
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
+}) {
   const { asset } = evaluation.walletOperation;
-  if (!asset) return formatAssetAmount(evaluation, "-");
+  if (!asset) return formatAssetAmount(evaluation, "-", issuedTokensByMint);
 
+  const resolved = resolveTokenByMint(asset, issuedTokensByMint);
   return (
     <span className="flex items-center gap-2" title={asset}>
-      <TokenMark mint={asset} size="xs" />
-      <span className="min-w-0 truncate">{formatAssetAmount(evaluation, "-")}</span>
+      <TokenMark
+        mint={asset}
+        symbol={resolved.tokenName}
+        logoUrl={resolved.metadataImageUrl}
+        size="xs"
+      />
+      <span className="min-w-0 truncate">
+        {formatAssetAmount(evaluation, "-", issuedTokensByMint)}
+      </span>
     </span>
   );
 }
