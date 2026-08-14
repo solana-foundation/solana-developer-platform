@@ -62,7 +62,13 @@ describe.skipIf(!KORA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Kora Fee Payment", 
       // Kora raises max_allowed_lamports past the headroom, or grows an
       // authority this code reads as spend without a matching cap, every
       // request is denied without any change to this repository.
-      const PER_TRANSACTION_BUDGET_LAMPORTS = 10_000_000n;
+      // Mirrors the deployed environment's seeded per-transaction budget
+      // (migration 0055), not the 20M policies kora-flow.test.ts seeds for its
+      // own suite. Override alongside a coordinated budget raise so this pin
+      // follows the environment instead of paging on a healthy change.
+      const PER_TRANSACTION_BUDGET_LAMPORTS = env.KORA_PER_TRANSACTION_BUDGET_LAMPORTS
+        ? BigInt(env.KORA_PER_TRANSACTION_BUDGET_LAMPORTS)
+        : 10_000_000n;
       const NETWORK_FEE_HEADROOM_LAMPORTS = 50_000n;
       expect(configuration?.feePayerMayTransferLamports).toBe(true);
       expect(configuration?.maxAllowedLamports).toBeDefined();
