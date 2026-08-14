@@ -442,7 +442,7 @@
             "description": "Submits a memo transaction using the wallet bound to the authenticated API key. This endpoint requires API-key authentication.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"memo\": \"\",\n  \"walletId\": \"\"\n}",
+              "raw": "{\n  \"walletId\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
