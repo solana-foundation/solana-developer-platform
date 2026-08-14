@@ -1,9 +1,16 @@
 import Redis from "ioredis";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SponsorshipBudgetPolicy } from "@/db/repositories/sponsorship-budget.repository";
 import type { Env } from "@/types/env";
 import { closeAllRedisClients } from "./kv-redis";
 import { SponsorshipBudgetRedis } from "./sponsorship-budget-redis";
+
+const logEvent = vi.hoisted(() => vi.fn());
+
+vi.mock("./money-path-events", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./money-path-events")>()),
+  logEvent,
+}));
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
 const EMPTY_USAGE = {
@@ -70,6 +77,55 @@ describe("SponsorshipBudgetRedis", () => {
     const hour = await raw.hgetall("sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z");
     expect(hour).toMatchObject({ global: "3", "organization:org_1": "3" });
     expect(Object.keys(hour).some((field) => field.includes("undefined"))).toBe(false);
+  });
+
+  it("records which scope and limit rejected an admission, with the counters it was rejected against", async () => {
+    logEvent.mockClear();
+    const policies = [
+      policy("global", 1, true, 1000),
+      { ...policy("organization", 1, true, 1000), hourlyLamports: 5 },
+    ];
+    const window = {
+      network: "devnet" as const,
+      organizationId: "org_1",
+      projectId: null,
+      hourBucket: "2026-08-03T10:00:00.000Z",
+      dayBucket: "2026-08-03T00:00:00.000Z",
+      policies,
+    };
+    await expect(
+      budget.reserve({
+        ...window,
+        reservationId: "reservation_first",
+        attempt: 1,
+        amount: 4,
+        usage: EMPTY_USAGE,
+      })
+    ).resolves.toBe("admitted");
+
+    await expect(
+      budget.reserve({
+        ...window,
+        reservationId: "reservation_denied",
+        attempt: 1,
+        amount: 4,
+        usage: EMPTY_USAGE,
+      })
+    ).resolves.toBe("denied");
+
+    expect(logEvent).toHaveBeenCalledWith(
+      "warn",
+      expect.objectContaining({
+        event: "sdp_api_sponsorship_denied",
+        network: "devnet",
+        scope_type: "organization",
+        organization_id: "org_1",
+        requested_lamports: 4,
+        hourly_lamports: 5,
+        hour_used_lamports: 4,
+        day_used_lamports: 4,
+      })
+    );
   });
 
   it("enforces concurrent limits atomically across all applicable scopes", async () => {

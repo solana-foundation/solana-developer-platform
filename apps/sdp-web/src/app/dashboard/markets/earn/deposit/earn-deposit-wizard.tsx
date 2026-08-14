@@ -23,10 +23,8 @@ import { EarnDepositSkeleton } from "../earn-route-skeletons";
 import { SummaryRow } from "./earn-deposit-chrome";
 import {
   availableTokens,
-  defaultStrategyFilters,
-  type EarnStrategyFilters,
+  rankedFundableStrategies,
   singleStrategyAllocation,
-  visibleStrategies,
 } from "./earn-deposit-model";
 import { useEarnFundingWallets, walletDisplayName } from "./earn-funding-wallets";
 import { type EarnApiKeyView, IntegrationScreen } from "./integration-screen";
@@ -289,17 +287,13 @@ export function EarnDepositWizard({
    * again. It shapes the funding instructions; it never moves money.
    */
   const [walletId, setWalletId] = useState<string | null>(null);
-  const [filters, setFilters] = useState<EarnStrategyFilters>(defaultStrategyFilters);
   const [strategyId, setStrategyId] = useState<string | null>(initialStrategyId ?? null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
 
   const tokens = useMemo(() => availableTokens(liveStrategies), [liveStrategies]);
-  const browsable = useMemo(
-    () => visibleStrategies(liveStrategies, filters),
-    [filters, liveStrategies]
-  );
+  const browsable = useMemo(() => rankedFundableStrategies(liveStrategies), [liveStrategies]);
 
   const selectedWallet = (wallets ?? []).find((wallet) => wallet.id === walletId);
   const selectedStrategy: EarnStrategy | undefined = browsable.find(
@@ -337,17 +331,6 @@ export function EarnDepositWizard({
   };
 
   useWizardStepFocus(step, outcome);
-
-  /** A hidden row cannot remain selected and silently advance to review. */
-  const changeFilters = (next: EarnStrategyFilters) => {
-    setFilters(next);
-    if (
-      strategyId !== null &&
-      !visibleStrategies(liveStrategies, next).some((strategy) => strategy.id === strategyId)
-    ) {
-      setStrategyId(null);
-    }
-  };
 
   const confirm = async () => {
     if (!selectedStrategy || !stepReady.review) return;
@@ -468,11 +451,8 @@ export function EarnDepositWizard({
     ),
     strategy: (
       <StrategyStep
-        filters={filters}
         hasError={Boolean(catalogueError)}
         isLoading={catalogueLoading}
-        onFiltersChange={changeFilters}
-        onReset={() => changeFilters(defaultStrategyFilters())}
         onSelect={setStrategyId}
         selectedStrategyId={strategyId}
         strategies={browsable}

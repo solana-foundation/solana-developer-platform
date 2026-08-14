@@ -75,14 +75,13 @@ other's balance.
     resolution (400). An unentitled caller sending no key still gets 403, and a
     provider without the portfolio capability still gets 501, rather than a
     generic "missing idempotency key" that hides why the call could never work.
-  - **`assertKnownYieldSources` is what keeps non-Solana vaults out of new
-    programs.** It matches every requested `yieldSourceId` against the
-    `status = 'active'` catalogue for the environment, so the `not_solana_hosted`
-    gate in `@sdp/earn` reaches this route for free: an Ethereum-hosted vault is
-    no longer catalogued, so allocating to one 400s with "Unknown or inactive
-    yield sources". It does NOT re-check existing programs — a wallet pointed at
-    an off-Solana vault before the gate keeps that allocation until someone
-    re-targets it in Ground.
+  - **`assertKnownYieldSources` validates against stored active catalogue rows.**
+    It matches every requested `yieldSourceId` against `status = 'active'` for
+    the environment. Catalogue browse policy is intentionally separate:
+    `/strategies` list/detail never return Aave- or Morpho-related rows, while
+    the sync still stores them so the DB remains a truthful provider inventory.
+    Existing program positions are never filtered; hiding one could hide real
+    customer money.
   - **A unique violation on the insert is a REPLAY, not a race.** The provider
     dedupes on the derived key and answers a retried create with the ORIGINAL
     wallet ref, so a legitimate retry lands on 0056's global unique by design:

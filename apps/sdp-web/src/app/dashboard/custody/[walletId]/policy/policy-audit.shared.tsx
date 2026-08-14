@@ -1,11 +1,12 @@
-import {
-  type PolicyDecision,
-  type WalletControlProfileRevisionHistory,
-  type WalletOperationStatus,
-  type WalletPolicyEvaluationDetail,
-  WELL_KNOWN_TOKEN_BY_MINT,
+import type {
+  PolicyDecision,
+  WalletControlProfileRevisionHistory,
+  WalletOperationStatus,
+  WalletPolicyEvaluationDetail,
 } from "@sdp/types";
 import Link from "next/link";
+import { resolveTokenByMint } from "@/app/dashboard/payments/payments-overview.utils";
+import type { PaymentsIssuedTokenSymbol } from "@/app/dashboard/payments/payments-page.data";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
@@ -116,11 +117,13 @@ export function formatOperation(evaluation: WalletPolicyEvaluationDetail): strin
   return `${formatDisplayLabel(evaluation.walletOperation.operationFamily)} · ${formatDisplayLabel(evaluation.walletOperation.operationType)}`;
 }
 
-export function formatAssetAmount(evaluation: WalletPolicyEvaluationDetail, empty: string): string {
+export function formatAssetAmount(
+  evaluation: WalletPolicyEvaluationDetail,
+  empty: string,
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>
+): string {
   const { amount, asset } = evaluation.walletOperation;
-  const displayAsset = asset
-    ? (WELL_KNOWN_TOKEN_BY_MINT.get(asset)?.symbol ?? shortIdentifier(asset, 5))
-    : null;
+  const displayAsset = asset ? resolveTokenByMint(asset, issuedTokensByMint).tokenName : null;
   if (amount && displayAsset) return `${amount} ${displayAsset}`;
   return amount ?? displayAsset ?? empty;
 }

@@ -1,4 +1,4 @@
-import type { EarnStrategy } from "@sdp/types";
+import type { CustodyWalletSummary, EarnStrategy } from "@sdp/types";
 import type { ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -30,6 +30,11 @@ const data = vi.hoisted(() => ({
     error: undefined as Error | undefined,
     isLoading: false,
   },
+  fundingWallets: {
+    wallets: [] as CustodyWalletSummary[],
+    error: undefined as Error | undefined,
+    isLoading: false,
+  },
 }));
 
 vi.mock("./earn-program-data", () => ({
@@ -53,10 +58,34 @@ vi.mock("./earn-program-data", () => ({
   EARN_PORTFOLIO_PROVIDER: "ground",
 }));
 
+vi.mock("./deposit/earn-funding-wallets", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./deposit/earn-funding-wallets")>();
+  return {
+    ...original,
+    useEarnFundingWallets: () => data.fundingWallets,
+  };
+});
+
 import { EarnWorkspace } from "./earn-workspace";
 
 const TIMESTAMP = "2026-07-18T09:00:00.000Z";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+
+function fundingWallet(usdc: string): CustodyWalletSummary {
+  return {
+    id: "cw_earn_1",
+    custodyConfigId: "custody-config-1",
+    walletId: "wallet_earn_1",
+    publicKey: "7M6bFdwsXQZX9MjoD4PDxQJb9FZbwdQh6VS8sK7F3WcQ",
+    label: "Treasury Ops",
+    purpose: null,
+    status: "active",
+    createdAt: TIMESTAMP,
+    provider: "fireblocks",
+    isRuntimeExecutionAllowed: true,
+    balances: [{ token: "USDC", mint: USDC, amount: usdc, uiAmount: usdc, decimals: 6 }],
+  };
+}
 
 function strategy(partial: {
   id: string;
@@ -121,6 +150,9 @@ beforeEach(() => {
   data.strategies.strategies = CATALOGUE;
   data.strategies.error = undefined;
   data.strategies.isLoading = false;
+  data.fundingWallets.wallets = [];
+  data.fundingWallets.error = undefined;
+  data.fundingWallets.isLoading = false;
 });
 
 describe("EarnWorkspace while the program is still loading", () => {
@@ -148,15 +180,31 @@ describe("EarnWorkspace with no program yet", () => {
   });
 
   it("leads the hero with live catalogue facts rather than curator cards", () => {
+    data.fundingWallets.wallets = [fundingWallet("1250")];
     const html = renderToStaticMarkup(<EarnWorkspace />);
     expect(html).toContain("DashboardEarn.overview.startTitle");
+    expect(html).toContain("DashboardEarn.overview.startStatAvailableUsdc");
     expect(html).toContain("DashboardEarn.overview.startStatStrategies");
     expect(html).toContain("DashboardEarn.overview.startStatTopApy");
     expect(html).toContain("DashboardEarn.overview.startStatAccess");
+    // Connected-wallet USDC appears immediately beside the live catalogue facts.
+    expect(html).toContain("1,250 USDC");
     // Three active strategies, best rate 8.4%, and at least one instant source.
     expect(html).toContain(">3<");
     expect(html).toContain("8.4%");
     expect(html).toContain("DashboardEarn.liquidity.instant");
+  });
+
+  it("does not understate aggregate USDC when one wallet balance is unavailable", () => {
+    data.fundingWallets.wallets = [
+      fundingWallet("1250"),
+      { ...fundingWallet("25"), id: "cw_2", balances: undefined },
+    ];
+    const html = renderToStaticMarkup(<EarnWorkspace />);
+
+    expect(html).not.toContain("1,250 USDC");
+    expect(html).toContain("DashboardEarn.overview.startStatAvailableUsdc</dt><dd");
+    expect(html).toContain(">—</dd>");
   });
 
   it("never routes through a curator, the removed first step", () => {
