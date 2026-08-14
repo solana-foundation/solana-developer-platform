@@ -15,12 +15,17 @@ import {
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import { z } from "zod";
 import { getDb } from "@/db";
+import { createPolicyRepository } from "@/db/repositories";
 import { type ApiKeyContext, getAuth } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
-import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
+import {
+  approvedWalletOperationId,
+  beginApprovedWalletOperationEffect,
+} from "@/services/policy/approved-operation-replay";
 import {
   resolvePolicyCustodyWallet,
   walletOperationActorFromAuth,
@@ -84,6 +89,12 @@ export async function extractSignerCheckPolicyCandidate(
   }
 
   const policyWallet = await resolvePolicyCustodyWallet(c.env, auth, resolvedWalletId);
+
+  // The memo is generated per request, but an approved replay must rebuild
+  // the operation exactly as recorded, so it signs the stored memo the
+  // approvers reviewed instead of generating a new one.
+  const effectiveMemo = (await approvedReplayMemo(c)) ?? memo;
+
   return {
     candidate: {
       organizationId: auth.organizationId,
@@ -99,18 +110,38 @@ export async function extractSignerCheckPolicyCandidate(
       amount: null,
       destination: null,
       context: {
-        memo,
+        memo: effectiveMemo,
       },
       providerExtensions: {},
     },
     legs: [],
     body: parsed.data,
-    resolved: { auth, resolvedWalletId, memo },
+    resolved: { auth, resolvedWalletId, memo: effectiveMemo },
     rawPayload: {
       requestedWalletId: parsed.data.walletId === undefined ? null : parsed.data.walletId,
-      memo,
+      memo: effectiveMemo,
     },
   };
+}
+
+/**
+ * Resolve the memo recorded on the approved wallet operation being replayed,
+ * or null outside an approved-operation replay.
+ *
+ * @param c - Request context.
+ * @returns The stored memo text, or null when this is a normal request.
+ */
+async function approvedReplayMemo(c: AppContext): Promise<string | null> {
+  const operationId = approvedWalletOperationId(c);
+  if (!operationId) {
+    return null;
+  }
+  const operation = await createPolicyRepository(
+    c.env,
+    getRequestTenantScope(c)
+  ).getWalletOperationById(operationId);
+  const storedMemo = operation?.raw_payload.memo;
+  return typeof storedMemo === "string" ? storedMemo : null;
 }
 
 export const signerCheck = async (c: AppContext) => {

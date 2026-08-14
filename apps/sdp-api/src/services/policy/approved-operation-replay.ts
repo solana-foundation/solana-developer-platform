@@ -172,7 +172,14 @@ export async function tryApprovedOperationReplayAuth(
   const actor = isObject(rawPayload.actor) ? rawPayload.actor : null;
 
   if (apiKeyId) {
-    const apiKey = await loadActiveApiKey(db, apiKeyId, organizationId, projectId);
+    // The dashboard signer-check flow mints a short-lived key and retires it
+    // right after the request, so requiring the key to still be active would
+    // make every approved dashboard signer check unexecutable. For that
+    // operation type the approval itself is the authorization; the replay only
+    // re-runs the memo diagnostic the approvers reviewed.
+    const apiKey = await loadReplayApiKey(db, apiKeyId, organizationId, projectId, {
+      allowRetiredKey: operation.operation_type === "custody_signer_check",
+    });
     c.set("apiKey", apiKey);
   } else {
     const userId =
@@ -213,11 +220,12 @@ export async function tryApprovedOperationReplayAuth(
   return true;
 }
 
-async function loadActiveApiKey(
+async function loadReplayApiKey(
   db: DatabaseClient,
   apiKeyId: string,
   organizationId: string,
-  projectId: string | null
+  projectId: string | null,
+  options: { allowRetiredKey: boolean }
 ) {
   const row = await db
     .prepare(
@@ -230,12 +238,14 @@ async function loadActiveApiKey(
     )
     .bind(apiKeyId, organizationId, projectId)
     .first<Record<string, unknown>>();
-  if (row?.status !== "active") {
+  if (!row || (!options.allowRetiredKey && row.status !== "active")) {
     throw new AppError("FORBIDDEN", "Original API key is no longer active");
   }
-  for (const deadline of [row.expires_at, row.rotation_deadline]) {
-    if (typeof deadline === "string" && new Date(deadline) <= new Date()) {
-      throw new AppError("FORBIDDEN", "Original API key is no longer valid");
+  if (!options.allowRetiredKey) {
+    for (const deadline of [row.expires_at, row.rotation_deadline]) {
+      if (typeof deadline === "string" && new Date(deadline) <= new Date()) {
+        throw new AppError("FORBIDDEN", "Original API key is no longer valid");
+      }
     }
   }
 
