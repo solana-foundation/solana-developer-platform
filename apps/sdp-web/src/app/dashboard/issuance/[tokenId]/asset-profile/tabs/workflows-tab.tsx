@@ -1120,7 +1120,9 @@ function ReviewField({
     // split between them and the leftover under these cards read as an oversized margin
     // above the block below. The parameters block absorbs it all instead.
     <div className="flex flex-col gap-1.5 text-sm">
-      <span className="text-xs font-medium text-secondary">{t("review")}</span>
+      {/* Peer of the parameters heading below — same size, or the section under it would
+          out-shout it. */}
+      <span className="text-sm font-medium text-primary">{t("review")}</span>
       {/* items-stretch is the default, but stated: both cards must be the row's height so
           their bottom edges line up whatever their descriptions wrap to. */}
       <div className="grid flex-1 content-start items-stretch gap-3 sm:grid-cols-2">
@@ -1208,7 +1210,7 @@ function ParamsBlock({
   return (
     <div
       className={cn(
-        "grid gap-3 rounded-xl border border-border-subtle bg-fill-subtle/40 p-3",
+        "grid gap-4 rounded-xl border border-border-subtle bg-fill-subtle/40 p-4",
         // A lone field (e.g. allowlist's wallet) takes the full row; pairs split.
         paramFields.length > 1 && "sm:grid-cols-2"
       )}
@@ -1513,9 +1515,10 @@ function WizardRowLayout(args: LayoutArgs) {
               caption beneath, no accent bar. */}
           <h4 className="text-sm font-semibold text-primary">{t("settingsTitle")}</h4>
           <p className="mt-0.5 text-xs text-secondary">{t("settingsIntro")}</p>
-          {/* gap-4 between the two sections: the parameters heading has to read as a new
-              section, not as another line of the review block above it. */}
-          <div className="mt-4 flex flex-1 flex-col gap-4">
+          {/* gap-4 is the minimum between the two sections; justify-between then shares the
+              panel's spare height out between them, the way the preview column next door
+              spaces its nodes, instead of pooling it under the last control. */}
+          <div className="mt-4 flex flex-1 flex-col justify-between gap-4">
             {args.reviewField}
             {args.paramsBlock}
           </div>
@@ -1780,7 +1783,7 @@ function BuilderParamsBlock({
     <div className="flex flex-col gap-1.5">
       <div>
         {/* Set like the "Review" label above it — the line beneath carries the detail. */}
-        <h5 className="text-xs font-medium text-secondary">{heading}</h5>
+        <h5 className="text-sm font-medium text-primary">{heading}</h5>
         <p className="mt-0.5 text-xs text-tertiary">{caption}</p>
       </div>
       {actionType === "send_webhook" ? (
@@ -1822,7 +1825,9 @@ function ParamFieldControl({
   const inputId = `wf-param-${field.key}`;
   if (field.options) {
     return (
-      <div className="space-y-1.5 text-sm">
+      // flex, not space-y: the help/error line below the control is a <span>, and margin-top
+      // does nothing to an inline element — as a flex item it actually gets the gap.
+      <div className="flex flex-col gap-2 text-sm">
         <Label htmlFor={inputId} className="text-secondary">
           {wf(field.labelKey)}
         </Label>
@@ -1841,7 +1846,7 @@ function ParamFieldControl({
     );
   }
   return (
-    <div className="space-y-1.5 text-sm">
+    <div className="flex flex-col gap-2 text-sm">
       <Label htmlFor={inputId} className="text-secondary">
         {wf(field.labelKey)}
         {field.required ? <span className="text-error"> *</span> : null}
