@@ -111,8 +111,8 @@
       "title": "Opportunities",
       "description": "Ways to put idle stablecoins to work. Compare what each one pays, how it's backed, and how fast you can withdraw \u2014 rank by pool size or APY.",
       "deposit": "Deposit",
-      "depositDirectOnly": "Deposit direct, outside SDP",
-      "depositProviderClosed": "Not open for deposits",
+      "depositDirectOnly": "Coming soon",
+      "depositProviderClosed": "Not available",
       "columnAction": "Action"
     },
     "deposit": {

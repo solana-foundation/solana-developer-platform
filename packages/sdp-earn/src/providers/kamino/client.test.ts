@@ -407,18 +407,33 @@ describe("KaminoEarnClient.listStrategies", () => {
     assert.equal(fetchMock.mock.calls.length, 1 + 20);
   });
 
-  it("returns the SAME mainnet catalogue in sandbox as in production", async () => {
-    stubKaminoFetch(...catalogue([vault()], [metrics()]));
-    const production = await client.listStrategies(productionCtx);
+  /**
+   * This assertion is the INVERSE of the one it replaces.
+   *
+   * The old test pinned "sandbox gets the same mainnet catalogue as production",
+   * which encoded a belief that turned out to be false: Kamino does run a devnet
+   * kvault program, with 21 vaults on it (see providers/kamino/devnet.ts). The
+   * consequence of the old behaviour was a sandbox shelf of permanently
+   * un-fundable rows.
+   *
+   * Non-production must therefore never touch the mainnet REST API at all — not
+   * "fetch it and filter", which would still put a mainnet row one bug away from
+   * a sandbox database.
+   */
+  it("never reads the mainnet catalogue outside production", async () => {
+    const fetchMock = stubKaminoFetch(...catalogue([vault()], [metrics()]));
 
-    mock.restoreAll();
-    stubKaminoFetch(...catalogue([vault()], [metrics()]));
-    const sandbox = await client.listStrategies(sandboxCtx);
-
-    assert.deepEqual(sandbox, production);
-    // The whole point: a sandbox row states mainnet, so nothing downstream can
-    // mistake it for something devnet money can fund.
-    assert.equal(sandbox[0].hostCluster, "mainnet-beta");
+    await assert.rejects(
+      // No RPC URL in the sandbox context, so the devnet path fails closed —
+      // which itself proves the mainnet REST path was not taken.
+      client.listStrategies(sandboxCtx),
+      /RPC URL/
+    );
+    assert.equal(
+      fetchMock.mock.calls.length,
+      0,
+      "sandbox must not issue a single api.kamino.finance request"
+    );
   });
 
   it("refuses a metrics page with no result array", async () => {
@@ -517,15 +532,25 @@ describe("KaminoEarnClient.listStrategyMetrics", () => {
     ]);
   });
 
-  it("reports the same figures in both environments", async () => {
-    stubKaminoFetch({ body: { result: [metrics()], paginationToken: null } });
-    const production = await client.listStrategyMetrics(productionCtx);
+  /**
+   * Inverted alongside `listStrategies`. The metrics endpoint belongs to the
+   * MAINNET API and 404s for a devnet vault pubkey, so outside production the
+   * only honest answer is none: the map would be keyed by mainnet references
+   * that `updateStrategyMetrics` then fails to match against a devnet
+   * catalogue, no-opping on every five-minute pass while spending two requests
+   * to do it. A sandbox row renders "—" rather than a fabricated rate.
+   */
+  it("reports no figures outside production, and issues no request", async () => {
+    const fetchMock = stubKaminoFetch({
+      body: { result: [metrics()], paginationToken: null },
+    });
 
-    mock.restoreAll();
-    stubKaminoFetch({ body: { result: [metrics()], paginationToken: null } });
-    const sandbox = await client.listStrategyMetrics(sandboxCtx);
-
-    assert.deepEqual(sandbox, production);
+    assert.deepEqual(await client.listStrategyMetrics(sandboxCtx), []);
+    assert.equal(
+      fetchMock.mock.calls.length,
+      0,
+      "sandbox must not issue a single api.kamino.finance request"
+    );
   });
 });
 

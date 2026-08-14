@@ -46,9 +46,11 @@ balance with a live one.
   - Each row carries `hostCluster` (the cluster the INSTRUMENT lives on, stored)
     and `fundable` (derived per request from `hostCluster` against the caller's
     environment, never stored). **Catalogued is not the same as fundable**:
-    Kamino's K-Vaults are mainnet-only and are catalogued into sandbox too so
-    integrators can browse the real shelf, so a sandbox row may honestly read
-    `hostCluster: "mainnet-beta", fundable: false`. `fundable` is the wire-level
+    a provider may front instruments that do not exist on every cluster, and the
+    sync REFUSES to store a `mainnet-beta` instrument outside production. (Kamino
+    was the original example of the opposite — catalogued mainnet-into-sandbox
+    because we believed it had no devnet deployment; it does, and each
+    environment now catalogues its own cluster.) `fundable` is the wire-level
     warning — partners must branch on it rather than assume a listed strategy
     takes deposits.
   - **`fundable` answers the CLUSTER question only, and its two sides are not
@@ -140,9 +142,10 @@ other's balance.
     existing programs either — a wallet's current allocation stands until
     someone re-targets it in Ground.
   - **Its keep-set is filtered by `isClusterFundableInEnvironment` too**, and
-    that half is separately load-bearing: a mainnet-only provider's vaults ARE
-    catalogued in sandbox, so provider scoping alone would let devnet money be
-    allocated to an instrument that does not exist on this cluster. This is the
+    that half is separately load-bearing: a genuinely single-cluster provider's
+    vaults could be catalogued in sandbox, so provider scoping alone would let
+    devnet money be allocated to an instrument that does not exist on this
+    cluster. This is the
     last gate before a provider mutation on both create and re-target. The route
     tests pin it with a GROUND row whose cluster is flipped — a Kamino reference
     would pass on provider scoping alone and prove nothing.

@@ -200,12 +200,24 @@ simply never reaches the entitlement gate, which only guards money-in.
 ### If the provider is not deployed on every cluster
 
 State it on the snapshot. `ProviderStrategySnapshot.hostCluster` is the cluster
-the INSTRUMENT lives on, and it is not implied by the environment — Kamino is
-mainnet-only and is catalogued into both environments so sandbox integrators can
-browse the real shelf. Those rows are true and un-fundable, and one predicate,
-`isClusterFundableInEnvironment`, enforces that everywhere (see ADR 0002's
-2026-08-13 addendum). Do not reach for `status` — it is the operator's stop
-switch and the repository refuses to overwrite it.
+the INSTRUMENT lives on, and it is not implied by the environment. One predicate,
+`isClusterFundableInEnvironment`, enforces that everywhere. Do not reach for
+`status` — it is the operator's stop switch and the repository refuses to
+overwrite it.
+
+**But first: check whether the provider really has no devnet deployment.** Kamino
+was catalogued mainnet-into-both-environments for exactly one reason — we
+believed it had none. It does (2026-08-14 addendum), and the cost of that belief
+was a sandbox shelf where every row was permanently `fundable: false`. A hosted
+API that ignores an `env` parameter is not evidence: Kamino's returns 200 with a
+byte-identical mainnet payload. Check the chain for a per-cluster program before
+you conclude a provider is single-cluster.
+
+**And non-production may never STORE a mainnet instrument.** The catalogue sync
+refuses any snapshot whose `hostCluster` is `mainnet-beta` outside production,
+provider-neutrally, at the single writer. If your provider genuinely is
+mainnet-only, it contributes nothing to a sandbox catalogue — that is the
+intended outcome, not a gap to work around.
 
 ### A new catalogue column is EXPAND-ONLY in the release that adds it
 

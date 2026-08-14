@@ -13,6 +13,7 @@ import type {
   ProviderStrategySnapshot,
 } from "../../types";
 import { StubEarnClient } from "../stub";
+import { listKaminoDevnetVaults } from "./devnet";
 
 /**
  * Kamino's public data API. No credential: unlike every other Earn provider
@@ -504,7 +505,26 @@ export class KaminoEarnClient extends StubEarnClient implements EarnLiveMetricsP
     return byVault;
   }
 
-  override async listStrategies(_ctx: EarnRuntimeContext): Promise<ProviderStrategySnapshot[]> {
+  /**
+   * The shelf, per environment — and the two environments read DIFFERENT
+   * SOURCES, not the same source with a parameter.
+   *
+   * - **production** → the REST API, which indexes mainnet only.
+   * - **anything else** → devnet, read on-chain (`./devnet.ts`).
+   *
+   * Non-production NEVER returns a mainnet vault. That is a hard requirement,
+   * not a preference: a mainnet row in a sandbox catalogue is an instrument a
+   * devnet wallet cannot reach, and before this split every sandbox Kamino row
+   * was exactly that — catalogued, permanently `fundable: false`, and useless
+   * to an integrator. The catalogue sync enforces the same rule independently
+   * (`assertSnapshotClusterMatchesEnvironment`), so a bug here cannot put
+   * mainnet rows in a sandbox database.
+   */
+  override async listStrategies(ctx: EarnRuntimeContext): Promise<ProviderStrategySnapshot[]> {
+    if (ctx.environment !== "production") {
+      return await this._listDevnetStrategies(ctx);
+    }
+
     // Both reads are issued together: they are independent, and the vault list
     // alone cannot produce a snapshot (TVL and APY live only in metrics).
     const [vaults, metricsByVault] = await Promise.all([
@@ -523,6 +543,43 @@ export class KaminoEarnClient extends StubEarnClient implements EarnLiveMetricsP
   }
 
   /**
+   * Devnet vaults, from the chain.
+   *
+   * Two admission rules differ from mainnet's, and both follow from devnet
+   * having no economics rather than from a relaxed standard:
+   *
+   * - **No TVL floor.** `KAMINO_MIN_TVL_USD` exists to separate a real shelf
+   *   from a permissionless census of dust and test vaults, using size as the
+   *   proxy for seriousness. Devnet deposits are play money, so size measures
+   *   nothing there; applying the floor would empty the shelf entirely.
+   *   `declaredSupport` (stablecoin mints only) is what does the filtering.
+   * - **No APY.** The metrics endpoint 404s for devnet vaults, so rows carry no
+   *   rate and the dashboard renders "—". That is honest — a devnet rate would
+   *   be a fiction — and it is why the live-metrics refresh also skips
+   *   non-production (see `getStrategyMetrics`).
+   */
+  async _listDevnetStrategies(ctx: EarnRuntimeContext): Promise<ProviderStrategySnapshot[]> {
+    const rpcUrl = ctx.env.SOLANA_RPC_URL ?? "";
+    const vaults = await listKaminoDevnetVaults(rpcUrl);
+
+    return vaults.map((vault) => ({
+      providerReference: vault.address,
+      name: vault.name,
+      // Same reasoning as mainnet: a K-Vault allocates into Klend reserves, and
+      // that is the one classification its own mechanics establish. Never read
+      // out of the attacker-chosen name.
+      sourceKind: "defi" as const,
+      underlyingSource: "klend",
+      depositMints: [vault.tokenMint],
+      shareMint: vault.sharesMint,
+      hostCluster: "devnet" as const,
+      apyType: "variable" as const,
+      liquidityTerm: "instant" as const,
+      riskMetadata: {},
+    }));
+  }
+
+  /**
    * Live figures for the whole shelf — the short-cadence half of the catalogue.
    *
    * Kamino is a natural fit for this capability: `apy` moves continuously with
@@ -537,7 +594,18 @@ export class KaminoEarnClient extends StubEarnClient implements EarnLiveMetricsP
    * catalogue already holds, so an unknown reference is a no-op, and filtering
    * here would mean re-fetching the vault list to re-run the gates.
    */
-  async listStrategyMetrics(_ctx: EarnRuntimeContext): Promise<ProviderStrategyMetrics[]> {
+  async listStrategyMetrics(ctx: EarnRuntimeContext): Promise<ProviderStrategyMetrics[]> {
+    // PRODUCTION ONLY, for the same reason `listStrategies` splits: the metrics
+    // endpoint is the mainnet API's, and it 404s for a devnet vault pubkey
+    // (measured 2026-08-14). Calling it outside production would spend two
+    // requests every five minutes to build a map keyed by MAINNET references —
+    // which `updateStrategyMetrics` then matches against a devnet catalogue and
+    // no-ops on, every single pass. Empty is the honest answer, and it is why a
+    // sandbox row renders no rate rather than a fabricated one.
+    if (ctx.environment !== "production") {
+      return [];
+    }
+
     const metricsByVault = await this._loadMetricsByVault();
 
     return [...metricsByVault.values()].map((metrics) => {

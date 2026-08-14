@@ -182,6 +182,7 @@ pattern are in `docs/contributing/earn-pluggability-playbook.md` §6 and ADR 000
 
 | Symptom | Cause |
 |---|---|
+| Sandbox Kamino rows name devnet vaults you do not recognise | correct — they are the real devnet shelf (Allez, Steakhouse, RockawayX, Gauntlet Frontier and friends), read on-chain from `devkRng…`, not the mainnet names |
 | Catalogue shows only Kamino rows; no Ground strategies anywhere | correct — Ground is un-surfaced (`EARN_PROVIDER_SURFACING`, §5b). The rows are still in the DB; only the reads hide them |
 | No "Set up Earn"/"Add strategy"/"Change strategy" buttons; `/deposit` shows a notice | same cause: no surfaced provider can hold a program, so the dashboard is browse-only (§5b) |
 | `POST /v1/earn/programs` → 403 "is not currently offered" | the surfacing gate, not entitlement — no `providerOverrides` lifts it (§5b) |
@@ -198,8 +199,9 @@ pattern are in `docs/contributing/earn-pluggability-playbook.md` §6 and ADR 000
 | `POST /v1/earn/programs` → 400 "needs an idempotency key" | creation is key-REQUIRED since PRO-1670: send exactly one of body `requestId` (UUIDv4) or the `Idempotency-Key` header — never both |
 | Local total ≠ Ground console total | Ground sums the whole shared account; SDP shows only the wallets your org holds (§4b) |
 | Catalogue empty right after boot | sync cron runs on the hour — seed instead of waiting |
-| Kamino rows appear disabled in the dashboard | correct: sandbox rows are `fundable: false` and render `Mainnet only`; even in production, the portfolio wizard keeps catalogue-only providers browse-only until they implement a deposit capability |
-| Kamino APY looks stale | the 5-minute metrics refresh is a separate cron — check it registered (`isEarnEnabled`), not the hourly sync |
+| Kamino rows appear disabled in the dashboard | expected, but NOT for a cluster reason any more — sandbox now catalogues real devnet vaults, so they are `fundable: true`. They stay browse-only because SDP has no deposit path for a `vault_direct` provider (`no-sdp-route`) |
+| Kamino APY is blank in sandbox | correct: the metrics endpoint is mainnet's and 404s for devnet pubkeys, so `listStrategyMetrics` returns `[]` outside production and the row renders "—" rather than a fabricated rate |
+| Kamino APY looks stale in production | the 5-minute metrics refresh is a separate cron — check it registered (`isEarnEnabled`), not the hourly sync |
 | Local API boots on 8787 despite `PORT=…` | the dev wrapper reads **`SDP_API_PORT`**, not `PORT` (scripts/dev-local.mjs) |
 | Need devnet USDC to fund a program | Circle's faucet: <https://faucet.circle.com/> — USDC + Solana Devnet (§4b) |
 
@@ -227,9 +229,23 @@ page it links is fetchable as raw markdown):
   why `keyPairCredentialDefinition`'s parameter excludes `kamino`, and why there
   is no `KAMINO_API_KEY` in env.d.ts, turbo.json or secret-keys.mjs. Do not add
   one "for consistency" — secret-keys.mjs is "every env key the SDP API reads".
-- **Mainnet only.** `/kvaults/*` takes no env parameter and there is no devnet
-  deployment. SDP catalogues the mainnet shelf into BOTH environments so sandbox
-  integrators browse the real vaults; see `hostCluster` below.
+- **TWO clusters, TWO data sources.** Production reads the mainnet REST shelf;
+  every other environment reads DEVNET VAULTS ON-CHAIN (`providers/kamino/devnet.ts`).
+  Kamino runs a separate devnet kvault program — `devkRng…`, not mainnet's
+  `KvauGM…` — carrying 21 vaults, 9 of them in the devnet USDC the Circle faucet
+  dispenses, several mirroring mainnet names (Allez, Steakhouse, RockawayX,
+  Gauntlet Frontier).
+
+  This file previously asserted "mainnet only, there is no devnet deployment" as
+  fact. It was wrong, and it cost a sandbox shelf where every row was permanently
+  `fundable: false`. The trap: `api.kamino.finance` ignores `?env=devnet` and
+  `?cluster=devnet` — both return 200 with a byte-identical mainnet payload — and
+  devnet vault metrics 404. An accepted-and-ignored parameter reads exactly like
+  support. Verify per-cluster program deployment on-chain, not via the API.
+- **No metrics outside production.** The bulk metrics endpoint is mainnet's and
+  404s for devnet pubkeys, so `listStrategyMetrics` returns `[]` there and
+  sandbox rows render no rate. Computing one would mean blending devnet Klend
+  reserve rates (an SDK-sized job) for a number that is ≈0 anyway.
 - **The registry is permissionless**, so `GET /kvaults/vaults` is a census of
   everything ever created — 170 vaults, of which ~90 stablecoin ones are dust or
   literal test vaults (`testfail4`, `vkjm_test`). `KAMINO_MIN_TVL_USD` ($100k)

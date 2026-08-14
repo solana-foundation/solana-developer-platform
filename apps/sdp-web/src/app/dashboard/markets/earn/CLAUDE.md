@@ -455,17 +455,21 @@ what hid the bug above, so a surfacing change wants one browser pass on
   A `cash` position can be a token the org never deposited on Solana, so do not
   assume positions imply a Solana deposit — only the addresses do.
 - **The catalogue shows strategies this module deliberately cannot select.**
-  Kamino is a catalogue-only provider: its K-Vaults are non-custodial (the
-  customer's own wallet deposits) and mainnet-only, and SDP catalogues them into
-  BOTH environments so readers can compare the real shelf. They reach
+  Kamino is a catalogue-only provider: its K-Vaults are non-custodial — the
+  customer's own wallet deposits. Each environment catalogues its OWN cluster's
+  vaults (production → mainnet, everything else → devnet, read on-chain), so a
+  sandbox row is a real, reachable devnet vault. They reach
   `GET /v1/earn/strategies` and the wizard's comparison table, but they must not
   advance to review because there is no program to create for them. TWO
   independent eligibility checks disable them, and both are intentional:
   - `EARN_PORTFOLIO_PROVIDER` — the existing Ground pin, which refuses selection
     for every non-portfolio provider while leaving its catalogue row visible.
   - `strategy.fundable` — the API's per-request answer to "does this instrument
-    exist on the caller's cluster". A sandbox Kamino row is
-    `hostCluster: "mainnet-beta", fundable: false` and renders "Mainnet only".
+    exist on the caller's cluster". Since Kamino catalogues per cluster this is
+    now `true` in both environments, so it no longer disables anything for
+    Kamino — the gate remains for Ground and any genuinely single-cluster
+    provider. What disables the row is `no-sdp-route`: SDP has no deposit path
+    for a `vault_direct` provider.
 
   Do not collapse visibility and eligibility. The pin is about which provider
   the flow can create a program with; `fundable` is about whether an instrument

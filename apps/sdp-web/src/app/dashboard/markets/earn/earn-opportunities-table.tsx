@@ -96,11 +96,13 @@ function OpportunityRow({ strategy }: { strategy: EarnStrategy }) {
       : depositable.kind === "asset-unsupported"
         ? t("DashboardEarn.deposit.strategyAssetUnavailableLabel")
         : depositable.kind === "no-sdp-route"
-          ? // Names the REASON, which differs by provider shape: a vault-direct
-            // vault takes deposits from the customer's own wallet and SDP simply
-            // does not route them yet, while a custodial one is not being offered
-            // at all. "Browse only" for both would tell a reader nothing about
-            // whether waiting or looking elsewhere is the move.
+          ? // Both say "not yet", never "go do it elsewhere". Depositing into a
+            // vault-direct vault THROUGH SDP is intended and simply unbuilt, so
+            // this copy must not send a reader off-platform — that would be
+            // product direction a disabled-button label has no business
+            // implying. The two strings differ only because a custodial
+            // provider we are not offering is a different "not yet" from a
+            // capability we have not shipped.
             t(
               depositable.style === "vault_direct"
                 ? "DashboardEarn.opportunities.depositDirectOnly"
