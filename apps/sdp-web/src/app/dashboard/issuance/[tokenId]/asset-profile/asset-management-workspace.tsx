@@ -167,7 +167,7 @@ export function AssetManagementWorkspace({
         onCopyTokenId={() =>
           void ops.handleCopy(token.id, t("DashboardIssuance.management.tokenIdCopied"))
         }
-        onDeploy={() => ops.deployToken()}
+        onDeploy={() => syncActiveTabInUrl("operations")}
         onUnpause={() => ops.handlePause(false)}
       />
 

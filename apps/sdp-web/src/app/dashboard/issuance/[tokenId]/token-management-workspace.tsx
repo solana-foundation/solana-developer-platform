@@ -1409,7 +1409,7 @@ export function TokenManagementWorkspace({
           if (!canDeployToken) {
             return;
           }
-          deployToken();
+          syncActiveTabInUrl("fund-management");
         }}
         onUnpause={() => handlePause(false)}
       />
