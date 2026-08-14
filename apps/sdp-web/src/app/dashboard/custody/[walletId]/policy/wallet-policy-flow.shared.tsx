@@ -7,7 +7,6 @@ import { useTranslations } from "@/i18n/provider";
 import type {
   AuthoringDefaultAction,
   AuthoringRuleAction,
-  PolicyAuthoringState,
   PolicyFlowStep,
   RestrictionCategory,
 } from "./wallet-policy-authoring";
@@ -117,12 +116,6 @@ export function toggleValue<TValue extends string>(values: TValue[], value: TVal
 export function walletDetailHref(pathname: string, walletId: string): string {
   const section = pathname.startsWith("/dashboard/custody/") ? "custody" : "wallets";
   return `/dashboard/${section}/${encodeURIComponent(walletId)}`;
-}
-
-export function operationControlCount(state: PolicyAuthoringState): number {
-  return (
-    Object.values(state.familyActions).filter(Boolean).length + state.operationTypeRules.length
-  );
 }
 
 export function hasActiveRestrictions(policy: PaymentWalletPolicy): boolean {

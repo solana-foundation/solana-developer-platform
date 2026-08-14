@@ -12,6 +12,14 @@ export {
 } from "./constants";
 export { HeliusRingsError, type HeliusRingsErrorCode } from "./errors";
 export { type RevealScope, SecretRef } from "./secrets";
+export {
+  type FailEdge,
+  failEdgeFor,
+  nextState,
+  TRANSITIONS,
+  type Transition,
+  type TransitionGuard,
+} from "./state-machine";
 export type {
   AssetBalance,
   FailureCode,
