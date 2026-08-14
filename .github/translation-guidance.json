@@ -314,6 +314,122 @@
         }
       ]
     },
+    "kk": {
+      "context": {
+        "localeName": "қазақ тілі (Қазақстан)",
+        "audience": "Kazakh-speaking Web3 developers and institutional finance operators in Kazakhstan",
+        "conventions": [
+          "Use contemporary professional Kazakh that is natural in a product interface.",
+          "Prefer clear native Kazakh terminology over unnecessary Russian or English loanwords.",
+          "Keep established protocol names, product names, abbreviations and code identifiers unchanged."
+        ]
+      },
+      "instructions": [
+        "Use a respectful tone and address the user with Сіз when direct address is necessary.",
+        "Prefer concise action labels and neutral, descriptive status messages.",
+        "Choose terminology from the approved glossary consistently across catalog namespaces.",
+        "Preserve the meaning and grammatical role of every placeholder exactly."
+      ],
+      "terminology": [
+        {
+          "source": "token / wallet / asset",
+          "preferred": "токен / әмиян / актив"
+        },
+        {
+          "source": "counterparty",
+          "preferred": "қарсы тарап",
+          "avoid": "контрагент / қарсылас / қарсы агент"
+        },
+        {
+          "source": "compliance",
+          "preferred": "талаптарға сәйкестік",
+          "avoid": "комплаенс"
+        },
+        {
+          "source": "on-chain / off-chain",
+          "preferred": "блокчейн арқылы or блокчейнде / блокчейннен тыс",
+          "note": "Choose the grammatical form that fits the sentence."
+        },
+        {
+          "source": "tokenized",
+          "preferred": "токенге айналдырылған",
+          "avoid": "токенделген / токенизацияланған"
+        },
+        {
+          "source": "transfer / payment / provider / quote",
+          "preferred": "аударым / төлем / провайдер / баға ұсынысы"
+        },
+        {
+          "source": "custody / issuance / approval / policy",
+          "preferred": "сақтау / шығару / мақұлдау / саясат",
+          "note": "Use a more descriptive phrase when a short noun would be ambiguous in context."
+        },
+        {
+          "source": "stablecoin / blockchain / staking / airdrop",
+          "preferred": "стейблкоин / блокчейн / стейкинг / эйрдроп"
+        },
+        {
+          "source": "API / RPC / webhook / Solana / SPL / USDC",
+          "preferred": "Keep these technical terms unchanged."
+        }
+      ],
+      "forbiddenTerms": [
+        {
+          "label": "контрагент",
+          "pattern": "контрагент",
+          "flags": "iu",
+          "preferred": "қарсы тарап"
+        },
+        {
+          "label": "комплаенс",
+          "pattern": "комплаенс",
+          "flags": "iu",
+          "preferred": "талаптарға сәйкестік"
+        },
+        {
+          "label": "literal token variants",
+          "pattern": "(?:жетон|таңбалауыш|токендел|токенизац|таңбаланған)",
+          "flags": "iu",
+          "preferred": "токен / токенге айналдырылған"
+        },
+        {
+          "label": "жалбыз",
+          "pattern": "жалбыз",
+          "flags": "iu",
+          "preferred": "шығару / токен шығару мекенжайы"
+        },
+        {
+          "label": "mint as money or currency",
+          "pattern": "ақша мекенжай|теңге сарай|Актив немесе теңге",
+          "flags": "iu",
+          "preferred": "токен шығару мекенжайы"
+        },
+        {
+          "label": "API перне",
+          "pattern": "API перне",
+          "flags": "iu",
+          "preferred": "API кілті"
+        },
+        {
+          "label": "стабилкоин / стабелькоин",
+          "pattern": "стабилкоин|стабелькоин",
+          "flags": "iu",
+          "preferred": "стейблкоин"
+        },
+        {
+          "label": "informal сен address",
+          "pattern": "(?<!\\p{L})сен(?:ің|дер|дерің|ге|де|ді|мен)?(?!\\p{L})",
+          "flags": "iu",
+          "preferred": "Сіз"
+        },
+        {
+          "label": "inconsistent custody terminology",
+          "pattern": "(?:сақтаушы|қамқоршылық) (?:әмиян|провайдер)",
+          "flags": "iu",
+          "preferred": "кастодиандық әмиян / кастодиандық провайдер"
+        }
+      ]
+    },
     "pt": {
       "context": {
         "localeName": "português (Brasil)",
@@ -472,6 +588,116 @@
           "pattern": "\\bcunh(?:ar|agem)\\b",
           "flags": "iu",
           "preferred": "mint"
+        }
+      ]
+    },
+    "ru": {
+      "context": {
+        "localeName": "русский (Казахстан)",
+        "audience": "Russian-speaking Web3 developers and institutional finance operators in Kazakhstan",
+        "conventions": [
+          "Use natural professional Russian suitable for a financial developer product.",
+          "Prefer established Russian financial and Web3 terminology over literal calques.",
+          "Keep protocol names, product names, abbreviations and code identifiers unchanged."
+        ]
+      },
+      "instructions": [
+        "Use a respectful tone and address the user with вы when direct address is necessary.",
+        "Prefer concise action labels and neutral, descriptive status messages.",
+        "Keep terminology consistent across catalog namespaces.",
+        "Preserve the meaning and grammatical role of every placeholder exactly."
+      ],
+      "terminology": [
+        {
+          "source": "token / wallet / asset",
+          "preferred": "токен / кошелек / актив"
+        },
+        {
+          "source": "counterparty / compliance",
+          "preferred": "контрагент / соответствие требованиям",
+          "note": "Use комплаенс only where it is clearly the established short product label."
+        },
+        {
+          "source": "on-chain / off-chain",
+          "preferred": "ончейн or в блокчейне / офчейн or вне блокчейна",
+          "note": "Choose the concise technical form for labels and the descriptive form for explanatory prose."
+        },
+        {
+          "source": "tokenized",
+          "preferred": "токенизированный"
+        },
+        {
+          "source": "transfer / payment / provider / quote",
+          "preferred": "перевод / платёж / провайдер / котировка"
+        },
+        {
+          "source": "custody / issuance / approval / policy",
+          "preferred": "кастодиальное хранение or хранение / выпуск / одобрение / политика",
+          "note": "Choose the form that is clearest in context."
+        },
+        {
+          "source": "stablecoin / blockchain / staking / airdrop",
+          "preferred": "стейблкоин / блокчейн / стейкинг / эйрдроп"
+        },
+        {
+          "source": "API / RPC / webhook / Solana / SPL / USDC",
+          "preferred": "Keep these technical terms unchanged."
+        }
+      ],
+      "forbiddenTerms": [
+        {
+          "label": "API keyboard-key wording",
+          "pattern": "клавиш.{0,12}API|API.{0,12}клавиш",
+          "flags": "iu",
+          "preferred": "ключ API"
+        },
+        {
+          "label": "mint as the herb",
+          "pattern": "(?<!\\p{L})мят(?:а|ы|ный|ного|ности)(?!\\p{L})",
+          "flags": "iu",
+          "preferred": "выпуск / адрес выпуска токена"
+        },
+        {
+          "label": "mint as a coin mint",
+          "pattern": "монетн(?:ый|ого) (?:двор|адрес)",
+          "flags": "iu",
+          "preferred": "выпуск / адрес выпуска токена"
+        },
+        {
+          "label": "жетон",
+          "pattern": "жетон",
+          "flags": "iu",
+          "preferred": "токен"
+        },
+        {
+          "label": "поставщик for provider",
+          "pattern": "поставщик",
+          "flags": "iu",
+          "preferred": "провайдер"
+        },
+        {
+          "label": "informal ты address",
+          "pattern": "(?<!\\p{L})(?:ты|тебя|тебе|твой|твоя|твои|хочешь)(?!\\p{L})",
+          "flags": "iu",
+          "preferred": "вы"
+        },
+        {
+          "label": "депозитарный for custody",
+          "pattern": "депозитарн",
+          "flags": "iu",
+          "preferred": "кастодиальный"
+        },
+        {
+          "label": "трансфер wording",
+          "pattern": "трансфер",
+          "flags": "iu",
+          "preferred": "перевод"
+        },
+        {
+          "label": "утверждающий for approver",
+          "pattern": "утверждающ",
+          "flags": "iu",
+          "preferred": "согласующий"
         }
       ]
     }
