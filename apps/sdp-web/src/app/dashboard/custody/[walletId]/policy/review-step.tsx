@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { shortenAddress } from "@/app/dashboard/payments/payments-overview.utils";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
+import { PolicyAssetBadge } from "./policy-asset-badge";
 import {
   type PolicyAssetOption,
   type PolicyAuthoringState,
@@ -38,11 +39,15 @@ export function ReviewStep({
     return action ? [{ family, action }] : [];
   });
 
-  const limitLines = [
-    state.maxTransferAmount.trim()
-      ? t("DashboardCustody.policyReviewPerTransaction", { amount: state.maxTransferAmount })
-      : null,
-  ].filter((value): value is string => Boolean(value));
+  const configuredLimits = state.categories.includes("limits")
+    ? state.limits.flatMap((limit) => {
+        const amount = limit.max.trim();
+        if (!amount) return [];
+        const option = assetByMint.get(limit.asset);
+        const asset = option ? option.token : shortenAddress(limit.asset);
+        return [{ amount, asset, limit, option }];
+      })
+    : [];
 
   const reviewRows: Array<{
     label: string;
@@ -57,11 +62,14 @@ export function ReviewStep({
     },
     {
       label: t("DashboardCustody.policyReviewTransferLimits"),
-      value: limitLines.length ? (
+      value: configuredLimits.length ? (
         <span className="block space-y-0.5">
-          {limitLines.map((line) => (
-            <span key={line} className="block">
-              {line}
+          {configuredLimits.map(({ amount, asset, limit, option }) => (
+            <span key={limit.asset} className="flex items-center gap-2" title={limit.asset}>
+              <span>
+                {t("DashboardCustody.policyReviewPerTransactionAsset", { amount, asset })}
+              </span>
+              <PolicyAssetBadge mint={limit.asset} option={option} />
             </span>
           ))}
         </span>
@@ -76,9 +84,12 @@ export function ReviewStep({
           {state.assets.map((mint) => {
             const option = assetByMint.get(mint);
             return (
-              <span key={mint} className="block" title={mint}>
-                {option?.token ?? t("DashboardCustody.policyCustomMint")}
-                <span className="text-muted"> · {shortenAddress(mint)}</span>
+              <span key={mint} className="flex items-center gap-2" title={mint}>
+                <span>
+                  {option ? option.token : t("DashboardCustody.policyCustomMint")}
+                  <span className="text-muted"> · {shortenAddress(mint)}</span>
+                </span>
+                <PolicyAssetBadge mint={mint} option={option} />
               </span>
             );
           })}

@@ -1,12 +1,22 @@
 "use client";
 
+import { X } from "lucide-react";
+import { useMemo } from "react";
+import { shortenAddress } from "@/app/dashboard/payments/payments-overview.utils";
+import { TokenMark } from "@/components/token-mark";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTranslations } from "@/i18n/provider";
 import { AssetEditor } from "./asset-editor";
-import type {
-  PolicyAssetOption,
-  PolicyAuthoringState,
-  validatePolicyState,
+import { AssetSearchCombobox } from "./asset-search-combobox";
+import { PolicyAssetBadge } from "./policy-asset-badge";
+import {
+  isValidDecimal,
+  isValidSolanaAddress,
+  type PolicyAssetOption,
+  type PolicyAuthoringState,
+  type PolicyLimitInput,
+  type validatePolicyState,
 } from "./wallet-policy-authoring";
 import { EmptyStepState, FormSection } from "./wallet-policy-flow.shared";
 
@@ -24,6 +34,18 @@ export function LimitsAndAssetsStep({
   const t = useTranslations();
   const showLimits = state.categories.includes("limits");
   const showAssets = state.categories.includes("assets");
+  const assetByMint = useMemo(
+    () => new Map(assetOptions.map((asset) => [asset.mint, asset])),
+    [assetOptions]
+  );
+  const limitedMints = state.limits.map((limit) => limit.asset);
+  const seenLimitAssets = new Set<string>();
+  const duplicateLimitAssets = new Set<string>();
+  for (const limit of state.limits) {
+    const asset = limit.asset.trim();
+    if (seenLimitAssets.has(asset)) duplicateLimitAssets.add(asset);
+    seenLimitAssets.add(asset);
+  }
 
   if (!showLimits && !showAssets) return <EmptyStepState />;
 
@@ -34,17 +56,59 @@ export function LimitsAndAssetsStep({
           title={t("DashboardCustody.policyTransferLimits")}
           description={t("DashboardCustody.policyTransferLimitsHint")}
         >
-          <div className="sm:max-w-xs">
-            <AmountField
-              id="policy-per-transaction"
-              label={t("DashboardCustody.policyPerTransaction")}
-              value={state.maxTransferAmount}
-              error={errors.maxTransferAmount}
-              onChange={(value) =>
-                setPolicyState((current) => ({ ...current, maxTransferAmount: value }))
-              }
-            />
-          </div>
+          <AssetSearchCombobox
+            assetOptions={assetOptions}
+            selectedMints={limitedMints}
+            optionsId="policy-limit-asset-options"
+            onToggle={(mint) =>
+              setPolicyState((current) => ({
+                ...current,
+                limits: current.limits.some((limit) => limit.asset === mint)
+                  ? current.limits.filter((limit) => limit.asset !== mint)
+                  : [...current.limits, { asset: mint, max: "" }],
+              }))
+            }
+            onAddCustomMint={(mint) =>
+              setPolicyState((current) => ({
+                ...current,
+                limits: [...current.limits, { asset: mint, max: "" }],
+              }))
+            }
+          />
+
+          {state.limits.length > 0 ? (
+            <div className="mt-5">
+              <p className="text-xs font-medium text-muted">
+                {t("DashboardCustody.policySelectedAssets")}
+              </p>
+              <div className="mt-2 divide-y divide-border-default border-t border-border-default">
+                {state.limits.map((limit, index) => (
+                  <PolicyLimitRow
+                    key={limit.asset}
+                    limit={limit}
+                    option={assetByMint.get(limit.asset)}
+                    isDuplicate={duplicateLimitAssets.has(limit.asset.trim())}
+                    onMaxChange={(max) =>
+                      setPolicyState((current) => ({
+                        ...current,
+                        limits: current.limits.map((currentLimit, currentIndex) =>
+                          currentIndex === index ? { ...currentLimit, max } : currentLimit
+                        ),
+                      }))
+                    }
+                    onRemove={() =>
+                      setPolicyState((current) => ({
+                        ...current,
+                        limits: current.limits.filter(
+                          (_currentLimit, currentIndex) => currentIndex !== index
+                        ),
+                      }))
+                    }
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
         </FormSection>
       ) : null}
 
@@ -60,39 +124,80 @@ export function LimitsAndAssetsStep({
   );
 }
 
-function AmountField({
-  id,
-  label,
-  value,
-  error,
-  onChange,
+/**
+ * One controlled per-asset limit row.
+ *
+ * @param props - Limit value, catalogue metadata, duplicate flag, and row callbacks.
+ * @returns The asset identity, decimal input, validation detail, and remove action.
+ */
+function PolicyLimitRow({
+  limit,
+  option,
+  isDuplicate,
+  onMaxChange,
+  onRemove,
 }: {
-  id: string;
-  label: string;
-  value: string;
-  error?: "invalid_decimal" | "assets_required";
-  onChange: (value: string) => void;
+  limit: PolicyLimitInput;
+  option: PolicyAssetOption | undefined;
+  isDuplicate: boolean;
+  onMaxChange: (max: string) => void;
+  onRemove: () => void;
 }) {
   const t = useTranslations();
+  const label = option ? option.token : t("DashboardCustody.policyCustomMint");
+  const secondary = option?.name ? option.name : shortenAddress(limit.asset);
+  const invalidAsset = !isValidSolanaAddress(limit.asset);
+  const invalidMax = limit.max.trim() !== "" && !isValidDecimal(limit.max);
+
   return (
-    <label htmlFor={id} className="block">
-      <span className="mb-2 block text-sm font-medium text-primary">{label}</span>
-      <Input
-        id={id}
-        value={value}
-        inputMode="decimal"
-        placeholder="0.00"
-        size="xl"
-        aria-invalid={Boolean(error)}
-        onChange={(event) => onChange(event.target.value)}
+    <div className="flex min-h-14 items-center gap-3 py-2.5 last:pb-0">
+      <TokenMark
+        mint={limit.asset}
+        symbol={option ? option.token : undefined}
+        logoUrl={option ? option.imageUrl : undefined}
+        size="md"
       />
-      {error ? (
-        <span className="mt-2 block text-sm text-error">
-          {error === "assets_required"
-            ? t("DashboardCustody.policyLimitRequiresAssets")
-            : t("DashboardCustody.policyInvalidDecimal")}
+      <span className="min-w-0 flex-1">
+        <span className="block text-base font-medium text-primary">{label}</span>
+        <span className="block truncate text-sm text-muted" title={limit.asset}>
+          {secondary}
         </span>
-      ) : null}
-    </label>
+        {invalidAsset ? (
+          <span className="mt-1 block text-xs text-error">
+            {t("DashboardCustody.policyInvalidMint")}
+          </span>
+        ) : isDuplicate ? (
+          <span className="mt-1 block text-xs text-error">
+            {t("DashboardCustody.policyDuplicateAsset")}
+          </span>
+        ) : null}
+      </span>
+      <PolicyAssetBadge mint={limit.asset} option={option} />
+      <span className="w-32 shrink-0">
+        <Input
+          value={limit.max}
+          inputMode="decimal"
+          placeholder={t("DashboardCustody.policyAmountPlaceholder")}
+          className="w-32 text-right"
+          aria-label={`${t("DashboardCustody.policyPerTransaction")} ${label}`}
+          aria-invalid={invalidMax}
+          onChange={(event) => onMaxChange(event.target.value)}
+        />
+        {invalidMax ? (
+          <span className="mt-1 block text-xs text-error">
+            {t("DashboardCustody.policyInvalidDecimal")}
+          </span>
+        ) : null}
+      </span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        aria-label={t("DashboardCustody.policyRemoveAsset", { asset: label })}
+        onClick={onRemove}
+      >
+        <X className="size-4" />
+      </Button>
+    </div>
   );
 }
