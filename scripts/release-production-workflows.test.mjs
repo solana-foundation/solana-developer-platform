@@ -15,13 +15,20 @@ const webWorkflow = fs.readFileSync(
 );
 
 test("release publication passes an immutable identity to both production deployments", () => {
+  const publishJob = releaseWorkflow.slice(
+    releaseWorkflow.indexOf("  publish-release:"),
+    releaseWorkflow.indexOf("  deploy-api-production:")
+  );
+
+  assert.match(publishJob, /ref: \$\{\{ github\.sha \}\}/);
+  assert.doesNotMatch(publishJob, /ref: main/);
   assert.match(
-    releaseWorkflow,
+    publishJob,
     /publish-release:[\s\S]*outputs:\n\s+release_sha: \$\{\{ steps\.release\.outputs\.release_sha \}\}\n\s+release_tag: \$\{\{ steps\.release\.outputs\.release_tag \}\}/
   );
-  assert.match(releaseWorkflow, /- name: Resolve published release\n\s+id: release/);
-  assert.match(releaseWorkflow, /git rev-parse "\$\{release_tag\}\^\{commit\}"/);
-  assert.match(releaseWorkflow, /if \[\[ "\$\{release_sha\}" != "\$\{GITHUB_SHA\}" \]\]/);
+  assert.match(publishJob, /- name: Resolve published release\n\s+id: release/);
+  assert.match(publishJob, /git rev-parse "\$\{release_tag\}\^\{commit\}"/);
+  assert.match(publishJob, /if \[\[ "\$\{release_sha\}" != "\$\{GITHUB_SHA\}" \]\]/);
 
   for (const [job, workflow] of [
     ["deploy-api-production", "deploy-sdp-api-gcp-prod.yml"],
