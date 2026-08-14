@@ -276,6 +276,27 @@ describe("distillKaminoVault", () => {
       assert.equal(result.outcome, "catalogued");
     });
 
+    /**
+     * Kamino serializes small balances in EXPONENT form — 28 of the 173 vaults
+     * on the live shelf report `tokensAvailableUsd` as e.g. `"9.9984972e-7"`.
+     * A plain-decimal-only parser reads those as "no value" and drops a real
+     * balance out of the TVL, so `kaminoUsd` accepts the full numeric grammar
+     * while the APY path keeps the strict regex its string-slicing needs.
+     */
+    it("counts exponent-form balances, which the live API really sends", () => {
+      const result = distillKaminoVault(
+        vault(),
+        metrics({ tokensAvailableUsd: "9.9984972e-7", tokensInvestedUsd: "200000" })
+      );
+
+      assert.equal(result.outcome, "catalogued");
+      // Strictly greater than the invested leg alone: the idle balance was
+      // counted rather than silently discarded. Asserted as a property, not a
+      // literal — the exact sum is not representable as a float.
+      const tvlUsd = result.outcome === "catalogued" ? result.snapshot.riskMetadata?.tvlUsd : 0;
+      assert.ok(typeof tvlUsd === "number" && tvlUsd > 200_000);
+    });
+
     it("reports the token reason before the size reason, so the census reads by shelf", () => {
       assert.equal(
         dropped(vault({ tokenMint: SOL_MINT }), metrics({ tokensAvailableUsd: "0" })),
@@ -343,11 +364,8 @@ describe("KaminoEarnClient.listStrategies", () => {
       { body: { result: [metrics()], paginationToken: "forever" } }
     );
 
-    // Bounded (the cap stops the spin) AND loud. Returning the pages it did
-    // read would be worse than failing: a vault with no metrics row is dropped
-    // as `no_metrics`, and the catalogue sync DELETES rows a provider no longer
-    // lists — so a short map delists every vault whose page went unread. The
-    // throw makes the sync skip the pass instead.
+    // Bounded AND loud: a short map would silently mass-delist — see
+    // `_loadMetricsByVault`.
     await assert.rejects(client.listStrategies(productionCtx), /refusing a partial shelf/);
 
     // 1 vault-list call + the page cap. Without the cap this never returns.

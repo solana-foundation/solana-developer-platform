@@ -36,6 +36,7 @@ import {
   KAMINO_MIN_TVL_USD,
   type KaminoCatalogueDropReason,
   KaminoEarnClient,
+  kaminoTvlUsd,
 } from "@sdp/earn/providers/kamino/client";
 import { earnCuratorLabel, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import { z } from "zod";
@@ -275,12 +276,11 @@ async function runFetch(): Promise<void> {
   const rows: VaultRow[] = vaults.map((vault) => {
     const metrics = metricsByVault.get(vault.address);
     const distilled = distillKaminoVault(vault, metrics);
-    const tvlParts = [metrics?.tokensAvailableUsd, metrics?.tokensInvestedUsd].map((value) =>
-      value == null ? Number.NaN : Number(value)
-    );
-    const tvlUsd = tvlParts.every(Number.isNaN)
-      ? null
-      : tvlParts.reduce((sum, part) => sum + (Number.isNaN(part) ? 0 : part), 0);
+    // Shared with the client, not re-derived: the census prints the TVL beside
+    // each row and the floor's verdict in the same table, so the two must be
+    // the same number. The hand-rolled copy this replaced disagreed on the
+    // exponent-form balances Kamino really sends.
+    const tvlUsd = (metrics && kaminoTvlUsd(metrics)) ?? null;
 
     return {
       address: vault.address,

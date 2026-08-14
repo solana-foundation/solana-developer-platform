@@ -122,7 +122,7 @@ interface KaminoVaultState {
   performanceFeeBps?: number | null;
 }
 
-interface KaminoVault {
+export interface KaminoVault {
   /** Vault pubkey — the catalogue's `providerReference`. */
   address: string;
   state: KaminoVaultState;
@@ -133,7 +133,7 @@ interface KaminoVault {
  * often at absurd precision (`apy` runs to 21 places), so nothing here is
  * parsed into a float before it has to be.
  */
-interface KaminoVaultMetrics {
+export interface KaminoVaultMetrics {
   /** Vault pubkey this row describes — the join key back to `KaminoVault`. */
   kvault: string;
   /** Current blended APY as a decimal fraction string ("0.0592…" = 5.92%). */
@@ -165,7 +165,33 @@ const KAMINO_METRICS_MAX_PAGES = 20;
 
 // --- Normalization helpers ---
 
-const KAMINO_DECIMAL = /^-?\d+(\.\d+)?$/;
+/**
+ * Plain decimal, NO exponent — the shape `truncateKaminoApy` can slice.
+ *
+ * Deliberately narrower than what Kamino's numeric strings can be (see
+ * `kaminoUsd`): a rate is truncated by string surgery, so `1e-7` has no digit
+ * at the position the slice would cut and must be refused rather than
+ * mis-read. Every `apy` observed on the live shelf is plain decimal.
+ */
+const KAMINO_PLAIN_DECIMAL = /^-?\d+(\.\d+)?$/;
+
+/**
+ * Parse a USD figure from Kamino, accepting the FULL numeric grammar it emits.
+ *
+ * Kamino serializes small balances in exponent form — `tokensAvailableUsd`
+ * comes back as `"9.9984972e-7"` on 28 of the 173 vaults on the live shelf —
+ * so the plain-decimal regex above would silently read those as "no value" and
+ * drop a real balance out of the vault's TVL. These are money figures headed
+ * for a float sum and a size comparison, not for string surgery, so `Number`
+ * is the right parser; the guards reject the two inputs it gets wrong
+ * (`Number("")` is 0, and `Infinity` is not a size).
+ */
+function kaminoUsd(value: string | null | undefined): number | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
 
 /** APY decimal places kept. Six is a hundredth of a basis point — well past
  * anything a rate display or a yield calculation needs, and it keeps the stored
@@ -186,7 +212,7 @@ const APY_DECIMAL_PLACES = 6;
  */
 export function truncateKaminoApy(value: string | null | undefined): string | undefined {
   const trimmed = value?.trim();
-  if (!trimmed || !KAMINO_DECIMAL.test(trimmed)) {
+  if (!trimmed || !KAMINO_PLAIN_DECIMAL.test(trimmed)) {
     return undefined;
   }
   const point = trimmed.indexOf(".");
@@ -204,12 +230,14 @@ export function truncateKaminoApy(value: string | null | undefined): string | un
  * undefined when neither figure parses, which the distillation treats as
  * "TVL unprovable" and drops — a vault we cannot size cannot clear a size
  * floor.
+ *
+ * Exported for the catalogue-inventory script, which prints the TVL beside each
+ * row: the census must report the same number the admission gate judged, so it
+ * shares this rather than re-deriving it (same reason Ground exports
+ * `classifySourceKind`/`deriveCurator`).
  */
-function kaminoTvlUsd(metrics: KaminoVaultMetrics): number | undefined {
-  const parts = [metrics.tokensAvailableUsd, metrics.tokensInvestedUsd].map((value) => {
-    const trimmed = value?.trim();
-    return trimmed && KAMINO_DECIMAL.test(trimmed) ? Number(trimmed) : undefined;
-  });
+export function kaminoTvlUsd(metrics: KaminoVaultMetrics): number | undefined {
+  const parts = [metrics.tokensAvailableUsd, metrics.tokensInvestedUsd].map(kaminoUsd);
   if (parts.every((part) => part === undefined)) {
     return undefined;
   }
@@ -429,10 +457,8 @@ export class KaminoEarnClient extends StubEarnClient implements EarnLiveMetricsP
       page += 1;
     } while (paginationToken && page < KAMINO_METRICS_MAX_PAGES);
 
-    // Hit the cap with a live token: we cannot say what the shelf holds, so we
-    // must not answer as if we could. This is the exact case the cap exists for
-    // (a server that always echoes a token), and refusing turns it into a
-    // skipped pass instead of a silent mass-delisting.
+    // A live token at the cap means the shelf is unfinished — refuse it rather
+    // than answer with a partial map (see this method's doc).
     if (paginationToken) {
       throw providerUnavailable(
         `Kamino metrics pagination exceeded ${KAMINO_METRICS_MAX_PAGES} pages; refusing a partial shelf`
@@ -491,5 +517,3 @@ export class KaminoEarnClient extends StubEarnClient implements EarnLiveMetricsP
     });
   }
 }
-
-export type { KaminoVault, KaminoVaultMetrics, KaminoVaultState };

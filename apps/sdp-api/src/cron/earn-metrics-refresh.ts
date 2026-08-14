@@ -18,17 +18,10 @@
  *   volatile risk metadata and nothing else, and the metadata is MERGED so
  *   slow-moving fields the sync owns (curator above all) survive.
  *
- * Why refresh into the DB rather than read live at request time: the strategies
- * route reads exactly ONE source for the state it reports (ADR 0002 addendum),
- * so overlaying live figures onto stored rows would blend two sources on the
- * one surface that must not. Freshness comes from cadence instead — the route
- * stays a plain DB read, and every consumer sees the same numbers.
- *
- * Only providers implementing the optional live-metrics capability take part
- * (`supportsLiveMetrics`), so this is a registry change, never a named list.
- * Ground does not implement it: its rates come from the same paged
- * yield-sources endpoint the catalogue uses, so a five-minute pass would re-pay
- * the whole catalogue cost for the rate alone.
+ * Participation is by capability (`supportsLiveMetrics`), so this is a registry
+ * change and never a named list. For why this is a write pass rather than a
+ * live read, and which providers should not implement it, see
+ * `EarnLiveMetricsProvider` in @sdp/earn/types.
  */
 
 import { EARN_PROVIDER_CLIENTS, SdpEarnError, supportsLiveMetrics } from "@sdp/earn";
@@ -157,18 +150,16 @@ export interface EarnMetricsRefreshDeps {
 }
 
 export function runEarnMetricsRefresh(deps: EarnMetricsRefreshDeps): void {
-  const work = () => refreshEarnStrategyMetrics(deps.env);
-
-  // Never invoke `work` eagerly — a throw before the first await must become a
-  // rejected promise the BackgroundRunner can track, not propagate to the
-  // runtime entrypoint. Same contract as runEarnCatalogueSync.
-  const promise = deps.observability
-    ? deps.observability.withMonitor(EARN_METRICS_REFRESH_MONITOR, work, {
-        schedule: { type: "crontab", value: EARN_METRICS_REFRESH_CRON },
-      })
-    : Promise.resolve().then(work);
-
-  deps.bg.run(promise);
+  // Reuses the managed tick verbatim, which the catalogue sync deliberately
+  // cannot: ITS tick claims a Redis slot the in-process scheduler must not
+  // touch, so the two paths there differ. This pass is unslotted (see the
+  // tick's docstring), leaving nothing for the two to disagree about.
+  //
+  // `runEarnMetricsRefreshTick` is async, so a throw before its first await is
+  // already a rejected promise the BackgroundRunner can track rather than one
+  // propagating into the runtime entrypoint — the invariant the hand-rolled
+  // `Promise.resolve().then(work)` used to buy.
+  deps.bg.run(runEarnMetricsRefreshTick(deps.env, deps.observability));
 }
 
 /**

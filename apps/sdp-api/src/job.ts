@@ -93,16 +93,11 @@ export async function runCronJob(): Promise<void> {
     // its own Sentry monitor, so a sync failure never masquerades as a
     // reconciliation failure (and vice versa).
     if (isEarnEnabled(env)) {
-      // The metrics refresh runs FIRST and unslotted: this job's five-minute
-      // schedule IS its cadence, so every tick refreshes rates, while the
-      // catalogue sync below still claims its hourly slot and skips the other
-      // eleven ticks. Ordered first so an unusually slow catalogue pass cannot
-      // eat the tick and leave rates stale — refresh is the cheap half (one
-      // bulk call per capable provider) and the half with a freshness promise.
-      // Via the monitored tick, not the bare function: the refresh is the half
-      // with a freshness PROMISE, so "it silently stopped running" is its worst
-      // failure and exactly what a Sentry cron monitor catches. Its own monitor,
-      // like the catalogue sync's, so neither masquerades as the other.
+      // Unslotted — this job's five-minute schedule IS its cadence (see
+      // runEarnMetricsRefreshTick's docstring) — and ordered FIRST so a slow
+      // catalogue pass cannot eat the tick and leave rates stale. That
+      // freshness promise is also why it goes through the MONITORED tick:
+      // "it silently stopped running" is this pass's worst failure.
       await runEarnMetricsRefreshTick(env, sentryEnabled ? nodeObservability : undefined).catch(
         (error: unknown) => {
           // Never fails the job: the refresh degrades per provider internally,
