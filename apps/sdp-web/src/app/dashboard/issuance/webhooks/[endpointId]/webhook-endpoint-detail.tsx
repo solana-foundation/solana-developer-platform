@@ -137,11 +137,13 @@ export function WebhookEndpointDetail({
                   ? t("DashboardWebhooks.disable")
                   : t("DashboardWebhooks.enable")}
               </Button>
+              {/* Same quiet chrome as its neighbours — the destructive intent is carried by
+                  the red icon alone, and the confirm modal is where the warning belongs. */}
               <Button
                 type="button"
-                variant="destructive"
+                variant="outline"
                 size="sm"
-                iconLeft={<Trash2Icon className="size-3.5" />}
+                iconLeft={<Trash2Icon className="size-3.5 text-error" />}
                 onClick={() => actions.requestDelete(endpoint)}
               >
                 {t("DashboardWebhooks.delete")}
