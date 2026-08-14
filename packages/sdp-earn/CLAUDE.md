@@ -323,7 +323,14 @@ rates come from the same paged endpoint the catalogue uses.
 
 ## Conventions
 
-- New provider = subclass `providers/stub.ts` (`StubEarnClient`), register in
+- **Adding a provider: follow the runbook, not this bullet.**
+  `docs/contributing/earn-pluggability-playbook.md` §4 is the ordered checklist
+  and the only place that covers the whole chain — shared types, client,
+  registry, package export, availability (keyed vs keyless), `hostCluster`,
+  migrations, sdp-infra secrets, the **dashboard surfaces** (§4d), the
+  verification commands (§4e), and a what-breaks-if-you-skip-it table. The steps
+  below are the summary; the layers people actually miss are the last three.
+  New provider = subclass `providers/stub.ts` (`StubEarnClient`), register in
   `EARN_PROVIDER_CLIENTS`, add the `./providers/<id>/client` package export.
   A registry-consistency test in src/index.test.ts fails if any of these is
   missing for an id in `EARN_PROVIDERS`.

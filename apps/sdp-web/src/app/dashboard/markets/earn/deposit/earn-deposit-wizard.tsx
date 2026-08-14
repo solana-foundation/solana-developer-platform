@@ -11,7 +11,6 @@ import { useTranslations } from "@/i18n/provider";
 import { formatApy } from "../earn-format";
 import {
   createEarnProgram,
-  EARN_PORTFOLIO_PROVIDER,
   type EarnProgramWriteInput,
   findProgram,
   retargetEarnProgram,
@@ -25,6 +24,7 @@ import {
   availableTokens,
   defaultStrategyFilters,
   type EarnStrategyFilters,
+  isStrategySelectable,
   singleStrategyAllocation,
   visibleStrategies,
 } from "./earn-deposit-model";
@@ -273,13 +273,13 @@ export function EarnDepositWizard({
   const { wallets, error: walletsError, isLoading: walletsLoading } = useEarnFundingWallets();
   const { state: programState, error: programsError, refresh: refreshProgram } = useEarnPrograms();
 
-  // The PUT validates yield sources against the pinned provider's active
-  // catalogue, so the flow only ever offers those rows.
+  // The whole active catalogue, every provider — the table shows what SDP
+  // serves. Rows the flow cannot start a program with are rendered browse-only
+  // (see `strategyUnavailability`) rather than dropped, which is what made the
+  // Kamino vaults invisible here. Selection is separately guarded below, so a
+  // browse-only row can never reach the confirm the API would refuse.
   const liveStrategies = useMemo(
-    () =>
-      (catalogue ?? []).filter(
-        (strategy) => strategy.provider === EARN_PORTFOLIO_PROVIDER && strategy.status === "active"
-      ),
+    () => (catalogue ?? []).filter((strategy) => strategy.status === "active"),
     [catalogue]
   );
 
@@ -302,8 +302,15 @@ export function EarnDepositWizard({
   );
 
   const selectedWallet = (wallets ?? []).find((wallet) => wallet.id === walletId);
+  /**
+   * SELECTABLE, not merely visible. The table now lists browse-only rows
+   * (another provider's vault, or one that does not exist on this cluster), and
+   * resolving the selection against the visible list alone would let a stale
+   * `?strategy=<id>` deep-link — or any future row that becomes browse-only —
+   * carry a row the confirm can only 501 on straight through to review.
+   */
   const selectedStrategy: EarnStrategy | undefined = browsable.find(
-    (strategy) => strategy.id === strategyId
+    (strategy) => strategy.id === strategyId && isStrategySelectable(strategy)
   );
 
   /**

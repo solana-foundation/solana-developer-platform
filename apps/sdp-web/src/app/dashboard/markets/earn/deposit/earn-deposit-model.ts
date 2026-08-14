@@ -60,36 +60,86 @@ export function defaultStrategyFilters(): EarnStrategyFilters {
 }
 
 /**
- * Strategies that can actually be funded: their deposit mint is routable AND
- * the API says the instrument exists on this environment's cluster.
+ * Providers this flow can create a PROGRAM with, i.e. those exposing SDP the
+ * portfolio-wallet capability.
  *
- * The `fundable` half is not decoration. The catalogue lists what EXISTS, which
- * since Kamino is a larger set than what can take a deposit here — Kamino's
- * K-Vaults are mainnet-only and are catalogued into sandbox too, so an
- * integrator can browse the real shelf. Offering one of those rows in the
- * wizard would walk a user to a confirm step that provisions nothing.
+ * Deliberately a set, not the single `EARN_PORTFOLIO_PROVIDER` pin: the
+ * catalogue now lists providers the flow cannot fund, so "which provider do we
+ * post to" and "which rows may be selected" stopped being the same question.
+ * Kamino is absent because a K-Vault is non-custodial — the customer's own
+ * wallet deposits on-chain, so there is no program for SDP to create and
+ * `POST /v1/earn/programs` answers 501 for it by capability detection.
  *
- * The API derives the flag per request (`hostCluster` vs. the caller's
- * environment) and its own `assertKnownYieldSources` refuses the allocation
- * regardless, so this is the second of two independent guards, not the only
- * one. Never invert it into "hide unless known-bad".
+ * This mirrors a server fact rather than owning it: the API is authoritative
+ * and refuses regardless. Keeping the list here is what stops the wizard
+ * offering a row whose confirm could only fail. Add an id once its execution
+ * path actually exists, never to make a vault look available.
+ */
+export const EARN_PROGRAM_PROVIDERS: readonly string[] = ["ground"];
+
+/** Why a catalogued strategy cannot start a program from this flow. */
+export type StrategyUnavailability = "not_on_this_cluster" | "no_program_support";
+
+/**
+ * The reason a row is browse-only, or undefined when it can be selected.
+ *
+ * Order matters: the cluster answer is checked FIRST because it is the more
+ * specific and more actionable of the two. A Kamino vault in sandbox is both
+ * off-cluster and unsupported; "this exists on mainnet only" tells the reader
+ * something they can act on (switch environment), while "not available through
+ * SDP" reads as permanent and is what they should see in production.
+ */
+export function strategyUnavailability(strategy: EarnStrategy): StrategyUnavailability | undefined {
+  // `=== false`, not falsy — see the version-skew note on browsableStrategies.
+  if (strategy.fundable === false) return "not_on_this_cluster";
+  if (!EARN_PROGRAM_PROVIDERS.includes(strategy.provider)) return "no_program_support";
+  return undefined;
+}
+
+/** A strategy the flow can actually start a program with. */
+export function isStrategySelectable(strategy: EarnStrategy): boolean {
+  return strategyUnavailability(strategy) === undefined;
+}
+
+/**
+ * Every strategy the catalogue table LISTS — all providers, all clusters.
+ *
+ * The catalogue and the fundable set are different sets, and since Kamino the
+ * difference is the point: SDP serves the communal vaults, so the shelf shows
+ * what exists. Rows that cannot start a program are rendered browse-only with
+ * the reason from `strategyUnavailability`, never silently dropped — hiding
+ * them made the whole Kamino integration invisible in the dashboard.
+ *
+ * The token lane is still required: it drives the token column and filter, and
+ * a row without one has nothing to render there.
+ */
+export function browsableStrategies(strategies: readonly EarnStrategy[]): readonly EarnStrategy[] {
+  return strategies.filter((strategy) => strategyToken(strategy) !== undefined);
+}
+
+/**
+ * Strategies that can actually be funded: routable deposit mint, a provider
+ * that supports programs, and an instrument the API says exists on this
+ * environment's cluster.
+ *
+ * Drives the onboarding hero's counts — NOT the catalogue table, which uses
+ * `browsableStrategies`. The hero is a call to action for setting up a program,
+ * so counting a vault the flow cannot fund would advertise an option (and a top
+ * APY) the reader cannot reach.
  */
 export function fundableStrategies(strategies: readonly EarnStrategy[]): readonly EarnStrategy[] {
-  // `!== false`, NOT a truthiness check. The API is a separate deployable, so
-  // the type's promise that `fundable` is always present describes the CURRENT
-  // API, not necessarily the one answering: a Vercel preview (web-only, pointed
-  // at the deployed API) and any rollout where web ships ahead of API both see
-  // responses without the field. Truthiness there reads `undefined` as "not
-  // fundable" and blanks the ENTIRE catalogue — which is exactly what happened
-  // on the first preview of this branch.
+  // `!== false` inside `strategyUnavailability`, NOT a truthiness check. The API
+  // is a separate deployable, so the type's promise that `fundable` is always
+  // present describes the CURRENT API, not necessarily the one answering: a
+  // Vercel preview (web-only, pointed at the deployed API) and any rollout where
+  // web ships ahead of API both see responses without the field. Truthiness
+  // there reads `undefined` as "not fundable" and blanks the ENTIRE catalogue —
+  // which is exactly what happened on the first preview of this branch.
   //
   // Absent is safe to admit: an API old enough to omit `fundable` is an API
   // without a mainnet-only provider registered, so its catalogue holds no row
-  // this filter would need to hide. Once the API ships, the field is always
-  // present and the strict comparison does the real work.
-  return strategies.filter(
-    (strategy) => strategy.fundable !== false && strategyToken(strategy) !== undefined
-  );
+  // this filter would need to hide.
+  return browsableStrategies(strategies).filter(isStrategySelectable);
 }
 
 /** Apply only the direct controls shown above the strategy table. */
@@ -121,23 +171,36 @@ const COMPARATORS: Record<EarnStrategySort, (a: EarnStrategy, b: EarnStrategy) =
     settlementDays(left) - settlementDays(right) || compareByApy(left, right),
 };
 
-/** The browse step's list: fundable, filtered, sorted. Never mutates the input. */
+/**
+ * The browse step's list: the whole catalogue, filtered and sorted. Never
+ * mutates the input.
+ *
+ * Browsable rather than fundable — the table shows every vault SDP serves and
+ * marks the ones it cannot start a program with. Selectability is a per-ROW
+ * property (`strategyUnavailability`), not a reason to omit the row.
+ */
 export function visibleStrategies(
   strategies: readonly EarnStrategy[],
   filters: EarnStrategyFilters
 ): readonly EarnStrategy[] {
-  const matching = fundableStrategies(strategies).filter((strategy) =>
+  const matching = browsableStrategies(strategies).filter((strategy) =>
     matchesFilters(strategy, filters)
   );
   return [...matching].sort(COMPARATORS[filters.sort]);
 }
 
-/** The stablecoins the catalogue can actually fund, for the token filter chips. */
+/**
+ * The stablecoins the catalogue lists, for the token filter chips.
+ *
+ * Browsable, matching the table: a filter offering a token whose only rows are
+ * browse-only would still be honest — those rows render — whereas omitting it
+ * would hide vaults the table otherwise shows.
+ */
 export function availableTokens(
   strategies: readonly EarnStrategy[]
 ): readonly EarnPortfolioToken[] {
   const tokens = new Set<EarnPortfolioToken>();
-  for (const strategy of fundableStrategies(strategies)) {
+  for (const strategy of browsableStrategies(strategies)) {
     const token = strategyToken(strategy);
     if (token) tokens.add(token);
   }

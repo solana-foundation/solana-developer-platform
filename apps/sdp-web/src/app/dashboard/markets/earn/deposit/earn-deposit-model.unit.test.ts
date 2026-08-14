@@ -2,11 +2,13 @@ import type { EarnStrategy } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import {
   availableTokens,
+  browsableStrategies,
   defaultStrategyFilters,
   EARN_SHORT_SETTLEMENT_DAYS,
   fundableStrategies,
   matchesFilters,
   singleStrategyAllocation,
+  strategyUnavailability,
   visibleStrategies,
 } from "./earn-deposit-model";
 
@@ -33,6 +35,65 @@ function strategy(partial: Partial<EarnStrategy> & { id: string }): EarnStrategy
     ...partial,
   };
 }
+
+describe("strategyUnavailability", () => {
+  it("clears a Ground row that exists on this cluster", () => {
+    expect(strategyUnavailability(strategy({ id: "ok" }))).toBeUndefined();
+  });
+
+  it("marks a provider with no program support browse-only", () => {
+    const kamino = strategy({ id: "k", provider: "kamino" });
+
+    expect(strategyUnavailability(kamino)).toBe("no_program_support");
+  });
+
+  /**
+   * Precedence, and it is deliberate. A Kamino row in sandbox is BOTH
+   * off-cluster and unsupported; "Mainnet only" tells the reader something they
+   * can act on, while "Browse only" reads as permanent and is what production
+   * should show for the same vault.
+   */
+  it("reports the cluster reason first when both apply", () => {
+    const kaminoInSandbox = strategy({ id: "k", provider: "kamino", fundable: false });
+
+    expect(strategyUnavailability(kaminoInSandbox)).toBe("not_on_this_cluster");
+  });
+
+  it("marks a supported provider off-cluster too", () => {
+    const groundElsewhere = strategy({ id: "g", fundable: false });
+
+    expect(strategyUnavailability(groundElsewhere)).toBe("not_on_this_cluster");
+  });
+
+  it("treats an absent fundable as no cluster objection (version skew)", () => {
+    const { fundable: _omitted, ...fromOlderApi } = strategy({ id: "legacy" });
+
+    expect(strategyUnavailability(fromOlderApi as EarnStrategy)).toBeUndefined();
+  });
+});
+
+describe("browsableStrategies", () => {
+  /**
+   * The catalogue and the fundable set are different sets, and that difference
+   * is the point: SDP serves the communal vaults, so the table shows what
+   * exists. Dropping these rows is what made the Kamino shelf invisible.
+   */
+  it("keeps providers the flow cannot start a program with", () => {
+    const ground = strategy({ id: "ground-row" });
+    const kamino = strategy({ id: "kamino-row", provider: "kamino", fundable: false });
+
+    expect(browsableStrategies([ground, kamino]).map((s) => s.id)).toEqual([
+      "ground-row",
+      "kamino-row",
+    ]);
+  });
+
+  it("still drops a row with no routable token lane — nothing to render", () => {
+    const noLane = strategy({ id: "sol", depositMints: [UNROUTABLE_MINT] });
+
+    expect(browsableStrategies([noLane])).toEqual([]);
+  });
+});
 
 describe("fundableStrategies", () => {
   it("drops a strategy whose deposit mint is not a routable stablecoin", () => {

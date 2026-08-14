@@ -164,6 +164,8 @@ most of them — see the keyless variant under the table.
 | 6. Credential keys | `apps/sdp-api/src/types/env.d.ts` | `<ID>_API_KEY` + `<ID>_SANDBOX_API_KEY`. `keyPairCredentialDefinition` binds its derived keys to `keyof Env`, so skipping this is a compile error. |
 | 7. Key projections | `turbo.json` `globalEnv` + `scripts/secret-keys.mjs` | Both keys in both files (+ the secret manager for deployed environments). |
 | 8. Managed deployments | sdp-infra `terraform/envs/<env>/terraform.tfvars` | Append the credential key(s) to `app_secret_keys` (the Doppler → Secret Manager mirror; also add the value to that env's Doppler config). Dev carries sandbox keys only — production keys are a launch-gated decision (PRO-1647). Nothing else: the Cloud Run service and Job read the same secret set, and the hourly catalogue sync picks the provider up from `EARN_PROVIDER_CLIENTS` with zero job changes (`src/job.ts` never names providers; an un-credentialed provider skips fail-closed with `PROVIDER_NOT_CONFIGURED`). |
+| 9. Host cluster | your `distill*` function | Every `ProviderStrategySnapshot` must state `hostCluster` — where the INSTRUMENT lives, not where you are syncing from. Ground answers with the environment's own cluster (its gate already proved that); a mainnet-only provider answers `"mainnet-beta"` in both environments. See "If the provider is not deployed on every cluster" below. |
+| 10. Dashboard visibility | `apps/sdp-web/.../earn/deposit/earn-deposit-model.ts` | **Nothing, if the provider is catalogue-only** — its vaults appear in the strategy table automatically, rendered browse-only. Add the id to `EARN_PROGRAM_PROVIDERS` **only once `POST /v1/earn/programs` actually works for it**, i.e. once the portfolio-wallet capability is implemented (§4b). See §4d. |
 
 ### The keyless variant (public API — Kamino)
 
@@ -339,6 +341,70 @@ Three things to understand before opting in:
 Why this writes to the DB rather than reading live at request time:
 `GET /strategies` reads exactly ONE source for the state it reports (ADR 0002,
 2026-08-11 addendum). Freshness is cadence, not blending.
+
+## 4d. The dashboard — what appears automatically, and what does not
+
+Easy to miss, because the API half can be complete while the vaults stay
+invisible. The rule is one sentence: **the catalogue table shows everything;
+only `EARN_PROGRAM_PROVIDERS` can be selected.**
+
+| Surface | Behaviour for a NEW provider | Action needed |
+|---|---|---|
+| Strategy table (`deposit/strategy-step.tsx`) | Rows appear as soon as they are catalogued, via `browsableStrategies` | **None** |
+| Selectability | Browse-only, with a chip naming why (`strategyUnavailability`) | Add the id to `EARN_PROGRAM_PROVIDERS` only when programs work |
+| Onboarding hero counts (`earn-workspace.tsx`) | Counts `fundableStrategies` — selectable only | None; deliberately narrower than the table |
+| Programs list + create body | `EARN_PORTFOLIO_PROVIDER` (still Ground) | Only if the provider supports programs |
+
+`strategyUnavailability` returns `not_on_this_cluster` (the API's `fundable`
+said no) before `no_program_support` (provider outside
+`EARN_PROGRAM_PROVIDERS`), because the cluster answer is the one a reader can
+act on. Both render the row; neither hides it.
+
+**Do not add an id to `EARN_PROGRAM_PROVIDERS` to make a vault look available.**
+The API answers 501 by capability detection regardless, so the only effect is a
+confirm step that fails after the user has picked a wallet and a strategy.
+
+New copy goes in `apps/sdp-web/messages/en/dashboard-earn.json` and **English
+only** — CI's Translation Catalog Policy fails a branch that edits English and
+localized catalogs together.
+
+## 4e. Verify the whole chain
+
+Run in this order; each step's failure points at exactly one missed step above.
+
+```bash
+pnpm --filter @sdp/earn test           # registry + subpath export (steps 3–4), client mapping
+pnpm --filter @sdp/api test:serial     # availability drift (step 7), route gates, repository
+pnpm --filter sdp-web exec vitest run src/app/dashboard/markets/earn   # §4d; CI does NOT run these
+pnpm typecheck                         # steps 1, 6, 9 — the closed union and keyof Env
+```
+
+Then against a real stack (`packages/sdp-earn/CLAUDE.md` → "Local development"):
+
+```bash
+# rows land, with the cluster they actually live on
+psql "$DATABASE_URL" -c "SELECT provider, environment, host_cluster, count(*) FROM earn_strategies GROUP BY 1,2,3;"
+# the wire says what a partner should branch on
+curl -s "$API/v1/earn/strategies?pageSize=100" -H "Authorization: Bearer $KEY" \
+  | jq '[.data.strategies[] | select(.provider=="<id>")] | {n: length, sample: .[0] | {hostCluster, fundable}}'
+# a provider without the portfolio capability must refuse money-in, not accept it
+curl -s -o /dev/null -w '%{http_code}\n' -X POST "$API/v1/earn/programs" \
+  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+  -d '{"provider":"<id>","allocations":{"usdc":[{"yieldSourceId":"<ref>","pct":100}]},"requestId":"'"$(uuidgen)"'"}'
+# expect 501 for catalogue-only, 201 for a portfolio provider
+```
+
+### What breaks if you skip a step
+
+| Skipped | Symptom |
+|---|---|
+| 3 / 4 (registry, export) | `index.test.ts` fails — the compiler cannot see either |
+| 6 (env.d.ts) | Compile error from `keyPairCredentialDefinition` |
+| 7 (turbo/secret-keys) | Drift test fails; deployed env silently lacks the credential |
+| 8 (sdp-infra) | Sync skips the provider forever with `PROVIDER_NOT_CONFIGURED` — logged at info, so it looks like nothing is wrong |
+| 9 (`hostCluster`) | Compile error (the field is required) — which is the point |
+| 10 (`EARN_PROGRAM_PROVIDERS`, added too early) | The wizard offers a vault whose confirm 501s |
+| §4c (live metrics) | Rates go stale by up to an hour; nothing fails |
 
 ## 5. Custodian seam — "add Anchorage/Fireblocks to Earn"
 

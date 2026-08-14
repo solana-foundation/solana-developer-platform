@@ -102,8 +102,13 @@ the body `requestId` form, which is the only one that can get through.
   `programId` and builds its path from it; none may fall back to "whichever
   program is first". `requestId` is REQUIRED on the write input — the API
   refuses a create carrying no idempotency key (PRO-1670).
-  `EARN_PORTFOLIO_PROVIDER` is the single deliberate Ground pin — widening to
-  multi-provider selection happens HERE, not by scattering provider ids.
+  `EARN_PORTFOLIO_PROVIDER` is the MONEY-PATH pin (programs list query + create
+  body) and is still Ground. Which rows the catalogue may SELECT is a separate
+  question answered by `EARN_PROGRAM_PROVIDERS` in
+  `deposit/earn-deposit-model.ts` — see "THE catalogue rule" under Rules.
+  Widening either happens in that one place, never by scattering provider ids.
+  Onboarding a provider end to end:
+  `docs/contributing/earn-pluggability-playbook.md` §4 (§4d is this module).
   `fetchEarnStrategies()` AND `fetchEarnProgramsState()` both **page to the
   end**: the API caps `pageSize` at 100, and a single request silently drops
   everything past the window — for programs that is hidden MONEY (totals
@@ -296,23 +301,39 @@ funding instructions and nothing else — never imply a transfer happens.
   appearing in the UI as a provider-client bug, not something to patch here.
   A `cash` position can be a token the org never deposited on Solana, so do not
   assume positions imply a Solana deposit — only the addresses do.
-- **The catalogue now holds strategies this module deliberately never shows.**
-  Kamino is a catalogue-only provider: its K-Vaults are non-custodial (the
-  customer's own wallet deposits) and mainnet-only, and SDP catalogues them into
-  BOTH environments so API integrators can browse the real shelf. They reach
-  `GET /v1/earn/strategies` and they must not reach the wizard, because there is
-  no program to create for them. TWO independent filters keep them out, and both
-  are intentional:
-  - `EARN_PORTFOLIO_PROVIDER` — the existing Ground pin, which already excluded
-    every non-portfolio provider.
-  - `strategy.fundable` in `fundableStrategies` — the API's per-request answer
-    to "does this instrument exist on the caller's cluster". A sandbox Kamino
-    row is `hostCluster: "mainnet-beta", fundable: false`.
+- **THE catalogue rule: the table shows everything; only
+  `EARN_PROGRAM_PROVIDERS` can be selected.**
+  SDP serves the communal vaults, so the strategy table lists every vault in the
+  catalogue — including providers this flow cannot start a program with. Three
+  functions in `deposit/earn-deposit-model.ts` carry it, and they are different
+  sets on purpose:
+  - `browsableStrategies` — what the TABLE lists: every active row with a
+    routable token lane, any provider, any cluster.
+  - `strategyUnavailability(strategy)` — why a row is browse-only, or undefined.
+    `not_on_this_cluster` (the API's `fundable` said no) is checked BEFORE
+    `no_program_support` (provider outside `EARN_PROGRAM_PROVIDERS`), because
+    the cluster answer is the one a reader can act on. Rendered as a chip; the
+    row keeps its live figures and loses its radio.
+  - `fundableStrategies` — the selectable subset, and the ONLY thing the
+    onboarding hero counts. The hero is a call to action whose stats include a
+    top APY, so counting a vault the flow cannot fund would advertise a rate the
+    reader cannot reach. Deliberately narrower than the table.
 
-  Do not collapse these into one. The pin is about which provider the flow can
-  create a program with; `fundable` is about whether an instrument exists here
-  at all, and it is what stops devnet money being pointed at a mainnet vault if
-  the pin is ever widened. Neither may be inverted into "hide unless known-bad".
+  **Never add an id to `EARN_PROGRAM_PROVIDERS` to make a vault look
+  available.** `POST /v1/earn/programs` answers 501 by capability detection
+  regardless, so the only effect is a confirm that fails after the user has
+  picked a wallet and a strategy. Add it when execution exists, not before.
+
+  `EARN_PORTFOLIO_PROVIDER` still exists and is still Ground: it is the provider
+  the money path POSTs to (programs list query + create body), which is a
+  narrower question than "which rows may be selected". Do not merge the two.
+- **`strategy.fundable` is `!== false`, never truthy.** The API is a separate
+  deployable: a Vercel preview is a web-only deploy pointed at the already-
+  deployed API, and any rollout can put web ahead of API — both serve strategies
+  with no `fundable` field. Reading `undefined` as "not fundable" blanks the
+  ENTIRE catalogue, which is exactly what the first preview of the Kamino branch
+  did. Admitting it is safe: an API that omits the field has no mainnet-only
+  provider registered, so it cannot be serving a row that needs hiding.
 - **The CATALOGUE is Solana-hosted-only; POSITIONS are not, and that is not a
   bug here.** Since the `not_solana_hosted` gate (`@sdp/earn`), the strategy
   catalogue lists and stores only vaults hosted on Solana, so the wizard can no

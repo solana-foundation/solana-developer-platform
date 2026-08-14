@@ -20,7 +20,6 @@ import { fundableStrategies } from "./deposit/earn-deposit-model";
 import { shortenAddress } from "./deposit/earn-funding-wallets";
 import { formatApy, formatUsd } from "./earn-format";
 import {
-  EARN_PORTFOLIO_PROVIDER,
   type EarnProgram,
   findProgram,
   hasPrograms,
@@ -572,13 +571,18 @@ function StartSection() {
     return null;
   }
 
-  // Exactly what the deposit flow will offer: the pinned provider's active rows
-  // that map to a fundable stablecoin lane. Counting anything else makes the
-  // hero promise options the flow then filters away.
+  // Exactly what the deposit flow can START A PROGRAM with — NOT everything the
+  // catalogue table lists. `fundableStrategies` now carries the whole rule
+  // (routable lane, a provider that supports programs, an instrument on this
+  // cluster), so no provider id is named here.
+  //
+  // This stays narrower than the table on purpose. The hero is a call to action
+  // for setting up a program, and its stats include a TOP APY: counting a vault
+  // the flow cannot fund would advertise a headline rate the reader then cannot
+  // reach. The table's job is to show the shelf; the hero's is to promise only
+  // what the next click delivers.
   const fundable = fundableStrategies(
-    (strategies ?? []).filter(
-      (strategy) => strategy.provider === EARN_PORTFOLIO_PROVIDER && strategy.status === "active"
-    )
+    (strategies ?? []).filter((strategy) => strategy.status === "active")
   );
   const apys = fundable
     .map((strategy) => strategyApy(strategy))

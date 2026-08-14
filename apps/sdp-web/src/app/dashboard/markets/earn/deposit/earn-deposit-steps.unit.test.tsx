@@ -175,6 +175,65 @@ describe("StrategyStep", () => {
     expect(html).not.toContain("DashboardEarn.deposit.strategyStablecoinColumn");
   });
 
+  /**
+   * The catalogue shows every vault SDP serves, including ones this flow cannot
+   * start a program with — a non-custodial provider, or an instrument that does
+   * not exist on the caller's cluster. Those rows RENDER, with the reason
+   * stated and no radio, so the shelf is honest and the confirm stays reachable
+   * only from rows the API would accept.
+   */
+  it("renders a browse-only row with its reason and no radio", () => {
+    const catalogue = [
+      ...CATALOGUE,
+      strategy({ id: "Kamino Steakhouse USDC", provider: "kamino", fundable: false }),
+    ];
+
+    const html = renderToStaticMarkup(
+      <StrategyStep
+        filters={filters}
+        hasError={false}
+        isLoading={false}
+        onFiltersChange={() => {}}
+        onReset={() => {}}
+        onSelect={() => {}}
+        selectedStrategyId={null}
+        strategies={visibleStrategies(catalogue, filters)}
+        tokens={["usdc"]}
+      />
+    );
+
+    // Listed and counted — not hidden.
+    expect(html).toContain("Kamino Steakhouse USDC");
+    expect(html).toContain("DashboardEarn.deposit.resultCount(3)");
+    // Off-cluster wins over no-program-support: the more actionable reason.
+    expect(html).toContain("DashboardEarn.deposit.unavailable.not_on_this_cluster");
+    // Still exactly two radios — the browse-only row has none to click.
+    expect(html.match(/name="earn-strategy"/g)).toHaveLength(2);
+    expect(html).toContain('aria-disabled="true"');
+  });
+
+  it("names the provider reason when the vault does exist on this cluster", () => {
+    const html = renderToStaticMarkup(
+      <StrategyStep
+        filters={filters}
+        hasError={false}
+        isLoading={false}
+        onFiltersChange={() => {}}
+        onReset={() => {}}
+        onSelect={() => {}}
+        selectedStrategyId={null}
+        strategies={visibleStrategies(
+          [strategy({ id: "Kamino on mainnet", provider: "kamino" })],
+          filters
+        )}
+        tokens={["usdc"]}
+      />
+    );
+
+    expect(html).toContain("DashboardEarn.deposit.unavailable.no_program_support");
+    expect(html).not.toContain('name="earn-strategy"');
+  });
+
   it("hides the stablecoin filter when the catalogue has a single lane", () => {
     const html = renderToStaticMarkup(
       <StrategyStep

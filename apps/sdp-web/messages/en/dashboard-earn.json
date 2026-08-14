@@ -146,6 +146,10 @@
       "strategyApyColumn": "APY",
       "poolUnknown": "Not reported",
       "curatedBy": "Curated by {curator}",
+      "unavailable": {
+        "not_on_this_cluster": "Mainnet only",
+        "no_program_support": "Browse only"
+      },
       "selectStrategy": "Select a strategy",
       "selectedStrategyAnnouncement": "{strategy} selected.",
       "reviewTitle": "Review and confirm",

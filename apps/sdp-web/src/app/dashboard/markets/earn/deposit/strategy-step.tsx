@@ -37,6 +37,7 @@ import {
   EARN_STRATEGY_SORTS,
   type EarnStrategyFilters,
   type EarnStrategySort,
+  strategyUnavailability,
 } from "./earn-deposit-model";
 
 /** Sentinel for "no constraint" in the single-select filter controls. */
@@ -198,6 +199,16 @@ function StrategyTableRow({
   const poolUsd = strategyPoolUsd(strategy);
   const sourceLabel = strategySourceLabel(strategy);
   const curatorLabel = strategyCuratorLabel(strategy);
+  /**
+   * Browse-only rows: catalogued and real, but this flow cannot start a program
+   * with them. They RENDER — SDP serves these vaults and hiding them made the
+   * whole Kamino shelf invisible here — with the reason stated and no radio, so
+   * the row can never reach a confirm the API would refuse.
+   */
+  const unavailability = strategyUnavailability(strategy);
+  const browseOnlyLabel = unavailability
+    ? t(`DashboardEarn.deposit.unavailable.${unavailability}`)
+    : undefined;
 
   // Provider metadata, not a gate: protocol and curating house are deduped,
   // because "Maple · Curated by Maple" says one thing twice.
@@ -212,38 +223,54 @@ function StrategyTableRow({
 
   return (
     <TableRow
-      aria-selected={selected}
-      className="cursor-pointer"
-      data-state={selected ? "selected" : undefined}
+      aria-disabled={browseOnlyLabel ? true : undefined}
+      aria-selected={browseOnlyLabel ? undefined : selected}
+      className={browseOnlyLabel ? "cursor-default" : "cursor-pointer"}
+      data-state={selected && !browseOnlyLabel ? "selected" : undefined}
       onClick={(event) => {
+        if (browseOnlyLabel) return;
         const target = event.target as HTMLElement;
         if (target.closest("input, label")) return;
         onSelect();
       }}
     >
       <TableCell className="relative w-12">
-        <input
-          aria-describedby={`${backingId} ${accessId} ${poolId} ${apyId}`}
-          aria-labelledby={nameId}
-          checked={selected}
-          className="peer sr-only"
-          id={inputId}
-          name="earn-strategy"
-          onChange={onSelect}
-          type="radio"
-          value={strategy.id}
-        />
-        <label
-          className="inline-flex cursor-pointer rounded-full peer-focus-visible:ring-2 peer-focus-visible:ring-primary/40"
-          htmlFor={inputId}
-        >
-          <SelectionMark selected={selected} />
-          <span className="sr-only">{t("DashboardEarn.deposit.selectStrategy")}</span>
-        </label>
+        {browseOnlyLabel ? null : (
+          <>
+            <input
+              aria-describedby={`${backingId} ${accessId} ${poolId} ${apyId}`}
+              aria-labelledby={nameId}
+              checked={selected}
+              className="peer sr-only"
+              id={inputId}
+              name="earn-strategy"
+              onChange={onSelect}
+              type="radio"
+              value={strategy.id}
+            />
+            <label
+              className="inline-flex cursor-pointer rounded-full peer-focus-visible:ring-2 peer-focus-visible:ring-primary/40"
+              htmlFor={inputId}
+            >
+              <SelectionMark selected={selected} />
+              <span className="sr-only">{t("DashboardEarn.deposit.selectStrategy")}</span>
+            </label>
+          </>
+        )}
       </TableCell>
       <TableCell className="whitespace-normal text-sm font-normal">
-        <span className="block text-primary" id={nameId}>
-          {strategy.name}
+        <span className="flex flex-wrap items-center gap-2">
+          {/* Dimmed, not hidden: the vault is real and its figures are live —
+              only this flow's ability to fund it is missing. */}
+          <span className={browseOnlyLabel ? "text-secondary" : "text-primary"} id={nameId}>
+            {strategy.name}
+          </span>
+          {browseOnlyLabel ? (
+            // Not a Badge: Badge is status-only in this design system.
+            <span className="rounded-md bg-fill px-2 py-1 text-[11px] font-medium text-secondary">
+              {browseOnlyLabel}
+            </span>
+          ) : null}
         </span>
         <span className="mt-1 block text-secondary">{sourceMeta || "—"}</span>
       </TableCell>
