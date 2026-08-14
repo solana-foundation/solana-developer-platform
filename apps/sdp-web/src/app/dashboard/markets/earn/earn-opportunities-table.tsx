@@ -24,13 +24,7 @@ import {
   sortStrategies,
 } from "./deposit/earn-deposit-model";
 import { formatApy, formatUsdCompact } from "./earn-format";
-import {
-  strategyCuratorLabel,
-  strategyPoolUsd,
-  strategySourceLabel,
-  strategyToken,
-  useLiquidityLabel,
-} from "./earn-program-presentation";
+import { strategyPoolUsd, strategyToken, useLiquidityLabel } from "./earn-program-presentation";
 
 const DEPOSIT_PATH = "/dashboard/markets/earn/deposit";
 
@@ -92,20 +86,7 @@ function OpportunityRow({ strategy }: { strategy: EarnStrategy }) {
   const nameId = `earn-opportunity-${strategy.id}-name`;
   const token = strategyToken(strategy);
   const poolUsd = strategyPoolUsd(strategy);
-  const sourceLabel = strategySourceLabel(strategy);
-  const curatorLabel = strategyCuratorLabel(strategy);
   const depositable = opportunityDepositability(strategy);
-
-  // Provider metadata, not a gate: protocol and curating house are deduped,
-  // because "Maple · Curated by Maple" says one thing twice.
-  const sourceMeta = [
-    sourceLabel,
-    curatorLabel && curatorLabel !== sourceLabel
-      ? t("DashboardEarn.deposit.curatedBy", { curator: curatorLabel })
-      : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
 
   const blockedLabel =
     depositable.kind === "wrong-cluster"
@@ -146,9 +127,14 @@ function OpportunityRow({ strategy }: { strategy: EarnStrategy }) {
         >
           {strategy.name}
         </span>
-        <span className="mt-1 block truncate text-secondary" title={sourceMeta || undefined}>
-          {sourceMeta || "—"}
-        </span>
+        {/* No provenance line. `underlyingSource` is the protocol a vault runs
+            on ("klend") — plumbing, not a reason to pick one yield source over
+            another, and it rendered as a bare unexplained token under every
+            name. Where the yield comes from is the provider's problem; what the
+            reader compares is Backing, Access, Pool size and APY. Curator would
+            be worth showing, but Kamino publishes none on purpose (permissionless
+            registry — see packages/sdp-earn/CLAUDE.md), so the line was only ever
+            "klend" or an em dash. */}
         {blockedLabel ? (
           <Badge
             className="mt-2"
