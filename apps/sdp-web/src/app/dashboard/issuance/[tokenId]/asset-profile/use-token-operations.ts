@@ -16,7 +16,6 @@ import {
 import type {
   ActionExecutionInput,
   AdminAction,
-  DeployFeePayment,
   PermissionControlStatus,
   PermissionRow,
   RunActionOptions,
@@ -150,7 +149,6 @@ export function useTokenOperations({
   const [authorityModalSignerWalletId, setAuthorityModalSignerWalletId] = useState("");
   const [fundManagementModalAction, setFundManagementModalAction] =
     useState<FundManagementModalAction | null>(null);
-  const [deploySignerWalletId, setDeploySignerWalletId] = useState("");
   const [mintForm, setMintForm] = useState(createInitialMintForm);
   const [burnForm, setBurnForm] = useState(createInitialBurnForm);
   const [seizeForm, setSeizeForm] = useState(createInitialSeizeForm);
@@ -338,7 +336,9 @@ export function useTokenOperations({
     withWalletLoadError(
       getSignerSelectionForAction({ action, token, authorityWallets, metadataAuthority, t })
     );
-  const deploySignerSelection = signerSelectionFor("deploy");
+  // Deploy needs no signer picker (the server resolves the signing wallet), only
+  // the yes/no gate that at least one custody wallet exists to sign the mint.
+  const deployDisabledReason = signerSelectionFor("deploy").unavailableReason;
   const mintSignerSelection = signerSelectionFor("mint");
   const burnSignerSelection = signerSelectionFor("burn");
   const seizeSignerSelection = signerSelectionFor("seize");
@@ -487,7 +487,6 @@ export function useTokenOperations({
   });
 
   const fundManagementDisabledReasons: Record<FundManagementModalAction, string | null> = {
-    deploy: deploySignerSelection.unavailableReason,
     mint: effectiveMintDisabledReason ?? mintValidationReason,
     burn: effectiveBurnDisabledReason ?? burnValidationReason,
   };
@@ -522,19 +521,17 @@ export function useTokenOperations({
     }
   };
 
-  // The deploy modal picks both the signer and who pays the fees, so the
-  // submitting button already carries the intent — it runs immediately rather
-  // than through the confirmation dialog the other actions use.
-  const deployToken = (feePayment: DeployFeePayment) => {
-    closeFundManagementModal();
+  // Fees are always Kora-sponsored and the server resolves the signing wallet
+  // (token signer, then org custody fallback), so deploy fires immediately —
+  // no modal, no confirmation dialog.
+  const deployToken = () => {
     void runActionImmediately(
       {
         label: t("DashboardIssuance.management.deployToken"),
         method: "POST",
         path: `${tokenBasePath}/deploy`,
         body: {
-          signingWalletId: deploySignerWalletId || undefined,
-          feePayment,
+          feePayment: "sponsored",
         },
       },
       {
@@ -993,9 +990,6 @@ export function useTokenOperations({
     }
 
     switch (action) {
-      case "deploy":
-        setDeploySignerWalletId(deploySignerSelection.defaultWalletId);
-        break;
       case "mint":
         setMintForm((previous) => ({
           ...previous,
@@ -1134,8 +1128,6 @@ export function useTokenOperations({
     setLockSupplyRevokeFailed(true);
   };
 
-  // Deploy is not routed here: its modal submits through `deployToken`, which
-  // also carries the fee-payment choice.
   const submitFundManagementAction = (action: FundManagementModalAction) => {
     closeFundManagementModal();
 
@@ -1276,10 +1268,7 @@ export function useTokenOperations({
     seizeValidationReason,
     forceBurnValidationErrors,
     forceBurnValidationReason,
-    // deploy modal
-    deploySignerSelection,
-    deploySignerWalletId,
-    setDeploySignerWalletId,
+    deployDisabledReason,
     fundManagementModalAction,
     openFundManagementModal,
     closeFundManagementModal,
