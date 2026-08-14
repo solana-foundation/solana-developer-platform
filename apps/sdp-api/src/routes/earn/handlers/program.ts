@@ -1,4 +1,8 @@
-import { resolveEarnProviderClient, supportsPortfolioWallets } from "@sdp/earn";
+import {
+  isClusterFundableInEnvironment,
+  resolveEarnProviderClient,
+  supportsPortfolioWallets,
+} from "@sdp/earn";
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnPortfolioWalletProvider } from "@sdp/earn/types";
 import type {
@@ -243,7 +247,17 @@ async function assertKnownYieldSources(
   for (let offset = 0; ; offset += pageSize) {
     const { rows, total } = await repo.listStrategies({ environment, limit: pageSize, offset });
     for (const row of rows) {
-      if (row.provider === provider) {
+      // Being CATALOGUED in this environment is not the same as being FUNDABLE
+      // in it, and this is the last gate before a provider mutation. A
+      // mainnet-only provider's vaults are listed in sandbox so integrators can
+      // browse the real shelf; allocating devnet money to one would ask the
+      // provider to deposit into an instrument that does not exist on this
+      // cluster. `isClusterFundableInEnvironment` is the single rule — do not
+      // inline the comparison (see @sdp/earn support.ts).
+      if (
+        row.provider === provider &&
+        isClusterFundableInEnvironment(row.host_cluster, environment)
+      ) {
         known.add(row.provider_reference);
       }
     }
