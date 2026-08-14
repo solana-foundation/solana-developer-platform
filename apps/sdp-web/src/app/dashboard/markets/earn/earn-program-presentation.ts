@@ -2,7 +2,6 @@
 
 import {
   EARN_PORTFOLIO_TOKENS,
-  type EarnPortfolioPosition,
   type EarnPortfolioTargetAllocations,
   type EarnPortfolioToken,
   type EarnStrategy,
@@ -94,49 +93,23 @@ export function useLiquidityLabel() {
   };
 }
 
-/** Portfolio value split by stablecoin lane. See {@link withdrawLanes}. */
-export interface WithdrawLanes {
-  /** USD value attributable to each stablecoin lane. */
-  totals: ReadonlyMap<EarnPortfolioToken, number>;
-  /**
-   * Value whose lane could not be resolved: no token on the wire and no
-   * catalogue row for its yield source (e.g. the catalogue read is still in
-   * flight). Callers count it toward EVERY lane's ceiling, so an incomplete
-   * join can only over-allow — the withdrawal preview is the authority that
-   * catches that — and never block an amount the provider would fill.
-   */
-  unattributedUsd: number;
-}
-
-/**
- * Per-stablecoin value held in the program. `withdrawableUsd` is wallet-level
- * while Ground fills withdrawals per lane (it never converts between
- * stablecoins), so a withdraw surface must scope what it promises to the
- * selected token. Cash and in-transit slices carry their token on the wire;
- * deployed slices resolve through the catalogue by yield-source reference —
- * the same join the dashboard holdings use. An ESTIMATE (position values, not
- * a net-of-reserve quote): cap it at the wallet-level withdrawable.
+/*
+ * `withdrawLanes()` lived here until PRO-1675 and is deliberately GONE.
+ *
+ * It reconstructed a per-stablecoin withdrawal ceiling in the browser by
+ * joining position values to the catalogue, folding every unattributable slice
+ * into each lane, and capping at the wallet total. Its own doc comment called
+ * it an ESTIMATE and pointed at the withdrawal preview as "the authority that
+ * catches that" — but the preview was never asked until the reader had already
+ * typed an amount, so nothing caught it in time and `Max` could offer a figure
+ * the provider answered with a 409.
+ *
+ * The withdraw modal now asks the provider directly, on open, with an
+ * amount-less preview. Do not reintroduce a client-side ceiling: if the read is
+ * pending or failed the modal shows no number and validates shape only, which
+ * is the honest state — the provider is the authority, and money out must never
+ * be blocked by a read we could not complete (ADR 0002).
  */
-export function withdrawLanes(
-  positions: readonly EarnPortfolioPosition[],
-  strategies: readonly EarnStrategy[]
-): WithdrawLanes {
-  const laneByReference = new Map(
-    strategies.map((strategy) => [strategy.providerReference, strategyToken(strategy)])
-  );
-  const totals = new Map<EarnPortfolioToken, number>();
-  let unattributedUsd = 0;
-  for (const position of positions) {
-    const value = Number(position.valueUsd);
-    if (!Number.isFinite(value) || value <= 0) continue;
-    const token =
-      position.token ??
-      (position.yieldSourceId ? laneByReference.get(position.yieldSourceId) : undefined);
-    if (token) totals.set(token, (totals.get(token) ?? 0) + value);
-    else unattributedUsd += value;
-  }
-  return { totals, unattributedUsd };
-}
 
 /**
  * The catalogue keyed by provider reference, filtered to ONE provider — the

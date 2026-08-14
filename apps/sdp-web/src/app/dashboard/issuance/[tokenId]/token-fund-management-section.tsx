@@ -3,26 +3,27 @@
 import { Button } from "@/components/ui/button";
 import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
 
-export type FundManagementModalAction = "deploy" | "mint" | "burn";
+export type FundManagementModalAction = "mint" | "burn";
+
+// Deploy shows in the fund-management rows but fires immediately (Kora-sponsored)
+// instead of opening the shared modal, so each row carries its own action.
+export type FundManagementRowId = FundManagementModalAction | "deploy";
 
 export interface FundManagementRow {
-  id: FundManagementModalAction;
+  id: FundManagementRowId;
   title: string;
   helper: string;
   actionLabel: string;
+  onAction: () => void;
   disabled?: boolean;
   disabledReason?: string | null;
 }
 
 interface TokenFundManagementSectionProps {
   rows: FundManagementRow[];
-  onOpenAction: (action: FundManagementModalAction) => void;
 }
 
-export function TokenFundManagementSection({
-  rows,
-  onOpenAction,
-}: TokenFundManagementSectionProps) {
+export function TokenFundManagementSection({ rows }: TokenFundManagementSectionProps) {
   return (
     <section className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
       {rows.map((row) => (
@@ -39,7 +40,7 @@ export function TokenFundManagementSection({
             <Button
               type="button"
               className="w-[112px]"
-              onClick={() => onOpenAction(row.id)}
+              onClick={row.onAction}
               disabled={row.disabled}
             >
               {row.actionLabel}

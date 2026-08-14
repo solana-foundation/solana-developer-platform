@@ -31,10 +31,10 @@ the body `requestId` form, which is the only one that can get through.
 - `layout.tsx` — the `earn()` flag gate (`notFound()`); `../layout.tsx` gates the
   whole Markets module the same way. Pages hold no flag checks — add new Earn
   routes under this segment and they inherit both gates.
-- `earn-workspace.tsx` — overview: ONE CARD PER PROGRAM, stacked as repeated
-  records with no switcher (hiding a funded program behind a tab would make a
-  reader hunt for money they hold). Each card owns its money tiles, its FLAT
-  value-ordered holdings list (deployed slices first, cash last), its copyable
+- `earn-workspace.tsx` — overview: ONE CARD PER PROGRAM, stacked newest first as
+  repeated records with no switcher (hiding a funded program behind a tab would
+  make a reader hunt for money they hold). Each card owns its money tiles, its
+  FLAT value-ordered holdings list (deployed slices first, cash last), its copyable
   deposit-address row (the funding loop without re-walking the wizard), and the
   two verbs that manage it — Withdraw, and Change strategy, which links to
   `deposit?program=<id>`. Above them, an aggregate portfolio strip (total /
@@ -118,14 +118,29 @@ the body `requestId` form, which is the only one that can get through.
 - `earn-withdraw-modal.tsx` — portfolio-level withdrawal: stablecoin FIRST
   (it scopes everything below), then amount + Solana destination; preview →
   confirm → submitted state. The token always defaults to USDC — the one
-  stablecoin Ground pays out on Solana. Every figure the modal quotes
-  (available line, Max, amount validation, per-option amounts) is scoped to the
-  SELECTED token via `withdrawLanes()` in `earn-program-presentation.ts`,
-  because `withdrawableUsd` is wallet-level while Ground fills per lane —
-  quoting the wallet figure let Max fill an amount the lane could never pay.
-  Lane-unresolved value widens every lane's ceiling (never narrows), so an
-  incomplete catalogue join degrades to the wallet-level figure; the preview
-  stays the authority. A token Ground never routes to Solana (USDT: Ethereum
+  stablecoin Ground pays out on Solana.
+  **Every figure it quotes comes from the PROVIDER, never from a local
+  estimate** (PRO-1675). On open — and again on every token change — it fires an
+  **amount-less** withdrawal preview for that lane; the answer drives the
+  available line, `Max`, and amount validation. The old client-side
+  `withdrawLanes()` join is deleted, and reintroducing any locally-derived
+  ceiling is the regression to avoid: it is what let `Max` offer an amount the
+  provider then 409'd. It takes NO props beyond `programId` for exactly this
+  reason — balance and positions were only ever inputs to that estimate.
+  Three rules hold this together, all measured against Ground sandbox
+  2026-08-13 (see `packages/sdp-earn/CLAUDE.md` → Conventions):
+  - **A 409 can be the answer.** Ground's amount-less preview may refuse while
+    still reporting the lane balance, so a 409 carrying
+    `error.details.balance.withdrawableUsd` resolves the read instead of
+    failing it.
+  - **`Max` floors to whole cents** (`floorUsdToCents`). The reported figure is
+    a balance, not a fillable amount — a lane reporting `20.001241` refuses
+    exactly that and accepts `20.00`. Validation still permits the full figure,
+    so this narrows what SDP offers, never what it allows.
+  - **An unresolved read never blocks the exit.** Pending or failed, the modal
+    shows no number and validates shape only; the provider decides at confirm
+    (ADR 0002 — money out must not gate on a read we could not complete).
+  A token Ground never routes to Solana (USDT: Ethereum
   only, per their supported-chains doc — sandbox USDT is Ground's mock Sepolia
   asset) is NOT OFFERED at all: the token select renders only
   `SOLANA_PAYOUT_TOKENS`, mirroring `GROUND_SOLANA_ROUTED_TOKENS` in the

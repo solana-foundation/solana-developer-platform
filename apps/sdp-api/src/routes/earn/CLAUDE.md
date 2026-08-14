@@ -131,7 +131,24 @@ other's balance.
 - `GET /programs/:programId/deposits` — **live provider** (provider-observed
   on-chain deposits; cursor passthrough). Deposits are customer-initiated, so SDP
   never sees them at intent time — they are deliberately NOT ledgered in V1.
-- `POST /programs/:programId/withdrawal-preview` — **live provider**.
+- `POST /programs/:programId/withdrawal-preview` — **live provider**. `amountUsd`
+  is **OPTIONAL** (PRO-1675): omitted, this is the LIQUIDITY read — what the
+  `token` lane can pay right now, answered as `withdrawableUsd` with no
+  `amountRequestedUsd`; present, it also validates that amount and returns its
+  fee and post-withdrawal total. Money-out gate unchanged
+  (`assertEarnProviderConfigured` only), so an un-credentialed provider still
+  503s rather than answering a fabricated figure.
+  - **The create schema no longer extends this one, deliberately.**
+    `earnProgramWithdrawalCreateSchema` used to be
+    `earnProgramWithdrawalPreviewSchema.extend(...)`, which would have carried
+    the new optionality onto the PAYOUT path — a withdrawal with no amount.
+    Each declares its own `amountUsd`; a test pins the create at 400 when it is
+    missing. Do not re-couple them for the two fields they share.
+  - A provider's refusal may be more informative than its success: Ground
+    answers `409 insufficient_funds` with the lane's balance breakdown, which
+    the provider client normalizes onto `SdpEarnError.details.balance` and
+    `app.ts` already serializes into `error.details`. Consumers should read it
+    rather than surfacing the provider's message.
 - **`POST /programs/:programId/withdrawals` — live provider call + SDP ledger
   write.**
   Needs a retry-stable idempotency key and refuses a request carrying none:
