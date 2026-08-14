@@ -227,7 +227,10 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
   made every Ground 4xx fall back to `"<provider> request failed with status
   <n>"`, which names the status and explains nothing, so a refused write reached
   the dashboard with its reason stripped. Do not narrow these shapes again; the
-  provider's own sentence is the most useful thing on this path.
+  provider's own sentence is the most useful thing on this path. It picks the
+  first NON-BLANK of `error` / `message` / `reason` — the first *present* one
+  would let `error: ""` beside a real `message` select the blank and fall back,
+  discarding an explanation the body did carry.
 - **Chain keys are HARD-SET in `GROUND_SOLANA_CHAINS`**
   (providers/ground/client.ts): sandbox = `solana_devnet`, production =
   `solana`. Ground confirmed (2026-08-05) sandbox supports both Ethereum

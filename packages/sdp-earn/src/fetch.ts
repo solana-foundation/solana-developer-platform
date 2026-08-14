@@ -67,8 +67,14 @@ export function extractProviderErrorMessage(payload: unknown, fallback: string):
     reason?: unknown;
   };
   const error = typeof record.error === "string" ? record.error : record.error?.message;
-  const message = error ?? record.message ?? record.reason;
-  return typeof message === "string" && message.trim() ? message : fallback;
+  // The first NON-BLANK candidate, not merely the first PRESENT one: a body
+  // carrying `error: ""` beside a real `message` would otherwise select the
+  // blank and degrade to the fallback, discarding the explanation it did send.
+  return (
+    [error, record.message, record.reason].find(
+      (candidate): candidate is string => typeof candidate === "string" && candidate.trim() !== ""
+    ) ?? fallback
+  );
 }
 
 export async function providerFetch<TBody = never>(
