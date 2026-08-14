@@ -145,7 +145,7 @@ export interface UpdateEarnStrategyMetricsInput {
   provider: EarnProviderId;
   providerReference: string;
   environment: SdpEnvironment;
-  /** Null clears a rate the provider no longer reports; undefined leaves it. */
+  /** Null clears a rate the provider no longer reports. */
   currentApy: string | null;
   /** Merged over the stored metadata, so curator and friends survive. */
   riskMetadata: EarnStrategyRiskMetadata;

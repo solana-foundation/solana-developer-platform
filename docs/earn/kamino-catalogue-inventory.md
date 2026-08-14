@@ -12,7 +12,7 @@ no devnet deployment, so there is one shelf and it is the mainnet one. SDP
 catalogues it into BOTH the sandbox and production environments — sandbox rows
 carry `host_cluster = 'mainnet-beta'` and are never fundable there.
 
-- Fetched: `2026-08-14T00:21:38.607Z`
+- Fetched: `2026-08-14T13:10:45.223Z`
 - Vaults in the registry: **170**
 - Catalogued by SDP: **21**
 - TVL floor: **$100,000** (`KAMINO_MIN_TVL_USD`)
@@ -21,27 +21,27 @@ carry `host_cluster = 'mainnet-beta'` and are never fundable there.
 
 | Vault | Token | TVL | APY | Holders | Kind | Curator | Address |
 |---|---|---:|---:|---:|---|---|---|
-| Steakhouse High Yield USDG | USDG | $36,369,927 | 3.87% | 727 | defi | Steakhouse Financial | `BoZDRc1RDY9FzUZZ19WT4GbtTnnbXQ8AGSU5ByEw3ut5` |
-| RWA USDC | USDC | $22,994,210 | 6.79% | 654 | rwa | Kamino | `DWSXb18xZApz29vnQpgR2m6MynCT7PznaXt7Ut7M7KaP` |
-| Steakhouse USDC | USDC | $20,104,945 | 3.60% | 3496 | defi | Steakhouse Financial | `HDsayqAsDWy3QvANGqh2yNraqcD8Fnjgh73Mhb3WRS5E` |
-| Allez USDC | USDC | $12,132,068 | 5.41% | 857 | defi | Allez Labs | `A1USdzqDHmw5oz97AkqAGLxEQZfFjASZFuy4T6Qdvnpo` |
-| Kamino Institutional Commodity Yield | USDC | $11,020,746 | 8.40% | 332 | rwa | Kamino | `B5pjfZAiKjyUEuqB2694NHrsjcaM67uuJaWqjzTVtzR6` |
-| Kamino Private Credit USDC | USDC | $7,249,588 | 6.94% | 50 | rwa | Kamino | `91b1opzHNUQobfLZxGMNYT5qDRKoqV8FdsdQBmH4wBxy` |
-| Elemental USDC Turbo | USDC | $5,145,423 | 6.57% | 369 | defi | Elemental | `A3hTCWdnfV6uiQLxRmnv17EpiEtmc93v1AGQnWy44Mup` |
-| Steakhouse High Yield USDC | USDC | $3,352,042 | 4.15% | 387 | defi | Steakhouse Financial | `BEEfo7xwgK2ZP13Pxo7qqTPzAteKJmXjVWtMWcXSvbn2` |
-| Elemental USDG Optimizer | USDG | $2,689,874 | 7.09% | 242 | defi | Elemental | `DJbRxuBckoJpFVUNtWx94NghcthfGaRV5NRmEazUaddE` |
-| Neutral Trade USDC Max Yield | USDC | $2,605,351 | 4.95% | 259 | defi | Neutral Trade | `67dqmR76uAbjX6e81A1ganKv3ou31WUMEdeWJkwVfeXy` |
-| Galaxy USDT | USDT | $2,549,148 | 3.27% | 2 | defi | Galaxy | `FPQNECVaw9qCHTJ7JRQXQUV94YffmhX3he5khUgx4m3j` |
-| Ethena Prime | USDG | $1,787,381 | 3.49% | 13 | defi | Ethena | `D1XVxx4ur7kiSgpuerUmoJXvZ3yEBFZWPx1uN7qBADFb` |
-| MEV Capital USDC | USDC | $1,492,159 | 6.93% | 134 | defi | MEV Capital | `EPC2N3AAv84P9TKsnDt2x41p6T7c5vTewBhQbh4RVx4r` |
-| Marinade USD Vault | USDC | $1,475,295 | 6.24% | 347 | defi | Marinade | `2TNCzzYJt3uHmpFpqeeJkza4pQUK9xoLa79DJH9AdgGA` |
-| USDC Prime | USDC | $1,170,584 | 4.81% | 236 | defi | Kamino | `9E69U4GzWhryRaPe8DYpco6Z9vTZY6gg8w6W2QsBACEj` |
-| Squads USDC | USDC | $921,756 | 3.63% | 595 | defi | Squads | `3DBvs2MraKsXoLdSGsQDue3RUQKxM6dp5KWWC6PWtUcg` |
-| Allez USDT | USDT | $901,892 | 3.09% | 149 | defi | Allez Labs | `A1USdT5BhSBpWiH4W6oZeykCDr9vq56qXVkMFhZjN48o` |
-| Steakhouse USDG | USDG | $533,608 | 2.64% | 200 | defi | Steakhouse Financial | `BqBsS4myH82S4yfqeKjXSF7yErWwSi5WTshSzKmHQgzw` |
-| Gauntlet Frontier | USDC | $374,920 | 5.82% | 121 | defi | Gauntlet | `GFiW6edsrtHZd4Vnz2qTSurVasRrgKrXE1ouHNtCVsft` |
-| Elaris USDC Optimizer | USDC | $325,355 | 7.31% | 3 | defi | Elaris | `8VoxRCLSAh791MWpsYYkgbWJoek55hkiU3aHE3VQadBv` |
-| Hyperithm USDC Apex | USDC | $208,632 | 6.29% | 5 | defi | Hyperithm | `7p5PczFqftBcyfgWkozHiVEQEtK9yeDXbXwQFkxenh7C` |
+| Steakhouse High Yield USDG | USDG | $37,569,829 | 3.68% | 733 | defi | Steakhouse Financial | `BoZDRc1RDY9FzUZZ19WT4GbtTnnbXQ8AGSU5ByEw3ut5` |
+| Kamino Institutional Commodity Yield | USDC | $26,780,479 | 7.11% | 432 | rwa | Kamino | `B5pjfZAiKjyUEuqB2694NHrsjcaM67uuJaWqjzTVtzR6` |
+| RWA USDC | USDC | $22,011,675 | 5.81% | 652 | rwa | Kamino | `DWSXb18xZApz29vnQpgR2m6MynCT7PznaXt7Ut7M7KaP` |
+| Steakhouse USDC | USDC | $20,083,208 | 3.98% | 3495 | defi | Steakhouse Financial | `HDsayqAsDWy3QvANGqh2yNraqcD8Fnjgh73Mhb3WRS5E` |
+| Allez USDC | USDC | $12,073,893 | 6.17% | 855 | defi | Allez Labs | `A1USdzqDHmw5oz97AkqAGLxEQZfFjASZFuy4T6Qdvnpo` |
+| Kamino Private Credit USDC | USDC | $7,247,887 | 6.90% | 50 | rwa | Kamino | `91b1opzHNUQobfLZxGMNYT5qDRKoqV8FdsdQBmH4wBxy` |
+| Elemental USDC Turbo | USDC | $5,284,539 | 6.33% | 372 | defi | Elemental | `A3hTCWdnfV6uiQLxRmnv17EpiEtmc93v1AGQnWy44Mup` |
+| Steakhouse High Yield USDC | USDC | $3,352,181 | 4.57% | 387 | defi | Steakhouse Financial | `BEEfo7xwgK2ZP13Pxo7qqTPzAteKJmXjVWtMWcXSvbn2` |
+| Elemental USDG Optimizer | USDG | $2,703,014 | 6.92% | 244 | defi | Elemental | `DJbRxuBckoJpFVUNtWx94NghcthfGaRV5NRmEazUaddE` |
+| Neutral Trade USDC Max Yield | USDC | $2,637,609 | 6.09% | 258 | defi | Neutral Trade | `67dqmR76uAbjX6e81A1ganKv3ou31WUMEdeWJkwVfeXy` |
+| Galaxy USDT | USDT | $2,548,858 | 3.21% | 2 | defi | Galaxy | `FPQNECVaw9qCHTJ7JRQXQUV94YffmhX3he5khUgx4m3j` |
+| Ethena Prime | USDG | $1,792,372 | 3.92% | 14 | defi | Ethena | `D1XVxx4ur7kiSgpuerUmoJXvZ3yEBFZWPx1uN7qBADFb` |
+| Marinade USD Vault | USDC | $1,474,761 | 5.81% | 348 | defi | Marinade | `2TNCzzYJt3uHmpFpqeeJkza4pQUK9xoLa79DJH9AdgGA` |
+| MEV Capital USDC | USDC | $1,411,320 | 6.29% | 133 | defi | MEV Capital | `EPC2N3AAv84P9TKsnDt2x41p6T7c5vTewBhQbh4RVx4r` |
+| USDC Prime | USDC | $1,170,641 | 6.21% | 235 | defi | Kamino | `9E69U4GzWhryRaPe8DYpco6Z9vTZY6gg8w6W2QsBACEj` |
+| Allez USDT | USDT | $991,686 | 2.99% | 149 | defi | Allez Labs | `A1USdT5BhSBpWiH4W6oZeykCDr9vq56qXVkMFhZjN48o` |
+| Squads USDC | USDC | $910,788 | 4.05% | 595 | defi | Squads | `3DBvs2MraKsXoLdSGsQDue3RUQKxM6dp5KWWC6PWtUcg` |
+| Steakhouse USDG | USDG | $521,359 | 2.54% | 199 | defi | Steakhouse Financial | `BqBsS4myH82S4yfqeKjXSF7yErWwSi5WTshSzKmHQgzw` |
+| Gauntlet Frontier | USDC | $374,946 | 5.26% | 121 | defi | Gauntlet | `GFiW6edsrtHZd4Vnz2qTSurVasRrgKrXE1ouHNtCVsft` |
+| Elaris USDC Optimizer | USDC | $325,382 | 7.07% | 3 | defi | Elaris | `8VoxRCLSAh791MWpsYYkgbWJoek55hkiU3aHE3VQadBv` |
+| Hyperithm USDC Apex | USDC | $208,645 | 4.99% | 5 | defi | Hyperithm | `7p5PczFqftBcyfgWkozHiVEQEtK9yeDXbXwQFkxenh7C` |
 
 ## Why the rest stayed out
 
@@ -59,9 +59,9 @@ the line first.
 
 | Vault | Token | TVL | Holders |
 |---|---|---:|---:|
-| Echlon Optimized USDC | USDC | $94,301 | 14 |
-| Elemental USDT Optimizer | USDT | $15,591 | 13 |
-| Solana Mobile USDC Earn Vault | USDC | $1,023 | 8 |
+| Echlon Optimized USDC | USDC | $93,607 | 14 |
+| Elemental USDT Optimizer | USDT | $15,589 | 13 |
+| Solana Mobile USDC Earn Vault | USDC | $1,024 | 8 |
 | Honeycomb USDC | USDC | $300 | 3 |
 | NeutralTrade USDC Max Yield | USDC | $229 | 4 |
 | STKUSDC | USDC | $103 | 2 |
@@ -69,7 +69,7 @@ the line first.
 | Core+ USDC Vault | USDC | $103 | 1 |
 | Core++ USDT Vault | USDT | $103 | 1 |
 | USDT Max Yield | USDT | $103 | 1 |
-| SFS USDC | USDC | $34 | 10 |
+| SFS USDC | USDC | $40 | 10 |
 | OpenDelta USDC Prime | USDC | $30 | 2 |
 | PC Test Vault Dawid | USDC | $26 | 3 |
 | Mushroom | USDC | $25 | 4 |

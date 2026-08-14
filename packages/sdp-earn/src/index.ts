@@ -22,13 +22,7 @@ export {
   type SdpEarnErrorCode,
 } from "./errors";
 export { GroundEarnClient } from "./providers/ground/client";
-export {
-  distillKaminoVault,
-  KAMINO_MIN_TVL_USD,
-  type KaminoCatalogueDropReason,
-  KaminoEarnClient,
-  type KaminoVaultDistillation,
-} from "./providers/kamino/client";
+export { KaminoEarnClient } from "./providers/kamino/client";
 export { PerenaEarnClient } from "./providers/perena/client";
 export { StubEarnClient } from "./providers/stub";
 export { UpshiftEarnClient } from "./providers/upshift/client";
