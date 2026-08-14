@@ -39,6 +39,7 @@ import {
   formatStatus,
   resolveTokenByMint,
   resolveTransferTokenLabel,
+  statusMessageKey,
   statusVariant,
 } from "./payments/payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "./payments/payments-page.data";
@@ -132,13 +133,17 @@ function ActivityAddress({
  * row would drown the failed ones this exists to surface.
  */
 function ActivityStatusBadge({ status }: { status: string }) {
+  const t = useTranslations();
   const variant = statusVariant(status);
   if (!status || variant === "success") {
     return null;
   }
+  // Known statuses use the transactions catalog keys so the badge localizes;
+  // an unknown one falls back to the raw title-cased status.
+  const messageKey = statusMessageKey(status);
   return (
     <Badge variant={variant} className="shrink-0">
-      {formatStatus(status)}
+      {messageKey ? t(messageKey) : formatStatus(status)}
     </Badge>
   );
 }
