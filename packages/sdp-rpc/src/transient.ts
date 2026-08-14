@@ -40,3 +40,21 @@ export function isUnauthorizedRpcError(error: unknown): boolean {
   }
   return (context as { statusCode?: unknown }).statusCode === 401;
 }
+
+/**
+ * Returns `true` when an RPC failure is a gateway HTTP 403. `@solana/kit`'s HTTP
+ * transport puts that on `error.context.statusCode`. The SPC gateway answers 403
+ * (`-32002 "account not owned by caller"`) for a token account that does not
+ * exist yet, so a channel read treats a never-credited owner as an empty balance
+ * rather than an error — see `getChannelTokenBalance`.
+ */
+export function isForbiddenRpcError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const context = (error as { context?: unknown }).context;
+  if (!context || typeof context !== "object") {
+    return false;
+  }
+  return (context as { statusCode?: unknown }).statusCode === 403;
+}

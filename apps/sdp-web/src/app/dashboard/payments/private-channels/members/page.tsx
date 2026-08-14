@@ -9,7 +9,7 @@ import { loadMembers } from "../private-channels-page.data";
 import { MembersTable } from "./members-table";
 
 export default async function PrivateChannelsMembersPage() {
-  await requirePrivateChannelsAccess();
+  await requirePrivateChannelsAccess("project-members:read");
 
   const t = await getTranslations();
 

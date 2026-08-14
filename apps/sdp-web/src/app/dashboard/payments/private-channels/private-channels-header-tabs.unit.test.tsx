@@ -24,7 +24,7 @@ describe("PrivateChannelsHeaderTabs", () => {
   it("shows Members next to Overview and the transfer flow tabs for connected instances", () => {
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
-        <PrivateChannelsHeaderTabs isConnected />
+        <PrivateChannelsHeaderTabs isConnected canReadMembers />
       </I18nProvider>
     );
 
@@ -39,10 +39,26 @@ describe("PrivateChannelsHeaderTabs", () => {
     ]);
   });
 
+  it("hides the Members tab without project-members:read permission", () => {
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <PrivateChannelsHeaderTabs isConnected canReadMembers={false} />
+      </I18nProvider>
+    );
+
+    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual([
+      "Overview",
+      "Deposit",
+      "Transfer",
+      "Withdraw",
+      "API Playground",
+    ]);
+  });
+
   it("keeps Overview and API Playground visible when no instance is connected", () => {
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
-        <PrivateChannelsHeaderTabs isConnected={false} />
+        <PrivateChannelsHeaderTabs isConnected={false} canReadMembers />
       </I18nProvider>
     );
 

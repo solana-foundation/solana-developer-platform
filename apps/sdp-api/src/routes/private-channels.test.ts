@@ -29,6 +29,9 @@ const TEST_API_KEY = {
   raw: "sk_test_private_channels",
   prefix: "sk_test_pc",
 };
+const PAYMENTS_ONLY_API_KEY = {
+  raw: "sk_test_private_channels_payments_only",
+};
 const TEST_CACHED_API_KEY: CachedApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
@@ -90,6 +93,15 @@ async function seedAuth(): Promise<void> {
   ]);
 }
 
+async function seedPaymentsOnlyAuth(): Promise<void> {
+  const keyHash = await hashString(PAYMENTS_ONLY_API_KEY.raw, env.API_KEY_PEPPER);
+  await seedCachedApiKey(env, keyHash, {
+    ...TEST_CACHED_API_KEY,
+    id: "key_pc_payments_only",
+    permissions: ["payments:read", "payments:write"],
+  });
+}
+
 function authHeaders() {
   return {
     Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -125,6 +137,7 @@ describe("Private Channels routes", () => {
     probeConnectionMock.mockReset();
     await seedTestDatabase(env);
     await seedAuth();
+    await seedPaymentsOnlyAuth();
   });
 
   afterEach(async () => {
@@ -135,6 +148,29 @@ describe("Private Channels routes", () => {
   it("returns 403 when the feature flag is off", async () => {
     env.PRIVATE_CHANNELS_ENABLED = undefined;
     const res = await app.request("/v1/private-channels/instance", { headers: authHeaders() }, env);
+    expect(res.status).toBe(403);
+  });
+
+  it.each([
+    ["GET", "/v1/private-channels/users"],
+    ["GET", "/v1/private-channels/users/pcu_test"],
+    ["POST", "/v1/private-channels/users"],
+    ["DELETE", "/v1/private-channels/users/pcu_test"],
+    ["POST", "/v1/private-channels/channels/pch_test/memberships"],
+    ["DELETE", "/v1/private-channels/channels/pch_test/memberships/pcu_test"],
+  ])("%s %s requires project-members permissions", async (method, path) => {
+    const res = await app.request(
+      path,
+      {
+        method,
+        headers: {
+          Authorization: `Bearer ${PAYMENTS_ONLY_API_KEY.raw}`,
+          "Content-Type": "application/json",
+        },
+      },
+      env
+    );
+
     expect(res.status).toBe(403);
   });
 

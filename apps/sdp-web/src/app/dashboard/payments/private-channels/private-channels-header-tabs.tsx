@@ -12,7 +12,8 @@ import { useTranslations } from "@/i18n/provider";
 // connected. There is no Instance or Channels tab: the instance
 // (connect/disconnect) and channels are reached from links in the Overview's
 // Connected-instance card. The Events feed has no tab either — it's reached from
-// the Overview's "All activity" link.
+// the Overview's "All activity" link. The Members tab is additionally gated on the
+// caller's `project-members:read` permission (see `canReadMembers`).
 const TABS = [
   {
     id: "overview",
@@ -56,15 +57,20 @@ const TABS = [
 
 interface Props {
   isConnected: boolean;
+  /** Whether the caller has `project-members:read` — gates the Members tab. */
+  canReadMembers: boolean;
 }
 
-export function PrivateChannelsHeaderTabs({ isConnected }: Props) {
+export function PrivateChannelsHeaderTabs({ isConnected, canReadMembers }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const t = useTranslations();
 
-  // Keep the always-visible destinations available before an instance is connected.
-  const visible = TABS.filter((tab) => isConnected || !tab.requiresActive);
+  // Keep the always-visible destinations available before an instance is connected,
+  // and hide Members from callers without `project-members:read`.
+  const visible = TABS.filter(
+    (tab) => (isConnected || !tab.requiresActive) && (tab.id !== "members" || canReadMembers)
+  );
   if (visible.length === 0) return null;
 
   const activeId = visible.find((tab) => pathname.startsWith(tab.href))?.id ?? visible[0].id;
