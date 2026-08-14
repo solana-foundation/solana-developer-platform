@@ -188,6 +188,19 @@ export interface ListEarnStrategiesInput {
    * the sync still persists the provider's complete routable catalogue.
    */
   excludeRelatedTerms?: readonly string[];
+  /**
+   * Server-owned provider allowlist — the offered set
+   * (`SURFACED_EARN_PROVIDERS`), never a caller's filter.
+   *
+   * An EMPTY array means "no provider is offered" and returns nothing. That is
+   * the whole point of accepting the array rather than an optional single id:
+   * the caller passes the offered set as-is, and the degenerate case cannot
+   * quietly invert into "no filter, show everything" at a call site that forgot
+   * to check. Filtering belongs in the query for the same reason
+   * `excludeRelatedTerms` does — so pagination and totals describe the rows the
+   * caller can actually see.
+   */
+  providers?: readonly string[];
   limit: number;
   offset: number;
 }

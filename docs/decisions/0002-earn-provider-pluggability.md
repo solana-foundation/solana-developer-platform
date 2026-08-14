@@ -74,6 +74,12 @@ Independent switches, all runtime-safe:
   holds until the status is deliberately written back. See the playbook's vault
   checklist.
 - **Feature flag:** the whole `/v1/earn` family sits behind `EARN_ENABLED`.
+- **Surfacing (2026-08-14 addendum):** `EARN_PROVIDER_SURFACING` declares which
+  registered providers SDP currently OFFERS. An un-surfaced provider keeps its
+  code, credentials, crons and catalogue rows, but its strategies vanish from
+  every public read and `POST /programs` refuses it. This is the *product*
+  switch — the four above are deployment and customer switches — and it is the
+  only one that no per-organization override can lift.
 
 ### Invariants that make disabling safe
 
@@ -92,6 +98,11 @@ Independent switches, all runtime-safe:
   remain readable regardless of provider entitlement, and the withdrawal
   ledger list carries no provider gate at all (2026-08-11 addendum), so
   dashboards and partner integrations keep working while a provider is off.
+  Surfacing is the one exception, and only for the *catalogue* read: an
+  un-surfaced provider's strategies are hidden, while every route that reads or
+  exits an existing program stays open (2026-08-14 addendum). Hiding a shelf
+  nobody may buy from is presentation; hiding a position someone holds would be
+  hiding their money.
 
 ## Consequences
 
@@ -447,3 +458,68 @@ second shape that the pluggability constraint has to absorb without a rewrite.
   type carries figures only, so it can neither admit a vault the catalogue
   refused nor change what a strategy is. Freshness is cadence, not blending.
   A provider whose rates cost one request per vault should not implement it.
+
+## Addendum (2026-08-14) — surfacing: which registered providers SDP actually offers
+
+The switches above (credentials, org entitlement, strategy status, feature flag)
+answer *deployment* and *customer* questions. None answers the **product**
+question — "is SDP selling this provider right now?" — and the first time it was
+asked, the honest options were all bad: delete a working integration, remove its
+credentials and let a `PROVIDER_NOT_CONFIGURED` stand in for a business
+decision, or pause every one of its strategies individually and hope the next
+catalogue sync respects it.
+
+So registration and surfacing are now separate declarations.
+`EARN_PROVIDER_SURFACING` in `packages/sdp-types/src/provider-access.ts` is an
+exhaustive `Record<EarnProviderId, boolean>` beside `EARN_PROVIDERS`: the latter
+is "what this deployment can talk to", the former is "what we offer today".
+
+- **One declaration, three consumers, no provider ids anywhere else.**
+  `GET /strategies` (list and detail) hides an un-surfaced provider's rows;
+  `POST /programs` refuses to open a new position with it
+  (`assertEarnProviderSurfaced`); the dashboard derives
+  `EARN_PROGRAM_CREATION_ENABLED` and drops every create affordance. Hiding at
+  the API rather than in the browser is deliberate — the API is the surface the
+  dashboard *and* every partner integration read, and a client-side copy of a
+  visibility rule is the second thing that drifts toward permissive.
+- **Exhaustive on purpose.** A provider added to `EARN_PROVIDERS` without an
+  entry is a compile error, so "we registered a provider and never decided
+  whether it was public" cannot happen quietly. The default for a new id is a
+  decision, not an omission.
+- **It gates the way IN, and only the way in.** Reads, withdrawal previews,
+  withdrawals, the ledger, and re-targeting an existing program all ignore
+  surfacing entirely. This is the money-out-beats-money-off invariant applied to
+  a new switch: an organization holding a position taken while a provider was
+  offered keeps every route that reads or exits it, and un-surfacing can never
+  trap funds. `POST /programs` is the only route that opens a *new* commitment,
+  so it is the only one that refuses.
+- **Its 403 is not the entitlement 403.** `assertProviderAvailable` answers an
+  organization-scoped question and tells the caller to request manual
+  activation. No override lifts surfacing, so it runs first and says "not
+  currently offered" — pointing a caller at an activation door that does not
+  exist is worse than a plain refusal.
+- **The catalogue sync and metrics refresh keep running.** `earn_strategies`
+  stays a truthful provider inventory, and re-surfacing takes effect on deploy
+  rather than after the next hourly pass. Same reasoning as the API's
+  `HIDDEN_STRATEGY_TERMS`: filter at the policy boundary, never by refusing to
+  store what a provider reports.
+
+**First application: Ground un-surfaced, Kamino the only offered provider.**
+Ground is the only portfolio-capable provider, so with it un-surfaced nothing
+can create a program and Earn is browse-only — a Kamino comparison catalogue
+plus whatever programs already exist. That is a product consequence of the
+switch, not a property of it; re-surfacing Ground is a one-line change.
+
+Two consequences worth naming, because both are load-bearing and neither is
+obvious:
+
+- **`assertKnownYieldSources` deliberately does NOT inherit the hide.** It
+  validates re-target allocations against the STORED catalogue, so a position
+  may keep pointing at a row the browse surface no longer shows. Collapsing the
+  two would freeze an existing customer's allocation because of an editorial
+  decision about new customers.
+- **The create test suite is config-independent.** `earn-program.test.ts`
+  partial-mocks `isEarnProviderSurfaced` to force it on, because idempotency,
+  replay, gate order and environment isolation have to keep working for whichever
+  provider is offered next — the gate itself gets its own tests that flip the
+  mock off and run against the real map.

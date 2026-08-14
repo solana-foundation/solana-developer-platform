@@ -1,9 +1,11 @@
 import { isClusterFundableInEnvironment } from "@sdp/earn";
-import type {
-  EarnStrategy,
-  EarnStrategyResponse,
-  ListEarnStrategiesResponse,
-  SdpEnvironment,
+import {
+  type EarnStrategy,
+  type EarnStrategyResponse,
+  isEarnProviderSurfaced,
+  type ListEarnStrategiesResponse,
+  type SdpEnvironment,
+  SURFACED_EARN_PROVIDERS,
 } from "@sdp/types";
 import type { EarnStrategyRow } from "@/db/repositories";
 import { notFound } from "@/lib/errors";
@@ -25,7 +27,26 @@ import { listResponse, pageWindow, parseParams, parseQuery } from "./shared";
  */
 const HIDDEN_STRATEGY_TERMS = ["aave", "morpho"] as const;
 
+/**
+ * Rows absent from every public strategy read, for either of TWO independent
+ * reasons — kept in one predicate so the detail route can never drift from the
+ * list route's filters:
+ *
+ * 1. The row's PROVIDER is not currently offered (`EARN_PROVIDER_SURFACING` in
+ *    @sdp/types). Platform-level: we are not selling that provider today.
+ * 2. The row names a SOURCE we have decided not to show. Editorial, per-row.
+ *
+ * Both are visibility, and neither is entitlement or `fundable`. Note the
+ * asymmetry with the money routes this deliberately does not reach: an existing
+ * program may point at a row hidden by either rule, and `assertKnownYieldSources`
+ * still accepts it from the stored catalogue precisely because hiding a
+ * customer's own position would hide their money.
+ */
 function isHiddenStrategy(row: EarnStrategyRow): boolean {
+  if (!isEarnProviderSurfaced(row.provider)) {
+    return true;
+  }
+
   const searchable = [row.provider_reference, row.name, row.underlying_source ?? ""]
     .join("\n")
     .toLowerCase();
@@ -91,6 +112,10 @@ export const listEarnStrategies = async (c: AppContext) => {
     sourceKind: query.sourceKind,
     apyType: query.apyType,
     liquidityTerm: query.liquidityTerm,
+    // Both visibility rules run in SQL so `total` and the page window describe
+    // the rows the caller can see. `isHiddenStrategy` applies the same two rules
+    // to the detail route, which has no query to push them into.
+    providers: SURFACED_EARN_PROVIDERS,
     excludeRelatedTerms: HIDDEN_STRATEGY_TERMS,
     ...pageWindow(query),
   });

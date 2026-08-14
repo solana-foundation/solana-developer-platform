@@ -163,10 +163,28 @@ Flags control *visibility*; earn access is **override-only per organization**
 the UI reaches the flow and the API refuses with "requires manual activation" —
 that is correct, not a bug. Grant the override in the **local** DB to proceed.
 
+### 5b. The gate BEFORE that one: is the provider even offered?
+
+**Ground is currently un-surfaced, so locally you will see a Kamino-only
+catalogue and no way to create a program — that is the shipped state, not a
+broken setup.** `EARN_PROVIDER_SURFACING`
+(`packages/sdp-types/src/provider-access.ts`) declares which registered
+providers SDP OFFERS; it is a code constant, so there is no env var or DB row to
+flip. Ground's client, credentials and catalogue sync all still run — only the
+public reads and `POST /programs` refuse it.
+
+To work on the Ground flow locally, set `ground: true` there and do not commit
+it. The full rationale, the exit-safety rules it must never break, and the test
+pattern are in `docs/contributing/earn-pluggability-playbook.md` §6 and ADR 0002's
+2026-08-14 addendum.
+
 ### Troubleshooting
 
 | Symptom | Cause |
 |---|---|
+| Catalogue shows only Kamino rows; no Ground strategies anywhere | correct — Ground is un-surfaced (`EARN_PROVIDER_SURFACING`, §5b). The rows are still in the DB; only the reads hide them |
+| No "Set up Earn"/"Add strategy"/"Change strategy" buttons; `/deposit` shows a notice | same cause: no surfaced provider can hold a program, so the dashboard is browse-only (§5b) |
+| `POST /v1/earn/programs` → 403 "is not currently offered" | the surfacing gate, not entitlement — no `providerOverrides` lifts it (§5b) |
 | Every request 500s | Redis missing/wrong port (rate limiter) |
 | `/v1/earn/*` → 403 | `MARKETS_ENABLED` or `EARN_ENABLED` unset/false |
 | `/dashboard/markets/earn` → 404 | same flags, web side (segment guards) |
@@ -405,6 +423,26 @@ rates come from the same paged endpoint the catalogue uses.
   NOTE: `deriveCurator` and `GROUND_CURATOR_HOUSES` still carry EVM vocabulary
   (e.g. `morpho`) on purpose — they parse Ground's RAW 18-source response so the
   inventory can attribute what we DROP. Do not "clean" those.
+
+## Registered is not the same as offered
+
+`EARN_PROVIDERS` is what this deployment can talk to; `EARN_PROVIDER_SURFACING`
+(both in `packages/sdp-types/src/provider-access.ts`) is what SDP sells today.
+An un-surfaced provider keeps everything in this package — client, credentials,
+catalogue sync, metrics refresh — and disappears from `GET /strategies` and
+`POST /programs` only.
+
+**Nothing in this package reads it, and nothing should.** Surfacing is a product
+policy enforced at the API's read/write boundary, exactly like
+`HIDDEN_STRATEGY_TERMS`; a client here gates on credentials alone, the same rule
+that keeps feature flags out of this package. Keeping the sync provider-blind is
+what makes the DB a truthful inventory and re-surfacing a deploy rather than an
+hour's wait.
+
+The invariant it must never break is the one at the top of "Hard invariants":
+surfacing gates the way IN (a NEW program) and nothing else, so it can never
+trap funds. §6 of `docs/contributing/earn-pluggability-playbook.md` is the
+checklist.
 
 ## Cross-package coupling
 

@@ -6,6 +6,7 @@ import {
   type CustodyProvider,
   EARN_PROVIDERS,
   type EarnProviderId,
+  isEarnProviderSurfaced,
   normalizeOrganizationTier,
   ORGANIZATION_RPC_PROVIDERS,
   type OrganizationProviderAvailabilityResponse,
@@ -735,6 +736,30 @@ export async function assertProviderAvailable(
         `${def.label} is not configured for ${mode} mode.`
       );
     }
+  }
+}
+
+/**
+ * Platform-level gate: opening a NEW position with a provider SDP does not
+ * currently offer (`EARN_PROVIDER_SURFACING` in @sdp/types).
+ *
+ * Deliberately NOT folded into `assertProviderAvailable`, which answers an
+ * ORGANIZATION-scoped question and whose refusal tells the caller to ask for
+ * manual activation. No override lifts this one, so it runs FIRST and says
+ * something different — pointing a caller at an activation door that does not
+ * exist is worse than a plain "not offered".
+ *
+ * This is the ONLY place surfacing is allowed to refuse anything. Every
+ * money-out route, every read, and re-targeting an existing program ignore it
+ * entirely, so un-surfacing a provider can never strand a position taken while
+ * it was offered (ADR 0002).
+ */
+export function assertEarnProviderSurfaced(providerId: EarnProviderId): void {
+  if (!isEarnProviderSurfaced(providerId)) {
+    throw new AppError(
+      "FORBIDDEN",
+      `${PROVIDER_AVAILABILITY_DEFINITIONS.earn[providerId].label} is not currently offered.`
+    );
   }
 }
 

@@ -323,6 +323,17 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         conditions.push("liquidity_term = ?");
         bindings.push(input.liquidityTerm);
       }
+      if (input.providers !== undefined) {
+        if (input.providers.length === 0) {
+          // `provider IN ()` is a syntax error, and falling through to "no
+          // filter" would surface EVERY provider the moment the offered set went
+          // empty — the exact inversion this filter exists to prevent.
+          conditions.push("1 = 0");
+        } else {
+          conditions.push(`provider IN (${input.providers.map(() => "?").join(", ")})`);
+          bindings.push(...input.providers);
+        }
+      }
       for (const rawTerm of input.excludeRelatedTerms ?? []) {
         const term = rawTerm.trim().toLowerCase();
         if (!term) continue;
