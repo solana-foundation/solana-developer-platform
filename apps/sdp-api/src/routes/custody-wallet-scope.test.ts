@@ -676,6 +676,162 @@ describe("Custody wallet scope routes", () => {
     expect(body.data.publicKey).toBe("para_pubkey_a");
   });
 
+  it("rejects custody record IDs on public command selectors", async () => {
+    await seedCachedKey({
+      walletScope: "selected",
+      signingWalletId: "para_wallet_a",
+      walletBindings: [
+        {
+          walletId: "para_wallet_a",
+          custodyWalletId: "cwlt_scope_para_a",
+          permissions: ["wallets:read"],
+        },
+      ],
+    });
+
+    const requests = [
+      ["/v1/wallets/public-key?walletId=cwlt_scope_para_a", 404],
+      ["/v1/payments/wallets/cwlt_scope_para_a/balances", 403],
+      ["/v1/payments/wallets/cwlt_scope_para_a/policies", 403],
+    ] as const;
+
+    for (const [path, expectedStatus] of requests) {
+      const response = await app.request(
+        path,
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+      expect(response.status).toBe(expectedStatus);
+    }
+  });
+
+  it("keeps the custody record ID alias for exact wallet GET and PATCH", async () => {
+    await seedCachedKey({
+      walletScope: "selected",
+      signingWalletId: "para_wallet_a",
+      walletBindings: [
+        {
+          walletId: "para_wallet_a",
+          custodyWalletId: "cwlt_scope_para_a",
+          permissions: ["wallets:read", "wallets:write"],
+        },
+      ],
+    });
+
+    const detail = await app.request(
+      "/v1/wallets/cwlt_scope_para_a?includeBalance=false",
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(detail.status).toBe(200);
+    expect(await detail.json()).toMatchObject({
+      data: { wallet: { id: "cwlt_scope_para_a", walletId: "para_wallet_a" } },
+    });
+
+    const update = await app.request(
+      "/v1/wallets/cwlt_scope_para_a",
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ label: "Alias update" }),
+      },
+      env
+    );
+    expect(update.status).toBe(200);
+    expect(await update.json()).toMatchObject({
+      data: { wallet: { id: "cwlt_scope_para_a", label: "Alias update" } },
+    });
+  });
+
+  it("returns 409 when an exact wallet selector matches a canonical ID and record-ID alias", async () => {
+    await seedCachedKey({
+      walletScope: "selected",
+      signingWalletId: "para_wallet_a",
+      walletBindings: [
+        {
+          walletId: "para_wallet_a",
+          custodyWalletId: "cwlt_scope_para_a",
+          permissions: ["wallets:read", "wallets:write"],
+        },
+      ],
+    });
+    await getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
+           (id, custody_config_id, wallet_id, public_key, status)
+         VALUES ('para_wallet_a', ?, 'para_alias_collision', ?, 'active')`
+      )
+      .bind(PARA_CONFIG_ID, TEST_SOLANA_ADDRESSES.wallet3)
+      .run();
+
+    const detail = await app.request(
+      "/v1/wallets/para_wallet_a?includeBalance=false",
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(detail.status).toBe(409);
+
+    const update = await app.request(
+      "/v1/wallets/para_wallet_a",
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ label: "Ambiguous" }),
+      },
+      env
+    );
+    expect(update.status).toBe(409);
+  });
+
+  it("does not expose a canonical and record-ID collision outside the key bindings", async () => {
+    await seedCachedKey({
+      walletScope: "selected",
+      signingWalletId: "para_wallet_a",
+      walletBindings: [
+        {
+          walletId: "para_wallet_a",
+          custodyWalletId: "cwlt_scope_para_a",
+          permissions: ["wallets:read", "wallets:write"],
+        },
+      ],
+    });
+    await getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
+           (id, custody_config_id, wallet_id, public_key, status)
+         VALUES ('privy_wallet_a', ?, 'privy_alias_unbound', ?, 'active')`
+      )
+      .bind(PRIVY_CONFIG_ID, TEST_SOLANA_ADDRESSES.wallet3)
+      .run();
+
+    const detail = await app.request(
+      "/v1/wallets/privy_wallet_a?includeBalance=false",
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(detail.status).toBe(404);
+
+    const update = await app.request(
+      "/v1/wallets/privy_wallet_a",
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ label: "Hidden" }),
+      },
+      env
+    );
+    expect(update.status).toBe(404);
+  });
+
   it("fails closed when a selected wallet ID becomes ambiguous", async () => {
     await getDb(env).batch([
       getDb(env)

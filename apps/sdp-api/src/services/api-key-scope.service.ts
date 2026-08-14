@@ -528,7 +528,8 @@ export function getAllowedApiKeyCustodyWalletIdsForPermissions(
 export function resolveApiKeyCustodyWalletId(
   auth: ApiKeyContext,
   requestedWalletId: string | null | undefined,
-  requiredPermissions: Permission[] = []
+  requiredPermissions: Permission[] = [],
+  allowRecordIdAlias = false
 ): string | null {
   if (auth.authType !== "api_key" || !hasSelectedWalletScope(auth)) {
     return null;
@@ -540,7 +541,8 @@ export function resolveApiKeyCustodyWalletId(
   const binding = requestedWalletId
     ? bindings.find(
         (entry) =>
-          entry.walletId === requestedWalletId || entry.custodyWalletId === requestedWalletId
+          entry.walletId === requestedWalletId ||
+          (allowRecordIdAlias && entry.custodyWalletId === requestedWalletId)
       )
     : auth.signingWalletId
       ? bindings.find((entry) => entry.walletId === auth.signingWalletId)

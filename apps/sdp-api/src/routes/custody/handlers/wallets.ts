@@ -7,7 +7,7 @@ import type { Address } from "@solana/kit";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError, badRequest } from "@/lib/errors";
+import { AppError, badRequest, conflict } from "@/lib/errors";
 import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
@@ -132,19 +132,46 @@ async function findAuthorizedOperationalWallet(
   const actor = resolveActor(c);
   const projectId = c.get("projectId");
   const targets = new CustodyRuntimeTargets(getDb(c.env), c.env, new Map());
-  const custodyWalletId = resolveApiKeyCustodyWalletId(auth, walletId, permissions);
-  return custodyWalletId
-    ? targets.findOperationalWalletById({
-        organizationId: actor.organizationId,
-        projectId,
-        custodyWalletId,
-      })
-    : targets.findOperationalWallet({
-        organizationId: actor.organizationId,
-        projectId,
-        walletId,
-        allowRecordIdAlias,
-      });
+  const custodyWalletId = resolveApiKeyCustodyWalletId(
+    auth,
+    walletId,
+    permissions,
+    allowRecordIdAlias
+  );
+  if (custodyWalletId) {
+    const wallet = await targets.findOperationalWalletById({
+      organizationId: actor.organizationId,
+      projectId,
+      custodyWalletId,
+    });
+    if (!wallet || !allowRecordIdAlias) {
+      return wallet;
+    }
+
+    const collision =
+      wallet.walletId === walletId
+        ? await targets.findOperationalWalletById({
+            organizationId: actor.organizationId,
+            projectId,
+            custodyWalletId: walletId,
+          })
+        : await targets.findOperationalWallet({
+            organizationId: actor.organizationId,
+            projectId,
+            walletId,
+          });
+    if (collision && collision.id !== wallet.id) {
+      throw conflict("Custody wallet ownership is ambiguous");
+    }
+    return wallet;
+  }
+
+  return targets.findOperationalWallet({
+    organizationId: actor.organizationId,
+    projectId,
+    walletId,
+    allowRecordIdAlias,
+  });
 }
 
 async function getWalletSummaries(
