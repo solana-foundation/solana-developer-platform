@@ -1,0 +1,33 @@
+{
+  "Metadata": {
+    "title": "Solana Developer Platform",
+    "description": "Dashboard SDP"
+  },
+  "Home": {
+    "solanaLogo": "Solana",
+    "docs": "Tài liệu",
+    "dashboard": "Dashboard",
+    "title": "Xây mọi sản phẩm tài chính, không cần lo hạ tầng",
+    "description": "Dù phát hành Stablecoin, điều phối thanh toán xuyên biên giới, hay token hóa tài sản thực, SDP cung cấp API và hạ tầng đáng tin cậy nhất để thực hiện.",
+    "trySdp": "Dùng thử SDP",
+    "contactUs": "Liên hệ",
+    "joinWaitlist": "Tham gia danh sách chờ"
+  },
+  "NotFound": {
+    "solanaLogo": "Solana",
+    "title": "Không tìm thấy trang",
+    "description": "Trang bạn tìm không tồn tại hoặc đã được chuyển.",
+    "backToDashboard": "Về dashboard",
+    "goHome": "Về trang chủ"
+  },
+  "Feedback": {
+    "label": "Phản hồi"
+  },
+  "Error": {
+    "tryAgain": "Thử lại",
+    "reportIssue": "Báo cáo sự cố",
+    "viewTitle": "Không tải được view này",
+    "viewDescription": "Đã xảy ra lỗi khi tải trang. Phần còn lại của dashboard vẫn hoạt động — bạn có thể thử lại hoặc tiếp tục.",
+    "reference": "Tham chiếu {digest}"
+  }
+}
