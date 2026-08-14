@@ -127,8 +127,6 @@ export function NotificationBell() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(false);
-  // null = unknown (config unreachable) — only an explicit `false` shows the warning.
-  const [emailEnabled, setEmailEnabled] = useState<boolean | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -241,11 +239,6 @@ export function NotificationBell() {
     setLoading(false);
   }, []);
 
-  const loadConfig = useCallback(async () => {
-    const data = await getJson<{ emailEnabled: boolean }>("/api/dashboard/notifications/config");
-    setEmailEnabled(data ? data.emailEnabled : null);
-  }, []);
-
   // Realtime nudges over SSE: the badge updates instantly from the pushed count, and
   // an open panel folds in fresh rows. Purely additive — the polling below stays as
   // the fallback whenever the stream is down.
@@ -315,16 +308,15 @@ export function NotificationBell() {
     };
   }, [refreshCount]);
 
-  // Load the list (first page) + email availability when the panel opens, and move
-  // focus into the dialog — without this a screen reader's cursor stays on the
-  // trigger and the open panel is never announced. close() restores focus.
+  // Load the list (first page) when the panel opens, and move focus into the dialog —
+  // without this a screen reader's cursor stays on the trigger and the open panel is
+  // never announced. close() restores focus.
   useEffect(() => {
     if (open) {
       void loadList(1);
-      void loadConfig();
       panelRef.current?.focus();
     }
-  }, [open, loadList, loadConfig]);
+  }, [open, loadList]);
 
   const close = useCallback(() => {
     setOpen(false);
@@ -472,12 +464,6 @@ export function NotificationBell() {
               </button>
             ) : null}
           </div>
-
-          {emailEnabled === false ? (
-            <p className="border-b border-border-subtle bg-fill-subtle px-4 py-2 text-xs text-secondary">
-              {t("Shared.notifications.emailUnavailable")}
-            </p>
-          ) : null}
 
           <NotificationPanelBody
             items={items}

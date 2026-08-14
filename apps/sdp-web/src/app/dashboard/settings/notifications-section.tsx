@@ -23,11 +23,9 @@ import { updateNotificationPreferencesAction } from "./actions";
 // theirs to tune, same rationale as the appearance section.
 export function NotificationsSection({
   preferences,
-  emailEnabled,
   loadError,
 }: {
   preferences: NotificationPreferenceDto[];
-  emailEnabled: boolean;
   loadError: boolean;
 }) {
   const t = useTranslations();
@@ -175,11 +173,6 @@ export function NotificationsSection({
             </tbody>
           </table>
         </div>
-        {!emailEnabled ? (
-          <p className="mt-3 text-xs text-tertiary">
-            {t("Shared.notifications.preferences.emailUnavailableHint")}
-          </p>
-        ) : null}
       </CardContent>
     </Card>
   );

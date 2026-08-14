@@ -1,5 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
-import type { NotificationPreferencesResponse, OrganizationRpcProvider } from "@sdp/types";
+import type {
+  NotificationPreferenceDto,
+  NotificationPreferencesResponse,
+  OrganizationRpcProvider,
+} from "@sdp/types";
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { assetProfiles } from "@/flags";
@@ -44,6 +48,31 @@ function resolveMembersPage(value: string | string[] | undefined): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 }
 
+type NotificationPreferencesState = {
+  preferences: NotificationPreferenceDto[];
+  loadError: boolean;
+};
+
+/**
+ * Notification preferences load independently of the org sections: their failure
+ * renders a section-local error, never the page-level one. Extracted (and resolved to
+ * a total shape rather than `| null`) because the page function sits at the cognitive
+ * complexity ceiling — every extra try/catch and `?.`/`??` at the call site counts.
+ */
+async function loadNotificationPreferences(
+  apiClient: Awaited<ReturnType<typeof createOrgSdpApiClient>>,
+  trace: ReturnType<typeof createTimedTrace>
+): Promise<NotificationPreferencesState> {
+  try {
+    const response = await trace.step("fetch_notification_preferences", () =>
+      apiClient.fetch<NotificationPreferencesResponse>("/v1/notifications/preferences")
+    );
+    return { preferences: response.preferences, loadError: false };
+  } catch {
+    return { preferences: [], loadError: true };
+  }
+}
+
 export default async function SettingsPage({
   searchParams,
 }: {
@@ -70,9 +99,11 @@ export default async function SettingsPage({
   let isLinked = true;
   let loadError = false;
   let enabledRpcProviders: OrganizationRpcProvider[] = [];
-  // Notification preferences load independently of the org sections: their failure
-  // renders a section-local error, never the page-level one.
-  let notificationPreferences: NotificationPreferencesResponse | null = null;
+  // Stays in its failed state if the outer try never reaches the fetch.
+  let notificationPreferences: NotificationPreferencesState = {
+    preferences: [],
+    loadError: true,
+  };
 
   try {
     const apiClient = await trace.step("create_sdp_api_client", () =>
@@ -80,11 +111,7 @@ export default async function SettingsPage({
     );
     let onboardingFailed = false;
 
-    try {
-      notificationPreferences = await trace.step("fetch_notification_preferences", () =>
-        apiClient.fetch<NotificationPreferencesResponse>("/v1/notifications/preferences")
-      );
-    } catch {}
+    notificationPreferences = await loadNotificationPreferences(apiClient, trace);
 
     try {
       const onboarding = await trace.step("fetch_onboarding_status", () =>
@@ -212,9 +239,8 @@ export default async function SettingsPage({
       {/* Not permission-gated either: a member's own notification matrix is personal
           state, same rationale as the appearance section above. */}
       <NotificationsSection
-        preferences={notificationPreferences?.preferences ?? []}
-        emailEnabled={notificationPreferences?.emailEnabled ?? false}
-        loadError={notificationPreferences === null}
+        preferences={notificationPreferences.preferences}
+        loadError={notificationPreferences.loadError}
       />
     </div>
   );

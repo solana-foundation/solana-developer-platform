@@ -379,7 +379,6 @@
     "showMore": "Show more",
     "showMoreCount": "Show more ({loaded} of {total})",
     "unreadItem": "Unread:",
-    "emailUnavailable": "Email delivery is unavailable at the moment.",
     "types": {
       "workflow_execution": "Automation ran: {trigger}",
       "workflow_run_failed": "Workflow run failed",
@@ -414,7 +413,6 @@
       "saveFailed": "Couldn't save the notification preference.",
       "loadError": "Couldn't load notification preferences.",
       "retry": "Try again",
-      "emailUnavailableHint": "Email delivery isn't configured yet, so email notifications are paused — your choices here apply as soon as it's enabled.",
       "toggleAria": "{category} notifications via {channel}",
       "categories": {
         "workflows": "Workflow automations",
