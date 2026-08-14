@@ -93,7 +93,7 @@ export default function DashboardLoading() {
                   <SkeletonBlock className="h-4 w-20" />
                 </TableHead>
                 <TableHead
-                  className="hidden w-[10rem] md:table-cell"
+                  className="hidden w-[12rem] md:table-cell"
                   data-loading-home-activity-column="type"
                 >
                   <SkeletonBlock className="h-4 w-16" />

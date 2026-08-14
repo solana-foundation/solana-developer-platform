@@ -7,6 +7,7 @@ import {
   type PaymentsDashboardWallet as WalletRecord,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
+import type { BadgeVariant } from "@/components/ui/badge";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { toTitleCase } from "../activity-format-utils";
 import type { PaymentsIssuedTokenSymbol } from "./payments-page.data";
@@ -320,6 +321,23 @@ export function formatRampQuoteTimeRemaining(
   const minutes = Math.floor(remainingSeconds / 60);
   const seconds = remainingSeconds % 60;
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+export function statusVariant(status: string): BadgeVariant {
+  if (["completed", "confirmed", "finalized"].includes(status)) return "success";
+  if (["pending", "processing", "awaiting_payment", "settling"].includes(status)) {
+    return "warning";
+  }
+  if (status === "failed") return "danger";
+  return "default";
+}
+
+export function formatStatus(status: string): string {
+  return status
+    .split("_")
+    .filter(Boolean)
+    .map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`)
+    .join(" ");
 }
 
 export function formatDirection(direction: string | undefined, t: Translate): string {

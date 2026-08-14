@@ -36,8 +36,10 @@ import { fetchHomeActivity } from "./home-workspace.data";
 import {
   formatCurrencyAmount,
   formatDisplayAmount,
+  formatStatus,
   resolveTokenByMint,
   resolveTransferTokenLabel,
+  statusVariant,
 } from "./payments/payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "./payments/payments-page.data";
 import { tokenActivityHref } from "./tokens/holdings-links";
@@ -120,6 +122,24 @@ function ActivityAddress({
       <TruncatedTableText value={row.address} className={`min-w-0 ${className ?? "truncate"}`} />
       <ExternalLink className="size-3 shrink-0" aria-hidden />
     </a>
+  );
+}
+
+/**
+ * Exception-only status marker. Success is the norm in this digest, so confirmed
+ * rows stay quiet and anything else — failed, pending, processing — gets the same
+ * badge variants the payments Transactions table uses. Badging every confirmed
+ * row would drown the failed ones this exists to surface.
+ */
+function ActivityStatusBadge({ status }: { status: string }) {
+  const variant = statusVariant(status);
+  if (!status || variant === "success") {
+    return null;
+  }
+  return (
+    <Badge variant={variant} className="shrink-0">
+      {formatStatus(status)}
+    </Badge>
   );
 }
 
@@ -644,7 +664,9 @@ export function HomeWorkspace({
                         <TableHead className="w-[calc(100%-8rem)] md:hidden">
                           {t("Shared.homeWorkspace.activity")}
                         </TableHead>
-                        <TableHead className="hidden w-[9.5rem] md:table-cell">
+                        {/* Wide enough for a type label plus an exception status
+                            badge ("Processing") without truncating either. */}
+                        <TableHead className="hidden w-[12rem] md:table-cell">
                           {t("Shared.homeWorkspace.type")}
                         </TableHead>
                         <TableHead className="hidden w-[12rem] md:table-cell">
@@ -684,7 +706,6 @@ export function HomeWorkspace({
                           row.amount === "—"
                             ? "—"
                             : formatDisplayAmount(row.amount, tokenSymbol, locale);
-
                         return (
                           <TableRow key={row.id}>
                             <TableCell className="pl-6 text-secondary">
@@ -703,7 +724,10 @@ export function HomeWorkspace({
                             </TableCell>
                             <TableCell className="min-w-0 md:hidden">
                               <div className="min-w-0">
-                                <div className="truncate font-medium">{row.type}</div>
+                                <div className="flex min-w-0 items-center gap-2">
+                                  <div className="truncate font-medium">{row.type}</div>
+                                  <ActivityStatusBadge status={row.status} />
+                                </div>
                                 <div className="mt-1 truncate text-xs text-tertiary">
                                   {mobileAmountLabel}
                                 </div>
@@ -715,7 +739,10 @@ export function HomeWorkspace({
                               </div>
                             </TableCell>
                             <TableCell className="hidden font-medium md:table-cell">
-                              {row.type}
+                              <span className="flex min-w-0 items-center gap-2">
+                                <span className="truncate">{row.type}</span>
+                                <ActivityStatusBadge status={row.status} />
+                              </span>
                             </TableCell>
                             <TableCell className="hidden text-secondary md:table-cell">
                               <span className="flex min-w-0 items-center gap-2">
