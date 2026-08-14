@@ -234,12 +234,28 @@ Ground publishes **no** risk tier, rating, grade, or score on a yield source —
 its own docs say so, and `riskMetadata.riskTier` is written only by the local dev
 seed. There is deliberately no profile or bucket step: every active, fundable
 strategy appears once in a comparison table. Liquidity is the explicit
-redemption-speed filter; yield is the APY sort. Neither assigns a synthetic
+redemption-speed filter; yield is the APY ranking. Neither assigns a synthetic
 category, and copy must never imply that the provider rated anything.
 
 Changing a filter clears a selected strategy if that row becomes hidden, so the
-review step can never confirm a choice the reader can no longer see. Missing
-pool size remains visible as `—` and sorts after reported values.
+review step can never confirm a choice the reader can no longer see.
+
+**Ranking is the reader's; the ordering rules are the model's.** Pool size and
+APY are clickable column headers (`SortableColumnHeader` → `nextStrategySort`):
+the active column flips direction, a newly clicked one opens descending, and
+`aria-sort` on the `th` carries the state (the ARIA sortable-table pattern — no
+separate live region). `sortStrategies` is the ONE comparator, and
+`rankedFundableStrategies` is that function at `DEFAULT_STRATEGY_SORT` (APY
+desc), so the step re-ranking the list it was handed is a no-op until a header
+is clicked — do not add a second comparator. Two rules hold in BOTH directions:
+an unreported figure stays visible as `—` and sorts LAST (an ascending pass must
+not promote the rows we know least about above every row the reader can
+compare), and ties break on name (the catalogue is re-read on revalidation, so
+two 5.1% rows must not swap under the cursor). The sort is the step's own state,
+not the wizard's: re-entering restores the default order, the way the step also
+lands pre-scrolled at the top, while the selection belongs to the wizard and
+survives wherever its row moves to. Backing and Access are labels, not rankings
+— leave them unsortable.
 
 ### Confirm is idempotent — keep it that way
 
@@ -309,6 +325,24 @@ funding instructions and nothing else — never imply a transfer happens.
   mono by design. Selection state is `border-primary bg-fill-subtle` across the
   whole module — do not mix in the issuance/ramps outline+ring variant. `Badge`
   is status-only; a plain label is an inline chip.
+- **Nothing may overlap — provider names run long.** Two traps, both sprung by
+  "Janus Henderson JTRSY tokenized by Centrifuge":
+  - `@solana/design-system`'s `cn` is a plain string join — **no
+    tailwind-merge**. A class handed to `Table*` that conflicts with one of its
+    own base classes does not win; it loses to CSS source order
+    (`.whitespace-nowrap` is emitted after `.whitespace-normal`), and under
+    `table-fixed` the still-unwrapped text overflows into the next column. The
+    strategy table therefore declares wrapping and clamping on the child spans,
+    where nothing competes. Never assume an override of a DS base class took —
+    and watch for the same trap with `display` (`block` vs `line-clamp-*`).
+  - `SummaryRow` gives the LABEL `shrink-0` and the VALUE `ml-auto min-w-0
+    break-words`. The inverse — a `shrink-0 whitespace-nowrap` value — is what
+    drove a fund name back over its own label: `justify-between` distributes
+    NEGATIVE free space, so a value that cannot shrink overlaps rather than
+    merely overflowing. Mirrors `payments/wizard-summary-list`.
+
+  Long text wraps inside a bounded clamp, or truncates with a `title` carrying
+  the full string. Numbers never truncate — wrap them instead.
 - Steps must land pre-scrolled at top (useLayoutEffect, `behavior: "instant"`,
   then focus the first `h2` — keep it). `WizardFrame` owns the only scroll
   container AND already renders the step `h2` + description, so step children

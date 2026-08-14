@@ -227,6 +227,38 @@ describe("StrategyStep", () => {
     expect(html).not.toContain("DashboardEarn.deposit.clearFilters");
   });
 
+  /**
+   * Overlap regressions. Neither renderer here does layout, so the rendered
+   * classes are the only observable — and that is exactly where both bugs lived:
+   * a class that silently never applied, and one that applied when it should not
+   * have.
+   */
+  it("keeps a long provider name inside its own column", () => {
+    const html = renderToStaticMarkup(
+      <StrategyStep
+        hasError={false}
+        isLoading={false}
+        onSelect={() => {}}
+        selectedStrategyId={null}
+        strategies={[
+          strategy({ id: "long", name: "Janus Henderson JTRSY tokenized by Centrifuge" }),
+        ]}
+        tokens={["usdc"]}
+      />
+    );
+
+    // `TableCell` merges its own classes with a plain join (no tailwind-merge)
+    // and `.whitespace-nowrap` is emitted last, so wrapping only takes effect
+    // when it is declared on the span — where an own value beats an inherited
+    // one. The clamp then bounds the row height instead of the column width.
+    const nameClasses = /<span class="([^"]*)" id="earn-strategy-long-name"/.exec(html)?.[1] ?? "";
+    expect(nameClasses).toContain("whitespace-normal");
+    expect(nameClasses).toContain("line-clamp-2");
+    expect(nameClasses).toContain("break-words");
+    // The full name stays reachable on hover even when the clamp bites.
+    expect(html).toContain('title="Janus Henderson JTRSY tokenized by Centrifuge"');
+  });
+
   it("renders an unreported pool without inventing a number", () => {
     const html = renderToStaticMarkup(
       <StrategyStep
@@ -309,6 +341,28 @@ describe("ReviewStep", () => {
     );
     expect(html).toContain("DashboardEarn.overview.providerNotConfigured");
     expect(html).not.toContain("DashboardEarn.deposit.createTitle");
+  });
+
+  it("lets a long summary value wrap instead of running back over its label", () => {
+    const html = renderToStaticMarkup(
+      <ReviewStep
+        onEditStrategy={() => {}}
+        onEditWallet={() => {}}
+        programExists={false}
+        providerUnconfigured={false}
+        strategy={strategy({ id: "long", name: "Janus Henderson JTRSY tokenized by Centrifuge" })}
+        submitError={null}
+        wallet={wallet()}
+      />
+    );
+
+    expect(html).toContain("Janus Henderson JTRSY tokenized by Centrifuge");
+    // A `shrink-0 whitespace-nowrap` value did not merely overflow the row:
+    // `justify-between` distributes negative free space, so it slid back over
+    // the label. The value now takes the slack (`ml-auto`) and wraps in it.
+    expect(html).not.toContain("whitespace-nowrap");
+    expect(html).toContain("ml-auto");
+    expect(html).toContain("break-words");
   });
 
   it("surfaces a submit failure inline", () => {

@@ -220,6 +220,14 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
   missing for an id in `EARN_PROVIDERS`.
 - All HTTP goes through `providerFetch`/`providerFetchJson` (src/fetch.ts) —
   never raw `fetch` in a client.
+- **`error` on a failure body is read as BOTH an object and a bare string**
+  (`extractProviderErrorMessage`). Measured 2026-08-14: Ground rejects a request
+  with `{"error":"Invalid query params: unknown parameter(s)","code":
+  "unknown_parameters",…}` — `error` is a STRING. Reading only `error.message`
+  made every Ground 4xx fall back to `"<provider> request failed with status
+  <n>"`, which names the status and explains nothing, so a refused write reached
+  the dashboard with its reason stripped. Do not narrow these shapes again; the
+  provider's own sentence is the most useful thing on this path.
 - **Chain keys are HARD-SET in `GROUND_SOLANA_CHAINS`**
   (providers/ground/client.ts): sandbox = `solana_devnet`, production =
   `solana`. Ground confirmed (2026-08-05) sandbox supports both Ethereum

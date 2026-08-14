@@ -204,6 +204,33 @@ describe("providerFetchJson", () => {
     );
   });
 
+  it("surfaces a bare string error, the shape Ground rejects writes with", async () => {
+    // Verbatim from Ground sandbox 2026-08-14. Reading only `error.message`
+    // dropped this sentence and left the caller staring at the bare status.
+    mock.method(globalThis, "fetch", async () =>
+      jsonResponse(400, {
+        error: "Invalid query params: unknown parameter(s)",
+        code: "unknown_parameters",
+        unknownKeys: ["limit"],
+        allowedKeys: [],
+      })
+    );
+
+    await assert.rejects(
+      providerFetchJson("ground", "https://ground.test/v2/wallets", { method: "POST" }),
+      earnError("BAD_REQUEST", /^Invalid query params: unknown parameter\(s\)$/)
+    );
+  });
+
+  it("falls back when a string error is blank rather than reporting an empty reason", async () => {
+    mock.method(globalThis, "fetch", async () => jsonResponse(400, { error: "   " }));
+
+    await assert.rejects(
+      providerFetchJson("ground", "https://ground.test/v2/wallets", { method: "POST" }),
+      earnError("BAD_REQUEST", /^ground request failed with status 400$/)
+    );
+  });
+
   it("falls back to a status message when the failure body is not JSON", async () => {
     mock.method(globalThis, "fetch", async () => new Response("Bad Gateway", { status: 502 }));
 
