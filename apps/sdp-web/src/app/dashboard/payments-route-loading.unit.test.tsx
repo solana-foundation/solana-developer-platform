@@ -227,8 +227,8 @@ describe("home and payments route loading states", () => {
     expect(markup).toContain("min-w-0 [&amp;_table]:table-fixed");
     expect(markup).toContain("w-[8rem] pl-6");
     expect(markup).toContain("w-[calc(100%_-_8rem)] md:hidden");
-    expect(markup.match(/hidden w-\[10rem\] md:table-cell/g)).toHaveLength(2);
-    expect(markup).toContain("hidden w-[8rem] md:table-cell");
+    expect(markup.match(/hidden w-\[12rem\] md:table-cell/g)).toHaveLength(2);
+    expect(markup).toContain("hidden w-[9rem] md:table-cell");
     expect(markup).toContain("hidden pr-6 md:table-cell");
     expect(markup).not.toContain('class="h-11 w-full"');
   });
