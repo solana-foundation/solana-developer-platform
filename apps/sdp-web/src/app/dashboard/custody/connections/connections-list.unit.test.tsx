@@ -144,6 +144,13 @@ describe("connections list", () => {
     expect(html).toContain("Wallet pending activation");
   });
 
+  it("renders the empty state for an empty slice even when a stale total disagrees", () => {
+    const html = renderList({ result: makeResult([], 20) });
+
+    expect(html).toContain("No connections yet");
+    expect(html).not.toContain("data-connection-id");
+  });
+
   it("renders the empty state with a setup CTA only for custody admins", () => {
     const emptyResult = makeResult([]);
 

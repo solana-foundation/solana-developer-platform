@@ -173,7 +173,10 @@ export function ConnectionsList({
     </Button>
   ) : null;
 
-  if (pagination.total === 0) {
+  // Keyed on the slice, not the total: a deletion race can hand page 1 an
+  // empty slice with a stale nonzero count, and a rowless table is never the
+  // right render for that.
+  if (connections.length === 0) {
     return (
       <ListEmptyState
         icon={<CableIcon className="size-5" />}
