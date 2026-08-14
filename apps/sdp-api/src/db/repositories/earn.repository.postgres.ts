@@ -9,6 +9,7 @@ import type {
   SdpEnvironment,
   SolanaCluster,
 } from "@sdp/types";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
 import type { AppDb } from "@/db";
 import type {
   CreateEarnProgramWithdrawalInput,
@@ -35,7 +36,21 @@ import {
   generateEarnStrategyId,
 } from "./earn.repository";
 
+/**
+ * `host_cluster` is NULLABLE in the schema on purpose (migration 0057 is the
+ * expand half of an expand/contract rollout), so the read has to answer for a
+ * row an older writer left unset. It answers with the environment's own
+ * cluster — the same rule the migration's backfill applies, and true of every
+ * writer that predates the column: Ground's catalogue gate only ever admits a
+ * source hosted on the environment's own chain.
+ *
+ * Failing closed here instead would be worse than useless: a NULL row would
+ * come back un-fundable, so a mid-deploy or rolled-back write would quietly
+ * drop live Ground strategies out of the wizard. Reading the fact that IS
+ * known keeps such a row correct until the next sync states it explicitly.
+ */
 function mapStrategyRow(row: Record<string, unknown>): EarnStrategyRow {
+  const environment = row.environment as SdpEnvironment;
   return {
     id: row.id as string,
     provider: row.provider as string,
@@ -51,8 +66,9 @@ function mapStrategyRow(row: Record<string, unknown>): EarnStrategyRow {
     redemption_delay_days: row.redemption_delay_days as number | null,
     risk_metadata: row.risk_metadata as EarnStrategyRiskMetadata,
     status: row.status as EarnStrategyStatus,
-    host_cluster: row.host_cluster as SolanaCluster,
-    environment: row.environment as SdpEnvironment,
+    host_cluster:
+      (row.host_cluster as SolanaCluster | null) ?? CLUSTER_BY_SDP_ENVIRONMENT[environment],
+    environment,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -306,6 +322,17 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       if (input.liquidityTerm) {
         conditions.push("liquidity_term = ?");
         bindings.push(input.liquidityTerm);
+      }
+      for (const rawTerm of input.excludeRelatedTerms ?? []) {
+        const term = rawTerm.trim().toLowerCase();
+        if (!term) continue;
+        const pattern = `%${term}%`;
+        conditions.push(
+          `(LOWER(provider_reference) NOT LIKE ?
+            AND LOWER(name) NOT LIKE ?
+            AND LOWER(COALESCE(underlying_source, '')) NOT LIKE ?)`
+        );
+        bindings.push(pattern, pattern, pattern);
       }
 
       return selectPage(db, "earn_strategies", conditions, bindings, input, mapStrategyRow);

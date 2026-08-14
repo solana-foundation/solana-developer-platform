@@ -524,4 +524,53 @@ describe("Earn routes — strategy catalogue", () => {
     };
     expect(body.data.strategy).toMatchObject({ hostCluster: "mainnet-beta", fundable: false });
   });
+
+  /**
+   * Browse policy, which is a DIFFERENT question from `fundable` above and must
+   * not be collapsed into it: a hidden row is absent from the response entirely,
+   * while an un-fundable row is present and says so. Hiding is SDP's editorial
+   * choice about a source; `fundable` is a fact about where the instrument
+   * lives.
+   */
+  it("stores Morpho and Aave rows but never returns them from strategy reads", async () => {
+    await seedAuth();
+    const visible = await seedStrategy({
+      provider: "ground",
+      providerReference: "kamino-steakhouse-usdc",
+      name: "Kamino Steakhouse USDC",
+      underlyingSource: "kamino",
+    });
+    const morpho = await seedStrategy({
+      provider: "ground",
+      providerReference: "morpho-gauntlet-usdc",
+      name: "Gauntlet USDC Prime",
+      underlyingSource: "morpho",
+    });
+    const aave = await seedStrategy({
+      provider: "ground",
+      providerReference: "aave-v3-usdc",
+      name: "Aave V3 Core USDC",
+      // Pin the fallback matching path too: a related row remains hidden even
+      // if provider metadata arrives without an underlying-source value.
+      underlyingSource: null,
+    });
+
+    const repository = createPostgresEarnRepository(getDb(env));
+    expect(await repository.getStrategyById(morpho.id)).not.toBeNull();
+    expect(await repository.getStrategyById(aave.id)).not.toBeNull();
+
+    const list = await getEarn("/v1/earn/strategies?pageSize=1");
+    expect(list.status).toBe(200);
+    const listBody = (await list.json()) as {
+      data: { strategies: Array<{ id: string }>; total: number; pageSize: number };
+    };
+    expect(listBody.data.strategies.map((strategy) => strategy.id)).toEqual([visible.id]);
+    expect(listBody.data.total).toBe(1);
+    expect(listBody.data.pageSize).toBe(1);
+
+    for (const hidden of [morpho, aave]) {
+      const detail = await getEarn(`/v1/earn/strategies/${hidden.id}`);
+      expect(detail.status).toBe(404);
+    }
+  });
 });

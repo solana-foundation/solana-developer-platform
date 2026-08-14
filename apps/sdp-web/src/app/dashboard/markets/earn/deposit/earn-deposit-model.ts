@@ -1,18 +1,8 @@
-import type {
-  EarnPortfolioAllocationInput,
-  EarnPortfolioToken,
-  EarnStrategy,
-  EarnStrategySourceKind,
-} from "@sdp/types";
-import {
-  settlementDays,
-  strategyApy,
-  strategyPoolUsd,
-  strategyToken,
-} from "../earn-program-presentation";
+import type { EarnPortfolioAllocationInput, EarnPortfolioToken, EarnStrategy } from "@sdp/types";
+import { strategyApy, strategyToken } from "../earn-program-presentation";
 
 /**
- * Pure model for the Earn deposit flow: full catalogue → direct filters → ONE
+ * Pure model for the Earn deposit flow: full catalogue → APY-ranked rows → ONE
  * strategy → a 100% allocation.
  *
  * Every value is derived from a field the provider actually reports. For Ground
@@ -32,33 +22,14 @@ import {
  * Ground publishes **no** risk tier, rating, or grade on a yield source. The UI
  * therefore exposes the observable fields above directly instead of assigning
  * a strategy to a synthetic liquidity/yield category.
+ *
+ * THE set distinction, which the rest of this file exists to hold: what the
+ * table LISTS is deliberately larger than what the flow can FUND. Since Kamino,
+ * SDP serves the communal vaults, so the shelf shows what exists.
+ * `browsableStrategies` is the table, `fundableStrategies` is the subset the
+ * onboarding hero may promise, and `strategyUnavailability` explains the gap
+ * one row at a time.
  */
-
-/** How a filtered catalogue is ordered. */
-export const EARN_STRATEGY_SORTS = ["apy", "size", "access"] as const;
-export type EarnStrategySort = (typeof EARN_STRATEGY_SORTS)[number];
-
-/** The short settlement ceiling offered by the browse step's access filter. */
-export const EARN_SHORT_SETTLEMENT_DAYS = 3;
-
-/**
- * Catalogue filters. `null` always means "no constraint" so an absent provider
- * field can never silently exclude a strategy.
- */
-export interface EarnStrategyFilters {
-  /** Longest acceptable redemption wait, in whole days. `0` = instant only. */
-  maxSettlementDays: number | null;
-  /** Restrict to one backing kind. */
-  sourceKind: EarnStrategySourceKind | null;
-  /** Restrict to one funding stablecoin. */
-  token: EarnPortfolioToken | null;
-  sort: EarnStrategySort;
-}
-
-/** Show the full fundable catalogue initially, ranked by indicative APY. */
-export function defaultStrategyFilters(): EarnStrategyFilters {
-  return { maxSettlementDays: null, sourceKind: null, token: null, sort: "apy" };
-}
 
 /**
  * Providers this flow can create a PROGRAM with, i.e. those exposing SDP the
@@ -116,41 +87,29 @@ export function isStrategySelectable(strategy: EarnStrategy): boolean {
 /**
  * Every strategy the catalogue table LISTS — all providers, all clusters.
  *
- * The catalogue and the fundable set are different sets, and since Kamino the
- * difference is the point: SDP serves the communal vaults, so the shelf shows
- * what exists. Rows that cannot start a program are rendered browse-only with
- * the reason from `strategyUnavailability`, never silently dropped — hiding
- * them made the whole Kamino integration invisible in the dashboard.
+ * Rows that cannot start a program render browse-only, carrying the reason from
+ * `strategyUnavailability`, and are never silently dropped: hiding them is what
+ * made the whole Kamino integration invisible in the dashboard.
  *
- * The token lane is still required: it drives the token column and filter, and
- * a row without one has nothing to render there.
+ * A routable token lane is still required — it drives the token column, and a
+ * row without one has nothing to render there.
  */
 export function browsableStrategies(strategies: readonly EarnStrategy[]): readonly EarnStrategy[] {
   return strategies.filter((strategy) => strategyToken(strategy) !== undefined);
 }
 
 /**
- * Strategies that can actually be funded: routable deposit mint, a provider
+ * Strategies that can actually be funded: a routable deposit mint, a provider
  * that supports programs, and an instrument the API says exists on this
  * environment's cluster.
  *
  * Drives the onboarding hero's counts — NOT the catalogue table, which uses
- * `browsableStrategies`. The hero is a call to action for setting up a program,
- * so counting a vault the flow cannot fund would advertise an option (and a top
- * APY) the reader cannot reach.
+ * `browsableStrategies`. The hero is a call to action for setting up a program
+ * and its stats include a top APY, so counting a vault the flow cannot fund
+ * would advertise a rate the reader cannot reach.
  */
 export function fundableStrategies(strategies: readonly EarnStrategy[]): readonly EarnStrategy[] {
   return browsableStrategies(strategies).filter(isStrategySelectable);
-}
-
-/** Apply only the direct controls shown above the strategy table. */
-export function matchesFilters(strategy: EarnStrategy, filters: EarnStrategyFilters): boolean {
-  if (filters.maxSettlementDays !== null && settlementDays(strategy) > filters.maxSettlementDays) {
-    return false;
-  }
-  if (filters.sourceKind !== null && strategy.sourceKind !== filters.sourceKind) return false;
-  if (filters.token !== null && strategyToken(strategy) !== filters.token) return false;
-  return true;
 }
 
 function descendingUnknownLast(left: number | undefined, right: number | undefined): number {
@@ -160,39 +119,30 @@ function descendingUnknownLast(left: number | undefined, right: number | undefin
   return right - left;
 }
 
-function compareByApy(left: EarnStrategy, right: EarnStrategy): number {
-  return descendingUnknownLast(strategyApy(left), strategyApy(right));
-}
-
-/** Sort comparators. Rows missing the sorted-on value always fall to the end. */
-const COMPARATORS: Record<EarnStrategySort, (a: EarnStrategy, b: EarnStrategy) => number> = {
-  apy: compareByApy,
-  size: (left, right) => descendingUnknownLast(strategyPoolUsd(left), strategyPoolUsd(right)),
-  access: (left, right) =>
-    settlementDays(left) - settlementDays(right) || compareByApy(left, right),
-};
-
 /**
- * The browse step's list: the whole catalogue, filtered and sorted. Never
- * mutates the input. Browsable rather than fundable — selectability is a
- * per-ROW property, not a reason to omit the row.
- */
-export function visibleStrategies(
-  strategies: readonly EarnStrategy[],
-  filters: EarnStrategyFilters
-): readonly EarnStrategy[] {
-  const matching = browsableStrategies(strategies).filter((strategy) =>
-    matchesFilters(strategy, filters)
-  );
-  return [...matching].sort(COMPARATORS[filters.sort]);
-}
-
-/**
- * The stablecoins the catalogue lists, for the token filter chips.
+ * The browse step's list: the whole catalogue, highest indicative APY first.
+ * Never mutates the input.
  *
- * Browsable, matching the table: a filter offering a token whose only rows are
- * browse-only would still be honest — those rows render — whereas omitting it
- * would hide vaults the table otherwise shows.
+ * BROWSABLE, not fundable, and the name carries that — it replaced
+ * `rankedFundableStrategies`, which would now describe a strictly smaller set
+ * than what it returns. Selectability is a per-ROW property `strategy-step`
+ * renders, never a reason to omit the row, so a browse-only vault competes for
+ * the top of this list on its real rate like any other.
+ */
+export function rankedBrowsableStrategies(
+  strategies: readonly EarnStrategy[]
+): readonly EarnStrategy[] {
+  return [...browsableStrategies(strategies)].sort((left, right) =>
+    descendingUnknownLast(strategyApy(left), strategyApy(right))
+  );
+}
+
+/**
+ * Stablecoins the catalogue lists; used to avoid a redundant table column.
+ *
+ * Browsable, matching the table: a token whose only rows are browse-only is
+ * still a token the table shows, so counting it keeps the column decision
+ * consistent with what is on screen.
  */
 export function availableTokens(
   strategies: readonly EarnStrategy[]

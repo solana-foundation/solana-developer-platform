@@ -207,8 +207,8 @@ can take hours; small balances may stay as cash on economic minimums. Every
 sentence about timing must trace to one of those.
 
 - `earn-deposit-wizard.tsx` — orchestrator: step state, submit, outcome routing.
-- `earn-deposit-model.ts` — the pure model (filters, sorting,
-  `singleStrategyAllocation`). No JSX, unit-tested.
+- `earn-deposit-model.ts` — the pure model (the browsable/fundable set split,
+  APY ranking, `singleStrategyAllocation`). No JSX, unit-tested.
 - `earn-funding-wallets.ts` — org wallets via `/api/dashboard/wallets`.
 - `wallet-step` → `strategy-step` → `review-step`.
 - `integration-screen.tsx` + `earn-api-snippets.ts` — the conditional API step;
@@ -233,18 +233,20 @@ curator grouping without changing this note.
 Omitting a token lane **preserves** it server-side (Ground: "the omitted group
 is not changed"), which is why the review copy promises only the selected lane.
 
-### Catalogue controls are filters, never a risk rating
+### The catalogue is a plain ranked list, never a risk rating
 
 Ground publishes **no** risk tier, rating, grade, or score on a yield source —
 its own docs say so, and `riskMetadata.riskTier` is written only by the local dev
-seed. There is deliberately no profile or bucket step: every active, fundable
-strategy appears once in a comparison table. Liquidity is the explicit
-redemption-speed filter; yield is the APY sort. Neither assigns a synthetic
-category, and copy must never imply that the provider rated anything.
+seed. There is deliberately no profile or bucket step, and since #1299 no filter
+or sort controls either: every active strategy with a routable token lane
+appears once in a comparison table, ranked by indicative APY
+(`rankedBrowsableStrategies`). Liquidity and backing are columns the reader
+compares, not controls. Nothing here assigns a synthetic category, and copy must
+never imply that the provider rated anything.
 
-Changing a filter clears a selected strategy if that row becomes hidden, so the
-review step can never confirm a choice the reader can no longer see. Missing
-pool size remains visible as `—` and sorts after reported values.
+Missing pool size remains visible as `—` and sorts after reported values. Rows
+the flow cannot fund are marked, not removed — see "THE catalogue rule" under
+Rules.
 
 ### Confirm is idempotent — keep it that way
 
@@ -336,16 +338,25 @@ funding instructions and nothing else — never imply a transfer happens.
   Kamino branch's first preview. Admitting it is safe: an API that omits the
   field has no mainnet-only provider registered, so it cannot be serving a row
   that needs hiding. The check lives once, on `strategyUnavailability`.
-- **The CATALOGUE is Solana-hosted-only; POSITIONS are not, and that is not a
-  bug here.** Since the `not_solana_hosted` gate (`@sdp/earn`), the strategy
-  catalogue lists and stores only vaults hosted on Solana, so the wizard can no
-  longer offer an EVM vault. But a program whose Ground wallet was pointed at an
-  off-Solana vault BEFORE that gate still renders that vault's name under "Where
-  the money sits" — the position comes from Ground's live wallet response, not
-  from `earn_strategies`, and real value sits in it. Do not filter such a
+- **A POSITION may name a vault the catalogue does not show, and that is not a
+  bug here.** The two come from different places: positions are read live from
+  Ground's wallet response, while the strategy table comes from
+  `earn_strategies` filtered by API policy. So a program pointed at an
+  Ethereum-hosted or an Aave/Morpho source still renders that vault's name under
+  "Where the money sits", and real value sits in it. Do not filter such a
   position out of the UI: hiding a funded position hides customer money, which
-  is worse than naming a vault we would no longer offer. Clearing one means
+  is worse than naming a vault the wizard would not offer. Clearing one means
   re-targeting the allocation in Ground (a money movement), not a web change.
+- **A third visibility rule lives in the API, and this module never sees it.**
+  `/strategies` list and detail omit Aave- and Morpho-related rows entirely
+  (`HIDDEN_STRATEGY_TERMS`), while the sync keeps storing them so the DB stays a
+  truthful provider inventory. That is server-side editorial policy about a
+  SOURCE — distinct from `fundable`, which is a fact about where an instrument
+  lives, and from the provider pin, which is about what the flow can create.
+  Do not reimplement it here: a client-side copy would drift, and a hidden row
+  never reaches the browser to begin with. Same caveat as above applies — a live
+  program POSITION may still name one of those sources, since positions come
+  from Ground's wallet response and may hold real value.
 - Design system: SDP quiet-institutional (see `.claude/skills/sdp-ui-designer`).
   Inter only — monospace is forbidden, including for addresses; use
   `tabular-nums` for numeric alignment. The ONE exception is a genuine code

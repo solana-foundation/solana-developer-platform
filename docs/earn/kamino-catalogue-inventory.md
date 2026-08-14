@@ -12,36 +12,44 @@ no devnet deployment, so there is one shelf and it is the mainnet one. SDP
 catalogues it into BOTH the sandbox and production environments — sandbox rows
 carry `host_cluster = 'mainnet-beta'` and are never fundable there.
 
-- Fetched: `2026-08-14T13:10:45.223Z`
+**Every row is `defi`, and no row carries a curator.** Permissionless creation
+means the vault NAME is chosen by whoever created it, so SDP quotes it but
+never parses it into a claim. Some catalogued vaults really are RWA-backed and
+really are run by a named house — Kamino publishes no field that establishes
+either, and an assertion anyone could forge by naming a vault is worse than an
+absent one. Both fields return when there is a verified source for them (see
+`packages/sdp-earn/src/providers/kamino/client.ts`).
+
+- Fetched: `2026-08-14T14:48:53.258Z`
 - Vaults in the registry: **170**
 - Catalogued by SDP: **21**
 - TVL floor: **$100,000** (`KAMINO_MIN_TVL_USD`)
 
 ## Catalogued
 
-| Vault | Token | TVL | APY | Holders | Kind | Curator | Address |
-|---|---|---:|---:|---:|---|---|---|
-| Steakhouse High Yield USDG | USDG | $37,569,829 | 3.68% | 733 | defi | Steakhouse Financial | `BoZDRc1RDY9FzUZZ19WT4GbtTnnbXQ8AGSU5ByEw3ut5` |
-| Kamino Institutional Commodity Yield | USDC | $26,780,479 | 7.11% | 432 | rwa | Kamino | `B5pjfZAiKjyUEuqB2694NHrsjcaM67uuJaWqjzTVtzR6` |
-| RWA USDC | USDC | $22,011,675 | 5.81% | 652 | rwa | Kamino | `DWSXb18xZApz29vnQpgR2m6MynCT7PznaXt7Ut7M7KaP` |
-| Steakhouse USDC | USDC | $20,083,208 | 3.98% | 3495 | defi | Steakhouse Financial | `HDsayqAsDWy3QvANGqh2yNraqcD8Fnjgh73Mhb3WRS5E` |
-| Allez USDC | USDC | $12,073,893 | 6.17% | 855 | defi | Allez Labs | `A1USdzqDHmw5oz97AkqAGLxEQZfFjASZFuy4T6Qdvnpo` |
-| Kamino Private Credit USDC | USDC | $7,247,887 | 6.90% | 50 | rwa | Kamino | `91b1opzHNUQobfLZxGMNYT5qDRKoqV8FdsdQBmH4wBxy` |
-| Elemental USDC Turbo | USDC | $5,284,539 | 6.33% | 372 | defi | Elemental | `A3hTCWdnfV6uiQLxRmnv17EpiEtmc93v1AGQnWy44Mup` |
-| Steakhouse High Yield USDC | USDC | $3,352,181 | 4.57% | 387 | defi | Steakhouse Financial | `BEEfo7xwgK2ZP13Pxo7qqTPzAteKJmXjVWtMWcXSvbn2` |
-| Elemental USDG Optimizer | USDG | $2,703,014 | 6.92% | 244 | defi | Elemental | `DJbRxuBckoJpFVUNtWx94NghcthfGaRV5NRmEazUaddE` |
-| Neutral Trade USDC Max Yield | USDC | $2,637,609 | 6.09% | 258 | defi | Neutral Trade | `67dqmR76uAbjX6e81A1ganKv3ou31WUMEdeWJkwVfeXy` |
-| Galaxy USDT | USDT | $2,548,858 | 3.21% | 2 | defi | Galaxy | `FPQNECVaw9qCHTJ7JRQXQUV94YffmhX3he5khUgx4m3j` |
-| Ethena Prime | USDG | $1,792,372 | 3.92% | 14 | defi | Ethena | `D1XVxx4ur7kiSgpuerUmoJXvZ3yEBFZWPx1uN7qBADFb` |
-| Marinade USD Vault | USDC | $1,474,761 | 5.81% | 348 | defi | Marinade | `2TNCzzYJt3uHmpFpqeeJkza4pQUK9xoLa79DJH9AdgGA` |
-| MEV Capital USDC | USDC | $1,411,320 | 6.29% | 133 | defi | MEV Capital | `EPC2N3AAv84P9TKsnDt2x41p6T7c5vTewBhQbh4RVx4r` |
-| USDC Prime | USDC | $1,170,641 | 6.21% | 235 | defi | Kamino | `9E69U4GzWhryRaPe8DYpco6Z9vTZY6gg8w6W2QsBACEj` |
-| Allez USDT | USDT | $991,686 | 2.99% | 149 | defi | Allez Labs | `A1USdT5BhSBpWiH4W6oZeykCDr9vq56qXVkMFhZjN48o` |
-| Squads USDC | USDC | $910,788 | 4.05% | 595 | defi | Squads | `3DBvs2MraKsXoLdSGsQDue3RUQKxM6dp5KWWC6PWtUcg` |
-| Steakhouse USDG | USDG | $521,359 | 2.54% | 199 | defi | Steakhouse Financial | `BqBsS4myH82S4yfqeKjXSF7yErWwSi5WTshSzKmHQgzw` |
-| Gauntlet Frontier | USDC | $374,946 | 5.26% | 121 | defi | Gauntlet | `GFiW6edsrtHZd4Vnz2qTSurVasRrgKrXE1ouHNtCVsft` |
-| Elaris USDC Optimizer | USDC | $325,382 | 7.07% | 3 | defi | Elaris | `8VoxRCLSAh791MWpsYYkgbWJoek55hkiU3aHE3VQadBv` |
-| Hyperithm USDC Apex | USDC | $208,645 | 4.99% | 5 | defi | Hyperithm | `7p5PczFqftBcyfgWkozHiVEQEtK9yeDXbXwQFkxenh7C` |
+| Vault | Token | TVL | APY | Holders | Kind | Address |
+|---|---|---:|---:|---:|---|---|
+| Steakhouse High Yield USDG | USDG | $35,700,767 | 3.95% | 734 | defi | `BoZDRc1RDY9FzUZZ19WT4GbtTnnbXQ8AGSU5ByEw3ut5` |
+| Kamino Institutional Commodity Yield | USDC | $26,893,509 | 7.08% | 436 | defi | `B5pjfZAiKjyUEuqB2694NHrsjcaM67uuJaWqjzTVtzR6` |
+| RWA USDC | USDC | $22,011,603 | 5.82% | 652 | defi | `DWSXb18xZApz29vnQpgR2m6MynCT7PznaXt7Ut7M7KaP` |
+| Steakhouse USDC | USDC | $20,083,023 | 3.96% | 3495 | defi | `HDsayqAsDWy3QvANGqh2yNraqcD8Fnjgh73Mhb3WRS5E` |
+| Allez USDC | USDC | $12,071,498 | 5.30% | 853 | defi | `A1USdzqDHmw5oz97AkqAGLxEQZfFjASZFuy4T6Qdvnpo` |
+| Kamino Private Credit USDC | USDC | $7,247,841 | 6.90% | 50 | defi | `91b1opzHNUQobfLZxGMNYT5qDRKoqV8FdsdQBmH4wBxy` |
+| Elemental USDC Turbo | USDC | $5,396,591 | 6.16% | 372 | defi | `A3hTCWdnfV6uiQLxRmnv17EpiEtmc93v1AGQnWy44Mup` |
+| Steakhouse High Yield USDC | USDC | $3,352,147 | 4.43% | 387 | defi | `BEEfo7xwgK2ZP13Pxo7qqTPzAteKJmXjVWtMWcXSvbn2` |
+| Elemental USDG Optimizer | USDG | $2,700,012 | 7.16% | 244 | defi | `DJbRxuBckoJpFVUNtWx94NghcthfGaRV5NRmEazUaddE` |
+| Neutral Trade USDC Max Yield | USDC | $2,621,968 | 6.09% | 257 | defi | `67dqmR76uAbjX6e81A1ganKv3ou31WUMEdeWJkwVfeXy` |
+| Galaxy USDT | USDT | $2,548,788 | 3.21% | 2 | defi | `FPQNECVaw9qCHTJ7JRQXQUV94YffmhX3he5khUgx4m3j` |
+| Ethena Prime | USDG | $1,792,296 | 3.88% | 14 | defi | `D1XVxx4ur7kiSgpuerUmoJXvZ3yEBFZWPx1uN7qBADFb` |
+| Marinade USD Vault | USDC | $1,474,759 | 5.66% | 348 | defi | `2TNCzzYJt3uHmpFpqeeJkza4pQUK9xoLa79DJH9AdgGA` |
+| MEV Capital USDC | USDC | $1,411,310 | 6.08% | 133 | defi | `EPC2N3AAv84P9TKsnDt2x41p6T7c5vTewBhQbh4RVx4r` |
+| USDC Prime | USDC | $1,163,434 | 4.27% | 234 | defi | `9E69U4GzWhryRaPe8DYpco6Z9vTZY6gg8w6W2QsBACEj` |
+| Allez USDT | USDT | $991,658 | 3.01% | 149 | defi | `A1USdT5BhSBpWiH4W6oZeykCDr9vq56qXVkMFhZjN48o` |
+| Squads USDC | USDC | $915,511 | 4.08% | 595 | defi | `3DBvs2MraKsXoLdSGsQDue3RUQKxM6dp5KWWC6PWtUcg` |
+| Steakhouse USDG | USDG | $521,336 | 2.70% | 199 | defi | `BqBsS4myH82S4yfqeKjXSF7yErWwSi5WTshSzKmHQgzw` |
+| Gauntlet Frontier | USDC | $374,943 | 6.17% | 121 | defi | `GFiW6edsrtHZd4Vnz2qTSurVasRrgKrXE1ouHNtCVsft` |
+| Elaris USDC Optimizer | USDC | $325,380 | 7.04% | 3 | defi | `8VoxRCLSAh791MWpsYYkgbWJoek55hkiU3aHE3VQadBv` |
+| Hyperithm USDC Apex | USDC | $208,644 | 5.85% | 5 | defi | `7p5PczFqftBcyfgWkozHiVEQEtK9yeDXbXwQFkxenh7C` |
 
 ## Why the rest stayed out
 

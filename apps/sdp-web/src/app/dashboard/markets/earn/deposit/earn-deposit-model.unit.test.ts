@@ -3,13 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   availableTokens,
   browsableStrategies,
-  defaultStrategyFilters,
-  EARN_SHORT_SETTLEMENT_DAYS,
   fundableStrategies,
-  matchesFilters,
+  isStrategySelectable,
+  rankedBrowsableStrategies,
   singleStrategyAllocation,
   strategyUnavailability,
-  visibleStrategies,
 } from "./earn-deposit-model";
 
 const TIMESTAMP = "2026-07-18T09:00:00.000Z";
@@ -69,6 +67,22 @@ describe("strategyUnavailability", () => {
     const { fundable: _omitted, ...fromOlderApi } = strategy({ id: "legacy" });
 
     expect(strategyUnavailability(fromOlderApi as EarnStrategy)).toBeUndefined();
+  });
+
+  /**
+   * The wizard guards its selection with `isStrategySelectable` while the table
+   * renders the chip from `strategyUnavailability`. They must never disagree, or
+   * a row could show "Browse only" and still reach review via a stale
+   * `?strategy=<id>` deep link.
+   */
+  it("agrees with isStrategySelectable, which is what guards the wizard", () => {
+    for (const row of [
+      strategy({ id: "ok" }),
+      strategy({ id: "k", provider: "kamino" }),
+      strategy({ id: "g", fundable: false }),
+    ]) {
+      expect(isStrategySelectable(row)).toBe(strategyUnavailability(row) === undefined);
+    }
   });
 });
 
@@ -145,52 +159,7 @@ describe("fundableStrategies", () => {
   });
 });
 
-describe("defaultStrategyFilters", () => {
-  it("shows the full catalogue ranked by APY", () => {
-    const filters = defaultStrategyFilters();
-    expect(filters.maxSettlementDays).toBeNull();
-    expect(filters.sourceKind).toBeNull();
-    expect(filters.token).toBeNull();
-    expect(filters.sort).toBe("apy");
-  });
-});
-
-describe("matchesFilters", () => {
-  it("includes delayed strategies by default and excludes them only when instant is chosen", () => {
-    const delayed = strategy({ id: "a", liquidityTerm: "delayed", redemptionDelayDays: 2 });
-    expect(matchesFilters(delayed, defaultStrategyFilters())).toBe(true);
-    expect(matchesFilters(delayed, { ...defaultStrategyFilters(), maxSettlementDays: 0 })).toBe(
-      false
-    );
-    expect(
-      matchesFilters(delayed, {
-        ...defaultStrategyFilters(),
-        maxSettlementDays: EARN_SHORT_SETTLEMENT_DAYS,
-      })
-    ).toBe(true);
-  });
-
-  it("treats a delayed strategy with no day count as T+1", () => {
-    const delayed = strategy({ id: "a", liquidityTerm: "delayed" });
-    expect(matchesFilters(delayed, { ...defaultStrategyFilters(), maxSettlementDays: 0 })).toBe(
-      false
-    );
-    expect(matchesFilters(delayed, { ...defaultStrategyFilters(), maxSettlementDays: 1 })).toBe(
-      true
-    );
-  });
-
-  it("filters on backing kind and stablecoin", () => {
-    const rwa = strategy({ id: "a", sourceKind: "rwa" });
-    const base = defaultStrategyFilters();
-    expect(matchesFilters(rwa, { ...base, sourceKind: "rwa" })).toBe(true);
-    expect(matchesFilters(rwa, { ...base, sourceKind: "defi" })).toBe(false);
-    expect(matchesFilters(rwa, { ...base, token: "usdc" })).toBe(true);
-    expect(matchesFilters(rwa, { ...base, token: "usdt" })).toBe(false);
-  });
-});
-
-describe("visibleStrategies", () => {
+describe("rankedBrowsableStrategies", () => {
   const instantHigh = strategy({ id: "instant-high", currentApy: "0.09" });
   const instantLow = strategy({ id: "instant-low", currentApy: "0.03" });
   const delayedTop = strategy({
@@ -203,47 +172,49 @@ describe("visibleStrategies", () => {
   const catalogue = [instantLow, delayedTop, noRate, instantHigh];
 
   it("shows instant and delayed strategies together, sorted by rate", () => {
-    const visible = visibleStrategies(catalogue, defaultStrategyFilters());
+    const visible = rankedBrowsableStrategies(catalogue);
     expect(visible.map((entry) => entry.id)).toEqual([
       "delayed-top",
       "instant-high",
       "instant-low",
       "no-rate",
     ]);
-  });
-
-  it("sorts by fastest access, breaking ties on rate", () => {
-    const visible = visibleStrategies(catalogue, {
-      ...defaultStrategyFilters(),
-      sort: "access",
-    });
-    expect(visible.map((entry) => entry.id)).toEqual([
-      "instant-high",
-      "instant-low",
-      "no-rate",
-      "delayed-top",
-    ]);
-  });
-
-  it("drops the highest rate when the user filters for instant access", () => {
-    const visible = visibleStrategies(catalogue, {
-      ...defaultStrategyFilters(),
-      maxSettlementDays: 0,
-    });
-    expect(visible.map((entry) => entry.id)).not.toContain("delayed-top");
   });
 
   it("omits strategies whose deposit mint is not a routable stablecoin", () => {
-    const visible = visibleStrategies(
-      [strategy({ id: "unroutable", depositMints: [UNROUTABLE_MINT] })],
-      defaultStrategyFilters()
-    );
+    const visible = rankedBrowsableStrategies([
+      strategy({ id: "unroutable", depositMints: [UNROUTABLE_MINT] }),
+    ]);
     expect(visible).toHaveLength(0);
+  });
+
+  /**
+   * The whole reason this is `Browsable` and not `Fundable`. A Kamino vault
+   * carrying the best rate on the shelf must still appear, and appear FIRST —
+   * ranking it below the rows SDP can fund would quietly editorialise the
+   * comparison table. `strategy-step` marks it browse-only; the model does not
+   * demote it.
+   */
+  it("ranks a browse-only vault on its real rate rather than dropping it", () => {
+    const kamino = strategy({
+      id: "kamino-top",
+      provider: "kamino",
+      currentApy: "0.15",
+      fundable: false,
+    });
+
+    expect(rankedBrowsableStrategies([...catalogue, kamino]).map((entry) => entry.id)).toEqual([
+      "kamino-top",
+      "delayed-top",
+      "instant-high",
+      "instant-low",
+      "no-rate",
+    ]);
   });
 
   it("does not mutate the input array", () => {
     const input = [instantLow, instantHigh];
-    visibleStrategies(input, defaultStrategyFilters());
+    rankedBrowsableStrategies(input);
     expect(input.map((entry) => entry.id)).toEqual(["instant-low", "instant-high"]);
   });
 });

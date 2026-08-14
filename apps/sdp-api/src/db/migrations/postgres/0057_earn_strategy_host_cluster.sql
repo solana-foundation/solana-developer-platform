@@ -16,6 +16,21 @@
 -- `fundable` on the strategies wire shape, and the dashboard's strategy filter.
 --
 -- Open TEXT with the closed union in code, per ADR 0001.
+--
+-- EXPAND ONLY — the column stays NULLABLE in this release, deliberately.
+-- deploy-sdp-api-gcp.yml runs this migration BEFORE it updates the service and
+-- the cron image, and a rollback restores the previous image without reverting
+-- the schema. The previous catalogue writer's INSERT does not list
+-- `host_cluster`, so a NOT NULL here would fail every upsert made in that
+-- window — and permanently after a rollback, leaving the restored job unable to
+-- refresh the shelf. The CONTRACT half (SET NOT NULL) belongs in a later
+-- release, once no deployable writer predates this column.
+--
+-- Nullability is not a hole in the invariant: `UpsertEarnStrategyInput.hostCluster`
+-- is required, so every writer on this release states it, and the repository's
+-- read derives the environment's own cluster for any row an older writer left
+-- NULL — the same rule as the backfill below, so such a row stays correct and
+-- fundable rather than silently dropping out of the catalogue.
 
 ALTER TABLE earn_strategies ADD COLUMN IF NOT EXISTS host_cluster TEXT;
 
@@ -28,5 +43,3 @@ UPDATE earn_strategies
                         ELSE 'devnet'
                       END
  WHERE host_cluster IS NULL;
-
-ALTER TABLE earn_strategies ALTER COLUMN host_cluster SET NOT NULL;

@@ -13,6 +13,26 @@ import { earnStrategyIdParamsSchema, listEarnStrategiesQuerySchema } from "../sc
 import { listResponse, pageWindow, parseParams, parseQuery } from "./shared";
 
 /**
+ * Indexed for catalogue completeness, intentionally absent from every public
+ * strategy read. Keep the terms here at the API policy boundary rather than in
+ * Ground's client or the sync, so the DB continues to reflect what Ground
+ * reports and pagination can exclude the rows before applying its window.
+ *
+ * Note this is a different question from `fundable` below, and the two must
+ * stay separate: this hides rows SDP has decided not to SHOW, while `fundable`
+ * states whether an instrument the caller CAN see exists on their cluster. A
+ * hidden row is absent; an un-fundable row is present and honest about itself.
+ */
+const HIDDEN_STRATEGY_TERMS = ["aave", "morpho"] as const;
+
+function isHiddenStrategy(row: EarnStrategyRow): boolean {
+  const searchable = [row.provider_reference, row.name, row.underlying_source ?? ""]
+    .join("\n")
+    .toLowerCase();
+  return HIDDEN_STRATEGY_TERMS.some((term) => searchable.includes(term));
+}
+
+/**
  * Takes the caller's environment because `fundable` is derived per request, not
  * stored: the catalogue is platform-global and the same row answers differently
  * to a sandbox and a production caller. A mainnet-only provider's row is listed
@@ -42,15 +62,19 @@ export function mapToEarnStrategy(row: EarnStrategyRow, environment: SdpEnvironm
 }
 
 /**
- * Loads a strategy and hides it from callers in the other environment — the
- * catalogue is platform-global, so environment scoping happens here rather
- * than via project scoping.
+ * Loads a strategy and applies the same environment and visibility policy as
+ * the list route. The catalogue is platform-global, so environment scoping
+ * happens here rather than via project scoping.
  */
 async function requireEarnStrategy(c: AppContext, strategyId: string): Promise<EarnStrategyRow> {
   const repo = getEarnRepository(c);
   const strategy = await repo.getStrategyById(strategyId);
 
-  if (!strategy || strategy.environment !== resolveSdpEnvironment(c)) {
+  if (
+    !strategy ||
+    strategy.environment !== resolveSdpEnvironment(c) ||
+    isHiddenStrategy(strategy)
+  ) {
     throw notFound("Earn strategy");
   }
 
@@ -67,6 +91,7 @@ export const listEarnStrategies = async (c: AppContext) => {
     sourceKind: query.sourceKind,
     apyType: query.apyType,
     liquidityTerm: query.liquidityTerm,
+    excludeRelatedTerms: HIDDEN_STRATEGY_TERMS,
     ...pageWindow(query),
   });
 
