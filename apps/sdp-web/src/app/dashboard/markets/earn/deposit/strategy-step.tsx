@@ -199,12 +199,8 @@ function StrategyTableRow({
   const poolUsd = strategyPoolUsd(strategy);
   const sourceLabel = strategySourceLabel(strategy);
   const curatorLabel = strategyCuratorLabel(strategy);
-  /**
-   * Browse-only rows: catalogued and real, but this flow cannot start a program
-   * with them. They RENDER — SDP serves these vaults and hiding them made the
-   * whole Kamino shelf invisible here — with the reason stated and no radio, so
-   * the row can never reach a confirm the API would refuse.
-   */
+  // Browse-only rows keep their live figures and lose only the radio — see
+  // `browsableStrategies` for why they render at all.
   const unavailability = strategyUnavailability(strategy);
   const browseOnlyLabel = unavailability
     ? t(`DashboardEarn.deposit.unavailable.${unavailability}`)

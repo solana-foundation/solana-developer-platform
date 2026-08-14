@@ -571,16 +571,9 @@ function StartSection() {
     return null;
   }
 
-  // Exactly what the deposit flow can START A PROGRAM with — NOT everything the
-  // catalogue table lists. `fundableStrategies` now carries the whole rule
-  // (routable lane, a provider that supports programs, an instrument on this
-  // cluster), so no provider id is named here.
-  //
-  // This stays narrower than the table on purpose. The hero is a call to action
-  // for setting up a program, and its stats include a TOP APY: counting a vault
-  // the flow cannot fund would advertise a headline rate the reader then cannot
-  // reach. The table's job is to show the shelf; the hero's is to promise only
-  // what the next click delivers.
+  // Fundable, not browsable: the hero promises only what the next click
+  // delivers, so no provider id is named here — `fundableStrategies` carries
+  // the whole rule and its docstring the reasoning.
   const fundable = fundableStrategies(
     (strategies ?? []).filter((strategy) => strategy.status === "active")
   );

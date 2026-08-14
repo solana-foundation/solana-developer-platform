@@ -16,7 +16,8 @@ import {
  * strategy → a 100% allocation.
  *
  * Every value is derived from a field the provider actually reports. For Ground
- * (the only live provider) the catalogue row is mapped from
+ * (the only provider this flow can start a program with — see
+ * `EARN_PROGRAM_PROVIDERS`) the catalogue row is mapped from
  * `GET /v2/wallets/yield-sources` by `@sdp/earn`:
  *
  * | Ground field                | Catalogue field                       |
@@ -75,7 +76,7 @@ export function defaultStrategyFilters(): EarnStrategyFilters {
  * offering a row whose confirm could only fail. Add an id once its execution
  * path actually exists, never to make a vault look available.
  */
-export const EARN_PROGRAM_PROVIDERS: readonly string[] = ["ground"];
+const EARN_PROGRAM_PROVIDERS: readonly string[] = ["ground"];
 
 /** Why a catalogued strategy cannot start a program from this flow. */
 export type StrategyUnavailability = "not_on_this_cluster" | "no_program_support";
@@ -90,7 +91,18 @@ export type StrategyUnavailability = "not_on_this_cluster" | "no_program_support
  * SDP" reads as permanent and is what they should see in production.
  */
 export function strategyUnavailability(strategy: EarnStrategy): StrategyUnavailability | undefined {
-  // `=== false`, not falsy — see the version-skew note on browsableStrategies.
+  // `=== false`, NOT falsy. The API is a separate deployable, so the type's
+  // promise that `fundable` is always present describes the CURRENT API, not
+  // necessarily the one answering: a Vercel preview (web-only, pointed at the
+  // deployed API) and any rollout where web ships ahead of API both see
+  // responses without the field. Reading `undefined` as "not fundable" would
+  // mark every row browse-only and zero the hero's counts — the same mistake
+  // that, before the table listed browse-only rows, blanked the catalogue
+  // outright on this branch's first preview.
+  //
+  // Absent is safe to admit: an API old enough to omit the field has no
+  // mainnet-only provider registered, so it cannot be serving a row that needs
+  // hiding.
   if (strategy.fundable === false) return "not_on_this_cluster";
   if (!EARN_PROGRAM_PROVIDERS.includes(strategy.provider)) return "no_program_support";
   return undefined;
@@ -128,17 +140,6 @@ export function browsableStrategies(strategies: readonly EarnStrategy[]): readon
  * APY) the reader cannot reach.
  */
 export function fundableStrategies(strategies: readonly EarnStrategy[]): readonly EarnStrategy[] {
-  // `!== false` inside `strategyUnavailability`, NOT a truthiness check. The API
-  // is a separate deployable, so the type's promise that `fundable` is always
-  // present describes the CURRENT API, not necessarily the one answering: a
-  // Vercel preview (web-only, pointed at the deployed API) and any rollout where
-  // web ships ahead of API both see responses without the field. Truthiness
-  // there reads `undefined` as "not fundable" and blanks the ENTIRE catalogue —
-  // which is exactly what happened on the first preview of this branch.
-  //
-  // Absent is safe to admit: an API old enough to omit `fundable` is an API
-  // without a mainnet-only provider registered, so its catalogue holds no row
-  // this filter would need to hide.
   return browsableStrategies(strategies).filter(isStrategySelectable);
 }
 
@@ -173,11 +174,8 @@ const COMPARATORS: Record<EarnStrategySort, (a: EarnStrategy, b: EarnStrategy) =
 
 /**
  * The browse step's list: the whole catalogue, filtered and sorted. Never
- * mutates the input.
- *
- * Browsable rather than fundable — the table shows every vault SDP serves and
- * marks the ones it cannot start a program with. Selectability is a per-ROW
- * property (`strategyUnavailability`), not a reason to omit the row.
+ * mutates the input. Browsable rather than fundable — selectability is a
+ * per-ROW property, not a reason to omit the row.
  */
 export function visibleStrategies(
   strategies: readonly EarnStrategy[],

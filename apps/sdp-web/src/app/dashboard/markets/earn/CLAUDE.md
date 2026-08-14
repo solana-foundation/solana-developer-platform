@@ -330,10 +330,12 @@ funding instructions and nothing else — never imply a transfer happens.
 - **`strategy.fundable` is `!== false`, never truthy.** The API is a separate
   deployable: a Vercel preview is a web-only deploy pointed at the already-
   deployed API, and any rollout can put web ahead of API — both serve strategies
-  with no `fundable` field. Reading `undefined` as "not fundable" blanks the
-  ENTIRE catalogue, which is exactly what the first preview of the Kamino branch
-  did. Admitting it is safe: an API that omits the field has no mainnet-only
-  provider registered, so it cannot be serving a row that needs hiding.
+  with no `fundable` field. Reading `undefined` as "not fundable" would mark
+  every row browse-only and zero the hero's counts — and before the table listed
+  browse-only rows, that same mistake blanked the catalogue outright on the
+  Kamino branch's first preview. Admitting it is safe: an API that omits the
+  field has no mainnet-only provider registered, so it cannot be serving a row
+  that needs hiding. The check lives once, on `strategyUnavailability`.
 - **The CATALOGUE is Solana-hosted-only; POSITIONS are not, and that is not a
   bug here.** Since the `not_solana_hosted` gate (`@sdp/earn`), the strategy
   catalogue lists and stores only vaults hosted on Solana, so the wizard can no

@@ -273,11 +273,9 @@ export function EarnDepositWizard({
   const { wallets, error: walletsError, isLoading: walletsLoading } = useEarnFundingWallets();
   const { state: programState, error: programsError, refresh: refreshProgram } = useEarnPrograms();
 
-  // The whole active catalogue, every provider — the table shows what SDP
-  // serves. Rows the flow cannot start a program with are rendered browse-only
-  // (see `strategyUnavailability`) rather than dropped, which is what made the
-  // Kamino vaults invisible here. Selection is separately guarded below, so a
-  // browse-only row can never reach the confirm the API would refuse.
+  // The whole active catalogue, every provider — rows the flow cannot fund
+  // render browse-only rather than being dropped (see `browsableStrategies`).
+  // Selection is separately guarded below.
   const liveStrategies = useMemo(
     () => (catalogue ?? []).filter((strategy) => strategy.status === "active"),
     [catalogue]
