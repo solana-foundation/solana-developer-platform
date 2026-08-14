@@ -1468,10 +1468,7 @@ function BuilderNode({
 // Decorative left-to-right connector, hidden when the row wraps to a column.
 function RowArrow() {
   return (
-    // Aligned with the nodes' kicker row rather than centred on the node: the cards differ
-    // in height, so a centred connector sits at a different place on each pair. mt-4 is
-    // the node's p-3 plus half its 36px kicker tile, less half this 28px badge.
-    <div className="hidden items-start self-start pt-4 xl:flex" aria-hidden>
+    <div className="hidden items-center self-center xl:flex" aria-hidden>
       <ConnectorBadge icon={ArrowRight} />
     </div>
   );
