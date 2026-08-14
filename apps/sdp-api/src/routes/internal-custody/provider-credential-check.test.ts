@@ -247,6 +247,22 @@ async function seedPendingInstallation(
   ]);
 }
 
+async function useRuntimeCredential(): Promise<void> {
+  env.SDP_DEPLOYMENT_MODE = "self_hosted";
+  env.PRIVY_APP_ID = APP_ID;
+  env.PRIVY_APP_SECRET = APP_SECRET;
+  await getDb(env)
+    .prepare(
+      `UPDATE provider_credentials
+       SET source = 'runtime', storage_backend = 'runtime_env',
+           secret_ref = NULL, secret_version_ref = NULL,
+           encrypted_secret_payload = NULL
+       WHERE id = ?`
+    )
+    .bind(CREDENTIAL_ID)
+    .run();
+}
+
 async function seedActiveFingerprintConnection(
   options: {
     projectId?: string;
@@ -437,6 +453,7 @@ describe("exact Custody Connection installation routes", () => {
     appId: env.PRIVY_APP_ID,
     appSecret: env.PRIVY_APP_SECRET,
     apiBaseUrl: env.PRIVY_API_BASE_URL,
+    selfHostedStoredSetup: env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED,
   };
 
   beforeEach(async () => {
@@ -449,6 +466,7 @@ describe("exact Custody Connection installation routes", () => {
     env.PRIVY_APP_ID = undefined;
     env.PRIVY_APP_SECRET = undefined;
     env.PRIVY_API_BASE_URL = "https://privy.example.test/v1";
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = undefined;
     await seedActor();
     await seedPendingInstallation();
   });
@@ -463,6 +481,7 @@ describe("exact Custody Connection installation routes", () => {
     env.PRIVY_APP_ID = original.appId;
     env.PRIVY_APP_SECRET = original.appSecret;
     env.PRIVY_API_BASE_URL = original.apiBaseUrl;
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = original.selfHostedStoredSetup;
     await clearKVStores(env);
   });
 
@@ -749,6 +768,207 @@ describe("exact Custody Connection installation routes", () => {
     });
     expect(providerFetch).not.toHaveBeenCalled();
     expect(secretFactory).not.toHaveBeenCalled();
+  });
+
+  it("uses the persisted runtime source after setup policy changes without selecting it", async () => {
+    await useRuntimeCredential();
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = "true";
+    const providerFetch = successfulPrivyFetch();
+    const { app, token } = buildApp();
+
+    const installation = await getInstallation(app, token);
+    const completed = await installationRequest(app, token, "complete");
+
+    expect(installation.status).toBe(200);
+    expect(await installation.json()).toMatchObject({
+      data: {
+        connection: {
+          id: CONNECTION_ID,
+          canComplete: true,
+          canReplaceCredentials: false,
+          canCancel: true,
+        },
+      },
+    });
+    expect(completed.status).toBe(200);
+    expect(await completed.json()).toMatchObject({
+      data: {
+        providerCredential: { id: CREDENTIAL_ID, status: "active" },
+        connectionId: CONNECTION_ID,
+        completion: { status: "success" },
+      },
+    });
+    expect(providerFetch).toHaveBeenCalledTimes(3);
+    expect(
+      await getDb(env).prepare("SELECT COUNT(*) AS count FROM custody_scope_defaults").first()
+    ).toEqual({ count: 0 });
+  });
+
+  it("uses the persisted stored source after setup policy changes", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = "false";
+    successfulPrivyFetch();
+    const { app, token } = buildApp();
+
+    const completed = await installationRequest(app, token, "complete");
+
+    expect(completed.status).toBe(200);
+    expect(await completed.json()).toMatchObject({
+      data: {
+        providerCredential: { id: CREDENTIAL_ID, status: "active" },
+        connectionId: CONNECTION_ID,
+        completion: { status: "success" },
+      },
+    });
+  });
+
+  it("replays a runtime credential failure flag-off and safely retries the same installation", async () => {
+    await useRuntimeCredential();
+    const invalidFetch = vi.fn().mockResolvedValue(privyJson({ error: "invalid" }, 401));
+    vi.stubGlobal("fetch", invalidFetch);
+    const { app, token } = buildApp();
+
+    const failed = await installationRequest(app, token, "complete");
+    const failedBody = (await failed.json()) as {
+      data: { completion: { attemptedAt: string } };
+    };
+
+    expect(failed.status).toBe(200);
+    expect(failedBody).toMatchObject({
+      data: {
+        providerCredential: { id: CREDENTIAL_ID, status: "failed_validation" },
+        connectionId: CONNECTION_ID,
+        completion: { status: "failed", code: "invalid_credentials" },
+      },
+    });
+    expect(await (await getInstallation(app, token)).json()).toMatchObject({
+      data: {
+        connection: {
+          canComplete: true,
+          canReplaceCredentials: false,
+          canCancel: false,
+        },
+      },
+    });
+
+    env.PRIVY_BYOK_ENABLED = "false";
+    invalidFetch.mockClear();
+    const secretFactory = vi.spyOn(credentialSecretStore, "createCredentialSecretStore");
+    const replay = await installationRequest(app, token, "complete");
+
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({
+      data: {
+        completion: {
+          status: "failed",
+          attemptedAt: failedBody.data.completion.attemptedAt,
+          code: "invalid_credentials",
+        },
+      },
+    });
+    expect(invalidFetch).not.toHaveBeenCalled();
+    expect(secretFactory).not.toHaveBeenCalled();
+
+    env.PRIVY_BYOK_ENABLED = "true";
+    const unavailableFetch = vi.fn(async () => {
+      expect(await getState()).toMatchObject({
+        credential_status: "pending",
+        connection_status: "checking",
+        last_check_status: "running",
+        last_check_failure_code: null,
+      });
+      return privyJson({ error: "temporary" }, 503);
+    });
+    vi.stubGlobal("fetch", unavailableFetch);
+    const retryUnknown = await installationRequest(app, token, "complete");
+
+    expect(retryUnknown.status).toBe(200);
+    expect(await retryUnknown.json()).toMatchObject({
+      data: {
+        providerCredential: { id: CREDENTIAL_ID, status: "pending" },
+        connectionId: CONNECTION_ID,
+        completion: { status: "retry_unknown", code: "provider_response_unknown" },
+      },
+    });
+    expect(unavailableFetch).toHaveBeenCalledOnce();
+
+    successfulPrivyFetch();
+    const completed = await installationRequest(app, token, "complete");
+
+    expect(completed.status).toBe(200);
+    expect(await completed.json()).toMatchObject({
+      data: {
+        providerCredential: { id: CREDENTIAL_ID, status: "active" },
+        connectionId: CONNECTION_ID,
+        completion: { status: "success" },
+      },
+    });
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT (SELECT COUNT(*) FROM provider_credentials) AS credential_count,
+                  (SELECT COUNT(*) FROM custody_connections) AS connection_count`
+        )
+        .first()
+    ).toEqual({ credential_count: 1, connection_count: 1 });
+  });
+
+  it("blocks a failed runtime retry while another installation is unfinished", async () => {
+    await useRuntimeCredential();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(privyJson({ error: "invalid" }, 401)));
+    const { app, token } = buildApp();
+    expect((await installationRequest(app, token, "complete")).status).toBe(200);
+
+    await seedPendingInstallation({
+      credentialId: "pcred_provider_credential_installation_sibling",
+      connectionId: "cconn_provider_credential_installation_sibling",
+    });
+    const providerFetch = vi.fn();
+    vi.stubGlobal("fetch", providerFetch);
+    const secretFactory = vi.spyOn(credentialSecretStore, "createCredentialSecretStore");
+
+    const response = await installationRequest(app, token, "complete");
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: { code: "CONFLICT", details: { reason: "unfinished_installation_exists" } },
+    });
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(secretFactory).not.toHaveBeenCalled();
+  });
+
+  it("cancels a runtime installation flag-off without modifying deployment credentials", async () => {
+    await useRuntimeCredential();
+    env.PRIVY_BYOK_ENABLED = "false";
+    const providerFetch = vi.fn();
+    vi.stubGlobal("fetch", providerFetch);
+    const { app, token } = buildApp();
+
+    const response = await installationRequest(app, token, "cancel");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: {
+        connection: {
+          id: CONNECTION_ID,
+          status: "deactivated",
+          canComplete: false,
+          canReplaceCredentials: false,
+          canCancel: false,
+        },
+      },
+    });
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(env.PRIVY_APP_ID).toBe(APP_ID);
+    expect(env.PRIVY_APP_SECRET).toBe(APP_SECRET);
+    expect(await getState()).toMatchObject({
+      credential_status: "deactivated",
+      encrypted_secret_payload: null,
+      connection_status: "deactivated",
+      provider_account_fingerprint: null,
+      default_custody_wallet_id: null,
+      deactivated_at: expect.any(String),
+    });
   });
 
   it("destroys a rejected GCP secret version only after terminal state is committed", async () => {
@@ -1044,6 +1264,38 @@ describe("exact Custody Connection installation routes", () => {
       provider_account_fingerprint: null,
       last_check_status: "failed",
       last_check_failure_code: "provider_account_already_connected",
+    });
+  });
+
+  it("retries a runtime duplicate-account failure on the same Credential and Connection", async () => {
+    await useRuntimeCredential();
+    await seedActiveFingerprintConnection();
+    const duplicateFetch = vi.fn().mockResolvedValue(privyJson({ data: [] }));
+    vi.stubGlobal("fetch", duplicateFetch);
+    const { app, token } = buildApp();
+
+    const duplicate = await installationRequest(app, token, "complete");
+
+    expect(duplicate.status).toBe(409);
+    expect(duplicateFetch).toHaveBeenCalledOnce();
+    expect(duplicateFetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+
+    env.PRIVY_APP_ID = "corrected-runtime-app";
+    successfulPrivyFetch();
+    const completed = await installationRequest(app, token, "complete");
+
+    expect(completed.status).toBe(200);
+    expect(await completed.json()).toMatchObject({
+      data: {
+        providerCredential: { id: CREDENTIAL_ID, status: "active" },
+        connectionId: CONNECTION_ID,
+        completion: { status: "success" },
+      },
+    });
+    expect(await getState()).toMatchObject({
+      credential_status: "active",
+      connection_status: "active",
+      last_check_status: "success",
     });
   });
 

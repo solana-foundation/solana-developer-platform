@@ -99,6 +99,15 @@ function ensureClient(url: string): Promise<Redis> {
   return promise;
 }
 
+/** Shared low-level client for features that require atomic Redis scripts. */
+export function getRedisClient(env: Pick<Env, "REDIS_URL">): Promise<Redis> {
+  const url = env.REDIS_URL?.trim();
+  if (!url) {
+    throw new Error("REDIS_URL is required for sponsorship budget admission.");
+  }
+  return ensureClient(url);
+}
+
 export class RedisKVStore implements KVStore {
   // Union accepts a raw connected client for test fixtures; Promise.resolve
   // normalizes both shapes so the rest of the class can just `await`.

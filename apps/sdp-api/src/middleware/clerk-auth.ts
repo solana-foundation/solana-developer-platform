@@ -30,6 +30,7 @@ import {
 } from "@/services/clerk-users.service";
 import { ProjectService } from "@/services/project.service";
 import type { Env } from "@/types/env";
+import { DASHBOARD_ACTOR_MAX_REQUESTS, enforceRateLimit } from "./rate-limit";
 
 /**
  * The stored identity for a Clerk user, with both copies of the email.
@@ -536,6 +537,16 @@ export function clerkAuthMiddleware() {
     }
 
     const clerkContext = await buildClerkContext(c, payload);
+
+    // Dashboard traffic bypasses the pre-auth per-IP limiter (verified Clerk
+    // JWTs are exempted there), so this per-user-per-org limit is the only
+    // general ceiling on Clerk-authenticated requests.
+    await enforceRateLimit(
+      c,
+      `user:${clerkContext.userId}:org:${clerkContext.organizationId}`,
+      DASHBOARD_ACTOR_MAX_REQUESTS
+    );
+
     c.set("clerk", clerkContext);
 
     await next();
@@ -557,11 +568,20 @@ export function optionalClerkAuth() {
       if (payload.sub && payload.org_id) {
         const clerkContext = await buildClerkContext(c, payload);
         if (clerkContext) {
+          await enforceRateLimit(
+            c,
+            `user:${clerkContext.userId}:org:${clerkContext.organizationId}`,
+            DASHBOARD_ACTOR_MAX_REQUESTS
+          );
           c.set("clerk", clerkContext);
         }
       }
-    } catch {
-      // Ignore invalid Clerk auth for optional usage
+    } catch (error) {
+      // Ignore invalid Clerk auth for optional usage, but never rate
+      // limiting — a limited user must not proceed as anonymous.
+      if (error instanceof AppError && error.code === "RATE_LIMITED") {
+        throw error;
+      }
     }
 
     await next();

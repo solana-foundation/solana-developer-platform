@@ -108,11 +108,14 @@ const providerWalletLifecycleRegistry = {
     },
   },
   coinbase_cdp: {
-    create: async ({ env, orgId, parsed }) => {
+    create: async ({ env, orgId, projectId, parsed }) => {
+      // Additional wallets get a unique seed: every create provisions a fresh
+      // account, and a name collision is an error rather than a silent reuse.
       const provisioned = await withProvisioningError("Coinbase CDP", () =>
         provisionCoinbaseCdpAccount(env, {
           orgId,
-          orgSlug: orgId,
+          projectId: projectId ?? null,
+          walletSeed: crypto.randomUUID(),
           network: parsed.network ?? env.COINBASE_CDP_NETWORK,
           accountPolicy: parsed.accountPolicy,
         })

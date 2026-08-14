@@ -1,11 +1,10 @@
-import { EARN_PROVIDER_CLIENTS } from "@sdp/earn";
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
   createPostgresEarnRepository,
-  type EarnPositionRow,
+  type EarnProviderWalletRow,
   type EarnStrategyRow,
   type UpsertEarnStrategyInput,
 } from "@/db/repositories";
@@ -52,35 +51,27 @@ const TEST_PRODUCTION_PROJECT = {
 const TEST_SESSION_ID = "ses_earn_routes";
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-const USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
-const VEDA_SANDBOX_KEY = "veda-sandbox-test-api-key";
-const VEDA_PRODUCTION_KEY = "veda-production-test-api-key";
 
 let originalMarketsEnabled: string | undefined;
 let originalEarnEnabled: string | undefined;
-let originalVedaSandboxApiKey: string | undefined;
-let originalVedaApiKey: string | undefined;
 
-/**
- * Earn provider entitlement defaults to OFF for every organization
- * (GENERAL_PROVIDER_DEFAULTS.earn is empty), so the deposit-side availability
- * gate needs an explicit org-settings override; `entitleVeda: false` seeds an
- * organization without one.
- */
-async function seedAuth({ entitleVeda = true }: { entitleVeda?: boolean } = {}): Promise<void> {
+async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
-
-  const settings = entitleVeda
-    ? JSON.stringify({ providerOverrides: { earn: { veda: true } } })
-    : null;
 
   await getDb(env).batch([
     getDb(env)
       .prepare(
         "INSERT INTO organizations (id, name, slug, tier, status, settings) VALUES (?, ?, ?, ?, ?, ?)"
       )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "enterprise", "active", settings),
+      .bind(
+        TEST_ORG.id,
+        TEST_ORG.name,
+        TEST_ORG.slug,
+        "enterprise",
+        "active",
+        JSON.stringify({ providerOverrides: { earn: { veda: true } } })
+      ),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
@@ -190,29 +181,27 @@ async function seedStrategy(
   return strategy;
 }
 
-async function seedPosition(
-  strategyId: string,
-  walletId: string,
-  status: "active" | "closed" = "active"
-): Promise<EarnPositionRow> {
-  const position = await createPostgresEarnRepository(getDb(env)).createPosition({
+/**
+ * A real `earn_provider_wallets` row, so the `:programId` probes below ride an
+ * id the handler actually resolves. Provider "ground" on purpose: it is NOT the
+ * entitled provider here (seedAuth entitles only "veda") and this file sets no
+ * GROUND credentials, which is exactly why the probe uses the one per-program
+ * route that takes no provider gate at all.
+ */
+async function seedProgram(): Promise<EarnProviderWalletRow> {
+  const row = await createPostgresEarnRepository(getDb(env)).insertProviderWallet({
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT.id,
-    strategyId,
-    walletId,
+    environment: "sandbox",
+    provider: "ground",
+    providerWalletRef: crypto.randomUUID(),
+    label: null,
+    createdBy: TEST_USER.id,
   });
-  if (!position) {
-    throw new Error("Failed to seed earn position");
+  if (!row) {
+    throw new Error("Failed to seed earn program");
   }
-  if (status === "closed") {
-    // The repository exposes no close-position mutation yet (that lands with
-    // execution endpoints), so tests flip the row directly.
-    await getDb(env)
-      .prepare("UPDATE earn_positions SET status = 'closed' WHERE id = ?")
-      .bind(position.id)
-      .run();
-  }
-  return position;
+  return row;
 }
 
 function getEarn(path: string) {
@@ -221,21 +210,6 @@ function getEarn(path: string) {
     {
       method: "GET",
       headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-    },
-    env
-  );
-}
-
-function postEarn(path: string, body: Record<string, unknown>) {
-  return app.request(
-    path,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_API_KEY.raw}`,
-      },
-      body: JSON.stringify(body),
     },
     env
   );
@@ -252,35 +226,12 @@ function getEarnAsSession(path: string, projectId: string) {
   );
 }
 
-function postEarnAsSession(path: string, projectId: string, body: Record<string, unknown>) {
-  return app.request(
-    path,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: `sdp_session=${TEST_SESSION_ID}`,
-        "x-project-id": projectId,
-      },
-      body: JSON.stringify(body),
-    },
-    env
-  );
-}
-
 beforeEach(async () => {
   originalMarketsEnabled = env.MARKETS_ENABLED;
   originalEarnEnabled = env.EARN_ENABLED;
-  originalVedaSandboxApiKey = env.VEDA_SANDBOX_API_KEY;
-  originalVedaApiKey = env.VEDA_API_KEY;
   // Earn is a Markets sub-module, so both gates have to be on to reach a route.
   env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
-  // Sandbox credentials so the provider-configured gates pass; provider HTTP
-  // itself is stubbed per-test via EARN_PROVIDER_CLIENTS spies. The production
-  // credential stays absent unless a test opts in.
-  env.VEDA_SANDBOX_API_KEY = VEDA_SANDBOX_KEY;
-  env.VEDA_API_KEY = undefined;
   await seedTestDatabase(env);
 });
 
@@ -288,8 +239,6 @@ afterEach(async () => {
   vi.restoreAllMocks();
   env.MARKETS_ENABLED = originalMarketsEnabled;
   env.EARN_ENABLED = originalEarnEnabled;
-  env.VEDA_SANDBOX_API_KEY = originalVedaSandboxApiKey;
-  env.VEDA_API_KEY = originalVedaApiKey;
   await clearKVStores(env);
 });
 
@@ -325,6 +274,134 @@ describe("Earn routes — feature flag gate", () => {
     const res = await getEarn("/v1/earn/strategies");
 
     expect(res.status).toBe(200);
+  });
+});
+
+describe("Earn routes — retired surfaces stay retired (PRO-1628)", () => {
+  it("serves 404 for the removed positions/movements/quotes/nav routes", async () => {
+    // The empty-ledger and permanently-501 surfaces were removed by the
+    // ledger-vs-live decision (ADR 0002 addendum). If any of these come back,
+    // it must be a deliberate re-introduction, not a leftover registration.
+    await seedAuth();
+    // The NAV probe rides a REAL strategy id: a resurrected /nav route would
+    // 200 here, whereas a made-up id would 404 either way (vacuous).
+    const strategy = await seedStrategy();
+
+    for (const path of [
+      "/v1/earn/positions",
+      "/v1/earn/positions/pos_1",
+      "/v1/earn/movements",
+      "/v1/earn/movements/mov_1",
+      `/v1/earn/strategies/${strategy.id}/nav`,
+    ]) {
+      const res = await getEarn(path);
+      expect(res.status, path).toBe(404);
+    }
+
+    for (const path of ["/v1/earn/deposits/quote", "/v1/earn/withdrawals/quote"]) {
+      const res = await app.request(
+        path,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({}),
+        },
+        env
+      );
+      expect(res.status, path).toBe(404);
+    }
+  });
+});
+
+describe("Earn routes — retired program surfaces (PRO-1670)", () => {
+  // The singular `/program` family was an implicit create-or-update keyed on
+  // (organization, environment, provider), which stops being addressable the
+  // moment a second program exists. Every path below has an addressable
+  // `/programs[/:programId]` replacement; a stale registration would quietly
+  // hand callers the one-program model back.
+  //
+  // Both tests PAIR the 404s with a live probe of the replacement, because a 404
+  // for a URL that was never registered passes even if the replacement is
+  // broken — the same trap the /nav case above avoids by riding a real strategy
+  // id. This file's seedAuth entitles only "veda" and sets no GROUND
+  // credentials, so the probes are deliberately the two program routes that
+  // answer without any provider call: the UNFILTERED collection (no provider
+  // named ⇒ no credential gate) and the withdrawal LEDGER list (no provider gate
+  // whatsoever, by design — ADR 0002: the audit trail outlives credential
+  // removal).
+
+  it("serves 404 for the singular /program paths, while the collection answers", async () => {
+    await seedAuth();
+
+    for (const path of [
+      "/v1/earn/program",
+      "/v1/earn/program?provider=ground",
+      "/v1/earn/program/deposits",
+      "/v1/earn/program/withdrawals",
+      "/v1/earn/program/withdrawals/wd_x",
+    ]) {
+      const res = await getEarn(path);
+      expect(res.status, path).toBe(404);
+    }
+
+    for (const [method, path] of [
+      ["PUT", "/v1/earn/program"],
+      ["POST", "/v1/earn/program/withdrawals"],
+      ["POST", "/v1/earn/program/withdrawal-preview"],
+    ] as const) {
+      const res = await app.request(
+        path,
+        {
+          method,
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({}),
+        },
+        env
+      );
+      expect(res.status, `${method} ${path}`).toBe(404);
+    }
+
+    // The pairing: /programs is registered and serves the collection envelope
+    // end to end. An empty collection is a 200, never a 404 — the plural surface
+    // cannot 404 for emptiness, which is what makes the 404s above meaningful.
+    const collection = await getEarn("/v1/earn/programs");
+    expect(collection.status).toBe(200);
+    const body = (await collection.json()) as {
+      data: { programs: unknown[]; total: number; page: number; pageSize: number };
+    };
+    expect(body.data).toEqual({ programs: [], total: 0, page: 1, pageSize: 20 });
+  });
+
+  it("routes the per-program sub-paths under a real program id", async () => {
+    await seedAuth();
+    const program = await seedProgram();
+
+    // The retired sub-paths 404 …
+    for (const path of ["/v1/earn/program/deposits", "/v1/earn/program/withdrawals"]) {
+      const res = await getEarn(path);
+      expect(res.status, path).toBe(404);
+    }
+
+    // … and the same shape under `/programs/:programId` resolves the row and
+    // answers. Non-vacuous by construction: swap in an id that does not exist
+    // and this is a 404 too, so the 200 proves the route is registered AND that
+    // the id addressed a real program.
+    const ledger = await getEarn(`/v1/earn/programs/${program.id}/withdrawals`);
+    expect(ledger.status).toBe(200);
+    const ledgerBody = (await ledger.json()) as {
+      data: { withdrawals: unknown[]; total: number };
+    };
+    expect(ledgerBody.data.withdrawals).toEqual([]);
+    expect(ledgerBody.data.total).toBe(0);
+
+    const unknownProgram = await getEarn("/v1/earn/programs/earn_provider_wallet_nope/withdrawals");
+    expect(unknownProgram.status).toBe(404);
   });
 });
 
@@ -380,72 +457,6 @@ describe("Earn routes — session-caller environment resolution", () => {
     };
     expect(sandboxBody.data.strategies.map((s) => s.id)).toEqual([sandbox.id]);
   });
-
-  it("refuses production deposit quotes while only the sandbox credential exists", async () => {
-    await seedAuth();
-    await seedSessionAuth();
-    const production = await seedStrategy({ environment: "production" });
-
-    // The entitled org passes the availability gate on the credential union;
-    // the mode-specific re-check must still refuse production when only
-    // VEDA_SANDBOX_API_KEY is configured (every non-production deployment).
-    const res = await postEarnAsSession("/v1/earn/deposits/quote", TEST_PRODUCTION_PROJECT.id, {
-      strategyId: production.id,
-      tokenMint: USDC_MINT,
-      amount: "1000000",
-    });
-
-    expect(res.status).toBe(503);
-    const body = (await res.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe("PROVIDER_NOT_CONFIGURED");
-    expect(body.error.message).toContain("not configured for production mode");
-  });
-
-  it("keeps the entitlement gate closed for production deposits", async () => {
-    await seedAuth({ entitleVeda: false });
-    await seedSessionAuth();
-    const production = await seedStrategy({ environment: "production" });
-    // Credentials alone must not open production: entitlement is the gate.
-    env.VEDA_API_KEY = VEDA_PRODUCTION_KEY;
-
-    const res = await postEarnAsSession("/v1/earn/deposits/quote", TEST_PRODUCTION_PROJECT.id, {
-      strategyId: production.id,
-      tokenMint: USDC_MINT,
-      amount: "1000000",
-    });
-
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toContain("manual activation");
-  });
-
-  it("carries the production environment into the provider runtime", async () => {
-    await seedAuth();
-    await seedSessionAuth();
-    env.VEDA_API_KEY = VEDA_PRODUCTION_KEY;
-    const production = await seedStrategy({ environment: "production" });
-    const quoteDeposit = vi.spyOn(EARN_PROVIDER_CLIENTS.veda, "quoteDeposit").mockResolvedValue({
-      provider: "veda",
-      strategyProviderReference: production.provider_reference,
-      expectedShareAmount: "980000",
-    });
-
-    const res = await postEarnAsSession("/v1/earn/deposits/quote", TEST_PRODUCTION_PROJECT.id, {
-      strategyId: production.id,
-      tokenMint: USDC_MINT,
-      amount: "1000000",
-    });
-
-    expect(res.status).toBe(200);
-    expect(quoteDeposit).toHaveBeenCalledWith(
-      expect.objectContaining({ environment: "production" }),
-      {
-        strategyProviderReference: production.provider_reference,
-        tokenMint: USDC_MINT,
-        amount: "1000000",
-      }
-    );
-  });
 });
 
 describe("Earn routes — strategy catalogue", () => {
@@ -469,186 +480,5 @@ describe("Earn routes — strategy catalogue", () => {
     expect(body.data.total).toBe(1);
     expect(body.data.page).toBe(1);
     expect(body.data.pageSize).toBe(20);
-  });
-});
-
-describe("Earn routes — quote exit safety (ADR 0002)", () => {
-  it("blocks deposit quotes on a paused strategy but still quotes withdrawals from it", async () => {
-    await seedAuth();
-    const paused = await seedStrategy({ status: "paused" });
-    const quoteDeposit = vi.spyOn(EARN_PROVIDER_CLIENTS.veda, "quoteDeposit").mockResolvedValue({
-      provider: "veda",
-      strategyProviderReference: paused.provider_reference,
-      expectedShareAmount: "980000",
-    });
-    const quoteWithdrawal = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.veda, "quoteWithdrawal")
-      .mockResolvedValue({
-        provider: "veda",
-        strategyProviderReference: paused.provider_reference,
-        expectedAmount: "1000000",
-        sharePrice: "1.02",
-        expiresAt: "2099-01-01T00:00:00.000Z",
-      });
-
-    const deposit = await postEarn("/v1/earn/deposits/quote", {
-      strategyId: paused.id,
-      tokenMint: USDC_MINT,
-      amount: "1000000",
-    });
-
-    expect(deposit.status).toBe(409);
-    const depositBody = (await deposit.json()) as { error: { code: string } };
-    expect(depositBody.error.code).toBe("STRATEGY_NOT_AVAILABLE");
-    expect(quoteDeposit).not.toHaveBeenCalled();
-
-    // Money out beats money off: pausing stops deposits, never withdrawals.
-    const withdrawal = await postEarn("/v1/earn/withdrawals/quote", {
-      strategyId: paused.id,
-      tokenMint: USDC_MINT,
-      shareAmount: "980000",
-    });
-
-    expect(withdrawal.status).toBe(200);
-    const withdrawalBody = (await withdrawal.json()) as {
-      data: { quote: Record<string, unknown> };
-    };
-    expect(withdrawalBody.data.quote).toEqual({
-      provider: "veda",
-      strategyId: paused.id,
-      tokenMint: USDC_MINT,
-      amount: "1000000",
-      shareAmount: "980000",
-      sharePrice: "1.02",
-      expiresAt: "2099-01-01T00:00:00.000Z",
-    });
-    expect(quoteWithdrawal).toHaveBeenCalledWith(
-      expect.objectContaining({ environment: "sandbox" }),
-      expect.objectContaining({
-        strategyProviderReference: paused.provider_reference,
-        tokenMint: USDC_MINT,
-        shareAmount: "980000",
-      })
-    );
-  });
-
-  it("keeps withdrawals quotable when the organization loses deposit entitlement", async () => {
-    await seedAuth({ entitleVeda: false });
-    const strategy = await seedStrategy();
-    vi.spyOn(EARN_PROVIDER_CLIENTS.veda, "quoteWithdrawal").mockResolvedValue({
-      provider: "veda",
-      strategyProviderReference: strategy.provider_reference,
-      expectedAmount: "1000000",
-    });
-
-    const deposit = await postEarn("/v1/earn/deposits/quote", {
-      strategyId: strategy.id,
-      tokenMint: USDC_MINT,
-      amount: "1000000",
-    });
-
-    expect(deposit.status).toBe(403);
-    const depositBody = (await deposit.json()) as { error: { message: string } };
-    expect(depositBody.error.message).toContain("manual activation");
-
-    const withdrawal = await postEarn("/v1/earn/withdrawals/quote", {
-      strategyId: strategy.id,
-      tokenMint: USDC_MINT,
-      amount: "1000000",
-    });
-
-    expect(withdrawal.status).toBe(200);
-  });
-
-  it("quotes deposits on an active strategy through the provider client", async () => {
-    await seedAuth();
-    const strategy = await seedStrategy();
-    const quoteDeposit = vi.spyOn(EARN_PROVIDER_CLIENTS.veda, "quoteDeposit").mockResolvedValue({
-      provider: "veda",
-      strategyProviderReference: strategy.provider_reference,
-      expectedShareAmount: "980000",
-      sharePrice: "1.02",
-      expiresAt: "2099-01-01T00:00:00.000Z",
-    });
-
-    const res = await postEarn("/v1/earn/deposits/quote", {
-      strategyId: strategy.id,
-      tokenMint: USDC_MINT,
-      amount: "1000000",
-    });
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { data: { quote: Record<string, unknown> } };
-    expect(body.data.quote).toEqual({
-      provider: "veda",
-      strategyId: strategy.id,
-      tokenMint: USDC_MINT,
-      amount: "1000000",
-      shareAmount: "980000",
-      sharePrice: "1.02",
-      expiresAt: "2099-01-01T00:00:00.000Z",
-    });
-    expect(quoteDeposit).toHaveBeenCalledWith(expect.objectContaining({ environment: "sandbox" }), {
-      strategyProviderReference: strategy.provider_reference,
-      tokenMint: USDC_MINT,
-      amount: "1000000",
-    });
-  });
-
-  it("rejects deposit quotes for a mint the strategy does not accept", async () => {
-    await seedAuth();
-    const strategy = await seedStrategy();
-
-    const res = await postEarn("/v1/earn/deposits/quote", {
-      strategyId: strategy.id,
-      tokenMint: USDT_MINT,
-      amount: "1000000",
-    });
-
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe("BAD_REQUEST");
-    expect(body.error.message).toContain(`does not accept mint ${USDT_MINT}`);
-  });
-});
-
-describe("Earn routes — positions", () => {
-  it("excludes closed positions unless includeClosed=true", async () => {
-    await seedAuth();
-    const strategy = await seedStrategy();
-    const active = await seedPosition(strategy.id, "wal_earn_active");
-    const closed = await seedPosition(strategy.id, "wal_earn_closed", "closed");
-
-    const defaultList = await getEarn("/v1/earn/positions");
-    expect(defaultList.status).toBe(200);
-    const defaultBody = (await defaultList.json()) as {
-      data: { positions: Array<{ id: string }>; total: number; page: number; pageSize: number };
-    };
-    expect(defaultBody.data.positions.map((p) => p.id)).toEqual([active.id]);
-    expect(defaultBody.data.total).toBe(1);
-
-    const withClosed = await getEarn("/v1/earn/positions?includeClosed=true");
-    expect(withClosed.status).toBe(200);
-    const withClosedBody = (await withClosed.json()) as {
-      data: { positions: Array<{ id: string }>; total: number };
-    };
-    expect(withClosedBody.data.positions.map((p) => p.id).sort()).toEqual(
-      [active.id, closed.id].sort()
-    );
-    expect(withClosedBody.data.total).toBe(2);
-  });
-
-  it("rejects non-boolean includeClosed values instead of coercing them", async () => {
-    await seedAuth();
-
-    // z.coerce.boolean() would have turned "1" — and even "false" — into
-    // true; the strict flag schema must 400 instead of inverting intent.
-    const rejected = await getEarn("/v1/earn/positions?includeClosed=1");
-    expect(rejected.status).toBe(400);
-    const body = (await rejected.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("BAD_REQUEST");
-
-    const explicitFalse = await getEarn("/v1/earn/positions?includeClosed=false");
-    expect(explicitFalse.status).toBe(200);
   });
 });

@@ -126,12 +126,7 @@ export function operationControlCount(state: PolicyAuthoringState): number {
 }
 
 export function hasActiveRestrictions(policy: PaymentWalletPolicy): boolean {
-  return Boolean(
-    policy.destinationAllowlist.length ||
-      policy.maxTransferAmount ||
-      policy.maxDailyAmount ||
-      policy.rules?.length
-  );
+  return policy.rules.length > 0 || policy.defaultAction !== "allow";
 }
 
 export function LoadingState() {

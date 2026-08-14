@@ -37,7 +37,7 @@ import {
   RWA_ALLOCATION_TYPE,
 } from "@sdp/earn/providers/ground/client";
 import type { EarnRuntimeContext } from "@sdp/earn/types";
-import { CLUSTER_BY_SDP_ENVIRONMENT, earnCuratorLabel, type SdpEnvironment } from "@sdp/types";
+import { earnCuratorLabel, type SdpEnvironment } from "@sdp/types";
 import { z } from "zod";
 
 const INVENTORY_ROOT = path.resolve(process.cwd(), ".earn-catalogue");
@@ -89,7 +89,13 @@ const sourceRowSchema = z.object({
   curator: z.string().nullable(),
   outcome: z.enum(["catalogued", "dropped"]),
   dropReason: z
-    .enum(["inactive_mode", "not_solana_routable", "unknown_token_symbol", "no_cluster_mint"])
+    .enum([
+      "inactive_mode",
+      "not_solana_routable",
+      "not_solana_hosted",
+      "unknown_token_symbol",
+      "no_cluster_mint",
+    ])
     .nullable(),
   liquidityTerm: z.enum(["instant", "delayed"]).nullable(),
   redemptionDelayDays: z.number().nullable(),
@@ -115,7 +121,7 @@ async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
 }
 
 function toSourceRow(source: GroundYieldSource, environment: SdpEnvironment): SourceRow {
-  const distilled = distillGroundYieldSource(source, CLUSTER_BY_SDP_ENVIRONMENT[environment]);
+  const distilled = distillGroundYieldSource(source, environment);
   return {
     id: source.id,
     name: source.name,
@@ -210,11 +216,11 @@ function renderCataloguedTable(rows: readonly SourceRow[]): string {
 }
 
 /**
- * Where the catalogued shelf actually lives. SDP's Solana-only mandate governs
- * the rails the CUSTOMER touches, not where Ground routes capital afterwards,
- * so a source hosted off Solana is catalogued by design — but "how much of what
- * we offer is Solana-native" is a product question the gates never answer, and
- * this is where it gets answered.
+ * Where the catalogued shelf actually lives. Since the `not_solana_hosted` gate
+ * this should be a ONE-ROW table naming the environment's Solana chain: any
+ * other row means an off-Solana source reached the catalogue, i.e. the gate is
+ * broken or Ground changed its chain vocabulary. Kept as a census rather than an
+ * assertion because the dropped table alone cannot show that.
  */
 function renderHostChainCensus(rows: readonly SourceRow[]): string {
   const counts = new Map<string, { total: number; rwa: number }>();
@@ -327,11 +333,10 @@ function renderEnvironmentSection(inventory: Inventory): string {
     "",
     "### Host-chain census — what is actually Solana-native",
     "",
-    "SDP's Solana-only mandate governs the rails the CUSTOMER touches: deposits and",
-    "payouts move USDC on Solana. Where a yield source itself lives is Ground's",
-    "internal routing (the `bridge` position kind), so an off-Solana source funded by",
-    "Solana USDC is catalogued on purpose. This table is how much of the shelf would",
-    "remain if that decision were ever narrowed to Solana-hosted sources only.",
+    "SDP lists and stores Solana-HOSTED vaults only (`not_solana_hosted`), so this",
+    "table should carry exactly one row: this environment's Solana chain. Any other",
+    "row is a gate failure or a change in Ground's chain vocabulary — investigate",
+    "before trusting the catalogue.",
     "",
     renderHostChainCensus(catalogued),
     "",

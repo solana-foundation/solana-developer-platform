@@ -1,3 +1,4 @@
+import type { CreateWalletOperationInput } from "@sdp/policy";
 import type { PolicyDefaultAction, PolicyRule } from "@sdp/types";
 import { describe, expect, it, vi } from "vitest";
 import type {
@@ -6,7 +7,6 @@ import type {
   ApiKeyWalletPolicyBindingRow,
   ApprovalRequestRow,
   CreatePolicyEvaluationInput,
-  CreateWalletOperationInput,
   PolicyRepository,
   WalletOperationRow,
 } from "@/db/repositories";
@@ -29,6 +29,7 @@ const baseOperation: CreateWalletOperationInput = {
   asset: "USDC",
   amount: "25.00",
   destination: "recipient_1",
+  legs: [],
   rawPayload: { requestId: "req_1" },
 };
 

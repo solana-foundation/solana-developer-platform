@@ -48,7 +48,9 @@
   --clerk-color-background: #fcfcfa;
   --clerk-color-input: #f0ede6;
   --clerk-color-input-foreground: #1c1c1d;
-  --clerk-color-muted: rgba(28, 28, 29, 0.06);
+  /* colorMuted must stay opaque: Clerk paints it as the sole background of the
+     account-modal navbar, so any alpha lets the page bleed through. */
+  --clerk-color-muted: color-mix(in srgb, #fcfcfa, #1c1c1d 6%);
   --clerk-color-border: rgba(28, 28, 29, 0.14);
   --clerk-color-ring: rgba(28, 28, 29, 0.4);
   --clerk-color-shimmer: rgba(28, 28, 29, 0.1);
@@ -196,7 +198,7 @@
   --clerk-color-background: #343435;
   --clerk-color-input: #1c1c1d;
   --clerk-color-input-foreground: #fcfcfa;
-  --clerk-color-muted: rgba(252, 252, 250, 0.08);
+  --clerk-color-muted: color-mix(in srgb, #343435, #fcfcfa 8%);
   --clerk-color-border: rgba(252, 252, 250, 0.16);
   --clerk-color-ring: rgba(252, 252, 250, 0.56);
   --clerk-color-shimmer: rgba(252, 252, 250, 0.1);

@@ -52,6 +52,7 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
 
 const PRIVY_CONFIG_ID = "cust_cfg_wallet_by_id_privy";
 const PARA_CONFIG_ID = "cust_cfg_wallet_by_id_para";
+let originalPrivyByokEnabled: string | undefined;
 async function seedAuthAndConfigs(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
@@ -177,6 +178,8 @@ async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
 
 describe("Custody wallet by ID route", () => {
   beforeEach(async () => {
+    originalPrivyByokEnabled = env.PRIVY_BYOK_ENABLED;
+    env.PRIVY_BYOK_ENABLED = "true";
     vi.clearAllMocks();
     createRpcMock.mockReset();
     getAccountInfoMock.mockReset();
@@ -192,7 +195,161 @@ describe("Custody wallet by ID route", () => {
   });
 
   afterEach(async () => {
+    env.PRIVY_BYOK_ENABLED = originalPrivyByokEnabled;
     await clearKVStores(env);
+  });
+
+  it("reads and labels a Connection wallet without exposing a Config owner", async () => {
+    const connection = await seedConnectionWallet();
+
+    for (const selector of [connection.walletId, connection.walletRecordId]) {
+      const response = await app.request(
+        `/v1/wallets/${selector}?includeBalance=false`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        data: {
+          wallet: {
+            id: connection.walletRecordId,
+            custodyConnectionId: connection.connectionId,
+            isRuntimeExecutionAllowed: true,
+            provider: "privy",
+            walletId: connection.walletId,
+          },
+        },
+      });
+    }
+
+    env.PRIVY_BYOK_ENABLED = "false";
+    const update = await app.request(
+      `/v1/wallets/${connection.walletRecordId}`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({ label: "Connection treasury" }),
+      },
+      env
+    );
+    expect(update.status).toBe(200);
+    expect(await update.json()).toMatchObject({
+      data: {
+        wallet: {
+          custodyConnectionId: connection.connectionId,
+          isRuntimeExecutionAllowed: false,
+          label: "Connection treasury",
+        },
+      },
+    });
+  });
+
+  it("returns a persisted Connection public key while runtime is off", async () => {
+    const connection = await seedConnectionWallet();
+    env.PRIVY_BYOK_ENABLED = "false";
+
+    const response = await app.request(
+      `/v1/wallets/public-key?walletId=${connection.walletId}`,
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+      },
+      env
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { publicKey: connection.publicKey },
+    });
+
+    const alias = await app.request(
+      `/v1/wallets/public-key?walletId=${connection.walletRecordId}`,
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+      },
+      env
+    );
+    expect(alias.status).toBe(404);
+  });
+
+  it("returns 404 for a wallet under a non-active Connection", async () => {
+    const connection = await seedConnectionWallet();
+    await getDb(env)
+      .prepare(
+        `UPDATE custody_connections
+         SET status = 'deactivated', deactivated_at = sdp_iso_now()
+         WHERE id = ?`
+      )
+      .bind(connection.connectionId)
+      .run();
+
+    const list = await app.request(
+      "/v1/wallets",
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(list.status).toBe(200);
+    expect(await list.json()).not.toMatchObject({
+      data: { wallets: expect.arrayContaining([{ walletId: connection.walletId }]) },
+    });
+
+    for (const path of [
+      `/v1/wallets/${connection.walletId}?includeBalance=false`,
+      `/v1/wallets/public-key?walletId=${connection.walletId}`,
+    ]) {
+      const response = await app.request(
+        path,
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+      expect(response.status).toBe(404);
+    }
+  });
+
+  it("returns 409 when the record-ID alias collides with a canonical wallet ID", async () => {
+    const connection = await seedConnectionWallet();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets (
+           id, custody_connection_id, wallet_id, public_key, status
+         ) VALUES (?, ?, 'privy_alias_collision_other', ?, 'active')`
+      )
+      .bind(connection.walletId, connection.connectionId, TEST_SOLANA_ADDRESSES.wallet1)
+      .run();
+
+    const detail = await app.request(
+      `/v1/wallets/${connection.walletId}?includeBalance=false`,
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(detail.status).toBe(409);
+
+    const update = await app.request(
+      `/v1/wallets/${connection.walletId}`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ label: "Ambiguous" }),
+      },
+      env
+    );
+    expect(update.status).toBe(409);
+
+    const canonicalOnly = await app.request(
+      `/v1/wallets/public-key?walletId=${connection.walletId}`,
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(canonicalOnly.status).toBe(200);
   });
 
   it("returns wallet metadata and SOL balance for a wallet across active providers", async () => {
@@ -531,3 +688,57 @@ describe("Custody wallet by ID route", () => {
     });
   });
 });
+
+async function seedConnectionWallet() {
+  const credentialId = "pcred_wallet_by_id_connection";
+  const connectionId = "cconn_wallet_by_id_connection";
+  const walletRecordId = "cwlt_wallet_by_id_connection";
+  const walletId = "privy_wallet_by_id_connection";
+  const publicKey = TEST_SOLANA_ADDRESSES.wallet3;
+
+  await getDb(env).batch([
+    getDb(env)
+      .prepare(
+        `INSERT INTO provider_credentials (
+           id, organization_id, project_id, provider, label, scope, source,
+           storage_backend, encrypted_secret_payload, status, created_by
+         ) VALUES (?, ?, ?, 'privy', 'Connection wallet', 'project', 'stored',
+                   'encrypted_db', 'ciphertext', 'active', ?)`
+      )
+      .bind(credentialId, TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_connections (
+           id, organization_id, project_id, provider, scope,
+           provider_credential_id, provider_credential_scope_key, status, created_by
+         ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?)`
+      )
+      .bind(
+        connectionId,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        credentialId,
+        TEST_PROJECT.id,
+        TEST_USER.id
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets (
+           id, custody_connection_id, wallet_id, public_key, label, status
+         ) VALUES (?, ?, ?, ?, 'Connection wallet', 'active')`
+      )
+      .bind(walletRecordId, connectionId, walletId, publicKey),
+    getDb(env)
+      .prepare(
+        `UPDATE custody_connections
+         SET default_custody_wallet_id = ?, status = 'active',
+             last_check_status = 'success', last_check_at = sdp_iso_now(),
+             provider_account_fingerprint = 'sha256:wallet-by-id',
+             activated_at = sdp_iso_now()
+         WHERE id = ?`
+      )
+      .bind(walletRecordId, connectionId),
+  ]);
+
+  return { connectionId, walletId, walletRecordId, publicKey };
+}

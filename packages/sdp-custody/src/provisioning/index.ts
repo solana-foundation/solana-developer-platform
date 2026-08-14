@@ -9,8 +9,8 @@ import { ApiKeyStamper } from "@solana/keychain-turnkey";
 import { importPKCS8, SignJWT } from "jose";
 import { SigningError } from "../signing";
 import {
-  buildCoinbaseCdpAccountName,
   coinbaseCdpRequest,
+  deriveCoinbaseCdpAccountName,
   extractCoinbaseCdpAccountAddress,
   isCoinbaseCdpAlreadyExistsError,
 } from "./coinbase";
@@ -112,6 +112,7 @@ export interface ProvisionPrivyOptions {
   walletId?: string;
   externalId?: string;
   idempotencyKey?: string;
+  credentialRequest?: boolean;
 }
 
 export interface PrivyProvisioningConfig {
@@ -127,7 +128,21 @@ export interface ProvisionPrivyResult {
 
 export interface ProvisionCoinbaseCdpOptions {
   orgId: string;
-  orgSlug: string;
+  /** null/undefined designates the organization-level scope. */
+  projectId?: string | null;
+  /**
+   * Unique seed for additional wallets beyond the scope's root account.
+   * Omitted for the root account so retries resolve to the same slot.
+   */
+  walletSeed?: string;
+  /**
+   * Allow resolving a 409 name collision to the existing account. Only safe
+   * for deterministic identities (root account retries); the derived name
+   * encodes the full tenant scope, so the existing account can only belong to
+   * the same scope. Defaults to false: collisions fail instead of silently
+   * handing out an existing account.
+   */
+  reuseExisting?: boolean;
   accountPolicy?: string;
 }
 
@@ -271,6 +286,7 @@ export async function provisionFireblocksVaultAccount(
   return { vaultAccountId, assetId, apiBaseUrl };
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: ponytail: keep legacy and credential modes in one Provider boundary; split if a third mode is added.
 export async function provisionPrivyWallet(
   runtime: CustodyProvisioningRuntime,
   config: PrivyProvisioningConfig,
@@ -309,6 +325,8 @@ export async function provisionPrivyWallet(
   const externalWalletLookup = options.externalId
     ? { apiBaseUrl, authHeader, appId, externalId: options.externalId }
     : undefined;
+  const credentialRequest =
+    options.credentialRequest === true || externalWalletLookup !== undefined;
   if (externalWalletLookup) {
     const existing = await findPrivyWalletByExternalId(
       runtime,
@@ -323,7 +341,7 @@ export async function provisionPrivyWallet(
       apiBaseUrl,
       authHeader,
       appId,
-      storedCredentialRequest: externalWalletLookup !== undefined,
+      storedCredentialRequest: credentialRequest,
       idempotencyKey: options.idempotencyKey,
       method: "POST",
       path: "/wallets",
@@ -338,7 +356,10 @@ export async function provisionPrivyWallet(
     }
 
     if (!created?.id || !created.address) {
-      throw new SigningError("Privy wallet creation failed", "PROVIDER_NOT_CONFIGURED");
+      throw new SigningError(
+        credentialRequest ? "Privy wallet outcome is unknown" : "Privy wallet creation failed",
+        credentialRequest ? "NETWORK_ERROR" : "PROVIDER_NOT_CONFIGURED"
+      );
     }
     return { walletId: created.id, address: created.address };
   } catch (error) {
@@ -410,11 +431,13 @@ export async function provisionCoinbaseCdpAccount(
   const apiBaseUrl = config.apiBaseUrl ?? DEFAULT_COINBASE_CDP_API_BASE_URL;
   const network = config.network ?? DEFAULT_COINBASE_CDP_NETWORK;
 
-  const name = buildCoinbaseCdpAccountName(
-    runtime,
-    options.orgSlug || options.orgId,
-    config.accountScope
-  );
+  const name = await deriveCoinbaseCdpAccountName(runtime, {
+    accountScope: config.accountScope,
+    organizationId: options.orgId,
+    projectId: options.projectId,
+    network,
+    walletSeed: options.walletSeed,
+  });
 
   try {
     const created = await coinbaseCdpRequest<CoinbaseCdpSolanaAccountResponse>(runtime, {
@@ -440,6 +463,14 @@ export async function provisionCoinbaseCdpAccount(
   } catch (error) {
     if (!isCoinbaseCdpAlreadyExistsError(error)) {
       throw error;
+    }
+
+    if (!options.reuseExisting) {
+      throw new SigningError(
+        `Coinbase CDP account '${name}' already exists and this operation does not reuse existing accounts`,
+        "PROVIDER_NOT_CONFIGURED",
+        error
+      );
     }
 
     try {

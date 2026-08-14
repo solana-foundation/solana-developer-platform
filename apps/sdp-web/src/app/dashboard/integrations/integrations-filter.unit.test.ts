@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  countByFamily,
-  type FilterableIntegration,
-  hasActiveFilters,
-  matchesFilters,
-  NO_FILTERS,
-} from "./integrations-filter";
+import { type FilterableIntegration, matchesFilters, NO_FILTERS } from "./integrations-filter";
 
 const ROWS: FilterableIntegration[] = [
   { family: "custody", provider: "privy", label: "Privy", status: "active" },
@@ -17,7 +11,6 @@ const ROWS: FilterableIntegration[] = [
 describe("integration filters", () => {
   it("passes everything through with no filters", () => {
     expect(ROWS.filter((row) => matchesFilters(row, NO_FILTERS))).toHaveLength(4);
-    expect(hasActiveFilters(NO_FILTERS)).toBe(false);
   });
 
   it("narrows by family and by status independently", () => {
@@ -45,9 +38,5 @@ describe("integration filters", () => {
       matchesFilters(row, { family: "custody", status: "active", query: "priv" })
     );
     expect(filtered.map((row) => row.provider)).toEqual(["privy"]);
-  });
-
-  it("counts rows per family for the filter pills", () => {
-    expect(countByFamily(ROWS)).toEqual({ custody: 2, rpc: 1, ramps: 1, compliance: 0 });
   });
 });

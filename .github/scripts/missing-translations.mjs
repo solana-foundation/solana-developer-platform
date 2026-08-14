@@ -572,8 +572,10 @@ async function requestTranslations({
 }) {
   const endpoint = agentUrl.replace(/\/$/, "");
   const authorization = `Basic ${Buffer.from(`${agentUsername}:${agentPassword}`).toString("base64")}`;
-  const body = {
-    message: JSON.stringify({
+  let retryFeedback;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    const message = {
       targetLocale: locale,
       // Preserve the guidance envelope so a release remains compatible while
       // the independently deployed Eve prompt rolls forward.
@@ -585,11 +587,18 @@ async function requestTranslations({
         context,
       })),
       outputShape: [{ file: "same file", key: "same key", translation: "translated value" }],
-    }),
-    outputSchema: translationOutputSchema(entries),
-  };
+    };
+    if (retryFeedback) {
+      message.retryFeedback = {
+        reason: retryFeedback,
+        instruction: "Regenerate the full batch and correct the validation failure.",
+      };
+    }
+    const body = {
+      message: JSON.stringify(message),
+      outputSchema: translationOutputSchema(entries),
+    };
 
-  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     try {
       const response = await fetchImpl(`${endpoint}/eve/v1/session`, {
         method: "POST",
@@ -622,7 +631,13 @@ async function requestTranslations({
         throw new Error(`Translation agent stream returned HTTP ${stream.status}`);
       }
 
-      return validateAgentTranslations(entries, await readAgentResult(stream), guidance);
+      const translations = await readAgentResult(stream);
+      try {
+        return validateAgentTranslations(entries, translations, guidance);
+      } catch (error) {
+        retryFeedback = error instanceof Error ? error.message : String(error);
+        throw error;
+      }
     } catch (error) {
       if (attempt >= maxRetries) {
         throw error;
@@ -640,7 +655,6 @@ export async function translateMissingEntries({
   agentUrl,
   agentUsername,
   agentPassword,
-  maxKeys = 500,
   batchSize = 50,
   maxRetries = 2,
   fetchImpl = fetch,
@@ -656,21 +670,12 @@ export async function translateMissingEntries({
       "TRANSLATION_AGENT_USERNAME and TRANSLATION_AGENT_PASSWORD are required when translations are missing"
     );
   }
-  if (!Number.isInteger(maxKeys) || maxKeys < 1) {
-    throw new Error("Translation budget must be a positive integer");
-  }
   if (!Number.isInteger(batchSize) || batchSize < 1) {
     throw new Error("Translation batch size must be a positive integer");
   }
   if (!Number.isInteger(maxRetries) || maxRetries < 0) {
     throw new Error("Translation retry count must be a non-negative integer");
   }
-  if (missing.length > maxKeys) {
-    throw new Error(
-      `Translation budget exceeded: ${missing.length} keys requested, maximum is ${maxKeys}`
-    );
-  }
-
   const translations = [];
   let batches = 0;
   const byLocale = new Map();
