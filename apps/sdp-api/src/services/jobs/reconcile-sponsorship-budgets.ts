@@ -8,6 +8,7 @@ import {
   type SponsorshipReconciliationReservation,
 } from "@/db/repositories/sponsorship-budget.repository";
 import { getLogger } from "@/runtime/logger";
+import { logEvent } from "@/runtime/money-path-events";
 import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
 import type { Env } from "@/types/env";
 import { getManagedSponsorshipProviderConfiguration } from "../sponsorship.service";
@@ -27,6 +28,13 @@ type ReconciliationRepository = Pick<
   | "markRedisSettled"
 >;
 type ReconciliationRedis = Pick<SponsorshipBudgetRedis, "settle" | "syncPolicy">;
+
+type ReconciliationOutcome =
+  | "redis_synced"
+  | "committed"
+  | "charged_unknown"
+  | "still_valid"
+  | "awaiting_expiry";
 
 export interface SponsorshipReconciliationDependencies {
   repository?: ReconciliationRepository;
@@ -62,8 +70,25 @@ export async function reconcileSponsorshipBudgets(
     RECONCILIATION_BATCH_SIZE
   );
   const failures: Error[] = [];
+  const outcomes: Record<ReconciliationOutcome, number> = {
+    redis_synced: 0,
+    committed: 0,
+    charged_unknown: 0,
+    still_valid: 0,
+    awaiting_expiry: 0,
+  };
 
-  if (reservations.length === 0) return;
+  if (reservations.length === 0) {
+    logEvent("info", {
+      event: "sdp_api_sponsorship_reconciliation_tick",
+      network,
+      candidates: 0,
+      failed: 0,
+      batch_saturated: false,
+      ...outcomes,
+    });
+    return;
+  }
 
   let providerConfiguration: SponsorshipProviderConfiguration;
   try {
@@ -94,13 +119,14 @@ export async function reconcileSponsorshipBudgets(
         );
         throw new Error("Kora signer or security configuration does not match the reservation");
       }
-      await reconcileReservation({
+      const outcome = await reconcileReservation({
         reservation,
         repository,
         budgetRedis,
         getTransaction,
         isBlockhashValid,
       });
+      outcomes[outcome] += 1;
     } catch (error) {
       const failure = error instanceof Error ? error : new Error(String(error));
       failures.push(failure);
@@ -110,6 +136,15 @@ export async function reconcileSponsorshipBudgets(
       );
     }
   }
+
+  logEvent("info", {
+    event: "sdp_api_sponsorship_reconciliation_tick",
+    network,
+    candidates: reservations.length,
+    failed: failures.length,
+    batch_saturated: reservations.length === RECONCILIATION_BATCH_SIZE,
+    ...outcomes,
+  });
 
   if (failures.length > 0) {
     throw new AggregateError(
@@ -125,14 +160,14 @@ async function reconcileReservation(input: {
   budgetRedis: ReconciliationRedis;
   getTransaction: SponsorshipReconciliationDependencies["getTransaction"] & {};
   isBlockhashValid: SponsorshipReconciliationDependencies["isBlockhashValid"] & {};
-}): Promise<void> {
+}): Promise<ReconciliationOutcome> {
   const { reservation, repository, budgetRedis } = input;
   if (reservation.status === "committed" || reservation.status === "released") {
     if (reservation.actualLamports === null) {
       throw new Error("Terminal sponsorship reservation omitted actual lamports");
     }
     await syncRedisSettlement(repository, budgetRedis, reservation, reservation.actualLamports);
-    return;
+    return "redis_synced";
   }
   if (!reservation.signature) {
     await persistAmbiguousCharge({
@@ -143,7 +178,7 @@ async function reconcileReservation(input: {
       breakerReason: "Signature-less ambiguous reservation lost its durable transition",
       lostTransitionError: "Failed to persist signature-less ambiguous sponsorship outcome",
     });
-    return;
+    return "charged_unknown";
   }
 
   assertIsSignature(reservation.signature);
@@ -159,14 +194,14 @@ async function reconcileReservation(input: {
       );
     }
     await settleDurably(repository, budgetRedis, reservation, "committed", actualLamports);
-    return;
+    return "committed";
   }
 
   assertIsBlockhash(reservation.recentBlockhash);
-  if (await input.isBlockhashValid(reservation.recentBlockhash)) return;
+  if (await input.isBlockhashValid(reservation.recentBlockhash)) return "still_valid";
   if (reservation.missCount === 0) {
     await repository.recordReconciliationMiss(reservation.id, reservation.attempt, 0);
-    return;
+    return "awaiting_expiry";
   }
   await persistAmbiguousCharge({
     reservation,
@@ -176,6 +211,7 @@ async function reconcileReservation(input: {
     breakerReason: "Ambiguous unconfirmed reservation lost its durable transition",
     lostTransitionError: "Failed to retain ambiguous unconfirmed sponsorship charge",
   });
+  return "charged_unknown";
 }
 
 function feePayerSpendLamports(
@@ -252,6 +288,13 @@ async function tripBreaker(
   reason: string
 ): Promise<void> {
   const policy = await repository.tripGlobalBreaker(network, reason);
+  logEvent("error", {
+    event: "sdp_api_sponsorship_breaker_tripped",
+    network,
+    reason,
+    already_tripped: policy === null,
+    source: "reconciliation",
+  });
   if (policy) await budgetRedis.syncPolicy(policy);
 }
 
