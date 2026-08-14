@@ -253,7 +253,7 @@ describe("Custody wallet scope routes", () => {
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
           "Dry-Run": "true",
         },
-        body: JSON.stringify({ walletId: "privy_wallet_a", memo: "policy dry run" }),
+        body: JSON.stringify({ walletId: "privy_wallet_a" }),
       },
       env
     );
@@ -305,7 +305,7 @@ describe("Custody wallet scope routes", () => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
-        body: JSON.stringify({ walletId: "privy_wallet_a", memo: "denied signer check" }),
+        body: JSON.stringify({ walletId: "privy_wallet_a" }),
       },
       env
     );

@@ -74,7 +74,8 @@ export async function extractSignerCheckPolicyCandidate(
     });
   }
 
-  const memo = parsed.data.memo?.trim() || `SDP signer check ${new Date().toISOString()}`;
+  // Server-generated memo: the org wallet must never sign caller-chosen text.
+  const memo = `SDP signer check ${crypto.randomUUID()}`;
   const resolvedWalletId = resolveApiKeySigningWalletId(auth, parsed.data.walletId, [
     "wallets:write",
   ]);

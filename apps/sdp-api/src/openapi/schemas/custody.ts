@@ -30,7 +30,7 @@ export const switchSigningRequestSchema = withOpenApi(switchSigningSchemaBase, {
 
 export const signerCheckRequestSchema = withOpenApi(signerCheckSchemaBase, {
   description:
-    "Optional memo payload for signer check. Signing wallet is resolved from the API key binding.",
+    "Signer check request. Signing wallet is resolved from the API key binding and the memo text is generated server-side.",
 });
 
 export const orgCustodyProviderSchema = z
@@ -596,8 +596,8 @@ export const signerCheckResponseSchema = z
       description: "Fee payer address (Kora signer).",
     }),
     memo: z.string().openapi({
-      description: "Memo text submitted on-chain.",
-      example: "SDP signer check 2026-02-20T00:00:00.000Z",
+      description: "Server-generated memo text submitted on-chain.",
+      example: "SDP signer check 5b1f6c2e-8a24-4c8e-9d5f-0f0f6f8b1a2c",
     }),
     signature: z.string().openapi({
       description: "Submitted Solana transaction signature.",
