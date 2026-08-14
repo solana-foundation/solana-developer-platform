@@ -8,13 +8,13 @@
 | --- | --- | --- |
 | Relevant push to `main` | Dev | Builds a SHA-tagged image, runs migrations, updates the dev service, and updates the dev cron job |
 | `chore(main): release X.Y.Z` commit on `main` | Release publication | Creates the `vX.Y.Z` tag, publishes the GitHub release, and triggers release-image/checksum workflows |
-| `vX.Y.Z` release published | Production API | Builds version- and SHA-tagged images from the tagged commit, runs migrations, updates the production service, and updates the production cron job |
-| `vX.Y.Z` release published | Production web | Builds sdp-web from the tagged commit and deploys it to Vercel production |
+| Release publication job on `main` | Production API | Verifies the published tag and SHA, builds version- and SHA-tagged images from that commit, runs migrations, updates the production service, and updates the production cron job |
+| Release publication job on `main` | Production web | Verifies the published tag and SHA, builds sdp-web from that commit, and deploys it to Vercel production |
 | Manual dev workflow dispatch | Dev | Rebuilds and deploys the selected workflow revision |
 | Manual production workflow dispatch from `main` | Production API | Resolves an existing 40-character Git SHA image tag and redeploys its immutable digest without running migrations |
 | Manual sdp-web workflow dispatch | Production web | Builds and deploys the provided ref to Vercel production |
 
-Vercel's git integration builds previews for pull-request branches only; `apps/sdp-web/vercel.json` skips git-triggered builds on `main`, so sdp-web reaches production exclusively through the release-triggered workflow.
+Vercel's git integration builds previews for pull-request branches only; `apps/sdp-web/vercel.json` skips git-triggered builds on `main`, so sdp-web reaches production exclusively through the release flow's production deployment job.
 
 The hosted API runs as a Node.js container on Cloud Run. Dev and production use separate GCP projects, Artifact Registry repositories, services, migration jobs, and cron jobs.
 
@@ -109,15 +109,17 @@ Auto-merge is enabled, but branch protection still requires review approval and 
 
 ### 3. Deploy and publish production
 
-Merging the release pull request creates a `chore(main): release X.Y.Z` commit on `main`. That push runs [`release-please.yml`](../../.github/workflows/release-please.yml), which creates the `vX.Y.Z` tag and publishes the GitHub release. Publishing the release then starts two independent deployments from the tagged commit:
+Merging the release pull request creates a `chore(main): release X.Y.Z` commit on `main`. That push runs [`release-please.yml`](../../.github/workflows/release-please.yml), which creates the `vX.Y.Z` tag, publishes the GitHub release, resolves the tag to the exact `main` commit, and then calls two independent production deployments with that immutable tag and SHA:
 
 - [`deploy-sdp-api-gcp-prod.yml`](../../.github/workflows/deploy-sdp-api-gcp-prod.yml) deploys the production API.
 - [`deploy-sdp-web-vercel-prod.yml`](../../.github/workflows/deploy-sdp-web-vercel-prod.yml) deploys sdp-web to Vercel production.
 
+Both called workflows retain the `main` event context required by the `production` environment. Before using production credentials, they verify that the checked-out SHA matches the published tag, belongs to `origin/main`, and has the matching version in `package.json`.
+
 The production deploy workflow:
 
 1. Authenticates to the production GCP project.
-2. Builds the API image and pushes both `X.Y.Z` and `GITHUB_SHA` tags.
+2. Builds the API image and pushes both `X.Y.Z` and release-SHA tags.
 3. Resolves the SHA tag to an immutable image digest.
 4. Updates and executes `sdp-prod-api-public-migrate`.
 5. Captures the current service traffic and cron image for rollback.
