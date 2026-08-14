@@ -5,6 +5,7 @@ import type {
   EarnPortfolioWalletSnapshot,
   EarnPortfolioWithdrawal,
 } from "@sdp/types";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
@@ -213,6 +214,7 @@ async function seedSessionAuth(): Promise<void> {
 }
 
 async function seedGroundStrategy(overrides: Partial<UpsertEarnStrategyInput> = {}): Promise<void> {
+  const environment = overrides.environment ?? "sandbox";
   const strategy = await createPostgresEarnRepository(getDb(env)).upsertStrategy({
     provider: "ground",
     providerReference: GROUND_SOURCE,
@@ -227,7 +229,13 @@ async function seedGroundStrategy(overrides: Partial<UpsertEarnStrategyInput> = 
     redemptionDelayDays: null,
     riskMetadata: { curator: "gauntlet" },
     status: "active",
-    environment: "sandbox",
+    // Follows the environment by default because that is what Ground itself
+    // does — it catalogues a source against the environment's own Solana mint,
+    // so a fixture pinned to devnet would be un-fundable in the
+    // production-session cases and fail for the wrong reason. Tests exercising
+    // the cluster gate override it explicitly.
+    hostCluster: CLUSTER_BY_SDP_ENVIRONMENT[environment],
+    environment,
     ...overrides,
   });
   if (!strategy) {
@@ -741,6 +749,75 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
     expect(res.status).toBe(501);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("NOT_IMPLEMENTED");
+  });
+
+  it("returns 501 for a catalogue-only provider, whose vaults ARE in the catalogue", async () => {
+    // Kamino differs from the stub providers above: it lists real strategies,
+    // so its references resolve. The capability gate is the only thing between
+    // a caller and a program on a provider that moves no money through SDP —
+    // and it answers before entitlement or key resolution can muddy the reason.
+    await seedAuth();
+    await seedGroundStrategy({ provider: "kamino", hostCluster: "mainnet-beta" });
+
+    const res = await requestEarn("POST", PROGRAMS_PATH, {
+      provider: "kamino",
+      allocations: VALID_ALLOCATIONS,
+    });
+
+    expect(res.status).toBe(501);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("NOT_IMPLEMENTED");
+  });
+
+  /**
+   * The devnet-money guard. A mainnet-only provider is catalogued into sandbox
+   * on purpose, so `assertKnownYieldSources` must refuse a reference whose
+   * instrument does not live on this environment's cluster — being listed here
+   * is not the same as being fundable here.
+   *
+   * Deliberately uses a GROUND row with its cluster flipped rather than a
+   * Kamino row: a Kamino reference is already refused for being another
+   * provider's, which would pass this test without the cluster check existing
+   * at all. Same provider, same environment, one field different.
+   */
+  it("refuses an allocation whose strategy is hosted on another cluster", async () => {
+    await seedAuth();
+    await seedGroundStrategy({ hostCluster: "mainnet-beta" });
+    const createWallet = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet");
+
+    const res = await requestEarn(
+      "POST",
+      PROGRAMS_PATH,
+      createProgramBody({ requestId: crypto.randomUUID() })
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      error: { code: string; details?: { unknownYieldSourceIds?: string[] } };
+    };
+    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(body.error.details?.unknownYieldSourceIds).toEqual([GROUND_SOURCE]);
+    expect(createWallet).not.toHaveBeenCalled();
+  });
+
+  it("accepts the same allocation once the strategy is hosted on this cluster", async () => {
+    // The control for the case above: without it, a gate that refused
+    // everything would pass just as well.
+    await seedAuth();
+    await seedGroundStrategy({ hostCluster: "devnet" });
+    const createWallet = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet")
+      .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
+    stubProgramReads();
+
+    const res = await requestEarn(
+      "POST",
+      PROGRAMS_PATH,
+      createProgramBody({ requestId: crypto.randomUUID() })
+    );
+
+    expect(res.status).toBe(201);
+    expect(createWallet).toHaveBeenCalled();
   });
 
   it("answers an unentitled create 403 even when no idempotency key was sent", async () => {

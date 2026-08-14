@@ -180,7 +180,128 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
 | `POST /v1/earn/programs` → 400 "needs an idempotency key" | creation is key-REQUIRED since PRO-1670: send exactly one of body `requestId` (UUIDv4) or the `Idempotency-Key` header — never both |
 | Local total ≠ Ground console total | Ground sums the whole shared account; SDP shows only the wallets your org holds (§4b) |
 | Catalogue empty right after boot | sync cron runs on the hour — seed instead of waiting |
+| Kamino rows appear disabled in the dashboard | correct: sandbox rows are `fundable: false` and render `Mainnet only`; even in production, the portfolio wizard keeps catalogue-only providers browse-only until they implement a deposit capability |
+| Kamino APY looks stale | the 5-minute metrics refresh is a separate cron — check it registered (`isEarnEnabled`), not the hourly sync |
+| Local API boots on 8787 despite `PORT=…` | the dev wrapper reads **`SDP_API_PORT`**, not `PORT` (scripts/dev-local.mjs) |
 | Need devnet USDC to fund a program | Circle's faucet: <https://faucet.circle.com/> — USDC + Solana Devnet (§4b) |
+
+## Two provider shapes — read this before assuming Ground's model
+
+Ground is **custodial**: SDP provisions an omnibus portfolio wallet, the
+customer funds it, Ground spreads it across yield sources. Programs,
+withdrawals and the deposit wizard all assume that shape.
+
+Kamino is **non-custodial and catalogue-only**: a K-Vault is an on-chain vault
+the customer's own wallet deposits into, so there is no wallet for SDP to
+provision or pay out from. It implements the base `EarnVaultProvider` contract
+plus the live-metrics capability, and NONE of the portfolio-wallet capability —
+so every money-moving route answers 501 for it through `supportsPortfolioWallets`,
+never a provider-id check. Deposit/withdraw execution is not "not yet"; it is a
+different money model that V1 does not carry.
+
+Three Kamino facts drive most of its code, all measured against the live API on
+2026-08-13 (Kamino publishes an agent-readable API index at
+<https://kamino.com/docs/skill.md>, and every `https://kamino.com/docs/*.md`
+page it links is fetchable as raw markdown):
+
+- **No credential.** The data API is public, which is why `publicApiDefinition`
+  exists beside `keyPairCredentialDefinition` in the API's availability service,
+  why `keyPairCredentialDefinition`'s parameter excludes `kamino`, and why there
+  is no `KAMINO_API_KEY` in env.d.ts, turbo.json or secret-keys.mjs. Do not add
+  one "for consistency" — secret-keys.mjs is "every env key the SDP API reads".
+- **Mainnet only.** `/kvaults/*` takes no env parameter and there is no devnet
+  deployment. SDP catalogues the mainnet shelf into BOTH environments so sandbox
+  integrators browse the real vaults; see `hostCluster` below.
+- **The registry is permissionless**, so `GET /kvaults/vaults` is a census of
+  everything ever created — 170 vaults, of which ~90 stablecoin ones are dust or
+  literal test vaults (`testfail4`, `vkjm_test`). `KAMINO_MIN_TVL_USD` ($100k)
+  is the admission floor; 21 vaults clear it. Review a change to that number
+  against `pnpm --filter @sdp/api earn:inventory:kamino`, which regenerates
+  docs/earn/kamino-catalogue-inventory.md including the largest near-misses.
+
+  Permissionless also means **the vault NAME is attacker-controlled** — free
+  text chosen by whoever called `createVaultIxs`. SDP may quote it (it is the
+  strategy's name) but never PARSE it into a claim. Concretely: Kamino
+  snapshots carry **no `curator`** and are **always `sourceKind: "defi"`**, and
+  `declaredSupport.sourceKinds` is `["defi"]` to match. An earlier revision
+  matched a curator-house list and an RWA regex against the name, which let
+  anyone mint "Steakhouse USDC Prime" or "RWA USDC", clear the floor for one
+  sync, and borrow a real house's name or the `sourceKind=rwa` filter. The floor
+  is a cost, not an authorization. Populating either field needs verified
+  authority/address data or an audited vault-address allowlist — this is the one
+  place Ground's `deriveCurator` precedent does NOT transfer, because Ground's
+  yield-source ids come from Ground, not from the public.
+
+## `hostCluster` — catalogued is not the same as fundable
+
+Every `ProviderStrategySnapshot` states the cluster from which its INSTRUMENT is
+reachable, and it is not implied by the environment. Ground answers with the
+environment's own cluster because its deposit is Solana-side there — the row
+carries that cluster's mint, and Ground bridges internally to wherever it hosts
+the source (#1299 removed the old `not_solana_hosted` gate, so off-Solana
+sources are indexed again; the deposit rail is what makes the cluster true, not
+the host chain). Kamino always answers `mainnet-beta`, in sandbox too: its
+K-Vault takes the customer's own deposit at a mainnet address with no bridge in
+front of it.
+
+A sandbox Kamino row therefore names a live mainnet vault and a mainnet mint.
+Everything about it is true and none of it is fundable from devnet, so ONE
+predicate decides — `isClusterFundableInEnvironment` (src/support.ts) — and
+three gates enforce its answer, none of which may re-derive the comparison:
+
+1. `assertKnownYieldSources` in the API **calls it**, the last gate before a
+   provider mutation, on both program create and re-target.
+2. `mapToEarnStrategy` **calls it** to emit `hostCluster` plus a per-request
+   `fundable` boolean — the machine-readable warning a partner reads.
+3. `fundableStrategies` in the dashboard's deposit model **consumes that
+   answer** over the wire (`strategy.fundable`). It deliberately does not
+   recompute it: a browser-side copy of the cluster comparison is the second
+   thing that can drift toward permissive.
+
+Note `fundable` answers the cluster question ALONE. `true` does not promise a
+deposit will succeed — a catalogue-only provider still answers 501, and the org
+still needs entitlement. See the field's doc comment in `@sdp/types`.
+
+`status` cannot express this: it is the operator's stop switch, and reusing it
+would misstate the reason AND collide with the repository's refusal to overwrite
+an operator pause. Migration 0057 added the column and backfilled from
+`environment` (correct for every pre-existing row, all Ground's).
+
+## Rates are refreshed on their own cadence
+
+The catalogue sync is hourly because catalogue DRIFT is slow. Rates are not, and
+an hour-old APY on a comparison table is a number a customer could act on
+wrongly. So the volatile figures have a second pass —
+`cron/earn-metrics-refresh.ts`, every 5 minutes — driven by the optional
+`EarnLiveMetricsProvider` capability (`supportsLiveMetrics`).
+
+Two properties keep it from fighting the sync, and both are load-bearing:
+
+- **It can only UPDATE.** `updateStrategyMetrics` matches on (provider,
+  reference, environment) and no-ops otherwise, so a provider reporting figures
+  for a vault the catalogue refused cannot admit it. Every admission gate stays
+  in the hourly sync. Kamino deliberately reports its whole shelf (173 rows) and
+  21 land.
+- **It cannot change what a strategy IS.** `UpdateEarnStrategyMetricsInput`
+  carries the rate and volatile risk metadata only, and the metadata is MERGED
+  so `curator` (which the sync derives) survives.
+
+**A provider's shelf read must be ALL-OR-NOTHING.** `_loadMetricsByVault`
+throws rather than returning a short map — on a page missing its `result` array
+and on hitting the pagination cap with a live token. This is not defensive
+padding: a vault with no metrics row is dropped as `no_metrics`, and the sync
+DELETES rows a provider no longer lists, so a half-read shelf would not degrade
+gracefully — it would delist every vault whose page went unread, in both
+environments. Failing the read makes the sync skip the pass and leave the
+catalogue intact. Any future provider whose catalogue read is paginated owes the
+same guarantee; `providerFetchJson` does no schema validation, so a 200 carrying
+`{}` is otherwise indistinguishable from an empty page.
+
+It refreshes into the DB rather than reading live at request time because the
+strategies route reads exactly ONE source for the state it reports (ADR 0002
+addendum). Freshness is cadence, not blending. A provider needing one request
+per vault should NOT implement the capability — Ground does not, because its
+rates come from the same paged endpoint the catalogue uses.
 
 ## Contracts
 
@@ -197,6 +318,9 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
 - Registry: `EARN_PROVIDER_CLIENTS` (src/index.ts) + fail-closed
   `resolveEarnProviderClient` — DB provider ids are open strings and MUST be
   resolved through this, never direct-indexed.
+- Optional capabilities so far: portfolio wallets, withdrawal approvals, and
+  live metrics. All three are method-presence guards in capabilities.ts, and a
+  provider may implement any subset — Kamino has only the third.
 
 ## Hard invariants (ADR 0002)
 
