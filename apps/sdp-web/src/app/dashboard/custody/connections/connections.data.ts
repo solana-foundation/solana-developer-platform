@@ -1,19 +1,19 @@
-import type { CustodyConnectionLifecycle, CustodyProvider, CustodyWalletSummary } from "@sdp/types";
+import type {
+  CustodyConnectionCheckStatus,
+  CustodyConnectionFailureCode,
+  CustodyConnectionLifecycle,
+  CustodyProvider,
+  CustodyWalletSummary,
+  ProviderCredentialStatus,
+} from "@sdp/types";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
 export const CONNECTIONS_PAGE_SIZE = 20;
 
-/** Failure codes the installation service publishes; anything unknown renders the generic copy. */
-export type ConnectionCheckFailureCode =
-  | "invalid_credentials"
-  | "provider_response_unknown"
-  | "provider_account_already_connected"
-  | "wallet_conflict";
-
 export interface ConnectionLastCheck {
-  status: "running" | "success" | "failed" | "retry_unknown" | (string & {});
+  status: CustodyConnectionCheckStatus;
   at: string | null;
-  failureCode: ConnectionCheckFailureCode | (string & {}) | null;
+  failureCode: CustodyConnectionFailureCode | null;
 }
 
 export interface CustodyConnectionListItem {
@@ -27,7 +27,7 @@ export interface CustodyConnectionListItem {
   providerCredential: {
     id: string;
     label: string;
-    status: "pending" | "active" | "failed_validation" | "retired" | "deactivated" | (string & {});
+    status: ProviderCredentialStatus;
   };
 }
 
@@ -142,9 +142,9 @@ export async function fetchWalletsByConnection(
   if (!res.ok) {
     throw new ConnectionsRequestError(res.status);
   }
-  const json = (await res.json()) as { data?: { wallets?: CustodyWalletSummary[] } };
+  const json = (await res.json()) as { data: { wallets: CustodyWalletSummary[] } };
   const byConnection = new Map<string, CustodyWalletSummary[]>();
-  for (const wallet of json.data?.wallets ?? []) {
+  for (const wallet of json.data.wallets) {
     if (!wallet.custodyConnectionId) continue;
     const existing = byConnection.get(wallet.custodyConnectionId);
     if (existing) {

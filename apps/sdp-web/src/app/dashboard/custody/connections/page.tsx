@@ -8,6 +8,7 @@ import {
 } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
+import { privyByok } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
@@ -29,6 +30,9 @@ export default async function CustodyConnectionsPage({
   const { userId, orgId, orgRole } = await auth();
   if (!userId) redirect(await getAuthEntryPath());
   if (!orgId) redirect("/dashboard");
+  // The wallets overview only links here behind the flag; the route has to
+  // enforce it too, or the URL is reachable directly while the feature is off.
+  if (!(await privyByok())) redirect("/dashboard/wallets");
 
   const [resolvedSearchParams, t] = await Promise.all([searchParams, getTranslations()]);
   const requestedFilters = parseConnectionsFilters(resolvedSearchParams);

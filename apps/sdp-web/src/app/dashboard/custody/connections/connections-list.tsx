@@ -1,6 +1,10 @@
 "use client";
 
-import type { CustodyConnectionLifecycle, CustodyWalletSummary } from "@sdp/types";
+import type {
+  CustodyConnectionFailureCode,
+  CustodyConnectionLifecycle,
+  CustodyWalletSummary,
+} from "@sdp/types";
 import { CableIcon, PlusIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -21,6 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { cn } from "@/lib/utils";
 import {
   buildConnectionsSearchParams,
   CONNECTIONS_PAGE_SIZE,
@@ -61,7 +66,7 @@ function statusLabel(status: CustodyConnectionLifecycle, t: Translate): string {
  * Short, secret-free explanation for a conclusively failed install. Codes come
  * from the installation service; anything unrecognized gets the generic line.
  */
-function failureHint(failureCode: string | null, t: Translate): string {
+function failureHint(failureCode: CustodyConnectionFailureCode | null, t: Translate): string {
   switch (failureCode) {
     case "invalid_credentials":
       return t("DashboardCustody.connectionFailureInvalidCredentials");
@@ -69,8 +74,13 @@ function failureHint(failureCode: string | null, t: Translate): string {
       return t("DashboardCustody.connectionFailureAccountAlreadyConnected");
     case "wallet_conflict":
       return t("DashboardCustody.connectionFailureWalletConflict");
-    default:
+    case "provider_response_unknown":
+    case null:
       return t("DashboardCustody.connectionFailureGeneric");
+    default: {
+      const exhaustive: never = failureCode;
+      return exhaustive;
+    }
   }
 }
 
@@ -202,7 +212,7 @@ export function ConnectionsList({
             <TableHead className="w-[30%] @2xl/connections-table:w-[26%]">
               {t("DashboardCustody.connectionColumn")}
             </TableHead>
-            <TableHead className={`${PROVIDER_COLUMN_CLASS} w-[16%]`}>
+            <TableHead className={cn(PROVIDER_COLUMN_CLASS, "w-[16%]")}>
               {t("DashboardCustody.provider")}
             </TableHead>
             <TableHead className="w-[38%] @2xl/connections-table:w-[30%]">
@@ -211,7 +221,7 @@ export function ConnectionsList({
             <TableHead className="w-[32%] @2xl/connections-table:w-[18%] @4xl/connections-table:w-[16%]">
               {t("DashboardCustody.status")}
             </TableHead>
-            <TableHead className={`${CREATED_COLUMN_CLASS} w-[12%]`}>
+            <TableHead className={cn(CREATED_COLUMN_CLASS, "w-[12%]")}>
               {t("DashboardCustody.created")}
             </TableHead>
           </TableRow>
@@ -250,7 +260,7 @@ export function ConnectionsList({
                   </span>
                 ) : null}
               </TableCell>
-              <TableCell className={`${CREATED_COLUMN_CLASS} text-xs text-secondary`}>
+              <TableCell className={cn(CREATED_COLUMN_CLASS, "text-xs text-secondary")}>
                 {formatDate(connection.createdAt, locale, t)}
               </TableCell>
             </TableRow>
