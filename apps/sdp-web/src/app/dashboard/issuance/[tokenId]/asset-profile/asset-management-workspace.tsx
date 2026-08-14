@@ -12,6 +12,7 @@ import { useTranslations } from "@/i18n/provider";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { getTokenAccessControlMode, hasAccessControlList } from "../../access-control.utils";
 import { togglePublicField } from "../../create/draft-mapping";
+import { resolveVerifiedHolders } from "../../issuance-token-fields";
 import { TokenActionConfirmationDialog } from "../token-action-confirmation-dialog";
 import { TokenAuthorityModal } from "../token-authority-modal";
 import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
@@ -29,6 +30,7 @@ import { OpsActionForms } from "./tabs/ops-action-forms";
 import { OverviewTab } from "./tabs/overview-tab";
 import { PermissionsTab } from "./tabs/permissions-tab";
 import { PublicInfoTab } from "./tabs/public-info-tab";
+import { WorkflowsTab } from "./tabs/workflows-tab";
 import { useAssetProfileForm } from "./use-asset-profile-form";
 import { useTokenOperations } from "./use-token-operations";
 
@@ -39,6 +41,7 @@ type AssetManagementTab =
   | "compliance"
   | "operations"
   | "permissions"
+  | "workflows"
   | "activity";
 
 const managementTabIds: AssetManagementTab[] = [
@@ -48,6 +51,7 @@ const managementTabIds: AssetManagementTab[] = [
   "compliance",
   "operations",
   "permissions",
+  "workflows",
   "activity",
 ];
 
@@ -90,6 +94,7 @@ export function AssetManagementWorkspace({
   const t = useTranslations();
   const { dashboardAccess } = useDashboardWorkspace();
   const canManageTokenAdmin = dashboardAccess.capabilities.canManageTokenAdmin;
+  const canManageTokenWrite = dashboardAccess.capabilities.canManageTokenWrite;
   // Admins get the full compliance tab (policy editor + controls). Non-admins
   // see it only for tokens that have a control list, and then only the allowlist
   // controls — the policy editor stays admin-only (also enforced server-side).
@@ -127,6 +132,7 @@ export function AssetManagementWorkspace({
       : []),
     { id: "operations", label: t("DashboardIssuance.tabs.operations") },
     { id: "permissions", label: t("DashboardIssuance.tabs.permissions") },
+    { id: "workflows", label: t("DashboardIssuance.tabs.workflows") },
     { id: "activity", label: t("DashboardIssuance.tabs.activity") },
   ];
 
@@ -300,6 +306,18 @@ export function AssetManagementWorkspace({
         {activeTab === "operations" ? <OperationsTab ops={ops} tokenId={token.id} /> : null}
         {activeTab === "permissions" ? (
           <PermissionsTab ops={ops} canManageTokenAdmin={canManageTokenAdmin} />
+        ) : null}
+        {activeTab === "workflows" ? (
+          <WorkflowsTab
+            tokenId={token.id}
+            canManage={canManageTokenWrite}
+            canManagePrivileged={canManageTokenAdmin}
+            // Enrollment defines who counts as a *verified holder* of the asset, so the
+            // roster only belongs on assets that gate on that (the "Verified holders"
+            // access mode = KYC capacity). On an ungated asset, enrolling a wallet does
+            // nothing, so the card is hidden rather than shown as dead UI.
+            verifiedHolders={resolveVerifiedHolders(form.draft)}
+          />
         ) : null}
         {activeTab === "activity" ? <ActivityTab tokenId={token.id} /> : null}
       </motion.div>

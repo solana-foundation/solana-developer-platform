@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import type { CustodyConfigSummary } from "@sdp/types";
 import { redirect } from "next/navigation";
+import { privyByok } from "@/flags";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
@@ -66,6 +67,7 @@ export default async function CustodySetupPage({ searchParams }: CustodySetupPag
   }
 
   const trace = createTimedTrace("dashboard.custody.setup.page");
+  const privyByokEnabled = await privyByok();
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const initialProvider = parseProvider(getSearchParamValue(resolvedSearchParams, "provider"));
 
@@ -113,6 +115,7 @@ export default async function CustodySetupPage({ searchParams }: CustodySetupPag
       connectedProviders={connectedProviders}
       enabledProviders={enabledProviders}
       initialProvider={initialProvider}
+      privyByokEnabled={privyByokEnabled}
     />
   );
 }

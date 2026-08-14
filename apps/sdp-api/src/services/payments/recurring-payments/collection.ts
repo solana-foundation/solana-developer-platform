@@ -40,12 +40,13 @@ import { getLogger } from "@/runtime/logger";
 import * as solanaServices from "@/services/solana";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
+import { emitRecurringPaymentFailed } from "@/services/workflows/payment-events";
 import type { Env } from "@/types/env";
 import {
   DEFAULT_RECURRING_COLLECTION_RETRY_AFTER_MINUTES,
   parsePositiveIntegerConfig,
 } from "../recurring-payment-config";
-import { assertWalletPolicyAllowsTransferWithRepository } from "../wallet-policy";
+import { enforceRecurringPaymentPolicy } from "./policy";
 import {
   activationErrorMessage,
   confirmSubscriptionSignature,
@@ -426,6 +427,18 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
     if (attemptRows === 0) {
       throw new AppError("INTERNAL_ERROR", "Failed to mark collection attempt failed");
     }
+  });
+
+  // Workflow trigger seam: a failed collection attempt fires recurring_payment_failed
+  // (not token-scoped). Best-effort — never blocks the collection job.
+  await emitRecurringPaymentFailed(input.env, {
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPaymentId: input.recurringPaymentId,
+    subscriptionId: input.attempt.subscription_id,
+    dueAt: input.attempt.due_at,
+    attemptId: input.attempt.id,
+    error: message,
   });
 }
 
@@ -997,13 +1010,29 @@ export async function collectRecurringPayment(input: {
       throw new AppError("CONFLICT", "Recurring payment collection is already processing");
     }
 
-    await assertWalletPolicyAllowsTransferWithRepository(paymentsRepo, {
+    await enforceRecurringPaymentPolicy({
+      env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      wallet: input.sourceWallet,
-      destinationAddress: input.recurringPayment.destination_address,
+      sourceWallet: input.sourceWallet,
+      operationType: "recurring_payment_collection",
       token: input.recurringPayment.token,
       amount: input.recurringPayment.amount,
+      destination: input.recurringPayment.destination_address,
+      apiKeyId: input.initiatedByKeyId,
+      actor:
+        input.initiatedByKeyId === null
+          ? null
+          : {
+              type: "api_key",
+              id: input.initiatedByKeyId,
+              apiKeyId: input.initiatedByKeyId,
+            },
+      rawPayload: {
+        recurringPaymentId: input.recurringPayment.id,
+        subscriptionId: subscription.id,
+        collectionDueAt: dueAt,
+      },
     });
 
     transfer = await paymentsRepo.createTransfer({

@@ -45,6 +45,7 @@ export async function enforceWalletOperationPolicy(
     const policies = await store.loadEffectivePolicies(operation);
     const result = evaluateWalletOperationPolicies({
       operation,
+      legs: input.legs,
       walletPolicy: policies.walletPolicy,
       apiKeyPolicy: policies.apiKeyPolicy,
     });

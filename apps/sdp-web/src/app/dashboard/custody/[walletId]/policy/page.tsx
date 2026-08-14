@@ -52,6 +52,22 @@ async function getWalletDetail(
   return wallet;
 }
 
+/**
+ * A wallet without an active control profile: the implicit default-allow
+ * policy the API also reports for unconfigured wallets.
+ *
+ * @param walletId - The wallet the policy describes.
+ * @returns The implicit default-allow policy.
+ */
+function implicitDefaultAllowPolicy(walletId: string): PaymentWalletPolicy {
+  return {
+    walletId,
+    defaultAction: "allow",
+    rules: [],
+    controlProfile: null,
+  };
+}
+
 async function getWalletPolicy(
   request: SdpApiClient["request"],
   walletId: string
@@ -60,37 +76,29 @@ async function getWalletPolicy(
     const response = await request(`/v1/payments/wallets/${encodeURIComponent(walletId)}/policies`);
     if (response.status === 404) {
       return {
-        policy: {
-          walletId,
-          destinationAllowlist: [],
-        },
+        policy: implicitDefaultAllowPolicy(walletId),
         error: null,
       };
     }
     if (!response.ok) {
       return {
-        policy: {
-          walletId,
-          destinationAllowlist: [],
-        },
+        policy: implicitDefaultAllowPolicy(walletId),
         error: "Wallet controls are unavailable right now.",
       };
     }
 
     const json = (await response.json()) as { data?: { policy?: PaymentWalletPolicy } };
-    return {
-      policy: json.data?.policy ?? {
-        walletId,
-        destinationAllowlist: [],
-      },
-      error: null,
-    };
+    const policy = json.data?.policy;
+    if (!policy) {
+      return {
+        policy: implicitDefaultAllowPolicy(walletId),
+        error: "Wallet controls are unavailable right now.",
+      };
+    }
+    return { policy, error: null };
   } catch {
     return {
-      policy: {
-        walletId,
-        destinationAllowlist: [],
-      },
+      policy: implicitDefaultAllowPolicy(walletId),
       error: "Wallet controls are unavailable right now.",
     };
   }

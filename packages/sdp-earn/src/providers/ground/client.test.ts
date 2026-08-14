@@ -61,7 +61,9 @@ const yieldSource = (overrides: Record<string, unknown> = {}) => ({
   name: "Morpho Gauntlet USDC",
   description: null,
   mode: "active",
-  chain: "ethereum",
+  // Solana-hosted so the catalogue happy path survives the `not_solana_hosted`
+  // gate; the host-chain drops are asserted explicitly in distillGroundYieldSource.
+  chain: "solana_devnet",
   apyBps: 356,
   navUpdateMode: "continuous",
   tvlUsd: 512_400_000,
@@ -165,7 +167,12 @@ describe("GroundEarnClient.listStrategies", () => {
 
   it("uses the production host and key, and skips tokens Ground cannot route on Solana", async () => {
     const fetchMock = stubGroundFetch({
-      body: page([yieldSource(), yieldSource({ id: "tether-reserve", depositToken: "usdt" })]),
+      // Production's Solana chain key is `solana`, not sandbox's `solana_devnet`
+      // — the fixture default would be dropped as `not_solana_hosted` here.
+      body: page([
+        yieldSource({ chain: "solana" }),
+        yieldSource({ id: "tether-reserve", depositToken: "usdt", chain: "solana" }),
+      ]),
     });
 
     const strategies = await client.listStrategies(productionCtx);
@@ -391,8 +398,8 @@ describe("GroundEarnClient.listStrategies", () => {
 describe("distillGroundYieldSource", () => {
   const distill = (
     overrides: Record<string, unknown>,
-    cluster: "devnet" | "mainnet-beta" = "devnet"
-  ) => distillGroundYieldSource(yieldSource(overrides) as GroundYieldSource, cluster);
+    environment: "sandbox" | "production" = "sandbox"
+  ) => distillGroundYieldSource(yieldSource(overrides) as GroundYieldSource, environment);
 
   it("names the gate that keeps each source out of the catalogue", () => {
     assert.deepEqual(distill({ mode: "buy_only" }), {
@@ -403,12 +410,52 @@ describe("distillGroundYieldSource", () => {
       outcome: "dropped",
       reason: "inactive_mode",
     });
-    // Rail-gated, not mint-gated: USDT drops even on mainnet-beta, where a
-    // well-known mint exists — Ground's Solana rails carry USDC only.
-    assert.deepEqual(distill({ depositToken: "usdt" }, "mainnet-beta"), {
+    // Rail-gated, not mint-gated: USDT drops even in production, where a
+    // well-known mint exists — Ground's Solana rails carry USDC only. Ordered
+    // ahead of the host-chain gate, so this stays the reported reason for a
+    // USDT source wherever it is hosted.
+    assert.deepEqual(distill({ depositToken: "usdt", chain: "solana" }, "production"), {
       outcome: "dropped",
       reason: "not_solana_routable",
     });
+  });
+
+  it("catalogues Solana-HOSTED sources only, per environment", () => {
+    // The vaults that prompted the gate: Ethereum-hosted USDC sources Ground
+    // funds over Solana rails. Every one of these was catalogued before.
+    for (const chain of ["ethereum", "ethereum_sepolia", "base", "solana"]) {
+      assert.deepEqual(
+        distill({ chain }),
+        { outcome: "dropped", reason: "not_solana_hosted" },
+        `sandbox must refuse a ${chain}-hosted source`
+      );
+    }
+    // Chain keys are per-environment: sandbox's Solana is `solana_devnet`,
+    // production's is `solana` — neither is catalogued in the other.
+    assert.equal(distill({ chain: "solana" }, "production").outcome, "catalogued");
+    assert.equal(distill({ chain: "solana_devnet" }, "production").outcome, "dropped");
+  });
+
+  it("fails closed when a source reports no host chain", () => {
+    // Ground does not document `chain` as required, and an unlabelled source
+    // cannot be shown to be Solana-hosted — refuse rather than assume.
+    for (const chain of [null, undefined, "", "   ", "SOLANA_MAINNET", "unknown"]) {
+      assert.deepEqual(
+        distill({ chain }),
+        { outcome: "dropped", reason: "not_solana_hosted" },
+        `chain=${JSON.stringify(chain)} must not be catalogued`
+      );
+    }
+  });
+
+  it("accepts the host chain case- and whitespace-insensitively", () => {
+    for (const chain of ["SOLANA_DEVNET", " solana_devnet ", "Solana_Devnet"]) {
+      assert.equal(
+        distill({ chain }).outcome,
+        "catalogued",
+        `chain=${JSON.stringify(chain)} names this environment's Solana rail`
+      );
+    }
   });
 
   it("catalogues an active USDC source with the snapshot listStrategies publishes", () => {
@@ -463,6 +510,7 @@ describe("Solana-only boundary — every request pins the environment's chain", 
         client.createPortfolioWallet(ctx, {
           label: "boundary",
           allocations: { usdc: [{ yieldSourceId: "morpho-gauntlet-usdc", pct: 100 }] },
+          requestId: "55555555-5555-4555-8555-555555555555",
         }),
       carriesChain: false,
     },
@@ -571,12 +619,29 @@ describe("GroundEarnClient.createPortfolioWallet", () => {
     assert.deepEqual(result, { providerWalletRef: "wal_1", status: "creating" });
   });
 
-  it("generates a UUIDv4 requestId when the caller omits one", async () => {
+  /**
+   * The create path deliberately has NO mint-when-absent fallback (PRO-1670):
+   * a server-minted id is fresh per attempt, so it would guarantee the
+   * double-provision it appears to guard against. `requestId` is required by
+   * `EarnPortfolioWalletCreateInput`, so the omission is a type error rather
+   * than a silent downgrade — this test pins that whatever the caller sends is
+   * exactly what reaches the wire, including a value the type system cannot
+   * catch at a JS boundary.
+   *
+   * The UPDATE path keeps its fallback (see updatePortfolioStrategy below):
+   * re-applying the same allocations is a provider no-op, so an absent key
+   * costs a duplicate mutation rather than a duplicate wallet.
+   */
+  it("never mints a requestId of its own on create", async () => {
     const fetchMock = stubGroundFetch({ body: groundWallet({ status: "creating" }) });
 
-    await client.createPortfolioWallet(sandboxCtx, { label: "SDP Earn", allocations: {} });
+    await client.createPortfolioWallet(sandboxCtx, {
+      label: "SDP Earn",
+      allocations: {},
+      requestId: undefined as unknown as string,
+    });
 
-    assert.match(String(requestBody(fetchMock).requestId), UUID_V4_PATTERN);
+    assert.equal(requestBody(fetchMock).requestId, undefined);
   });
 });
 
@@ -1092,6 +1157,111 @@ describe("GroundEarnClient.previewPortfolioWithdrawal", () => {
       );
     }
     assert.equal(fetchMock.mock.callCount(), 0);
+  });
+
+  // PRO-1675: the liquidity form. Ground keys it off the field's ABSENCE, so
+  // this asserts the key is missing rather than merely falsy — `null` and `0`
+  // are different questions and `0` is off `parseUsdAmount`'s pattern anyway.
+  it("OMITS amountUsd entirely when asked for the lane maximum", async () => {
+    const fetchMock = stubGroundFetch({
+      body: {
+        amountRequestedUsd: null,
+        feeUsd: "0.100000",
+        withdrawableUsd: "412.500000",
+        totalUsdAfterWithdrawal: "412.500000",
+      },
+    });
+
+    const preview = await client.previewPortfolioWithdrawal(sandboxCtx, {
+      providerWalletRef: "wal_1",
+      token: "usdc",
+    });
+
+    const body = requestBody(fetchMock);
+    assert.deepEqual(body, { destinationChain: "solana_devnet", token: "usdc" });
+    assert.equal("amountUsd" in body, false);
+    assert.equal(preview.withdrawableUsd, "412.500000");
+    assert.equal(preview.amountRequestedUsd, undefined);
+  });
+
+  it("still refuses a token Ground cannot route to Solana, amount or not", async () => {
+    const fetchMock = stubGroundFetch({ body: {} });
+
+    await assert.rejects(
+      client.previewPortfolioWithdrawal(sandboxCtx, {
+        providerWalletRef: "wal_1",
+        token: "usdt",
+      }),
+      earnError("BAD_REQUEST")
+    );
+    assert.equal(fetchMock.mock.callCount(), 0);
+  });
+
+  // The 409 body is the only place the provider says HOW short a request is.
+  // Losing it is why an over-request used to read as "…failed with status 409".
+  it("carries the 409 lane balance onto SdpEarnError.details", async () => {
+    stubGroundFetch({
+      status: 409,
+      body: {
+        error: { code: "insufficient_funds", message: "insufficient funds" },
+        balance: { totalUsd: "900.00", withdrawableUsd: "412.50", reservedUsd: "487.50" },
+      },
+    });
+
+    await assert.rejects(
+      client.previewPortfolioWithdrawal(sandboxCtx, {
+        providerWalletRef: "wal_1",
+        amountUsd: "800",
+        token: "usdc",
+      }),
+      (error: unknown) => {
+        const earn = error as { code: string; details?: Record<string, unknown> };
+        assert.equal(earn.code, "CONFLICT");
+        assert.deepEqual(earn.details?.balance, {
+          totalUsd: "900.00",
+          withdrawableUsd: "412.50",
+          reservedUsd: "487.50",
+        });
+        // The transport's own facts are not overwritable by the normalizer.
+        assert.equal(earn.details?.provider, "ground");
+        assert.equal(earn.details?.providerStatus, 409);
+        return true;
+      }
+    );
+  });
+
+  it("normalizes a nested, numeric balance and declines a 409 that carries none", async () => {
+    stubGroundFetch(
+      {
+        status: 409,
+        // Ground nests the payload inconsistently across endpoints, and sends
+        // JSON numbers here where the success payload uses strings.
+        body: { error: { message: "nope", balance: { withdrawableUsd: 412.5 } } },
+      },
+      // A conflict with no balance (Ground's `request_id_conflict` shape) must
+      // pass through untouched rather than gaining an empty `balance`.
+      { status: 409, body: { error: { message: "request_id_conflict" } } }
+    );
+
+    const preview = () =>
+      client.previewPortfolioWithdrawal(sandboxCtx, {
+        providerWalletRef: "wal_1",
+        amountUsd: "800",
+        token: "usdc",
+      });
+
+    await assert.rejects(preview(), (error: unknown) => {
+      const earn = error as { details?: Record<string, unknown> };
+      assert.deepEqual(earn.details?.balance, { withdrawableUsd: "412.5" });
+      return true;
+    });
+
+    await assert.rejects(preview(), (error: unknown) => {
+      const earn = error as { message: string; details?: Record<string, unknown> };
+      assert.equal(earn.message, "request_id_conflict");
+      assert.equal("balance" in (earn.details ?? {}), false);
+      return true;
+    });
   });
 });
 

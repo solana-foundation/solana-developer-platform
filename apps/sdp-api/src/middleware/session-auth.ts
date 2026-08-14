@@ -11,6 +11,7 @@ import { AppError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
+import { DASHBOARD_ACTOR_MAX_REQUESTS, enforceRateLimit } from "./rate-limit";
 
 const SESSION_COOKIE_NAME = "sdp_session";
 
@@ -32,6 +33,14 @@ export function sessionAuthMiddleware() {
     if (!cachedSession) {
       throw new AppError("UNAUTHORIZED", "Invalid or expired session");
     }
+
+    // Cookie sessions are the other dashboard auth mode with no per-key
+    // limit; meter them per user per org like Clerk traffic.
+    await enforceRateLimit(
+      c,
+      `user:${cachedSession.userId}:org:${cachedSession.organizationId}`,
+      DASHBOARD_ACTOR_MAX_REQUESTS
+    );
 
     // Set session context
     c.set("session", cachedSession);
@@ -56,11 +65,20 @@ export function optionalSessionAuth() {
         const cachedSession = await sessionService.getSession(sessionId);
 
         if (cachedSession) {
+          await enforceRateLimit(
+            c,
+            `user:${cachedSession.userId}:org:${cachedSession.organizationId}`,
+            DASHBOARD_ACTOR_MAX_REQUESTS
+          );
           c.set("session", cachedSession);
           updateLastActivity(getDb(c.env), sessionId);
         }
-      } catch {
-        // Ignore errors for optional auth
+      } catch (error) {
+        // Ignore errors for optional auth, but never rate limiting — a
+        // limited user must not proceed as anonymous.
+        if (error instanceof AppError && error.code === "RATE_LIMITED") {
+          throw error;
+        }
       }
     }
 

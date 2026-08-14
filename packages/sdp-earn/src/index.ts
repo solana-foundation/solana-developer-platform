@@ -9,14 +9,12 @@ import type { EarnVaultProvider } from "./types";
 export { supportsPortfolioWallets, supportsWithdrawalApprovals } from "./capabilities";
 export {
   badRequest,
-  insufficientLiquidity,
   internalError,
   notImplemented,
   providerNotConfigured,
   providerUnavailable,
   SdpEarnError,
   type SdpEarnErrorCode,
-  strategyNotAvailable,
 } from "./errors";
 export { GroundEarnClient } from "./providers/ground/client";
 export { PerenaEarnClient } from "./providers/perena/client";
@@ -26,12 +24,6 @@ export { VedaEarnClient } from "./providers/veda/client";
 export { isStrategyWithinDeclaredSupport } from "./support";
 export type {
   EarnDeclaredStrategySupport,
-  EarnDepositIntent,
-  EarnDepositQuote,
-  EarnDepositQuoteInput,
-  EarnMovementStatusInput,
-  EarnMovementStatusResult,
-  EarnNavInput,
   EarnPendingWithdrawalApproval,
   EarnPortfolioAddressBookEntryInput,
   EarnPortfolioAddressBookEntryResult,
@@ -46,9 +38,7 @@ export type {
   EarnPortfolioWithdrawalPreviewInput,
   EarnPortfolioWithdrawalStatusInput,
   EarnRuntimeContext,
-  EarnSettlementEvent,
   EarnVaultProvider,
-  EarnWebhookValidationContext,
   EarnWithdrawalApprovalAction,
   EarnWithdrawalApprovalProvider,
   EarnWithdrawalApprovalRequest,
@@ -56,10 +46,6 @@ export type {
   EarnWithdrawalApprovalStamp,
   EarnWithdrawalApprovalVoteInput,
   EarnWithdrawalApprovalVoteResult,
-  EarnWithdrawalIntent,
-  EarnWithdrawalQuote,
-  EarnWithdrawalQuoteInput,
-  ProviderNavSnapshot,
   ProviderStrategySnapshot,
 } from "./types";
 

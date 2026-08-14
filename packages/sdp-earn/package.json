@@ -24,16 +24,6 @@
       "import": "./src/fetch.ts",
       "default": "./src/fetch.ts"
     },
-    "./nav": {
-      "types": "./src/nav.ts",
-      "import": "./src/nav.ts",
-      "default": "./src/nav.ts"
-    },
-    "./shared": {
-      "types": "./src/shared.ts",
-      "import": "./src/shared.ts",
-      "default": "./src/shared.ts"
-    },
     "./support": {
       "types": "./src/support.ts",
       "import": "./src/support.ts",

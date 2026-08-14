@@ -84,23 +84,13 @@
               "custodyConfigId": "cfg_example",
               "provider": "privy",
               "isDefaultProvider": true,
+              "isRuntimeExecutionAllowed": true,
               "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",
               "label": "Root Signing Wallet",
               "purpose": "root",
               "status": "active",
-              "createdAt": "2025-01-01T00:00:00.000Z",
-              "balances": [
-                {
-                  "token": "USDC",
-                  "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-                  "amount": "1250000",
-                  "uiAmount": "1.25",
-                  "decimals": 6,
-                  "usdPrice": 1,
-                  "usdValue": 125.5
-                }
-              ]
+              "createdAt": "2025-01-01T00:00:00.000Z"
             }
           },
           "meta": {
@@ -247,23 +237,13 @@
                 "custodyConfigId": "cfg_example",
                 "provider": "privy",
                 "isDefaultProvider": true,
+                "isRuntimeExecutionAllowed": true,
                 "walletId": "privy_wallet_123",
                 "publicKey": "So11111111111111111111111111111111111111112",
                 "label": "Root Signing Wallet",
                 "purpose": "root",
                 "status": "active",
-                "createdAt": "2025-01-01T00:00:00.000Z",
-                "balances": [
-                  {
-                    "token": "USDC",
-                    "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-                    "amount": "1250000",
-                    "uiAmount": "1.25",
-                    "decimals": 6,
-                    "usdPrice": 1,
-                    "usdValue": 125.5
-                  }
-                ]
+                "createdAt": "2025-01-01T00:00:00.000Z"
               }
             ]
           },
@@ -976,19 +956,13 @@
               "custodyConfigId": "cfg_example",
               "provider": "privy",
               "isDefaultProvider": true,
+              "isRuntimeExecutionAllowed": true,
               "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",
               "label": "Root Signing Wallet",
               "purpose": "root",
               "status": "active",
-              "createdAt": "2025-01-01T00:00:00.000Z",
-              "balance": {
-                "token": "SOL",
-                "mint": "So11111111111111111111111111111111111111112",
-                "amount": "123456789",
-                "uiAmount": "0.123456789",
-                "decimals": 9
-              }
+              "createdAt": "2025-01-01T00:00:00.000Z"
             }
           },
           "meta": {
@@ -1030,23 +1004,13 @@
               "custodyConfigId": "cfg_example",
               "provider": "privy",
               "isDefaultProvider": true,
+              "isRuntimeExecutionAllowed": true,
               "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",
               "label": "Root Signing Wallet",
               "purpose": "root",
               "status": "active",
-              "createdAt": "2025-01-01T00:00:00.000Z",
-              "balances": [
-                {
-                  "token": "USDC",
-                  "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-                  "amount": "1250000",
-                  "uiAmount": "1.25",
-                  "decimals": 6,
-                  "usdPrice": 1,
-                  "usdValue": 125.5
-                }
-              ]
+              "createdAt": "2025-01-01T00:00:00.000Z"
             }
           },
           "meta": {
@@ -1118,9 +1082,6 @@
           "data": {
             "policy": {
               "walletId": "privy_wallet_123",
-              "destinationAllowlist": ["7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"],
-              "maxTransferAmount": "100.00",
-              "maxDailyAmount": "100.00",
               "defaultAction": "allow",
               "rules": [
                 {
@@ -1136,6 +1097,7 @@
                 "activeRevisionId": "activerevision_example",
                 "revisionId": "revision_example",
                 "revisionNumber": 1,
+                "commitMessage": "example",
                 "defaultAction": "allow",
                 "rules": [
                   {
@@ -1171,9 +1133,7 @@
                     "evaluatedAt": "2025-01-01T00:00:00.000Z"
                   }
                 ]
-              },
-              "createdAt": "2025-01-01T00:00:00.000Z",
-              "updatedAt": "2025-01-02T00:00:00.000Z"
+              }
             }
           },
           "meta": {
@@ -1204,7 +1164,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"destinationAllowlist\": [\n    \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n  ],\n  \"maxTransferAmount\": \"100.00\",\n  \"maxDailyAmount\": \"1000.00\",\n  \"defaultAction\": \"allow\",\n  \"rules\": [\n    {\n      \"id\": \"deny-raw-signing\",\n      \"kind\": \"operation_family\",\n      \"family\": \"raw_sign\",\n      \"action\": \"deny\"\n    }\n  ]\n}",
+            "defaultValue": "{\n  \"commitMessage\": \"Require approval for transfers above 10,000 USDC.\",\n  \"defaultAction\": \"allow\",\n  \"rules\": [\n    {\n      \"id\": \"deny-raw-signing\",\n      \"kind\": \"operation_family\",\n      \"family\": \"raw_sign\",\n      \"action\": \"deny\"\n    }\n  ]\n}",
             "required": true
           }
         ],
@@ -1212,9 +1172,6 @@
           "data": {
             "policy": {
               "walletId": "privy_wallet_123",
-              "destinationAllowlist": ["7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"],
-              "maxTransferAmount": "100.00",
-              "maxDailyAmount": "100.00",
               "defaultAction": "allow",
               "rules": [
                 {
@@ -1230,6 +1187,7 @@
                 "activeRevisionId": "activerevision_example",
                 "revisionId": "revision_example",
                 "revisionNumber": 1,
+                "commitMessage": "example",
                 "defaultAction": "allow",
                 "rules": [
                   {
@@ -1265,9 +1223,7 @@
                     "evaluatedAt": "2025-01-01T00:00:00.000Z"
                   }
                 ]
-              },
-              "createdAt": "2025-01-01T00:00:00.000Z",
-              "updatedAt": "2025-01-02T00:00:00.000Z"
+              }
             }
           },
           "meta": {
@@ -1322,6 +1278,7 @@
                   }
                 ],
                 "defaultAction": "allow",
+                "commitMessage": "example",
                 "createdBy": "example",
                 "createdAt": "2025-01-01T00:00:00.000Z",
                 "activatedAt": "2025-01-01T00:00:00.000Z",

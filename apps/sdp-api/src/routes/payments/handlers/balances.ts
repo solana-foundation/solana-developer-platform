@@ -2,6 +2,8 @@ import * as solanaRpc from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import type {
   PaymentWalletControlProfileSummary,
+  PaymentWalletPolicy,
+  PaymentWalletPolicyAudit,
   PaymentWalletPolicyAuditEntry,
   PolicyDefaultAction,
   PolicyRule,
@@ -9,31 +11,26 @@ import type {
 import type { Address } from "@solana/kit";
 import { z } from "zod";
 import { type DatabaseExecutor, getDb } from "@/db";
-import {
-  type ActiveWalletControlProfileResult,
-  createPostgresPaymentsRepository,
-  type WalletPolicyEvaluationAuditRow,
+import type {
+  ActiveWalletControlProfileResult,
+  WalletPolicyEvaluationAuditRow,
 } from "@/db/repositories";
 import {
   generateWalletControlProfileId,
   generateWalletControlProfileRevisionId,
 } from "@/db/repositories/policy.repository";
-import { AppError, badRequest } from "@/lib/errors";
+import { getAuth } from "@/lib/auth";
+import { AppError, badRequest, walletNotFound } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
+import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
+import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import {
   attachTokenSymbolsToBalances,
   attachUsdValuesToBalances,
 } from "@/services/helius-das.service";
-import { type AppContext, getPaymentsRepository, getPolicyRepository } from "../context";
-import {
-  buildWalletPolicyPayload,
-  DESTINATION_ALLOWLIST_POLICY_TYPE,
-  PAYMENT_POLICY_VERSION,
-  TRANSFER_LIMITS_POLICY_TYPE,
-} from "../policy";
-import { updateWalletPolicySchema } from "../schemas";
+import { type AppContext, getPolicyRepository } from "../context";
+import { updateWalletPolicySchema, walletIdParamsSchema } from "../schemas";
 import * as tokenAccounts from "../token-accounts";
 import { resolveIssuedTokenLabelsByMint } from "../token-labels";
 import { resolveWalletFromParams } from "./transfers";
@@ -231,7 +228,25 @@ async function activateWalletControlProfileRevisionInTransaction({
 }
 
 export async function getWalletBalances(c: AppContext) {
-  const { wallet } = await resolveWalletFromParams(c, ["wallets:read"]);
+  const params = walletIdParamsSchema.safeParse(c.req.param());
+  if (!params.success) {
+    throw badRequest("Invalid wallet ID");
+  }
+
+  const auth = getAuth(c);
+  const wallet = await new CustodyRuntimeTargets(
+    getDb(c.env),
+    c.env,
+    new Map()
+  ).findOperationalWallet({
+    organizationId: auth.organizationId,
+    projectId: auth.projectId ?? undefined,
+    walletId: params.data.walletId,
+  });
+  if (!wallet) {
+    throw walletNotFound();
+  }
+  assertApiKeyWalletAccess(auth, wallet.walletId, ["wallets:read"]);
 
   const rpc = solanaRpc.createRpc(c.env);
   const tokenLabelsByMint = await resolveIssuedTokenLabelsByMint(c);
@@ -290,12 +305,32 @@ export async function getWalletBalances(c: AppContext) {
   });
 }
 
+/**
+ * Shape a wallet's control profile into the policies API response. A wallet
+ * without an active profile is implicitly default-allow with no rules.
+ *
+ * @param walletId - The wallet the policy belongs to.
+ * @param controlProfile - The wallet's active control profile, if any.
+ * @param audit - The wallet's recent policy evaluations.
+ * @returns The policy response payload.
+ */
+function walletPolicyResponse(
+  walletId: string,
+  controlProfile: PaymentWalletControlProfileSummary | null,
+  audit: PaymentWalletPolicyAudit
+): PaymentWalletPolicy {
+  return {
+    walletId,
+    defaultAction: controlProfile === null ? "allow" : controlProfile.defaultAction,
+    rules: controlProfile === null ? [] : controlProfile.rules,
+    controlProfile,
+    audit,
+  };
+}
+
 export async function getWalletPolicy(c: AppContext) {
   const { auth, wallet } = await resolveWalletFromParams(c, ["wallets:read"]);
-  const repository = getPaymentsRepository(c);
 
-  const rows = await repository.getWalletPoliciesByCustodyWalletId(wallet.id);
-  const payload = buildWalletPolicyPayload(wallet.walletId, rows, wallet.createdAt);
   const controlProfile = await getWalletControlProfileSummary(c, wallet.id);
   const audit = await getWalletPolicyAudit(c, {
     organizationId: auth.organizationId,
@@ -303,24 +338,11 @@ export async function getWalletPolicy(c: AppContext) {
     custodyWalletId: wallet.id,
   });
 
-  return success(c, {
-    policy: {
-      ...payload,
-      audit,
-      ...(controlProfile
-        ? {
-            defaultAction: controlProfile.defaultAction,
-            rules: controlProfile.rules,
-            controlProfile,
-          }
-        : {}),
-    },
-  });
+  return success(c, { policy: walletPolicyResponse(wallet.walletId, controlProfile, audit) });
 }
 
 export async function updateWalletPolicy(c: AppContext) {
   const { auth, wallet } = await resolveWalletFromParams(c, ["wallets:write"]);
-  const repository = getPaymentsRepository(c);
 
   const body = await c.req.json();
   const parsed = updateWalletPolicySchema.safeParse(body);
@@ -332,88 +354,27 @@ export async function updateWalletPolicy(c: AppContext) {
   }
 
   const now = new Date().toISOString();
-  const walletPolicyInputs = [
-    {
-      id: `pwp_${crypto.randomUUID()}`,
+  await getDb(c.env).transaction(async (tx) => {
+    await activateWalletControlProfileRevisionInTransaction({
+      db: tx,
+      organizationId: auth.organizationId,
+      projectId: auth.projectId ?? null,
       custodyWalletId: wallet.id,
-      policyType: DESTINATION_ALLOWLIST_POLICY_TYPE,
-      policy: JSON.stringify({
-        version: PAYMENT_POLICY_VERSION,
-        destinationAllowlist: parsed.data.destinationAllowlist,
-      }),
-      createdAt: now,
-      updatedAt: now,
-    },
-    {
-      id: `pwp_${crypto.randomUUID()}`,
-      custodyWalletId: wallet.id,
-      policyType: TRANSFER_LIMITS_POLICY_TYPE,
-      policy: JSON.stringify({
-        version: PAYMENT_POLICY_VERSION,
-        maxTransferAmount: parsed.data.maxTransferAmount ?? null,
-        maxDailyAmount: parsed.data.maxDailyAmount ?? null,
-      }),
-      createdAt: now,
-      updatedAt: now,
-    },
-  ];
-
-  let controlProfile: PaymentWalletControlProfileSummary | null = null;
-  let rows: Awaited<ReturnType<typeof repository.upsertWalletPolicies>>;
-  if (parsed.data.rules || parsed.data.defaultAction) {
-    rows = await getDb(c.env).transaction(async (tx) => {
-      const txRepository = createPostgresPaymentsRepository(tx, getRequestTenantScope(c));
-      const savedRows = await txRepository.upsertWalletPolicies(walletPolicyInputs);
-
-      if (savedRows.length === 0) {
-        throw new AppError("INTERNAL_ERROR", "Failed to persist wallet policy");
-      }
-
-      await activateWalletControlProfileRevisionInTransaction({
-        db: tx,
-        organizationId: auth.organizationId,
-        projectId: auth.projectId ?? null,
-        custodyWalletId: wallet.id,
-        profileName: `${wallet.label ?? wallet.walletId} controls`,
-        rules: parsed.data.rules ?? [],
-        defaultAction: parsed.data.defaultAction ?? "allow",
-        commitMessage: parsed.data.commitMessage,
-        createdBy: auth.userId ?? auth.apiKeyId ?? null,
-        activatedAt: now,
-      });
-
-      return savedRows;
+      profileName: `${wallet.label ?? wallet.walletId} controls`,
+      rules: parsed.data.rules,
+      defaultAction: parsed.data.defaultAction,
+      commitMessage: parsed.data.commitMessage,
+      createdBy: auth.userId ?? auth.apiKeyId ?? null,
+      activatedAt: now,
     });
+  });
 
-    controlProfile = await getWalletControlProfileSummary(c, wallet.id);
-  } else {
-    rows = await repository.upsertWalletPolicies(walletPolicyInputs);
-
-    if (rows.length === 0) {
-      throw new AppError("INTERNAL_ERROR", "Failed to persist wallet policy");
-    }
-
-    controlProfile = await getWalletControlProfileSummary(c, wallet.id);
-  }
-
-  const payload = buildWalletPolicyPayload(wallet.walletId, rows, now);
+  const controlProfile = await getWalletControlProfileSummary(c, wallet.id);
   const audit = await getWalletPolicyAudit(c, {
     organizationId: auth.organizationId,
     projectId: auth.projectId ?? null,
     custodyWalletId: wallet.id,
   });
 
-  return success(c, {
-    policy: {
-      ...payload,
-      audit,
-      ...(controlProfile
-        ? {
-            defaultAction: controlProfile.defaultAction,
-            rules: controlProfile.rules,
-            controlProfile,
-          }
-        : {}),
-    },
-  });
+  return success(c, { policy: walletPolicyResponse(wallet.walletId, controlProfile, audit) });
 }

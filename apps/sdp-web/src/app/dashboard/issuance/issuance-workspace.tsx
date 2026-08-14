@@ -8,9 +8,7 @@ import {
   Coins,
   LayoutGrid,
   List,
-  Loader2,
   Plus,
-  Search,
   ShieldCheck,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
@@ -21,7 +19,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -712,26 +710,17 @@ export function IssuanceWorkspace({
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
               <div className="flex items-center gap-3 sm:flex-1">
                 <div className="flex-1">
-                  <Input
+                  <SearchInput
                     value={search}
                     onChange={(event) => {
                       const value = event.currentTarget.value;
                       setSearch(value);
                     }}
-                    // The DS input paints its border on an inner span via
-                    // --input-border-*, so border-* classes are inert — override the
-                    // vars to 1px + shared tokens to match the filter/toggle buttons.
-                    className="h-10 rounded-[10px] bg-surface-raised [--input-border-hover:var(--color-border-strong)] [--input-border-idle:var(--color-border-default)] [--input-border-width:1px]"
                     placeholder={t("DashboardIssuance.workspace.search")}
-                    iconLeft={<Search />}
                     // Keystrokes are debounced and answered by the server, so the
                     // input says so — otherwise typing has no acknowledgement at
                     // all until the rows change.
-                    iconRight={
-                      isSearchPending ? (
-                        <Loader2 className="animate-spin" aria-hidden="true" />
-                      ) : null
-                    }
+                    pending={isSearchPending}
                   />
                 </div>
                 {/* Filter & sort — icon-only trigger opening a popover. */}
