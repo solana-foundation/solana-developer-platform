@@ -147,14 +147,12 @@ describe("OpenAPI spec", () => {
       const operation = doc.paths?.[path]?.post;
       const requestSchema = getJsonSchema(operation?.requestBody);
 
-      expect(requestSchema.properties?.connectionId).toMatchObject({
-        type: "string",
-        minLength: 1,
+      expect(requestSchema.properties?.connectionId).toBeUndefined();
+      expect(JSON.stringify(requestSchema.properties?.provisionWallet)).toContain("connectionId");
+      expect(JSON.stringify(requestSchema.properties?.provisionWallet)).toContain("boolean");
+      expect(requestSchema.example).toMatchObject({
+        provisionWallet: { connectionId: "cconn_123" },
       });
-      expect(JSON.stringify(requestSchema.properties?.connectionId)).toContain(
-        "Requires walletScope 'selected' and provisionWallet true"
-      );
-      expect(requestSchema.required ?? []).not.toContain("connectionId");
       expect(operation?.responses?.["201"]).toBeDefined();
       expect(operation?.responses?.["400"]).toBeDefined();
       expect(operation?.responses?.["403"]).toBeDefined();

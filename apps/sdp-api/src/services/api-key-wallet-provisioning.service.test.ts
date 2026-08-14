@@ -143,8 +143,7 @@ describe("provisionApiKeyWallet", () => {
           body: JSON.stringify({
             name: `Connection key ${path}`,
             walletScope: "selected",
-            provisionWallet: true,
-            connectionId: CONNECTION_ID,
+            provisionWallet: { connectionId: CONNECTION_ID },
           }),
         },
         env
@@ -203,7 +202,7 @@ describe("provisionApiKeyWallet", () => {
   );
 
   it.each(["/v1/api-keys", `/v1/projects/${PROJECT_ID}/api-keys`])(
-    "rejects a Connection selector without provisioning through %s",
+    "rejects the obsolete top-level Connection selector through %s",
     async (path) => {
       const response = await app.request(
         path,
@@ -216,6 +215,7 @@ describe("provisionApiKeyWallet", () => {
           body: JSON.stringify({
             name: `Invalid Connection key ${path}`,
             walletScope: "selected",
+            provisionWallet: true,
             connectionId: CONNECTION_ID,
           }),
         },
@@ -224,6 +224,7 @@ describe("provisionApiKeyWallet", () => {
 
       expect(response.status).toBe(400);
       expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+      expect(createConfigWalletMock).not.toHaveBeenCalled();
     }
   );
 
@@ -250,8 +251,7 @@ describe("provisionApiKeyWallet", () => {
           body: JSON.stringify({
             name: `Rejected Connection key ${connectionId}`,
             walletScope: "selected",
-            provisionWallet: true,
-            connectionId,
+            provisionWallet: { connectionId },
           }),
         },
         env
@@ -284,8 +284,7 @@ describe("provisionApiKeyWallet", () => {
         body: JSON.stringify({
           name: "Unusable Connection key",
           walletScope: "selected",
-          provisionWallet: true,
-          connectionId: CONNECTION_ID,
+          provisionWallet: { connectionId: CONNECTION_ID },
         }),
       },
       env

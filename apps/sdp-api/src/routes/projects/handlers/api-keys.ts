@@ -133,24 +133,27 @@ export const createProjectApiKey = async (c: AppContext) => {
     signingWalletIds,
     walletBindings,
     provisionWallet,
-    connectionId,
     walletLabel,
     walletPurpose,
   } = parsed.data;
+
+  const connectionId =
+    typeof provisionWallet === "object" ? provisionWallet.connectionId : undefined;
+  const provisionWalletRequested = Boolean(provisionWallet);
 
   const walletSelection = resolveCreateWalletScope({
     walletScope,
     signingWalletId,
     signingWalletIds,
     walletBindings,
-    provisionWallet,
+    provisionWallet: provisionWalletRequested,
     connectionId,
   });
 
   let resolvedSigningWalletId: string | null = walletSelection.defaultSigningWalletId;
   let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];
 
-  if (provisionWallet) {
+  if (provisionWalletRequested) {
     if (!(auth.permissions.includes("*") || auth.permissions.includes("custody:admin"))) {
       throw new AppError("INSUFFICIENT_PERMISSIONS", "Required permissions: custody:admin");
     }
@@ -227,7 +230,7 @@ export const createProjectApiKey = async (c: AppContext) => {
       walletScope: resolvedWalletBindings.length > 0 ? "selected" : "all",
       signingWalletId: resolvedSigningWalletId,
       signingWalletIds: resolvedWalletBindings.map((binding) => binding.walletId),
-      provisionedWallet: Boolean(provisionWallet),
+      provisionedWallet: provisionWalletRequested,
     },
   });
 

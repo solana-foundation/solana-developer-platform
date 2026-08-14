@@ -107,8 +107,7 @@ export interface CreateApiKeyRequest {
     walletId: string;
     permissions?: Permission[];
   }>;
-  provisionWallet?: boolean;
-  connectionId?: string;
+  provisionWallet?: boolean | { connectionId: string };
   walletLabel?: string;
   walletPurpose?: string;
 }

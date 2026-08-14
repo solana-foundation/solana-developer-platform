@@ -77,7 +77,7 @@
             "description": "Creates a new API key. The full key is returned once.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Primary Key\",\n  \"role\": \"api_developer\",\n  \"walletScope\": \"selected\",\n  \"provisionWallet\": true,\n  \"connectionId\": \"cconn_123\",\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
+              "raw": "{\n  \"name\": \"Primary Key\",\n  \"role\": \"api_developer\",\n  \"walletScope\": \"selected\",\n  \"provisionWallet\": {\n    \"connectionId\": \"cconn_123\"\n  },\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -675,7 +675,7 @@
             "description": "Creates an API key scoped to the project. The full key is returned once.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Primary Key\",\n  \"role\": \"api_developer\",\n  \"walletScope\": \"selected\",\n  \"provisionWallet\": true,\n  \"connectionId\": \"cconn_123\",\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
+              "raw": "{\n  \"name\": \"Primary Key\",\n  \"role\": \"api_developer\",\n  \"walletScope\": \"selected\",\n  \"provisionWallet\": {\n    \"connectionId\": \"cconn_123\"\n  },\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
