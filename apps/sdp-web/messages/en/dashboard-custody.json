@@ -79,6 +79,7 @@
     "typeKeyNameToConfirm": "Type {name} to confirm.",
     "confirmKeyName": "Confirm key name",
     "cancel": "Cancel",
+    "save": "Save",
     "organizationName": "Organization name",
     "organizationSlug": "Organization slug",
     "clerkOrganizationId": "Clerk organization ID",

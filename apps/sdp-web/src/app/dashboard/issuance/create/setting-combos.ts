@@ -146,8 +146,18 @@ export const SETTING_COMBOS: readonly SettingCombo[] = [
   },
 ];
 
+/**
+ * Combos offered as add-on chips for a category. The category's default combo is
+ * excluded — the asset profile already applies it, so re-showing it as a chip
+ * would just re-ask the "what is this asset?" question the profile answered.
+ *
+ * @param category - The draft's asset category.
+ * @returns The stackable add-on combos to render as chips.
+ */
 export function getCombosForCategory(category: AssetCategory): SettingCombo[] {
-  return SETTING_COMBOS.filter((combo) => combo.category === category);
+  return SETTING_COMBOS.filter(
+    (combo) => combo.category === category && combo.key !== DEFAULT_COMBO_KEY[category]
+  );
 }
 
 const DEFAULT_COMBO_KEY: Partial<Record<AssetCategory, string>> = {

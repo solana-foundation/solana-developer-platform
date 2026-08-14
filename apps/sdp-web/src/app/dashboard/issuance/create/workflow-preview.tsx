@@ -59,7 +59,7 @@ export function WorkflowPreview({
   const unlocked = available.filter((entry) => entry.support.ok);
 
   return (
-    <div className="rounded-2xl border border-border-default bg-white p-5">
+    <div className="rounded-2xl border border-border-default bg-surface-raised p-5">
       <h3 className="text-sm font-semibold text-primary">{wf("previewTitle")}</h3>
       <p className="mt-1 text-sm text-secondary">{wf("previewIntro")}</p>
 
