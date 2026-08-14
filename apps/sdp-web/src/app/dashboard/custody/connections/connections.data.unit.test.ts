@@ -107,6 +107,32 @@ describe("resolveConnectionsPage", () => {
     );
   });
 
+  it("funnels an in-range page that lost its rows down to page 1", async () => {
+    const request = vi
+      .fn()
+      // Page 2 is in range per the stale total, but deletions emptied it.
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: { connections: [], pagination: { limit: 20, offset: 20, total: 25 } },
+        })
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            connections: [{ id: "conn-1" }],
+            pagination: { limit: 20, offset: 0, total: 5 },
+          },
+        })
+      );
+
+    const { result, filters } = await resolveConnectionsPage(request, { page: 2 });
+
+    expect(filters.page).toBe(1);
+    expect(result.connections).toHaveLength(1);
+    // The clamp target equals the requested page here, so it goes straight to page 1.
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
   it("returns a genuinely empty last page untouched", async () => {
     const request = vi.fn(async () =>
       jsonResponse({ data: { connections: [], pagination: { limit: 20, offset: 0, total: 0 } } })

@@ -88,35 +88,45 @@ export async function fetchConnectionsPage(
   return json.data;
 }
 
-function isSettledPage(result: ConnectionsPageResult, page: number): boolean {
-  const pageCount = Math.max(1, Math.ceil(result.pagination.total / CONNECTIONS_PAGE_SIZE));
-  return result.connections.length > 0 || result.pagination.total === 0 || page <= pageCount;
+/**
+ * An empty slice with a nonzero total is never trustworthy, whether the page
+ * was past the end or an in-range page emptied by concurrent deletions with a
+ * stale count in the same response. Only rows, or a zero total, settle a page.
+ */
+function isSettledPage(result: ConnectionsPageResult): boolean {
+  return result.connections.length > 0 || result.pagination.total === 0;
 }
 
 /**
- * A stale or hand-edited `?page=` past the end returns an empty slice with a
- * nonzero total, which would render an empty table with no pager to escape
- * through. Clamp to the last real page and refetch; if the total shrank again
- * between the two reads, fall back to page 1, which is always in range.
+ * A `?page=` whose slice comes back empty despite a nonzero total (stale URL,
+ * shrunk inventory, or an in-range page emptied under the read) would render
+ * the project-wide empty state while connections still exist. Clamp to the
+ * last page the total implies and refetch; if that is still empty, fall back
+ * to page 1, whose slice is definitionally the inventory's own answer.
  */
 export async function resolveConnectionsPage(
   request: SdpApiClient["request"],
   filters: ConnectionsFilters
 ): Promise<{ result: ConnectionsPageResult; filters: ConnectionsFilters }> {
   const result = await fetchConnectionsPage(request, filters);
-  if (isSettledPage(result, filters.page)) {
+  if (isSettledPage(result)) {
     return { result, filters };
   }
 
   const clamped = {
     page: Math.max(1, Math.ceil(result.pagination.total / CONNECTIONS_PAGE_SIZE)),
   };
-  const clampedResult = await fetchConnectionsPage(request, clamped);
-  if (isSettledPage(clampedResult, clamped.page)) {
-    return { result: clampedResult, filters: clamped };
+  if (clamped.page !== filters.page) {
+    const clampedResult = await fetchConnectionsPage(request, clamped);
+    if (isSettledPage(clampedResult)) {
+      return { result: clampedResult, filters: clamped };
+    }
   }
 
   const firstPage = { page: 1 };
+  if (filters.page === firstPage.page) {
+    return { result, filters };
+  }
   return { result: await fetchConnectionsPage(request, firstPage), filters: firstPage };
 }
 
