@@ -15,7 +15,20 @@ then read all of its money live — what it may never do is mix a persisted
 balance with a live one.
 
 - `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Written only
-  by the sync cron + the local dev seed.
+  by the hourly sync cron, the 5-minute metrics refresh
+  (`cron/earn-metrics-refresh.ts`, figures only — it can never insert a row),
+  and the local dev seed.
+  - Each row carries `hostCluster` (the cluster the INSTRUMENT lives on, stored)
+    and `fundable` (derived per request from `hostCluster` against the caller's
+    environment, never stored). **Catalogued is not the same as fundable**:
+    Kamino's K-Vaults are mainnet-only and are catalogued into sandbox too so
+    integrators can browse the real shelf, so a sandbox row may honestly read
+    `hostCluster: "mainnet-beta", fundable: false`. `fundable` is the wire-level
+    warning — partners must branch on it rather than assume a listed strategy
+    takes deposits.
+  - `mapToEarnStrategy` therefore takes the environment. It is the only place
+    `fundable` is computed; the rule itself is
+    `isClusterFundableInEnvironment` in `@sdp/earn`.
 
 **Programs — N per (org, environment, provider) since PRO-1670**, each pinned to
 one vault, nothing rebalancing across them; moving money between programs is
@@ -83,6 +96,13 @@ other's balance.
     yield sources". It does NOT re-check existing programs — a wallet pointed at
     an off-Solana vault before the gate keeps that allocation until someone
     re-targets it in Ground.
+  - **Its keep-set is filtered by `isClusterFundableInEnvironment` too**, and
+    that half is separately load-bearing: a mainnet-only provider's vaults ARE
+    catalogued in sandbox, so provider scoping alone would let devnet money be
+    allocated to an instrument that does not exist on this cluster. This is the
+    last gate before a provider mutation on both create and re-target. The route
+    tests pin it with a GROUND row whose cluster is flipped — a Kamino reference
+    would pass on provider scoping alone and prove nothing.
   - **A unique violation on the insert is a REPLAY, not a race.** The provider
     dedupes on the derived key and answers a retried create with the ORIGINAL
     wallet ref, so a legitimate retry lands on 0056's global unique by design:
@@ -247,7 +267,10 @@ other's balance.
 - Zod schemas in schemas.ts; parse/paginate/envelope helpers in
   handlers/shared.ts — don't hand-roll either.
 - Capability gating: `supportsPortfolioWallets(client)` → NOT_IMPLEMENTED for
-  providers lacking the surface.
+  providers lacking the surface. This is how a **catalogue-only** provider is
+  handled: Kamino lists real strategies but moves no money through SDP (its
+  vaults are non-custodial — the customer's own wallet deposits), so every
+  program route answers 501 for it by capability, never by a provider-id check.
 - Withdrawal approval is a SECOND optional capability
   (`supportsWithdrawalApprovals`) with **no public route on purpose**: casting
   a vote needs the account-level Turnkey signer (platform ops — one shared
@@ -260,9 +283,11 @@ other's balance.
 - Provider ids from DB rows are open strings — always dispatch via
   `resolveEarnProviderClient`.
 - Catalogue writes happen ONLY via the sync cron
-  (`src/cron/earn-catalogue-sync.ts` — the production path) and the dev seed
-  (`db:seed:earn` — local only, refuses non-local databases). Cadence, failure
-  behaviour, and which to use: `packages/sdp-earn/README.md` → "Catalogue data".
+  (`src/cron/earn-catalogue-sync.ts` — the production path), the metrics refresh
+  (`src/cron/earn-metrics-refresh.ts` — every 5 minutes, figures only, UPDATE-only
+  so it can never admit a row), and the dev seed (`db:seed:earn` — local only,
+  refuses non-local databases). Cadence, failure behaviour, and which to use:
+  `packages/sdp-earn/README.md` → "Catalogue data".
 - Whole-stack local setup (ports, flags, Ground key, entitlement, troubleshooting):
   `packages/sdp-earn/CLAUDE.md` → "Local development".
 - Tests: vitest; stub `EARN_PROVIDER_CLIENTS.<id>` methods with `vi.spyOn`;

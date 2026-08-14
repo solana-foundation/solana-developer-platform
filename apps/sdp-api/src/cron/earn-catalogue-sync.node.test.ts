@@ -69,6 +69,7 @@ function makeSnapshot(ref: string): ProviderStrategySnapshot {
     depositMints: ["EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"],
     apyType: "variable",
     liquidityTerm: "instant",
+    hostCluster: "devnet",
   };
 }
 

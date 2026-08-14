@@ -157,6 +157,11 @@ describe("GroundEarnClient.listStrategies", () => {
         sourceKind: "defi",
         underlyingSource: "morpho",
         depositMints: [wellKnownMint("USDC", "devnet")],
+        // Ground's `not_solana_hosted` gate has already proved the source is
+        // hosted on this environment's own chain, so the snapshot's cluster is
+        // the environment's. A mainnet-only provider cannot say this — see
+        // Kamino, whose rows read `mainnet-beta` in sandbox too.
+        hostCluster: "devnet",
         apyType: "variable",
         currentApy: "0.0356",
         liquidityTerm: "instant",

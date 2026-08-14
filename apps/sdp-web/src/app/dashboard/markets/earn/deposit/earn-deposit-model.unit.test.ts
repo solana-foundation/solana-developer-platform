@@ -4,6 +4,7 @@ import {
   availableTokens,
   defaultStrategyFilters,
   EARN_SHORT_SETTLEMENT_DAYS,
+  fundableStrategies,
   matchesFilters,
   singleStrategyAllocation,
   visibleStrategies,
@@ -25,11 +26,46 @@ function strategy(partial: Partial<EarnStrategy> & { id: string }): EarnStrategy
     currentApy: "0.05",
     liquidityTerm: "instant",
     status: "active",
+    hostCluster: "devnet",
+    fundable: true,
     createdAt: TIMESTAMP,
     updatedAt: TIMESTAMP,
     ...partial,
   };
 }
+
+describe("fundableStrategies", () => {
+  it("drops a strategy whose deposit mint is not a routable stablecoin", () => {
+    const kept = strategy({ id: "usdc" });
+    const dropped = strategy({ id: "sol", depositMints: [UNROUTABLE_MINT] });
+
+    expect(fundableStrategies([kept, dropped]).map((s) => s.id)).toEqual(["usdc"]);
+  });
+
+  /**
+   * The devnet-money guard, dashboard side. Kamino's mainnet-only vaults are
+   * catalogued into sandbox so integrators can browse the real shelf; the API
+   * marks them `fundable: false` and the wizard must never offer one, or a user
+   * walks to a confirm step that provisions nothing.
+   */
+  it("drops a strategy the API says is not fundable in this environment", () => {
+    const local = strategy({ id: "ground-devnet" });
+    const elsewhere = strategy({
+      id: "kamino-mainnet",
+      provider: "kamino",
+      hostCluster: "mainnet-beta",
+      fundable: false,
+    });
+
+    expect(fundableStrategies([local, elsewhere]).map((s) => s.id)).toEqual(["ground-devnet"]);
+  });
+
+  it("keeps a routable, fundable strategy — the filter is opt-in, not opt-out", () => {
+    const kept = strategy({ id: "keeper" });
+
+    expect(fundableStrategies([kept])).toEqual([kept]);
+  });
+});
 
 describe("defaultStrategyFilters", () => {
   it("shows the full catalogue ranked by APY", () => {

@@ -1,0 +1,495 @@
+import {
+  EARN_DEPOSIT_TOKEN_SYMBOLS,
+  type EarnDepositTokenSymbol,
+  type EarnStrategySourceKind,
+  WELL_KNOWN_TOKEN_BY_MINT,
+} from "@sdp/types";
+import { providerUnavailable } from "../../errors";
+import { providerFetchJson } from "../../fetch";
+import type {
+  EarnDeclaredStrategySupport,
+  EarnLiveMetricsProvider,
+  EarnRuntimeContext,
+  ProviderStrategyMetrics,
+  ProviderStrategySnapshot,
+} from "../../types";
+import { StubEarnClient } from "../stub";
+
+/**
+ * Kamino's public data API. No credential: unlike every other Earn provider
+ * this is an open read-only API, which is why there is no `KAMINO_API_KEY` and
+ * why `readKaminoConfig`-style credential resolution does not exist here. The
+ * "missing API key ⇒ PROVIDER_NOT_CONFIGURED before any network call"
+ * invariant (ADR 0002) is vacuous for a provider with no key — nothing about
+ * Kamino can be mis-configured into reaching a wrong account.
+ */
+const KAMINO_API_URL = "https://api.kamino.finance";
+
+/**
+ * Kamino K-Vaults are deployed on MAINNET ONLY. `/kvaults/*` accepts no `env`
+ * parameter and there is no devnet deployment, so this constant is not an SDP
+ * preference — it is the whole of Kamino's reality, and every snapshot carries
+ * it as `hostCluster` in both environments.
+ *
+ * SDP catalogues the mainnet shelf into sandbox as well, so an integrator
+ * building against sandbox sees the real vaults. Those rows are true and
+ * un-fundable: `isClusterFundableInEnvironment` is what keeps devnet money away
+ * from them, at the API's `assertKnownYieldSources`, on the wire as
+ * `fundable: false`, and in the dashboard's strategy filter.
+ */
+const KAMINO_HOST_CLUSTER = "mainnet-beta" as const;
+
+/**
+ * Minimum vault TVL, in USD, to enter the catalogue.
+ *
+ * Kamino's vault registry is permissionless, so `GET /kvaults/vaults` is a
+ * census of everything ever created rather than a curated shelf. Measured
+ * 2026-08-13: 170 vaults total, 114 in SDP's three stablecoins, and roughly 90
+ * of those 114 are dust or literal test vaults — `testfail4`, `vkjm_test`,
+ * `silviu test vault`, `4dsfda`, plus 8 with blank names.
+ *
+ * The distribution has a natural cliff: 21 vaults hold $100k or more, the next
+ * one down holds $1,023, and below that it is test fixtures all the way. The
+ * floor sits at the top of that cliff. It is a one-line tune, and because it
+ * reads live TVL it self-heals in both directions — a launching vault appears
+ * once it takes real deposits, a draining one leaves via the sync's delist
+ * pass.
+ *
+ * `pnpm -C apps/sdp-api earn:inventory:kamino` regenerates the census in
+ * docs/earn/kamino-catalogue-inventory.md, which is how a change to this number
+ * gets reviewed against what it admits and refuses.
+ */
+export const KAMINO_MIN_TVL_USD = 100_000;
+
+/**
+ * Curator houses Kamino names inside a vault's on-chain `name`, e.g.
+ * "Steakhouse High Yield USDG" or "Allez USDT". Kamino publishes no curator
+ * field on any endpoint — not on the vault, not on the metrics, not on the
+ * share-mint metadata — so the name is the only signal, exactly as Ground's
+ * `deriveCurator` parses Ground's id/name vocabulary.
+ *
+ * Deliberately NOT `EARN_KNOWN_CURATOR_LABELS`: that registry is display-only,
+ * and keeping the two apart is what makes "onboarding a curator is a data
+ * change" true. Longest-match-first so "neutral trade" cannot be shadowed by a
+ * shorter entry; a house not listed here still resolves to the `kamino`
+ * fallback rather than being dropped.
+ */
+const KAMINO_CURATOR_HOUSES: readonly (readonly [pattern: string, curator: string])[] = [
+  ["neutral trade", "neutral_trade"],
+  ["neutraltrade", "neutral_trade"],
+  ["mev capital", "mev_capital"],
+  ["steakhouse", "steakhouse"],
+  ["smokehouse", "smokehouse"],
+  ["rockawayx", "rockawayx"],
+  ["hyperithm", "hyperithm"],
+  ["elemental", "elemental"],
+  ["marinade", "marinade"],
+  ["gauntlet", "gauntlet"],
+  ["sentora", "sentora"],
+  ["ethena", "ethena"],
+  ["elaris", "elaris"],
+  ["galaxy", "galaxy"],
+  ["squads", "squads"],
+  ["allez", "allez"],
+];
+
+/**
+ * Vault names that mark real-world assets rather than DeFi lending.
+ *
+ * Kamino's `vaultAllocationStrategy` names Klend RESERVE pubkeys, not asset
+ * classes, so classifying by allocation the way Ground does would mean
+ * resolving every reserve against `/v2/kamino-market` on each sync — several
+ * hundred extra requests to recover a fact the vault name already states. The
+ * four terms below cover every RWA vault on the current shelf: "RWA USDC",
+ * "Kamino Private Credit USDC", "Kamino Institutional Commodity Yield",
+ * "Honeycomb RWA", "SharpByte RWA USDC Prime".
+ *
+ * Do not extend this on speculation — check what `earn:inventory:kamino`
+ * reports first.
+ */
+const KAMINO_RWA_NAME = /\brwa\b|private credit|commodity|treasur/i;
+
+// --- Kamino wire shapes (api.kamino.finance, verified 2026-08-13) ---
+
+interface KaminoVaultState {
+  /** On-chain vault label. May be blank — 8 vaults carry an empty name. */
+  name?: string | null;
+  /** Mint accepted for deposit. Mainnet addresses, always. */
+  tokenMint: string;
+  /** Mint of the kVault share token. Present on every vault observed. */
+  sharesMint?: string | null;
+  managementFeeBps?: number | null;
+  performanceFeeBps?: number | null;
+}
+
+interface KaminoVault {
+  /** Vault pubkey — the catalogue's `providerReference`. */
+  address: string;
+  state: KaminoVaultState;
+}
+
+/**
+ * One row of `GET /kvaults/vaults/metrics`. Every numeric is a decimal STRING,
+ * often at absurd precision (`apy` runs to 21 places), so nothing here is
+ * parsed into a float before it has to be.
+ */
+interface KaminoVaultMetrics {
+  /** Vault pubkey this row describes — the join key back to `KaminoVault`. */
+  kvault: string;
+  /** Current blended APY as a decimal fraction string ("0.0592…" = 5.92%). */
+  apy?: string | null;
+  /** Idle balance, USD. */
+  tokensAvailableUsd?: string | null;
+  /** Balance deployed into Klend reserves, USD. */
+  tokensInvestedUsd?: string | null;
+  numberOfHolders?: number | null;
+}
+
+interface KaminoMetricsPage {
+  result: KaminoVaultMetrics[];
+  paginationToken?: string | null;
+}
+
+/** `limit` is capped at 100 by the endpoint; ask for the maximum. */
+const KAMINO_METRICS_PAGE_SIZE = 100;
+
+/**
+ * Hard stop on the metrics pagination loop. The shelf is ~170 vaults over two
+ * pages; twenty is unreachable in practice and exists so a server that always
+ * echoes a `paginationToken` cannot spin the sync until its deadline.
+ *
+ * Reaching it is an ERROR, not a quiet truncation — see `_loadMetricsByVault`.
+ * A partial metrics map would silently delist every vault it failed to read.
+ */
+const KAMINO_METRICS_MAX_PAGES = 20;
+
+// --- Normalization helpers ---
+
+const KAMINO_DECIMAL = /^-?\d+(\.\d+)?$/;
+
+/** APY decimal places kept. Six is a hundredth of a basis point — well past
+ * anything a rate display or a yield calculation needs, and it keeps the stored
+ * string comparable with Ground's bps-derived values. */
+const APY_DECIMAL_PLACES = 6;
+
+/**
+ * Kamino sends rates as decimal strings up to 21 places
+ * (`"0.05925349346419595"`). Truncate by SLICING, never by `Number()` — the
+ * package rule is that no float touches a rate, and a round-trip through a
+ * double silently re-renders the tail it cannot hold.
+ *
+ * Truncates rather than rounds so the catalogue never quotes a rate above the
+ * one the provider reported. Negative APYs are real (four vaults on the current
+ * shelf) and pass through unchanged; a vault genuinely losing value must not be
+ * shown as flat. Anything unparseable answers undefined, which renders as "no
+ * rate yet" rather than a fabricated 0%.
+ */
+export function truncateKaminoApy(value: string | null | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed || !KAMINO_DECIMAL.test(trimmed)) {
+    return undefined;
+  }
+  const point = trimmed.indexOf(".");
+  if (point === -1) {
+    return trimmed;
+  }
+  const truncated = trimmed.slice(0, point + 1 + APY_DECIMAL_PLACES).replace(/\.?0+$/, "");
+  // A value smaller than the retained precision truncates to "0"/"-0"; report
+  // the zero rather than an empty string or a signed zero.
+  return truncated === "" || truncated === "-" || truncated === "-0" ? "0" : truncated;
+}
+
+/**
+ * Vault TVL: idle balance plus what is deployed into reserves. Returns
+ * undefined when neither figure parses, which the distillation treats as
+ * "TVL unprovable" and drops — a vault we cannot size cannot clear a size
+ * floor.
+ */
+function kaminoTvlUsd(metrics: KaminoVaultMetrics): number | undefined {
+  const parts = [metrics.tokensAvailableUsd, metrics.tokensInvestedUsd].map((value) => {
+    const trimmed = value?.trim();
+    return trimmed && KAMINO_DECIMAL.test(trimmed) ? Number(trimmed) : undefined;
+  });
+  if (parts.every((part) => part === undefined)) {
+    return undefined;
+  }
+  const total = parts.reduce<number>((sum, part) => sum + (part ?? 0), 0);
+  return Number.isFinite(total) ? total : undefined;
+}
+
+/** Curator is data, not code (ADR 0002): match a house named in the vault's
+ * own name, else attribute the vault to Kamino, which curates its own. */
+export function deriveKaminoCurator(name: string): string {
+  const haystack = name.toLowerCase();
+  for (const [pattern, curator] of KAMINO_CURATOR_HOUSES) {
+    if (haystack.includes(pattern)) {
+      return curator;
+    }
+  }
+  return "kamino";
+}
+
+function classifyKaminoSourceKind(name: string): EarnStrategySourceKind {
+  return KAMINO_RWA_NAME.test(name) ? "rwa" : "defi";
+}
+
+// --- Distillation ---
+
+/** Why distillation kept a raw Kamino vault out of the strategy catalogue. */
+export type KaminoCatalogueDropReason =
+  | "unknown_deposit_mint"
+  | "not_a_deposit_token"
+  | "unnamed"
+  | "no_metrics"
+  | "below_tvl_floor";
+
+export type KaminoVaultDistillation =
+  | { outcome: "catalogued"; snapshot: ProviderStrategySnapshot }
+  | { outcome: "dropped"; reason: KaminoCatalogueDropReason };
+
+const KAMINO_DEPOSIT_SYMBOLS: ReadonlySet<string> = new Set(EARN_DEPOSIT_TOKEN_SYMBOLS);
+
+/**
+ * Distill one raw Kamino vault into a catalogue snapshot, or say exactly why it
+ * stays out. The single decision point for what enters the catalogue:
+ * `listStrategies` collects the catalogued outcomes and the inventory script
+ * (apps/sdp-api/scripts/inventory-kamino-catalogue.ts) reports the dropped
+ * ones. These gates refuse 93 of 114 stablecoin vaults, so coverage questions
+ * need the drops enumerated, not skipped.
+ *
+ * Gate order is chosen to make the census legible: token gates first (they
+ * describe the shelf), then shape, then size. Reordering changes which reason a
+ * vault is attributed to, not whether it is admitted.
+ */
+export function distillKaminoVault(
+  vault: KaminoVault,
+  metrics: KaminoVaultMetrics | undefined
+): KaminoVaultDistillation {
+  // The mint is read from the vault's own on-chain state, never resolved from a
+  // symbol against a cluster the way Ground's is: Kamino states the exact mint
+  // it accepts, and it is always a mainnet address.
+  const token = WELL_KNOWN_TOKEN_BY_MINT.get(vault.state.tokenMint);
+  if (token === undefined) {
+    return { outcome: "dropped", reason: "unknown_deposit_mint" };
+  }
+  // Screened here rather than left to `isStrategyWithinDeclaredSupport`, which
+  // would also refuse it: the catalogue sync logs a warning per snapshot
+  // outside declared support, and Kamino's 56 non-stablecoin vaults (SOL, USDS,
+  // PYUSD, cbBTC…) would emit that warning every hour in both environments
+  // forever. Provider drift deserves a warning; a shelf we knowingly only cover
+  // part of does not.
+  if (!KAMINO_DEPOSIT_SYMBOLS.has(token.symbol)) {
+    return { outcome: "dropped", reason: "not_a_deposit_token" };
+  }
+  const name = vault.state.name?.trim();
+  if (!name) {
+    return { outcome: "dropped", reason: "unnamed" };
+  }
+  // Fail closed on a missing metrics row: TVL is the admission test, and a
+  // vault whose size cannot be established has not passed it. This also keeps a
+  // partial metrics response from admitting the whole shelf.
+  if (metrics === undefined) {
+    return { outcome: "dropped", reason: "no_metrics" };
+  }
+  const tvlUsd = kaminoTvlUsd(metrics);
+  if (tvlUsd === undefined || tvlUsd < KAMINO_MIN_TVL_USD) {
+    return { outcome: "dropped", reason: "below_tvl_floor" };
+  }
+
+  const shareMint = vault.state.sharesMint?.trim();
+  return {
+    outcome: "catalogued",
+    snapshot: {
+      providerReference: vault.address,
+      name,
+      sourceKind: classifyKaminoSourceKind(name),
+      // Every K-Vault deploys into Klend reserves — that is what a K-Vault is.
+      underlyingSource: "klend",
+      depositMints: [vault.state.tokenMint],
+      ...(shareMint ? { shareMint } : {}),
+      hostCluster: KAMINO_HOST_CLUSTER,
+      apyType: "variable",
+      currentApy: truncateKaminoApy(metrics.apy),
+      // A K-Vault withdrawal is atomic in one transaction and auto-disinvests
+      // from a Klend reserve when the vault's idle balance is short — Kamino's
+      // withdraw docs are explicit, and there is no redemption queue and no
+      // day-denominated delay to report. A fully-utilised underlying reserve
+      // can still stall an exit, but that is a liquidity CONDITION at the
+      // moment of withdrawal, not a redemption TERM of the vault, and the
+      // snapshot has no field that could honestly carry it.
+      liquidityTerm: "instant",
+      riskMetadata: {
+        curator: deriveKaminoCurator(name),
+        tvlUsd,
+        ...(metrics.numberOfHolders == null ? {} : { holders: metrics.numberOfHolders }),
+        ...(vault.state.managementFeeBps == null
+          ? {}
+          : { managementFeeBps: vault.state.managementFeeBps }),
+        ...(vault.state.performanceFeeBps == null
+          ? {}
+          : { performanceFeeBps: vault.state.performanceFeeBps }),
+      },
+    },
+  };
+}
+
+/**
+ * Kamino vault-infra client (api.kamino.finance).
+ *
+ * CATALOGUE-ONLY, and that is the integration, not a stage of it. Kamino is
+ * non-custodial: a K-Vault is an on-chain vault the customer's own wallet
+ * deposits into, so there is no omnibus wallet for SDP to provision, fund, or
+ * pay out from. It therefore implements the base `EarnVaultProvider` contract
+ * and NONE of the optional capabilities — every portfolio and withdrawal route
+ * answers 501 for it through `supportsPortfolioWallets`, never through a
+ * provider-id check.
+ *
+ * Two facts shape everything else here, both verified against the live API on
+ * 2026-08-13:
+ *
+ * - **No credential.** The data API is public. Nothing in this file reads
+ *   `ctx.env`.
+ * - **Mainnet only.** `/kvaults/*` takes no `env` parameter. Both environments
+ *   receive the same mainnet-derived snapshots, each stamped
+ *   `hostCluster: "mainnet-beta"`, and `ctx.environment` is deliberately unused
+ *   for data selection. That costs one duplicate fetch per hourly pass (six
+ *   requests an hour in total) — cheaper than carrying cache state to avoid.
+ */
+export class KaminoEarnClient extends StubEarnClient implements EarnLiveMetricsProvider {
+  readonly provider = "kamino" as const;
+  readonly declaredSupport: EarnDeclaredStrategySupport = {
+    // "RWA USDC", "Kamino Private Credit USDC" and "Kamino Institutional
+    // Commodity Yield" are all real rows on the current shelf.
+    sourceKinds: ["defi", "rwa"],
+    // Kamino's vaults span SOL, USDS, PYUSD, cbBTC and more; SDP Earn V1 is a
+    // stablecoin deposit facility, so the envelope stays at the three symbols
+    // `EARN_DEPOSIT_TOKEN_SYMBOLS` declares. Widening this is a change to that
+    // shared union, not to this client.
+    depositTokens: [...EARN_DEPOSIT_TOKEN_SYMBOLS] as EarnDepositTokenSymbol[],
+  };
+
+  /**
+   * The raw vault registry, unfiltered. Data source for `listStrategies`, and
+   * the tooling surface the catalogue-inventory script reads so it can report
+   * what distillation drops (underscore-prefixed like Ground's
+   * `_iterateYieldSources`: a real consumer exists, but this is not part of the
+   * provider contract).
+   */
+  async _listVaults(): Promise<KaminoVault[]> {
+    return await providerFetchJson<KaminoVault[]>(
+      this.provider,
+      `${KAMINO_API_URL}/kvaults/vaults`,
+      {
+        method: "GET",
+      }
+    );
+  }
+
+  /**
+   * Current metrics for every vault, keyed by address.
+   *
+   * The BULK endpoint is what makes this integration cheap: the per-vault
+   * `/kvaults/vaults/{pubkey}/metrics` route would be one request per vault
+   * (170 today) on every sync, in both environments, every hour. This is two.
+   *
+   * ALL-OR-NOTHING, and that is the important property. A vault with no metrics
+   * row is dropped from the catalogue (`no_metrics`), and the sync DELETES rows
+   * a provider no longer lists — so a half-read shelf would not degrade, it
+   * would delist every vault whose page went missing. Both truncation paths
+   * therefore throw rather than return a short map: the sync's per-provider
+   * catch then skips the pass entirely and the catalogue is left intact.
+   */
+  async _loadMetricsByVault(): Promise<Map<string, KaminoVaultMetrics>> {
+    const byVault = new Map<string, KaminoVaultMetrics>();
+    let paginationToken: string | null = null;
+    let page = 0;
+
+    do {
+      const url = new URL("/kvaults/vaults/metrics", KAMINO_API_URL);
+      url.searchParams.set("limit", String(KAMINO_METRICS_PAGE_SIZE));
+      if (paginationToken) {
+        url.searchParams.set("paginationToken", paginationToken);
+      }
+      const response: KaminoMetricsPage = await providerFetchJson(this.provider, url.toString(), {
+        method: "GET",
+      });
+      // A 200 whose body carries no `result` array is a malformed page, not an
+      // empty one — providerFetchJson does no schema validation, so `{}` would
+      // otherwise sail through as "this page had zero vaults". An empty array
+      // is legitimate and still ends the walk via the token below.
+      if (!Array.isArray(response.result)) {
+        throw providerUnavailable("Kamino returned a metrics page with no result array");
+      }
+      for (const metrics of response.result) {
+        if (metrics.kvault) {
+          byVault.set(metrics.kvault, metrics);
+        }
+      }
+      paginationToken = response.paginationToken ?? null;
+      page += 1;
+    } while (paginationToken && page < KAMINO_METRICS_MAX_PAGES);
+
+    // Hit the cap with a live token: we cannot say what the shelf holds, so we
+    // must not answer as if we could. This is the exact case the cap exists for
+    // (a server that always echoes a token), and refusing turns it into a
+    // skipped pass instead of a silent mass-delisting.
+    if (paginationToken) {
+      throw providerUnavailable(
+        `Kamino metrics pagination exceeded ${KAMINO_METRICS_MAX_PAGES} pages; refusing a partial shelf`
+      );
+    }
+
+    return byVault;
+  }
+
+  override async listStrategies(_ctx: EarnRuntimeContext): Promise<ProviderStrategySnapshot[]> {
+    // Both reads are issued together: they are independent, and the vault list
+    // alone cannot produce a snapshot (TVL and APY live only in metrics).
+    const [vaults, metricsByVault] = await Promise.all([
+      this._listVaults(),
+      this._loadMetricsByVault(),
+    ]);
+
+    const snapshots: ProviderStrategySnapshot[] = [];
+    for (const vault of vaults) {
+      const distilled = distillKaminoVault(vault, metricsByVault.get(vault.address));
+      if (distilled.outcome === "catalogued") {
+        snapshots.push(distilled.snapshot);
+      }
+    }
+    return snapshots;
+  }
+
+  /**
+   * Live figures for the whole shelf — the short-cadence half of the catalogue.
+   *
+   * Kamino is a natural fit for this capability: `apy` moves continuously with
+   * the underlying Klend reserve rates, and the BULK metrics endpoint carries
+   * every figure for every vault in two requests. There is no vault-list fetch
+   * here at all (the 348KB call `listStrategies` makes) because none of what it
+   * returns can change between hourly syncs — name, mints and share mint are
+   * on-chain identity.
+   *
+   * Reports figures for every vault Kamino knows, including ones distillation
+   * refused. That is deliberate and safe: the refresh only UPDATEs rows the
+   * catalogue already holds, so an unknown reference is a no-op, and filtering
+   * here would mean re-fetching the vault list to re-run the gates.
+   */
+  async listStrategyMetrics(_ctx: EarnRuntimeContext): Promise<ProviderStrategyMetrics[]> {
+    const metricsByVault = await this._loadMetricsByVault();
+
+    return [...metricsByVault.values()].map((metrics) => {
+      const tvlUsd = kaminoTvlUsd(metrics);
+      return {
+        providerReference: metrics.kvault,
+        currentApy: truncateKaminoApy(metrics.apy),
+        riskMetadata: {
+          ...(tvlUsd === undefined ? {} : { tvlUsd }),
+          ...(metrics.numberOfHolders == null ? {} : { holders: metrics.numberOfHolders }),
+        },
+      };
+    });
+  }
+}
+
+export type { KaminoVault, KaminoVaultMetrics, KaminoVaultState };

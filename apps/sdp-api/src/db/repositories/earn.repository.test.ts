@@ -94,6 +94,7 @@ describe("EarnRepository (postgres)", () => {
       redemptionDelayDays: null,
       riskMetadata: { curator: "gauntlet" },
       status: "active",
+      hostCluster: "devnet",
       environment: "sandbox",
       ...overrides,
     };
@@ -123,6 +124,103 @@ describe("EarnRepository (postgres)", () => {
       await setCreatedAt(table, id, SHARED_CREATED_AT);
     }
   }
+
+  /**
+   * The five-minute metrics refresh writes through here. Its whole safety
+   * argument is that it can only rewrite FIGURES on rows the hourly catalogue
+   * sync already admitted — these cases are that argument.
+   */
+  describe("updateStrategyMetrics", () => {
+    const metricsInput = (overrides: Record<string, unknown> = {}) => ({
+      provider: "veda" as const,
+      providerReference: "vault-usdc-prime",
+      environment: "sandbox" as const,
+      currentApy: "0.0731",
+      riskMetadata: { tvlUsd: 4_200_000 },
+      ...overrides,
+    });
+
+    it("refreshes the rate and merges volatile metadata over the stored object", async () => {
+      const seeded = await seedStrategy();
+
+      const applied = await repo.updateStrategyMetrics(metricsInput());
+
+      expect(applied).toBe(true);
+      const row = await repo.getStrategyById(seeded.id);
+      expect(row?.current_apy).toBe("0.0731");
+      // curator came from the catalogue sync and is NOT in the refresh payload;
+      // a replacing write would drop it and the dashboard would lose the label.
+      expect(row?.risk_metadata).toEqual({ curator: "gauntlet", tvlUsd: 4_200_000 });
+    });
+
+    it("never inserts — an unknown reference is a silent no-op", async () => {
+      // This is what lets the refresh hand over a provider's whole shelf
+      // without first working out which of it we catalogue. If it could
+      // insert, it would be a second way into the catalogue that skips every
+      // admission gate in the provider clients.
+      const applied = await repo.updateStrategyMetrics(
+        metricsInput({ providerReference: "a-vault-we-never-catalogued" })
+      );
+
+      expect(applied).toBe(false);
+      const { total } = await repo.listStrategies({
+        environment: "sandbox",
+        includeInactive: true,
+        limit: 10,
+        offset: 0,
+      });
+      expect(total).toBe(0);
+    });
+
+    it("does not cross environments or providers", async () => {
+      const seeded = await seedStrategy();
+
+      expect(await repo.updateStrategyMetrics(metricsInput({ environment: "production" }))).toBe(
+        false
+      );
+      expect(await repo.updateStrategyMetrics(metricsInput({ provider: "ground" }))).toBe(false);
+
+      expect((await repo.getStrategyById(seeded.id))?.current_apy).toBe("0.052");
+    });
+
+    it("clears a rate the provider has stopped reporting", async () => {
+      const seeded = await seedStrategy();
+
+      await repo.updateStrategyMetrics(metricsInput({ currentApy: null }));
+
+      // Null, not the last-known figure: a rate with no source behind it is
+      // worse than no rate — the UI renders "—" for null.
+      expect((await repo.getStrategyById(seeded.id))?.current_apy).toBeNull();
+    });
+
+    it("leaves identity alone — name, mints and liquidity term are the sync's", async () => {
+      const seeded = await seedStrategy();
+
+      await repo.updateStrategyMetrics(metricsInput());
+
+      const row = await repo.getStrategyById(seeded.id);
+      expect(row?.name).toBe(seeded.name);
+      expect(row?.deposit_mints).toEqual(seeded.deposit_mints);
+      expect(row?.liquidity_term).toBe(seeded.liquidity_term);
+      expect(row?.host_cluster).toBe(seeded.host_cluster);
+      expect(row?.source_kind).toBe(seeded.source_kind);
+    });
+
+    it("refreshes an operator-paused row's figures without reviving it", async () => {
+      // A pause stops deposits; it does not freeze the vault's real-world
+      // numbers. An operator deciding whether to unpause wants current figures,
+      // not the ones from the moment they hit stop.
+      const seeded = await seedStrategy();
+      await repo.upsertStrategy(strategyInput({ status: "paused" }));
+
+      const applied = await repo.updateStrategyMetrics(metricsInput());
+
+      expect(applied).toBe(true);
+      const row = await repo.getStrategyById(seeded.id);
+      expect(row?.status).toBe("paused");
+      expect(row?.current_apy).toBe("0.0731");
+    });
+  });
 
   describe("upsertStrategy", () => {
     it("inserts a catalogue row and round-trips the jsonb columns", async () => {

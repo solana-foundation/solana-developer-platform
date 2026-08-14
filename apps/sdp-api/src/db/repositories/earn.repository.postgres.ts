@@ -7,6 +7,7 @@ import type {
   EarnStrategySourceKind,
   EarnStrategyStatus,
   SdpEnvironment,
+  SolanaCluster,
 } from "@sdp/types";
 import type { AppDb } from "@/db";
 import type {
@@ -24,6 +25,7 @@ import type {
   ListEarnStrategiesInput,
   ListEarnStrategiesResult,
   UpdateEarnProgramWithdrawalStatusGuardedInput,
+  UpdateEarnStrategyMetricsInput,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
 import {
@@ -49,6 +51,7 @@ function mapStrategyRow(row: Record<string, unknown>): EarnStrategyRow {
     redemption_delay_days: row.redemption_delay_days as number | null,
     risk_metadata: row.risk_metadata as EarnStrategyRiskMetadata,
     status: row.status as EarnStrategyStatus,
+    host_cluster: row.host_cluster as SolanaCluster,
     environment: row.environment as SdpEnvironment,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
@@ -153,8 +156,8 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
              id, provider, provider_reference, name,
              source_kind, underlying_source, deposit_mints, share_mint,
              apy_type, current_apy, liquidity_term, redemption_delay_days,
-             risk_metadata, status, environment
-           ) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)
+             risk_metadata, status, host_cluster, environment
+           ) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
            ON CONFLICT (provider, provider_reference, environment) DO UPDATE SET
              name = EXCLUDED.name,
              source_kind = EXCLUDED.source_kind,
@@ -166,6 +169,7 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
              liquidity_term = EXCLUDED.liquidity_term,
              redemption_delay_days = EXCLUDED.redemption_delay_days,
              risk_metadata = EXCLUDED.risk_metadata,
+             host_cluster = EXCLUDED.host_cluster,
              -- An operator pause/deprecation outranks the provider catalogue.
              -- The hourly sync always upserts 'active' for anything a provider
              -- still lists, so overwriting status here would silently unpause a
@@ -196,11 +200,42 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
           input.redemptionDelayDays,
           JSON.stringify(input.riskMetadata ?? {}),
           input.status,
+          input.hostCluster,
           input.environment
         )
         .first<Record<string, unknown>>();
 
       return row ? mapStrategyRow(row) : null;
+    },
+
+    async updateStrategyMetrics(input: UpdateEarnStrategyMetricsInput) {
+      // `||` merges the incoming keys over the stored object, so a refresh that
+      // reports only tvlUsd and holders leaves curator (which the hourly sync
+      // derives) exactly as it was. A plain assignment here would silently
+      // strip every field the refresh does not carry.
+      //
+      // No status predicate: refreshing an operator-PAUSED row's rate is
+      // correct — the pause stops deposits, it does not freeze the vault's
+      // real-world numbers, and an operator deciding whether to unpause wants
+      // the current figures, not the ones from the moment they stopped it.
+      const row = await db
+        .prepare(
+          `UPDATE earn_strategies
+              SET current_apy = ?,
+                  risk_metadata = risk_metadata || ?::jsonb,
+                  updated_at = sdp_iso_now()
+            WHERE provider = ? AND provider_reference = ? AND environment = ?
+            RETURNING id`
+        )
+        .bind(
+          input.currentApy,
+          JSON.stringify(input.riskMetadata ?? {}),
+          input.provider,
+          input.providerReference,
+          input.environment
+        )
+        .first<Record<string, unknown>>();
+      return row !== null && row !== undefined;
     },
 
     async getStrategyById(strategyId: string) {

@@ -560,6 +560,12 @@ export function distillGroundYieldSource(
       sourceKind: classifySourceKind(source.allocations),
       underlyingSource: source.protocol?.trim().toLowerCase() || undefined,
       depositMints: [mint],
+      // Safe to assert the environment's own cluster: the `not_solana_hosted`
+      // gate above already proved the source is hosted on exactly this
+      // environment's Solana chain, so a Ground row is never catalogued into an
+      // environment it does not live on. A mainnet-only provider cannot say
+      // this — see `hostCluster` on ProviderStrategySnapshot.
+      hostCluster: cluster,
       apyType: "variable",
       currentApy: source.apyBps == null ? undefined : bpsToDecimalString(source.apyBps),
       ...redeemLiquidity(source.processingPolicies?.redeem),

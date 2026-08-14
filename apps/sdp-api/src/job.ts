@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 
 import * as Sentry from "@sentry/node";
 import { runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
+import { runEarnMetricsRefreshTick } from "@/cron/earn-metrics-refresh";
 import { PENDING_TRANSFERS_CRON, PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
 import { WORKFLOW_EXECUTIONS_CRON, WORKFLOW_EXECUTIONS_MONITOR } from "@/cron/workflow-executions";
 import {
@@ -92,6 +93,27 @@ export async function runCronJob(): Promise<void> {
     // its own Sentry monitor, so a sync failure never masquerades as a
     // reconciliation failure (and vice versa).
     if (isEarnEnabled(env)) {
+      // The metrics refresh runs FIRST and unslotted: this job's five-minute
+      // schedule IS its cadence, so every tick refreshes rates, while the
+      // catalogue sync below still claims its hourly slot and skips the other
+      // eleven ticks. Ordered first so an unusually slow catalogue pass cannot
+      // eat the tick and leave rates stale — refresh is the cheap half (one
+      // bulk call per capable provider) and the half with a freshness promise.
+      // Via the monitored tick, not the bare function: the refresh is the half
+      // with a freshness PROMISE, so "it silently stopped running" is its worst
+      // failure and exactly what a Sentry cron monitor catches. Its own monitor,
+      // like the catalogue sync's, so neither masquerades as the other.
+      await runEarnMetricsRefreshTick(env, sentryEnabled ? nodeObservability : undefined).catch(
+        (error: unknown) => {
+          // Never fails the job: the refresh degrades per provider internally,
+          // so anything escaping is infrastructure-level, and rates going one
+          // tick stale must not stop the catalogue sync that follows.
+          getLogger().error(
+            { error: error instanceof Error ? error.message : String(error) },
+            "reconciliation job: earn metrics refresh failed"
+          );
+        }
+      );
       await runEarnCatalogueSyncIfDue(env, sentryEnabled ? nodeObservability : undefined);
     }
   } finally {

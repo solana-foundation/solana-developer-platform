@@ -172,6 +172,7 @@ async function seedStrategy(
     redemptionDelayDays: null,
     riskMetadata: {},
     status: "active",
+    hostCluster: "devnet",
     environment: "sandbox",
     ...overrides,
   });
@@ -480,5 +481,47 @@ describe("Earn routes — strategy catalogue", () => {
     expect(body.data.total).toBe(1);
     expect(body.data.page).toBe(1);
     expect(body.data.pageSize).toBe(20);
+  });
+
+  /**
+   * `fundable` is derived per request, so the SAME row answers differently to a
+   * sandbox and a production caller. This is the wire-level warning a partner
+   * reads before treating a listed strategy as depositable — a mainnet-only
+   * provider's vaults are listed in sandbox on purpose and must never look
+   * fundable there.
+   */
+  it("derives fundable from hostCluster against the caller's environment", async () => {
+    await seedAuth();
+    const local = await seedStrategy({ hostCluster: "devnet" });
+    const elsewhere = await seedStrategy({ hostCluster: "mainnet-beta" });
+
+    const res = await getEarn("/v1/earn/strategies");
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        strategies: Array<{ id: string; hostCluster: string; fundable: boolean }>;
+      };
+    };
+    const byId = new Map(body.data.strategies.map((s) => [s.id, s]));
+    expect(byId.get(local.id)).toMatchObject({ hostCluster: "devnet", fundable: true });
+    // Listed, and explicitly not fundable — the row is honest about both.
+    expect(byId.get(elsewhere.id)).toMatchObject({
+      hostCluster: "mainnet-beta",
+      fundable: false,
+    });
+  });
+
+  it("carries hostCluster and fundable on the single-strategy read too", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy({ hostCluster: "mainnet-beta" });
+
+    const res = await getEarn(`/v1/earn/strategies/${strategy.id}`);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { strategy: { hostCluster: string; fundable: boolean } };
+    };
+    expect(body.data.strategy).toMatchObject({ hostCluster: "mainnet-beta", fundable: false });
   });
 });

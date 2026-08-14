@@ -296,6 +296,23 @@ funding instructions and nothing else — never imply a transfer happens.
   appearing in the UI as a provider-client bug, not something to patch here.
   A `cash` position can be a token the org never deposited on Solana, so do not
   assume positions imply a Solana deposit — only the addresses do.
+- **The catalogue now holds strategies this module deliberately never shows.**
+  Kamino is a catalogue-only provider: its K-Vaults are non-custodial (the
+  customer's own wallet deposits) and mainnet-only, and SDP catalogues them into
+  BOTH environments so API integrators can browse the real shelf. They reach
+  `GET /v1/earn/strategies` and they must not reach the wizard, because there is
+  no program to create for them. TWO independent filters keep them out, and both
+  are intentional:
+  - `EARN_PORTFOLIO_PROVIDER` — the existing Ground pin, which already excluded
+    every non-portfolio provider.
+  - `strategy.fundable` in `fundableStrategies` — the API's per-request answer
+    to "does this instrument exist on the caller's cluster". A sandbox Kamino
+    row is `hostCluster: "mainnet-beta", fundable: false`.
+
+  Do not collapse these into one. The pin is about which provider the flow can
+  create a program with; `fundable` is about whether an instrument exists here
+  at all, and it is what stops devnet money being pointed at a mainnet vault if
+  the pin is ever widened. Neither may be inverted into "hide unless known-bad".
 - **The CATALOGUE is Solana-hosted-only; POSITIONS are not, and that is not a
   bug here.** Since the `not_solana_hosted` gate (`@sdp/earn`), the strategy
   catalogue lists and stores only vaults hosted on Solana, so the wizard can no

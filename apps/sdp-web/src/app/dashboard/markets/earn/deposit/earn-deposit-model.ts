@@ -59,9 +59,25 @@ export function defaultStrategyFilters(): EarnStrategyFilters {
   return { maxSettlementDays: null, sourceKind: null, token: null, sort: "apy" };
 }
 
-/** Strategies that can actually be funded — i.e. their deposit mint is routable. */
+/**
+ * Strategies that can actually be funded: their deposit mint is routable AND
+ * the API says the instrument exists on this environment's cluster.
+ *
+ * The `fundable` half is not decoration. The catalogue lists what EXISTS, which
+ * since Kamino is a larger set than what can take a deposit here — Kamino's
+ * K-Vaults are mainnet-only and are catalogued into sandbox too, so an
+ * integrator can browse the real shelf. Offering one of those rows in the
+ * wizard would walk a user to a confirm step that provisions nothing.
+ *
+ * The API derives the flag per request (`hostCluster` vs. the caller's
+ * environment) and its own `assertKnownYieldSources` refuses the allocation
+ * regardless, so this is the second of two independent guards, not the only
+ * one. Never invert it into "hide unless known-bad".
+ */
 export function fundableStrategies(strategies: readonly EarnStrategy[]): readonly EarnStrategy[] {
-  return strategies.filter((strategy) => strategyToken(strategy) !== undefined);
+  return strategies.filter(
+    (strategy) => strategy.fundable && strategyToken(strategy) !== undefined
+  );
 }
 
 /** Apply only the direct controls shown above the strategy table. */

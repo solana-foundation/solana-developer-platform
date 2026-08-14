@@ -136,10 +136,23 @@ reference strategies by provider reference.
 every registration point is filled — the type errors are the checklist, and
 two tests guard the registration points the compiler can't see.
 
-**Ground is the worked example** for every step below — its files are the
-copyable precedent (`ground` id, `GroundEarnClient`, `GROUND_API_KEY` /
-`GROUND_SANDBOX_API_KEY`), and it is the first client past the stub: a live
-`listStrategies` plus the portfolio-wallet capability (§4b).
+**Two worked examples**, and which one you copy depends on how the provider
+holds the money:
+
+- **Ground — custodial portfolio.** `ground` id, `GroundEarnClient`,
+  `GROUND_API_KEY` / `GROUND_SANDBOX_API_KEY`; a live `listStrategies` plus the
+  portfolio-wallet capability (§4b). Copy this when SDP provisions a wallet and
+  moves funds through the provider.
+- **Kamino — catalogue-only, and keyless.** `kamino` id, `KaminoEarnClient`, no
+  credential at all; the base contract plus the live-metrics capability (§4c)
+  and *none* of the portfolio-wallet surface. Copy this when the provider's
+  vaults are non-custodial — the customer's own wallet deposits on-chain, so
+  there is nothing for SDP to provision, and `supportsPortfolioWallets`
+  returning false is the finished answer rather than a TODO. Every program route
+  then answers 501 by capability detection, with no dispatch edits.
+
+Steps 5–8 below are the **credentialed** path. A provider on a public API skips
+most of them — see the keyless variant under the table.
 
 | Step | File | What you add (Ground precedent) |
 |---|---|---|
@@ -152,15 +165,48 @@ copyable precedent (`ground` id, `GroundEarnClient`, `GROUND_API_KEY` /
 | 7. Key projections | `turbo.json` `globalEnv` + `scripts/secret-keys.mjs` | Both keys in both files (+ the secret manager for deployed environments). |
 | 8. Managed deployments | sdp-infra `terraform/envs/<env>/terraform.tfvars` | Append the credential key(s) to `app_secret_keys` (the Doppler → Secret Manager mirror; also add the value to that env's Doppler config). Dev carries sandbox keys only — production keys are a launch-gated decision (PRO-1647). Nothing else: the Cloud Run service and Job read the same secret set, and the hourly catalogue sync picks the provider up from `EARN_PROVIDER_CLIENTS` with zero job changes (`src/job.ts` never names providers; an un-credentialed provider skips fail-closed with `PROVIDER_NOT_CONFIGURED`). |
 
+### The keyless variant (public API — Kamino)
+
+A provider whose data API takes no credential does steps 1–4 unchanged, then:
+
+- **Step 5** becomes `<id>: publicApiDefinition("<Label>")` — `isConfigured`
+  answers true because there is nothing to configure: no key to be missing, no
+  sandbox account to mistake for production, no tenant to point at wrongly.
+- **Steps 6, 7 and 8 are SKIPPED, deliberately.** Do not add placeholder
+  `<ID>_API_KEY` entries "for consistency": `scripts/secret-keys.mjs` is "every
+  env key the SDP API reads" and projects into the local and Docker env files,
+  so a declared secret nothing reads is a standing question for whoever next
+  provisions the service. Nothing goes into sdp-infra either.
+- **Add the id to `KeyPairedEarnProviderId`'s exclusion** in
+  provider-availability.service.ts. That type is what stops
+  `keyPairCredentialDefinition` from requiring a `keyof Env` entry that will
+  never exist.
+
+Entitlement is unaffected: a keyless provider still defaults to disabled, since
+entitlement and configuration are separate gates. A catalogue-only provider
+simply never reaches the entitlement gate, which only guards money-in.
+
+### If the provider is not deployed on every cluster
+
+State it on the snapshot. `ProviderStrategySnapshot.hostCluster` is the cluster
+the INSTRUMENT lives on, and it is not implied by the environment — Kamino is
+mainnet-only and is catalogued into both environments so sandbox integrators can
+browse the real shelf. Those rows are true and un-fundable, and one predicate,
+`isClusterFundableInEnvironment`, enforces that everywhere (see ADR 0002's
+2026-08-13 addendum). Do not reach for `status` — it is the operator's stop
+switch and the repository refuses to overwrite it.
+
 Tests that enforce the checklist (run them; they fail on the exact step you
 missed):
 
 - `packages/sdp-earn/src/index.test.ts` — every `EARN_PROVIDERS` id has a
   registry entry with a matching `provider` field and a `package.json`
   subpath export (steps 3–4).
-- `apps/sdp-api/src/services/provider-availability.drift.test.ts` — both
-  credential keys appear in `turbo.json` `globalEnv` and
-  `scripts/secret-keys.mjs` (step 7).
+- `apps/sdp-api/src/services/provider-availability.drift.test.ts` — every
+  credential key an availability definition actually READS appears in
+  `turbo.json` `globalEnv` and `scripts/secret-keys.mjs` (step 7), plus an
+  inverse guard so a credentialed provider cannot slip through by declaring no
+  keys at all.
 
 Verify with `pnpm --filter @sdp/earn typecheck && pnpm --filter @sdp/earn test`
 plus the API vitest suite. Rules carried over from the ramp skills: no
@@ -257,6 +303,42 @@ and `EARN_ENABLED` (child) are off by default in *every* environment, local dev
 included — there is no development default-on. Without both, `/v1/earn` answers
 403 and the dashboard segment `notFound()`s. Set them for `sdp-api` **and**
 `sdp-web` (same unprefixed names; see each app's `.env.local.example`).
+
+## 4c. Implementing the live-metrics capability — fresh rates
+
+The catalogue sync runs hourly because catalogue *drift* is slow. Rates are not,
+and an hour-old APY on a comparison table is a number a customer compares vaults
+by and then moves money on. A provider that can serve its whole shelf's current
+figures in a call or two implements `EarnLiveMetricsProvider`:
+
+```ts
+async listStrategyMetrics(ctx: EarnRuntimeContext): Promise<ProviderStrategyMetrics[]>
+```
+
+`supportsLiveMetrics` discovers it, and `cron/earn-metrics-refresh.ts` refreshes
+those figures in place every 5 minutes. Nothing else to wire — both schedulers
+already iterate the registry.
+
+Three things to understand before opting in:
+
+- **It is a promise about COST.** The pass runs 12× more often than the sync.
+  Kamino qualifies because one bulk endpoint carries every vault's figures in
+  two requests. Ground does NOT implement it: its rates arrive on the same paged
+  yield-sources endpoint the catalogue uses, so a five-minute pass would re-pay
+  the whole catalogue cost for the rate alone.
+- **Return your whole shelf, unfiltered.** The refresh is UPDATE-only —
+  `updateStrategyMetrics` no-ops on any reference the catalogue does not hold —
+  so reporting vaults that distillation refused costs one no-op per row and
+  saves you re-running the admission gates. Kamino reports 173 and 21 land.
+- **Figures only.** `ProviderStrategyMetrics` carries the rate and volatile risk
+  metadata (TVL, holders) and nothing that could change what a strategy *is*.
+  The metadata is merged over what is stored, so `curator` — which the hourly
+  sync derives — survives. Keep it that way: the narrow input is what makes the
+  pass safe to run unslotted.
+
+Why this writes to the DB rather than reading live at request time:
+`GET /strategies` reads exactly ONE source for the state it reports (ADR 0002,
+2026-08-11 addendum). Freshness is cadence, not blending.
 
 ## 5. Custodian seam — "add Anchorage/Fireblocks to Earn"
 

@@ -34,6 +34,8 @@ function strategy(partial: Partial<EarnStrategy> & { id: string }): EarnStrategy
     liquidityTerm: "instant",
     riskMetadata: { tvlUsd: 40_000_000, curator: "gauntlet" },
     status: "active",
+    hostCluster: "devnet",
+    fundable: true,
     createdAt: TIMESTAMP,
     updatedAt: TIMESTAMP,
     ...partial,
