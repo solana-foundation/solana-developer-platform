@@ -160,6 +160,7 @@ describe("OpenAPI spec", () => {
       expect(operation?.responses?.["403"]).toBeDefined();
       expect(operation?.responses?.["404"]).toBeDefined();
       expect(operation?.responses?.["409"]).toBeDefined();
+      expect(operation?.responses?.["503"]).toBeDefined();
     }
   });
 
