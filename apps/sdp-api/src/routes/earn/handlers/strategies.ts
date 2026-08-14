@@ -6,6 +6,21 @@ import { type AppContext, getEarnRepository, resolveSdpEnvironment } from "../co
 import { earnStrategyIdParamsSchema, listEarnStrategiesQuerySchema } from "../schemas";
 import { listResponse, pageWindow, parseParams, parseQuery } from "./shared";
 
+/**
+ * Indexed for catalogue completeness, intentionally absent from every public
+ * strategy read. Keep the terms here at the API policy boundary rather than in
+ * Ground's client or the sync, so the DB continues to reflect what Ground
+ * reports and pagination can exclude the rows before applying its window.
+ */
+const HIDDEN_STRATEGY_TERMS = ["aave", "morpho"] as const;
+
+function isHiddenStrategy(row: EarnStrategyRow): boolean {
+  const searchable = [row.provider_reference, row.name, row.underlying_source ?? ""]
+    .join("\n")
+    .toLowerCase();
+  return HIDDEN_STRATEGY_TERMS.some((term) => searchable.includes(term));
+}
+
 export function mapToEarnStrategy(row: EarnStrategyRow): EarnStrategy {
   return {
     id: row.id,
@@ -28,15 +43,19 @@ export function mapToEarnStrategy(row: EarnStrategyRow): EarnStrategy {
 }
 
 /**
- * Loads a strategy and hides it from callers in the other environment — the
- * catalogue is platform-global, so environment scoping happens here rather
- * than via project scoping.
+ * Loads a strategy and applies the same environment and visibility policy as
+ * the list route. The catalogue is platform-global, so environment scoping
+ * happens here rather than via project scoping.
  */
 async function requireEarnStrategy(c: AppContext, strategyId: string): Promise<EarnStrategyRow> {
   const repo = getEarnRepository(c);
   const strategy = await repo.getStrategyById(strategyId);
 
-  if (!strategy || strategy.environment !== resolveSdpEnvironment(c)) {
+  if (
+    !strategy ||
+    strategy.environment !== resolveSdpEnvironment(c) ||
+    isHiddenStrategy(strategy)
+  ) {
     throw notFound("Earn strategy");
   }
 
@@ -52,6 +71,7 @@ export const listEarnStrategies = async (c: AppContext) => {
     sourceKind: query.sourceKind,
     apyType: query.apyType,
     liquidityTerm: query.liquidityTerm,
+    excludeRelatedTerms: HIDDEN_STRATEGY_TERMS,
     ...pageWindow(query),
   });
 
