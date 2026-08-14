@@ -79,9 +79,9 @@ runner. Doppler supplies Clerk keys, so the dashboard needs `doppler login`.
   Ground's real yield sources. It fires on the hour, so a freshly started API
   shows nothing until then — seed if you don't want to wait.
 - **Offline (no key needed):** `DATABASE_URL=… pnpm -C apps/sdp-api db:seed:earn`
-  writes Ground's 5 Solana-hosted sandbox sources as fixtures (prefixed
+  writes a compact 5-source Solana-hosted subset as fixtures (prefixed
   `seed-demo-`, removable with `--clean`, never confusable with synced rows).
-  Solana-only like the sync, so no fixture references an EVM vault. Every run
+  This is a deterministic UI seed, not a complete mirror of the sync. Every run
   also PRUNES prefixed rows the fixture set no longer defines — an upsert-only
   seed would leave dropped fixtures behind forever. The seed's key space is
   excluded from the sync's delete pass (providers never list a prefixed ref), so
@@ -204,15 +204,12 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
   depend on availability/enablement — only on configured credentials.
 - Catalogue mapping must exclude anything that would trap funds (Ground:
   `mode === "buy_only"` sources are skipped, only `active` is listed).
-- **Solana-HOSTED only, listed AND stored.** `distillGroundYieldSource` gates on
-  the source's own `chain` matching `GROUND_SOLANA_CHAINS[environment]`
-  (`not_solana_hosted`, fail-closed on an absent/unknown chain), and the
-  catalogue sync DELETES `earn_strategies` rows the provider no longer lists, so
-  a tightened gate reaches rows already stored. Ground's shelf is majority
-  Ethereum-hosted (Aave, four Morpho vaults, Syrup and all four RWA sources) —
-  none of it may be listed or stored in ANY environment, sandbox included.
-  This deliberately takes RWA coverage to zero; see
-  docs/earn/ground-rwa-coverage-findings.md.
+- **Persistence and visibility are separate.** `distillGroundYieldSource`
+  indexes every active source Ground can fund and exit through SDP's Solana USDC
+  rail, regardless of the source's host chain. The catalogue sync deletes only
+  rows Ground no longer lists or that stop satisfying those safety gates. The
+  Earn strategy API separately hides Aave- and Morpho-related rows from list and
+  detail reads; do not move that product policy into this provider client.
 - Missing API key ⇒ throw `PROVIDER_NOT_CONFIGURED` **before** any network call.
 
 ## Conventions
@@ -223,6 +220,17 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
   missing for an id in `EARN_PROVIDERS`.
 - All HTTP goes through `providerFetch`/`providerFetchJson` (src/fetch.ts) —
   never raw `fetch` in a client.
+- **`error` on a failure body is read as BOTH an object and a bare string**
+  (`extractProviderErrorMessage`). Measured 2026-08-14: Ground rejects a request
+  with `{"error":"Invalid query params: unknown parameter(s)","code":
+  "unknown_parameters",…}` — `error` is a STRING. Reading only `error.message`
+  made every Ground 4xx fall back to `"<provider> request failed with status
+  <n>"`, which names the status and explains nothing, so a refused write reached
+  the dashboard with its reason stripped. Do not narrow these shapes again; the
+  provider's own sentence is the most useful thing on this path. It picks the
+  first NON-BLANK of `error` / `message` / `reason` — the first *present* one
+  would let `error: ""` beside a real `message` select the blank and fall back,
+  discarding an explanation the body did carry.
 - **Chain keys are HARD-SET in `GROUND_SOLANA_CHAINS`**
   (providers/ground/client.ts): sandbox = `solana_devnet`, production =
   `solana`. Ground confirmed (2026-08-05) sandbox supports both Ethereum

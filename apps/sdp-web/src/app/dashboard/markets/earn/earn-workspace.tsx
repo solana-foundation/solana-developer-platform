@@ -17,8 +17,12 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { useCopy } from "@/lib/use-copy";
 import { fundableStrategies } from "./deposit/earn-deposit-model";
-import { shortenAddress } from "./deposit/earn-funding-wallets";
-import { formatApy, formatUsd } from "./earn-format";
+import {
+  shortenAddress,
+  totalWalletUsdcAmount,
+  useEarnFundingWallets,
+} from "./deposit/earn-funding-wallets";
+import { formatApy, formatTokenQuantity, formatUsd } from "./earn-format";
 import {
   EARN_PORTFOLIO_PROVIDER,
   type EarnProgram,
@@ -562,6 +566,7 @@ function StartSection() {
   const t = useTranslations();
   const { state } = useEarnPrograms();
   const { strategies, error, isLoading } = useEarnStrategies();
+  const { wallets, error: walletsError, isLoading: walletsLoading } = useEarnFundingWallets();
 
   // Nothing until the program read RESOLVES. `undefined` is in-flight, not
   // "no programs": rendering the hero on it flashed onboarding at every reader
@@ -584,8 +589,17 @@ function StartSection() {
     .map((strategy) => strategyApy(strategy))
     .filter((apy): apy is number => apy !== undefined);
   const fastest = fundable.length > 0 ? Math.min(...fundable.map(settlementDays)) : undefined;
+  const availableUsdc = wallets === undefined ? undefined : totalWalletUsdcAmount(wallets);
 
   const stats = [
+    {
+      id: "available-usdc",
+      label: t("DashboardEarn.overview.startStatAvailableUsdc"),
+      value:
+        walletsLoading || walletsError || availableUsdc === undefined
+          ? "—"
+          : formatTokenQuantity(availableUsdc, "USDC"),
+    },
     {
       id: "strategies",
       label: t("DashboardEarn.overview.startStatStrategies"),
@@ -619,7 +633,7 @@ function StartSection() {
         </p>
       </div>
 
-      <dl className="mt-6 grid gap-x-8 gap-y-4 sm:grid-cols-3">
+      <dl className="mt-6 grid gap-x-8 gap-y-4 sm:grid-cols-2 xl:grid-cols-4">
         {stats.map((stat) => (
           <div className="min-w-0 border-t border-border-subtle pt-3" key={stat.id}>
             <dt className="text-xs text-tertiary">{stat.label}</dt>

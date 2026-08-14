@@ -46,15 +46,15 @@ Companion docs:
   holds many portfolio wallets, and every SDP org shares a single account per
   environment — which is why a provider console's account-wide total will exceed
   what any one org sees in SDP.
-- **Solana-only surface, and USDC-only on it.** Deposits are funded by sending
-  **USDC** on Solana to the wallet's deposit address (`solana_devnet` in
+- **Solana-only customer rails, and USDC-only on them.** Deposits are funded by
+  sending **USDC** on Solana to the wallet's deposit address (`solana_devnet` in
   sandbox, `solana` in production); withdrawals settle to a Solana address the
   org controls. USDT is not a second option here: Ground routes it on Ethereum
   only (`GROUND_SOLANA_ROUTED_TOKENS`), so a USDT source never enters the
   catalogue and a USDT payout is refused before any network call. Ground can route
-  capital to yield sources on other chains internally, but SDP no longer
-  catalogues those sources at all: "Solana Earn" means Solana-HOSTED yield, not
-  Solana-rail access to yield hosted elsewhere (`not_solana_hosted`).
+  capital to yield sources on other chains internally. The sync retains those
+  routable sources in `earn_strategies`; customer catalogue visibility is an API
+  policy, currently excluding Aave- and Morpho-related rows.
 - **Funding is address-based in V1**: show the deposit address, track incoming
   deposits via the provider's deposits API. No custody signing in the flow.
   Webhooks (Ground supports Stripe-style HMAC) are future work; V1 polls.
@@ -73,7 +73,7 @@ Ground's [Portfolio Wallets API](https://docs.groundtech.co/docs/portfolio-walle
 | Yield-source id / name / protocol | `risk_metadata.curator` (known ids → `morpho-<curator>-<token>` convention → protocol fallback) |
 | `allocations[].type` (observed: `market`, `liquidity`, `loan`, `reserve`, `rwa`, `treasury`) | `source_kind`: `rwa` / `defi` (dominant allocation; `rwa` + `treasury` are the RWA side) |
 | `mode` | only `active` sources are listed; `buy_only` is excluded (would trap funds — ADR 0002 exit-safety) |
-| `chain` | **gate, not metadata**: only sources hosted on the environment's Solana chain are catalogued (`not_solana_hosted`, fail-closed on an absent/unknown chain). Ground's shelf is majority Ethereum-hosted — Aave, four Morpho vaults, Syrup and every RWA source — and SDP lists and stores none of it |
+| `chain` | Inventory metadata. Ground may bridge Solana USDC to a source hosted elsewhere, so host chain does not prevent persistence. Customer catalogue visibility is enforced by the Earn API read route. |
 | Portfolio wallet (`POST /v2/wallets`, `GET /v2/wallets/{id}`) | One SDP program: `earn_provider_wallets.provider_wallet_ref` (globally unique per provider) |
 | Strategy weights | `POST /v1/earn/programs` (create) / `PUT /v1/earn/programs/:programId` (re-target) allocations → Ground target weights. **V1 is single-vault (PRO-1667): exactly one entry per token group, which the sum rule pins to `pct: 100`.** The weighted wire shape (percent, 0.1 grid, sum = 100 per group) is unchanged and the multi-entry surface is dormant — the API side of re-enabling weights is relaxing the route-schema cap (wire shape and provider contract untouched), but the dashboard separately needs weight authoring + share display back (removed by design) before the cap can safely relax. Both branches send a `requestId` — **required on create** (`EarnPortfolioWalletCreateInput.requestId`, no client-side fallback since PRO-1670: an unkeyed retry would provision a second wallet), optional on update, where the client still mints one per call. Either way SDP derives it rather than forwarding the caller's key. Ground replays a matching payload and **409s a reused key with a changed payload**, so callers must re-mint whenever the allocation changes. An omitted token lane is preserved, not cleared. |
 | `depositAddresses.solana{,_devnet}` | The program's funding address (only Solana is surfaced) |
@@ -150,10 +150,9 @@ domains**; USDT stays on Ethereum. That is why USDT sources never enter SDP's
 catalogue at all — `GROUND_SOLANA_ROUTED_TOKENS` (client.ts) pins Ground's
 Solana rails to USDC, so an un-routable source is excluded on every cluster
 and withdrawal preview/create refuse un-routable tokens before any network
-call. `bridge` remains a position kind because a wallet funded before the
-host-chain gate can still hold value mid-route, but it is no longer a reason to
-catalogue an off-Solana source: since `not_solana_hosted`, SDP lists and stores
-Solana-hosted vaults only.
+call. `bridge` remains a position kind because Ground may move value between the
+Solana customer rail and a yield source it hosts elsewhere; host chain is not a
+catalogue persistence gate.
 
 Ground confirmed (2026-08-05) that **sandbox supports both `ethereum_sepolia`
 and `solana_devnet`**; Solana flows in sandbox ride the `solana_devnet` chain
@@ -362,15 +361,13 @@ Two things write `earn_strategies`, and only one of them is a production path.
   It is never run by CI or any deploy.
 - **Why it exists:** browse a populated catalogue without a Ground API key and
   without waiting for the cron; deterministic data for demos and UI work.
-- **What it seeds:** Ground's five Solana-hosted sandbox sources, ids/names/APYs/
-  liquidity/curators mirroring the committed inventory snapshot (so local dev
-  looks like production), plus exactly one **paused** row
+- **What it seeds:** a compact five-source, Solana-hosted subset of Ground's
+  sandbox catalogue, with ids/names/APYs/liquidity/curators mirroring the
+  committed inventory snapshot, plus exactly one **paused** row
   (`seed-demo-kamino-superstate-usdc`) that exercises the operator-pause
   invariants — hidden from the default catalogue, unselectable as an allocation
-  target, and sticky against the sync re-asserting `active`.
-  Solana-hosted only, matching the `not_solana_hosted` catalogue gate. That costs
-  local dev its delayed-liquidity, `rwa` and high-APY-outlier fixtures, because
-  Ground's Solana shelf has none — cover those in unit tests, not fixtures.
+  target, and sticky against the sync re-asserting `active`. The small seed is a
+  deterministic UI convenience, not a complete mirror of the live sync.
 - **It prunes its own stale rows.** Every run deletes prefixed rows the current
   fixture set no longer defines, so a re-run after the set changes cannot leave
   the old ones behind (an upsert-only seed would).
@@ -430,10 +427,10 @@ Two things write `earn_strategies`, and only one of them is a production path.
 4. **Declared support bounds the catalogue.** A synced strategy outside the
    provider's declared token/source envelope is rejected and logged, not
    persisted.
-5. **Solana-only surface.** No other chain's addresses or rails may leak into
-   wire types or UI — and since the `not_solana_hosted` gate, no other chain's
-   VAULTS either: the catalogue lists and stores Solana-hosted sources only,
-   and the sync deletes rows that stop qualifying.
+5. **Solana-only customer rails.** No other chain's addresses or transaction
+   identifiers may leak into wire types or UI. Yield-source host chain remains
+   provider metadata, and the API owns product visibility independently from
+   the sync's complete persisted inventory.
 
 ## Adding a provider (the 30-second version)
 

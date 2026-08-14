@@ -137,8 +137,7 @@ export const EARN_SEED_REFERENCE_PREFIX = "seed-demo-";
 /**
  * Delist pass input: everything the provider still lists for (provider,
  * environment). Anything else the table holds is stale — a vault the provider
- * delisted, or one a tightened catalogue gate now refuses (the
- * `not_solana_hosted` case) — and is deleted.
+ * delisted or one a tightened catalogue gate now refuses — and is deleted.
  *
  * `listedProviderReferences` is the KEEP set, never the delete set, so the
  * caller cannot enumerate stale rows it does not know about: the provider's
@@ -156,6 +155,13 @@ export interface ListEarnStrategiesInput {
   apyType?: EarnApyType;
   liquidityTerm?: EarnLiquidityTerm;
   includeInactive?: boolean;
+  /**
+   * Server-owned visibility terms matched case-insensitively against the
+   * provider reference, display name, and underlying source. Filtering belongs
+   * in the query so pagination and totals describe the rows callers can see;
+   * the sync still persists the provider's complete routable catalogue.
+   */
+  excludeRelatedTerms?: readonly string[];
   limit: number;
   offset: number;
 }
