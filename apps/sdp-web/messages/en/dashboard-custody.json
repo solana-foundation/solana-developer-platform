@@ -825,6 +825,7 @@
     "connectionNoWallets": "No wallets yet",
     "connectionWalletsUnavailable": "Wallets unavailable right now",
     "connectionsLoadError": "Unable to load connections",
-    "connectionsLoadErrorDescription": "Something went wrong reading this project's connections. Try again in a moment."
+    "connectionsLoadErrorDescription": "Something went wrong reading this project's connections. Try again in a moment.",
+    "policyAmountPlaceholder": "0.00"
   }
 }
