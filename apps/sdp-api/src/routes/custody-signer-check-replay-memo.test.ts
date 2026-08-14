@@ -199,7 +199,74 @@ describe("Approved signer check replay memo", () => {
     await getDb(env)
       .prepare(
         `UPDATE wallet_operations
-            SET raw_payload = jsonb_set(raw_payload::jsonb, '{memo}', '"attacker chosen text"')
+            SET raw_payload = (raw_payload::jsonb
+              || '{"memo": "attacker chosen text"}'::jsonb) - 'memoServerGenerated'
+          WHERE id = ?`
+      )
+      .bind(walletOperationId)
+      .run();
+
+    const approvedResponse = await app.request(
+      `/v1/wallets/approval-requests/${approvalRequestId}/approve`,
+      {
+        method: "POST",
+        headers: {
+          Cookie: `sdp_session=${APPROVER_SESSION_ID}`,
+          "x-project-id": TEST_PROJECT.id,
+        },
+      },
+      env
+    );
+    expect(approvedResponse.status).toBe(200);
+    const approvedBody = (await approvedResponse.json()) as ApprovedOperationBody;
+    expect(approvedBody.data.approvalRequest.operation.status).not.toBe("completed");
+    expect(approvedBody.data.approvalRequest.operation.executionError).toContain(
+      "does not match replayed action"
+    );
+  });
+
+  it("refuses a legacy memo even when it mimics the generated format", async () => {
+    await seedApproverSession();
+    await seedWalletControlProfile({
+      rules: [
+        { id: "approve-signer-check", kind: "approval", operationTypes: ["custody_signer_check"] },
+      ],
+    });
+    await seedCachedKey({
+      signingWalletId: TEST_WALLET_ID,
+      walletBindings: [{ walletId: TEST_WALLET_ID, permissions: ["wallets:write"] }],
+    });
+    await getDb(env)
+      .prepare("UPDATE api_keys SET signing_wallet_id = ? WHERE id = ?")
+      .bind(TEST_WALLET_ID, TEST_API_KEY.id)
+      .run();
+
+    const pendingResponse = await app.request(
+      "/v1/wallets/signer-check",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({ walletId: TEST_WALLET_ID }),
+      },
+      env
+    );
+    expect(pendingResponse.status).toBe(202);
+    const pendingBody = (await pendingResponse.json()) as {
+      error: { details: { approvalRequestId: string; walletOperationId: string } };
+    };
+    const { approvalRequestId, walletOperationId } = pendingBody.error.details;
+
+    // A pre-change caller could have sent text shaped exactly like the memo
+    // this handler mints, so format is not provenance; only the marker is.
+    await getDb(env)
+      .prepare(
+        `UPDATE wallet_operations
+            SET raw_payload = (raw_payload::jsonb
+              || '{"memo": "SDP signer check 00000000-0000-4000-8000-000000000000"}'::jsonb)
+              - 'memoServerGenerated'
           WHERE id = ?`
       )
       .bind(walletOperationId)

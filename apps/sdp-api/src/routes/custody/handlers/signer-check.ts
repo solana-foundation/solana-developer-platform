@@ -42,10 +42,14 @@ const KORA_MEMO_ALLOWED_PROGRAM_HINT =
   "Add MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr to Kora validation.allowed_programs.";
 
 const MEMO_PREFIX = "SDP signer check ";
-/** The exact shape this handler mints, used to refuse legacy caller memos on replay. */
-const SERVER_MEMO_PATTERN = new RegExp(
-  `^${MEMO_PREFIX}[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
-);
+/**
+ * Marks a stored payload whose memo this handler generated. The caller can
+ * never set it, since the payload is assembled server-side, so its absence
+ * identifies an operation filed while the memo still came from the request
+ * body. Shape alone could not tell the two apart: a caller could have sent
+ * text in exactly the format this handler mints.
+ */
+const SERVER_MEMO_MARKER = "memoServerGenerated";
 
 type SignerCheckBody = z.output<typeof signerCheckSchema>;
 
@@ -127,6 +131,7 @@ export async function extractSignerCheckPolicyCandidate(
     rawPayload: {
       requestedWalletId: parsed.data.walletId === undefined ? null : parsed.data.walletId,
       memo: effectiveMemo,
+      [SERVER_MEMO_MARKER]: true,
     },
   };
 }
@@ -138,9 +143,9 @@ export async function extractSignerCheckPolicyCandidate(
  * An approval filed before this change can hold caller-supplied text, since
  * the old handler accepted a memo from the request body. Replaying one must
  * not put that text on-chain under the org wallet's signature, so a stored
- * memo is only reused when it carries the server-generated shape; anything
- * else is refused and the replay fails its integrity check instead of
- * publishing.
+ * memo is only reused when the payload carries the server-generated marker;
+ * anything else is refused and the replay fails its integrity check instead
+ * of publishing.
  *
  * @param c - Request context.
  * @returns The stored memo text, or null for a normal request or a legacy
@@ -155,8 +160,12 @@ async function approvedReplayMemo(c: AppContext): Promise<string | null> {
     c.env,
     getRequestTenantScope(c)
   ).getWalletOperationById(operationId);
-  const storedMemo = operation?.raw_payload.memo;
-  return typeof storedMemo === "string" && SERVER_MEMO_PATTERN.test(storedMemo) ? storedMemo : null;
+  const rawPayload = operation?.raw_payload;
+  if (rawPayload?.[SERVER_MEMO_MARKER] !== true) {
+    return null;
+  }
+  const storedMemo = rawPayload.memo;
+  return typeof storedMemo === "string" ? storedMemo : null;
 }
 
 export const signerCheck = async (c: AppContext) => {
