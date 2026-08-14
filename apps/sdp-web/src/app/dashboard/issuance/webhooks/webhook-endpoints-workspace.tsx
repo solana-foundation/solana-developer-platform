@@ -4,7 +4,6 @@ import { LockIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { HeaderBackAction } from "@/components/dashboard-header";
 import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -43,15 +42,7 @@ function endpointHref(endpointId: string): string {
   return `/dashboard/issuance/webhooks/${encodeURIComponent(endpointId)}`;
 }
 
-export function WebhookEndpointsWorkspace({
-  canManage,
-  back,
-}: {
-  canManage: boolean;
-  // Resolved server-side from `?from=`, so the page always has a way back even though it
-  // is deliberately absent from the sidebar.
-  back: { href: string; label: string };
-}) {
+export function WebhookEndpointsWorkspace({ canManage }: { canManage: boolean }) {
   const t = useTranslations();
   const locale = useLocale();
   const router = useRouter();
@@ -78,15 +69,9 @@ export function WebhookEndpointsWorkspace({
     <div className="h-full overflow-y-auto px-3 pb-8 md:px-6">
       <div className="mx-auto w-full max-w-[1200px] py-6">
         <header className="flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0">
-            {/* The shared back action, unrestyled — only moved onto the title's line and
-                centred with it. */}
-            <div className="flex items-center gap-3">
-              <HeaderBackAction href={back.href} label={back.label} />
-              <h1 className="text-2xl font-medium text-primary">{t("DashboardWebhooks.title")}</h1>
-            </div>
-            <p className="mt-1 text-sm text-secondary">{t("DashboardWebhooks.description")}</p>
-          </div>
+          {/* No title here: the shell's top bar already names the page, and its back
+              action sits at that title's level. */}
+          <p className="min-w-0 text-sm text-secondary">{t("DashboardWebhooks.description")}</p>
           <div className="flex items-center gap-2">
             <Button
               type="button"

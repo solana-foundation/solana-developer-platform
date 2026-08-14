@@ -10,7 +10,7 @@ import {
   Settings2Icon,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   ApiKeyAuthoringSkeleton,
@@ -491,6 +491,7 @@ export function DashboardShell({
   const t = useTranslations();
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
@@ -516,7 +517,9 @@ export function DashboardShell({
     pathname,
     t,
     assetProfilesEnabled,
-    privateChannelsEnabled
+    privateChannelsEnabled,
+    // The webhooks list's back action depends on the asset that opened it.
+    searchParams.get("from")
   );
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
