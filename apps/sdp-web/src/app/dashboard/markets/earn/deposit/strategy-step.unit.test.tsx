@@ -3,10 +3,10 @@
 import type { EarnStrategy } from "@sdp/types";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import { rankedFundableStrategies } from "./earn-deposit-model";
+import { rankedStrategies } from "./earn-deposit-model";
 import { StrategyStep } from "./strategy-step";
 
 /**
@@ -30,6 +30,8 @@ function strategy(partial: Partial<EarnStrategy> & { id: string }): EarnStrategy
     currentApy: "0.05",
     liquidityTerm: "instant",
     status: "active",
+    hostCluster: "devnet",
+    fundable: true,
     createdAt: TIMESTAMP,
     updatedAt: TIMESTAMP,
     ...partial,
@@ -43,15 +45,24 @@ const CATALOGUE = [
   strategy({ id: "big-pool", currentApy: "0.051", riskMetadata: { tvlUsd: 22_000_000 } }),
 ];
 
-function renderStep() {
+function renderStep({
+  onSelect = () => {},
+  selectedStrategyId = null,
+  strategies = CATALOGUE,
+}: {
+  onSelect?: (strategyId: string) => void;
+  selectedStrategyId?: string | null;
+  strategies?: readonly EarnStrategy[];
+} = {}) {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
       <StrategyStep
         hasError={false}
         isLoading={false}
-        onSelect={() => {}}
-        selectedStrategyId={null}
-        strategies={rankedFundableStrategies(CATALOGUE)}
+        onSelect={onSelect}
+        portfolioProvider="ground"
+        selectedStrategyId={selectedStrategyId}
+        strategies={rankedStrategies(strategies)}
         tokens={["usdc"]}
       />
     </I18nProvider>
@@ -121,5 +132,39 @@ describe("StrategyStep ranking", () => {
     // Backing and Access are labels, not rankings — nothing to compare them by.
     expect(screen.queryByRole("button", { name: "Backing" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Access" })).toBeNull();
+  });
+
+  it("shows an environment-mismatched Kamino vault but does not select it", async () => {
+    const onSelect = vi.fn();
+    renderStep({
+      onSelect,
+      selectedStrategyId: "kamino-mainnet",
+      strategies: [
+        strategy({ id: "ground-devnet", name: "Ground Devnet USDC" }),
+        strategy({
+          id: "kamino-mainnet",
+          name: "Kamino Mainnet USDC",
+          provider: "kamino",
+          hostCluster: "mainnet-beta",
+          fundable: false,
+        }),
+      ],
+    });
+
+    const kaminoRadio = screen.getByRole("radio", { name: "Kamino Mainnet USDC" });
+    expect((kaminoRadio as HTMLInputElement).disabled).toBe(true);
+    expect((kaminoRadio as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByText("Mainnet only")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Strategies that cannot be funded from this project remain visible for comparison."
+      )
+    ).toBeTruthy();
+
+    await userEvent.click(screen.getByText("Kamino Mainnet USDC"));
+    expect(onSelect).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByText("Ground Devnet USDC"));
+    expect(onSelect).toHaveBeenCalledWith("ground-devnet");
   });
 });

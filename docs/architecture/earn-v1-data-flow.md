@@ -21,13 +21,13 @@ flowchart LR
 
     subgraph SDP["sdp-api  /v1/earn"]
         ROUTES["earn routes<br/>auth · project scope · earn:read/write"]
-        SVC["@sdp/earn provider clients<br/>(Ground live; Veda/Upshift/Perena stubs)"]
+        SVC["@sdp/earn provider clients<br/>(Ground portfolio · Kamino catalogue-only; Veda/Upshift/Perena stubs)"]
         DB[("Postgres<br/>earn_strategies · earn_provider_wallets<br/>earn_program_withdrawals")]
-        CRON["cron: catalogue sync"]
+        CRON["cron: catalogue sync (hourly) · metrics refresh (5 min)"]
     end
 
     subgraph External
-        VAULT["Vault-infra APIs<br/>Ground (+ future providers)"]
+        VAULT["Vault-infra APIs<br/>Ground · Kamino (+ future providers)"]
         CHAIN["Solana<br/>(funding: customer → wallet deposit address)"]
         CURATOR["Curator risk frameworks<br/>Gauntlet · Steakhouse · Sentora<br/>(via vault-infra metadata)"]
     end
@@ -53,8 +53,9 @@ PRO-1634 owns whatever returns.
 
 | Surface | Serving read | Fed by | Freshness |
 |---|---|---|---|
-| Strategy catalogue | `earn_strategies` (DB) | Cron sync ← provider `listStrategies` (curator/risk metadata rides along as `risk_metadata`); snapshots outside the client's `declaredSupport` are skipped fail-closed (`isStrategyWithinDeclaredSupport`, `@sdp/earn/support`) | Hourly (`cron/earn-catalogue-sync.ts`) |
-| APY (headline + program-level) | `earn_strategies.current_apy` (latest observed, overwritten by sync) + live `getPortfolioYield` | Catalogue sync; live provider read | Hourly / real-time |
+| Strategy catalogue | `earn_strategies` (DB) | Cron sync ← provider `listStrategies` (curator/risk metadata rides along as `risk_metadata`); snapshots outside the client's `declaredSupport` are skipped fail-closed (`isStrategyWithinDeclaredSupport`, `@sdp/earn/support`) | Hourly (`cron/earn-catalogue-sync.ts`) — identity, mints, liquidity terms and **admission** only |
+| APY + vault TVL/holders | `earn_strategies.current_apy` / `risk_metadata` (DB) + live `getPortfolioYield` for the program-level rate | Metrics refresh ← provider `listStrategyMetrics` (`supportsLiveMetrics`); live provider read | **Every 5 min** (`cron/earn-metrics-refresh.ts`) / real-time |
+| Whether a strategy is fundable *here* | Derived per request from `earn_strategies.host_cluster` vs the caller's environment — the `fundable` field on `GET /strategies` | `isClusterFundableInEnvironment` (`@sdp/earn`) | Real-time (never stored) |
 | Program list | `earn_provider_wallets` (**DB**, oldest first) joined per row with a **live provider snapshot** — `GET /v1/earn/programs` | Rows written by create; snapshots fetched in parallel per listed program | Real-time |
 | Positions & balances | **Live provider snapshot** (`GET /v1/earn/programs/:programId` ← `getPortfolioWallet`) — never persisted | Provider | Real-time |
 | Deposits | **Live provider** (`GET /programs/:programId/deposits` ← provider-observed on-chain deposits) — customer-initiated, so SDP has no intent moment to ledger | Provider | Real-time |
@@ -74,6 +75,25 @@ PRO-1634 owns whatever returns.
 > by guarded CAS on every observation, and listed as the audit surface. The
 > provider remains the authority for live status and final amounts; the
 > ledger relays provider truth, never replaces it.
+
+> **Catalogue vs figures — split by how fast the thing moves (2026-08-13).**
+> The catalogue row and the numbers on it now have different cadences and
+> different writers. The hourly sync owns identity, mints, liquidity terms and
+> ADMISSION; a five-minute refresh owns `current_apy` and volatile
+> `risk_metadata`, and it is UPDATE-only — it cannot insert, so it can never
+> admit a vault the catalogue gates refused, and its input type carries figures
+> only, so it cannot change what a strategy is. This keeps rates quotable
+> without breaking the one-source rule above: `GET /strategies` is still a plain
+> DB read, and freshness comes from cadence rather than from blending a live
+> overlay onto stored rows.
+>
+> **Catalogued ≠ fundable (2026-08-13).** With Kamino, the catalogue lists
+> instruments that do not exist on every cluster: its K-Vaults are mainnet-only
+> and are catalogued into BOTH environments so sandbox integrators browse the
+> real shelf. `host_cluster` states where the instrument lives, and the derived
+> `fundable` answers the caller's actual question. Three gates read the one
+> predicate — `assertKnownYieldSources` before any provider mutation, the wire
+> field, and the dashboard's strategy filter.
 
 **No new indexer.** V1 needs no event-sourced chain indexer: the catalogue
 comes from provider APIs and position truth is the live provider snapshot.

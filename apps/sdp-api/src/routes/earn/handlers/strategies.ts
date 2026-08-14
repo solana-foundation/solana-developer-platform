@@ -1,4 +1,10 @@
-import type { EarnStrategy, EarnStrategyResponse, ListEarnStrategiesResponse } from "@sdp/types";
+import { isClusterFundableInEnvironment } from "@sdp/earn";
+import type {
+  EarnStrategy,
+  EarnStrategyResponse,
+  ListEarnStrategiesResponse,
+  SdpEnvironment,
+} from "@sdp/types";
 import type { EarnStrategyRow } from "@/db/repositories";
 import { notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -11,6 +17,11 @@ import { listResponse, pageWindow, parseParams, parseQuery } from "./shared";
  * strategy read. Keep the terms here at the API policy boundary rather than in
  * Ground's client or the sync, so the DB continues to reflect what Ground
  * reports and pagination can exclude the rows before applying its window.
+ *
+ * Note this is a different question from `fundable` below, and the two must
+ * stay separate: this hides rows SDP has decided not to SHOW, while `fundable`
+ * states whether an instrument the caller CAN see exists on their cluster. A
+ * hidden row is absent; an un-fundable row is present and honest about itself.
  */
 const HIDDEN_STRATEGY_TERMS = ["aave", "morpho"] as const;
 
@@ -21,7 +32,13 @@ function isHiddenStrategy(row: EarnStrategyRow): boolean {
   return HIDDEN_STRATEGY_TERMS.some((term) => searchable.includes(term));
 }
 
-export function mapToEarnStrategy(row: EarnStrategyRow): EarnStrategy {
+/**
+ * Takes the caller's environment because `fundable` is derived per request, not
+ * stored: the catalogue is platform-global and the same row answers differently
+ * to a sandbox and a production caller. A mainnet-only provider's row is listed
+ * in both and fundable in one — see `hostCluster` in @sdp/types.
+ */
+export function mapToEarnStrategy(row: EarnStrategyRow, environment: SdpEnvironment): EarnStrategy {
   return {
     id: row.id,
     provider: row.provider,
@@ -37,6 +54,8 @@ export function mapToEarnStrategy(row: EarnStrategyRow): EarnStrategy {
     redemptionDelayDays: row.redemption_delay_days ?? undefined,
     riskMetadata: row.risk_metadata,
     status: row.status,
+    hostCluster: row.host_cluster,
+    fundable: isClusterFundableInEnvironment(row.host_cluster, environment),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -66,8 +85,9 @@ export const listEarnStrategies = async (c: AppContext) => {
   const query = parseQuery(c, listEarnStrategiesQuerySchema);
 
   const repo = getEarnRepository(c);
+  const environment = resolveSdpEnvironment(c);
   const { rows, total } = await repo.listStrategies({
-    environment: resolveSdpEnvironment(c),
+    environment,
     sourceKind: query.sourceKind,
     apyType: query.apyType,
     liquidityTerm: query.liquidityTerm,
@@ -76,7 +96,7 @@ export const listEarnStrategies = async (c: AppContext) => {
   });
 
   const response: ListEarnStrategiesResponse = listResponse(query, total, {
-    strategies: rows.map(mapToEarnStrategy),
+    strategies: rows.map((row) => mapToEarnStrategy(row, environment)),
   });
 
   return success(c, response);
@@ -87,6 +107,8 @@ export const getEarnStrategy = async (c: AppContext) => {
 
   const strategy = await requireEarnStrategy(c, strategyId);
 
-  const response: EarnStrategyResponse = { strategy: mapToEarnStrategy(strategy) };
+  const response: EarnStrategyResponse = {
+    strategy: mapToEarnStrategy(strategy, resolveSdpEnvironment(c)),
+  };
   return success(c, response);
 };
