@@ -1,14 +1,22 @@
 name: Deploy sdp-api to Cloud Run (prod)
 
 on:
+  workflow_call:
+    inputs:
+      release_sha:
+        description: "Exact release commit to build and deploy"
+        type: string
+        required: true
+      release_tag:
+        description: "Version tag that must resolve to release_sha"
+        type: string
+        required: true
   workflow_dispatch:
     inputs:
       image_sha:
         description: "Existing 40-character Git SHA image tag to redeploy (run from main)"
         type: string
         required: true
-  release:
-    types: [published]
 
 permissions:
   contents: read
@@ -24,8 +32,9 @@ jobs:
     if: >-
       always() &&
       github.repository == 'solana-foundation/solana-developer-platform' &&
-      (github.event_name == 'release' ||
-       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+      github.ref == 'refs/heads/main' &&
+      ((inputs.release_sha != '' && inputs.release_tag != '') ||
+       (github.event_name == 'workflow_dispatch' && inputs.image_sha != ''))
     runs-on: ubuntu-latest
     timeout-minutes: 90
     environment: production
@@ -40,7 +49,7 @@ jobs:
     steps:
       - name: Validate deploy image SHA
         env:
-          DEPLOY_IMAGE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.image_sha || github.sha }}
+          DEPLOY_IMAGE_SHA: ${{ inputs.release_sha != '' && inputs.release_sha || inputs.image_sha }}
         run: |
           set -euo pipefail
           if [[ ! "${DEPLOY_IMAGE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
@@ -50,8 +59,15 @@ jobs:
           echo "DEPLOY_IMAGE_SHA=${DEPLOY_IMAGE_SHA}" >> "${GITHUB_ENV}"
 
       - name: Checkout
-        if: ${{ github.event_name == 'release' }}
+        if: ${{ inputs.release_sha != '' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.release_sha }}
+
+      - name: Verify release identity
+        if: ${{ inputs.release_sha != '' }}
+        run: .github/scripts/verify-release-identity.sh "${{ inputs.release_tag }}" "${{ inputs.release_sha }}"
 
       - name: Authenticate to GCP
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
@@ -63,18 +79,18 @@ jobs:
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
 
       - name: Configure Docker for Artifact Registry
-        if: ${{ github.event_name == 'release' }}
+        if: ${{ inputs.release_sha != '' }}
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
       - name: Build and push image
-        if: ${{ github.event_name == 'release' }}
+        if: ${{ inputs.release_sha != '' }}
         timeout-minutes: 20
         run: |
           set -euo pipefail
           VERSION="$(node -p "require('./package.json').version")"
           VERSION_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public:${VERSION}"
-          SHA_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public:${GITHUB_SHA}"
-          docker build -f apps/sdp-api/Dockerfile --build-arg GIT_SHA="${GITHUB_SHA}" \
+          SHA_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public:${DEPLOY_IMAGE_SHA}"
+          docker build -f apps/sdp-api/Dockerfile --build-arg GIT_SHA="${DEPLOY_IMAGE_SHA}" \
             -t "${VERSION_IMAGE}" -t "${SHA_IMAGE}" .
           docker push "${VERSION_IMAGE}"
           docker push "${SHA_IMAGE}"
@@ -103,7 +119,7 @@ jobs:
           echo "Deploying ${tagged_image} as ${resolved_image}" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Run database migrations
-        if: ${{ github.event_name == 'release' }}
+        if: ${{ inputs.release_sha != '' }}
         timeout-minutes: 15
         run: |
           gcloud run jobs update "${MIGRATE_JOB}" \

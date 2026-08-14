@@ -48,15 +48,33 @@ export function classifyProviderStatus(status: number): SdpEarnErrorCode {
   return "BAD_REQUEST";
 }
 
+/**
+ * The provider's own explanation, from whichever field it puts it in.
+ *
+ * `error` is read BOTH as an object carrying `message` and as a bare string,
+ * because providers disagree: Ground answers a rejected write with
+ * `{"error":"Invalid query params: unknown parameter(s)","code":"…"}`, and
+ * reading only `error.message` there yields `undefined` — every Ground 4xx
+ * degraded to the caller's fallback ("ground request failed with status 400"),
+ * which names the status and explains nothing. The reason a write was refused is
+ * the most useful sentence on this path; do not narrow these shapes again.
+ */
 export function extractProviderErrorMessage(payload: unknown, fallback: string): string {
   if (!payload || typeof payload !== "object") return fallback;
   const record = payload as {
-    error?: { message?: unknown };
+    error?: { message?: unknown } | string;
     message?: unknown;
     reason?: unknown;
   };
-  const message = record.error?.message ?? record.message ?? record.reason;
-  return typeof message === "string" && message.trim() ? message : fallback;
+  const error = typeof record.error === "string" ? record.error : record.error?.message;
+  // The first NON-BLANK candidate, not merely the first PRESENT one: a body
+  // carrying `error: ""` beside a real `message` would otherwise select the
+  // blank and degrade to the fallback, discarding the explanation it did send.
+  return (
+    [error, record.message, record.reason].find(
+      (candidate): candidate is string => typeof candidate === "string" && candidate.trim() !== ""
+    ) ?? fallback
+  );
 }
 
 export async function providerFetch<TBody = never>(

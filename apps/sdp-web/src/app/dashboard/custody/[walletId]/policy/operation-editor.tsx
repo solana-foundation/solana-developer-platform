@@ -1,12 +1,12 @@
 "use client";
 
-import type { WalletOperationFamily } from "@sdp/types";
 import { Check } from "lucide-react";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import {
   AUTHORING_RULE_ACTIONS,
+  type AuthorableOperationFamily,
   type AuthoringRuleAction,
   type PolicyAuthoringState,
   WALLET_OPERATION_FAMILIES,
@@ -29,7 +29,7 @@ export function OperationEditor({
 }) {
   const t = useTranslations();
 
-  function toggleFamily(family: WalletOperationFamily) {
+  function toggleFamily(family: AuthorableOperationFamily) {
     setPolicyState((current) => {
       const nextActions = { ...current.familyActions };
       if (nextActions[family]) delete nextActions[family];

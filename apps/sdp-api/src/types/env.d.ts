@@ -192,6 +192,7 @@ export interface Env {
   KORA_API_KEY?: string;
   KORA_CLOUD_RUN_AUDIENCE?: string;
   KORA_TIMEOUT_MS?: string;
+  KORA_PER_TRANSACTION_BUDGET_LAMPORTS?: string;
   KORA_SURFPOOL_SHIM?: string;
   KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS?: string;
 

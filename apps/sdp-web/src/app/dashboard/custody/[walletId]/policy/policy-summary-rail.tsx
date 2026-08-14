@@ -1,27 +1,29 @@
 "use client";
 
-import {
-  type PaymentWalletPolicy,
-  type PolicyProfileStatus,
-  WELL_KNOWN_TOKEN_BY_MINT,
-} from "@sdp/types";
+import type { PaymentWalletPolicy, PolicyProfileStatus } from "@sdp/types";
 import { ChevronRight, Copy } from "lucide-react";
 import { AnimatePresence } from "motion/react";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { shortenAddress } from "@/app/dashboard/payments/payments-overview.utils";
 import { TokenMark } from "@/components/token-mark";
-import { Badge } from "@/components/ui/badge";
 import { HeightReveal } from "@/components/ui/height-reveal";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
-import type { PolicyAssetOption, PolicyAuthoringState } from "./wallet-policy-authoring";
+import { PolicyAssetBadge } from "./policy-asset-badge";
+import {
+  type PolicyAssetOption,
+  type PolicyAuthoringState,
+  parseDestinationText,
+  WALLET_OPERATION_FAMILIES,
+} from "./wallet-policy-authoring";
 import {
   CATEGORY_OPTIONS,
   DEFAULT_ACTION_LABEL_KEYS,
-  operationControlCount,
+  FAMILY_LABEL_KEYS,
   type PolicyFlowWallet,
+  RULE_ACTION_LABEL_KEYS,
 } from "./wallet-policy-flow.shared";
 
 export function PolicySummaryRail({
@@ -29,14 +31,12 @@ export function PolicySummaryRail({
   policy,
   state,
   stepIndex,
-  destinationCount,
   assetOptions,
 }: {
   wallet: PolicyFlowWallet;
   policy: PaymentWalletPolicy;
   state: PolicyAuthoringState;
   stepIndex: number;
-  destinationCount: number;
   assetOptions: PolicyAssetOption[];
 }) {
   const t = useTranslations();
@@ -78,14 +78,36 @@ export function PolicySummaryRail({
   ];
 
   if (stepIndex >= 1 && state.categories.includes("limits")) {
-    const maxTransferAmount = state.maxTransferAmount.trim();
-    if (!maxTransferAmount) {
+    const configuredLimits = state.limits.filter((limit) => limit.max.trim() !== "");
+    if (configuredLimits.length === 0) {
       rows.push({
         label: t("DashboardCustody.policyReviewTransferLimits"),
         value: t("DashboardCustody.policyNotConfigured"),
       });
     } else {
-      rows.push({ label: t("DashboardCustody.policyPerTransaction"), value: maxTransferAmount });
+      const limitValues = configuredLimits.map((limit) => {
+        const option = assetByMint.get(limit.asset);
+        const assetLabel = option ? option.token : shortenAddress(limit.asset);
+        return (
+          <span key={limit.asset} className="flex items-center gap-2" title={limit.asset}>
+            <TokenMark
+              mint={limit.asset}
+              symbol={option ? option.token : undefined}
+              logoUrl={option ? option.imageUrl : undefined}
+              size="sm"
+            />
+            <span className="min-w-0 truncate text-sm font-medium text-primary">
+              {limit.max.trim()} {assetLabel}
+            </span>
+            <PolicyAssetBadge mint={limit.asset} option={option} />
+          </span>
+        );
+      });
+      rows.push({
+        label: t("DashboardCustody.policyPerTransaction"),
+        collapsedCount: configuredLimits.length,
+        value: limitValues,
+      });
     }
   }
   if (stepIndex >= 1 && state.categories.includes("assets")) {
@@ -101,13 +123,7 @@ export function PolicySummaryRail({
               <span className="min-w-0 truncate text-sm font-medium text-primary">
                 {option?.token ?? t("DashboardCustody.policyCustomMint")}
               </span>
-              {WELL_KNOWN_TOKEN_BY_MINT.has(mint) ? null : option?.sdpIssued ? (
-                <Badge variant="outline" className="shrink-0">
-                  {t("Shared.SharedComponents.sdpMintedToken")}
-                </Badge>
-              ) : (
-                <Badge className="shrink-0">{t("DashboardCustody.policyAssetBadgeCustom")}</Badge>
-              )}
+              <PolicyAssetBadge mint={mint} option={option} />
               <span className="ml-auto shrink-0 text-xs text-muted">{shortenAddress(mint)}</span>
             </span>
           );
@@ -121,16 +137,65 @@ export function PolicySummaryRail({
     }
   }
   if (stepIndex >= 2 && state.categories.includes("destinations")) {
-    rows.push({
-      label: t("DashboardCustody.policySummaryDestinations"),
-      value: String(destinationCount),
-    });
+    const destinationEntries = [
+      ...parseDestinationText(state.destinationAllowText).valid.map((address) => ({
+        address,
+        action: "allow" as const,
+      })),
+      ...parseDestinationText(state.destinationBlockText).valid.map((address) => ({
+        address,
+        action: "deny" as const,
+      })),
+    ];
+    if (destinationEntries.length === 0) {
+      rows.push({
+        label: t("DashboardCustody.policySummaryDestinations"),
+        value: t("DashboardCustody.policyNotConfigured"),
+      });
+    } else {
+      rows.push({
+        label: t("DashboardCustody.policySummaryDestinations"),
+        collapsedCount: destinationEntries.length,
+        value: destinationEntries.map((entry) => (
+          <span
+            key={`${entry.action}:${entry.address}`}
+            className="block text-sm font-medium text-primary"
+            title={entry.address}
+          >
+            {shortenAddress(entry.address)} · {t(RULE_ACTION_LABEL_KEYS[entry.action])}
+          </span>
+        )),
+      });
+    }
   }
   if (stepIndex >= 2 && state.categories.includes("operations")) {
-    rows.push({
-      label: t("DashboardCustody.policyReviewOperationControls"),
-      value: String(operationControlCount(state)),
-    });
+    const operationControls = [
+      ...WALLET_OPERATION_FAMILIES.flatMap((family) => {
+        const action = state.familyActions[family];
+        return action ? [{ key: family, label: t(FAMILY_LABEL_KEYS[family]), action }] : [];
+      }),
+      ...state.operationTypeRules.map((rule) => ({
+        key: rule.value,
+        label: rule.value,
+        action: rule.action,
+      })),
+    ];
+    if (operationControls.length === 0) {
+      rows.push({
+        label: t("DashboardCustody.policyReviewOperationControls"),
+        value: t("DashboardCustody.policyNotConfigured"),
+      });
+    } else {
+      rows.push({
+        label: t("DashboardCustody.policyReviewOperationControls"),
+        collapsedCount: operationControls.length,
+        value: operationControls.map((control) => (
+          <span key={control.key} className="block text-sm font-medium text-primary">
+            {control.label} · {t(RULE_ACTION_LABEL_KEYS[control.action])}
+          </span>
+        )),
+      });
+    }
   }
 
   async function copyAddress() {
