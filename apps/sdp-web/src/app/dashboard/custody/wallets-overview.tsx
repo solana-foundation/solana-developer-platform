@@ -38,6 +38,7 @@ interface WalletsOverviewProps {
   canManageCustody: boolean;
   enabledProviders: KnownCustodyProvider[];
   configsError: string | null;
+  showConnectionsLink: boolean;
   wallets: CustodyWalletSummary[];
   walletsError: string | null;
   onCreateWallet: OpenCreateWallet;
@@ -242,6 +243,7 @@ export function WalletsOverview({
   canManageCustody,
   enabledProviders,
   configsError,
+  showConnectionsLink,
   wallets,
   walletsError,
   onCreateWallet,
@@ -405,11 +407,20 @@ export function WalletsOverview({
           ) : null}
         </div>
 
-        {canManageCustody && enabledProviderEntries.length > 0 ? (
-          <Button type="button" className="w-full sm:w-auto" onClick={() => onCreateWallet(null)}>
-            {t("DashboardCustody.createWallet")}
-          </Button>
-        ) : null}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          {showConnectionsLink ? (
+            <Button asChild variant="secondary" className="w-full sm:w-auto">
+              <Link href="/dashboard/wallets/connections">
+                {t("Shared.dashboardShell.connections")}
+              </Link>
+            </Button>
+          ) : null}
+          {canManageCustody && enabledProviderEntries.length > 0 ? (
+            <Button type="button" className="w-full sm:w-auto" onClick={() => onCreateWallet(null)}>
+              {t("DashboardCustody.createWallet")}
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       <div aria-busy={searchIsPending} data-wallet-search-results>
