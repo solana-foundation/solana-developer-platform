@@ -1,16 +1,6 @@
 name: Deploy sdp-web to Vercel (prod)
 
 on:
-  workflow_call:
-    inputs:
-      release_sha:
-        description: "Exact release commit to build and deploy"
-        type: string
-        required: true
-      release_tag:
-        description: "Version tag that must resolve to release_sha"
-        type: string
-        required: true
   workflow_dispatch:
     inputs:
       ref:
@@ -31,24 +21,16 @@ jobs:
     if: >-
       github.repository == 'solana-foundation/solana-developer-platform' &&
       github.ref == 'refs/heads/main' &&
-      ((inputs.release_sha != '' && inputs.release_tag != '') ||
-       (github.event_name == 'workflow_dispatch' && inputs.ref != ''))
+      inputs.ref != ''
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: production
-    env:
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           fetch-depth: 0
-          ref: ${{ inputs.release_sha != '' && inputs.release_sha || inputs.ref }}
-
-      - name: Verify release identity
-        if: ${{ inputs.release_sha != '' }}
-        run: .github/scripts/verify-release-identity.sh "${{ inputs.release_tag }}" "${{ inputs.release_sha }}"
+          ref: ${{ inputs.ref }}
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -58,11 +40,17 @@ jobs:
       - name: Install Vercel CLI
         run: npm install --global vercel@58.9.4
 
-      - name: Pull Vercel environment
-        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Build and deploy production artifact
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          : "${VERCEL_ORG_ID:?VERCEL_ORG_ID is not configured in the production environment}"
+          : "${VERCEL_PROJECT_ID:?VERCEL_PROJECT_ID is not configured in the production environment}"
+          : "${VERCEL_TOKEN:?VERCEL_TOKEN is not configured in the production environment}"
 
-      - name: Build production artifact
-        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
-
-      - name: Deploy prebuilt artifact
-        run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+          vercel pull --yes --environment=production --token="${VERCEL_TOKEN}"
+          vercel build --prod --token="${VERCEL_TOKEN}"
+          vercel deploy --prebuilt --prod --token="${VERCEL_TOKEN}"

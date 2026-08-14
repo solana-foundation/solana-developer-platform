@@ -24,9 +24,22 @@ export type AuthoringRuleAction = Exclude<
 export type AuthoringDefaultAction = Exclude<PolicyDefaultAction, "review">;
 export type DestinationMode = "allowlist" | "blocklist";
 
+export const WALLET_OPERATION_FAMILIES = [
+  "payment",
+  "ramp",
+  "issuance",
+] as const satisfies readonly WalletOperationFamily[];
+
+export type AuthorableOperationFamily = (typeof WALLET_OPERATION_FAMILIES)[number];
+
 export interface OperationTypeRuleInput {
   value: string;
   action: AuthoringRuleAction;
+}
+
+export interface PolicyLimitInput {
+  asset: string;
+  max: string;
 }
 
 export interface PolicyAssetOption {
@@ -137,12 +150,12 @@ export function buildPolicyAssetOptions(
 export interface PolicyAuthoringState {
   defaultAction: AuthoringDefaultAction;
   categories: RestrictionCategory[];
-  maxTransferAmount: string;
+  limits: PolicyLimitInput[];
   assets: string[];
   destinationMode: DestinationMode;
   destinationAllowText: string;
   destinationBlockText: string;
-  familyActions: Partial<Record<WalletOperationFamily, AuthoringRuleAction>>;
+  familyActions: Partial<Record<AuthorableOperationFamily, AuthoringRuleAction>>;
   operationTypeRules: OperationTypeRuleInput[];
   passthroughRules: PolicyRule[];
 }
@@ -158,7 +171,7 @@ export interface StoredPolicyDraft {
 
 export interface PolicyValidationErrors {
   intent?: "restriction_required";
-  maxTransferAmount?: "invalid_decimal" | "assets_required";
+  limits?: "invalid_asset" | "invalid_decimal" | "duplicate_asset";
   assets?: "invalid_asset";
   operations?: "invalid_operation_type";
   review?: "no_restrictions";
@@ -179,15 +192,8 @@ export interface ParsedDestinations {
 
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
-export const WALLET_OPERATION_FAMILIES = [
-  "transfer",
-  "payment",
-  "ramp",
-  "issuance",
-  "raw_sign",
-  "program",
-  "provider_admin",
-] as const satisfies readonly WalletOperationFamily[];
+/** Id prefix shared by every wizard-authored per-asset transfer-cap rule. */
+export const PER_TRANSACTION_LIMIT_RULE_ID_PREFIX = "per-transaction-limit";
 
 export const AUTHORING_RULE_ACTIONS = [
   "allow",
@@ -243,16 +249,23 @@ function normalizeAuthoringDefaultAction(action: PolicyDefaultAction): Authoring
   return action === "review" ? "approval_required" : action;
 }
 
-function isWalletOperationFamily(value: unknown): value is WalletOperationFamily {
-  return WALLET_OPERATION_FAMILIES.includes(value as WalletOperationFamily);
+function isAuthorableOperationFamily(
+  value: WalletOperationFamily
+): value is AuthorableOperationFamily {
+  return WALLET_OPERATION_FAMILIES.some((family) => family === value);
 }
 
 function operationFamiliesFromRule(
   rule: Extract<PolicyRule, { kind: "operation_family" }>
 ): WalletOperationFamily[] {
-  return uniqueValues(rule.families ?? (rule.family ? [rule.family] : [])).filter(
-    isWalletOperationFamily
-  );
+  const families: WalletOperationFamily[] = [];
+  if (rule.families) {
+    for (const family of rule.families) {
+      if (!families.includes(family)) families.push(family);
+    }
+  }
+  if (rule.family && !families.includes(rule.family)) families.push(rule.family);
+  return families;
 }
 
 function operationTypesFromRule(rule: Extract<PolicyRule, { kind: "operation_type" }>): string[] {
@@ -272,17 +285,6 @@ function assetsFromRule(rule: Extract<PolicyRule, { kind: "asset" }>): string[] 
  */
 function amountRuleAssets(rule: Extract<PolicyRule, { kind: "amount" }>): string[] {
   return uniqueValues(rule.assets ?? (rule.asset ? [rule.asset] : []));
-}
-
-/**
- * Whether two lists contain the same members, order-insensitively.
- *
- * @param left - First list.
- * @param right - Second list.
- * @returns True when both lists hold exactly the same values.
- */
-function sameMembers(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((value) => right.includes(value));
 }
 
 export function categoryForRule(rule: PolicyRule): RestrictionCategory | null {
@@ -351,6 +353,8 @@ export function parseDestinationText(value: string): ParsedDestinations {
 export function createPolicyAuthoringState(policy: PaymentWalletPolicy): PolicyAuthoringState {
   const rules = policy.rules;
   const categories: RestrictionCategory[] = [];
+  const limits: PolicyLimitInput[] = [];
+  const limitedAssets = new Set<string>();
   const assets: string[] = [];
   const allowDestinations: string[] = [];
   const blockDestinations: string[] = [];
@@ -359,19 +363,25 @@ export function createPolicyAuthoringState(policy: PaymentWalletPolicy): PolicyA
   const passthroughRules: PolicyRule[] = [];
   let hasEditableAllowRule = false;
   let hasEditableBlockRule = false;
-  let editableAmountRule: Extract<PolicyRule, { kind: "amount" }> | null = null;
 
   for (const rule of rules) {
     switch (rule.kind) {
       case "operation_family": {
         const families = operationFamiliesFromRule(rule);
         const action = normalizeAuthoringRuleAction(rule.action);
+        // Retired families gate nothing, so rules naming them are erased on the
+        // next save rather than preserved forever as unreadable advanced rules;
+        // authorable families named alongside them are adopted into the editor.
+        const authorableFamilies = families.filter(isAuthorableOperationFamily);
+        if (families.length > 0 && authorableFamilies.length === 0) {
+          break;
+        }
         if (families.length === 0 || !action) {
           passthroughRules.push(rule);
           addCategory(categories, "operations");
           break;
         }
-        for (const family of families) familyActions[family] = action;
+        for (const family of authorableFamilies) familyActions[family] = action;
         addCategory(categories, "operations");
         break;
       }
@@ -432,13 +442,21 @@ export function createPolicyAuthoringState(policy: PaymentWalletPolicy): PolicyA
         break;
       }
       case "amount": {
+        const ruleAssets = amountRuleAssets(rule);
+        // The API rejects asset-less amount rules on write, so passing one
+        // through would make every future save of this wallet's policy fail.
+        // Dropping it here surfaces as a visible removal in the review diff.
+        if (ruleAssets.length === 0) {
+          break;
+        }
+        const max = rule.max;
         const isEditableMaximum =
-          Boolean(rule.max) &&
-          !rule.min &&
-          amountRuleAssets(rule).length > 0 &&
-          (!rule.action || rule.action === "allow");
-        if (isEditableMaximum && !editableAmountRule) {
-          editableAmountRule = rule;
+          max !== undefined && rule.min === undefined && (!rule.action || rule.action === "allow");
+        if (isEditableMaximum && !ruleAssets.some((asset) => limitedAssets.has(asset))) {
+          for (const asset of ruleAssets) {
+            limits.push({ asset, max });
+            limitedAssets.add(asset);
+          }
         } else {
           passthroughRules.push(rule);
         }
@@ -446,16 +464,20 @@ export function createPolicyAuthoringState(policy: PaymentWalletPolicy): PolicyA
         break;
       }
       case "approval": {
+        const families = rule.families;
         const isFamilyOnly =
-          Boolean(rule.families?.length) &&
+          families !== undefined &&
+          families.length > 0 &&
           !rule.operationTypes?.length &&
           !rule.assets?.length &&
           !rule.approvalGroupId &&
           (!rule.action || rule.action === "approval_required");
         if (isFamilyOnly) {
-          for (const family of rule.families ?? []) {
-            if (isWalletOperationFamily(family)) familyActions[family] = "approval_required";
+          const authorableFamilies = families.filter(isAuthorableOperationFamily);
+          if (authorableFamilies.length === 0) {
+            break;
           }
+          for (const family of authorableFamilies) familyActions[family] = "approval_required";
         } else {
           passthroughRules.push(rule);
         }
@@ -471,23 +493,12 @@ export function createPolicyAuthoringState(policy: PaymentWalletPolicy): PolicyA
     addCategory(categories, "destinations");
   }
 
-  // The wizard rebuilds the per-transaction limit with the allowed-assets
-  // selection as its scope, so an amount rule scoped to a different asset set
-  // must ride along untouched rather than be silently rescoped on save.
   const uniqueAssets = uniqueValues(assets);
-  let maxTransferAmount = "";
-  if (editableAmountRule) {
-    if (sameMembers(amountRuleAssets(editableAmountRule), uniqueAssets)) {
-      maxTransferAmount = editableAmountRule.max ?? "";
-    } else {
-      passthroughRules.push(editableAmountRule);
-    }
-  }
 
   return {
     defaultAction: normalizeAuthoringDefaultAction(policy.defaultAction),
     categories,
-    maxTransferAmount,
+    limits,
     assets: uniqueAssets,
     destinationMode:
       blockDestinations.length > 0 && allowDestinations.length === 0 ? "blocklist" : "allowlist",
@@ -590,20 +601,20 @@ export function buildPolicyPayload(
     }
   }
 
-  // Amount bounds are always keyed by asset mint, so the per-transaction
-  // limit is scoped to the wizard's allowed-assets selection; without assets
-  // the limit cannot be expressed and validation reports it instead.
-  const maxTransferAmount = state.maxTransferAmount.trim();
-  const limitAssets = uniqueValues(state.assets);
-  if (categories.has("limits") && maxTransferAmount && limitAssets.length > 0) {
-    rules.push({
-      id: "per-transaction-limit",
-      kind: "amount",
-      max: maxTransferAmount,
-      assets: limitAssets,
-      action: "allow",
-      name: "Per transaction limit",
-    });
+  if (categories.has("limits")) {
+    for (const limit of state.limits) {
+      const max = limit.max.trim();
+      if (!max) continue;
+      const asset = limit.asset.trim();
+      rules.push({
+        id: `${PER_TRANSACTION_LIMIT_RULE_ID_PREFIX}-${asset}`,
+        kind: "amount",
+        asset,
+        max,
+        action: "allow",
+        name: "Per transaction limit",
+      });
+    }
   }
 
   return {
@@ -633,14 +644,15 @@ export function validatePolicyState(state: PolicyAuthoringState): PolicyValidati
     }
   }
 
-  if (!isValidDecimal(state.maxTransferAmount)) {
-    errors.maxTransferAmount = "invalid_decimal";
-  } else if (
-    categories.has("limits") &&
-    state.maxTransferAmount.trim() &&
-    uniqueValues(state.assets).length === 0
-  ) {
-    errors.maxTransferAmount = "assets_required";
+  if (categories.has("limits")) {
+    const limitAssets = state.limits.map((limit) => limit.asset.trim());
+    if (state.limits.some((limit) => !isValidSolanaAddress(limit.asset))) {
+      errors.limits = "invalid_asset";
+    } else if (new Set(limitAssets).size !== limitAssets.length) {
+      errors.limits = "duplicate_asset";
+    } else if (state.limits.some((limit) => !isValidDecimal(limit.max))) {
+      errors.limits = "invalid_decimal";
+    }
   }
 
   if (categories.has("assets") && state.assets.some((asset) => !isValidSolanaAddress(asset))) {
@@ -687,7 +699,12 @@ function isStoredPolicyDraft(
     Boolean(state) &&
     hasOnlyKnownValues([state?.defaultAction], POLICY_DEFAULT_ACTIONS) &&
     hasOnlyKnownValues(state?.categories, RESTRICTION_CATEGORIES) &&
-    typeof state?.maxTransferAmount === "string" &&
+    Array.isArray(state.limits) &&
+    state.limits.every((limit) => {
+      if (!limit || typeof limit !== "object") return false;
+      if (!("asset" in limit) || !("max" in limit)) return false;
+      return typeof limit.asset === "string" && typeof limit.max === "string";
+    }) &&
     Array.isArray(state.assets) &&
     state.assets.every((asset) => typeof asset === "string") &&
     (state.destinationMode === "allowlist" || state.destinationMode === "blocklist") &&
@@ -713,18 +730,59 @@ export function savePolicyDraft(storage: StorageLike, draft: StoredPolicyDraft):
  * @param state - The parsed draft state, possibly carrying retired fields.
  * @returns The state restricted to the current schema.
  */
+/**
+ * Whether a stored rule is one `createPolicyAuthoringState` erases: an
+ * asset-less amount rule, or a rule scoped only to retired operation
+ * families. Drafts saved by older builds captured such rules in
+ * `passthroughRules` before erasure existed, so loading filters them with the
+ * same decisions the parser applies to the stored policy.
+ *
+ * @param rule - The stored rule to classify.
+ * @returns True when the rule must not survive a draft load.
+ */
+function isErasedStoredRule(rule: PolicyRule): boolean {
+  switch (rule.kind) {
+    case "amount":
+      return amountRuleAssets(rule).length === 0;
+    case "operation_family": {
+      const families = operationFamiliesFromRule(rule);
+      return families.length > 0 && !families.some(isAuthorableOperationFamily);
+    }
+    case "approval": {
+      const families = rule.families;
+      return (
+        families !== undefined &&
+        families.length > 0 &&
+        !rule.operationTypes?.length &&
+        !rule.assets?.length &&
+        !rule.approvalGroupId &&
+        (!rule.action || rule.action === "approval_required") &&
+        !families.some(isAuthorableOperationFamily)
+      );
+    }
+    default:
+      return false;
+  }
+}
+
 function sanitizeStoredPolicyState(state: PolicyAuthoringState): PolicyAuthoringState {
+  const familyActions: PolicyAuthoringState["familyActions"] = {};
+  for (const family of WALLET_OPERATION_FAMILIES) {
+    const action = state.familyActions[family];
+    if (action) familyActions[family] = action;
+  }
+
   return {
     defaultAction: state.defaultAction,
     categories: state.categories,
-    maxTransferAmount: state.maxTransferAmount,
+    limits: state.limits,
     assets: state.assets,
     destinationMode: state.destinationMode,
     destinationAllowText: state.destinationAllowText,
     destinationBlockText: state.destinationBlockText,
-    familyActions: state.familyActions,
+    familyActions,
     operationTypeRules: state.operationTypeRules,
-    passthroughRules: state.passthroughRules,
+    passthroughRules: state.passthroughRules.filter((rule) => !isErasedStoredRule(rule)),
   };
 }
 

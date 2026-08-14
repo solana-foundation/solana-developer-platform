@@ -49,7 +49,7 @@ describe("AdvancedSettingsEditor", () => {
       />
     );
     expect(withAccess).toContain("Access control");
-    expect(withAccess).toContain("Allow list");
+    expect(withAccess).toContain("Allowlist");
     // The single-select control is backed by native radio inputs, not tab-role
     // buttons (there are no tabpanels behind it) — a screen-reader correctness guard.
     expect(withAccess).toContain('type="radio"');
@@ -96,12 +96,18 @@ describe("AdvancedSettingsEditor", () => {
     expect(markup).toContain("configured later on the compliance tab");
   });
 
-  it("offers quick-fill presets, hidden once the on-chain settings are read-only", () => {
+  it("offers add-on bundles, hidden once the on-chain settings are read-only", () => {
     const editable = renderWithI18n(<AdvancedSettingsEditor {...baseProps} />);
-    expect(editable).toContain("Start from a scenario");
+    expect(editable).toContain("Common add-ons");
 
     const readOnly = renderWithI18n(<AdvancedSettingsEditor {...baseProps} settingsReadOnly />);
-    expect(readOnly).not.toContain("Start from a scenario");
+    expect(readOnly).not.toContain("Common add-ons");
+  });
+
+  it("excludes the profile-applied default combo from the add-on chips", () => {
+    const markup = renderWithI18n(<AdvancedSettingsEditor {...baseProps} />);
+    expect(markup).not.toContain("Regulated stablecoin");
+    expect(markup).toContain("Closed network");
   });
 
   it("hides unselected on-chain options once deployed, keeping required ones", () => {
