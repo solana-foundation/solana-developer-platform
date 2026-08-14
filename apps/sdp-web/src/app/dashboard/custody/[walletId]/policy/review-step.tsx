@@ -39,13 +39,15 @@ export function ReviewStep({
     return action ? [{ family, action }] : [];
   });
 
-  const configuredLimits = state.limits.flatMap((limit) => {
-    const amount = limit.max.trim();
-    if (!amount) return [];
-    const option = assetByMint.get(limit.asset);
-    const asset = option ? option.token : shortenAddress(limit.asset);
-    return [{ amount, asset, limit, option }];
-  });
+  const configuredLimits = state.categories.includes("limits")
+    ? state.limits.flatMap((limit) => {
+        const amount = limit.max.trim();
+        if (!amount) return [];
+        const option = assetByMint.get(limit.asset);
+        const asset = option ? option.token : shortenAddress(limit.asset);
+        return [{ amount, asset, limit, option }];
+      })
+    : [];
 
   const reviewRows: Array<{
     label: string;
