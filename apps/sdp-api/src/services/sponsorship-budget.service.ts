@@ -25,6 +25,7 @@ import {
   type SponsorshipReservation,
   type SponsorshipReservationStatus,
 } from "@/db/repositories/sponsorship-budget.repository";
+import { describeError, logEvent } from "@/runtime/money-path-events";
 import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
 import type { Env } from "@/types/env";
 import type { SponsorshipScope } from "./sponsorship.service";
@@ -666,6 +667,14 @@ export class BudgetedFeePayment implements FeePaymentPort {
 
   private async tripBreaker(network: SponsorshipNetwork, reason: string): Promise<void> {
     const policy = await this.repository.tripGlobalBreaker(network, reason);
+    logEvent("error", {
+      event: "sdp_api_sponsorship_breaker_tripped",
+      network,
+      reason,
+      already_tripped: policy === null,
+      organization_id: this.scope.organizationId,
+      project_id: this.scope.projectId,
+    });
     if (policy) await this.budgetRedis.syncPolicy(policy);
   }
 
@@ -690,6 +699,14 @@ export class BudgetedFeePayment implements FeePaymentPort {
     breakerReason: string,
     error?: unknown
   ): Promise<never> {
+    logEvent("error", {
+      event: "sdp_api_sponsorship_accounting_unavailable",
+      network,
+      reason: breakerReason,
+      organization_id: this.scope.organizationId,
+      project_id: this.scope.projectId,
+      ...(error === undefined ? {} : describeError(error)),
+    });
     try {
       await this.tripBreaker(network, breakerReason);
     } catch {

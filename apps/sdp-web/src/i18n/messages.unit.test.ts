@@ -23,6 +23,7 @@ describe("i18n messages", () => {
     expect(isAppLocale("es")).toBe(true);
     expect(isAppLocale("fr")).toBe(true);
     expect(isAppLocale("pt")).toBe(true);
+    expect(isAppLocale("vi")).toBe(true);
     expect(isAppLocale("de")).toBe(false);
   });
 
@@ -31,6 +32,7 @@ describe("i18n messages", () => {
     expect(translate(getMessages("es"), "Home.contactUs")).toBe("Contáctanos");
     expect(translate(getMessages("fr"), "Home.contactUs")).toBe("Nous contacter");
     expect(translate(getMessages("pt"), "Home.contactUs")).toBe("Fale conosco");
+    expect(translate(getMessages("vi"), "Home.contactUs")).toBe("Liên hệ");
   });
 
   it("keeps non-English catalogs inventory-matched to English", () => {

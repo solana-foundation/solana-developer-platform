@@ -1,11 +1,10 @@
 "use client";
 
-import { Check, Pencil, X } from "lucide-react";
+import { PencilIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { useTranslations } from "@/i18n/provider";
 import { updateWalletLabelAction } from "./actions";
 
@@ -70,14 +69,16 @@ export function WalletLabelInlineEditor({
 
   if (isEditing) {
     return (
-      <div className="flex min-w-0 max-w-full items-center gap-1">
-        <Input
+      <div className="flex min-w-0 max-w-full items-center gap-1 border-b border-border-strong pb-1 focus-within:border-[var(--input-border-focus)]">
+        <input
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           maxLength={100}
           placeholder={t("DashboardCustody.untitled")}
-          className="h-8 min-w-0 w-full"
+          className="w-full min-w-0 border-0 bg-transparent p-0 text-primary placeholder:text-tertiary focus:outline-none disabled:opacity-50"
+          style={{ font: "inherit", letterSpacing: "inherit" }}
           disabled={isPending}
+          // biome-ignore lint/a11y/noAutofocus: editing starts from an explicit user action, so focus moving into the field is the expected behavior.
           autoFocus
           onKeyDown={(event) => {
             if (event.key === "Enter") {
@@ -91,26 +92,17 @@ export function WalletLabelInlineEditor({
             }
           }}
         />
-        <Button
-          type="button"
-          size="icon-xs"
-          onClick={handleSubmit}
-          disabled={isPending}
-          aria-label={t("DashboardCustody.saveWalletLabel")}
-          title={t("DashboardCustody.saveWalletLabel")}
-        >
-          <Check className="h-3 w-3" />
+        <Button type="button" size="xs" onClick={handleSubmit} disabled={isPending}>
+          {t("DashboardCustody.save")}
         </Button>
         <Button
           type="button"
           variant="outline"
-          size="icon-xs"
+          size="xs"
           onClick={handleCancel}
           disabled={isPending}
-          aria-label={t("DashboardCustody.cancelWalletLabelEdit")}
-          title={t("DashboardCustody.cancelWalletLabelEdit")}
         >
-          <X className="h-3 w-3" />
+          {t("DashboardCustody.cancel")}
         </Button>
       </div>
     );
@@ -131,7 +123,7 @@ export function WalletLabelInlineEditor({
           title={t("DashboardCustody.editWalletLabel")}
           className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
         >
-          <Pencil className="h-3 w-3" />
+          <PencilIcon className="h-3 w-3" />
         </Button>
       ) : null}
     </div>

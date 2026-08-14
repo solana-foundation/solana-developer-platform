@@ -327,7 +327,7 @@
     "rpcTitle": "RPC",
     "rpcDescription": "Solana RPC for this organization. One provider is active at a time; change it in Settings.",
     "rampsTitle": "Ramps",
-    "rampsDescription": "On-ramp and off-ramp rails used by deposits and payouts.",
+    "rampsDescription": "Onramp and offramp rails used by deposits and payouts.",
     "complianceTitle": "Compliance",
     "complianceDescription": "Screening and monitoring providers. Enabled per organization by arrangement.",
     "custodyUnavailable": "Custody connection state is unavailable right now. Reload to see what is installed before setting anything up.",
@@ -340,13 +340,13 @@
     "emptyTitle": "No integrations match",
     "emptyBody": "Try a different search or clear the filters.",
     "rpcSectionAction": "Change in Settings",
-    "rampMoonpayDescription": "Card and bank fiat on-ramp and off-ramp.",
+    "rampMoonpayDescription": "Card and bank fiat onramp and offramp.",
     "rampLightsparkDescription": "Fiat settlement rails over the Lightning Network.",
     "rampBvnkDescription": "Business payments between fiat and stablecoins.",
     "rampMoneygramDescription": "Cash and bank transfers through the MoneyGram network.",
-    "rampCoinbaseDescription": "Fiat on-ramp and off-ramp through Coinbase accounts.",
+    "rampCoinbaseDescription": "Fiat onramp and offramp through Coinbase accounts.",
     "rampMuralDescription": "Stablecoin payouts and invoicing rails.",
-    "rampStripeDescription": "Fiat on-ramp through Stripe checkout.",
+    "rampStripeDescription": "Fiat onramp through Stripe checkout.",
     "complianceRangeDescription": "Transaction screening and risk monitoring for Solana.",
     "complianceEllipticDescription": "Blockchain analytics and transaction screening.",
     "complianceTrmDescription": "Risk intelligence and compliance monitoring.",
@@ -375,15 +375,14 @@
     "error": "Couldn't load notifications.",
     "retry": "Try again",
     "showMore": "Show more",
-    "emailUnavailable": "Email delivery is unavailable at the moment.",
     "types": {
       "workflow_execution": "Automation ran: {trigger}"
     },
     "triggerLabels": {
       "kyc_approved": "KYC approved",
       "kyc_rejected": "KYC rejected",
-      "onramp_settled": "On-ramp settled",
-      "offramp_settled": "Off-ramp settled",
+      "onramp_settled": "Onramp settled",
+      "offramp_settled": "Offramp settled",
       "recurring_payment_failed": "Recurring payment failed",
       "token_operation_completed": "Token operation completed"
     }
