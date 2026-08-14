@@ -44,19 +44,32 @@ const INVENTORY_ROOT = path.resolve(process.cwd(), ".earn-catalogue");
 const INVENTORY_FILE = path.join(INVENTORY_ROOT, "kamino.inventory.json");
 const REPORT_TARGET = path.resolve(process.cwd(), "../../docs/earn/kamino-catalogue-inventory.md");
 
+/** Base58, the only shape a Solana pubkey can take. */
+const BASE58_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+/**
+ * Every field is CONSTRAINED, not merely typed, because each one is a value a
+ * third party controls: anyone can create a Kamino vault and name it anything,
+ * and this snapshot is committed to the repo. Bounding the free-text fields and
+ * pinning the address-shaped ones is what keeps an upstream response from
+ * writing unbounded or malformed content into a tracked file — the schema is
+ * applied on WRITE as well as on read (see `runFetch`).
+ */
 const vaultRowSchema = z.object({
-  address: z.string(),
-  name: z.string(),
-  tokenMint: z.string(),
+  address: z.string().regex(BASE58_ADDRESS),
+  /** On-chain vault label; bounded because it is free text from upstream. */
+  name: z.string().max(200),
+  tokenMint: z.string().regex(BASE58_ADDRESS),
   /** Resolved symbol, or null when the mint is not a well-known token. */
-  tokenSymbol: z.string().nullable(),
-  tvlUsd: z.number().nullable(),
-  apy: z.string().nullable(),
-  holders: z.number().nullable(),
+  tokenSymbol: z.string().max(32).nullable(),
+  tvlUsd: z.number().finite().nullable(),
+  /** Recorded verbatim for the census, so bounded rather than pattern-matched. */
+  apy: z.string().max(64).nullable(),
+  holders: z.number().int().nonnegative().nullable(),
   outcome: z.enum(["catalogued", "dropped"]),
-  dropReason: z.string().nullable(),
-  sourceKind: z.string().nullable(),
-  curator: z.string().nullable(),
+  dropReason: z.string().max(64).nullable(),
+  sourceKind: z.string().max(32).nullable(),
+  curator: z.string().max(64).nullable(),
 });
 
 const inventorySchema = z.object({
@@ -78,8 +91,18 @@ const DROP_REASON_LABELS: Record<KaminoCatalogueDropReason, string> = {
   below_tvl_floor: `TVL below the $${KAMINO_MIN_TVL_USD.toLocaleString("en-US")} floor`,
 };
 
+/**
+ * Escape a value for one markdown table cell.
+ *
+ * Backslash FIRST, then pipe — order is the whole point. Escaping only the pipe
+ * leaves a trailing `\` in the input to pair with the `\` we add, so a vault
+ * named `foo\` renders `foo\\|` : the backslash escapes itself and the pipe
+ * becomes a live column separator, shifting every later cell in the row. Vault
+ * names are attacker-controlled in the sense that anyone can create a Kamino
+ * vault and name it anything, so this is the sanitiser, not a formality.
+ */
 function escapeCell(value: string): string {
-  return value.replace(/\|/g, "\\|");
+  return value.replaceAll("\\", "\\\\").replaceAll("|", "\\|");
 }
 
 function formatUsd(value: number | null): string {
@@ -284,8 +307,15 @@ async function runFetch(): Promise<void> {
     rows,
   };
 
+  // Validate BEFORE writing, not just when reading back. Everything above came
+  // off the network and this file is committed, so the schema is the boundary
+  // between an upstream response and a tracked artifact: a malformed or
+  // unbounded field fails the script here rather than landing in the repo and
+  // surfacing later as a render-time parse error.
+  const validated = inventorySchema.parse(inventory);
+
   await mkdir(INVENTORY_ROOT, { recursive: true });
-  await writeFile(INVENTORY_FILE, `${JSON.stringify(inventory, null, 2)}\n`, "utf8");
+  await writeFile(INVENTORY_FILE, `${JSON.stringify(validated, null, 2)}\n`, "utf8");
   console.log(`  wrote ${path.relative(process.cwd(), INVENTORY_FILE)}`);
 }
 

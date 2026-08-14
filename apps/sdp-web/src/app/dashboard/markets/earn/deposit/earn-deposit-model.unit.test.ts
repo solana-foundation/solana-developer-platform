@@ -65,6 +65,32 @@ describe("fundableStrategies", () => {
 
     expect(fundableStrategies([kept])).toEqual([kept]);
   });
+
+  /**
+   * Version skew, and the reason this is `!== false` rather than a truthiness
+   * check. The API is a separate deployable: a Vercel preview is a web-only
+   * deploy pointed at the already-deployed API, and any rollout can put web
+   * ahead of API. Both serve strategies with no `fundable` field at all.
+   *
+   * Reading that as "not fundable" blanks the whole catalogue — which is what
+   * the first preview of this branch actually did. Admitting it is safe: an API
+   * that omits the field has no mainnet-only provider registered, so it cannot
+   * be serving a row this filter would need to hide.
+   */
+  it("keeps strategies from an API too old to send `fundable`", () => {
+    // Built without the key rather than deleting it, so this really is the wire
+    // shape an older API returns — the field never existed on that response.
+    const { fundable: _omitted, ...fromOlderApi } = strategy({ id: "legacy" });
+
+    expect(fundableStrategies([fromOlderApi as EarnStrategy]).map((s) => s.id)).toEqual(["legacy"]);
+  });
+
+  it("still hides an explicit fundable:false from a current API", () => {
+    // The control: tolerating `undefined` must not tolerate a real `false`.
+    const refused = strategy({ id: "mainnet-only", fundable: false });
+
+    expect(fundableStrategies([refused])).toEqual([]);
+  });
 });
 
 describe("defaultStrategyFilters", () => {

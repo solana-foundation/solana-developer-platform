@@ -75,8 +75,20 @@ export function defaultStrategyFilters(): EarnStrategyFilters {
  * one. Never invert it into "hide unless known-bad".
  */
 export function fundableStrategies(strategies: readonly EarnStrategy[]): readonly EarnStrategy[] {
+  // `!== false`, NOT a truthiness check. The API is a separate deployable, so
+  // the type's promise that `fundable` is always present describes the CURRENT
+  // API, not necessarily the one answering: a Vercel preview (web-only, pointed
+  // at the deployed API) and any rollout where web ships ahead of API both see
+  // responses without the field. Truthiness there reads `undefined` as "not
+  // fundable" and blanks the ENTIRE catalogue — which is exactly what happened
+  // on the first preview of this branch.
+  //
+  // Absent is safe to admit: an API old enough to omit `fundable` is an API
+  // without a mainnet-only provider registered, so its catalogue holds no row
+  // this filter would need to hide. Once the API ships, the field is always
+  // present and the strict comparison does the real work.
   return strategies.filter(
-    (strategy) => strategy.fundable && strategyToken(strategy) !== undefined
+    (strategy) => strategy.fundable !== false && strategyToken(strategy) !== undefined
   );
 }
 
