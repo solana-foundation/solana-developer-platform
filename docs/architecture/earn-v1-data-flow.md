@@ -105,11 +105,27 @@ V1 precisely because observing customer-initiated transfers from chain is
 indexer-shaped work. If V2 needs richer on-chain history (per-block share
 price, protocol events), that's the point to evaluate an indexer — not V1.
 
-## Execution era (PRO-1634 — not V1, and no longer in the tree)
+## Execution era (PRO-1634 — arrived for `vault_direct`)
 
-V1's funding model is "send stablecoins to the program's Solana deposit
-address"; there are no SDP-built deposit/withdrawal transactions, no custody
-signing, and no per-strategy movement ledger. The execution-era design that
+**This is now half true.** For the CUSTODIAL shape it still holds exactly: a
+Ground program is funded by sending stablecoins to its deposit address, with no
+SDP-built transaction and no custody signing.
+
+For the NON-CUSTODIAL (`vault_direct`) shape it no longer does. A K-Vault has no
+address to send to, so the only way money moves is SDP building an instruction,
+signing it with an organization custody wallet and submitting it. That path
+exists: `@sdp/kamino` builds the plan, `POST /v1/earn/vault-deposits` signs and
+submits, and `earn_vault_movements` (migration 0058) ledgers it — written at
+intent BEFORE signing, because the chain has no request-id dedupe and a crash
+between signing and recording is otherwise unrecoverable. `earn_vault_positions`
+records only WHICH (wallet, vault) pairs an org holds; shares and value stay live
+chain reads, so the ledger-vs-live rule above is unchanged.
+
+Still outstanding for that shape: the withdraw counterpart and the Active-tab
+snapshot. Until both land, a vault position can be entered and not exited through
+SDP — so Kamino must not become creatable on mainnet.
+
+The original V1 note, still accurate for the custodial model: The execution-era design that
 used to be diagrammed here (per-strategy `createDeposit`/`createWithdrawal`,
 `/movements/:id/submit`, movement webhooks + `getMovementStatus` reconcile
 polling) was **removed from the codebase by PRO-1628** because none of it had

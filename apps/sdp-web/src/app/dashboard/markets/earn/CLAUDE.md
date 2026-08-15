@@ -235,18 +235,29 @@ sentence about timing must trace to one of those.
   resolved from the `programId` the confirm returned.
 - `earn-deposit-chrome.tsx` / `earn-deposit-outcome.tsx` — shared primitives.
 
-### NOT BUILT: the simplified deposit run
+### The vault deposit run (BUILT)
 
-The intended shape is **Deposit → wallet → amount → summary → hand-off**, and it
-is not written. The Opportunities tab's Deposit link still enters the wizard above
-(wallet → strategy → review). Two things constrain the design, both discovered
-rather than assumed:
+Shipped as **`earn-vault-deposit-modal.tsx`** — wallet → amount → confirm, opened
+IN PLACE from an Opportunities row rather than navigating to `/deposit`.
 
-- **SDP has no code path that moves money into a vault, for either provider
-  shape.** A custodial program is funded by the customer sending stablecoins to
-  the program's address; a `vault_direct` vault is funded by the customer's own
-  wallet signing an on-chain instruction. So the "amount" step is context for a
-  hand-off, never an execution.
+A modal, not a page, for symmetry: `earn-withdraw-modal.tsx` is the money-OUT
+verb for the same position and is already a modal, and two halves of one
+position behaving differently is a difference no reader can explain. The
+full-page wizard keeps its shape because the CUSTODIAL run is a three-step
+provisioning flow ending in a program create; this is two short steps against a
+strategy the reader already chose by clicking its row.
+
+`EARN_VAULT_DEPOSITS_ENABLED` (`earn-surfacing.ts`) gates it, and it stayed
+`false` through every intermediate commit — flipping only once the modal existed.
+Keep that discipline: an enabled Deposit link with no flow behind it is the
+dead-end review caught on #1340.
+
+Two things still constrain the design, both discovered rather than assumed:
+
+- **Confirm MOVES MONEY here, unlike the custodial run.** The custodial wizard
+  provisions a wallet and hands back an address to fund later; this signs and
+  submits on the spot, so the copy says so and the modal cannot be dismissed
+  while submitting.
 - **A `vault_direct` completion must never present the vault as a send target.**
   Kamino's `providerReference` is the vault's PROGRAM ACCOUNT — stablecoins sent
   there are lost. `earnDepositStyle` (@sdp/types) is what the completion step
@@ -396,6 +407,12 @@ by hand (`earn-deposit-model.unit.test.ts`). Caught in review on #1340.
 reason: a `vault_direct` vault takes deposits from the customer's own wallet and
 SDP does not route them yet, while a `custodial` one is simply not being offered.
 Both answer "no" today.
+
+**Vault positions have no UI exit yet.** `POST /v1/earn/vault-deposits` has no
+withdraw counterpart, and the Active tab still reads only `earn_provider_wallets`
+(custodial), so a vault position does not render there. Both are outstanding, and
+until they land Kamino must not be creatable on mainnet — ADR 0002 forbids a
+position you can enter and not exit.
 
 **Withdraw is never gated on surfacing** (ADR 0002 — money out beats money off),
 and the withdraw modal's focus-return fallback

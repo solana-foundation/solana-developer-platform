@@ -289,6 +289,49 @@ other's balance.
   `GET /strategies/:id/nav` (no writer, no reachable reader). A regression
   test in `../earn.test.ts` pins all of them at 404.
 
+## Vault-direct routes (non-custodial positions)
+
+A second money model, added for Kamino. A `vault_direct` provider custodies
+nothing: there is no wallet to provision and no address to fund — the vault's
+account is a PROGRAM account and stablecoins sent to it are destroyed. Money
+moves only when SDP builds an instruction and signs it with one of the
+organization's own custody wallets.
+
+- `POST /vault-deposits` — **build + sign + submit + ledger**, in that order.
+  Body `{strategyId, walletId, amount, requestId}`. The caller names a CATALOGUE
+  row, never a raw vault address, so the sync's admission gates still bound this
+  path; the wallet resolves through `resolveWalletAddress`, the same
+  permission-checked helper payments and private channels use (it takes a
+  provider `walletId` or a public key — never the `cwlt_…` row id).
+  - `requestId` is **REQUIRED**, unlike the custodial create. There is no
+    provider-side dedupe to fall back on: the chain will happily accept the same
+    transfer twice, so the intent row written before signing is the only defence.
+  - Gate order mirrors `POST /programs`: schema → strategy resolution →
+    deposit-style check → `host_cluster` vs environment → surfacing → entitlement
+    → wallet. Surfacing before entitlement, for the same reason as create.
+  - Simulates before signing. The instructions come from a third-party SDK built
+    against live vault state, so a stale reserve set surfaces as a readable
+    program error instead of a landed, failed transaction the customer paid for.
+  - Fee payer is the CUSTODY WALLET today. Kora only sponsors allow-listed
+    programs and the kvault/klend ids are not on that list (the Private Channels
+    escrow hit the same wall); the sponsored path exists in
+    `services/earn/vault-execution.service.ts` and is one line away.
+- `GET /vault-positions` — DB claim rows **hydrated live from chain**. Shares and
+  value are never persisted: for a non-custodial vault the chain IS the provider.
+  Takes **no provider gate at all** — it is a read of money the org already
+  holds, and hiding it when a provider is un-offered would close the door out.
+  A failed chain read leaves a position UNHYDRATED rather than zero; reporting
+  zero is a claim about someone's money that a failed RPC call cannot support.
+
+Capability dispatch is `supportsVaultDirect` (`@sdp/earn/capabilities`), resolved
+through `services/earn/execution-registry.ts` — the one place a provider id maps
+to an executing client. `EARN_PROVIDER_CLIENTS` stays the CATALOGUE registry so
+the hourly sync keeps its small dependency surface.
+
+**Not built yet:** the withdraw counterpart, and the Active-tab snapshot. Until
+both land, a vault position can be entered and not exited through SDP, so Kamino
+must not become creatable on mainnet (ADR 0002).
+
 ## Gate asymmetry — DO NOT BREAK (ADR 0002 exit-safety)
 
 - **Money-in** (`POST /programs`, `PUT /programs/:programId`):
@@ -334,10 +377,10 @@ other's balance.
 - Zod schemas in schemas.ts; parse/paginate/envelope helpers in
   handlers/shared.ts — don't hand-roll either.
 - Capability gating: `supportsPortfolioWallets(client)` → NOT_IMPLEMENTED for
-  providers lacking the surface. This is how a **catalogue-only** provider is
-  handled: Kamino lists real strategies but moves no money through SDP (its
-  vaults are non-custodial — the customer's own wallet deposits), so every
-  program route answers 501 for it by capability, never by a provider-id check.
+  providers lacking the surface. Kamino implements NONE of it, so every
+  **program** route still answers 501 for it by capability, never by a
+  provider-id check — its money moves through the vault-direct routes above
+  instead. The two capabilities are asserted mutually exclusive.
 - Withdrawal approval is a SECOND optional capability
   (`supportsWithdrawalApprovals`) with **no public route on purpose**: casting
   a vote needs the account-level Turnkey signer (platform ops — one shared
