@@ -9,6 +9,7 @@ import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { StepNotice, StepSection, SummaryRow } from "./deposit/earn-deposit-chrome";
 import {
+  shortenAddress,
   useEarnFundingWallets,
   walletDisplayName,
   walletUsdcAmount,
@@ -151,6 +152,25 @@ export function EarnVaultDepositModal({
               label={t("DashboardEarn.deposit.vaultFrom")}
               value={walletDisplayName(selectedWallet, selectedWallet?.publicKey ?? "")}
             />
+            {/* Keyed off the STRATEGY's cluster, not an app-wide one: the
+                transaction landed on whichever cluster the vault lives on, and
+                `hostCluster` is the field that states it. A devnet signature on
+                a mainnet explorer link is a dead end. */}
+            {result.signature ? (
+              <SummaryRow
+                label={t("DashboardEarn.deposit.vaultTransaction")}
+                value={
+                  <a
+                    className="underline underline-offset-2"
+                    href={explorerTxUrl(result.signature, strategy.hostCluster)}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    {shortenAddress(result.signature)}
+                  </a>
+                }
+              />
+            ) : null}
           </dl>
           <p className="mt-4 text-sm leading-6 text-secondary">
             {t("DashboardEarn.deposit.vaultSettlingNote")}
