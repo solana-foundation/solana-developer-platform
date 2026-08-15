@@ -1,6 +1,7 @@
 import type {
   EarnLiveMetricsProvider,
   EarnPortfolioWalletProvider,
+  EarnVaultDirectProvider,
   EarnVaultProvider,
   EarnWithdrawalApprovalProvider,
 } from "./types";
@@ -63,6 +64,28 @@ export function supportsWithdrawalApprovals(
     Record<(typeof WITHDRAWAL_APPROVAL_METHODS)[number], unknown>
   >;
   return WITHDRAWAL_APPROVAL_METHODS.every((method) => typeof candidate[method] === "function");
+}
+
+const VAULT_DIRECT_METHODS = [
+  "buildVaultDeposit",
+  "buildVaultWithdrawal",
+  "readVaultPositions",
+] as const satisfies readonly Exclude<keyof EarnVaultDirectProvider, keyof EarnVaultProvider>[];
+
+/**
+ * Capability discovery for the optional vault-direct contract — same
+ * all-or-nothing method-presence rule as the guards above.
+ *
+ * Deliberately DISJOINT from `supportsPortfolioWallets`: the two describe
+ * opposite money models. A portfolio provider hands SDP a custodied wallet
+ * address to fund; a vault-direct provider has no such address at all, and the
+ * one it superficially resembles — the vault's own account — destroys funds sent
+ * to it. Nothing should ever be true of both, and a provider implementing both
+ * sets of methods is a bug in that client, not a richer provider.
+ */
+export function supportsVaultDirect(client: EarnVaultProvider): client is EarnVaultDirectProvider {
+  const candidate = client as Partial<Record<(typeof VAULT_DIRECT_METHODS)[number], unknown>>;
+  return VAULT_DIRECT_METHODS.every((method) => typeof candidate[method] === "function");
 }
 
 const LIVE_METRICS_METHODS = ["listStrategyMetrics"] as const satisfies readonly Exclude<

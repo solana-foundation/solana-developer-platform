@@ -37,6 +37,7 @@ import {
   strategySourceLabel,
   useLiquidityLabel,
 } from "./earn-program-presentation";
+import { EarnVaultDepositModal } from "./earn-vault-deposit-modal";
 import { EarnWithdrawModal } from "./earn-withdraw-modal";
 
 const DEPOSIT_PATH = "/dashboard/markets/earn/deposit";
@@ -672,6 +673,10 @@ function EarnTabBar({
 export function EarnOpportunitiesPanel() {
   const t = useTranslations();
   const { strategies, error, isLoading } = useEarnStrategies();
+  // Owned here rather than in the table so the table stays a pure presentation
+  // of what the API returned — the same reason it never re-applies a visibility
+  // rule.
+  const [depositStrategy, setDepositStrategy] = useState<EarnStrategy | undefined>(undefined);
 
   return (
     <section
@@ -697,13 +702,26 @@ export function EarnOpportunitiesPanel() {
             {t("DashboardEarn.overview.catalogueLoadError")}
           </p>
         ) : (
-          <EarnOpportunitiesTable strategies={strategies ?? []} />
+          <EarnOpportunitiesTable
+            onVaultDeposit={setDepositStrategy}
+            strategies={strategies ?? []}
+          />
         )}
       </div>
 
       <p className="mt-5 max-w-3xl text-xs leading-5 text-muted">
         {t("DashboardEarn.overview.rateDisclosure")}
       </p>
+
+      {depositStrategy ? (
+        <EarnVaultDepositModal
+          // Remount per strategy so no draft amount, wallet choice, or minted
+          // idempotency key can survive a switch between vaults.
+          key={depositStrategy.id}
+          onClose={() => setDepositStrategy(undefined)}
+          strategy={depositStrategy}
+        />
+      ) : null}
     </section>
   );
 }

@@ -572,3 +572,55 @@ export function useEarnWithdrawalOutcomeToast(
     onSettledRef.current?.();
   }, [data, t]);
 }
+
+// --- Non-custodial vault deposits ------------------------------------------
+
+export interface EarnVaultDepositInput {
+  /** Catalogue strategy id; the API resolves it to a vault address. */
+  strategyId: string;
+  /**
+   * The wallet to deposit FROM, as its Solana public key.
+   *
+   * Public key rather than the `cwlt_…` row id, because that is what
+   * `resolveWalletAddress` accepts on every money-moving route in SDP (payments,
+   * private channels, and this one). The wallet picker hands back the row id, so
+   * the caller maps it — the mapping belongs at the call site, not in a second
+   * resolution rule inside the API.
+   */
+  walletId: string;
+  /** Decimal string in the vault token's units. */
+  amount: string;
+  /** REQUIRED: the chain has no request-id dedupe, so this is the only guard. */
+  requestId: string;
+}
+
+export interface EarnVaultDepositResult {
+  positionId: string;
+  movementId: string;
+  status: "pending" | "submitted" | "confirmed" | "failed";
+  signature: string | null;
+  failureReason: string | null;
+  /** The key had already been used — nothing was re-sent. */
+  replayed: boolean;
+  strategy: {
+    id: string;
+    name: string;
+    provider: string;
+    providerReference: string;
+    hostCluster: string;
+  };
+}
+
+/**
+ * Deposit into a non-custodial vault: SDP builds the instruction, signs it with
+ * the chosen custody wallet, and submits it. Unlike `createEarnProgram` this
+ * moves money on the call — there is no address to fund afterwards.
+ */
+export function createEarnVaultDeposit(
+  input: EarnVaultDepositInput
+): Promise<DashboardFetchResult<{ data: EarnVaultDepositResult }>> {
+  return dashboardFetch("/api/dashboard/markets/earn/vault-deposits", {
+    method: "POST",
+    body: input,
+  });
+}

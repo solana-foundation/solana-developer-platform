@@ -1,0 +1,174 @@
+import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
+import { KaminoEarnClient } from "@sdp/earn/providers/kamino/client";
+import type {
+  EarnRuntimeContext,
+  EarnVaultDepositInput,
+  EarnVaultDirectProvider,
+  EarnVaultInstruction,
+  EarnVaultPositionInput,
+  EarnVaultPositionSnapshot,
+  EarnVaultTransactionPlan,
+  EarnVaultWithdrawInput,
+} from "@sdp/earn/types";
+import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
+import { type Address, address, createNoopSigner, createSolanaRpc } from "@solana/kit";
+import { SdpKaminoError } from "./errors";
+import { buildKaminoDepositPlan, buildKaminoWithdrawPlan, readKaminoPosition } from "./sdk";
+import type { KaminoInstructionPlan, KaminoRuntime } from "./types";
+
+/**
+ * Kamino as an EXECUTING provider: the catalogue client plus the vault-direct
+ * capability.
+ *
+ * Lives here rather than in `@sdp/earn` so that package keeps its single
+ * `@sdp/types` dependency — its hourly catalogue cron runs in both environments
+ * and must never load klend-sdk. The arrow points inward: `@sdp/kamino` depends
+ * on `@sdp/earn`, never the reverse.
+ *
+ * Registered by the API's execution registry, which prefers this class over the
+ * catalogue-only `KaminoEarnClient` when a route needs to move money. Callers
+ * still discover the capability with `supportsVaultDirect`, never a provider-id
+ * check.
+ */
+export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVaultDirectProvider {
+  /**
+   * Where the RPC endpoint comes from.
+   *
+   * Injected rather than read from `ctx.env.SOLANA_RPC_URL` directly, because
+   * that variable is PROCESS-level while the cluster is PER-REQUEST: syncing the
+   * sandbox environment inside a production deployment reaches this code with a
+   * MAINNET url. The API resolves the right endpoint for the cluster it is
+   * serving and hands it in; `listKaminoDevnetVaults` guards the same hazard
+   * with a genesis-hash check.
+   */
+  constructor(private readonly resolveRpcUrl: (cluster: SolanaCluster) => string) {
+    super();
+  }
+
+  private runtime(ctx: EarnRuntimeContext): KaminoRuntime {
+    const cluster = CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment];
+    const rpcUrl = this.resolveRpcUrl(cluster);
+    if (!rpcUrl.trim()) {
+      throw new SdpKaminoError(
+        "VAULT_UNREADABLE",
+        `No Solana RPC endpoint configured for ${cluster}; Kamino cannot build a transaction.`
+      );
+    }
+    return { cluster, rpcUrl };
+  }
+
+  /**
+   * The owner arrives as an ADDRESS, not a signer — custody lives in the API and
+   * a private key must never reach a provider client. klend-sdk needs a signer
+   * shaped object to place the account correctly, so a noop signer stands in: it
+   * contributes the right address and role and signs nothing. The API attaches
+   * the real custody signer at compile time, where kit matches by address.
+   */
+  private owner(value: string) {
+    return createNoopSigner(address(value));
+  }
+
+  private static toWire(plan: KaminoInstructionPlan): EarnVaultTransactionPlan {
+    return {
+      cluster: plan.cluster,
+      transactions: plan.instructions.map((batch) =>
+        batch.map(
+          (instruction): EarnVaultInstruction => ({
+            programAddress: String(instruction.programAddress),
+            accounts: (instruction.accounts ?? []).map((account) => ({
+              address: String(account.address),
+              role: Number(account.role),
+            })),
+            // Base64 keeps the contract JSON-safe: a plan may cross a queue or a
+            // log before it is compiled, and a Uint8Array does not survive that.
+            data: Buffer.from(instruction.data ?? new Uint8Array()).toString("base64"),
+          })
+        )
+      ),
+      lookupTables: plan.lookupTables.map(String),
+    };
+  }
+
+  async buildVaultDeposit(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultDepositInput
+  ): Promise<EarnVaultTransactionPlan> {
+    const plan = await buildKaminoDepositPlan(this.runtime(ctx), {
+      vault: address(input.providerReference),
+      owner: this.owner(input.owner),
+      amount: input.amount,
+      ...(input.minSharesOut === undefined ? {} : { minSharesOut: input.minSharesOut }),
+    });
+    return KaminoVaultDirectClient.toWire(plan);
+  }
+
+  async buildVaultWithdrawal(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultWithdrawInput
+  ): Promise<EarnVaultTransactionPlan> {
+    const runtime = this.runtime(ctx);
+    const slot = await createSolanaRpc(runtime.rpcUrl).getSlot().send();
+    const plan = await buildKaminoWithdrawPlan(runtime, {
+      vault: address(input.providerReference),
+      owner: this.owner(input.owner),
+      shares: input.shares,
+      slot,
+    });
+    return KaminoVaultDirectClient.toWire(plan);
+  }
+
+  /**
+   * Reads every requested vault against ONE slot, so a multi-position page is
+   * priced consistently rather than drifting between reads.
+   *
+   * A vault that fails to read is DROPPED, not defaulted to zero: a zero would
+   * render as "you hold nothing here", which is a claim about someone's money
+   * that a failed RPC call does not support.
+   */
+  async readVaultPositions(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultPositionInput
+  ): Promise<EarnVaultPositionSnapshot[]> {
+    const runtime = this.runtime(ctx);
+    const slot = await createSolanaRpc(runtime.rpcUrl).getSlot().send();
+    const owner: Address = address(input.owner);
+
+    const results = await Promise.allSettled(
+      input.providerReferences.map((reference) =>
+        readKaminoPosition(runtime, { vault: address(reference), owner, slot })
+      )
+    );
+
+    return results.flatMap((result) => {
+      if (result.status !== "fulfilled") return [];
+      const position = result.value;
+      return [
+        {
+          providerReference: String(position.vault),
+          owner: String(position.owner),
+          cluster: position.cluster,
+          shares: position.shares,
+          ...(position.tokenValue === undefined ? {} : { tokenValue: position.tokenValue }),
+          tokenMint: String(position.tokenMint),
+          shareMint: String(position.sharesMint),
+        },
+      ];
+    });
+  }
+}
+
+/**
+ * Guard asserted at construction rather than trusted: the two capabilities
+ * describe opposite money models, and a client answering yes to both would let a
+ * portfolio route hand a customer the vault's own account as a deposit address —
+ * where funds are destroyed. Exported so the API can assert it at registry wiring.
+ */
+export function assertNotPortfolioProvider(client: KaminoVaultDirectClient): void {
+  if (supportsPortfolioWallets(client)) {
+    throw new SdpKaminoError(
+      "VAULT_UNREADABLE",
+      "Kamino must never report the portfolio-wallet capability: it custodies nothing, " +
+        "and its vault account is not a fundable address."
+    );
+  }
+}

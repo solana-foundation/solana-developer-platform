@@ -7,7 +7,7 @@ import {
   earnDepositStyle,
 } from "@sdp/types";
 import { strategyApy, strategyPoolUsd, strategyToken } from "../earn-program-presentation";
-import { EARN_PROGRAM_CREATION_ENABLED } from "../earn-surfacing";
+import { EARN_PROGRAM_CREATION_ENABLED, EARN_VAULT_DEPOSITS_ENABLED } from "../earn-surfacing";
 
 /**
  * Pure model for the Earn deposit flow: full catalogue → ranked comparison
@@ -91,8 +91,11 @@ export function fundableStrategies(strategies: readonly EarnStrategy[]): readonl
  *
  * - `custodial` — needs a surfaced provider with a program model. With Ground
  *   un-surfaced there is none, so `EARN_PROGRAM_CREATION_ENABLED` is false.
- * - `vault_direct` — needs the wallet -> amount -> hand-off run, which is not
- *   built. SDP moves no money into a K-Vault and holds no address to point at.
+ * - `vault_direct` — the API half is BUILT (`POST /v1/earn/vault-deposits`
+ *   builds the instruction, signs it with an org custody wallet and submits it),
+ *   but the wizard run is not, so `EARN_VAULT_DEPOSITS_ENABLED` still pins this
+ *   to no. SDP never hands out an address for these: a K-Vault's account is a
+ *   program account and funds sent to it are lost.
  *
  * Re-enabling is therefore a real change in both cases, not a flag flip, and
  * this predicate is where the compiler will bring you.
@@ -111,6 +114,16 @@ export function opportunityDepositability(strategy: EarnStrategy): OpportunityDe
   if (strategyToken(strategy) === undefined) return { kind: "asset-unsupported" };
 
   const style = earnDepositStyle(strategy.provider);
+  // `vault_direct` becomes depositable when the vault run is enabled: SDP builds
+  // the instruction, signs it with one of the org's own custody wallets, and
+  // submits it (POST /v1/earn/vault-deposits). Nothing is ever sent to an
+  // address — the vault's account is a program account and funds sent there are
+  // lost — so this is true only because a path was BUILT, never by relaxing a
+  // check. `EARN_VAULT_DEPOSITS_ENABLED` is what keeps the affordance and the
+  // flow shipping together.
+  if (style === "vault_direct" && EARN_VAULT_DEPOSITS_ENABLED) {
+    return { kind: "depositable" };
+  }
   if (style === "custodial" && EARN_PROGRAM_CREATION_ENABLED) {
     return { kind: "depositable" };
   }

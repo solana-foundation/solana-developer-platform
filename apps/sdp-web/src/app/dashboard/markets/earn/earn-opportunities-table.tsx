@@ -80,7 +80,18 @@ function SortableColumnHeader({
  * `?strategy=<id>`, so a row is shareable, middle-clickable, and the wizard can
  * be entered directly without this table having to hand state across a route.
  */
-function OpportunityRow({ strategy }: { strategy: EarnStrategy }) {
+function OpportunityRow({
+  strategy,
+  onVaultDeposit,
+}: {
+  strategy: EarnStrategy;
+  /**
+   * Present only for non-custodial vaults, where the deposit opens in place.
+   * Absent falls through to the custodial link, so the row keeps working for a
+   * provider whose deposit really is a separate page.
+   */
+  onVaultDeposit?: (strategy: EarnStrategy) => void;
+}) {
   const t = useTranslations();
   const liquidityLabel = useLiquidityLabel();
   const nameId = `earn-opportunity-${strategy.id}-name`;
@@ -165,7 +176,14 @@ function OpportunityRow({ strategy }: { strategy: EarnStrategy }) {
         </span>
       </TableCell>
       <TableCell align="right">
-        {depositable.kind === "depositable" ? (
+        {depositable.kind === "depositable" && onVaultDeposit ? (
+          // Non-custodial: two short steps against a strategy already chosen by
+          // clicking this row, and its money-OUT counterpart is a modal too —
+          // so it opens in place rather than navigating away from the table.
+          <Button onClick={() => onVaultDeposit(strategy)} size="sm" variant="secondary">
+            {t("DashboardEarn.opportunities.deposit")}
+          </Button>
+        ) : depositable.kind === "depositable" ? (
           <Button asChild size="sm" variant="secondary">
             <Link href={`${DEPOSIT_PATH}?strategy=${encodeURIComponent(strategy.id)}`}>
               {t("DashboardEarn.opportunities.deposit")}
@@ -194,7 +212,13 @@ function OpportunityRow({ strategy }: { strategy: EarnStrategy }) {
  * never re-applies a visibility rule. What it DOES decide is per-row
  * depositability, which is a different question (`opportunityDepositability`).
  */
-export function EarnOpportunitiesTable({ strategies }: { strategies: readonly EarnStrategy[] }) {
+export function EarnOpportunitiesTable({
+  strategies,
+  onVaultDeposit,
+}: {
+  strategies: readonly EarnStrategy[];
+  onVaultDeposit?: (strategy: EarnStrategy) => void;
+}) {
   const t = useTranslations();
   const [sort, setSort] = useState<EarnStrategySort>(DEFAULT_STRATEGY_SORT);
   const rows = useMemo(() => sortStrategies(strategies, sort), [strategies, sort]);
@@ -245,7 +269,7 @@ export function EarnOpportunitiesTable({ strategies }: { strategies: readonly Ea
         </TableHeader>
         <TableBody>
           {rows.map((strategy) => (
-            <OpportunityRow key={strategy.id} strategy={strategy} />
+            <OpportunityRow key={strategy.id} onVaultDeposit={onVaultDeposit} strategy={strategy} />
           ))}
         </TableBody>
       </Table>

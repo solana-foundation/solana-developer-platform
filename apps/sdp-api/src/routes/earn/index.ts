@@ -16,6 +16,7 @@ import {
   retargetEarnProgram,
 } from "./handlers/program";
 import { getEarnStrategy, listEarnStrategies } from "./handlers/strategies";
+import { createEarnVaultDeposit, listEarnVaultPositions } from "./handlers/vault";
 
 const earn = new Hono<{ Bindings: Env }>();
 
@@ -37,6 +38,13 @@ earn.use("*", projectContextMiddleware());
 // Strategy catalogue (source: DB, written only by the sync cron + dev seed).
 earn.get("/strategies", requirePermissions("earn:read"), listEarnStrategies);
 earn.get("/strategies/:strategyId", requirePermissions("earn:read"), getEarnStrategy);
+
+// Non-custodial ("vault_direct") positions: SDP builds and signs the deposit
+// from a custody wallet, so unlike /programs there is no provider wallet to
+// provision and no address to fund afterwards. Money-in takes earn:write;
+// the position listing is a plain read.
+earn.post("/vault-deposits", requirePermissions("earn:write"), createEarnVaultDeposit);
+earn.get("/vault-positions", requirePermissions("earn:read"), listEarnVaultPositions);
 
 // Portfolio programs: N provider wallets per org+environment+provider
 // (PRO-1670), each addressed by its own id. Money-in (create, re-target) takes

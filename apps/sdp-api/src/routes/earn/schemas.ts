@@ -213,3 +213,35 @@ export const earnProgramWithdrawalParamsSchema = earnProgramParamsSchema.extend(
  * trail outlives credential removal).
  */
 export const earnProgramWithdrawalsListQuerySchema = z.object(earnPageQueryShape);
+
+/**
+ * Open a position in a NON-CUSTODIAL vault, or add to one, from an SDP custody
+ * wallet.
+ *
+ * Unlike the custodial create this carries an AMOUNT and a WALLET, because for
+ * a `vault_direct` provider opening the position and funding it are the same
+ * on-chain action — there is no wallet to provision first and no address to
+ * fund afterwards.
+ */
+export const earnVaultDepositSchema = z.object({
+  /** Catalogue strategy id, resolved to a vault address server-side. */
+  strategyId: z.string().min(1),
+  /** SDP custody wallet that signs and holds the shares. */
+  walletId: z.string().min(1),
+  /** Deposit amount in the vault token's units, as a decimal string. */
+  amount: z
+    .string()
+    .regex(/^\d+(\.\d+)?$/, "amount must be a positive decimal string")
+    .refine((value) => Number(value) > 0, "amount must be greater than zero"),
+  /**
+   * Idempotency key, REQUIRED here unlike the custodial create. The chain has
+   * no request-id dedupe of its own, so this row is the only thing preventing a
+   * retry from moving money twice.
+   */
+  requestId: z.uuidv4(),
+  /** Optional slippage floor, in shares, as a decimal string. */
+  minSharesOut: z
+    .string()
+    .regex(/^\d+(\.\d+)?$/, "minSharesOut must be a decimal string")
+    .optional(),
+});

@@ -109,19 +109,42 @@ describe("fundableStrategies", () => {
  * `wrong-cluster` there — so the third check has to be asserted, not eyeballed.
  */
 describe("opportunityDepositability", () => {
-  it("refuses a fundable vault-direct vault: SDP has no route for its deposit", () => {
+  it("allows a fundable vault-direct vault now that the deposit modal exists", () => {
     const kamino = strategy({
       id: "kamino-production",
       provider: "kamino",
       hostCluster: "mainnet-beta",
-      // The exact shape that used to slip through: on-cluster and USDC.
       fundable: true,
     });
 
-    expect(opportunityDepositability(kamino)).toEqual({
-      kind: "no-sdp-route",
-      style: "vault_direct",
-    });
+    // Flipped only once BOTH halves existed: POST /v1/earn/vault-deposits and
+    // `EarnVaultDepositModal` behind the row's button. An enabled link with no
+    // flow behind it is the dead-end review caught on #1340 — the two ship
+    // together, which is what `EARN_VAULT_DEPOSITS_ENABLED` encodes.
+    expect(opportunityDepositability(kamino)).toEqual({ kind: "depositable" });
+  });
+
+  it("still refuses a vault-direct vault on the wrong cluster", () => {
+    // Cluster is checked BEFORE the deposit style, so shipping the vault run
+    // must not make a mainnet vault look fundable from a sandbox project.
+    expect(
+      opportunityDepositability(
+        strategy({
+          id: "kamino-wrong-cluster",
+          provider: "kamino",
+          hostCluster: "mainnet-beta",
+          fundable: false,
+        })
+      )
+    ).toEqual({ kind: "wrong-cluster" });
+  });
+
+  it("still refuses a vault-direct vault in an unsupported asset", () => {
+    expect(
+      opportunityDepositability(
+        strategy({ id: "kamino-odd-mint", provider: "kamino", depositMints: [UNROUTABLE_MINT] })
+      )
+    ).toEqual({ kind: "asset-unsupported" });
   });
 
   it("refuses a custodial vault while no custodial provider is offered", () => {

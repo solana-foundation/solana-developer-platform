@@ -109,7 +109,7 @@
     },
     "opportunities": {
       "title": "Opportunities",
-      "description": "Ways to put idle stablecoins to work. Compare what each one pays, how it's backed, and how fast you can withdraw \u2014 rank by pool size or APY.",
+      "description": "Ways to put idle stablecoins to work. Compare what each one pays, how it's backed, and how fast you can withdraw — rank by pool size or APY.",
       "deposit": "Deposit",
       "depositDirectOnly": "Coming soon",
       "depositProviderClosed": "Not available",
@@ -235,7 +235,27 @@
       "timingDisclosure": "Confirming saves the target immediately, but money moves on the provider's later rebalances — not instantly. Slower strategies can take hours to converge, and small balances may stay as cash where deploying them isn't economical.",
       "programMissing": "That strategy could not be found — it may have been changed or removed since this link was made. Head back to Earn to see your current strategies.",
       "programMissingAction": "Back to Earn",
-      "creationUnavailable": "Earn strategies are open for comparison only right now — no provider is accepting deposits, so there is no strategy to set up. Head back to Earn to browse what is listed."
+      "creationUnavailable": "Earn strategies are open for comparison only right now — no provider is accepting deposits, so there is no strategy to set up. Head back to Earn to browse what is listed.",
+      "vaultWalletTitle": "Choose the wallet to deposit from",
+      "vaultWalletBody": "SDP signs the deposit with this wallet and the vault shares are held by it. Nothing is sent to an address — the deposit is an on-chain instruction.",
+      "vaultAmountTitle": "How much do you want to deposit?",
+      "vaultAmountBody": "Confirming signs and submits the transaction. There is no separate funding step afterwards.",
+      "vaultAmount": "Amount",
+      "vaultStrategy": "Vault",
+      "vaultBacking": "Backing",
+      "vaultFrom": "From wallet",
+      "vaultBalanceUnknown": "Balance unavailable right now — you can still deposit.",
+      "vaultBalanceAvailable": "{amount} available in this wallet.",
+      "vaultOverBalance": "That is more than this wallet's last known balance. You can still submit — the network decides.",
+      "vaultConfirmNote": "Confirming moves funds immediately. The wallet pays the network fee.",
+      "vaultSubmit": "Confirm deposit",
+      "vaultSubmitting": "Submitting…",
+      "vaultSubmitError": "The deposit could not be submitted.",
+      "vaultDoneTitle": "Deposit submitted",
+      "vaultDoneBody": "Your deposit is on-chain. Vault shares are held by the wallet you chose.",
+      "vaultSettlingNote": "It can take a few moments to finalise. You will see the position under Active once it settles.",
+      "vaultDone": "Done",
+      "vaultTransaction": "Transaction"
     }
   }
 }
