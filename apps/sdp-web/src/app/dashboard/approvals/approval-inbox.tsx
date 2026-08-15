@@ -1,9 +1,10 @@
 "use client";
 
-import type {
-  ApprovalRequestStatus,
-  WalletApprovalRequestSummary,
-  WalletOperationFamily,
+import {
+  type ApprovalRequestStatus,
+  type WalletApprovalRequestSummary,
+  type WalletOperationFamily,
+  WELL_KNOWN_TOKENS,
 } from "@sdp/types";
 import {
   ArrowLeftRightIcon,
@@ -23,6 +24,7 @@ import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
 } from "@/components/dashboard-workspace-panel";
+import { TokenMark } from "@/components/token-mark";
 import { Button } from "@/components/ui/button";
 import { DateRangePicker, formatDateValue } from "@/components/ui/date-picker";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
@@ -40,6 +42,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { cn } from "@/lib/utils";
+import { formatDisplayAmount, resolveTokenByMint } from "../payments/payments-overview.utils";
+import type { PaymentsIssuedTokenSymbol } from "../payments/payments-page.data";
 import { ApprovalStatusBadge } from "./approval-request-shared";
 import {
   APPROVAL_HISTORY_STATUSES,
@@ -47,7 +51,6 @@ import {
   APPROVAL_OPERATION_FAMILIES,
   type ApprovalInboxFilters,
   type ApprovalInboxTab,
-  approvalAmount,
   approvalApiKeyLabel,
   approvalReason,
   approvalWalletLabel,
@@ -69,6 +72,8 @@ function approvalRequestHref(approvalRequestId: string): string {
 interface ApprovalInboxProps {
   initialRequests: WalletApprovalRequestSummary[];
   apiKeyNames: Record<string, string>;
+  /** The org's issued tokens keyed by mint, so SDP-minted assets resolve to a symbol. */
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
   canDecide: boolean;
   renderedAt: number;
   loadError?: boolean;
@@ -77,6 +82,7 @@ interface ApprovalInboxProps {
 export function ApprovalInbox({
   initialRequests,
   apiKeyNames,
+  issuedTokensByMint,
   canDecide,
   renderedAt,
   loadError = false,
@@ -277,6 +283,7 @@ export function ApprovalInbox({
               <ApprovalRequestRows
                 requests={visibleRequests}
                 apiKeyNames={apiKeyNames}
+                issuedTokensByMint={issuedTokensByMint}
                 locale={locale}
                 relativeTimeBase={relativeTimeBase}
               />
@@ -541,11 +548,13 @@ function FilterField({
 function ApprovalRequestRows({
   requests,
   apiKeyNames,
+  issuedTokensByMint,
   locale,
   relativeTimeBase,
 }: {
   requests: WalletApprovalRequestSummary[];
   apiKeyNames: Record<string, string>;
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
   locale: string;
   relativeTimeBase: number;
 }) {
@@ -584,7 +593,7 @@ function ApprovalRequestRows({
                   />
                   <MobileValue
                     label={t("DashboardApprovals.amountAssetColumn")}
-                    value={approvalAmount(request)}
+                    value={approvalAmountLabel(request, issuedTokensByMint, locale)}
                   />
                   <MobileValue
                     label={t("DashboardApprovals.requestedByColumn")}
@@ -668,9 +677,18 @@ function ApprovalRequestRows({
                       {request.operation.operationType}
                     </p>
                   </ApprovalCell>
-                  <ApprovalCell>{approvalAmount(request)}</ApprovalCell>
                   <ApprovalCell>
-                    <span title={request.operation.destination ?? undefined}>
+                    <ApprovalAmountAsset
+                      request={request}
+                      issuedTokensByMint={issuedTokensByMint}
+                      locale={locale}
+                    />
+                  </ApprovalCell>
+                  <ApprovalCell>
+                    <span
+                      className="whitespace-nowrap"
+                      title={request.operation.destination ?? undefined}
+                    >
                       {shortApprovalIdentifier(request.operation.destination)}
                     </span>
                   </ApprovalCell>
@@ -709,6 +727,61 @@ function ApprovalRequestRows({
         </Table>
       </div>
     </>
+  );
+}
+
+/**
+ * Formats an operation's amount and asset for display. The `asset` field holds
+ * a mint address, so it resolves through the shared token helpers — the
+ * well-known catalogue, then the org's issued tokens — before falling back to
+ * a shortened mint, exactly like the transactions tables.
+ */
+function approvalAmountLabel(
+  request: WalletApprovalRequestSummary,
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>,
+  locale: string
+): string {
+  const { amount, asset } = request.operation;
+  const tokenName = asset ? resolveTokenByMint(asset, issuedTokensByMint).tokenName : undefined;
+  if (!amount) return tokenName ?? "-";
+  return formatDisplayAmount(amount, tokenName, locale);
+}
+
+/**
+ * Operation payloads carry platform token keys ("USDC") for rail-native
+ * assets rather than mints. Those keys come from our own API, not issuer
+ * metadata, so resolving them to the registry mint does not open the
+ * spoofed-symbol hole TokenMark guards against; either cluster's mint maps
+ * to the same registry entry, so the mainnet address suffices for the mark.
+ */
+function wellKnownMintForAssetKey(asset: string): string | null {
+  const entry = WELL_KNOWN_TOKENS[asset.trim().toUpperCase() as keyof typeof WELL_KNOWN_TOKENS];
+  return entry ? entry.mints["mainnet-beta"].address : null;
+}
+
+function ApprovalAmountAsset({
+  request,
+  issuedTokensByMint,
+  locale,
+}: {
+  request: WalletApprovalRequestSummary;
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
+  locale: string;
+}) {
+  const asset = request.operation.asset;
+  const label = approvalAmountLabel(request, issuedTokensByMint, locale);
+  if (!asset) return label;
+  const resolvedToken = resolveTokenByMint(asset, issuedTokensByMint);
+  return (
+    <span className="flex min-w-0 items-center gap-2" title={asset}>
+      <TokenMark
+        mint={wellKnownMintForAssetKey(asset) ?? resolvedToken.mint}
+        symbol={resolvedToken.tokenName}
+        logoUrl={resolvedToken.metadataImageUrl}
+        size="xs"
+      />
+      <span className="truncate">{label}</span>
+    </span>
   );
 }
 
