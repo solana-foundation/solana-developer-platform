@@ -101,16 +101,26 @@ export class RpcConnectionStore {
     return { connections, total: Number(totalRow?.total ?? 0) };
   }
 
-  /** Always organization-qualified: an id alone must never resolve a row. */
+  /**
+   * Organization- and scope-qualified: an id alone must never resolve a row.
+   *
+   * `scopeKeys` is the set the caller is acting within -- the organization
+   * sentinel plus the selected project, never another project's. Without it an
+   * administrator working in one project could name a connection belonging to
+   * another and read or mutate it.
+   */
   async findConnection(
     organizationId: string,
-    connectionId: string
+    connectionId: string,
+    scopeKeys: readonly string[]
   ): Promise<RpcConnectionRow | null> {
     return this.db.queryOne<RpcConnectionRow>(
       `SELECT ${CONNECTION_COLUMNS}
          FROM rpc_connections
-        WHERE id = ? AND organization_id = ?`,
-      [connectionId, organizationId]
+        WHERE id = ?
+          AND organization_id = ?
+          AND scope_key IN (${scopeKeys.map(() => "?").join(", ")})`,
+      [connectionId, organizationId, ...scopeKeys]
     );
   }
 
@@ -181,6 +191,7 @@ export class RpcConnectionStore {
   async activateConnection(params: {
     organizationId: string;
     connectionId: string;
+    scopeKeys: readonly string[];
     makeDefault: boolean;
     executor?: DatabaseExecutor;
   }): Promise<RpcConnectionRow | null> {
@@ -197,9 +208,10 @@ export class RpcConnectionStore {
               updated_at = sdp_iso_now()
         WHERE id = ?
           AND organization_id = ?
+          AND scope_key IN (${params.scopeKeys.map(() => "?").join(", ")})
           AND status IN ('pending', 'checking', 'failed', 'active')
         RETURNING ${CONNECTION_COLUMNS}`,
-      [params.makeDefault, params.connectionId, params.organizationId]
+      [params.makeDefault, params.connectionId, params.organizationId, ...params.scopeKeys]
     );
   }
 
@@ -210,6 +222,7 @@ export class RpcConnectionStore {
   async deactivateConnection(params: {
     organizationId: string;
     connectionId: string;
+    scopeKeys: readonly string[];
     executor?: DatabaseExecutor;
   }): Promise<RpcConnectionRow | null> {
     const db = params.executor ?? this.db;
@@ -221,15 +234,17 @@ export class RpcConnectionStore {
               updated_at = sdp_iso_now()
         WHERE id = ?
           AND organization_id = ?
+          AND scope_key IN (${params.scopeKeys.map(() => "?").join(", ")})
           AND status <> 'deactivated'
         RETURNING ${CONNECTION_COLUMNS}`,
-      [params.connectionId, params.organizationId]
+      [params.connectionId, params.organizationId, ...params.scopeKeys]
     );
   }
 
   async recordCheckFailure(params: {
     organizationId: string;
     connectionId: string;
+    scopeKeys: readonly string[];
     failureCode: string;
     executor?: DatabaseExecutor;
   }): Promise<void> {
@@ -242,17 +257,24 @@ export class RpcConnectionStore {
               last_check_at = sdp_iso_now(),
               last_check_failure_code = ?,
               updated_at = sdp_iso_now()
-        WHERE id = ? AND organization_id = ?`,
-      [params.failureCode, params.connectionId, params.organizationId]
+        WHERE id = ?
+          AND organization_id = ?
+          AND scope_key IN (${params.scopeKeys.map(() => "?").join(", ")})`,
+      [params.failureCode, params.connectionId, params.organizationId, ...params.scopeKeys]
     );
   }
 
   /**
-   * The credential secret columns for one connection, organization-qualified.
-   * `ProviderCredentialStore.findCredential` deliberately omits these and does
-   * not filter by organization, so activation reads them through here instead.
+   * The credential secret columns for one connection, organization- and
+   * scope-qualified. `ProviderCredentialStore.findCredential` deliberately
+   * omits these and does not filter by organization, so activation reads them
+   * through here instead.
    */
-  async findConnectionSecret(params: { organizationId: string; connectionId: string }): Promise<{
+  async findConnectionSecret(params: {
+    organizationId: string;
+    connectionId: string;
+    scopeKeys: readonly string[];
+  }): Promise<{
     id: string;
     label: string;
     status: string;
@@ -271,8 +293,10 @@ export class RpcConnectionStore {
               pc.encrypted_secret_payload
          FROM rpc_connections c
          JOIN provider_credentials pc ON pc.id = c.provider_credential_id
-        WHERE c.id = ? AND c.organization_id = ?`,
-      [params.connectionId, params.organizationId]
+        WHERE c.id = ?
+          AND c.organization_id = ?
+          AND c.scope_key IN (${params.scopeKeys.map(() => "?").join(", ")})`,
+      [params.connectionId, params.organizationId, ...params.scopeKeys]
     );
   }
 
