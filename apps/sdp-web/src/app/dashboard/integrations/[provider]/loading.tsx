@@ -7,6 +7,8 @@ export default function IntegrationDetailLoading() {
       <div className="h-[104px] rounded-2xl border border-border-subtle bg-surface-raised" />
       <div className="h-[120px] rounded-2xl border border-border-subtle bg-surface-raised" />
       <div className="h-[120px] rounded-2xl border border-border-subtle bg-surface-raised" />
+      {/* RPC providers carry a Connection section above About. */}
+      <div className="h-[120px] rounded-2xl border border-border-subtle bg-surface-raised" />
     </div>
   );
 }

@@ -11,6 +11,7 @@ import {
   resolveCustodyProviderAvailability,
 } from "@/app/dashboard/custody/provider-display-status";
 import type { MessageKey } from "@/i18n/messages";
+import { RPC_PROVIDER_LABELS } from "@/lib/rpc-providers";
 
 /**
  * One vocabulary across every provider family, aligned with the
@@ -75,16 +76,11 @@ const COMPLIANCE_DESCRIPTION_KEYS: Record<ComplianceProviderId, MessageKey> = {
   chainalysis: "Shared.integrations.complianceChainalysisDescription",
 };
 
-/** Display labels for families whose ids never had UI names on main. */
-export const RPC_PROVIDER_LABELS: Record<OrganizationRpcProvider, string> = {
-  alchemy: "Alchemy",
-  default: "SDP RPC",
-  helius: "Helius",
-  nodit: "Nodit",
-  quicknode: "QuickNode",
-  triton: "Triton",
-  validationcloud: "Validation Cloud",
-};
+/**
+ * Re-exported so the catalog's consumers keep one import path now that the
+ * labels are shared with Settings and the integration detail controls.
+ */
+export { RPC_PROVIDER_LABELS };
 
 export const RAMP_PROVIDER_LABELS: Record<RampProviderId, string> = {
   moonpay: "MoonPay",

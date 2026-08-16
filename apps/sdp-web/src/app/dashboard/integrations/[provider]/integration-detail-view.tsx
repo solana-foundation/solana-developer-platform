@@ -10,6 +10,18 @@ import { getTranslations } from "@/i18n/server";
 import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
 import { RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import type { IntegrationDetail } from "../integration-detail";
+import { RpcConnectionPanel } from "../rpc-connection-panel";
+
+/**
+ * What the RPC family needs beyond the shared detail shape. Absent for every
+ * other family, and absent for RPC only if the organization could not be
+ * resolved — in which case the page falls back to the Settings link.
+ */
+export interface RpcConnectionContext {
+  activeProvider: OrganizationRpcProvider;
+  canManage: boolean;
+  organizationId: string;
+}
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
 
@@ -73,7 +85,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function resolvePrimaryAction(detail: IntegrationDetail, t: Translate) {
+function resolvePrimaryAction(
+  detail: IntegrationDetail,
+  t: Translate,
+  rpc: RpcConnectionContext | undefined
+) {
   // With the connection state unreadable, no state-dependent action is honest.
   if (detail.status === "unknown") {
     return null;
@@ -103,7 +119,10 @@ function resolvePrimaryAction(detail: IntegrationDetail, t: Translate) {
       </Button>
     );
   }
-  if (detail.family === "rpc") {
+  // With the connection panel mounted, the header would only repeat its
+  // buttons; the Settings link stays as the fallback for a page that could not
+  // resolve the organization.
+  if (detail.family === "rpc" && !rpc) {
     return (
       <Button asChild variant="secondary">
         <Link href="/dashboard/settings">{t("Shared.integrations.rpcSectionAction")}</Link>
@@ -113,11 +132,17 @@ function resolvePrimaryAction(detail: IntegrationDetail, t: Translate) {
   return null;
 }
 
-export async function IntegrationDetailView({ detail }: { detail: IntegrationDetail }) {
+export async function IntegrationDetailView({
+  detail,
+  rpc,
+}: {
+  detail: IntegrationDetail;
+  rpc?: RpcConnectionContext;
+}) {
   const t = await getTranslations();
   const entry = detail.custodyEntry;
 
-  const primaryAction = resolvePrimaryAction(detail, t);
+  const primaryAction = resolvePrimaryAction(detail, t, rpc);
 
   return (
     <div className="w-full space-y-6 px-4 py-6 md:px-6" data-integration-detail={detail.provider}>
@@ -149,6 +174,20 @@ export async function IntegrationDetailView({ detail }: { detail: IntegrationDet
         </div>
         {primaryAction}
       </header>
+
+      {/* Leads the page: on an integration you can actually act on, what the
+          organization runs right now outranks what the provider is. */}
+      {detail.family === "rpc" && rpc ? (
+        <Section title={t("Shared.integrations.rpcConnectionTitle")}>
+          <RpcConnectionPanel
+            activeProvider={rpc.activeProvider}
+            canManage={rpc.canManage}
+            organizationId={rpc.organizationId}
+            provider={detail.provider as OrganizationRpcProvider}
+            status={detail.status}
+          />
+        </Section>
+      ) : null}
 
       {detail.descriptionKey ? (
         <Section title={t("Shared.integrations.detailAbout")}>
