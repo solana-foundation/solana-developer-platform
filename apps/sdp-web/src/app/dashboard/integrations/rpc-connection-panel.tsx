@@ -154,11 +154,15 @@ export function RpcConnectionPanel({
             {t("Shared.integrations.rpcActiveProviderLabel")}
           </p>
           <p className="text-sm leading-6 text-secondary">
-            {isActive
-              ? t("Shared.integrations.rpcActiveHere")
-              : t("Shared.integrations.rpcActiveElsewhere", {
-                  provider: rpcProviderLabel(currentProvider),
-                })}
+            {/* A stranded default is selected but not serving, so it must not
+                also claim traffic runs through it. */}
+            {isStrandedDefault
+              ? t("Shared.integrations.rpcActiveSelectedOnly")
+              : isActive
+                ? t("Shared.integrations.rpcActiveHere")
+                : t("Shared.integrations.rpcActiveElsewhere", {
+                    provider: rpcProviderLabel(currentProvider),
+                  })}
           </p>
         </div>
 

@@ -120,6 +120,9 @@ describe("RpcConnectionPanel", () => {
     renderPanel({ isEnabledInDeployment: false });
     expect(screen.queryByRole("button", { name: "Test connection" })).toBeNull();
     expect(screen.getByText(/falling back to another provider/)).toBeTruthy();
+    // ...and must not simultaneously claim traffic runs through it.
+    expect(screen.queryByText(/runs through this provider/)).toBeNull();
+    expect(screen.getByText("This organization is set to use this provider.")).toBeTruthy();
   });
 
   it("explains an unconfigured provider instead of offering a dead switch", () => {
