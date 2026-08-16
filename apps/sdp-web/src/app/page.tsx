@@ -1,14 +1,12 @@
-import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
 import Image from "next/image";
 import Link from "next/link";
 import { HomepageCtas } from "@/components/homepage-ctas";
 import { LanguagePicker } from "@/components/language-picker";
 import { homepageOpenSignup } from "@/flags";
 import { getTranslations } from "@/i18n/server";
+import { resolveDocsUrl } from "@/lib/docs-url";
 
-const docsHref =
-  process.env.NEXT_PUBLIC_SDP_DOCS_URL ||
-  (process.env.NODE_ENV === "development" ? "http://localhost:3001/docs" : DEFAULT_SDP_DOCS_URL);
+const docsHref = resolveDocsUrl();
 export default async function Home() {
   const [t, openSignup] = await Promise.all([getTranslations(), homepageOpenSignup()]);
 
