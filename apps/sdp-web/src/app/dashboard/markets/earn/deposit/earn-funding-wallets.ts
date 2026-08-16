@@ -1,6 +1,6 @@
 "use client";
 
-import type { CustodyWalletSummary } from "@sdp/types";
+import type { CustodyWalletSummary, EarnPortfolioToken } from "@sdp/types";
 import useSWR from "swr";
 import { portfolioTokenForMint } from "../earn-program-presentation";
 
@@ -70,20 +70,28 @@ export function walletDisplayName(
 }
 
 /**
- * Spendable USDC observed in a custody wallet. `undefined` means the RPC read
- * was unavailable; zero is reserved for a successful observation with no USDC.
- * Earn currently funds over Ground's Solana USDC rail, so this is the number
- * that belongs on the first screen rather than a generic roll-up of stablecoins
- * the program cannot accept. `uiAmount` is authoritative here; `usdValue` is
- * optional and must not turn a funded wallet into "$0.00".
+ * Spendable balance for one exact Earn stablecoin lane. `undefined` means the
+ * RPC read was unavailable; zero is reserved for a successful observation with
+ * none of that token. Never aggregate stablecoins here: a USDT vault cannot
+ * spend USDC even though both are close to one dollar. `uiAmount` is
+ * authoritative; `usdValue` is optional and must not turn a funded wallet into
+ * "$0.00".
  */
-export function walletUsdcAmount(wallet: CustodyWalletSummary): number | undefined {
+export function walletTokenAmount(
+  wallet: CustodyWalletSummary,
+  token: EarnPortfolioToken
+): number | undefined {
   if (wallet.balances === undefined) return undefined;
   return wallet.balances.reduce((total, balance) => {
-    if (portfolioTokenForMint(balance.mint) !== "usdc") return total;
+    if (portfolioTokenForMint(balance.mint) !== token) return total;
     const amount = Number(balance.uiAmount);
     return Number.isFinite(amount) && amount > 0 ? total + amount : total;
   }, 0);
+}
+
+/** Ground's custodial flow chooses its strategy after the wallet, so it starts on USDC. */
+export function walletUsdcAmount(wallet: CustodyWalletSummary): number | undefined {
+  return walletTokenAmount(wallet, "usdc");
 }
 
 /** Aggregate only complete observations; one unknown wallet makes the total unknown. */

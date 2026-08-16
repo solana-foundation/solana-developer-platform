@@ -1,6 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
 import {
   fetchActiveApiKeys,
   resolvePlaygroundApiBaseUrl,
@@ -8,6 +7,7 @@ import {
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createRequestScopedSdpApiClients } from "@/lib/sdp-api";
+import { fetchEarnSdpOrganizationId } from "../earn-server-context";
 // From `earn-surfacing`, NOT `earn-program-data`: the latter is a client module,
 // and a Server Component importing a value from one receives a client-reference
 // proxy (truthy) instead of the boolean, which makes the guard below dead code.
@@ -77,14 +77,11 @@ export default async function EarnDepositPage({ searchParams }: EarnDepositPageP
     if (projectClient) {
       // Provider access is keyed by the SDP organization id, which is not the
       // Clerk org id — it comes from the onboarding link, same as custody setup.
-      const onboarding =
-        await organizationClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status");
+      const organizationId = await fetchEarnSdpOrganizationId(organizationClient);
       const [keysResult, availability] = await Promise.all([
         fetchActiveApiKeys(projectClient.request),
-        onboarding.organization
-          ? fetchProviderAvailability(projectClient.request, onboarding.organization.id).catch(
-              () => undefined
-            )
+        organizationId
+          ? fetchProviderAvailability(projectClient.request, organizationId).catch(() => undefined)
           : Promise.resolve(undefined),
       ]);
       if (keysResult.ok && keysResult.data) {

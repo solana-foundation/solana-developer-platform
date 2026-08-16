@@ -6,7 +6,9 @@ import {
   resolvePlaygroundApiBaseUrl,
 } from "@/app/dashboard/playground-api-data";
 import { getAuthEntryPath } from "@/lib/auth-entry";
+import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createRequestScopedSdpApiClients } from "@/lib/sdp-api";
+import { fetchEarnSdpOrganizationId } from "./earn-server-context";
 import { EarnWorkspace } from "./earn-workspace";
 
 export const dynamic = "force-dynamic";
@@ -30,18 +32,37 @@ export default async function EarnPage() {
   // playground. Best-effort: the API-key read failing must cost the reader the
   // playground's key selector, never the Opportunities and Active tabs beside it.
   let apiKeys: PlaygroundApiKeyView[] = [];
+  // Real custody-provider availability, read the same way the custodial deposit
+  // wizard reads it. The vault deposit modal reuses `WalletStep`, whose
+  // "connect Fireblocks" card is either an invitation or a locked notice — and
+  // hard-coding it to locked told entitled organizations something false about
+  // their own account.
+  let fireblocksEnabled = false;
   try {
-    const { projectClient } = await createRequestScopedSdpApiClients();
+    const { organizationClient, projectClient } = await createRequestScopedSdpApiClients();
     if (projectClient) {
       const keysResult = await fetchActiveApiKeys(projectClient.request);
       if (keysResult.ok && keysResult.data) {
         apiKeys = keysResult.data;
       }
+      const organizationId = await fetchEarnSdpOrganizationId(organizationClient);
+      const availability = organizationId
+        ? await fetchProviderAvailability(projectClient.request, organizationId).catch(
+            () => undefined
+          )
+        : undefined;
+      fireblocksEnabled = availability?.enabledCustodyProviders.includes("fireblocks") ?? false;
     }
   } catch {
     // Leaves apiKeys empty, which renders the playground's "needs an API key"
     // notice — the same state a project with no keys sees.
   }
 
-  return <EarnWorkspace apiBaseUrl={resolvePlaygroundApiBaseUrl()} apiKeys={apiKeys} />;
+  return (
+    <EarnWorkspace
+      apiBaseUrl={resolvePlaygroundApiBaseUrl()}
+      apiKeys={apiKeys}
+      fireblocksEnabled={fireblocksEnabled}
+    />
+  );
 }

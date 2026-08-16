@@ -236,18 +236,34 @@ sentence about timing must trace to one of those.
   resolved from the `programId` the confirm returned.
 - `earn-deposit-chrome.tsx` / `earn-deposit-outcome.tsx` — shared primitives.
 
-### NOT BUILT: the simplified deposit run
+### The vault deposit run (BUILT)
 
-The intended shape is **Deposit → wallet → amount → summary → hand-off**, and it
-is not written. The Opportunities tab's Deposit link still enters the wizard above
-(wallet → strategy → review). Two things constrain the design, both discovered
-rather than assumed:
+Shipped as **`earn-vault-deposit-modal.tsx`** — wallet → amount → confirm, opened
+IN PLACE from an Opportunities row rather than navigating to `/deposit`.
 
-- **SDP has no code path that moves money into a vault, for either provider
-  shape.** A custodial program is funded by the customer sending stablecoins to
-  the program's address; a `vault_direct` vault is funded by the customer's own
-  wallet signing an on-chain instruction. So the "amount" step is context for a
-  hand-off, never an execution.
+A modal, not a page, for symmetry: `earn-withdraw-modal.tsx` is the money-OUT
+verb for the same position and is already a modal, and two halves of one
+position behaving differently is a difference no reader can explain. The
+full-page wizard keeps its shape because the CUSTODIAL run is a three-step
+provisioning flow ending in a program create; this is two short steps against a
+strategy the reader already chose by clicking its row.
+
+`EARN_VAULT_DEPOSITS_ENABLED` (`earn-surfacing.ts`) says the flow exists, and it
+stayed `false` through every intermediate commit — flipping only once the modal
+existed. A separate shared capability, `isVaultDirectDepositEnabled`, says the
+flow is OPEN in the selected project environment. The API and Opportunities row
+both read it: sandbox is open for integration testing; production stays visibly
+disabled until vault withdrawals and Active-tab positions exist. Keep both
+questions. An enabled Deposit button with no flow behind it is the dead-end
+review caught on #1340; a button the API refuses is the same failure at a later
+boundary.
+
+Two things still constrain the design, both discovered rather than assumed:
+
+- **Confirm MOVES MONEY here, unlike the custodial run.** The custodial wizard
+  provisions a wallet and hands back an address to fund later; this signs and
+  submits on the spot, so the copy says so and the modal cannot be dismissed
+  while submitting.
 - **A `vault_direct` completion must never present the vault as a send target.**
   Kamino's `providerReference` is the vault's PROGRAM ACCOUNT — stablecoins sent
   there are lost. `earnDepositStyle` (@sdp/types) is what the completion step
@@ -371,10 +387,10 @@ at the call site.
 
 ## Browse-only mode — when no provider can hold a program
 
-**This is the shipped state as of 2026-08-14.** Ground is un-surfaced
-(`EARN_PROVIDER_SURFACING` in `@sdp/types`) and Kamino, the only offered
-provider, is catalogue-only — so nothing can create a program and Earn is a
-comparison catalogue plus whatever programs already exist.
+Ground is un-surfaced (`EARN_PROVIDER_SURFACING` in `@sdp/types`) and Kamino is
+the only offered provider. Nothing can create a custodial program; Kamino vaults
+remain comparable in both environments and can be deposited into directly only
+from sandbox. Existing custodial programs remain visible and withdrawable.
 
 Everything branches on ONE derived boolean, `EARN_PROGRAM_CREATION_ENABLED`.
 Never re-derive it from a provider id, and never add a second flag beside it:
@@ -386,26 +402,63 @@ Never re-derive it from a provider id, and never add a second flag beside it:
 | Program card | Withdraw + "Change strategy" | Withdraw only |
 | `/deposit` route | the wizard | `EarnDepositUnavailable` notice, returned by the server shell before it fetches anything |
 
-Note the Opportunities row: `opportunityDepositability` asks THREE questions in order —
-cluster, then token (both facts about the INSTRUMENT), then whether SDP has a
-deposit path for the provider's shape at all (`no-sdp-route`).
+Note the Opportunities row: `opportunityDepositability` asks FOUR questions in
+order — cluster, token (both facts about the INSTRUMENT), whether the path is
+open in the selected project environment (`environment-closed`), then whether
+SDP has a deposit path for the provider's shape at all (`no-sdp-route`).
 
-**That third check is not optional, and omitting it shipped a dead end.** With
-only cluster + token, a PRODUCTION Kamino row is fundable, holds USDC, renders an
-enabled Deposit link — and lands on `EarnDepositUnavailable`, because the route
-creates custodial programs only. Sandbox hides it, since every Kamino row is
-`wrong-cluster` there, so this must be asserted in the model rather than checked
-by hand (`earn-deposit-model.unit.test.ts`). Caught in review on #1340.
+Its `depositable` verdict CARRIES the `style`, and the row dispatches on that —
+never on whether an `onVaultDeposit` callback was passed. Callback presence is a
+fact about the parent's wiring; the style is a fact about the strategy, and only
+the second can say which endpoint the row may reach. If a custodial provider is
+surfaced again, branching on the callback would have opened the vault modal for
+its rows and posted them to the vault endpoint, which provisions no wallet.
 
-`no-sdp-route` carries the provider's `style` so the badge can name the real
-reason: a `vault_direct` vault takes deposits from the customer's own wallet and
-SDP does not route them yet, while a `custodial` one is simply not being offered.
-Both answer "no" today.
+`WalletStep` takes a `depositMode` prop for the same class of reason: its note
+promised a "provider-managed deposit address", which is true for the custodial
+wizard and false for `vault_direct`, where confirming signs and submits on the
+spot and there is no address ever. It also takes REAL `fireblocksEnabled`,
+threaded from `page.tsx` — hard-coding `false` told entitled organizations that
+Fireblocks was locked. A direct vault also passes its `strategyToken` as
+`balanceToken`, so both the wallet row and amount screen show that exact
+stablecoin balance — a USDT vault must never quote the wallet's USDC balance.
+The picker keeps `custody_wallets.id` as local selection state and submits that
+same row id as `custodyWalletId`. The API authorizes the exact row before
+resolving its provider wallet; a provider `walletId` is unique only within its
+custody configuration, and a public key can match more than one provider
+record. A successful response always carries a transaction signature because
+signing precedes intent persistence; the submitted and ambiguous-pending panels
+therefore always expose the cluster-correct explorer link.
+
+**That fourth check is not optional.** Before the vault-direct run existed,
+omitting it let a production Kamino row link into the custodial route, which
+could not create its provider shape. Style dispatch now selects the right run,
+but the route-shape verdict remains asserted in `earn-deposit-model.unit.test.ts`
+for the next provider rather than trusted to manual wiring. Caught in review on
+#1340.
+
+`environment-closed` keeps a production vault row visible with a compact status
+and a full withdrawal-prerequisite explanation on its disabled action.
+`no-sdp-route` carries the provider's `style` so any genuinely unbuilt provider
+shape can still name the real reason rather than falling through to a wrong flow.
+
+**Vault positions have no UI exit yet.** `POST /v1/earn/vault-deposits` has no
+withdraw counterpart, and the Active tab still reads only `earn_provider_wallets`
+(custodial), so a vault position does not render there. Both are outstanding, and
+until they land Kamino must not be creatable on mainnet — ADR 0002 forbids a
+position you can enter and not exit.
 
 **Withdraw is never gated on surfacing** (ADR 0002 — money out beats money off),
-and the withdraw modal's focus-return fallback
-(`data-earn-withdraw-focus-fallback`) therefore lives on the **Withdraw button**,
-not on "Change strategy" which disappears with it.
+and the modal focus-return fallback (`data-modal-focus-fallback`) therefore
+lives on the **Withdraw button**, not on "Change strategy" which disappears with
+it.
+
+That focus lifecycle now lives in `src/lib/use-modal-focus.ts` and is shared by
+the withdraw modal and `EarnVaultDepositModal`. The shared `Modal` gives a
+portal, `aria-modal` and Escape — and NOTHING about focus: no initial focus, no
+trap, no restoration. The deposit modal had none at all, which meant keyboard
+focus could sit on page content the dialog covered. Two halves of one position
+behaving differently for a keyboard user is a difference nobody can explain.
 
 The onboarding hero (`StartSection`) that used to own the "Set up Earn" CTA is
 GONE — the Opportunities tab is the landing surface now, so there is no empty state to
@@ -459,22 +512,22 @@ what hid the bug above, so a surfacing change wants one browser pass on
   appearing in the UI as a provider-client bug, not something to patch here.
   A `cash` position can be a token the org never deposited on Solana, so do not
   assume positions imply a Solana deposit — only the addresses do.
-- **The catalogue shows strategies this module deliberately cannot select.**
-  Kamino is a catalogue-only provider: its K-Vaults are non-custodial — the
-  customer's own wallet deposits. Each environment catalogues its OWN cluster's
-  vaults (production → mainnet, everything else → devnet, read on-chain), so a
-  sandbox row is a real, reachable devnet vault. They reach
-  `GET /v1/earn/strategies` and the wizard's comparison table, but they must not
-  advance to review because there is no program to create for them. TWO
-  independent eligibility checks disable them, and both are intentional:
+- **The catalogue shows strategies the custodial wizard deliberately cannot
+  select.** Kamino's K-Vaults are non-custodial — the customer's own wallet
+  deposits. Each environment catalogues its OWN cluster's vaults (production →
+  mainnet, everything else → devnet, read on-chain), so a sandbox row is a real,
+  reachable devnet vault. It can open the direct-deposit modal from
+  Opportunities, but it must not advance through the separate custodial wizard
+  because there is no program to create for it. TWO independent eligibility
+  checks disable that wizard path, and both are intentional:
   - `EARN_PORTFOLIO_PROVIDER` — the existing Ground pin, which refuses selection
     for every non-portfolio provider while leaving its catalogue row visible.
   - `strategy.fundable` — the API's per-request answer to "does this instrument
     exist on the caller's cluster". Since Kamino catalogues per cluster this is
     now `true` in both environments, so it no longer disables anything for
     Kamino — the gate remains for Ground and any genuinely single-cluster
-    provider. What disables the row is `no-sdp-route`: SDP has no deposit path
-    for a `vault_direct` provider.
+    provider. The Opportunities action separately applies
+    `opportunityDepositability`, including the environment capability.
 
   Do not collapse visibility and eligibility. The pin is about which provider
   the flow can create a program with; `fundable` is about whether an instrument

@@ -6,6 +6,7 @@ import type {
   EarnPortfolioWalletActivity,
   EarnPortfolioWalletStatus,
   EarnStrategy,
+  SdpEnvironment,
 } from "@sdp/types";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import Link from "next/link";
@@ -19,6 +20,7 @@ import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { useCopy } from "@/lib/use-copy";
@@ -44,6 +46,7 @@ import {
   strategySourceLabel,
   useLiquidityLabel,
 } from "./earn-program-presentation";
+import { EarnVaultDepositModal } from "./earn-vault-deposit-modal";
 import { EarnWithdrawModal } from "./earn-withdraw-modal";
 
 const DEPOSIT_PATH = "/dashboard/markets/earn/deposit";
@@ -359,7 +362,7 @@ function ProgramCard({
               disappears with the provider's surfacing. */}
           <Button
             className="flex-1 sm:flex-none"
-            data-earn-withdraw-focus-fallback={program.id}
+            data-modal-focus-fallback={program.id}
             disabled={Number(program.wallet.balance.withdrawableUsd) <= 0}
             onClick={onWithdraw}
             variant="secondary"
@@ -572,9 +575,21 @@ export function EarnPositionsPanel() {
  * filtered to surfaced providers and visible sources; this never re-applies a
  * visibility rule (a browser-side copy is what drifts).
  */
-export function EarnOpportunitiesPanel() {
+export function EarnOpportunitiesPanel({
+  environment,
+  fireblocksEnabled = false,
+}: {
+  /** Selected SDP project environment; it gates vault money-IN with the API. */
+  environment: SdpEnvironment;
+  /** Passed through to the vault deposit modal's wallet step. */
+  fireblocksEnabled?: boolean;
+}) {
   const t = useTranslations();
   const { strategies, error, isLoading } = useEarnStrategies();
+  // Owned here rather than in the table so the table stays a pure presentation
+  // of what the API returned — the same reason it never re-applies a visibility
+  // rule.
+  const [depositStrategy, setDepositStrategy] = useState<EarnStrategy | undefined>(undefined);
 
   return (
     <section className="rounded-xl border border-border-default bg-surface-raised p-6">
@@ -595,13 +610,28 @@ export function EarnOpportunitiesPanel() {
             {t("DashboardEarn.overview.catalogueLoadError")}
           </p>
         ) : (
-          <EarnOpportunitiesTable strategies={strategies ?? []} />
+          <EarnOpportunitiesTable
+            environment={environment}
+            onVaultDeposit={setDepositStrategy}
+            strategies={strategies ?? []}
+          />
         )}
       </div>
 
       <p className="mt-5 max-w-3xl text-xs leading-5 text-muted">
         {t("DashboardEarn.overview.rateDisclosure")}
       </p>
+
+      {depositStrategy ? (
+        <EarnVaultDepositModal
+          fireblocksEnabled={fireblocksEnabled}
+          // Remount per strategy so no draft amount, wallet choice, or minted
+          // idempotency key can survive a switch between vaults.
+          key={depositStrategy.id}
+          onClose={() => setDepositStrategy(undefined)}
+          strategy={depositStrategy}
+        />
+      ) : null}
     </section>
   );
 }
@@ -619,10 +649,14 @@ export function EarnOpportunitiesPanel() {
 export function EarnWorkspace({
   apiBaseUrl,
   apiKeys,
+  fireblocksEnabled,
 }: {
   apiBaseUrl: string | null;
   apiKeys: readonly PlaygroundApiKeyView[];
+  /** Real custody-provider availability, resolved server-side in page.tsx. */
+  fireblocksEnabled: boolean;
 }) {
+  const { sdpEnvironment } = useDashboardWorkspace();
   const { state } = useEarnPrograms();
   useHeaderTabCount("positions", state?.kind === "ready" ? state.programs.length : undefined);
 
@@ -632,7 +666,12 @@ export function EarnWorkspace({
         {
           id: "opportunities",
           className: dashboardWorkspaceOverviewPanelClassName,
-          content: <EarnOpportunitiesPanel />,
+          content: (
+            <EarnOpportunitiesPanel
+              environment={sdpEnvironment}
+              fireblocksEnabled={fireblocksEnabled}
+            />
+          ),
         },
         {
           id: "positions",

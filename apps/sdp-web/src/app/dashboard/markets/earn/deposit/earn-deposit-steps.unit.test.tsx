@@ -21,6 +21,7 @@ import { WalletStep } from "./wallet-step";
 
 const TIMESTAMP = "2026-07-18T09:00:00.000Z";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const USDT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 
 function strategy(partial: Partial<EarnStrategy> & { id: string }): EarnStrategy {
   return {
@@ -115,8 +116,33 @@ describe("WalletStep", () => {
         ]}
       />
     );
-    expect(html).toContain("DashboardEarn.deposit.walletAvailableToInvest");
+    expect(html).toContain("DashboardEarn.deposit.walletAvailableToInvest(USDC)");
     expect(html).toContain("1,250 USDC");
+  });
+
+  it("shows only the requested stablecoin lane in each wallet row", () => {
+    const html = renderToStaticMarkup(
+      <WalletStep
+        balanceToken="usdt"
+        fireblocksEnabled
+        hasError={false}
+        isLoading={false}
+        onSelect={() => {}}
+        selectedWalletId="wallet_1"
+        wallets={[
+          wallet({
+            balances: [
+              { token: "USDC", mint: USDC, amount: "9000000000", uiAmount: "9000", decimals: 6 },
+              { token: "USDT", mint: USDT, amount: "12500000", uiAmount: "12.5", decimals: 6 },
+            ],
+          }),
+        ]}
+      />
+    );
+
+    expect(html).toContain("DashboardEarn.deposit.walletAvailableToInvest(USDT)");
+    expect(html).toContain("12.5 USDT");
+    expect(html).not.toContain("9,000 USDC");
   });
 
   it("distinguishes an unavailable balance read from a confirmed zero", () => {

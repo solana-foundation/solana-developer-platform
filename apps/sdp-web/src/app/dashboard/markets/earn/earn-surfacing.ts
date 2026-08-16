@@ -56,3 +56,29 @@ export const EARN_PROGRAM_CREATION_ENABLED = SURFACED_CUSTODIAL_EARN_PROVIDERS.l
  */
 export const EARN_PROGRAM_CREATE_PROVIDER: EarnProviderId | undefined =
   SURFACED_CUSTODIAL_EARN_PROVIDERS[0];
+
+/**
+ * Providers SDP offers whose vaults are NON-CUSTODIAL — the customer's own
+ * wallet deposits, and SDP signs that deposit from a custody wallet it controls.
+ *
+ * Derived the same way as the custodial list above: surfacing says what is
+ * offered, `earnDepositStyle` says which of those are `vault_direct`. It is
+ * `["kamino"]` today.
+ */
+export const SURFACED_VAULT_DIRECT_EARN_PROVIDERS: readonly EarnProviderId[] =
+  SURFACED_EARN_PROVIDERS.filter((provider) => earnDepositStyle(provider) === "vault_direct");
+
+/**
+ * Whether the dashboard offers the VAULT deposit run (wallet → amount → review
+ * → execute against `POST /v1/earn/vault-deposits`).
+ *
+ * True once a vault-direct provider is offered AND the flow behind the button
+ * exists — `EarnVaultDepositModal`, opened in place from an Opportunities row.
+ *
+ * It stayed pinned `false` while that modal was being built, precisely so an
+ * enabled Deposit link could never land the reader on `EarnDepositUnavailable`
+ * — the dead-end review caught on #1340, where cluster and token both passed and
+ * only the "is there an SDP route at all" question was missing. Keep that
+ * discipline: the affordance and the flow ship together.
+ */
+export const EARN_VAULT_DEPOSITS_ENABLED = SURFACED_VAULT_DIRECT_EARN_PROVIDERS.length > 0;
