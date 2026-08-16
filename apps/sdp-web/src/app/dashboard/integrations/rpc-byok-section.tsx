@@ -2,7 +2,7 @@
 
 import { rpcProviderNeedsEndpoint, type SafeRpcConnection } from "@sdp/types";
 import { EyeIcon, EyeOffIcon } from "lucide-react";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -40,6 +40,8 @@ export function RpcByokSection({
   const [apiKey, setApiKey] = useState("");
   const [network, setNetwork] = useState("devnet");
   const [showKey, setShowKey] = useState(false);
+  const apiKeyHintId = useId();
+  const endpointHintId = useId();
   const needsEndpoint = rpcProviderNeedsEndpoint(provider);
 
   const runConnectionAction = async (
@@ -230,11 +232,14 @@ export function RpcByokSection({
                 <Input
                   required
                   type="url"
+                  aria-describedby={endpointHintId}
                   value={endpointUrl}
                   onChange={(event) => setEndpointUrl(event.target.value)}
                   placeholder="https://your-endpoint.example"
                 />
-                <span className="text-xs text-tertiary">
+                {/* Described by, not labelled by: hint text inside the label
+                    becomes part of the field's accessible name. */}
+                <span id={endpointHintId} className="text-xs text-tertiary">
                   {t("Shared.integrations.rpcByokEndpointHint")}{" "}
                   {/* Rendered as an element, not copy: translate() reads braces
                     in a message as an interpolation slot and throws on render. */}
@@ -253,6 +258,7 @@ export function RpcByokSection({
                   className="flex-1"
                   type={showKey ? "text" : "password"}
                   autoComplete="off"
+                  aria-describedby={apiKeyHintId}
                   value={apiKey}
                   onChange={(event) => setApiKey(event.target.value)}
                 />
@@ -278,7 +284,7 @@ export function RpcByokSection({
                   )}
                 </Button>
               </div>
-              <span className="text-xs text-tertiary">
+              <span id={apiKeyHintId} className="text-xs text-tertiary">
                 {t("Shared.integrations.rpcByokApiKeyHint")}
               </span>
             </label>
