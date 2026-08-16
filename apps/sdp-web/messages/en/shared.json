@@ -393,8 +393,8 @@
     "rpcByokLabelPlaceholder": "Production key",
     "rpcByokCancel": "Cancel",
     "rpcByokSave": "Save connection",
-    "rpcByokShowKey": "Show",
-    "rpcByokHideKey": "Hide"
+    "rpcByokShowKey": "Reveal key",
+    "rpcByokHideKey": "Hide key"
   },
   "notifications": {
     "ariaLabel": "Notifications",

@@ -1,6 +1,7 @@
 "use client";
 
 import { rpcProviderNeedsEndpoint, type SafeRpcConnection } from "@sdp/types";
+import { EyeIcon, EyeOffIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -262,11 +263,19 @@ export function RpcByokSection({
                   variant="secondary"
                   size="sm"
                   aria-pressed={showKey}
+                  // The icon carries no text, so the control needs its own name.
+                  aria-label={
+                    showKey
+                      ? t("Shared.integrations.rpcByokHideKey")
+                      : t("Shared.integrations.rpcByokShowKey")
+                  }
                   onClick={() => setShowKey((shown) => !shown)}
                 >
-                  {showKey
-                    ? t("Shared.integrations.rpcByokHideKey")
-                    : t("Shared.integrations.rpcByokShowKey")}
+                  {showKey ? (
+                    <EyeOffIcon aria-hidden className="size-4" />
+                  ) : (
+                    <EyeIcon aria-hidden className="size-4" />
+                  )}
                 </Button>
               </div>
               <span className="text-xs text-tertiary">

@@ -151,10 +151,10 @@ describe("RpcByokSection", () => {
     const key = screen.getByLabelText(/API key/i) as HTMLInputElement;
     expect(key.type).toBe("password");
 
-    await user.click(screen.getByRole("button", { name: "Show" }));
+    await user.click(screen.getByRole("button", { name: "Reveal key" }));
     expect(key.type).toBe("text");
 
-    await user.click(screen.getByRole("button", { name: "Hide" }));
+    await user.click(screen.getByRole("button", { name: "Hide key" }));
     expect(key.type).toBe("password");
   });
 
