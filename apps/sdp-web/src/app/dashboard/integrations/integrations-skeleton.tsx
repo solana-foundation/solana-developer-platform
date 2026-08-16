@@ -1,3 +1,5 @@
+import { INTEGRATION_FAMILIES } from "./integrations-filter";
+
 export function IntegrationsSkeleton() {
   return (
     <div className="w-full animate-pulse space-y-6 px-4 py-5 md:px-6">
@@ -7,8 +9,10 @@ export function IntegrationsSkeleton() {
         <div className="h-9 w-full max-w-[560px] rounded-full bg-fill-subtle" />
         <div className="h-10 w-full max-w-xs rounded-[10px] bg-fill-subtle xl:w-64 xl:shrink-0" />
       </div>
-      {[0, 1].map((section) => (
-        <div key={section} className="space-y-4">
+      {/* One block per family the catalog actually renders, read from the same
+          constant it maps over: a fixed count here drifted to half the page. */}
+      {INTEGRATION_FAMILIES.map((family) => (
+        <div key={family} className="space-y-4">
           <div className="space-y-2">
             <div className="h-5 w-28 rounded bg-fill-subtle" />
             <div className="h-4 w-64 rounded bg-fill-subtle" />

@@ -1,7 +1,9 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import IntegrationDetailLoading from "./[provider]/loading";
-import { IntegrationDetailSkeleton } from "./integrations-skeleton";
+import { INTEGRATION_FAMILIES } from "./integrations-filter";
+import { IntegrationDetailSkeleton, IntegrationsSkeleton } from "./integrations-skeleton";
+import IntegrationsLoading from "./loading";
 
 /**
  * A dashboard route has two loading paths: the server `loading.tsx` on a hard
@@ -22,5 +24,18 @@ describe("integration detail skeleton", () => {
     // the RPC family renders the most sections, and the skeleton is sized
     // close to it.
     expect(markup.match(/rounded-2xl/g)).toHaveLength(5);
+  });
+
+  it("reserves one catalog section per family the page renders", () => {
+    const markup = renderToStaticMarkup(<IntegrationsSkeleton />);
+    // A fixed count drifted to half the page once already.
+    expect(markup.match(/space-y-4/g)).toHaveLength(INTEGRATION_FAMILIES.length);
+  });
+
+  it("renders the same catalog markup down both loading paths", () => {
+    // The catalog already shares one component; this keeps it that way.
+    expect(renderToStaticMarkup(<IntegrationsLoading />)).toContain(
+      renderToStaticMarkup(<IntegrationsSkeleton />)
+    );
   });
 });
