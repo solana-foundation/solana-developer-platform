@@ -1,7 +1,7 @@
 "use client";
 
 import type { CustodyWalletTokenBalance, PaymentsDashboardWallet, SolanaCluster } from "@sdp/types";
-import { ExternalLink } from "lucide-react";
+import { ArrowLeftRight, Coins, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
@@ -145,6 +145,29 @@ function ActivityStatusBadge({ status }: { status: string }) {
     <Badge variant={variant} className="shrink-0">
       {messageKey ? t(messageKey) : formatStatus(status)}
     </Badge>
+  );
+}
+
+/**
+ * Quiet category mark for the mixed activity feed. Issuance rows (Deploy, Mint,
+ * Burn) and payments rows (Send, Receive) read as one flat list on type words
+ * alone, so each row leads with a muted glyph for the surface it came from —
+ * the same icons those modules already use. A glyph rather than a label keeps
+ * the table body text uniform; the sr-only text names the category for screen
+ * readers, which cannot read an icon.
+ */
+function ActivityCategoryMark({ sourceKind }: { sourceKind: HomeActivityRow["sourceKind"] }) {
+  const t = useTranslations();
+  const Icon = sourceKind === "issuance" ? Coins : ArrowLeftRight;
+  return (
+    <>
+      <Icon className="size-3.5 shrink-0 text-tertiary" aria-hidden="true" />
+      <span className="sr-only">
+        {sourceKind === "issuance"
+          ? t("Shared.homeWorkspace.categoryIssuance")
+          : t("Shared.homeWorkspace.categoryPayments")}
+      </span>
+    </>
   );
 }
 
@@ -734,6 +757,7 @@ export function HomeWorkspace({
                             <TableCell className="min-w-0 md:hidden">
                               <div className="min-w-0">
                                 <div className="flex min-w-0 items-center gap-2">
+                                  <ActivityCategoryMark sourceKind={row.sourceKind} />
                                   <div className="truncate font-medium">{row.type}</div>
                                   <ActivityStatusBadge status={row.status} />
                                 </div>
@@ -749,6 +773,7 @@ export function HomeWorkspace({
                             </TableCell>
                             <TableCell className="hidden font-medium md:table-cell">
                               <span className="flex min-w-0 items-center gap-2">
+                                <ActivityCategoryMark sourceKind={row.sourceKind} />
                                 <span className="truncate">{row.type}</span>
                                 <ActivityStatusBadge status={row.status} />
                               </span>
