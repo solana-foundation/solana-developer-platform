@@ -57,8 +57,17 @@ export function Callout({
     >
       {/* Deliberately not a heading: the callout does not know the outline of the
           page hosting it, and a guessed level would fight the real one. */}
-      {title ? <p className="font-medium">{title}</p> : null}
-      <div className={cn(title && "mt-1")}>{children}</div>
+      {title ? (
+        <>
+          <p className="font-medium">{title}</p>
+          <div className="mt-1">{children}</div>
+        </>
+      ) : (
+        // Untitled callouts stay transparent to the caller's layout. Wrapping here
+        // would make the wrapper the only flex item, turning a requested row into
+        // a column.
+        children
+      )}
     </div>
   );
 }

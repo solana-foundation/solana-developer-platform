@@ -58,6 +58,22 @@ describe("Callout", () => {
     expect(info).toContain('role="status"');
   });
 
+  it("lets a caller lay its own content out when there is no title", () => {
+    // An untitled callout that wraps its children makes the wrapper the only flex
+    // item, so a caller asking for a row gets a column. Only wrap when a title
+    // needs separating from the body.
+    const markup = renderToStaticMarkup(
+      <Callout className="flex sm:flex-row" variant="info">
+        <span>first</span>
+        <span>second</span>
+      </Callout>
+    );
+
+    expect(markup).toMatch(
+      /<div class="[^"]*flex[^"]*"><span>first<\/span><span>second<\/span><\/div>/
+    );
+  });
+
   it("renders a title without inventing a heading level", () => {
     // Heading elements here would collide with whatever page hosts the callout,
     // and a duplicate h1 has already shipped once on this dashboard.
