@@ -211,13 +211,36 @@ Ground is **custodial**: SDP provisions an omnibus portfolio wallet, the
 customer funds it, Ground spreads it across yield sources. Programs,
 withdrawals and the deposit wizard all assume that shape.
 
-Kamino is **non-custodial and catalogue-only**: a K-Vault is an on-chain vault
-the customer's own wallet deposits into, so there is no wallet for SDP to
-provision or pay out from. It implements the base `EarnVaultProvider` contract
-plus the live-metrics capability, and NONE of the portfolio-wallet capability —
-so every money-moving route answers 501 for it through `supportsPortfolioWallets`,
-never a provider-id check. Deposit/withdraw execution is not "not yet"; it is a
-different money model that V1 does not carry.
+Kamino is **non-custodial**: a K-Vault is an on-chain vault the customer's own
+wallet deposits into, so there is no wallet for SDP to provision or pay out
+from, and no address to hand out — the vault's account is a PROGRAM account and
+stablecoins sent to it are destroyed.
+
+It implements the base `EarnVaultProvider` contract, the live-metrics
+capability, and — since the vault-deposit change — the **vault-direct**
+capability (`EarnVaultDirectProvider`, `supportsVaultDirect`), which is
+DEPOSIT + READ only.
+
+Money OUT is a separate capability, `EarnVaultWithdrawProvider` /
+`supportsVaultWithdraw`, and Kamino deliberately does NOT implement it yet. The
+split is not taxonomy: an exit may legitimately need several transactions (one
+withdraw instruction per reserve the vault draws from), which a deposit never
+does, so "can build a deposit" must not silently assert "can build a correctly
+BATCHED exit". Withholding it says the SDP route does not exist; it is never a
+permission gate, since ADR 0002 forbids money-out inheriting a money-in gate.
+
+It still
+implements NONE of the portfolio-wallet capability, so every portfolio route
+answers 501 for it through `supportsPortfolioWallets`, never a provider-id
+check. The two capabilities are asserted MUTUALLY EXCLUSIVE: a client claiming
+both would let a portfolio route render the vault account as a fundable
+address.
+
+Money moves for Kamino by SDP BUILDING an instruction, signing it with one of
+the organization's own custody wallets and submitting it — `@sdp/kamino` builds
+the plan, the API signs and submits (`POST /v1/earn/vault-deposits`). That
+package depends on this one, never the reverse: the hourly catalogue cron must
+not load a 13MB chain SDK it never calls.
 
 Three Kamino facts drive most of its code, all measured against the live API on
 2026-08-13 (Kamino publishes an agent-readable API index at

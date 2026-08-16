@@ -1,3 +1,4 @@
+import type { SdpEnvironment } from "./api-keys";
 import { CUSTODY_PROVIDERS, type CustodyProvider } from "./custody";
 import {
   normalizeOrganizationTier,
@@ -144,6 +145,39 @@ export function earnDepositStyle(provider: string): EarnDepositStyle {
 export const SURFACED_EARN_PROVIDERS: readonly EarnProviderId[] = EARN_PROVIDERS.filter(
   (provider) => EARN_PROVIDER_SURFACING[provider]
 );
+
+/**
+ * Environments where a `vault_direct` deposit may be OPENED.
+ *
+ * ── Why production is closed ────────────────────────────────────────────────
+ * SDP can currently move money INTO a K-Vault and not back out. There is no
+ * vault-withdraw route (the Kamino client withholds the capability because its
+ * plan is not yet batched), and the dashboard's Active tab reads custodial
+ * `earn_provider_wallets` only, so a vault position does not even appear there.
+ * Entitlement will not save us: it is org-scoped, not environment-scoped, so an
+ * entitled org would otherwise reach mainnet with real funds.
+ *
+ * Nothing here traps money that is already deposited. The shares sit in the
+ * org's OWN custody wallet and Kamino's UI can always redeem them — this closes
+ * the door IN, which is the only direction ADR 0002 ever permits closing.
+ *
+ * Shared rather than duplicated on purpose: this is the single fact the API
+ * refuses on and the dashboard hides the affordance on, and a UI that offered a
+ * button the server refuses is the specific failure this replaces.
+ *
+ * TO OPEN PRODUCTION: land the withdraw path and the Active-tab surface, then
+ * add "production" here. It is one line precisely so it cannot be forgotten,
+ * and it is not a flag flip precisely because the work is real.
+ */
+export const VAULT_DIRECT_DEPOSIT_ENVIRONMENTS: readonly SdpEnvironment[] = ["sandbox"];
+
+/**
+ * Whether a non-custodial vault deposit may be opened in this environment.
+ * Fail-closed: an unrecognized environment answers false.
+ */
+export function isVaultDirectDepositEnabled(environment: string): boolean {
+  return (VAULT_DIRECT_DEPOSIT_ENVIRONMENTS as readonly string[]).includes(environment);
+}
 
 /**
  * Fail-closed surfacing check for an OPEN string.

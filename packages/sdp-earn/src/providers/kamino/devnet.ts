@@ -1,3 +1,4 @@
+import { KAMINO_DEVNET_KVAULT_PROGRAM_ID } from "@sdp/types/kamino-programs";
 import { internalError, providerNotConfigured } from "../../errors";
 import { providerFetchJson } from "../../fetch";
 
@@ -35,9 +36,18 @@ import { providerFetchJson } from "../../fetch";
  * program per cluster, and mainnet's id also exists on devnet with ZERO
  * accounts under it, so pointing at the wrong one yields a confident empty
  * shelf rather than an error.
+ *
+ * Re-exported from `@sdp/types/kamino-programs`, which is the single home for
+ * every Kamino program address. It cannot live in `@sdp/kamino` (the package
+ * that builds deposit/withdraw instructions against the same program) because
+ * this module would then have to import it, and a `@sdp/earn → @sdp/kamino`
+ * edge is both a workspace cycle and a reason for the catalogue cron to load a
+ * 13MB SDK it never calls.
+ *
+ * Imported AND re-exported: `listKaminoDevnetVaults` below uses it as a value,
+ * which a bare `export … from` would not bind locally.
  */
-// biome-ignore lint/security/noSecrets: a public Solana program address, not a credential
-export const KAMINO_DEVNET_KVAULT_PROGRAM_ID = "devkRngFnfp4gBc5a3LsadgbQKdPo8MSZ4prFiNSVmY";
+export { KAMINO_DEVNET_KVAULT_PROGRAM_ID };
 
 /**
  * `VaultState` account size, and the byte offsets of the fields SDP reads.
