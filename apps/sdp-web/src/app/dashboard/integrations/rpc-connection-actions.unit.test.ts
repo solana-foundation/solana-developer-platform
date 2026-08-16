@@ -7,10 +7,7 @@ vi.mock("@/lib/sdp-api", () => ({
   createSdpApiClient: async () => ({ fetch: fetchMock }),
 }));
 
-import {
-  activateRpcConnectionAction,
-  submitRpcConnectionAction,
-} from "./rpc-connection-actions";
+import { activateRpcConnectionAction, submitRpcConnectionAction } from "./rpc-connection-actions";
 
 /**
  * These actions were the one layer without tests, and the gap showed: the
