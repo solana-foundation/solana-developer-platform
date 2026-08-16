@@ -1,5 +1,7 @@
+import { COMPLIANCE_PROVIDERS, ORGANIZATION_RPC_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { CUSTODY_PROVIDER_CATALOG } from "@/app/dashboard/custody/provider-catalog";
 import IntegrationDetailLoading from "./[provider]/loading";
 import { INTEGRATION_FAMILIES } from "./integrations-filter";
 import { IntegrationDetailSkeleton, IntegrationsSkeleton } from "./integrations-skeleton";
@@ -37,5 +39,18 @@ describe("integration detail skeleton", () => {
     expect(renderToStaticMarkup(<IntegrationsLoading />)).toContain(
       renderToStaticMarkup(<IntegrationsSkeleton />)
     );
+  });
+
+  it("reserves a card per provider the catalog actually lists", () => {
+    // Four per section left the placeholder 22% shorter than the page: custody
+    // alone renders ten. Measured at 1832px page against 1820px skeleton.
+    const expected =
+      CUSTODY_PROVIDER_CATALOG.filter((entry) => entry.visible).length +
+      (ORGANIZATION_RPC_PROVIDERS.length - 1) +
+      RAMP_PROVIDERS.length +
+      COMPLIANCE_PROVIDERS.length;
+
+    const markup = renderToStaticMarkup(<IntegrationsSkeleton />);
+    expect(markup.match(/h-\[120px\]/g)).toHaveLength(expected);
   });
 });

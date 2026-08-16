@@ -1,4 +1,21 @@
-import { INTEGRATION_FAMILIES } from "./integrations-filter";
+import { COMPLIANCE_PROVIDERS, ORGANIZATION_RPC_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types";
+import { CUSTODY_PROVIDER_CATALOG } from "@/app/dashboard/custody/provider-catalog";
+import { INTEGRATION_FAMILIES, type IntegrationFamily } from "./integrations-filter";
+
+/**
+ * How many cards each family settles at, read from the same catalogues the page
+ * maps over. A flat four per section left the placeholder 22% shorter than the
+ * page it stood in for, because custody alone renders ten.
+ *
+ * `default` is only listed while the organization runs on it, so RPC is counted
+ * one short of the union rather than assuming it shows.
+ */
+const FAMILY_CARD_COUNTS: Record<IntegrationFamily, number> = {
+  custody: CUSTODY_PROVIDER_CATALOG.filter((entry) => entry.visible).length,
+  rpc: ORGANIZATION_RPC_PROVIDERS.length - 1,
+  ramps: RAMP_PROVIDERS.length,
+  compliance: COMPLIANCE_PROVIDERS.length,
+};
 
 export function IntegrationsSkeleton() {
   return (
@@ -18,7 +35,7 @@ export function IntegrationsSkeleton() {
             <div className="h-4 w-64 rounded bg-fill-subtle" />
           </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {[0, 1, 2, 3].map((card) => (
+            {Array.from({ length: FAMILY_CARD_COUNTS[family] }, (_, index) => index).map((card) => (
               <div
                 key={card}
                 className="h-[120px] rounded-2xl border border-border-subtle bg-surface-raised"
