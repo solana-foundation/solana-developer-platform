@@ -42,6 +42,9 @@ export function RpcByokSection({
   const [showKey, setShowKey] = useState(false);
   const apiKeyHintId = useId();
   const endpointHintId = useId();
+  const labelFieldId = useId();
+  const endpointFieldId = useId();
+  const apiKeyFieldId = useId();
   const needsEndpoint = rpcProviderNeedsEndpoint(provider);
 
   const runConnectionAction = async (
@@ -194,11 +197,12 @@ export function RpcByokSection({
             }}
           >
             <div className="grid gap-2 sm:grid-cols-2">
-              <label className="grid gap-1.5 text-sm">
+              <label className="grid gap-1.5 text-sm" htmlFor={labelFieldId}>
                 <span className="font-medium text-primary">
                   {t("Shared.integrations.rpcByokLabel")}
                 </span>
                 <Input
+                  id={labelFieldId}
                   required
                   value={credentialLabel}
                   onChange={(event) => setCredentialLabel(event.target.value)}
@@ -225,11 +229,12 @@ export function RpcByokSection({
             {/* Only providers that issue an account-specific host make the
                 tenant type one; for the rest the published endpoint is used. */}
             {needsEndpoint ? (
-              <label className="grid gap-1.5 text-sm">
+              <label className="grid gap-1.5 text-sm" htmlFor={endpointFieldId}>
                 <span className="font-medium text-primary">
                   {t("Shared.integrations.rpcByokEndpoint")}
                 </span>
                 <Input
+                  id={endpointFieldId}
                   required
                   type="url"
                   aria-describedby={endpointHintId}
@@ -248,12 +253,13 @@ export function RpcByokSection({
               </label>
             ) : null}
 
-            <label className="grid gap-1.5 text-sm">
+            <label className="grid gap-1.5 text-sm" htmlFor={apiKeyFieldId}>
               <span className="font-medium text-primary">
                 {t("Shared.integrations.rpcByokApiKey")}
               </span>
               <div className="flex items-center gap-2">
                 <Input
+                  id={apiKeyFieldId}
                   required
                   className="flex-1"
                   type={showKey ? "text" : "password"}
