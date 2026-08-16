@@ -1,4 +1,5 @@
 import {
+  assertReachableTenantEndpoint,
   type ByokRpcProvider,
   buildTenantDisplayMetadata,
   buildTenantRpcTarget,
@@ -85,6 +86,17 @@ function resolveScope(
   return { projectId, scopeKey: projectId };
 }
 
+/**
+ * The scopes this request may act on: the organization plus whichever project
+ * is selected, never another project's. The selected project is already
+ * membership-checked by middleware, so anchoring to it is what stops one
+ * project's administrator naming another project's connection by id.
+ */
+function actingScopeKeys(c: AppContext): string[] {
+  const projectId = c.get("projectId");
+  return projectId ? [ORGANIZATION_SCOPE_KEY, projectId] : [ORGANIZATION_SCOPE_KEY];
+}
+
 function requireUserId(c: AppContext): string {
   const auth = getAuth(c);
   const userId = auth.userId;
@@ -137,8 +149,10 @@ export async function submitRpcConnection(
     apiKey: input.apiKey,
   };
 
-  // Reject an endpoint we cannot build a target from before anything is
-  // written, rather than storing a secret for a connection that can never run.
+  // Reject an endpoint we cannot build a target from, or must never reach,
+  // before anything is written -- no secret stored for a connection that can
+  // never run, and no row that would point the relay at a private address.
+  assertReachableTenantEndpoint(credential.endpointUrl);
   buildTenantRpcTarget(input.provider, credential);
 
   const providerCredentialId = `pcred_${crypto.randomUUID()}`;
@@ -211,11 +225,12 @@ export async function submitRpcConnection(
 async function loadConnectionWithSecret(c: AppContext, connectionId: string) {
   const auth = getAuth(c);
   const store = new RpcConnectionStore(getDb(c.env));
-  const connection = await store.findConnection(auth.organizationId, connectionId);
+  const scopeKeys = actingScopeKeys(c);
+  const connection = await store.findConnection(auth.organizationId, connectionId, scopeKeys);
   if (!connection) {
     throw notFound("RPC connection");
   }
-  return { auth, store, connection };
+  return { auth, store, connection, scopeKeys };
 }
 
 /**
@@ -228,7 +243,7 @@ export async function activateRpcConnection(
   connectionId: string,
   options: { makeDefault: boolean }
 ): Promise<SafeRpcConnection> {
-  const { auth, store, connection } = await loadConnectionWithSecret(c, connectionId);
+  const { auth, store, connection, scopeKeys } = await loadConnectionWithSecret(c, connectionId);
 
   if (connection.status === "deactivated") {
     throw conflict("A deactivated RPC connection cannot be reactivated; create a new one");
@@ -237,6 +252,7 @@ export async function activateRpcConnection(
   const credential = await store.findConnectionSecret({
     organizationId: auth.organizationId,
     connectionId,
+    scopeKeys,
   });
   if (!credential) {
     throw notFound("Provider credential");
@@ -277,30 +293,44 @@ export async function activateRpcConnection(
     await store.recordCheckFailure({
       organizationId: auth.organizationId,
       connectionId,
+      scopeKeys,
       failureCode,
     });
     throw conflict("The RPC provider rejected this connection", { failureCode });
   }
 
   const db = getDb(c.env);
-  const activated = await db.transaction(async (tx) => {
-    const txStore = new RpcConnectionStore(tx);
-    if (options.makeDefault) {
-      await txStore.clearDefault({
+  let activated: RpcConnectionRow | null;
+  try {
+    activated = await db.transaction(async (tx) => {
+      const txStore = new RpcConnectionStore(tx);
+      if (options.makeDefault) {
+        await txStore.clearDefault({
+          organizationId: auth.organizationId,
+          scopeKey: connection.scope_key,
+          network: connection.network,
+          exceptConnectionId: connectionId,
+          executor: tx,
+        });
+      }
+      return txStore.activateConnection({
         organizationId: auth.organizationId,
-        scopeKey: connection.scope_key,
-        network: connection.network,
-        exceptConnectionId: connectionId,
+        connectionId,
+        scopeKeys,
+        makeDefault: options.makeDefault,
         executor: tx,
       });
-    }
-    return txStore.activateConnection({
-      organizationId: auth.organizationId,
-      connectionId,
-      makeDefault: options.makeDefault,
-      executor: tx,
     });
-  });
+  } catch (error) {
+    // Two administrators activating different defaults for the same scope and
+    // network can both clear the previous one before either commits; the
+    // partial unique index then rejects the loser. That is a conflict the
+    // caller can retry, not an internal error.
+    if (isDefaultConflict(error)) {
+      throw conflict("Another connection was made the default at the same time");
+    }
+    throw error;
+  }
 
   if (!activated) {
     throw conflict("The RPC connection changed while it was being activated");
@@ -313,11 +343,12 @@ export async function deactivateRpcConnection(
   c: AppContext,
   connectionId: string
 ): Promise<SafeRpcConnection> {
-  const { auth, store } = await loadConnectionWithSecret(c, connectionId);
+  const { auth, store, scopeKeys } = await loadConnectionWithSecret(c, connectionId);
 
   const deactivated = await store.deactivateConnection({
     organizationId: auth.organizationId,
     connectionId,
+    scopeKeys,
   });
   if (!deactivated) {
     throw conflict("The RPC connection is already deactivated");
@@ -326,9 +357,17 @@ export async function deactivateRpcConnection(
   const credential = await store.findConnectionSecret({
     organizationId: auth.organizationId,
     connectionId,
+    scopeKeys,
   });
 
   return toSafeWithCredential(deactivated, credential);
+}
+
+function isDefaultConflict(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes("rpc_connections_one_default_per_scope_network") || message.includes("23505")
+  );
 }
 
 function toSafeWithCredential(

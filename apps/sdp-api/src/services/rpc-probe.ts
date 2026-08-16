@@ -30,6 +30,9 @@ export async function probeRpcEndpoint(target: RpcProbeTarget): Promise<RpcProbe
   const startedAt = Date.now();
   const upstream = await fetch(target.endpoint, {
     method: "POST",
+    // A validated host can still redirect; following it would land the request
+    // somewhere the host check already refused.
+    redirect: "manual",
     headers: {
       "Content-Type": "application/json",
       ...target.headers,

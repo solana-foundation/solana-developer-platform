@@ -145,6 +145,7 @@ describe("BYOK end to end", () => {
     await connections.activateConnection({
       organizationId: ORG_ID,
       connectionId: CONNECTION_ID,
+      scopeKeys: ["__organization__"],
       makeDefault: true,
     });
 
@@ -181,6 +182,7 @@ describe("BYOK end to end", () => {
     await connections.deactivateConnection({
       organizationId: ORG_ID,
       connectionId: CONNECTION_ID,
+      scopeKeys: ["__organization__"],
     });
 
     const target = await resolveRpcTarget({

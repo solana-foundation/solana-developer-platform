@@ -2,6 +2,7 @@
 // and this is the code path the RPC connection service depends on.
 
 import {
+  assertReachableTenantEndpoint,
   BYOK_RPC_PROVIDERS,
   buildTenantDisplayMetadata,
   buildTenantRpcTarget,
@@ -101,5 +102,41 @@ describe("tenant redaction", () => {
         endpointHost: "a.example",
       }
     );
+  });
+});
+
+describe("assertReachableTenantEndpoint", () => {
+  it("refuses the cloud metadata address", () => {
+    // The endpoint is fetched on activation and on every relayed request, so a
+    // stored metadata URL would turn SDP's server into the caller.
+    expect(() => assertReachableTenantEndpoint("https://169.254.169.254/latest/meta-data")).toThrow(
+      /not reachable/i
+    );
+  });
+
+  it("refuses loopback and private ranges", () => {
+    for (const host of [
+      "https://localhost/rpc",
+      "https://127.0.0.1/rpc",
+      "https://10.0.0.5/rpc",
+      "https://192.168.1.10/rpc",
+      "https://172.16.4.4/rpc",
+      "https://vault.internal/rpc",
+    ]) {
+      expect(() => assertReachableTenantEndpoint(host)).toThrow(/not reachable/i);
+    }
+  });
+
+  it("refuses plaintext http", () => {
+    expect(() => assertReachableTenantEndpoint("http://rpc.example.com")).toThrow(/https/i);
+  });
+
+  it("refuses a malformed URL", () => {
+    expect(() => assertReachableTenantEndpoint("not-a-url")).toThrow(/valid URL/i);
+  });
+
+  it("allows an ordinary vendor endpoint", () => {
+    expect(() => assertReachableTenantEndpoint("https://devnet.helius-rpc.com")).not.toThrow();
+    expect(() => assertReachableTenantEndpoint("https://example.quiknode.pro/abc/")).not.toThrow();
   });
 });
