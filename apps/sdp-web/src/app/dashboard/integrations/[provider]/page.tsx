@@ -43,6 +43,19 @@ async function getConnectedCustodyProviders(request: SdpApiClient["request"]) {
  * the internal routes refuse API keys; a failure is not fatal to the page, it
  * just means the BYOK section has nothing to show.
  */
+const CONNECTION_PAGE_SIZE = 50;
+
+/**
+ * Tenant connections for one provider.
+ *
+ * Pages to the end before filtering: the list is organization-wide, so
+ * truncating at one page and then narrowing by provider would hide credentials
+ * that exist but sit past the cut.
+ *
+ * Returns `null` when the read fails rather than an empty array. An empty array
+ * means "you have none and are running on SDP's", which is a claim we cannot
+ * make from a failed request.
+ */
 async function getByokConnections(provider: string) {
   // `default` is SDP's own rail and has no tenant credential; every other RPC
   // provider does. Checked here rather than importing @sdp/rpc, which the web
@@ -50,14 +63,29 @@ async function getByokConnections(provider: string) {
   if (provider === "default" || !ORGANIZATION_RPC_PROVIDERS.includes(provider as never)) {
     return undefined;
   }
+
   try {
     const client = await createSdpApiClient();
-    const payload = await client.fetch<RpcConnectionListResponse>(
-      "/internal/dashboard/rpc/connections?scope=organization&limit=50"
-    );
-    return payload.connections.filter((connection) => connection.provider === provider);
+    const collected: RpcConnectionListResponse["connections"] = [];
+    let offset = 0;
+    let total = 0;
+
+    do {
+      const payload = await client.fetch<RpcConnectionListResponse>(
+        `/internal/dashboard/rpc/connections?scope=organization&limit=${CONNECTION_PAGE_SIZE}&offset=${offset}`
+      );
+      collected.push(...payload.connections);
+      total = payload.pagination.total;
+      offset += CONNECTION_PAGE_SIZE;
+      // A page that comes back short means the list ended, whatever total says.
+      if (payload.connections.length < CONNECTION_PAGE_SIZE) {
+        break;
+      }
+    } while (collected.length < total);
+
+    return collected.filter((connection) => connection.provider === provider);
   } catch {
-    return [];
+    return null;
   }
 }
 

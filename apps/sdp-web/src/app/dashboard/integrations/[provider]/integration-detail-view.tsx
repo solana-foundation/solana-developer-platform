@@ -24,8 +24,11 @@ export interface RpcConnectionContext {
   /** Whether this deployment holds an endpoint for the provider on the page. */
   isEnabledInDeployment: boolean;
   organizationId: string;
-  /** Tenant-owned connections for this provider; absent for SDP's own rail. */
-  byokConnections?: SafeRpcConnection[];
+  /**
+   * Tenant-owned connections for this provider; absent for SDP's own rail,
+   * `null` when the read failed and we must not claim there are none.
+   */
+  byokConnections?: SafeRpcConnection[] | null;
 }
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
@@ -184,7 +187,7 @@ export async function IntegrationDetailView({
         </Section>
       ) : null}
 
-      {detail.family === "rpc" && rpc?.byokConnections ? (
+      {detail.family === "rpc" && rpc?.byokConnections !== undefined ? (
         <Section title={t("Shared.integrations.rpcByokTitle")}>
           <RpcByokSection
             canManage={rpc.canManage}

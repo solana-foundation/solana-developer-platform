@@ -191,4 +191,13 @@ describe("RpcByokSection", () => {
     });
     expect(screen.getByText("provider_rejected_credentials")).toBeTruthy();
   });
+
+  it("says the credentials could not be read rather than claiming there are none", () => {
+    // An empty array is a claim; a failed read is not. Telling an organization
+    // with stored credentials that it has none is the worse of the two.
+    renderSection({ connections: null });
+
+    expect(screen.getByText(/could not be loaded/)).toBeTruthy();
+    expect(screen.queryByText(/running on SDP's/)).toBeNull();
+  });
 });

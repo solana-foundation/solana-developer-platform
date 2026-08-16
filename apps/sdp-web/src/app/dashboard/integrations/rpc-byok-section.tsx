@@ -28,7 +28,8 @@ export function RpcByokSection({
   provider,
 }: {
   canManage: boolean;
-  connections: SafeRpcConnection[];
+  /** `null` when the read failed: unknown is not the same as none. */
+  connections: SafeRpcConnection[] | null;
   provider: string;
 }) {
   const t = useTranslations();
@@ -102,7 +103,11 @@ export function RpcByokSection({
         {t("Shared.integrations.rpcByokDescription")}
       </p>
 
-      {connections.length > 0 ? (
+      {connections === null ? (
+        <p className="text-sm leading-6 text-warning">
+          {t("Shared.integrations.rpcByokUnavailable")}
+        </p>
+      ) : connections.length > 0 ? (
         <ul className="space-y-2">
           {connections.map((connection) => (
             <li

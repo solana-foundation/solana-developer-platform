@@ -394,7 +394,8 @@
     "rpcByokCancel": "Cancel",
     "rpcByokSave": "Save connection",
     "rpcByokShowKey": "Reveal key",
-    "rpcByokHideKey": "Hide key"
+    "rpcByokHideKey": "Hide key",
+    "rpcByokUnavailable": "Your own credentials could not be loaded just now. Reload before assuming there are none."
   },
   "notifications": {
     "ariaLabel": "Notifications",
