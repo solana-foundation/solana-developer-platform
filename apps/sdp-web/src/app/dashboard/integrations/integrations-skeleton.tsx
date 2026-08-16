@@ -36,7 +36,10 @@ export function IntegrationDetailSkeleton() {
       <div className="h-[104px] rounded-2xl border border-border-subtle bg-surface-raised" />
       <div className="h-[120px] rounded-2xl border border-border-subtle bg-surface-raised" />
       <div className="h-[120px] rounded-2xl border border-border-subtle bg-surface-raised" />
-      {/* RPC providers carry a Connection section above About. */}
+      {/* RPC providers carry Connection and "Your own credentials" above About.
+          Custody settles one block shorter; five is the closest single shape to
+          both, so neither family jumps far. */}
+      <div className="h-[120px] rounded-2xl border border-border-subtle bg-surface-raised" />
       <div className="h-[120px] rounded-2xl border border-border-subtle bg-surface-raised" />
     </div>
   );

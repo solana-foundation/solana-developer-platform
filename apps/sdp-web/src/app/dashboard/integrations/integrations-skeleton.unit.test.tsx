@@ -18,8 +18,9 @@ describe("integration detail skeleton", () => {
 
   it("carries a block for every section the detail page renders", () => {
     const markup = renderToStaticMarkup(<IntegrationDetailSkeleton />);
-    // Header, Connection, About, How it connects, Resources — the RPC family
-    // renders the most sections, and the skeleton is sized for it.
-    expect(markup.match(/rounded-2xl/g)).toHaveLength(4);
+    // Header, Connection, credentials, About, How it connects, Resources —
+    // the RPC family renders the most sections, and the skeleton is sized
+    // close to it.
+    expect(markup.match(/rounded-2xl/g)).toHaveLength(5);
   });
 });

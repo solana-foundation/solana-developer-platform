@@ -1,12 +1,21 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyConfigSummary, OrganizationRpcProvider } from "@sdp/types";
+import type {
+  CustodyConfigSummary,
+  OrganizationRpcProvider,
+  RpcConnectionListResponse,
+} from "@sdp/types";
+import { ORGANIZATION_RPC_PROVIDERS } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
 import { isKnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
-import { createRequestScopedSdpApiClients, type SdpApiClient } from "@/lib/sdp-api";
+import {
+  createRequestScopedSdpApiClients,
+  createSdpApiClient,
+  type SdpApiClient,
+} from "@/lib/sdp-api";
 import { isKnownIntegrationProvider, resolveIntegrationDetail } from "../integration-detail";
 import {
   resolveComplianceIntegrations,
@@ -27,6 +36,29 @@ async function getConnectedCustodyProviders(request: SdpApiClient["request"]) {
     .filter((config) => config.status === "active")
     .map((config) => config.provider)
     .filter(isKnownCustodyProvider);
+}
+
+/**
+ * Tenant connections for one provider. Read through the session client because
+ * the internal routes refuse API keys; a failure is not fatal to the page, it
+ * just means the BYOK section has nothing to show.
+ */
+async function getByokConnections(provider: string) {
+  // `default` is SDP's own rail and has no tenant credential; every other RPC
+  // provider does. Checked here rather than importing @sdp/rpc, which the web
+  // app deliberately does not depend on.
+  if (provider === "default" || !ORGANIZATION_RPC_PROVIDERS.includes(provider as never)) {
+    return undefined;
+  }
+  try {
+    const client = await createSdpApiClient();
+    const payload = await client.fetch<RpcConnectionListResponse>(
+      "/internal/dashboard/rpc/connections?scope=organization&limit=50"
+    );
+    return payload.connections.filter((connection) => connection.provider === provider);
+  } catch {
+    return [];
+  }
 }
 
 export default async function IntegrationDetailPage({
@@ -100,6 +132,7 @@ export default async function IntegrationDetailPage({
               isEnabledInDeployment:
                 availability.providers.rpc[provider as OrganizationRpcProvider]?.enabled ?? false,
               organizationId,
+              byokConnections: await getByokConnections(provider),
             }
           : undefined
       }
