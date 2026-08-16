@@ -1,6 +1,6 @@
 "use client";
 
-import type { CustodyWalletSummary } from "@sdp/types";
+import type { CustodyWalletSummary, EarnPortfolioToken } from "@sdp/types";
 import { ExternalLinkIcon, LockIcon, PlusIcon, ShieldCheckIcon } from "lucide-react";
 import Link from "next/link";
 import { useId, useMemo, useState } from "react";
@@ -22,7 +22,7 @@ import {
   matchesWalletQuery,
   shortenAddress,
   walletDisplayName,
-  walletUsdcAmount,
+  walletTokenAmount,
 } from "./earn-funding-wallets";
 
 /** Above this many wallets a search field is worth the extra chrome. */
@@ -33,10 +33,12 @@ const SEARCH_THRESHOLD = 6;
  * first line and the address the second — and neither is monospaced.
  */
 function WalletRow({
+  balanceToken,
   onSelect,
   selected,
   wallet,
 }: {
+  balanceToken: EarnPortfolioToken;
   onSelect: () => void;
   selected: boolean;
   wallet: CustodyWalletSummary;
@@ -45,7 +47,8 @@ function WalletRow({
   const inputId = `earn-funding-wallet-${wallet.id}`;
   const nameId = `${inputId}-name`;
   const detailId = `${inputId}-detail`;
-  const availableUsdc = walletUsdcAmount(wallet);
+  const availableAmount = walletTokenAmount(wallet, balanceToken);
+  const balanceTokenLabel = balanceToken.toUpperCase();
 
   return (
     <SelectableCard
@@ -79,10 +82,14 @@ function WalletRow({
           </span>
           <span className="mt-3 flex items-baseline justify-between gap-3 border-t border-border-subtle pt-3">
             <span className="text-xs text-tertiary">
-              {t("DashboardEarn.deposit.walletAvailableToInvest")}
+              {t("DashboardEarn.deposit.walletAvailableToInvest", {
+                token: balanceTokenLabel,
+              })}
             </span>
             <span className="text-sm font-medium text-primary tabular-nums">
-              {availableUsdc === undefined ? "—" : formatTokenQuantity(availableUsdc, "USDC")}
+              {availableAmount === undefined
+                ? "—"
+                : formatTokenQuantity(availableAmount, balanceTokenLabel)}
             </span>
           </span>
         </span>
@@ -136,6 +143,7 @@ function ConnectWalletCard({ fireblocksEnabled }: { fireblocksEnabled: boolean }
 }
 
 export function WalletStep({
+  balanceToken = "usdc",
   depositMode = "custodial",
   fireblocksEnabled,
   hasError,
@@ -144,6 +152,8 @@ export function WalletStep({
   selectedWalletId,
   wallets,
 }: {
+  /** Stablecoin balance shown in each wallet row; direct vaults pass their strategy token. */
+  balanceToken?: EarnPortfolioToken;
   /**
    * Which money model this wallet is being chosen FOR.
    *
@@ -230,6 +240,7 @@ export function WalletStep({
             <legend className="sr-only">{t("DashboardEarn.deposit.walletLegend")}</legend>
             {visible.map((wallet) => (
               <WalletRow
+                balanceToken={balanceToken}
                 key={wallet.id}
                 onSelect={() => onSelect(wallet.id)}
                 selected={wallet.id === selectedWalletId}

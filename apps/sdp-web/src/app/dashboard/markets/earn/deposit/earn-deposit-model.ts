@@ -5,6 +5,8 @@ import {
   type EarnProviderId,
   type EarnStrategy,
   earnDepositStyle,
+  isVaultDirectDepositEnabled,
+  type SdpEnvironment,
 } from "@sdp/types";
 import { strategyApy, strategyPoolUsd, strategyToken } from "../earn-program-presentation";
 import { EARN_PROGRAM_CREATION_ENABLED, EARN_VAULT_DEPOSITS_ENABLED } from "../earn-surfacing";
@@ -70,35 +72,38 @@ export function fundableStrategies(strategies: readonly EarnStrategy[]): readonl
  * Whether a catalogue row can start a deposit run that can actually FINISH, and
  * if not, why.
  *
- * Three questions, in the order that gives the reader the most actionable
+ * Four questions, in the order that gives the reader the most actionable
  * answer:
  *
  * 1. Does the instrument exist on this cluster (`wrong-cluster`)? Definitive and
  *    environment-specific, so it wins — a sandbox reader looking at a
  *    mainnet-only Kamino row needs that before they wonder about its token.
  * 2. Does its mint map to a supported stablecoin lane (`asset-unsupported`)?
- * 3. **Does SDP have a deposit path for this provider's shape at all
+ * 3. Is that path open in this project environment (`environment-closed`)? A
+ *    sandbox vault can be exercised while production stays closed until SDP
+ *    also supports the exit.
+ * 4. **Does SDP have a deposit path for this provider's shape at all
  *    (`no-sdp-route`)?**
  *
- * The third check is the one that is easy to omit and was: without it, a
- * production Kamino row is fundable, has a supported token, renders an enabled
- * Deposit link — and lands on `EarnDepositUnavailable`, because the route it
- * points at only creates custodial programs. Sandbox hides that (every Kamino
- * row is `wrong-cluster` there), which is exactly why the check belongs in the
- * model rather than in a manual pass.
+ * The fourth check is easy to omit and was caught before the vault-direct run
+ * existed: a production Kamino row rendered an enabled link into the custodial
+ * route, which could not create its provider shape. The style now dispatches to
+ * the right run, but the route-shape check remains the compiler-enforced guard
+ * for the next provider rather than a manual assumption.
  *
- * It answers differently per provider shape, and today both answer "no":
+ * It answers differently per provider shape:
  *
  * - `custodial` — needs a surfaced provider with a program model. With Ground
  *   un-surfaced there is none, so `EARN_PROGRAM_CREATION_ENABLED` is false.
- * - `vault_direct` — the API half is BUILT (`POST /v1/earn/vault-deposits`
- *   builds the instruction, signs it with an org custody wallet and submits it),
- *   but the wizard run is not, so `EARN_VAULT_DEPOSITS_ENABLED` still pins this
- *   to no. SDP never hands out an address for these: a K-Vault's account is a
- *   program account and funds sent to it are lost.
+ * - `vault_direct` — both the API and the in-place modal are built, so
+ *   `EARN_VAULT_DEPOSITS_ENABLED` follows provider surfacing. The independent
+ *   environment capability keeps production closed until withdrawal and Active
+ *   support exist. SDP never hands out an address for these: a K-Vault's account
+ *   is a program account and funds sent to it are lost.
  *
- * Re-enabling is therefore a real change in both cases, not a flag flip, and
- * this predicate is where the compiler will bring you.
+ * Opening either unavailable branch is therefore a real capability change, not
+ * a presentation-only flag flip, and this predicate is where the compiler will
+ * bring you.
  */
 /**
  * `depositable` carries the STYLE, so a caller dispatches on what the route
@@ -115,9 +120,13 @@ export type OpportunityDepositability =
   | { kind: "depositable"; style: EarnDepositStyle }
   | { kind: "wrong-cluster" }
   | { kind: "asset-unsupported" }
+  | { kind: "environment-closed" }
   | { kind: "no-sdp-route"; style: EarnDepositStyle };
 
-export function opportunityDepositability(strategy: EarnStrategy): OpportunityDepositability {
+export function opportunityDepositability(
+  strategy: EarnStrategy,
+  environment: SdpEnvironment
+): OpportunityDepositability {
   // `=== false`, not falsy: an API old enough to omit `fundable` predates any
   // mainnet-only provider, so absent must read as "no cluster objection" rather
   // than blanking every row. Same rule as `fundableStrategies` above.
@@ -125,6 +134,14 @@ export function opportunityDepositability(strategy: EarnStrategy): OpportunityDe
   if (strategyToken(strategy) === undefined) return { kind: "asset-unsupported" };
 
   const style = earnDepositStyle(strategy.provider);
+  // The route exists in both deploys, but the shared capability deliberately
+  // closes production until SDP can also show and withdraw a vault position.
+  // Mirror the API's gate here so a real-money project never gets an action the
+  // server must refuse. The row stays visible for comparison; only money-IN is
+  // unavailable.
+  if (style === "vault_direct" && !isVaultDirectDepositEnabled(environment)) {
+    return { kind: "environment-closed" };
+  }
   // `vault_direct` becomes depositable when the vault run is enabled: SDP builds
   // the instruction, signs it with one of the org's own custody wallets, and
   // submits it (POST /v1/earn/vault-deposits). Nothing is ever sent to an

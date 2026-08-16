@@ -1,11 +1,14 @@
 import { KaminoVault, KaminoVaultClient } from "@kamino-finance/klend-sdk";
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
-import { type Address, address, createSolanaRpc, type Instruction } from "@solana/kit";
+import type { Address, Instruction } from "@solana/kit";
 import Decimal from "decimal.js";
 import { acceptAtMintScale, isZeroAmount, mintDecimals } from "./amounts";
-import { invalidAmount, vaultUnreadable } from "./errors";
+import { vaultAssetIdentityFromState } from "./asset-identity";
+import { invalidAmount, SdpKaminoError, vaultUnreadable } from "./errors";
 import { assertPlanTargetsCluster } from "./guards";
 import { kaminoClusterConfig } from "./programs";
+import { createKaminoRpc } from "./rpc";
+import { sumRawTokenAccountBaseUnits } from "./share-balances";
 import type {
   KaminoDepositInput,
   KaminoInstructionPlan,
@@ -59,7 +62,9 @@ type Kit2 = any;
  */
 async function bindVault(runtime: KaminoRuntime, vaultAddress: Address) {
   const config = kaminoClusterConfig(runtime.cluster);
-  const rpc = createSolanaRpc(runtime.rpcUrl) as Kit2;
+  // The transport deadline covers both our direct reads and every nested
+  // reserve/farm/vault request klend-sdk performs with this same client.
+  const rpc = createKaminoRpc(runtime.rpcUrl) as Kit2;
 
   const client = new KaminoVaultClient(
     rpc,
@@ -93,7 +98,12 @@ async function bindVault(runtime: KaminoRuntime, vaultAddress: Address) {
     // assert, and the failure it guards is invisible otherwise.
     throw vaultUnreadable(vaultAddress, runtime.cluster, "vault bound to the wrong kvault program");
   }
-  return { client, vault, state, config, rpc };
+
+  // Bind the asset identity to the same live state snapshot used for decimals,
+  // reserve loading and instruction construction. The API compares these
+  // builder-observed mints with catalogue metadata before it signs anything.
+  const assetIdentity = vaultAssetIdentityFromState(state);
+  return { client, vault, state, config, rpc, assetIdentity };
 }
 
 /** Decimal strings are the boundary currency; `Decimal` never escapes this file. */
@@ -101,6 +111,31 @@ function toDecimal(value: string, label: string): Decimal {
   if (!isDecimalString(value)) throw invalidAmount(label, value);
   const parsed = new Decimal(value);
   if (!parsed.isFinite() || parsed.isNegative()) throw invalidAmount(label, value);
+  return parsed;
+}
+
+/**
+ * Validate numeric state observed from klend-sdk without trusting its physical
+ * `decimal.js` instance. The SDK carries a nested copy, so normalize through a
+ * string and rebuild with this package's pinned Decimal before checking it.
+ */
+export function requireNonNegativeFiniteDecimal(label: string, value: unknown): Decimal {
+  let parsed: Decimal;
+  try {
+    parsed = new Decimal(String(value));
+  } catch (cause) {
+    throw new SdpKaminoError(
+      "VAULT_UNREADABLE",
+      `Kamino ${label} was not a finite non-negative decimal`,
+      { cause }
+    );
+  }
+  if (!parsed.isFinite() || parsed.isNegative()) {
+    throw new SdpKaminoError(
+      "VAULT_UNREADABLE",
+      `Kamino ${label} was not a finite non-negative decimal`
+    );
+  }
   return parsed;
 }
 
@@ -120,7 +155,7 @@ export async function buildKaminoDepositPlan(
   runtime: KaminoRuntime,
   input: KaminoDepositInput
 ): Promise<KaminoInstructionPlan> {
-  const { client, vault, state, config } = await bindVault(runtime, input.vault);
+  const { client, vault, state, config, assetIdentity } = await bindVault(runtime, input.vault);
 
   // Precision is checked against the MINT, so it can only be checked once the
   // vault has been read — the token and share mints have independent decimals
@@ -172,6 +207,7 @@ export async function buildKaminoDepositPlan(
     cluster: config.cluster,
     instructions: [instructions],
     lookupTables: [],
+    assetIdentity,
     accepted: {
       amount: acceptedAmount,
       ...(acceptedMinSharesOut === undefined ? {} : { minSharesOut: acceptedMinSharesOut }),
@@ -212,7 +248,7 @@ export async function buildKaminoWithdrawPlan(
   runtime: KaminoRuntime,
   input: KaminoWithdrawInput
 ): Promise<KaminoInstructionPlan> {
-  const { client, vault, state, config } = await bindVault(runtime, input.vault);
+  const { client, vault, state, config, assetIdentity } = await bindVault(runtime, input.vault);
   const acceptedShares = acceptAtMintScale(
     "shares",
     input.shares,
@@ -242,6 +278,7 @@ export async function buildKaminoWithdrawPlan(
     cluster: config.cluster,
     instructions: [instructions],
     lookupTables: [],
+    assetIdentity,
     accepted: { shares: acceptedShares },
   });
 }
@@ -267,14 +304,10 @@ async function readUnstakedShareBaseUnits(
     .getTokenAccountsByOwner(owner, { mint: sharesMint }, { encoding: "jsonParsed" })
     .send();
 
-  let total = 0n;
-  for (const entry of response?.value ?? []) {
-    const raw = entry?.account?.data?.parsed?.info?.tokenAmount?.amount;
-    // A non-numeric `amount` means the account was not the parsed shape we
-    // expect; skipping it is right, because guessing a balance is not.
-    if (typeof raw === "string" && /^\d+$/.test(raw)) total += BigInt(raw);
-  }
-  return total;
+  // The RPC filter says every entry is part of this balance. A malformed entry
+  // therefore makes the whole position unreadable; summing only the readable
+  // subset would silently under-report funds.
+  return sumRawTokenAccountBaseUnits(response?.value);
 }
 
 /**
@@ -289,7 +322,7 @@ export async function readKaminoPosition(
   runtime: KaminoRuntime,
   input: { vault: Address; owner: Address; slot: bigint }
 ): Promise<KaminoPosition> {
-  const { vault, state, config, rpc } = await bindVault(runtime, input.vault);
+  const { vault, state, config, rpc, assetIdentity } = await bindVault(runtime, input.vault);
   const shareDecimals = mintDecimals(state.sharesMintDecimals, "sharesMintDecimals");
 
   // UNSTAKED shares are counted here rather than taken from the SDK, and that is
@@ -304,22 +337,27 @@ export async function readKaminoPosition(
   // as an exact `Decimal`, never through `uiAmount`, so re-implementing it would
   // duplicate the farm lookup for no precision gain.
   const staked = await vault.getUserShares(input.owner as Kit2);
-  const unstakedBase = await readUnstakedShareBaseUnits(
-    rpc,
-    input.owner,
-    address(String(state.sharesMint))
-  );
-  const shares = new Decimal(formatDecimalAmount(unstakedBase, shareDecimals)).add(
-    new Decimal(String(staked.stakedShares ?? 0))
+  const unstakedBase = await readUnstakedShareBaseUnits(rpc, input.owner, assetIdentity.shareMint);
+  const shares = requireNonNegativeFiniteDecimal(
+    "total share balance",
+    new Decimal(formatDecimalAmount(unstakedBase, shareDecimals)).add(
+      requireNonNegativeFiniteDecimal("staked share balance", staked.stakedShares)
+    )
   );
 
   let tokenValue: string | undefined;
   try {
-    const rate: Decimal = await vault.getExchangeRate(input.slot as Kit2);
+    const rate = requireNonNegativeFiniteDecimal(
+      "vault exchange rate",
+      await vault.getExchangeRate(input.slot as Kit2)
+    );
     const decimals = mintDecimals(state.tokenMintDecimals, "tokenMintDecimals");
     // Round-trip through the repo's own fixed-point helpers so the string that
     // leaves this package is scaled exactly like every other amount in SDP.
-    const raw = shares.mul(rate).toFixed(decimals, Decimal.ROUND_DOWN);
+    const raw = requireNonNegativeFiniteDecimal("vault token value", shares.mul(rate)).toFixed(
+      decimals,
+      Decimal.ROUND_DOWN
+    );
     tokenValue = formatDecimalAmount(parseDecimalAmount(raw, decimals), decimals);
   } catch {
     tokenValue = undefined;
@@ -331,7 +369,7 @@ export async function readKaminoPosition(
     cluster: config.cluster,
     shares: shares.toFixed(),
     ...(tokenValue === undefined ? {} : { tokenValue }),
-    tokenMint: address(String(state.tokenMint)),
-    sharesMint: address(String(state.sharesMint)),
+    tokenMint: assetIdentity.depositTokenMint,
+    sharesMint: assetIdentity.shareMint,
   };
 }

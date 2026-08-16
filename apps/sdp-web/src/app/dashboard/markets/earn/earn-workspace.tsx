@@ -6,6 +6,7 @@ import type {
   EarnPortfolioWalletActivity,
   EarnPortfolioWalletStatus,
   EarnStrategy,
+  SdpEnvironment,
 } from "@sdp/types";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import Link from "next/link";
@@ -13,6 +14,7 @@ import { type KeyboardEvent, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { useCopy } from "@/lib/use-copy";
@@ -671,11 +673,14 @@ function EarnTabBar({
  * visibility rule (a browser-side copy is what drifts).
  */
 export function EarnOpportunitiesPanel({
+  environment,
   fireblocksEnabled = false,
 }: {
+  /** Selected SDP project environment; it gates vault money-IN with the API. */
+  environment: SdpEnvironment;
   /** Passed through to the vault deposit modal's wallet step. */
   fireblocksEnabled?: boolean;
-} = {}) {
+}) {
   const t = useTranslations();
   const { strategies, error, isLoading } = useEarnStrategies();
   // Owned here rather than in the table so the table stays a pure presentation
@@ -708,6 +713,7 @@ export function EarnOpportunitiesPanel({
           </p>
         ) : (
           <EarnOpportunitiesTable
+            environment={environment}
             onVaultDeposit={setDepositStrategy}
             strategies={strategies ?? []}
           />
@@ -742,6 +748,7 @@ export function EarnWorkspace({
   /** Real custody-provider availability, resolved server-side in page.tsx. */
   fireblocksEnabled?: boolean;
 } = {}) {
+  const { sdpEnvironment } = useDashboardWorkspace();
   const [tab, setTab] = useState<EarnTab>("opportunities");
   const { state } = useEarnPrograms();
   const positionCount = state?.kind === "ready" ? state.programs.length : undefined;
@@ -751,7 +758,10 @@ export function EarnWorkspace({
     <div className="grid content-start gap-6">
       <EarnTabBar active={tab} onChange={setTab} positionCount={positionCount} />
       {tab === "opportunities" ? (
-        <EarnOpportunitiesPanel fireblocksEnabled={fireblocksEnabled} />
+        <EarnOpportunitiesPanel
+          environment={sdpEnvironment}
+          fireblocksEnabled={fireblocksEnabled}
+        />
       ) : null}
       {tab === "positions" ? (
         <div

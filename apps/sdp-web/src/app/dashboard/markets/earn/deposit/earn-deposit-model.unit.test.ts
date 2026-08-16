@@ -109,11 +109,11 @@ describe("fundableStrategies", () => {
  * `wrong-cluster` there — so the third check has to be asserted, not eyeballed.
  */
 describe("opportunityDepositability", () => {
-  it("allows a fundable vault-direct vault now that the deposit modal exists", () => {
+  it("allows a fundable vault-direct vault in sandbox", () => {
     const kamino = strategy({
-      id: "kamino-production",
+      id: "kamino-sandbox",
       provider: "kamino",
-      hostCluster: "mainnet-beta",
+      hostCluster: "devnet",
       fundable: true,
     });
 
@@ -123,9 +123,22 @@ describe("opportunityDepositability", () => {
     // together, which is what `EARN_VAULT_DEPOSITS_ENABLED` encodes.
     // The STYLE rides along with the verdict so the row dispatches on what the
     // route is, not on which callback the parent happened to pass.
-    expect(opportunityDepositability(kamino)).toEqual({
+    expect(opportunityDepositability(kamino, "sandbox")).toEqual({
       kind: "depositable",
       style: "vault_direct",
+    });
+  });
+
+  it("keeps a production vault visible but closes its deposit action", () => {
+    const kamino = strategy({
+      id: "kamino-production",
+      provider: "kamino",
+      hostCluster: "mainnet-beta",
+      fundable: true,
+    });
+
+    expect(opportunityDepositability(kamino, "production")).toEqual({
+      kind: "environment-closed",
     });
   });
 
@@ -139,7 +152,8 @@ describe("opportunityDepositability", () => {
           provider: "kamino",
           hostCluster: "mainnet-beta",
           fundable: false,
-        })
+        }),
+        "sandbox"
       )
     ).toEqual({ kind: "wrong-cluster" });
   });
@@ -147,7 +161,8 @@ describe("opportunityDepositability", () => {
   it("still refuses a vault-direct vault in an unsupported asset", () => {
     expect(
       opportunityDepositability(
-        strategy({ id: "kamino-odd-mint", provider: "kamino", depositMints: [UNROUTABLE_MINT] })
+        strategy({ id: "kamino-odd-mint", provider: "kamino", depositMints: [UNROUTABLE_MINT] }),
+        "sandbox"
       )
     ).toEqual({ kind: "asset-unsupported" });
   });
@@ -155,7 +170,7 @@ describe("opportunityDepositability", () => {
   it("refuses a custodial vault while no custodial provider is offered", () => {
     // Ground is un-surfaced, so EARN_PROGRAM_CREATION_ENABLED is false and the
     // deposit route answers with its unavailable notice.
-    expect(opportunityDepositability(strategy({ id: "ground-devnet" }))).toEqual({
+    expect(opportunityDepositability(strategy({ id: "ground-devnet" }), "sandbox")).toEqual({
       kind: "no-sdp-route",
       style: "custodial",
     });
@@ -169,12 +184,12 @@ describe("opportunityDepositability", () => {
       fundable: false,
     });
 
-    expect(opportunityDepositability(kamino)).toEqual({ kind: "wrong-cluster" });
+    expect(opportunityDepositability(kamino, "sandbox")).toEqual({ kind: "wrong-cluster" });
   });
 
   it("reports an unroutable mint once the cluster is fine", () => {
     expect(
-      opportunityDepositability(strategy({ id: "odd", depositMints: [UNROUTABLE_MINT] }))
+      opportunityDepositability(strategy({ id: "odd", depositMints: [UNROUTABLE_MINT] }), "sandbox")
     ).toEqual({
       kind: "asset-unsupported",
     });

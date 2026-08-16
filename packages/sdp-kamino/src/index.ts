@@ -48,5 +48,6 @@ export type {
   KaminoInstructionPlan,
   KaminoPosition,
   KaminoRuntime,
+  KaminoVaultAssetIdentity,
   KaminoWithdrawInput,
 } from "./types";

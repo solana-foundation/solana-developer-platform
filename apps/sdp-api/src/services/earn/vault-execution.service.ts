@@ -71,6 +71,8 @@ export interface SignedVaultTransaction {
    * so signing determines it and broadcasting only publishes it.
    */
   signature: Signature;
+  /** Inclusive block height after which these exact bytes cannot land. */
+  lastValidBlockHeight: string;
 }
 
 /**
@@ -105,6 +107,7 @@ export async function signVaultPlan(
   return {
     bytes: new Uint8Array(getTransactionEncoder().encode(signed)),
     signature: getSignatureFromTransaction(signed),
+    lastValidBlockHeight: String(lastValidBlockHeight),
   };
 }
 
@@ -126,6 +129,12 @@ export async function broadcastVaultTransaction(
 
 /** The single batch a deposit plan carries, with the multi-transaction refusal. */
 function singleBatchInstructions(plan: EarnVaultTransactionPlan) {
+  if (plan.lookupTables.length > 0) {
+    // Address lookup tables require a different compilation path. Refuse them
+    // at the shared boundary so simulation, signing and submission cannot each
+    // make a different assumption about the same provider plan.
+    throw new Error("Vault plans with address lookup tables are not implemented");
+  }
   const batch = plan.transactions[0];
   if (!batch || batch.length === 0) {
     throw new Error("Vault plan carried no instructions");
@@ -160,20 +169,7 @@ export async function submitVaultPlan(
   env: Env,
   input: SubmitVaultPlanInput
 ): Promise<SubmitVaultPlanResult> {
-  const batch = input.plan.transactions[0];
-  if (!batch || batch.length === 0) {
-    throw new Error("Vault plan carried no instructions");
-  }
-  if (input.plan.transactions.length > 1) {
-    // Multi-transaction plans need per-leg ledger rows and a resume story; the
-    // deposit path never produces one today, so refuse rather than silently
-    // land only the first leg.
-    throw new Error(
-      `Vault plan needs ${input.plan.transactions.length} transactions; multi-transaction submission is not implemented`
-    );
-  }
-
-  const instructions = batch.map(toKitInstruction);
+  const instructions = singleBatchInstructions(input.plan).map(toKitInstruction);
   const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
   const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
 
@@ -220,8 +216,16 @@ export async function simulateVaultPlan(
   env: Env,
   input: { plan: EarnVaultTransactionPlan; owner: Address; rpcUrl: string }
 ): Promise<{ ok: true } | { ok: false; error: string; logs: readonly string[] }> {
-  const batch = input.plan.transactions[0];
-  if (!batch) return { ok: false, error: "empty plan", logs: [] };
+  let batch: ReturnType<typeof singleBatchInstructions>;
+  try {
+    batch = singleBatchInstructions(input.plan);
+  } catch (cause) {
+    return {
+      ok: false,
+      error: cause instanceof Error ? cause.message : "invalid vault plan",
+      logs: [],
+    };
+  }
 
   const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
   const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");

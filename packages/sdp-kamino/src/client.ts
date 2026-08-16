@@ -10,10 +10,69 @@ import type {
   EarnVaultTransactionPlan,
 } from "@sdp/earn/types";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
-import { type Address, address, createNoopSigner, createSolanaRpc } from "@solana/kit";
+import { type Address, address, createNoopSigner } from "@solana/kit";
 import { SdpKaminoError } from "./errors";
+import { createKaminoRpc } from "./rpc";
 import { buildKaminoDepositPlan, readKaminoPosition } from "./sdk";
 import type { KaminoInstructionPlan, KaminoRuntime } from "./types";
+
+/** One portfolio request may fan out over many vaults; never fan out the RPCs without a bound. */
+export const KAMINO_POSITION_READ_CONCURRENCY = 4;
+
+async function mapSettledWithConcurrency<T, U>(
+  items: readonly T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<U>
+): Promise<Array<PromiseSettledResult<U>>> {
+  const results = new Array<PromiseSettledResult<U>>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(concurrency, items.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        try {
+          results[index] = { status: "fulfilled", value: await mapper(items[index] as T) };
+        } catch (reason) {
+          results[index] = { status: "rejected", reason };
+        }
+      }
+    })
+  );
+
+  return results;
+}
+
+/** Convert the kit-native plan to the dependency-free Earn wire contract. */
+export function toEarnVaultTransactionPlan(plan: KaminoInstructionPlan): EarnVaultTransactionPlan {
+  return {
+    cluster: plan.cluster,
+    transactions: plan.instructions.map((batch) =>
+      batch.map(
+        (instruction): EarnVaultInstruction => ({
+          programAddress: String(instruction.programAddress),
+          accounts: (instruction.accounts ?? []).map((account) => ({
+            address: String(account.address),
+            role: Number(account.role),
+          })),
+          // Base64 keeps the contract JSON-safe: a plan may cross a queue or a
+          // log before it is compiled, and a Uint8Array does not survive that.
+          data: Buffer.from(instruction.data ?? new Uint8Array()).toString("base64"),
+        })
+      )
+    ),
+    lookupTables: plan.lookupTables.map(String),
+    assetIdentity: {
+      depositTokenMint: String(plan.assetIdentity.depositTokenMint),
+      shareMint: String(plan.assetIdentity.shareMint),
+    },
+    // These are the mint-scale amounts the instructions actually encode. The
+    // API ledgers this shape; dropping it reintroduces raw-request drift.
+    accepted: { ...plan.accepted },
+  };
+}
 
 /**
  * Kamino as an EXECUTING provider: the catalogue client plus the vault-direct
@@ -67,27 +126,6 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
     return createNoopSigner(address(value));
   }
 
-  private static toWire(plan: KaminoInstructionPlan): EarnVaultTransactionPlan {
-    return {
-      cluster: plan.cluster,
-      transactions: plan.instructions.map((batch) =>
-        batch.map(
-          (instruction): EarnVaultInstruction => ({
-            programAddress: String(instruction.programAddress),
-            accounts: (instruction.accounts ?? []).map((account) => ({
-              address: String(account.address),
-              role: Number(account.role),
-            })),
-            // Base64 keeps the contract JSON-safe: a plan may cross a queue or a
-            // log before it is compiled, and a Uint8Array does not survive that.
-            data: Buffer.from(instruction.data ?? new Uint8Array()).toString("base64"),
-          })
-        )
-      ),
-      lookupTables: plan.lookupTables.map(String),
-    };
-  }
-
   async buildVaultDeposit(
     ctx: EarnRuntimeContext,
     input: EarnVaultDepositInput
@@ -98,7 +136,7 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
       amount: input.amount,
       ...(input.minSharesOut === undefined ? {} : { minSharesOut: input.minSharesOut }),
     });
-    return KaminoVaultDirectClient.toWire(plan);
+    return toEarnVaultTransactionPlan(plan);
   }
 
   /*
@@ -136,13 +174,15 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
     input: EarnVaultPositionInput
   ): Promise<EarnVaultPositionSnapshot[]> {
     const runtime = this.runtime(ctx);
-    const slot = await createSolanaRpc(runtime.rpcUrl).getSlot().send();
+    // One shared slot makes the page internally consistent. The client carries
+    // the same transport deadline as every nested Kamino SDK read below.
+    const slot = await createKaminoRpc(runtime.rpcUrl).getSlot().send();
     const owner: Address = address(input.owner);
 
-    const results = await Promise.allSettled(
-      input.providerReferences.map((reference) =>
-        readKaminoPosition(runtime, { vault: address(reference), owner, slot })
-      )
+    const results = await mapSettledWithConcurrency(
+      input.providerReferences,
+      KAMINO_POSITION_READ_CONCURRENCY,
+      (reference) => readKaminoPosition(runtime, { vault: address(reference), owner, slot })
     );
 
     return results.flatMap((result) => {

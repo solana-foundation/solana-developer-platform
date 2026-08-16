@@ -45,18 +45,27 @@ export function resolveClusterRpcUrl(env: Env, cluster: SolanaCluster): string {
 }
 
 /**
- * Memoised verdicts, keyed by `cluster\nurl`.
+ * Briefly memoised genesis observations, keyed by `cluster\nurl`.
  *
- * The genesis hash of an endpoint is immutable for the life of that endpoint,
- * so this is a cache of a constant rather than of a reading — but it is also
- * what keeps the assertion affordable: without it every deposit and every
- * position page would pay an extra round trip.
+ * The genesis hash returned by one backend is immutable, but a URL is not: DNS,
+ * a load balancer, or deployment configuration can repoint the same string at a
+ * different cluster. Cache only a short burst so concurrent/page fan-out stays
+ * affordable without turning one old observation into a process-lifetime funds
+ * authorization.
  *
- * Failures are cached too, deliberately. A misconfigured endpoint is a
- * deployment fact, not a transient one, and re-probing it on every request
- * turns one configuration error into sustained load against someone else's RPC.
+ * A rejected RPC call is NOT an observation. Timeouts, 429s and network failures
+ * are evicted immediately; successful matches and mismatches share the same
+ * short TTL.
  */
-const clusterProofs = new Map<string, Promise<void>>();
+export const CLUSTER_ENDPOINT_PROOF_TTL_MS = 30_000;
+
+interface ClusterEndpointProof {
+  promise: Promise<string>;
+  /** Null while the shared probe is still in flight. */
+  expiresAt: number | null;
+}
+
+const clusterProofs = new Map<string, ClusterEndpointProof>();
 
 /**
  * Refuse to build against an endpoint that has not proved it serves `cluster`.
@@ -68,8 +77,8 @@ const clusterProofs = new Map<string, Promise<void>>();
  * accounts under it, so the failure mode is "this vault does not exist", or a
  * transaction built for the wrong deployment.
  *
- * Called before every build and every position read. Cheap after the first hit,
- * and the first hit is the one that matters.
+ * Called before every build and every position read. Concurrent calls coalesce,
+ * and a later call re-proves the URL after the short trust window expires.
  */
 export async function assertClusterEndpoint(
   env: Env,
@@ -85,31 +94,41 @@ export async function assertClusterEndpoint(
   }
 
   const key = `${cluster}\n${rpcUrl}`;
-  const existing = clusterProofs.get(key);
-  if (existing) return await existing;
+  let proof = clusterProofs.get(key);
+  if (proof && proof.expiresAt !== null && proof.expiresAt <= Date.now()) {
+    clusterProofs.delete(key);
+    proof = undefined;
+  }
+  if (!proof) {
+    proof = { promise: getGenesisHash(env, rpcUrl), expiresAt: null };
+    clusterProofs.set(key, proof);
+  }
 
-  const proof = (async () => {
-    const expected = GENESIS_HASH_BY_CLUSTER[cluster];
-    let observed: string;
-    try {
-      observed = await getGenesisHash(env, rpcUrl);
-    } catch (cause) {
-      throw providerNotConfigured(
-        `Could not verify that the configured ${cluster} RPC endpoint serves ${cluster}: ` +
-          `${cause instanceof Error ? cause.message : String(cause)}`
-      );
+  let observed: string;
+  try {
+    observed = await proof.promise;
+    if (clusterProofs.get(key) === proof && proof.expiresAt === null) {
+      proof.expiresAt = Date.now() + CLUSTER_ENDPOINT_PROOF_TTL_MS;
     }
-    if (observed !== expected) {
-      throw providerNotConfigured(
-        `The RPC endpoint configured for ${cluster} reports genesis ${observed}, not ${expected}. ` +
-          "Building against it would address the wrong chain — refusing. Set " +
-          `SOLANA_${cluster === "devnet" ? "DEVNET" : "MAINNET"}_RPC_URL to a ${cluster} endpoint.`
-      );
-    }
-  })();
+  } catch (cause) {
+    // Delete only if this is still the promise stored for the key. Concurrent
+    // callers may all observe the same rejection; none may delete a newer probe
+    // started after this one failed.
+    if (clusterProofs.get(key) === proof) clusterProofs.delete(key);
+    throw providerNotConfigured(
+      `Could not verify that the configured ${cluster} RPC endpoint serves ${cluster}: ` +
+        `${cause instanceof Error ? cause.message : String(cause)}`
+    );
+  }
 
-  clusterProofs.set(key, proof);
-  return await proof;
+  const expected = GENESIS_HASH_BY_CLUSTER[cluster];
+  if (observed !== expected) {
+    throw providerNotConfigured(
+      `The RPC endpoint configured for ${cluster} reports genesis ${observed}, not ${expected}. ` +
+        "Building against it would address the wrong chain — refusing. Set " +
+        `SOLANA_${cluster === "devnet" ? "DEVNET" : "MAINNET"}_RPC_URL to a ${cluster} endpoint.`
+    );
+  }
 }
 
 async function getGenesisHash(env: Env, rpcUrl: string): Promise<string> {

@@ -82,7 +82,7 @@ export const KAMINO_FARMS_PROGRAM_IDS = {
  *   devnet        264.5 ms/slot
  *
  * Devnet is materially faster than mainnet, and both differ from klend-sdk's own
- * `DEFAULT_RECENT_SLOT_DURATION_MS` (450) — which is why this is never left to
+ * `DEFAULT_RECENT_SLOT_DURATION_MS` (400) — which is why this is never left to
  * the SDK default. Re-measure and update the date above if figures look off;
  * these are observations, not protocol constants.
  */

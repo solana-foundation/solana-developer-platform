@@ -62,7 +62,7 @@ cycle *and* would drag a 13MB SDK into the hourly catalogue cron).
   rewards), so a wrong value yields plausible WRONG NUMBERS with no error — the
   same silent class as the program trap, and one no instruction assertion catches.
   Measured 2026-08-15 over a 4,000-slot span: **mainnet ≈ 416 ms, devnet ≈ 265 ms**.
-  Both differ from klend-sdk's own default of 450. Re-measure rather than adjust
+  Both differ from klend-sdk's own default of 400. Re-measure rather than adjust
   by feel.
 - **`KAMINO_KVAULT_PROGRAM_IDS`** — the one address that DIFFERS per cluster.
   Mainnet's id also exists on devnet with zero accounts, so aiming at the wrong one
@@ -83,6 +83,12 @@ it for share-ATA rent — a spend its `FeePayerPolicy` may refuse and which
 here for exactly that reason, and it defaults to the owner.
 
 ## Plans are transaction-sized BATCHES
+
+Every plan also carries required `assetIdentity` with the deposit-token mint and
+share mint read from the same live vault state used to build its instructions.
+Catalogue metadata drives policy and ledger labels but is not builder truth; the
+API must compare both mints before signing so a stale or poisoned row cannot
+authorize one asset while the transaction moves another.
 
 `KaminoInstructionPlan.instructions` is `Instruction[][]`, one entry per
 transaction — not a flat list. A multi-reserve exit emits several withdraw
@@ -119,6 +125,9 @@ batching work, not the first (`client.test.ts` pins this).
   the live exchange rate. Passing `"0"` would be the appearance of slippage
   protection without the substance, so the caller computes a floor or passes
   nothing. The API requires one in PRODUCTION for exactly that reason.
+- **`lookupTables` is always empty today.** The field exists so callers compile
+  against the right shape; populating it from Kamino's per-vault LUT is the fix
+  when a plan stops fitting.
 
 ## Amounts are checked against the MINT, not just parsed
 
@@ -126,6 +135,8 @@ batching work, not the first (`client.test.ts` pins this).
 without loading klend-sdk) refuses any value finer than its mint can represent,
 and returns the canonical form the instruction actually encodes — surfaced as
 `KaminoInstructionPlan.accepted`, which is what the ledger should persist.
+Trailing fractional zeroes do not add precision (`1.5000000` is representable by
+a six-decimal mint); a non-zero sub-atom still fails rather than being floored.
 
 This exists because klend-sdk converts every `Decimal` to mint atoms and
 **floors, silently**. Two different bugs hide under that floor: `1.0000009` on a
@@ -144,10 +155,18 @@ from `vault.getUserShares`. The SDK's own path sums
 `getTokenAccountAmount` (`utils/ata.ts`), so above 2^53 base units the value has
 already lost precision and no amount of `Decimal`-wrapping downstream recovers
 it. The staked half comes from farm state as an exact `Decimal`, so it is safe
-to reuse.
-- **`lookupTables` is always empty today.** The field exists so callers compile
-  against the right shape; populating it from Kamino's per-vault LUT is the fix
-  when a plan stops fitting.
+to reuse. Every matching token account is summed; if any returned account lacks
+an exact raw amount, the entire position is unreadable rather than silently
+under-reported.
+
+## RPC reads are bounded
+
+`rpc.ts` applies a 30-second deadline at the transport boundary shared with
+klend-sdk, so vault, reserve, farm, token-account, exchange-rate and slot reads
+cannot hold an API worker forever. Caller cancellation is composed with that
+deadline and remains distinguishable from a timeout. A portfolio page reads one
+shared slot, then hydrates at most four vaults concurrently; the number of
+in-flight RPC sequences never scales without a bound from catalogue size.
 
 ## Tests
 

@@ -10,6 +10,10 @@ import { foreignKvaultProgramId, kaminoClusterConfig } from "./programs";
 import type { KaminoInstructionPlan } from "./types";
 
 const ATA_PROGRAM = address("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+const ASSET_IDENTITY = {
+  depositTokenMint: address("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"),
+  shareMint: address("So11111111111111111111111111111111111111112"),
+};
 
 function plan(
   cluster: KaminoInstructionPlan["cluster"],
@@ -25,6 +29,7 @@ function plan(
       })),
     ],
     lookupTables: [],
+    assetIdentity: ASSET_IDENTITY,
     accepted: {},
   } as KaminoInstructionPlan;
 }
@@ -101,6 +106,7 @@ describe("assertPlanTargetsCluster", () => {
         ],
       ],
       lookupTables: [],
+      assetIdentity: ASSET_IDENTITY,
       accepted: {},
     } as KaminoInstructionPlan;
     expect(() => assertPlanTargetsCluster(twoBatches)).toThrow(KaminoProgramMismatchError);

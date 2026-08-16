@@ -1,6 +1,6 @@
 "use client";
 
-import type { EarnStrategy } from "@sdp/types";
+import type { EarnStrategy, SdpEnvironment } from "@sdp/types";
 import { ArrowDownIcon, ArrowUpIcon, ChevronsUpDownIcon } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -20,6 +20,7 @@ import {
   type EarnStrategySort,
   type EarnStrategySortColumn,
   nextStrategySort,
+  type OpportunityDepositability,
   opportunityDepositability,
   sortStrategies,
 } from "./deposit/earn-deposit-model";
@@ -27,6 +28,41 @@ import { formatApy, formatUsdCompact } from "./earn-format";
 import { strategyPoolUsd, strategyToken, useLiquidityLabel } from "./earn-program-presentation";
 
 const DEPOSIT_PATH = "/dashboard/markets/earn/deposit";
+
+function opportunityBlockedCopy(
+  depositable: OpportunityDepositability,
+  strategy: EarnStrategy,
+  t: ReturnType<typeof useTranslations>
+): { label: string | null; description: string | null } {
+  if (depositable.kind === "depositable") return { label: null, description: null };
+  if (depositable.kind === "wrong-cluster") {
+    const label = t("DashboardEarn.deposit.strategyEnvironmentOnly", {
+      environment: strategy.hostCluster === "mainnet-beta" ? "Mainnet" : "Devnet",
+    });
+    return { label, description: label };
+  }
+  if (depositable.kind === "asset-unsupported") {
+    const label = t("DashboardEarn.deposit.strategyAssetUnavailableLabel");
+    return { label, description: label };
+  }
+  if (depositable.kind === "environment-closed") {
+    return {
+      label: t("DashboardEarn.opportunities.depositProductionClosed"),
+      description: t("DashboardEarn.opportunities.depositProductionClosedReason"),
+    };
+  }
+
+  // Both say "not yet", never "go do it elsewhere". Depositing into a
+  // vault-direct vault THROUGH SDP is intended, so disabled copy must not send
+  // a reader off-platform. A custodial provider we are not offering is a
+  // different "not yet" from a capability we have not shipped.
+  const label = t(
+    depositable.style === "vault_direct"
+      ? "DashboardEarn.opportunities.depositDirectOnly"
+      : "DashboardEarn.opportunities.depositProviderClosed"
+  );
+  return { label, description: label };
+}
 
 /**
  * A numeric column the reader can rank the table by.
@@ -81,9 +117,11 @@ function SortableColumnHeader({
  * be entered directly without this table having to hand state across a route.
  */
 function OpportunityRow({
+  environment,
   strategy,
   onVaultDeposit,
 }: {
+  environment: SdpEnvironment;
   strategy: EarnStrategy;
   /**
    * Present only for non-custodial vaults, where the deposit opens in place.
@@ -97,29 +135,13 @@ function OpportunityRow({
   const nameId = `earn-opportunity-${strategy.id}-name`;
   const token = strategyToken(strategy);
   const poolUsd = strategyPoolUsd(strategy);
-  const depositable = opportunityDepositability(strategy);
+  const depositable = opportunityDepositability(strategy, environment);
 
-  const blockedLabel =
-    depositable.kind === "wrong-cluster"
-      ? t("DashboardEarn.deposit.strategyEnvironmentOnly", {
-          environment: strategy.hostCluster === "mainnet-beta" ? "Mainnet" : "Devnet",
-        })
-      : depositable.kind === "asset-unsupported"
-        ? t("DashboardEarn.deposit.strategyAssetUnavailableLabel")
-        : depositable.kind === "no-sdp-route"
-          ? // Both say "not yet", never "go do it elsewhere". Depositing into a
-            // vault-direct vault THROUGH SDP is intended and simply unbuilt, so
-            // this copy must not send a reader off-platform — that would be
-            // product direction a disabled-button label has no business
-            // implying. The two strings differ only because a custodial
-            // provider we are not offering is a different "not yet" from a
-            // capability we have not shipped.
-            t(
-              depositable.style === "vault_direct"
-                ? "DashboardEarn.opportunities.depositDirectOnly"
-                : "DashboardEarn.opportunities.depositProviderClosed"
-            )
-          : null;
+  const { label: blockedLabel, description: blockedDescription } = opportunityBlockedCopy(
+    depositable,
+    strategy,
+    t
+  );
 
   return (
     <TableRow>
@@ -192,6 +214,7 @@ function OpportunityRow({
           // rather than falling through to the custodial page — landing there
           // would be a wrong answer wearing a working affordance.
           <Button
+            data-modal-focus-fallback={strategy.id}
             disabled={!onVaultDeposit}
             onClick={() => onVaultDeposit?.(strategy)}
             size="sm"
@@ -210,7 +233,17 @@ function OpportunityRow({
           // the badge beside its name, and a missing verb reads as an oversight.
           // `title` carries the reason to a pointer, since the badge sits in a
           // different column.
-          <Button disabled size="sm" title={blockedLabel ?? undefined} variant="secondary">
+          <Button
+            aria-label={
+              blockedDescription
+                ? `${t("DashboardEarn.opportunities.deposit")} — ${blockedDescription}`
+                : undefined
+            }
+            disabled
+            size="sm"
+            title={blockedDescription ?? undefined}
+            variant="secondary"
+          >
             {t("DashboardEarn.opportunities.deposit")}
           </Button>
         )}
@@ -229,9 +262,11 @@ function OpportunityRow({
  * depositability, which is a different question (`opportunityDepositability`).
  */
 export function EarnOpportunitiesTable({
+  environment,
   strategies,
   onVaultDeposit,
 }: {
+  environment: SdpEnvironment;
   strategies: readonly EarnStrategy[];
   onVaultDeposit?: (strategy: EarnStrategy) => void;
 }) {
@@ -285,7 +320,12 @@ export function EarnOpportunitiesTable({
         </TableHeader>
         <TableBody>
           {rows.map((strategy) => (
-            <OpportunityRow key={strategy.id} onVaultDeposit={onVaultDeposit} strategy={strategy} />
+            <OpportunityRow
+              environment={environment}
+              key={strategy.id}
+              onVaultDeposit={onVaultDeposit}
+              strategy={strategy}
+            />
           ))}
         </TableBody>
       </Table>

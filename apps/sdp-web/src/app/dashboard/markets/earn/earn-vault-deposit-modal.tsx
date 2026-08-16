@@ -13,10 +13,10 @@ import {
   shortenAddress,
   useEarnFundingWallets,
   walletDisplayName,
-  walletUsdcAmount,
+  walletTokenAmount,
 } from "./deposit/earn-funding-wallets";
 import { WalletStep } from "./deposit/wallet-step";
-import { formatUsd } from "./earn-format";
+import { formatTokenQuantity } from "./earn-format";
 import { createEarnVaultDeposit, type EarnVaultDepositResult } from "./earn-program-data";
 import { strategySourceLabel, strategyToken } from "./earn-program-presentation";
 
@@ -65,20 +65,19 @@ export function EarnVaultDepositModal({
 }) {
   const t = useTranslations();
   const { wallets, error: walletsError, isLoading: walletsLoading } = useEarnFundingWallets();
-  /**
-   * Initial focus, a focus trap, and focus returned to the Opportunities row
-   * that opened this — none of which the shared `Modal` provides. Keyed by the
-   * strategy id so that when the row remounts, focus lands on the button the
-   * reader actually pressed rather than on whichever row rendered first.
-   */
-  const contentRef = useModalFocus<HTMLDivElement>(strategy.id);
-
   const [step, setStep] = useState<VaultDepositStep>("wallet");
   const [walletRowId, setWalletRowId] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<EarnVaultDepositResult | null>(null);
+  /**
+   * Trap/return live for the modal's whole lifetime; autofocus keys off the
+   * visible panel so replacing a focused Continue/Submit button cannot drop a
+   * keyboard reader onto the page behind the dialog.
+   */
+  const focusPanelKey = result ? `result:${result.status}` : step;
+  const contentRef = useModalFocus<HTMLDivElement>(strategy.id, focusPanelKey);
 
   /**
    * One idempotency key per (wallet, amount) attempt, held in a ref.
@@ -101,8 +100,10 @@ export function EarnVaultDepositModal({
     () => (wallets ?? []).find((wallet) => wallet.id === walletRowId),
     [wallets, walletRowId]
   );
-  const walletBalance = selectedWallet ? walletUsdcAmount(selectedWallet) : undefined;
   const token = strategyToken(strategy);
+  const tokenLabel = token?.toUpperCase() ?? "";
+  const walletBalance =
+    selectedWallet && token ? walletTokenAmount(selectedWallet, token) : undefined;
 
   const amountNumber = Number(amount);
   const amountValid = /^\d+(\.\d+)?$/.test(amount) && amountNumber > 0;
@@ -118,8 +119,9 @@ export function EarnVaultDepositModal({
     try {
       const response = await createEarnVaultDeposit({
         strategyId: strategy.id,
-        // Public key, not the row id — the form every SDP money route accepts.
-        walletId: selectedWallet.publicKey,
+        // SDP custody row id, not the provider-local id or public key: the API
+        // authorizes one exact row, then resolves that row's provider wallet.
+        custodyWalletId: selectedWallet.id,
         amount,
         requestId: requestIdFor(attemptToken),
       });
@@ -165,8 +167,8 @@ export function EarnVaultDepositModal({
 
     return (
       <Modal isOpen ariaLabel={title} onClose={onClose} size="md">
-        <div ref={contentRef}>
-          <StepSection title={title}>
+        <div data-modal-focus-panel={focusPanelKey} ref={contentRef}>
+          <StepSection focusHeading title={title}>
             <p className="mb-5 text-sm leading-6 text-secondary">
               {inFlight
                 ? t("DashboardEarn.deposit.vaultPendingBody")
@@ -186,26 +188,22 @@ export function EarnVaultDepositModal({
                 transaction landed on whichever cluster the vault lives on, and
                 `hostCluster` is the field that states it. A devnet signature on
                 a mainnet explorer link is a dead end. */}
-              {result.signature ? (
-                <SummaryRow
-                  label={t("DashboardEarn.deposit.vaultTransaction")}
-                  value={
-                    <a
-                      className="underline underline-offset-2"
-                      href={explorerTxUrl(result.signature, strategy.hostCluster)}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      {shortenAddress(result.signature)}
-                    </a>
-                  }
-                />
-              ) : null}
+              <SummaryRow
+                label={t("DashboardEarn.deposit.vaultTransaction")}
+                value={
+                  <a
+                    className="underline underline-offset-2"
+                    href={explorerTxUrl(result.signature, strategy.hostCluster)}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    {shortenAddress(result.signature)}
+                  </a>
+                }
+              />
             </dl>
             <p className="mt-4 text-sm leading-6 text-secondary">
-              {inFlight && !result.signature
-                ? t("DashboardEarn.deposit.vaultPendingNoSignature")
-                : t("DashboardEarn.deposit.vaultSettlingNote")}
+              {t("DashboardEarn.deposit.vaultSettlingNote")}
             </p>
             <div className="mt-6 flex justify-end">
               <Button onClick={onClose}>{t("DashboardEarn.deposit.vaultDone")}</Button>
@@ -224,12 +222,13 @@ export function EarnVaultDepositModal({
         onClose={onClose}
         size="md"
       >
-        <div ref={contentRef}>
-          <StepSection title={t("DashboardEarn.deposit.vaultWalletTitle")}>
+        <div data-modal-focus-panel={focusPanelKey} ref={contentRef}>
+          <StepSection focusHeading title={t("DashboardEarn.deposit.vaultWalletTitle")}>
             <p className="mb-5 text-sm leading-6 text-secondary">
               {t("DashboardEarn.deposit.vaultWalletBody")}
             </p>
             <WalletStep
+              balanceToken={token}
               // Says what this flow actually does, instead of the custodial
               // note's promise of a provider-managed deposit address — which
               // directly contradicted the body immediately above.
@@ -266,15 +265,15 @@ export function EarnVaultDepositModal({
       onClose={onClose}
       size="md"
     >
-      <div ref={contentRef}>
-        <StepSection title={t("DashboardEarn.deposit.vaultAmountTitle")}>
+      <div data-modal-focus-panel={focusPanelKey} ref={contentRef}>
+        <StepSection focusHeading title={t("DashboardEarn.deposit.vaultAmountTitle")}>
           <p className="mb-5 text-sm leading-6 text-secondary">
             {t("DashboardEarn.deposit.vaultAmountBody")}
           </p>
           <div className="grid gap-5">
             <div className="grid gap-2">
               <label className="text-sm text-primary" htmlFor="vault-deposit-amount">
-                {t("DashboardEarn.deposit.vaultAmount")}
+                {t("DashboardEarn.deposit.vaultAmount", { token: tokenLabel })}
               </label>
               <Input
                 autoComplete="off"
@@ -288,7 +287,7 @@ export function EarnVaultDepositModal({
                 {walletBalance === undefined
                   ? t("DashboardEarn.deposit.vaultBalanceUnknown")
                   : t("DashboardEarn.deposit.vaultBalanceAvailable", {
-                      amount: formatUsd(walletBalance),
+                      amount: formatTokenQuantity(walletBalance, tokenLabel),
                     })}
               </p>
             </div>

@@ -297,8 +297,9 @@ account is a PROGRAM account and stablecoins sent to it are destroyed. Money
 moves only when SDP builds an instruction and signs it with one of the
 organization's own custody wallets.
 
-- `POST /vault-deposits` — **build + sign + record + broadcast + ledger**, in
-  that order. Body `{strategyId, walletId, amount, requestId, minSharesOut?}`.
+- `POST /vault-deposits` — **build + simulate + sign + record + broadcast**, in
+  that order. Body
+  `{strategyId, custodyWalletId, amount, requestId, minSharesOut?}`.
   Registered as
   `requirePermissions("earn:write", "wallets:read")` → `policyGate` → handler.
   The caller names a CATALOGUE row, never a raw vault address, so the sync's
@@ -314,8 +315,9 @@ organization's own custody wallets.
   - **Environment capability first.** `isVaultDirectDepositEnabled(environment)`
     (`@sdp/types/provider-access`) fail-closes PRODUCTION while SDP has no
     vault-withdraw route and no Active-tab surface. Entitlement cannot express
-    this — it is org-scoped, not environment-scoped. The dashboard hides the
-    affordance from the same constant.
+    this — it is org-scoped, not environment-scoped. The dashboard visibly
+    disables the affordance from the same constant so the opportunity remains
+    discoverable without advertising an action the API will refuse.
   - `minSharesOut` is **required in production** and optional in sandbox: the
     pinned Kamino SDK picks the LEGACY deposit instruction when it is absent, so
     there is no implicit floor at all.
@@ -335,14 +337,19 @@ organization's own custody wallets.
     binding must not be able to spend. Note this is the first `earn:*` scope
     asserted on a BINDING: a selected-scope key provisioned only with
     payments-family binding permissions will now 403 here.
+    `custodyWalletId` is the exact `custody_wallets.id` (`cwlt_…`) returned by
+    the wallet surface, never the provider-local `walletId` or public key. The
+    latter can repeat across configurations; a selected binding whose provider
+    id maps to multiple scoped rows fails closed.
   - Simulates before signing. The instructions come from a third-party SDK built
     against live vault state, so a stale reserve set surfaces as a readable
     program error instead of a landed, failed transaction the customer paid for.
-  - **Signature is recorded BEFORE broadcast.** `signVaultPlan` signs without
-    sending, the movement stores the signature while still `pending`, and only
-    then are the bytes broadcast. A send error leaves the row `pending` WITH its
-    signature — reconcilable — and never `failed`, because a lost response does
-    not prove the transaction did not land.
+  - **The signed outbox is recorded BEFORE broadcast.** `signVaultPlan` signs
+    without sending; one transaction stores the signature, base64 wire bytes,
+    last-valid block height, movement and activated claim while still `pending`.
+    Only the insert winner broadcasts. A send error leaves that row `pending`
+    and never `failed`, because a lost response does not prove the transaction
+    did not land.
   - Fee payer is the CUSTODY WALLET. Kora only sponsors allow-listed programs and
     the kvault/klend ids are not on that list. The sponsored path in
     `services/earn/vault-execution.service.ts` is no longer one line away: it

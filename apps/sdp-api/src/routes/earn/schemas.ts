@@ -226,13 +226,14 @@ export const earnProgramWithdrawalsListQuerySchema = z.object(earnPageQueryShape
 export const earnVaultDepositSchema = z.object({
   /** Catalogue strategy id, resolved to a vault address server-side. */
   strategyId: z.string().min(1),
-  /** SDP custody wallet that signs and holds the shares. */
-  walletId: z.string().min(1),
+  /** SDP custody-wallet row that signs and holds the shares (`id`, not provider `walletId`). */
+  custodyWalletId: z.string().min(1),
   /** Deposit amount in the vault token's units, as a decimal string. */
   amount: z
     .string()
+    .max(128)
     .regex(/^\d+(\.\d+)?$/, "amount must be a positive decimal string")
-    .refine((value) => Number(value) > 0, "amount must be greater than zero"),
+    .refine((value) => /[1-9]/.test(value), "amount must be greater than zero"),
   /**
    * Idempotency key, REQUIRED here unlike the custodial create. The chain has
    * no request-id dedupe of its own, so this row is the only thing preventing a
@@ -242,6 +243,14 @@ export const earnVaultDepositSchema = z.object({
   /** Optional slippage floor, in shares, as a decimal string. */
   minSharesOut: z
     .string()
+    .max(128)
     .regex(/^\d+(\.\d+)?$/, "minSharesOut must be a decimal string")
+    .refine((value) => /[1-9]/.test(value), "minSharesOut must be greater than zero")
     .optional(),
+});
+
+/** Bounded keyset page over active vault holdings, newest first. */
+export const earnVaultPositionsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  before: z.string().min(1).optional(),
 });

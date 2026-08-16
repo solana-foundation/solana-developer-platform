@@ -134,16 +134,25 @@ export function SummaryRow({ label, value }: { label: ReactNode; value: ReactNod
 export function StepSection({
   action,
   children,
+  focusHeading = false,
   title,
 }: {
   action?: ReactNode;
   children: ReactNode;
+  /** Marks the section title as the modal panel's semantic focus fallback. */
+  focusHeading?: boolean;
   title: ReactNode;
 }) {
   return (
     <section className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
       <div className="flex items-center justify-between gap-3 border-b border-border-subtle bg-fill-subtle px-4 py-3">
-        <h3 className="text-sm font-medium text-primary">{title}</h3>
+        <h3
+          className="text-sm font-medium text-primary"
+          data-modal-focus-heading={focusHeading ? "" : undefined}
+          tabIndex={focusHeading ? -1 : undefined}
+        >
+          {title}
+        </h3>
         {action}
       </div>
       <div className="px-4 py-2">{children}</div>

@@ -12,6 +12,13 @@ import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
+const depositIntoVault = vi.hoisted(() => vi.fn());
+
+vi.mock("@/services/earn/vault-deposit.service", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/earn/vault-deposit.service")>()),
+  depositIntoVault,
+}));
+
 /**
  * `POST /v1/earn/vault-deposits` — the gates and the idempotency contract.
  *
@@ -52,10 +59,45 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
 };
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const SHARE_MINT = "So11111111111111111111111111111111111111112";
 const WALLET_ADDRESS = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 
 let originalMarketsEnabled: string | undefined;
 let originalEarnEnabled: string | undefined;
+
+async function seedWallet(params: {
+  configId: string;
+  custodyWalletId: string;
+  providerWalletId: string;
+  publicKey?: string;
+  projectId?: string | null;
+}): Promise<void> {
+  await getDb(env).batch([
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_configs
+           (id, organization_id, project_id, provider, config_encrypted, status)
+         VALUES (?, ?, ?, 'privy', 'encrypted', 'active')`
+      )
+      .bind(
+        params.configId,
+        TEST_ORG.id,
+        params.projectId === undefined ? TEST_PROJECT.id : params.projectId
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
+           (id, custody_config_id, wallet_id, public_key, status)
+         VALUES (?, ?, ?, ?, 'active')`
+      )
+      .bind(
+        params.custodyWalletId,
+        params.configId,
+        params.providerWalletId,
+        params.publicKey ?? WALLET_ADDRESS
+      ),
+  ]);
+}
 
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -136,7 +178,7 @@ async function seedStrategy(
     sourceKind: "defi",
     underlyingSource: "kamino",
     depositMints: [USDC_MINT],
-    shareMint: null,
+    shareMint: SHARE_MINT,
     apyType: "variable",
     currentApy: "0.062",
     liquidityTerm: "instant",
@@ -173,6 +215,17 @@ beforeEach(async () => {
   env.EARN_ENABLED = "true";
   await seedTestDatabase(env);
   await clearKVStores(env);
+  vi.clearAllMocks();
+  depositIntoVault.mockResolvedValue({
+    position: { id: "earn_vault_position_test" },
+    movement: {
+      id: "earn_vault_movement_test",
+      status: "submitted",
+      signature: "sig_test",
+      failure_reason: null,
+    },
+    replayed: false,
+  });
 });
 
 afterEach(() => {
@@ -194,7 +247,7 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
 
     const res = await postVaultDeposit({
       strategyId: strategy.id,
-      walletId: WALLET_ADDRESS,
+      custodyWalletId: WALLET_ADDRESS,
       amount: "10",
       requestId: crypto.randomUUID(),
     });
@@ -210,7 +263,7 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
 
     const res = await postVaultDeposit({
       strategyId: strategy.id,
-      walletId: WALLET_ADDRESS,
+      custodyWalletId: WALLET_ADDRESS,
       amount: "10",
       requestId: crypto.randomUUID(),
     });
@@ -224,7 +277,7 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
 
     const res = await postVaultDeposit({
       strategyId: strategy.id,
-      walletId: WALLET_ADDRESS,
+      custodyWalletId: WALLET_ADDRESS,
       amount: "10",
       requestId: crypto.randomUUID(),
     });
@@ -242,7 +295,7 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
 
     const res = await postVaultDeposit({
       strategyId: strategy.id,
-      walletId: WALLET_ADDRESS,
+      custodyWalletId: WALLET_ADDRESS,
       amount: "10",
     });
 
@@ -255,7 +308,7 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
 
     const res = await postVaultDeposit({
       strategyId: strategy.id,
-      walletId: WALLET_ADDRESS,
+      custodyWalletId: WALLET_ADDRESS,
       amount: "0",
       requestId: crypto.randomUUID(),
     });
@@ -263,16 +316,151 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects a zero minSharesOut without lossy numeric coercion", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+
+    const res = await postVaultDeposit({
+      strategyId: strategy.id,
+      custodyWalletId: "cwlt_unused",
+      amount: "10",
+      minSharesOut: "000.0000",
+      requestId: crypto.randomUUID(),
+    });
+
+    expect(res.status).toBe(400);
+    expect(depositIntoVault).not.toHaveBeenCalled();
+  });
+
   it("404s an unknown strategy rather than leaking whether the id exists elsewhere", async () => {
     await seedAuth();
 
     const res = await postVaultDeposit({
       strategyId: "earn_strategy_does_not_exist",
-      walletId: WALLET_ADDRESS,
+      custodyWalletId: WALLET_ADDRESS,
       amount: "10",
       requestId: crypto.randomUUID(),
     });
 
     expect(res.status).toBe(404);
+  });
+
+  it("requires a custody row id and rejects a raw wallet address", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    await seedWallet({
+      configId: "cfg_earn_vault_raw_address",
+      custodyWalletId: "cwlt_earn_vault_raw_address",
+      providerWalletId: "privy_earn_vault_raw_address",
+    });
+
+    const res = await postVaultDeposit({
+      strategyId: strategy.id,
+      custodyWalletId: WALLET_ADDRESS,
+      amount: "10",
+      requestId: crypto.randomUUID(),
+    });
+
+    expect(res.status).toBe(404);
+    expect(depositIntoVault).not.toHaveBeenCalled();
+  });
+
+  it("selects the exact custody row when scoped configurations share an address", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    await seedWallet({
+      configId: "cfg_earn_vault_first",
+      custodyWalletId: "cwlt_earn_vault_first",
+      providerWalletId: "privy_earn_vault_first",
+    });
+    await seedWallet({
+      configId: "cfg_earn_vault_second",
+      custodyWalletId: "cwlt_earn_vault_second",
+      providerWalletId: "privy_earn_vault_second",
+      projectId: null,
+    });
+
+    const res = await postVaultDeposit({
+      strategyId: strategy.id,
+      custodyWalletId: "cwlt_earn_vault_second",
+      amount: "10",
+      requestId: crypto.randomUUID(),
+    });
+
+    expect(res.status).toBe(200);
+    expect(depositIntoVault).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({
+        wallet: expect.objectContaining({
+          id: "cwlt_earn_vault_second",
+          walletId: "privy_earn_vault_second",
+        }),
+      }),
+      expect.any(Object)
+    );
+  });
+
+  it("rejects a provider wallet id even when scoped configurations reuse it", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    await seedWallet({
+      configId: "cfg_earn_vault_duplicate_a",
+      custodyWalletId: "cwlt_earn_vault_duplicate_a",
+      providerWalletId: "privy_earn_vault_duplicate",
+    });
+    await seedWallet({
+      configId: "cfg_earn_vault_duplicate_b",
+      custodyWalletId: "cwlt_earn_vault_duplicate_b",
+      providerWalletId: "privy_earn_vault_duplicate",
+      publicKey: "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF",
+      projectId: null,
+    });
+
+    const res = await postVaultDeposit({
+      strategyId: strategy.id,
+      custodyWalletId: "privy_earn_vault_duplicate",
+      amount: "10",
+      requestId: crypto.randomUUID(),
+    });
+
+    expect(res.status).toBe(404);
+    expect(depositIntoVault).not.toHaveBeenCalled();
+  });
+
+  it("does not let a selected-wallet key cross an ambiguous provider wallet id", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    await seedWallet({
+      configId: "cfg_earn_vault_bound_project",
+      custodyWalletId: "cwlt_earn_vault_bound_project",
+      providerWalletId: "privy_earn_vault_bound_duplicate",
+    });
+    await seedWallet({
+      configId: "cfg_earn_vault_bound_org",
+      custodyWalletId: "cwlt_earn_vault_bound_org",
+      providerWalletId: "privy_earn_vault_bound_duplicate",
+      projectId: null,
+    });
+    const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
+    await seedCachedApiKey(env, keyHash, {
+      ...TEST_CACHED_API_KEY,
+      signingWalletId: "privy_earn_vault_bound_duplicate",
+      walletBindings: [
+        {
+          walletId: "privy_earn_vault_bound_duplicate",
+          permissions: ["earn:write"],
+        },
+      ],
+    });
+
+    const res = await postVaultDeposit({
+      strategyId: strategy.id,
+      custodyWalletId: "cwlt_earn_vault_bound_org",
+      amount: "10",
+      requestId: crypto.randomUUID(),
+    });
+
+    expect(res.status).toBe(403);
+    expect(depositIntoVault).not.toHaveBeenCalled();
   });
 });

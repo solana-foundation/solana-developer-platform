@@ -97,4 +97,26 @@ describe("vault construction", () => {
     // is a convention inside one call, the assertion is a property of the output.
     expect(builders.length).toBeGreaterThanOrEqual(2);
   });
+
+  it("binds every plan to the asset mints read from live vault state", () => {
+    const sdk = read("sdk.ts");
+    expect(sdk).toContain("vaultAssetIdentityFromState(state)");
+    // Deposit and withdrawal must both return the identity produced by the
+    // shared bind path; omitting either would reopen catalogue-only trust.
+    expect(
+      sdk.match(/lookupTables:\s*\[\],\s*assetIdentity,/g)?.length ?? 0
+    ).toBeGreaterThanOrEqual(2);
+  });
+
+  it("fails closed on invalid observed shares but only withholds an invalid valuation", () => {
+    const sdk = read("sdk.ts");
+    expect(sdk).toContain(
+      'requireNonNegativeFiniteDecimal("staked share balance", staked.stakedShares)'
+    );
+    expect(sdk).toMatch(/requireNonNegativeFiniteDecimal\(\s*"total share balance"/);
+    expect(sdk).toMatch(/requireNonNegativeFiniteDecimal\(\s*"vault exchange rate"/);
+    expect(sdk).toMatch(
+      /let tokenValue:[\s\S]*?try\s*\{[\s\S]*?requireNonNegativeFiniteDecimal\(\s*"vault exchange rate"/
+    );
+  });
 });

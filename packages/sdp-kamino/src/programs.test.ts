@@ -46,9 +46,9 @@ describe("kaminoClusterConfig", () => {
     expect(devnet).toBe(KAMINO_SLOT_DURATION_MS.devnet);
     expect(mainnet).toBe(KAMINO_SLOT_DURATION_MS["mainnet-beta"]);
     expect(devnet).not.toBe(mainnet);
-    // 450 is klend-sdk's DEFAULT_RECENT_SLOT_DURATION_MS; neither cluster is it.
-    expect(devnet).not.toBe(450);
-    expect(mainnet).not.toBe(450);
+    // 400 is klend-sdk's DEFAULT_RECENT_SLOT_DURATION_MS; neither cluster is it.
+    expect(devnet).not.toBe(400);
+    expect(mainnet).not.toBe(400);
   });
 });
 

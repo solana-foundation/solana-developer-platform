@@ -579,15 +579,13 @@ export interface EarnVaultDepositInput {
   /** Catalogue strategy id; the API resolves it to a vault address. */
   strategyId: string;
   /**
-   * The wallet to deposit FROM, as its Solana public key.
+   * The wallet to deposit FROM, as its SDP custody-wallet row id.
    *
-   * Public key rather than the `cwlt_…` row id, because that is what
-   * `resolveWalletAddress` accepts on every money-moving route in SDP (payments,
-   * private channels, and this one). The wallet picker hands back the row id, so
-   * the caller maps it — the mapping belongs at the call site, not in a second
-   * resolution rule inside the API.
+   * Neither the provider-local `CustodyWalletSummary.walletId` nor the public
+   * key identifies a globally unique wallet. The API authorizes this exact row,
+   * then resolves the provider wallet id within its custody configuration.
    */
-  walletId: string;
+  custodyWalletId: string;
   /** Decimal string in the vault token's units. */
   amount: string;
   /** REQUIRED: the chain has no request-id dedupe, so this is the only guard. */
@@ -598,7 +596,8 @@ export interface EarnVaultDepositResult {
   positionId: string;
   movementId: string;
   status: "pending" | "submitted" | "confirmed" | "failed";
-  signature: string | null;
+  /** Signed transaction exists before the API creates the deposit intent. */
+  signature: string;
   failureReason: string | null;
   /** The key had already been used — nothing was re-sent. */
   replayed: boolean;

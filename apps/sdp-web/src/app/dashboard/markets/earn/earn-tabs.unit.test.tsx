@@ -9,6 +9,10 @@ vi.mock("@/i18n/provider", () => ({
   useLocale: () => "en",
 }));
 
+vi.mock("@/contexts/dashboard-workspace-context", () => ({
+  useDashboardWorkspace: () => ({ sdpEnvironment: "sandbox" }),
+}));
+
 // The panels each fetch; this suite is about the tab STRIP, so they are stubbed
 // down to markers. Their own behaviour is covered in earn-workspace.unit.test.
 vi.mock("./earn-program-data", () => ({

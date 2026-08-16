@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const PANEL_HEADING_SELECTOR = "[data-modal-focus-heading]";
 
 /**
  * The focus lifecycle a portaled dialog needs and the shared `Modal` does not
@@ -17,14 +18,17 @@ const FOCUSABLE_SELECTOR =
  * money-IN and money-OUT halves of the same position behave identically rather
  * than one of them silently going without.
  *
- * Three parts, and the fallback is the subtle one:
+ * Three parts, and the split between the first two is load-bearing:
  *
- * 1. **Initial focus** on the first enabled input inside the dialog, on the
- *    next frame — the portal's children are not in the document yet when the
- *    effect runs.
- * 2. **Trap** on Tab/Shift-Tab, cycling within the nearest `[role="dialog"]`
+ * 1. **Panel focus** runs on every `panelKey`, independently of the modal
+ *    lifecycle. A wizard keeps the same dialog mounted while replacing its
+ *    focused Continue/Submit button; without a second effect, focus falls to
+ *    `body` and the next panel is never announced.
+ * 2. **Trap** is mount-level and cycles Tab/Shift-Tab within the nearest
+ *    `[role="dialog"]`
  *    ancestor. Scoped to that ancestor rather than to the ref so that popovers
- *    portaled INSIDE the dialog (Select, Tooltip) stay reachable.
+ *    portaled INSIDE the dialog (Select, Tooltip) stay reachable. If focus has
+ *    already escaped, the next Tab recovers it into the dialog.
  * 3. **Return focus** to the element that had it, or — when that element was
  *    unmounted by a re-render while the dialog was open — to a trigger marked
  *    with `data-modal-focus-fallback="<fallbackId>"`. The id must be the
@@ -33,23 +37,22 @@ const FOCUSABLE_SELECTOR =
  *    different row than the one the reader was working in.
  *
  * @param fallbackId Identifies the trigger to return focus to if it remounts.
+ * @param panelKey Changes whenever the modal replaces its visible panel.
  */
-export function useModalFocus<T extends HTMLElement = HTMLDivElement>(fallbackId: string) {
+export function useModalFocus<T extends HTMLElement = HTMLDivElement>(
+  fallbackId: string,
+  panelKey: string = fallbackId
+) {
   const contentRef = useRef<T>(null);
 
   useEffect(() => {
     const returnFocus =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const focusFrame = window.requestAnimationFrame(() => {
-      contentRef.current
-        ?.querySelector<HTMLElement>('input:not([type="hidden"]):not([disabled])')
-        ?.focus();
-    });
 
     const trapFocus = (event: KeyboardEvent) => {
       if (event.key !== "Tab") return;
       const dialog = contentRef.current?.closest<HTMLElement>('[role="dialog"]');
-      if (!dialog?.contains(document.activeElement)) return;
+      if (!dialog) return;
       const focusable = [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)].filter(
         (element) => element.getAttribute("aria-hidden") !== "true"
       );
@@ -73,7 +76,6 @@ export function useModalFocus<T extends HTMLElement = HTMLDivElement>(fallbackId
 
     document.addEventListener("keydown", trapFocus);
     return () => {
-      window.cancelAnimationFrame(focusFrame);
       document.removeEventListener("keydown", trapFocus);
       window.requestAnimationFrame(() => {
         const focusTarget = returnFocus?.isConnected
@@ -85,6 +87,29 @@ export function useModalFocus<T extends HTMLElement = HTMLDivElement>(fallbackId
       });
     };
   }, [fallbackId]);
+
+  useEffect(() => {
+    // One frame lets Modal's portal mount and lets a state transition replace
+    // its panel before querying. Inputs are the most useful landing target for
+    // the two form panels; a marked heading is the semantic fallback for
+    // loading, empty, and result panels; the first ordinary control is last.
+    const focusFrame = window.requestAnimationFrame(() => {
+      const content = contentRef.current;
+      if (!content) return;
+      // A keyed panel can expose the same value on its root. This guards a
+      // queued frame from focusing a replacement that rendered after it was
+      // scheduled; unkeyed single-panel consumers remain supported.
+      const renderedPanelKey = content.dataset.modalFocusPanel;
+      if (renderedPanelKey !== undefined && renderedPanelKey !== panelKey) return;
+      const target =
+        content.querySelector<HTMLElement>('input:not([type="hidden"]):not([disabled])') ??
+        content.querySelector<HTMLElement>(PANEL_HEADING_SELECTOR) ??
+        content.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+      target?.focus();
+    });
+
+    return () => window.cancelAnimationFrame(focusFrame);
+  }, [panelKey]);
 
   return contentRef;
 }

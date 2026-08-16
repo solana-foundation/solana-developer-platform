@@ -382,6 +382,15 @@ export interface EarnVaultTransactionPlan {
   /** Address lookup tables the caller should apply when compiling. */
   lookupTables: string[];
   /**
+   * Asset addresses observed from the live vault state used to build this plan.
+   *
+   * Required so the execution layer can compare builder truth with catalogue
+   * metadata before signing. Amount validation alone is insufficient: a stale
+   * or poisoned catalogue row could otherwise apply policy and ledger labels to
+   * one mint while the instructions actually move another.
+   */
+  assetIdentity: EarnVaultAssetIdentity;
+  /**
    * The amounts the instructions above actually ENCODE, canonical to each
    * mint's own precision.
    *
@@ -394,6 +403,14 @@ export interface EarnVaultTransactionPlan {
    * what moved on chain.
    */
   accepted?: EarnVaultAcceptedAmounts;
+}
+
+/** Solana asset identity bound to an unsigned vault transaction plan. */
+export interface EarnVaultAssetIdentity {
+  /** Mint whose tokens the deposit instructions consume. */
+  depositTokenMint: string;
+  /** Mint whose receipt/share tokens the vault issues. */
+  shareMint: string;
 }
 
 /** What a built plan encodes, per mint. All values are decimal strings. */

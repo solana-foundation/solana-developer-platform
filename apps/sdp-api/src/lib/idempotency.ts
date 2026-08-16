@@ -150,6 +150,16 @@ export interface EarnVaultDepositFingerprintInput {
   minSharesOut: string | null;
 }
 
+/** Canonicalize decimal spelling without rounding or passing through a float. */
+function normalizeDecimalString(value: string): string {
+  const [integer = "0", fraction = ""] = value.split(".");
+  const normalizedInteger = integer.replace(/^0+(?=\d)/, "") || "0";
+  const normalizedFraction = fraction.replace(/0+$/, "");
+  return normalizedFraction === ""
+    ? normalizedInteger
+    : `${normalizedInteger}.${normalizedFraction}`;
+}
+
 /**
  * Fingerprint for a non-custodial vault deposit.
  *
@@ -160,11 +170,10 @@ export interface EarnVaultDepositFingerprintInput {
  * original, stricter deposit. `environment` is included because the same key
  * arriving in sandbox and in production is two requests against two chains.
  *
- * Amounts are NOT numerically normalised, unlike the earn WITHDRAWAL
- * fingerprint. That one matches a provider wire where `100` and `100.00` are
- * literally one request; there is no such wire here, and the vault builder now
- * refuses any amount finer than the mint, so distinct strings are distinct
- * intents and should conflict rather than silently replay.
+ * Decimal spelling is normalized without rounding. The builder accepts
+ * insignificant zeroes and canonicalizes them to the same mint atoms, so `1`
+ * and `1.000000` are one intent. Non-zero sub-atom precision remains distinct
+ * here and is rejected by the provider builder before anything is signed.
  */
 export const buildEarnVaultDepositFingerprint = (input: EarnVaultDepositFingerprintInput): string =>
   JSON.stringify(
@@ -175,8 +184,8 @@ export const buildEarnVaultDepositFingerprint = (input: EarnVaultDepositFingerpr
       providerReference: input.providerReference,
       custodyWalletId: input.custodyWalletId,
       direction: "deposit",
-      amount: input.amount,
-      minSharesOut: input.minSharesOut,
+      amount: normalizeDecimalString(input.amount),
+      minSharesOut: input.minSharesOut === null ? null : normalizeDecimalString(input.minSharesOut),
     })
   );
 

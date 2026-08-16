@@ -3,8 +3,34 @@ import {
   supportsVaultDirect,
   supportsVaultWithdraw,
 } from "@sdp/earn/capabilities";
-import { describe, expect, it } from "vitest";
-import { assertNotPortfolioProvider, KaminoVaultDirectClient } from "./client";
+import { type Address, address } from "@solana/kit";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  assertNotPortfolioProvider,
+  KAMINO_POSITION_READ_CONCURRENCY,
+  KaminoVaultDirectClient,
+  toEarnVaultTransactionPlan,
+} from "./client";
+import type { KaminoInstructionPlan, KaminoPosition, KaminoRuntime } from "./types";
+
+const DEPOSIT_TOKEN_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const SHARE_MINT = "So11111111111111111111111111111111111111112";
+
+const mocks = vi.hoisted(() => ({
+  buildKaminoDepositPlan: vi.fn(),
+  createKaminoRpc: vi.fn(),
+  readKaminoPosition: vi.fn(),
+}));
+
+vi.mock("./rpc", () => ({ createKaminoRpc: mocks.createKaminoRpc }));
+vi.mock("./sdk", () => ({
+  buildKaminoDepositPlan: mocks.buildKaminoDepositPlan,
+  readKaminoPosition: mocks.readKaminoPosition,
+}));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 const client = new KaminoVaultDirectClient(() => "https://example.invalid");
 
@@ -87,5 +113,90 @@ describe("KaminoVaultDirectClient capabilities", () => {
     // sandbox -> devnet, production -> mainnet-beta, via CLUSTER_BY_SDP_ENVIRONMENT
     // rather than a second copy of that mapping.
     expect(seen).toEqual(["devnet", "mainnet-beta"]);
+  });
+
+  it("reads vaults with bounded concurrency against one shared slot", async () => {
+    const slot = 123n;
+    const getSlotSend = vi.fn().mockResolvedValue(slot);
+    mocks.createKaminoRpc.mockReturnValue({ getSlot: () => ({ send: getSlotSend }) });
+
+    let active = 0;
+    let maxActive = 0;
+    const releases: Array<() => void> = [];
+    mocks.readKaminoPosition.mockImplementation(
+      async (
+        runtime: KaminoRuntime,
+        input: { vault: Address; owner: Address; slot: bigint }
+      ): Promise<KaminoPosition> => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise<void>((resolve) => releases.push(resolve));
+        active -= 1;
+        return {
+          vault: input.vault,
+          owner: input.owner,
+          cluster: runtime.cluster,
+          shares: "1",
+          tokenMint: input.vault,
+          sharesMint: input.vault,
+        };
+      }
+    );
+
+    const vault = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
+    const providerReferences = Array.from({ length: 9 }, () => vault);
+    const pending = client.readVaultPositions(
+      { env: {}, environment: "sandbox" },
+      {
+        owner: "11111111111111111111111111111112",
+        providerReferences,
+      }
+    );
+
+    await vi.waitFor(() =>
+      expect(mocks.readKaminoPosition).toHaveBeenCalledTimes(KAMINO_POSITION_READ_CONCURRENCY)
+    );
+    for (const release of releases.splice(0)) release();
+
+    await vi.waitFor(() =>
+      expect(mocks.readKaminoPosition).toHaveBeenCalledTimes(KAMINO_POSITION_READ_CONCURRENCY * 2)
+    );
+    for (const release of releases.splice(0)) release();
+
+    await vi.waitFor(() => expect(mocks.readKaminoPosition).toHaveBeenCalledTimes(9));
+    for (const release of releases.splice(0)) release();
+
+    await expect(pending).resolves.toHaveLength(9);
+    expect(maxActive).toBe(KAMINO_POSITION_READ_CONCURRENCY);
+    expect(getSlotSend).toHaveBeenCalledOnce();
+    expect(mocks.readKaminoPosition.mock.calls.every(([, input]) => input.slot === slot)).toBe(
+      true
+    );
+  });
+});
+
+describe("toEarnVaultTransactionPlan", () => {
+  it("preserves the mint-scale amounts encoded by the SDK plan", () => {
+    const plan: KaminoInstructionPlan = {
+      cluster: "devnet",
+      instructions: [],
+      lookupTables: [],
+      assetIdentity: {
+        depositTokenMint: address(DEPOSIT_TOKEN_MINT),
+        shareMint: address(SHARE_MINT),
+      },
+      accepted: { amount: "1.5", minSharesOut: "1.49" },
+    };
+
+    expect(toEarnVaultTransactionPlan(plan)).toMatchObject({
+      cluster: "devnet",
+      transactions: [],
+      lookupTables: [],
+      assetIdentity: {
+        depositTokenMint: DEPOSIT_TOKEN_MINT,
+        shareMint: SHARE_MINT,
+      },
+      accepted: { amount: "1.5", minSharesOut: "1.49" },
+    });
   });
 });

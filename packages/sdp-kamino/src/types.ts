@@ -50,8 +50,18 @@ export interface KaminoInstructionPlan {
    * publishes a per-vault LUT precisely because these account lists are large.
    */
   lookupTables: readonly Address[];
+  /** Asset mints observed from the same live vault state used to build. */
+  assetIdentity: KaminoVaultAssetIdentity;
   /** What the instructions above actually encode. See `KaminoAcceptedAmounts`. */
   accepted: KaminoAcceptedAmounts;
+}
+
+/** Live K-Vault asset identity carried with a built instruction plan. */
+export interface KaminoVaultAssetIdentity {
+  /** Mint consumed by a deposit. */
+  depositTokenMint: Address;
+  /** Mint issued as the vault receipt/share token. */
+  shareMint: Address;
 }
 
 /**

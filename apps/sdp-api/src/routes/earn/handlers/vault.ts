@@ -1,3 +1,4 @@
+import { isDecimalString } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types";
 import { earnDepositStyle, isVaultDirectDepositEnabled } from "@sdp/types/provider-access";
 import { z } from "zod";
@@ -5,13 +6,36 @@ import { getDb } from "@/db";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import { createPostgresEarnVaultRepository } from "@/db/repositories/earn-vault.repository";
 import { requireProjectId } from "@/lib/auth";
-import { AppError, badRequest, notFound, walletNotFound } from "@/lib/errors";
+import { mapSettledWithConcurrency } from "@/lib/concurrency";
+import {
+  AppError,
+  badRequest,
+  conflict,
+  internalError,
+  notFound,
+  walletNotFound,
+} from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
-import { resolveScope, resolveWalletAddress } from "@/routes/payments/wallets";
-import { getAllowedApiKeyWalletIdsForPermissions } from "@/services/api-key-scope.service";
-import { resolveVaultDirectClient } from "@/services/earn/execution-registry";
+import { resolveScope } from "@/routes/payments/wallets";
+import { getLogger } from "@/runtime/logger";
+import {
+  assertApiKeyWalletAccess,
+  getAllowedApiKeyWalletIdsForPermissions,
+} from "@/services/api-key-scope.service";
+import {
+  assertClusterEndpoint,
+  earnClusterFor,
+  resolveClusterRpcUrl,
+  resolveVaultDirectClient,
+} from "@/services/earn/execution-registry";
+import { withVaultDeadline } from "@/services/earn/vault-deadline";
 import { depositIntoVault } from "@/services/earn/vault-deposit.service";
+import {
+  approvedWalletOperationId,
+  beginApprovedWalletOperationEffect,
+  runApprovedWalletOperationEffectTransaction,
+} from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import {
   assertEarnProviderSurfaced,
@@ -20,8 +44,9 @@ import {
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { AppContext } from "../context";
 import { earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
-import { earnVaultDepositSchema } from "../schemas";
+import { earnVaultDepositSchema, earnVaultPositionsQuerySchema } from "../schemas";
 import { assertStrategyDepositable } from "./admission";
+import { parseQuery } from "./shared";
 
 /**
  * POST /v1/earn/vault-deposits — open or add to a non-custodial vault position,
@@ -40,20 +65,49 @@ export async function createEarnVaultDeposit(c: AppContext) {
     EarnVaultDepositResolved
   >(c);
   const { strategy, wallet, auth, projectId, environment } = resolved;
+  const tokenMint = strategy.deposit_mints[0];
+  if (!tokenMint) {
+    throw internalError(`Earn strategy ${strategy.id} has no deposit mint`);
+  }
+  const shareMint = strategy.share_mint;
+  if (!shareMint) {
+    throw internalError(`Earn strategy ${strategy.id} has no share mint`);
+  }
 
-  const result = await depositIntoVault(c.env, {
-    organizationId: auth.organizationId,
-    projectId,
-    environment,
-    provider: strategy.provider,
-    providerReference: strategy.provider_reference,
-    wallet,
-    amount: parsedData.amount,
-    requestId: parsedData.requestId,
-    minSharesOut: parsedData.minSharesOut,
-    userId: auth.userId ?? null,
-    apiKeyId: auth.apiKeyId ?? null,
-  });
+  const result = await depositIntoVault(
+    c.env,
+    {
+      organizationId: auth.organizationId,
+      projectId,
+      environment,
+      provider: strategy.provider,
+      providerReference: strategy.provider_reference,
+      wallet,
+      tokenMint,
+      shareMint,
+      label: strategy.name,
+      amount: parsedData.amount,
+      requestId: parsedData.requestId,
+      minSharesOut: parsedData.minSharesOut,
+      userId: auth.userId ?? null,
+      apiKeyId: auth.apiKeyId ?? null,
+    },
+    {
+      runIntentTransaction: (mutation) => runApprovedWalletOperationEffectTransaction(c, mutation),
+    }
+  );
+
+  if (result.replayed && approvedWalletOperationId(c)) {
+    // Sequential replays do not pass through the insert transaction, so fence
+    // the approved operation before returning their durable outcome. A legacy
+    // unsigned row must fail closed instead of becoming a completed approval.
+    await beginApprovedWalletOperationEffect(c);
+    if (!result.movement.signature) {
+      throw conflict(
+        "Approved vault deposit execution is incomplete and requires manual reconciliation"
+      );
+    }
+  }
 
   return success(c, {
     positionId: result.position.id,
@@ -198,16 +252,12 @@ export async function extractEarnVaultDepositPolicyCandidate(
   // `wallets:read` is required at the router for the same reason payments does
   // it: for a key with NO bindings the per-wallet assertion is a no-op, so the
   // router permission is the only gate that key ever meets.
-  const walletAddress = resolveWalletAddress(wallets, parsed.data.walletId, "walletId", auth, [
-    "earn:write",
-  ]);
-  const wallet = wallets.find((candidate) => candidate.publicKey === walletAddress);
-  if (!wallet) {
-    // Also closes the raw-address bypass: `resolveWalletAddress` returns an
-    // unknown base58 address unchecked, treating it as an external destination.
-    // For money-IN the wallet must be one SDP holds keys for.
-    throw walletNotFound();
-  }
+  // Resolve only the exposed custody row id. Provider wallet ids are unique
+  // only within one custody configuration, and public keys may also repeat, so
+  // neither is a safe identifier for this money-in route.
+  const wallet = resolveEarnVaultCustodyWallet(wallets, parsed.data.custodyWalletId);
+  assertBoundWalletIdentifierIsUnique(auth, wallets, wallet);
+  assertApiKeyWalletAccess(auth, wallet.walletId, ["earn:write"]);
 
   const resolved: EarnVaultDepositResolved = {
     strategy,
@@ -263,6 +313,35 @@ export async function extractEarnVaultDepositPolicyCandidate(
   };
 }
 
+function resolveEarnVaultCustodyWallet(
+  wallets: readonly CustodyWallet[],
+  custodyWalletId: string
+): CustodyWallet {
+  const exact = wallets.find((wallet) => wallet.id === custodyWalletId);
+  if (exact) return exact;
+  throw walletNotFound();
+}
+
+function assertBoundWalletIdentifierIsUnique(
+  auth: EarnVaultDepositResolved["auth"],
+  wallets: readonly CustodyWallet[],
+  wallet: CustodyWallet
+): void {
+  const selectedScope =
+    auth.authType === "api_key" &&
+    (auth.walletBindings.length > 0 ||
+      auth.signingWalletId !== null ||
+      auth.signingWalletIds.length > 0);
+  if (!selectedScope) return;
+
+  if (wallets.filter((candidate) => candidate.walletId === wallet.walletId).length !== 1) {
+    throw new AppError(
+      "FORBIDDEN",
+      "The selected API-key wallet binding is ambiguous across custody configurations"
+    );
+  }
+}
+
 /**
  * GET /v1/earn/vault-positions — the org's vault positions, HYDRATED LIVE.
  *
@@ -277,6 +356,11 @@ export async function extractEarnVaultDepositPolicyCandidate(
  * money-in route above takes both gates; this one deliberately takes neither.
  */
 export async function listEarnVaultPositions(c: AppContext) {
+  const query = parseQuery(c, earnVaultPositionsQuerySchema);
+  const before = query.before ? decodeVaultPositionCursor(query.before) : null;
+  if (query.before && !before) {
+    throw badRequest("Invalid vault position pagination cursor");
+  }
   const environment = resolveSdpEnvironment(c);
   const { auth, wallets } = await resolveScope(c);
 
@@ -291,25 +375,31 @@ export async function listEarnVaultPositions(c: AppContext) {
   // match nothing and silently return an empty page — a filter that looks like
   // it works and hides everything.
   const allowedProviderWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["earn:read"]);
-  let custodyWalletIds: string[] | undefined;
-  if (allowedProviderWalletIds !== null) {
-    const allowed = new Set(allowedProviderWalletIds);
-    custodyWalletIds = wallets
-      .filter((wallet) => allowed.has(wallet.walletId))
-      .map((wallet) => wallet.id);
-    // Bound, but nothing qualifies: answer empty WITHOUT querying. `null` means
-    // unbound and takes no filter at all; `[]` here would otherwise widen back
-    // to "no filter" in the repository.
-    if (custodyWalletIds.length === 0) {
-      return success(c, { positions: [] });
-    }
+  const allowed = allowedProviderWalletIds === null ? null : new Set(allowedProviderWalletIds);
+  const scopedProviderWalletCounts = new Map<string, number>();
+  for (const wallet of wallets) {
+    scopedProviderWalletCounts.set(
+      wallet.walletId,
+      (scopedProviderWalletCounts.get(wallet.walletId) ?? 0) + 1
+    );
+  }
+  const scopedWallets = wallets.filter(
+    (wallet) =>
+      allowed === null ||
+      (allowed.has(wallet.walletId) && scopedProviderWalletCounts.get(wallet.walletId) === 1)
+  );
+  const custodyWalletIds = [...new Set(scopedWallets.map((wallet) => wallet.id))];
+  if (custodyWalletIds.length === 0) {
+    return success(c, { positions: [], hasMore: false, nextCursor: null });
   }
 
   const repo = createPostgresEarnVaultRepository(getDb(c.env));
-  const rows = await repo.listPositions({
+  const { rows, hasMore } = await repo.listPositions({
     organizationId: auth.organizationId,
     environment,
-    ...(custodyWalletIds === undefined ? {} : { custodyWalletIds }),
+    custodyWalletIds,
+    limit: query.limit,
+    ...(before === null ? {} : { before }),
   });
 
   // Group by provider so each client reads its whole shelf in one pass, sharing
@@ -317,56 +407,109 @@ export async function listEarnVaultPositions(c: AppContext) {
   // page against drifting slots.
   const byProvider = new Map<string, typeof rows>();
   for (const row of rows) {
-    byProvider.set(row.provider, [...(byProvider.get(row.provider) ?? []), row]);
+    const providerRows = byProvider.get(row.provider);
+    if (providerRows) providerRows.push(row);
+    else byProvider.set(row.provider, [row]);
   }
 
-  const live = new Map<string, { shares: string; tokenValue?: string }>();
-  await Promise.all(
-    [...byProvider.entries()].map(async ([provider, providerRows]) => {
-      const client = resolveVaultDirectClient(c.env, provider);
-      if (!client) return;
-      // Positions are grouped per WALLET too: one owner per read.
-      const byWallet = new Map<string, string[]>();
-      for (const row of providerRows) {
-        byWallet.set(row.custody_wallet_id, [
-          ...(byWallet.get(row.custody_wallet_id) ?? []),
-          row.provider_reference,
-        ]);
-      }
-      const walletAddresses = await resolveWalletAddresses(c, [...byWallet.keys()]);
-      await Promise.all(
-        [...byWallet.entries()].map(async ([walletId, references]) => {
-          const owner = walletAddresses.get(walletId);
-          if (!owner) return;
-          try {
-            const snapshots = await client.readVaultPositions(earnRuntime(c), {
-              owner,
-              providerReferences: references,
-            });
-            for (const snapshot of snapshots) {
-              live.set(`${walletId}:${snapshot.providerReference}`, {
-                shares: snapshot.shares,
-                ...(snapshot.tokenValue === undefined ? {} : { tokenValue: snapshot.tokenValue }),
-              });
-            }
-          } catch {
-            // A failed chain read leaves this position unhydrated rather than
-            // failing the whole list — the reader still sees that they hold it.
-            // Reporting zero would be a claim about their money that a failed
-            // RPC call does not support.
-          }
-        })
-      );
-    })
+  const walletAddresses = new Map(
+    scopedWallets.map((wallet) => [wallet.id, wallet.publicKey] as const)
   );
+  const live = new Map<
+    string,
+    {
+      shares: string;
+      tokenValue?: string;
+    }
+  >();
+  const hydrationJobs: Array<() => Promise<void>> = [];
+
+  for (const [provider, providerRows] of byProvider) {
+    const client = resolveVaultDirectClient(c.env, provider);
+    if (!client) continue;
+    const byWallet = new Map<string, typeof rows>();
+    for (const row of providerRows) {
+      const walletRows = byWallet.get(row.custody_wallet_id);
+      if (walletRows) walletRows.push(row);
+      else byWallet.set(row.custody_wallet_id, [row]);
+    }
+    for (const [walletId, walletRows] of byWallet) {
+      const owner = walletAddresses.get(walletId);
+      if (!owner) continue;
+      const trustedIdentity = new Map(
+        walletRows.map((row) => [
+          row.provider_reference,
+          { tokenMint: row.token_mint, shareMint: row.share_mint },
+        ])
+      );
+      const references = walletRows.map((row) => row.provider_reference);
+      hydrationJobs.push(async () => {
+        const snapshots = await withVaultDeadline(
+          client.readVaultPositions(earnRuntime(c), {
+            owner,
+            providerReferences: references,
+          }),
+          `Reading ${provider} vault positions`
+        );
+        for (const snapshot of snapshots) {
+          const trusted = trustedIdentity.get(snapshot.providerReference);
+          if (
+            !trusted ||
+            snapshot.owner !== owner ||
+            snapshot.cluster !== earnClusterFor(environment) ||
+            snapshot.tokenMint !== trusted.tokenMint ||
+            snapshot.shareMint !== trusted.shareMint ||
+            !isBoundedSnapshotAmount(snapshot.shares) ||
+            (snapshot.tokenValue !== undefined && !isBoundedSnapshotAmount(snapshot.tokenValue))
+          ) {
+            getLogger().warn(
+              {
+                provider,
+                walletId,
+                providerReference: snapshot.providerReference,
+                snapshotOwner: snapshot.owner,
+                snapshotCluster: snapshot.cluster,
+                snapshotTokenMint: snapshot.tokenMint,
+                snapshotShareMint: snapshot.shareMint,
+              },
+              "vault position: ignored live snapshot with mismatched identity"
+            );
+            continue;
+          }
+          live.set(vaultPositionLiveKey(provider, walletId, snapshot.providerReference), {
+            shares: snapshot.shares,
+            ...(snapshot.tokenValue === undefined ? {} : { tokenValue: snapshot.tokenValue }),
+          });
+        }
+      });
+    }
+  }
+
+  if (hydrationJobs.length > 0) {
+    const cluster = earnClusterFor(environment);
+    const rpcUrl = resolveClusterRpcUrl(c.env, cluster);
+    await withVaultDeadline(
+      assertClusterEndpoint(c.env, cluster, rpcUrl),
+      `Verifying the ${cluster} RPC endpoint`
+    );
+    // Failed reads intentionally leave only their rows unhydrated; never report
+    // zero when the chain could not be read. In-flight RPC work stays bounded.
+    await mapSettledWithConcurrency(hydrationJobs, 8, (hydrate) => hydrate());
+  }
+
+  const last = rows.at(-1);
+  const nextCursor = hasMore && last ? encodeVaultPositionCursor(last.created_at, last.id) : null;
 
   return success(c, {
     positions: rows.map((row) => {
-      const hydrated = live.get(`${row.custody_wallet_id}:${row.provider_reference}`);
+      const hydrated = live.get(
+        vaultPositionLiveKey(row.provider, row.custody_wallet_id, row.provider_reference)
+      );
       return {
         id: row.id,
         provider: row.provider,
         providerReference: row.provider_reference,
+        label: row.label,
         custodyWalletId: row.custody_wallet_id,
         tokenMint: row.token_mint,
         shareMint: row.share_mint,
@@ -377,20 +520,30 @@ export async function listEarnVaultPositions(c: AppContext) {
         tokenValue: hydrated?.tokenValue,
       };
     }),
+    hasMore,
+    nextCursor,
   });
 }
 
-/** Map custody wallet row ids to their public keys, for the chain reads above. */
-async function resolveWalletAddresses(
-  c: AppContext,
-  walletRowIds: readonly string[]
-): Promise<Map<string, string>> {
-  const { wallets } = await resolveScope(c);
-  const byId = new Map(wallets.map((wallet) => [wallet.id, wallet.publicKey]));
-  return new Map(
-    walletRowIds.flatMap((id) => {
-      const publicKey = byId.get(id);
-      return publicKey ? [[id, publicKey] as [string, string]] : [];
-    })
-  );
+function vaultPositionLiveKey(provider: string, walletId: string, reference: string): string {
+  return JSON.stringify([provider, walletId, reference]);
+}
+
+function isBoundedSnapshotAmount(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 128 && isDecimalString(value);
+}
+
+function encodeVaultPositionCursor(createdAt: string, id: string): string {
+  return btoa(`${createdAt}|${id}`).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function decodeVaultPositionCursor(cursor: string): { createdAt: string; id: string } | null {
+  try {
+    const decoded = atob(cursor.replace(/-/g, "+").replace(/_/g, "/"));
+    const separator = decoded.indexOf("|");
+    if (separator <= 0 || separator === decoded.length - 1) return null;
+    return { createdAt: decoded.slice(0, separator), id: decoded.slice(separator + 1) };
+  } catch {
+    return null;
+  }
 }

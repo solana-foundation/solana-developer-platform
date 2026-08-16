@@ -64,12 +64,29 @@ export function acceptAtMintScale(field: string, value: string, decimals: number
   // digits and at most one dot, so "-1", "1e5" and "Infinity" are all rejected
   // here rather than needing a separate numeric parse.
   if (!isDecimalString(normalized)) throw invalidAmount(field, value);
-  if (decimalScale(normalized) > decimals) throw amountTooPrecise(field, value, decimals);
+  // Scale is a property of the VALUE, not its spelling. Zeros after the last
+  // non-zero fractional digit do not require mint atoms: `1.5000000` is exactly
+  // representable by a six-decimal mint even though its input text has seven
+  // places. Strip only those insignificant zeros; a non-zero sub-atom remains
+  // and is still rejected below (`1.0000001` stays seven-place precision).
+  const canonicalScaleInput = trimInsignificantFractionalZeroes(normalized);
+  if (decimalScale(canonicalScaleInput) > decimals) {
+    throw amountTooPrecise(field, value, decimals);
+  }
   // Re-serialised through the repo's fixed-point helpers so what leaves this
   // package is scaled exactly like every other amount in SDP ("1.500" -> "1.5").
   // Safe by construction: the scale check above is precisely
   // `parseDecimalAmount`'s own precondition, so it cannot throw here.
-  return formatDecimalAmount(parseDecimalAmount(normalized, decimals), decimals);
+  return formatDecimalAmount(parseDecimalAmount(canonicalScaleInput, decimals), decimals);
+}
+
+function trimInsignificantFractionalZeroes(value: string): string {
+  const dot = value.indexOf(".");
+  if (dot === -1) return value;
+
+  const whole = value.slice(0, dot);
+  const fraction = value.slice(dot + 1).replace(/0+$/, "");
+  return fraction === "" ? whole : `${whole}.${fraction}`;
 }
 
 /**

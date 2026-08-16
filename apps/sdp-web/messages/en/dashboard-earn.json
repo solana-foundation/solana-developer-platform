@@ -113,6 +113,8 @@
       "deposit": "Deposit",
       "depositDirectOnly": "Coming soon",
       "depositProviderClosed": "Not available",
+      "depositProductionClosed": "Production unavailable",
+      "depositProductionClosedReason": "Production vault deposits are unavailable until SDP supports vault withdrawals.",
       "columnAction": "Action"
     },
     "deposit": {
@@ -133,7 +135,7 @@
       "walletsEmptyTitle": "No wallets in SDP yet",
       "walletsEmptyBody": "Create one in the Wallets module first — the deposit flow needs a wallet to send from.",
       "walletUnnamed": "Unnamed wallet",
-      "walletAvailableToInvest": "Available to invest",
+      "walletAvailableToInvest": "Available {token}",
       "walletLegend": "Funding wallet",
       "connectFireblocksTitle": "Connect Fireblocks",
       "connectFireblocksBody": "Provision an institutional wallet on Fireblocks, then start this deposit again.",
@@ -240,7 +242,7 @@
       "vaultWalletBody": "SDP signs the deposit with this wallet and the vault shares are held by it. Nothing is sent to an address — the deposit is an on-chain instruction.",
       "vaultAmountTitle": "How much do you want to deposit?",
       "vaultAmountBody": "Confirming signs and submits the transaction. There is no separate funding step afterwards.",
-      "vaultAmount": "Amount",
+      "vaultAmount": "{token} amount",
       "vaultStrategy": "Vault",
       "vaultBacking": "Backing",
       "vaultFrom": "From wallet",
@@ -259,8 +261,7 @@
       "walletVaultDirectTitle": "This wallet signs and holds the shares",
       "walletVaultDirectBody": "SDP builds the deposit and signs it with this wallet, which then holds the vault shares. There is no deposit address — confirming submits the transaction.",
       "vaultPendingTitle": "Deposit in flight",
-      "vaultPendingBody": "This deposit was signed but SDP has not confirmed it reached the network. Do not retry with a new amount — check the transaction first, if one is shown.",
-      "vaultPendingNoSignature": "No transaction signature was recorded, so nothing was broadcast."
+      "vaultPendingBody": "This deposit was signed but SDP has not confirmed it reached the network. Do not submit it again with a new request — check the transaction first."
     }
   }
 }

@@ -9,6 +9,11 @@ describe("acceptAtMintScale", () => {
     // Trailing zeros are noise, not precision — "1.500" and "1.5" are the same
     // number of atoms, and the ledger should hold one spelling.
     expect(acceptAtMintScale("amount", "1.500000", 6)).toBe("1.5");
+    // The spelling may have more places than the mint when every extra place
+    // is zero. Precision is determined after insignificant zeros are removed.
+    expect(acceptAtMintScale("amount", "1.5000000", 6)).toBe("1.5");
+    expect(acceptAtMintScale("amount", "0.0000010", 6)).toBe("0.000001");
+    expect(acceptAtMintScale("amount", "1.000000000000", 6)).toBe("1");
     expect(acceptAtMintScale("amount", "  20  ", 6)).toBe("20");
     expect(acceptAtMintScale("amount", "0.000001", 6)).toBe("0.000001");
   });
@@ -25,6 +30,8 @@ describe("acceptAtMintScale", () => {
     expect(() => acceptAtMintScale("amount", "1.0000009", 6)).toThrow(/more precision/);
     // One decimal past the boundary is still past it.
     expect(() => acceptAtMintScale("amount", "0.0000001", 6)).toThrow(SdpKaminoError);
+    // A trailing zero does not erase the preceding non-zero sub-atom.
+    expect(() => acceptAtMintScale("amount", "0.00000010", 6)).toThrow(SdpKaminoError);
   });
 
   /**
@@ -55,6 +62,7 @@ describe("acceptAtMintScale", () => {
 
   it("handles a zero-decimal mint", () => {
     expect(acceptAtMintScale("amount", "7", 0)).toBe("7");
+    expect(acceptAtMintScale("amount", "7.000", 0)).toBe("7");
     expect(() => acceptAtMintScale("amount", "7.5", 0)).toThrow(/more precision/);
   });
 

@@ -8,6 +8,7 @@ import {
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createRequestScopedSdpApiClients } from "@/lib/sdp-api";
+import { fetchEarnSdpOrganizationId } from "./earn-server-context";
 import { EarnWorkspace } from "./earn-workspace";
 
 export const dynamic = "force-dynamic";
@@ -38,15 +39,18 @@ export default async function EarnPage() {
   // their own account.
   let fireblocksEnabled = false;
   try {
-    const { projectClient } = await createRequestScopedSdpApiClients();
+    const { organizationClient, projectClient } = await createRequestScopedSdpApiClients();
     if (projectClient) {
       const keysResult = await fetchActiveApiKeys(projectClient.request);
       if (keysResult.ok && keysResult.data) {
         apiKeys = keysResult.data;
       }
-      const availability = await fetchProviderAvailability(projectClient.request, orgId).catch(
-        () => undefined
-      );
+      const organizationId = await fetchEarnSdpOrganizationId(organizationClient);
+      const availability = organizationId
+        ? await fetchProviderAvailability(projectClient.request, organizationId).catch(
+            () => undefined
+          )
+        : undefined;
       fireblocksEnabled = availability?.enabledCustodyProviders.includes("fireblocks") ?? false;
     }
   } catch {
