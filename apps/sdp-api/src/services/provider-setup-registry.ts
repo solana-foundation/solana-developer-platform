@@ -16,6 +16,7 @@ import {
   replaceProviderCredential,
   submitProviderCredential,
 } from "@/services/provider-credential-submission.service";
+import { probeRpcEndpoint } from "@/services/rpc-probe";
 import type { Env } from "@/types/env";
 
 export const PROVIDER_SETUP_FAMILIES = ["custody", "rpc", "compliance", "ramps"] as const;
@@ -142,27 +143,7 @@ export interface RpcConnectionCheckResult {
 export async function checkResolvedRpcTargetConnection(
   input: RpcConnectionCheckInput
 ): Promise<RpcConnectionCheckResult> {
-  const startedAt = Date.now();
-  const upstream = await fetch(input.target.endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...input.target.headers,
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: "rpc-connectivity-test",
-      method: "getVersion",
-      params: [],
-    }),
-  });
-
-  const rawBody = await upstream.text();
-  return {
-    elapsedMs: Date.now() - startedAt,
-    upstream,
-    upstreamBody: rawBody ? tryParseJson(rawBody) : null,
-  };
+  return probeRpcEndpoint(input.target);
 }
 
 export interface ProviderConfigurationCheckInput {
@@ -287,12 +268,4 @@ export function getProviderSetupDefinition<
   const Provider extends keyof ProviderSetupRegistry[Family],
 >(family: Family, provider: Provider): ProviderSetupRegistry[Family][Provider] {
   return PROVIDER_SETUP_REGISTRY[family][provider];
-}
-
-function tryParseJson(value: string): unknown {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return value;
-  }
 }

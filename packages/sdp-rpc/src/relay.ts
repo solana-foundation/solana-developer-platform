@@ -23,6 +23,8 @@ export { withHeliusApiKey } from "./config";
 export type ManagedRpcProviderId = OrganizationRpcProvider;
 export type ResolvedRpcProviderId = ManagedRpcProviderId | "custom";
 export type RpcSelectionMode =
+  | "project_connection"
+  | "organization_connection"
   | "project_provider"
   | "project_custom_provider"
   | "organization_provider"
@@ -62,6 +64,34 @@ export interface RpcProviderStatus {
   stats: RpcProviderStatsSummary;
 }
 
+/**
+ * What a tenant-owned connection resolves to, as seen from the relay.
+ *
+ * Deliberately carries no secret: the caller reads the credential through
+ * CredentialSecretStore, builds the target, and masks the label before handing
+ * it over, so key material never enters this package or anything it logs.
+ */
+export type TenantRpcConnectionResolution =
+  | { kind: "none" }
+  /** Configured for this scope but not usable -- must not fall back silently. */
+  | { kind: "unusable"; reason: string }
+  | {
+      kind: "active";
+      connectionId: string;
+      providerId: ManagedRpcProviderId;
+      endpoint: string;
+      endpointLabel: string;
+      headers: Record<string, string>;
+    };
+
+export interface TenantRpcConnectionLookup {
+  resolve(input: {
+    organizationId: string;
+    scopeKey: string;
+    network: string;
+  }): Promise<TenantRpcConnectionResolution>;
+}
+
 export interface ResolveRpcTargetInput {
   env: RpcEnv;
   kv: KVStoreSet;
@@ -69,6 +99,11 @@ export interface ResolveRpcTargetInput {
   organizationId: string;
   authProjectId: string | null;
   requestedProjectId: string | null;
+  /**
+   * Injected rather than imported: CredentialSecretStore lives in the API app,
+   * and this package may not depend on it.
+   */
+  connections?: TenantRpcConnectionLookup;
 }
 
 export interface ResolvedRpcTarget {
@@ -78,6 +113,8 @@ export interface ResolvedRpcTarget {
   endpointLabel: string;
   headers: Record<string, string>;
   selectionMode: RpcSelectionMode;
+  /** Set only for tenant-owned connections; telemetry uses ids, never endpoints. */
+  connectionId?: string;
 }
 
 export interface RelayTelemetryInput {
@@ -576,7 +613,71 @@ export function includesTransactionMethod(methodNames: string[]): boolean {
   return methodNames.some((methodName) => isTransactionMethod(methodName));
 }
 
+const ORGANIZATION_SCOPE_KEY = "__organization__";
+
+/**
+ * Tenant connections outrank every platform-managed selection (HOO-1093).
+ *
+ * A scope that holds a connection which is not live fails closed rather than
+ * falling through: an organization that has said "use my key" must never have
+ * its traffic quietly moved onto credentials SDP pays for.
+ */
+async function resolveTenantConnection(
+  input: ResolveRpcTargetInput,
+  projectId: string | null
+): Promise<ResolvedRpcTarget | null> {
+  if (!input.connections) {
+    return null;
+  }
+
+  const network = input.env.SOLANA_NETWORK ?? "devnet";
+  const scopes: Array<{ scopeKey: string; mode: RpcSelectionMode }> = [];
+  if (projectId) {
+    scopes.push({ scopeKey: projectId, mode: "project_connection" });
+  }
+  scopes.push({ scopeKey: ORGANIZATION_SCOPE_KEY, mode: "organization_connection" });
+
+  for (const scope of scopes) {
+    const resolution = await input.connections.resolve({
+      organizationId: input.organizationId,
+      scopeKey: scope.scopeKey,
+      network,
+    });
+
+    if (resolution.kind === "unusable") {
+      throw new SdpRpcError(
+        "SOLANA_RPC_ERROR",
+        `The RPC connection for this ${scope.mode === "project_connection" ? "project" : "organization"} is not active (${resolution.reason})`
+      );
+    }
+
+    if (resolution.kind === "active") {
+      return {
+        providerId: resolution.providerId,
+        projectId,
+        endpoint: resolution.endpoint,
+        endpointLabel: resolution.endpointLabel,
+        headers: resolution.headers,
+        selectionMode: scope.mode,
+        connectionId: resolution.connectionId,
+      };
+    }
+  }
+
+  return null;
+}
+
 export async function resolveRpcTarget(input: ResolveRpcTargetInput): Promise<ResolvedRpcTarget> {
+  // Precedence 1 and 2: an explicit tenant connection, project before
+  // organization, ahead of anything platform-managed.
+  const tenantTarget = await resolveTenantConnection(
+    input,
+    getEffectiveProjectId(input.authProjectId, input.requestedProjectId)
+  );
+  if (tenantTarget) {
+    return tenantTarget;
+  }
+
   const managedProviders = resolveManagedProviders(input.env);
   const access = await getRpcProviderAvailability(input.env, input.db, input.organizationId);
   const enabledManagedProviders = managedProviders.filter(

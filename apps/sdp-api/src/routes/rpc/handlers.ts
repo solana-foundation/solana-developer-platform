@@ -15,6 +15,7 @@ import {
   checkResolvedRpcTargetConnection,
   getProviderSetupDefinition,
 } from "@/services/provider-setup-registry";
+import { createTenantRpcConnectionLookup } from "@/services/rpc-connection-lookup";
 import type { Env } from "@/types/env";
 import { rpcProjectQuerySchema, rpcRelayPayloadSchema } from "./schemas";
 
@@ -131,6 +132,7 @@ export const getRpcProviders = async (c: AppContext) => {
     organizationId: auth.organizationId,
     authProjectId: auth.projectId,
     requestedProjectId: queryParse.data.projectId ?? null,
+    connections: createTenantRpcConnectionLookup(c.env, getDb(c.env)),
   });
 
   return success(c, response);
@@ -220,6 +222,7 @@ export const relayRpcRequest = async (c: AppContext) => {
     organizationId: auth.organizationId,
     authProjectId: auth.projectId,
     requestedProjectId: queryParse.data.projectId ?? null,
+    connections: createTenantRpcConnectionLookup(c.env, getDb(c.env)),
   });
 
   const startedAt = Date.now();
@@ -266,6 +269,7 @@ export const testRpcConnection = async (c: AppContext) => {
     organizationId: auth.organizationId,
     authProjectId: auth.projectId,
     requestedProjectId: queryParse.data.projectId ?? null,
+    connections: createTenantRpcConnectionLookup(c.env, getDb(c.env)),
   });
 
   const startedAt = Date.now();
