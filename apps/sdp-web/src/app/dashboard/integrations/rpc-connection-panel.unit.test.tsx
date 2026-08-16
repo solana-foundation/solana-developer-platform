@@ -47,6 +47,7 @@ function renderPanel(props: Partial<ComponentProps<typeof RpcConnectionPanel>> =
     <RpcConnectionPanel
       activeProvider="helius"
       canManage
+      isEnabledInDeployment
       organizationId="org_1"
       provider="helius"
       status="active"
@@ -103,6 +104,22 @@ describe("RpcConnectionPanel", () => {
     renderPanel({ canManage: false, provider: "alchemy", status: "available" });
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.getByText(/only admins can change them/)).toBeTruthy();
+  });
+
+  it("does not let a read-only member invoke the relay probe", () => {
+    // Testing reaches an upstream provider; a member who may only read state
+    // must not be able to spend that call.
+    renderPanel({ canManage: false });
+    expect(screen.queryByRole("button", { name: "Test connection" })).toBeNull();
+  });
+
+  it("says the saved provider is stranded instead of offering a dead test", () => {
+    // The catalog marks the saved provider active whatever the deployment
+    // holds, so without this the page offers a probe that silently measures a
+    // different provider.
+    renderPanel({ isEnabledInDeployment: false });
+    expect(screen.queryByRole("button", { name: "Test connection" })).toBeNull();
+    expect(screen.getByText(/falling back to another provider/)).toBeTruthy();
   });
 
   it("explains an unconfigured provider instead of offering a dead switch", () => {

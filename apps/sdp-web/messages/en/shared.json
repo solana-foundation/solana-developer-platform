@@ -347,6 +347,7 @@
     "rpcTestConnection": "Test connection",
     "rpcUseThisProvider": "Use this provider",
     "rpcNotConfiguredHere": "This deployment does not hold an endpoint for this provider, so it cannot be selected here.",
+    "rpcActiveUnavailable": "This organization is set to use this provider, but the deployment no longer holds an endpoint for it, so RPC traffic is falling back to another provider. Pick an available provider to stop relying on the fallback.",
     "rampMoonpayDescription": "Card and bank fiat onramp and offramp.",
     "rampLightsparkDescription": "Fiat settlement rails over the Lightning Network.",
     "rampBvnkDescription": "Business payments between fiat and stablecoins.",

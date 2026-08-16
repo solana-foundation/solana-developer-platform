@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyConfigSummary } from "@sdp/types";
+import type { CustodyConfigSummary, OrganizationRpcProvider } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
 import { isKnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
@@ -97,6 +97,8 @@ export default async function IntegrationDetailPage({
           ? {
               activeProvider: activeRpcProvider,
               canManage: dashboardAccess.capabilities.canManageOrgSettings,
+              isEnabledInDeployment:
+                availability.providers.rpc[provider as OrganizationRpcProvider]?.enabled ?? false,
               organizationId,
             }
           : undefined

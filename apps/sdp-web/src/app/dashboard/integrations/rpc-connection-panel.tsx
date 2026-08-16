@@ -23,12 +23,20 @@ import type { IntegrationStatus } from "./integrations-status";
 export function RpcConnectionPanel({
   activeProvider,
   canManage,
+  isEnabledInDeployment,
   organizationId,
   provider,
   status,
 }: {
   activeProvider: OrganizationRpcProvider;
   canManage: boolean;
+  /**
+   * Whether this deployment actually holds an endpoint for the provider. The
+   * catalog marks the organization's saved provider `active` whatever the
+   * deployment offers, so a provider dropped from the tier still reads as
+   * connected -- and the relay quietly serves someone else.
+   */
+  isEnabledInDeployment: boolean;
   organizationId: string;
   provider: OrganizationRpcProvider;
   status: IntegrationStatus | "unknown";
@@ -47,6 +55,9 @@ export function RpcConnectionPanel({
   }, [activeProvider]);
 
   const isActive = provider === currentProvider;
+  // Saved here, but unserviceable: the relay is falling back to another
+  // provider, so there is nothing honest to test on this page.
+  const isStrandedDefault = isActive && !isEnabledInDeployment;
 
   const switchToProvider = async () => {
     setIsSwitching(true);
@@ -151,7 +162,7 @@ export function RpcConnectionPanel({
           </p>
         </div>
 
-        {isActive ? (
+        {isActive && isEnabledInDeployment && canManage ? (
           <Button
             type="button"
             variant="secondary"
@@ -177,13 +188,19 @@ export function RpcConnectionPanel({
         ) : null}
       </div>
 
+      {isStrandedDefault ? (
+        <p className="max-w-2xl text-sm leading-6 text-warning">
+          {t("Shared.integrations.rpcActiveUnavailable")}
+        </p>
+      ) : null}
+
       {!isActive && status === "available" && !canManage ? (
         <p className="max-w-2xl text-sm leading-6 text-tertiary">
           {t("DashboardCustody.viewOnlyRpcSettings")}
         </p>
       ) : null}
 
-      {status === "not_configured" ? (
+      {status === "not_configured" && !isStrandedDefault ? (
         <p className="max-w-2xl text-sm leading-6 text-tertiary">
           {t("Shared.integrations.rpcNotConfiguredHere")}
         </p>

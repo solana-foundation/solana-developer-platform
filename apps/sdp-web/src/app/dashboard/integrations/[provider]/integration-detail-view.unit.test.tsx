@@ -92,7 +92,12 @@ describe("IntegrationDetailView", () => {
     const markup = renderToStaticMarkup(
       await IntegrationDetailView({
         detail,
-        rpc: { activeProvider: "helius", canManage: true, organizationId: "org_1" },
+        rpc: {
+          activeProvider: "helius",
+          canManage: true,
+          isEnabledInDeployment: true,
+          organizationId: "org_1",
+        },
       })
     );
     expect(markup).toContain("Connection");

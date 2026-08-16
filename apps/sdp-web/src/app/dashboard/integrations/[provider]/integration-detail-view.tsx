@@ -20,6 +20,8 @@ import { RpcConnectionPanel } from "../rpc-connection-panel";
 export interface RpcConnectionContext {
   activeProvider: OrganizationRpcProvider;
   canManage: boolean;
+  /** Whether this deployment holds an endpoint for the provider on the page. */
+  isEnabledInDeployment: boolean;
   organizationId: string;
 }
 
@@ -182,6 +184,7 @@ export async function IntegrationDetailView({
           <RpcConnectionPanel
             activeProvider={rpc.activeProvider}
             canManage={rpc.canManage}
+            isEnabledInDeployment={rpc.isEnabledInDeployment}
             organizationId={rpc.organizationId}
             provider={detail.provider as OrganizationRpcProvider}
             status={detail.status}
