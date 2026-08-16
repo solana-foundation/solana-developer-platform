@@ -65,6 +65,34 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("RpcByokSection", () => {
+  it("keeps the credential form collapsed until asked for", async () => {
+    const user = userEvent.setup();
+    renderSection();
+
+    const toggle = screen.getByRole("button", { name: "Add connection" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    // A page that is mostly status should not sit with a secret field open.
+    expect(screen.queryByRole("button", { name: "Save connection" })).toBeNull();
+
+    await user.click(toggle);
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save connection" })).toBeTruthy();
+  });
+
+  it("collapses again once the credential is saved", async () => {
+    const user = userEvent.setup();
+    renderSection();
+
+    await user.click(screen.getByRole("button", { name: "Add connection" }));
+    await user.type(screen.getByRole("textbox", { name: /Connection name/i }), "Prod");
+    await user.type(screen.getByRole("textbox", { name: /Endpoint URL/i }), "https://x.example");
+    await user.type(screen.getByLabelText(/API key/i), "tenant-key-9999");
+    await user.click(screen.getByRole("button", { name: "Save connection" }));
+
+    expect(screen.queryByRole("button", { name: "Save connection" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Add connection" })).toBeTruthy();
+  });
+
   it("says the organization is on SDP's credentials when it has none of its own", () => {
     renderSection();
     expect(screen.getByText(/running on SDP's/)).toBeTruthy();
@@ -74,11 +102,12 @@ describe("RpcByokSection", () => {
     const user = userEvent.setup();
     renderSection();
 
+    await user.click(screen.getByRole("button", { name: "Add connection" }));
     await user.type(screen.getByRole("textbox", { name: /Connection name/i }), "Prod");
     await user.type(screen.getByRole("textbox", { name: /Endpoint URL/i }), "https://x.example");
     // A password input has no textbox role, so it is reached by label text.
     await user.type(screen.getByLabelText(/API key/i), "tenant-key-9999");
-    await user.click(screen.getByRole("button", { name: "Add connection" }));
+    await user.click(screen.getByRole("button", { name: "Save connection" }));
 
     expect(submitRpcConnectionAction).toHaveBeenCalledTimes(1);
     const sent = submitRpcConnectionAction.mock.calls[0][0] as FormData;
@@ -91,11 +120,12 @@ describe("RpcByokSection", () => {
     const user = userEvent.setup();
     renderSection();
 
+    await user.click(screen.getByRole("button", { name: "Add connection" }));
     await user.type(screen.getByRole("textbox", { name: /Connection name/i }), "Prod");
     await user.type(screen.getByRole("textbox", { name: /Endpoint URL/i }), "https://x.example");
     const key = screen.getByLabelText(/API key/i) as HTMLInputElement;
     await user.type(key, "tenant-key-9999");
-    await user.click(screen.getByRole("button", { name: "Add connection" }));
+    await user.click(screen.getByRole("button", { name: "Save connection" }));
 
     expect(key.value).toBe("");
   });

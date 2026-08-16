@@ -31,6 +31,7 @@ export function RpcByokSection({
   provider: string;
 }) {
   const t = useTranslations();
+  const [isFormOpen, setIsFormOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [credentialLabel, setCredentialLabel] = useState("");
@@ -76,6 +77,7 @@ export function RpcByokSection({
         setApiKey("");
         setCredentialLabel("");
         setEndpointUrl("");
+        setIsFormOpen(false);
         toast.success(t("Shared.integrations.rpcByokAdded"), { position: "bottom-right" });
         return;
       }
@@ -160,85 +162,104 @@ export function RpcByokSection({
       )}
 
       {canManage ? (
-        <form
-          className="grid gap-4 rounded-xl border border-border-default p-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submit();
-          }}
-        >
-          <div className="grid gap-2 sm:grid-cols-2">
+        <div className="space-y-3">
+          {/* Collapsed by default: most visits are to read what is connected,
+              not to add a credential, and a permanently open secret field is
+              noise on a page that is mostly status. */}
+          <Button
+            type="button"
+            variant={isFormOpen ? "secondary" : "default"}
+            aria-expanded={isFormOpen}
+            aria-controls="rpc-byok-form"
+            onClick={() => setIsFormOpen((open) => !open)}
+          >
+            {isFormOpen
+              ? t("Shared.integrations.rpcByokCancel")
+              : t("Shared.integrations.rpcByokAdd")}
+          </Button>
+
+          <form
+            id="rpc-byok-form"
+            hidden={!isFormOpen}
+            className="grid gap-4 rounded-xl border border-border-default p-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submit();
+            }}
+          >
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className="grid gap-1.5 text-sm">
+                <span className="font-medium text-primary">
+                  {t("Shared.integrations.rpcByokLabel")}
+                </span>
+                <Input
+                  required
+                  value={credentialLabel}
+                  onChange={(event) => setCredentialLabel(event.target.value)}
+                  placeholder={t("Shared.integrations.rpcByokLabelPlaceholder")}
+                />
+              </label>
+              <div className="grid gap-1.5 text-sm">
+                <span className="font-medium text-primary">
+                  {t("Shared.integrations.rpcByokNetwork")}
+                </span>
+                <Select
+                  ariaLabel={t("Shared.integrations.rpcByokNetwork")}
+                  value={network}
+                  onValueChange={(value) => {
+                    if (value) setNetwork(value);
+                  }}
+                >
+                  <SelectItem value="devnet">devnet</SelectItem>
+                  <SelectItem value="mainnet-beta">mainnet-beta</SelectItem>
+                </Select>
+              </div>
+            </div>
+
             <label className="grid gap-1.5 text-sm">
               <span className="font-medium text-primary">
-                {t("Shared.integrations.rpcByokLabel")}
+                {t("Shared.integrations.rpcByokEndpoint")}
               </span>
               <Input
                 required
-                value={credentialLabel}
-                onChange={(event) => setCredentialLabel(event.target.value)}
-                placeholder={t("Shared.integrations.rpcByokLabelPlaceholder")}
+                type="url"
+                value={endpointUrl}
+                onChange={(event) => setEndpointUrl(event.target.value)}
+                placeholder="https://your-endpoint.example"
               />
-            </label>
-            <div className="grid gap-1.5 text-sm">
-              <span className="font-medium text-primary">
-                {t("Shared.integrations.rpcByokNetwork")}
-              </span>
-              <Select
-                ariaLabel={t("Shared.integrations.rpcByokNetwork")}
-                value={network}
-                onValueChange={(value) => {
-                  if (value) setNetwork(value);
-                }}
-              >
-                <SelectItem value="devnet">devnet</SelectItem>
-                <SelectItem value="mainnet-beta">mainnet-beta</SelectItem>
-              </Select>
-            </div>
-          </div>
-
-          <label className="grid gap-1.5 text-sm">
-            <span className="font-medium text-primary">
-              {t("Shared.integrations.rpcByokEndpoint")}
-            </span>
-            <Input
-              required
-              type="url"
-              value={endpointUrl}
-              onChange={(event) => setEndpointUrl(event.target.value)}
-              placeholder="https://your-endpoint.example"
-            />
-            <span className="text-xs text-tertiary">
-              {t("Shared.integrations.rpcByokEndpointHint")}{" "}
-              {/* Rendered as an element, not copy: translate() reads braces in
+              <span className="text-xs text-tertiary">
+                {t("Shared.integrations.rpcByokEndpointHint")}{" "}
+                {/* Rendered as an element, not copy: translate() reads braces in
                   a message as an interpolation slot and throws on render. */}
-              <code className="rounded bg-fill-subtle px-1 font-mono">{"{API_KEY}"}</code>
-            </span>
-          </label>
+                <code className="rounded bg-fill-subtle px-1 font-mono">{"{API_KEY}"}</code>
+              </span>
+            </label>
 
-          <label className="grid gap-1.5 text-sm">
-            <span className="font-medium text-primary">
-              {t("Shared.integrations.rpcByokApiKey")}
-            </span>
-            <Input
-              required
-              type="password"
-              autoComplete="off"
-              value={apiKey}
-              onChange={(event) => setApiKey(event.target.value)}
-            />
-            <span className="text-xs text-tertiary">
-              {t("Shared.integrations.rpcByokApiKeyHint")}
-            </span>
-          </label>
+            <label className="grid gap-1.5 text-sm">
+              <span className="font-medium text-primary">
+                {t("Shared.integrations.rpcByokApiKey")}
+              </span>
+              <Input
+                required
+                type="password"
+                autoComplete="off"
+                value={apiKey}
+                onChange={(event) => setApiKey(event.target.value)}
+              />
+              <span className="text-xs text-tertiary">
+                {t("Shared.integrations.rpcByokApiKeyHint")}
+              </span>
+            </label>
 
-          <div>
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting
-                ? t("Shared.integrations.rpcByokAdding")
-                : t("Shared.integrations.rpcByokAdd")}
-            </Button>
-          </div>
-        </form>
+            <div>
+              <Button type="submit" disabled={isSubmitting}>
+                {isSubmitting
+                  ? t("Shared.integrations.rpcByokAdding")
+                  : t("Shared.integrations.rpcByokSave")}
+              </Button>
+            </div>
+          </form>
+        </div>
       ) : (
         <p className="text-sm leading-6 text-tertiary">
           {t("Shared.integrations.rpcByokAdminOnly")}

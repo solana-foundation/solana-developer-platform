@@ -390,7 +390,9 @@
     "rpcByokServing": "Serving traffic",
     "rpcByokEmpty": "No credentials of your own yet — this organization is running on SDP's.",
     "rpcByokAdminOnly": "Only organization administrators can add credentials.",
-    "rpcByokLabelPlaceholder": "Production key"
+    "rpcByokLabelPlaceholder": "Production key",
+    "rpcByokCancel": "Cancel",
+    "rpcByokSave": "Save connection"
   },
   "notifications": {
     "ariaLabel": "Notifications",
