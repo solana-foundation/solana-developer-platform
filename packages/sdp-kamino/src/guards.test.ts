@@ -25,6 +25,7 @@ function plan(
       })),
     ],
     lookupTables: [],
+    accepted: {},
   } as KaminoInstructionPlan;
 }
 
@@ -100,6 +101,7 @@ describe("assertPlanTargetsCluster", () => {
         ],
       ],
       lookupTables: [],
+      accepted: {},
     } as KaminoInstructionPlan;
     expect(() => assertPlanTargetsCluster(twoBatches)).toThrow(KaminoProgramMismatchError);
   });

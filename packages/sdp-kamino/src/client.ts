@@ -8,12 +8,11 @@ import type {
   EarnVaultPositionInput,
   EarnVaultPositionSnapshot,
   EarnVaultTransactionPlan,
-  EarnVaultWithdrawInput,
 } from "@sdp/earn/types";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
 import { type Address, address, createNoopSigner, createSolanaRpc } from "@solana/kit";
 import { SdpKaminoError } from "./errors";
-import { buildKaminoDepositPlan, buildKaminoWithdrawPlan, readKaminoPosition } from "./sdk";
+import { buildKaminoDepositPlan, readKaminoPosition } from "./sdk";
 import type { KaminoInstructionPlan, KaminoRuntime } from "./types";
 
 /**
@@ -102,20 +101,27 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
     return KaminoVaultDirectClient.toWire(plan);
   }
 
-  async buildVaultWithdrawal(
-    ctx: EarnRuntimeContext,
-    input: EarnVaultWithdrawInput
-  ): Promise<EarnVaultTransactionPlan> {
-    const runtime = this.runtime(ctx);
-    const slot = await createSolanaRpc(runtime.rpcUrl).getSlot().send();
-    const plan = await buildKaminoWithdrawPlan(runtime, {
-      vault: address(input.providerReference),
-      owner: this.owner(input.owner),
-      shares: input.shares,
-      slot,
-    });
-    return KaminoVaultDirectClient.toWire(plan);
-  }
+  /*
+   * NO `buildVaultWithdrawal` — the withdraw capability is WITHHELD, and its
+   * absence is the mechanism, not an oversight.
+   *
+   * `buildKaminoWithdrawPlan` exists and is proven against a mainnet-forked
+   * surfnet, but it does not yet honour the plan contract: it flattens every
+   * unstake/withdraw/cleanup instruction into ONE batch and returns no lookup
+   * table, while the pinned SDK documents that a multi-reserve exit "might have
+   * to be split in multiple transactions". Implementing the method here would
+   * make `supportsVaultWithdraw` answer true, which is what a future exit route
+   * will narrow on — and it would then hand that route a plan that either
+   * exceeds the packet limit or is refused by the submitter, after the customer
+   * was told their withdrawal was prepared.
+   *
+   * Adding the method is therefore the LAST step of that work, not the first:
+   * load the vault LUT, compile-measure and split at protocol boundaries (an
+   * unstake must never land without its withdraw), and give the API a resumable
+   * multi-leg submission. Until then the honest answer is that SDP has no exit
+   * route — the shares are in the org's own wallet and Kamino's UI can redeem
+   * them, which is why withholding this is safe rather than fund-trapping.
+   */
 
   /**
    * Reads every requested vault against ONE slot, so a multi-position page is

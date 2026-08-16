@@ -138,6 +138,48 @@ export const buildTransferBatchFingerprint = (input: TransferBatchFingerprintInp
     })
   );
 
+export interface EarnVaultDepositFingerprintInput {
+  environment: string;
+  provider: string;
+  /** The vault address. */
+  providerReference: string;
+  /** The `custody_wallets` row id that signs and holds the shares. */
+  custodyWalletId: string;
+  amount: string;
+  /** The slippage floor, or null when none applies. */
+  minSharesOut: string | null;
+}
+
+/**
+ * Fingerprint for a non-custodial vault deposit.
+ *
+ * Every field here changes WHAT MOVES, which is the whole test for inclusion.
+ * `minSharesOut` earns its place for a reason that is easy to miss: the floor is
+ * baked into the built instruction, so omitting it would let a caller reuse a
+ * key with a weaker floor — or none — and get a silent `replayed: true` for the
+ * original, stricter deposit. `environment` is included because the same key
+ * arriving in sandbox and in production is two requests against two chains.
+ *
+ * Amounts are NOT numerically normalised, unlike the earn WITHDRAWAL
+ * fingerprint. That one matches a provider wire where `100` and `100.00` are
+ * literally one request; there is no such wire here, and the vault builder now
+ * refuses any amount finer than the mint, so distinct strings are distinct
+ * intents and should conflict rather than silently replay.
+ */
+export const buildEarnVaultDepositFingerprint = (input: EarnVaultDepositFingerprintInput): string =>
+  JSON.stringify(
+    normalizeForFingerprint({
+      scope: "earn_vault_deposit",
+      environment: input.environment,
+      provider: input.provider,
+      providerReference: input.providerReference,
+      custodyWalletId: input.custodyWalletId,
+      direction: "deposit",
+      amount: input.amount,
+      minSharesOut: input.minSharesOut,
+    })
+  );
+
 export interface EarnWithdrawalFingerprintInput {
   providerWalletRef: string;
   amountUsd: string;

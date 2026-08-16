@@ -532,8 +532,8 @@ describe("EarnWorkspace with several programs", () => {
       expect(html).toContain("$300.00");
       // The withdraw modal's focus-return fallback has to survive the missing
       // change-strategy link that used to carry it.
-      expect(html).toContain('data-earn-withdraw-focus-fallback="p1"');
-      expect(html).toContain('data-earn-withdraw-focus-fallback="p2"');
+      expect(html).toContain('data-modal-focus-fallback="p1"');
+      expect(html).toContain('data-modal-focus-fallback="p2"');
     });
   });
 

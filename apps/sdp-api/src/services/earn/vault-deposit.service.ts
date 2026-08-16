@@ -1,4 +1,4 @@
-import { notImplemented, providerNotConfigured } from "@sdp/earn/errors";
+import { notImplemented } from "@sdp/earn/errors";
 import type { EarnRuntimeContext } from "@sdp/earn/types";
 import type { SdpEnvironment } from "@sdp/types";
 import { address } from "@solana/kit";
@@ -9,16 +9,23 @@ import {
   type EarnVaultPositionRow,
 } from "@/db/repositories/earn-vault.repository";
 import { badRequest } from "@/lib/errors";
+import { buildEarnVaultDepositFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import {
+  assertClusterEndpoint,
   earnClusterFor,
   resolveClusterRpcUrl,
   resolveVaultDirectClient,
 } from "./execution-registry";
-import { simulateVaultPlan, submitVaultPlan, type VaultFeeMode } from "./vault-execution.service";
+import {
+  broadcastVaultTransaction,
+  type SignedVaultTransaction,
+  signVaultPlan,
+  simulateVaultPlan,
+} from "./vault-execution.service";
 
 /**
  * Deposit into a non-custodial vault from an SDP custody wallet.
@@ -75,11 +82,13 @@ export async function depositIntoVault(
 
   const cluster = earnClusterFor(input.environment);
   const rpcUrl = resolveClusterRpcUrl(env, cluster);
-  if (!rpcUrl) {
-    throw providerNotConfigured(
-      `No Solana RPC endpoint is configured, so a ${cluster} vault deposit cannot be built.`
-    );
-  }
+  // Proves the endpoint serves THIS cluster before anything is built against
+  // it. One process serves both environments, so an endpoint configured for the
+  // other one would otherwise build a transaction addressed to the wrong chain
+  // — and that failure is silent, because Kamino's mainnet program id also
+  // resolves on devnet with no accounts under it. Cached per endpoint, so this
+  // is one round trip per process, not per deposit.
+  await assertClusterEndpoint(env, cluster, rpcUrl);
 
   const repo = createPostgresEarnVaultRepository(getDb(env));
   const runtime: EarnRuntimeContext = {
@@ -87,7 +96,53 @@ export async function depositIntoVault(
     environment: input.environment,
   };
 
-  // 1. Claim the position and write the intent row.
+  // 1. RESOLVE THE REPLAY FIRST — before the position is claimed.
+  //
+  // The order here is the fix, not decoration. Claiming the position first
+  // meant a request reusing a key with a DIFFERENT vault wrote (or reopened) a
+  // real position row for the new vault and only then discovered the key was
+  // taken — answering with the new `positionId` beside the ORIGINAL movement's
+  // status and signature. That response is not merely stale, it describes a
+  // transaction that never touched the position it names.
+  //
+  // Comparing the fingerprint is what separates a genuine retry from a
+  // different request wearing the same key: the first replays, the second 409s
+  // and writes nothing at all.
+  const fingerprint = buildEarnVaultDepositFingerprint({
+    environment: input.environment,
+    provider: input.provider,
+    providerReference: input.providerReference,
+    custodyWalletId: input.wallet.id,
+    amount: input.amount,
+    minSharesOut: input.minSharesOut ?? null,
+  });
+
+  const priorMovement = await resolveIdempotencyReplay(
+    () =>
+      repo.findMovementByRequestId({
+        organizationId: input.organizationId,
+        requestId: input.requestId,
+      }),
+    fingerprint
+  );
+  if (priorMovement) {
+    const priorPosition = await repo.getPositionById({
+      organizationId: input.organizationId,
+      environment: input.environment,
+      positionId: priorMovement.position_id,
+    });
+    if (!priorPosition) {
+      // The FK makes this unreachable; if it ever fires, the ledger is
+      // inconsistent and guessing would be worse than failing.
+      throw new Error(
+        `Replayed movement ${priorMovement.id} references missing position ${priorMovement.position_id}`
+      );
+    }
+    // A replay must NOT move money again. Return what the original attempt did.
+    return { position: priorPosition, movement: priorMovement, replayed: true };
+  }
+
+  // 2. Claim the position and write the intent row.
   //
   // NOTE the two different wallet identifiers, which are easy to confuse and
   // fail in different ways: `wallet.id` is the SDP row (`cwlt_…`) and is what
@@ -115,12 +170,14 @@ export async function depositIntoVault(
     custodyWalletId: input.wallet.id,
     direction: "deposit",
     requestId: input.requestId,
+    idempotencyFingerprint: fingerprint,
     amount: input.amount,
     createdBy: input.userId ?? null,
     initiatedByKeyId: input.apiKeyId ?? null,
   });
 
-  // A replay must NOT move money again. Return what the original attempt did.
+  // Lost a race with a concurrent IDENTICAL request (the differing-intent case
+  // threw above and inside createMovement). The winner owns the money movement.
   if (replayed) {
     return { position, movement, replayed: true };
   }
@@ -177,45 +234,82 @@ export async function depositIntoVault(
     throw badRequest("Resolved signing wallet does not match the deposit wallet");
   }
 
-  let signature: string;
+  // 5. SIGN, RECORD, THEN BROADCAST — in that order, and the order is the point.
+  //
+  // Signing determines the signature; broadcasting only publishes it. Writing
+  // the signature down BEFORE the bytes can reach the network is what makes an
+  // ambiguous send recoverable: if the process dies, or the RPC accepts the
+  // transaction and the response is lost, there is a row naming the exact
+  // transaction to go and look for. Recording it afterwards — as this did —
+  // leaves a window where money has moved and SDP holds no evidence it exists.
+  let signed: SignedVaultTransaction;
   try {
-    const submitted = await submitVaultPlan(env, {
-      plan,
-      owner: signer,
-      rpcUrl,
-      fee: resolveVaultFeeMode(),
-    });
-    signature = submitted.signature;
+    signed = await signVaultPlan(env, { plan, owner: signer, rpcUrl });
   } catch (error) {
-    getLogger().error({ movementId: movement.id, error }, "vault deposit: submit failed");
-    return await fail(error instanceof Error ? error.message : "Failed to submit the deposit.");
+    // Nothing was broadcast, so this is a definitive failure.
+    getLogger().error({ movementId: movement.id, error }, "vault deposit: signing failed");
+    return await fail(error instanceof Error ? error.message : "Failed to sign the deposit.");
   }
 
-  // 5. Advance. Guarded so a concurrent observer cannot regress the row.
+  await repo.advanceMovement({
+    movementId: movement.id,
+    organizationId: input.organizationId,
+    fromStatuses: ["pending"],
+    // Deliberately still `pending`: nothing has been sent yet. What changes is
+    // that the row now carries the signature, so a crash between here and the
+    // send leaves a "pending WITH a signature" row — the state a reconciler can
+    // resolve by asking the chain, rather than an untraceable orphan.
+    toStatus: "pending",
+    signature: signed.signature,
+  });
+
+  try {
+    await broadcastVaultTransaction(env, { bytes: signed.bytes, rpcUrl });
+  } catch (error) {
+    // A send error does NOT mean the transaction failed — it may have landed
+    // and the response been lost. Marking this `failed` would assert that no
+    // money moved, which is exactly the claim we cannot make. Leave it pending
+    // with its signature so the outcome can be established from the chain.
+    getLogger().error(
+      { movementId: movement.id, signature: signed.signature, error },
+      "vault deposit: broadcast outcome unknown; left reconcilable"
+    );
+    const pending = await repo.getMovementById({
+      movementId: movement.id,
+      organizationId: input.organizationId,
+    });
+    return { position, movement: pending ?? movement, replayed: false };
+  }
+
+  // 6. Advance. Guarded so a concurrent observer cannot regress the row.
   const advanced = await repo.advanceMovement({
     movementId: movement.id,
     organizationId: input.organizationId,
     fromStatuses: ["pending"],
     toStatus: "submitted",
-    signature,
+    signature: signed.signature,
   });
 
   return { position, movement: advanced ?? movement, replayed: false };
 }
 
-/**
- * Who pays the transaction fee.
+/*
+ * WHO PAYS THE TRANSACTION FEE — the custody wallet, unconditionally.
  *
- * WALLET-PAYS for now, unconditionally. Kora only sponsors transactions whose
- * programs are on its allowlist, and the Kamino kvault/klend programs are not on
- * it — the Private Channels escrow hit exactly this and still pays its own fee
- * today. Attempting sponsorship would fail at the relay with an opaque
- * rejection AFTER the customer's wallet had already signed.
+ * Kora only sponsors transactions whose programs are on its allowlist, and the
+ * Kamino kvault/klend programs are not on it (the Private Channels escrow hit
+ * exactly this and still pays its own fee today). Attempting sponsorship would
+ * fail at the relay with an opaque rejection AFTER the customer's wallet had
+ * already signed.
  *
- * Flipping to sponsored is a one-line change here once `validation_config.allowed_programs`
- * carries the kvault, klend and farms ids on the relevant relay (an sdp-infra
- * change). The plumbing already exists: `submitVaultPlan` takes the mode.
+ * The sponsored path is deliberately NOT reachable from here any more. It
+ * cannot satisfy the record-before-broadcast rule above: the relay signs as fee
+ * payer after SDP does, so the final signature is not knowable before the bytes
+ * leave — which is precisely the window that made an ambiguous send
+ * untraceable. Turning sponsorship on therefore owes two things, not one: the
+ * kvault/klend/farms ids added to `validation_config.allowed_programs` in
+ * sdp-infra, AND a relay handshake that returns the signature before broadcast
+ * (or a ledger state that records the intent-to-sponsor first).
+ * `submitVaultPlan` in vault-execution.service.ts still carries the sponsored
+ * plumbing for when that lands.
  */
-function resolveVaultFeeMode(): VaultFeeMode {
-  return { kind: "wallet-pays" };
-}

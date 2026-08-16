@@ -16,11 +16,9 @@ import { Modal } from "@/components/ui/modal";
 import { Select, SelectItem } from "@/components/ui/select";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { useModalFocus } from "@/lib/use-modal-focus";
 import { formatDurationRange, formatUsd, isoDurationDays } from "./earn-format";
 import { createEarnWithdrawal, previewEarnWithdrawal } from "./earn-program-data";
-
-const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /** Positive USD decimal with at most 6 decimal places (the API's contract). */
 const USD_AMOUNT_PATTERN = /^\d+(\.\d{1,6})?$/;
@@ -62,65 +60,15 @@ const WITHDRAWAL_STATUS_BADGES: Record<
 };
 
 /**
- * Scope focus to the portaled Earn dialog and return it to the trigger on
- * close. The fallback (trigger unmounted by a re-render) is scoped to THIS
- * program's card via the attribute value — with several cards on screen, an
- * unscoped query would land focus on whichever card renders first.
+ * Focus lifecycle, now SHARED with the vault deposit modal.
+ *
+ * Lifted verbatim into `src/lib/use-modal-focus.ts`: the two halves of one
+ * position — money in and money out — behaving differently for a keyboard user
+ * is a difference nobody can explain, and the deposit side had no focus
+ * management at all. The only behavioural change is the fallback attribute
+ * name, which is no longer withdraw-specific.
  */
-function useEarnModalFocus(programId: string) {
-  const contentRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const returnFocus =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const focusFrame = window.requestAnimationFrame(() => {
-      contentRef.current
-        ?.querySelector<HTMLElement>('input:not([type="hidden"]):not([disabled])')
-        ?.focus();
-    });
-
-    const trapFocus = (event: KeyboardEvent) => {
-      if (event.key !== "Tab") return;
-      const dialog = contentRef.current?.closest<HTMLElement>('[role="dialog"]');
-      if (!dialog?.contains(document.activeElement)) return;
-      const focusable = [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)].filter(
-        (element) => element.getAttribute("aria-hidden") !== "true"
-      );
-      const first = focusable[0];
-      const last = focusable.at(-1);
-      if (!first || !last) return;
-      if (!focusable.includes(document.activeElement as HTMLElement)) {
-        event.preventDefault();
-        (event.shiftKey ? last : first).focus();
-        return;
-      }
-
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener("keydown", trapFocus);
-    return () => {
-      window.cancelAnimationFrame(focusFrame);
-      document.removeEventListener("keydown", trapFocus);
-      window.requestAnimationFrame(() => {
-        const focusTarget = returnFocus?.isConnected
-          ? returnFocus
-          : document.querySelector<HTMLElement>(
-              `[data-earn-withdraw-focus-fallback="${CSS.escape(programId)}"]`
-            );
-        focusTarget?.focus();
-      });
-    };
-  }, [programId]);
-
-  return contentRef;
-}
+const useEarnModalFocus = (programId: string) => useModalFocus<HTMLDivElement>(programId);
 
 type PreviewState =
   | { phase: "idle" }

@@ -33,6 +33,26 @@ export function invalidAmount(field: string, value: string): SdpKaminoError {
 }
 
 /**
+ * A caller-supplied amount that is finer than the mint can represent.
+ *
+ * Distinct from `invalidAmount` because the value IS a well-formed decimal — it
+ * simply carries more places than the mint has atoms, and klend-sdk FLOORS
+ * rather than rejects. Two different failures hide behind that floor: a deposit
+ * records more than it encodes (`1.0000009` on a 6-decimal mint moves
+ * `1.000000`), and a positive `minSharesOut` below one atom becomes `0`, which
+ * silently removes the very protection it was passed to provide. Refusing is
+ * the only answer that keeps the recorded number and the encoded number equal.
+ */
+export function amountTooPrecise(field: string, value: string, decimals: number): SdpKaminoError {
+  return new SdpKaminoError(
+    "INVALID_AMOUNT",
+    `Kamino ${field} ${JSON.stringify(value)} has more precision than its mint supports ` +
+      `(${decimals} decimals). The SDK would floor it, so the amount encoded on chain would not ` +
+      "match the amount requested."
+  );
+}
+
+/**
  * The vault account could not be read on this cluster.
  *
  * The most likely cause is the RPC pointing at the wrong chain: Kamino's mainnet

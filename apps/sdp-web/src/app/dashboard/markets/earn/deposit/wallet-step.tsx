@@ -136,6 +136,7 @@ function ConnectWalletCard({ fireblocksEnabled }: { fireblocksEnabled: boolean }
 }
 
 export function WalletStep({
+  depositMode = "custodial",
   fireblocksEnabled,
   hasError,
   isLoading,
@@ -143,6 +144,21 @@ export function WalletStep({
   selectedWalletId,
   wallets,
 }: {
+  /**
+   * Which money model this wallet is being chosen FOR.
+   *
+   * The note above the list is a promise about what happens next, and the two
+   * models make OPPOSITE promises: `custodial` provisions a provider-managed
+   * address and nothing moves until the customer sends funds to it later;
+   * `vault_direct` has no address at any point and confirming signs and submits
+   * immediately from the wallet chosen here.
+   *
+   * Defaulted so the existing custodial wizard is untouched. Hard-coding the
+   * custodial copy is what made the vault modal contradict itself — its own
+   * body says the deposit is immediate and addressless, and this note directly
+   * beneath it announced a deposit address was coming.
+   */
+  depositMode?: "custodial" | "vault_direct";
   fireblocksEnabled: boolean;
   hasError: boolean;
   isLoading: boolean;
@@ -165,9 +181,17 @@ export function WalletStep({
   return (
     <div className="space-y-5">
       <StepNote
-        body={t("DashboardEarn.deposit.walletCustodyBody")}
+        body={t(
+          depositMode === "vault_direct"
+            ? "DashboardEarn.deposit.walletVaultDirectBody"
+            : "DashboardEarn.deposit.walletCustodyBody"
+        )}
         icon={<ShieldCheckIcon className="size-5" />}
-        title={t("DashboardEarn.deposit.walletCustodyTitle")}
+        title={t(
+          depositMode === "vault_direct"
+            ? "DashboardEarn.deposit.walletVaultDirectTitle"
+            : "DashboardEarn.deposit.walletCustodyTitle"
+        )}
       />
 
       {isLoading ? <StepListSkeleton rowClassName="h-28 w-full rounded-2xl" /> : null}

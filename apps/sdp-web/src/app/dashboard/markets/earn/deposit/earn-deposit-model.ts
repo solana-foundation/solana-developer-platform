@@ -100,8 +100,19 @@ export function fundableStrategies(strategies: readonly EarnStrategy[]): readonl
  * Re-enabling is therefore a real change in both cases, not a flag flip, and
  * this predicate is where the compiler will bring you.
  */
+/**
+ * `depositable` carries the STYLE, so a caller dispatches on what the route
+ * actually IS rather than on which callback it happens to have been handed.
+ *
+ * The Opportunities row used to choose modal-vs-link by asking whether an
+ * `onVaultDeposit` prop was present — a property of the parent's wiring, not of
+ * the strategy. A custodial provider becoming surfaced again would then have
+ * opened the vault modal for its rows and posted them to the vault endpoint,
+ * which provisions no wallet and hands back no address. Putting the style in
+ * the verdict makes the compiler ask the question at every branch.
+ */
 export type OpportunityDepositability =
-  | { kind: "depositable" }
+  | { kind: "depositable"; style: EarnDepositStyle }
   | { kind: "wrong-cluster" }
   | { kind: "asset-unsupported" }
   | { kind: "no-sdp-route"; style: EarnDepositStyle };
@@ -122,10 +133,10 @@ export function opportunityDepositability(strategy: EarnStrategy): OpportunityDe
   // check. `EARN_VAULT_DEPOSITS_ENABLED` is what keeps the affordance and the
   // flow shipping together.
   if (style === "vault_direct" && EARN_VAULT_DEPOSITS_ENABLED) {
-    return { kind: "depositable" };
+    return { kind: "depositable", style };
   }
   if (style === "custodial" && EARN_PROGRAM_CREATION_ENABLED) {
-    return { kind: "depositable" };
+    return { kind: "depositable", style };
   }
   return { kind: "no-sdp-route", style };
 }

@@ -1,7 +1,14 @@
 import { supportsVaultDirect } from "@sdp/earn/capabilities";
+import { providerNotConfigured } from "@sdp/earn/errors";
 import type { EarnVaultDirectProvider, EarnVaultProvider } from "@sdp/earn/types";
 import { KaminoVaultDirectClient } from "@sdp/kamino";
-import { CLUSTER_BY_SDP_ENVIRONMENT, type SdpEnvironment, type SolanaCluster } from "@sdp/types";
+import * as solanaRpc from "@sdp/rpc/solana";
+import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
+  GENESIS_HASH_BY_CLUSTER,
+  type SdpEnvironment,
+  type SolanaCluster,
+} from "@sdp/types";
 import type { Env } from "@/types/env";
 
 /**
@@ -19,23 +26,100 @@ import type { Env } from "@/types/env";
 /**
  * The RPC endpoint used to build instructions for `cluster`.
  *
- * Deliberately reads the EXISTING `SOLANA_RPC_URL` and introduces no new env
- * key — a new one would have to be registered in `env.d.ts`, `turbo.json` and
- * `secret-keys.mjs` together, and the env-configurator drift test enforces that
- * they agree.
+ * Per-cluster by construction, because one API process serves BOTH — a sandbox
+ * project is devnet and a production project is mainnet-beta, and the same
+ * deployment answers requests for each. Reading one process-level
+ * `SOLANA_RPC_URL` for both meant whichever chain that endpoint served, the
+ * other environment silently built and read against the wrong one.
  *
- * The known limitation, stated rather than hidden: `SOLANA_RPC_URL` is a
- * PROCESS-level value while the cluster is PER-REQUEST, so one process can only
- * serve the cluster its endpoint points at. A production deployment (mainnet
- * endpoint) therefore cannot build devnet instructions for a sandbox project.
- * That fails LOUDLY rather than silently: `listKaminoDevnetVaults` proves the
- * chain by genesis hash before returning anything, so a mismatch is a refusal,
- * never a confidently wrong result. Serving both clusters from one process is a
- * follow-up that owes the full env registration.
+ * `SOLANA_DEVNET_RPC_URL` / `SOLANA_MAINNET_RPC_URL` are optional overrides;
+ * `SOLANA_RPC_URL` stays the fallback so an existing single-cluster deployment
+ * keeps working unchanged. What makes the fallback SAFE rather than the same
+ * bug with more steps is `assertClusterEndpoint` below: the endpoint has to
+ * prove which chain it serves before anything is built against it.
  */
-export function resolveClusterRpcUrl(env: Env, _cluster: SolanaCluster): string {
-  const url = env.SOLANA_RPC_URL;
+export function resolveClusterRpcUrl(env: Env, cluster: SolanaCluster): string {
+  const perCluster = cluster === "devnet" ? env.SOLANA_DEVNET_RPC_URL : env.SOLANA_MAINNET_RPC_URL;
+  const url = perCluster ?? env.SOLANA_RPC_URL;
   return typeof url === "string" ? url.trim() : "";
+}
+
+/**
+ * Memoised verdicts, keyed by `cluster\nurl`.
+ *
+ * The genesis hash of an endpoint is immutable for the life of that endpoint,
+ * so this is a cache of a constant rather than of a reading — but it is also
+ * what keeps the assertion affordable: without it every deposit and every
+ * position page would pay an extra round trip.
+ *
+ * Failures are cached too, deliberately. A misconfigured endpoint is a
+ * deployment fact, not a transient one, and re-probing it on every request
+ * turns one configuration error into sustained load against someone else's RPC.
+ */
+const clusterProofs = new Map<string, Promise<void>>();
+
+/**
+ * Refuse to build against an endpoint that has not proved it serves `cluster`.
+ *
+ * This is the check the execution path was missing. The catalogue path already
+ * had it — `listKaminoDevnetVaults` verifies genesis before returning anything —
+ * but the money path trusted its URL, and a cluster mismatch does NOT surface as
+ * an error: Kamino's mainnet kvault program id also resolves on devnet with no
+ * accounts under it, so the failure mode is "this vault does not exist", or a
+ * transaction built for the wrong deployment.
+ *
+ * Called before every build and every position read. Cheap after the first hit,
+ * and the first hit is the one that matters.
+ */
+export async function assertClusterEndpoint(
+  env: Env,
+  cluster: SolanaCluster,
+  rpcUrl: string
+): Promise<void> {
+  if (rpcUrl === "") {
+    throw providerNotConfigured(
+      `No Solana RPC endpoint is configured for ${cluster}. Set SOLANA_${
+        cluster === "devnet" ? "DEVNET" : "MAINNET"
+      }_RPC_URL, or point SOLANA_RPC_URL at a ${cluster} endpoint.`
+    );
+  }
+
+  const key = `${cluster}\n${rpcUrl}`;
+  const existing = clusterProofs.get(key);
+  if (existing) return await existing;
+
+  const proof = (async () => {
+    const expected = GENESIS_HASH_BY_CLUSTER[cluster];
+    let observed: string;
+    try {
+      observed = await getGenesisHash(env, rpcUrl);
+    } catch (cause) {
+      throw providerNotConfigured(
+        `Could not verify that the configured ${cluster} RPC endpoint serves ${cluster}: ` +
+          `${cause instanceof Error ? cause.message : String(cause)}`
+      );
+    }
+    if (observed !== expected) {
+      throw providerNotConfigured(
+        `The RPC endpoint configured for ${cluster} reports genesis ${observed}, not ${expected}. ` +
+          "Building against it would address the wrong chain — refusing. Set " +
+          `SOLANA_${cluster === "devnet" ? "DEVNET" : "MAINNET"}_RPC_URL to a ${cluster} endpoint.`
+      );
+    }
+  })();
+
+  clusterProofs.set(key, proof);
+  return await proof;
+}
+
+async function getGenesisHash(env: Env, rpcUrl: string): Promise<string> {
+  const rpc = solanaRpc.createRpc(env, { rpcUrl });
+  return String(await rpc.getGenesisHash().send());
+}
+
+/** Test seam: forget cached genesis verdicts. */
+export function resetClusterEndpointProofs(): void {
+  clusterProofs.clear();
 }
 
 export function earnClusterFor(environment: SdpEnvironment): SolanaCluster {

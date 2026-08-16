@@ -381,6 +381,26 @@ export interface EarnVaultTransactionPlan {
   transactions: EarnVaultInstruction[][];
   /** Address lookup tables the caller should apply when compiling. */
   lookupTables: string[];
+  /**
+   * The amounts the instructions above actually ENCODE, canonical to each
+   * mint's own precision.
+   *
+   * Separate from the request because they need not be the same number: a chain
+   * SDK converts decimals to mint atoms and typically FLOORS, so a request of
+   * `1.0000009` against a six-decimal mint encodes `1.000000`. A provider that
+   * refuses over-precise input (the right answer) still re-serialises here, so
+   * `"1.500"` returns as `"1.5"`. Ledger these rather than the raw request: only
+   * the builder knows the mint's decimals, and a movement row is a claim about
+   * what moved on chain.
+   */
+  accepted?: EarnVaultAcceptedAmounts;
+}
+
+/** What a built plan encodes, per mint. All values are decimal strings. */
+export interface EarnVaultAcceptedAmounts {
+  amount?: string;
+  minSharesOut?: string;
+  shares?: string;
 }
 
 export interface EarnVaultDepositInput {
@@ -441,10 +461,6 @@ export interface EarnVaultDirectProvider extends EarnVaultProvider {
     ctx: EarnRuntimeContext,
     input: EarnVaultDepositInput
   ): Promise<EarnVaultTransactionPlan>;
-  buildVaultWithdrawal(
-    ctx: EarnRuntimeContext,
-    input: EarnVaultWithdrawInput
-  ): Promise<EarnVaultTransactionPlan>;
   /**
    * Live positions. Read from chain per call and never persisted — positions are
    * provider truth (ADR 0002), and for a vault-direct provider "the provider" is
@@ -454,6 +470,31 @@ export interface EarnVaultDirectProvider extends EarnVaultProvider {
     ctx: EarnRuntimeContext,
     input: EarnVaultPositionInput
   ): Promise<EarnVaultPositionSnapshot[]>;
+}
+
+/**
+ * Optional capability: the money-OUT half of the vault-direct model, kept
+ * SEPARATE from money-in deliberately.
+ *
+ * Splitting it is not taxonomy for its own sake. A vault EXIT is the case that
+ * genuinely needs several transactions — one withdraw instruction per reserve
+ * the vault must draw from, each carrying the vault's full remaining-accounts
+ * list — so `transactions` having more than one entry is normal here and
+ * impossible on deposit. Folding both into one capability therefore made "can
+ * build a deposit" silently assert "can build a correctly BATCHED exit", which
+ * is a different and much harder claim.
+ *
+ * Discovered via `supportsVaultWithdraw` (capabilities.ts). A provider may
+ * implement `EarnVaultDirectProvider` alone, and an exit route must then refuse
+ * rather than assume. Note this says only whether the ROUTE CAN BE BUILT — it is
+ * never a permission gate, because ADR 0002 forbids money-out inheriting any
+ * money-in gate.
+ */
+export interface EarnVaultWithdrawProvider extends EarnVaultDirectProvider {
+  buildVaultWithdrawal(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultWithdrawInput
+  ): Promise<EarnVaultTransactionPlan>;
 }
 
 /**

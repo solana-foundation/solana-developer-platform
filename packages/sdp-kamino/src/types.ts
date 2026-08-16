@@ -50,6 +50,29 @@ export interface KaminoInstructionPlan {
    * publishes a per-vault LUT precisely because these account lists are large.
    */
   lookupTables: readonly Address[];
+  /** What the instructions above actually encode. See `KaminoAcceptedAmounts`. */
+  accepted: KaminoAcceptedAmounts;
+}
+
+/**
+ * The amounts as ENCODED, canonicalised to each mint's own precision.
+ *
+ * Exists because the requested amount and the encoded amount are not
+ * necessarily the same number: klend-sdk converts every `Decimal` to mint atoms
+ * and FLOORS. This package refuses anything that would lose value to that floor
+ * (`amountTooPrecise`), so these values are always exactly equal to the request
+ * in magnitude — but they are re-serialised from the mint's decimals, so
+ * `"1.500"` comes back as `"1.5"`. The ledger should persist THESE, not the raw
+ * request string: a movement row is a claim about what moved on chain, and only
+ * this side of the boundary knows the mint's precision.
+ */
+export interface KaminoAcceptedAmounts {
+  /** Deposit amount, canonical to the vault token mint's decimals. */
+  amount?: string;
+  /** Share floor, canonical to the share mint's decimals. */
+  minSharesOut?: string;
+  /** Shares redeemed, canonical to the share mint's decimals. */
+  shares?: string;
 }
 
 export interface KaminoDepositInput {

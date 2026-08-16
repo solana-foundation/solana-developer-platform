@@ -396,6 +396,20 @@ Note the Opportunities row: `opportunityDepositability` asks THREE questions in 
 cluster, then token (both facts about the INSTRUMENT), then whether SDP has a
 deposit path for the provider's shape at all (`no-sdp-route`).
 
+Its `depositable` verdict CARRIES the `style`, and the row dispatches on that —
+never on whether an `onVaultDeposit` callback was passed. Callback presence is a
+fact about the parent's wiring; the style is a fact about the strategy, and only
+the second can say which endpoint the row may reach. If a custodial provider is
+surfaced again, branching on the callback would have opened the vault modal for
+its rows and posted them to the vault endpoint, which provisions no wallet.
+
+`WalletStep` takes a `depositMode` prop for the same class of reason: its note
+promised a "provider-managed deposit address", which is true for the custodial
+wizard and false for `vault_direct`, where confirming signs and submits on the
+spot and there is no address ever. It also takes REAL `fireblocksEnabled`,
+threaded from `page.tsx` — hard-coding `false` told entitled organizations that
+Fireblocks was locked.
+
 **That third check is not optional, and omitting it shipped a dead end.** With
 only cluster + token, a PRODUCTION Kamino row is fundable, holds USDC, renders an
 enabled Deposit link — and lands on `EarnDepositUnavailable`, because the route
@@ -415,9 +429,16 @@ until they land Kamino must not be creatable on mainnet — ADR 0002 forbids a
 position you can enter and not exit.
 
 **Withdraw is never gated on surfacing** (ADR 0002 — money out beats money off),
-and the withdraw modal's focus-return fallback
-(`data-earn-withdraw-focus-fallback`) therefore lives on the **Withdraw button**,
-not on "Change strategy" which disappears with it.
+and the modal focus-return fallback (`data-modal-focus-fallback`) therefore
+lives on the **Withdraw button**, not on "Change strategy" which disappears with
+it.
+
+That focus lifecycle now lives in `src/lib/use-modal-focus.ts` and is shared by
+the withdraw modal and `EarnVaultDepositModal`. The shared `Modal` gives a
+portal, `aria-modal` and Escape — and NOTHING about focus: no initial focus, no
+trap, no restoration. The deposit modal had none at all, which meant keyboard
+focus could sit on page content the dialog covered. Two halves of one position
+behaving differently for a keyboard user is a difference nobody can explain.
 
 The onboarding hero (`StartSection`) that used to own the "Set up Earn" CTA is
 GONE — the Opportunities tab is the landing surface now, so there is no empty state to

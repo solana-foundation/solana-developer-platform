@@ -218,7 +218,18 @@ stablecoins sent to it are destroyed.
 
 It implements the base `EarnVaultProvider` contract, the live-metrics
 capability, and — since the vault-deposit change — the **vault-direct**
-capability (`EarnVaultDirectProvider`, `supportsVaultDirect`). It still
+capability (`EarnVaultDirectProvider`, `supportsVaultDirect`), which is
+DEPOSIT + READ only.
+
+Money OUT is a separate capability, `EarnVaultWithdrawProvider` /
+`supportsVaultWithdraw`, and Kamino deliberately does NOT implement it yet. The
+split is not taxonomy: an exit may legitimately need several transactions (one
+withdraw instruction per reserve the vault draws from), which a deposit never
+does, so "can build a deposit" must not silently assert "can build a correctly
+BATCHED exit". Withholding it says the SDP route does not exist; it is never a
+permission gate, since ADR 0002 forbids money-out inheriting a money-in gate.
+
+It still
 implements NONE of the portfolio-wallet capability, so every portfolio route
 answers 501 for it through `supportsPortfolioWallets`, never a provider-id
 check. The two capabilities are asserted MUTUALLY EXCLUSIVE: a client claiming

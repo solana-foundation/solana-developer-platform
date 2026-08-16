@@ -96,6 +96,17 @@ land atomically, since unstaking without the withdraw leaves the position in a
 state nobody asked for. If that stops fitting, the fix is the lookup table, not
 splitting the batch.
 
+**`buildKaminoWithdrawPlan` does NOT yet honour this contract**, and that is why
+the WITHDRAW CAPABILITY IS WITHHELD. It flattens every instruction into one
+batch and returns no lookup table, while the pinned SDK documents that a
+multi-reserve exit "might have to be split in multiple transactions".
+`KaminoVaultDirectClient` therefore does not implement `buildVaultWithdrawal`,
+`supportsVaultWithdraw` answers false, and the builder is not re-exported from
+`index.ts` — its only callers are this package's smoke tests. Nothing is
+fund-trapped by that: the shares sit in the org's own custody wallet and
+Kamino's UI can redeem them. Implementing the method is the LAST step of the
+batching work, not the first (`client.test.ts` pins this).
+
 ## Known gaps (deliberate, and owed to the caller)
 
 - **Withdrawal penalties are not quoted.** Kamino charges
@@ -107,7 +118,33 @@ splitting the batch.
 - **`minSharesOut` is optional and unset by default.** Computing a real floor needs
   the live exchange rate. Passing `"0"` would be the appearance of slippage
   protection without the substance, so the caller computes a floor or passes
-  nothing.
+  nothing. The API requires one in PRODUCTION for exactly that reason.
+
+## Amounts are checked against the MINT, not just parsed
+
+`amounts.ts` (deliberately outside the SDK firewall, so it is unit-testable
+without loading klend-sdk) refuses any value finer than its mint can represent,
+and returns the canonical form the instruction actually encodes — surfaced as
+`KaminoInstructionPlan.accepted`, which is what the ledger should persist.
+
+This exists because klend-sdk converts every `Decimal` to mint atoms and
+**floors, silently**. Two different bugs hide under that floor: `1.0000009` on a
+six-decimal mint is RECORDED as 1.0000009 while 1.000000 moves, and a
+`minSharesOut` below one atom becomes `0` — a slippage floor that reads as
+protection everywhere and imposes none on chain. Validating the scale rather
+than clamping is the point: clamping would make SDP quietly move a different
+amount than it was asked for.
+
+## Share balances are read in base units, never `uiAmount`
+
+`readKaminoPosition` computes UNSTAKED shares itself, from
+`tokenAmount.amount` (the exact integer string), and takes only the STAKED half
+from `vault.getUserShares`. The SDK's own path sums
+`parsed.info.tokenAmount.uiAmount` — a JSON **number** — via
+`getTokenAccountAmount` (`utils/ata.ts`), so above 2^53 base units the value has
+already lost precision and no amount of `Decimal`-wrapping downstream recovers
+it. The staked half comes from farm state as an exact `Decimal`, so it is safe
+to reuse.
 - **`lookupTables` is always empty today.** The field exists so callers compile
   against the right shape; populating it from Kamino's per-vault LUT is the fix
   when a plan stops fitting.

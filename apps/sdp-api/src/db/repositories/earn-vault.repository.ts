@@ -1,5 +1,6 @@
 import type { SdpEnvironment } from "@sdp/types";
 import type { AppDb } from "@/db";
+import { conflict } from "@/lib/errors";
 
 /**
  * Persistence for NON-CUSTODIAL ("vault_direct") Earn positions and the money
@@ -57,6 +58,14 @@ export interface EarnVaultMovementRow {
   signature: string | null;
   failure_reason: string | null;
   request_id: string;
+  /**
+   * Canonical fingerprint of the request that created this row, so a reused
+   * `request_id` carrying a different intent is a 409 rather than a silent
+   * replay of someone else's deposit. Built by
+   * `buildEarnVaultDepositFingerprint`; nullable in the TYPE only to satisfy
+   * `resolveIdempotencyReplay`'s generic, NOT NULL in the schema (0059).
+   */
+  idempotency_fingerprint: string | null;
   created_by: string | null;
   initiated_by_key_id: string | null;
   created_at: string;
@@ -87,6 +96,8 @@ export interface CreateEarnVaultMovementInput {
   custodyWalletId: string;
   direction: EarnVaultMovementDirection;
   requestId: string;
+  /** Canonical fingerprint of this request; compared on replay (0059). */
+  idempotencyFingerprint: string;
   amount?: string | null;
   createdBy?: string | null;
   initiatedByKeyId?: string | null;
@@ -125,6 +136,16 @@ export interface EarnVaultRepository {
   listPositions(params: {
     organizationId: string;
     environment: SdpEnvironment;
+    /**
+     * Restrict to these `custody_wallets.id` values — the API key's wallet
+     * bindings, already translated out of the provider id space by the caller.
+     *
+     * `undefined` means UNBOUND and applies no filter. An empty array is
+     * refused rather than treated as "no filter": that mistake is how a scope
+     * check silently widens to everything, so the caller must short-circuit
+     * before reaching here.
+     */
+    custodyWalletIds?: readonly string[];
   }): Promise<EarnVaultPositionRow[]>;
 
   /**
@@ -134,10 +155,24 @@ export interface EarnVaultRepository {
    * throwing: that is what makes a retried deposit safe. The chain has no
    * request-id dedupe, so this row is the only thing standing between a retry
    * and a second real transfer.
+   *
+   * Callers must resolve the replay through `findMovementByRequestId` +
+   * `resolveIdempotencyReplay` FIRST, so a key reused with a different intent
+   * 409s before anything else is written. The collision handling here is the
+   * backstop for the concurrent case, where two identical requests race.
    */
   createMovement(
     input: CreateEarnVaultMovementInput
   ): Promise<{ row: EarnVaultMovementRow; replayed: boolean }>;
+  /** The movement holding this caller key, for the replay/fingerprint check. */
+  findMovementByRequestId(params: {
+    organizationId: string;
+    requestId: string;
+  }): Promise<EarnVaultMovementRow | null>;
+  getMovementById(params: {
+    movementId: string;
+    organizationId: string;
+  }): Promise<EarnVaultMovementRow | null>;
   /** Guarded CAS. Returns null when the row was not in `fromStatuses`. */
   advanceMovement(input: AdvanceEarnVaultMovementInput): Promise<EarnVaultMovementRow | null>;
   listMovements(params: {
@@ -200,13 +235,26 @@ export function createPostgresEarnVaultRepository(db: AppDb): EarnVaultRepositor
     },
 
     async listPositions(params) {
+      const scoped = params.custodyWalletIds;
+      if (scoped !== undefined && scoped.length === 0) {
+        // Fail LOUD rather than returning the whole org. An empty allow-list
+        // means "bound to nothing that qualifies", and the one thing it must
+        // never do is degrade into no filter at all.
+        throw new Error(
+          "listPositions received an empty custodyWalletIds allow-list; the caller must " +
+            "short-circuit to an empty page instead of querying."
+        );
+      }
+
+      const placeholders = scoped?.map(() => "?").join(", ");
       const result = await db
         .prepare(
           `SELECT * FROM earn_vault_positions
            WHERE organization_id = ? AND environment = ?
+           ${placeholders ? `AND custody_wallet_id IN (${placeholders})` : ""}
            ORDER BY created_at DESC, id DESC`
         )
-        .bind(params.organizationId, params.environment)
+        .bind(params.organizationId, params.environment, ...(scoped ?? []))
         .all<EarnVaultPositionRow>();
       return result.results ?? [];
     },
@@ -218,8 +266,9 @@ export function createPostgresEarnVaultRepository(db: AppDb): EarnVaultRepositor
           `INSERT INTO earn_vault_movements (
              id, organization_id, project_id, environment, position_id,
              provider, provider_reference, custody_wallet_id,
-             direction, request_id, amount, created_by, initiated_by_key_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             direction, request_id, idempotency_fingerprint,
+             amount, created_by, initiated_by_key_id
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (organization_id, request_id) DO NOTHING
            RETURNING *`
         )
@@ -234,6 +283,7 @@ export function createPostgresEarnVaultRepository(db: AppDb): EarnVaultRepositor
           input.custodyWalletId,
           input.direction,
           input.requestId,
+          input.idempotencyFingerprint,
           input.amount ?? null,
           input.createdBy ?? null,
           input.initiatedByKeyId ?? null
@@ -242,14 +292,38 @@ export function createPostgresEarnVaultRepository(db: AppDb): EarnVaultRepositor
 
       if (inserted) return { row: inserted, replayed: false };
 
-      // DO NOTHING means the key was already used. Return that row — the caller
-      // reports the original movement rather than moving money a second time.
+      // DO NOTHING means the key was already used — a concurrent identical
+      // request won the race (the differing-intent case 409s before we get
+      // here). Return that row rather than moving money a second time.
       const existing = await db
         .prepare(`SELECT * FROM earn_vault_movements WHERE organization_id = ? AND request_id = ?`)
         .bind(input.organizationId, input.requestId)
         .first<EarnVaultMovementRow>();
       if (!existing) throw new Error("Failed to create earn vault movement");
+      // Re-check the fingerprint here too. The preflight resolved against a
+      // read taken before the insert, so a request that lost the race to a
+      // DIFFERENT intent would otherwise be handed that other deposit's row.
+      if (
+        existing.idempotency_fingerprint !== null &&
+        existing.idempotency_fingerprint !== input.idempotencyFingerprint
+      ) {
+        throw conflict("Idempotency key already used with different request payload");
+      }
       return { row: existing, replayed: true };
+    },
+
+    async findMovementByRequestId(params) {
+      return await db
+        .prepare(`SELECT * FROM earn_vault_movements WHERE organization_id = ? AND request_id = ?`)
+        .bind(params.organizationId, params.requestId)
+        .first<EarnVaultMovementRow>();
+    },
+
+    async getMovementById(params) {
+      return await db
+        .prepare(`SELECT * FROM earn_vault_movements WHERE id = ? AND organization_id = ?`)
+        .bind(params.movementId, params.organizationId)
+        .first<EarnVaultMovementRow>();
     },
 
     async advanceMovement(input) {

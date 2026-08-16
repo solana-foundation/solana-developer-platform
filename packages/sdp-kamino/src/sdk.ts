@@ -2,6 +2,7 @@ import { KaminoVault, KaminoVaultClient } from "@kamino-finance/klend-sdk";
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
 import { type Address, address, createSolanaRpc, type Instruction } from "@solana/kit";
 import Decimal from "decimal.js";
+import { acceptAtMintScale, isZeroAmount, mintDecimals } from "./amounts";
 import { invalidAmount, vaultUnreadable } from "./errors";
 import { assertPlanTargetsCluster } from "./guards";
 import { kaminoClusterConfig } from "./programs";
@@ -120,12 +121,35 @@ export async function buildKaminoDepositPlan(
   input: KaminoDepositInput
 ): Promise<KaminoInstructionPlan> {
   const { client, vault, state, config } = await bindVault(runtime, input.vault);
-  const amount = toDecimal(input.amount, "amount");
-  if (amount.isZero()) throw invalidAmount("amount", input.amount);
+
+  // Precision is checked against the MINT, so it can only be checked once the
+  // vault has been read — the token and share mints have independent decimals
+  // and neither is knowable at the API boundary.
+  const acceptedAmount = acceptAtMintScale(
+    "amount",
+    input.amount,
+    mintDecimals(state.tokenMintDecimals, "tokenMintDecimals")
+  );
+  if (isZeroAmount(acceptedAmount)) throw invalidAmount("amount", input.amount);
+  const amount = toDecimal(acceptedAmount, "amount");
 
   const reserves = await client.loadVaultReserves(state);
-  const minSharesOut =
-    input.minSharesOut === undefined ? undefined : toDecimal(input.minSharesOut, "minSharesOut");
+
+  let acceptedMinSharesOut: string | undefined;
+  let minSharesOut: Decimal | undefined;
+  if (input.minSharesOut !== undefined) {
+    acceptedMinSharesOut = acceptAtMintScale(
+      "minSharesOut",
+      input.minSharesOut,
+      mintDecimals(state.sharesMintDecimals, "sharesMintDecimals")
+    );
+    // A floor that rounds to nothing is worse than no floor: it reads as
+    // protection in the request and the ledger while imposing none on chain.
+    // The scale check above already refuses sub-atom values, so reaching zero
+    // here means the caller literally passed "0".
+    if (isZeroAmount(acceptedMinSharesOut)) throw invalidAmount("minSharesOut", input.minSharesOut);
+    minSharesOut = toDecimal(acceptedMinSharesOut, "minSharesOut");
+  }
 
   const bundle = await vault.depositIxs(
     input.owner as Kit2,
@@ -148,26 +172,54 @@ export async function buildKaminoDepositPlan(
     cluster: config.cluster,
     instructions: [instructions],
     lookupTables: [],
+    accepted: {
+      amount: acceptedAmount,
+      ...(acceptedMinSharesOut === undefined ? {} : { minSharesOut: acceptedMinSharesOut }),
+    },
   });
 }
 
 /**
- * Build a withdrawal.
+ * Build a withdrawal. **NOT CONTRACT-COMPLETE — see the warning below.**
  *
- * `unstake → withdraw → post` are returned as ONE batch because they must land
- * atomically: unstaking without the withdraw leaves the position in a state the
- * user did not ask for. If a future vault's reserve set makes that exceed the
- * 1232-byte packet, the fix is a lookup table (Kamino publishes one per vault),
- * NOT splitting these apart — which is why the plan carries `lookupTables` and
- * why the caller is handed batches rather than a flat list.
+ * ── Why this is not exported as a capability ────────────────────────────────
+ * `KaminoInstructionPlan.instructions` promises TRANSACTION-SIZED batches: one
+ * entry, one transaction. This function cannot honour that promise yet. It
+ * flattens `unstake → withdraw → post` into a single batch and returns no
+ * lookup table, while the pinned SDK documents the opposite — `withdrawIxs`
+ * returns "one or multiple withdraw instructions, based on how many reserves
+ * it's needed to withdraw from. This might have to be split in multiple
+ * transactions". A multi-reserve exit therefore builds a plan that can exceed
+ * Solana's 1232-byte packet, and the API's submitter refuses any plan with more
+ * than one transaction — so the failure lands at submit, after the caller has
+ * been told a withdrawal was prepared.
+ *
+ * Honouring the contract needs three things this does not do: load the vault's
+ * published lookup table, compile-measure and split at valid protocol
+ * boundaries (an unstake must never land without its withdraw), and give the
+ * API a resumable multi-leg submission with per-leg ledger rows.
+ *
+ * Until then the WITHDRAW CAPABILITY IS WITHHELD: `KaminoVaultDirectClient` does
+ * not implement `buildVaultWithdrawal`, so `supportsVaultWithdraw` answers false
+ * and no route can move money out through an unsized plan. This builder stays in
+ * the package because it is proven against a mainnet-forked surfnet and is the
+ * starting point for that work — it is deliberately NOT re-exported from
+ * `index.ts`, so the only callers are this package's own smoke tests.
+ *
+ * Tracked as the exit half of the vault-direct path; see `CLAUDE.md`.
  */
 export async function buildKaminoWithdrawPlan(
   runtime: KaminoRuntime,
   input: KaminoWithdrawInput
 ): Promise<KaminoInstructionPlan> {
   const { client, vault, state, config } = await bindVault(runtime, input.vault);
-  const shares = toDecimal(input.shares, "shares");
-  if (shares.isZero()) throw invalidAmount("shares", input.shares);
+  const acceptedShares = acceptAtMintScale(
+    "shares",
+    input.shares,
+    mintDecimals(state.sharesMintDecimals, "sharesMintDecimals")
+  );
+  if (isZeroAmount(acceptedShares)) throw invalidAmount("shares", input.shares);
+  const shares = toDecimal(acceptedShares, "shares");
 
   const reserves = await client.loadVaultReserves(state);
   const bundle = await vault.withdrawIxs(
@@ -190,7 +242,39 @@ export async function buildKaminoWithdrawPlan(
     cluster: config.cluster,
     instructions: [instructions],
     lookupTables: [],
+    accepted: { shares: acceptedShares },
   });
+}
+
+/**
+ * Sum an owner's share-token accounts in EXACT base units.
+ *
+ * Deliberately reads `tokenAmount.amount` — the raw integer string — and never
+ * `uiAmount`, which the RPC serialises as a JSON number and which therefore
+ * cannot represent a balance above 2^53 base units without rounding. Returns
+ * `bigint` so nothing between here and the mint's decimals can go lossy.
+ *
+ * Sums ALL matching accounts rather than just the ATA, matching what the SDK
+ * counts: a wallet may legitimately hold the same share mint in more than one
+ * token account, and ignoring the others would under-report someone's position.
+ */
+async function readUnstakedShareBaseUnits(
+  rpc: Kit2,
+  owner: Address,
+  sharesMint: Address
+): Promise<bigint> {
+  const response = await rpc
+    .getTokenAccountsByOwner(owner, { mint: sharesMint }, { encoding: "jsonParsed" })
+    .send();
+
+  let total = 0n;
+  for (const entry of response?.value ?? []) {
+    const raw = entry?.account?.data?.parsed?.info?.tokenAmount?.amount;
+    // A non-numeric `amount` means the account was not the parsed shape we
+    // expect; skipping it is right, because guessing a balance is not.
+    if (typeof raw === "string" && /^\d+$/.test(raw)) total += BigInt(raw);
+  }
+  return total;
 }
 
 /**
@@ -205,15 +289,34 @@ export async function readKaminoPosition(
   runtime: KaminoRuntime,
   input: { vault: Address; owner: Address; slot: bigint }
 ): Promise<KaminoPosition> {
-  const { vault, state, config } = await bindVault(runtime, input.vault);
+  const { vault, state, config, rpc } = await bindVault(runtime, input.vault);
+  const shareDecimals = mintDecimals(state.sharesMintDecimals, "sharesMintDecimals");
 
-  const userShares = await vault.getUserShares(input.owner as Kit2);
-  const shares = new Decimal(String(userShares.totalShares ?? 0));
+  // UNSTAKED shares are counted here rather than taken from the SDK, and that is
+  // the whole point of this block. `vault.getUserShares` sums its token accounts
+  // through `getTokenAccountAmount`, which returns
+  // `parsed.info.tokenAmount.uiAmount` — a JavaScript NUMBER. Above 2^53 base
+  // units that has already lost value, and no amount of `Decimal`-wrapping
+  // downstream can put it back. `amount` on the same parsed account is the exact
+  // base-unit string, so this reads that and scales it by the share mint itself.
+  //
+  // STAKED shares still come from the SDK: that half is derived from farm state
+  // as an exact `Decimal`, never through `uiAmount`, so re-implementing it would
+  // duplicate the farm lookup for no precision gain.
+  const staked = await vault.getUserShares(input.owner as Kit2);
+  const unstakedBase = await readUnstakedShareBaseUnits(
+    rpc,
+    input.owner,
+    address(String(state.sharesMint))
+  );
+  const shares = new Decimal(formatDecimalAmount(unstakedBase, shareDecimals)).add(
+    new Decimal(String(staked.stakedShares ?? 0))
+  );
 
   let tokenValue: string | undefined;
   try {
     const rate: Decimal = await vault.getExchangeRate(input.slot as Kit2);
-    const decimals = Number(state.tokenMintDecimals ?? 6);
+    const decimals = mintDecimals(state.tokenMintDecimals, "tokenMintDecimals");
     // Round-trip through the repo's own fixed-point helpers so the string that
     // leaves this package is scaled exactly like every other amount in SDP.
     const raw = shares.mul(rate).toFixed(decimals, Decimal.ROUND_DOWN);

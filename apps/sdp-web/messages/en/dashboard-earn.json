@@ -252,10 +252,15 @@
       "vaultSubmitting": "Submitting…",
       "vaultSubmitError": "The deposit could not be submitted.",
       "vaultDoneTitle": "Deposit submitted",
-      "vaultDoneBody": "Your deposit is on-chain. Vault shares are held by the wallet you chose.",
-      "vaultSettlingNote": "It can take a few moments to finalise. You will see the position under Active once it settles.",
+      "vaultDoneBody": "Your deposit was signed and broadcast. It is not confirmed yet — check the transaction to follow it on-chain.",
+      "vaultSettlingNote": "Vault positions are not listed under Active yet, so use the transaction link above to confirm the outcome.",
       "vaultDone": "Done",
-      "vaultTransaction": "Transaction"
+      "vaultTransaction": "Transaction",
+      "walletVaultDirectTitle": "This wallet signs and holds the shares",
+      "walletVaultDirectBody": "SDP builds the deposit and signs it with this wallet, which then holds the vault shares. There is no deposit address — confirming submits the transaction.",
+      "vaultPendingTitle": "Deposit in flight",
+      "vaultPendingBody": "This deposit was signed but SDP has not confirmed it reached the network. Do not retry with a new amount — check the transaction first, if one is shown.",
+      "vaultPendingNoSignature": "No transaction signature was recorded, so nothing was broadcast."
     }
   }
 }

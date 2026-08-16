@@ -176,11 +176,27 @@ function OpportunityRow({
         </span>
       </TableCell>
       <TableCell align="right">
-        {depositable.kind === "depositable" && onVaultDeposit ? (
+        {depositable.kind === "depositable" && depositable.style === "vault_direct" ? (
           // Non-custodial: two short steps against a strategy already chosen by
           // clicking this row, and its money-OUT counterpart is a modal too —
           // so it opens in place rather than navigating away from the table.
-          <Button onClick={() => onVaultDeposit(strategy)} size="sm" variant="secondary">
+          //
+          // Branches on the STYLE, never on whether a callback was passed. A
+          // callback's presence is a fact about the parent's wiring; the style
+          // is a fact about the strategy, and only the second can say which
+          // endpoint this row is allowed to reach. If a custodial provider is
+          // surfaced again, its rows keep the link below instead of silently
+          // posting to the vault endpoint, which provisions no wallet.
+          //
+          // A missing `onVaultDeposit` is a wiring bug, so the button disables
+          // rather than falling through to the custodial page — landing there
+          // would be a wrong answer wearing a working affordance.
+          <Button
+            disabled={!onVaultDeposit}
+            onClick={() => onVaultDeposit?.(strategy)}
+            size="sm"
+            variant="secondary"
+          >
             {t("DashboardEarn.opportunities.deposit")}
           </Button>
         ) : depositable.kind === "depositable" ? (

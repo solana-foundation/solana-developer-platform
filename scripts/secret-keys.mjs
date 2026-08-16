@@ -33,6 +33,11 @@ export const API_LOCAL_ENV_KEYS = [
   "ALLOWLIST_ADMIN_KEY",
   "ALLOWLIST_ADMIN_ORG_ID",
   "SOLANA_RPC_URL",
+  // Optional per-cluster overrides. One API process serves sandbox (devnet) and
+  // production (mainnet-beta), so the Earn execution path resolves its endpoint
+  // by cluster and falls back to SOLANA_RPC_URL when these are unset.
+  "SOLANA_DEVNET_RPC_URL",
+  "SOLANA_MAINNET_RPC_URL",
   "SOLANA_RPC_DEFAULT_PROVIDER",
   "SOLANA_RPC_TRITON_URL",
   "SOLANA_RPC_TRITON_API_KEY",

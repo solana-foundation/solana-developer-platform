@@ -129,6 +129,25 @@ CREATE TABLE IF NOT EXISTS earn_vault_movements (
     -- dedupe to fall back on: the chain will happily accept the same transfer
     -- twice.
     request_id TEXT NOT NULL,
+    -- Canonical fingerprint of the request that wrote this row.
+    --
+    -- The key alone is not enough, and the gap is not hypothetical. Matching on
+    -- `request_id` only cannot distinguish a genuine RETRY from a DIFFERENT
+    -- request wearing the same key: reusing a key with another vault, wallet or
+    -- amount would return 200 carrying the ORIGINAL movement's signature. And
+    -- because the position is claimed as part of the same call, such a request
+    -- would also open a real position row for the new vault and then answer
+    -- with the old vault's transaction — a response that is not merely stale
+    -- but self-contradictory.
+    --
+    -- Storing the fingerprint lets the replay path compare INTENT, not just the
+    -- key, and answer 409 on mismatch. NOT NULL follows 0055's earn convention
+    -- rather than the nullable payments one, because the caller key is required
+    -- on this route: a NULL fingerprint would read as "unclaimed" to
+    -- `resolveIdempotencyReplay` and turn the replay backstop into an
+    -- unrecoverable unique-violation instead of a clean 409.
+    -- Built by `buildEarnVaultDepositFingerprint` (src/lib/idempotency.ts).
+    idempotency_fingerprint TEXT NOT NULL,
 
     created_by TEXT,
     initiated_by_key_id TEXT,

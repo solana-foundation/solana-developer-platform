@@ -353,7 +353,7 @@ function ProgramCard({
               disappears with the provider's surfacing. */}
           <Button
             className="flex-1 sm:flex-none"
-            data-earn-withdraw-focus-fallback={program.id}
+            data-modal-focus-fallback={program.id}
             disabled={Number(program.wallet.balance.withdrawableUsd) <= 0}
             onClick={onWithdraw}
             variant="secondary"
@@ -670,7 +670,12 @@ function EarnTabBar({
  * filtered to surfaced providers and visible sources; this never re-applies a
  * visibility rule (a browser-side copy is what drifts).
  */
-export function EarnOpportunitiesPanel() {
+export function EarnOpportunitiesPanel({
+  fireblocksEnabled = false,
+}: {
+  /** Passed through to the vault deposit modal's wallet step. */
+  fireblocksEnabled?: boolean;
+} = {}) {
   const t = useTranslations();
   const { strategies, error, isLoading } = useEarnStrategies();
   // Owned here rather than in the table so the table stays a pure presentation
@@ -715,6 +720,7 @@ export function EarnOpportunitiesPanel() {
 
       {depositStrategy ? (
         <EarnVaultDepositModal
+          fireblocksEnabled={fireblocksEnabled}
           // Remount per strategy so no draft amount, wallet choice, or minted
           // idempotency key can survive a switch between vaults.
           key={depositStrategy.id}
@@ -729,9 +735,12 @@ export function EarnOpportunitiesPanel() {
 export function EarnWorkspace({
   apiBaseUrl = null,
   apiKeys = [],
+  fireblocksEnabled = false,
 }: {
   apiBaseUrl?: string | null;
   apiKeys?: readonly PlaygroundApiKeyView[];
+  /** Real custody-provider availability, resolved server-side in page.tsx. */
+  fireblocksEnabled?: boolean;
 } = {}) {
   const [tab, setTab] = useState<EarnTab>("opportunities");
   const { state } = useEarnPrograms();
@@ -741,7 +750,9 @@ export function EarnWorkspace({
     // No root padding: the dashboard shell already pads non-viewport-locked routes.
     <div className="grid content-start gap-6">
       <EarnTabBar active={tab} onChange={setTab} positionCount={positionCount} />
-      {tab === "opportunities" ? <EarnOpportunitiesPanel /> : null}
+      {tab === "opportunities" ? (
+        <EarnOpportunitiesPanel fireblocksEnabled={fireblocksEnabled} />
+      ) : null}
       {tab === "positions" ? (
         <div
           aria-labelledby="earn-tab-positions"

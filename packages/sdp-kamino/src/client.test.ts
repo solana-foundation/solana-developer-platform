@@ -1,4 +1,8 @@
-import { supportsPortfolioWallets, supportsVaultDirect } from "@sdp/earn/capabilities";
+import {
+  supportsPortfolioWallets,
+  supportsVaultDirect,
+  supportsVaultWithdraw,
+} from "@sdp/earn/capabilities";
 import { describe, expect, it } from "vitest";
 import { assertNotPortfolioProvider, KaminoVaultDirectClient } from "./client";
 
@@ -7,6 +11,23 @@ const client = new KaminoVaultDirectClient(() => "https://example.invalid");
 describe("KaminoVaultDirectClient capabilities", () => {
   it("reports the vault-direct capability", () => {
     expect(supportsVaultDirect(client)).toBe(true);
+  });
+
+  /**
+   * The withdraw capability is WITHHELD on purpose, and this pins it so that
+   * implementing `buildVaultWithdrawal` cannot happen by accident.
+   *
+   * `buildKaminoWithdrawPlan` returns every unstake/withdraw/cleanup
+   * instruction in ONE batch with no lookup table, while the pinned SDK
+   * documents that a multi-reserve exit may need several transactions.
+   * Answering yes here would let a future exit route narrow onto this client
+   * and receive a plan the API submitter refuses — after the customer was told
+   * their withdrawal was prepared. Deleting this test is the wrong way to make
+   * it pass; batching the plan is the right way.
+   */
+  it("does NOT report the withdraw capability until the plan is batched", () => {
+    expect(supportsVaultWithdraw(client)).toBe(false);
+    expect((client as unknown as Record<string, unknown>).buildVaultWithdrawal).toBeUndefined();
   });
 
   /**

@@ -7,6 +7,7 @@ import {
   createNoopSigner,
   createTransactionMessage,
   getBase64EncodedWireTransaction,
+  getSignatureFromTransaction,
   getTransactionEncoder,
   type Instruction,
   pipe,
@@ -59,6 +60,85 @@ export interface SubmitVaultPlanInput {
 
 export interface SubmitVaultPlanResult {
   signature: Signature;
+}
+
+export interface SignedVaultTransaction {
+  /** The wire bytes, ready to broadcast. */
+  bytes: Uint8Array;
+  /**
+   * The signature this transaction WILL have on chain, known before it is
+   * sent — a Solana signature is the fee payer's signature over the message,
+   * so signing determines it and broadcasting only publishes it.
+   */
+  signature: Signature;
+}
+
+/**
+ * Sign, WITHOUT sending.
+ *
+ * Split from the broadcast so the caller can durably record the signature
+ * before the transaction can possibly land. That ordering is the only thing
+ * that makes an ambiguous send recoverable: once bytes are on the wire, a
+ * timeout, a crash or a lost DB write leaves a transaction that may be on chain
+ * with money moved, and without the signature there is nothing to reconcile it
+ * against — SDP would not know the transfer exists.
+ *
+ * Wallet-pays only. In the sponsored path the relay signs as fee payer AFTER
+ * us, so the final signature is not knowable here; that path keeps the combined
+ * `submitVaultPlan` and owes the same treatment before it is switched on.
+ */
+export async function signVaultPlan(
+  env: Env,
+  input: { plan: EarnVaultTransactionPlan; owner: TransactionSigner; rpcUrl: string }
+): Promise<SignedVaultTransaction> {
+  const instructions = singleBatchInstructions(input.plan).map(toKitInstruction);
+  const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
+  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
+
+  const message = pipe(
+    createTransactionMessage({ version: 0 }),
+    (m) => setTransactionMessageFeePayerSigner(input.owner, m),
+    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+    (m) => appendTransactionMessageInstructions(instructions, m)
+  );
+  const signed = await signTransactionMessageWithSigners(message);
+  return {
+    bytes: new Uint8Array(getTransactionEncoder().encode(signed)),
+    signature: getSignatureFromTransaction(signed),
+  };
+}
+
+/**
+ * Broadcast bytes whose signature the caller has already recorded.
+ *
+ * Throwing here does NOT mean the transaction failed — it may have landed and
+ * the response been lost. The caller must treat a throw as UNKNOWN and leave
+ * the ledger row reconcilable against its recorded signature, never mark it
+ * failed.
+ */
+export async function broadcastVaultTransaction(
+  env: Env,
+  input: { bytes: Uint8Array; rpcUrl: string }
+): Promise<void> {
+  const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
+  await solanaRpc.sendTransaction(rpc, input.bytes);
+}
+
+/** The single batch a deposit plan carries, with the multi-transaction refusal. */
+function singleBatchInstructions(plan: EarnVaultTransactionPlan) {
+  const batch = plan.transactions[0];
+  if (!batch || batch.length === 0) {
+    throw new Error("Vault plan carried no instructions");
+  }
+  if (plan.transactions.length > 1) {
+    // Multi-transaction plans need per-leg ledger rows and a resume story; the
+    // deposit path never produces one today, so refuse rather than silently
+    // land only the first leg.
+    throw new Error(
+      `Vault plan needs ${plan.transactions.length} transactions; multi-transaction submission is not implemented`
+    );
+  }
+  return batch;
 }
 
 /**

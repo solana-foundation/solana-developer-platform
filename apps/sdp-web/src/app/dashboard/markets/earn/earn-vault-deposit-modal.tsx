@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
+import { useModalFocus } from "@/lib/use-modal-focus";
 import { StepNotice, StepSection, SummaryRow } from "./deposit/earn-deposit-chrome";
 import {
   shortenAddress,
@@ -48,15 +49,29 @@ type VaultDepositStep = "wallet" | "amount";
 
 export function EarnVaultDepositModal({
   strategy,
+  fireblocksEnabled = false,
   onClose,
   onDeposited,
 }: {
   strategy: EarnStrategy;
+  /**
+   * Whether this organization actually has Fireblocks available, threaded from
+   * the same provider-availability read the custodial wizard uses. Defaulted
+   * false only so the prop is additive; the workspace passes the real value.
+   */
+  fireblocksEnabled?: boolean;
   onClose: () => void;
   onDeposited?: (result: EarnVaultDepositResult) => void;
 }) {
   const t = useTranslations();
   const { wallets, error: walletsError, isLoading: walletsLoading } = useEarnFundingWallets();
+  /**
+   * Initial focus, a focus trap, and focus returned to the Opportunities row
+   * that opened this — none of which the shared `Modal` provides. Keyed by the
+   * strategy id so that when the row remounts, focus lands on the button the
+   * reader actually pressed rather than on whichever row rendered first.
+   */
+  const contentRef = useModalFocus<HTMLDivElement>(strategy.id);
 
   const [step, setStep] = useState<VaultDepositStep>("wallet");
   const [walletRowId, setWalletRowId] = useState<string | null>(null);
@@ -131,54 +146,72 @@ export function EarnVaultDepositModal({
   }
 
   if (result) {
+    /**
+     * `pending` and `submitted` are DIFFERENT outcomes and must not share a
+     * screen. `submitted` means signed and broadcast — on the wire, not
+     * settled. `pending` means SDP holds a signed transaction whose fate it
+     * could not establish (an ambiguous send), which is precisely the state a
+     * reader must not be told is finished, and precisely the state where a
+     * blind retry can deposit twice.
+     *
+     * Neither is confirmation, so neither claims a holding: SDP has no
+     * confirmer for this path yet, and the Active tab reads custodial programs
+     * only, so "you will see it under Active" was false for both.
+     */
+    const inFlight = result.status === "pending";
+    const title = inFlight
+      ? t("DashboardEarn.deposit.vaultPendingTitle")
+      : t("DashboardEarn.deposit.vaultDoneTitle");
+
     return (
-      <Modal
-        isOpen
-        ariaLabel={t("DashboardEarn.deposit.vaultDoneTitle")}
-        onClose={onClose}
-        size="md"
-      >
-        <StepSection title={t("DashboardEarn.deposit.vaultDoneTitle")}>
-          <p className="mb-5 text-sm leading-6 text-secondary">
-            {t("DashboardEarn.deposit.vaultDoneBody")}
-          </p>
-          <dl className="grid gap-3 rounded-xl border border-border-default bg-surface-raised p-5">
-            <SummaryRow label={t("DashboardEarn.deposit.vaultStrategy")} value={strategy.name} />
-            <SummaryRow
-              label={t("DashboardEarn.deposit.vaultAmount")}
-              value={`${amount} ${token?.toUpperCase() ?? ""}`}
-            />
-            <SummaryRow
-              label={t("DashboardEarn.deposit.vaultFrom")}
-              value={walletDisplayName(selectedWallet, selectedWallet?.publicKey ?? "")}
-            />
-            {/* Keyed off the STRATEGY's cluster, not an app-wide one: the
+      <Modal isOpen ariaLabel={title} onClose={onClose} size="md">
+        <div ref={contentRef}>
+          <StepSection title={title}>
+            <p className="mb-5 text-sm leading-6 text-secondary">
+              {inFlight
+                ? t("DashboardEarn.deposit.vaultPendingBody")
+                : t("DashboardEarn.deposit.vaultDoneBody")}
+            </p>
+            <dl className="grid gap-3 rounded-xl border border-border-default bg-surface-raised p-5">
+              <SummaryRow label={t("DashboardEarn.deposit.vaultStrategy")} value={strategy.name} />
+              <SummaryRow
+                label={t("DashboardEarn.deposit.vaultAmount")}
+                value={`${amount} ${token?.toUpperCase() ?? ""}`}
+              />
+              <SummaryRow
+                label={t("DashboardEarn.deposit.vaultFrom")}
+                value={walletDisplayName(selectedWallet, selectedWallet?.publicKey ?? "")}
+              />
+              {/* Keyed off the STRATEGY's cluster, not an app-wide one: the
                 transaction landed on whichever cluster the vault lives on, and
                 `hostCluster` is the field that states it. A devnet signature on
                 a mainnet explorer link is a dead end. */}
-            {result.signature ? (
-              <SummaryRow
-                label={t("DashboardEarn.deposit.vaultTransaction")}
-                value={
-                  <a
-                    className="underline underline-offset-2"
-                    href={explorerTxUrl(result.signature, strategy.hostCluster)}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    {shortenAddress(result.signature)}
-                  </a>
-                }
-              />
-            ) : null}
-          </dl>
-          <p className="mt-4 text-sm leading-6 text-secondary">
-            {t("DashboardEarn.deposit.vaultSettlingNote")}
-          </p>
-          <div className="mt-6 flex justify-end">
-            <Button onClick={onClose}>{t("DashboardEarn.deposit.vaultDone")}</Button>
-          </div>
-        </StepSection>
+              {result.signature ? (
+                <SummaryRow
+                  label={t("DashboardEarn.deposit.vaultTransaction")}
+                  value={
+                    <a
+                      className="underline underline-offset-2"
+                      href={explorerTxUrl(result.signature, strategy.hostCluster)}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      {shortenAddress(result.signature)}
+                    </a>
+                  }
+                />
+              ) : null}
+            </dl>
+            <p className="mt-4 text-sm leading-6 text-secondary">
+              {inFlight && !result.signature
+                ? t("DashboardEarn.deposit.vaultPendingNoSignature")
+                : t("DashboardEarn.deposit.vaultSettlingNote")}
+            </p>
+            <div className="mt-6 flex justify-end">
+              <Button onClick={onClose}>{t("DashboardEarn.deposit.vaultDone")}</Button>
+            </div>
+          </StepSection>
+        </div>
       </Modal>
     );
   }
@@ -191,24 +224,34 @@ export function EarnVaultDepositModal({
         onClose={onClose}
         size="md"
       >
-        <StepSection title={t("DashboardEarn.deposit.vaultWalletTitle")}>
-          <p className="mb-5 text-sm leading-6 text-secondary">
-            {t("DashboardEarn.deposit.vaultWalletBody")}
-          </p>
-          <WalletStep
-            fireblocksEnabled={false}
-            hasError={Boolean(walletsError)}
-            isLoading={walletsLoading}
-            onSelect={setWalletRowId}
-            selectedWalletId={walletRowId}
-            wallets={wallets ?? []}
-          />
-          <div className="mt-6 flex justify-end">
-            <Button disabled={!walletRowId} onClick={() => setStep("amount")}>
-              {t("DashboardEarn.deposit.continueAction")}
-            </Button>
-          </div>
-        </StepSection>
+        <div ref={contentRef}>
+          <StepSection title={t("DashboardEarn.deposit.vaultWalletTitle")}>
+            <p className="mb-5 text-sm leading-6 text-secondary">
+              {t("DashboardEarn.deposit.vaultWalletBody")}
+            </p>
+            <WalletStep
+              // Says what this flow actually does, instead of the custodial
+              // note's promise of a provider-managed deposit address — which
+              // directly contradicted the body immediately above.
+              depositMode="vault_direct"
+              // Real availability, not a hard-coded `false`. Telling an entitled
+              // organization that Fireblocks is unavailable is a wrong statement
+              // about their own account, and it was only ever `false` here
+              // because this modal had nowhere to read it from.
+              fireblocksEnabled={fireblocksEnabled}
+              hasError={Boolean(walletsError)}
+              isLoading={walletsLoading}
+              onSelect={setWalletRowId}
+              selectedWalletId={walletRowId}
+              wallets={wallets ?? []}
+            />
+            <div className="mt-6 flex justify-end">
+              <Button disabled={!walletRowId} onClick={() => setStep("amount")}>
+                {t("DashboardEarn.deposit.continueAction")}
+              </Button>
+            </div>
+          </StepSection>
+        </div>
       </Modal>
     );
   }
@@ -223,72 +266,74 @@ export function EarnVaultDepositModal({
       onClose={onClose}
       size="md"
     >
-      <StepSection title={t("DashboardEarn.deposit.vaultAmountTitle")}>
-        <p className="mb-5 text-sm leading-6 text-secondary">
-          {t("DashboardEarn.deposit.vaultAmountBody")}
-        </p>
-        <div className="grid gap-5">
-          <div className="grid gap-2">
-            <label className="text-sm text-primary" htmlFor="vault-deposit-amount">
-              {t("DashboardEarn.deposit.vaultAmount")}
-            </label>
-            <Input
-              autoComplete="off"
-              id="vault-deposit-amount"
-              inputMode="decimal"
-              onChange={(event) => setAmount(event.target.value)}
-              placeholder="0.00"
-              value={amount}
-            />
-            <p className="text-xs text-tertiary tabular-nums">
-              {walletBalance === undefined
-                ? t("DashboardEarn.deposit.vaultBalanceUnknown")
-                : t("DashboardEarn.deposit.vaultBalanceAvailable", {
-                    amount: formatUsd(walletBalance),
-                  })}
-            </p>
-          </div>
+      <div ref={contentRef}>
+        <StepSection title={t("DashboardEarn.deposit.vaultAmountTitle")}>
+          <p className="mb-5 text-sm leading-6 text-secondary">
+            {t("DashboardEarn.deposit.vaultAmountBody")}
+          </p>
+          <div className="grid gap-5">
+            <div className="grid gap-2">
+              <label className="text-sm text-primary" htmlFor="vault-deposit-amount">
+                {t("DashboardEarn.deposit.vaultAmount")}
+              </label>
+              <Input
+                autoComplete="off"
+                id="vault-deposit-amount"
+                inputMode="decimal"
+                onChange={(event) => setAmount(event.target.value)}
+                placeholder="0.00"
+                value={amount}
+              />
+              <p className="text-xs text-tertiary tabular-nums">
+                {walletBalance === undefined
+                  ? t("DashboardEarn.deposit.vaultBalanceUnknown")
+                  : t("DashboardEarn.deposit.vaultBalanceAvailable", {
+                      amount: formatUsd(walletBalance),
+                    })}
+              </p>
+            </div>
 
-          <dl className="grid gap-3 rounded-xl border border-border-default bg-surface-raised p-5">
-            <SummaryRow label={t("DashboardEarn.deposit.vaultStrategy")} value={strategy.name} />
-            <SummaryRow
-              label={t("DashboardEarn.deposit.vaultBacking")}
-              value={strategySourceLabel(strategy)}
-            />
-            <SummaryRow
-              label={t("DashboardEarn.deposit.vaultFrom")}
-              value={walletDisplayName(selectedWallet, selectedWallet?.publicKey ?? "")}
-            />
-          </dl>
+            <dl className="grid gap-3 rounded-xl border border-border-default bg-surface-raised p-5">
+              <SummaryRow label={t("DashboardEarn.deposit.vaultStrategy")} value={strategy.name} />
+              <SummaryRow
+                label={t("DashboardEarn.deposit.vaultBacking")}
+                value={strategySourceLabel(strategy)}
+              />
+              <SummaryRow
+                label={t("DashboardEarn.deposit.vaultFrom")}
+                value={walletDisplayName(selectedWallet, selectedWallet?.publicKey ?? "")}
+              />
+            </dl>
 
-          {/* Over-balance is a WARNING, never a block — the balance is a live RPC
+            {/* Over-balance is a WARNING, never a block — the balance is a live RPC
             read and the chain decides. Blocking on it would refuse a deposit the
             wallet can fund whenever that read is stale or unavailable. */}
-          {overBalance ? (
-            <StepNotice>{t("DashboardEarn.deposit.vaultOverBalance")}</StepNotice>
-          ) : null}
-          {/* `tone="error"` is not decoration: it carries the error palette AND
+            {overBalance ? (
+              <StepNotice>{t("DashboardEarn.deposit.vaultOverBalance")}</StepNotice>
+            ) : null}
+            {/* `tone="error"` is not decoration: it carries the error palette AND
             `role="alert"`, so a refusal is announced to a screen reader instead
             of sitting silently in the flow. A refused deposit read as helper
             text without it. */}
-          {error ? <StepNotice tone="error">{error}</StepNotice> : null}
+            {error ? <StepNotice tone="error">{error}</StepNotice> : null}
 
-          <p className="text-sm leading-6 text-secondary">
-            {t("DashboardEarn.deposit.vaultConfirmNote")}
-          </p>
+            <p className="text-sm leading-6 text-secondary">
+              {t("DashboardEarn.deposit.vaultConfirmNote")}
+            </p>
 
-          <div className="flex justify-between gap-3">
-            <Button onClick={() => setStep("wallet")} variant="secondary">
-              {t("DashboardEarn.deposit.back")}
-            </Button>
-            <Button disabled={!amountValid || submitting} onClick={() => void submit()}>
-              {submitting
-                ? t("DashboardEarn.deposit.vaultSubmitting")
-                : t("DashboardEarn.deposit.vaultSubmit")}
-            </Button>
+            <div className="flex justify-between gap-3">
+              <Button onClick={() => setStep("wallet")} variant="secondary">
+                {t("DashboardEarn.deposit.back")}
+              </Button>
+              <Button disabled={!amountValid || submitting} onClick={() => void submit()}>
+                {submitting
+                  ? t("DashboardEarn.deposit.vaultSubmitting")
+                  : t("DashboardEarn.deposit.vaultSubmit")}
+              </Button>
+            </div>
           </div>
-        </div>
-      </StepSection>
+        </StepSection>
+      </div>
     </Modal>
   );
 }

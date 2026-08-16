@@ -121,7 +121,12 @@ describe("opportunityDepositability", () => {
     // `EarnVaultDepositModal` behind the row's button. An enabled link with no
     // flow behind it is the dead-end review caught on #1340 — the two ship
     // together, which is what `EARN_VAULT_DEPOSITS_ENABLED` encodes.
-    expect(opportunityDepositability(kamino)).toEqual({ kind: "depositable" });
+    // The STYLE rides along with the verdict so the row dispatches on what the
+    // route is, not on which callback the parent happened to pass.
+    expect(opportunityDepositability(kamino)).toEqual({
+      kind: "depositable",
+      style: "vault_direct",
+    });
   });
 
   it("still refuses a vault-direct vault on the wrong cluster", () => {

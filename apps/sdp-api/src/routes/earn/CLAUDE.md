@@ -297,29 +297,67 @@ account is a PROGRAM account and stablecoins sent to it are destroyed. Money
 moves only when SDP builds an instruction and signs it with one of the
 organization's own custody wallets.
 
-- `POST /vault-deposits` — **build + sign + submit + ledger**, in that order.
-  Body `{strategyId, walletId, amount, requestId}`. The caller names a CATALOGUE
-  row, never a raw vault address, so the sync's admission gates still bound this
-  path; the wallet resolves through `resolveWalletAddress`, the same
-  permission-checked helper payments and private channels use (it takes a
-  provider `walletId` or a public key — never the `cwlt_…` row id).
+- `POST /vault-deposits` — **build + sign + record + broadcast + ledger**, in
+  that order. Body `{strategyId, walletId, amount, requestId, minSharesOut?}`.
+  Registered as
+  `requirePermissions("earn:write", "wallets:read")` → `policyGate` → handler.
+  The caller names a CATALOGUE row, never a raw vault address, so the sync's
+  admission gates still bound this path.
+  - **POLICY-GATED.** `policyGate({ extract:
+    extractEarnVaultDepositPolicyCandidate })` resolves everything (strategy,
+    wallet, amount) and enforces wallet policy BEFORE `createOrgSigner` is
+    reached. The extractor owns all the gates below; the handler only ledgers.
+    Registered as the `earn` family in
+    `src/security/value-moving-conformance.node.test.ts`, whose
+    `valueMovingSourceRoots` now includes `src/services/earn` — it did not, which
+    is how a whole money-moving surface stayed invisible to the sink inventory.
+  - **Environment capability first.** `isVaultDirectDepositEnabled(environment)`
+    (`@sdp/types/provider-access`) fail-closes PRODUCTION while SDP has no
+    vault-withdraw route and no Active-tab surface. Entitlement cannot express
+    this — it is org-scoped, not environment-scoped. The dashboard hides the
+    affordance from the same constant.
+  - `minSharesOut` is **required in production** and optional in sandbox: the
+    pinned Kamino SDK picks the LEGACY deposit instruction when it is absent, so
+    there is no implicit floor at all.
   - `requestId` is **REQUIRED**, unlike the custodial create. There is no
     provider-side dedupe to fall back on: the chain will happily accept the same
-    transfer twice, so the intent row written before signing is the only defence.
-  - Gate order mirrors `POST /programs`: schema → strategy resolution →
-    deposit-style check → `host_cluster` vs environment → surfacing → entitlement
-    → wallet. Surfacing before entitlement, for the same reason as create.
+    transfer twice. It is stored with a canonical
+    `buildEarnVaultDepositFingerprint`, and the replay is resolved BEFORE the
+    position is claimed — reusing a key with a different intent is a **409**, not
+    a silent replay, and writes nothing.
+  - Gate order: schema → environment capability → production floor → strategy
+    resolution → deposit-style check → surfacing → entitlement →
+    **catalogue admission** → wallet. `assertStrategyDepositable`
+    (`handlers/admission.ts`) is shared with the custodial path and asserts
+    `status = 'active'` plus `isClusterFundableInEnvironment`; without it a
+    `paused` row — an operator's deliberate stop — stayed fundable by id.
+  - Wallet binding takes **`earn:write`**, not `wallets:read`. A read-only
+    binding must not be able to spend. Note this is the first `earn:*` scope
+    asserted on a BINDING: a selected-scope key provisioned only with
+    payments-family binding permissions will now 403 here.
   - Simulates before signing. The instructions come from a third-party SDK built
     against live vault state, so a stale reserve set surfaces as a readable
     program error instead of a landed, failed transaction the customer paid for.
-  - Fee payer is the CUSTODY WALLET today. Kora only sponsors allow-listed
-    programs and the kvault/klend ids are not on that list (the Private Channels
-    escrow hit the same wall); the sponsored path exists in
-    `services/earn/vault-execution.service.ts` and is one line away.
+  - **Signature is recorded BEFORE broadcast.** `signVaultPlan` signs without
+    sending, the movement stores the signature while still `pending`, and only
+    then are the bytes broadcast. A send error leaves the row `pending` WITH its
+    signature — reconcilable — and never `failed`, because a lost response does
+    not prove the transaction did not land.
+  - Fee payer is the CUSTODY WALLET. Kora only sponsors allow-listed programs and
+    the kvault/klend ids are not on that list. The sponsored path in
+    `services/earn/vault-execution.service.ts` is no longer one line away: it
+    cannot satisfy record-before-broadcast, because the relay signs as fee payer
+    after SDP and the final signature is unknown until the bytes leave.
 - `GET /vault-positions` — DB claim rows **hydrated live from chain**. Shares and
   value are never persisted: for a non-custodial vault the chain IS the provider.
   Takes **no provider gate at all** — it is a read of money the org already
   holds, and hiding it when a provider is un-offered would close the door out.
+  It DOES take wallet-binding scope: `getAllowedApiKeyWalletIdsForPermissions(auth,
+  ["earn:read"])`, applied in the repository query before any chain read. Mind
+  the id spaces — that helper returns provider `walletId`s (`privy_…`) while
+  `earn_vault_positions.custody_wallet_id` is the `cwlt_…` row id, so the handler
+  translates through `scope.wallets`. Passing the allow-list straight through
+  matches nothing and silently returns an empty page.
   A failed chain read leaves a position UNHYDRATED rather than zero; reporting
   zero is a claim about someone's money that a failed RPC call cannot support.
 
@@ -328,9 +366,20 @@ through `services/earn/execution-registry.ts` — the one place a provider id ma
 to an executing client. `EARN_PROVIDER_CLIENTS` stays the CATALOGUE registry so
 the hourly sync keeps its small dependency surface.
 
-**Not built yet:** the withdraw counterpart, and the Active-tab snapshot. Until
-both land, a vault position can be entered and not exited through SDP, so Kamino
-must not become creatable on mainnet (ADR 0002).
+**Not built yet:** the withdraw counterpart, the Active-tab snapshot, and a
+confirmation sweep (`idx_earn_vault_movements_unsettled` is the work queue
+waiting for one, so `submitted` never advances to `confirmed`). Until the first
+two land, a vault position can be entered and not exited through SDP — which is
+why `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` fail-closes production rather than
+relying on anyone remembering ADR 0002.
+
+**Per-cluster RPC.** `resolveClusterRpcUrl` reads `SOLANA_DEVNET_RPC_URL` /
+`SOLANA_MAINNET_RPC_URL`, falling back to `SOLANA_RPC_URL`, and
+`assertClusterEndpoint` proves the endpoint by GENESIS HASH before anything is
+built against it (cached per endpoint). One process serves both environments, so
+the old cluster-agnostic read silently built against whichever chain the single
+URL happened to serve — and a mismatch does not error, because Kamino's mainnet
+kvault program id also resolves on devnet with no accounts under it.
 
 ## Gate asymmetry — DO NOT BREAK (ADR 0002 exit-safety)
 
