@@ -51,6 +51,15 @@ describe("BYOK parity with organization RPC selection", () => {
     expect(missing).toEqual([]);
   });
 
+  it("passes the tenant lookup at every resolveRoundRobinRpcTargets call site", () => {
+    // The faucet path resolves separately and was the one branch that still
+    // spent platform credentials for an organization on its own key.
+    const sites = callSitesOf("resolveRoundRobinRpcTargets");
+
+    expect(sites.length).toBeGreaterThan(0);
+    expect(sites.filter((site) => !site.passesLookup).map((site) => site.file)).toEqual([]);
+  });
+
   it("covers the relay, the connectivity test and the signer check", () => {
     const files = new Set(callSitesOf("resolveRpcTarget").map((site) => site.file));
 
