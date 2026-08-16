@@ -26,6 +26,7 @@ import {
   walletOperationActorFromAuth,
 } from "@/services/policy/enforcement.service";
 import { FeePaymentError } from "@/services/ports";
+import { createTenantRpcConnectionLookup } from "@/services/rpc-connection-lookup";
 import { createOrgSigner } from "@/services/solana";
 import { createAuthenticatedSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { AppContext } from "../context";
@@ -136,6 +137,9 @@ export const signerCheck = async (c: AppContext) => {
       organizationId: auth.organizationId,
       authProjectId: auth.projectId ?? null,
       requestedProjectId: null,
+      // Signer check reads chain state on the organization's behalf, so it
+      // belongs on the organization's own connection when there is one.
+      connections: createTenantRpcConnectionLookup(c.env, getDb(c.env)),
     });
 
     const rpc = createRpc(c.env, {
