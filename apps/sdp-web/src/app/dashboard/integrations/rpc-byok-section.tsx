@@ -16,6 +16,93 @@ import {
 } from "./rpc-connection-actions";
 
 /**
+ * The stored-credential rows.
+ *
+ * Extracted so the section's own branching stays under the repository's
+ * cognitive-complexity limit: the list has its own per-row state to reason
+ * about and reads better on its own.
+ */
+function ConnectionList({
+  canManage,
+  connections,
+  pendingId,
+  onAction,
+  t,
+}: {
+  canManage: boolean;
+  connections: SafeRpcConnection[];
+  pendingId: string | null;
+  onAction: (action: typeof activateRpcConnectionAction, connectionId: string) => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  return (
+    <ul className="space-y-2">
+      {connections.map((connection) => (
+        <li
+          key={connection.id}
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border-default bg-fill-subtle px-4 py-3"
+        >
+          <div className="min-w-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium text-primary">
+                {connection.providerCredential.label}
+              </span>
+              {connection.isDefault && connection.status === "active" ? (
+                <Badge variant="success">{t("Shared.integrations.rpcByokServing")}</Badge>
+              ) : (
+                <Badge variant="outline">{connection.status}</Badge>
+              )}
+            </div>
+            <p className="text-xs text-tertiary">
+              {connection.network}
+              {typeof connection.displayMetadata.endpointHost === "string"
+                ? ` · ${connection.displayMetadata.endpointHost}`
+                : ""}
+              {typeof connection.displayMetadata.apiKeySuffix === "string"
+                ? ` · ····${connection.displayMetadata.apiKeySuffix}`
+                : ""}
+            </p>
+            {connection.lastCheck?.failureCode ? (
+              <p className="text-xs text-error">{connection.lastCheck.failureCode}</p>
+            ) : null}
+          </div>
+
+          {canManage ? (
+            <div className="flex flex-wrap gap-2">
+              {connection.status !== "active" ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={pendingId === connection.id}
+                  onClick={() => {
+                    onAction(activateRpcConnectionAction, connection.id);
+                  }}
+                >
+                  {t("Shared.integrations.rpcByokUse")}
+                </Button>
+              ) : null}
+              {connection.status !== "deactivated" ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={pendingId === connection.id}
+                  onClick={() => {
+                    onAction(deactivateRpcConnectionAction, connection.id);
+                  }}
+                >
+                  {t("Shared.integrations.rpcByokDeactivate")}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
  * Tenant-owned credentials for one provider (HOO-1090).
  *
  * The key field is write-only by construction: it is cleared on submit and the
@@ -108,69 +195,15 @@ export function RpcByokSection({
           {t("Shared.integrations.rpcByokUnavailable")}
         </p>
       ) : connections.length > 0 ? (
-        <ul className="space-y-2">
-          {connections.map((connection) => (
-            <li
-              key={connection.id}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border-default bg-fill-subtle px-4 py-3"
-            >
-              <div className="min-w-0 space-y-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium text-primary">
-                    {connection.providerCredential.label}
-                  </span>
-                  {connection.isDefault && connection.status === "active" ? (
-                    <Badge variant="success">{t("Shared.integrations.rpcByokServing")}</Badge>
-                  ) : (
-                    <Badge variant="outline">{connection.status}</Badge>
-                  )}
-                </div>
-                <p className="text-xs text-tertiary">
-                  {connection.network}
-                  {typeof connection.displayMetadata.endpointHost === "string"
-                    ? ` · ${connection.displayMetadata.endpointHost}`
-                    : ""}
-                  {typeof connection.displayMetadata.apiKeySuffix === "string"
-                    ? ` · ····${connection.displayMetadata.apiKeySuffix}`
-                    : ""}
-                </p>
-                {connection.lastCheck?.failureCode ? (
-                  <p className="text-xs text-error">{connection.lastCheck.failureCode}</p>
-                ) : null}
-              </div>
-
-              {canManage ? (
-                <div className="flex flex-wrap gap-2">
-                  {connection.status !== "active" ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={pendingId === connection.id}
-                      onClick={() => {
-                        void runConnectionAction(activateRpcConnectionAction, connection.id);
-                      }}
-                    >
-                      {t("Shared.integrations.rpcByokUse")}
-                    </Button>
-                  ) : null}
-                  {connection.status !== "deactivated" ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      disabled={pendingId === connection.id}
-                      onClick={() => {
-                        void runConnectionAction(deactivateRpcConnectionAction, connection.id);
-                      }}
-                    >
-                      {t("Shared.integrations.rpcByokDeactivate")}
-                    </Button>
-                  ) : null}
-                </div>
-              ) : null}
-            </li>
-          ))}
-        </ul>
+        <ConnectionList
+          canManage={canManage}
+          connections={connections}
+          pendingId={pendingId}
+          onAction={(action, id) => {
+            void runConnectionAction(action, id);
+          }}
+          t={t}
+        />
       ) : (
         <p className="text-sm leading-6 text-tertiary">{t("Shared.integrations.rpcByokEmpty")}</p>
       )}
