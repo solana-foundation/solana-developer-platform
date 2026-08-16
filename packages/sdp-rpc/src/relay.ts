@@ -752,6 +752,19 @@ export async function resolveRpcTarget(input: ResolveRpcTargetInput): Promise<Re
 export async function resolveRoundRobinRpcTargets(
   input: ResolveRpcTargetInput
 ): Promise<ResolvedRpcTarget[]> {
+  // The faucet path resolves tenant connections on the same terms as the
+  // ordinary relay. Without this an organization that said "use my key" would
+  // still have airdrop requests served by platform credentials, and a
+  // connection that should fail closed would be bypassed rather than honoured.
+  const tenantTarget = await resolveTenantConnection(
+    input,
+    getEffectiveProjectId(input.authProjectId, input.requestedProjectId)
+  );
+  if (tenantTarget) {
+    // One connection, so there is nothing to rotate between.
+    return [tenantTarget];
+  }
+
   const managedProviders = resolveManagedProviders(input.env);
   const access = await getRpcProviderAvailability(input.env, input.db, input.organizationId);
   const enabledManagedProviders = managedProviders.filter(

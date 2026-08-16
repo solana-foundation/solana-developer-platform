@@ -172,6 +172,7 @@ export const relayRpcRequest = async (c: AppContext) => {
       organizationId: auth.organizationId,
       authProjectId: auth.projectId,
       requestedProjectId: queryParse.data.projectId ?? null,
+      connections: createTenantRpcConnectionLookup(c.env, getDb(c.env)),
     });
 
     let lastResponse: ReturnType<typeof buildRelayResponse> | null = null;
