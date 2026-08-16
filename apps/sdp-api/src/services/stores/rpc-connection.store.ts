@@ -277,6 +277,39 @@ export class RpcConnectionStore {
   }
 
   /**
+   * What the relay asks before falling back (HOO-1093).
+   *
+   * Returns the live default when there is one, and otherwise reports whether
+   * the scope holds a connection at all. The epic requires an explicit but
+   * unusable connection to fail closed rather than quietly spend SDP's own
+   * credentials, so "nothing configured" and "configured but broken" cannot be
+   * the same answer.
+   */
+  async findScopeConnectionState(params: {
+    organizationId: string;
+    scopeKey: string;
+    network: RpcConnectionNetwork;
+  }): Promise<{ kind: "none" } | { kind: "unusable" } | { kind: "active"; connectionId: string }> {
+    const rows = await this.db.queryMany<{ id: string; status: string; is_default: boolean }>(
+      `SELECT c.id, c.status, c.is_default
+         FROM rpc_connections c
+         JOIN provider_credentials pc ON pc.id = c.provider_credential_id
+        WHERE c.organization_id = ?
+          AND c.scope_key = ?
+          AND c.network = ?
+          AND c.status <> 'deactivated'`,
+      [params.organizationId, params.scopeKey, params.network]
+    );
+
+    if (rows.length === 0) {
+      return { kind: "none" };
+    }
+
+    const live = rows.find((row) => row.status === "active" && row.is_default);
+    return live ? { kind: "active", connectionId: live.id } : { kind: "unusable" };
+  }
+
+  /**
    * What the relay reads (HOO-1093): the one active default for a scope and
    * network. Returns the credential's stored-secret columns so the caller can
    * hand them to CredentialSecretStore — this is the only method that carries
