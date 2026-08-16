@@ -191,7 +191,9 @@ export async function IntegrationDetailView({
 
       {detail.descriptionKey ? (
         <Section title={t("Shared.integrations.detailAbout")}>
-          <p className="max-w-2xl text-sm leading-6 text-secondary">{t(detail.descriptionKey)}</p>
+          <p className="max-w-3xl text-sm leading-6 text-pretty text-secondary">
+            {t(detail.descriptionKey)}
+          </p>
         </Section>
       ) : null}
 
@@ -226,7 +228,7 @@ export async function IntegrationDetailView({
       <Section title={t("Shared.integrations.detailHowItConnects")}>
         {entry?.storedCredentialSetup.mode === "self_service" ? (
           <div className="space-y-3">
-            <p className="max-w-2xl text-sm leading-6 text-secondary">
+            <p className="max-w-3xl text-sm leading-6 text-pretty text-secondary">
               {t("Shared.integrations.connectSelfServe")}
             </p>
             <p className="text-xs font-medium tracking-wide text-tertiary uppercase">
@@ -249,13 +251,13 @@ export async function IntegrationDetailView({
           // Manual providers, whether or not a request route is wired yet
           // (HOO-775): access is granted by the SDP team, and the page must say
           // so even when the header has no request button to offer.
-          <p className="max-w-2xl text-sm leading-6 text-secondary">
+          <p className="max-w-3xl text-sm leading-6 text-pretty text-secondary">
             {t("Shared.integrations.connectByArrangement")}
           </p>
         ) : (
           // Generally available providers riding deployment credentials, and
           // the deployment-wide rails: the SDP operator turns these on.
-          <p className="max-w-2xl text-sm leading-6 text-secondary">
+          <p className="max-w-3xl text-sm leading-6 text-pretty text-secondary">
             {t("Shared.integrations.connectManaged")}
           </p>
         )}
