@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { cn } from "@/lib/utils";
 import { resolveDocsUrl } from "@/lib/docs-url";
+import { cn } from "@/lib/utils";
 
 type DocLinkProps = {
   children: ReactNode;

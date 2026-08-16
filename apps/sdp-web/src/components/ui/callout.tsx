@@ -52,11 +52,7 @@ export function Callout({
 }: CalloutProps) {
   return (
     <div
-      className={cn(
-        "rounded-xl border px-4 py-3 text-sm",
-        variantClassNames[variant],
-        className
-      )}
+      className={cn("rounded-xl border px-4 py-3 text-sm", variantClassNames[variant], className)}
       role={live ? liveRoles[variant] : undefined}
     >
       {/* Deliberately not a heading: the callout does not know the outline of the
