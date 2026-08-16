@@ -85,7 +85,6 @@ describe("RpcByokSection", () => {
 
     await user.click(screen.getByRole("button", { name: "Add connection" }));
     await user.type(screen.getByRole("textbox", { name: /Connection name/i }), "Prod");
-    await user.type(screen.getByRole("textbox", { name: /Endpoint URL/i }), "https://x.example");
     await user.type(screen.getByLabelText(/API key/i), "tenant-key-9999");
     await user.click(screen.getByRole("button", { name: "Save connection" }));
 
@@ -104,7 +103,6 @@ describe("RpcByokSection", () => {
 
     await user.click(screen.getByRole("button", { name: "Add connection" }));
     await user.type(screen.getByRole("textbox", { name: /Connection name/i }), "Prod");
-    await user.type(screen.getByRole("textbox", { name: /Endpoint URL/i }), "https://x.example");
     // A password input has no textbox role, so it is reached by label text.
     await user.type(screen.getByLabelText(/API key/i), "tenant-key-9999");
     await user.click(screen.getByRole("button", { name: "Save connection" }));
@@ -122,12 +120,42 @@ describe("RpcByokSection", () => {
 
     await user.click(screen.getByRole("button", { name: "Add connection" }));
     await user.type(screen.getByRole("textbox", { name: /Connection name/i }), "Prod");
-    await user.type(screen.getByRole("textbox", { name: /Endpoint URL/i }), "https://x.example");
     const key = screen.getByLabelText(/API key/i) as HTMLInputElement;
     await user.type(key, "tenant-key-9999");
     await user.click(screen.getByRole("button", { name: "Save connection" }));
 
     expect(key.value).toBe("");
+  });
+
+  it("does not ask for an endpoint a provider publishes for every account", async () => {
+    const user = userEvent.setup();
+    renderSection({ provider: "helius" });
+
+    await user.click(screen.getByRole("button", { name: "Add connection" }));
+    expect(screen.queryByRole("textbox", { name: /Endpoint URL/i })).toBeNull();
+  });
+
+  it("asks for an endpoint when the provider issues an account-specific one", async () => {
+    const user = userEvent.setup();
+    renderSection({ provider: "quicknode" });
+
+    await user.click(screen.getByRole("button", { name: "Add connection" }));
+    expect(screen.getByRole("textbox", { name: /Endpoint URL/i })).toBeTruthy();
+  });
+
+  it("lets the key be revealed so a typo is catchable before saving", async () => {
+    const user = userEvent.setup();
+    renderSection();
+
+    await user.click(screen.getByRole("button", { name: "Add connection" }));
+    const key = screen.getByLabelText(/API key/i) as HTMLInputElement;
+    expect(key.type).toBe("password");
+
+    await user.click(screen.getByRole("button", { name: "Show" }));
+    expect(key.type).toBe("text");
+
+    await user.click(screen.getByRole("button", { name: "Hide" }));
+    expect(key.type).toBe("password");
   });
 
   it("masks a stored credential down to a host and suffix", () => {

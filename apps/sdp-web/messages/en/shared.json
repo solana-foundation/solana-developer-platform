@@ -392,7 +392,9 @@
     "rpcByokAdminOnly": "Only organization administrators can add credentials.",
     "rpcByokLabelPlaceholder": "Production key",
     "rpcByokCancel": "Cancel",
-    "rpcByokSave": "Save connection"
+    "rpcByokSave": "Save connection",
+    "rpcByokShowKey": "Show",
+    "rpcByokHideKey": "Hide"
   },
   "notifications": {
     "ariaLabel": "Notifications",

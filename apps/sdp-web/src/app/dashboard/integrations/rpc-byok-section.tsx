@@ -1,6 +1,6 @@
 "use client";
 
-import type { SafeRpcConnection } from "@sdp/types";
+import { rpcProviderNeedsEndpoint, type SafeRpcConnection } from "@sdp/types";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -38,6 +38,8 @@ export function RpcByokSection({
   const [endpointUrl, setEndpointUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [network, setNetwork] = useState("devnet");
+  const [showKey, setShowKey] = useState(false);
+  const needsEndpoint = rpcProviderNeedsEndpoint(provider);
 
   const runConnectionAction = async (
     action: typeof activateRpcConnectionAction,
@@ -78,6 +80,7 @@ export function RpcByokSection({
         setCredentialLabel("");
         setEndpointUrl("");
         setIsFormOpen(false);
+        setShowKey(false);
         toast.success(t("Shared.integrations.rpcByokAdded"), { position: "bottom-right" });
         return;
       }
@@ -216,36 +219,56 @@ export function RpcByokSection({
               </div>
             </div>
 
-            <label className="grid gap-1.5 text-sm">
-              <span className="font-medium text-primary">
-                {t("Shared.integrations.rpcByokEndpoint")}
-              </span>
-              <Input
-                required
-                type="url"
-                value={endpointUrl}
-                onChange={(event) => setEndpointUrl(event.target.value)}
-                placeholder="https://your-endpoint.example"
-              />
-              <span className="text-xs text-tertiary">
-                {t("Shared.integrations.rpcByokEndpointHint")}{" "}
-                {/* Rendered as an element, not copy: translate() reads braces in
-                  a message as an interpolation slot and throws on render. */}
-                <code className="rounded bg-fill-subtle px-1 font-mono">{"{API_KEY}"}</code>
-              </span>
-            </label>
+            {/* Only providers that issue an account-specific host make the
+                tenant type one; for the rest the published endpoint is used. */}
+            {needsEndpoint ? (
+              <label className="grid gap-1.5 text-sm">
+                <span className="font-medium text-primary">
+                  {t("Shared.integrations.rpcByokEndpoint")}
+                </span>
+                <Input
+                  required
+                  type="url"
+                  value={endpointUrl}
+                  onChange={(event) => setEndpointUrl(event.target.value)}
+                  placeholder="https://your-endpoint.example"
+                />
+                <span className="text-xs text-tertiary">
+                  {t("Shared.integrations.rpcByokEndpointHint")}{" "}
+                  {/* Rendered as an element, not copy: translate() reads braces
+                    in a message as an interpolation slot and throws on render. */}
+                  <code className="rounded bg-fill-subtle px-1 font-mono">{"{API_KEY}"}</code>
+                </span>
+              </label>
+            ) : null}
 
             <label className="grid gap-1.5 text-sm">
               <span className="font-medium text-primary">
                 {t("Shared.integrations.rpcByokApiKey")}
               </span>
-              <Input
-                required
-                type="password"
-                autoComplete="off"
-                value={apiKey}
-                onChange={(event) => setApiKey(event.target.value)}
-              />
+              <div className="flex items-center gap-2">
+                <Input
+                  required
+                  className="flex-1"
+                  type={showKey ? "text" : "password"}
+                  autoComplete="off"
+                  value={apiKey}
+                  onChange={(event) => setApiKey(event.target.value)}
+                />
+                {/* A typo in a masked field is the usual reason a first
+                    activation fails, so the value is checkable before saving. */}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  aria-pressed={showKey}
+                  onClick={() => setShowKey((shown) => !shown)}
+                >
+                  {showKey
+                    ? t("Shared.integrations.rpcByokHideKey")
+                    : t("Shared.integrations.rpcByokShowKey")}
+                </Button>
+              </div>
               <span className="text-xs text-tertiary">
                 {t("Shared.integrations.rpcByokApiKeyHint")}
               </span>
