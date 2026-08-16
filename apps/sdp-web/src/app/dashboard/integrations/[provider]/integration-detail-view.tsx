@@ -87,11 +87,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function resolvePrimaryAction(
-  detail: IntegrationDetail,
-  t: Translate,
-  rpc: RpcConnectionContext | undefined
-) {
+function resolvePrimaryAction(detail: IntegrationDetail, t: Translate) {
   // With the connection state unreadable, no state-dependent action is honest.
   if (detail.status === "unknown") {
     return null;
@@ -121,16 +117,9 @@ function resolvePrimaryAction(
       </Button>
     );
   }
-  // With the connection panel mounted, the header would only repeat its
-  // buttons; the Settings link stays as the fallback for a page that could not
-  // resolve the organization.
-  if (detail.family === "rpc" && !rpc) {
-    return (
-      <Button asChild variant="secondary">
-        <Link href="/dashboard/settings">{t("Shared.integrations.rpcSectionAction")}</Link>
-      </Button>
-    );
-  }
+  // RPC acts through the connection panel below. When the organization could
+  // not be resolved the panel does not render either, and there is no honest
+  // action left to offer -- Settings no longer holds RPC (HOO-787).
   return null;
 }
 
@@ -144,7 +133,7 @@ export async function IntegrationDetailView({
   const t = await getTranslations();
   const entry = detail.custodyEntry;
 
-  const primaryAction = resolvePrimaryAction(detail, t, rpc);
+  const primaryAction = resolvePrimaryAction(detail, t);
 
   return (
     <div className="w-full space-y-6 px-4 py-6 md:px-6" data-integration-detail={detail.provider}>

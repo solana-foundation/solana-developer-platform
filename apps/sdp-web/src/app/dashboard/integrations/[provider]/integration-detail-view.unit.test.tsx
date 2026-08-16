@@ -105,12 +105,11 @@ describe("IntegrationDetailView", () => {
     expect(markup).not.toContain("Change in Settings");
   });
 
-  it("keeps the Settings link when the organization could not be resolved", async () => {
+  it("offers no RPC action when the organization could not be resolved", async () => {
     const markup = await render("helius");
-    // No rpc context means no panel, so the page must still offer somewhere to
-    // change the provider rather than becoming a dead end.
-    expect(markup).toContain("Change in Settings");
-    expect(markup).toContain("/dashboard/settings");
+    // No rpc context means no panel. Settings no longer holds RPC, so linking
+    // there would be a dead end rather than a fallback.
+    expect(markup).not.toContain("/dashboard/settings");
     expect(markup).not.toContain("rpc-connection-panel");
   });
 
