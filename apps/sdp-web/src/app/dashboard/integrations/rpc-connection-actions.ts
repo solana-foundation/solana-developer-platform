@@ -49,8 +49,10 @@ export async function submitRpcConnectionAction(
   const apiKey = String(formData.get("apiKey") ?? "");
 
   // Trimmed-empty passes the browser's `required` check but is a known reject.
-  if (!provider || !network || !credentialLabel || !endpointUrl || !apiKey.trim()) {
-    return { status: "invalid", message: "Every field is required." };
+  // The endpoint is deliberately absent: providers that publish one host for
+  // every account resolve it server-side, and only the rest are asked for it.
+  if (!provider || !network || !credentialLabel || !apiKey.trim()) {
+    return { status: "invalid", message: "A name and an API key are required." };
   }
 
   try {
@@ -64,7 +66,8 @@ export async function submitRpcConnectionAction(
           network,
           scope,
           credentialLabel,
-          endpointUrl,
+          // Omitted, not empty: the API validates this as a URL when present.
+          ...(endpointUrl ? { endpointUrl } : {}),
           apiKey,
         }),
       }
