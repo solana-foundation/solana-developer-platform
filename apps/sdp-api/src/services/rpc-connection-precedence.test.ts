@@ -3,7 +3,7 @@ import type {
   TenantRpcConnectionLookup,
   TenantRpcConnectionResolution,
 } from "@sdp/rpc/relay";
-import { resolveRpcTarget } from "@sdp/rpc/relay";
+import { resolveRoundRobinRpcTargets, resolveRpcTarget } from "@sdp/rpc/relay";
 import { describe, expect, it, vi } from "vitest";
 
 /**
@@ -153,6 +153,54 @@ describe("tenant RPC connection precedence", () => {
         organizationId: "org_1",
         authProjectId: null,
         requestedProjectId: null,
+      })
+    ).rejects.toThrow(FELL_THROUGH);
+  });
+
+  it("routes the faucet path through a tenant connection too", async () => {
+    // The airdrop branch resolves separately; leaving it on managed providers
+    // let an organization on its own key still spend platform credentials.
+    const targets = await resolveRoundRobinRpcTargets({
+      env: { SOLANA_NETWORK: "devnet", SOLANA_RPC_URL: "https://platform.example" },
+      kv,
+      db,
+      organizationId: "org_1",
+      authProjectId: null,
+      requestedProjectId: null,
+      connections: lookupReturning({ __organization__: activeConnection("rconn_org") }),
+    });
+
+    expect(targets).toHaveLength(1);
+    expect(targets[0].selectionMode).toBe("organization_connection");
+    expect(targets[0].connectionId).toBe("rconn_org");
+  });
+
+  it("fails the faucet path closed on an unusable connection", async () => {
+    await expect(
+      resolveRoundRobinRpcTargets({
+        env: { SOLANA_NETWORK: "devnet", SOLANA_RPC_URL: "https://platform.example" },
+        kv,
+        db,
+        organizationId: "org_1",
+        authProjectId: null,
+        requestedProjectId: null,
+        connections: lookupReturning({
+          __organization__: { kind: "unusable", reason: "no active default connection" },
+        }),
+      })
+    ).rejects.toThrow(/not active/i);
+  });
+
+  it("still round-robins platform providers when no connection is configured", async () => {
+    await expect(
+      resolveRoundRobinRpcTargets({
+        env: { SOLANA_NETWORK: "devnet", SOLANA_RPC_URL: "https://platform.example" },
+        kv,
+        db,
+        organizationId: "org_1",
+        authProjectId: null,
+        requestedProjectId: null,
+        connections: lookupReturning({}),
       })
     ).rejects.toThrow(FELL_THROUGH);
   });
