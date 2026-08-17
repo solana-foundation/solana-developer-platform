@@ -258,7 +258,7 @@ questions. An enabled Deposit button with no flow behind it is the dead-end
 review caught on #1340; a button the API refuses is the same failure at a later
 boundary.
 
-Two things still constrain the design, both discovered rather than assumed:
+Three things still constrain the design, all discovered rather than assumed:
 
 - **Confirm MOVES MONEY here, unlike the custodial run.** The custodial wizard
   provisions a wallet and hands back an address to fund later; this signs and
@@ -269,6 +269,11 @@ Two things still constrain the design, both discovered rather than assumed:
   there are lost. `earnDepositStyle` (@sdp/types) is what the completion step
   branches on, and the drift test in apps/sdp-api keeps it honest against the
   real `supportsPortfolioWallets` capability.
+- **Amount precision comes from the strategy's exact deposit mint.** Wallet
+  balances are optional RPC context, never the gate. The modal rejects a
+  non-zero fractional digit below one mint atom before submission and never
+  rounds or truncates it; insignificant trailing zeroes remain valid because
+  the provider canonicalizes those away. An unknown mint scale fails closed.
 
 ### One strategy, no curator step
 
@@ -427,8 +432,10 @@ same row id as `custodyWalletId`. The API authorizes the exact row before
 resolving its provider wallet; a provider `walletId` is unique only within its
 custody configuration, and a public key can match more than one provider
 record. A successful response always carries a transaction signature because
-signing precedes intent persistence; the submitted and ambiguous-pending panels
-therefore always expose the cluster-correct explorer link.
+signing precedes intent persistence; the submitted, confirmed and
+ambiguous-pending panels therefore always expose the cluster-correct explorer
+link, with confirmed rendered as the terminal on-chain outcome rather than
+reusing unconfirmed copy.
 
 **That fourth check is not optional.** Before the vault-direct run existed,
 omitting it let a production Kamino row link into the custodial route, which

@@ -1,6 +1,6 @@
 "use client";
 
-import type { CustodyWalletSummary, EarnStrategy } from "@sdp/types";
+import { type CustodyWalletSummary, type EarnStrategy, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import { useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,6 +46,77 @@ import { strategySourceLabel, strategyToken } from "./earn-program-presentation"
  */
 
 type VaultDepositStep = "wallet" | "amount";
+
+/**
+ * The vault builder reads this same mint's scale from chain before signing.
+ * Resolve it from the strategy instead of a wallet balance: balance reads are
+ * optional context, while the strategy mint defines what the transaction can
+ * encode even when that context is unavailable.
+ */
+function strategyTokenDecimals(strategy: EarnStrategy, token: string | undefined) {
+  for (const mint of strategy.depositMints) {
+    const knownToken = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
+    if (knownToken && knownToken.symbol.toLowerCase() === token) return knownToken.decimals;
+  }
+  return undefined;
+}
+
+/**
+ * Fractional zeroes beyond the mint scale carry no precision and the provider
+ * canonicalizes them away. Any non-zero digit below one mint atom must be
+ * refused rather than rounded before this money-moving request is submitted.
+ */
+function fitsMintScale(value: string, decimals: number) {
+  const fraction = value.split(".")[1] ?? "";
+  return fraction.replace(/0+$/, "").length <= decimals;
+}
+
+function validateVaultAmount(value: string, decimals: number | undefined) {
+  if (!/^\d+(\.\d+)?$/.test(value) || !/[1-9]/.test(value)) {
+    return { kind: "invalid-shape", valid: false } as const;
+  }
+  if (decimals === undefined) {
+    return { kind: "unknown-scale", valid: false } as const;
+  }
+  if (!fitsMintScale(value, decimals)) {
+    return { decimals, kind: "over-precision", valid: false } as const;
+  }
+  return { kind: "valid", valid: true } as const;
+}
+
+function vaultDepositOutcome(
+  status: EarnVaultDepositResult["status"],
+  t: ReturnType<typeof useTranslations>
+) {
+  switch (status) {
+    case "pending":
+      return {
+        body: t("DashboardEarn.deposit.vaultPendingBody"),
+        note: t("DashboardEarn.deposit.vaultSettlingNote"),
+        title: t("DashboardEarn.deposit.vaultPendingTitle"),
+      };
+    case "confirmed":
+      return {
+        body: t("DashboardEarn.deposit.vaultConfirmedBody"),
+        note: t("DashboardEarn.deposit.vaultConfirmedNote"),
+        title: t("DashboardEarn.deposit.vaultConfirmedTitle"),
+      };
+    case "submitted":
+      return {
+        body: t("DashboardEarn.deposit.vaultDoneBody"),
+        note: t("DashboardEarn.deposit.vaultSettlingNote"),
+        title: t("DashboardEarn.deposit.vaultDoneTitle"),
+      };
+    case "failed":
+      // Failed responses are converted to the modal's error state before a
+      // result is stored. Reaching this branch would violate that invariant.
+      throw new Error("Failed vault deposits cannot render as successful outcomes");
+    default: {
+      const exhaustive: never = status;
+      throw new Error(`Unhandled vault deposit status: ${exhaustive}`);
+    }
+  }
+}
 
 export function EarnVaultDepositModal({
   strategy,
@@ -102,11 +173,21 @@ export function EarnVaultDepositModal({
   );
   const token = strategyToken(strategy);
   const tokenLabel = token?.toUpperCase() ?? "";
+  const tokenDecimals = strategyTokenDecimals(strategy, token);
   const walletBalance =
     selectedWallet && token ? walletTokenAmount(selectedWallet, token) : undefined;
 
   const amountNumber = Number(amount);
-  const amountValid = /^\d+(\.\d+)?$/.test(amount) && amountNumber > 0;
+  // Fail closed if a modal is ever opened for a strategy whose mint metadata
+  // cannot establish the transaction's smallest representable unit.
+  const amountValidation = validateVaultAmount(amount, tokenDecimals);
+  const amountValid = amountValidation.valid;
+  const amountPrecisionError =
+    amountValidation.kind === "over-precision"
+      ? t("DashboardEarn.deposit.vaultAmountPrecision", {
+          decimals: amountValidation.decimals,
+        })
+      : null;
   // Balance is CONTEXT, not a gate: it comes from a live RPC read that may be
   // unavailable, and the chain is the real authority. An unreadable balance must
   // never block a deposit the wallet can actually fund.
@@ -149,31 +230,21 @@ export function EarnVaultDepositModal({
 
   if (result) {
     /**
-     * `pending` and `submitted` are DIFFERENT outcomes and must not share a
-     * screen. `submitted` means signed and broadcast — on the wire, not
-     * settled. `pending` means SDP holds a signed transaction whose fate it
-     * could not establish (an ambiguous send), which is precisely the state a
-     * reader must not be told is finished, and precisely the state where a
-     * blind retry can deposit twice.
+     * These are three different outcomes. `submitted` is signed and broadcast
+     * but not settled. `pending` is an ambiguous send whose fate SDP could not
+     * establish, where a blind retry can deposit twice. `confirmed` is the
+     * terminal on-chain result and must never inherit either unconfirmed claim.
      *
-     * Neither is confirmation, so neither claims a holding: SDP has no
-     * confirmer for this path yet, and the Active tab reads custodial programs
-     * only, so "you will see it under Active" was false for both.
+     * None claims the position is visible under Active yet: that tab still
+     * reads custodial programs only.
      */
-    const inFlight = result.status === "pending";
-    const title = inFlight
-      ? t("DashboardEarn.deposit.vaultPendingTitle")
-      : t("DashboardEarn.deposit.vaultDoneTitle");
+    const outcome = vaultDepositOutcome(result.status, t);
 
     return (
-      <Modal isOpen ariaLabel={title} onClose={onClose} size="md">
+      <Modal isOpen ariaLabel={outcome.title} onClose={onClose} size="md">
         <div data-modal-focus-panel={focusPanelKey} ref={contentRef}>
-          <StepSection focusHeading title={title}>
-            <p className="mb-5 text-sm leading-6 text-secondary">
-              {inFlight
-                ? t("DashboardEarn.deposit.vaultPendingBody")
-                : t("DashboardEarn.deposit.vaultDoneBody")}
-            </p>
+          <StepSection focusHeading title={outcome.title}>
+            <p className="mb-5 text-sm leading-6 text-secondary">{outcome.body}</p>
             <dl className="grid gap-3 rounded-xl border border-border-default bg-surface-raised p-5">
               <SummaryRow label={t("DashboardEarn.deposit.vaultStrategy")} value={strategy.name} />
               <SummaryRow
@@ -202,9 +273,7 @@ export function EarnVaultDepositModal({
                 }
               />
             </dl>
-            <p className="mt-4 text-sm leading-6 text-secondary">
-              {t("DashboardEarn.deposit.vaultSettlingNote")}
-            </p>
+            <p className="mt-4 text-sm leading-6 text-secondary">{outcome.note}</p>
             <div className="mt-6 flex justify-end">
               <Button onClick={onClose}>{t("DashboardEarn.deposit.vaultDone")}</Button>
             </div>
@@ -276,6 +345,12 @@ export function EarnVaultDepositModal({
                 {t("DashboardEarn.deposit.vaultAmount", { token: tokenLabel })}
               </label>
               <Input
+                aria-describedby={
+                  amountPrecisionError
+                    ? "vault-deposit-balance vault-deposit-amount-error"
+                    : "vault-deposit-balance"
+                }
+                aria-invalid={Boolean(amountPrecisionError)}
                 autoComplete="off"
                 id="vault-deposit-amount"
                 inputMode="decimal"
@@ -283,13 +358,22 @@ export function EarnVaultDepositModal({
                 placeholder="0.00"
                 value={amount}
               />
-              <p className="text-xs text-tertiary tabular-nums">
+              <p className="text-xs text-tertiary tabular-nums" id="vault-deposit-balance">
                 {walletBalance === undefined
                   ? t("DashboardEarn.deposit.vaultBalanceUnknown")
                   : t("DashboardEarn.deposit.vaultBalanceAvailable", {
                       amount: formatTokenQuantity(walletBalance, tokenLabel),
                     })}
               </p>
+              {amountPrecisionError ? (
+                <p
+                  className="text-destructive text-xs"
+                  id="vault-deposit-amount-error"
+                  role="alert"
+                >
+                  {amountPrecisionError}
+                </p>
+              ) : null}
             </div>
 
             <dl className="grid gap-3 rounded-xl border border-border-default bg-surface-raised p-5">
