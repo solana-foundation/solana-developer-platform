@@ -6,6 +6,7 @@ import {
   assertClusterEndpoint,
   CLUSTER_ENDPOINT_PROOF_TTL_MS,
   resetClusterEndpointProofs,
+  resolveClusterRpcUrl,
   resolveVaultDirectClient,
 } from "./execution-registry";
 import { createVaultDeadline } from "./vault-deadline";
@@ -100,6 +101,48 @@ describe("assertClusterEndpoint", () => {
   });
 });
 
+describe("resolveClusterRpcUrl", () => {
+  it("prefers an explicit per-cluster endpoint", () => {
+    expect(
+      resolveClusterRpcUrl(
+        {
+          SOLANA_NETWORK: "devnet",
+          SOLANA_RPC_URL: "https://public.example.invalid",
+          SOLANA_DEVNET_RPC_URL: " https://earn-devnet.example.invalid ",
+        } as Env,
+        "devnet"
+      )
+    ).toBe("https://earn-devnet.example.invalid");
+  });
+
+  it("preserves the canonical managed-provider selection and API-key expansion", () => {
+    expect(
+      resolveClusterRpcUrl(
+        {
+          SOLANA_NETWORK: "devnet",
+          SOLANA_RPC_URL: "https://public.example.invalid",
+          SOLANA_RPC_DEFAULT_PROVIDER: "helius",
+          SOLANA_RPC_HELIUS_URL: "https://helius.example.invalid/?api-key={API_KEY}",
+          SOLANA_RPC_HELIUS_API_KEY: "secret key",
+        } as Env,
+        "devnet"
+      )
+    ).toBe("https://helius.example.invalid/?api-key=secret%20key");
+  });
+
+  it("does not reuse a canonical default for the other cluster", () => {
+    expect(
+      resolveClusterRpcUrl(
+        {
+          SOLANA_NETWORK: "devnet",
+          SOLANA_RPC_URL: "https://devnet.example.invalid",
+        } as Env,
+        "mainnet-beta"
+      )
+    ).toBe("");
+  });
+});
+
 describe("resolveVaultDirectClient", () => {
   it("keeps resolution I/O-free and preserves inherited provider capabilities", () => {
     const createRpc = vi.spyOn(solanaRpc, "createRpc");
@@ -139,7 +182,7 @@ describe("resolveVaultDirectClient", () => {
 
     const result = client.buildVaultDeposit(runtime, depositInput);
     const rejection = expect(result).rejects.toThrow(
-      "Verifying the devnet RPC endpoint timed out after 25ms"
+      "Building the vault deposit timed out after 25ms"
     );
     await vi.advanceTimersByTimeAsync(25);
     await rejection;

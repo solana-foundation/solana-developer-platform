@@ -26,12 +26,13 @@ export const KAMINO_POSITION_READ_CONCURRENCY = 4;
  */
 export type KaminoVaultOperationRunner = <T>(
   label: string,
-  operation: () => Promise<T>
+  operation: (assertActive: () => void) => Promise<T>
 ) => Promise<T>;
 
 async function mapSettledWithConcurrency<T, U>(
   items: readonly T[],
   concurrency: number,
+  assertActive: () => void,
   mapper: (item: T) => Promise<U>
 ): Promise<Array<PromiseSettledResult<U>>> {
   const results = new Array<PromiseSettledResult<U>>(items.length);
@@ -41,6 +42,9 @@ async function mapSettledWithConcurrency<T, U>(
   await Promise.all(
     Array.from({ length: workerCount }, async () => {
       while (nextIndex < items.length) {
+        // A timed-out aggregate read cannot cancel an in-flight SDK request,
+        // but it must never dequeue another vault after the budget expires.
+        assertActive();
         const index = nextIndex;
         nextIndex += 1;
         try {
@@ -136,10 +140,15 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
   private async withRuntime<T>(
     ctx: EarnRuntimeContext,
     label: string,
-    operation: (runtime: KaminoRuntime) => Promise<T>
+    operation: (runtime: KaminoRuntime, assertActive: () => void) => Promise<T>
   ): Promise<T> {
-    const runtime = await this.runtime(ctx);
-    return this.runOperation(label, () => operation(runtime));
+    return this.runOperation(label, async (assertActive) => {
+      // Endpoint resolution/proof and provider work are one operation, so they
+      // consume one deadline rather than receiving independent budgets.
+      const runtime = await this.runtime(ctx);
+      assertActive();
+      return operation(runtime, assertActive);
+    });
   }
 
   /**
@@ -157,13 +166,20 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
     ctx: EarnRuntimeContext,
     input: EarnVaultDepositInput
   ): Promise<EarnVaultTransactionPlan> {
-    const plan = await this.withRuntime(ctx, "Building the vault deposit", (runtime) =>
-      buildKaminoDepositPlan(runtime, {
-        vault: address(input.providerReference),
-        owner: this.owner(input.owner),
-        amount: input.amount,
-        ...(input.minSharesOut === undefined ? {} : { minSharesOut: input.minSharesOut }),
-      })
+    const plan = await this.withRuntime(
+      ctx,
+      "Building the vault deposit",
+      (runtime, assertActive) =>
+        buildKaminoDepositPlan(
+          runtime,
+          {
+            vault: address(input.providerReference),
+            owner: this.owner(input.owner),
+            amount: input.amount,
+            ...(input.minSharesOut === undefined ? {} : { minSharesOut: input.minSharesOut }),
+          },
+          assertActive
+        )
     );
     return toEarnVaultTransactionPlan(plan);
   }
@@ -206,22 +222,26 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
     ctx: EarnRuntimeContext,
     input: EarnVaultPositionInput
   ): Promise<EarnVaultPositionSnapshot[]> {
-    return this.withRuntime(ctx, "Reading vault positions", async (runtime) => {
+    return this.withRuntime(ctx, "Reading vault positions", async (runtime, assertActive) => {
       const owner: Address = address(input.owner);
       const readAllHoldings = input.providerReferences.length === 0;
       const providerReferences = readAllHoldings
-        ? await discoverKaminoPositionVaults(runtime, owner)
+        ? await discoverKaminoPositionVaults(runtime, owner, assertActive)
         : input.providerReferences;
+      assertActive();
       if (providerReferences.length === 0) return [];
 
       // One shared slot makes the page internally consistent. The client carries
       // the same transport deadline as every nested Kamino SDK read below.
       const slot = await createKaminoRpc(runtime.rpcUrl).getSlot().send();
+      assertActive();
 
       const results = await mapSettledWithConcurrency(
         providerReferences,
         KAMINO_POSITION_READ_CONCURRENCY,
-        (reference) => readKaminoPosition(runtime, { vault: address(reference), owner, slot })
+        assertActive,
+        (reference) =>
+          readKaminoPosition(runtime, { vault: address(reference), owner, slot }, assertActive)
       );
 
       const failures = results.flatMap((result, index) =>

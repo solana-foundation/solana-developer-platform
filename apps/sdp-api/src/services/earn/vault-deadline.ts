@@ -11,8 +11,8 @@ export const VAULT_EXTERNAL_CALL_TIMEOUT_MS = 20_000;
  * effect.
  *
  * This bounds caller latency; it cannot cancel an SDK that exposes no
- * AbortSignal. A timed-out broadcast or combined fee-payment `signAndSend`
- * therefore remains ambiguous and must never be treated as a definite failure.
+ * AbortSignal. A timed-out broadcast therefore remains ambiguous and must
+ * never be treated as a definite failure; callers persist signed intent first.
  */
 export class VaultDeadline {
   readonly timeoutMs: number;
@@ -26,10 +26,15 @@ export class VaultDeadline {
     this.expiresAt = Date.now() + timeoutMs;
   }
 
+  /** Refuse to start another external boundary after this budget expired. */
+  assertActive(label: string): void {
+    if (this.expiresAt - Date.now() <= 0) throw this.timeoutError(label);
+  }
+
   /** Run one external stage inside the workflow's remaining absolute budget. */
   async run<T>(label: string, operation: () => Promise<T>): Promise<T> {
+    this.assertActive(label);
     const remainingMs = this.expiresAt - Date.now();
-    if (remainingMs <= 0) throw this.timeoutError(label);
 
     // Invoke only after the expiry check. A synchronous throw remains the
     // operation's own error and never gets relabelled as a timeout.

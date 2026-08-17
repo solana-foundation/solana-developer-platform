@@ -51,6 +51,17 @@ describe("withVaultDeadline", () => {
     expect(operation).not.toHaveBeenCalled();
   });
 
+  it("exposes the same expiry check to nested provider boundaries", () => {
+    vi.useFakeTimers();
+    const deadline = createVaultDeadline(25);
+
+    vi.advanceTimersByTime(25);
+
+    expect(() => deadline.assertActive("nested provider read")).toThrow(
+      "nested provider read timed out after 25ms"
+    );
+  });
+
   it("preserves an operation's own rejection", async () => {
     const deadline = createVaultDeadline(25);
     const cause = new Error("upstream failed");

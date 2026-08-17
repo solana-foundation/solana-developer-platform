@@ -27,9 +27,10 @@ async function resolveKaminoRpcUrl(
   return rpcUrl;
 }
 
-const kamino = new KaminoVaultDirectClient(resolveKaminoRpcUrl, (label, operation) =>
-  createVaultDeadline().run(label, operation)
-);
+const kamino = new KaminoVaultDirectClient(resolveKaminoRpcUrl, (label, operation) => {
+  const deadline = createVaultDeadline();
+  return deadline.run(label, () => operation(() => deadline.assertActive(label)));
+});
 assertNotPortfolioProvider(kamino);
 
 /**

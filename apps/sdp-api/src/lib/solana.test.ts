@@ -1,4 +1,5 @@
 import { getSolanaConfig, resolveDefaultSolanaRpcUrl } from "@sdp/rpc";
+import { createRpc } from "@sdp/rpc/solana";
 import { describe, expect, it } from "vitest";
 import type { Env } from "@/types/env";
 
@@ -66,5 +67,13 @@ describe("solana config resolution", () => {
     expect(() => getSolanaConfig({ SOLANA_NETWORK: "devnet" } as Partial<Env> as Env)).toThrow(
       "No Solana RPC endpoint is configured"
     );
+  });
+
+  it("constructs an explicit endpoint without requiring a legacy default", () => {
+    const explicitOnly = { SOLANA_NETWORK: "devnet" } as Partial<Env> as Env;
+
+    expect(() =>
+      createRpc(explicitOnly, { rpcUrl: "https://devnet.example.invalid" })
+    ).not.toThrow();
   });
 });

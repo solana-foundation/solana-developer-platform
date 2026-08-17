@@ -2,6 +2,7 @@ import { supportsVaultDirect } from "@sdp/earn/capabilities";
 import { providerNotConfigured } from "@sdp/earn/errors";
 import type { EarnVaultDirectProvider, EarnVaultProvider } from "@sdp/earn/types";
 import { assertNotPortfolioProvider, KaminoVaultDirectClient } from "@sdp/kamino";
+import { resolveDefaultSolanaRpcUrl } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import {
   CLUSTER_BY_SDP_ENVIRONMENT,
@@ -10,7 +11,7 @@ import {
   type SolanaCluster,
 } from "@sdp/types";
 import type { Env } from "@/types/env";
-import { type VaultDeadline, withVaultDeadline } from "./vault-deadline";
+import type { VaultDeadline } from "./vault-deadline";
 
 /**
  * Which providers this deployment can EXECUTE for, as opposed to merely
@@ -33,16 +34,22 @@ import { type VaultDeadline, withVaultDeadline } from "./vault-deadline";
  * `SOLANA_RPC_URL` for both meant whichever chain that endpoint served, the
  * other environment silently built and read against the wrong one.
  *
- * `SOLANA_DEVNET_RPC_URL` / `SOLANA_MAINNET_RPC_URL` are optional overrides;
- * `SOLANA_RPC_URL` stays the fallback so an existing single-cluster deployment
- * keeps working unchanged. What makes the fallback SAFE rather than the same
- * bug with more steps is `assertClusterEndpoint` below: the endpoint has to
- * prove which chain it serves before anything is built against it.
+ * `SOLANA_DEVNET_RPC_URL` / `SOLANA_MAINNET_RPC_URL` are optional overrides.
+ * The configured cluster may fall back through the canonical default resolver,
+ * preserving managed-provider selection and API-key expansion; the other
+ * cluster requires an explicit override. `assertClusterEndpoint` still makes
+ * every selected URL prove which chain it serves before work begins.
  */
 export function resolveClusterRpcUrl(env: Env, cluster: SolanaCluster): string {
   const perCluster = cluster === "devnet" ? env.SOLANA_DEVNET_RPC_URL : env.SOLANA_MAINNET_RPC_URL;
-  const url = perCluster ?? env.SOLANA_RPC_URL;
-  return typeof url === "string" ? url.trim() : "";
+  if (typeof perCluster === "string" && perCluster.trim() !== "") return perCluster.trim();
+
+  // The canonical default may be a managed provider with URL/API-key template
+  // expansion. It is safe only for the cluster the process config names; the
+  // other cluster needs an explicit override and must fail closed without one.
+  const defaultCluster = env.SOLANA_NETWORK ?? "devnet";
+  if (defaultCluster !== cluster) return "";
+  return resolveDefaultSolanaRpcUrl(env)?.trim() ?? "";
 }
 
 /**
@@ -90,7 +97,7 @@ export async function assertClusterEndpoint(
     throw providerNotConfigured(
       `No Solana RPC endpoint is configured for ${cluster}. Set SOLANA_${
         cluster === "devnet" ? "DEVNET" : "MAINNET"
-      }_RPC_URL, or point SOLANA_RPC_URL at a ${cluster} endpoint.`
+      }_RPC_URL, or configure the canonical default for ${cluster}.`
     );
   }
 
@@ -101,13 +108,7 @@ export async function assertClusterEndpoint(
     proof = undefined;
   }
   if (!proof) {
-    proof = {
-      promise: withVaultDeadline(
-        getGenesisHash(env, rpcUrl),
-        `Verifying the ${cluster} RPC endpoint`
-      ),
-      expiresAt: null,
-    };
+    proof = { promise: getGenesisHash(env, rpcUrl), expiresAt: null };
     clusterProofs.set(key, proof);
   }
 
@@ -170,12 +171,10 @@ export function resolveEarnExecutionClient(
     const client = new KaminoVaultDirectClient(
       async (_ctx, cluster) => {
         const rpcUrl = resolveClusterRpcUrl(env, cluster);
-        await deadline.run(`Verifying the ${cluster} RPC endpoint`, () =>
-          assertClusterEndpoint(env, cluster, rpcUrl)
-        );
+        await assertClusterEndpoint(env, cluster, rpcUrl);
         return rpcUrl;
       },
-      (label, operation) => deadline.run(label, operation)
+      (label, operation) => deadline.run(label, () => operation(() => deadline.assertActive(label)))
     );
     assertNotPortfolioProvider(client);
     return client;

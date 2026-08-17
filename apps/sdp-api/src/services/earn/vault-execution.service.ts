@@ -1,14 +1,15 @@
-import type { EarnVaultTransactionPlan } from "@sdp/earn/types";
+import type { EarnVaultAssetIdentity, EarnVaultTransactionPlan } from "@sdp/earn/types";
 import * as solanaRpc from "@sdp/rpc/solana";
 import type { SolanaCluster } from "@sdp/types";
 import {
   type Address,
   address,
+  addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
-  createNoopSigner,
   createTransactionMessage,
   getBase64EncodedWireTransaction,
   getSignatureFromTransaction,
+  getTransactionDecoder,
   getTransactionEncoder,
   type Instruction,
   pipe,
@@ -60,16 +61,17 @@ export interface VaultExecutionScope {
   deadline: VaultDeadline;
 }
 
-export interface SubmitVaultPlanInput extends VaultExecutionScope {
+export interface VaultPlanExecutionScope extends VaultExecutionScope {
+  /** Catalogue identity authorized by the route before provider plan creation. */
+  expectedAssetIdentity: EarnVaultAssetIdentity;
+}
+
+export interface SignVaultPlanInput extends VaultPlanExecutionScope {
   plan: EarnVaultTransactionPlan;
   /** The custody wallet signer — the vault `user`, and the only real signer. */
   owner: TransactionSigner;
   rpcUrl: string;
   fee: VaultFeeMode;
-}
-
-export interface SubmitVaultPlanResult {
-  signature: Signature;
 }
 
 export interface SignedVaultTransaction {
@@ -85,13 +87,26 @@ export interface SignedVaultTransaction {
   lastValidBlockHeight: string;
 }
 
-function assertExpectedPlanCluster(
+function assertExpectedPlan(
   plan: EarnVaultTransactionPlan,
-  expectedCluster: SolanaCluster
+  expectedCluster: SolanaCluster,
+  expectedAssetIdentity: EarnVaultAssetIdentity
 ): void {
   if (plan.cluster !== expectedCluster) {
     throw new Error(
       `Vault plan targets ${plan.cluster}, not the expected ${expectedCluster} cluster`
+    );
+  }
+  if (plan.assetIdentity.depositTokenMint !== expectedAssetIdentity.depositTokenMint) {
+    throw new Error(
+      `Vault plan deposit token mint ${plan.assetIdentity.depositTokenMint} does not match ` +
+        `the expected ${expectedAssetIdentity.depositTokenMint}`
+    );
+  }
+  if (plan.assetIdentity.shareMint !== expectedAssetIdentity.shareMint) {
+    throw new Error(
+      `Vault plan share mint ${plan.assetIdentity.shareMint} does not match ` +
+        `the expected ${expectedAssetIdentity.shareMint}`
     );
   }
 }
@@ -115,19 +130,16 @@ async function verifyVaultRpc(
  * with money moved, and without the signature there is nothing to reconcile it
  * against — SDP would not know the transfer exists.
  *
- * Wallet-pays only. In the sponsored path the relay signs as fee payer AFTER
- * us, so the final signature is not knowable here; that path keeps the combined
- * `submitVaultPlan` and owes the same treatment before it is switched on.
+ * Works for both fee modes. Sponsored signing is deliberately sign-only: the
+ * custody owner signs first, the fee-payment port adds the fee-payer signature
+ * without broadcasting, and the fully signed bytes plus deterministic
+ * signature return to the caller for durable intent persistence.
  */
 export async function signVaultPlan(
   env: Env,
-  input: VaultExecutionScope & {
-    plan: EarnVaultTransactionPlan;
-    owner: TransactionSigner;
-    rpcUrl: string;
-  }
+  input: SignVaultPlanInput
 ): Promise<SignedVaultTransaction> {
-  assertExpectedPlanCluster(input.plan, input.cluster);
+  assertExpectedPlan(input.plan, input.cluster, input.expectedAssetIdentity);
   const instructions = singleBatchInstructions(input.plan).map(toKitInstruction);
   await verifyVaultRpc(env, input);
   const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
@@ -136,17 +148,49 @@ export async function signVaultPlan(
     () => solanaRpc.getRecentBlockhash(rpc, "confirmed")
   );
 
-  const message = pipe(
-    createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayerSigner(input.owner, m),
-    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-    (m) => appendTransactionMessageInstructions(instructions, m)
-  );
-  const signed = await input.deadline.run("Signing the vault transaction", () =>
-    signTransactionMessageWithSigners(message)
-  );
+  let signedBytes: Uint8Array;
+  if (input.fee.kind === "sponsored") {
+    const { feePayment } = input.fee;
+    const feePayer = await input.deadline.run("Resolving the sponsored fee payer", () =>
+      feePayment.getFeePayer()
+    );
+    const message = pipe(
+      createTransactionMessage({ version: 0 }),
+      (m) => setTransactionMessageFeePayer(feePayer, m),
+      (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+      (m) => appendTransactionMessageInstructions(instructions, m),
+      (m) => addSignersToTransactionMessage([input.owner], m)
+    );
+    const ownerSigned = await input.deadline.run("Signing the vault transaction", () =>
+      partiallySignTransactionMessageWithSigners(message)
+    );
+    const ownerSignedBytes = new Uint8Array(getTransactionEncoder().encode(ownerSigned));
+    signedBytes = await input.deadline.run("Signing the sponsored vault fee", () =>
+      feePayment.signAsFeePayer(ownerSignedBytes)
+    );
+  } else {
+    const message = pipe(
+      createTransactionMessage({ version: 0 }),
+      (m) => setTransactionMessageFeePayerSigner(input.owner, m),
+      (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+      (m) => appendTransactionMessageInstructions(instructions, m),
+      (m) => addSignersToTransactionMessage([input.owner], m)
+    );
+    const signed = await input.deadline.run("Signing the vault transaction", () =>
+      signTransactionMessageWithSigners(message)
+    );
+    signedBytes = new Uint8Array(getTransactionEncoder().encode(signed));
+  }
+
+  const signed = getTransactionDecoder().decode(signedBytes);
+  if (
+    signed.signatures[input.owner.address] === null ||
+    signed.signatures[input.owner.address] === undefined
+  ) {
+    throw new Error("Vault transaction is missing the custody-owner signature");
+  }
   return {
-    bytes: new Uint8Array(getTransactionEncoder().encode(signed)),
+    bytes: signedBytes,
     signature: getSignatureFromTransaction(signed),
     lastValidBlockHeight: String(lastValidBlockHeight),
   };
@@ -195,77 +239,6 @@ function singleBatchInstructions(plan: EarnVaultTransactionPlan) {
 }
 
 /**
- * Decide who pays the transaction fee.
- *
- * Kora only sponsors transactions whose programs are on its allowlist, and the
- * Kamino kvault/klend programs are not on it (the Private Channels escrow hit
- * the same wall and still pays its own fee). Rather than fail at submit with an
- * opaque relay rejection, callers pass `wallet-pays` when sponsorship is not
- * available for the programs in the plan.
- *
- * NOTE the distinction that is easy to lose: klend-sdk also has a `payer`
- * concept, but that is the RENT payer for created ATAs, embedded in the
- * instruction accounts. This function is about the TRANSACTION FEE payer, which
- * is a property of the message. They are different spends and must not be
- * conflated — a sponsor that agreed to fees has not agreed to fund rent.
- */
-export async function submitVaultPlan(
-  env: Env,
-  input: SubmitVaultPlanInput
-): Promise<SubmitVaultPlanResult> {
-  assertExpectedPlanCluster(input.plan, input.cluster);
-  const instructions = singleBatchInstructions(input.plan).map(toKitInstruction);
-  await verifyVaultRpc(env, input);
-  const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
-  const { blockhash, lastValidBlockHeight } = await input.deadline.run(
-    "Fetching the vault transaction blockhash",
-    () => solanaRpc.getRecentBlockhash(rpc, "confirmed")
-  );
-
-  if (input.fee.kind === "sponsored") {
-    // Sponsored: the relay's address is the fee payer and signs AFTER us, so the
-    // message carries a noop signer for it and the custody wallet signs its own
-    // slots only.
-    const { feePayment } = input.fee;
-    const feePayer = await input.deadline.run("Resolving the sponsored fee payer", () =>
-      feePayment.getFeePayer()
-    );
-    const message = pipe(
-      createTransactionMessage({ version: 0 }),
-      (m) => setTransactionMessageFeePayerSigner(createNoopSigner(feePayer), m),
-      (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-      (m) => appendTransactionMessageInstructions(instructions, m)
-    );
-    const partiallySigned = await input.deadline.run(
-      "Signing the sponsored vault transaction",
-      () => partiallySignTransactionMessageWithSigners(message)
-    );
-    const bytes = new Uint8Array(getTransactionEncoder().encode(partiallySigned));
-    const signature = await input.deadline.run("Submitting the sponsored vault transaction", () =>
-      feePayment.signAndSend(bytes)
-    );
-    return { signature };
-  }
-
-  // Wallet pays: the custody wallet is both the vault `user` and the fee payer,
-  // so it signs once for both and we broadcast directly.
-  const message = pipe(
-    createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayerSigner(input.owner, m),
-    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-    (m) => appendTransactionMessageInstructions(instructions, m)
-  );
-  const signed = await input.deadline.run("Signing the vault transaction", () =>
-    signTransactionMessageWithSigners(message)
-  );
-  const bytes = new Uint8Array(getTransactionEncoder().encode(signed));
-  const signature = await input.deadline.run("Broadcasting the vault transaction", () =>
-    solanaRpc.sendTransaction(rpc, bytes)
-  );
-  return { signature };
-}
-
-/**
  * Simulate before signing.
  *
  * Worth the extra round trip on this path specifically: the instructions were
@@ -275,9 +248,13 @@ export async function submitVaultPlan(
  */
 export async function simulateVaultPlan(
   env: Env,
-  input: VaultExecutionScope & { plan: EarnVaultTransactionPlan; owner: Address; rpcUrl: string }
+  input: VaultPlanExecutionScope & {
+    plan: EarnVaultTransactionPlan;
+    owner: Address;
+    rpcUrl: string;
+  }
 ): Promise<{ ok: true } | { ok: false; error: string; logs: readonly string[] }> {
-  assertExpectedPlanCluster(input.plan, input.cluster);
+  assertExpectedPlan(input.plan, input.cluster, input.expectedAssetIdentity);
   let batch: ReturnType<typeof singleBatchInstructions>;
   try {
     batch = singleBatchInstructions(input.plan);

@@ -35,7 +35,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-const runOperation: KaminoVaultOperationRunner = (_label, operation) => operation();
+const runOperation: KaminoVaultOperationRunner = (_label, operation) => operation(() => undefined);
 const client = new KaminoVaultDirectClient(async () => "https://example.invalid", runOperation);
 
 describe("KaminoVaultDirectClient capabilities", () => {
@@ -151,6 +151,37 @@ describe("KaminoVaultDirectClient capabilities", () => {
     expect(mocks.readKaminoPosition).not.toHaveBeenCalled();
   });
 
+  it("does not start provider work when endpoint proof finishes after expiry", async () => {
+    let resolveRpc!: (url: string) => void;
+    let expired = false;
+    const probe = new KaminoVaultDirectClient(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveRpc = resolve;
+        }),
+      (_label, operation) =>
+        operation(() => {
+          if (expired) throw new Error("vault operation expired");
+        })
+    );
+
+    const pending = probe.buildVaultDeposit(
+      { env: {}, environment: "sandbox" },
+      {
+        providerReference: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
+        owner: "11111111111111111111111111111112",
+        amount: "1",
+      }
+    );
+    await vi.waitFor(() => expect(resolveRpc).toBeTypeOf("function"));
+
+    expired = true;
+    resolveRpc("https://devnet.example.invalid");
+
+    await expect(pending).rejects.toThrow("vault operation expired");
+    expect(mocks.buildKaminoDepositPlan).not.toHaveBeenCalled();
+  });
+
   it("discovers owner-held vaults on chain without consulting the curated shelf", async () => {
     const resolvedRpcUrl = "https://devnet.example.invalid";
     const resolveRpcUrl = vi.fn(async () => resolvedRpcUrl);
@@ -203,7 +234,8 @@ describe("KaminoVaultDirectClient capabilities", () => {
     );
     expect(mocks.discoverKaminoPositionVaults).toHaveBeenCalledWith(
       { cluster: "devnet", rpcUrl: resolvedRpcUrl },
-      address(owner)
+      address(owner),
+      expect.any(Function)
     );
     expect(listStrategies).not.toHaveBeenCalled();
     expect(mocks.createKaminoRpc).toHaveBeenCalledWith(resolvedRpcUrl);
@@ -368,6 +400,42 @@ describe("KaminoVaultDirectClient capabilities", () => {
     expect(mocks.readKaminoPosition.mock.calls.every(([, input]) => input.slot === slot)).toBe(
       true
     );
+  });
+
+  it("does not dequeue more position reads after the operation expires", async () => {
+    let expired = false;
+    const probe = new KaminoVaultDirectClient(
+      async () => "https://devnet.example.invalid",
+      (_label, operation) =>
+        operation(() => {
+          if (expired) throw new Error("vault operation expired");
+        })
+    );
+    mocks.createKaminoRpc.mockReturnValue({
+      getSlot: () => ({ send: vi.fn().mockResolvedValue(123n) }),
+    });
+    const releases: Array<() => void> = [];
+    mocks.readKaminoPosition.mockImplementation(
+      () => new Promise<KaminoPosition>((resolve) => releases.push(() => resolve({} as never)))
+    );
+    const providerReference = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
+
+    const pending = probe.readVaultPositions(
+      { env: {}, environment: "sandbox" },
+      {
+        owner: "11111111111111111111111111111112",
+        providerReferences: Array.from({ length: 9 }, () => providerReference),
+      }
+    );
+    await vi.waitFor(() =>
+      expect(mocks.readKaminoPosition).toHaveBeenCalledTimes(KAMINO_POSITION_READ_CONCURRENCY)
+    );
+
+    expired = true;
+    for (const release of releases.splice(0)) release();
+
+    await expect(pending).rejects.toThrow("vault operation expired");
+    expect(mocks.readKaminoPosition).toHaveBeenCalledTimes(KAMINO_POSITION_READ_CONCURRENCY);
   });
 });
 
