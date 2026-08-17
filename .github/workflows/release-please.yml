@@ -81,14 +81,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          if ! git ls-remote --exit-code origin refs/heads/codex/release-main >/dev/null 2>&1; then
+          if ! git ls-remote --exit-code origin refs/heads/sdp/release-main >/dev/null 2>&1; then
             echo "No release branch was created; skipping translation sync."
             exit 0
           fi
 
           git reset --hard
-          git fetch origin codex/release-main
-          git checkout -B codex/release-main origin/codex/release-main
+          git fetch origin sdp/release-main
+          git checkout -B sdp/release-main origin/sdp/release-main
           node .github/scripts/translate-missing.mjs
 
   publish-release:
