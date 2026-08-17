@@ -106,4 +106,40 @@ describe("EarnVaultDepositModal", () => {
       requestId: expect.any(String),
     });
   });
+
+  it("renders the submitted result with the strategy token", async () => {
+    data.createDeposit.mockResolvedValue({
+      ok: true,
+      data: {
+        data: {
+          positionId: "evp_result",
+          movementId: "evm_result",
+          status: "submitted",
+          signature: "result_signature",
+          failureReason: null,
+          replayed: false,
+          strategy: {
+            id: USDT_STRATEGY.id,
+            name: USDT_STRATEGY.name,
+            provider: USDT_STRATEGY.provider,
+            providerReference: USDT_STRATEGY.providerReference,
+            hostCluster: USDT_STRATEGY.hostCluster,
+          },
+        },
+      },
+    });
+    const user = userEvent.setup();
+    render(<EarnVaultDepositModal onClose={() => {}} strategy={USDT_STRATEGY} />);
+
+    await user.click(await screen.findByRole("radio"));
+    await user.click(screen.getByRole("button", { name: "DashboardEarn.deposit.continueAction" }));
+    await user.type(await screen.findByLabelText("DashboardEarn.deposit.vaultAmount(USDT)"), "2");
+    await user.click(screen.getByRole("button", { name: "DashboardEarn.deposit.vaultSubmit" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "DashboardEarn.deposit.vaultDoneTitle" })
+    ).not.toBeNull();
+    expect(screen.getByText("DashboardEarn.deposit.vaultAmount(USDT)")).not.toBeNull();
+    expect(screen.getByText("2 USDT")).not.toBeNull();
+  });
 });

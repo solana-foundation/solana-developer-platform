@@ -177,7 +177,7 @@ export function EarnVaultDepositModal({
             <dl className="grid gap-3 rounded-xl border border-border-default bg-surface-raised p-5">
               <SummaryRow label={t("DashboardEarn.deposit.vaultStrategy")} value={strategy.name} />
               <SummaryRow
-                label={t("DashboardEarn.deposit.vaultAmount")}
+                label={t("DashboardEarn.deposit.vaultAmount", { token: tokenLabel })}
                 value={`${amount} ${token?.toUpperCase() ?? ""}`}
               />
               <SummaryRow
