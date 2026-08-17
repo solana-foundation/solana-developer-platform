@@ -4,7 +4,7 @@ import type { PaymentTransferSummary } from "@sdp/types";
 import { ExternalLinkIcon, ReceiptTextIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Badge, type BadgeVariant } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { Modal } from "@/components/ui/modal";
@@ -25,10 +25,12 @@ import { cn } from "@/lib/utils";
 import {
   formatDirection,
   formatDisplayAmount,
+  formatStatus,
   formatTimestamp,
   resolveTransferTokenLabel,
   resolveTransferTypeLabel,
   shortenAddress,
+  statusVariant,
 } from "../payments-overview.utils";
 import { TransactionAmount } from "./transactions-amount";
 import {
@@ -48,23 +50,6 @@ const DETAIL_SKELETON_ROWS = [
   "source",
   "destination",
 ] as const;
-
-function statusVariant(status: string): BadgeVariant {
-  if (["completed", "confirmed", "finalized"].includes(status)) return "success";
-  if (["pending", "processing", "awaiting_payment", "settling"].includes(status)) {
-    return "warning";
-  }
-  if (status === "failed") return "danger";
-  return "default";
-}
-
-function formatStatus(status: string): string {
-  return status
-    .split("_")
-    .filter(Boolean)
-    .map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`)
-    .join(" ");
-}
 
 function TransactionIdentity({
   transfer,
