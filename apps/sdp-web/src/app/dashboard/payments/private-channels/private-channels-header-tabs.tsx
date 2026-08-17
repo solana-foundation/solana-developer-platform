@@ -1,23 +1,31 @@
 "use client";
 
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "@/i18n/provider";
+import { replaceDashboardSearchParams } from "@/lib/dashboard-url-state";
+import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "./private-channels-routes";
 
 // Adding a new sub-page (transfers, channels, members, …):
 //   1. Create app/dashboard/payments/private-channels/<slug>/page.tsx
 //   2. Append { id, labelKey, href, requiresActive: true } to the list.
 //
-// Overview and API Playground are always visible, including before an instance is
-// connected. There is no Instance or Channels tab: the instance
+// Overview and API Playground are always visible, including before an instance
+// is connected — and they are two panes of the same Overview route, switched by
+// the shallow `?tab=` contract (see DashboardHeaderTabs) so toggling them never
+// refetches an RSC payload. There is no Instance or Channels tab: the instance
 // (connect/disconnect) and channels are reached from links in the Overview's
-// Connected-instance card. The Events feed has no tab either — it's reached from
-// the Overview's "All activity" link.
+// Connected-instance card. The Events feed has no tab either — it's reached
+// from the Overview's "All activity" link.
+
+/** The Overview route's `?tab=` value for its playground pane. */
+const PLAYGROUND_TAB = "playground";
+
 const TABS = [
   {
     id: "overview",
     labelKey: "DashboardPrivateChannels.tabs.overview",
-    href: "/dashboard/payments/private-channels/overview",
+    href: PRIVATE_CHANNELS_OVERVIEW_PATH,
     requiresActive: false,
   },
   {
@@ -47,7 +55,7 @@ const TABS = [
   {
     id: "api-playground",
     labelKey: "DashboardPrivateChannels.tabs.apiPlayground",
-    href: "/dashboard/payments/private-channels/api-playground",
+    href: `${PRIVATE_CHANNELS_OVERVIEW_PATH}?tab=${PLAYGROUND_TAB}`,
     // Always visible: the /instance endpoints are what the operator needs
     // before an instance is connected.
     requiresActive: false,
@@ -61,13 +69,24 @@ interface Props {
 export function PrivateChannelsHeaderTabs({ isConnected }: Props) {
   const router = useRouter();
   const pathname = usePathname();
+  // Router state, not `useDashboardTab`: its window snapshot is only re-read
+  // after the commit, so a cross-route push landing here with `?tab=` preset
+  // (e.g. Members → API Playground) would paint one frame with Overview
+  // highlighted. Router-provided search params are correct at render time and
+  // stay in sync with the shallow history writes below, which Next patches.
+  const urlTab = useSearchParams().get("tab");
   const t = useTranslations();
 
   // Keep the always-visible destinations available before an instance is connected.
   const visible = TABS.filter((tab) => isConnected || !tab.requiresActive);
   if (visible.length === 0) return null;
 
-  const activeId = visible.find((tab) => pathname.startsWith(tab.href))?.id ?? visible[0].id;
+  const onOverviewRoute = pathname.startsWith(PRIVATE_CHANNELS_OVERVIEW_PATH);
+  const activeId = onOverviewRoute
+    ? urlTab === PLAYGROUND_TAB
+      ? "api-playground"
+      : "overview"
+    : (visible.find((tab) => pathname.startsWith(tab.href))?.id ?? visible[0].id);
 
   return (
     <Tabs
@@ -75,7 +94,15 @@ export function PrivateChannelsHeaderTabs({ isConnected }: Props) {
       value={activeId}
       onValueChange={(value) => {
         const next = visible.find((tab) => tab.id === value);
-        if (next) router.push(next.href);
+        if (!next) return;
+        if (onOverviewRoute && (value === "overview" || value === "api-playground")) {
+          // Both panes live on the Overview route — swap them shallowly.
+          replaceDashboardSearchParams({
+            tab: value === "api-playground" ? PLAYGROUND_TAB : null,
+          });
+          return;
+        }
+        router.push(next.href);
       }}
     >
       <TabList>
