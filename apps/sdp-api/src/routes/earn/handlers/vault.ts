@@ -533,6 +533,13 @@ function isBoundedSnapshotAmount(value: unknown): value is string {
   return typeof value === "string" && value.length <= 128 && isDecimalString(value);
 }
 
+const vaultPositionCursorSchema = z.object({
+  // `created_at` is ordered as canonical UTC text, so accepting offsets or a
+  // different precision would make a syntactically valid cursor sort wrongly.
+  createdAt: z.string().datetime({ precision: 3 }),
+  id: z.templateLiteral(["earn_vault_position_", z.uuidv4()]),
+});
+
 function encodeVaultPositionCursor(createdAt: string, id: string): string {
   return btoa(`${createdAt}|${id}`).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
@@ -542,7 +549,11 @@ function decodeVaultPositionCursor(cursor: string): { createdAt: string; id: str
     const decoded = atob(cursor.replace(/-/g, "+").replace(/_/g, "/"));
     const separator = decoded.indexOf("|");
     if (separator <= 0 || separator === decoded.length - 1) return null;
-    return { createdAt: decoded.slice(0, separator), id: decoded.slice(separator + 1) };
+    const parsed = vaultPositionCursorSchema.safeParse({
+      createdAt: decoded.slice(0, separator),
+      id: decoded.slice(separator + 1),
+    });
+    return parsed.success ? parsed.data : null;
   } catch {
     return null;
   }

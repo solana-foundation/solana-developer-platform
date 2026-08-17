@@ -136,6 +136,10 @@ function getPositions(query = "") {
   );
 }
 
+function encodeCursorPayload(createdAt: string, id: string): string {
+  return btoa(`${createdAt}|${id}`).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
 beforeEach(async () => {
   env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
@@ -314,6 +318,32 @@ describe("GET /v1/earn/vault-positions", () => {
   it("rejects an invalid cursor and caps page size", async () => {
     expect((await getPositions("?before=not-a-cursor")).status).toBe(400);
     expect((await getPositions("?limit=101")).status).toBe(400);
+  });
+
+  it.each([
+    [
+      "malformed timestamp",
+      "not-a-timestamp",
+      "earn_vault_position_00000000-0000-4000-8000-000000000000",
+    ],
+    [
+      "noncanonical timestamp",
+      "2026-08-17T16:29:31Z",
+      "earn_vault_position_00000000-0000-4000-8000-000000000000",
+    ],
+    ["malformed position id", "2026-08-17T16:29:31.000Z", "not-a-position-id"],
+  ])("rejects a decodable cursor with a %s", async (_case, createdAt, id) => {
+    const cursor = encodeCursorPayload(createdAt, id);
+    const response = await getPositions(`?before=${encodeURIComponent(cursor)}`);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "BAD_REQUEST",
+        message: "Invalid vault position pagination cursor",
+      },
+    });
+    expect(readVaultPositions).not.toHaveBeenCalled();
   });
 
   it("caps live wallet hydration at eight concurrent calls", async () => {
