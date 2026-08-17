@@ -60,7 +60,7 @@ describe("API-key authoring", () => {
       restrictionsEnabled: true,
       restrictionsEdited: true,
       operationFamilies: ["ramp", "issuance"],
-      operationTypes: "payment_transfer_execute, issuance_mint_execute",
+      operationTypes: ["payment_transfer_execute", "issuance_mint_execute"],
       assets: "USDC\nSOL",
       maximumAmount: "2500",
       maximumAmountAssets: "USDC, SOL",

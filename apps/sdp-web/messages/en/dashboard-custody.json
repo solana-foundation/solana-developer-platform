@@ -718,7 +718,7 @@
     "apiKeyFamilyPayment": "Payments",
     "apiKeyFamilyRamp": "Ramps",
     "apiKeyFamilyIssuance": "Issuance",
-    "apiKeyOperationTypesPlaceholder": "payment_transfer_execute, issuance_mint_execute",
+    "apiKeyOperationTypesTrigger": "Select operation types",
     "apiKeyAssetsPlaceholder": "USDC, SOL",
     "apiKeyMaximumAmount": "Maximum operation amount",
     "apiKeyMaximumAmountPlaceholder": "2500",

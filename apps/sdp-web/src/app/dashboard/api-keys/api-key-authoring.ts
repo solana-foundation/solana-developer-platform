@@ -1,23 +1,20 @@
-import {
-  type ApiKeyEnvironment,
-  type ApiKeyRole,
-  type ApiKeyWalletPolicyBindingSummary,
-  type ApiKeyWalletScope,
-  type Permission,
-  type PolicyDefaultAction,
-  type PolicyRule,
-  WALLET_OPERATION_TYPES,
-  type WalletOperationFamily,
+import type {
+  ApiKeyEnvironment,
+  ApiKeyRole,
+  ApiKeyWalletPolicyBindingSummary,
+  ApiKeyWalletScope,
+  Permission,
+  PolicyDefaultAction,
+  PolicyRule,
+  WalletOperationFamily,
+  WalletOperationType,
 } from "@sdp/types";
-import { z } from "zod";
 
 export const API_KEY_AUTHORING_STEPS = ["details", "permissions", "wallets", "review"] as const;
 
 export type ApiKeyAuthoringStep = (typeof API_KEY_AUTHORING_STEPS)[number];
 export type ApiKeyAuthoringMode = "create" | "edit";
 export type BindingConfirmation = "replace" | "clear";
-
-const walletOperationTypesSchema = z.array(z.enum(WALLET_OPERATION_TYPES));
 
 export interface ApiKeyAuthoringDraft {
   name: string;
@@ -30,7 +27,7 @@ export interface ApiKeyAuthoringDraft {
   restrictionsEdited: boolean;
   defaultAction: PolicyDefaultAction;
   operationFamilies: WalletOperationFamily[];
-  operationTypes: string;
+  operationTypes: WalletOperationType[];
   assets: string;
   maximumAmount: string;
   maximumAmountAssets: string;
@@ -91,7 +88,7 @@ export function createApiKeyAuthoringDraft(): ApiKeyAuthoringDraft {
     restrictionsEdited: false,
     defaultAction: "allow",
     operationFamilies: [],
-    operationTypes: "",
+    operationTypes: [],
     assets: "",
     maximumAmount: "",
     maximumAmountAssets: "",
@@ -127,13 +124,12 @@ export function buildApiKeyPolicyRules(draft: ApiKeyAuthoringDraft): PolicyRule[
     });
   }
 
-  const operationTypes = walletOperationTypesSchema.parse(splitPolicyValues(draft.operationTypes));
-  if (operationTypes.length > 0) {
+  if (draft.operationTypes.length > 0) {
     rules.push({
       id: "additional-operation-types",
       name: "Additional restriction: operation types",
       kind: "operation_type",
-      operationTypes,
+      operationTypes: draft.operationTypes,
       action: "deny",
     });
   }
