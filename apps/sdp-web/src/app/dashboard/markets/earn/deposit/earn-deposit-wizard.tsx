@@ -23,10 +23,9 @@ import { EarnDepositSkeleton } from "../earn-route-skeletons";
 import { SummaryRow } from "./earn-deposit-chrome";
 import {
   availableTokens,
-  defaultStrategyFilters,
-  type EarnStrategyFilters,
+  rankedStrategies,
   singleStrategyAllocation,
-  visibleStrategies,
+  strategyDepositEligibility,
 } from "./earn-deposit-model";
 import { useEarnFundingWallets, walletDisplayName } from "./earn-funding-wallets";
 import { type EarnApiKeyView, IntegrationScreen } from "./integration-screen";
@@ -273,13 +272,11 @@ export function EarnDepositWizard({
   const { wallets, error: walletsError, isLoading: walletsLoading } = useEarnFundingWallets();
   const { state: programState, error: programsError, refresh: refreshProgram } = useEarnPrograms();
 
-  // The PUT validates yield sources against the pinned provider's active
-  // catalogue, so the flow only ever offers those rows.
-  const liveStrategies = useMemo(
-    () =>
-      (catalogue ?? []).filter(
-        (strategy) => strategy.provider === EARN_PORTFOLIO_PROVIDER && strategy.status === "active"
-      ),
+  // The table is a catalogue, not an eligibility filter: show every active
+  // strategy so a sandbox reader can compare the real Kamino shelf too.
+  // Selection stays guarded independently below.
+  const activeStrategies = useMemo(
+    () => (catalogue ?? []).filter((strategy) => strategy.status === "active"),
     [catalogue]
   );
 
@@ -289,22 +286,35 @@ export function EarnDepositWizard({
    * again. It shapes the funding instructions; it never moves money.
    */
   const [walletId, setWalletId] = useState<string | null>(null);
-  const [filters, setFilters] = useState<EarnStrategyFilters>(defaultStrategyFilters);
   const [strategyId, setStrategyId] = useState<string | null>(initialStrategyId ?? null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
 
-  const tokens = useMemo(() => availableTokens(liveStrategies), [liveStrategies]);
-  const browsable = useMemo(
-    () => visibleStrategies(liveStrategies, filters),
-    [filters, liveStrategies]
-  );
+  const tokens = useMemo(() => availableTokens(activeStrategies), [activeStrategies]);
+  const browsable = useMemo(() => rankedStrategies(activeStrategies), [activeStrategies]);
 
   const selectedWallet = (wallets ?? []).find((wallet) => wallet.id === walletId);
-  const selectedStrategy: EarnStrategy | undefined = browsable.find(
+  const selectedCatalogueStrategy: EarnStrategy | undefined = browsable.find(
     (strategy) => strategy.id === strategyId
   );
+  // Defence beyond the disabled radio: a `?strategy=` deep link or a catalogue
+  // revalidation must not carry an ineligible row into review.
+  const selectedStrategy =
+    selectedCatalogueStrategy &&
+    strategyDepositEligibility(selectedCatalogueStrategy, EARN_PORTFOLIO_PROVIDER) === "eligible"
+      ? selectedCatalogueStrategy
+      : undefined;
+
+  const selectStrategy = (candidateId: string) => {
+    const candidate = browsable.find((strategy) => strategy.id === candidateId);
+    if (
+      candidate &&
+      strategyDepositEligibility(candidate, EARN_PORTFOLIO_PROVIDER) === "eligible"
+    ) {
+      setStrategyId(candidate.id);
+    }
+  };
 
   /**
    * The run's shape comes from the URL, not from whether the organization
@@ -337,17 +347,6 @@ export function EarnDepositWizard({
   };
 
   useWizardStepFocus(step, outcome);
-
-  /** A hidden row cannot remain selected and silently advance to review. */
-  const changeFilters = (next: EarnStrategyFilters) => {
-    setFilters(next);
-    if (
-      strategyId !== null &&
-      !visibleStrategies(liveStrategies, next).some((strategy) => strategy.id === strategyId)
-    ) {
-      setStrategyId(null);
-    }
-  };
 
   const confirm = async () => {
     if (!selectedStrategy || !stepReady.review) return;
@@ -468,13 +467,11 @@ export function EarnDepositWizard({
     ),
     strategy: (
       <StrategyStep
-        filters={filters}
         hasError={Boolean(catalogueError)}
         isLoading={catalogueLoading}
-        onFiltersChange={changeFilters}
-        onReset={() => changeFilters(defaultStrategyFilters())}
-        onSelect={setStrategyId}
-        selectedStrategyId={strategyId}
+        onSelect={selectStrategy}
+        portfolioProvider={EARN_PORTFOLIO_PROVIDER}
+        selectedStrategyId={selectedStrategy?.id ?? null}
         strategies={browsable}
         tokens={tokens}
       />
