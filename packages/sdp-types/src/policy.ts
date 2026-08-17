@@ -134,14 +134,19 @@ export type ApprovalRequestStatus =
   | "expired"
   | "failed";
 
+/**
+ * Historical read model: rows predating a vocabulary trim keep their retired
+ * operation family/type strings, so these fields are not narrowed to the live
+ * enums.
+ */
 export interface WalletApprovalRequestOperationSummary {
   id: string;
   custodyWalletId: string | null;
   walletId: string;
   apiKeyId: string | null;
   source: string;
-  operationFamily: WalletOperationFamily;
-  operationType: WalletOperationType;
+  operationFamily: string;
+  operationType: string;
   asset: string | null;
   amount: string | null;
   destination: string | null;
@@ -420,12 +425,17 @@ export type PublicPolicyEvaluationContext = Omit<PolicyEvaluationContext, "opera
   operation: Omit<PolicyEvaluationContext["operation"], "providerExtensions" | "rawPayload">;
 };
 
+/**
+ * Historical read model: rows predating a vocabulary trim keep their retired
+ * operation family/type strings, so these fields are not narrowed to the live
+ * enums.
+ */
 export interface WalletPolicyEvaluationDetail {
   id: string;
   walletOperation: {
     id: string;
-    operationFamily: WalletOperationFamily;
-    operationType: WalletOperationType;
+    operationFamily: string;
+    operationType: string;
     asset: string | null;
     amount: string | null;
     destination: string | null;

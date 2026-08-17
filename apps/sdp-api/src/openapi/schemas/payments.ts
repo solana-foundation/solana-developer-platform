@@ -6,7 +6,6 @@ import {
   RAMP_PROVIDERS,
   RAMPS_MEMO_LIMITS,
   WALLET_OPERATION_FAMILIES,
-  WALLET_OPERATION_TYPES,
 } from "@sdp/types";
 import {
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
@@ -124,8 +123,6 @@ const policyDecisionSchema = z.enum([
 
 const walletOperationFamilySchema = z.enum(WALLET_OPERATION_FAMILIES);
 
-const walletOperationTypeSchema = z.enum(WALLET_OPERATION_TYPES);
-
 const walletOperationStatusSchema = z.enum([
   "created",
   "evaluated",
@@ -146,11 +143,13 @@ const walletPolicyAuditEntrySchema = z
       description: "Policy evaluation record ID.",
       example: "peval_example",
     }),
-    operationFamily: walletOperationFamilySchema.openapi({
-      description: "Normalized wallet operation family.",
+    operationFamily: z.string().openapi({
+      description:
+        "Normalized wallet operation family. Historical rows may carry retired families.",
+      example: "payment",
     }),
-    operationType: walletOperationTypeSchema.openapi({
-      description: "Normalized wallet operation type.",
+    operationType: z.string().openapi({
+      description: "Normalized wallet operation type. Historical rows may carry retired types.",
       example: "payment_transfer_execute",
     }),
     asset: z.string().nullable().openapi({
@@ -272,8 +271,8 @@ const publicPolicyEvaluationContextSchema = z
       apiKeyId: z.string().nullable(),
       actor: z.record(z.string(), z.unknown()).nullable(),
       source: z.string(),
-      operationFamily: walletOperationFamilySchema,
-      operationType: walletOperationTypeSchema,
+      operationFamily: z.string(),
+      operationType: z.string(),
       asset: z.string().nullable(),
       amount: z.string().nullable(),
       destination: z.string().nullable(),
@@ -294,8 +293,8 @@ export const walletPolicyEvaluationDetailSchema = z
     id: z.string().openapi({ description: "Policy evaluation ID." }),
     walletOperation: z.object({
       id: z.string(),
-      operationFamily: walletOperationFamilySchema,
-      operationType: walletOperationTypeSchema,
+      operationFamily: z.string(),
+      operationType: z.string(),
       asset: z.string().nullable(),
       amount: z.string().nullable(),
       destination: z.string().nullable(),

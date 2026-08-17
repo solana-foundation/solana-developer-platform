@@ -1,4 +1,3 @@
-import { WALLET_OPERATION_FAMILIES, WALLET_OPERATION_TYPES } from "@sdp/types";
 import {
   approvalRequestStatusSchema as approvalRequestStatusSchemaBase,
   createWalletSchema as createWalletSchemaBase,
@@ -455,12 +454,6 @@ export const custodyPublicKeyResponseSchema = z
   })
   .openapi({ description: "Wallet public key response payload." });
 
-const walletOperationFamilySchema = z
-  .enum(WALLET_OPERATION_FAMILIES)
-  .openapi({ description: "Normalized wallet operation family.", example: "payment" });
-
-const walletOperationTypeSchema = z.enum(WALLET_OPERATION_TYPES);
-
 const walletOperationStatusSchema = z
   .enum([
     "created",
@@ -531,9 +524,13 @@ const walletApprovalRequestSchema = z
         walletId: walletIdParamSchema,
         apiKeyId: z.string().nullable().openapi({ description: "API key that requested it." }),
         source: z.string().openapi({ description: "Operation source.", example: "api" }),
-        operationFamily: walletOperationFamilySchema,
-        operationType: walletOperationTypeSchema.openapi({
-          description: "Normalized wallet operation type.",
+        operationFamily: z.string().openapi({
+          description:
+            "Normalized wallet operation family. Historical rows may carry retired families.",
+          example: "payment",
+        }),
+        operationType: z.string().openapi({
+          description: "Normalized wallet operation type. Historical rows may carry retired types.",
           example: "payment_transfer_execute",
         }),
         asset: z.string().nullable().openapi({ description: "Asset symbol or mint." }),

@@ -1,5 +1,3 @@
-import { WALLET_OPERATION_TYPES } from "@sdp/types";
-import { z } from "zod";
 import type { AppDb, DatabaseExecutor } from "@/db";
 import {
   asPostgresJsonArray,
@@ -57,7 +55,6 @@ import {
 } from "./policy.repository";
 
 const WALLET_CONTROL_PROFILE_REVISION_HISTORY_LIMIT = 100;
-const walletOperationTypeSchema = z.enum(WALLET_OPERATION_TYPES);
 
 const POLICY_CONTROL_INVENTORY_CTE = `
 WITH scope AS (
@@ -481,8 +478,8 @@ function mapWalletOperationRow(row: Record<string, unknown>): WalletOperationRow
     wallet_id: row.wallet_id as string,
     api_key_id: (row.api_key_id as string | null | undefined) ?? null,
     source: row.source as string,
-    operation_family: row.operation_family as WalletOperationRow["operation_family"],
-    operation_type: walletOperationTypeSchema.parse(row.operation_type),
+    operation_family: row.operation_family as string,
+    operation_type: row.operation_type as string,
     asset: (row.asset as string | null | undefined) ?? null,
     amount: (row.amount as string | null | undefined) ?? null,
     destination: (row.destination as string | null | undefined) ?? null,
@@ -531,8 +528,8 @@ function mapWalletPolicyEvaluationAuditRow(
   return {
     wallet_operation_id: row.wallet_operation_id as string,
     policy_evaluation_id: row.policy_evaluation_id as string,
-    operation_family: row.operation_family as WalletPolicyEvaluationAuditRow["operation_family"],
-    operation_type: walletOperationTypeSchema.parse(row.operation_type),
+    operation_family: row.operation_family as string,
+    operation_type: row.operation_type as string,
     asset: (row.asset as string | null | undefined) ?? null,
     amount: (row.amount as string | null | undefined) ?? null,
     destination: (row.destination as string | null | undefined) ?? null,
@@ -599,8 +596,8 @@ function mapApprovalRequestDetailRow(row: Record<string, unknown>): ApprovalRequ
     wallet_label: (row.wallet_label as string | null | undefined) ?? null,
     api_key_id: (row.api_key_id as string | null | undefined) ?? null,
     source: row.source as string,
-    operation_family: row.operation_family as ApprovalRequestDetailRow["operation_family"],
-    operation_type: walletOperationTypeSchema.parse(row.operation_type),
+    operation_family: row.operation_family as string,
+    operation_type: row.operation_type as string,
     asset: (row.asset as string | null | undefined) ?? null,
     amount: (row.amount as string | null | undefined) ?? null,
     destination: (row.destination as string | null | undefined) ?? null,

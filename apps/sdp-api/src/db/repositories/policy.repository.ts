@@ -176,8 +176,8 @@ export interface WalletOperationRow {
   wallet_id: string;
   api_key_id: string | null;
   source: string;
-  operation_family: WalletOperationFamily;
-  operation_type: WalletOperationType;
+  operation_family: string;
+  operation_type: string;
   asset: string | null;
   amount: string | null;
   destination: string | null;
@@ -214,8 +214,8 @@ export interface PolicyEvaluationRow {
 export interface WalletPolicyEvaluationAuditRow {
   wallet_operation_id: string;
   policy_evaluation_id: string;
-  operation_family: WalletOperationFamily;
-  operation_type: WalletOperationType;
+  operation_family: string;
+  operation_type: string;
   asset: string | null;
   amount: string | null;
   destination: string | null;
@@ -275,8 +275,8 @@ export interface ApprovalRequestDetailRow {
   wallet_label: string | null;
   api_key_id: string | null;
   source: string;
-  operation_family: WalletOperationFamily;
-  operation_type: WalletOperationType;
+  operation_family: string;
+  operation_type: string;
   asset: string | null;
   amount: string | null;
   destination: string | null;
