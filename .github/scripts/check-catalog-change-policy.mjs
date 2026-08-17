@@ -10,7 +10,7 @@ export function checkCatalogChangePolicy({
   headBranch,
   headRepository,
   baseRepository,
-  releaseBranch = "codex/release-main",
+  releaseBranch = "sdp/release-main",
 }) {
   const sourceFiles = changedFiles.filter((file) => SOURCE_CATALOG.test(file));
   const localizedFiles = changedFiles.filter((file) => LOCALIZED_CATALOG.test(file));
