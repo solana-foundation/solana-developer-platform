@@ -27,6 +27,8 @@ KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS="${KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS:-
 KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS="${KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS:-15000}"
 KORA_SHIM_LOG="${STATE_DIR}/kora-shim.log"
 KORA_SHIM_PID_FILE="${STATE_DIR}/kora-shim.pid"
+KORA_RPC_PROXY_LOG="${STATE_DIR}/kora-rpc-proxy.log"
+KORA_RPC_PROXY_PID_FILE="${STATE_DIR}/kora-rpc-proxy.pid"
 
 mkdir -p "${STATE_DIR}"
 chmod 700 "${STATE_DIR}"
@@ -326,6 +328,25 @@ NODE
     ;;
   docker)
     require_command docker
+    # On Linux, host.docker.internal resolves to the docker bridge gateway,
+    # from which the host's loopback-only Surfpool RPC is unreachable. Forward
+    # the RPC port on the gateway address so the Kora container can reach it.
+    if [ "$(uname -s)" = "Linux" ] && [ -z "${KORA_SURFPOOL_KORA_RPC_URL:-}" ]; then
+      surfpool_port="$(url_port "${SURFPOOL_RPC_URL}")"
+      gateway_ip="$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')"
+      if [ -n "${gateway_ip}" ]; then
+        echo "Forwarding Surfpool RPC on ${gateway_ip}:${surfpool_port} for the Kora container."
+        stop_pid_file "${KORA_RPC_PROXY_PID_FILE}"
+        (
+          cd "${ROOT_DIR}/packages/sdp-api-integration"
+          export KORA_RPC_PROXY_LISTEN_HOST="${gateway_ip}"
+          export KORA_RPC_PROXY_LISTEN_PORT="${surfpool_port}"
+          export KORA_RPC_PROXY_TARGET_PORT="${surfpool_port}"
+          exec node scripts/kora-surfpool-rpc-proxy.mjs
+        ) >"${KORA_RPC_PROXY_LOG}" 2>&1 &
+        echo "$!" >"${KORA_RPC_PROXY_PID_FILE}"
+      fi
+    fi
     echo "Starting local Kora with upstream RPC ${KORA_DOCKER_RPC_URL}."
     docker compose --env-file "${ENV_FILE}" -f "${ROOT_DIR}/infra/kora/docker-compose.yml" up -d redis kora
     ;;
