@@ -56,6 +56,8 @@ let cachedCustodyAddress: string | null = null;
 // stablecoin shape; the ScaledUiAmount extension on tokenized-security
 // pushed the mint rent ~0.0004 SOL higher and tipped tests over.
 const INTEGRATION_CUSTODY_FUND_LAMPORTS = 50_000_000;
+// Fallback when the relay does not expose its policy; matches the deployed
+// devnet max_allowed_lamports.
 const KORA_MAX_TRANSFER_LAMPORTS = 9_900_000n;
 
 type SolanaRpcResponse<T> =
@@ -481,13 +483,17 @@ async function fundAddressViaKoraFeePayer(
   const feePayment = createFeePaymentAdapter(env);
   const feePayer = await feePayment.getFeePayer();
   const rpc = createRpc(env);
+  const maxTransferLamports =
+    (await feePayment
+      .getSponsorshipConfiguration?.()
+      .then((configuration) => configuration.maxAllowedLamports)
+      .catch(() => 0n)
+      .then((cap) => (cap > 0n ? cap : undefined))) ?? KORA_MAX_TRANSFER_LAMPORTS;
   let remainingLamports = lamports;
 
   while (remainingLamports > 0n) {
     const requestedAmount =
-      remainingLamports > KORA_MAX_TRANSFER_LAMPORTS
-        ? KORA_MAX_TRANSFER_LAMPORTS
-        : remainingLamports;
+      remainingLamports > maxTransferLamports ? maxTransferLamports : remainingLamports;
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
     const minimumLamports = await getMinimumBalanceForRentExemption(rpc, 0);
     const amount = requestedAmount > minimumLamports ? requestedAmount : minimumLamports + 1n;
