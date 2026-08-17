@@ -1,0 +1,47 @@
+{
+  "name": "@sdp/kamino",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./programs": {
+      "types": "./src/programs.ts",
+      "import": "./src/programs.ts",
+      "default": "./src/programs.ts"
+    },
+    "./types": {
+      "types": "./src/types.ts",
+      "import": "./src/types.ts",
+      "default": "./src/types.ts"
+    },
+    "./errors": {
+      "types": "./src/errors.ts",
+      "import": "./src/errors.ts",
+      "default": "./src/errors.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "biome check src/"
+  },
+  "dependencies": {
+    "@kamino-finance/klend-sdk": "10.0.0",
+    "@sdp/earn": "workspace:*",
+    "@sdp/solana": "workspace:*",
+    "@sdp/types": "workspace:*",
+    "@solana/kit": "catalog:",
+    "decimal.js": "10.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.2",
+    "tsx": "4.23.5",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10"
+  }
+}

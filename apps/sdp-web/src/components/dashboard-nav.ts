@@ -1,4 +1,3 @@
-import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowDownLeftIcon,
@@ -24,6 +23,7 @@ import {
   DASHBOARD_PAYMENTS_SUBNAV_HREFS,
   DASHBOARD_SIDE_NAV_HREFS,
 } from "@/lib/dashboard-navigation-loading";
+import { resolveDocsUrl } from "@/lib/docs-url";
 
 export type SubNavItem = {
   label: string;
@@ -230,6 +230,4 @@ export function getNavSections(
   ];
 }
 
-export const docsHref =
-  process.env.NEXT_PUBLIC_SDP_DOCS_URL ||
-  (process.env.NODE_ENV === "development" ? "http://localhost:3001/docs" : DEFAULT_SDP_DOCS_URL);
+export const docsHref = resolveDocsUrl();

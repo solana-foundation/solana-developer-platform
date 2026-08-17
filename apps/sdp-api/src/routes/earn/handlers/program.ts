@@ -1,8 +1,4 @@
-import {
-  isClusterFundableInEnvironment,
-  resolveEarnProviderClient,
-  supportsPortfolioWallets,
-} from "@sdp/earn";
+import { isClusterFundableInEnvironment, supportsPortfolioWallets } from "@sdp/earn";
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnPortfolioWalletProvider } from "@sdp/earn/types";
 import type {
@@ -34,6 +30,7 @@ import {
 import { success } from "@/lib/response";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getLogger } from "@/runtime/logger";
+import { resolveEarnProviderClient } from "@/services/earn-provider-registry";
 import {
   applyEarnWithdrawalObservationByReference,
   applyEarnWithdrawalObservationToRow,

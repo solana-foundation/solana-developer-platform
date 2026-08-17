@@ -24,6 +24,7 @@ const MODULE_METADATA = [
       "@sdp/earn",
       "@sdp/env-config",
       "@sdp/issuance",
+      "@sdp/kamino",
       "@sdp/payments",
       "@sdp/policy",
       "@sdp/private-channels",
@@ -95,6 +96,18 @@ const MODULE_METADATA = [
     directory: "packages/sdp-issuance",
     purpose: "Token issuance domain services and Mosaic integration.",
     allowedDependencies: ["@sdp/payments", "@sdp/rpc", "@sdp/solana", "@sdp/types"],
+  },
+  {
+    name: "@sdp/kamino",
+    directory: "packages/sdp-kamino",
+    purpose: "Kit-native Kamino K-Vault deposit/withdraw instruction plans over klend-sdk.",
+    // The arrow points INWARD and only inward: this package depends on
+    // @sdp/earn (for the provider contract and the catalogue client it extends),
+    // and @sdp/earn must never depend back — its hourly catalogue cron would
+    // then load klend-sdk (13MB, built against a different @solana/kit major).
+    // That one-way edge is also why the Kamino program-id table lives in
+    // @sdp/types, which both reach without a cycle.
+    allowedDependencies: ["@sdp/earn", "@sdp/solana", "@sdp/types"],
   },
   {
     name: "@sdp/payments",
