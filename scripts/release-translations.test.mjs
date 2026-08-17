@@ -550,7 +550,7 @@ test("creates translation commits through GitHub without overriding the app iden
   const encodedContents = Buffer.from('{"test":true}').toString("base64");
   const commit = await createCommitOnBranch({
     repository: "solana-foundation/solana-developer-platform",
-    branch: "codex/release-main",
+    branch: "sdp/release-main",
     expectedHeadOid: "abc123",
     headline: "chore(i18n): translate missing release strings",
     additions: [{ path: "apps/sdp-web/messages/fr.json", contents: encodedContents }],
@@ -579,7 +579,7 @@ test("creates translation commits through GitHub without overriding the app iden
   assert.deepEqual(input, {
     branch: {
       repositoryNameWithOwner: "solana-foundation/solana-developer-platform",
-      branchName: "codex/release-main",
+      branchName: "sdp/release-main",
     },
     expectedHeadOid: "abc123",
     message: { headline: "chore(i18n): translate missing release strings" },
@@ -595,7 +595,7 @@ test("surfaces GraphQL commit errors returned with HTTP 200", async () => {
   await assert.rejects(
     createCommitOnBranch({
       repository: "solana-foundation/solana-developer-platform",
-      branch: "codex/release-main",
+      branch: "sdp/release-main",
       expectedHeadOid: "stale-head",
       headline: "chore(i18n): translate missing release strings",
       additions: [],
