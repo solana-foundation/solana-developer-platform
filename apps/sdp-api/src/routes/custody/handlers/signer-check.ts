@@ -18,7 +18,6 @@ import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { FeePaymentError } from "@/services/ports";
 import { createOrgSigner } from "@/services/solana";
@@ -30,12 +29,6 @@ import { type SignerCheckResponse, signerCheckSchema } from "../schemas";
 const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr" as Address;
 const KORA_MEMO_ALLOWED_PROGRAM_HINT =
   "Add MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr to Kora validation.allowed_programs.";
-
-/**
- * Fail-closed ceilings on Kora fee spend, charged after request validation so
- * a malformed body or unbound wallet never consumes the shared budget.
- */
-const SIGNER_CHECK_QUOTA = { name: "signer-check", actorMax: 2, orgMax: 10 };
 
 function isKoraMemoProgramPolicyError(message: string): boolean {
   const normalized = message.toLowerCase();
@@ -65,7 +58,6 @@ export const signerCheck = async (c: AppContext) => {
         : "walletId is required for session or Clerk authentication"
     );
   }
-  await enforceMeteredQuota(c, SIGNER_CHECK_QUOTA);
   const memo = `SDP signer check ${crypto.randomUUID()}`;
 
   try {
