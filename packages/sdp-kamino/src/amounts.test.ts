@@ -66,6 +66,13 @@ describe("acceptAtMintScale", () => {
     expect(() => acceptAtMintScale("amount", "7.5", 0)).toThrow(/more precision/);
   });
 
+  it("handles long zero runs in linear time without changing scale semantics", () => {
+    const zeroRun = "0".repeat(50_000);
+
+    expect(acceptAtMintScale("amount", `1.${zeroRun}`, 6)).toBe("1");
+    expect(() => acceptAtMintScale("amount", `1.${zeroRun}1`, 6)).toThrow(/more precision/);
+  });
+
   /**
    * The precision floor the reviewer asked to be tested: a share balance above
    * 2^53 base units is exactly where `uiAmount`'s JSON number loses value.

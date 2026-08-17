@@ -85,8 +85,15 @@ function trimInsignificantFractionalZeroes(value: string): string {
   if (dot === -1) return value;
 
   const whole = value.slice(0, dot);
-  const fraction = value.slice(dot + 1).replace(/0+$/, "");
-  return fraction === "" ? whole : `${whole}.${fraction}`;
+  let fractionEnd = value.length;
+  // Scan once from the end instead of applying an end-anchored repetition to
+  // caller-controlled input. The latter can retry from every zero when a long
+  // run ends in a non-zero digit, turning validation into quadratic work.
+  while (fractionEnd > dot + 1 && value[fractionEnd - 1] === "0") {
+    fractionEnd -= 1;
+  }
+
+  return fractionEnd === dot + 1 ? whole : value.slice(0, fractionEnd);
 }
 
 /**
