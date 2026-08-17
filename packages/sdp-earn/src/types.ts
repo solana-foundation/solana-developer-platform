@@ -61,10 +61,13 @@ export interface ProviderStrategySnapshot {
   /**
    * The cluster this strategy's instrument lives on. REQUIRED — every provider
    * must state it rather than let the sync assume the environment's own
-   * cluster, because that assumption is exactly what a mainnet-only provider
-   * catalogued into sandbox would violate silently (see `EarnStrategy` in
-   * @sdp/types). Ground answers with its environment's cluster; Kamino always
-   * answers `mainnet-beta`.
+   * cluster, because that assumption is exactly what a single-cluster provider
+   * catalogued into the wrong environment would violate silently (see
+   * `EarnStrategy` in @sdp/types). Ground answers with its environment's
+   * cluster. Kamino answers per data source: `mainnet-beta` from the REST shelf
+   * in production, `devnet` from the on-chain read elsewhere — and that second
+   * one is measured (genesis hash) rather than inferred from the environment,
+   * which is the whole point of this field.
    */
   hostCluster: SolanaCluster;
 }

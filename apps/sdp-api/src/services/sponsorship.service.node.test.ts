@@ -125,6 +125,29 @@ describe("sponsorship identity boundary", () => {
     );
   });
 
+  it("derives a user-scoped identity for authenticated dashboard sessions", async () => {
+    const app = new Hono<{ Bindings: Env }>();
+    app.use("*", async (c, next) => {
+      c.set("session", {
+        id: "session_trusted",
+        userId: "user_trusted",
+        organizationId: "org_trusted",
+        permissions: ["wallets:write"],
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      });
+      c.set("projectId", "project_trusted");
+      c.set("projectEnvironment", "sandbox");
+      await next();
+    });
+    app.get("/probe", (c) => c.text(buildKoraUserId(resolveAuthenticatedSponsorshipScope(c))));
+
+    const response = await app.request("/probe");
+
+    expect(await response.text()).toBe(
+      "sdp:v1:sandbox:org_trusted:project:project_trusted:user:user_trusted"
+    );
+  });
+
   it("keeps project-required request sponsorship fail closed", async () => {
     const app = new Hono<{ Bindings: Env }>();
     let sponsorshipError: unknown;

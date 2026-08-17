@@ -36,7 +36,7 @@ function evaluation(
     walletOperation: {
       id: `operation-${decision}`,
       operationFamily: "payment",
-      operationType: "payment_transfer",
+      operationType: "payment_transfer_execute",
       asset: "USDC",
       amount: "25.00",
       destination: "destination-address",
@@ -63,7 +63,7 @@ function evaluation(
         actor: { type: "api_key", id: "api-key-1" },
         source: "api",
         operationFamily: "payment",
-        operationType: "payment_transfer",
+        operationType: "payment_transfer_execute",
         asset: "USDC",
         amount: "25.00",
         destination: "destination-address",
@@ -411,15 +411,15 @@ describe("policy audit presentation invariants", () => {
   });
 
   it("uses the evaluated operation in the detail heading", () => {
-    const rawSign = evaluation("allow", {
+    const issuance = evaluation("allow", {
       walletOperation: {
         ...evaluation("allow").walletOperation,
-        operationFamily: "raw_sign",
-        operationType: "custody_signer_check",
+        operationFamily: "issuance",
+        operationType: "issuance_mint_execute",
       },
     });
 
-    expect(decisionHeading(rawSign)).toBe("Raw Sign · Custody Signer Check");
+    expect(decisionHeading(issuance)).toBe("Issuance · Issuance Mint Execute");
   });
 
   it("formats revision dates per locale and passes invalid values through", () => {

@@ -6,7 +6,7 @@
 
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
-import { policyGate } from "@/middleware/policy-gate";
+import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
 import {
@@ -14,7 +14,6 @@ import {
   cancelApprovalRequest,
   createWallet,
   deleteWallet,
-  extractSignerCheckPolicyCandidate,
   getApprovalRequest,
   getConfig,
   getConfigs,
@@ -48,7 +47,7 @@ wallets.patch("/:walletId", requirePermissions("custody:admin"), updateWallet);
 wallets.post(
   "/signer-check",
   requirePermissions("wallets:write"),
-  policyGate({ extract: extractSignerCheckPolicyCandidate }),
+  meteredQuota({ name: "signer-check", actorMax: 2, orgMax: 10 }),
   signerCheck
 );
 

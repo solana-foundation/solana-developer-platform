@@ -540,7 +540,6 @@ export interface DeleteWalletRequest {
 }
 
 export interface SignerCheckRequest {
-  memo?: string;
   walletId?: string;
 }
 

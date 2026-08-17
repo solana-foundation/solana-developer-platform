@@ -7,7 +7,10 @@
 
 import { getDb } from "@/db";
 import { createKVStoreSet, getRedisClient } from "@/runtime/kv-redis";
-import { AUDIT_LEDGER_CHECKPOINT_KEY } from "@/services/audit.service";
+import {
+  AUDIT_LEDGER_CHECKPOINT_KEY,
+  AUDIT_LEDGER_SESSION_LOCK_KEY,
+} from "@/services/audit.service";
 import type { Env } from "@/types/env";
 
 const POSTGRES_TEST_TABLES = [
@@ -120,10 +123,26 @@ export async function seedTestDatabase(env: Env): Promise<void> {
   const db = getDb(env);
 
   try {
-    await db
-      .prepare(`TRUNCATE TABLE ${POSTGRES_TEST_TABLES.join(", ")} RESTART IDENTITY CASCADE`)
-      .run();
-    await createKVStoreSet(env).cache.delete(AUDIT_LEDGER_CHECKPOINT_KEY);
+    // Serialize the reset with in-flight audit-ledger writers. TRUNCATE already
+    // waits for their transactions via its ACCESS EXCLUSIVE lock, but the
+    // checkpoint delete talks to Redis and would otherwise land between a
+    // writer's pre-commit witness and its post-commit advance, failing that
+    // write with "checkpoint did not advance" in whichever test runs next.
+    const lockedTransactionWithPostCommit = db.lockedTransactionWithPostCommit?.bind(db);
+    if (!lockedTransactionWithPostCommit) {
+      throw new Error("Test database client cannot serialize the audit-ledger reset");
+    }
+    await lockedTransactionWithPostCommit(
+      AUDIT_LEDGER_SESSION_LOCK_KEY,
+      async (tx) => {
+        await tx.execute(
+          `TRUNCATE TABLE ${POSTGRES_TEST_TABLES.join(", ")} RESTART IDENTITY CASCADE`
+        );
+      },
+      async () => {
+        await createKVStoreSet(env).cache.delete(AUDIT_LEDGER_CHECKPOINT_KEY);
+      }
+    );
     const redis = await getRedisClient(env);
     const sponsorshipKeys = await redis.keys("sdp:sponsorship:*");
     if (sponsorshipKeys.length > 0) {

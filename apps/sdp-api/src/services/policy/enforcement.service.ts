@@ -79,6 +79,17 @@ export class WalletPolicyEnforcementService {
     throw walletOperationPolicyDecisionError(enforcement.operation, enforcement.evaluation);
   }
 
+  /**
+   * Rebuilds the enforcement result for an approved operation being replayed.
+   * The returned envelope takes its family/type from the validated input, not
+   * the stored row: the row's fields are historical strings, and the `matches`
+   * equality check below proves the input values equal them before use.
+   *
+   * @param walletOperationId - The approved operation being resumed.
+   * @param executionAttemptId - The claimed execution lease attempt.
+   * @param input - The replayed operation input, zod-validated at the route.
+   * @returns The reconstructed enforcement envelope and evaluation.
+   */
   async resumeApprovedOperation(
     walletOperationId: string,
     executionAttemptId: string,
@@ -131,8 +142,8 @@ export class WalletPolicyEnforcementService {
         apiKeyId: operation.api_key_id,
         actor: storedOperationActor(operation.raw_payload),
         source: operation.source,
-        operationFamily: operation.operation_family,
-        operationType: operation.operation_type,
+        operationFamily: input.operationFamily,
+        operationType: input.operationType,
         asset: operation.asset,
         amount: operation.amount,
         destination: operation.destination,
