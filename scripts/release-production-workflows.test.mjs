@@ -14,7 +14,10 @@ const webWorkflow = fs.readFileSync(
   "utf8"
 );
 
-function assertVercelProductionStep(workflow, buildStepName = "Build and deploy production artifact") {
+function assertVercelProductionStep(
+  workflow,
+  buildStepName = "Build and deploy production artifact"
+) {
   const stepStart = workflow.indexOf(`      - name: ${buildStepName}`);
 
   assert.notEqual(stepStart, -1);
@@ -106,7 +109,9 @@ test("the manual web deploy can build without deploying", () => {
   assert.match(buildStep, /vercel pull --yes --environment=production/);
   assert.match(buildStep, /vercel build --prod/);
 
-  const deployStep = webWorkflow.slice(webWorkflow.indexOf("      - name: Deploy production artifact"));
+  const deployStep = webWorkflow.slice(
+    webWorkflow.indexOf("      - name: Deploy production artifact")
+  );
   assert.match(deployStep, /if: \$\{\{ !inputs\.dry_run \}\}/);
   assert.match(deployStep, /vercel deploy --prebuilt --prod/);
 });
