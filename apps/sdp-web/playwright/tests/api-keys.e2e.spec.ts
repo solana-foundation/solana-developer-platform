@@ -85,7 +85,7 @@ test.describe
       await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("switch", { name: "Add API-key restrictions" }).click();
-      await page.getByRole("checkbox", { name: "Raw signing" }).check();
+      await page.getByRole("checkbox", { name: "Issuance" }).check();
       await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("button", { name: "Create key" }).click();
 
