@@ -102,6 +102,62 @@ test("allows reveal() where it belongs — handed to an adapter or signer", () =
   assert.deepEqual(violations, []);
 });
 
+test("flags a revealed secret logged through a variable", () => {
+  const violations = findSecretRefViolations(
+    [
+      `const material = keyRef.material.reveal("adapter");`,
+      `logger.info({ material }, "provisioned");`,
+    ].join("\n"),
+    "apps/sdp-api/src/services/helius-rings/example.ts"
+  );
+
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /:2: info\(\) receives a revealed SecretRef/);
+});
+
+test("follows an alias chain and reassignment to a sink", () => {
+  const violations = findSecretRefViolations(
+    [
+      `let value = other;`,
+      `value = secret.reveal("signer");`,
+      `const copy = value;`,
+      `const body = JSON.stringify({ copy });`,
+      `const shown = \`key \${copy}\`;`,
+    ].join("\n"),
+    "apps/sdp-api/src/services/helius-rings/example.ts"
+  );
+
+  assert.equal(violations.length, 2);
+  assert.match(violations[0], /:4: JSON\.stringify\(\) receives a revealed SecretRef/);
+  assert.match(violations[1], /:5: Template literal interpolates a revealed SecretRef/);
+});
+
+test("does not taint values transformed by another call", () => {
+  const violations = findSecretRefViolations(
+    [
+      `const digest = sha256(secret.reveal("adapter"));`,
+      `logger.info({ digest }, "provisioned");`,
+    ].join("\n"),
+    "apps/sdp-api/src/services/helius-rings/example.ts"
+  );
+
+  // Hashing is the sanctioned way to log; only direct aliases are tracked.
+  assert.deepEqual(violations, []);
+});
+
+test("does not flag a same-named property on another object", () => {
+  const violations = findSecretRefViolations(
+    [
+      `const material = keyRef.material.reveal("adapter");`,
+      `await gateway.buildOperation({ material });`,
+      `logger.info({ kind: row.material }, "stored");`,
+    ].join("\n"),
+    "apps/sdp-api/src/services/helius-rings/example.ts"
+  );
+
+  assert.deepEqual(violations, []);
+});
+
 test("does not confuse an unrelated reveal() method", () => {
   const violations = findSecretRefViolations(
     `logger.info({ state: animation.reveal() }, "toggled");\n`,

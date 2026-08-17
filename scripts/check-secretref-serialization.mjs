@@ -18,6 +18,12 @@
  *   2. a logger or console call
  *   3. a template literal or String()
  *
+ * "Flowing into" covers the direct call and one indirection: identifiers
+ * assigned a reveal() result (or an alias of one) are tracked per file and
+ * flagged at the same sinks. Aliasing is deliberately direct-only — a value
+ * that passed through another call (a hash, an encryptor) is considered
+ * transformed and is the sanctioned way to log.
+ *
  * It also flags `JSON.stringify` applied directly to a `SecretRef` construction,
  * which is harmless at runtime but always means the author misunderstood the
  * wrapper.
@@ -115,6 +121,58 @@ function isSecretRefConstruction(node) {
   );
 }
 
+/** Strips wrappers that do not change what a value is. */
+function unwrapExpression(node) {
+  while (
+    ts.isParenthesizedExpression(node) ||
+    ts.isAwaitExpression(node) ||
+    ts.isAsExpression(node) ||
+    ts.isNonNullExpression(node) ||
+    ts.isSatisfiesExpression(node)
+  ) {
+    node = node.expression;
+  }
+  return node;
+}
+
+/**
+ * Names bound to a reveal() result in this file, direct aliases included
+ * (`const v = ref.reveal(...)`, `w = v`). Name-based and file-scoped — a
+ * same-named variable elsewhere in the file is treated as tainted too, which
+ * errs toward flagging.
+ */
+function collectRevealedAliases(sourceFile) {
+  const aliases = new Set();
+  const taintsFrom = (initializer) => {
+    const value = unwrapExpression(initializer);
+    return isRevealCall(value) || (ts.isIdentifier(value) && aliases.has(value.text));
+  };
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const visit = (node) => {
+      let name = null;
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+        if (taintsFrom(node.initializer)) name = node.name.text;
+      } else if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isIdentifier(node.left)
+      ) {
+        if (taintsFrom(node.right)) name = node.left.text;
+      }
+      if (name && !aliases.has(name)) {
+        aliases.add(name);
+        changed = true;
+      }
+      ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(sourceFile, visit);
+  }
+  return aliases;
+}
+
 /** Walks `root` (inclusive) looking for any node satisfying `predicate`. */
 function containsNode(root, predicate) {
   let found = false;
@@ -134,9 +192,9 @@ function lineOf(sourceFile, node) {
   return sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
 }
 
-/** True when any argument of a call contains a reveal(). */
-function hasRevealedArgument(node) {
-  return node.arguments.some((argument) => containsNode(argument, isRevealCall));
+/** True when any argument of a call contains a revealed value. */
+function hasRevealedArgument(node, isRevealedValue) {
+  return node.arguments.some((argument) => containsNode(argument, isRevealedValue));
 }
 
 /**
@@ -145,11 +203,11 @@ function hasRevealedArgument(node) {
  * adding a rule does not push the walker past the repo's complexity ceiling.
  */
 const RULES = [
-  function serialization(node) {
+  function serialization(node, isRevealedValue) {
     if (!isJsonStringifyCall(node)) return null;
     const [argument] = node.arguments;
     if (!argument) return null;
-    if (containsNode(argument, isRevealCall)) {
+    if (containsNode(argument, isRevealedValue)) {
       return "JSON.stringify() receives a revealed SecretRef. Serialize the wrapper, or a hash of the value, not reveal().";
     }
     if (containsNode(argument, isSecretRefConstruction)) {
@@ -158,20 +216,20 @@ const RULES = [
     return null;
   },
 
-  function logging(node) {
-    if (!isLogCall(node) || !hasRevealedArgument(node)) return null;
+  function logging(node, isRevealedValue) {
+    if (!isLogCall(node) || !hasRevealedArgument(node, isRevealedValue)) return null;
     return `${node.expression.name.text}() receives a revealed SecretRef. Log an identifier or a hash, never the material.`;
   },
 
-  function stringCoercion(node) {
-    if (!isStringCoercionCall(node) || !hasRevealedArgument(node)) return null;
+  function stringCoercion(node, isRevealedValue) {
+    if (!isStringCoercionCall(node) || !hasRevealedArgument(node, isRevealedValue)) return null;
     return 'String() receives a revealed SecretRef. Coerce the wrapper instead — it yields "[REDACTED]".';
   },
 
-  function interpolation(node) {
+  function interpolation(node, isRevealedValue) {
     if (!ts.isTemplateExpression(node)) return null;
     const interpolatesReveal = node.templateSpans.some((span) =>
-      containsNode(span.expression, isRevealCall)
+      containsNode(span.expression, isRevealedValue)
     );
     if (!interpolatesReveal) return null;
     return 'Template literal interpolates a revealed SecretRef. Interpolate the wrapper instead — it yields "[REDACTED]".';
@@ -192,9 +250,20 @@ export function findSecretRefViolations(sourceText, relativePath) {
     relativePath.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS
   );
 
+  const aliases = collectRevealedAliases(sourceFile);
+  const isRevealedValue = (node) => {
+    if (isRevealCall(node)) return true;
+    if (!ts.isIdentifier(node) || !aliases.has(node.text)) return false;
+    // A same-named property (`obj.v`, `{ v: x }`) is not the variable.
+    const parent = node.parent;
+    if (parent && ts.isPropertyAccessExpression(parent) && parent.name === node) return false;
+    if (parent && ts.isPropertyAssignment(parent) && parent.name === node) return false;
+    return true;
+  };
+
   const visit = (node) => {
     for (const rule of RULES) {
-      const message = rule(node);
+      const message = rule(node, isRevealedValue);
       if (message) {
         violations.push(`${relativePath}:${lineOf(sourceFile, node)}: ${message}`);
       }
