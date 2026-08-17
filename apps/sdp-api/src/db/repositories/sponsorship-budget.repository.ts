@@ -326,10 +326,17 @@ export class SponsorshipBudgetRepository {
     reason: string;
   }): Promise<SponsorshipBudgetPolicy | null> {
     return this.db.transaction(async (tx) => {
+      // A disable over an already-disabled policy must still record who asked
+      // and why: auto-recovery resumes only the breaker's config-unavailability
+      // trips, so an operator kill or integrity trip layered on top of one has
+      // to overwrite that provenance or it would be silently resumed later.
+      // Identical repeated disables stay no-ops.
       const row = await tx.queryOne<PolicyRow>(
         `UPDATE sponsorship_budget_policies
            SET enabled = ?, version = version + 1, updated_by = ?, update_reason = ?, updated_at = sdp_iso_now()
-         WHERE network = ? AND scope_type = ? AND scope_id IS NOT DISTINCT FROM ? AND enabled <> ?
+         WHERE network = ? AND scope_type = ? AND scope_id IS NOT DISTINCT FROM ?
+           AND (enabled <> ?
+                OR (? = FALSE AND (updated_by <> ? OR update_reason <> ?)))
          RETURNING *`,
         [
           input.enabled,
@@ -339,6 +346,9 @@ export class SponsorshipBudgetRepository {
           input.scopeType,
           input.scopeId,
           input.enabled,
+          input.enabled,
+          input.operator,
+          input.reason,
         ]
       );
       if (!row) return null;

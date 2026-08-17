@@ -105,9 +105,20 @@ describe("SponsorshipBudgetRepository", () => {
       scopeId: null,
       enabled: false,
       operator: "system:sponsorship-breaker",
-      reason: "already tripped",
+      reason: "trip",
     });
     expect(noop).toBeNull();
+
+    const provenanceOverwrite = await repository.setPolicyEnabled({
+      network: "devnet",
+      scopeType: "global",
+      scopeId: null,
+      enabled: false,
+      operator: "operator:oncall",
+      reason: "manual kill during breaker trip",
+    });
+    expect(provenanceOverwrite?.enabled).toBe(false);
+    expect(provenanceOverwrite?.updatedBy).toBe("operator:oncall");
   });
 
   it("resumes the breaker only when the trip provenance still matches", async () => {
@@ -156,6 +167,37 @@ describe("SponsorshipBudgetRepository", () => {
       reason: "restore",
     });
     await repository.tripGlobalBreaker("devnet", "overspend detected");
+    expect(
+      await repository.resumeGlobalBreaker("devnet", "config unavailable", "config readable again")
+    ).toBeNull();
+  });
+
+  it("blocks auto-resume after an operator kill lands over an existing breaker trip", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+
+    await repository.tripGlobalBreaker("devnet", "config unavailable");
+    const killed = await repository.setPolicyEnabled({
+      network: "devnet",
+      scopeType: "global",
+      scopeId: null,
+      enabled: false,
+      operator: "operator:oncall",
+      reason: "keep sponsorship down during incident review",
+    });
+    expect(killed?.updatedBy).toBe("operator:oncall");
+
+    expect(
+      await repository.resumeGlobalBreaker("devnet", "config unavailable", "config readable again")
+    ).toBeNull();
+  });
+
+  it("blocks auto-resume after an integrity trip lands over a config-unavailability trip", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+
+    await repository.tripGlobalBreaker("devnet", "config unavailable");
+    const integrityTrip = await repository.tripGlobalBreaker("devnet", "overspend detected");
+    expect(integrityTrip?.updateReason).toBe("overspend detected");
+
     expect(
       await repository.resumeGlobalBreaker("devnet", "config unavailable", "config readable again")
     ).toBeNull();
