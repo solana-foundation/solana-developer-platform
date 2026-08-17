@@ -11,7 +11,7 @@ import {
   validateCatalogs,
 } from "./missing-translations.mjs";
 
-const releaseBranch = process.env.RELEASE_BRANCH ?? "codex/release-main";
+const releaseBranch = process.env.RELEASE_BRANCH ?? "sdp/release-main";
 const repo = process.env.GITHUB_REPOSITORY;
 const token = process.env.GITHUB_TOKEN;
 const messagesDir = path.resolve(
