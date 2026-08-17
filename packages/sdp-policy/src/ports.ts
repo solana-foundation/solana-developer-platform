@@ -13,6 +13,7 @@ import type {
   WalletOperationFamily,
   WalletOperationProviderExtensions,
   WalletOperationStatus,
+  WalletOperationType,
 } from "@sdp/types";
 
 export interface CreateWalletOperationInput {
@@ -24,7 +25,7 @@ export interface CreateWalletOperationInput {
   actor?: WalletOperationActor | null;
   source?: string;
   operationFamily: WalletOperationFamily;
-  operationType: string;
+  operationType: WalletOperationType;
   asset?: string | null;
   amount?: string | null;
   destination?: string | null;

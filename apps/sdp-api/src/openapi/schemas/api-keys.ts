@@ -98,9 +98,9 @@ export const apiKeyWalletPolicyBindingSchema = z
 export const apiKeyPolicyRuleSchema = withOpenApi(policyRuleSchema, {
   description: "Operation-level API-key policy rule.",
   example: {
-    id: "deny-raw-signing",
+    id: "deny-issuance",
     kind: "operation_family",
-    family: "raw_sign",
+    family: "issuance",
     action: "deny",
   },
 });

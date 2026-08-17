@@ -18,12 +18,39 @@ balance with a live one.
   by the hourly sync cron, the 5-minute metrics refresh
   (`cron/earn-metrics-refresh.ts`, figures only — it can never insert a row),
   and the local dev seed.
+  - **FOUR visibility filters, all server-side, all in `handlers/strategies.ts`.**
+    `EARN_PROVIDER_SURFACING` (@sdp/types) hides every row of a provider SDP does
+    not currently OFFER — Ground today, so the shipped catalogue is Kamino only;
+    `HIDDEN_STRATEGY_TERMS` hides individual Aave/Morpho-related rows. The list
+    pushes both into SQL (`providers: SURFACED_EARN_PROVIDERS` +
+    `excludeRelatedTerms`) so `total` and the page window describe the rows the
+    caller can see; `isHiddenStrategy` applies the same two rules to the detail
+    route, which has no query to push them into. Keep them in that one predicate
+    — a detail route that drifts from the list route leaks a row by id.
+  - **Per-vault curation** sits beside them, and is the knob for an opinionated
+    shelf: `HIDDEN_VAULTS` (subtractive — drop one vault, the rest keeps flowing
+    in) and `CURATED_VAULTS` (a hand-picked allowlist — a provider listed there
+    shows ONLY those vaults, so a newly created one does not appear until someone
+    adds it). Both push into SQL so `total` moves with the rows.
+  - **Curation keys on the vault ADDRESS, never the name.** Kamino's registry is
+    permissionless and the name is free text chosen by whoever created the vault,
+    so a name-keyed rule can be dodged by renaming and tripped by impersonating a
+    curated vault's name. `HIDDEN_STRATEGY_TERMS` is name-based only because it
+    can exclusively REMOVE rows; the same trick pointed the other way would be an
+    admission hole.
+  - None of these is entitlement and none is `fundable`. The sync keeps STORING
+    everything a provider reports, so the DB stays a truthful inventory and
+    un-curating is a deploy rather than an hour's wait. None is an allocation
+    gate either — `assertKnownYieldSources` reads the stored catalogue, so an
+    existing program pointed at a curated-away vault keeps working.
   - Each row carries `hostCluster` (the cluster the INSTRUMENT lives on, stored)
     and `fundable` (derived per request from `hostCluster` against the caller's
     environment, never stored). **Catalogued is not the same as fundable**:
-    Kamino's K-Vaults are mainnet-only and are catalogued into sandbox too so
-    integrators can browse the real shelf, so a sandbox row may honestly read
-    `hostCluster: "mainnet-beta", fundable: false`. `fundable` is the wire-level
+    a provider may front instruments that do not exist on every cluster, and the
+    sync REFUSES to store a `mainnet-beta` instrument outside production. (Kamino
+    was the original example of the opposite — catalogued mainnet-into-sandbox
+    because we believed it had no devnet deployment; it does, and each
+    environment now catalogues its own cluster.) `fundable` is the wire-level
     warning — partners must branch on it rather than assume a listed strategy
     takes deposits.
   - **`fundable` answers the CLUSTER question only, and its two sides are not
@@ -93,11 +120,18 @@ other's balance.
     Deliberately NOT in scope: `projectId` (sibling projects share programs), the
     allocations, and the label.
   - **Gate ORDER is load-bearing — key resolution runs LAST.** parseBody
-    (schema 400s) → `requirePortfolioClient` (501) → `assertProviderAvailable`
-    (403) → `assertKnownYieldSources` (400) → project scope (500) → key
-    resolution (400). An unentitled caller sending no key still gets 403, and a
-    provider without the portfolio capability still gets 501, rather than a
-    generic "missing idempotency key" that hides why the call could never work.
+    (schema 400s) → `requirePortfolioClient` (501) →
+    `assertEarnProviderSurfaced` (403) → `assertProviderAvailable` (403) →
+    `assertKnownYieldSources` (400) → project scope (500) → key resolution
+    (400). An unentitled caller sending no key still gets 403, and a provider
+    without the portfolio capability still gets 501, rather than a generic
+    "missing idempotency key" that hides why the call could never work.
+  - **Surfacing runs BEFORE entitlement, and says something different.** This is
+    the ONLY route that consults `EARN_PROVIDER_SURFACING` — the platform-level
+    "we do not offer this provider", which no `providerOverrides` can lift. Its
+    403 reads "not currently offered"; `assertProviderAvailable`'s reads
+    "requires manual activation". Order matters because pointing a caller at an
+    activation door that does not exist is worse than a plain refusal.
   - **`assertKnownYieldSources` validates against the STORED active catalogue.**
     It matches every requested `yieldSourceId` against `status = 'active'` for
     the environment, so whatever a provider client admits is allocatable and
@@ -108,19 +142,25 @@ other's balance.
     existing programs either — a wallet's current allocation stands until
     someone re-targets it in Ground.
   - **Its keep-set is filtered by `isClusterFundableInEnvironment` too**, and
-    that half is separately load-bearing: a mainnet-only provider's vaults ARE
-    catalogued in sandbox, so provider scoping alone would let devnet money be
-    allocated to an instrument that does not exist on this cluster. This is the
+    that half is separately load-bearing: a genuinely single-cluster provider's
+    vaults could be catalogued in sandbox, so provider scoping alone would let
+    devnet money be allocated to an instrument that does not exist on this
+    cluster. This is the
     last gate before a provider mutation on both create and re-target. The route
     tests pin it with a GROUND row whose cluster is flipped — a Kamino reference
     would pass on provider scoping alone and prove nothing.
-  - **Browse policy is deliberately NOT one of its gates.** `/strategies`
-    list/detail hide Aave- and Morpho-related rows (`HIDDEN_STRATEGY_TERMS`)
-    while the sync keeps storing them, so the DB stays a truthful provider
-    inventory. This gate reads the STORED catalogue, so a hidden row is still a
-    valid allocation target — correct, because hiding is a presentation choice
-    and an existing program may already point at one. Existing program positions
-    are never filtered either; hiding one could hide real customer money.
+  - **Browse policy is deliberately NOT one of its gates — neither half.**
+    `/strategies` list/detail hide Aave/Morpho-related rows
+    (`HIDDEN_STRATEGY_TERMS`) *and* every row of an un-surfaced provider
+    (`EARN_PROVIDER_SURFACING`), while the sync keeps storing both, so the DB
+    stays a truthful provider inventory. This gate reads the STORED catalogue,
+    so a hidden row is still a valid allocation target — correct, because hiding
+    is a presentation choice and an existing program may already point at one.
+    That matters most on `PUT` (re-target), which takes no surfacing gate: an
+    org holding an un-surfaced provider's program must still be able to move its
+    allocation, and inheriting the hide here would freeze it. Existing program
+    positions are never filtered either; hiding one could hide real customer
+    money.
 
   - **A unique violation on the insert is a REPLAY, not a race.** The provider
     dedupes on the derived key and answers a retried create with the ORIGINAL
@@ -253,6 +293,14 @@ other's balance.
 
 - **Money-in** (`POST /programs`, `PUT /programs/:programId`):
   `assertProviderAvailable` (entitlement + enablement + credentials).
+- **New positions only** (`POST /programs`): `assertEarnProviderSurfaced`.
+  Surfacing gates the way IN and nothing else — every read, every money-out
+  route, and `PUT` (re-target) ignore it, so un-surfacing a provider can never
+  strand a position taken while it was offered. `POST /programs` is the only
+  route that opens a *new* commitment, which is why it is the only one that
+  refuses. Pinned by the "un-surfaced provider" describe in
+  `../earn-program.test.ts`, whose second test asserts read/re-target/withdraw
+  all still work.
 - **Money-out and live reads** (withdrawals create/detail, previews, program
   get, programs list, deposits list): `assertEarnProviderConfigured` ONLY — a
   disabled provider must never trap funds. The list resolves capability +
@@ -309,6 +357,16 @@ other's balance.
   `packages/sdp-earn/README.md` → "Catalogue data".
 - Whole-stack local setup (ports, flags, Ground key, entitlement, troubleshooting):
   `packages/sdp-earn/CLAUDE.md` → "Local development".
+- **Tests must not depend on which providers are surfaced today.** Ground is the
+  only portfolio-capable provider and it is currently un-surfaced, so
+  `POST /programs` 403s for it in the shipped config — but idempotency, replay,
+  gate order and environment isolation still have to work for whichever provider
+  is offered next. `earn-program.test.ts` therefore partial-mocks
+  `isEarnProviderSurfaced` (a `vi.hoisted` flag, forced on in `beforeEach`), and
+  the gate gets its own describe that flips the flag off and runs against the
+  real map. `earn.test.ts` seeds a SURFACED provider by default for the same
+  reason. When a surfacing change breaks a suite, copy that pattern — do not
+  edit `EARN_PROVIDER_SURFACING` to make a test pass.
 - Tests: vitest; stub `EARN_PROVIDER_CLIENTS.<id>` methods with `vi.spyOn`;
   repository tests use testcontainers. The ledger repository/service suites in
   `../../db/repositories/earn.repository.test.ts` run against a NON-Ground

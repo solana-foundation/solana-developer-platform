@@ -35,11 +35,17 @@ export function isStrategyWithinDeclaredSupport(
  * THE fundability rule: a strategy can only take a deposit in an environment
  * whose cluster its instrument actually lives on.
  *
- * This exists because the catalogue and the fundable set are not the same set.
- * Kamino's K-Vaults are mainnet-only but are catalogued in BOTH environments so
- * sandbox integrators can browse the real shelf — those sandbox rows name a
- * live mainnet vault and mainnet mint, and nothing may treat them as
- * depositable there. Every gate that stands between a caller and a provider
+ * This exists because the catalogue and the fundable set are not the same set,
+ * and `host_cluster` is a per-row column (migration 0057) rather than a
+ * property of the environment. Kamino was the original example — catalogued
+ * mainnet-into-sandbox because we believed it had no devnet deployment — and it
+ * no longer is: each environment now catalogues its own cluster. The rule still
+ * has live work, which is why it stays: rows written under the old behaviour
+ * survive until a delist pass clears them, a `devnet` row reaching production is
+ * caught by this predicate alone (the sync's persistence guard only refuses
+ * mainnet-beta outside production), and the next genuinely single-cluster
+ * provider reintroduces the mismatch on day one. Every gate that stands between
+ * a caller and a provider
  * mutation calls this one predicate: the API's `assertKnownYieldSources`, the
  * strategies read model's derived `fundable`, and the dashboard's
  * `fundableStrategies`. Do not re-derive the comparison anywhere else — a

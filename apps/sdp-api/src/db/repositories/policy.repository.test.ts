@@ -3,6 +3,7 @@ import type {
   PolicyEvaluationContext,
   PolicyRule,
   WalletOperationFamily,
+  WalletOperationType,
 } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
@@ -262,7 +263,7 @@ describe("PolicyRepository (postgres)", () => {
       apiKeyId: TEST_API_KEY.id,
       actor: { type: "api_key", id: TEST_API_KEY.id, apiKeyId: TEST_API_KEY.id },
       operationFamily: "payment",
-      operationType: "payment_request",
+      operationType: "payment_transfer_execute",
       asset: "USDC",
       amount: "12.50",
       destination: "recipient_1",
@@ -276,7 +277,7 @@ describe("PolicyRepository (postgres)", () => {
       context: { requestId: "req_policy_1" },
       providerExtensions: { provider: "future-provider" },
     });
-    const evaluationContext = {
+    const evaluationContext: PolicyEvaluationContext = {
       operation: {
         id: operation?.id ?? "",
         organizationId: TEST_ORG.id,
@@ -287,7 +288,7 @@ describe("PolicyRepository (postgres)", () => {
         actor: { type: "api_key", id: TEST_API_KEY.id, apiKeyId: TEST_API_KEY.id },
         source: "api",
         operationFamily: "payment" as const,
-        operationType: "payment_request",
+        operationType: "payment_transfer_execute",
         asset: "USDC",
         amount: "12.50",
         destination: "recipient_1",
@@ -361,7 +362,7 @@ describe("PolicyRepository (postgres)", () => {
         custodyWalletId: TEST_CUSTODY_WALLET.id,
         walletId: OTHER_PROJECT_CUSTODY_WALLET.walletId,
         operationFamily: "payment",
-        operationType: "payment_transfer",
+        operationType: "payment_transfer_execute",
       })
     ).resolves.toBeNull();
 
@@ -468,7 +469,7 @@ describe("PolicyRepository (postgres)", () => {
       walletId: TEST_CUSTODY_WALLET.walletId,
       apiKeyId: TEST_API_KEY.id,
       operationFamily: "ramp",
-      operationType: "onramp_quote",
+      operationType: "ramp_onramp_quote",
       asset: "USDC",
       amount: "25.00",
       destination: "recipient_1",
@@ -496,7 +497,7 @@ describe("PolicyRepository (postgres)", () => {
         custodyWalletId: TEST_CUSTODY_WALLET.id,
         walletId: TEST_CUSTODY_WALLET.walletId,
         operationFamily: "ramp",
-        operationType: "onramp_quote",
+        operationType: "ramp_onramp_quote",
       }),
       requiresApproval: true,
       approvalRequestId: approvalRequest?.id,
@@ -510,7 +511,7 @@ describe("PolicyRepository (postgres)", () => {
       walletId: SECOND_CUSTODY_WALLET.walletId,
       apiKeyId: TEST_API_KEY.id,
       operationFamily: "payment",
-      operationType: "payment_transfer",
+      operationType: "payment_transfer_execute",
       status: "failed",
     });
     expect(otherWalletOperation).not.toBeNull();
@@ -524,7 +525,7 @@ describe("PolicyRepository (postgres)", () => {
         custodyWalletId: SECOND_CUSTODY_WALLET.id,
         walletId: SECOND_CUSTODY_WALLET.walletId,
         operationFamily: "payment",
-        operationType: "payment_transfer",
+        operationType: "payment_transfer_execute",
       }),
     });
 
@@ -541,7 +542,7 @@ describe("PolicyRepository (postgres)", () => {
       wallet_operation_id: operation?.id,
       policy_evaluation_id: evaluation?.id,
       operation_family: "ramp",
-      operation_type: "onramp_quote",
+      operation_type: "ramp_onramp_quote",
       asset: "USDC",
       amount: "25.00",
       destination: "recipient_1",
@@ -561,7 +562,7 @@ describe("PolicyRepository (postgres)", () => {
       custodyWalletId: TEST_CUSTODY_WALLET.id,
       walletId: TEST_CUSTODY_WALLET.walletId,
       operationFamily: "transfer",
-      operationType: "legacy_transfer",
+      operationType: "payment_transfer_execute",
     });
     expect(operation).not.toBeNull();
 
@@ -593,7 +594,7 @@ describe("PolicyRepository (postgres)", () => {
       walletId: TEST_CUSTODY_WALLET.walletId,
       apiKeyId: TEST_API_KEY.id,
       operationFamily: "payment",
-      operationType: "payment_transfer",
+      operationType: "payment_transfer_execute",
       status: "pending_approval",
     });
     expect(operation).not.toBeNull();
@@ -679,7 +680,7 @@ describe("PolicyRepository (postgres)", () => {
       walletId: TEST_CUSTODY_WALLET.walletId,
       apiKeyId: TEST_API_KEY.id,
       operationFamily: "payment",
-      operationType: "payment_transfer",
+      operationType: "payment_transfer_execute",
       asset: "USDC",
       amount: "25.00",
       destination: "recipient_1",
@@ -706,7 +707,7 @@ describe("PolicyRepository (postgres)", () => {
         custodyWalletId: TEST_CUSTODY_WALLET.id,
         walletId: TEST_CUSTODY_WALLET.walletId,
         operationFamily: "payment",
-        operationType: "payment_transfer",
+        operationType: "payment_transfer_execute",
       }),
       requiresApproval: true,
       approvalRequestId: request?.id,
@@ -732,7 +733,7 @@ describe("PolicyRepository (postgres)", () => {
       custodyWalletId: OTHER_PROJECT_CUSTODY_WALLET.id,
       walletId: OTHER_PROJECT_CUSTODY_WALLET.walletId,
       operationFamily: "payment",
-      operationType: "payment_transfer",
+      operationType: "payment_transfer_execute",
       status: "pending_approval",
     });
     expect(otherOperation).not.toBeNull();
@@ -759,7 +760,7 @@ describe("PolicyRepository (postgres)", () => {
       wallet_id: TEST_CUSTODY_WALLET.walletId,
       wallet_public_key: TEST_CUSTODY_WALLET.publicKey,
       operation_family: "payment",
-      operation_type: "payment_transfer",
+      operation_type: "payment_transfer_execute",
       decision: "approval_required",
       reason_code: "wallet_policy_match",
       matched_rules: [{ ruleId: "payment-approval" }],
@@ -823,8 +824,8 @@ describe("PolicyRepository (postgres)", () => {
       walletId: TEST_CUSTODY_WALLET.walletId,
       apiKeyId: TEST_API_KEY.id,
       actor: null,
-      operationFamily: "program",
-      operationType: "program_call",
+      operationFamily: "issuance",
+      operationType: "issuance_update_authority_execute",
       legs: [],
       rawPayload: { programId: "program_1" },
     });
@@ -1672,7 +1673,7 @@ function buildPolicyEvaluationContext(input: {
   custodyWalletId: string;
   walletId: string;
   operationFamily: WalletOperationFamily;
-  operationType: string;
+  operationType: WalletOperationType;
 }): PolicyEvaluationContext {
   return {
     operation: {
