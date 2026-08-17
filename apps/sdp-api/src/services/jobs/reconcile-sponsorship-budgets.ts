@@ -24,6 +24,13 @@ const RECONCILIATION_BATCH_SIZE = 250;
 const PROVIDER_CONFIG_READ_ATTEMPTS = 3;
 const PROVIDER_CONFIG_RETRY_DELAY_MS = 5_000;
 
+// Per-request admission is already fail-closed while the provider is
+// unreachable, so an immediate trip buys no safety and only extends the outage
+// past the provider's recovery. Reconciliation skips the tick instead and
+// trips only after this many consecutive failed ticks — an operator signal
+// for a sustained outage, not a lock for a blip.
+const CONSECUTIVE_CONFIG_FAILURES_BEFORE_TRIP = 3;
+
 export const KORA_CONFIG_UNAVAILABLE_BREAKER_REASON =
   "Kora security configuration was unavailable during reconciliation";
 const BREAKER_RECOVERY_REASON =
@@ -39,6 +46,8 @@ type ReconciliationRepository = Pick<
   | "getGlobalPolicy"
   | "tripGlobalBreaker"
   | "resumeGlobalBreaker"
+  | "recordProviderConfigFailure"
+  | "resetProviderConfigFailures"
   | "markRedisSettled"
 >;
 type ReconciliationRedis = Pick<SponsorshipBudgetRedis, "settle" | "syncPolicy">;
@@ -120,12 +129,11 @@ export async function reconcileSponsorshipBudgets(
     // With no live reservations there is nothing the breaker protects; the
     // already-tripped policy stays down and the next tick probes again.
     if (reservations.length > 0) {
-      await tripBreaker(repository, budgetRedis, network, KORA_CONFIG_UNAVAILABLE_BREAKER_REASON, {
-        recoverable: true,
-      });
+      await handleProviderConfigFailure(repository, budgetRedis, network);
     }
     throw new Error("Kora security configuration is unavailable", { cause: error });
   }
+  await repository.resetProviderConfigFailures(network);
 
   if (recoverableTrip) {
     const resumed = await repository.resumeGlobalBreaker(
@@ -363,6 +371,26 @@ async function readProviderConfiguration(
     }
   }
   throw lastError;
+}
+
+async function handleProviderConfigFailure(
+  repository: ReconciliationRepository,
+  budgetRedis: ReconciliationRedis,
+  network: SponsorshipNetwork
+): Promise<void> {
+  const consecutiveFailures = await repository.recordProviderConfigFailure(network);
+  if (consecutiveFailures >= CONSECUTIVE_CONFIG_FAILURES_BEFORE_TRIP) {
+    await tripBreaker(repository, budgetRedis, network, KORA_CONFIG_UNAVAILABLE_BREAKER_REASON, {
+      recoverable: true,
+    });
+    return;
+  }
+  logEvent("warn", {
+    event: "sdp_api_sponsorship_config_read_failed",
+    network,
+    consecutive_failures: consecutiveFailures,
+    trip_threshold: CONSECUTIVE_CONFIG_FAILURES_BEFORE_TRIP,
+  });
 }
 
 async function tripBreaker(

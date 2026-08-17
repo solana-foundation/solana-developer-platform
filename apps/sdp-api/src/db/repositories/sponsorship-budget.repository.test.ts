@@ -48,7 +48,7 @@ describe("SponsorshipBudgetRepository", () => {
   beforeEach(async () => {
     const db = getDb(env);
     await db.execute(
-      "TRUNCATE sponsorship_budget_policy_revisions, sponsorship_budget_reservations, sponsorship_budget_policies"
+      "TRUNCATE sponsorship_budget_policy_revisions, sponsorship_budget_reservations, sponsorship_budget_policies, sponsorship_reconciliation_state"
     );
     await insertPolicy({ id: "global", scopeType: "global", scopeId: null });
     await insertPolicy({ id: "org_default", scopeType: "organization", scopeId: null });
@@ -170,6 +170,19 @@ describe("SponsorshipBudgetRepository", () => {
     expect(
       await repository.resumeGlobalBreaker("devnet", "config unavailable", "config readable again")
     ).toBeNull();
+  });
+
+  it("counts consecutive provider config failures durably and resets on success", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+
+    expect(await repository.recordProviderConfigFailure("devnet")).toBe(1);
+    expect(await repository.recordProviderConfigFailure("devnet")).toBe(2);
+    expect(await repository.recordProviderConfigFailure("devnet")).toBe(3);
+    expect(await repository.recordProviderConfigFailure("mainnet")).toBe(1);
+
+    await repository.resetProviderConfigFailures("devnet");
+    expect(await repository.recordProviderConfigFailure("devnet")).toBe(1);
+    expect(await repository.recordProviderConfigFailure("mainnet")).toBe(2);
   });
 
   it("blocks auto-resume after an operator kill lands over an existing breaker trip", async () => {
