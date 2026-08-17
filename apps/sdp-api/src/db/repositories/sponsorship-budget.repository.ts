@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { AppDb, DatabaseExecutor } from "@/db";
 
+export const SPONSORSHIP_BREAKER_OPERATOR = "system:sponsorship-breaker";
+
 export type SponsorshipNetwork = "devnet" | "mainnet";
 export type SponsorshipBudgetScopeType = "global" | "organization" | "project";
 export type SponsorshipReservationStatus =
@@ -124,6 +126,15 @@ function mapPolicy(row: PolicyRow): SponsorshipBudgetPolicy {
 
 export class SponsorshipBudgetRepository {
   constructor(private readonly db: AppDb) {}
+
+  async getGlobalPolicy(network: SponsorshipNetwork): Promise<SponsorshipBudgetPolicy | null> {
+    const row = await this.db.queryOne<PolicyRow>(
+      `SELECT * FROM sponsorship_budget_policies
+       WHERE network = ? AND scope_type = 'global' AND scope_id IS NULL`,
+      [network]
+    );
+    return row ? mapPolicy(row) : null;
+  }
 
   async listPolicies(network?: SponsorshipNetwork): Promise<SponsorshipBudgetPolicy[]> {
     const rows = await this.db.queryMany<PolicyRow>(
@@ -345,7 +356,21 @@ export class SponsorshipBudgetRepository {
       scopeType: "global",
       scopeId: null,
       enabled: false,
-      operator: "system:sponsorship-breaker",
+      operator: SPONSORSHIP_BREAKER_OPERATOR,
+      reason,
+    });
+  }
+
+  async resumeGlobalBreaker(
+    network: SponsorshipNetwork,
+    reason: string
+  ): Promise<SponsorshipBudgetPolicy | null> {
+    return this.setPolicyEnabled({
+      network,
+      scopeType: "global",
+      scopeId: null,
+      enabled: true,
+      operator: SPONSORSHIP_BREAKER_OPERATOR,
       reason,
     });
   }
