@@ -1,7 +1,7 @@
 {
   "provider": "ground",
   "environment": "sandbox",
-  "fetchedAt": "2026-08-12T22:37:14.430Z",
+  "fetchedAt": "2026-08-05T23:36:57.376Z",
   "sources": [
     {
       "id": "aave-v3-usdc",
@@ -10,9 +10,9 @@
       "chain": "ethereum_sepolia",
       "depositToken": "usdc",
       "protocol": "aave_v3",
-      "apyBps": 356,
-      "tvlUsd": 2173559730.85904,
-      "utilizationPct": 91.89834467610144,
+      "apyBps": 351,
+      "tvlUsd": 1978726696.323814,
+      "utilizationPct": 99.99465275870236,
       "allocations": [
         {
           "label": "Aave V3 Core Market",
@@ -22,9 +22,9 @@
       ],
       "sourceKind": "defi",
       "curator": "aave_v3",
-      "outcome": "dropped",
-      "dropReason": "not_solana_hosted",
-      "liquidityTerm": null,
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "instant",
       "redemptionDelayDays": null
     },
     {
@@ -34,8 +34,8 @@
       "chain": "ethereum_sepolia",
       "depositToken": "usdc",
       "protocol": "centrifuge",
-      "apyBps": 458,
-      "tvlUsd": 693890365.28,
+      "apyBps": 411,
+      "tvlUsd": 684935951.57,
       "utilizationPct": null,
       "allocations": [
         {
@@ -46,10 +46,10 @@
       ],
       "sourceKind": "rwa",
       "curator": "centrifuge",
-      "outcome": "dropped",
-      "dropReason": "not_solana_hosted",
-      "liquidityTerm": null,
-      "redemptionDelayDays": null
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "delayed",
+      "redemptionDelayDays": 2
     },
     {
       "id": "ground-jaaa-usdt-vault",
@@ -58,8 +58,8 @@
       "chain": "ethereum_sepolia",
       "depositToken": "usdt",
       "protocol": "centrifuge",
-      "apyBps": 458,
-      "tvlUsd": 693890365.28,
+      "apyBps": 411,
+      "tvlUsd": 684935951.57,
       "utilizationPct": null,
       "allocations": [
         {
@@ -82,8 +82,8 @@
       "chain": "ethereum_sepolia",
       "depositToken": "usdc",
       "protocol": "centrifuge",
-      "apyBps": 357,
-      "tvlUsd": 882009846.76,
+      "apyBps": 354,
+      "tvlUsd": 881450490.84,
       "utilizationPct": null,
       "allocations": [
         {
@@ -94,10 +94,10 @@
       ],
       "sourceKind": "rwa",
       "curator": "centrifuge",
-      "outcome": "dropped",
-      "dropReason": "not_solana_hosted",
-      "liquidityTerm": null,
-      "redemptionDelayDays": null
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "delayed",
+      "redemptionDelayDays": 2
     },
     {
       "id": "ground-jtrsy-usdt-vault",
@@ -106,8 +106,8 @@
       "chain": "ethereum_sepolia",
       "depositToken": "usdt",
       "protocol": "centrifuge",
-      "apyBps": 357,
-      "tvlUsd": 882009846.76,
+      "apyBps": 354,
+      "tvlUsd": 881450490.84,
       "utilizationPct": null,
       "allocations": [
         {
@@ -130,8 +130,8 @@
       "chain": "ethereum_sepolia",
       "depositToken": "usdc",
       "protocol": "guscc",
-      "apyBps": 385,
-      "tvlUsd": 123767874.17,
+      "apyBps": 271,
+      "tvlUsd": 129306810.28,
       "utilizationPct": null,
       "allocations": [
         {
@@ -142,10 +142,10 @@
       ],
       "sourceKind": "rwa",
       "curator": "guscc",
-      "outcome": "dropped",
-      "dropReason": "not_solana_hosted",
-      "liquidityTerm": null,
-      "redemptionDelayDays": null
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "delayed",
+      "redemptionDelayDays": 2
     },
     {
       "id": "ground-ustb-vault",
@@ -155,7 +155,7 @@
       "depositToken": "usdc",
       "protocol": "gustb",
       "apyBps": 351,
-      "tvlUsd": 958406746.95,
+      "tvlUsd": 956345552.44,
       "utilizationPct": null,
       "allocations": [
         {
@@ -166,10 +166,10 @@
       ],
       "sourceKind": "rwa",
       "curator": "gustb",
-      "outcome": "dropped",
-      "dropReason": "not_solana_hosted",
-      "liquidityTerm": null,
-      "redemptionDelayDays": null
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "delayed",
+      "redemptionDelayDays": 1
     },
     {
       "id": "kamino-allez-usdc",
@@ -178,49 +178,49 @@
       "chain": "solana_devnet",
       "depositToken": "usdc",
       "protocol": "kamino",
-      "apyBps": 516,
-      "tvlUsd": 15009581.274942,
+      "apyBps": 506,
+      "tvlUsd": 15421376.992137,
       "utilizationPct": null,
       "allocations": [
         {
           "label": "USDC / SOL/BTC",
           "type": "reserve",
-          "pct": 17.72614702608773
+          "pct": 15.511845230356514
         },
         {
           "label": "USDC / JLP",
           "type": "reserve",
-          "pct": 0.8279452940933983
+          "pct": 2.866891384105099
         },
         {
           "label": "USDC / Bitcoin",
           "type": "reserve",
-          "pct": 2.4400762305816546
+          "pct": 0.42522965889668596
         },
         {
           "label": "USDC / STRCx",
           "type": "reserve",
-          "pct": 0.26636309729546326
+          "pct": 0.2590698220123732
         },
         {
           "label": "USDC / OnRe",
           "type": "reserve",
-          "pct": 2.2682086130410104
+          "pct": 2.0839741374116483
         },
         {
           "label": "USDC / Maple",
           "type": "reserve",
-          "pct": 3.495381454152252
+          "pct": 2.6848766009531992
         },
         {
           "label": "USDC / Figure",
           "type": "reserve",
-          "pct": 19.72165056332624
+          "pct": 25.091403765232638
         },
         {
           "label": "USDC / HYPE",
           "type": "reserve",
-          "pct": 3.330490012969346
+          "pct": 3.2407510170948033
         },
         {
           "label": "USDC / Huma",
@@ -230,7 +230,7 @@
         {
           "label": "USDC / OnRe",
           "type": "reserve",
-          "pct": 49.92373770845291
+          "pct": 47.83595838393704
         }
       ],
       "sourceKind": "defi",
@@ -247,19 +247,19 @@
       "chain": "solana_devnet",
       "depositToken": "usdc",
       "protocol": "kamino",
-      "apyBps": 506,
-      "tvlUsd": 365281.564357,
+      "apyBps": 479,
+      "tvlUsd": 391667.254369,
       "utilizationPct": null,
       "allocations": [
         {
           "label": "USDC / Figure",
           "type": "reserve",
-          "pct": 35.31
+          "pct": 87.62
         },
         {
           "label": "USDC / Maple",
           "type": "reserve",
-          "pct": 64.69
+          "pct": 12.379999999999999
         },
         {
           "label": "USDC / SOL/BTC",
@@ -286,8 +286,8 @@
       "chain": "solana_devnet",
       "depositToken": "usdc",
       "protocol": "kamino",
-      "apyBps": 588,
-      "tvlUsd": 22607744.110443,
+      "apyBps": 585,
+      "tvlUsd": 27292892.090138,
       "utilizationPct": null,
       "allocations": [
         {
@@ -298,22 +298,22 @@
         {
           "label": "USDC / Huma",
           "type": "reserve",
-          "pct": 28.176428176428175
+          "pct": 30.000030000029998
         },
         {
           "label": "USDC / OnRe",
           "type": "reserve",
-          "pct": 40.89244089244089
+          "pct": 40.58014058014058
         },
         {
           "label": "USDC / Figure",
           "type": "reserve",
-          "pct": 7.000007000007
+          "pct": 10.00001000001
         },
         {
           "label": "USDC / OnRe",
           "type": "reserve",
-          "pct": 1.3268013268013268
+          "pct": 1.099001099001099
         },
         {
           "label": "USDC / OnRe",
@@ -323,7 +323,7 @@
         {
           "label": "USDC / Obligate",
           "type": "reserve",
-          "pct": 22.604322604322604
+          "pct": 18.320818320818322
         }
       ],
       "sourceKind": "defi",
@@ -340,29 +340,29 @@
       "chain": "solana_devnet",
       "depositToken": "usdc",
       "protocol": "kamino",
-      "apyBps": 401,
-      "tvlUsd": 19806299.337234,
+      "apyBps": 393,
+      "tvlUsd": 19924792.976088,
       "utilizationPct": null,
       "allocations": [
         {
           "label": "USDC / JLP",
           "type": "reserve",
-          "pct": 21.1694
+          "pct": 18.665499999999998
         },
         {
           "label": "USDC / SOL/BTC",
           "type": "reserve",
-          "pct": 78.75959999999999
+          "pct": 78.5549
         },
         {
           "label": "USDC / Bitcoin",
           "type": "reserve",
-          "pct": 0.0659
+          "pct": 0.827
         },
         {
           "label": "USDC / Maple",
           "type": "reserve",
-          "pct": 0.0051
+          "pct": 1.9526000000000001
         }
       ],
       "sourceKind": "defi",
@@ -379,8 +379,8 @@
       "chain": "solana_devnet",
       "depositToken": "usdc",
       "protocol": "kamino",
-      "apyBps": 134,
-      "tvlUsd": 8390138.513715,
+      "apyBps": 151,
+      "tvlUsd": 8388124.799811,
       "utilizationPct": null,
       "allocations": [
         {
@@ -403,26 +403,26 @@
       "chain": "ethereum_sepolia",
       "depositToken": "usdc",
       "protocol": "morpho",
-      "apyBps": 839,
-      "tvlUsd": 742744.435989,
+      "apyBps": 815,
+      "tvlUsd": 1598579.296852,
       "utilizationPct": null,
       "allocations": [
         {
-          "label": "USDC / AA_FalconXUSDC",
+          "label": "USDC / upUSDC",
           "type": "market",
-          "pct": 0.00001291148106995908
+          "pct": 29.754776822786038
         },
         {
           "label": "USDC / syzUSD",
           "type": "market",
-          "pct": 99.99998708851892
+          "pct": 70.24522317721394
         }
       ],
       "sourceKind": "defi",
       "curator": "august",
-      "outcome": "dropped",
-      "dropReason": "not_solana_hosted",
-      "liquidityTerm": null,
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "instant",
       "redemptionDelayDays": null
     },
     {
@@ -432,56 +432,56 @@
       "chain": "ethereum_sepolia",
       "depositToken": "usdc",
       "protocol": "morpho",
-      "apyBps": 375,
-      "tvlUsd": 27572100.306034,
+      "apyBps": 370,
+      "tvlUsd": 28486197.202605,
       "utilizationPct": null,
       "allocations": [
         {
-          "label": "USDC / cbBTC",
-          "type": "market",
-          "pct": 0.00000504169898102239
-        },
-        {
           "label": "USDC / WETH",
           "type": "market",
-          "pct": 2.6795473286529905
+          "pct": 2.083812757201495
         },
         {
           "label": "USDC / WBTC",
           "type": "market",
-          "pct": 0.44347444802047403
+          "pct": 0.42905389363330165
         },
         {
           "label": "USDC / wstETH",
           "type": "market",
-          "pct": 4.192178011155403
+          "pct": 4.212563258702585
         },
         {
           "label": "USDC / cbBTC",
           "type": "market",
-          "pct": 67.2210539666526
+          "pct": 0.000004876715914750664
+        },
+        {
+          "label": "USDC / cbBTC",
+          "type": "market",
+          "pct": 57.176729245141274
         },
         {
           "label": "USDC / WBTC",
           "type": "market",
-          "pct": 16.058198804624
+          "pct": 21.365224384770805
         },
         {
           "label": "USDC idle market",
           "type": "market",
-          "pct": 0.1844043292662548
+          "pct": 0.33026496815876905
         },
         {
           "label": "USDC / wstETH",
           "type": "market",
-          "pct": 9.221138069929276
+          "pct": 14.40234661567586
         }
       ],
       "sourceKind": "defi",
       "curator": "gauntlet",
-      "outcome": "dropped",
-      "dropReason": "not_solana_hosted",
-      "liquidityTerm": null,
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "instant",
       "redemptionDelayDays": null
     },
     {
@@ -491,106 +491,41 @@
       "chain": "ethereum_sepolia",
       "depositToken": "usdc",
       "protocol": "morpho",
-      "apyBps": 466,
-      "tvlUsd": 15807688.864438,
+      "apyBps": 485,
+      "tvlUsd": 15846940.67263,
       "utilizationPct": null,
       "allocations": [
         {
           "label": "USDC / PT-USDG-24SEP2026",
           "type": "market",
-          "pct": 0.00005033714628366676
-        },
-        {
-          "label": "USDC / TSLAon",
-          "type": "market",
-          "pct": 1.9741607215349292e-8
-        },
-        {
-          "label": "USDC / weETH",
-          "type": "market",
-          "pct": 1.85844278045841e-8
-        },
-        {
-          "label": "USDC / reUSD",
-          "type": "market",
-          "pct": 24.99999814169317
+          "pct": 0.00752934843994693
         },
         {
           "label": "USDC / PT-sUSDS-26NOV2026",
           "type": "market",
-          "pct": 55.93567686728596
-        },
-        {
-          "label": "USDC / weETH",
-          "type": "market",
-          "pct": 1.9194221116210184
-        },
-        {
-          "label": "USDC / USCC",
-          "type": "market",
-          "pct": 2.1897881417922672e-8
-        },
-        {
-          "label": "USDC / steakEURCV",
-          "type": "market",
-          "pct": 5.243150249278533
-        },
-        {
-          "label": "USDC / cbBTC",
-          "type": "market",
-          "pct": 0.0008178702016119809
+          "pct": 56.20792173978661
         },
         {
           "label": "USDC / PT-reUSD-10DEC2026",
           "type": "market",
-          "pct": 9.999999530153541
+          "pct": 10.011614888764091
         },
         {
-          "label": "USDC / mF-ONE",
+          "label": "USDC / reUSD",
           "type": "market",
-          "pct": 0.8682281489606857
-        },
-        {
-          "label": "USDC / wstETH",
-          "type": "market",
-          "pct": 0.17177696444955903
-        },
-        {
-          "label": "USDC / WETH",
-          "type": "market",
-          "pct": 0.08042891588266411
-        },
-        {
-          "label": "USDC / weETH",
-          "type": "market",
-          "pct": 0.0328089773773248
-        },
-        {
-          "label": "USDC / WBTC",
-          "type": "market",
-          "pct": 0.023915274861791184
-        },
-        {
-          "label": "USDC / FLHYon",
-          "type": "market",
-          "pct": 1.915353243282927e-8
-        },
-        {
-          "label": "USDC / cbBTC",
-          "type": "market",
-          "pct": 0.000007484895687604332
+          "pct": 25.028873145206802
         },
         {
           "label": "USDC / AA_FalconXUSDC",
           "type": "market",
-          "pct": 0.7237190468147091
+          "pct": 8.744060877802545
         }
       ],
       "sourceKind": "defi",
       "curator": "smokehouse",
-      "outcome": "dropped",
-      "dropReason": "not_solana_hosted",
-      "liquidityTerm": null,
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "instant",
       "redemptionDelayDays": null
     },
     {
@@ -600,61 +535,61 @@
       "chain": "ethereum_sepolia",
       "depositToken": "usdc",
       "protocol": "morpho",
-      "apyBps": 360,
-      "tvlUsd": 75189325.081363,
+      "apyBps": 352,
+      "tvlUsd": 75954831.816277,
       "utilizationPct": null,
       "allocations": [
         {
           "label": "USDC / FLHYon",
           "type": "market",
-          "pct": 7.737177389142294e-10
+          "pct": 2.3396650299899852e-8
         },
         {
           "label": "USDC / WBTC",
           "type": "market",
-          "pct": 48.717936101997786
+          "pct": 42.67164013840488
         },
         {
           "label": "USDC / wstETH",
           "type": "market",
-          "pct": 7.477234385182288
+          "pct": 7.358308076885897
         },
         {
           "label": "USDC / WBTC",
           "type": "market",
-          "pct": 1.322863997233909
+          "pct": 1.7164783064016216
         },
         {
           "label": "USDC / cbBTC",
           "type": "market",
-          "pct": 0.01533375611486337
+          "pct": 0.015669057826118542
         },
         {
           "label": "USDC / WETH",
           "type": "market",
-          "pct": 0.9255209955920641
+          "pct": 1.3838428615857323
         },
         {
           "label": "USDC / steakEURCV",
           "type": "market",
-          "pct": 13.289791006043558
+          "pct": 10.791499305582763
         },
         {
           "label": "USDC / cbBTC",
           "type": "market",
-          "pct": 27.705904598899227
+          "pct": 36.03650443844039
         },
         {
           "label": "USDC / weETH",
           "type": "market",
-          "pct": 0.545415158162572
+          "pct": 0.026057791475946075
         }
       ],
       "sourceKind": "defi",
       "curator": "steakhouse",
-      "outcome": "dropped",
-      "dropReason": "not_solana_hosted",
-      "liquidityTerm": null,
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "instant",
       "redemptionDelayDays": null
     },
     {
@@ -664,14 +599,14 @@
       "chain": "ethereum_sepolia",
       "depositToken": "usdc",
       "protocol": "maple",
-      "apyBps": 491,
-      "tvlUsd": 1061884694.284733,
+      "apyBps": 492,
+      "tvlUsd": 1109136116.677432,
       "utilizationPct": null,
       "allocations": [
         {
           "label": "Open-term loans",
           "type": "loan",
-          "pct": 98.46701962419347
+          "pct": 98.33847042805209
         },
         {
           "label": "Fixed-term loans",
@@ -681,15 +616,15 @@
         {
           "label": "Liquid assets",
           "type": "liquidity",
-          "pct": 1.532980375806526
+          "pct": 1.6615295719479057
         }
       ],
       "sourceKind": "defi",
       "curator": "maple",
-      "outcome": "dropped",
-      "dropReason": "not_solana_hosted",
-      "liquidityTerm": null,
-      "redemptionDelayDays": null
+      "outcome": "catalogued",
+      "dropReason": null,
+      "liquidityTerm": "delayed",
+      "redemptionDelayDays": 1
     },
     {
       "id": "syrup-usdt",
@@ -698,14 +633,14 @@
       "chain": "ethereum_sepolia",
       "depositToken": "usdt",
       "protocol": "maple",
-      "apyBps": 421,
-      "tvlUsd": 440194284.020484,
+      "apyBps": 422,
+      "tvlUsd": 451390380.370055,
       "utilizationPct": null,
       "allocations": [
         {
           "label": "Open-term loans",
           "type": "loan",
-          "pct": 98.41576134334255
+          "pct": 91.88475863112032
         },
         {
           "label": "Fixed-term loans",
@@ -715,7 +650,7 @@
         {
           "label": "Liquid assets",
           "type": "liquidity",
-          "pct": 1.5842386566574478
+          "pct": 8.115241368879678
         }
       ],
       "sourceKind": "defi",

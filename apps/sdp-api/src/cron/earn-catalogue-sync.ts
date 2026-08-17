@@ -169,6 +169,11 @@ async function syncProviderCatalogue(
         liquidityTerm: snapshot.liquidityTerm,
         redemptionDelayDays: snapshot.redemptionDelayDays ?? null,
         riskMetadata: snapshot.riskMetadata ?? {},
+        // Taken from the PROVIDER, never derived from `ctx.environment`. A
+        // mainnet-only provider is catalogued into both environments, so
+        // assuming the environment's cluster here is exactly the silent lie
+        // this column exists to prevent (migration 0057).
+        hostCluster: snapshot.hostCluster,
         // Providers report no status; being listed is what makes a strategy
         // depositable, so the sync submits `active` for anything a provider
         // still lists. The repository upsert refuses to overwrite an operator
@@ -201,9 +206,8 @@ async function syncProviderCatalogue(
 /**
  * Delete catalogue rows the provider no longer lists — the other half of
  * keeping `earn_strategies` truthful. Upserting alone only ever adds: a vault
- * the provider delists, or one a tightened gate now refuses (Ground's
- * `not_solana_hosted`), would otherwise keep its `active` row and stay
- * depositable forever.
+ * the provider delists, or one a tightened gate now refuses, would otherwise
+ * keep its `active` row and stay depositable forever.
  *
  * Deliberately conservative — it skips rather than deletes whenever this
  * pass cannot prove what the provider currently lists:
