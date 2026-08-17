@@ -4,6 +4,7 @@ import {
   type ApiKeyRole,
   getPermissionsForApiKeyRole,
   type PolicyDefaultAction,
+  WALLET_OPERATION_FAMILIES,
   type WalletOperationFamily,
 } from "@sdp/types";
 import {
@@ -53,15 +54,7 @@ import type { ApiKeyAuthoringWallet, WalletControlStatus } from "./api-key-autho
 const API_KEYS_PATH = "/dashboard/api-keys";
 
 const ROLE_OPTIONS: ApiKeyRole[] = ["api_admin", "api_developer", "api_readonly"];
-const FAMILY_OPTIONS: WalletOperationFamily[] = [
-  "transfer",
-  "payment",
-  "ramp",
-  "issuance",
-  "raw_sign",
-  "program",
-  "provider_admin",
-];
+const FAMILY_OPTIONS = WALLET_OPERATION_FAMILIES;
 const DEFAULT_ACTIONS: PolicyDefaultAction[] = ["allow", "deny", "approval_required"];
 
 interface ApiKeyAuthoringWorkspaceProps {
@@ -113,15 +106,12 @@ function roleLabel(role: ApiKeyRole, t: ReturnType<typeof useTranslations>): str
 }
 
 function familyLabel(family: WalletOperationFamily, t: ReturnType<typeof useTranslations>): string {
-  const labels: Record<WalletOperationFamily, string> = {
+  const labels = {
     transfer: t("DashboardCustody.apiKeyFamilyTransfer"),
     payment: t("DashboardCustody.apiKeyFamilyPayment"),
     ramp: t("DashboardCustody.apiKeyFamilyRamp"),
     issuance: t("DashboardCustody.apiKeyFamilyIssuance"),
-    raw_sign: t("DashboardCustody.apiKeyFamilyRawSign"),
-    program: t("DashboardCustody.apiKeyFamilyProgram"),
-    provider_admin: t("DashboardCustody.apiKeyFamilyProviderAdmin"),
-  };
+  } satisfies Record<WalletOperationFamily, string>;
   return labels[family];
 }
 

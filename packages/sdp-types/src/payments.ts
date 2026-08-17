@@ -10,6 +10,7 @@ import type {
   PolicyRule,
   WalletOperationFamily,
   WalletOperationStatus,
+  WalletOperationType,
 } from "./policy";
 import type { PrivateTransferRequest } from "./private-transfers";
 import type { RampProviderId } from "./provider-access";
@@ -81,7 +82,7 @@ export interface PaymentWalletPolicyAuditEntry {
   walletOperationId: string;
   policyEvaluationId: string;
   operationFamily: WalletOperationFamily;
-  operationType: string;
+  operationType: WalletOperationType;
   asset: string | null;
   amount: string | null;
   destination: string | null;

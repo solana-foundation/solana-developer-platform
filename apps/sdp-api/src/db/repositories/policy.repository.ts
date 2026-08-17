@@ -14,6 +14,7 @@ import type {
   WalletOperationFamily,
   WalletOperationProviderExtensions,
   WalletOperationStatus,
+  WalletOperationType,
 } from "@sdp/types";
 import type { RepositoryDbClient } from "./base";
 
@@ -176,7 +177,7 @@ export interface WalletOperationRow {
   api_key_id: string | null;
   source: string;
   operation_family: WalletOperationFamily;
-  operation_type: string;
+  operation_type: WalletOperationType;
   asset: string | null;
   amount: string | null;
   destination: string | null;
@@ -214,7 +215,7 @@ export interface WalletPolicyEvaluationAuditRow {
   wallet_operation_id: string;
   policy_evaluation_id: string;
   operation_family: WalletOperationFamily;
-  operation_type: string;
+  operation_type: WalletOperationType;
   asset: string | null;
   amount: string | null;
   destination: string | null;
@@ -275,7 +276,7 @@ export interface ApprovalRequestDetailRow {
   api_key_id: string | null;
   source: string;
   operation_family: WalletOperationFamily;
-  operation_type: string;
+  operation_type: WalletOperationType;
   asset: string | null;
   amount: string | null;
   destination: string | null;
@@ -405,7 +406,7 @@ export interface CreateWalletOperationInput {
   actor?: WalletOperationActor | null;
   source?: string;
   operationFamily: WalletOperationFamily;
-  operationType: string;
+  operationType: WalletOperationType;
   asset?: string | null;
   amount?: string | null;
   destination?: string | null;

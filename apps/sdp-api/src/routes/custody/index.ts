@@ -6,7 +6,6 @@
 
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
-import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
 import {
@@ -14,7 +13,6 @@ import {
   cancelApprovalRequest,
   createWallet,
   deleteWallet,
-  extractSignerCheckPolicyCandidate,
   getApprovalRequest,
   getConfig,
   getConfigs,
@@ -45,12 +43,7 @@ wallets.post("/", requirePermissions("custody:admin"), createWallet);
 wallets.delete("/", requirePermissions("custody:admin"), deleteWallet);
 wallets.post("/default-wallet", requirePermissions("custody:admin"), setDefaultWallet);
 wallets.patch("/:walletId", requirePermissions("custody:admin"), updateWallet);
-wallets.post(
-  "/signer-check",
-  requirePermissions("wallets:write"),
-  policyGate({ extract: extractSignerCheckPolicyCandidate }),
-  signerCheck
-);
+wallets.post("/signer-check", requirePermissions("wallets:write"), signerCheck);
 
 // Read configuration and wallets
 wallets.get("/config", requirePermissions("wallets:read"), getConfig);

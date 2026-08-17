@@ -180,11 +180,10 @@ export const deleteWalletSchema = z.object({
 export type DeleteWalletRequest = z.infer<typeof deleteWalletSchema>;
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Signer Check (API key flow)
+// Signer Check
 // ═══════════════════════════════════════════════════════════════════════════
 
 export const signerCheckSchema = z.object({
-  memo: z.string().max(256).optional(),
   walletId: z.string().min(1).optional(),
 });
 

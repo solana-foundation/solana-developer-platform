@@ -1,19 +1,23 @@
-import type {
-  ApiKeyEnvironment,
-  ApiKeyRole,
-  ApiKeyWalletPolicyBindingSummary,
-  ApiKeyWalletScope,
-  Permission,
-  PolicyDefaultAction,
-  PolicyRule,
-  WalletOperationFamily,
+import {
+  type ApiKeyEnvironment,
+  type ApiKeyRole,
+  type ApiKeyWalletPolicyBindingSummary,
+  type ApiKeyWalletScope,
+  type Permission,
+  type PolicyDefaultAction,
+  type PolicyRule,
+  WALLET_OPERATION_TYPES,
+  type WalletOperationFamily,
 } from "@sdp/types";
+import { z } from "zod";
 
 export const API_KEY_AUTHORING_STEPS = ["details", "permissions", "wallets", "review"] as const;
 
 export type ApiKeyAuthoringStep = (typeof API_KEY_AUTHORING_STEPS)[number];
 export type ApiKeyAuthoringMode = "create" | "edit";
 export type BindingConfirmation = "replace" | "clear";
+
+const walletOperationTypesSchema = z.array(z.enum(WALLET_OPERATION_TYPES));
 
 export interface ApiKeyAuthoringDraft {
   name: string;
@@ -123,7 +127,7 @@ export function buildApiKeyPolicyRules(draft: ApiKeyAuthoringDraft): PolicyRule[
     });
   }
 
-  const operationTypes = splitPolicyValues(draft.operationTypes);
+  const operationTypes = walletOperationTypesSchema.parse(splitPolicyValues(draft.operationTypes));
   if (operationTypes.length > 0) {
     rules.push({
       id: "additional-operation-types",
