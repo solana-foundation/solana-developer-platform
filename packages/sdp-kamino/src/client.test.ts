@@ -9,6 +9,7 @@ import {
   assertNotPortfolioProvider,
   KAMINO_POSITION_READ_CONCURRENCY,
   KaminoVaultDirectClient,
+  type KaminoVaultOperationRunner,
   toEarnVaultTransactionPlan,
 } from "./client";
 import type { KaminoInstructionPlan, KaminoPosition, KaminoRuntime } from "./types";
@@ -34,7 +35,8 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-const client = new KaminoVaultDirectClient(() => "https://example.invalid");
+const runOperation: KaminoVaultOperationRunner = (_label, operation) => operation();
+const client = new KaminoVaultDirectClient(async () => "https://example.invalid", runOperation);
 
 describe("KaminoVaultDirectClient capabilities", () => {
   it("reports the vault-direct capability", () => {
@@ -79,7 +81,7 @@ describe("KaminoVaultDirectClient capabilities", () => {
   });
 
   it("refuses to build when no RPC endpoint is configured for the cluster", async () => {
-    const unconfigured = new KaminoVaultDirectClient(() => "  ");
+    const unconfigured = new KaminoVaultDirectClient(async () => "  ", runOperation);
     await expect(
       unconfigured.buildVaultDeposit(
         { env: {}, environment: "sandbox" },
@@ -96,10 +98,10 @@ describe("KaminoVaultDirectClient capabilities", () => {
 
   it("maps the SDP environment to the right cluster", async () => {
     const seen: string[] = [];
-    const probe = new KaminoVaultDirectClient((_ctx, cluster) => {
+    const probe = new KaminoVaultDirectClient(async (_ctx, cluster) => {
       seen.push(cluster);
       return "";
-    });
+    }, runOperation);
     for (const environment of ["sandbox", "production"] as const) {
       await probe
         .buildVaultDeposit(
@@ -117,10 +119,42 @@ describe("KaminoVaultDirectClient capabilities", () => {
     expect(seen).toEqual(["devnet", "mainnet-beta"]);
   });
 
+  it("requires the proven RPC resolver before any chain work", async () => {
+    const resolverError = new Error("RPC endpoint was not proven");
+    const unproven = new KaminoVaultDirectClient(async () => {
+      throw resolverError;
+    }, runOperation);
+
+    await expect(
+      unproven.buildVaultDeposit(
+        { env: {}, environment: "sandbox" },
+        {
+          providerReference: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
+          owner: "11111111111111111111111111111112",
+          amount: "1",
+        }
+      )
+    ).rejects.toBe(resolverError);
+    await expect(
+      unproven.readVaultPositions(
+        { env: {}, environment: "sandbox" },
+        {
+          owner: "11111111111111111111111111111112",
+          providerReferences: ["7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx"],
+        }
+      )
+    ).rejects.toBe(resolverError);
+
+    expect(mocks.buildKaminoDepositPlan).not.toHaveBeenCalled();
+    expect(mocks.discoverKaminoPositionVaults).not.toHaveBeenCalled();
+    expect(mocks.createKaminoRpc).not.toHaveBeenCalled();
+    expect(mocks.readKaminoPosition).not.toHaveBeenCalled();
+  });
+
   it("discovers owner-held vaults on chain without consulting the curated shelf", async () => {
     const resolvedRpcUrl = "https://devnet.example.invalid";
-    const resolveRpcUrl = vi.fn(() => resolvedRpcUrl);
-    const probe = new KaminoVaultDirectClient(resolveRpcUrl);
+    const resolveRpcUrl = vi.fn(async () => resolvedRpcUrl);
+    const probe = new KaminoVaultDirectClient(resolveRpcUrl, runOperation);
     const slot = 123n;
     const getSlotSend = vi.fn().mockResolvedValue(slot);
     mocks.createKaminoRpc.mockReturnValue({ getSlot: () => ({ send: getSlotSend }) });
@@ -195,7 +229,10 @@ describe("KaminoVaultDirectClient capabilities", () => {
   });
 
   it("returns an empty snapshot without slot or hydration reads when discovery finds no holdings", async () => {
-    const probe = new KaminoVaultDirectClient(() => "https://devnet.example.invalid");
+    const probe = new KaminoVaultDirectClient(
+      async () => "https://devnet.example.invalid",
+      runOperation
+    );
     mocks.discoverKaminoPositionVaults.mockResolvedValue([]);
 
     await expect(
@@ -214,7 +251,10 @@ describe("KaminoVaultDirectClient capabilities", () => {
   });
 
   it("propagates on-chain discovery failures instead of reporting no holdings", async () => {
-    const probe = new KaminoVaultDirectClient(() => "https://devnet.example.invalid");
+    const probe = new KaminoVaultDirectClient(
+      async () => "https://devnet.example.invalid",
+      runOperation
+    );
     const discoveryError = new Error("program census unavailable");
     mocks.discoverKaminoPositionVaults.mockRejectedValue(discoveryError);
 

@@ -6,10 +6,19 @@ import {
   assertClusterEndpoint,
   CLUSTER_ENDPOINT_PROOF_TTL_MS,
   resetClusterEndpointProofs,
+  resolveVaultDirectClient,
 } from "./execution-registry";
+import { createVaultDeadline } from "./vault-deadline";
 
 const env = {} as Env;
 const rpcUrl = "https://rpc.example.invalid";
+const executionEnv = { SOLANA_DEVNET_RPC_URL: rpcUrl } as Env;
+const runtime = { env: {}, environment: "sandbox" } as const;
+const depositInput = {
+  providerReference: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
+  owner: "11111111111111111111111111111112",
+  amount: "1",
+};
 
 function mockGenesisSend() {
   const send = vi.fn();
@@ -88,5 +97,51 @@ describe("assertClusterEndpoint", () => {
     vi.advanceTimersByTime(1);
     await expect(assertClusterEndpoint(env, "devnet", rpcUrl)).resolves.toBeUndefined();
     expect(send).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("resolveVaultDirectClient", () => {
+  it("keeps resolution I/O-free and preserves inherited provider capabilities", () => {
+    const createRpc = vi.spyOn(solanaRpc, "createRpc");
+
+    const client = resolveVaultDirectClient(executionEnv, "kamino", createVaultDeadline());
+
+    expect(client).not.toBeNull();
+    expect(typeof (client as unknown as Record<string, unknown>).listStrategyMetrics).toBe(
+      "function"
+    );
+    expect(createRpc).not.toHaveBeenCalled();
+  });
+
+  it("refuses build and position work before the SDK when genesis is wrong", async () => {
+    mockGenesisSend().mockResolvedValue(GENESIS_HASH_BY_CLUSTER["mainnet-beta"]);
+    const client = resolveVaultDirectClient(executionEnv, "kamino", createVaultDeadline());
+    expect(client).not.toBeNull();
+    if (!client) throw new Error("expected Kamino vault-direct client");
+
+    await expect(client.buildVaultDeposit(runtime, depositInput)).rejects.toThrow(
+      /reports genesis/
+    );
+    await expect(
+      client.readVaultPositions(runtime, {
+        owner: depositInput.owner,
+        providerReferences: [depositInput.providerReference],
+      })
+    ).rejects.toThrow(/reports genesis/);
+  });
+
+  it("does not start provider work after endpoint proof exhausts the shared deadline", async () => {
+    vi.useFakeTimers();
+    mockGenesisSend().mockReturnValue(new Promise<never>(() => undefined));
+    const client = resolveVaultDirectClient(executionEnv, "kamino", createVaultDeadline(25));
+    expect(client).not.toBeNull();
+    if (!client) throw new Error("expected Kamino vault-direct client");
+
+    const result = client.buildVaultDeposit(runtime, depositInput);
+    const rejection = expect(result).rejects.toThrow(
+      "Verifying the devnet RPC endpoint timed out after 25ms"
+    );
+    await vi.advanceTimersByTimeAsync(25);
+    await rejection;
   });
 });

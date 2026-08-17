@@ -1,5 +1,6 @@
 import type { EarnVaultTransactionPlan } from "@sdp/earn/types";
 import * as solanaRpc from "@sdp/rpc/solana";
+import type { SolanaCluster } from "@sdp/types";
 import {
   type Address,
   address,
@@ -23,6 +24,8 @@ import {
 } from "@solana/signers";
 import type { FeePaymentPort } from "@/services/ports";
 import type { Env } from "@/types/env";
+import { assertClusterEndpoint } from "./execution-registry";
+import type { VaultDeadline } from "./vault-deadline";
 
 /**
  * Turn a provider's unsigned plan into a landed transaction, signed by an SDP
@@ -50,7 +53,14 @@ export type VaultFeeMode =
   | { kind: "sponsored"; feePayment: FeePaymentPort }
   | { kind: "wallet-pays" };
 
-export interface SubmitVaultPlanInput {
+export interface VaultExecutionScope {
+  /** Cluster derived from the authenticated SDP project environment. */
+  cluster: SolanaCluster;
+  /** One absolute budget shared by every stage in this vault workflow. */
+  deadline: VaultDeadline;
+}
+
+export interface SubmitVaultPlanInput extends VaultExecutionScope {
   plan: EarnVaultTransactionPlan;
   /** The custody wallet signer — the vault `user`, and the only real signer. */
   owner: TransactionSigner;
@@ -75,6 +85,26 @@ export interface SignedVaultTransaction {
   lastValidBlockHeight: string;
 }
 
+function assertExpectedPlanCluster(
+  plan: EarnVaultTransactionPlan,
+  expectedCluster: SolanaCluster
+): void {
+  if (plan.cluster !== expectedCluster) {
+    throw new Error(
+      `Vault plan targets ${plan.cluster}, not the expected ${expectedCluster} cluster`
+    );
+  }
+}
+
+async function verifyVaultRpc(
+  env: Env,
+  input: Pick<VaultExecutionScope, "cluster" | "deadline"> & { rpcUrl: string }
+): Promise<void> {
+  await input.deadline.run(`Verifying the ${input.cluster} RPC endpoint`, () =>
+    assertClusterEndpoint(env, input.cluster, input.rpcUrl)
+  );
+}
+
 /**
  * Sign, WITHOUT sending.
  *
@@ -91,11 +121,20 @@ export interface SignedVaultTransaction {
  */
 export async function signVaultPlan(
   env: Env,
-  input: { plan: EarnVaultTransactionPlan; owner: TransactionSigner; rpcUrl: string }
+  input: VaultExecutionScope & {
+    plan: EarnVaultTransactionPlan;
+    owner: TransactionSigner;
+    rpcUrl: string;
+  }
 ): Promise<SignedVaultTransaction> {
+  assertExpectedPlanCluster(input.plan, input.cluster);
   const instructions = singleBatchInstructions(input.plan).map(toKitInstruction);
+  await verifyVaultRpc(env, input);
   const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
+  const { blockhash, lastValidBlockHeight } = await input.deadline.run(
+    "Fetching the vault transaction blockhash",
+    () => solanaRpc.getRecentBlockhash(rpc, "confirmed")
+  );
 
   const message = pipe(
     createTransactionMessage({ version: 0 }),
@@ -103,7 +142,9 @@ export async function signVaultPlan(
     (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
     (m) => appendTransactionMessageInstructions(instructions, m)
   );
-  const signed = await signTransactionMessageWithSigners(message);
+  const signed = await input.deadline.run("Signing the vault transaction", () =>
+    signTransactionMessageWithSigners(message)
+  );
   return {
     bytes: new Uint8Array(getTransactionEncoder().encode(signed)),
     signature: getSignatureFromTransaction(signed),
@@ -121,10 +162,13 @@ export async function signVaultPlan(
  */
 export async function broadcastVaultTransaction(
   env: Env,
-  input: { bytes: Uint8Array; rpcUrl: string }
+  input: VaultExecutionScope & { bytes: Uint8Array; rpcUrl: string }
 ): Promise<void> {
+  await verifyVaultRpc(env, input);
   const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
-  await solanaRpc.sendTransaction(rpc, input.bytes);
+  await input.deadline.run("Broadcasting the vault transaction", () =>
+    solanaRpc.sendTransaction(rpc, input.bytes)
+  );
 }
 
 /** The single batch a deposit plan carries, with the multi-transaction refusal. */
@@ -169,24 +213,37 @@ export async function submitVaultPlan(
   env: Env,
   input: SubmitVaultPlanInput
 ): Promise<SubmitVaultPlanResult> {
+  assertExpectedPlanCluster(input.plan, input.cluster);
   const instructions = singleBatchInstructions(input.plan).map(toKitInstruction);
+  await verifyVaultRpc(env, input);
   const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
+  const { blockhash, lastValidBlockHeight } = await input.deadline.run(
+    "Fetching the vault transaction blockhash",
+    () => solanaRpc.getRecentBlockhash(rpc, "confirmed")
+  );
 
   if (input.fee.kind === "sponsored") {
     // Sponsored: the relay's address is the fee payer and signs AFTER us, so the
     // message carries a noop signer for it and the custody wallet signs its own
     // slots only.
-    const feePayer = await input.fee.feePayment.getFeePayer();
+    const { feePayment } = input.fee;
+    const feePayer = await input.deadline.run("Resolving the sponsored fee payer", () =>
+      feePayment.getFeePayer()
+    );
     const message = pipe(
       createTransactionMessage({ version: 0 }),
       (m) => setTransactionMessageFeePayerSigner(createNoopSigner(feePayer), m),
       (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
       (m) => appendTransactionMessageInstructions(instructions, m)
     );
-    const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
+    const partiallySigned = await input.deadline.run(
+      "Signing the sponsored vault transaction",
+      () => partiallySignTransactionMessageWithSigners(message)
+    );
     const bytes = new Uint8Array(getTransactionEncoder().encode(partiallySigned));
-    const signature = await input.fee.feePayment.signAndSend(bytes);
+    const signature = await input.deadline.run("Submitting the sponsored vault transaction", () =>
+      feePayment.signAndSend(bytes)
+    );
     return { signature };
   }
 
@@ -198,9 +255,13 @@ export async function submitVaultPlan(
     (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
     (m) => appendTransactionMessageInstructions(instructions, m)
   );
-  const signed = await signTransactionMessageWithSigners(message);
+  const signed = await input.deadline.run("Signing the vault transaction", () =>
+    signTransactionMessageWithSigners(message)
+  );
   const bytes = new Uint8Array(getTransactionEncoder().encode(signed));
-  const signature = await solanaRpc.sendTransaction(rpc, bytes);
+  const signature = await input.deadline.run("Broadcasting the vault transaction", () =>
+    solanaRpc.sendTransaction(rpc, bytes)
+  );
   return { signature };
 }
 
@@ -214,8 +275,9 @@ export async function submitVaultPlan(
  */
 export async function simulateVaultPlan(
   env: Env,
-  input: { plan: EarnVaultTransactionPlan; owner: Address; rpcUrl: string }
+  input: VaultExecutionScope & { plan: EarnVaultTransactionPlan; owner: Address; rpcUrl: string }
 ): Promise<{ ok: true } | { ok: false; error: string; logs: readonly string[] }> {
+  assertExpectedPlanCluster(input.plan, input.cluster);
   let batch: ReturnType<typeof singleBatchInstructions>;
   try {
     batch = singleBatchInstructions(input.plan);
@@ -227,8 +289,12 @@ export async function simulateVaultPlan(
     };
   }
 
+  await verifyVaultRpc(env, input);
   const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
+  const { blockhash, lastValidBlockHeight } = await input.deadline.run(
+    "Fetching the vault simulation blockhash",
+    () => solanaRpc.getRecentBlockhash(rpc, "confirmed")
+  );
   const message = pipe(
     createTransactionMessage({ version: 0 }),
     (m) => setTransactionMessageFeePayer(input.owner, m),
@@ -238,15 +304,19 @@ export async function simulateVaultPlan(
 
   // `sigVerify: false` + `replaceRecentBlockhash` so an unsigned message can be
   // simulated: we want the PROGRAM's verdict, not a signature check.
-  const compiled = await partiallySignTransactionMessageWithSigners(message);
+  const compiled = await input.deadline.run("Compiling the vault simulation", () =>
+    partiallySignTransactionMessageWithSigners(message)
+  );
   const wire = getBase64EncodedWireTransaction(compiled);
-  const result = await rpc
-    .simulateTransaction(wire, {
-      encoding: "base64",
-      sigVerify: false,
-      replaceRecentBlockhash: true,
-    })
-    .send();
+  const result = await input.deadline.run("Simulating the vault transaction", () =>
+    rpc
+      .simulateTransaction(wire, {
+        encoding: "base64",
+        sigVerify: false,
+        replaceRecentBlockhash: true,
+      })
+      .send()
+  );
 
   if (result.value.err) {
     return {

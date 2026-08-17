@@ -2,28 +2,72 @@
 export const VAULT_EXTERNAL_CALL_TIMEOUT_MS = 20_000;
 
 /**
- * Bound an external call even when its SDK does not expose an AbortSignal.
- * Consume a late rejection so a timed-out operation cannot become unhandled.
+ * One absolute budget for a vault workflow.
+ *
+ * Race each awaited external boundary separately through this handle. Racing a
+ * whole multi-step async function is unsafe: if its first RPC settles after the
+ * timeout, that orphaned function can continue into signing or broadcasting.
+ * A thunk also means an already-expired workflow cannot start its next side
+ * effect.
+ *
+ * This bounds caller latency; it cannot cancel an SDK that exposes no
+ * AbortSignal. A timed-out broadcast or combined fee-payment `signAndSend`
+ * therefore remains ambiguous and must never be treated as a definite failure.
  */
-export async function withVaultDeadline<T>(
+export class VaultDeadline {
+  readonly timeoutMs: number;
+  private readonly expiresAt: number;
+
+  constructor(timeoutMs = VAULT_EXTERNAL_CALL_TIMEOUT_MS) {
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      throw new Error("Vault deadline must be a positive number of milliseconds");
+    }
+    this.timeoutMs = timeoutMs;
+    this.expiresAt = Date.now() + timeoutMs;
+  }
+
+  /** Run one external stage inside the workflow's remaining absolute budget. */
+  async run<T>(label: string, operation: () => Promise<T>): Promise<T> {
+    const remainingMs = this.expiresAt - Date.now();
+    if (remainingMs <= 0) throw this.timeoutError(label);
+
+    // Invoke only after the expiry check. A synchronous throw remains the
+    // operation's own error and never gets relabelled as a timeout.
+    const pending = operation();
+    // SDKs without AbortSignal support may reject after our race is over.
+    void pending.catch(() => undefined);
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        pending,
+        new Promise<never>((_resolve, reject) => {
+          timeoutId = setTimeout(() => reject(this.timeoutError(label)), remainingMs);
+        }),
+      ]);
+    } finally {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    }
+  }
+
+  private timeoutError(label: string): Error {
+    return new Error(`${label} timed out after ${this.timeoutMs}ms`);
+  }
+}
+
+export function createVaultDeadline(timeoutMs = VAULT_EXTERNAL_CALL_TIMEOUT_MS): VaultDeadline {
+  return new VaultDeadline(timeoutMs);
+}
+
+/**
+ * Backward-compatible convenience for one already-created external operation.
+ * Multi-stage workflows must share one `VaultDeadline` and call `run` with
+ * thunks so expiry can prevent later work from starting.
+ */
+export function withVaultDeadline<T>(
   operation: Promise<T>,
   label: string,
   timeoutMs = VAULT_EXTERNAL_CALL_TIMEOUT_MS
 ): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  void operation.catch(() => undefined);
-
-  try {
-    return await Promise.race([
-      operation,
-      new Promise<never>((_resolve, reject) => {
-        timeoutId = setTimeout(
-          () => reject(new Error(`${label} timed out after ${timeoutMs}ms`)),
-          timeoutMs
-        );
-      }),
-    ]);
-  } finally {
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
-  }
+  return createVaultDeadline(timeoutMs).run(label, () => operation);
 }

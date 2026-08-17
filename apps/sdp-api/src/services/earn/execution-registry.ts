@@ -1,7 +1,7 @@
 import { supportsVaultDirect } from "@sdp/earn/capabilities";
 import { providerNotConfigured } from "@sdp/earn/errors";
 import type { EarnVaultDirectProvider, EarnVaultProvider } from "@sdp/earn/types";
-import { KaminoVaultDirectClient } from "@sdp/kamino";
+import { assertNotPortfolioProvider, KaminoVaultDirectClient } from "@sdp/kamino";
 import * as solanaRpc from "@sdp/rpc/solana";
 import {
   CLUSTER_BY_SDP_ENVIRONMENT,
@@ -10,6 +10,7 @@ import {
   type SolanaCluster,
 } from "@sdp/types";
 import type { Env } from "@/types/env";
+import { type VaultDeadline, withVaultDeadline } from "./vault-deadline";
 
 /**
  * Which providers this deployment can EXECUTE for, as opposed to merely
@@ -100,7 +101,13 @@ export async function assertClusterEndpoint(
     proof = undefined;
   }
   if (!proof) {
-    proof = { promise: getGenesisHash(env, rpcUrl), expiresAt: null };
+    proof = {
+      promise: withVaultDeadline(
+        getGenesisHash(env, rpcUrl),
+        `Verifying the ${cluster} RPC endpoint`
+      ),
+      expiresAt: null,
+    };
     clusterProofs.set(key, proof);
   }
 
@@ -151,9 +158,27 @@ export function earnClusterFor(environment: SdpEnvironment): SolanaCluster {
  * throwing, so a row written by a newer deploy degrades to "cannot execute"
  * instead of 500ing a read that happens to touch it.
  */
-export function resolveEarnExecutionClient(env: Env, provider: string): EarnVaultProvider | null {
+export function resolveEarnExecutionClient(
+  env: Env,
+  provider: string,
+  deadline: VaultDeadline
+): EarnVaultProvider | null {
   if (provider === "kamino") {
-    return new KaminoVaultDirectClient((cluster) => resolveClusterRpcUrl(env, cluster));
+    // Construction remains synchronous and I/O-free. The client awaits this
+    // resolver only when a chain method is invoked, so an idempotent replay can
+    // return from durable state during an RPC outage.
+    const client = new KaminoVaultDirectClient(
+      async (_ctx, cluster) => {
+        const rpcUrl = resolveClusterRpcUrl(env, cluster);
+        await deadline.run(`Verifying the ${cluster} RPC endpoint`, () =>
+          assertClusterEndpoint(env, cluster, rpcUrl)
+        );
+        return rpcUrl;
+      },
+      (label, operation) => deadline.run(label, operation)
+    );
+    assertNotPortfolioProvider(client);
+    return client;
   }
   return null;
 }
@@ -161,9 +186,10 @@ export function resolveEarnExecutionClient(env: Env, provider: string): EarnVaul
 /** The executing client narrowed to the vault-direct capability, or null. */
 export function resolveVaultDirectClient(
   env: Env,
-  provider: string
+  provider: string,
+  deadline: VaultDeadline
 ): EarnVaultDirectProvider | null {
-  const client = resolveEarnExecutionClient(env, provider);
+  const client = resolveEarnExecutionClient(env, provider, deadline);
   if (!client) return null;
   return supportsVaultDirect(client) ? client : null;
 }
