@@ -10,6 +10,7 @@ import type {
 import { createPostgresHeliusRingsOperationRepository } from "./helius-rings-operation.repository.postgres";
 import type { HeliusRingsWalletRepository } from "./helius-rings-wallet.repository";
 import { createPostgresHeliusRingsWalletRepository } from "./helius-rings-wallet.repository.postgres";
+import { createPostgresHeliusRingsZoneRepository } from "./helius-rings-zone.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_hro_repo_test";
 const OTHER_PROJECT_ID = "prj_hro_repo_other";
@@ -313,6 +314,29 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
       });
 
       expect(result).toBeNull();
+    });
+  });
+
+  describe("zone destinations", () => {
+    it("rejects a zone owned by another wallet", async () => {
+      const other = await walletRepo.createWallet({
+        ...scope,
+        sdpWalletId: "wal_hro_zone_other",
+        name: "Operations",
+        materialTag: "simulated",
+      });
+      if (!other) throw new Error("wallet fixture was not created");
+      const zone = await createPostgresHeliusRingsZoneRepository(getDb(env)).createZone({
+        walletId: other.id,
+        name: "Payroll",
+        kind: "treasury",
+      });
+      if (!zone) throw new Error("zone fixture was not created");
+
+      // The composite (zone_id, wallet_id) FK refuses the cross-wallet reference.
+      await expect(
+        repo.reserveIntent(shieldIntent({ intentKey: "sha256:cross-zone", zoneId: zone.id }))
+      ).rejects.toMatchObject({ message: expect.stringContaining("zone") });
     });
   });
 
