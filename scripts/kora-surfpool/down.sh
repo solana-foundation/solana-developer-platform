@@ -8,6 +8,7 @@ RUNTIME_ENV_FILE="${STATE_DIR}/runtime.env"
 SURFPOOL_PID_FILE="${STATE_DIR}/surfpool.pid"
 SURFPOOL_INFO_FILE="${STATE_DIR}/surfpool.json"
 KORA_SHIM_PID_FILE="${STATE_DIR}/kora-shim.pid"
+KORA_RPC_PROXY_PID_FILE="${STATE_DIR}/kora-rpc-proxy.pid"
 
 compose_args=(-f "${ROOT_DIR}/infra/kora/docker-compose.yml")
 if [ -f "${ENV_FILE}" ]; then
@@ -16,6 +17,14 @@ fi
 
 if command -v docker >/dev/null 2>&1; then
   docker compose "${compose_args[@]}" down || true
+fi
+
+if [ -f "${KORA_RPC_PROXY_PID_FILE}" ]; then
+  pid="$(cat "${KORA_RPC_PROXY_PID_FILE}")"
+  if [ -n "${pid}" ] && kill -0 "${pid}" >/dev/null 2>&1; then
+    kill -- -"${pid}" >/dev/null 2>&1 || kill "${pid}" >/dev/null 2>&1 || true
+  fi
+  rm -f "${KORA_RPC_PROXY_PID_FILE}"
 fi
 
 if [ -f "${KORA_SHIM_PID_FILE}" ]; then
