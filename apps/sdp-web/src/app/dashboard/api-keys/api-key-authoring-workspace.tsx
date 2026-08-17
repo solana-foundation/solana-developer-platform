@@ -28,6 +28,7 @@ import { type ReactNode, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Callout } from "@/components/ui/callout";
 import { DateTimePicker } from "@/components/ui/date-picker";
 import {
   DropdownMenu,
@@ -481,7 +482,10 @@ function RestrictionEditor({
         {t("DashboardCustody.apiKeyRestrictionsNarrowCopy")}
       </div>
       {preservingExisting ? (
-        <div className="flex flex-col gap-3 rounded-lg border border-info-border bg-info-bg p-4 sm:flex-row sm:items-center sm:justify-between">
+        <Callout
+          className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+          variant="info"
+        >
           <div>
             <p className="text-sm font-medium text-primary">
               {t("DashboardCustody.apiKeyExistingRestrictionsActive")}
@@ -497,7 +501,7 @@ function RestrictionEditor({
           >
             {t("DashboardCustody.apiKeyReplaceRestrictionDetails")}
           </Button>
-        </div>
+        </Callout>
       ) : null}
       <fieldset
         disabled={preservingExisting}
@@ -942,14 +946,14 @@ function ReviewStep({
           <p className="text-sm text-secondary">{bindingSummary}</p>
         </WorkSection>
         {defaultAllowWallets.length > 0 ? (
-          <div className="flex items-start gap-3 rounded-lg border border-warning-border bg-warning-bg p-4">
+          <Callout className="flex items-start gap-3" variant="warning">
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
             <p className="text-sm text-primary">
               {t("DashboardCustody.apiKeyDefaultAllowWarning", {
                 wallets: defaultAllowWallets.map(walletLabel).join(", "),
               })}
             </p>
-          </div>
+          </Callout>
         ) : null}
         {draft.restrictionsEnabled &&
         draft.walletScope === "selected" &&
