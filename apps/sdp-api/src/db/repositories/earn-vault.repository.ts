@@ -54,7 +54,7 @@ export interface EarnVaultMovementRow {
   last_valid_block_height: string;
   failure_reason: string | null;
   request_id: string;
-  /** Canonical request fingerprint; NOT NULL in migration 0058. */
+  /** Canonical request fingerprint; NOT NULL in migration 0059. */
   idempotency_fingerprint: string;
   created_by: string | null;
   initiated_by_key_id: string | null;
@@ -174,6 +174,16 @@ function assertValidMovementTransition(input: AdvanceEarnVaultMovementInput): vo
   if (input.shares !== undefined && input.toStatus !== "confirmed") {
     throw new Error("shares are only valid when confirming an earn vault movement");
   }
+  if (
+    input.shares !== undefined &&
+    input.shares !== null &&
+    (input.shares.length < 1 ||
+      input.shares.length > 128 ||
+      !/^\d+(?:\.\d+)?$/.test(input.shares) ||
+      !/[1-9]/.test(input.shares))
+  ) {
+    throw new Error("shares must be a positive unsigned decimal with at most 128 characters");
+  }
   if (input.toStatus === "confirmed" && !input.confirmedAt?.trim()) {
     throw new Error("confirmedAt is required when confirming an earn vault movement");
   }
@@ -233,33 +243,58 @@ async function claimPosition(
          id, organization_id, project_id, environment,
          provider, provider_reference, custody_wallet_id,
          share_mint, token_mint, label, created_by, activated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, sdp_iso_now())
+       )
+       SELECT
+         ?, project.organization_id, project.id, project.environment,
+         ?, ?, wallet.id, ?, ?, ?, ?, sdp_iso_now()
+       FROM projects project
+       INNER JOIN custody_wallets wallet
+         ON wallet.id = ?
+       LEFT JOIN custody_configs config
+         ON config.id = wallet.custody_config_id
+       LEFT JOIN custody_connections connection
+         ON connection.id = wallet.custody_connection_id
+       WHERE project.id = ?
+         AND project.organization_id = ?
+         AND project.environment = ?
+         AND (
+           (
+             wallet.custody_config_id IS NOT NULL
+             AND config.organization_id = project.organization_id
+             AND (config.project_id IS NULL OR config.project_id = project.id)
+           )
+           OR
+           (
+             wallet.custody_connection_id IS NOT NULL
+             AND connection.organization_id = project.organization_id
+             AND (connection.project_id IS NULL OR connection.project_id = project.id)
+           )
+         )
        ON CONFLICT (organization_id, environment, provider, provider_reference, custody_wallet_id)
        DO UPDATE SET
          updated_at = sdp_iso_now(),
          label = EXCLUDED.label,
-         activated_at = COALESCE(earn_vault_positions.activated_at, sdp_iso_now()),
-         closed_at = NULL
+         activated_at = COALESCE(earn_vault_positions.activated_at, sdp_iso_now())
        WHERE earn_vault_positions.token_mint = EXCLUDED.token_mint
          AND earn_vault_positions.share_mint = EXCLUDED.share_mint
        RETURNING *`
     )
     .bind(
       generateEarnVaultPositionId(),
-      input.organizationId,
-      input.projectId,
-      input.environment,
       input.provider,
       input.providerReference,
-      input.custodyWalletId,
       input.shareMint,
       input.tokenMint,
       input.label,
-      input.createdBy ?? null
+      input.createdBy ?? null,
+      input.custodyWalletId,
+      input.projectId,
+      input.organizationId,
+      input.environment
     )
     .first<EarnVaultPositionRow>();
   if (!row) {
-    throw conflict("Vault asset identity changed for an existing position");
+    throw conflict("Vault position does not match project, wallet scope, or asset identity");
   }
   return row;
 }
@@ -372,7 +407,16 @@ export function createPostgresEarnVaultRepository(db: AppDb): EarnVaultRepositor
            WHERE organization_id = ?
              AND environment = ?
              AND activated_at IS NOT NULL
-             AND closed_at IS NULL
+             AND (
+               closed_at IS NULL
+               OR EXISTS (
+                 SELECT 1
+                 FROM earn_vault_movements reentry
+                 WHERE reentry.position_id = earn_vault_positions.id
+                   AND reentry.direction = 'deposit'
+                   AND reentry.status IN ('pending', 'submitted')
+               )
+             )
              AND custody_wallet_id = ANY (?::text[])
              AND EXISTS (
                SELECT 1
@@ -436,18 +480,18 @@ export function createPostgresEarnVaultRepository(db: AppDb): EarnVaultRepositor
           .bind(...values, input.movementId, input.organizationId, ...input.fromStatuses)
           .first<EarnVaultMovementRow>();
 
-      if (input.toStatus !== "failed") return advance(db);
+      if (input.toStatus !== "failed" && input.toStatus !== "confirmed") return advance(db);
 
       return db.transaction(async (executor) => {
         const transaction = asTransactionalClient(executor);
         const candidate = await transaction
           .prepare(
-            `SELECT position_id
+            `SELECT position_id, direction
              FROM earn_vault_movements
              WHERE id = ? AND organization_id = ?`
           )
           .bind(input.movementId, input.organizationId)
-          .first<{ position_id: string }>();
+          .first<{ position_id: string; direction: EarnVaultMovementDirection }>();
         if (!candidate) return null;
         await transaction
           .prepare("SELECT id FROM earn_vault_positions WHERE id = ? FOR UPDATE")
@@ -455,21 +499,34 @@ export function createPostgresEarnVaultRepository(db: AppDb): EarnVaultRepositor
           .first<{ id: string }>();
         const movement = await advance(transaction);
         if (!movement) return null;
-        await transaction
-          .prepare(
-            `UPDATE earn_vault_positions position
-             SET activated_at = NULL, updated_at = sdp_iso_now()
-             WHERE position.id = ?
-               AND position.activated_at IS NOT NULL
-               AND NOT EXISTS (
-                 SELECT 1
-                 FROM earn_vault_movements movement
-                 WHERE movement.position_id = position.id
-                   AND movement.status IN ('pending', 'submitted', 'confirmed')
-               )`
-          )
-          .bind(movement.position_id)
-          .run();
+        if (input.toStatus === "confirmed" && candidate.direction === "deposit") {
+          await transaction
+            .prepare(
+              `UPDATE earn_vault_positions
+               SET activated_at = COALESCE(activated_at, sdp_iso_now()),
+                   closed_at = NULL,
+                   updated_at = sdp_iso_now()
+               WHERE id = ? AND organization_id = ?`
+            )
+            .bind(movement.position_id, input.organizationId)
+            .run();
+        } else if (input.toStatus === "failed") {
+          await transaction
+            .prepare(
+              `UPDATE earn_vault_positions position
+               SET activated_at = NULL, updated_at = sdp_iso_now()
+               WHERE position.id = ?
+                 AND position.activated_at IS NOT NULL
+                 AND NOT EXISTS (
+                   SELECT 1
+                   FROM earn_vault_movements movement
+                   WHERE movement.position_id = position.id
+                     AND movement.status IN ('pending', 'submitted', 'confirmed')
+                 )`
+            )
+            .bind(movement.position_id)
+            .run();
+        }
         return movement;
       });
     },

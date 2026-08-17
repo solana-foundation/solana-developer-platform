@@ -251,6 +251,16 @@ CREATE TABLE IF NOT EXISTS earn_vault_movements (
             AND requested_amount ~ '[1-9]'
             AND amount ~ '[1-9]'
         ),
+    CONSTRAINT earn_vault_movements_shares_format_check
+        CHECK (
+            shares IS NULL
+            OR (
+                status = 'confirmed'
+                AND LENGTH(shares) BETWEEN 1 AND 128
+                AND shares ~ '^\d+(\.\d+)?$'
+                AND shares ~ '[1-9]'
+            )
+        ),
     CONSTRAINT earn_vault_movements_amount_identity_check
         CHECK (
             CASE
