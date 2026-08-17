@@ -4,7 +4,10 @@ import {
   isDecimalString,
   parseDecimalAmount,
 } from "@sdp/solana/amount";
-import { amountTooPrecise, invalidAmount } from "./errors";
+import { amountOutOfRange, amountTooPrecise, invalidAmount } from "./errors";
+
+/** Every amount Kamino serializes into an instruction is an unsigned 64-bit integer. */
+const MAX_U64_BASE_UNITS = (1n << 64n) - 1n;
 
 /**
  * Amount validation at the MINT's precision.
@@ -73,11 +76,17 @@ export function acceptAtMintScale(field: string, value: string, decimals: number
   if (decimalScale(canonicalScaleInput) > decimals) {
     throw amountTooPrecise(field, value, decimals);
   }
+  // Parse once and retain the exact atom count. Scale-valid decimals can still
+  // overflow the u64 encoded by Kamino instructions; letting those through
+  // defers the failure until Borsh emits an opaque byte-length error after RPC
+  // work. This shared gate covers deposit amount, minSharesOut and withdrawal
+  // shares before any of them reaches the SDK.
+  const baseUnits = parseDecimalAmount(canonicalScaleInput, decimals);
+  if (baseUnits > MAX_U64_BASE_UNITS) throw amountOutOfRange(field, value);
+
   // Re-serialised through the repo's fixed-point helpers so what leaves this
   // package is scaled exactly like every other amount in SDP ("1.500" -> "1.5").
-  // Safe by construction: the scale check above is precisely
-  // `parseDecimalAmount`'s own precondition, so it cannot throw here.
-  return formatDecimalAmount(parseDecimalAmount(canonicalScaleInput, decimals), decimals);
+  return formatDecimalAmount(baseUnits, decimals);
 }
 
 function trimInsignificantFractionalZeroes(value: string): string {

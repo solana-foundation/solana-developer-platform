@@ -99,13 +99,15 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
    * serving and hands it in; `listKaminoDevnetVaults` guards the same hazard
    * with a genesis-hash check.
    */
-  constructor(private readonly resolveRpcUrl: (cluster: SolanaCluster) => string) {
+  constructor(
+    private readonly resolveRpcUrl: (ctx: EarnRuntimeContext, cluster: SolanaCluster) => string
+  ) {
     super();
   }
 
   private runtime(ctx: EarnRuntimeContext): KaminoRuntime {
     const cluster = CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment];
-    const rpcUrl = this.resolveRpcUrl(cluster);
+    const rpcUrl = this.resolveRpcUrl(ctx, cluster);
     if (!rpcUrl.trim()) {
       throw new SdpKaminoError(
         "VAULT_UNREADABLE",
@@ -169,9 +171,9 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
    * kvault program, not the curated deposit catalogue: a visibility or TVL
    * gate may stop new money without hiding an existing position.
    *
-   * A vault that fails to read is DROPPED, not defaulted to zero: a zero would
-   * render as "you hold nothing here", which is a claim about someone's money
-   * that a failed RPC call does not support.
+   * A vault that fails to read fails the WHOLE snapshot. Returning every other
+   * vault would make the failed holding indistinguishable from no holding at
+   * all; a partial portfolio is not a truthful portfolio.
    */
   async readVaultPositions(
     ctx: EarnRuntimeContext,
@@ -195,7 +197,33 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
       (reference) => readKaminoPosition(runtime, { vault: address(reference), owner, slot })
     );
 
+    const failures = results.flatMap((result, index) =>
+      result.status === "rejected"
+        ? [{ providerReference: providerReferences[index], cause: result.reason }]
+        : []
+    );
+    if (failures.length > 0) {
+      throw new SdpKaminoError(
+        "VAULT_UNREADABLE",
+        `Kamino could not read ${failures.length} of ${providerReferences.length} requested ` +
+          "vault positions; refusing to return a partial portfolio.",
+        {
+          cause: new AggregateError(
+            failures.map(({ providerReference, cause }) =>
+              cause instanceof Error
+                ? new Error(`Kamino vault ${providerReference} read failed`, { cause })
+                : new Error(`Kamino vault ${providerReference} read failed: ${String(cause)}`)
+            ),
+            "Kamino vault position reads failed"
+          ),
+        }
+      );
+    }
+
     return results.flatMap((result) => {
+      // All rejected results were handled above, so only fulfilled values can
+      // reach the serializer. Keep the guard for TypeScript's settled-result
+      // narrowing and as a defensive assertion if this block is later moved.
       if (result.status !== "fulfilled") return [];
       const position = result.value;
       // Exact reads serialize zero canonically as "0". A full-portfolio read

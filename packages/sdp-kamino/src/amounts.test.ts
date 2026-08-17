@@ -66,6 +66,30 @@ describe("acceptAtMintScale", () => {
     expect(() => acceptAtMintScale("amount", "7.5", 0)).toThrow(/more precision/);
   });
 
+  it("enforces the on-chain u64 range for every encoded amount field", () => {
+    const maxU64 = "18446744073709551615";
+    const overU64 = "18446744073709551616";
+
+    for (const field of ["amount", "minSharesOut", "shares"]) {
+      expect(acceptAtMintScale(field, maxU64, 0), field).toBe(maxU64);
+      expect(() => acceptAtMintScale(field, overU64, 0), field).toThrow(SdpKaminoError);
+      try {
+        acceptAtMintScale(field, overU64, 0);
+        expect.unreachable("should have rejected an amount above u64");
+      } catch (error) {
+        expect(error).toBeInstanceOf(SdpKaminoError);
+        expect((error as SdpKaminoError).code).toBe("INVALID_AMOUNT");
+        expect((error as Error).message).toMatch(/unsigned 64-bit base-unit/);
+      }
+    }
+
+    // The bound applies after mint scaling, not to the whole-number spelling.
+    expect(acceptAtMintScale("amount", "18446744073709.551615", 6)).toBe("18446744073709.551615");
+    expect(() => acceptAtMintScale("amount", "18446744073709.551616", 6)).toThrow(
+      /unsigned 64-bit base-unit/
+    );
+  });
+
   it("handles long zero runs in linear time without changing scale semantics", () => {
     const zeroRun = "0".repeat(50_000);
 

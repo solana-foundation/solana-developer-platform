@@ -96,7 +96,7 @@ describe("KaminoVaultDirectClient capabilities", () => {
 
   it("maps the SDP environment to the right cluster", async () => {
     const seen: string[] = [];
-    const probe = new KaminoVaultDirectClient((cluster) => {
+    const probe = new KaminoVaultDirectClient((_ctx, cluster) => {
       seen.push(cluster);
       return "";
     });
@@ -157,7 +157,16 @@ describe("KaminoVaultDirectClient capabilities", () => {
       }
     );
 
-    expect(resolveRpcUrl).toHaveBeenCalledWith("devnet");
+    expect(resolveRpcUrl).toHaveBeenCalledWith(
+      {
+        environment: "sandbox",
+        env: {
+          SOLANA_RPC_URL: "https://process-mainnet.example.invalid",
+          UNRELATED: "preserved",
+        },
+      },
+      "devnet"
+    );
     expect(mocks.discoverKaminoPositionVaults).toHaveBeenCalledWith(
       { cluster: "devnet", rpcUrl: resolvedRpcUrl },
       address(owner)
@@ -221,6 +230,44 @@ describe("KaminoVaultDirectClient capabilities", () => {
 
     expect(mocks.createKaminoRpc).not.toHaveBeenCalled();
     expect(mocks.readKaminoPosition).not.toHaveBeenCalled();
+  });
+
+  it("fails the whole snapshot when any discovered vault cannot be hydrated", async () => {
+    const slot = 123n;
+    mocks.createKaminoRpc.mockReturnValue({
+      getSlot: () => ({ send: vi.fn().mockResolvedValue(slot) }),
+    });
+
+    const owner = "11111111111111111111111111111112";
+    const providerReferences = ["7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx", SHARE_MINT];
+    mocks.discoverKaminoPositionVaults.mockResolvedValue(providerReferences.map(address));
+    mocks.readKaminoPosition.mockImplementation(
+      async (
+        runtime: KaminoRuntime,
+        input: { vault: Address; owner: Address }
+      ): Promise<KaminoPosition> => {
+        if (String(input.vault) === SHARE_MINT) throw new Error("RPC unavailable");
+        return {
+          vault: input.vault,
+          owner: input.owner,
+          cluster: runtime.cluster,
+          shares: "1",
+          tokenMint: address(DEPOSIT_TOKEN_MINT),
+          sharesMint: address(SHARE_MINT),
+        };
+      }
+    );
+
+    await expect(
+      client.readVaultPositions(
+        { env: {}, environment: "sandbox" },
+        { owner, providerReferences: [] }
+      )
+    ).rejects.toMatchObject({
+      code: "VAULT_UNREADABLE",
+      message: expect.stringMatching(/refusing to return a partial portfolio/),
+    });
+    expect(mocks.readKaminoPosition).toHaveBeenCalledTimes(2);
   });
 
   it("reads vaults with bounded concurrency against one shared slot", async () => {

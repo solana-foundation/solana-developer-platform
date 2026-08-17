@@ -52,6 +52,14 @@ export function amountTooPrecise(field: string, value: string, decimals: number)
   );
 }
 
+/** A decimal whose mint-scaled integer cannot fit Kamino's on-chain u64 field. */
+export function amountOutOfRange(field: string, value: string): SdpKaminoError {
+  return new SdpKaminoError(
+    "INVALID_AMOUNT",
+    `Kamino ${field} ${JSON.stringify(value)} exceeds the maximum unsigned 64-bit base-unit amount`
+  );
+}
+
 /**
  * The vault account could not be read on this cluster.
  *
