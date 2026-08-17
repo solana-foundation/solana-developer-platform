@@ -17,4 +17,9 @@ jobs:
       - uses: actions/dependency-review-action@v5
         with:
           fail-on-severity: high
+          # klend-sdk declares bigint-buffer@1.1.5 transitively, but the API
+          # runner ships only its esbuild output and no native .node artifacts.
+          # build-node.mjs fails if the advisory's native loader ever enters a
+          # shipped bundle. No patched bigint-buffer release exists today.
+          allow-ghsas: GHSA-3gc7-fjrx-p6mg
           comment-summary-in-pr: on-failure

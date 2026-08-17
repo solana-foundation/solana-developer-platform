@@ -60,7 +60,7 @@ type Kit2 = any;
  * function's correctness is a convention inside one call and that assertion is a
  * property of what we actually emit.
  */
-async function bindVault(runtime: KaminoRuntime, vaultAddress: Address) {
+function createVaultClient(runtime: KaminoRuntime) {
   const config = kaminoClusterConfig(runtime.cluster);
   // The transport deadline covers both our direct reads and every nested
   // reserve/farm/vault request klend-sdk performs with this same client.
@@ -74,6 +74,12 @@ async function bindVault(runtime: KaminoRuntime, vaultAddress: Address) {
     undefined,
     config.farmsProgramId as Kit2
   );
+
+  return { client, config, rpc };
+}
+
+async function bindVault(runtime: KaminoRuntime, vaultAddress: Address) {
+  const { client, config, rpc } = createVaultClient(runtime);
 
   // The probe exists only to fetch state under the right program id; it is never
   // used to build anything.
@@ -281,6 +287,37 @@ export async function buildKaminoWithdrawPlan(
     assetIdentity,
     accepted: { shares: acceptedShares },
   });
+}
+
+/**
+ * Discover every K-Vault in which an owner may hold shares.
+ *
+ * This deliberately uses the on-chain kvault program census rather than the
+ * curated strategy catalogue. Catalogue admission filters (known mint,
+ * metrics, TVL) decide what SDP offers for NEW deposits; they must never hide
+ * money the owner already holds in a filtered or delisted vault.
+ *
+ * klend-sdk's bulk helper is safe only as a CANDIDATE INDEX. Its unstaked
+ * balances pass through JSON `uiAmount` and it overwrites rather than sums
+ * multiple token accounts. We therefore consume only the returned vault keys;
+ * `readKaminoPosition` re-reads every candidate in exact base units below and
+ * is the sole source of balances returned to callers.
+ */
+export async function discoverKaminoPositionVaults(
+  runtime: KaminoRuntime,
+  owner: Address
+): Promise<Address[]> {
+  const { client } = createVaultClient(runtime);
+  try {
+    const candidateBalances = await client.getUserSharesBalanceAllVaults(owner as Kit2);
+    return [...candidateBalances.keys()].map((vault) => vault as Address);
+  } catch (cause) {
+    throw new SdpKaminoError(
+      "VAULT_UNREADABLE",
+      `Kamino holdings could not be discovered on ${runtime.cluster}; refusing to report an empty portfolio.`,
+      { cause }
+    );
+  }
 }
 
 /**

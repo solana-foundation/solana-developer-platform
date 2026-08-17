@@ -1,5 +1,5 @@
 /* biome-ignore-all lint/security/noSecrets: file contains the esbuild banner template, which trips the high-entropy heuristic */
-import { copyFileSync, existsSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import esbuild from "esbuild";
@@ -42,19 +42,21 @@ const banner =
   "const __filename=__furl(import.meta.url);" +
   "const __dirname=__path.dirname(__filename);";
 
+// migrate.js lets the prebuilt image apply migrations without the source tree.
+const entryPoints = {
+  server: "src/server.ts",
+  job: "src/job.ts",
+  migrate: "scripts/migrate-postgres.mjs",
+  // custody-backfill.js re-encrypts legacy custody rows to KMS envelopes from the prebuilt image.
+  "custody-backfill": "scripts/migrate-custody-encryption.ts",
+  // counterparty-pii-migrate.js performs the gated PII backfill/cutover lifecycle.
+  "counterparty-pii-migrate": "scripts/counterparty-pii-migrate.ts",
+  // configure.js generates a self-hosted .env in the terminal from the prebuilt image.
+  configure: "scripts/configure.ts",
+};
+
 await esbuild.build({
-  // migrate.js lets the prebuilt image apply migrations without the source tree.
-  entryPoints: {
-    server: "src/server.ts",
-    job: "src/job.ts",
-    migrate: "scripts/migrate-postgres.mjs",
-    // custody-backfill.js re-encrypts legacy custody rows to KMS envelopes from the prebuilt image.
-    "custody-backfill": "scripts/migrate-custody-encryption.ts",
-    // counterparty-pii-migrate.js performs the gated PII backfill/cutover lifecycle.
-    "counterparty-pii-migrate": "scripts/counterparty-pii-migrate.ts",
-    // configure.js generates a self-hosted .env in the terminal from the prebuilt image.
-    configure: "scripts/configure.ts",
-  },
+  entryPoints,
   bundle: true,
   platform: "node",
   target: "node22",
@@ -63,6 +65,22 @@ await esbuild.build({
   external: ["pg-native", "@sentry/profiling-node"],
   banner: { js: banner },
 });
+
+// klend-sdk's dependency graph declares bigint-buffer@1.1.5, whose native
+// `toBigIntLE` binding has GHSA-3gc7-fjrx-p6mg and no patched release. The API
+// runner ships dist/ alone (never node_modules or native .node artifacts), and
+// esbuild currently removes this unused transitive package entirely. Keep the
+// workflow's one-advisory exception honest: fail the build if a future import
+// pulls the vulnerable native loader into ANY shipped JavaScript entry point.
+for (const entryPoint of Object.keys(entryPoints)) {
+  const output = path.join("dist", `${entryPoint}.js`);
+  if (readFileSync(output, "utf8").includes("bigint_buffer")) {
+    throw new Error(
+      `${output} contains bigint-buffer's vulnerable native binding loader ` +
+        "(GHSA-3gc7-fjrx-p6mg). Remove or replace that runtime path before shipping it."
+    );
+  }
+}
 
 const wasmSource = resolveOrcaWasm();
 if (!existsSync(wasmSource)) {

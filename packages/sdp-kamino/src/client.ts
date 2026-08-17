@@ -13,7 +13,7 @@ import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
 import { type Address, address, createNoopSigner } from "@solana/kit";
 import { SdpKaminoError } from "./errors";
 import { createKaminoRpc } from "./rpc";
-import { buildKaminoDepositPlan, readKaminoPosition } from "./sdk";
+import { buildKaminoDepositPlan, discoverKaminoPositionVaults, readKaminoPosition } from "./sdk";
 import type { KaminoInstructionPlan, KaminoRuntime } from "./types";
 
 /** One portfolio request may fan out over many vaults; never fan out the RPCs without a bound. */
@@ -165,6 +165,10 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
    * Reads every requested vault against ONE slot, so a multi-position page is
    * priced consistently rather than drifting between reads.
    *
+   * An empty reference list discovers owner-held vaults from the on-chain
+   * kvault program, not the curated deposit catalogue: a visibility or TVL
+   * gate may stop new money without hiding an existing position.
+   *
    * A vault that fails to read is DROPPED, not defaulted to zero: a zero would
    * render as "you hold nothing here", which is a claim about someone's money
    * that a failed RPC call does not support.
@@ -175,17 +179,9 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
   ): Promise<EarnVaultPositionSnapshot[]> {
     const runtime = this.runtime(ctx);
     const owner: Address = address(input.owner);
-    const readAllKnownVaults = input.providerReferences.length === 0;
-    const providerReferences = readAllKnownVaults
-      ? (
-          await this.listStrategies({
-            ...ctx,
-            // Catalogue discovery reads this process-level key on devnet.
-            // Use the same per-cluster endpoint as the position reads so an
-            // empty request cannot discover on one chain and hydrate another.
-            env: { ...ctx.env, SOLANA_RPC_URL: runtime.rpcUrl },
-          })
-        ).map((strategy) => strategy.providerReference)
+    const readAllHoldings = input.providerReferences.length === 0;
+    const providerReferences = readAllHoldings
+      ? await discoverKaminoPositionVaults(runtime, owner)
       : input.providerReferences;
     if (providerReferences.length === 0) return [];
 
@@ -205,7 +201,7 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
       // Exact reads serialize zero canonically as "0". A full-portfolio read
       // reports holdings, while an explicitly requested vault may still return
       // a truthful zero balance.
-      if (readAllKnownVaults && position.shares === "0") return [];
+      if (readAllHoldings && position.shares === "0") return [];
       return [
         {
           providerReference: String(position.vault),

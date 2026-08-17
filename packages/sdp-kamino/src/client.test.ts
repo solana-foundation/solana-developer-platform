@@ -3,7 +3,6 @@ import {
   supportsVaultDirect,
   supportsVaultWithdraw,
 } from "@sdp/earn/capabilities";
-import type { ProviderStrategySnapshot } from "@sdp/earn/types";
 import { type Address, address } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -20,12 +19,14 @@ const SHARE_MINT = "So11111111111111111111111111111111111111112";
 const mocks = vi.hoisted(() => ({
   buildKaminoDepositPlan: vi.fn(),
   createKaminoRpc: vi.fn(),
+  discoverKaminoPositionVaults: vi.fn(),
   readKaminoPosition: vi.fn(),
 }));
 
 vi.mock("./rpc", () => ({ createKaminoRpc: mocks.createKaminoRpc }));
 vi.mock("./sdk", () => ({
   buildKaminoDepositPlan: mocks.buildKaminoDepositPlan,
+  discoverKaminoPositionVaults: mocks.discoverKaminoPositionVaults,
   readKaminoPosition: mocks.readKaminoPosition,
 }));
 
@@ -116,7 +117,7 @@ describe("KaminoVaultDirectClient capabilities", () => {
     expect(seen).toEqual(["devnet", "mainnet-beta"]);
   });
 
-  it("reads every provider-known vault when no references are supplied", async () => {
+  it("discovers owner-held vaults on chain without consulting the curated shelf", async () => {
     const resolvedRpcUrl = "https://devnet.example.invalid";
     const resolveRpcUrl = vi.fn(() => resolvedRpcUrl);
     const probe = new KaminoVaultDirectClient(resolveRpcUrl);
@@ -125,20 +126,9 @@ describe("KaminoVaultDirectClient capabilities", () => {
     mocks.createKaminoRpc.mockReturnValue({ getSlot: () => ({ send: getSlotSend }) });
 
     const providerReferences = ["7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx", SHARE_MINT];
-    const strategies = providerReferences.map(
-      (providerReference, index): ProviderStrategySnapshot => ({
-        providerReference,
-        name: `Vault ${index + 1}`,
-        sourceKind: "defi",
-        underlyingSource: "klend",
-        depositMints: [DEPOSIT_TOKEN_MINT],
-        shareMint: SHARE_MINT,
-        hostCluster: "devnet",
-        apyType: "variable",
-        liquidityTerm: "instant",
-      })
-    );
-    const listStrategies = vi.spyOn(probe, "listStrategies").mockResolvedValue(strategies);
+    const owner = "11111111111111111111111111111112";
+    mocks.discoverKaminoPositionVaults.mockResolvedValue(providerReferences.map(address));
+    const listStrategies = vi.spyOn(probe, "listStrategies");
     mocks.readKaminoPosition.mockImplementation(
       async (
         runtime: KaminoRuntime,
@@ -162,19 +152,17 @@ describe("KaminoVaultDirectClient capabilities", () => {
         },
       },
       {
-        owner: "11111111111111111111111111111112",
+        owner,
         providerReferences: [],
       }
     );
 
     expect(resolveRpcUrl).toHaveBeenCalledWith("devnet");
-    expect(listStrategies).toHaveBeenCalledWith({
-      environment: "sandbox",
-      env: {
-        SOLANA_RPC_URL: resolvedRpcUrl,
-        UNRELATED: "preserved",
-      },
-    });
+    expect(mocks.discoverKaminoPositionVaults).toHaveBeenCalledWith(
+      { cluster: "devnet", rpcUrl: resolvedRpcUrl },
+      address(owner)
+    );
+    expect(listStrategies).not.toHaveBeenCalled();
     expect(mocks.createKaminoRpc).toHaveBeenCalledWith(resolvedRpcUrl);
     expect(getSlotSend).toHaveBeenCalledOnce();
     expect(positions.map((position) => position.providerReference)).toEqual([
@@ -197,9 +185,9 @@ describe("KaminoVaultDirectClient capabilities", () => {
     );
   });
 
-  it("returns an empty snapshot without chain reads when the known shelf is empty", async () => {
+  it("returns an empty snapshot without slot or hydration reads when discovery finds no holdings", async () => {
     const probe = new KaminoVaultDirectClient(() => "https://devnet.example.invalid");
-    vi.spyOn(probe, "listStrategies").mockResolvedValue([]);
+    mocks.discoverKaminoPositionVaults.mockResolvedValue([]);
 
     await expect(
       probe.readVaultPositions(
@@ -211,14 +199,15 @@ describe("KaminoVaultDirectClient capabilities", () => {
       )
     ).resolves.toEqual([]);
 
+    expect(mocks.discoverKaminoPositionVaults).toHaveBeenCalledOnce();
     expect(mocks.createKaminoRpc).not.toHaveBeenCalled();
     expect(mocks.readKaminoPosition).not.toHaveBeenCalled();
   });
 
-  it("propagates known-vault discovery failures instead of reporting no holdings", async () => {
+  it("propagates on-chain discovery failures instead of reporting no holdings", async () => {
     const probe = new KaminoVaultDirectClient(() => "https://devnet.example.invalid");
-    const discoveryError = new Error("catalogue unavailable");
-    vi.spyOn(probe, "listStrategies").mockRejectedValue(discoveryError);
+    const discoveryError = new Error("program census unavailable");
+    mocks.discoverKaminoPositionVaults.mockRejectedValue(discoveryError);
 
     await expect(
       probe.readVaultPositions(
@@ -264,7 +253,6 @@ describe("KaminoVaultDirectClient capabilities", () => {
 
     const vault = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
     const providerReferences = Array.from({ length: 9 }, () => vault);
-    const listStrategies = vi.spyOn(client, "listStrategies");
     const pending = client.readVaultPositions(
       { env: {}, environment: "sandbox" },
       {
@@ -289,7 +277,7 @@ describe("KaminoVaultDirectClient capabilities", () => {
     await expect(pending).resolves.toHaveLength(9);
     expect(maxActive).toBe(KAMINO_POSITION_READ_CONCURRENCY);
     expect(getSlotSend).toHaveBeenCalledOnce();
-    expect(listStrategies).not.toHaveBeenCalled();
+    expect(mocks.discoverKaminoPositionVaults).not.toHaveBeenCalled();
     expect(mocks.readKaminoPosition.mock.calls.every(([, input]) => input.slot === slot)).toBe(
       true
     );

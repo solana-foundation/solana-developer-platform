@@ -159,14 +159,25 @@ to reuse. Every matching token account is summed; if any returned account lacks
 an exact raw amount, the entire position is unreadable rather than silently
 under-reported.
 
+An empty portfolio request first calls the SDK's on-chain
+`getUserSharesBalanceAllVaults` only to discover candidate vault ADDRESSES. That
+helper enumerates the configured kvault program plus the owner's farm and token
+accounts, so catalogue admission gates cannot hide an existing holding. Never
+return its balance values: they use the same lossy `uiAmount` path and overwrite
+rather than sum multiple token accounts. Every candidate is re-hydrated through
+`readKaminoPosition`, and exact zeroes are removed only after that read.
+
 ## RPC reads are bounded
 
 `rpc.ts` applies a 30-second deadline at the transport boundary shared with
 klend-sdk, so vault, reserve, farm, token-account, exchange-rate and slot reads
 cannot hold an API worker forever. Caller cancellation is composed with that
 deadline and remains distinguishable from a timeout. A portfolio page reads one
-shared slot, then hydrates at most four vaults concurrently; the number of
-in-flight RPC sequences never scales without a bound from catalogue size.
+shared slot, then hydrates at most four candidate holdings concurrently. An
+empty request pays one on-chain program/owner census up front, then fans out only
+over vaults for which the SDK found a share-token account or farm position — not
+the whole raw registry and not the curated catalogue. Census failures propagate
+rather than becoming a false empty portfolio.
 
 ## Tests
 
