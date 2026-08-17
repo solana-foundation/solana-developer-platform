@@ -656,7 +656,14 @@ export function DashboardShell({
   }, [dashboardAccess.capabilities.canReadApprovals, selectedProjectId]);
 
   if (!isLoaded || shouldRedirectToOnboarding) {
-    return <FullscreenLoadingIndicator />;
+    // This is the only caller with a route in scope, so it hands the indicator the
+    // same skeleton the settled page streams. Without it the cold load paints one
+    // generic shape on every route and the layout jumps when content arrives.
+    return (
+      <FullscreenLoadingIndicator contentWidthClass={contentWidthClass}>
+        <PageLoadingComponent assetProfilesEnabled={assetProfilesEnabled} />
+      </FullscreenLoadingIndicator>
+    );
   }
 
   if (!isSignedIn) {
