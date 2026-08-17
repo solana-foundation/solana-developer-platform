@@ -1,10 +1,13 @@
-import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types";
+import { type CustodyWalletTokenBalance, SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import {
   formatTokenAmount,
   isHttpUrl,
+  normalizeAggregateBalances,
   resolveTokenByMint,
+  resolveTotalBalance,
   resolveTransferTokenLabel,
+  statusMessageKey,
 } from "./payments-overview.utils";
 
 const UNCATALOGUED_MINT = "BmA22WnK8p5Ai5mkzJhk64DCxMiUiii69tgSmUGMWPSh";
@@ -121,5 +124,60 @@ describe("isHttpUrl", () => {
   it("rejects unparseable values", () => {
     expect(isHttpUrl("not-a-url")).toBe(false);
     expect(isHttpUrl("")).toBe(false);
+  });
+});
+
+describe("statusMessageKey", () => {
+  it("maps known statuses to the transactions catalog keys", () => {
+    expect(statusMessageKey("failed")).toBe("DashboardPayments.transactions.failed");
+    expect(statusMessageKey("awaiting_payment")).toBe(
+      "DashboardPayments.transactions.awaitingPayment"
+    );
+  });
+
+  it("returns null for a status the catalog does not name", () => {
+    expect(statusMessageKey("some_new_status")).toBeNull();
+  });
+});
+
+describe("normalizeAggregateBalances", () => {
+  const solBalance: CustodyWalletTokenBalance = {
+    token: "SOL",
+    mint: SOL_MINT,
+    amount: "2500000000",
+    uiAmount: "2.5",
+    decimals: 9,
+    usdValue: 375.25,
+  };
+  const usdcBalance: CustodyWalletTokenBalance = {
+    token: "USDC",
+    mint: WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address,
+    amount: "100000000",
+    uiAmount: "100",
+    decimals: 6,
+  };
+  const issuedBalance: CustodyWalletTokenBalance = {
+    token: "bSGD",
+    mint: UNCATALOGUED_MINT,
+    amount: "50000000",
+    uiAmount: "50",
+    decimals: 6,
+    usdValue: 37.5,
+  };
+
+  it("keeps native SOL as a row alongside SPL tokens", () => {
+    const rows = normalizeAggregateBalances([solBalance, usdcBalance, issuedBalance]);
+    expect(rows.map((row) => row.token)).toEqual(["USDC", "bSGD", "SOL"]);
+  });
+
+  it("counts SOL in the total balance", () => {
+    const rows = normalizeAggregateBalances([solBalance, usdcBalance, issuedBalance]);
+    expect(resolveTotalBalance(rows)).toBe(375.25 + 100 + 37.5);
+  });
+
+  it("still drops balances the API could not price", () => {
+    const unpriced: CustodyWalletTokenBalance = { ...issuedBalance, usdValue: undefined };
+    const rows = normalizeAggregateBalances([solBalance, usdcBalance, unpriced]);
+    expect(rows.map((row) => row.token)).toEqual(["USDC", "SOL"]);
   });
 });

@@ -7,6 +7,7 @@ import type {
   EarnStrategySourceKind,
   EarnStrategyStatus,
   SdpEnvironment,
+  SolanaCluster,
 } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 
@@ -43,6 +44,13 @@ export interface EarnStrategyRow {
   redemption_delay_days: number | null;
   risk_metadata: EarnStrategyRiskMetadata;
   status: EarnStrategyStatus;
+  /**
+   * Cluster the instrument lives on — NOT implied by `environment`. A
+   * mainnet-only provider (Kamino) is catalogued into both environments, so a
+   * sandbox row may legitimately read `mainnet-beta`; that row is browsable and
+   * never fundable. See migration 0057 and `isClusterFundableInEnvironment`.
+   */
+  host_cluster: SolanaCluster;
   environment: SdpEnvironment;
   created_at: string;
   updated_at: string;
@@ -122,7 +130,25 @@ export interface UpsertEarnStrategyInput {
   redemptionDelayDays: number | null;
   riskMetadata: EarnStrategyRiskMetadata;
   status: EarnStrategyStatus;
+  /** Cluster the instrument lives on; the provider states it, never the sync. */
+  hostCluster: SolanaCluster;
   environment: SdpEnvironment;
+}
+
+/**
+ * The volatile figures a short-cadence refresh may rewrite, and nothing else.
+ * No name, no mints, no liquidity term, no status — narrowing the input is what
+ * makes "a refresh cannot change what a strategy IS" a property of the type
+ * rather than a convention.
+ */
+export interface UpdateEarnStrategyMetricsInput {
+  provider: EarnProviderId;
+  providerReference: string;
+  environment: SdpEnvironment;
+  /** Null clears a rate the provider no longer reports. */
+  currentApy: string | null;
+  /** Merged over the stored metadata, so curator and friends survive. */
+  riskMetadata: EarnStrategyRiskMetadata;
 }
 
 /**
@@ -137,8 +163,7 @@ export const EARN_SEED_REFERENCE_PREFIX = "seed-demo-";
 /**
  * Delist pass input: everything the provider still lists for (provider,
  * environment). Anything else the table holds is stale — a vault the provider
- * delisted, or one a tightened catalogue gate now refuses (the
- * `not_solana_hosted` case) — and is deleted.
+ * delisted or one a tightened catalogue gate now refuses — and is deleted.
  *
  * `listedProviderReferences` is the KEEP set, never the delete set, so the
  * caller cannot enumerate stale rows it does not know about: the provider's
@@ -156,6 +181,13 @@ export interface ListEarnStrategiesInput {
   apyType?: EarnApyType;
   liquidityTerm?: EarnLiquidityTerm;
   includeInactive?: boolean;
+  /**
+   * Server-owned visibility terms matched case-insensitively against the
+   * provider reference, display name, and underlying source. Filtering belongs
+   * in the query so pagination and totals describe the rows callers can see;
+   * the sync still persists the provider's complete routable catalogue.
+   */
+  excludeRelatedTerms?: readonly string[];
   limit: number;
   offset: number;
 }
@@ -246,6 +278,19 @@ export interface ListEarnProgramWithdrawalsResult {
 
 export interface EarnRepository {
   upsertStrategy(input: UpsertEarnStrategyInput): Promise<EarnStrategyRow | null>;
+  /**
+   * Refresh the volatile figures on ONE already-catalogued strategy.
+   *
+   * Update-only by design — it can never insert. The catalogue's admission
+   * gates live in the provider clients and run on the hourly sync; a write path
+   * that could create a row would be a second, ungated way in. An unmatched
+   * (provider, reference, environment) is a silent no-op, which is what lets
+   * the refresh pass hand over a provider's whole shelf without first working
+   * out which of it we catalogue.
+   *
+   * Returns whether a row was updated, so the caller can report coverage.
+   */
+  updateStrategyMetrics(input: UpdateEarnStrategyMetricsInput): Promise<boolean>;
   getStrategyById(strategyId: string): Promise<EarnStrategyRow | null>;
   listStrategies(input: ListEarnStrategiesInput): Promise<ListEarnStrategiesResult>;
   /**

@@ -21,7 +21,7 @@ export function ApprovalStatusBadge({
   return (
     <span
       className={cn(
-        "inline-flex h-6 items-center rounded-full border px-2.5 text-xs font-medium",
+        "inline-flex h-6 items-center rounded-full border px-2.5 text-xs font-medium whitespace-nowrap",
         STATUS_CLASS_NAMES[status],
         className
       )}

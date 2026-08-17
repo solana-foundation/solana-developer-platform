@@ -1,12 +1,17 @@
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { providerNotConfigured } from "./errors";
 import { GroundEarnClient } from "./providers/ground/client";
+import { KaminoEarnClient } from "./providers/kamino/client";
 import { PerenaEarnClient } from "./providers/perena/client";
 import { UpshiftEarnClient } from "./providers/upshift/client";
 import { VedaEarnClient } from "./providers/veda/client";
 import type { EarnVaultProvider } from "./types";
 
-export { supportsPortfolioWallets, supportsWithdrawalApprovals } from "./capabilities";
+export {
+  supportsLiveMetrics,
+  supportsPortfolioWallets,
+  supportsWithdrawalApprovals,
+} from "./capabilities";
 export {
   badRequest,
   internalError,
@@ -17,13 +22,15 @@ export {
   type SdpEarnErrorCode,
 } from "./errors";
 export { GroundEarnClient } from "./providers/ground/client";
+export { KaminoEarnClient } from "./providers/kamino/client";
 export { PerenaEarnClient } from "./providers/perena/client";
 export { StubEarnClient } from "./providers/stub";
 export { UpshiftEarnClient } from "./providers/upshift/client";
 export { VedaEarnClient } from "./providers/veda/client";
-export { isStrategyWithinDeclaredSupport } from "./support";
+export { isClusterFundableInEnvironment, isStrategyWithinDeclaredSupport } from "./support";
 export type {
   EarnDeclaredStrategySupport,
+  EarnLiveMetricsProvider,
   EarnPendingWithdrawalApproval,
   EarnPortfolioAddressBookEntryInput,
   EarnPortfolioAddressBookEntryResult,
@@ -46,6 +53,7 @@ export type {
   EarnWithdrawalApprovalStamp,
   EarnWithdrawalApprovalVoteInput,
   EarnWithdrawalApprovalVoteResult,
+  ProviderStrategyMetrics,
   ProviderStrategySnapshot,
 } from "./types";
 
@@ -58,6 +66,7 @@ export const EARN_PROVIDER_CLIENTS = {
   upshift: new UpshiftEarnClient(),
   perena: new PerenaEarnClient(),
   ground: new GroundEarnClient(),
+  kamino: new KaminoEarnClient(),
 } as const satisfies Record<EarnProviderId, EarnVaultProvider>;
 
 export function isEarnProviderId(value: string): value is EarnProviderId {

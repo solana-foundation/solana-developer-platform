@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.62.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.61.0...v0.62.0) (2026-08-14)
+
+### Features
+
+* **sponsorship:** emit structured money-path events ([#1286](https://github.com/solana-foundation/solana-developer-platform/pull/1286)) ([04102b3](https://github.com/solana-foundation/solana-developer-platform/commit/04102b3b2ddf5fc65d04c9a87a3b39f5fba9c320))
+* **i18n:** add complete Vietnamese (vi) UI translation catalogs ([#1154](https://github.com/solana-foundation/solana-developer-platform/pull/1154)) ([3ecc2e3](https://github.com/solana-foundation/solana-developer-platform/commit/3ecc2e3b133e5f02d45fa4f232652f125bef5170))
+
+### Bug Fixes
+
+* **ci:** restore dashboard release deploys ([#1327](https://github.com/solana-foundation/solana-developer-platform/pull/1327)) ([465ed16](https://github.com/solana-foundation/solana-developer-platform/commit/465ed1669488e2c5b8aff7215e60214dcf7113cd))
+
+### Maintenance
+
+* **web:** general dashboard improvements ([#1324](https://github.com/solana-foundation/solana-developer-platform/pull/1324)) ([bf12555](https://github.com/solana-foundation/solana-developer-platform/commit/bf12555482b67a0e5e738b077a071620a53fb9b0))
+
 ## [0.61.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.60.0...v0.61.0) (2026-08-14)
 
 ### Features

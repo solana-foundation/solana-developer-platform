@@ -23,6 +23,8 @@ function strategy(id: string): EarnStrategy {
     currentApy: "0.05",
     liquidityTerm: "instant",
     status: "active",
+    hostCluster: "devnet",
+    fundable: true,
     createdAt: TIMESTAMP,
     updatedAt: TIMESTAMP,
   };
