@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.63.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.62.0...v0.63.0) (2026-08-17)
+
+### Features
+
+* **earn:** add Kamino as a catalogue-only vault provider ([#1300](https://github.com/solana-foundation/solana-developer-platform/pull/1300)) ([8397212](https://github.com/solana-foundation/solana-developer-platform/commit/83972128e6e325ea0e3731494f519798dcf588f2))
+* **earn:** sort the strategy catalogue by pool size and APY ([#1334](https://github.com/solana-foundation/solana-developer-platform/pull/1334)) ([e8e7ad5](https://github.com/solana-foundation/solana-developer-platform/commit/e8e7ad5c84f09b2c3e0f51e55e94b617a75b480e))
+* **earn:** surface wallet USDC and curate strategies ([#1299](https://github.com/solana-foundation/solana-developer-platform/pull/1299)) ([f27f6f3](https://github.com/solana-foundation/solana-developer-platform/commit/f27f6f34121c51c6a08e707a179eacd00116ec5f))
+
+### Bug Fixes
+
+* **web:** swap private channels overview and playground tabs shallowly ([#1321](https://github.com/solana-foundation/solana-developer-platform/pull/1321)) ([fe20451](https://github.com/solana-foundation/solana-developer-platform/commit/fe2045150d6e0ada697bb423a3ec600b2cf1701c))
+* **web:** resolve token labels in approvals amount/asset column ([#1314](https://github.com/solana-foundation/solana-developer-platform/pull/1314)) ([911509f](https://github.com/solana-foundation/solana-developer-platform/commit/911509fb0738aaa7e916612bac932ebfd8b41843))
+* **api:** reuse pending approval when a recurring collection retries ([#1320](https://github.com/solana-foundation/solana-developer-platform/pull/1320)) ([33dfbcf](https://github.com/solana-foundation/solana-developer-platform/commit/33dfbcfc653187a5c0846d2c89eadc021dcdcc08))
+* **web:** keep a single divider under the private channels tab strip ([#1317](https://github.com/solana-foundation/solana-developer-platform/pull/1317)) ([6a5790b](https://github.com/solana-foundation/solana-developer-platform/commit/6a5790bf87d19a1403ec6593653dafb69e1e98df))
+* **web:** include SOL in the payments available balance card ([#1311](https://github.com/solana-foundation/solana-developer-platform/pull/1311)) ([7046c23](https://github.com/solana-foundation/solana-developer-platform/commit/7046c23c81978b5fd372240470e82e93cb486463))
+* **web:** give wallet setup step indicator breathing room below the header ([#1310](https://github.com/solana-foundation/solana-developer-platform/pull/1310)) ([49d1090](https://github.com/solana-foundation/solana-developer-platform/commit/49d1090ee59bbbad564360e038ef5083fd2eb85d))
+
 ## [0.62.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.61.0...v0.62.0) (2026-08-14)
 
 ### Features
