@@ -120,7 +120,9 @@ export async function reconcileSponsorshipBudgets(
     // With no live reservations there is nothing the breaker protects; the
     // already-tripped policy stays down and the next tick probes again.
     if (reservations.length > 0) {
-      await tripBreaker(repository, budgetRedis, network, KORA_CONFIG_UNAVAILABLE_BREAKER_REASON);
+      await tripBreaker(repository, budgetRedis, network, KORA_CONFIG_UNAVAILABLE_BREAKER_REASON, {
+        recoverable: true,
+      });
     }
     throw new Error("Kora security configuration is unavailable", { cause: error });
   }
@@ -367,9 +369,10 @@ async function tripBreaker(
   repository: ReconciliationRepository,
   budgetRedis: ReconciliationRedis,
   network: SponsorshipNetwork,
-  reason: string
+  reason: string,
+  options: { recoverable?: boolean } = {}
 ): Promise<void> {
-  const policy = await repository.tripGlobalBreaker(network, reason);
+  const policy = await repository.tripGlobalBreaker(network, reason, options);
   logEvent("error", {
     event: "sdp_api_sponsorship_breaker_tripped",
     network,

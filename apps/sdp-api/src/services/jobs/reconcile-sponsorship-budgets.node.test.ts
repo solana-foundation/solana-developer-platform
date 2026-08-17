@@ -198,7 +198,8 @@ describe("reconcileSponsorshipBudgets", () => {
     await run();
     expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
       "devnet",
-      expect.stringContaining("exceeded reservation")
+      expect.stringContaining("exceeded reservation"),
+      {}
     );
     expect(repository.settleReservation).toHaveBeenCalledWith(
       "reservation_1",
@@ -321,7 +322,8 @@ describe("reconcileSponsorshipBudgets", () => {
       await expect(run()).rejects.toThrow("failed reconciliation");
       expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
         "devnet",
-        expect.stringContaining("configuration changed")
+        expect.stringContaining("configuration changed"),
+        {}
       );
       expect(budgetRedis.syncPolicy).toHaveBeenCalledOnce();
       expect(getTransaction).not.toHaveBeenCalled();
@@ -348,7 +350,8 @@ describe("reconcileSponsorshipBudgets", () => {
     expect(sleep).toHaveBeenCalledTimes(2);
     expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
       "devnet",
-      expect.stringContaining("unavailable")
+      expect.stringContaining("unavailable"),
+      { recoverable: true }
     );
     expect(getTransaction).not.toHaveBeenCalled();
   });
@@ -405,7 +408,8 @@ describe("reconcileSponsorshipBudgets", () => {
     expect(repository.getReservation).toHaveBeenCalledWith("reservation_1");
     expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
       "devnet",
-      expect.stringContaining("lost its durable transition")
+      expect.stringContaining("lost its durable transition"),
+      {}
     );
     expect(budgetRedis.syncPolicy).toHaveBeenCalledOnce();
     expect(logEvent).toHaveBeenCalledWith(

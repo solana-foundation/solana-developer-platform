@@ -194,10 +194,33 @@ describe("SponsorshipBudgetRepository", () => {
   it("blocks auto-resume after an integrity trip lands over a config-unavailability trip", async () => {
     const repository = new SponsorshipBudgetRepository(getDb(env));
 
-    await repository.tripGlobalBreaker("devnet", "config unavailable");
+    await repository.tripGlobalBreaker("devnet", "config unavailable", { recoverable: true });
     const integrityTrip = await repository.tripGlobalBreaker("devnet", "overspend detected");
     expect(integrityTrip?.updateReason).toBe("overspend detected");
 
+    expect(
+      await repository.resumeGlobalBreaker("devnet", "config unavailable", "config readable again")
+    ).toBeNull();
+  });
+
+  it("does not let a recoverable config trip downgrade a stronger disable", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+
+    await repository.setPolicyEnabled({
+      network: "devnet",
+      scopeType: "global",
+      scopeId: null,
+      enabled: false,
+      operator: "operator:oncall",
+      reason: "manual kill",
+    });
+    const configTrip = await repository.tripGlobalBreaker("devnet", "config unavailable", {
+      recoverable: true,
+    });
+    expect(configTrip).toBeNull();
+
+    const policy = await repository.getGlobalPolicy("devnet");
+    expect(policy?.updatedBy).toBe("operator:oncall");
     expect(
       await repository.resumeGlobalBreaker("devnet", "config unavailable", "config readable again")
     ).toBeNull();
