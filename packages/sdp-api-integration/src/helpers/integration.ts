@@ -56,7 +56,7 @@ let cachedCustodyAddress: string | null = null;
 // stablecoin shape; the ScaledUiAmount extension on tokenized-security
 // pushed the mint rent ~0.0004 SOL higher and tipped tests over.
 const INTEGRATION_CUSTODY_FUND_LAMPORTS = 50_000_000;
-const KORA_MAX_TRANSFER_LAMPORTS = 10_000_000n;
+const KORA_MAX_TRANSFER_LAMPORTS = 9_900_000n;
 
 type SolanaRpcResponse<T> =
   | { jsonrpc: "2.0"; id: number; result: T }
