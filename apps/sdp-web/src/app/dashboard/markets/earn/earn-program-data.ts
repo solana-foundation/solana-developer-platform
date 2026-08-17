@@ -10,7 +10,6 @@ import {
   type EarnPortfolioWithdrawal,
   type EarnPortfolioWithdrawalPreview,
   type EarnPortfolioYield,
-  type EarnProviderId,
   type EarnStrategy,
   type ListEarnStrategiesResponse,
 } from "@sdp/types";
@@ -20,11 +19,22 @@ import useSWR from "swr";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { type DashboardFetchResult, dashboardFetch } from "@/lib/dashboard-fetch";
+import {
+  EARN_PROGRAM_CREATE_PROVIDER,
+  EARN_PROGRAM_CREATION_ENABLED,
+  SURFACED_CUSTODIAL_EARN_PROVIDERS,
+} from "./earn-surfacing";
 
 /**
  * Live Earn data access for the dashboard, over the /api/dashboard/markets/earn
- * BFF proxies. Provider is pinned to Ground until a second portfolio-capable
- * provider ships and provider selection becomes a product surface.
+ * BFF proxies.
+ *
+ * **No provider id is spelled in this file.** Which providers are offered, and
+ * which of those hold money through a program, are both derived from the single
+ * declaration in `@sdp/types` (`EARN_PROVIDER_SURFACING`) via `./earn-surfacing`.
+ * Reads are provider-agnostic on purpose — the Positions surface must show every
+ * program the organization holds, including one whose provider is no longer
+ * offered.
  *
  * The API returns a LIST of programs since PRO-1670 — an organization may hold
  * several, each pinned to one vault — and every surface here is program-scoped:
@@ -33,7 +43,18 @@ import { type DashboardFetchResult, dashboardFetch } from "@/lib/dashboard-fetch
  * a stable head. The overview sorts a copy newest-first only at its card-render
  * boundary, after every page has loaded.
  */
-export const EARN_PORTFOLIO_PROVIDER: EarnProviderId = "ground";
+/**
+ * Both constants live in `./earn-surfacing` (no `"use client"`) and are
+ * re-exported here so client callers keep one import site. They must NOT be
+ * declared in this file: a Server Component importing a value from a client
+ * module gets a client-reference proxy rather than the value, which silently
+ * broke the deposit route's server-side guard. See that file's header.
+ */
+export {
+  EARN_PROGRAM_CREATE_PROVIDER,
+  EARN_PROGRAM_CREATION_ENABLED,
+  SURFACED_CUSTODIAL_EARN_PROVIDERS,
+};
 
 /** Mirrors the sdp-api program envelope (route-owned there, thin enough to pin here). */
 export interface EarnProgram {
@@ -127,7 +148,19 @@ export async function fetchEarnProgramsState(): Promise<EarnProgramsState> {
     const { status, body } = await requestJson<{
       data: { programs: EarnProgram[]; total: number };
     }>(
-      `/api/dashboard/markets/earn/programs?provider=${EARN_PORTFOLIO_PROVIDER}&page=${page}&pageSize=${PROGRAMS_PAGE_SIZE}`
+      // UNFILTERED by provider, deliberately. Positions must show every program
+      // the organization holds — a filter pinned to one provider hides money,
+      // which is the worst failure this surface has. It also has to keep working
+      // for a provider that is no longer offered (ADR 0002 exit safety), and a
+      // surfacing-derived filter would do exactly the opposite.
+      //
+      // The cost is narrow: the API can only run its credential check when the
+      // caller names a provider, so "zero programs AND no credentials" now reads
+      // as an empty list rather than `unconfigured`. That is the one case with no
+      // money at stake. Whenever the org DOES hold a program whose provider is
+      // un-credentialed, the API still 503s the whole list (it gates per distinct
+      // provider among the rows), so the notice still appears when it matters.
+      `/api/dashboard/markets/earn/programs?page=${page}&pageSize=${PROGRAMS_PAGE_SIZE}`
     );
     // Checked before the range test: a 503 carries no usable body and would
     // otherwise fall into the throw.
@@ -315,9 +348,16 @@ export interface EarnProgramWriteResult {
 export function createEarnProgram(
   input: EarnProgramWriteInput
 ): Promise<DashboardFetchResult<{ data: EarnProgramWriteResult }>> {
+  if (EARN_PROGRAM_CREATE_PROVIDER === undefined) {
+    // Unreachable through the UI — every create affordance is gated on
+    // EARN_PROGRAM_CREATION_ENABLED — so this is a programming error, not a
+    // state to render. Failing loudly beats POSTing `provider: undefined` and
+    // reading the API's schema 400 as if the input were at fault.
+    return Promise.reject(new Error("No surfaced Earn provider offers programs"));
+  }
   return dashboardFetch("/api/dashboard/markets/earn/programs", {
     method: "POST",
-    body: { provider: EARN_PORTFOLIO_PROVIDER, ...input },
+    body: { provider: EARN_PROGRAM_CREATE_PROVIDER, ...input },
   });
 }
 

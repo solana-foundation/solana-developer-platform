@@ -11,6 +11,8 @@ import {
   type PrivateTransferRequest,
   RAMP_PROVIDERS,
   RAMPS_MEMO_LIMITS,
+  WALLET_OPERATION_FAMILIES,
+  WALLET_OPERATION_TYPES,
 } from "@sdp/types";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
 import { getI64Encoder, getU64Encoder } from "@solana/kit";
@@ -88,9 +90,7 @@ export const walletPolicyEvaluationListQuerySchema = z.object({
       "canceled",
     ])
     .optional(),
-  operationFamily: z
-    .enum(["transfer", "payment", "ramp", "issuance", "raw_sign", "program", "provider_admin"])
-    .optional(),
+  operationFamily: z.enum(WALLET_OPERATION_FAMILIES).optional(),
   reasonCode: z.string().min(1).max(100).optional(),
 });
 
@@ -107,15 +107,10 @@ const policyRuleBaseShape = {
     .optional(),
 };
 
-const walletOperationFamilySchema = z.enum([
-  "transfer",
-  "payment",
-  "ramp",
-  "issuance",
-  "raw_sign",
-  "program",
-  "provider_admin",
-]);
+const walletOperationFamilySchema = z.enum(WALLET_OPERATION_FAMILIES);
+const walletOperationTypeSchema = z.enum(WALLET_OPERATION_TYPES, {
+  error: "operation type must be one of the supported wallet operation types",
+});
 
 export const walletPolicyRuleSchema: z.ZodType<PolicyRule> = z.discriminatedUnion("kind", [
   z.object({
@@ -127,11 +122,8 @@ export const walletPolicyRuleSchema: z.ZodType<PolicyRule> = z.discriminatedUnio
   z.object({
     ...policyRuleBaseShape,
     kind: z.literal("operation_type"),
-    operationType: z.string().min(1, "operationType must not be empty").max(120).optional(),
-    operationTypes: z
-      .array(z.string().min(1, "operationTypes entries must not be empty").max(120))
-      .max(100)
-      .optional(),
+    operationType: walletOperationTypeSchema.optional(),
+    operationTypes: z.array(walletOperationTypeSchema).max(100).optional(),
   }),
   z.object({
     ...policyRuleBaseShape,
@@ -168,7 +160,7 @@ export const walletPolicyRuleSchema: z.ZodType<PolicyRule> = z.discriminatedUnio
     ...policyRuleBaseShape,
     kind: z.literal("approval"),
     families: z.array(walletOperationFamilySchema).max(20).optional(),
-    operationTypes: z.array(z.string().min(1).max(120)).max(100).optional(),
+    operationTypes: z.array(walletOperationTypeSchema).max(100).optional(),
     assets: z.array(z.string().min(1).max(120)).max(100).optional(),
     approvalGroupId: z.string().min(1).max(120).optional(),
   }),

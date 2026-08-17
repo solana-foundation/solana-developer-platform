@@ -1,46 +1,10 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { type ContextVariableMap, Hono } from "hono";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AppError } from "@/lib/errors";
-import { policyGate } from "@/middleware/policy-gate";
-import type { Env } from "@/types/env";
-
-const boundaryMocks = vi.hoisted(() => ({
-  createOrgSigner: vi.fn(),
-  createSponsorship: vi.fn(),
-  enforcePolicy: vi.fn(),
-  resolvePolicyWallet: vi.fn(),
-}));
-
-vi.mock("@/services/solana", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/solana")>()),
-  createOrgSigner: boundaryMocks.createOrgSigner,
-}));
-
-vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/sponsorship.service")>()),
-  createAuthenticatedSponsorshipFeePayment: boundaryMocks.createSponsorship,
-}));
-
-vi.mock("@/services/policy/enforcement.service", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/policy/enforcement.service")>()),
-  enforceWalletOperationPolicy: boundaryMocks.enforcePolicy,
-  resolvePolicyCustodyWallet: boundaryMocks.resolvePolicyWallet,
-}));
-
-import { extractSignerCheckPolicyCandidate } from "@/routes/custody/handlers/signer-check";
+import { describe, expect, it } from "vitest";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../../../..");
 
-type ValueMovingFamily =
-  | "batch"
-  | "recurring"
-  | "issuance"
-  | "payments"
-  | "ramps"
-  | "custody"
-  | "raw_signing";
+type ValueMovingFamily = "batch" | "recurring" | "issuance" | "payments" | "ramps" | "custody";
 
 interface OrderedBoundary {
   file: string;
@@ -213,26 +177,6 @@ const contracts: ValueMovingContract[] = [
       },
     ],
   },
-  {
-    family: "raw_signing",
-    trustedContext: {
-      file: "apps/sdp-api/src/routes/custody/handlers/signer-check.ts",
-      evidence: "const auth = getAuth(c)",
-    },
-    authorization: {
-      file: "apps/sdp-api/src/routes/custody/index.ts",
-      section: '"/signer-check",',
-      before: "policyGate({ extract: extractSignerCheckPolicyCandidate })",
-      after: "signerCheck",
-    },
-    replay: [
-      {
-        mode: "fresh_blockhash_per_attempt",
-        file: "apps/sdp-api/src/routes/custody/handlers/signer-check.ts",
-        evidence: 'getRecentBlockhash(rpc, "confirmed")',
-      },
-    ],
-  },
 ];
 
 const signingSinkInventory: Record<string, string[]> = {
@@ -313,11 +257,6 @@ function sectionSource(boundary: OrderedBoundary): string {
 }
 
 describe("value-moving authorization and replay conformance", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    boundaryMocks.resolvePolicyWallet.mockResolvedValue({ id: "cwlt_authorized" });
-  });
-
   it("covers every required value-moving family", () => {
     expect(contracts.map((contract) => contract.family).sort()).toEqual([
       "batch",
@@ -325,7 +264,6 @@ describe("value-moving authorization and replay conformance", () => {
       "issuance",
       "payments",
       "ramps",
-      "raw_signing",
       "recurring",
     ]);
   });
@@ -382,49 +320,5 @@ describe("value-moving authorization and replay conformance", () => {
     expect(productionSource).not.toMatch(
       /durable.?nonce|nonce.?account|advance.?nonce|setTransactionMessageLifetimeUsingDurableNonce/i
     );
-  });
-
-  it("stops a raw-sign policy denial in the gate before handler, KMS, or Kora access", async () => {
-    boundaryMocks.enforcePolicy.mockRejectedValueOnce(
-      new AppError("FORBIDDEN", "Denied by wallet policy")
-    );
-    const apiKey = {
-      id: "key_conformance",
-      organizationId: "org_conformance",
-      projectId: "prj_conformance",
-      role: "admin",
-      permissions: ["wallets:write"],
-      environment: "sandbox",
-      signingWalletId: "wal_conformance",
-      signingWalletIds: ["wal_conformance"],
-      walletBindings: [{ walletId: "wal_conformance", permissions: ["wallets:write"] }],
-    } satisfies NonNullable<ContextVariableMap["apiKey"]>;
-    const handler = vi.fn(() => new Response(null, { status: 204 }));
-    const testApp = new Hono<{ Bindings: Env }>();
-    testApp.use("*", async (c, next) => {
-      c.set("apiKey", apiKey);
-      c.set("projectId", "prj_conformance");
-      c.set("projectEnvironment", "sandbox");
-      await next();
-    });
-    testApp.post(
-      "/signer-check",
-      policyGate({ extract: extractSignerCheckPolicyCandidate }),
-      handler
-    );
-    testApp.onError((error) => {
-      throw error;
-    });
-
-    await expect(
-      testApp.request("/signer-check", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ walletId: "wal_conformance", memo: "conformance" }),
-      })
-    ).rejects.toMatchObject({ code: "FORBIDDEN" });
-    expect(handler).not.toHaveBeenCalled();
-    expect(boundaryMocks.createOrgSigner).not.toHaveBeenCalled();
-    expect(boundaryMocks.createSponsorship).not.toHaveBeenCalled();
   });
 });

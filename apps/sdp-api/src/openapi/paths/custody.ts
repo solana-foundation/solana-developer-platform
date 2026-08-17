@@ -299,11 +299,12 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Check signer via memo transaction",
     operationId: "checkWalletSigner",
     description:
-      "Submits a memo transaction using the wallet bound to the authenticated API key. This endpoint requires API-key authentication.",
+      "Submits a server-authored memo transaction using the wallet selected by an authenticated API key or dashboard session. The wallet is the only readonly signer, Kora pays the fee, and the request cannot supply memo text.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       body: {
-        required: false,
+        required: true,
         content: jsonContent(signerCheckRequestSchema),
       },
     },

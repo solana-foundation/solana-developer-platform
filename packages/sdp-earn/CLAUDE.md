@@ -163,10 +163,29 @@ Flags control *visibility*; earn access is **override-only per organization**
 the UI reaches the flow and the API refuses with "requires manual activation" —
 that is correct, not a bug. Grant the override in the **local** DB to proceed.
 
+### 5b. The gate BEFORE that one: is the provider even offered?
+
+**Ground is currently un-surfaced, so locally you will see a Kamino-only
+catalogue and no way to create a program — that is the shipped state, not a
+broken setup.** `EARN_PROVIDER_SURFACING`
+(`packages/sdp-types/src/provider-access.ts`) declares which registered
+providers SDP OFFERS; it is a code constant, so there is no env var or DB row to
+flip. Ground's client, credentials and catalogue sync all still run — only the
+public reads and `POST /programs` refuse it.
+
+To work on the Ground flow locally, set `ground: true` there and do not commit
+it. The full rationale, the exit-safety rules it must never break, and the test
+pattern are in `docs/contributing/earn-pluggability-playbook.md` §6 and ADR 0002's
+2026-08-14 addendum.
+
 ### Troubleshooting
 
 | Symptom | Cause |
 |---|---|
+| Sandbox Kamino rows name devnet vaults you do not recognise | correct — they are the real devnet shelf (Allez, Steakhouse, RockawayX, Gauntlet Frontier and friends), read on-chain from `devkRng…`, not the mainnet names |
+| Catalogue shows only Kamino rows; no Ground strategies anywhere | correct — Ground is un-surfaced (`EARN_PROVIDER_SURFACING`, §5b). The rows are still in the DB; only the reads hide them |
+| No "Set up Earn"/"Add strategy"/"Change strategy" buttons; `/deposit` shows a notice | same cause: no surfaced provider can hold a program, so the dashboard is browse-only (§5b) |
+| `POST /v1/earn/programs` → 403 "is not currently offered" | the surfacing gate, not entitlement — no `providerOverrides` lifts it (§5b) |
 | Every request 500s | Redis missing/wrong port (rate limiter) |
 | `/v1/earn/*` → 403 | `MARKETS_ENABLED` or `EARN_ENABLED` unset/false |
 | `/dashboard/markets/earn` → 404 | same flags, web side (segment guards) |
@@ -180,8 +199,9 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
 | `POST /v1/earn/programs` → 400 "needs an idempotency key" | creation is key-REQUIRED since PRO-1670: send exactly one of body `requestId` (UUIDv4) or the `Idempotency-Key` header — never both |
 | Local total ≠ Ground console total | Ground sums the whole shared account; SDP shows only the wallets your org holds (§4b) |
 | Catalogue empty right after boot | sync cron runs on the hour — seed instead of waiting |
-| Kamino rows appear disabled in the dashboard | correct: sandbox rows are `fundable: false` and render `Mainnet only`; even in production, the portfolio wizard keeps catalogue-only providers browse-only until they implement a deposit capability |
-| Kamino APY looks stale | the 5-minute metrics refresh is a separate cron — check it registered (`isEarnEnabled`), not the hourly sync |
+| Kamino rows appear disabled in the dashboard | expected, but NOT for a cluster reason any more — sandbox now catalogues real devnet vaults, so they are `fundable: true`. They stay browse-only because SDP has no deposit path for a `vault_direct` provider (`no-sdp-route`) |
+| Kamino APY is blank in sandbox | correct: the metrics endpoint is mainnet's and 404s for devnet pubkeys, so `listStrategyMetrics` returns `[]` outside production and the row renders "—" rather than a fabricated rate |
+| Kamino APY looks stale in production | the 5-minute metrics refresh is a separate cron — check it registered (`isEarnEnabled`), not the hourly sync |
 | Local API boots on 8787 despite `PORT=…` | the dev wrapper reads **`SDP_API_PORT`**, not `PORT` (scripts/dev-local.mjs) |
 | Need devnet USDC to fund a program | Circle's faucet: <https://faucet.circle.com/> — USDC + Solana Devnet (§4b) |
 
@@ -209,9 +229,23 @@ page it links is fetchable as raw markdown):
   why `keyPairCredentialDefinition`'s parameter excludes `kamino`, and why there
   is no `KAMINO_API_KEY` in env.d.ts, turbo.json or secret-keys.mjs. Do not add
   one "for consistency" — secret-keys.mjs is "every env key the SDP API reads".
-- **Mainnet only.** `/kvaults/*` takes no env parameter and there is no devnet
-  deployment. SDP catalogues the mainnet shelf into BOTH environments so sandbox
-  integrators browse the real vaults; see `hostCluster` below.
+- **TWO clusters, TWO data sources.** Production reads the mainnet REST shelf;
+  every other environment reads DEVNET VAULTS ON-CHAIN (`providers/kamino/devnet.ts`).
+  Kamino runs a separate devnet kvault program — `devkRng…`, not mainnet's
+  `KvauGM…` — carrying 21 vaults, 9 of them in the devnet USDC the Circle faucet
+  dispenses, several mirroring mainnet names (Allez, Steakhouse, RockawayX,
+  Gauntlet Frontier).
+
+  This file previously asserted "mainnet only, there is no devnet deployment" as
+  fact. It was wrong, and it cost a sandbox shelf where every row was permanently
+  `fundable: false`. The trap: `api.kamino.finance` ignores `?env=devnet` and
+  `?cluster=devnet` — both return 200 with a byte-identical mainnet payload — and
+  devnet vault metrics 404. An accepted-and-ignored parameter reads exactly like
+  support. Verify per-cluster program deployment on-chain, not via the API.
+- **No metrics outside production.** The bulk metrics endpoint is mainnet's and
+  404s for devnet pubkeys, so `listStrategyMetrics` returns `[]` there and
+  sandbox rows render no rate. Computing one would mean blending devnet Klend
+  reserve rates (an SDK-sized job) for a number that is ≈0 anyway.
 - **The registry is permissionless**, so `GET /kvaults/vaults` is a census of
   everything ever created — 170 vaults, of which ~90 stablecoin ones are dust or
   literal test vaults (`testfail4`, `vkjm_test`). `KAMINO_MIN_TVL_USD` ($100k)
@@ -240,11 +274,12 @@ environment's own cluster because its deposit is Solana-side there — the row
 carries that cluster's mint, and Ground bridges internally to wherever it hosts
 the source (#1299 removed the old `not_solana_hosted` gate, so off-Solana
 sources are indexed again; the deposit rail is what makes the cluster true, not
-the host chain). Kamino always answers `mainnet-beta`, in sandbox too: its
-K-Vault takes the customer's own deposit at a mainnet address with no bridge in
-front of it.
+the host chain). Kamino answers per data source — `mainnet-beta` from the REST
+shelf in production, `devnet` from the on-chain read elsewhere — and the second
+is MEASURED (genesis hash) before a single vault is returned, not inferred from
+the environment.
 
-A sandbox Kamino row therefore names a live mainnet vault and a mainnet mint.
+A sandbox Kamino row therefore names a live DEVNET vault and a devnet mint.
 Everything about it is true and none of it is fundable from devnet, so ONE
 predicate decides — `isClusterFundableInEnvironment` (src/support.ts) — and
 three gates enforce its answer, none of which may re-derive the comparison:
@@ -405,6 +440,26 @@ rates come from the same paged endpoint the catalogue uses.
   NOTE: `deriveCurator` and `GROUND_CURATOR_HOUSES` still carry EVM vocabulary
   (e.g. `morpho`) on purpose — they parse Ground's RAW 18-source response so the
   inventory can attribute what we DROP. Do not "clean" those.
+
+## Registered is not the same as offered
+
+`EARN_PROVIDERS` is what this deployment can talk to; `EARN_PROVIDER_SURFACING`
+(both in `packages/sdp-types/src/provider-access.ts`) is what SDP sells today.
+An un-surfaced provider keeps everything in this package — client, credentials,
+catalogue sync, metrics refresh — and disappears from `GET /strategies` and
+`POST /programs` only.
+
+**Nothing in this package reads it, and nothing should.** Surfacing is a product
+policy enforced at the API's read/write boundary, exactly like
+`HIDDEN_STRATEGY_TERMS`; a client here gates on credentials alone, the same rule
+that keeps feature flags out of this package. Keeping the sync provider-blind is
+what makes the DB a truthful inventory and re-surfacing a deploy rather than an
+hour's wait.
+
+The invariant it must never break is the one at the top of "Hard invariants":
+surfacing gates the way IN (a NEW program) and nothing else, so it can never
+trap funds. §6 of `docs/contributing/earn-pluggability-playbook.md` is the
+checklist.
 
 ## Cross-package coupling
 
