@@ -4,11 +4,15 @@ import {
   type ApiKeyRole,
   getPermissionsForApiKeyRole,
   type PolicyDefaultAction,
+  WALLET_OPERATION_FAMILIES,
+  WALLET_OPERATION_TYPES,
   type WalletOperationFamily,
+  type WalletOperationType,
 } from "@sdp/types";
 import {
   AlertTriangle,
   Check,
+  ChevronDown,
   CircleCheck,
   FileText,
   KeyRound,
@@ -25,9 +29,16 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DateTimePicker } from "@/components/ui/date-picker";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
+import { triggerSizeClassName } from "@/components/ui/select";
 import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -53,15 +64,7 @@ import type { ApiKeyAuthoringWallet, WalletControlStatus } from "./api-key-autho
 const API_KEYS_PATH = "/dashboard/api-keys";
 
 const ROLE_OPTIONS: ApiKeyRole[] = ["api_admin", "api_developer", "api_readonly"];
-const FAMILY_OPTIONS: WalletOperationFamily[] = [
-  "transfer",
-  "payment",
-  "ramp",
-  "issuance",
-  "raw_sign",
-  "program",
-  "provider_admin",
-];
+const FAMILY_OPTIONS = WALLET_OPERATION_FAMILIES;
 const DEFAULT_ACTIONS: PolicyDefaultAction[] = ["allow", "deny", "approval_required"];
 
 interface ApiKeyAuthoringWorkspaceProps {
@@ -113,15 +116,12 @@ function roleLabel(role: ApiKeyRole, t: ReturnType<typeof useTranslations>): str
 }
 
 function familyLabel(family: WalletOperationFamily, t: ReturnType<typeof useTranslations>): string {
-  const labels: Record<WalletOperationFamily, string> = {
+  const labels = {
     transfer: t("DashboardCustody.apiKeyFamilyTransfer"),
     payment: t("DashboardCustody.apiKeyFamilyPayment"),
     ramp: t("DashboardCustody.apiKeyFamilyRamp"),
     issuance: t("DashboardCustody.apiKeyFamilyIssuance"),
-    raw_sign: t("DashboardCustody.apiKeyFamilyRawSign"),
-    program: t("DashboardCustody.apiKeyFamilyProgram"),
-    provider_admin: t("DashboardCustody.apiKeyFamilyProviderAdmin"),
-  };
+  } satisfies Record<WalletOperationFamily, string>;
   return labels[family];
 }
 
@@ -466,6 +466,14 @@ function RestrictionEditor({
         : [...draft.operationFamilies, family],
     });
   };
+  const toggleOperationType = (operationType: WalletOperationType) => {
+    update({
+      restrictionsEdited: true,
+      operationTypes: draft.operationTypes.includes(operationType)
+        ? draft.operationTypes.filter((item) => item !== operationType)
+        : [...draft.operationTypes, operationType],
+    });
+  };
 
   return (
     <div className="space-y-4">
@@ -529,17 +537,41 @@ function RestrictionEditor({
           </div>
         </RestrictionGroup>
         <RestrictionGroup title={t("DashboardCustody.apiKeyAdditionalOperationTypes")}>
-          <Label htmlFor="api-key-operation-types" className="sr-only">
-            {t("DashboardCustody.apiKeyAdditionalOperationTypes")}
-          </Label>
-          <Input
-            id="api-key-operation-types"
-            value={draft.operationTypes}
-            onChange={(event) =>
-              update({ operationTypes: event.currentTarget.value, restrictionsEdited: true })
-            }
-            placeholder={t("DashboardCustody.apiKeyOperationTypesPlaceholder")}
-          />
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className={cn(
+                "flex w-full items-center gap-2 bg-fill-subtle text-left",
+                triggerSizeClassName("lg")
+              )}
+            >
+              {draft.operationTypes.length > 0 ? (
+                <span className="min-w-0 flex-1 truncate font-mono text-xs text-primary">
+                  {draft.operationTypes.join(", ")}
+                </span>
+              ) : (
+                <span className="min-w-0 flex-1 truncate text-sm text-[var(--input-placeholder-color)]">
+                  {t("DashboardCustody.apiKeyOperationTypesTrigger")}
+                </span>
+              )}
+              <ChevronDown className="size-4 shrink-0 text-secondary" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              className="min-w-[var(--radix-dropdown-menu-trigger-width)]"
+            >
+              {WALLET_OPERATION_TYPES.map((operationType) => (
+                <DropdownMenuCheckboxItem
+                  key={operationType}
+                  checked={draft.operationTypes.includes(operationType)}
+                  onCheckedChange={() => toggleOperationType(operationType)}
+                  onSelect={(event) => event.preventDefault()}
+                  className="font-mono text-xs"
+                >
+                  {operationType}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </RestrictionGroup>
         <RestrictionGroup title={t("DashboardCustody.apiKeyAdditionalAssets")}>
           <Label htmlFor="api-key-assets" className="sr-only">

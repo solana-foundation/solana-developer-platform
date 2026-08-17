@@ -1,5 +1,5 @@
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
-import type { WalletOperationActor } from "@sdp/types";
+import type { WalletOperationActor, WalletOperationType } from "@sdp/types";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
@@ -7,10 +7,10 @@ import { enforceWalletOperationPolicy } from "@/services/policy/enforcement.serv
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 
-export type RecurringPaymentOperationType =
-  | "recurring_payment_create"
-  | "recurring_payment_update"
-  | "recurring_payment_collection";
+export type RecurringPaymentOperationType = Extract<
+  WalletOperationType,
+  "recurring_payment_create" | "recurring_payment_update" | "recurring_payment_collection"
+>;
 
 interface PendingCollectionApprovalRow {
   wallet_operation_id: string;
