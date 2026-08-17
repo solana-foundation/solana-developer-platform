@@ -174,13 +174,27 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
     input: EarnVaultPositionInput
   ): Promise<EarnVaultPositionSnapshot[]> {
     const runtime = this.runtime(ctx);
+    const owner: Address = address(input.owner);
+    const readAllKnownVaults = input.providerReferences.length === 0;
+    const providerReferences = readAllKnownVaults
+      ? (
+          await this.listStrategies({
+            ...ctx,
+            // Catalogue discovery reads this process-level key on devnet.
+            // Use the same per-cluster endpoint as the position reads so an
+            // empty request cannot discover on one chain and hydrate another.
+            env: { ...ctx.env, SOLANA_RPC_URL: runtime.rpcUrl },
+          })
+        ).map((strategy) => strategy.providerReference)
+      : input.providerReferences;
+    if (providerReferences.length === 0) return [];
+
     // One shared slot makes the page internally consistent. The client carries
     // the same transport deadline as every nested Kamino SDK read below.
     const slot = await createKaminoRpc(runtime.rpcUrl).getSlot().send();
-    const owner: Address = address(input.owner);
 
     const results = await mapSettledWithConcurrency(
-      input.providerReferences,
+      providerReferences,
       KAMINO_POSITION_READ_CONCURRENCY,
       (reference) => readKaminoPosition(runtime, { vault: address(reference), owner, slot })
     );
@@ -188,6 +202,10 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
     return results.flatMap((result) => {
       if (result.status !== "fulfilled") return [];
       const position = result.value;
+      // Exact reads serialize zero canonically as "0". A full-portfolio read
+      // reports holdings, while an explicitly requested vault may still return
+      // a truthful zero balance.
+      if (readAllKnownVaults && position.shares === "0") return [];
       return [
         {
           providerReference: String(position.vault),

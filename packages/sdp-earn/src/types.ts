@@ -440,7 +440,7 @@ export interface EarnVaultWithdrawInput {
 
 export interface EarnVaultPositionInput {
   owner: string;
-  /** Vault addresses to read. Empty means "every vault this provider knows". */
+  /** Vault addresses to read. Empty means every strategy currently listed by the provider. */
   providerReferences: readonly string[];
 }
 
