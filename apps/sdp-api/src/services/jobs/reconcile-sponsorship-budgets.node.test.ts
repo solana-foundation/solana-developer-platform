@@ -491,6 +491,7 @@ describe("reconcileSponsorshipBudgets", () => {
 
     expect(repository.resumeGlobalBreaker).toHaveBeenCalledWith(
       "devnet",
+      KORA_CONFIG_UNAVAILABLE_BREAKER_REASON,
       expect.stringContaining("readable again")
     );
     expect(budgetRedis.syncPolicy).toHaveBeenCalledWith(resumedPolicy);

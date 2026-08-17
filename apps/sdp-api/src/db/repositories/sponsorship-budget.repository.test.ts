@@ -110,6 +110,57 @@ describe("SponsorshipBudgetRepository", () => {
     expect(noop).toBeNull();
   });
 
+  it("resumes the breaker only when the trip provenance still matches", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+
+    const tripped = await repository.tripGlobalBreaker("devnet", "config unavailable");
+    expect(tripped?.enabled).toBe(false);
+
+    const resumed = await repository.resumeGlobalBreaker(
+      "devnet",
+      "config unavailable",
+      "config readable again"
+    );
+    expect(resumed?.enabled).toBe(true);
+    expect(resumed?.version).toBe((tripped?.version ?? 0) + 1);
+
+    const alreadyEnabled = await repository.resumeGlobalBreaker(
+      "devnet",
+      "config unavailable",
+      "config readable again"
+    );
+    expect(alreadyEnabled).toBeNull();
+  });
+
+  it("does not resume a policy disabled by an operator or for another reason", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+
+    await repository.setPolicyEnabled({
+      network: "devnet",
+      scopeType: "global",
+      scopeId: null,
+      enabled: false,
+      operator: "operator:oncall",
+      reason: "manual kill",
+    });
+    expect(
+      await repository.resumeGlobalBreaker("devnet", "config unavailable", "config readable again")
+    ).toBeNull();
+
+    await repository.setPolicyEnabled({
+      network: "devnet",
+      scopeType: "global",
+      scopeId: null,
+      enabled: true,
+      operator: "operator:oncall",
+      reason: "restore",
+    });
+    await repository.tripGlobalBreaker("devnet", "overspend detected");
+    expect(
+      await repository.resumeGlobalBreaker("devnet", "config unavailable", "config readable again")
+    ).toBeNull();
+  });
+
   it("writes an audited revision for each policy change and prevents mutation", async () => {
     const repository = new SponsorshipBudgetRepository(getDb(env));
     const changed = await repository.upsertPolicy({

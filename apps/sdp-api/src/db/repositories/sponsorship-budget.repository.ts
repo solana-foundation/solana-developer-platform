@@ -363,15 +363,30 @@ export class SponsorshipBudgetRepository {
 
   async resumeGlobalBreaker(
     network: SponsorshipNetwork,
+    expectedTripReason: string,
     reason: string
   ): Promise<SponsorshipBudgetPolicy | null> {
-    return this.setPolicyEnabled({
-      network,
-      scopeType: "global",
-      scopeId: null,
-      enabled: true,
-      operator: SPONSORSHIP_BREAKER_OPERATOR,
-      reason,
+    return this.db.transaction(async (tx) => {
+      // Compare-and-set on the trip provenance: an operator kill or integrity
+      // trip that lands after the recovery decision changes updated_by or
+      // update_reason and must not be overwritten by a stale resume.
+      const row = await tx.queryOne<PolicyRow>(
+        `UPDATE sponsorship_budget_policies
+           SET enabled = TRUE, version = version + 1, updated_by = ?, update_reason = ?, updated_at = sdp_iso_now()
+         WHERE network = ? AND scope_type = 'global' AND scope_id IS NULL
+           AND enabled = FALSE AND updated_by = ? AND update_reason = ?
+         RETURNING *`,
+        [
+          SPONSORSHIP_BREAKER_OPERATOR,
+          reason,
+          network,
+          SPONSORSHIP_BREAKER_OPERATOR,
+          expectedTripReason,
+        ]
+      );
+      if (!row) return null;
+      await this.insertRevision(tx, row, SPONSORSHIP_BREAKER_OPERATOR, reason);
+      return mapPolicy(row);
     });
   }
 

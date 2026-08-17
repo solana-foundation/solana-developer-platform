@@ -126,14 +126,20 @@ export async function reconcileSponsorshipBudgets(
   }
 
   if (recoverableTrip) {
-    const resumed = await repository.resumeGlobalBreaker(network, BREAKER_RECOVERY_REASON);
+    const resumed = await repository.resumeGlobalBreaker(
+      network,
+      KORA_CONFIG_UNAVAILABLE_BREAKER_REASON,
+      BREAKER_RECOVERY_REASON
+    );
     if (resumed) {
-      await budgetRedis.syncPolicy(resumed);
       logEvent("warn", {
         event: "sdp_api_sponsorship_breaker_recovered",
         network,
         source: "reconciliation",
       });
+      // A failed sync is repaired by the next admission: reserve() re-syncs
+      // every policy from Postgres before touching the Lua counters.
+      await budgetRedis.syncPolicy(resumed);
     }
   }
 
