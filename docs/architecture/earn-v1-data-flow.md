@@ -87,10 +87,13 @@ PRO-1634 owns whatever returns.
 > DB read, and freshness comes from cadence rather than from blending a live
 > overlay onto stored rows.
 >
-> **Catalogued ≠ fundable (2026-08-13).** With Kamino, the catalogue lists
-> instruments that do not exist on every cluster: its K-Vaults are mainnet-only
-> and are catalogued into BOTH environments so sandbox integrators browse the
-> real shelf. `host_cluster` states where the instrument lives, and the derived
+> **Catalogued ≠ fundable (2026-08-13; Kamino premise corrected 2026-08-14).**
+> The catalogue may list instruments that do not exist on every cluster.
+> Kamino was the original example — believed mainnet-only and catalogued into
+> both environments — but it has a devnet deployment, and non-production now
+> catalogues devnet vaults while the sync refuses to STORE a `mainnet-beta`
+> instrument outside production. `host_cluster` states where the instrument
+> lives, and the derived
 > `fundable` answers the caller's actual question. Three gates read the one
 > predicate — `assertKnownYieldSources` before any provider mutation, the wire
 > field, and the dashboard's strategy filter.

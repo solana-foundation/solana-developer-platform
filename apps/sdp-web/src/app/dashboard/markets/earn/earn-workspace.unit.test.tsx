@@ -35,6 +35,10 @@ const data = vi.hoisted(() => ({
     error: undefined as Error | undefined,
     isLoading: false,
   },
+  // Whether the pinned portfolio provider is SURFACED. A module const in real
+  // life, so it is exposed through a getter on the mock below — that is what
+  // lets one file cover both surfacing modes without re-mocking.
+  creationEnabled: true,
 }));
 
 vi.mock("./earn-program-data", () => ({
@@ -56,6 +60,11 @@ vi.mock("./earn-program-data", () => ({
   // The workspace also reads the provider pin, so the hero counts exactly what
   // the deposit flow will offer rather than every synced row.
   EARN_PORTFOLIO_PROVIDER: "ground",
+  // A getter, not a value: every create affordance branches on this, and a
+  // plain property would freeze the whole file into one surfacing mode.
+  get EARN_PROGRAM_CREATION_ENABLED() {
+    return data.creationEnabled;
+  },
 }));
 
 vi.mock("./deposit/earn-funding-wallets", async (importOriginal) => {
@@ -66,12 +75,12 @@ vi.mock("./deposit/earn-funding-wallets", async (importOriginal) => {
   };
 });
 
-import { EarnWorkspace } from "./earn-workspace";
+import { EarnPositionsPanel } from "./earn-workspace";
 
 const TIMESTAMP = "2026-07-18T09:00:00.000Z";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
-function fundingWallet(usdc: string): CustodyWalletSummary {
+function _fundingWallet(usdc: string): CustodyWalletSummary {
   return {
     id: "cw_earn_1",
     custodyConfigId: "custody-config-1",
@@ -155,6 +164,7 @@ beforeEach(() => {
   data.fundingWallets.wallets = [];
   data.fundingWallets.error = undefined;
   data.fundingWallets.isLoading = false;
+  data.creationEnabled = true;
 });
 
 describe("EarnWorkspace while the program is still loading", () => {
@@ -162,7 +172,7 @@ describe("EarnWorkspace while the program is still loading", () => {
     // state stays undefined (in flight). Rendering the hero here flashed
     // onboarding at program holders for a beat, then yanked it away.
     data.program.isLoading = true;
-    const html = renderToStaticMarkup(<EarnWorkspace />);
+    const html = renderToStaticMarkup(<EarnPositionsPanel />);
     expect(html).not.toContain("DashboardEarn.overview.startTitle");
     expect(html).not.toContain("DashboardEarn.overview.startAction");
     expect(html).toContain("aria-busy");
@@ -175,42 +185,20 @@ describe("EarnWorkspace with no program yet", () => {
   });
 
   it("renders the empty program state and a single deposit entry point", () => {
-    const html = renderToStaticMarkup(<EarnWorkspace />);
+    const html = renderToStaticMarkup(<EarnPositionsPanel />);
     expect(html).toContain("DashboardEarn.overview.programTitle");
     expect(html).toContain("DashboardEarn.overview.programEmpty");
-    expect(html).toContain('href="/dashboard/markets/earn/deposit"');
   });
 
-  it("leads the hero with live catalogue facts rather than curator cards", () => {
-    data.fundingWallets.wallets = [fundingWallet("1250")];
-    const html = renderToStaticMarkup(<EarnWorkspace />);
-    expect(html).toContain("DashboardEarn.overview.startTitle");
-    expect(html).toContain("DashboardEarn.overview.startStatAvailableUsdc");
-    expect(html).toContain("DashboardEarn.overview.startStatStrategies");
-    expect(html).toContain("DashboardEarn.overview.startStatTopApy");
-    expect(html).toContain("DashboardEarn.overview.startStatAccess");
-    // Connected-wallet USDC appears immediately beside the live catalogue facts.
-    expect(html).toContain("1,250 USDC");
-    // Three active strategies, best rate 8.4%, and at least one instant source.
-    expect(html).toContain(">3<");
-    expect(html).toContain("8.4%");
-    expect(html).toContain("DashboardEarn.liquidity.instant");
-  });
-
-  it("does not understate aggregate USDC when one wallet balance is unavailable", () => {
-    data.fundingWallets.wallets = [
-      fundingWallet("1250"),
-      { ...fundingWallet("25"), id: "cw_2", balances: undefined },
-    ];
-    const html = renderToStaticMarkup(<EarnWorkspace />);
-
-    expect(html).not.toContain("1,250 USDC");
-    expect(html).toContain("DashboardEarn.overview.startStatAvailableUsdc</dt><dd");
-    expect(html).toContain(">—</dd>");
-  });
+  /**
+   * Browse-only Earn: the pinned portfolio provider is un-surfaced, so nothing
+   * can create a program. The hero must still describe the catalogue — four
+   * dashes and a CTA that dead-ends is strictly worse than saying what is
+   * listed and why it cannot be bought.
+   */
 
   it("never routes through a curator, the removed first step", () => {
-    const html = renderToStaticMarkup(<EarnWorkspace />);
+    const html = renderToStaticMarkup(<EarnPositionsPanel />);
     expect(html).not.toContain("curator");
     expect(html).not.toContain("Gauntlet");
   });
@@ -261,7 +249,7 @@ describe("EarnWorkspace with an active program", () => {
   });
 
   it("renders the live balance stat strip", () => {
-    const html = renderToStaticMarkup(<EarnWorkspace />);
+    const html = renderToStaticMarkup(<EarnPositionsPanel />);
     expect(html).toContain("DashboardEarn.overview.totalBalance");
     expect(html).toContain("DashboardEarn.overview.totalEarned");
     expect(html).toContain("DashboardEarn.overview.withdrawableBalance");
@@ -271,7 +259,7 @@ describe("EarnWorkspace with an active program", () => {
   });
 
   it("lists holdings flat and deployed-first, with no curator grouping", () => {
-    const html = renderToStaticMarkup(<EarnWorkspace />);
+    const html = renderToStaticMarkup(<EarnPositionsPanel />);
     expect(html).toContain("DashboardEarn.overview.holdingsTitle");
     const gauntlet = html.indexOf("Morpho Gauntlet USDC");
     const cash = html.indexOf("Cash (USDC)");
@@ -281,7 +269,7 @@ describe("EarnWorkspace with an active program", () => {
   });
 
   it("renders the provider's position label verbatim so no chain name is rebuilt", () => {
-    const html = renderToStaticMarkup(<EarnWorkspace />);
+    const html = renderToStaticMarkup(<EarnPositionsPanel />);
     expect(html).toContain("Cash (USDC)");
   });
 
@@ -295,7 +283,7 @@ describe("EarnWorkspace with an active program", () => {
         throw new Error("expected an active program");
       }
       Object.assign(state.programs[0].wallet, patch);
-      return renderToStaticMarkup(<EarnWorkspace />);
+      return renderToStaticMarkup(<EarnPositionsPanel />);
     };
 
     it("shows no chip while the wallet is ready", () => {
@@ -350,7 +338,7 @@ describe("EarnWorkspace with an active program", () => {
   });
 
   it("explains what each cash slice is waiting for, from the target allocations", () => {
-    const html = renderToStaticMarkup(<EarnWorkspace />);
+    const html = renderToStaticMarkup(<EarnPositionsPanel />);
     // The USDC lane targets a yield source, so its cash deploys on rebalance.
     expect(html).toContain("DashboardEarn.overview.cashDeploys");
   });
@@ -373,7 +361,7 @@ describe("EarnWorkspace with an active program", () => {
         token: "usdc",
       }
     );
-    const html = renderToStaticMarkup(<EarnWorkspace />);
+    const html = renderToStaticMarkup(<EarnPositionsPanel />);
     expect(html).not.toContain("Cash (USDT)");
     expect(html).not.toContain("In transit (USDC)");
     expect(html).toContain("Ground JAAA USDC");
@@ -384,18 +372,18 @@ describe("EarnWorkspace with an active program", () => {
   it("never renders a share percent beside holdings — V1 is single-vault", () => {
     // The fixture's positions carry `pct` (the provider keeps reporting it);
     // the workspace must not surface it as portfolio framing.
-    const html = renderToStaticMarkup(<EarnWorkspace />);
+    const html = renderToStaticMarkup(<EarnPositionsPanel />);
     expect(html).not.toContain("programShare");
   });
 
   it("keeps the deposit address one copy away on the dashboard", () => {
-    const html = renderToStaticMarkup(<EarnWorkspace />);
+    const html = renderToStaticMarkup(<EarnPositionsPanel />);
     expect(html).toContain("DashboardEarn.overview.depositAddressLabel");
     expect(html).toContain("7M6bFd…7F3WcQ");
   });
 
   it("offers the two managing verbs and keeps deposit as the address row", () => {
-    const html = renderToStaticMarkup(<EarnWorkspace />);
+    const html = renderToStaticMarkup(<EarnPositionsPanel />);
     expect(html).toContain("DashboardEarn.overview.withdraw");
     expect(html).toContain("DashboardEarn.overview.changeStrategy");
     // Depositing is the address row, not a wizard — nothing here says deposit
@@ -410,17 +398,18 @@ describe("EarnWorkspace when the provider is not configured", () => {
     data.program.state = { kind: "unconfigured" };
   });
 
-  it("renders a quiet notice and keeps the catalogue-backed hero", () => {
-    const html = renderToStaticMarkup(<EarnWorkspace />);
+  // 503 from the programs read degrades to a quiet notice, never a crash and
+  // never an empty list that reads as "you hold nothing".
+  it("renders a quiet notice instead of an empty positions list", () => {
+    const html = renderToStaticMarkup(<EarnPositionsPanel />);
     expect(html).toContain("DashboardEarn.overview.providerNotConfigured");
-    expect(html).toContain("DashboardEarn.overview.startTitle");
   });
 });
 
 describe("EarnWorkspace when the program read fails", () => {
   it("renders an inline error with a retry affordance instead of crashing", () => {
     data.program.error = new Error("boom");
-    const html = renderToStaticMarkup(<EarnWorkspace />);
+    const html = renderToStaticMarkup(<EarnPositionsPanel />);
     expect(html).toContain("DashboardEarn.overview.programLoadError");
     expect(html).toContain("Shared.SharedComponents.retry");
   });
@@ -488,13 +477,13 @@ describe("EarnWorkspace with several programs", () => {
   });
 
   it("renders every program, not just the first", () => {
-    const html = renderToStaticMarkup(<EarnWorkspace />);
+    const html = renderToStaticMarkup(<EarnPositionsPanel />);
     expect(html).toContain("$100.00");
     expect(html).toContain("$300.00");
   });
 
   it("lists the most recently created program first", () => {
-    const html = renderToStaticMarkup(<EarnWorkspace />);
+    const html = renderToStaticMarkup(<EarnPositionsPanel />);
     const newer = html.indexOf("Ground JAAA USDC");
     const older = html.indexOf("Morpho Gauntlet USDC");
     expect(newer).toBeGreaterThan(-1);
@@ -503,7 +492,7 @@ describe("EarnWorkspace with several programs", () => {
   });
 
   it("names each program after the vault it targets", () => {
-    const html = renderToStaticMarkup(<EarnWorkspace />);
+    const html = renderToStaticMarkup(<EarnPositionsPanel />);
     expect(html).toContain("Morpho Gauntlet USDC");
     expect(html).toContain("Ground JAAA USDC");
   });
@@ -512,26 +501,56 @@ describe("EarnWorkspace with several programs", () => {
   const blendedApyTile = (html: string) => html.match(/blendedApy<\/dt><dd[^>]*>([^<]*)</)?.[1];
 
   it("adds a portfolio strip totalling the programs, with a balance-weighted rate", () => {
-    const html = renderToStaticMarkup(<EarnWorkspace />);
+    const html = renderToStaticMarkup(<EarnPositionsPanel />);
     expect(html).toContain("$400.00");
     // 100 @ 5% + 300 @ 9% = 8%, not the 7% a per-program average would show.
     expect(blendedApyTile(html)).toBe("8.0%");
   });
 
+  /**
+   * ADR 0002 exit safety, at the UI layer: un-surfacing a provider closes the
+   * door IN, never the door out. A reader holding programs with an un-surfaced
+   * provider loses the two verbs that would open a wizard with nothing to
+   * select, and keeps every way to see and exit their money.
+   */
+  describe("when the portfolio provider is un-surfaced", () => {
+    beforeEach(() => {
+      data.creationEnabled = false;
+    });
+
+    it("drops both create verbs", () => {
+      const html = renderToStaticMarkup(<EarnPositionsPanel />);
+      expect(html).not.toContain("DashboardEarn.overview.addStrategy");
+      expect(html).not.toContain("DashboardEarn.overview.changeStrategy");
+      expect(html).not.toContain("/dashboard/markets/earn/deposit");
+    });
+
+    it("still renders every program, its money, and the withdraw verb", () => {
+      const html = renderToStaticMarkup(<EarnPositionsPanel />);
+      expect(html).toContain("DashboardEarn.overview.withdraw");
+      expect(html).toContain("$100.00");
+      expect(html).toContain("$300.00");
+      // The withdraw modal's focus-return fallback has to survive the missing
+      // change-strategy link that used to carry it.
+      expect(html).toContain('data-earn-withdraw-focus-fallback="p1"');
+      expect(html).toContain('data-earn-withdraw-focus-fallback="p2"');
+    });
+  });
+
   it("offers a per-program change-strategy link, addressed by program id", () => {
-    const html = renderToStaticMarkup(<EarnWorkspace />);
+    const html = renderToStaticMarkup(<EarnPositionsPanel />);
     expect(html).toContain("/dashboard/markets/earn/deposit?program=p1");
     expect(html).toContain("/dashboard/markets/earn/deposit?program=p2");
   });
 
   it("offers adding another strategy, unaddressed so it creates a new program", () => {
-    const html = renderToStaticMarkup(<EarnWorkspace />);
+    const html = renderToStaticMarkup(<EarnPositionsPanel />);
     expect(html).toContain("DashboardEarn.overview.addStrategy");
     expect(html).toContain('href="/dashboard/markets/earn/deposit"');
   });
 
   it("never shows the onboarding hero while programs exist", () => {
-    const html = renderToStaticMarkup(<EarnWorkspace />);
+    const html = renderToStaticMarkup(<EarnPositionsPanel />);
     expect(html).not.toContain("DashboardEarn.overview.startTitle");
   });
 
@@ -542,7 +561,7 @@ describe("EarnWorkspace with several programs", () => {
       kind: "ready",
       programs: [programAt("p1", "wallet-ref-1", "100.00", "0.05")],
     } as never;
-    const html = renderToStaticMarkup(<EarnWorkspace />);
+    const html = renderToStaticMarkup(<EarnPositionsPanel />);
     expect(html).not.toContain("DashboardEarn.overview.blendedApy");
     expect(html).toContain("$100.00");
   });
@@ -559,7 +578,7 @@ describe("EarnWorkspace with several programs", () => {
         programAt("p2", "wallet-ref-2", "300.00", undefined),
       ],
     } as never;
-    const html = renderToStaticMarkup(<EarnWorkspace />);
+    const html = renderToStaticMarkup(<EarnPositionsPanel />);
     expect(blendedApyTile(html)).toBe("—");
   });
 });

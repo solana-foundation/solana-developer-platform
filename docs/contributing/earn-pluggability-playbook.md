@@ -167,6 +167,7 @@ most of them — see the keyless variant under the table.
 | Step | File | What you add (Ground precedent) |
 |---|---|---|
 | 1. Declare the id | `packages/sdp-types/src/provider-access.ts` | Append to `EARN_PROVIDERS`. Earn entitlements are override-only (`createBooleanRecord(EARN_PROVIDERS, [])`): every org gets the provider disabled until an explicit `providerOverrides.earn.<id>` — there is no tier-default list to join. |
+| 1b. Decide if it is OFFERED | `packages/sdp-types/src/provider-access.ts` | Add the id to `EARN_PROVIDER_SURFACING` — it is exhaustive over `EarnProviderId`, so step 1 does not compile without it. `true` = customers see its strategies and may open programs with it; `false` = fully integrated but not offered (§6). Start a work-in-progress integration at `false`. |
 | 2. Client class | `packages/sdp-earn/src/providers/<id>/client.ts` | Subclass `StubEarnClient` (`packages/sdp-earn/src/providers/stub.ts`) carrying only the `provider` literal and `declaredSupport`. Every operation throws `NOT_IMPLEMENTED` until you override it — the integration lands method-by-method, with `providerFetchJson` (`packages/sdp-earn/src/fetch.ts`) as the HTTP core. |
 | 3. Registry | `packages/sdp-earn/src/index.ts` | `<id>: new <Id>EarnClient()` in `EARN_PROVIDER_CLIENTS` + the class re-export. |
 | 4. Subpath export | `packages/sdp-earn/package.json` | A `"./providers/<id>/client"` exports entry. |
@@ -199,12 +200,24 @@ simply never reaches the entitlement gate, which only guards money-in.
 ### If the provider is not deployed on every cluster
 
 State it on the snapshot. `ProviderStrategySnapshot.hostCluster` is the cluster
-the INSTRUMENT lives on, and it is not implied by the environment — Kamino is
-mainnet-only and is catalogued into both environments so sandbox integrators can
-browse the real shelf. Those rows are true and un-fundable, and one predicate,
-`isClusterFundableInEnvironment`, enforces that everywhere (see ADR 0002's
-2026-08-13 addendum). Do not reach for `status` — it is the operator's stop
-switch and the repository refuses to overwrite it.
+the INSTRUMENT lives on, and it is not implied by the environment. One predicate,
+`isClusterFundableInEnvironment`, enforces that everywhere. Do not reach for
+`status` — it is the operator's stop switch and the repository refuses to
+overwrite it.
+
+**But first: check whether the provider really has no devnet deployment.** Kamino
+was catalogued mainnet-into-both-environments for exactly one reason — we
+believed it had none. It does (2026-08-14 addendum), and the cost of that belief
+was a sandbox shelf where every row was permanently `fundable: false`. A hosted
+API that ignores an `env` parameter is not evidence: Kamino's returns 200 with a
+byte-identical mainnet payload. Check the chain for a per-cluster program before
+you conclude a provider is single-cluster.
+
+**And non-production may never STORE a mainnet instrument.** The catalogue sync
+refuses any snapshot whose `hostCluster` is `mainnet-beta` outside production,
+provider-neutrally, at the single writer. If your provider genuinely is
+mainnet-only, it contributes nothing to a sandbox catalogue — that is the
+intended outcome, not a gap to work around.
 
 ### A new catalogue column is EXPAND-ONLY in the release that adds it
 
@@ -408,3 +421,87 @@ What that means in practice:
   gain Earn operations (e.g. `"earn_deposit" | "earn_withdrawal"`) when
   execution lands, so policy evaluation and audit can discriminate Earn
   signing from transfers instead of mislabeling it.
+
+## 6. Un-surface a provider — stop offering it without deleting it
+
+"We are not selling this provider right now" is a different question from every
+switch in ADR 0002's enable/disable list, and answering it by deleting the
+integration, pulling its credentials, or pausing its strategies one by one all
+lose information you want back later.
+
+**The whole change is one boolean.** In
+`packages/sdp-types/src/provider-access.ts`:
+
+```ts
+export const EARN_PROVIDER_SURFACING = {
+  …
+  ground: false,   // ← un-surfaced
+  kamino: true,
+} as const satisfies Record<EarnProviderId, boolean>;
+```
+
+Nothing else. Three consumers read it and none of them names a provider:
+
+| Surface | Effect |
+|---|---|
+| `GET /v1/earn/strategies` (list + detail) | Rows hidden. The list filters in SQL (`providers: SURFACED_EARN_PROVIDERS`) so `total` and the page window describe what the caller can see; the detail route 404s via `isHiddenStrategy`. |
+| `POST /v1/earn/programs` | 403 `"… is not currently offered."` (`assertEarnProviderSurfaced`), refused before the provider is called. |
+| Dashboard | `EARN_PROGRAM_CREATION_ENABLED` drops the onboarding CTA, "Add strategy", "Change strategy", and the `/deposit` route itself. |
+
+### What un-surfacing must never do
+
+Money out beats money off, so the switch gates the way IN and nothing else.
+**Every route that reads or exits an existing program ignores it**: the programs
+list and detail, deposits, withdrawal previews, withdrawals, the ledger, and
+`PUT /programs/:programId` (re-targeting a position already taken). An
+organization holding a program with an un-surfaced provider loses no access to
+its money — it loses the ability to open a new one.
+
+Two things that look like bugs and are not:
+
+- **`assertKnownYieldSources` still accepts hidden rows.** It validates against
+  the STORED catalogue, so an existing program may keep pointing at a strategy
+  the browse surface no longer shows. Making it inherit the hide would freeze a
+  customer's allocation over an editorial decision about new customers.
+- **The catalogue sync keeps syncing it, and the metrics refresh keeps
+  refreshing it.** `earn_strategies` stays a truthful provider inventory and
+  re-surfacing takes effect on deploy rather than after the next hourly pass.
+  Un-surfacing is not a reason to remove credentials — that is a *different*
+  switch (503 `PROVIDER_NOT_CONFIGURED`) that would also break the exit path.
+
+### Before you flip one
+
+**Check what the provider is load-bearing for.** Ground is the only
+portfolio-capable provider today, so un-surfacing it leaves nothing that can
+create a program and Earn becomes browse-only. That may be exactly what you
+want — it is what shipped on 2026-08-14 — but it is a product decision to make
+deliberately, not a side effect to discover in the dashboard.
+
+Rule of thumb: if every surfaced provider fails `supportsPortfolioWallets`,
+there is no deposit flow left.
+
+### The dashboard trap: never read a surfacing constant out of a client module
+
+`EARN_PROGRAM_CREATION_ENABLED` lives in
+`apps/sdp-web/src/app/dashboard/markets/earn/earn-surfacing.ts`, which carries
+**no `"use client"` directive**, and that is load-bearing. A Server Component
+importing a *value* from a client module gets a **client-reference proxy, not the
+value** — an object, therefore always truthy — so `if (!FLAG)` silently becomes
+dead code. That is exactly what happened to `deposit/page.tsx`'s guard on the
+first pass: the route rendered the whole wizard with no provider that could
+create anything.
+
+`tsc` passes (the types are right), unit tests pass (they mock the module), lint
+is silent. **Only a browser catches it**, so finish a surfacing change by loading
+`/dashboard/markets/earn` and `/dashboard/markets/earn/deposit` for real.
+
+### Tests
+
+A suite that exercises money-in for a provider you just un-surfaced will fail,
+and the fix is *not* to weaken the gate. `earn-program.test.ts` partial-mocks
+`isEarnProviderSurfaced` to force surfacing ON, so the create machinery
+(idempotency, replay, gate order, environment isolation) stays tested
+independently of today's business config, and the gate gets its own
+`describe` that flips the mock off and runs against the real map. Catalogue
+tests (`earn.test.ts`) seed a **surfaced** provider by default for the same
+reason. Copy that pattern rather than editing the map to make a test pass.

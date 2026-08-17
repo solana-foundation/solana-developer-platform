@@ -1,8 +1,11 @@
-import type { PolicyCandidate, Token } from "@sdp/types";
+import type { PolicyCandidate, Token, WalletOperationType } from "@sdp/types";
 import type { ApiKeyContext } from "@/lib/auth";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 
-type IssuancePolicyOperationType = "issuance_mint_execute" | "issuance_update_authority_execute";
+type IssuancePolicyOperationType = Extract<
+  WalletOperationType,
+  "issuance_mint_execute" | "issuance_update_authority_execute"
+>;
 
 /**
  * Build the issuance wallet-operation policy candidate shared by the mint and
