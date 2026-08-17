@@ -220,16 +220,10 @@ const contracts: ValueMovingContract[] = [
 const signingSinkInventory: Record<string, string[]> = {
   "apps/sdp-api/src/routes/custody/handlers/signer-check.ts": ["signAndSend"],
   "apps/sdp-api/src/services/earn/vault-execution.service.ts": [
-    // signVaultPlan — signs WITHOUT sending, so the deposit service can record
-    // the signature before the bytes can possibly land. This is the only sink
-    // the vault deposit path actually reaches.
-    "signTransactionMessageWithSigners",
-    // submitVaultPlan, sponsored leg — the relay signs as fee payer and sends
-    // in one call, so the final signature is not knowable beforehand.
-    "signAndSend",
-    // submitVaultPlan, wallet-pays leg. Both submitVaultPlan legs are retained
-    // for the sponsored path and are unreachable from the deposit service until
-    // the relay can name the signature before broadcast.
+    // Sponsored signing adds the fee-payer signature without broadcasting, so
+    // the final signature can still be recorded before bytes reach the network.
+    "signAsFeePayer",
+    // Wallet-paid signing likewise returns fully signed bytes without sending.
     "signTransactionMessageWithSigners",
   ],
   "apps/sdp-api/src/routes/pay.ts": ["signAsFeePayer"],

@@ -282,13 +282,22 @@ describe("wallet policy rule schema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("rejects an operation family rule with the unproduced program family", () => {
+  it("accepts the program family now produced by Earn vault deposits", () => {
     const result = walletPolicyRuleSchema.safeParse({
       kind: "operation_family",
       family: "program",
     });
 
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts the Earn vault deposit operation type", () => {
+    const result = walletPolicyRuleSchema.safeParse({
+      kind: "operation_type",
+      operationType: "earn_vault_deposit",
+    });
+
+    expect(result.success).toBe(true);
   });
 
   it("rejects an approval rule with an unknown operation type", () => {

@@ -16,13 +16,12 @@ const signVaultPlan = vi.hoisted(() => vi.fn());
 const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
 const simulateVaultPlan = vi.hoisted(() => vi.fn());
 const createOrgSigner = vi.hoisted(() => vi.fn());
-const assertClusterEndpoint = vi.hoisted(() => vi.fn());
+const resolveVaultDirectClient = vi.hoisted(() => vi.fn());
 
 vi.mock("./execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./execution-registry")>()),
-  resolveVaultDirectClient: () => ({ buildVaultDeposit }),
+  resolveVaultDirectClient,
   resolveClusterRpcUrl: () => "https://rpc.example.invalid",
-  assertClusterEndpoint,
 }));
 
 vi.mock("./vault-execution.service", async (importOriginal) => ({
@@ -131,7 +130,7 @@ beforeEach(async () => {
   await seedTestDatabase(env);
   await seedWallet();
   vi.clearAllMocks();
-  assertClusterEndpoint.mockResolvedValue(undefined);
+  resolveVaultDirectClient.mockReturnValue({ buildVaultDeposit });
   buildVaultDeposit.mockResolvedValue(plan());
   simulateVaultPlan.mockResolvedValue({ ok: true });
   createOrgSigner.mockResolvedValue({ address: WALLET_ADDRESS });
@@ -162,12 +161,11 @@ describe("depositIntoVault — idempotency", () => {
   it("serves a durable replay without proving or touching the RPC endpoint", async () => {
     await depositIntoVault(env, depositInput());
     vi.clearAllMocks();
-    assertClusterEndpoint.mockRejectedValue(new Error("RPC unavailable"));
 
     const replay = await depositIntoVault(env, depositInput());
 
     expect(replay.replayed).toBe(true);
-    expect(assertClusterEndpoint).not.toHaveBeenCalled();
+    expect(resolveVaultDirectClient).not.toHaveBeenCalled();
     expect(buildVaultDeposit).not.toHaveBeenCalled();
     expect(signVaultPlan).not.toHaveBeenCalled();
   });
@@ -369,6 +367,23 @@ describe("depositIntoVault — signed persistence boundary", () => {
     await depositIntoVault(env, depositInput({ amount: "10.000000", minSharesOut: "1.000" }));
 
     expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+    const deadline = resolveVaultDirectClient.mock.calls[0]?.[2];
+    expect(deadline).toBeDefined();
+    expect(simulateVaultPlan.mock.calls[0]?.[1]).toMatchObject({
+      cluster: "devnet",
+      deadline,
+      expectedAssetIdentity: { depositTokenMint: TOKEN_MINT, shareMint: SHARE_MINT },
+    });
+    expect(signVaultPlan.mock.calls[0]?.[1]).toMatchObject({
+      cluster: "devnet",
+      deadline,
+      expectedAssetIdentity: { depositTokenMint: TOKEN_MINT, shareMint: SHARE_MINT },
+      fee: { kind: "wallet-pays" },
+    });
+    expect(broadcastVaultTransaction.mock.calls[0]?.[1]).toMatchObject({
+      cluster: "devnet",
+      deadline,
+    });
     expect(movementAtBroadcast).toMatchObject({
       requested_amount: "10.000000",
       amount: "10",

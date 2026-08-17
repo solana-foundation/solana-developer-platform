@@ -122,6 +122,7 @@ function familyLabel(family: WalletOperationFamily, t: ReturnType<typeof useTran
     payment: t("DashboardCustody.apiKeyFamilyPayment"),
     ramp: t("DashboardCustody.apiKeyFamilyRamp"),
     issuance: t("DashboardCustody.apiKeyFamilyIssuance"),
+    program: t("DashboardCustody.apiKeyFamilyProgram"),
   } satisfies Record<WalletOperationFamily, string>;
   return labels[family];
 }

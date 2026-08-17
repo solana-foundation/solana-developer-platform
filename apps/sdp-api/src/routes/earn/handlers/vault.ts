@@ -23,13 +23,8 @@ import {
   assertApiKeyWalletAccess,
   getAllowedApiKeyWalletIdsForPermissions,
 } from "@/services/api-key-scope.service";
-import {
-  assertClusterEndpoint,
-  earnClusterFor,
-  resolveClusterRpcUrl,
-  resolveVaultDirectClient,
-} from "@/services/earn/execution-registry";
-import { withVaultDeadline } from "@/services/earn/vault-deadline";
+import { earnClusterFor, resolveVaultDirectClient } from "@/services/earn/execution-registry";
+import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { depositIntoVault } from "@/services/earn/vault-deposit.service";
 import {
   approvedWalletOperationId,
@@ -423,9 +418,10 @@ export async function listEarnVaultPositions(c: AppContext) {
     }
   >();
   const hydrationJobs: Array<() => Promise<void>> = [];
+  const deadline = createVaultDeadline();
 
   for (const [provider, providerRows] of byProvider) {
-    const client = resolveVaultDirectClient(c.env, provider);
+    const client = resolveVaultDirectClient(c.env, provider, deadline);
     if (!client) continue;
     const byWallet = new Map<string, typeof rows>();
     for (const row of providerRows) {
@@ -444,13 +440,10 @@ export async function listEarnVaultPositions(c: AppContext) {
       );
       const references = walletRows.map((row) => row.provider_reference);
       hydrationJobs.push(async () => {
-        const snapshots = await withVaultDeadline(
-          client.readVaultPositions(earnRuntime(c), {
-            owner,
-            providerReferences: references,
-          }),
-          `Reading ${provider} vault positions`
-        );
+        const snapshots = await client.readVaultPositions(earnRuntime(c), {
+          owner,
+          providerReferences: references,
+        });
         for (const snapshot of snapshots) {
           const trusted = trustedIdentity.get(snapshot.providerReference);
           if (
@@ -486,12 +479,6 @@ export async function listEarnVaultPositions(c: AppContext) {
   }
 
   if (hydrationJobs.length > 0) {
-    const cluster = earnClusterFor(environment);
-    const rpcUrl = resolveClusterRpcUrl(c.env, cluster);
-    await withVaultDeadline(
-      assertClusterEndpoint(c.env, cluster, rpcUrl),
-      `Verifying the ${cluster} RPC endpoint`
-    );
     // Failed reads intentionally leave only their rows unhydrated; never report
     // zero when the chain could not be read. In-flight RPC work stays bounded.
     await mapSettledWithConcurrency(hydrationJobs, 8, (hydrate) => hydrate());

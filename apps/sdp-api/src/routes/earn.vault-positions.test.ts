@@ -9,13 +9,10 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const readVaultPositions = vi.hoisted(() => vi.fn());
-const assertClusterEndpoint = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
   resolveVaultDirectClient: () => ({ readVaultPositions }),
-  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
-  assertClusterEndpoint,
 }));
 
 const ORG = "org_vault_positions";
@@ -147,7 +144,6 @@ beforeEach(async () => {
   await clearKVStores(env);
   await seedScope();
   vi.clearAllMocks();
-  assertClusterEndpoint.mockResolvedValue(undefined);
   readVaultPositions.mockImplementation(
     async (_ctx: unknown, input: { owner: string; providerReferences: string[] }) =>
       input.providerReferences.map((providerReference) => ({
@@ -185,7 +181,6 @@ describe("GET /v1/earn/vault-positions", () => {
       }),
     ]);
     expect(readVaultPositions).toHaveBeenCalledTimes(1);
-    expect(assertClusterEndpoint).toHaveBeenCalledTimes(1);
   });
 
   it("exposes no rows for an ambiguous selected-wallet provider id", async () => {
@@ -225,7 +220,6 @@ describe("GET /v1/earn/vault-positions", () => {
 
     expect(response.status).toBe(200);
     expect(body.data.positions).toEqual([]);
-    expect(assertClusterEndpoint).not.toHaveBeenCalled();
     expect(readVaultPositions).not.toHaveBeenCalled();
   });
 
@@ -380,6 +374,5 @@ describe("GET /v1/earn/vault-positions", () => {
     expect(response.status).toBe(200);
     expect(readVaultPositions).toHaveBeenCalledTimes(10);
     expect(maximum).toBe(8);
-    expect(assertClusterEndpoint).toHaveBeenCalledTimes(1);
   });
 });

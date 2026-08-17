@@ -16,12 +16,11 @@ import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import {
-  assertClusterEndpoint,
   earnClusterFor,
   resolveClusterRpcUrl,
   resolveVaultDirectClient,
 } from "./execution-registry";
-import { withVaultDeadline } from "./vault-deadline";
+import { createVaultDeadline } from "./vault-deadline";
 import {
   broadcastVaultTransaction,
   type SignedVaultTransaction,
@@ -154,11 +153,6 @@ export async function depositIntoVault(
   input: VaultDepositInput,
   options: VaultDepositExecutionOptions = {}
 ): Promise<VaultDepositResult> {
-  const client = resolveVaultDirectClient(env, input.provider);
-  if (!client) {
-    throw notImplemented(input.provider as never, "direct vault deposits");
-  }
-
   const primaryRepo = createPostgresEarnVaultRepository(getDb(env));
   const fingerprint = buildEarnVaultDepositFingerprint({
     environment: input.environment,
@@ -185,12 +179,17 @@ export async function depositIntoVault(
   // Replays above are pure durable reads: they must keep working during an RPC
   // outage and must never touch a chain client. Only a fresh attempt proves and
   // uses the configured endpoint.
+  const deadline = createVaultDeadline();
+  const client = resolveVaultDirectClient(env, input.provider, deadline);
+  if (!client) {
+    throw notImplemented(input.provider as never, "direct vault deposits");
+  }
   const cluster = earnClusterFor(input.environment);
   const rpcUrl = resolveClusterRpcUrl(env, cluster);
-  await withVaultDeadline(
-    assertClusterEndpoint(env, cluster, rpcUrl),
-    `Verifying the ${cluster} RPC endpoint`
-  );
+  const expectedAssetIdentity = {
+    depositTokenMint: input.tokenMint,
+    shareMint: input.shareMint,
+  };
   const runtime: EarnRuntimeContext = {
     env: env as unknown as Record<string, string | undefined>,
     environment: input.environment,
@@ -198,15 +197,12 @@ export async function depositIntoVault(
 
   let plan: Awaited<ReturnType<typeof client.buildVaultDeposit>>;
   try {
-    const built = await withVaultDeadline(
-      client.buildVaultDeposit(runtime, {
-        providerReference: input.providerReference,
-        owner: input.wallet.publicKey,
-        amount: input.amount,
-        ...(input.minSharesOut === undefined ? {} : { minSharesOut: input.minSharesOut }),
-      }),
-      "Building the vault deposit"
-    );
+    const built = await client.buildVaultDeposit(runtime, {
+      providerReference: input.providerReference,
+      owner: input.wallet.publicKey,
+      amount: input.amount,
+      ...(input.minSharesOut === undefined ? {} : { minSharesOut: input.minSharesOut }),
+    });
     // Deterministic Solana signing plus a shared recent blockhash would make
     // otherwise independent requests produce the same signature. Bind the
     // caller key into the message so each ledger intent has a unique on-chain
@@ -225,14 +221,14 @@ export async function depositIntoVault(
   const accepted = requireAcceptedPlan(plan, input);
 
   try {
-    const simulation = await withVaultDeadline(
-      simulateVaultPlan(env, {
-        plan,
-        owner: address(input.wallet.publicKey),
-        rpcUrl,
-      }),
-      "Simulating the vault deposit"
-    );
+    const simulation = await simulateVaultPlan(env, {
+      cluster,
+      deadline,
+      expectedAssetIdentity,
+      plan,
+      owner: address(input.wallet.publicKey),
+      rpcUrl,
+    });
     if (!simulation.ok) {
       getLogger().error(
         { error: simulation.error, logs: simulation.logs.slice(-5) },
@@ -249,22 +245,26 @@ export async function depositIntoVault(
 
   let signed: SignedVaultTransaction;
   try {
-    const signer = await withVaultDeadline(
+    const signer = await deadline.run("Resolving the vault deposit signer", () =>
       solanaServices.createOrgSigner(
         env,
         input.organizationId,
         input.projectId,
         input.wallet.walletId
-      ),
-      "Resolving the vault deposit signer"
+      )
     );
     if (signer.address !== input.wallet.publicKey) {
       throw badRequest("Resolved signing wallet does not match the deposit wallet");
     }
-    signed = await withVaultDeadline(
-      signVaultPlan(env, { plan, owner: signer, rpcUrl }),
-      "Signing the vault deposit"
-    );
+    signed = await signVaultPlan(env, {
+      cluster,
+      deadline,
+      expectedAssetIdentity,
+      plan,
+      owner: signer,
+      rpcUrl,
+      fee: { kind: "wallet-pays" },
+    });
   } catch (error) {
     getLogger().error({ error }, "vault deposit: signer resolution or signing failed");
     throw error;
@@ -303,10 +303,12 @@ export async function depositIntoVault(
   if (result.replayed) return result;
 
   try {
-    await withVaultDeadline(
-      broadcastVaultTransaction(env, { bytes: signed.bytes, rpcUrl }),
-      "Broadcasting the vault deposit"
-    );
+    await broadcastVaultTransaction(env, {
+      cluster,
+      deadline,
+      bytes: signed.bytes,
+      rpcUrl,
+    });
   } catch (error) {
     // Timeout/transport failure is ambiguous: the transaction may have landed.
     // Leave the signed row pending for the confirmation sweep.

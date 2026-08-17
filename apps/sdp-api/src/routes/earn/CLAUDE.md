@@ -312,6 +312,8 @@ organization's own custody wallets.
     `src/security/value-moving-conformance.node.test.ts`, whose
     `valueMovingSourceRoots` now includes `src/services/earn` — it did not, which
     is how a whole money-moving surface stayed invisible to the sink inventory.
+    The policy envelope is `program` / `earn_vault_deposit`; migration 0060
+    re-opens that live family after the earlier vocabulary trim.
   - **Environment capability first.** `isVaultDirectDepositEnabled(environment)`
     (`@sdp/types/provider-access`) fail-closes PRODUCTION while SDP has no
     vault-withdraw route and no Active-tab surface. Entitlement cannot express
@@ -344,6 +346,9 @@ organization's own custody wallets.
   - Simulates before signing. The instructions come from a third-party SDK built
     against live vault state, so a stale reserve set surfaces as a readable
     program error instead of a landed, failed transaction the customer paid for.
+    Provider build, simulation, custody lookup, signing, and broadcast share one
+    absolute `VaultDeadline`; a slow early stage cannot reset the timeout before
+    a later side effect.
   - **The signed outbox is recorded BEFORE broadcast.** `signVaultPlan` signs
     without sending; one transaction stores the signature, base64 wire bytes,
     last-valid block height, movement and activated claim while still `pending`.
@@ -351,10 +356,10 @@ organization's own custody wallets.
     and never `failed`, because a lost response does not prove the transaction
     did not land.
   - Fee payer is the CUSTODY WALLET. Kora only sponsors allow-listed programs and
-    the kvault/klend ids are not on that list. The sponsored path in
-    `services/earn/vault-execution.service.ts` is no longer one line away: it
-    cannot satisfy record-before-broadcast, because the relay signs as fee payer
-    after SDP and the final signature is unknown until the bytes leave.
+    the kvault/klend ids are not on that list. The shared execution runtime can
+    add a sponsor signature without broadcasting, preserving record-before-send,
+    but this route deliberately selects `wallet-pays` until those programs are
+    eligible for sponsorship.
 - `GET /vault-positions` — DB claim rows **hydrated live from chain**. Shares and
   value are never persisted: for a non-custodial vault the chain IS the provider.
   Takes **no provider gate at all** — it is a read of money the org already
@@ -381,7 +386,8 @@ why `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` fail-closes production rather than
 relying on anyone remembering ADR 0002.
 
 **Per-cluster RPC.** `resolveClusterRpcUrl` reads `SOLANA_DEVNET_RPC_URL` /
-`SOLANA_MAINNET_RPC_URL`, falling back to `SOLANA_RPC_URL`, and
+`SOLANA_MAINNET_RPC_URL`, falling back to the canonical default only when its
+configured `SOLANA_NETWORK` matches the requested cluster, and
 `assertClusterEndpoint` proves the endpoint by GENESIS HASH before anything is
 built against it (cached per endpoint). One process serves both environments, so
 the old cluster-agnostic read silently built against whichever chain the single
