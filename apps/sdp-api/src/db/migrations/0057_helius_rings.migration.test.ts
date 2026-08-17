@@ -255,6 +255,64 @@ describe("0057_helius_rings tenant isolation", () => {
     );
   });
 
+  it("refuses an operation pointing at another wallet's zone", async () => {
+    const owner = await seedWallet("zoneowner");
+    const other = await seedWallet("zoneother");
+    await client.query(
+      "INSERT INTO helius_rings_zones (id, wallet_id, name) VALUES ('hrz_owner', $1, 'Payroll')",
+      [owner.walletId]
+    );
+
+    // The composite (zone_id, wallet_id) FK rejects the cross-wallet reference.
+    await expectSqlstate(
+      () =>
+        insertOperation({
+          id: "hro_crosszone",
+          organization_id: other.organizationId,
+          project_id: other.projectId,
+          wallet_id: other.walletId,
+          zone_id: "hrz_owner",
+          intent_key: "intent_crosszone",
+        }),
+      FK_VIOLATION
+    );
+
+    await expect(
+      insertOperation({
+        id: "hro_ownzone",
+        organization_id: owner.organizationId,
+        project_id: owner.projectId,
+        wallet_id: owner.walletId,
+        zone_id: "hrz_owner",
+        intent_key: "intent_ownzone",
+      })
+    ).resolves.toBeUndefined();
+  });
+
+  it("clears only zone_id when a referenced zone is deleted", async () => {
+    const { organizationId, projectId, walletId } = await seedWallet("zonedel");
+    await client.query(
+      "INSERT INTO helius_rings_zones (id, wallet_id, name) VALUES ('hrz_del', $1, 'Payroll')",
+      [walletId]
+    );
+    await insertOperation({
+      id: "hro_zonedel",
+      organization_id: organizationId,
+      project_id: projectId,
+      wallet_id: walletId,
+      zone_id: "hrz_del",
+      intent_key: "intent_zonedel",
+    });
+
+    await client.query("DELETE FROM helius_rings_zones WHERE id = 'hrz_del'");
+
+    // The SET NULL column list must not null wallet_id along with zone_id.
+    const { rows } = await client.query(
+      "SELECT wallet_id, zone_id FROM helius_rings_operations WHERE id = 'hro_zonedel'"
+    );
+    expect(rows[0]).toEqual({ wallet_id: walletId, zone_id: null });
+  });
+
   it("cascades wallets, key refs, operations and events when the project goes", async () => {
     const { organizationId, projectId, walletId } = await seedWallet("cascade");
     await insertOperation({
@@ -485,6 +543,50 @@ describe("0057_helius_rings value-set and coherence constraints", () => {
 
     await expectSqlstate(() => insertTimelock("2026-08-01T00:00:00.000Z"), CHECK_VIOLATION);
     await expect(insertTimelock("2026-09-02T00:00:00.000Z")).resolves.toBeDefined();
+  });
+
+  it("rejects timelock timestamps that are not fixed-width UTC", async () => {
+    const { organizationId, projectId, walletId } = await seedWallet("tlformat");
+    await insertOperation({
+      id: "hro_tlformat",
+      organization_id: organizationId,
+      project_id: projectId,
+      wallet_id: walletId,
+      intent_key: "tf1",
+      op_type: "timelock_create",
+    });
+
+    const insertTimelock = (unlockAt: string, releasedAt: string | null) =>
+      client.query(
+        `INSERT INTO helius_rings_timelocks (operation_id, unlock_at, released_at, beneficiary_addr)
+         VALUES ('hro_tlformat', $1, $2, 'beneficiary')`,
+        [unlockAt, releasedAt]
+      );
+
+    // An offset value sorts lexically before a Z value it chronologically follows.
+    await expectSqlstate(
+      () => insertTimelock("2026-08-31T23:30:00.000-01:00", null),
+      CHECK_VIOLATION
+    );
+    await expectSqlstate(
+      () => insertTimelock("2026-09-01T00:00:00.000Z", "2026-09-01T23:30:00.000-01:00"),
+      CHECK_VIOLATION
+    );
+    await expectSqlstate(() => insertTimelock("2026-09-01T00:00:00Z", null), CHECK_VIOLATION);
+
+    await expectSqlstate(
+      () =>
+        insertOperation({
+          id: "hro_tlformat2",
+          organization_id: organizationId,
+          project_id: projectId,
+          wallet_id: walletId,
+          intent_key: "tf2",
+          op_type: "timelock_create",
+          timelock_unlock_at: "2026-08-31T23:30:00.000-01:00",
+        }),
+      CHECK_VIOLATION
+    );
   });
 
   it("requires event payloads to be JSON objects", async () => {

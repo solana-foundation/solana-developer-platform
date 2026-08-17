@@ -141,6 +141,9 @@ CREATE TABLE IF NOT EXISTS helius_rings_zones (
     created_at TEXT NOT NULL DEFAULT sdp_iso_now(),
     CONSTRAINT helius_rings_zones_kind_check
         CHECK (kind IN ('treasury', 'public')),
+    -- Lets operations FK on (zone_id, wallet_id) so an operation cannot
+    -- reference another wallet's zone.
+    CONSTRAINT helius_rings_zones_id_wallet_key UNIQUE (id, wallet_id),
     FOREIGN KEY (wallet_id) REFERENCES helius_rings_wallets(id) ON DELETE CASCADE
 );
 
@@ -267,12 +270,23 @@ CREATE TABLE IF NOT EXISTS helius_rings_operations (
     -- the retry-depth cap in A21 loop forever.
     CONSTRAINT helius_rings_operations_retry_not_self_check
         CHECK (retry_of_operation_id IS NULL OR retry_of_operation_id <> id),
+    -- Same fixed-width-UTC pin as helius_rings_timelocks; the Activity table
+    -- sorts on this column.
+    CONSTRAINT helius_rings_operations_timelock_unlock_at_format_check
+        CHECK (
+            timelock_unlock_at IS NULL
+            OR timelock_unlock_at ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$'
+        ),
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
     FOREIGN KEY (wallet_id, organization_id, project_id)
         REFERENCES helius_rings_wallets(id, organization_id, project_id)
         ON DELETE CASCADE,
-    FOREIGN KEY (zone_id) REFERENCES helius_rings_zones(id) ON DELETE SET NULL,
+    -- Composite: the zone must belong to this operation's wallet. The SET
+    -- NULL column list (Postgres 15+) clears only zone_id, not wallet_id.
+    FOREIGN KEY (zone_id, wallet_id)
+        REFERENCES helius_rings_zones(id, wallet_id)
+        ON DELETE SET NULL (zone_id),
     -- SET NULL, never CASCADE: see decision 2 in the header.
     FOREIGN KEY (retry_of_operation_id)
         REFERENCES helius_rings_operations(id) ON DELETE SET NULL
@@ -331,9 +345,17 @@ CREATE TABLE IF NOT EXISTS helius_rings_timelocks (
     unlock_at TEXT NOT NULL,
     released_at TEXT,
     beneficiary_addr TEXT NOT NULL,
-    -- ISO-8601 UTC strings from sdp_iso_now() are fixed-width, so lexical
-    -- comparison is chronological. Releasing before the unlock time is the
-    -- whole failure this table exists to prevent.
+    -- The ordering check compares text; lexical order is only chronological
+    -- when every value is the fixed-width UTC shape sdp_iso_now() emits. A
+    -- caller-supplied offset value ('...T23:30:00.000-01:00') would sort
+    -- wrong and let an early release through, so the format is a constraint.
+    CONSTRAINT helius_rings_timelocks_unlock_at_format_check
+        CHECK (unlock_at ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$'),
+    CONSTRAINT helius_rings_timelocks_released_at_format_check
+        CHECK (
+            released_at IS NULL
+            OR released_at ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$'
+        ),
     CONSTRAINT helius_rings_timelocks_released_after_unlock_check
         CHECK (released_at IS NULL OR released_at >= unlock_at),
     FOREIGN KEY (operation_id)
