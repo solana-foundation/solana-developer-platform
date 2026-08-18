@@ -334,10 +334,11 @@ apps/sdp-web/src/app/
   api/dashboard/markets/earn/      BFF proxies to /v1/earn/*.
 ```
 
-## Catalogue data: the sync cron vs the metrics refresh vs the dev seed
+## Catalogue data: the sync cron and metrics refresh
 
-Three things write `earn_strategies`; two of them are production paths, and they
-split by how fast the thing they write actually moves.
+Two live paths write `earn_strategies`, split by how fast the data they own
+moves. The catalogue sync is the only path that can admit rows; the metrics
+refresh is update-only.
 
 ### The metrics refresh — the fast half
 
@@ -376,9 +377,7 @@ split by how fast the thing they write actually moves.
   re-pay the entire catalogue cost for the rate alone. Opting in is a promise
   about cost as much as capability.
 
-### The sync cron and the dev seed
-
-### The sync cron — the production path
+### The sync cron — the admitting path
 
 `apps/sdp-api/src/cron/earn-catalogue-sync.ts`
 
@@ -403,69 +402,9 @@ split by how fast the thing they write actually moves.
   `paused`/`deprecated` status, so an emergency pause holds until someone writes
   the status back to `active` — a sync pass can no longer resurrect it. Metadata
   and rates keep converging while the row is closed.
-- **Known limitation:** rows a provider *delists* keep their last status (there
-  is no deactivation-of-missing-rows pass yet), so a vault that silently
-  disappears from a provider's catalogue stays `active` until someone acts.
-
-### The dev seed — local development only
-
-`apps/sdp-api/scripts/seed-earn-demo.ts` (`pnpm -C apps/sdp-api db:seed:earn`)
-
-- **Local only, enforced.** It refuses any `DATABASE_URL` whose host is not
-  `localhost` / `127.0.0.1` / `::1`, and it only ever writes `sandbox` fixtures
-  (the old `--environment production` flag is gone and now exits with an error).
-  It is never run by CI or any deploy.
-- **Why it exists:** browse a populated catalogue without a Ground API key and
-  without waiting for the cron; deterministic data for demos and UI work.
-- **What it seeds:** a compact five-source, Solana-hosted subset of Ground's
-  sandbox catalogue, with ids/names/APYs/liquidity/curators mirroring the
-  committed inventory snapshot, plus exactly one **paused** row
-  (`seed-demo-kamino-superstate-usdc`) that exercises the operator-pause
-  invariants — hidden from the default catalogue, unselectable as an allocation
-  target, and sticky against the sync re-asserting `active`. The small seed is a
-  deterministic UI convenience, not a complete mirror of the live sync.
-- **It prunes its own stale rows.** Every run deletes prefixed rows the current
-  fixture set no longer defines, so a re-run after the set changes cannot leave
-  the old ones behind (an upsert-only seed would).
-- **Fixtures are labelled, never confused with real data:** every seeded row
-  carries the `seed-demo-` `provider_reference` prefix and
-  `riskMetadata.seedFixture`. `--clean` deletes **only** prefixed rows, so it can
-  never remove a row the live cron synced.
-- **It also links one program, and that part is NOT a fixture.** The seed points
-  your primary local org at one of the team's real Ground *sandbox* portfolio
-  wallets, so the dashboard opens onto live provider state (real allocation, real
-  forward APY, a real Solana deposit address) rather than an empty onboarding
-  screen. It links exactly ONE program — a seed choice, not a cap (the API takes
-  N per org since PRO-1670): the wallet it points at can be claimed by only one
-  link row platform-wide, so other local orgs stay unlinked rather than being
-  handed a sibling wallet that stands in for another org. If a developer has
-  already attached that wallet by hand, the seed says so and stops instead of
-  colliding on the global unique. The wallet is shared with teammates: funding
-  it, changing its strategy through the wizard, or withdrawing from it changes
-  what they see. Re-run the
-  seed after your first Clerk sign-in and it moves its own link onto your real
-  org; a program you created through the wizard is never moved. `--clean` removes
-  the link, never the Ground wallet.
-  The seeded program is an all-Solana/USDC wallet, funded via its devnet deposit
-  address (Circle's faucet, above) — shared with teammates, so its balance moves
-  and no particular figure is the baseline. Pointing the seed at one of the other
-  funded sandbox wallets instead would surface a withdrawable balance SDP cannot
-  withdraw, because those balances sit off the Solana rail while
-  `balance.withdrawableUsd` reports a wallet-level total.
-  Full local-dev detail: `CLAUDE.md` → "Get a program — the seed links one, the
-  API allows many".
-- **Commands**
-
-  ```bash
-  DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm -C apps/sdp-api db:seed:earn
-  DATABASE_URL=... pnpm -C apps/sdp-api db:seed:earn -- --clean     # remove the fixtures
-  ```
-
-  Idempotent: re-running upserts in place (ids stay stable, no duplicates).
-- **When *not* to use it:** never against a shared or deployed database. If you
-  have a Ground sandbox key, prefer the real cron path — and note that running
-  both leaves near-twin rows in your local DB (same names, different reference
-  prefix); `--clean` removes the fixtures and leaves the synced rows.
+- **Delist convergence:** after a successful non-empty provider response, active
+  rows absent from that provider's live catalogue are deleted. Operator-paused
+  or deprecated rows remain so a later sync cannot silently reactivate them.
 
 ## Invariants (do not break)
 
