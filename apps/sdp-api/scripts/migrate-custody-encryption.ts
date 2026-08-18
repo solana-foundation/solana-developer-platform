@@ -32,7 +32,27 @@ interface PassCounters {
   failed: number;
 }
 
+const MAX_SCANS = 10;
+
 async function migratePass(env: Env, version: string, label: string): Promise<PassCounters> {
+  const counters: PassCounters = { migrated: 0, contested: 0, failed: 0 };
+
+  for (let scan = 0; scan < MAX_SCANS; scan++) {
+    const pass = await scanOnce(env, version, label);
+    counters.migrated += pass.migrated;
+    counters.contested += pass.contested;
+    counters.failed += pass.failed;
+    if (pass.migrated === 0 && pass.contested === 0) {
+      return counters;
+    }
+  }
+
+  console.warn(`[${label}] rows still migrating after ${MAX_SCANS} scans; rerun to converge`);
+  counters.contested += 1;
+  return counters;
+}
+
+async function scanOnce(env: Env, version: string, label: string): Promise<PassCounters> {
   const db = getDb(env);
   const cipher = createCustodyCipher(env);
   const counters: PassCounters = { migrated: 0, contested: 0, failed: 0 };
