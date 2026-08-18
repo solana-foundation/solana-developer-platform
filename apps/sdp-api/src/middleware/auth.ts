@@ -25,6 +25,7 @@ import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
 import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
 import { isClientIpAllowed } from "@/lib/ip-allowlist";
+import { enforceOrganizationIpAllowlist } from "@/lib/organization-ip-allowlist";
 import type { KVStore } from "@/runtime/kv";
 import { getLogger } from "@/runtime/logger";
 import { tryApprovedOperationReplayAuth } from "@/services/policy/approved-operation-replay";
@@ -385,6 +386,12 @@ export function authMiddleware() {
     }
 
     await enforceRateLimit(c, cachedKey.id, RATE_LIMIT_TIERS[cachedKey.rateLimitTier]);
+
+    // Uncached Postgres read (so enabling it takes effect immediately) — which
+    // is why it must sit behind the KV-backed limiter: ahead of it, a flooding
+    // key costs one DB read per rejected request. Behind it, reads are capped
+    // at the tier; the quota this spends belongs to whoever holds the key.
+    await enforceOrganizationIpAllowlist(c, cachedKey.organizationId);
 
     // Set auth context
     const normalizedWalletBindings = normalizeWalletBindings(cachedKey);

@@ -8,6 +8,7 @@ import type { Context, Next } from "hono";
 import { getCookie } from "hono/cookie";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
+import { enforceOrganizationIpAllowlist } from "@/lib/organization-ip-allowlist";
 import { getLogger } from "@/runtime/logger";
 import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
@@ -42,6 +43,9 @@ export function sessionAuthMiddleware() {
       DASHBOARD_ACTOR_MAX_REQUESTS
     );
 
+    // Behind the limiter: an uncached Postgres read per request.
+    await enforceOrganizationIpAllowlist(c, cachedSession.organizationId);
+
     // Set session context
     c.set("session", cachedSession);
 
@@ -70,6 +74,8 @@ export function optionalSessionAuth() {
             `user:${cachedSession.userId}:org:${cachedSession.organizationId}`,
             DASHBOARD_ACTOR_MAX_REQUESTS
           );
+          // Before the context is set: a disallowed origin continues as anonymous.
+          await enforceOrganizationIpAllowlist(c, cachedSession.organizationId);
           c.set("session", cachedSession);
           updateLastActivity(getDb(c.env), sessionId);
         }
