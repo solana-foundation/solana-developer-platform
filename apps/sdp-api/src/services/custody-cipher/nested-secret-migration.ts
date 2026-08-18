@@ -16,11 +16,11 @@ export async function migrateNestedCustodySecrets(
   try {
     parsed = JSON.parse(configJson);
   } catch {
-    return { changed: false, configJson };
+    throw new Error("custody config is not valid JSON");
   }
 
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return { changed: false, configJson };
+    throw new Error("custody config is not a JSON object");
   }
 
   const config = parsed as Record<string, unknown>;
@@ -28,7 +28,12 @@ export async function migrateNestedCustodySecrets(
 
   for (const field of NESTED_SECRET_FIELDS) {
     const value = config[field];
-    if (typeof value !== "string" || value.length === 0 || isV2Ciphertext(value)) {
+    if (typeof value !== "string" || value.length === 0) {
+      continue;
+    }
+
+    if (isV2Ciphertext(value)) {
+      await cipher.decrypt(orgId, value);
       continue;
     }
 

@@ -10,8 +10,14 @@ function fakeKms() {
   const b64 = (b: Uint8Array) => btoa(String.fromCharCode(...b));
   const un = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
   return {
-    encrypt: async (pt: Uint8Array) => b64(mask(pt)),
-    decrypt: async (ct: string) => mask(un(ct)),
+    encrypt: async (pt: Uint8Array, aad: string) => `${btoa(aad)}!${b64(mask(pt))}`,
+    decrypt: async (ct: string, aad: string) => {
+      const [boundAad, payload] = ct.split("!");
+      if (boundAad !== btoa(aad) || !payload) {
+        throw new Error("AAD mismatch");
+      }
+      return mask(un(payload));
+    },
   };
 }
 
@@ -90,13 +96,34 @@ describe("migrateNestedCustodySecrets", () => {
     expect(result.configJson).toBe(config);
   });
 
-  it("leaves non-JSON payloads untouched", async () => {
+  it("rejects non-JSON payloads", async () => {
     const cipher = v2Router();
 
-    const result = await migrateNestedCustodySecrets(cipher, "org1", "not-json");
+    await expect(migrateNestedCustodySecrets(cipher, "org1", "not-json")).rejects.toThrow(
+      "not valid JSON"
+    );
+  });
 
-    expect(result.changed).toBe(false);
-    expect(result.configJson).toBe("not-json");
+  it("rejects non-object payloads", async () => {
+    const cipher = v2Router();
+
+    await expect(migrateNestedCustodySecrets(cipher, "org1", '["a"]')).rejects.toThrow(
+      "not a JSON object"
+    );
+  });
+
+  it("rejects v2 nested values that do not decrypt for the row's org", async () => {
+    const cipher = v2Router();
+    const innerCt = await cipher.encrypt("org2", "pem-secret");
+    const config = JSON.stringify({
+      provider: "fireblocks",
+      apiKey: "key",
+      apiSecretEncrypted: innerCt,
+      vaultAccountId: "7",
+      assetId: "SOL",
+    });
+
+    await expect(migrateNestedCustodySecrets(cipher, "org1", config)).rejects.toThrow();
   });
 
   it("propagates decryption failures for undecryptable nested values", async () => {

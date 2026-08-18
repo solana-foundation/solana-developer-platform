@@ -129,15 +129,18 @@ async function main(): Promise<void> {
     const nested = await migratePass(env, V2_VERSION, "custody_configs:nested");
     const legacy = await migratePass(env, LEGACY_VERSION, "custody_configs");
 
-    console.info(
-      `Done. Migrated ${legacy.migrated} legacy rows, ${nested.migrated} nested-secret rows.`
-    );
-
     const contested = legacy.contested + nested.contested;
     const failed = legacy.failed + nested.failed;
     if (contested > 0 || failed > 0) {
-      console.error(`${failed} rows failed, ${contested} contested; rerun until both reach zero.`);
+      console.error(
+        `Migrated ${legacy.migrated} legacy rows, ${nested.migrated} nested-secret rows; ` +
+          `${failed} rows failed, ${contested} contested. Rerun until both reach zero.`
+      );
       process.exitCode = 1;
+    } else {
+      console.info(
+        `Done. Migrated ${legacy.migrated} legacy rows, ${nested.migrated} nested-secret rows.`
+      );
     }
   } finally {
     await closeDatabasePools();
