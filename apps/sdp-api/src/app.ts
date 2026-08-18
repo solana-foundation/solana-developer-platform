@@ -35,6 +35,7 @@ import wallets from "@/routes/custody";
 import docs from "@/routes/docs";
 import earn from "@/routes/earn";
 import health from "@/routes/health";
+import heliusRings from "@/routes/helius-rings";
 import internalCustody from "@/routes/internal-custody";
 import issuance from "@/routes/issuance";
 import llms from "@/routes/llms";
@@ -362,6 +363,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/places", places);
   v1.route("/policies", policies);
   v1.route("/private-channels", privateChannels);
+  v1.route("/helius-rings", heliusRings);
   v1.route("/compliance", compliance);
 
   const registeredPluginNames = new Set<string>();

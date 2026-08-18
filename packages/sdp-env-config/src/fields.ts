@@ -721,6 +721,18 @@ export const FIELDS: EnvField[] = [
     help: "Gates Private Channels API routes and deposit/withdrawal reconcilers.",
   },
   {
+    key: "HELIUS_RINGS_ENABLED",
+    section: "advanced",
+    kind: "select",
+    label: "Helius Rings enabled",
+    defaultValue: "false",
+    options: [
+      { value: "false", label: "Disabled" },
+      { value: "true", label: "Enabled" },
+    ],
+    help: "Gates the devnet-only Helius Rings shielded wallet API routes.",
+  },
+  {
     key: "SPC_CREDENTIAL_ENCRYPTION_KEY",
     section: "secrets",
     kind: "secret",

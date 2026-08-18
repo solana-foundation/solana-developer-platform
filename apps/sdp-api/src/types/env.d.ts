@@ -223,6 +223,9 @@ export interface Env {
   // Private Channels (SPC) feature gate — API routes + deposit/withdrawal cron.
   PRIVATE_CHANNELS_ENABLED?: string;
 
+  // Helius Rings feature gate — devnet-only shielded wallet API routes.
+  HELIUS_RINGS_ENABLED?: string;
+
   // Compliance providers
   RANGE_API_KEY?: string;
   RANGE_API_BASE_URL?: string;
