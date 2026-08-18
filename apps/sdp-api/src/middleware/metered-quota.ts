@@ -61,7 +61,7 @@ export async function enforceMeteredQuota(
         {
           event: "sdp_api_metered_quota",
           quota: config.name,
-          decision: error.code === "RATE_LIMITED" ? "rejected" : "failed_closed",
+          decision: error.code === "RATE_LIMITED" ? "rejected" : "store_unavailable",
           organization_id: auth.organizationId,
           actor,
           auth_type: auth.authType,

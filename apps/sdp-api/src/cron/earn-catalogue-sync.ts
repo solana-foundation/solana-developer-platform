@@ -137,6 +137,30 @@ async function syncProviderCatalogue(
   let upsertFailed = false;
 
   for (const snapshot of snapshots) {
+    // MAINNET INSTRUMENTS NEVER ENTER A NON-PRODUCTION CATALOGUE.
+    //
+    // Provider-neutral and deliberately enforced HERE, at the one writer of
+    // `earn_strategies`, rather than trusted to each client: a sandbox row
+    // naming a mainnet vault is an instrument no devnet wallet can reach, and
+    // the whole point of a sandbox catalogue is that an integrator can act on
+    // it. Kamino used to be catalogued this way on purpose (we believed it had
+    // no devnet deployment; it does — see providers/kamino/devnet.ts), and the
+    // rows were permanently `fundable: false`.
+    //
+    // This is a persistence gate, not a presentation one. `fundable` still
+    // describes a row a caller CAN see; this stops the row existing at all.
+    if (snapshot.hostCluster === "mainnet-beta" && ctx.environment !== "production") {
+      getLogger().error(
+        {
+          ...logContext,
+          provider_reference: snapshot.providerReference,
+          host_cluster: snapshot.hostCluster,
+        },
+        "syncEarnCatalogue: refused a mainnet instrument in a non-production environment"
+      );
+      continue;
+    }
+
     // A snapshot outside the provider's declared support envelope is provider
     // drift (an unvetted deposit mint or an undeclared strategy shape) — flag
     // it and keep it out of the catalogue rather than persist it.
@@ -169,10 +193,12 @@ async function syncProviderCatalogue(
         liquidityTerm: snapshot.liquidityTerm,
         redemptionDelayDays: snapshot.redemptionDelayDays ?? null,
         riskMetadata: snapshot.riskMetadata ?? {},
-        // Taken from the PROVIDER, never derived from `ctx.environment`. A
-        // mainnet-only provider is catalogued into both environments, so
-        // assuming the environment's cluster here is exactly the silent lie
-        // this column exists to prevent (migration 0057).
+        // Taken from the PROVIDER, never derived from `ctx.environment` —
+        // assuming the environment's cluster here is the silent lie this column
+        // exists to prevent (migration 0057). Still true even though the guard
+        // above now refuses mainnet instruments outside production: that guard
+        // REJECTS a mismatch, which is only possible because the provider
+        // stated the cluster in the first place.
         hostCluster: snapshot.hostCluster,
         // Providers report no status; being listed is what makes a strategy
         // depositable, so the sync submits `active` for anything a provider

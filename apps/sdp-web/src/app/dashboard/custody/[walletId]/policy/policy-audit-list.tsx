@@ -338,8 +338,7 @@ function MobileAuditValue({ label, value }: { label: string; value: string }) {
 
 /**
  * Formats the operation type without the module prefix the Module column
- * already shows. Types that do not start with their family (e.g.
- * `custody_signer_check` under `raw_sign`) render in full.
+ * already shows. Types that do not start with their family render in full.
  *
  * @param evaluation - The audit row's evaluation.
  * @returns The display label for the Operation column.

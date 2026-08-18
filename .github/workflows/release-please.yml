@@ -183,6 +183,13 @@ jobs:
           "${{ needs.publish-release.outputs.release_tag }}"
           "${{ needs.publish-release.outputs.release_sha }}"
 
+      # vercel build shells out to the repo's package manager. Without pnpm on the
+      # runner it fails with "spawn pnpm ENOENT" before any build work happens.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          version: 10.16.0
+
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:

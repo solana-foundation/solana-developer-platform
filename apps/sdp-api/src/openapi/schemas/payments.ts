@@ -5,6 +5,7 @@ import {
   RAMP_FIAT_CURRENCIES,
   RAMP_PROVIDERS,
   RAMPS_MEMO_LIMITS,
+  WALLET_OPERATION_FAMILIES,
 } from "@sdp/types";
 import {
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
@@ -73,9 +74,9 @@ export const policyRuleSchema = withOpenApi(updateWalletPolicySchemaBase.shape.r
   description:
     "Wallet control profile rule. Supported kinds include operation_family, operation_type, asset, destination, amount, approval, and always.",
   example: {
-    id: "deny-raw-signing",
+    id: "deny-issuance",
     kind: "operation_family",
-    family: "raw_sign",
+    family: "issuance",
     action: "deny",
   },
 });
@@ -120,15 +121,7 @@ const policyDecisionSchema = z.enum([
   "not_evaluated",
 ]);
 
-const walletOperationFamilySchema = z.enum([
-  "transfer",
-  "payment",
-  "ramp",
-  "issuance",
-  "raw_sign",
-  "program",
-  "provider_admin",
-]);
+const walletOperationFamilySchema = z.enum(WALLET_OPERATION_FAMILIES);
 
 const walletOperationStatusSchema = z.enum([
   "created",
@@ -150,11 +143,13 @@ const walletPolicyAuditEntrySchema = z
       description: "Policy evaluation record ID.",
       example: "peval_example",
     }),
-    operationFamily: walletOperationFamilySchema.openapi({
-      description: "Normalized wallet operation family.",
+    operationFamily: z.string().openapi({
+      description:
+        "Normalized wallet operation family. Historical rows may carry retired families.",
+      example: "payment",
     }),
     operationType: z.string().openapi({
-      description: "Normalized wallet operation type.",
+      description: "Normalized wallet operation type. Historical rows may carry retired types.",
       example: "payment_transfer_execute",
     }),
     asset: z.string().nullable().openapi({
@@ -276,7 +271,7 @@ const publicPolicyEvaluationContextSchema = z
       apiKeyId: z.string().nullable(),
       actor: z.record(z.string(), z.unknown()).nullable(),
       source: z.string(),
-      operationFamily: walletOperationFamilySchema,
+      operationFamily: z.string(),
       operationType: z.string(),
       asset: z.string().nullable(),
       amount: z.string().nullable(),
@@ -298,7 +293,7 @@ export const walletPolicyEvaluationDetailSchema = z
     id: z.string().openapi({ description: "Policy evaluation ID." }),
     walletOperation: z.object({
       id: z.string(),
-      operationFamily: walletOperationFamilySchema,
+      operationFamily: z.string(),
       operationType: z.string(),
       asset: z.string().nullable(),
       amount: z.string().nullable(),
@@ -416,9 +411,9 @@ export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
         "Rules for the new immutable wallet control profile revision, activated after validation.",
       example: [
         {
-          id: "deny-raw-signing",
+          id: "deny-issuance",
           kind: "operation_family",
-          family: "raw_sign",
+          family: "issuance",
           action: "deny",
         },
       ],

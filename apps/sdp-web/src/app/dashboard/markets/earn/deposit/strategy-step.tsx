@@ -92,7 +92,7 @@ function StrategyTableRow({
   strategy,
 }: {
   onSelect: () => void;
-  portfolioProvider: EarnProviderId;
+  portfolioProvider: EarnProviderId | undefined;
   selected: boolean;
   showTokenColumn: boolean;
   strategy: EarnStrategy;
@@ -260,7 +260,7 @@ export function StrategyStep({
   hasError: boolean;
   isLoading: boolean;
   onSelect: (strategyId: string) => void;
-  portfolioProvider: EarnProviderId;
+  portfolioProvider: EarnProviderId | undefined;
   selectedStrategyId: string | null;
   strategies: readonly EarnStrategy[];
   tokens: readonly EarnPortfolioToken[];
