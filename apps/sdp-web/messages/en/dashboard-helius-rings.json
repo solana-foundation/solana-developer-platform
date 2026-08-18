@@ -34,9 +34,7 @@
       "creating": "Provisioning…",
       "createPendingNotice": "The wallet was reserved but its shielded identity is awaiting the external gateway integration. It will stay Pending until that lands.",
       "createFailed": "The wallet could not be created. Check the details and try again.",
-      "noCustodyWallets": "No custody wallets available. Create a wallet under Wallets first.",
-      "testOperation": "Prepare test operation",
-      "testOperationHint": "Files a shield operation through policy; it fails at the gateway seam until the integration lands."
+      "noCustodyWallets": "No custody wallets available. Create a wallet under Wallets first."
     },
     "activity": {
       "title": "Activity",
@@ -67,6 +65,48 @@
     "errors": {
       "loadFailed": "Could not load Helius Rings data. Retry shortly.",
       "gatewayUnavailable": "External integration pending"
+    },
+    "composer": {
+      "title": "New operation",
+      "description": "Compose a shielded operation, review it, then confirm. Until the live gateway lands, operations advance through policy and fail honestly at the integration seam.",
+      "wallet": "Private wallet",
+      "walletPlaceholder": "Select a private wallet",
+      "operation": "Operation",
+      "asset": "Asset",
+      "amount": "Amount (base units)",
+      "baseUnits": "base units",
+      "recipient": "Recipient address",
+      "recipientAnonymous": "Recipient address (undisclosed on-chain)",
+      "recipientPlaceholder": "Solana address",
+      "zone": "Destination zone",
+      "zonePlaceholder": "Optional",
+      "unlockAt": "Unlocks at",
+      "beneficiary": "Beneficiary address",
+      "review": "Review",
+      "back": "Back",
+      "confirm": "Confirm",
+      "preparing": "Preparing…",
+      "newOperation": "New operation",
+      "prepareFailed": "The operation could not be prepared. Check the details and try again.",
+      "summaryWallet": "Wallet",
+      "summaryOperation": "Operation",
+      "summaryAmount": "Amount",
+      "summaryRecipient": "Recipient",
+      "summaryZone": "Zone",
+      "summaryUnlockAt": "Unlocks at",
+      "summaryBeneficiary": "Beneficiary",
+      "anonymousWarning": "I understand the counterparty is not disclosed on-chain. Anonymous transfers are subject to the same wallet policy and approval rules as any other transfer — they are not lower-risk."
+    },
+    "zones": {
+      "title": "Zones",
+      "description": "Named destinations inside a wallet. Zone metadata is SDP-owned and works today; on-chain effects wait on the gateway.",
+      "empty": "No zones yet.",
+      "nameLabel": "Zone name",
+      "namePlaceholder": "Payroll",
+      "kindLabel": "Kind",
+      "kind_treasury": "Treasury",
+      "kind_public": "Public",
+      "create": "Create zone"
     }
   }
 }

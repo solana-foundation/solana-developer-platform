@@ -22,13 +22,15 @@ import {
   fetchRingsHealth,
   fetchRingsOperations,
   fetchRingsWallets,
-  prepareRingsTestOperation,
   type RingsHealth,
   type RingsHealthStatus,
   type RingsOperationState,
   type RingsOperationSummary,
   type RingsWallet,
+  type RingsZone,
 } from "./helius-rings.data";
+import { OperationComposer } from "./operation-composer";
+import { ZonesCard } from "./zones-card";
 
 interface CustodyWalletOption {
   walletId: string;
@@ -72,6 +74,7 @@ export function HeliusRingsWorkspace({
   const [health, setHealth] = useState<RingsHealth | null>(null);
   const [wallets, setWallets] = useState<RingsWallet[]>([]);
   const [operations, setOperations] = useState<RingsOperationSummary[]>([]);
+  const [zones, setZones] = useState<RingsZone[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [walletName, setWalletName] = useState("");
@@ -120,14 +123,6 @@ export function HeliusRingsWorkspace({
     setWalletName("");
     await refresh();
   }, [selectedCustodyWallet, walletName, refresh]);
-
-  const handleTestOperation = useCallback(
-    async (walletId: string) => {
-      await prepareRingsTestOperation({ walletId });
-      await refresh();
-    },
-    [refresh]
-  );
 
   const custodyLabel = useMemo(() => {
     const byId = new Map(custodyWallets.map((wallet) => [wallet.walletId, wallet]));
@@ -188,7 +183,6 @@ export function HeliusRingsWorkspace({
                   <TableHead>{t("DashboardHeliusRings.wallets.backingWallet")}</TableHead>
                   <TableHead>{t("DashboardHeliusRings.wallets.shieldedAddress")}</TableHead>
                   <TableHead>{t("DashboardHeliusRings.activity.state")}</TableHead>
-                  <TableHead />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -204,16 +198,6 @@ export function HeliusRingsWorkspace({
                       <Badge variant={WALLET_BADGE[wallet.status]}>
                         {t(`DashboardHeliusRings.wallets.status_${wallet.status}`)}
                       </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        title={t("DashboardHeliusRings.wallets.testOperationHint")}
-                        onClick={() => void handleTestOperation(wallet.id)}
-                      >
-                        {t("DashboardHeliusRings.wallets.testOperation")}
-                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -276,6 +260,10 @@ export function HeliusRingsWorkspace({
           )}
         </CardContent>
       </Card>
+
+      <OperationComposer wallets={wallets} zones={zones} onPrepared={refresh} />
+
+      <ZonesCard wallets={wallets} onZonesChanged={setZones} />
 
       <Card>
         <CardHeader>
