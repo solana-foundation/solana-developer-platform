@@ -107,6 +107,14 @@
       "kind_treasury": "Treasury",
       "kind_public": "Public",
       "create": "Create zone"
+    },
+    "detail": {
+      "title": "Operation detail",
+      "operationId": "Operation",
+      "timeline": "Timeline",
+      "timelineEmpty": "No events recorded.",
+      "retryable": "A retry can succeed.",
+      "notRetryable": "Not retryable."
     }
   }
 }
