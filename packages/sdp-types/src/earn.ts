@@ -122,12 +122,15 @@ export interface EarnStrategy {
    * The cluster the strategy's INSTRUMENT actually lives on — not the cluster
    * of the environment that catalogued it, and the two can differ.
    *
-   * Kamino's K-Vaults are deployed on mainnet only (`/kvaults/*` takes no env
-   * parameter and there is no devnet deployment), yet SDP catalogues them in
-   * both environments so sandbox integrators can browse the real shelf. Such a
-   * row names a live mainnet vault and a mainnet mint while sitting in a
-   * sandbox catalogue: everything about it is true, and none of it is fundable
-   * from devnet.
+   * A provider may front instruments that do not exist on every cluster, so a
+   * row can name a live mainnet vault while sitting in a sandbox catalogue:
+   * everything about it true, none of it fundable from devnet. Kamino was the
+   * original example and no longer is — it has a devnet deployment, so each
+   * environment now catalogues its own cluster, and the sync refuses to store a
+   * mainnet instrument outside production. The column stays because the
+   * mismatch is structural, not Kamino-shaped: rows written before that guard
+   * survive until a delist pass, and the next single-cluster provider brings it
+   * straight back.
    *
    * `status: "active"` cannot express that — it is the operator's stop switch,
    * and reusing it here would both lie about why and collide with the

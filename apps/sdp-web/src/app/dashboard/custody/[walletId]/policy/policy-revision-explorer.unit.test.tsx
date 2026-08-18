@@ -157,7 +157,7 @@ describe("policy revision explorer", () => {
               id: "rule-type",
               kind: "operation_type",
               action: "allow",
-              operationType: "payment_transfer",
+              operationType: "payment_transfer_execute",
             },
           ],
         },

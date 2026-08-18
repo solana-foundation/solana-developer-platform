@@ -1,0 +1,115 @@
+# Kora configuration for the local/CI Kora-on-Surfpool harness.
+# Mirrors the deployed devnet validation policy so tests exercise the same
+# constraints; auth, cache, and metrics are trimmed for local use.
+
+[kora]
+rate_limit = 100
+
+[kora.auth]
+# No auth for local development
+
+[kora.cache]
+enabled = true
+url = "redis://redis:6379"
+default_ttl = 300
+account_ttl = 60
+
+[kora.enabled_methods]
+liveness = true
+estimate_transaction_fee = true
+get_supported_tokens = true
+sign_transaction = true
+sign_and_send_transaction = true
+transfer_transaction = true
+get_blockhash = true
+get_config = true
+get_payer_signer = true
+
+[validation]
+max_allowed_lamports = 9900000  # 0.0099 SOL max per tx: a real token deploy funds ~9.08M lamports
+                                # of rent, and the platform-side ceiling (network fee + this value)
+                                # must stay under the 10M-lamport per-transaction sponsorship budget
+max_signatures = 10
+price_source = "Mock"
+allow_durable_transactions = false
+
+allowed_programs = [
+    "11111111111111111111111111111111",              # System Program
+    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",   # Token Program (legacy)
+    "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",  # Token-2022 Program
+    "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",  # Associated Token Program
+    "TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP",   # Token-ACL (sRFC-37)
+    "GATEzzqxhJnsWF6vHRsgtixxSB8PaQdcqGEVTEHWiULz",  # ABL / GATE Program
+    "SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2",   # MagicBlock private transfer program
+    "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh",   # MagicBlock delegation program
+    "De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44",   # Subscriptions (recurring payments) program
+    "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",   # Memo Program
+    "AddressLookupTab1e1111111111111111111111111",   # Address Lookup Table
+    "ComputeBudget111111111111111111111111111111",   # Compute Budget
+]
+
+# Native SOL (wrapped) is required for fee payment
+allowed_tokens = ["So11111111111111111111111111111111111111112"]
+
+# SPL tokens that can be used to pay fees (empty for SOL-only)
+allowed_spl_paid_tokens = []
+
+disallowed_accounts = []
+
+[validation.fee_payer_policy]
+
+[validation.fee_payer_policy.system]
+# The fee payer funds rent for token deploys (System Transfer / CreateAccount).
+# Outflow is bounded by max_allowed_lamports per transaction and the platform's
+# sponsorship budgets.
+allow_transfer = true
+allow_assign = false
+allow_create_account = true
+allow_allocate = false
+
+[validation.fee_payer_policy.system.nonce]
+allow_initialize = false
+allow_advance = false
+allow_authorize = false
+allow_withdraw = false
+
+[validation.fee_payer_policy.spl_token]
+allow_transfer = false
+allow_burn = false
+allow_close_account = false
+allow_approve = false
+allow_revoke = false
+allow_set_authority = false
+allow_mint_to = false
+allow_initialize_mint = false
+allow_initialize_account = false
+allow_initialize_multisig = false
+allow_freeze_account = false
+allow_thaw_account = false
+
+[validation.fee_payer_policy.token_2022]
+allow_transfer = false
+allow_burn = false
+allow_close_account = false
+allow_approve = false
+allow_revoke = false
+allow_set_authority = false
+allow_mint_to = false
+allow_initialize_mint = false
+allow_initialize_account = false
+allow_initialize_multisig = false
+allow_freeze_account = false
+allow_thaw_account = false
+
+[validation.price]
+type = "free"
+
+[validation.token2022]
+allow_confidential_transfers = true
+blocked_mint_extensions = []
+blocked_account_extensions = []
+allow_token_metadata_instructions = true
+allow_token_group_instructions = true
+
+[metrics]
+enabled = false
