@@ -56,12 +56,20 @@ const CONNECTION_PAGE_SIZE = 50;
  * means "you have none and are running on SDP's", which is a claim we cannot
  * make from a failed request.
  */
-async function getByokConnections(provider: string) {
+async function getByokConnections(provider: string, canManage: boolean) {
   // `default` is SDP's own rail and has no tenant credential; every other RPC
   // provider does. Checked here rather than importing @sdp/rpc, which the web
   // app deliberately does not depend on.
   if (provider === "default" || !ORGANIZATION_RPC_PROVIDERS.includes(provider as never)) {
     return undefined;
+  }
+
+  // The internal routes are org:admin for reads as well as writes, so asking on
+  // a member's behalf returns 403 every time and the section told them to
+  // reload something that was never going to load. Not permitted is its own
+  // answer, not a failed request.
+  if (!canManage) {
+    return "restricted" as const;
   }
 
   try {
@@ -160,7 +168,10 @@ export default async function IntegrationDetailPage({
               isEnabledInDeployment:
                 availability.providers.rpc[provider as OrganizationRpcProvider]?.enabled ?? false,
               organizationId,
-              byokConnections: await getByokConnections(provider),
+              byokConnections: await getByokConnections(
+                provider,
+                dashboardAccess.capabilities.canManageOrgSettings
+              ),
             }
           : undefined
       }

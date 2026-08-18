@@ -26,7 +26,6 @@ import {
   walletOperationActorFromAuth,
 } from "@/services/policy/enforcement.service";
 import { FeePaymentError } from "@/services/ports";
-import { createTenantRpcConnectionLookup } from "@/services/rpc-connection-lookup";
 import { createOrgSigner } from "@/services/solana";
 import { createAuthenticatedSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { AppContext } from "../context";
@@ -137,9 +136,11 @@ export const signerCheck = async (c: AppContext) => {
       organizationId: auth.organizationId,
       authProjectId: auth.projectId ?? null,
       requestedProjectId: null,
-      // Signer check reads chain state on the organization's behalf, so it
-      // belongs on the organization's own connection when there is one.
-      connections: createTenantRpcConnectionLookup(c.env, getDb(c.env)),
+      // Deliberately no tenant connection lookup: signer check stays on the
+      // platform rail. It is API-key reachable and organization-wide, so
+      // routing it through the fail-closed resolver would let one mistyped key
+      // on an unrelated surface take this endpoint down for every caller. The
+      // blast radius of a bad tenant credential belongs to the RPC relay.
     });
 
     const rpc = createRpc(c.env, {

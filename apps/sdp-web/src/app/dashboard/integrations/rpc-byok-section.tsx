@@ -115,8 +115,11 @@ export function RpcByokSection({
   provider,
 }: {
   canManage: boolean;
-  /** `null` when the read failed: unknown is not the same as none. */
-  connections: SafeRpcConnection[] | null;
+  /**
+   * `null` when the read failed and `"restricted"` when the viewer may not make
+   * it at all. Three different answers: unknown, not allowed, and none.
+   */
+  connections: SafeRpcConnection[] | null | "restricted";
   provider: string;
 }) {
   const t = useTranslations();
@@ -190,7 +193,12 @@ export function RpcByokSection({
         {t("Shared.integrations.rpcByokDescription")}
       </p>
 
-      {connections === null ? (
+      {connections === "restricted" ? (
+        // Not a failure, so not a warning and no invitation to retry.
+        <p className="text-sm leading-6 text-tertiary">
+          {t("Shared.integrations.rpcByokRestricted")}
+        </p>
+      ) : connections === null ? (
         <p className="text-sm leading-6 text-warning">
           {t("Shared.integrations.rpcByokUnavailable")}
         </p>

@@ -200,4 +200,15 @@ describe("RpcByokSection", () => {
     expect(screen.getByText(/could not be loaded/)).toBeTruthy();
     expect(screen.queryByText(/running on SDP's/)).toBeNull();
   });
+
+  it("tells a member the list is admin-only instead of asking them to reload", () => {
+    // The internal routes are org:admin for reads too, so a member's request
+    // was always going to 403. Rendering that as a failed read told everyone
+    // below admin to reload a page that could never load for them.
+    renderSection({ canManage: false, connections: "restricted" });
+
+    expect(screen.getByText(/Only organization administrators can see/)).toBeTruthy();
+    expect(screen.queryByText(/could not be loaded/)).toBeNull();
+    expect(screen.queryByText(/running on SDP's/)).toBeNull();
+  });
 });

@@ -28,7 +28,7 @@ export interface RpcConnectionContext {
    * Tenant-owned connections for this provider; absent for SDP's own rail,
    * `null` when the read failed and we must not claim there are none.
    */
-  byokConnections?: SafeRpcConnection[] | null;
+  byokConnections?: SafeRpcConnection[] | null | "restricted";
 }
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;

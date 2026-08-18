@@ -42,12 +42,27 @@ function callSitesOf(name: string): Array<{ file: string; passesLookup: boolean 
   return sites;
 }
 
+/**
+ * Call sites that stay on the platform rail on purpose.
+ *
+ * A tenant connection fails closed, so anything given the lookup inherits the
+ * blast radius of one mistyped key. `POST /v1/wallets/signer-check` is
+ * API-key reachable and organization-wide, and it reads chain state for a
+ * platform operation rather than serving the organization's own RPC traffic —
+ * an admin's typo on the integrations page must not take it down for every
+ * caller. Adding a file here is a deliberate decision, not a way past a
+ * failing test.
+ */
+const PLATFORM_RAIL_CALL_SITES = new Set(["routes/custody/handlers/signer-check.ts"]);
+
 describe("BYOK parity with organization RPC selection", () => {
-  it("passes the tenant lookup at every resolveRpcTarget call site", () => {
+  it("passes the tenant lookup at every resolveRpcTarget call site that should have it", () => {
     const sites = callSitesOf("resolveRpcTarget");
 
     expect(sites.length).toBeGreaterThan(0);
-    const missing = sites.filter((site) => !site.passesLookup).map((site) => site.file);
+    const missing = sites
+      .filter((site) => !site.passesLookup && !PLATFORM_RAIL_CALL_SITES.has(site.file))
+      .map((site) => site.file);
     expect(missing).toEqual([]);
   });
 
@@ -60,10 +75,24 @@ describe("BYOK parity with organization RPC selection", () => {
     expect(sites.filter((site) => !site.passesLookup).map((site) => site.file)).toEqual([]);
   });
 
-  it("covers the relay, the connectivity test and the signer check", () => {
-    const files = new Set(callSitesOf("resolveRpcTarget").map((site) => site.file));
+  it("covers the relay and the connectivity test", () => {
+    const files = new Set(
+      callSitesOf("resolveRpcTarget")
+        .filter((site) => site.passesLookup)
+        .map((site) => site.file)
+    );
 
     expect(files).toContain("routes/rpc/handlers.ts");
-    expect(files).toContain("routes/custody/handlers/signer-check.ts");
+  });
+
+  it("keeps the signer check off the tenant rail", () => {
+    // The decision, asserted rather than described: if someone wires the lookup
+    // back in, this fails and the exclusion above has to be revisited with it.
+    const signerCheck = callSitesOf("resolveRpcTarget").filter(
+      (site) => site.file === "routes/custody/handlers/signer-check.ts"
+    );
+
+    expect(signerCheck.length).toBeGreaterThan(0);
+    expect(signerCheck.every((site) => !site.passesLookup)).toBe(true);
   });
 });

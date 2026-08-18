@@ -397,7 +397,8 @@
     "rpcByokSave": "Save connection",
     "rpcByokShowKey": "Reveal key",
     "rpcByokHideKey": "Hide key",
-    "rpcByokUnavailable": "Your own credentials could not be loaded just now. Reload before assuming there are none."
+    "rpcByokUnavailable": "Your own credentials could not be loaded just now. Reload before assuming there are none.",
+    "rpcByokRestricted": "Only organization administrators can see the credentials stored here."
   },
   "notifications": {
     "ariaLabel": "Notifications",

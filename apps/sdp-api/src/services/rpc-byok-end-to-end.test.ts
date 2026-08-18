@@ -5,6 +5,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import type { KVStoreSet } from "@/runtime/kv";
 import { createCredentialSecretStore } from "@/services/credential-secret-store";
+import {
+  activateRpcConnection,
+  deactivateRpcConnection,
+  submitRpcConnection,
+} from "@/services/rpc-connection.service";
 import { createTenantRpcConnectionLookup } from "@/services/rpc-connection-lookup";
 import { RpcConnectionStore } from "@/services/stores/rpc-connection.store";
 import { env } from "@/test/helpers/env";
@@ -12,9 +17,16 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 
 /**
- * The whole BYOK chain against real Postgres and real encryption: a tenant key
- * is written through CredentialSecretStore, bound to a connection, activated,
- * and then actually used by the relay to reach the tenant's own endpoint.
+ * The whole BYOK chain against real Postgres and real encryption: submit,
+ * activate, resolve.
+ *
+ * Activation and deactivation go through `rpc-connection.service`, not through
+ * the store. That distinction is the point of this file. An earlier version
+ * seeded the credential row `active` and called `RpcConnectionStore` directly,
+ * which meant it passed while `insertCredential` wrote `pending` and nothing
+ * promoted it -- the relay's effective lookup never matched in production and
+ * the organization's traffic quietly stayed on SDP's keys. A test that seeds
+ * the state under test proves nothing about the code that produces it.
  *
  * Unit tests cover each link with stubs; this is the one that answers "will my
  * own credentials work".
@@ -39,6 +51,48 @@ let server: Server;
 let seenKeys: string[] = [];
 let endpointBase = "";
 let originalEncryptionKey: string | undefined;
+let originalSecretBackend: string | undefined;
+
+/**
+ * The slice of the Hono context the connection service reads: `getAuth` looks
+ * for a `clerk` session, and scope resolution looks for `projectId`. Building
+ * the real middleware stack here would test the middleware, not the chain.
+ */
+function serviceContext() {
+  const values: Record<string, unknown> = {
+    clerk: {
+      userId: USER_ID,
+      organizationId: ORG_ID,
+      role: "admin",
+      permissions: ["org:read", "org:write", "org:admin"],
+    },
+    projectId: null,
+  };
+  return {
+    env: appEnv,
+    get: (key: string) => values[key],
+  } as unknown as Parameters<typeof activateRpcConnection>[0];
+}
+
+async function credentialStatus(): Promise<string | undefined> {
+  const row = await getDb(appEnv)
+    .prepare("SELECT status FROM provider_credentials WHERE id = ?")
+    .bind(CREDENTIAL_ID)
+    .first<{ status: string }>();
+  return row?.status;
+}
+
+function relayInput() {
+  return {
+    env: { ...appEnv, SOLANA_NETWORK: "devnet", SOLANA_RPC_URL: "https://platform.example" },
+    kv,
+    db: getDb(appEnv),
+    organizationId: ORG_ID,
+    authProjectId: null,
+    requestedProjectId: null,
+    connections: createTenantRpcConnectionLookup(appEnv, getDb(appEnv)),
+  } as Parameters<typeof resolveRpcTarget>[0];
+}
 
 beforeAll(async () => {
   await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -46,6 +100,11 @@ beforeAll(async () => {
   // key so the encrypted_db backend is exercised for real.
   originalEncryptionKey = appEnv.CUSTODY_ENCRYPTION_KEY;
   appEnv.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
+  // The service resolves the backend from env rather than taking one, and the
+  // test env has no GCP project. Pinning it keeps submission on the same
+  // encrypted_db path the rest of this file writes through.
+  originalSecretBackend = appEnv.CREDENTIAL_SECRET_STORE_BACKEND;
+  appEnv.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
 
   // Stands in for the vendor: records the key it was reached with.
   server = createServer((req, res) => {
@@ -91,7 +150,7 @@ beforeAll(async () => {
          storage_backend, secret_ref, secret_version_ref, encrypted_secret_payload,
          status, created_by
        ) VALUES (?, ?, NULL, 'helius', 'Tenant Helius', 'organization', 'stored',
-                 ?, ?, ?, ?, 'active', ?)`
+                 ?, ?, ?, ?, 'pending', ?)`
     )
     .bind(
       CREDENTIAL_ID,
@@ -120,44 +179,54 @@ beforeAll(async () => {
 
 afterAll(async () => {
   appEnv.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
+  appEnv.CREDENTIAL_SECRET_STORE_BACKEND =
+    originalSecretBackend as typeof appEnv.CREDENTIAL_SECRET_STORE_BACKEND;
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
 });
 
 describe("BYOK end to end", () => {
-  it("does not serve a connection that has not been activated", async () => {
-    // Pending, so it is "configured but not live" -- fail closed, not fallback.
-    await expect(
-      resolveRpcTarget({
-        env: { ...appEnv, SOLANA_NETWORK: "devnet", SOLANA_RPC_URL: "https://platform.example" },
-        kv,
-        db: getDb(appEnv),
-        organizationId: ORG_ID,
-        authProjectId: null,
-        requestedProjectId: null,
-        connections: createTenantRpcConnectionLookup(appEnv, getDb(appEnv)),
-      })
-    ).rejects.toThrow(/not active/i);
+  it("writes the credential pending, so nothing is live on submission alone", async () => {
+    // The endpoint the real form would take: submission validates it but never
+    // fetches it, so a routable vendor host is the honest fixture here.
+    const submitted = await submitRpcConnection(serviceContext(), {
+      provider: "helius",
+      network: "devnet",
+      scope: "organization",
+      credentialLabel: "Submitted only",
+      endpointUrl: "https://devnet.helius-rpc.com",
+      apiKey: "submitted-key-9999",
+    });
+
+    expect(submitted.status).toBe("pending");
+    expect(submitted.providerCredential.status).toBe("pending");
+    // The response must never be able to carry the key back out.
+    expect(JSON.stringify(submitted)).not.toContain("submitted-key-9999");
   });
 
-  it("routes through the tenant's own endpoint and key once activated", async () => {
-    const connections = new RpcConnectionStore(getDb(appEnv));
-    await connections.activateConnection({
-      organizationId: ORG_ID,
-      connectionId: CONNECTION_ID,
-      scopeKeys: ["__organization__"],
+  it("takes the platform rail while a connection is only submitted", async () => {
+    // A draft is not a promise. Failing closed here would 502 the whole
+    // organization over a form somebody opened and walked away from.
+    const target = await resolveRpcTarget(relayInput());
+
+    expect(target.selectionMode).toBe("round_robin_default");
+    expect(target.endpoint).not.toContain(TENANT_KEY);
+  });
+
+  it("promotes the credential and routes through the tenant's own key on activation", async () => {
+    expect(await credentialStatus()).toBe("pending");
+
+    const activated = await activateRpcConnection(serviceContext(), CONNECTION_ID, {
       makeDefault: true,
     });
 
-    const target = await resolveRpcTarget({
-      env: { ...appEnv, SOLANA_NETWORK: "devnet", SOLANA_RPC_URL: "https://platform.example" },
-      kv,
-      db: getDb(appEnv),
-      organizationId: ORG_ID,
-      authProjectId: null,
-      requestedProjectId: null,
-      connections: createTenantRpcConnectionLookup(appEnv, getDb(appEnv)),
-    });
+    expect(activated.status).toBe("active");
+    // The half that was missing: the connection went active while the
+    // credential stayed pending, so the effective lookup never matched.
+    expect(await credentialStatus()).toBe("active");
+    expect(activated.providerCredential.status).toBe("active");
+
+    const target = await resolveRpcTarget(relayInput());
 
     expect(target.selectionMode).toBe("organization_connection");
     expect(target.connectionId).toBe(CONNECTION_ID);
@@ -177,23 +246,33 @@ describe("BYOK end to end", () => {
     expect(seenKeys).toEqual([TENANT_KEY]);
   });
 
-  it("stops using the tenant key the moment the connection is deactivated", async () => {
-    const connections = new RpcConnectionStore(getDb(appEnv));
-    await connections.deactivateConnection({
+  it("fails closed once a live connection stops passing its check", async () => {
+    // Not a draft: this organization's traffic was on its own key, so moving it
+    // back onto SDP's without saying so is the thing being prevented.
+    await new RpcConnectionStore(getDb(appEnv)).recordCheckFailure({
       organizationId: ORG_ID,
       connectionId: CONNECTION_ID,
       scopeKeys: ["__organization__"],
+      failureCode: "provider_rejected",
     });
 
-    const target = await resolveRpcTarget({
-      env: { ...appEnv, SOLANA_NETWORK: "devnet", SOLANA_RPC_URL: "https://platform.example" },
-      kv,
-      db: getDb(appEnv),
-      organizationId: ORG_ID,
-      authProjectId: null,
-      requestedProjectId: null,
-      connections: createTenantRpcConnectionLookup(appEnv, getDb(appEnv)),
+    await expect(resolveRpcTarget(relayInput())).rejects.toThrow(/not active/i);
+  });
+
+  it("recovers on re-activation rather than requiring a new connection", async () => {
+    const reactivated = await activateRpcConnection(serviceContext(), CONNECTION_ID, {
+      makeDefault: true,
     });
+
+    expect(reactivated.status).toBe("active");
+    const target = await resolveRpcTarget(relayInput());
+    expect(target.connectionId).toBe(CONNECTION_ID);
+  });
+
+  it("stops using the tenant key the moment the connection is deactivated", async () => {
+    await deactivateRpcConnection(serviceContext(), CONNECTION_ID);
+
+    const target = await resolveRpcTarget(relayInput());
 
     // Deactivated is a deliberate withdrawal, so the platform rail is correct
     // here -- unlike a broken connection, which fails closed.
