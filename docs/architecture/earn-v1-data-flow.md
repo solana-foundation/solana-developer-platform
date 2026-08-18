@@ -166,8 +166,7 @@ moved uniqueness onto the provider wallet itself — one link row per
 `(provider, provider_wallet_ref)` platform-wide), the withdrawal ledger
 (`earn_program_withdrawals`, migration `0055`) with its status machine in
 `services/earn-withdrawal-ledger.service.ts`, and the catalogue-sync cron
-(`cron/earn-catalogue-sync.ts`) + dev seed (`db:seed:earn` →
-`scripts/seed-earn-demo.ts`).
+(`cron/earn-catalogue-sync.ts`).
 
 ## Ground — the first live provider (portfolio-wallet flow)
 
