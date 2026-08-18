@@ -13,6 +13,9 @@ interface ValidatedHandler {
 const HANDLER_DECLARATION =
   /(?:export const (\w+) = async|export async function (\w+))\s*\(\s*\n?\s*c:\s*(ValidatedBodyContext<typeof (\w+)>|ValidatedContext<\{([^}]+)\}>)/g;
 
+const INLINE_HANDLER =
+  /(?<!= )async \(\s*\n?\s*c:\s*(?:ValidatedBodyContext<typeof (\w+)>|ValidatedContext<\{([^}]+)\}>)/g;
+
 const REGISTRATION_METHOD = /\.(?:get|post|patch|put|delete|all)\(/g;
 
 function sourceFiles(directory: string): string[] {
@@ -49,27 +52,84 @@ function requiredValidator(target: string, schema: string): string {
   }
 }
 
+/**
+ * Derives the required `validate*` middleware calls from a handler's
+ * `ValidatedBodyContext`/`ValidatedContext` annotation match groups.
+ *
+ * @param bodySchema - The schema name from a `ValidatedBodyContext<typeof X>` annotation.
+ * @param targets - The `target: typeof schema` list from a `ValidatedContext<{...}>` annotation.
+ * @returns The `validate*(schema` prefixes the registration chain must contain.
+ */
+function annotationValidators(
+  bodySchema: string | undefined,
+  targets: string | undefined
+): string[] {
+  const validators: string[] = [];
+  if (bodySchema) {
+    validators.push(requiredValidator("json", bodySchema));
+  }
+  if (targets) {
+    for (const entry of targets.split(";")) {
+      const pair = entry.match(/(\w+):\s*typeof (\w+)/);
+      if (pair) {
+        validators.push(requiredValidator(pair[1], pair[2]));
+      }
+    }
+  }
+  return validators;
+}
+
 function collectValidatedHandlers(): ValidatedHandler[] {
   const handlers: ValidatedHandler[] = [];
   for (const file of sourceFiles(routesRoot)) {
     const source = readFileSync(file, "utf8");
     for (const match of source.matchAll(HANDLER_DECLARATION)) {
       const handler = match[1] ?? match[2];
-      const validators: string[] = [];
-      if (match[4]) {
-        validators.push(requiredValidator("json", match[4]));
-      }
-      if (match[5]) {
-        for (const entry of match[5].split(";")) {
-          const pair = entry.match(/(\w+):\s*typeof (\w+)/);
-          if (pair) {
-            validators.push(requiredValidator(pair[1], pair[2]));
-          }
-        }
-      }
+      const validators = annotationValidators(match[4], match[5]);
       if (validators.length > 0) {
         handlers.push({ file: path.relative(routesRoot, file), handler, validators });
       }
+    }
+  }
+  return handlers;
+}
+
+interface InlineValidatedHandler {
+  file: string;
+  line: number;
+  validators: string[];
+  chain: string | null;
+}
+
+/**
+ * Collects anonymous handlers declared inline inside a route registration —
+ * `async (c: ValidatedBodyContext<...>) => {...}` — which have no exported
+ * name for the registration scan to find. Their validator requirement is
+ * checked against the enclosing registration chain in the same file.
+ *
+ * @returns One entry per inline annotated handler, with the chain slice from
+ * the enclosing registration method up to the handler.
+ */
+function collectInlineHandlers(): InlineValidatedHandler[] {
+  const handlers: InlineValidatedHandler[] = [];
+  for (const file of sourceFiles(routesRoot)) {
+    const source = readFileSync(file, "utf8");
+    for (const match of source.matchAll(INLINE_HANDLER)) {
+      const validators = annotationValidators(match[1], match[2]);
+      if (validators.length === 0) {
+        continue;
+      }
+      const before = source.slice(0, match.index);
+      let lastMethodIndex = -1;
+      for (const method of before.matchAll(REGISTRATION_METHOD)) {
+        lastMethodIndex = method.index;
+      }
+      handlers.push({
+        file: path.relative(routesRoot, file),
+        line: before.split("\n").length,
+        validators,
+        chain: lastMethodIndex >= 0 ? source.slice(lastMethodIndex, match.index) : null,
+      });
     }
   }
   return handlers;
@@ -132,4 +192,20 @@ describe("validated handler wiring", () => {
       }
     }
   });
+
+  const inlineHandlers = collectInlineHandlers();
+
+  it("finds the inline handler inventory", () => {
+    expect(inlineHandlers.length).toBeGreaterThan(1);
+  });
+
+  it.each(inlineHandlers)(
+    "wires the inline handler at $file:$line with its declared validators",
+    ({ file, line, validators, chain }) => {
+      expect(chain, `${file}:${line} must sit inside a route registration`).not.toBeNull();
+      for (const validator of validators) {
+        expect(chain, `${file}:${line} chain must contain ${validator}`).toContain(validator);
+      }
+    }
+  );
 });
