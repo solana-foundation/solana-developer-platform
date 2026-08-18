@@ -41,6 +41,11 @@ export interface OrganizationSettings {
   defaultEnvironment?: "sandbox" | "production";
   webhookSecret?: string;
   allowedIpAddresses?: string[];
+  /**
+   * Pre-enforcement allowlist parked by migration 0055 — never applied, any
+   * shape (predates validation). Re-apply by sending it as `allowedIpAddresses`.
+   */
+  legacyAllowedIpAddresses?: unknown;
   providerOverrides?: OrganizationProviderOverrides;
   customRateLimits?: {
     requestsPerMinute?: number;

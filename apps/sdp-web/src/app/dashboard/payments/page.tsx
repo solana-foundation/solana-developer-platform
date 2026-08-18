@@ -2,6 +2,10 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
+import {
+  dashboardWorkspaceOverviewPanelClassName,
+  dashboardWorkspacePlaygroundPanelClassName,
+} from "@/components/dashboard-workspace-panel";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
@@ -80,16 +84,24 @@ export default async function PaymentsPage() {
 
   return (
     <DashboardWorkspaceTabShell
-      overviewKey="payments-overview-tab"
-      playgroundKey="payments-playground-tab"
-      overview={
-        <PaymentsCommandCenter apiClientPromise={apiClientPromise} organizationId={orgId} />
-      }
-      playground={
-        <Suspense fallback={<ApiPlaygroundShellSkeleton />}>
-          <PaymentsPlaygroundData apiClientPromise={apiClientPromise} trace={trace} />
-        </Suspense>
-      }
+      panels={[
+        {
+          id: "overview",
+          className: dashboardWorkspaceOverviewPanelClassName,
+          content: (
+            <PaymentsCommandCenter apiClientPromise={apiClientPromise} organizationId={orgId} />
+          ),
+        },
+        {
+          id: "playground",
+          className: dashboardWorkspacePlaygroundPanelClassName,
+          content: (
+            <Suspense fallback={<ApiPlaygroundShellSkeleton />}>
+              <PaymentsPlaygroundData apiClientPromise={apiClientPromise} trace={trace} />
+            </Suspense>
+          ),
+        },
+      ]}
     />
   );
 }
