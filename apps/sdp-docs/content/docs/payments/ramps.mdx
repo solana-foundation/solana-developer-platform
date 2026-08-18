@@ -147,11 +147,11 @@ HttpRequest request = HttpRequest.newBuilder()
 
 | Field | Required | Notes |
 | --- | --- | --- |
-| `provider` | yes | One of `moonpay`, `lightspark`, `bvnk`. |
+| `provider` | yes | One of `moonpay`, `lightspark`, `bvnk`, `moneygram`, `coinbase`, `mural`, `stripe`. |
 | `counterpartyId` | yes | An existing Counterparty. Provider-side identity (customer id, payout account) is resolved server-side from it, not passed on the request. |
 | `destinationWallet` (onramp) / `sourceWallet` (offramp) | yes | A custody wallet you control — its `walletId` or its Solana address, resolved against your API key's wallet scope. Same shape for every provider. |
 | `cryptoToken` | yes | Token symbol (`USDC`, `USDT`, `SOL`, …). |
-| `fiatCurrency` | onramp: yes; offramp: conditional | Required for onramp and for Lightspark/BVNK offramp; providers that resolve fiat currency during their own flow can omit it on offramp. |
+| `fiatCurrency` | onramp: yes; offramp: conditional | Required for onramp and for Lightspark/BVNK offramp; providers that resolve fiat currency during their own flow (MoneyGram) can omit it on offramp. |
 | `fiatAmount` (onramp) / `cryptoAmount` (offramp) | yes | Decimal string greater than zero. |
 | `redirectUrl` | no | Where the provider sends the user back after a hosted flow completes. |
 | `rampsMemo` | no | Up to 20 key/value string pairs stored on the resulting transfer for your own correlation. |
@@ -167,6 +167,10 @@ The quote also creates the underlying **Payment Transfer** record for the ramp; 
 | MoonPay | `hosted` | Redirect the user to `quote.hostedUrl`. |
 | Lightspark | `manual_instructions` | Display the funding instructions in `quote.paymentInstructions` (bank or wallet details to send fiat to). |
 | BVNK | `manual_instructions` | Same — display `quote.paymentInstructions`. |
+| MoneyGram | `session_widget` | Mount `quote.widgetUrl` using `quote.sessionToken`. Onramp and offramp both. |
+| Coinbase | `hosted` | Redirect the user to `quote.hostedUrl`. Onramp only; quote creation is sandbox-only today. |
+| Mural | `manual_instructions` | Display `quote.paymentInstructions`. Onramp only. |
+| Stripe | `session_widget` | Mount the session with `quote.clientSecret` and `quote.publishableKey`. Onramp only. |
 
 There is no further SDP endpoint to call after this — the provider owns settlement from here. Watch for the resulting on-chain transfer on the destination wallet via [`GET /v1/payments/transfers?direction=inbound`](/docs/payments/accept-indexing), or watch the provider's own side (dashboard or their webhook) for offramp payout confirmation.
 
