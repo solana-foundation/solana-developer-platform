@@ -3,6 +3,7 @@ import { normalizeOrganizationRole, type OrganizationRole, type Permission } fro
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
+import { isPlausibleEmail } from "@/lib/clerk-token";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
 import { getLogger } from "@/runtime/logger";
@@ -573,7 +574,38 @@ export const inviteMember = async (c: AppContext) => {
   return created(c, response);
 };
 
+/**
+ * The caller's verified email, to match against `invitations.email`. Both
+ * stored copies are consulted because either can hold an unsubstituted
+ * JWT-template placeholder (see clerk-auth.ts).
+ */
+async function resolveActorEmail(c: AppContext, userId: string): Promise<string | null> {
+  const clerkEmail = c.get("clerk")?.email;
+  if (isPlausibleEmail(clerkEmail)) {
+    return clerkEmail.trim().toLowerCase();
+  }
+
+  const row = await getDb(c.env)
+    .prepare(
+      `SELECT u.email AS user_email,
+              (SELECT aui.email
+                 FROM auth_user_identities aui
+                WHERE aui.user_id = u.id AND aui.email IS NOT NULL
+                ORDER BY aui.updated_at DESC NULLS LAST
+                LIMIT 1) AS identity_email
+         FROM users u
+        WHERE u.id = ?`
+    )
+    .bind(userId)
+    .first<{ user_email: string | null; identity_email: string | null }>();
+
+  const email = [row?.user_email, row?.identity_email].find(isPlausibleEmail);
+  return email ? email.trim().toLowerCase() : null;
+}
+
 export const acceptInvitation = async (c: AppContext) => {
+  const { userId: actorUserId } = resolveActor(c);
+
   const body = await c.req.json();
   const parsed = acceptSchema.safeParse(body);
 
@@ -584,6 +616,24 @@ export const acceptInvitation = async (c: AppContext) => {
   }
 
   const { token, name } = parsed.data;
+
+  // An API key has no identity to be the invitee — letting it redeem a token
+  // would let any key holder enrol somebody else or burn their invitation.
+  if (!actorUserId) {
+    throw new AppError(
+      "FORBIDDEN",
+      "An invitation can only be accepted by the invited user, not by an API key"
+    );
+  }
+
+  const actorEmail = await resolveActorEmail(c, actorUserId);
+  if (!actorEmail) {
+    throw new AppError(
+      "FORBIDDEN",
+      "Your account has no verified email address, so no invitation can be matched to it"
+    );
+  }
+
   const tokenHash = await hashString(token);
 
   // Get invitation
@@ -615,62 +665,120 @@ export const acceptInvitation = async (c: AppContext) => {
     throw new AppError("EXPIRED_INVITATION", "Invitation has expired");
   }
 
-  // Claim the invitation and create the membership in one transaction.
-  //
-  // The status check above is only a read, so on its own it leaves a window in
-  // which a concurrent revocation — or a second acceptance — can act on a row
-  // this request still believes is pending. The conditional write below closes
-  // that: exactly one caller flips pending to accepted.
-  //
-  // It has to commit together with the user and membership inserts, though.
-  // Claiming first and failing afterwards would consume the invitation without
-  // producing a membership, and the retry would be rejected as no longer valid
-  // — stranding an invitee holding a token that is still rightfully theirs.
-  await getDb(c.env).transaction(async (tx) => {
-    const claimed = await tx
-      .prepare(
-        `UPDATE invitations
-            SET status = 'accepted', accepted_at = datetime('now')
-          WHERE id = ? AND status = 'pending'`
-      )
-      .bind(invitation.id)
-      .run();
+  // The token proves an invitation was issued, not who is holding it — it
+  // travels by email and the link is forwardable. Anyone else spending it
+  // would enrol the invitee into an organization they never joined.
+  if (invitation.email.trim().toLowerCase() !== actorEmail) {
+    throw new AppError("FORBIDDEN", "This invitation was issued to a different email address");
+  }
 
-    if (claimed === 0) {
-      throw new AppError("INVALID_INVITATION", "Invitation is no longer valid");
-    }
-
-    let user = await tx
-      .prepare("SELECT id, email FROM users WHERE email = ?")
-      .bind(invitation.email)
-      .first<{ id: string; email: string }>();
-
-    if (!user) {
-      const userId = `usr_${crypto.randomUUID()}`;
-      await tx
+  // The conditional claim makes acceptance single-use under concurrency
+  // (exactly one caller flips pending → accepted) and re-tests expiry in the
+  // statement that consumes the row. It must commit together with the
+  // membership write: claiming alone and failing after would burn the token
+  // without granting anything.
+  const claimInvitationAndGrantMembership = () =>
+    getDb(c.env).transaction(async (tx) => {
+      const claimed = await tx
         .prepare(
-          `INSERT INTO users (id, email, name, email_verified, status)
-             VALUES (?, ?, ?, 1, 'active')`
+          `UPDATE invitations
+            SET status = 'accepted', accepted_at = datetime('now')
+          WHERE id = ? AND status = 'pending' AND expires_at > ?`
         )
-        .bind(userId, invitation.email, name ?? null)
+        .bind(invitation.id, new Date().toISOString())
         .run();
 
-      user = { id: userId, email: invitation.email };
+      if (claimed === 0) {
+        throw new AppError("INVALID_INVITATION", "Invitation is no longer valid");
+      }
+
+      // Fills a gap only — acceptance is not the place to rename an account.
+      if (name) {
+        await tx
+          .prepare("UPDATE users SET name = ? WHERE id = ? AND name IS NULL")
+          .bind(name, actorUserId)
+          .run();
+      }
+
+      // Scoped to the invitation's organization, not the caller's current one,
+      // so a token cannot be redeemed into whatever org the caller is signed
+      // in to. Locked because the row is read and then conditionally written.
+      const existingMembership = await tx
+        .prepare(
+          `SELECT id, role, status
+           FROM organization_members
+          WHERE organization_id = ? AND user_id = ?
+            FOR UPDATE`
+        )
+        .bind(invitation.organization_id, actorUserId)
+        .first<{ id: string; role: string; status: string }>();
+
+      if (existingMembership?.status === "active") {
+        // A concurrent Clerk sign-in can win the insert at its own role; the
+        // invitation is the explicit grant being consumed and must still
+        // deliver. Upgrade only — acceptance never demotes an existing admin
+        // (possibly the last one) over a stale member-role token.
+        if (
+          normalizeOrganizationRole(invitation.role) === "admin" &&
+          normalizeOrganizationRole(existingMembership.role) !== "admin"
+        ) {
+          await tx
+            .prepare("UPDATE organization_members SET role = 'admin' WHERE id = ?")
+            .bind(existingMembership.id)
+            .run();
+        }
+        return;
+      }
+
+      if (existingMembership) {
+        // Reinstating an inactive row is safe only because removal revokes the
+        // member's pending invitations in the same transaction (removeMember;
+        // migration 0056 for older rows) — so a still-pending invitation must
+        // postdate the removal: a deliberate re-invite, not a replayable leftover.
+        await tx
+          .prepare(
+            `UPDATE organization_members
+              SET role = ?, status = 'active'
+            WHERE id = ?`
+          )
+          .bind(normalizeOrganizationRole(invitation.role), existingMembership.id)
+          .run();
+        return;
+      }
+
+      await tx
+        .prepare(
+          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES (?, ?, ?, ?, 'active')`
+        )
+        .bind(
+          `mem_${crypto.randomUUID()}`,
+          invitation.organization_id,
+          actorUserId,
+          normalizeOrganizationRole(invitation.role)
+        )
+        .run();
+    });
+
+  try {
+    await claimInvitationAndGrantMembership();
+  } catch (error) {
+    // FOR UPDATE cannot lock a row that does not exist yet: a concurrent Clerk
+    // sign-in can insert this membership mid-transaction and the unique
+    // constraint rolls the acceptance back, claim included. That rollback makes
+    // one retry sound — the re-run claims again and sees the row that won.
+    // Retried only when such a row exists; every other failure propagates.
+    const concurrentMembership = await getDb(c.env)
+      .prepare("SELECT id FROM organization_members WHERE organization_id = ? AND user_id = ?")
+      .bind(invitation.organization_id, actorUserId)
+      .first<{ id: string }>();
+
+    if (!concurrentMembership) {
+      throw error;
     }
 
-    await tx
-      .prepare(
-        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-           VALUES (?, ?, ?, ?, 'active')`
-      )
-      .bind(
-        `mem_${crypto.randomUUID()}`,
-        invitation.organization_id,
-        user.id,
-        normalizeOrganizationRole(invitation.role)
-      )
-      .run();
-  });
+    await claimInvitationAndGrantMembership();
+  }
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));
@@ -678,7 +786,10 @@ export const acceptInvitation = async (c: AppContext) => {
     action: "accept_invite",
     resourceType: "invitation",
     resourceId: invitation.id,
-    metadata: { email: invitation.email },
+    metadata: { email: invitation.email, userId: actorUserId },
+    // The org the membership landed in, not the one the caller was signed in to.
+    organizationId: invitation.organization_id,
+    userId: actorUserId,
   });
 
   return success(c, { success: true });
@@ -714,7 +825,42 @@ export const removeMember = async (c: AppContext) => {
 
   const removesAnAdmin = normalizeOrganizationRole(member.role) === "admin";
 
+  // Acceptance matches the caller's email against `users` or any auth
+  // identity, so revocation must cover the same set.
+  const inviteeEmailRows = await getDb(c.env)
+    .prepare(
+      `SELECT email FROM users WHERE id = ?
+       UNION
+       SELECT email FROM auth_user_identities WHERE user_id = ? AND email IS NOT NULL`
+    )
+    .bind(member.user_id, member.user_id)
+    .all<{ email: string | null }>();
+  const inviteeEmails = [
+    ...new Set(
+      inviteeEmailRows.results
+        .map((row) => row.email?.trim().toLowerCase())
+        .filter((email): email is string => Boolean(email))
+    ),
+  ];
+
   await getDb(c.env).transaction(async (tx) => {
+    // A pending invitation surviving the removal is a self-reinstatement token
+    // (acceptance reinstates inactive rows at the invited role), so it dies in
+    // the same transaction as the status flip. Clerk's link needs no matching
+    // revocation — sign-in refuses the inactive row first. First statement so
+    // locks are taken in acceptance's order (invitation, then member): no
+    // deadlock against a concurrent acceptance.
+    if (inviteeEmails.length > 0) {
+      await tx
+        .prepare(
+          `UPDATE invitations SET status = 'revoked'
+            WHERE organization_id = ? AND status = 'pending'
+              AND LOWER(email) IN (${inviteeEmails.map(() => "?").join(", ")})`
+        )
+        .bind(organizationId, ...inviteeEmails)
+        .run();
+    }
+
     if (removesAnAdmin) {
       // Lock every active admin row before counting them. A conditional UPDATE
       // is not enough on its own: it only locks the row it writes, so under
