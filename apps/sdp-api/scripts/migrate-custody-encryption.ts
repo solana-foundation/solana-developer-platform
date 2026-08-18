@@ -1,9 +1,12 @@
 import { closeDatabasePools, getDb } from "../src/db";
 import { getProcessEnv } from "../src/lib/runtime-env";
 import { createCustodyCipher } from "../src/services/custody-cipher/cipher-router";
+import { migrateNestedCustodySecrets } from "../src/services/custody-cipher/nested-secret-migration";
 import type { Env } from "../src/types/env";
 
 const BATCH_SIZE = 50;
+const LEGACY_VERSION = "sdp-custody-encryption-v1";
+const V2_VERSION = "sdp-custody-kms-v2";
 
 // SCHEMA GAP — provider_credentials.encrypted_secret_payload backfill:
 //
@@ -17,51 +20,86 @@ const BATCH_SIZE = 50;
 // writing those rows and (b) whether an encryption_version column should be
 // added before the backfill runs. Add the loop here once that schema is stable.
 
-async function migrateCustodyConfigs(env: Env): Promise<number> {
+interface CustodyConfigRow {
+  id: string;
+  organization_id: string;
+  config_encrypted: string;
+}
+
+interface PassCounters {
+  migrated: number;
+  contested: number;
+  failed: number;
+}
+
+// Walks custody_configs rows of one encryption_version with a keyset cursor,
+// re-encrypting each row's config (nested secrets included) and flipping the
+// version to v2. The UPDATE is guarded by the previously read ciphertext, so a
+// row rewritten concurrently is left to its writer: the live cipher router
+// encrypts new writes with the active scheme, making the fresh value v2
+// already. Contested and failed rows are counted so the operator reruns
+// instead of trusting a false success.
+async function migratePass(env: Env, version: string, label: string): Promise<PassCounters> {
   const db = getDb(env);
   const cipher = createCustodyCipher(env);
-  let total = 0;
+  const counters: PassCounters = { migrated: 0, contested: 0, failed: 0 };
+  let lastId = "";
 
   while (true) {
     const { results } = await db
       .prepare(
         `SELECT id, organization_id, config_encrypted
          FROM custody_configs
-         WHERE encryption_version = 'sdp-custody-encryption-v1'
+         WHERE encryption_version = ?
+           AND id > ?
          ORDER BY id
          LIMIT ${BATCH_SIZE}`
       )
-      .all<{ id: string; organization_id: string; config_encrypted: string }>();
+      .bind(version, lastId)
+      .all<CustodyConfigRow>();
 
     if (results.length === 0) {
       break;
     }
 
     for (const row of results) {
-      const plaintext = await cipher.decrypt(row.organization_id, row.config_encrypted);
-      const reEncrypted = await cipher.encrypt(row.organization_id, plaintext);
+      lastId = row.id;
 
-      const updated = await db
-        .prepare(
-          `UPDATE custody_configs
-           SET config_encrypted = ?,
-               encryption_version = 'sdp-custody-kms-v2',
-               updated_at = datetime('now')
-           WHERE id = ?
-             AND encryption_version = 'sdp-custody-encryption-v1'
-             AND config_encrypted = ?`
-        )
-        .bind(reEncrypted, row.id, row.config_encrypted)
-        .run();
+      try {
+        const plaintext = await cipher.decrypt(row.organization_id, row.config_encrypted);
+        const nested = await migrateNestedCustodySecrets(cipher, row.organization_id, plaintext);
+        if (version === V2_VERSION && !nested.changed) {
+          continue;
+        }
+        const reEncrypted = await cipher.encrypt(row.organization_id, nested.configJson);
 
-      if (updated > 0) {
-        total += 1;
-        console.info(`[custody_configs] migrated ${total} rows (last id: ${row.id})`);
+        const updated = await db
+          .prepare(
+            `UPDATE custody_configs
+             SET config_encrypted = ?,
+                 encryption_version = '${V2_VERSION}',
+                 updated_at = datetime('now')
+             WHERE id = ?
+               AND config_encrypted = ?`
+          )
+          .bind(reEncrypted, row.id, row.config_encrypted)
+          .run();
+
+        if (updated > 0) {
+          counters.migrated += 1;
+          console.info(`[${label}] migrated ${counters.migrated} rows (last id: ${row.id})`);
+        } else {
+          counters.contested += 1;
+          console.warn(`[${label}] row ${row.id} changed concurrently, skipped; rerun to verify`);
+        }
+      } catch (e: unknown) {
+        counters.failed += 1;
+        console.error(`[${label}] row ${row.id} failed: ${e instanceof Error ? e.message : e}`);
       }
     }
   }
 
-  return total;
+  return counters;
 }
 
 async function main(): Promise<void> {
@@ -75,8 +113,23 @@ async function main(): Promise<void> {
   }
 
   try {
-    const migrated = await migrateCustodyConfigs(env);
-    console.info(`Done. Migrated ${migrated} custody_configs rows.`);
+    // Nested-only pass first: rows migrated before nested-secret support have a
+    // v2 outer envelope around legacy inner ciphertext and cannot be found by
+    // encryption_version. Running it before the legacy pass keeps rows migrated
+    // below (nested secrets included) out of this scan.
+    const nested = await migratePass(env, V2_VERSION, "custody_configs:nested");
+    const legacy = await migratePass(env, LEGACY_VERSION, "custody_configs");
+
+    console.info(
+      `Done. Migrated ${legacy.migrated} legacy rows, ${nested.migrated} nested-secret rows.`
+    );
+
+    const contested = legacy.contested + nested.contested;
+    const failed = legacy.failed + nested.failed;
+    if (contested > 0 || failed > 0) {
+      console.error(`${failed} rows failed, ${contested} contested; rerun until both reach zero.`);
+      process.exitCode = 1;
+    }
   } finally {
     await closeDatabasePools();
   }
