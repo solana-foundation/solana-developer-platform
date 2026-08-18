@@ -688,7 +688,11 @@ const vaultPositionCursorSchema = z.object({
   // `created_at` is ordered as canonical UTC text, so accepting offsets or a
   // different precision would make a syntactically valid cursor sort wrongly.
   createdAt: z.string().datetime({ precision: 3 }),
-  id: z.templateLiteral(["earn_vault_position_", z.uuidv4()]),
+  // Generated UUIDs are lowercase. Preserve that canonical spelling because
+  // PostgreSQL compares the prefixed position id as text in the keyset tuple.
+  id: z
+    .templateLiteral(["earn_vault_position_", z.uuidv4()])
+    .refine((id) => id === id.toLowerCase()),
 });
 
 function encodeVaultPositionCursor(createdAt: string, id: string): string {

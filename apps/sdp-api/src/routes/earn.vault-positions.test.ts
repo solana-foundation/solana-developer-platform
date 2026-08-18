@@ -325,6 +325,11 @@ describe("GET /v1/earn/vault-positions", () => {
       "2026-08-17T16:29:31Z",
       "earn_vault_position_00000000-0000-4000-8000-000000000000",
     ],
+    [
+      "noncanonical position id casing",
+      "2026-08-17T16:29:31.000Z",
+      "earn_vault_position_00000000-0000-4000-8000-000000000ABC",
+    ],
     ["malformed position id", "2026-08-17T16:29:31.000Z", "not-a-position-id"],
   ])("rejects a decodable cursor with a %s", async (_case, createdAt, id) => {
     const cursor = encodeCursorPayload(createdAt, id);
