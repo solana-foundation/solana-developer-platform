@@ -17,7 +17,7 @@ export const operation: WalletOperationEnvelope = {
   actor: { type: "api_key", id: "key_1", apiKeyId: "key_1" },
   source: "api",
   operationFamily: "payment",
-  operationType: "payment_request",
+  operationType: "payment_transfer_execute",
   asset: "USDC",
   amount: "125.50",
   destination: "recipient_blocked",

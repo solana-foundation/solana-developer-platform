@@ -25,7 +25,7 @@ const baseOperation: CreateWalletOperationInput = {
   apiKeyId: "key_1",
   actor: { type: "api_key", id: "key_1", apiKeyId: "key_1" },
   operationFamily: "payment",
-  operationType: "payment_transfer",
+  operationType: "payment_transfer_execute",
   asset: "USDC",
   amount: "25.00",
   destination: "recipient_1",
