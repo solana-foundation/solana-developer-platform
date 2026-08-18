@@ -9,6 +9,14 @@ describe("Earn dashboard headers", () => {
   it("labels the Earn overview", () => {
     expect(getDashboardPageConfig("/dashboard/markets/earn", t, false, false)).toMatchObject({
       title: "Shared.dashboardShell.earn",
+      headerTabs: {
+        tabs: [
+          { id: "opportunities", label: "DashboardEarn.tabs.opportunities" },
+          { id: "positions", label: "DashboardEarn.tabs.positions" },
+          { id: "playground", label: "DashboardEarn.tabs.playground" },
+        ],
+        hideOnMobile: false,
+      },
       contentWidthClass: "max-w-none",
     });
   });

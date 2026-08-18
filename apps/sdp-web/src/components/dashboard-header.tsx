@@ -236,6 +236,25 @@ function playgroundHeaderTabs(t: ReturnType<typeof useTranslations>): DashboardH
   };
 }
 
+/**
+ * Header config for a page whose title renders centered in the top bar with no
+ * leading back action — the centered look without the action-page chrome.
+ *
+ * @param config - The centered title and the page's content width class.
+ * @returns The page config rendering `CenteredDashboardTopBar`.
+ */
+function centeredTitleConfig(config: {
+  centeredTitle: string;
+  contentWidthClass: string;
+}): DashboardPageConfig {
+  return {
+    title: "",
+    hideTitle: true,
+    centeredTitle: config.centeredTitle,
+    contentWidthClass: config.contentWidthClass,
+  };
+}
+
 function actionPageConfig(config: {
   centeredTitle: string;
   backHref: string;
@@ -243,13 +262,10 @@ function actionPageConfig(config: {
   contentWidthClass: string;
 }): DashboardPageConfig {
   return {
-    title: "",
-    hideTitle: true,
-    centeredTitle: config.centeredTitle,
+    ...centeredTitleConfig(config),
     topBarLeadingContent: (
       <HeaderBackAction href={config.backHref} label={config.backLabel} compactOnMobile />
     ),
-    contentWidthClass: config.contentWidthClass,
   };
 }
 
@@ -355,7 +371,21 @@ function getEarnRoutePageConfig(
       contentWidthClass: "max-w-none",
     });
   }
-  if (pathname === "/dashboard/markets/earn" || pathname.startsWith("/dashboard/markets/earn/")) {
+  if (pathname === "/dashboard/markets/earn") {
+    return {
+      title: t("Shared.dashboardShell.earn"),
+      headerTabs: {
+        tabs: [
+          { id: "opportunities", label: t("DashboardEarn.tabs.opportunities") },
+          { id: "positions", label: t("DashboardEarn.tabs.positions") },
+          { id: "playground", label: t("DashboardEarn.tabs.playground") },
+        ],
+        hideOnMobile: false,
+      },
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname.startsWith("/dashboard/markets/earn/")) {
     return {
       title: t("Shared.dashboardShell.earn"),
       contentWidthClass: "max-w-none",

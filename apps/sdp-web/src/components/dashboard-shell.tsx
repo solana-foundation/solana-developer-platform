@@ -572,6 +572,7 @@ export function DashboardShell({
     pathname === "/dashboard/api-keys/new" ||
     (pathname.startsWith("/dashboard/api-keys/") && pathname.endsWith("/edit")) ||
     pathname.startsWith("/dashboard/payments") ||
+    pathname === "/dashboard/markets/earn" ||
     pathname === "/dashboard/markets/earn/deposit" ||
     pathname === "/dashboard/wallets" ||
     pathname === "/dashboard/custody" ||

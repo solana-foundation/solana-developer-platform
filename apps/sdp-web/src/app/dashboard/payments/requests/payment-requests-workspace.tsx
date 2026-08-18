@@ -32,6 +32,10 @@ import {
 import { toast } from "sonner";
 import useSWR from "swr";
 import { z } from "zod";
+import {
+  dashboardWorkspaceOverviewPanelClassName,
+  dashboardWorkspacePlaygroundPanelClassName,
+} from "@/components/dashboard-workspace-panel";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { Button } from "@/components/ui/button";
 import {
@@ -535,154 +539,174 @@ export function PaymentRequestsWorkspace({
   return (
     <>
       <DashboardWorkspaceTabShell
-        overviewClassName="flex min-h-0 flex-col overflow-hidden"
-        overviewKey="payment-requests-overview-tab"
-        playgroundKey="payment-requests-playground-tab"
-        overview={
-          <Card className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden rounded-lg border border-border-default bg-surface-raised py-0 shadow-none ring-0">
-            <CardHeader className="p-4">
-              <CardTitle>{t("DashboardPayments.requests.paymentRequests")}</CardTitle>
-              <CardDescription>
-                {t("DashboardPayments.requests.paymentRequestsDescription")}
-              </CardDescription>
-              {requests.length > 0 && (
-                <CardAction>
-                  <Button type="button" iconLeft={<PlusIcon />} onClick={() => setCreateOpen(true)}>
-                    {t("DashboardPayments.requests.create")}
-                  </Button>
-                </CardAction>
-              )}
-            </CardHeader>
-            <CardContent className="flex min-h-0 flex-1 flex-col px-0">
-              {initialError || initialLocalErrorCode ? (
-                <p className="text-sm text-error">
-                  {initialError ?? t("DashboardPayments.requests.loadFailed")}
-                </p>
-              ) : requests.length === 0 ? (
-                <div className="flex flex-1 flex-col items-center justify-center gap-4 py-16 text-center">
-                  <ReceiptTextIcon className="h-10 w-10 text-muted" />
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-primary">
-                      {t("DashboardPayments.requests.noPaymentRequests")}
+        panels={[
+          {
+            id: "overview",
+            className: cn(
+              dashboardWorkspaceOverviewPanelClassName,
+              "flex min-h-0 flex-col overflow-hidden"
+            ),
+            content: (
+              <Card className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden rounded-lg border border-border-default bg-surface-raised py-0 shadow-none ring-0">
+                <CardHeader className="p-4">
+                  <CardTitle>{t("DashboardPayments.requests.paymentRequests")}</CardTitle>
+                  <CardDescription>
+                    {t("DashboardPayments.requests.paymentRequestsDescription")}
+                  </CardDescription>
+                  {requests.length > 0 && (
+                    <CardAction>
+                      <Button
+                        type="button"
+                        iconLeft={<PlusIcon />}
+                        onClick={() => setCreateOpen(true)}
+                      >
+                        {t("DashboardPayments.requests.create")}
+                      </Button>
+                    </CardAction>
+                  )}
+                </CardHeader>
+                <CardContent className="flex min-h-0 flex-1 flex-col px-0">
+                  {initialError || initialLocalErrorCode ? (
+                    <p className="text-sm text-error">
+                      {initialError ?? t("DashboardPayments.requests.loadFailed")}
                     </p>
-                    <p className="text-sm text-tertiary">
-                      {t("DashboardPayments.requests.noPaymentRequestsDescription")}
-                    </p>
-                  </div>
-                  <Button type="button" iconLeft={<PlusIcon />} onClick={() => setCreateOpen(true)}>
-                    {t("DashboardPayments.requests.create")}
-                  </Button>
-                </div>
-              ) : (
-                <div className="min-h-0 flex-1 overflow-y-auto">
-                  <div className="divide-y divide-border-default md:hidden">
-                    {requests.map((request) => {
-                      const symbol = tokenSymbolByMint.get(request.token);
-                      return (
-                        <button
-                          key={request.id}
-                          type="button"
-                          onClick={() => setSelected(request)}
-                          className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-fill-subtle"
-                        >
-                          <span className="min-w-0 flex-1 space-y-1.5">
-                            <span className="flex items-center justify-between gap-3">
-                              <StatusBadge status={request.status} />
-                              <span className="truncate text-sm font-medium text-primary">
-                                {formatDisplayAmount(
-                                  request.amount,
-                                  symbol ? symbol : shortenAddress(request.token)
-                                )}
+                  ) : requests.length === 0 ? (
+                    <div className="flex flex-1 flex-col items-center justify-center gap-4 py-16 text-center">
+                      <ReceiptTextIcon className="h-10 w-10 text-muted" />
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium text-primary">
+                          {t("DashboardPayments.requests.noPaymentRequests")}
+                        </p>
+                        <p className="text-sm text-tertiary">
+                          {t("DashboardPayments.requests.noPaymentRequestsDescription")}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        iconLeft={<PlusIcon />}
+                        onClick={() => setCreateOpen(true)}
+                      >
+                        {t("DashboardPayments.requests.create")}
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="min-h-0 flex-1 overflow-y-auto">
+                      <div className="divide-y divide-border-default md:hidden">
+                        {requests.map((request) => {
+                          const symbol = tokenSymbolByMint.get(request.token);
+                          return (
+                            <button
+                              key={request.id}
+                              type="button"
+                              onClick={() => setSelected(request)}
+                              className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-fill-subtle"
+                            >
+                              <span className="min-w-0 flex-1 space-y-1.5">
+                                <span className="flex items-center justify-between gap-3">
+                                  <StatusBadge status={request.status} />
+                                  <span className="truncate text-sm font-medium text-primary">
+                                    {formatDisplayAmount(
+                                      request.amount,
+                                      symbol ? symbol : shortenAddress(request.token)
+                                    )}
+                                  </span>
+                                </span>
+                                <span className="block truncate text-xs text-secondary">
+                                  {fromLabel(request.counterpartyId)} ·{" "}
+                                  {formatTimestamp(request.createdAt, t)}
+                                </span>
                               </span>
-                            </span>
-                            <span className="block truncate text-xs text-secondary">
-                              {fromLabel(request.counterpartyId)} ·{" "}
-                              {formatTimestamp(request.createdAt, t)}
-                            </span>
-                          </span>
-                          <ChevronRightIcon className="size-4 shrink-0 text-tertiary" />
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <Table className="hidden rounded-none border-0 [&_table]:min-w-[800px] [&_table]:table-fixed md:block">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-[16%]">{t("DashboardPayments.status")}</TableHead>
-                        <TableHead className="w-[20%]">
-                          {t("DashboardPayments.requests.amount")}
-                        </TableHead>
-                        <TableHead className="w-[22%]">
-                          {t("DashboardPayments.requests.from")}
-                        </TableHead>
-                        <TableHead className="w-[22%]">
-                          {t("DashboardPayments.requests.to")}
-                        </TableHead>
-                        <TableHead className="w-[20%]">
-                          {t("DashboardPayments.recurring.created")}
-                        </TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {requests.map((request) => {
-                        const symbol = tokenSymbolByMint.get(request.token);
-                        return (
-                          <TableRow
-                            key={request.id}
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => setSelected(request)}
-                            onKeyDown={(event: KeyboardEvent) => {
-                              if (event.key === "Enter" || event.key === " ") {
-                                event.preventDefault();
-                                setSelected(request);
-                              }
-                            }}
-                            className="cursor-pointer"
-                          >
-                            <TableCell>
-                              <StatusBadge status={request.status} />
-                            </TableCell>
-                            <TableCell className="font-medium">
-                              <span className="block truncate">
-                                {formatDisplayAmount(
-                                  request.amount,
-                                  symbol ? symbol : shortenAddress(request.token)
-                                )}
-                              </span>
-                            </TableCell>
-                            <TableCell className="text-sm text-secondary">
-                              <span className="block truncate">
-                                {fromLabel(request.counterpartyId)}
-                              </span>
-                            </TableCell>
-                            <TableCell className="font-mono text-sm text-secondary">
-                              <span className="block truncate">
-                                {shortenAddress(request.destinationAddress)}
-                              </span>
-                            </TableCell>
-                            <TableCell className="text-sm text-secondary">
-                              {formatTimestamp(request.createdAt, t)}
-                            </TableCell>
+                              <ChevronRightIcon className="size-4 shrink-0 text-tertiary" />
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <Table className="hidden rounded-none border-0 [&_table]:min-w-[800px] [&_table]:table-fixed md:block">
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-[16%]">
+                              {t("DashboardPayments.status")}
+                            </TableHead>
+                            <TableHead className="w-[20%]">
+                              {t("DashboardPayments.requests.amount")}
+                            </TableHead>
+                            <TableHead className="w-[22%]">
+                              {t("DashboardPayments.requests.from")}
+                            </TableHead>
+                            <TableHead className="w-[22%]">
+                              {t("DashboardPayments.requests.to")}
+                            </TableHead>
+                            <TableHead className="w-[20%]">
+                              {t("DashboardPayments.recurring.created")}
+                            </TableHead>
                           </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        }
-        playground={
-          <PaymentRequestsPlayground
-            apiBaseUrl={apiBaseUrl}
-            apiKeyValue={playgroundApiKeyValue}
-            hasActiveApiKeys={apiKeys.length > 0}
-            wallets={wallets}
-            tokens={tokens}
-          />
-        }
+                        </TableHeader>
+                        <TableBody>
+                          {requests.map((request) => {
+                            const symbol = tokenSymbolByMint.get(request.token);
+                            return (
+                              <TableRow
+                                key={request.id}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => setSelected(request)}
+                                onKeyDown={(event: KeyboardEvent) => {
+                                  if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    setSelected(request);
+                                  }
+                                }}
+                                className="cursor-pointer"
+                              >
+                                <TableCell>
+                                  <StatusBadge status={request.status} />
+                                </TableCell>
+                                <TableCell className="font-medium">
+                                  <span className="block truncate">
+                                    {formatDisplayAmount(
+                                      request.amount,
+                                      symbol ? symbol : shortenAddress(request.token)
+                                    )}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-sm text-secondary">
+                                  <span className="block truncate">
+                                    {fromLabel(request.counterpartyId)}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="font-mono text-sm text-secondary">
+                                  <span className="block truncate">
+                                    {shortenAddress(request.destinationAddress)}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-sm text-secondary">
+                                  {formatTimestamp(request.createdAt, t)}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ),
+          },
+          {
+            id: "playground",
+            className: dashboardWorkspacePlaygroundPanelClassName,
+            content: (
+              <PaymentRequestsPlayground
+                apiBaseUrl={apiBaseUrl}
+                apiKeyValue={playgroundApiKeyValue}
+                hasActiveApiKeys={apiKeys.length > 0}
+                wallets={wallets}
+                tokens={tokens}
+              />
+            ),
+          },
+        ]}
       />
 
       {selected && payLink ? (
