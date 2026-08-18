@@ -14,6 +14,8 @@ import {
 import type { Env } from "@/types/env";
 
 const POSTGRES_TEST_TABLES = [
+  "earn_vault_movements",
+  "earn_vault_positions",
   "sponsorship_budget_policy_revisions",
   "sponsorship_budget_reservations",
   "sponsorship_budget_policies",

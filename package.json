@@ -33,6 +33,14 @@
       "@solana/mosaic-sdk@0.1.1": "patches/@solana__mosaic-sdk@0.1.1.patch",
       "next-themes@0.4.6": "patches/next-themes@0.4.6.patch",
       "brace-expansion@5.0.9": "patches/brace-expansion@5.0.9.patch"
+    },
+    "packageExtensions": {
+      "@kamino-finance/klend-sdk@10.0.0": {
+        "dependencies": {
+          "@solana-program/compute-budget": "^0.8.0",
+          "@solana-program/memo": "^0.7.0"
+        }
+      }
     }
   },
   "scripts": {
@@ -51,6 +59,7 @@
     "check:env-configurator-drift": "node scripts/check-env-configurator-drift.mjs",
     "check:module-boundaries": "node scripts/check-module-boundaries.mjs",
     "check:pinned-dependencies": "node scripts/check-pinned-dependency-versions.mjs",
+    "check:kamino-dependency-boundary": "node scripts/check-kamino-dependency-boundary.mjs",
     "check:well-known-mints": "pnpm --filter @sdp/api exec tsx ../../scripts/check-well-known-mints.mjs",
     "check:api-playground": "pnpm -C apps/sdp-api playground:check",
     "generate:api-playground": "pnpm -C apps/sdp-api playground:generate",

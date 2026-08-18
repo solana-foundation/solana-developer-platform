@@ -1,20 +1,13 @@
-import type {
-  ApprovalRequestStatus,
-  WalletApprovalRequestSummary,
-  WalletOperationFamily,
+import {
+  type ApprovalRequestStatus,
+  WALLET_OPERATION_FAMILIES,
+  type WalletApprovalRequestSummary,
+  type WalletOperationFamily,
 } from "@sdp/types";
 
 export const APPROVAL_INBOX_PAGE_SIZE = 25;
 
-export const APPROVAL_OPERATION_FAMILIES = [
-  "transfer",
-  "payment",
-  "ramp",
-  "issuance",
-  "raw_sign",
-  "program",
-  "provider_admin",
-] as const satisfies readonly WalletOperationFamily[];
+export const APPROVAL_OPERATION_FAMILIES = WALLET_OPERATION_FAMILIES;
 
 export const APPROVAL_HISTORY_STATUSES = [
   "approved",
@@ -42,12 +35,6 @@ export const EMPTY_APPROVAL_FILTERS: ApprovalInboxFilters = {
   apiKeyId: "",
   from: "",
   to: "",
-};
-
-const APPROVAL_LABEL_OVERRIDES: Readonly<Record<string, string>> = {
-  raw_sign: "Raw signing",
-  program: "Program operations",
-  provider_admin: "Provider administration",
 };
 
 export function mergeApprovalRequests(
@@ -113,9 +100,6 @@ export function hasApprovalFilters(filters: ApprovalInboxFilters): boolean {
 }
 
 export function formatApprovalLabel(value: string): string {
-  const override = APPROVAL_LABEL_OVERRIDES[value];
-  if (override) return override;
-
   return value
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .split(/[_\s-]+/)
