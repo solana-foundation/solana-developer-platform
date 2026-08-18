@@ -1,66 +1,50 @@
+import { isDecimalString } from "@sdp/solana/amount";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 
 /**
  * Pure display formatters shared by every Earn surface. All USD figures on the
- * live wire are decimal strings; these helpers accept both strings and numbers
- * so callers never juggle conversions at render time.
+ * live wire are decimal strings and never pass through JavaScript `number`.
  */
 
-export function formatApy(apy: string | number | undefined): string {
-  // Deliberately falsy, not just undefined: an APY of literal 0 (or "0") is a
-  // rate nothing publishes — it means "no rate", and "—" beats a claimed 0.0%.
-  if (!apy) return "—";
-  const value = typeof apy === "string" ? Number(apy) : apy;
-  if (!Number.isFinite(value)) return "—";
-  return `${(value * 100).toFixed(1)}%`;
+function groupedDecimal(
+  value: string,
+  maximumFractionDigits: number,
+  minimumFractionDigits: number
+): string {
+  if (!isDecimalString(value)) return "—";
+  const [whole = "0", fraction = ""] = value.split(".");
+  const groupedWhole = whole.replace(/^0+(?=\d)/, "").replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const visibleFraction = fraction
+    .slice(0, maximumFractionDigits)
+    .replace(/0+$/, "")
+    .padEnd(minimumFractionDigits, "0");
+  return visibleFraction ? `${groupedWhole}.${visibleFraction}` : groupedWhole;
 }
 
-const usdFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  maximumFractionDigits: 2,
-});
-
-export function formatUsd(value: number | string): string {
-  const amount = typeof value === "string" ? Number(value) : value;
-  if (!Number.isFinite(amount)) return "—";
-  return usdFormatter.format(amount);
+/** Display a provider amount without losing precision or inventing zero. */
+export function formatProviderAmount(
+  value: string | undefined,
+  symbol?: string,
+  maximumFractionDigits = 6,
+  minimumFractionDigits = 0
+): string {
+  if (value === undefined) return "—";
+  const amount = groupedDecimal(value, maximumFractionDigits, minimumFractionDigits);
+  if (amount === "—") return amount;
+  return symbol ? `${amount} ${symbol}` : amount;
 }
 
-const compactUsdFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
-
-export function formatUsdCompact(value: number | string): string {
-  const amount = typeof value === "string" ? Number(value) : value;
-  if (!Number.isFinite(amount)) return "—";
-  return compactUsdFormatter.format(amount);
+export function formatUsd(value: string | undefined): string {
+  const amount = formatProviderAmount(value, undefined, 6, 2);
+  return amount === "—" ? amount : `$${amount}`;
 }
 
 export function tokenSymbol(mint: string): string {
   return WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.symbol ?? `${mint.slice(0, 4)}…${mint.slice(-4)}`;
 }
 
-const amountFormatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
-
-export function formatTokenQuantity(value: number | string, symbol: string): string {
-  const amount = typeof value === "string" ? Number(value) : value;
-  if (!Number.isFinite(amount)) return "—";
-  return `${amountFormatter.format(amount)} ${symbol}`;
-}
-
-export function formatTokenAmount(value: number, mint: string): string {
-  return formatTokenQuantity(value, tokenSymbol(mint));
-}
-
-/** Simple-interest projection for preview panels (display only). */
-export function projectYearlyYield(amount: number, apy: string | undefined): number {
-  const rate = Number(apy ?? 0);
-  if (!Number.isFinite(rate) || !Number.isFinite(amount)) return 0;
-  return amount * rate;
+export function formatTokenQuantity(value: string | undefined, symbol: string): string {
+  return formatProviderAmount(value, symbol, 6);
 }
 
 /**

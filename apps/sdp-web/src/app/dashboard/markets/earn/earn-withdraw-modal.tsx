@@ -5,6 +5,7 @@ import {
   type EarnPortfolioToken,
   type EarnPortfolioWithdrawal,
   type EarnPortfolioWithdrawalPreview,
+  earnProgramSolanaPayoutTokens,
 } from "@sdp/types";
 import { Loader2Icon } from "lucide-react";
 import { type ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
@@ -16,35 +17,48 @@ import { Modal } from "@/components/ui/modal";
 import { Select, SelectItem } from "@/components/ui/select";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import {
+  compareUnsignedDecimals,
+  parseUnsignedDecimal,
+  unsignedDecimalScale,
+} from "./earn-decimal";
 import { formatDurationRange, formatUsd, isoDurationDays } from "./earn-format";
-import { createEarnWithdrawal, previewEarnWithdrawal } from "./earn-program-data";
+import { useEarnModalFocus } from "./earn-modal-focus";
+import {
+  createEarnWithdrawal,
+  previewEarnWithdrawal,
+  useEarnWithdrawalOutcomeToast,
+} from "./earn-program-data";
 
-const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+/**
+ * Exact ordering for provider money decimals. JavaScript numbers cannot
+ * distinguish every six-decimal value once balances exceed 2^53, while the
+ * API deliberately carries these amounts as strings.
+ */
+export const compareUsdDecimals = compareUnsignedDecimals;
 
-/** Positive USD decimal with at most 6 decimal places (the API's contract). */
-const USD_AMOUNT_PATTERN = /^\d+(\.\d{1,6})?$/;
+export function isPositiveUsdAmount(value: string): boolean {
+  const amount = parseUnsignedDecimal(value, { trim: false });
+  return (
+    amount !== undefined &&
+    unsignedDecimalScale(amount) <= 6 &&
+    compareUnsignedDecimals(amount.canonical, "0") === 1
+  );
+}
+
+export function withdrawalRequestSignature(
+  programId: string,
+  amountUsd: string,
+  token: EarnPortfolioToken,
+  destinationAddress: string
+): string {
+  return JSON.stringify([programId, amountUsd, token, destinationAddress]);
+}
 
 /** Base58 Solana address shape; the API re-validates with a real decoder. */
 const SOLANA_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 const PREVIEW_DEBOUNCE_MS = 400;
-
-/**
- * Stablecoins Ground pays out on the Solana rail — a GROUND constraint, not an
- * SDP preference, mirrored from `GROUND_SOLANA_ROUTED_TOKENS` in the provider
- * client (packages/sdp-earn/src/providers/ground/client.ts; Ground's
- * supported-chains doc: "Solana = USDC deposits and withdrawals only", USDT
- * rides Ethereum). SDP's surface is Solana-only, so tokens outside this set
- * are not offered AT ALL — they can never complete a withdrawal here, and the
- * same constraint already keeps their strategies out of the catalogue.
- */
-const SOLANA_PAYOUT_TOKENS: ReadonlySet<EarnPortfolioToken> = new Set(["usdc"]);
-
-/** The withdraw token choices: only lanes Ground can actually pay out. */
-const WITHDRAW_TOKEN_OPTIONS = EARN_PORTFOLIO_TOKENS.filter((candidate) =>
-  SOLANA_PAYOUT_TOKENS.has(candidate)
-);
 
 const WITHDRAWAL_STATUS_BADGES: Record<
   EarnPortfolioWithdrawal["status"],
@@ -61,66 +75,16 @@ const WITHDRAWAL_STATUS_BADGES: Record<
   cancelled: { variant: "danger", key: "DashboardEarn.withdraw.statusCancelled" },
 };
 
-/**
- * Scope focus to the portaled Earn dialog and return it to the trigger on
- * close. The fallback (trigger unmounted by a re-render) is scoped to THIS
- * program's card via the attribute value — with several cards on screen, an
- * unscoped query would land focus on whichever card renders first.
- */
-function useEarnModalFocus(programId: string) {
-  const contentRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const returnFocus =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const focusFrame = window.requestAnimationFrame(() => {
-      contentRef.current
-        ?.querySelector<HTMLElement>('input:not([type="hidden"]):not([disabled])')
-        ?.focus();
-    });
-
-    const trapFocus = (event: KeyboardEvent) => {
-      if (event.key !== "Tab") return;
-      const dialog = contentRef.current?.closest<HTMLElement>('[role="dialog"]');
-      if (!dialog?.contains(document.activeElement)) return;
-      const focusable = [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)].filter(
-        (element) => element.getAttribute("aria-hidden") !== "true"
-      );
-      const first = focusable[0];
-      const last = focusable.at(-1);
-      if (!first || !last) return;
-      if (!focusable.includes(document.activeElement as HTMLElement)) {
-        event.preventDefault();
-        (event.shiftKey ? last : first).focus();
-        return;
-      }
-
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener("keydown", trapFocus);
-    return () => {
-      window.cancelAnimationFrame(focusFrame);
-      document.removeEventListener("keydown", trapFocus);
-      window.requestAnimationFrame(() => {
-        const focusTarget = returnFocus?.isConnected
-          ? returnFocus
-          : document.querySelector<HTMLElement>(
-              `[data-earn-withdraw-focus-fallback="${CSS.escape(programId)}"]`
-            );
-        focusTarget?.focus();
-      });
-    };
-  }, [programId]);
-
-  return contentRef;
-}
+const WITHDRAWAL_STATUS_DESCRIPTIONS: Record<EarnPortfolioWithdrawal["status"], MessageKey> = {
+  processing: "DashboardEarn.withdraw.createdDescription",
+  // SDP does not expose Ground's customer-approval actions yet. Say where the
+  // withdrawal is parked and prevent an unsafe duplicate submission.
+  pending_approval: "DashboardEarn.withdraw.pendingApprovalDescription",
+  completed: "DashboardEarn.overview.withdrawalCompleted",
+  partially_completed: "DashboardEarn.overview.withdrawalPartiallyCompleted",
+  failed: "DashboardEarn.overview.withdrawalFailed",
+  cancelled: "DashboardEarn.overview.withdrawalCancelled",
+};
 
 type PreviewState =
   | { phase: "idle" }
@@ -206,8 +170,8 @@ export function laneCeilingFromErrorBody(body: unknown): string | undefined {
   const balance = (details as { balance?: unknown }).balance;
   if (!balance || typeof balance !== "object") return undefined;
   const withdrawableUsd = (balance as { withdrawableUsd?: unknown }).withdrawableUsd;
-  return typeof withdrawableUsd === "string" && withdrawableUsd.trim()
-    ? withdrawableUsd
+  return typeof withdrawableUsd === "string" && parseUnsignedDecimal(withdrawableUsd)
+    ? withdrawableUsd.trim()
     : undefined;
 }
 
@@ -288,7 +252,7 @@ function AmountError({
   token,
 }: {
   shapeValid: boolean;
-  laneCeiling: number | undefined;
+  laneCeiling: string | undefined;
   token: EarnPortfolioToken;
 }) {
   const t = useTranslations();
@@ -386,7 +350,7 @@ function WithdrawalCreatedView({
         <Badge variant={badge.variant}>{t(badge.key)}</Badge>
       </div>
       <p className="mt-1 text-sm leading-6 text-secondary">
-        {t("DashboardEarn.withdraw.createdDescription")}
+        {t(WITHDRAWAL_STATUS_DESCRIPTIONS[withdrawal.status])}
       </p>
 
       <dl className="mt-4 rounded-md border border-border-default bg-fill-subtle p-3 text-xs">
@@ -420,6 +384,8 @@ function WithdrawalCreatedView({
 interface EarnWithdrawModalProps {
   /** The program the money leaves. One modal instance serves one program. */
   programId: string;
+  /** Open provider id from the durable program read model. */
+  provider: string;
   onClose: () => void;
   /**
    * Fired once a withdrawal is accepted, carrying the provider's ref so the
@@ -427,6 +393,28 @@ interface EarnWithdrawModalProps {
    * the wallet returning to idle does not say whether the money arrived.
    */
   onWithdrawalCreated: (withdrawalRef: string) => void;
+}
+
+interface EarnWithdrawalOutcomeTrackerProps {
+  programId: string;
+  withdrawalRef: string;
+  /** Refresh balances and retire the tracker after its terminal announcement. */
+  onSettled?: () => void;
+}
+
+/**
+ * Keeps provider-authoritative outcome polling alive independently of the
+ * dismissible modal. Treasury mounts one tracker for the accepted withdrawal;
+ * the canonical hook waits through `pending_approval`, announces exactly once
+ * on a terminal withdrawal status, and then asks the caller to retire it.
+ */
+export function EarnWithdrawalOutcomeTracker({
+  programId,
+  withdrawalRef,
+  onSettled,
+}: EarnWithdrawalOutcomeTrackerProps) {
+  useEarnWithdrawalOutcomeToast(programId, withdrawalRef, onSettled);
+  return null;
 }
 
 /**
@@ -437,15 +425,26 @@ interface EarnWithdrawModalProps {
  */
 export function EarnWithdrawModal({
   programId,
+  provider,
   onClose,
   onWithdrawalCreated,
 }: EarnWithdrawModalProps) {
   const t = useTranslations();
-  const contentRef = useEarnModalFocus(programId);
+  const contentRef = useEarnModalFocus({
+    focusKey: programId,
+    initialFocusSelector: 'input:not([type="hidden"]):not([disabled])',
+    fallbackAttribute: "data-earn-withdraw-focus-fallback",
+    fallbackValue: programId,
+    restoreTiming: "animation-frame",
+  });
   const [amountInput, setAmountInput] = useState("");
-  // Always USDC: the one stablecoin Ground pays out on Solana, so it is the
-  // right anchor regardless of where the balance happens to sit.
-  const [token, setToken] = useState<EarnPortfolioToken>("usdc");
+  const withdrawTokenOptions = EARN_PORTFOLIO_TOKENS.filter((candidate) =>
+    earnProgramSolanaPayoutTokens(provider).includes(candidate)
+  );
+  const withdrawalAvailable = withdrawTokenOptions.length > 0;
+  // The caller disables providers with no declared Solana payout lane. The
+  // fallback keeps hook state typed; every read/write below still fails closed.
+  const [token, setToken] = useState<EarnPortfolioToken>(withdrawTokenOptions[0] ?? "usdc");
   const [destinationInput, setDestinationInput] = useState("");
   const [preview, setPreview] = useState<PreviewState>({ phase: "idle" });
   const [laneLiquidity, setLaneLiquidity] = useState<LaneLiquidity>({ phase: "loading" });
@@ -457,7 +456,9 @@ export function EarnWithdrawModal({
   // is still being read (or if the read failed). Never a locally-derived
   // stand-in: an estimate here is what PRO-1675 removed.
   const laneCeiling =
-    laneLiquidity.phase === "ready" ? Number(laneLiquidity.withdrawableUsd) : undefined;
+    laneLiquidity.phase === "ready" && parseUnsignedDecimal(laneLiquidity.withdrawableUsd)
+      ? laneLiquidity.withdrawableUsd
+      : undefined;
   // What `Max` puts in the box: the offered amount is conservative (whole
   // cents, empirically fillable) while validation below stays permissive
   // against the full reported figure. Offer only what will work; forbid only
@@ -465,13 +466,15 @@ export function EarnWithdrawModal({
   const maxFillAmount =
     laneLiquidity.phase === "ready" ? floorUsdToCents(laneLiquidity.withdrawableUsd) : undefined;
   const amount = amountInput.trim();
-  const amountShapeValid = USD_AMOUNT_PATTERN.test(amount) && Number(amount) > 0;
+  const amountShapeValid = isPositiveUsdAmount(amount);
   // An unresolved ceiling validates SHAPE only. Blocking the confirm because
   // our own read is slow or broken would gate an exit on provider
   // availability, which ADR 0002 forbids — the provider decides, as it always
   // did; we just no longer pretend to know the answer first.
   const amountValid =
-    amountShapeValid && (laneCeiling === undefined || Number(amount) <= laneCeiling);
+    withdrawalAvailable &&
+    amountShapeValid &&
+    (laneCeiling === undefined || compareUsdDecimals(amount, laneCeiling) !== 1);
   const destination = destinationInput.trim();
   const destinationValid = SOLANA_ADDRESS_PATTERN.test(destination);
 
@@ -493,7 +496,7 @@ export function EarnWithdrawModal({
    * for a withdrawal from program A would be carried into an identical-looking
    * withdrawal from program B.
    */
-  const requestSignature = `${programId}|${amount}|${token}|${destination}`;
+  const requestSignature = withdrawalRequestSignature(programId, amount, token, destination);
   const requestRef = useRef<{ signature: string; id: string } | null>(null);
   if (requestRef.current?.signature !== requestSignature) {
     requestRef.current = { signature: requestSignature, id: crypto.randomUUID() };
@@ -541,7 +544,10 @@ export function EarnWithdrawModal({
    * is already 2N provider round trips against an account every org shares.
    */
   useEffect(() => {
-    if (created) return;
+    if (!withdrawalAvailable || created) {
+      if (!withdrawalAvailable) setLaneLiquidity({ phase: "error" });
+      return;
+    }
     const controller = new AbortController();
     // A fresh dispatch, so `loading` legitimately outranks anything older still
     // in flight — the token just changed and no stale response may un-blank it.
@@ -571,7 +577,7 @@ export function EarnWithdrawModal({
       );
     })();
     return () => controller.abort();
-  }, [programId, token, created, commitLaneLiquidity]);
+  }, [programId, token, created, commitLaneLiquidity, withdrawalAvailable]);
 
   // The amount-specific preview — fee, resulting portfolio, processing window —
   // which needs only amount + token, so it refreshes as those settle. Every
@@ -618,7 +624,7 @@ export function EarnWithdrawModal({
   }, [amount, amountValid, token, created, programId, commitLaneLiquidity]);
 
   const submit = async () => {
-    if (!amountValid || !destinationValid || submitting) return;
+    if (!withdrawalAvailable || !amountValid || !destinationValid || submitting) return;
     setSubmitting(true);
     setSubmitError(null);
     const result = await createEarnWithdrawal(programId, {
@@ -692,6 +698,12 @@ export function EarnWithdrawModal({
           {t("DashboardEarn.withdraw.description")}
         </p>
 
+        {!withdrawalAvailable ? (
+          <p className="mt-4 text-sm leading-5 text-secondary" role="status">
+            {t("DashboardEarn.withdraw.providerUnavailable")}
+          </p>
+        ) : null}
+
         {/* Token FIRST: it scopes everything below — the available figure is
             read per lane, so changing this re-asks the provider. Options carry
             no amount of their own: a figure beside an UNSELECTED lane would
@@ -705,7 +717,7 @@ export function EarnWithdrawModal({
           <Select
             ariaLabel={t("DashboardEarn.withdraw.tokenLabel")}
             value={token}
-            disabled={submitting}
+            disabled={submitting || !withdrawalAvailable}
             onValueChange={(nextToken) => {
               if (!nextToken || nextToken === token) return;
               setToken(nextToken as EarnPortfolioToken);
@@ -714,7 +726,7 @@ export function EarnWithdrawModal({
               setAmountInput("");
             }}
           >
-            {WITHDRAW_TOKEN_OPTIONS.map((candidate) => (
+            {withdrawTokenOptions.map((candidate) => (
               <SelectItem key={candidate} value={candidate}>
                 {candidate.toUpperCase()}
               </SelectItem>
@@ -729,7 +741,7 @@ export function EarnWithdrawModal({
             id="earn-withdraw-amount"
             inputMode="decimal"
             placeholder="0.00"
-            disabled={submitting}
+            disabled={submitting || !withdrawalAvailable}
             value={amountInput}
             aria-invalid={Boolean(amountInput && !amountValid)}
             aria-describedby={
@@ -743,7 +755,11 @@ export function EarnWithdrawModal({
               // authoritative behind it is the exact affordance this removed.
               <button
                 type="button"
-                disabled={submitting || maxFillAmount === undefined || Number(maxFillAmount) <= 0}
+                disabled={
+                  submitting ||
+                  maxFillAmount === undefined ||
+                  compareUsdDecimals(maxFillAmount, "0") !== 1
+                }
                 onClick={() => {
                   if (maxFillAmount !== undefined) setAmountInput(maxFillAmount);
                 }}
@@ -766,7 +782,7 @@ export function EarnWithdrawModal({
           <Input
             id="earn-withdraw-destination"
             placeholder={t("DashboardEarn.withdraw.destinationPlaceholder")}
-            disabled={submitting}
+            disabled={submitting || !withdrawalAvailable}
             value={destinationInput}
             aria-invalid={Boolean(destinationInput && !destinationValid)}
             aria-describedby={
@@ -797,7 +813,7 @@ export function EarnWithdrawModal({
           </Button>
           <Button
             onClick={submit}
-            disabled={submitting || !amountValid || !destinationValid}
+            disabled={submitting || !withdrawalAvailable || !amountValid || !destinationValid}
             iconLeft={submitting ? <Loader2Icon className="animate-spin" /> : undefined}
           >
             {submitting

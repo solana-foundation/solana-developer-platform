@@ -35,9 +35,7 @@ export type DashboardLoadingRoute =
   | "issuance-create"
   | "issuance-detail"
   | "payments-overview"
-  | "earn-overview"
-  | "earn-deposit"
-  | "earn-strategy-detail"
+  | "earn-program"
   | "payments-transactions"
   | "payments-pay"
   | "payments-deposit"
@@ -97,10 +95,11 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
   if (pathname === "/dashboard/issuance/create") return "issuance-create";
   if (/^\/dashboard\/issuance\/[^/]+$/.test(pathname)) return "issuance-detail";
 
-  if (pathname === "/dashboard/markets/earn") return "earn-overview";
-  if (pathname === "/dashboard/markets/earn/deposit") return "earn-deposit";
-  if (/^\/dashboard\/markets\/earn\/strategies\/[^/]+$/.test(pathname)) {
-    return "earn-strategy-detail";
+  if (
+    pathname === "/dashboard/markets/earn" ||
+    pathname === "/dashboard/markets/earn/button-builder"
+  ) {
+    return "earn-program";
   }
 
   if (pathname === "/dashboard/payments") return "payments-overview";

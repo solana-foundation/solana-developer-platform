@@ -30,11 +30,7 @@ import {
   IssuancePageSkeleton,
 } from "@/app/dashboard/issuance/issuance-page-skeleton";
 import DashboardLoading from "@/app/dashboard/loading";
-import {
-  EarnDepositSkeleton,
-  EarnOverviewSkeleton,
-  EarnStrategyDetailSkeleton,
-} from "@/app/dashboard/markets/earn/earn-route-skeletons";
+import { EarnProgramSkeleton } from "@/app/dashboard/markets/markets-route-skeletons";
 import {
   CompactOperationsCardSkeleton,
   SettingsPageSkeleton,
@@ -155,12 +151,8 @@ function resolvePageLoadingComponent(
       return IssuanceDetailSkeleton;
     case "payments-overview":
       return PaymentsPageSkeleton;
-    case "earn-overview":
-      return EarnOverviewSkeleton;
-    case "earn-deposit":
-      return EarnDepositSkeleton;
-    case "earn-strategy-detail":
-      return EarnStrategyDetailSkeleton;
+    case "earn-program":
+      return EarnProgramSkeleton;
     case "payments-transactions":
       return PaymentsTransactionsPageSkeleton;
     case "payments-pay":
@@ -572,8 +564,7 @@ export function DashboardShell({
     pathname === "/dashboard/api-keys/new" ||
     (pathname.startsWith("/dashboard/api-keys/") && pathname.endsWith("/edit")) ||
     pathname.startsWith("/dashboard/payments") ||
-    pathname === "/dashboard/markets/earn" ||
-    pathname === "/dashboard/markets/earn/deposit" ||
+    pathname.startsWith("/dashboard/markets") ||
     pathname === "/dashboard/wallets" ||
     pathname === "/dashboard/custody" ||
     isWalletSetupRoute ||
