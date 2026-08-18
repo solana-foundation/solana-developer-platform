@@ -50,8 +50,14 @@ export interface RingsOperationSummary {
   createdAt: string;
 }
 
+export interface RingsOperationEvent {
+  kind: string;
+  createdAt: string;
+}
+
 export interface RingsOperationDetail extends RingsOperationSummary {
   failure: { code: string; message: string; retryable: boolean } | null;
+  events: RingsOperationEvent[];
 }
 
 interface Envelope<T> {
@@ -74,6 +80,16 @@ export function fetchRingsHealth(fallbackError: string): Promise<{ health: Rings
 
 export function fetchRingsWallets(fallbackError: string): Promise<{ wallets: RingsWallet[] }> {
   return getJson("/api/dashboard/helius-rings/wallets", fallbackError);
+}
+
+export function fetchRingsOperationDetail(
+  operationId: string,
+  fallbackError: string
+): Promise<{ operation: RingsOperationDetail }> {
+  return getJson(
+    `/api/dashboard/helius-rings/operations/${encodeURIComponent(operationId)}`,
+    fallbackError
+  );
 }
 
 export function fetchRingsOperations(

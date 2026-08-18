@@ -30,6 +30,7 @@ import {
   type RingsZone,
 } from "./helius-rings.data";
 import { OperationComposer } from "./operation-composer";
+import { OperationDetailDrawer } from "./operation-detail-drawer";
 import { ZonesCard } from "./zones-card";
 
 interface CustodyWalletOption {
@@ -75,6 +76,7 @@ export function HeliusRingsWorkspace({
   const [wallets, setWallets] = useState<RingsWallet[]>([]);
   const [operations, setOperations] = useState<RingsOperationSummary[]>([]);
   const [zones, setZones] = useState<RingsZone[]>([]);
+  const [detailOperationId, setDetailOperationId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [walletName, setWalletName] = useState("");
@@ -285,7 +287,11 @@ export function HeliusRingsWorkspace({
               </TableHeader>
               <TableBody>
                 {operations.map((operation) => (
-                  <TableRow key={operation.id}>
+                  <TableRow
+                    key={operation.id}
+                    className="cursor-pointer"
+                    onClick={() => setDetailOperationId(operation.id)}
+                  >
                     <TableCell>
                       {t(`DashboardHeliusRings.activity.opType_${operation.opType}`)}
                     </TableCell>
@@ -303,6 +309,11 @@ export function HeliusRingsWorkspace({
           )}
         </CardContent>
       </Card>
+
+      <OperationDetailDrawer
+        operationId={detailOperationId}
+        onClose={() => setDetailOperationId(null)}
+      />
     </div>
   );
 }
