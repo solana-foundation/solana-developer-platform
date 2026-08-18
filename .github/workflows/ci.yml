@@ -495,16 +495,23 @@ jobs:
             test_files: src/tests/payments-wallet-scope.test.ts src/tests/api-keys-flow.test.ts src/tests/api-keys-rotation.test.ts src/tests/custody-local.test.ts
             rpc_provider: alchemy
             custody_provider: local
+          - name: Surfpool / Token Flows (Kora)
+            provider: surfpool
+            kora_mode: docker
+            test_files: src/tests/deploy.test.ts src/tests/mint.test.ts src/tests/burn.test.ts src/tests/freeze.test.ts
+            rpc_provider: alchemy
+            custody_provider: local
     env:
       CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
       TEST_DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp_test
       REDIS_URL: redis://127.0.0.1:6379
-      DOPPLER_PRESERVE_ENV: TEST_DATABASE_URL,REDIS_URL,SOLANA_NETWORK
+      DOPPLER_PRESERVE_ENV: TEST_DATABASE_URL,REDIS_URL,SOLANA_NETWORK,KORA_SURFPOOL_MODE
       SOLANA_NETWORK: devnet
       INTEGRATION_SHARD_NAME: ${{ matrix.name }}
       INTEGRATION_TEST_FILES: ${{ matrix.test_files }}
       SOLANA_RPC_CI_PREFERRED_PROVIDER: ${{ matrix.rpc_provider }}
       SDP_INTEGRATION_CUSTODY_PROVIDER: ${{ matrix.custody_provider }}
+      KORA_SURFPOOL_MODE: ${{ matrix.kora_mode || 'shim' }}
     services:
       postgres:
         image: postgres:16-alpine

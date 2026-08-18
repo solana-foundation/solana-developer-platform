@@ -313,6 +313,24 @@ export async function activateRpcConnection(
           executor: tx,
         });
       }
+      // The probe above is the evidence the key works, so the credential is
+      // promoted out of `pending` here rather than anywhere else. It has to
+      // share the transaction with the connection update: the relay's
+      // effective-connection lookup requires both rows to agree, so a
+      // half-applied activation would read healthy and still route to SDP.
+      const promoted = await txStore.activateConnectionCredential({
+        organizationId: auth.organizationId,
+        connectionId,
+        scopeKeys,
+        executor: tx,
+      });
+      if (promoted === 0) {
+        // Only a deactivated or retired credential reaches here. Activating the
+        // connection anyway would produce the healthy-looking row that never
+        // resolves, so fail loudly instead of leaving the two rows disagreeing.
+        throw conflict("The credential behind this RPC connection is no longer usable");
+      }
+
       return txStore.activateConnection({
         organizationId: auth.organizationId,
         connectionId,
@@ -336,7 +354,10 @@ export async function activateRpcConnection(
     throw conflict("The RPC connection changed while it was being activated");
   }
 
-  return toSafeWithCredential(activated, credential);
+  // `credential` was read before the transaction, so its status is the
+  // pre-promotion one. The transaction committed and refuses to commit without
+  // promoting, so reporting `active` here is the state on disk, not a guess.
+  return toSafeWithCredential(activated, { ...credential, status: "active" });
 }
 
 export async function deactivateRpcConnection(

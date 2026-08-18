@@ -216,6 +216,45 @@ export class RpcConnectionStore {
   }
 
   /**
+   * Promote the credential the connection points at, in the same transaction
+   * that activates the connection.
+   *
+   * `insertCredential` writes `pending`, and a successful activation probe is
+   * the only evidence the key works. Without this the credential stays pending
+   * forever while the connection reads active, `findEffectiveConnection` never
+   * matches, and the organization's traffic keeps leaving on SDP's keys — the
+   * exact silent fallback this whole path exists to prevent.
+   *
+   * Reached through the connection rather than by id so the organization and
+   * scope checks are the same ones the caller already passed. `deactivated`
+   * and `retired` are excluded: neither may be resurrected by an activation.
+   */
+  async activateConnectionCredential(params: {
+    organizationId: string;
+    connectionId: string;
+    scopeKeys: readonly string[];
+    executor?: DatabaseExecutor;
+  }): Promise<number> {
+    const db = params.executor ?? this.db;
+    return db.execute(
+      `UPDATE provider_credentials
+          SET status = 'active',
+              last_validated_at = sdp_iso_now(),
+              last_failure_code = NULL,
+              updated_at = sdp_iso_now()
+        WHERE id = (
+                SELECT c.provider_credential_id
+                  FROM rpc_connections c
+                 WHERE c.id = ?
+                   AND c.organization_id = ?
+                   AND c.scope_key IN (${params.scopeKeys.map(() => "?").join(", ")})
+              )
+          AND status IN ('pending', 'failed_validation', 'active')`,
+      [params.connectionId, params.organizationId, ...params.scopeKeys]
+    );
+  }
+
+  /**
    * Deactivation drops the default flag in the same statement. Leaving it set
    * would keep a dead connection occupying the slot the relay reads.
    */
@@ -308,20 +347,42 @@ export class RpcConnectionStore {
    * unusable connection to fail closed rather than quietly spend SDP's own
    * credentials, so "nothing configured" and "configured but broken" cannot be
    * the same answer.
+   *
+   * Two things this deliberately does not treat as broken:
+   *
+   * `pending` and `checking` are drafts. Submitting a connection is not the
+   * statement of intent — activating it is. An administrator who opens the form
+   * and never finishes, or whose first probe is still running, must not take
+   * every RPC call in the organization down; that row has never carried
+   * traffic, so falling back to the platform rail changes nothing for them.
+   *
+   * `failed` is different and does fail closed: that connection was live, the
+   * organization's traffic was on it, and moving that traffic back onto SDP's
+   * keys without saying so is the thing being prevented. Re-activating clears
+   * it once the key is fixed.
+   *
+   * The credential predicate matches `findEffectiveConnection` exactly. When
+   * the two disagreed, this one could call a scope live that the effective
+   * lookup would not resolve, and every disagreement resolved toward SDP paying.
    */
   async findScopeConnectionState(params: {
     organizationId: string;
     scopeKey: string;
     network: RpcConnectionNetwork;
   }): Promise<{ kind: "none" } | { kind: "unusable" } | { kind: "active"; connectionId: string }> {
-    const rows = await this.db.queryMany<{ id: string; status: string; is_default: boolean }>(
-      `SELECT c.id, c.status, c.is_default
+    const rows = await this.db.queryMany<{
+      id: string;
+      status: string;
+      is_default: boolean;
+      credential_status: string;
+    }>(
+      `SELECT c.id, c.status, c.is_default, pc.status AS credential_status
          FROM rpc_connections c
          JOIN provider_credentials pc ON pc.id = c.provider_credential_id
         WHERE c.organization_id = ?
           AND c.scope_key = ?
           AND c.network = ?
-          AND c.status <> 'deactivated'`,
+          AND c.status NOT IN ('deactivated', 'pending', 'checking')`,
       [params.organizationId, params.scopeKey, params.network]
     );
 
@@ -329,7 +390,9 @@ export class RpcConnectionStore {
       return { kind: "none" };
     }
 
-    const live = rows.find((row) => row.status === "active" && row.is_default);
+    const live = rows.find(
+      (row) => row.status === "active" && row.is_default && row.credential_status === "active"
+    );
     return live ? { kind: "active", connectionId: live.id } : { kind: "unusable" };
   }
 
