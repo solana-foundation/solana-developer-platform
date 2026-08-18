@@ -23,7 +23,12 @@ import {
 } from "@/lib/dashboard-navigation-loading";
 import { cn } from "@/lib/utils";
 
-type MoreItem = { label: string; href: string; icon?: LucideIcon; external?: boolean };
+type MoreItem = {
+  label: string;
+  href: string;
+  icon?: LucideIcon;
+  external?: boolean;
+};
 type MoreGroup = { title: string; items: MoreItem[] };
 
 /**
@@ -32,8 +37,7 @@ type MoreGroup = { title: string; items: MoreItem[] };
  * The payments sub-actions are deliberately absent: the Payments tab already opens
  * a page carrying its own sub-navigation, so repeating Transactions, Pay, Deposit
  * and the rest here would be a second copy of a menu the destination already has.
- * Earn stays here because Markets does not have a dedicated bottom-bar destination;
- * it needs the Markets module flag as well as its own, matching the sidebar group.
+ * Markets stays here because it does not have a dedicated bottom-bar destination.
  */
 function getMoreGroups(
   t: ReturnType<typeof useTranslations>,
@@ -49,10 +53,10 @@ function getMoreGroups(
     {
       title: t("Shared.dashboardShell.manage"),
       items: [
-        ...(options.marketsEnabled && options.earnEnabled
+        ...(options.marketsEnabled
           ? [
               {
-                label: t("Shared.dashboardShell.earn"),
+                label: t("Shared.dashboardShell.markets"),
                 href: DASHBOARD_SIDE_NAV_HREFS.markets,
                 icon: TrendingUpIcon,
               },

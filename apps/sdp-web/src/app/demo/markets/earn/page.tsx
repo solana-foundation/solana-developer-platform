@@ -1,6 +1,6 @@
-import { EarnProgramWorkspace } from "./earn-program-workspace";
+import { EarnProgramWorkspace } from "@/app/dashboard/markets/earn/earn-program-workspace";
 
-export default async function EarnPage({
+export default async function EarnProgramDemoPage({
   searchParams,
 }: {
   searchParams: Promise<{ create?: string | string[] }>;
@@ -8,7 +8,7 @@ export default async function EarnPage({
   const { create } = await searchParams;
   return (
     <EarnProgramWorkspace
-      builderHref="/dashboard/markets/earn/button-builder"
+      builderHref="/demo/markets/earn/button-builder"
       startInCreateMode={create === "1"}
     />
   );

@@ -1,6 +1,6 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import type { ListProjectsResponse } from "@sdp/types";
-import type { NextRequest } from "next/server";
+import type { NextFetchEvent, NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { AUTH_ENTRY_PATH } from "@/lib/auth-entry";
 import {
@@ -23,6 +23,8 @@ export const isPublicRoute = createRouteMatcher([
   "/opengraph-image",
   "/twitter-image",
 ]);
+
+const isMarketsDemoRoute = createRouteMatcher(["/demo/markets(.*)"]);
 
 const needsSelectedProject = createRouteMatcher([
   "/dashboard(.*)",
@@ -69,7 +71,7 @@ async function resolveDefaultProjectId(
   );
 }
 
-export const proxy = clerkMiddleware(async (auth, req) => {
+const clerkProxy = clerkMiddleware(async (auth, req) => {
   if (!isPublicRoute(req)) {
     await auth.protect({
       unauthenticatedUrl: getUnauthenticatedUrl(req),
@@ -104,6 +106,21 @@ export const proxy = clerkMiddleware(async (auth, req) => {
   }
   return response;
 });
+
+/**
+ * The standalone Markets prototype is intentionally auth-free only when its
+ * explicit server flag is on. Bypass the Clerk wrapper itself here: a fake
+ * local publishable key otherwise starts Clerk's development-browser handshake
+ * before the middleware callback can decide that the route is public.
+ */
+export function proxy(req: NextRequest, event: NextFetchEvent) {
+  if (process.env.SDP_MARKETS_DEMO === "true" && isMarketsDemoRoute(req)) {
+    const requestHeaders = new Headers(req.headers);
+    requestHeaders.set("x-sdp-pathname", req.nextUrl.pathname);
+    return NextResponse.next({ request: { headers: requestHeaders } });
+  }
+  return clerkProxy(req, event);
+}
 
 export const config = {
   matcher: ["/((?!.*\\..*|_next).*)", "/", "/(api|trpc)(.*)"],

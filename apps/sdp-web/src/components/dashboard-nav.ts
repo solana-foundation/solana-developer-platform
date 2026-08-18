@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import type { useTranslations } from "@/i18n/provider";
 import {
+  DASHBOARD_MARKETS_SUBNAV_HREFS,
   DASHBOARD_PAYMENTS_SUBNAV_HREFS,
   DASHBOARD_SIDE_NAV_HREFS,
 } from "@/lib/dashboard-navigation-loading";
@@ -122,11 +123,15 @@ export function getMarketsActions(
   earnEnabled: boolean
 ): SubNavItem[] {
   return [
+    {
+      label: t("Shared.dashboardShell.treasurySolutions"),
+      href: DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions,
+    },
     ...(earnEnabled
       ? [
           {
-            label: t("Shared.dashboardShell.earn"),
-            href: DASHBOARD_SIDE_NAV_HREFS.markets,
+            label: t("Shared.dashboardShell.earnProgram"),
+            href: DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram,
           },
         ]
       : []),
@@ -177,9 +182,8 @@ export function getNavSections(
           children: getPaymentsActions(t, options.privateChannelsEnabled),
           subnavKey: "payments",
         },
-        // The group needs both flags: markets off hides the module, and an
-        // empty children array means no sub-module is enabled — a Markets entry
-        // with nothing under it would lead nowhere.
+        // Markets owns Treasury Solutions. Earn Program adds its own nested
+        // flag so it can remain hidden independently while Treasury stays usable.
         ...(options.marketsEnabled && marketsActions.length > 0
           ? [
               {
