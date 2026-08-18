@@ -3,6 +3,7 @@ import { AppError } from "@/lib/errors";
 import { isEarnEnabled } from "@/lib/feature-flags";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
   createEarnProgram,
@@ -16,6 +17,12 @@ import {
   retargetEarnProgram,
 } from "./handlers/program";
 import { getEarnStrategy, listEarnStrategies } from "./handlers/strategies";
+import {
+  earnProgramCreateSchema,
+  earnProgramRetargetSchema,
+  earnProgramWithdrawalCreateSchema,
+  earnProgramWithdrawalPreviewSchema,
+} from "./schemas";
 
 const earn = new Hono<{ Bindings: Env }>();
 
@@ -50,18 +57,30 @@ earn.get("/strategies/:strategyId", requirePermissions("earn:read"), getEarnStra
 // The collection is declared BEFORE the `:programId` routes so a literal
 // segment can never be captured as an id.
 earn.get("/programs", requirePermissions("earn:read"), listEarnPrograms);
-earn.post("/programs", requirePermissions("earn:write"), createEarnProgram);
+earn.post(
+  "/programs",
+  requirePermissions("earn:write"),
+  validateBody(earnProgramCreateSchema),
+  createEarnProgram
+);
 earn.get("/programs/:programId", requirePermissions("earn:read"), getEarnProgram);
-earn.put("/programs/:programId", requirePermissions("earn:write"), retargetEarnProgram);
+earn.put(
+  "/programs/:programId",
+  requirePermissions("earn:write"),
+  validateBody(earnProgramRetargetSchema),
+  retargetEarnProgram
+);
 earn.get("/programs/:programId/deposits", requirePermissions("earn:read"), listEarnProgramDeposits);
 earn.post(
   "/programs/:programId/withdrawal-preview",
   requirePermissions("earn:read"),
+  validateBody(earnProgramWithdrawalPreviewSchema),
   previewEarnProgramWithdrawal
 );
 earn.post(
   "/programs/:programId/withdrawals",
   requirePermissions("earn:write"),
+  validateBody(earnProgramWithdrawalCreateSchema),
   createEarnProgramWithdrawal
 );
 earn.get(

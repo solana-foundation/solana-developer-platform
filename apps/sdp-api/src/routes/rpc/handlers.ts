@@ -9,14 +9,15 @@ import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError, badRequest, badRequestQuery } from "@/lib/errors";
+import { AppError, badRequestQuery } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
   checkResolvedRpcTargetConnection,
   getProviderSetupDefinition,
 } from "@/services/provider-setup-registry";
 import type { Env } from "@/types/env";
-import { rpcProjectQuerySchema, rpcRelayPayloadSchema } from "./schemas";
+import { rpcProjectQuerySchema, type rpcRelayPayloadSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -136,7 +137,7 @@ export const getRpcProviders = async (c: AppContext) => {
   return success(c, response);
 };
 
-export const relayRpcRequest = async (c: AppContext) => {
+export const relayRpcRequest = async (c: ValidatedBodyContext<typeof rpcRelayPayloadSchema>) => {
   const auth = getAuth(c);
   const queryParse = rpcProjectQuerySchema.safeParse(c.req.query());
 
@@ -146,23 +147,11 @@ export const relayRpcRequest = async (c: AppContext) => {
     });
   }
 
-  let requestBody: unknown;
-  try {
-    requestBody = await c.req.json();
-  } catch {
-    throw badRequest("Invalid JSON body");
-  }
+  const payload = c.req.valid("json");
 
-  const payloadParse = rpcRelayPayloadSchema.safeParse(requestBody);
-  if (!payloadParse.success) {
-    throw badRequest("Invalid JSON-RPC payload", {
-      errors: z.flattenError(payloadParse.error).fieldErrors,
-    });
-  }
+  const methodNames = extractRpcMethodNames(payload);
 
-  const methodNames = extractRpcMethodNames(payloadParse.data);
-
-  if (shouldRoundRobinFaucetRequest(payloadParse.data, methodNames)) {
+  if (shouldRoundRobinFaucetRequest(payload, methodNames)) {
     const targets = await resolveRoundRobinRpcTargets({
       env: c.env,
       kv: c.var.kv,
@@ -178,13 +167,9 @@ export const relayRpcRequest = async (c: AppContext) => {
     for (const target of targets) {
       const startedAt = Date.now();
       try {
-        const { upstream, upstreamBody } = await relayToTarget(
-          c,
-          target,
-          payloadParse.data,
-          methodNames,
-          { recordJsonRpcErrorAsFailure: true }
-        );
+        const { upstream, upstreamBody } = await relayToTarget(c, target, payload, methodNames, {
+          recordJsonRpcErrorAsFailure: true,
+        });
         const relayResponse = buildRelayResponse(target, upstream, upstreamBody, methodNames);
         if (upstream.ok && !isJsonRpcErrorResponse(upstreamBody)) {
           return success(c, relayResponse);
@@ -224,12 +209,7 @@ export const relayRpcRequest = async (c: AppContext) => {
 
   const startedAt = Date.now();
   try {
-    const { upstream, upstreamBody } = await relayToTarget(
-      c,
-      target,
-      payloadParse.data,
-      methodNames
-    );
+    const { upstream, upstreamBody } = await relayToTarget(c, target, payload, methodNames);
     return success(c, buildRelayResponse(target, upstream, upstreamBody, methodNames));
   } catch (error) {
     await recordRpcRelayTelemetry(c.var.kv.cache, {

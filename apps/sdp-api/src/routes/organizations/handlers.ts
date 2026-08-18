@@ -7,12 +7,12 @@ import {
   type OrganizationTier,
 } from "@sdp/types";
 import type { Context } from "hono";
-import { z } from "zod";
 import { getDb } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { noContent, success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import {
@@ -21,7 +21,7 @@ import {
 } from "@/services/provider-availability.service";
 import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
-import { updateOrgSchema } from "./schemas";
+import type { updateOrgSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -107,7 +107,7 @@ export const getOrganization = async (c: AppContext) => {
   return success(c, response);
 };
 
-export const updateOrganization = async (c: AppContext) => {
+export const updateOrganization = async (c: ValidatedBodyContext<typeof updateOrgSchema>) => {
   const { orgId } = c.req.param();
   const auth = getAuth(c);
 
@@ -115,14 +115,7 @@ export const updateOrganization = async (c: AppContext) => {
     throw new AppError("FORBIDDEN", "Access denied to this organization");
   }
 
-  const body = await c.req.json();
-  const parsed = updateOrgSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const updates: string[] = [];
   const params: (string | null)[] = [];
@@ -139,25 +132,19 @@ export const updateOrganization = async (c: AppContext) => {
     throw notFound("Organization");
   }
 
-  if (parsed.data.name) {
+  if (body.name) {
     updates.push("name = ?");
-    params.push(parsed.data.name);
+    params.push(body.name);
   }
 
-  if (parsed.data.settings !== undefined) {
-    if (parsed.data.settings.rpcProvider) {
-      await assertProviderAvailable(
-        c.env,
-        getDb(c.env),
-        orgId,
-        "rpc",
-        parsed.data.settings.rpcProvider
-      );
+  if (body.settings !== undefined) {
+    if (body.settings.rpcProvider) {
+      await assertProviderAvailable(c.env, getDb(c.env), orgId, "rpc", body.settings.rpcProvider);
     }
 
     const mergedSettings: OrganizationSettings = {
       ...(parseOrganizationSettings(existing.settings) ?? {}),
-      ...parsed.data.settings,
+      ...body.settings,
     };
     updates.push("settings = ?");
     params.push(JSON.stringify(mergedSettings));
@@ -190,7 +177,7 @@ export const updateOrganization = async (c: AppContext) => {
     action: "update",
     resourceType: "organization",
     resourceId: orgId,
-    metadata: parsed.data,
+    metadata: body,
   });
 
   if (!org) {

@@ -12,6 +12,7 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
   assertApiKeyWalletAccess,
   getAllowedApiKeyWalletIdsForPermissions,
@@ -28,14 +29,14 @@ import { walletOperationActorFromAuth } from "@/services/policy/enforcement.serv
 import { type AppContext, getPaymentRecurringPaymentsRepository } from "../context";
 import { mapTransferRow } from "../mappers";
 import {
-  activateRecurringPaymentSchema,
+  type activateRecurringPaymentSchema,
   cancelRecurringPaymentSchema,
-  collectRecurringPaymentSchema,
-  createRecurringPaymentSchema,
+  type collectRecurringPaymentSchema,
+  type createRecurringPaymentSchema,
   listRecurringPaymentsQuerySchema,
   recurringPaymentIdParamsSchema,
   resumeRecurringPaymentSchema,
-  updateRecurringPaymentSchema,
+  type updateRecurringPaymentSchema,
 } from "../schemas";
 import { resolveScope, resolveWallet } from "../wallets";
 
@@ -93,17 +94,14 @@ function mapCollectionAttempt(
   };
 }
 
-export const createRecurringPayment = async (c: AppContext) => {
-  const body = await c.req.json();
-  const parsed = createRecurringPaymentSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
-  }
+export const createRecurringPayment = async (
+  c: ValidatedBodyContext<typeof createRecurringPaymentSchema>
+) => {
+  const body = c.req.valid("json");
 
   const projectId = requireProjectId(c);
   const scope = await resolveScope(c);
-  const sourceWallet = resolveWallet(scope.wallets, parsed.data.sourceWalletId);
+  const sourceWallet = resolveWallet(scope.wallets, body.sourceWalletId);
   assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, ["payments:write"]);
 
   const recurringPayment = await createRecurringPaymentRecord({
@@ -111,13 +109,13 @@ export const createRecurringPayment = async (c: AppContext) => {
     organizationId: scope.auth.organizationId,
     projectId,
     sourceWallet,
-    counterpartyId: parsed.data.counterpartyId,
-    counterpartyAccountId: parsed.data.counterpartyAccountId,
-    token: parsed.data.token,
-    amount: parsed.data.amount,
-    periodHours: parsed.data.periodHours,
-    firstCollectionAt: parsed.data.firstCollectionAt ?? null,
-    metadataUri: parsed.data.metadataUri ?? null,
+    counterpartyId: body.counterpartyId,
+    counterpartyAccountId: body.counterpartyAccountId,
+    token: body.token,
+    amount: body.amount,
+    periodHours: body.periodHours,
+    firstCollectionAt: body.firstCollectionAt ?? null,
+    metadataUri: body.metadataUri ?? null,
     createdBy: await resolveCreatorUserId(c),
     apiKeyId: scope.auth.apiKeyId,
     actor: walletOperationActorFromAuth(scope.auth),
@@ -142,7 +140,9 @@ async function readOptionalJsonBody(c: AppContext): Promise<unknown> {
   }
 }
 
-export const updateRecurringPayment = async (c: AppContext) => {
+export const updateRecurringPayment = async (
+  c: ValidatedBodyContext<typeof updateRecurringPaymentSchema>
+) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const params = recurringPaymentIdParamsSchema.safeParse(c.req.param());
@@ -151,11 +151,7 @@ export const updateRecurringPayment = async (c: AppContext) => {
     throw badRequestParams();
   }
 
-  const body = await readOptionalJsonBody(c);
-  const parsed = updateRecurringPaymentSchema.safeParse(body);
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
-  }
+  const body = c.req.valid("json");
 
   const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["payments:write"]);
   const recurringPayment = await getPaymentRecurringPaymentsRepository(c).getRecurringPaymentById({
@@ -173,8 +169,8 @@ export const updateRecurringPayment = async (c: AppContext) => {
   const sourceWallet = resolveWallet(scope.wallets, recurringPayment.source_wallet_id);
   assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, ["payments:write"]);
   const nextSourceWallet =
-    parsed.data.sourceWalletId && parsed.data.sourceWalletId !== sourceWallet.walletId
-      ? resolveWallet(scope.wallets, parsed.data.sourceWalletId)
+    body.sourceWalletId && body.sourceWalletId !== sourceWallet.walletId
+      ? resolveWallet(scope.wallets, body.sourceWalletId)
       : undefined;
   if (nextSourceWallet) {
     assertApiKeyWalletAccess(scope.auth, nextSourceWallet.walletId, ["payments:write"]);
@@ -187,7 +183,7 @@ export const updateRecurringPayment = async (c: AppContext) => {
     sourceWallet,
     nextSourceWallet,
     recurringPayment,
-    request: parsed.data,
+    request: body,
     createdBy: await resolveCreatorUserId(c),
     apiKeyId: scope.auth.apiKeyId,
     actor: walletOperationActorFromAuth(scope.auth),
@@ -199,19 +195,15 @@ export const updateRecurringPayment = async (c: AppContext) => {
   return success(c, response);
 };
 
-export const activateRecurringPayment = async (c: AppContext) => {
+export const activateRecurringPayment = async (
+  c: ValidatedBodyContext<typeof activateRecurringPaymentSchema>
+) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const params = recurringPaymentIdParamsSchema.safeParse(c.req.param());
 
   if (!params.success) {
     throw badRequestParams();
-  }
-
-  const body = await readOptionalJsonBody(c);
-  const parsed = activateRecurringPaymentSchema.safeParse(body);
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
   }
 
   const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["payments:write"]);
@@ -308,19 +300,15 @@ export const cancelRecurringPayment = async (c: AppContext) =>
 export const resumeRecurringPayment = async (c: AppContext) =>
   mutateRecurringPaymentLifecycle(c, "resume");
 
-export const collectRecurringPayment = async (c: AppContext) => {
+export const collectRecurringPayment = async (
+  c: ValidatedBodyContext<typeof collectRecurringPaymentSchema>
+) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const params = recurringPaymentIdParamsSchema.safeParse(c.req.param());
 
   if (!params.success) {
     throw badRequestParams();
-  }
-
-  const body = await readOptionalJsonBody(c);
-  const parsed = collectRecurringPaymentSchema.safeParse(body);
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
   }
 
   const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["payments:write"]);

@@ -29,6 +29,7 @@ import {
 } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { resolveEarnProviderClient } from "@/services/earn-provider-registry";
 import {
@@ -42,17 +43,17 @@ import {
 } from "@/services/provider-availability.service";
 import { type AppContext, earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
 import {
-  earnProgramCreateSchema,
+  type earnProgramCreateSchema,
   earnProgramDepositsQuerySchema,
   earnProgramParamsSchema,
-  earnProgramRetargetSchema,
+  type earnProgramRetargetSchema,
   earnProgramsListQuerySchema,
-  earnProgramWithdrawalCreateSchema,
+  type earnProgramWithdrawalCreateSchema,
   earnProgramWithdrawalParamsSchema,
-  earnProgramWithdrawalPreviewSchema,
+  type earnProgramWithdrawalPreviewSchema,
   earnProgramWithdrawalsListQuerySchema,
 } from "../schemas";
-import { listResponse, pageWindow, parseBody, parseParams, parseQuery } from "./shared";
+import { listResponse, pageWindow, parseParams, parseQuery } from "./shared";
 
 /**
  * Earn "programs": provider-managed portfolio wallets, N per (organization,
@@ -453,8 +454,10 @@ export const listEarnPrograms = async (c: AppContext) => {
   return success(c, response);
 };
 
-export const createEarnProgram = async (c: AppContext) => {
-  const body = await parseBody(c, earnProgramCreateSchema);
+export const createEarnProgram = async (
+  c: ValidatedBodyContext<typeof earnProgramCreateSchema>
+) => {
+  const body = c.req.valid("json");
   const client = requirePortfolioClient(body.provider);
   const auth = getAuth(c);
   const environment = resolveSdpEnvironment(c);
@@ -548,9 +551,11 @@ export const createEarnProgram = async (c: AppContext) => {
  * forcing withdraw → wait for settlement → re-deposit for what the provider
  * supports natively.
  */
-export const retargetEarnProgram = async (c: AppContext) => {
+export const retargetEarnProgram = async (
+  c: ValidatedBodyContext<typeof earnProgramRetargetSchema>
+) => {
   const { programId } = parseParams(c, earnProgramParamsSchema);
-  const body = await parseBody(c, earnProgramRetargetSchema);
+  const body = c.req.valid("json");
   const { row, client } = await requireProgramContext(c, programId);
   const auth = getAuth(c);
   const environment = resolveSdpEnvironment(c);
@@ -624,9 +629,11 @@ export const listEarnProgramDeposits = async (c: AppContext) => {
   return success(c, response);
 };
 
-export const previewEarnProgramWithdrawal = async (c: AppContext) => {
+export const previewEarnProgramWithdrawal = async (
+  c: ValidatedBodyContext<typeof earnProgramWithdrawalPreviewSchema>
+) => {
   const { programId } = parseParams(c, earnProgramParamsSchema);
-  const body = await parseBody(c, earnProgramWithdrawalPreviewSchema);
+  const body = c.req.valid("json");
   const { row, client, testMode } = await requireProgramContext(c, programId);
 
   // Money-out path: credentials only, never the entitlement gate.
@@ -720,9 +727,11 @@ async function persistWithdrawalObservation(
   }
 }
 
-export const createEarnProgramWithdrawal = async (c: AppContext) => {
+export const createEarnProgramWithdrawal = async (
+  c: ValidatedBodyContext<typeof earnProgramWithdrawalCreateSchema>
+) => {
   const { programId } = parseParams(c, earnProgramParamsSchema);
-  const body = await parseBody(c, earnProgramWithdrawalCreateSchema);
+  const body = c.req.valid("json");
   const { row, client, testMode } = await requireProgramContext(c, programId);
 
   // Money-out path: credentials only, never the entitlement gate.

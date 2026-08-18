@@ -322,9 +322,9 @@ describe("Private Channels routes", () => {
     );
     expect(res.status).toBe(400);
     const body = (await res.json()) as {
-      error: { message: string; details?: { fieldErrors?: Record<string, string[]> } };
+      error: { message: string; details?: { errors?: Record<string, string[]> } };
     };
-    expect(body.error.details?.fieldErrors?.gatewayUrl?.[0]).toMatch(/http/i);
+    expect(body.error.details?.errors?.gatewayUrl?.[0]).toMatch(/http/i);
     expect(probeConnectionMock).not.toHaveBeenCalled();
   });
 
