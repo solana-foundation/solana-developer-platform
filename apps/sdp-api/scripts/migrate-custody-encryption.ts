@@ -129,6 +129,16 @@ async function main(): Promise<void> {
     const nested = await migratePass(env, V2_VERSION, "custody_configs:nested");
     const legacy = await migratePass(env, LEGACY_VERSION, "custody_configs");
 
+    const { results } = await getDb(env)
+      .prepare(`SELECT COUNT(*) AS n FROM custody_configs WHERE encryption_version = ?`)
+      .bind(LEGACY_VERSION)
+      .all<{ n: number }>();
+    const remaining = results[0]?.n ?? 0;
+    if (remaining > 0) {
+      console.error(`${remaining} legacy rows appeared after the final scan; rerun.`);
+      process.exitCode = 1;
+    }
+
     const contested = legacy.contested + nested.contested;
     const failed = legacy.failed + nested.failed;
     if (contested > 0 || failed > 0) {
@@ -137,7 +147,7 @@ async function main(): Promise<void> {
           `${failed} rows failed, ${contested} contested. Rerun until both reach zero.`
       );
       process.exitCode = 1;
-    } else {
+    } else if (remaining === 0) {
       console.info(
         `Done. Migrated ${legacy.migrated} legacy rows, ${nested.migrated} nested-secret rows.`
       );
