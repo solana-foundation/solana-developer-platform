@@ -1003,16 +1003,26 @@ async function tenantOwnsWallet(
        LEFT JOIN custody_configs c ON c.id = w.custody_config_id
        LEFT JOIN custody_connections connection ON connection.id = w.custody_connection_id
        WHERE (w.id = ? OR w.wallet_id = ?)
-         AND COALESCE(c.organization_id, connection.organization_id) = ?
-         AND (
-           (c.id IS NOT NULL AND (c.project_id IS NOT DISTINCT FROM ? OR c.project_id IS NULL))
-           OR (connection.id IS NOT NULL AND connection.project_id IS NOT DISTINCT FROM ?)
-         )
          AND w.status = 'active'
-         AND COALESCE(c.status, connection.status) = 'active'
+         AND (
+           (c.organization_id = ?
+            AND (c.project_id IS NOT DISTINCT FROM ? OR c.project_id IS NULL)
+            AND c.status = 'active')
+           OR
+           (connection.organization_id = ?
+            AND connection.project_id IS NOT DISTINCT FROM ?
+            AND connection.status = 'active')
+         )
        LIMIT 1`
     )
-    .bind(walletId, walletId, scope.organizationId, scope.projectId, scope.projectId)
+    .bind(
+      walletId,
+      walletId,
+      scope.organizationId,
+      scope.projectId,
+      scope.organizationId,
+      scope.projectId
+    )
     .first<{ id: string }>();
   return Boolean(row);
 }
@@ -1033,13 +1043,16 @@ async function tenantOwnsWalletTarget(
        LEFT JOIN custody_connections connection ON connection.id = w.custody_connection_id
        WHERE w.wallet_id = ?
          ${custodyPredicate}
-         AND COALESCE(c.organization_id, connection.organization_id) = ?
-         AND (
-           (c.id IS NOT NULL AND (c.project_id IS NOT DISTINCT FROM ? OR c.project_id IS NULL))
-           OR (connection.id IS NOT NULL AND connection.project_id IS NOT DISTINCT FROM ?)
-         )
          AND w.status = 'active'
-         AND COALESCE(c.status, connection.status) = 'active'
+         AND (
+           (c.organization_id = ?
+            AND (c.project_id IS NOT DISTINCT FROM ? OR c.project_id IS NULL)
+            AND c.status = 'active')
+           OR
+           (connection.organization_id = ?
+            AND connection.project_id IS NOT DISTINCT FROM ?
+            AND connection.status = 'active')
+         )
        LIMIT 1`
     )
     .bind(
@@ -1047,6 +1060,7 @@ async function tenantOwnsWalletTarget(
       ...(hasCustodyWalletId ? [custodyWalletId] : []),
       scope.organizationId,
       scope.projectId,
+      scope.organizationId,
       scope.projectId
     )
     .first<{ id: string }>();

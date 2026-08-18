@@ -45,6 +45,7 @@ export type {
   EarnPortfolioWithdrawalPreviewInput,
   EarnPortfolioWithdrawalStatusInput,
   EarnRuntimeContext,
+  EarnRuntimeEnvironment,
   EarnVaultProvider,
   EarnWithdrawalApprovalAction,
   EarnWithdrawalApprovalProvider,

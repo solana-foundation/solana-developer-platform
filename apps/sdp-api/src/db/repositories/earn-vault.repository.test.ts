@@ -182,6 +182,7 @@ describe("EarnVaultRepository (postgres)", () => {
           environment: "sandbox",
           custodyWalletIds: [WALLET_A],
           limit: 10,
+          before: null,
         })
       ).rows
     ).toHaveLength(1);
@@ -207,6 +208,7 @@ describe("EarnVaultRepository (postgres)", () => {
           environment: "sandbox",
           custodyWalletIds: [WALLET_A],
           limit: 10,
+          before: null,
         })
       ).rows
     ).toHaveLength(0);

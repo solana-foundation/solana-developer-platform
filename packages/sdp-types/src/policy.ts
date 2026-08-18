@@ -3,6 +3,7 @@ export type PolicyDefaultAction = "allow" | "deny" | "approval_required" | "revi
 export type EffectivePolicySource = "implicit_default_allow" | "customer_profile";
 
 export const WALLET_OPERATION_TYPES = [
+  "earn_vault_deposit",
   "issuance_burn_execute",
   "issuance_force_burn_execute",
   "issuance_mint_execute",
@@ -19,7 +20,13 @@ export const WALLET_OPERATION_TYPES = [
 
 export type WalletOperationType = (typeof WALLET_OPERATION_TYPES)[number];
 
-export const WALLET_OPERATION_FAMILIES = ["transfer", "payment", "ramp", "issuance"] as const;
+export const WALLET_OPERATION_FAMILIES = [
+  "transfer",
+  "payment",
+  "ramp",
+  "issuance",
+  "program",
+] as const;
 
 export type WalletOperationFamily = (typeof WALLET_OPERATION_FAMILIES)[number];
 
