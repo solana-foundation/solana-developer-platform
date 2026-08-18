@@ -31,7 +31,8 @@ the body `requestId` form, which is the only one that can get through.
 - `layout.tsx` — the `earn()` flag gate (`notFound()`); `../layout.tsx` gates the
   whole Markets module the same way. Pages hold no flag checks — add new Earn
   routes under this segment and they inherit both gates.
-- `earn-workspace.tsx` — the TAB SHELL (see "Three tabs, one workspace") plus
+- `earn-workspace.tsx` — the shared header-tab panel shell (see "Three tabs,
+  one workspace") plus
   `EarnPositionsPanel`: ONE CARD PER PROGRAM, stacked newest first as
   repeated records with no switcher (hiding a funded program behind a tab would
   make a reader hunt for money they hold). Each card owns its money tiles, its
@@ -331,9 +332,12 @@ funding instructions and nothing else — never imply a transfer happens.
 
 ## Three tabs, one workspace
 
-`EarnWorkspace` is a tab shell (`role="tablist"`, house underline styling from
-`issuance/.../action-pills.tsx`, but real tab semantics because these switch
-panels rather than fire actions):
+The tabs live in the dashboard HEADER: `getEarnRoutePageConfig` declares its
+`headerTabs`, `DashboardHeaderTabs` owns the design-system tab semantics, and
+`useDashboardTab` carries selection in the shallow `?tab=` URL state. The exact
+Earn overview route is viewport-locked, and `EarnWorkspace` switches its three
+independently padded/scrolling panels through `DashboardWorkspaceTabShell`.
+There is no in-body `EarnTabBar` or second ARIA tabs contract.
 
 - **Opportunities** (default) — `EarnOpportunitiesPanel` → `earn-opportunities-table.tsx`. The
   catalogue, ranked, with a Deposit link per row. It renders what the API
@@ -341,12 +345,13 @@ panels rather than fire actions):
   different question, answered by `opportunityDepositability`.
 - **Active** — `EarnPositionsPanel` (the old `ProgramsSection`): one card per
   program, aggregate strip above when there is more than one, withdraw modal.
-  The tab label carries the count. Labelled "Active", keyed `positions`: the
-  label is copy, the key names the concept the panel renders.
-  The tab strip implements the FULL ARIA tabs contract — roving `tabIndex` **and**
-  arrow/Home/End key handling with focus following selection. Half of it is worse
-  than none: `tabIndex={-1}` alone takes the inactive tabs out of the Tab order,
-  making them unreachable rather than merely skipped (`earn-tabs.unit.test.tsx`).
+  Labelled "Active", keyed `positions`: the label is copy, the key names the
+  concept the panel renders. The tab carries a live program count — the count
+  is the point of the tab, answering "do I hold anything" without switching —
+  published by `EarnWorkspace` via the generic `useHeaderTabCount("positions",
+  …)` channel (a module-scoped store in `components/dashboard-header-tabs.tsx`,
+  so a count change re-renders only the tab strip). Undefined while the read is
+  in flight, so a loading state never renders as "(0)".
 - **Integrate** — `earn-playground.tsx` (labelled "Integrate", keyed
   `playground`), modelled on
   `payments/counterparty/counterparty-playground.tsx` down to
@@ -356,8 +361,8 @@ panels rather than fire actions):
   Endpoints are fully curated in `earn-playground-config.ts` (the generated
   OpenAPI catalogue has no `earn` module yet).
 
-Both panels are exported so unit tests can render them directly instead of
-driving the tab bar.
+The Opportunities and Positions panels are exported so unit tests can render
+them directly instead of driving the shared header tabs.
 
 **The Positions read is UNFILTERED by provider** (`fetchEarnProgramsState`). A
 filter pinned to one provider hid money — a program from any other provider, or
