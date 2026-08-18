@@ -100,6 +100,20 @@ describe("RpcConnectionPanel", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
+  it("offers the way back to SDP RPC from a vendor page", async () => {
+    const user = userEvent.setup();
+    // The catalog lists `default` alongside the vendors, so this page exists
+    // and is the only route back off a vendor now that the Settings dropdown
+    // is gone. Without it an organization on Helius was stuck there.
+    renderPanel({ provider: "default", status: "available" });
+
+    expect(screen.getByText("This organization currently runs on Helius.")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Use this provider" }));
+
+    const formData = updateOrganizationRpcSettingsAction.mock.calls[0][0] as FormData;
+    expect(formData.get("rpcProvider")).toBe("default");
+  });
+
   it("gives a non-admin the state but no way to change it", () => {
     renderPanel({ canManage: false, provider: "alchemy", status: "available" });
     expect(screen.queryByRole("button")).toBeNull();
