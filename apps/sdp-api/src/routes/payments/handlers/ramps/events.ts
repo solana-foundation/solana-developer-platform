@@ -111,18 +111,6 @@ async function recordAdvisoryClientEvent(
   return transferResponse(c, current);
 }
 
-/**
- * Rejects ramp event submissions for providers that emit no client events.
- * The supported providers are registered as literal routes with their exact
- * body schemas; this catch-all keeps the discoverable 400 for the rest.
- *
- * @param c - Request context carrying the unsupported `:provider` param.
- * @returns Never; always throws the unsupported-provider error.
- */
-export function rejectUnsupportedRampEventProvider(c: AppContext): never {
-  throw badRequest(`Unsupported ramp event provider: ${c.req.param("provider")}.`);
-}
-
 export async function recordCoinbaseRampEvent(
   c: ValidatedBodyContext<typeof coinbaseRampEventSchema>
 ) {

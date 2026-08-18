@@ -53,7 +53,6 @@ import {
   prepareSubscriptionCollection,
   recordCoinbaseRampEvent,
   recordMoneygramRampEvent,
-  rejectUnsupportedRampEventProvider,
   resumeRecurringPayment,
   simulateSandboxTransfer,
   updateRecurringPayment,
@@ -310,11 +309,6 @@ payments.post(
   requirePermissions("payments:write"),
   validateBody(coinbaseRampEventSchema),
   recordCoinbaseRampEvent
-);
-payments.post(
-  "/ramps/:provider/events",
-  requirePermissions("payments:write"),
-  rejectUnsupportedRampEventProvider
 );
 payments.post(
   "/ramps/transfers/cancel",
