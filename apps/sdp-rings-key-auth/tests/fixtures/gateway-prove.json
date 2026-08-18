@@ -1,0 +1,29 @@
+{
+  "preamble": {
+    "requestId": "req_01",
+    "owner": "11111111111111111111111111111111",
+    "keyMaterial": {
+      "viewingKeys": [
+        {
+          "index": 7,
+          "key": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
+        }
+      ],
+      "nullifierKey": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg=="
+    },
+    "walletProjection": null,
+    "requireSlot": 42
+  },
+  "action": {
+    "kind": "merge",
+    "asset": "So11111111111111111111111111111111111111112",
+    "inputs": null
+  },
+  "feePayer": "11111111111111111111111111111111",
+  "pinnedInputs": [
+    "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM=",
+    "BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ="
+  ],
+  "cuLimit": 400000,
+  "cuPriceMicroLamports": 1000
+}

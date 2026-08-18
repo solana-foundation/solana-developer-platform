@@ -35,6 +35,12 @@ const MODULE_METADATA = [
     ],
   },
   {
+    name: "@sdp/rings-key-auth",
+    directory: "apps/sdp-rings-key-auth",
+    purpose: "Internal Rust custody boundary for Helius Rings key material.",
+    allowedDependencies: [],
+  },
+  {
     name: "sdp-docs",
     directory: "apps/sdp-docs",
     purpose: "Public documentation site and generated API reference.",
