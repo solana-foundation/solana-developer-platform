@@ -11,7 +11,7 @@ steps:
 SDP provides two categories of compliance tooling:
 
 - **Token controls** — freeze individual accounts, pause all transfers, or seize tokens. Available for tokens with `isFreezable` enabled or the `pausable` extension.
-- **Address screening** — check a wallet against configured compliance providers before approving a destination or allowlisting it.
+- **Address screening** — check a wallet against configured compliance providers before approving a destination or adding it to a token's Token Access Control allowlist.
 
 Token-control actions require `tokens:admin` permission on the API key.
 
@@ -29,7 +29,7 @@ Check a Solana address against configured compliance providers before onboarding
 
 Use the **Screen address** action in the Compliance section of the dashboard.
 
-Enter the wallet address and select the intent (e.g., transfer destination or allowlist candidate). Results appear per provider — each showing risk level, score, and flags.
+Enter the wallet address and select the intent (e.g., transfer destination or Token Access Control allowlist candidate). Results appear per provider — each showing risk level, score, and flags.
 
 </Tab>
 <Tab value="API">
@@ -203,8 +203,6 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/seize \
     }
   }'
 ```
-
-Seize also supports `/prepare` for client-side signing.
 
 </Tab>
 </Tabs>

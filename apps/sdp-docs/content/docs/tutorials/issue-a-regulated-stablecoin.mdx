@@ -192,10 +192,10 @@ Before any API call, you decide three things: which template to start from, what
 
 ### 1. Pick the template
 
-SDP ships three public token templates, each a preset of [Token-2022](https://solana.com/docs/tokens/extensions) extensions tuned to an institutional product shape:
+SDP ships three public **Tokenization Templates**, each prescribing a fixed set of [Token-2022](https://solana.com/docs/tokens/extensions) extensions tuned to an institutional product shape:
 
-- **`stablecoin`**. 6 decimals by default. Required extensions: `permanentDelegate` and `pausable`. Allowlist off. The right template for a regulated dollar.
-- **`tokenized-security`**. 8 decimals. Required extensions: `permanentDelegate`, `pausable`, and `scaledUiAmount`. Allowlist on; accounts open frozen. The right template for a regulated security.
+- **`stablecoin`**. 6 decimals by default. Required extensions: `permanentDelegate` and `pausable`. **Token Access Control** allowlist off. The right template for a regulated dollar.
+- **`tokenized-security`**. 8 decimals. Required extensions: `permanentDelegate`, `pausable`, and `scaledUiAmount`. Token Access Control allowlist on; accounts open frozen. The right template for a regulated security.
 - **`custom`**. 9 decimals. No required extensions. Use only when neither template above fits.
 
 This tutorial uses `stablecoin`. The required extensions are what a US permitted payment stablecoin issuer needs to satisfy the GENIUS Act's technological-capability mandate covered in Section 5.
@@ -206,7 +206,7 @@ Four boolean flags on token creation determine the posture you deploy with:
 
 - **`isFreezable`**. Set to `true`. If `false` at create time, the token deploys with no freeze authority and freezing becomes impossible afterward.
 - **`isMintable`**. Set to `true` for an active stablecoin. You will mint as new fiat reserves arrive at the custody bank.
-- **`requiresAllowlist`**. Leave off for a payment stablecoin. The institutional pattern is screen-before-transfer, not gate-by-allowlist. The `tokenized-security` template flips this on automatically.
+- **`requiresAllowlist`**. Turns on Token Access Control's allowlist mode — only listed addresses may receive the token. Leave off for a payment stablecoin: the institutional pattern is screen-before-transfer, not gate-by-allowlist. The `tokenized-security` template flips this on automatically.
 - **`maxSupply`**. Optional cap in UI units (decimal string). Useful for pilot programs with a hard ceiling. Omit for uncapped supply.
 
 ### 3. Plan the authorities
@@ -243,7 +243,7 @@ With your design captured, you're ready to make the first state-mutating call.
 
 ## 4. Create and deploy
 
-Three API calls take a design from object literal to a deployed regulated stablecoin on Solana: one to create the record, one to deploy on-chain, and an optional `/prepare` call to diagnose if either fails opaquely. All three run from the Developer key (`sdp`).
+Two API calls take a design from object literal to a deployed regulated stablecoin on Solana: one to create the record, one to deploy on-chain. Both run from the Developer key (`sdp`).
 
 ### 1. Extend the client for Idempotency-Key
 
@@ -354,40 +354,11 @@ A successful response carries the deployed token record with `status: "active"` 
 
 The `mintAuthority`, `freezeAuthority`, and `metadataAuthority` all resolve to the custody wallet address that SDP picked from your configured custody (the project signing wallet, falling back to the org signing wallet). The `permanentDelegate` is set at the same time and appears on the token record's `extensions.permanentDelegate` field rather than as a top-level authority.
 
-### 4. When deploy fails opaquely, fall back to /prepare
-
 <Callout type="warn">
-Deploy can return a bare `500 INTERNAL_ERROR` with no `details` field. The most common cause on devnet is an unfunded custody wallet (Section 2 covered the airdrop fix), but any downstream Solana RPC failure surfaces this way. The SDP team is closing this gap so deploy will return the underlying Solana error directly; until that ships, the diagnostic move is to call the `/prepare` variant of the same endpoint.
+Deploy can return a bare `500 INTERNAL_ERROR` with no `details` field. The most common cause on devnet is an unfunded custody wallet (Section 2 covered the airdrop fix), but any downstream Solana RPC failure surfaces this way. Fund the custody wallet via the faucet and re-run `/deploy` with the same `Idempotency-Key` to replay, or a fresh key for a new attempt. SDP treats different keys as different requests; the same key with the same params replays the prior result.
 </Callout>
 
-
-```javascript title="deploy-prepare.js"
-const prepared = await sdp.post(
-  `/v1/issuance/tokens/${tokenId}/deploy/prepare`,
-  {}
-);
-console.log(prepared.data.simulation);
-```
-
-`/prepare` builds the transaction and runs simulation against Solana without submitting. Its response surfaces the real error in `simulation.error`:
-
-```json title="response.json"
-{
-  "data": {
-    "preparedTransaction": { "serialized": "...", "blockhash": "..." },
-    "simulation": {
-      "success": false,
-      "error": "\"AccountNotFound\""
-    }
-  }
-}
-```
-
-`"AccountNotFound"` on the fee payer means the custody wallet has zero SOL. Fund it via the faucet (Section 2, subsection 4) and re-run `/deploy` with the same `Idempotency-Key` if you want to replay, or a fresh key if you want a new attempt. SDP treats different keys as different requests; same key with the same params replays the prior result.
-
-This prepare-as-diagnostic pattern works for every endpoint that has a `/prepare` variant: mint, burn, seize, force-burn, authority. Whenever an execute call fails opaquely, the corresponding `/prepare` surfaces the underlying Solana error.
-
-### 5. Confirm the deploy
+### 4. Confirm the deploy
 
 Before moving to Section 5, confirm the on-chain state matches the record:
 
@@ -728,7 +699,7 @@ try {
 }
 ```
 
-Token-2022's `0x11` is `AccountFrozen` (decimal 17). Treat it as a compliance verdict, not a retry-able failure. The same pattern (outer code is the family of failure, wrapped code is the actual reason) applies whenever SDP wraps a downstream Solana RPC error. Section 4's prepare-as-diagnostic pattern handles the inverse case: when the outer error is opaque and the wrapped message is empty, `/prepare` surfaces the simulation error directly.
+Token-2022's `0x11` is `AccountFrozen` (decimal 17). Treat it as a compliance verdict, not a retry-able failure. The same pattern (outer code is the family of failure, wrapped code is the actual reason) applies whenever SDP wraps a downstream Solana RPC error.
 
 ### 5. Cleanup
 

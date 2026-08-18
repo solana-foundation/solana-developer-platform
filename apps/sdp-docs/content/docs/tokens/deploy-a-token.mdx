@@ -52,7 +52,7 @@ Note the `id` field (e.g., `tok_abc123`) — required for all deploy and post-de
 
 <Step number={2} title="Deploy the token">
 
-Use **execute mode** when SDP controls the signing wallet, or **prepare mode** when you need to sign externally.
+SDP signs and submits the deploy transaction using the token's configured signer wallet.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
@@ -70,8 +70,6 @@ SDP submits the transaction to Solana and polls for confirmation. The page updat
 
 </Tab>
 <Tab value="API">
-
-**Execute mode** — SDP signs and submits:
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy \
@@ -93,15 +91,6 @@ const res = await fetch(
 const { data } = await res.json();
 // data.token.mintAddress — the onchain mint address
 ```
-
-**Prepare mode** — returns an unsigned transaction:
-
-```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy/prepare \
-  -H "Authorization: Bearer sk_test_..."
-```
-
-Sign `data.transaction.serialized` with your private key and submit to Solana. See [Prepare vs Execute](/docs/tokens/prepare-vs-execute).
 
 Always pass an `Idempotency-Key` — retrying with the same key after a network error prevents double-deployment.
 

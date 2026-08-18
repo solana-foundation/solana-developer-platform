@@ -9,12 +9,12 @@ The platform serves a generated support matrix — which `(fiat, crypto)` pairs 
 
 You implement four things; the codegen (`apps/sdp-api/scripts/discover-ramp-rails.ts`) does the rest:
 
-1. a `RAMP_RAIL_DUMPS.<id>` entry in `lib/ramps/shared.ts`
+1. a `RAMP_RAIL_DUMPS.<id>` entry in `packages/sdp-payments/src/ramps/shared.ts`
 2. `_discoverRails` — HTTP → raw response dumps
 3. `distillRailSupport` — dumps → a `ProviderRailSupportSnapshot`, reporting any codes it drops
 4. a `<PROVIDER>_DECLARED_RAIL_SUPPORT` const — entity types, plus country support for whichever direction your snapshot doesn't discover it for
 
-**Canonical example: `lib/ramps/providers/lightspark/client.ts`** (one dump, declares country support as unreported on both directions). For a multi-endpoint provider, copy `bvnk/client.ts` (three dumps). For discovered — not declared — country support, copy `mural/client.ts`.
+**Canonical example: `packages/sdp-payments/src/ramps/providers/lightspark/client.ts`** (one dump, declares country support as unreported on both directions). For a multi-endpoint provider, copy `providers/bvnk/client.ts` (three dumps). For discovered — not declared — country support, copy `providers/mural/client.ts`.
 
 ## The data flow
 
@@ -28,7 +28,7 @@ Raw dumps under `.ramp-rails/raw/` are gitignored — network scratch, safe to d
 
 ## Step 1 — declare your dumps
 
-Add an entry to `RAMP_RAIL_DUMPS` in `lib/ramps/shared.ts`, one per upstream response you need:
+Add an entry to `RAMP_RAIL_DUMPS` in `packages/sdp-payments/src/ramps/shared.ts`, one per upstream response you need:
 
 ```ts
 <id>: {

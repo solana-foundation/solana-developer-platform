@@ -7,7 +7,7 @@ description: Scaffold and wire a new ramp provider into SDP so the platform know
 
 Step 1. This makes the platform *aware* of your provider and routes to it. The method bodies (estimate, quote, webhook, requirements, rails) are the other skills — here you build the skeleton and wire every dispatch site.
 
-Canonical example to copy: **`apps/sdp-api/src/lib/ramps/providers/lightspark/client.ts`** (the class) + how it's referenced across the files below.
+Canonical example to copy: **`packages/sdp-payments/src/ramps/providers/lightspark/client.ts`** (the class) + how it's referenced across the files below.
 
 ## The mantra: add the id, follow the compiler
 
@@ -15,43 +15,55 @@ Add your id to `RAMP_PROVIDERS` first, then run `tsc --noEmit`. The id is a clos
 
 ```ts
 // packages/sdp-types/src/provider-access.ts
-export const RAMP_PROVIDERS = ["moonpay", "lightspark", "bvnk", "<id>"] as const;
+export const RAMP_PROVIDERS = [
+  "moonpay",
+  "lightspark",
+  "bvnk",
+  "moneygram",
+  "coinbase",
+  "mural",
+  "stripe",
+  "<id>",
+] as const;
 ```
 
-Five sites break, in roughly this order:
+Four sites break, in roughly this order:
 
 | File | What's enforced | What you add |
 |---|---|---|
-| `lib/ramps/index.ts` | `RAMP_PROVIDER_CLIENTS` is `as const satisfies Record<RampProviderId, …>` | `<id>: new <Id>RampClient()` |
-| `services/provider-availability.service.ts` | `ramps: Record<RampProviderId, ProviderAvailabilityDefinition>` | `<id>: { label, isConfigured }` |
-| `routes/payments/handlers/ramps.ts` | quote, requirements, and (currently unused) execute switches end in `const _exhaustive: never` | a `case "<id>"` in each |
-| `routes/webhooks/handlers.ts` | `RAMP_PROVIDER_WEBHOOK_PROCESSOR` is `as const satisfies Record<Exclude<RampProviderId, …>, WebhookProcessor<…>>` | `<id>: new <Id>WebhookProcessor()` (or extend the `Exclude` list if you skip webhooks) |
-| `provider-access.ts` tier defaults | `createBooleanRecord(RAMP_PROVIDERS, …)` | (optional) add `<id>` to a tier's enabled list |
+| `packages/sdp-payments/src/ramps/index.ts` | `RAMP_PROVIDER_CLIENTS` is `as const satisfies Record<RampProviderId, RampProvider>` | `<id>: new <Id>RampClient()` |
+| `apps/sdp-api/src/services/provider-availability.service.ts` | `ramps: Record<RampProviderId, ProviderAvailabilityDefinition>` | `<id>: { label, isConfigured }` |
+| `apps/sdp-api/src/routes/payments/handlers/ramps.ts` | the on-ramp quote, off-ramp quote, and `advanceCounterpartyRequirements` switches end in `const exhaustive: never` | a `case "<id>"` in each |
+| `apps/sdp-api/src/routes/webhooks/handlers.ts` | `RAMP_PROVIDER_WEBHOOK_PROCESSOR` is `as const satisfies Record<Exclude<RampProviderId, …>, WebhookProcessor<…>>` | `<id>: new <Id>WebhookProcessor()` (or extend the `Exclude` list if you skip webhooks) |
+
+Provider Availability also depends on entitlement (`packages/sdp-types/src/provider-access.ts`) — see step 1.
 
 ## The wiring
 
-### 1. Provider id + entitlements — `provider-access.ts`
-Add the id (above). Then decide default entitlement per tier — your provider is **disabled by default** unless you add it to the enabled list:
+### 1. Provider id + entitlement — `packages/sdp-types/src/provider-access.ts`
+Add the id (above). `GENERAL_PROVIDER_DEFAULTS.ramps` currently enables every id in `RAMP_PROVIDERS` (all ramp providers are **Generally Available** by default today — there's no per-tier default list):
 
 ```ts
-const ENTERPRISE_PROVIDER_DEFAULTS = {
-  ramps: createBooleanRecord(RAMP_PROVIDERS, ["moonpay", "lightspark", "bvnk", "<id>"]),
+export const GENERAL_PROVIDER_DEFAULTS: OrganizationProviderEntitlements = {
+  ramps: createBooleanRecord(RAMP_PROVIDERS, RAMP_PROVIDERS),
   // …
 };
 ```
 
-### 2. Client registry — `lib/ramps/index.ts`
+Adding your id to `RAMP_PROVIDERS` makes it entitled (Generally Available) automatically. If your provider should instead require a **Manual Provider Activation** per organization, drop it from the enabled list passed to `createBooleanRecord` for `ramps` — it then needs an explicit `true` in an organization's `providerOverrides.ramps` (`OrganizationProviderOverrides`) to become available.
+
+### 2. Client registry — `packages/sdp-payments/src/ramps/index.ts`
 ```ts
 export const RAMP_PROVIDER_CLIENTS = {
   moonpay: new MoonpayRampClient(),
   lightspark: new LightsparkRampClient(),
   bvnk: new BvnkRampClient(),
   <id>: new <Id>RampClient(),
-} as const satisfies Record<RampProviderId, RampProviderClient>;
+} as const satisfies Record<RampProviderId, RampProvider>;
 ```
-`assertRampProviderRegistryComplete` also fails loudly at runtime if you miss this.
+Miss an id and `tsc --noEmit` fails on this file — that's the enforcement, there's no separate runtime assertion.
 
-### 3. Availability — `services/provider-availability.service.ts`
+### 3. Availability — `apps/sdp-api/src/services/provider-availability.service.ts`
 Add an entry that reports whether the provider's secrets are present, for both modes. `isConfigured` returning false → the route returns HTTP 503 `PROVIDER_NOT_CONFIGURED`.
 
 ```ts
@@ -71,15 +83,15 @@ ramps: {
 ### 4. Secrets — env vars on the `Env` type
 The keys you reference in step 3 (and in your config reader) must exist on the `Env` type (`apps/sdp-api/src/types/env.d.ts`) and be provided as environment variables — both prod and `*_SANDBOX_*` sets. Hosted and self-hosted deployments supply them through their runtime environment or secret manager; local development can use Doppler or `.env.local`. A missing value surfaces as a 503.
 
-### 5. Dispatch — `routes/payments/handlers/ramps.ts`
-Add a `case "<id>"` to each switch the compiler flags — the quote paths and `advanceCounterpartyRequirements`, plus the `executeOnramp`/`executeOfframp` switches. (Execute isn't currently exercised, but those switches still end in a `never` default, so add a case to compile.) The handler resolves DB state (counterparty, wallet, customer) and passes pre-resolved inputs to your client — the client never touches the DB. Provider-specific DB resolution that's too big to inline goes in `routes/payments/handlers/ramps/<id>.ts` (see `ramps/lightspark.ts`).
+### 5. Dispatch — `apps/sdp-api/src/routes/payments/handlers/ramps.ts`
+Add a `case "<id>"` to each switch the compiler flags — the on-ramp quote switch (`createOnrampQuote`), the off-ramp quote switch (`createOfframpQuote`), and `advanceCounterpartyRequirements`. Each ends in `const exhaustive: never`, so a missing case fails `tsc --noEmit`. There is no execute switch — quoting is the whole SDP-owned flow; execution happens in the provider's own hosted redirect, widget, or deposit instructions. The handler resolves DB state (counterparty, wallet, customer) and passes pre-resolved inputs to your client — the client never touches the DB. Provider-specific DB resolution that's too big to inline goes in `apps/sdp-api/src/routes/payments/handlers/ramps/<id>.ts` (see `ramps/lightspark.ts`).
 
-### 6. Webhook dispatch — `routes/webhooks/handlers.ts`
+### 6. Webhook dispatch — `apps/sdp-api/src/routes/webhooks/handlers.ts`
 Add `<id>: new <Id>WebhookProcessor()` to the `RAMP_PROVIDER_WEBHOOK_PROCESSOR` map (or extend its `Exclude<RampProviderId, …>` if your provider has no webhooks). `parseRampWebhookProvider` accepts the id automatically once it's in that map. (Webhook *implementation*, including the `WebhookProcessor` class itself, is the `integrate-webhook` skill.)
 
 ## The provider class + config reader
 
-Create `lib/ramps/providers/<id>/client.ts`:
+Create `packages/sdp-payments/src/ramps/providers/<id>/client.ts`:
 
 ```ts
 export class <Id>RampClient implements RampProvider {
@@ -90,7 +102,7 @@ export class <Id>RampClient implements RampProvider {
 }
 ```
 
-Credentials are read from the passed `env`, keyed by `mode` — the provider never imports AppContext. The handler builds the `{ env, mode }` context with `rampRuntime(c)` (`routes/payments/context.ts`). Write one config reader that throws when unconfigured:
+Credentials are read from the passed `env`, keyed by `mode` — the provider never imports AppContext. The handler builds the `{ env, mode }` context with `rampRuntime(c)` (`apps/sdp-api/src/routes/payments/context.ts`). Write one config reader that throws when unconfigured:
 
 ```ts
 function read<Id>Config(env: Record<string, string | undefined>, mode: SdpEnvironment) {

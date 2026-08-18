@@ -1,11 +1,20 @@
 ---
 title: What is SDP?
 icon: BookOpen
-description: Putting institutional-grade capital markets at your fingertips. Issue, move, and manage regulated assets on Solana.
+description: One API for tokenization, custody, payments, and compliance on Solana.
 ---
 
 import { Steps, Step } from "fumadocs-ui/components/steps";
 import "../../src/styles/ramp-rotator.css";
+
+SDP gives organizations project-scoped access to tokenization, custody, payments, and compliance through one stable API in front of interchangeable providers. Integrate against the API once; swap or add providers without changing your integration code.
+
+| Module | What it does |
+| --- | --- |
+| **Issuance** | Deploy, mint, burn, freeze, pause, and seize tokens built on Token-2022 |
+| **Custody** | Provision and operate Solana wallets through interchangeable custody providers |
+| **Payments** | Move funds onchain — transfers, batches, recurring payments, payment requests, and ramps |
+| **Compliance** | Screen wallets and transactions against your regulatory program |
 
 ## Background
 
@@ -15,7 +24,7 @@ Tokenized stocks are the fastest-growing slice of that market. Onchain equities 
 
 Assets at this scale need the same guarantees traditional markets provide: regulated custody, enforceable compliance, and auditable operational controls. Building that from raw Solana primitives means standing up wallet infrastructure, transaction construction, and compliance tooling before shipping anything.
 
-And there is more to be done: most of the world's capital still sits offchain. SDP aims to attract it by providing simplified programming models through a unified application layer for issuance, ramps, transfers, and compliance operations, so you can start without needing to maintain a huge team of Solana developers.
+And there is more to be done: most of the world's capital still sits offchain. SDP is built to attract it, without requiring a team of Solana developers to integrate.
 
 ## Core Features
 
@@ -90,15 +99,15 @@ curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
 
 Provision signing wallets through integrated custody providers, so your team never handles private keys. Hosted keys never leave the provider's MPC or TEE infrastructure and SDP only handles the signed transaction. Local development keys are encrypted at rest with `AES-256-GCM` using per-organization derived keys, and every signing request passes policy and permission checks before it executes.
 
-1. **Built on `@solana/keychain`**
+- **Built on `@solana/keychain`**
 
    The unified Solana signing interface. Every custody backend is a keychain adapter behind the same signing API, which is what makes providers interchangeable.
 
-2. **[Wallet policies](/docs/wallet-operations/policies)**
+- **[Wallet policies](/docs/wallet-operations/policies)**
 
    Constrain how a wallet can move funds. Destination controls, amount limits, operation permissions, approval requirements, and audit visibility, enforced before any operation executes.
 
-3. **Scoped custody configuration**
+- **Scoped custody configuration**
 
    Custody settings resolve per project, then organization, then environment, so different teams can run different providers side by side.
 </Step>
@@ -107,7 +116,7 @@ Provision signing wallets through integrated custody providers, so your team nev
 
 Create tokens from pre-built templates (stablecoin, tokenized security) or configure your own using Token-2022 extensions. Deploy, mint, burn, and manage supply through the dashboard or API.
 
-Those same extensions are what make compliance enforceable onchain. Freeze individual accounts, pause token activity, seize tokens, and manage allowlists for regulated issuance flows. Selected compliance actions accept reason or memo fields for audit trails. Every enforcement action is one POST on the same token surface.
+Those same extensions are what make compliance enforceable onchain. Freeze individual accounts, pause token activity, seize tokens, and manage each token's **Token Access Control** list for regulated issuance flows. Selected compliance actions accept reason or memo fields for audit trails. Every enforcement action is one POST on the same token surface.
 
 <Tabs items={["JavaScript", "Python", "curl"]}>
 <Tab value="JavaScript">
@@ -151,7 +160,61 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
 <Step>
 ### Ramps and Onchain Transfers
 
-Send stablecoins from custody wallets — single transfers, memo-tagged payments, and batch payouts — and move between fiat and crypto through our integrated ramp partners. One API covers rate estimates, quotes, and settlement across every provider and corridor, with counterparty KYC requirements collected per provider exactly when they are needed. See [Payments](/docs/payments) for transfers and [Ramps](/docs/payments/ramps) for supported providers, currencies, and corridors.
+SDP exposes unified endpoints for onchain transfers and ramps across providers, built on official Solana program implementations like [Subscriptions](https://github.com/solana-program/subscriptions) and [Solana Pay](https://github.com/solana-foundation/pay). These power Recurring Payments, Payment Requests, and Batch Transfers within SDP.
+
+<Tabs items={["Recurring Payments", "Payment Requests", "Batch Transfers"]}>
+<Tab value="Recurring Payments">
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/payments/recurring-payments \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sourceWalletId": "privy_wallet_123",
+    "counterpartyId": "cp_...",
+    "counterpartyAccountId": "cpa_...",
+    "token": "USDC",
+    "amount": "25.00",
+    "periodHours": 720
+  }'
+```
+</Tab>
+<Tab value="Payment Requests">
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/payments/requests \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "walletId": "privy_wallet_123",
+    "counterpartyId": "cp_...",
+    "token": "USDC",
+    "amount": "25.00",
+    "expiresAt": "2026-08-31T00:00:00.000Z"
+  }'
+```
+</Tab>
+<Tab value="Batch Transfers">
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/payments/transfer-batches \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "externalId": "payroll_2026_06_30",
+    "source": "privy_wallet_123",
+    "token": "USDC",
+    "recipients": [
+      {
+        "externalId": "payroll_row_001",
+        "counterpartyId": "cp_...",
+        "counterpartyAccountId": "cpa_...",
+        "amount": "25.00"
+      }
+    ]
+  }'
+```
+</Tab>
+</Tabs>
+
+The same API extends to on/offramps: rate estimates, quotes, and settlement work identically across every provider and corridor, so money can enter as fiat, live onchain as a token you issued, and exit back to fiat: a complete lifecycle from issuance through circulation to redemption, without stitching together provider-specific integrations. See [Payments](/docs/payments) for transfers and [Ramps](/docs/payments/ramps) for supported providers, currencies, and corridors.
 </Step>
 <Step>
 ### Audit Trails
@@ -162,11 +225,10 @@ Every sensitive operation is recorded automatically. Each entry captures the act
 | ----------------------- | ---------------------------------------------------------------------------------- |
 | API keys                | Create, revoke, and rotate, for both organization and project-scoped keys          |
 | Token issuance          | Deploy, mint, burn, force-burn, supply changes, and authority updates              |
-| Compliance actions      | Freeze, unfreeze, pause, unpause, seize, and allowlist changes                     |
+| Compliance actions      | Freeze, unfreeze, pause, unpause, seize, and Token Access Control changes          |
 | Custody                 | Provider configuration, wallet provisioning, and credential lifecycle changes      |
 | Transactions & signing  | Signing requests, submissions, and failed submissions                              |
 | Organization & access   | Members, invitations, projects, project membership, and login sessions             |
-| Counterparties & assets | Counterparty and payout account changes, asset profile changes                     |
+| Counterparties & assets | Counterparty and Counterparty Account changes, asset profile changes               |
 </Step>
 </Steps>
-

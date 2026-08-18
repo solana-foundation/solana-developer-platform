@@ -151,7 +151,7 @@ type HomeCard = {
 const modelSteps: HomeCard[] = [
   {
     name: "Understanding SDP",
-    desc: "The interfaces, authentication, and conventions you build against.",
+    desc: "Interfaces, authentication, and core conventions.",
     href: "/docs/introduction",
     graphic: <ArchitectureSketch />,
   },

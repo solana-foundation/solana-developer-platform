@@ -8,7 +8,9 @@ steps:
   - Remove an address
 ---
 
-Tokens created with `requiresAllowlist: true` enforce a list of approved destination addresses on allowlist-aware issuance flows such as minting and administrative transfers. Required for `tokenized-security` tokens. Payment transfers use wallet-level destination allowlists instead.
+**Token Access Control** gates who may hold or receive your token. This page covers its `allowlist` mode: tokens created with `requiresAllowlist: true` enforce a list of approved destination addresses on allowlist-aware issuance flows such as minting and administrative transfers, and it's required for `tokenized-security` tokens.
+
+This is distinct from a wallet's transfer allowlist (a Wallet Policy concern) and the Platform Allowlist (deployment admission).
 
 ## Prerequisites
 

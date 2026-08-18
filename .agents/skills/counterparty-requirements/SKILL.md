@@ -7,7 +7,7 @@ description: Implement a ramp provider's validateCounterparty → CounterpartyRe
 
 Before a quote, the platform asks your provider what a counterparty still needs — KYC, a payout account, or nothing at all. `validateCounterparty` answers that. It is **pure and synchronous**: it reads the counterparty + its `provider_data` and returns a `CounterpartyRequirements`. No HTTP, no DB — the actual provisioning happens later, in the advance flow.
 
-Canonical examples: `lib/ramps/providers/lightspark/counterparty.ts` and `providers/bvnk/counterparty.ts` (MoonPay just returns ready, inline in `providers/moonpay/client.ts`).
+Canonical examples: `packages/sdp-payments/src/ramps/providers/lightspark/counterparty.ts` and `providers/bvnk/counterparty.ts` (MoonPay just returns ready, inline in `providers/moonpay/client.ts`).
 
 ## Contract
 
@@ -15,21 +15,32 @@ Canonical examples: `lib/ramps/providers/lightspark/counterparty.ts` and `provid
 validateCounterparty(counterparty: Counterparty, options: ValidateCounterpartyOptions): CounterpartyRequirements
 ```
 
-`options` = `{ direction: RampDirection, providerData: CounterpartyProviderData, fiatCurrency? }`. Trivial bodies (`readyCounterparty(...)`, or an `unsupported` guard) stay inline in `providers/<id>/client.ts`; non-trivial decisions delegate to `providers/<id>/counterparty.ts`.
+`options` = `{ direction: RampDirection, providerData: CounterpartyProviderData, cryptoToken?, fiatCurrency?, destinationWalletAddress? }`. Trivial bodies (`readyCounterparty(...)`, or an `unsupported` guard) stay inline in `providers/<id>/client.ts`; non-trivial decisions delegate to `providers/<id>/counterparty.ts`.
 
-`CounterpartyRequirements` is discriminated by `provider`; the `status` union (`packages/sdp-types/src/ramp-requirements.ts`):
+`CounterpartyRequirements` is discriminated by `provider`; the `status` union (`packages/sdp-types/src/ramp-requirements.ts`). Every provider gets these three:
 
 - `{ status: "ready" }` — good to quote.
 - `{ status: "collect"; fields: RequirementField[] }` — need input first.
 - `{ status: "unsupported"; reason }` — this counterparty/corridor can't be served, and why.
-- onboarding states (Lightspark/BVNK): `onboarding_not_started`, `customer_verification_required` (+`verificationUrl`), `customer_verifying`, `customer_verification_failed`, `funding_account_provisioning`, `provisioning_failed`.
+
+Plus provider-specific onboarding states, each scoped to its own `provider` arm — a new provider does not automatically get these; add your own arms if you need intermediate onboarding states:
+
+| Status | Providers |
+|---|---|
+| `onboarding_not_started` | Lightspark, BVNK, Mural |
+| `terms_of_service_required` (+`termsOfServiceUrl`) | Mural |
+| `customer_verification_required` (+`verificationUrl`) | BVNK, Mural |
+| `customer_verifying` | BVNK, Mural |
+| `customer_verification_failed` | BVNK, Mural |
+| `funding_account_provisioning` | BVNK, Mural |
+| `provisioning_failed` | BVNK |
 
 `RequirementField` is a discriminated union (same module):
 
 - `{ kind: "text"; key; label; required; pattern?; minLength?; maxLength?; placeholder?; mask? }`
 - `{ kind: "select"; key; label; required; options: { value; label }[] }`
 
-Build fields with the existing helpers in `lib/ramps/requirements.ts` (`textField`, `selectField`, `readyCounterparty`); don't hand-roll the shape.
+Build fields with the existing helpers in `packages/sdp-payments/src/ramps/requirements.ts` (`textField`, `selectField`, `readyCounterparty`); don't hand-roll the shape.
 
 ## The decision (variety)
 
@@ -41,7 +52,7 @@ Build fields with the existing helpers in `lib/ramps/requirements.ts` (`textFiel
 
 ## The advance / submit flow
 
-`POST /v1/counterparties/:counterpartyId/requirements` (`submitCounterpartyRequirementsSchema`, a `discriminatedUnion("provider", …)`). The handler re-runs `validateCounterparty`, validates the submitted `collectedData` against your fields (`buildRequirementSchema`), then calls `advanceCounterpartyRequirements` (`routes/payments/handlers/ramps.ts`), which dispatches to your DB-side `ensure*` helper (e.g. `ensureLightsparkPayoutAccount`, `ensureBvnkCustomer`).
+`POST /v1/counterparties/:counterpartyId/requirements` (`submitCounterpartyRequirementsSchema`, a `discriminatedUnion("provider", …)`). The handler re-runs `validateCounterparty`, validates the submitted `collectedData` against your fields (`buildRequirementSchema` from `packages/sdp-payments/src/ramps/requirements.ts`), then calls `advanceCounterpartyRequirements` (`apps/sdp-api/src/routes/payments/handlers/ramps.ts`), which dispatches to your DB-side `ensure*` helper (e.g. `ensureLightsparkPayoutAccount`, `ensureBvnkCustomer`).
 
 **Hard rule: collected KYC is never persisted.** `collectedData` (SSN, IBAN, CDD, tax id) flows into the provider API call only. What lands in `provider_data` is metadata — customer id, account id, status, timestamps. Raw secrets are transient. (`GET /v1/counterparties/:id/requirements` exposes the current requirements for the client wizard.)
 
@@ -56,4 +67,4 @@ Shared rules live in `integrate-ramp-provider`. Hot here:
 - `validateCounterparty` is pure — no HTTP, no DB; read only `counterparty` + `providerData`.
 - No fallbacks — `unsupported` with a reason beats a silent empty requirement; never persist collected KYC.
 - Status + field types are discriminated unions — return exactly one arm; no `any`.
-- Verify with `tsc --noEmit` + `biome check`; test the decision table like `providers/lightspark/counterparty.test.ts`.
+- Verify with `tsc --noEmit` + `biome check`; test the decision table like `apps/sdp-api/src/lib/ramps/providers/lightspark/counterparty.test.ts`.

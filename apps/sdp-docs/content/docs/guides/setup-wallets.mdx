@@ -3,7 +3,7 @@ title: Set Up Wallets
 description: Initialize a custody provider and create wallets for signing transactions.
 ---
 
-Wallets are Solana keypairs managed by a custody provider. SDP uses them to sign transactions for token deployment, minting, transfers, and other onchain operations. You must initialize a signing provider before creating tokens or executing transactions.
+A **custody wallet** is a Solana keypair whose key is held and signed for by a custody provider — SDP routes signing requests to whichever provider holds the wallet's key. Initialize a provider, then create wallets for token deployment, minting, transfers, and other onchain operations.
 
 ## Supported providers
 

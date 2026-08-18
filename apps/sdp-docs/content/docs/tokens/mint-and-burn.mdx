@@ -118,7 +118,7 @@ const res = await fetch(
 );
 ```
 
-Add `/prepare` to the path to simulate before signing. Control priority with `options.priorityFee`: `"none"`, `"low"`, `"medium"`, `"high"`, or a micro-lamport value.
+Control priority with `options.priorityFee`: `"none"`, `"low"`, `"medium"`, `"high"`, or a micro-lamport value.
 
 </Tab>
 </Tabs>
@@ -190,8 +190,6 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn", {
   }),
 });
 ```
-
-Both endpoints support `/prepare` for client-side signing.
 
 </Tab>
 </Tabs>

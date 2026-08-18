@@ -92,7 +92,7 @@ Per-balance fields:
 
 When USD valuation is populated, the price comes from SDP's configured price source and reflects the most recent quote available. The cadence and source depend on deployment configuration — do not rely on `usdValue` for downstream balance-sheet decisions without confirming the price source's freshness with your operations team. When in doubt, treat `amount` / `uiAmount` as authoritative and convert with your own price feed.
 
-If no price source is configured, the `usdPrice` and `usdValue` fields are simply absent rather than zero — falling back to "I don't know" rather than "$0.00" so downstream consumers can decide how to handle the gap.
+If no price source is configured, the `usdPrice` and `usdValue` fields are absent rather than zero — the omission signals "unknown," not "$0.00," so downstream consumers can decide how to handle the gap.
 
 ## Comparison to on-chain RPC
 

@@ -3,7 +3,7 @@ title: Ramp providers
 description: MoonPay, Lightspark, and BVNK — capability matrix, configuration, and per-provider notes.
 ---
 
-SDP currently integrates three ramp providers. They are configured at the organization level via environment variables on the SDP API deployment; the same `provider` string on `POST /v1/payments/ramps/onramp/execute` and `POST /v1/payments/ramps/offramp/execute` selects between them.
+SDP currently integrates three ramp providers documented here. They are configured at the organization level via environment variables on the SDP API deployment; the same `provider` string on `POST /v1/payments/ramps/onramp/quote` and `POST /v1/payments/ramps/offramp/quote` selects between them.
 
 ## Sandbox vs production selection
 
@@ -16,11 +16,11 @@ Configure both credential pairs for any provider you want to expose to test and 
 
 ## Capability matrix
 
-| Provider | Onramp | Offramp | Sandbox | Compliance attachment | Notes |
+| Provider | Onramp | Offramp | Sandbox | Delivery mode | Notes |
 | --- | --- | --- | --- | --- | --- |
-| MoonPay | ✓ | ✓ | ✓ | — | Sandbox vs production is selected per request (see [Sandbox vs production](#sandbox-vs-production-selection)). |
-| Lightspark | ✓ | ✓ | ✓ | — | Grid API. Same per-request sandbox/production selection as MoonPay. |
-| BVNK | ✓ | ✓ | ✓ | ✓ (`bvnkCompliance`) | Hawk auth. |
+| MoonPay | ✓ | ✓ | ✓ | `hosted` | Sandbox vs production is selected per request (see [Sandbox vs production](#sandbox-vs-production-selection)). |
+| Lightspark | ✓ | ✓ | ✓ | `manual_instructions` | Grid API. Same per-request sandbox/production selection as MoonPay. |
+| BVNK | ✓ | ✓ | ✓ | `manual_instructions` | Hawk auth. Compliance party details are built from the Counterparty record, not passed on the request. |
 
 ## MoonPay
 
@@ -44,7 +44,9 @@ MoonPay normalizes token symbols internally — `USDC` is mapped to `usdc_sol`, 
 | `LIGHTSPARK_GRID_SANDBOX_CLIENT_ID` | conditional | Sandbox Grid API client identifier. Required when the request resolves to sandbox. |
 | `LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET` | conditional | Sandbox Grid API client secret. |
 
-Lightspark is integrated against the Grid API (`https://api.lightspark.com/grid/2025-10-13`); the sandbox/production choice follows the [per-request rule](#sandbox-vs-production-selection). Lightspark identifies wallets by its own `ExternalAccount:…` ids — onramp `destinationWallet` accepts that id *or* a Solana wallet address (SDP creates the external account if needed), while offramp `sourceWallet` requires the Lightspark account id.
+Lightspark is integrated against the Grid API (`https://api.lightspark.com/grid/2025-10-13`); the sandbox/production choice follows the [per-request rule](#sandbox-vs-production-selection). `destinationWallet` / `sourceWallet` are your own custody wallet, same as every other provider — Lightspark's customer id and payout account are resolved server-side from the counterparty's Provider Requirements, not passed on the quote request.
+
+Lightspark quotes always return `deliveryMode: "manual_instructions"` — the response carries funding instructions to display to the payer, not a redirect URL.
 
 ## BVNK
 
@@ -60,25 +62,13 @@ Lightspark is integrated against the Grid API (`https://api.lightspark.com/grid/
 
 BVNK uses Hawk authentication. Bearer-token auth is not currently supported.
 
-BVNK is the only provider that currently accepts the `bvnkCompliance` field on the ramp request — an object of the form `{ "partyDetails": [...] }` carrying compliance party records used to satisfy travel-rule and KYC sharing requirements. The exact shape of each party record is provider-defined; see BVNK's compliance docs for the field schema.
+BVNK is a travel-rule / compliance-sharing provider: it requires party details (name, address, and similar identity fields) to satisfy KYC sharing requirements. SDP builds those party details from the counterparty's own record when creating the quote — there is no compliance object to pass on the ramp request itself. Populate the counterparty's identity fields before quoting BVNK.
 
-```json title="request.json"
-{
-  "provider": "bvnk",
-  "destinationWallet": "wal_...",
-  "cryptoToken": "USDC",
-  "fiatAmount": "100.00",
-  "bvnkCompliance": {
-    "partyDetails": [
-      { "type": "individual", "firstName": "...", "lastName": "...", "...": "..." }
-    ]
-  }
-}
-```
+BVNK quotes always return `deliveryMode: "manual_instructions"` — the response carries funding-account details to display to the payer.
 
 ## Provider gating
 
-Even when all three providers' env vars are populated, an org can be restricted to a subset. SDP gates by `assertProviderAvailable` on every ramp call — if the org's entitlement does not include the requested provider, the call returns an error. To activate or change provider entitlements for a deployment, see [Provider onboarding](/docs/reference/provider-onboarding).
+Even when all three providers' env vars are populated, an org can be restricted to a subset. This is [**Provider Availability**](/docs/reference/provider-onboarding): a provider must be configured for the deployment and either generally available or manually activated for the organization. SDP checks this on every ramp call — if the org lacks availability for the requested provider, the call returns an error. To activate or change provider availability for a deployment, see [Provider onboarding](/docs/reference/provider-onboarding).
 
 ## Choosing a provider
 
@@ -87,7 +77,7 @@ Even when all three providers' env vars are populated, an org can be restricted 
 | Fastest sandbox iteration | MoonPay or BVNK. |
 | Travel-rule / compliance party metadata | BVNK. |
 | Lightning-aware fiat settlement | Lightspark. |
-| Broadest payment-method coverage | MoonPay (region-dependent). |
+| Broadest payment-method coverage | MoonPay (corridor-dependent). |
 
 For self-hosted deployments where only a subset of providers will ever be configured, see [Providers optional for self-hosted SDP](/docs/reference/provider-onboarding) — SDP supports running with any single provider active.
 

@@ -14,7 +14,16 @@
 ### What is SDP?
 Source: https://platform.solana.com/docs/introduction
 
-> Putting institutional-grade capital markets at your fingertips. Issue, move, and manage regulated assets on Solana.
+> One API for tokenization, custody, payments, and compliance on Solana.
+
+SDP gives organizations project-scoped access to tokenization, custody, payments, and compliance through one stable API in front of interchangeable providers. Integrate against the API once; swap or add providers without changing your integration code.
+
+| Module | What it does |
+| --- | --- |
+| **Issuance** | Deploy, mint, burn, freeze, pause, and seize tokens built on Token-2022 |
+| **Custody** | Provision and operate Solana wallets through interchangeable custody providers |
+| **Payments** | Move funds onchain — transfers, batches, recurring payments, payment requests, and ramps |
+| **Compliance** | Screen wallets and transactions against your regulatory program |
 
 ## Background
 
@@ -24,7 +33,7 @@ Tokenized stocks are the fastest-growing slice of that market. Onchain equities 
 
 Assets at this scale need the same guarantees traditional markets provide: regulated custody, enforceable compliance, and auditable operational controls. Building that from raw Solana primitives means standing up wallet infrastructure, transaction construction, and compliance tooling before shipping anything.
 
-And there is more to be done: most of the world's capital still sits offchain. SDP aims to attract it by providing simplified programming models through a unified application layer for issuance, ramps, transfers, and compliance operations, so you can start without needing to maintain a huge team of Solana developers.
+And there is more to be done: most of the world's capital still sits offchain. SDP is built to attract it, without requiring a team of Solana developers to integrate.
 
 ## Core Features
 
@@ -98,15 +107,15 @@ curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
 
 Provision signing wallets through integrated custody providers, so your team never handles private keys. Hosted keys never leave the provider's MPC or TEE infrastructure and SDP only handles the signed transaction. Local development keys are encrypted at rest with `AES-256-GCM` using per-organization derived keys, and every signing request passes policy and permission checks before it executes.
 
-1. **Built on `@solana/keychain`**
+- **Built on `@solana/keychain`**
 
    The unified Solana signing interface. Every custody backend is a keychain adapter behind the same signing API, which is what makes providers interchangeable.
 
-2. **[Wallet policies](/docs/wallet-operations/policies)**
+- **[Wallet policies](/docs/wallet-operations/policies)**
 
    Constrain how a wallet can move funds. Destination controls, amount limits, operation permissions, approval requirements, and audit visibility, enforced before any operation executes.
 
-3. **Scoped custody configuration**
+- **Scoped custody configuration**
 
    Custody settings resolve per project, then organization, then environment, so different teams can run different providers side by side.
 </Step>
@@ -115,7 +124,7 @@ Provision signing wallets through integrated custody providers, so your team nev
 
 Create tokens from pre-built templates (stablecoin, tokenized security) or configure your own using Token-2022 extensions. Deploy, mint, burn, and manage supply through the dashboard or API.
 
-Those same extensions are what make compliance enforceable onchain. Freeze individual accounts, pause token activity, seize tokens, and manage allowlists for regulated issuance flows. Selected compliance actions accept reason or memo fields for audit trails. Every enforcement action is one POST on the same token surface.
+Those same extensions are what make compliance enforceable onchain. Freeze individual accounts, pause token activity, seize tokens, and manage each token's **Token Access Control** list for regulated issuance flows. Selected compliance actions accept reason or memo fields for audit trails. Every enforcement action is one POST on the same token surface.
 
 <Tabs items={["JavaScript", "Python", "curl"]}>
 <Tab value="JavaScript">
@@ -158,7 +167,61 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
 <Step>
 ### Ramps and Onchain Transfers
 
-Send stablecoins from custody wallets — single transfers, memo-tagged payments, and batch payouts — and move between fiat and crypto through our integrated ramp partners. One API covers rate estimates, quotes, and settlement across every provider and corridor, with counterparty KYC requirements collected per provider exactly when they are needed. See [Payments](/docs/payments) for transfers and [Ramps](/docs/payments/ramps) for supported providers, currencies, and corridors.
+SDP exposes unified endpoints for onchain transfers and ramps across providers, built on official Solana program implementations like [Subscriptions](https://github.com/solana-program/subscriptions) and [Solana Pay](https://github.com/solana-foundation/pay). These power Recurring Payments, Payment Requests, and Batch Transfers within SDP.
+
+<Tabs items={["Recurring Payments", "Payment Requests", "Batch Transfers"]}>
+<Tab value="Recurring Payments">
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/payments/recurring-payments \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sourceWalletId": "privy_wallet_123",
+    "counterpartyId": "cp_...",
+    "counterpartyAccountId": "cpa_...",
+    "token": "USDC",
+    "amount": "25.00",
+    "periodHours": 720
+  }'
+```
+</Tab>
+<Tab value="Payment Requests">
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/payments/requests \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "walletId": "privy_wallet_123",
+    "counterpartyId": "cp_...",
+    "token": "USDC",
+    "amount": "25.00",
+    "expiresAt": "2026-08-31T00:00:00.000Z"
+  }'
+```
+</Tab>
+<Tab value="Batch Transfers">
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/payments/transfer-batches \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "externalId": "payroll_2026_06_30",
+    "source": "privy_wallet_123",
+    "token": "USDC",
+    "recipients": [
+      {
+        "externalId": "payroll_row_001",
+        "counterpartyId": "cp_...",
+        "counterpartyAccountId": "cpa_...",
+        "amount": "25.00"
+      }
+    ]
+  }'
+```
+</Tab>
+</Tabs>
+
+The same API extends to on/offramps: rate estimates, quotes, and settlement work identically across every provider and corridor, so money can enter as fiat, live onchain as a token you issued, and exit back to fiat: a complete lifecycle from issuance through circulation to redemption, without stitching together provider-specific integrations. See [Payments](/docs/payments) for transfers and [Ramps](/docs/payments/ramps) for supported providers, currencies, and corridors.
 </Step>
 <Step>
 ### Audit Trails
@@ -169,11 +232,11 @@ Every sensitive operation is recorded automatically. Each entry captures the act
 | ----------------------- | ---------------------------------------------------------------------------------- |
 | API keys                | Create, revoke, and rotate, for both organization and project-scoped keys          |
 | Token issuance          | Deploy, mint, burn, force-burn, supply changes, and authority updates              |
-| Compliance actions      | Freeze, unfreeze, pause, unpause, seize, and allowlist changes                     |
+| Compliance actions      | Freeze, unfreeze, pause, unpause, seize, and Token Access Control changes          |
 | Custody                 | Provider configuration, wallet provisioning, and credential lifecycle changes      |
 | Transactions & signing  | Signing requests, submissions, and failed submissions                              |
 | Organization & access   | Members, invitations, projects, project membership, and login sessions             |
-| Counterparties & assets | Counterparty and payout account changes, asset profile changes                     |
+| Counterparties & assets | Counterparty and Counterparty Account changes, asset profile changes               |
 </Step>
 </Steps>
 
@@ -186,7 +249,7 @@ Source: https://platform.solana.com/docs/developing-with-sdp
 
 > The interfaces, environments, and conventions you build against.
 
-SDP exposes two interfaces that connect to the same backend:
+SDP exposes two interfaces that operate over the same backend and enforce the same permissions, policies, and audit trails:
 
 - **Dashboard** — browser-based UI for setup, token management, and compliance operations. Sign in with email, Google, or GitHub.
 - **REST API** — programmatic access for backend integrations. Authenticate with an API key in the `Authorization` header.
@@ -195,25 +258,48 @@ Everything the dashboard does is available through the API. Build against the AP
 
 ## Environments
 
+Environments are a property of the **project**, not of individual requests. Every resource — and every API key — belongs to a project, and inherits that project's environment.
+
 | Environment  | Network      | API key prefix |
 | ------------ | ------------ | -------------- |
 | `sandbox`    | devnet       | `sk_test_`     |
 | `production` | mainnet-beta | `sk_live_`     |
 
-Both environments expose identical APIs. Develop and test against sandbox, then switch to production by swapping your API key.
+Both environments expose identical APIs. Develop and test against a sandbox project, then switch to production by swapping your API key.
 
-## Signing modes
+## Response conventions
 
-Most transaction endpoints support Execute (SDP signs and submits) or Prepare (SDP builds the transaction, you sign). See [Prepare vs Execute](/docs/guides/prepare-vs-execute).
+Every successful response wraps its payload in a `data` envelope with request metadata:
+
+```json
+{
+  "data": { ... },
+  "meta": { "requestId": "req_...", "timestamp": "2026-07-31T12:00:00.000Z" }
+}
+```
+
+Errors return a machine-readable `code` alongside a human-readable `message`:
+
+```json
+{
+  "error": { "code": "INVALID_API_KEY", "message": "Invalid API key" }
+}
+```
+
+Include the `requestId` when reporting an issue — it links your request to our internal traces and audit records.
+
+## Execution model
+
+SDP executes every operation: it builds the transaction, signs it with the custody wallet's key, and submits it to Solana.
 
 ---
 
 ### Idempotency
 Source: https://platform.solana.com/docs/developing-with-sdp/idempotency
 
-> Prevent duplicate operations by sending an Idempotency-Key header on mutation requests.
+> Replay-safe mutations through the Idempotency-Key header, claimed by the record itself.
 
-Include an `Idempotency-Key` header on mutation requests to prevent duplicates. If a request times out or your client retries, replaying the same key returns the original result instead of performing the operation twice.
+Retries are a fact of distributed systems: clients time out, connections drop, workers die mid-run. SDP lets you replay a mutation safely by sending an `Idempotency-Key` header — a unique value (a UUID works well) that you mint once per logical operation and reuse on every retry of that operation.
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfers \
@@ -223,14 +309,43 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
   -d '{ ... }'
 ```
 
-Use a unique key per logical operation (a UUID works well) and reuse the same key for retries of that operation.
+## How replay resolution works
+
+SDP's model differs from response-cache designs: the idempotency key is claimed by the **business record itself**, not by a snapshot of the original response.
+
+1. The first request creates the record — a transfer, a batch, an issuance transaction — carrying your key and a fingerprint of the normalized request payload.
+2. A retry with the same key and the same payload returns **HTTP 200 with the stored record**, in the normal success envelope. Because it is the live record and not a cached response, a replay reflects current state — a transfer that has since finalized comes back `finalized`, not the `processing` you would have seen on the first attempt.
+3. A request with the same key but a **different payload** is rejected with **409 `CONFLICT`** ("Idempotency key already used with different request payload"). The fingerprint comparison is field-normalized, so formatting differences don't cause false conflicts.
+
+Keys are retained for the lifetime of the record they claimed — there is no TTL, and a replay works for as long as the record exists.
+
+The header itself is validated on every `/v1` route (1–255 printable ASCII characters), but only the endpoints below consume it. Elsewhere it is accepted and ignored.
+
+## Where it applies
+
+Each domain claims keys in its own namespace, and the namespaces are scoped differently:
+
+| Domain | Operations | Key namespace |
+| --- | --- | --- |
+| Payments — transfers | `POST /v1/payments/transfers` | Per project |
+| Payments — batches | `POST /v1/payments/transfer-batches` | Per project |
+| Issuance | Execute-mode deploy, mint, burn, force-burn, freeze, thaw, pause, unpause, seize, and authority transfer | Per organization, shared across **all** issuance operations and tokens |
+| Custody | Provider credential submission (dashboard flow) | Required on every submission |
+
+Namespaces are independent across domains — the same key value used on a transfer and on a mint are two separate claims that never collide. Within issuance, however, the namespace is organization-wide: reusing a key for a different issuance operation, even on a different token, returns 409.
+
+## This model is open to change
+
+The per-domain differences above reflect the order in which these surfaces shipped, not a finished design, and we expect them to converge. Treat the core contract as stable — one key per logical operation, replay returns the record, payload mismatch returns 409 — and treat the scoping details (per-project vs per-organization namespaces, which endpoints consume the header) as subject to change. We are considering extending consumption to more mutation endpoints and unifying namespace scoping across domains.
 
 ---
 
 ### Authentication
 Source: https://platform.solana.com/docs/developing-with-sdp/authentication
 
-> Authenticate API requests with project-scoped API keys.
+> Authenticate API requests with project-scoped API keys, layered with roles, wallet bindings, and network controls.
+
+SDP layers independent controls onto a single API key — role, per-key permissions, wallet bindings, policy profiles, and IP allowlist — so a key grants exactly the access its integration needs, and no more.
 
 Every API request carries an API key in the `Authorization` header:
 
@@ -239,18 +354,58 @@ curl https://api.solana.com/v1/wallets \
   -H "Authorization: Bearer sk_test_..."
 ```
 
-Key prefixes tell you which environment a key belongs to: `sk_test_` keys are sandbox, `sk_live_` keys are production.
+The `Bearer` prefix is optional — a raw key in the `Authorization` header is also accepted.
 
-Keys are project-scoped — a key can only reach the wallets, tokens, and payments of the project it was issued for. See [Manage API Keys](/docs/developing-with-sdp/manage-api-keys) for creating, rotating, and revoking keys.
+## Key scope
+
+Keys are issued per **project** and inherit that project's environment: `sk_test_` keys belong to sandbox projects (devnet), `sk_live_` keys to production projects (mainnet-beta). A key can only reach the wallets, tokens, and payments of the project it was issued for; there is no cross-project or organization-wide key.
+
+## Authorization layers
+
+A request must clear every layer that is configured on its key:
+
+| Layer | What it controls |
+| --- | --- |
+| **Role** | Baseline permission set — see the table below |
+| **Per-key permissions** | Optional fine-grained overrides of the role's defaults. A key can only grant permissions its creator holds |
+| **Wallet bindings** | Restrict which custody wallets the key can operate, each binding with its own permission list |
+| **Policy profiles** | Rule sets (destination controls, amount limits, approval requirements) evaluated before a bound wallet moves funds |
+| **IP allowlist** | Optional IPv4/IPv6/CIDR ranges the key may be used from |
+
+| Role | Description |
+| --- | --- |
+| `api_admin` | Full access including custody and platform operations |
+| `api_developer` | Read/write access to tokens, payments, counterparties, wallets, and webhooks; excludes custody administration |
+| `api_readonly` | Read-only access to all resources, including audit records |
+
+## Errors
+
+Authentication and authorization failures are always machine-distinguishable:
+
+| Condition | Status | Code |
+| --- | --- | --- |
+| No API key on the request | 401 | `UNAUTHORIZED` |
+| Malformed or unknown key | 401 | `INVALID_API_KEY` |
+| Key has been revoked | 401 | `REVOKED_API_KEY` |
+| Key past its expiry or rotation deadline | 401 | `EXPIRED_API_KEY` |
+| Request origin not in the key's IP allowlist | 403 | `FORBIDDEN` |
+| Key lacks a required permission | 403 | `INSUFFICIENT_PERMISSIONS` |
+| Per-key rate limit exceeded | 429 | `RATE_LIMITED` |
+
+Requests are rate limited per key; the standard tier allows 100 requests per minute.
+
+See [Manage API Keys](/docs/developing-with-sdp/manage-api-keys) for creating, rotating, and revoking keys.
 
 ---
 
 ### Manage API Keys
 Source: https://platform.solana.com/docs/developing-with-sdp/manage-api-keys
 
-> Create, rotate, and revoke API keys with role-based access and environment scoping.
+> Create, rotate, and revoke API keys with role-based access, wallet bindings, and zero-downtime rotation.
 
-API keys authenticate every request to the SDP API. Each key is scoped to an environment (sandbox or production) and assigned a role that determines what operations it can perform.
+Create, rotate, and revoke the API keys that authenticate SDP API requests. Each key belongs to a project, inherits its environment, and carries a role plus optional fine-grained controls — see [Authentication](/docs/developing-with-sdp/authentication) for how those layers are enforced.
+
+The full secret is returned exactly once — at creation and at rotation. SDP stores only a salted hash and a display prefix; a lost key cannot be recovered, only rotated or replaced. Every key tracks `lastUsedAt` so you can identify stale credentials before revoking them.
 
 ## Key format
 
@@ -267,36 +422,36 @@ API keys authenticate every request to the SDP API. Each key is scoped to an env
 | `api_developer` | Read/write access, excludes custody actions |
 | `api_readonly` | Read-only access to all resources |
 
+A key can also carry explicit `permissions` that override the role's defaults. A key can only be granted permissions its creator holds.
+
 ## Create a key
 
 <Tabs items={["Dashboard", "API"]}>
 <Tab value="Dashboard">
 
-Navigate to **API keys** in the sidebar. You'll start with an empty list.
+1. Navigate to **API keys** in the sidebar. You start with an empty list.
 
-![API keys page with no keys yet](/images/getting-started/api-keys-empty.png)
+   ![API keys page with no keys yet](/images/getting-started/api-keys-empty.png)
 
-Click **New API key** in the top right. Fill in the key details:
+2. Click **New API key** in the top right, then fill in the key details:
+   - **Name** — a descriptive label (e.g., "CI deploy key")
+   - **Role** — Admin, Developer, or Read only
+   - **Wallet access** — All wallets or Selected wallets
+   - **Expiration (optional)** — date/time picker
 
-- **Name** — a descriptive label (e.g., "CI deploy key")
-- **Role** — Admin, Developer, or Read only
-- **Environment** — Sandbox or Production
-- **Wallet access** — All wallets or Selected wallets
-- **Expiration (optional)** — date/time picker
+   ![Create API key modal](/images/getting-started/api-key-create.png)
 
-![Create API key modal](/images/getting-started/api-key-create.png)
+3. Click **Continue**, review the summary, and click **Create key**.
 
-Click **Continue**. Review the summary and click **Create key**.
+   ![Review API key modal](/images/getting-started/api-key-review.png)
 
-![Review API key modal](/images/getting-started/api-key-review.png)
+4. Click **Copy** on the **API key generated** modal and save the key — it will not be shown again.
 
-The full key appears once in the **API key generated** modal. Click **Copy** and save it — it will not be shown again.
+   ![API key generated modal showing the full key](/images/getting-started/api-key-generated.png)
 
-![API key generated modal showing the full key](/images/getting-started/api-key-generated.png)
+5. Dismiss the modal. The key now appears in the table with its prefix, role, environment, and status.
 
-After dismissing, the key appears in the table with its prefix, role, environment, and status.
-
-![API keys list with one active key](/images/getting-started/api-keys-list.png)
+   ![API keys list with one active key](/images/getting-started/api-keys-list.png)
 
 </Tab>
 <Tab value="API">
@@ -310,7 +465,6 @@ curl -X POST https://api.solana.com/v1/api-keys \
   -d '{
     "name": "CI deploy key",
     "role": "api_developer",
-    "environment": "sandbox",
     "walletScope": "all",
     "expiresAt": "2026-12-31T23:59:59Z"
   }'
@@ -327,7 +481,6 @@ const response = await fetch("https://api.solana.com/v1/api-keys", {
   body: JSON.stringify({
     name: "CI deploy key",
     role: "api_developer",
-    environment: "sandbox",
     walletScope: "all",
     expiresAt: "2026-12-31T23:59:59Z",
   }),
@@ -346,7 +499,6 @@ HttpRequest request = HttpRequest.newBuilder()
         {
           "name": "CI deploy key",
           "role": "api_developer",
-          "environment": "sandbox",
           "walletScope": "all",
           "expiresAt": "2026-12-31T23:59:59Z"
         }"""))
@@ -355,23 +507,25 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-The response includes the full `key` value — **save it, it is only returned once**.
+The new key belongs to the project of the key that created it and inherits that project's environment — there is no environment field on the request. The response includes the full `key` value — **save it, it is only returned once**.
 
-Optional fields: `allowedIps` (CIDR ranges), `permissions` (fine-grained), `signingWalletId`, `walletBindings`.
+Optional fields: `description`, `permissions` (fine-grained overrides), `allowedIps` (IPv4/IPv6/CIDR ranges), `signingWalletId` / `signingWalletIds`, `walletBindings` (per-wallet permission lists).
 
 </Tab>
 </Tabs>
 
 ## Rotate a key
 
+Rotation replaces the secret without an availability gap: the new key is a fresh record that clones the old key's role, permissions, IP allowlist, wallet bindings, and policy profiles, while the old key keeps working until its grace deadline. During the grace period both keys are valid; after it, the old key fails with `EXPIRED_API_KEY`.
+
 <Tabs items={["Dashboard", "API"]}>
 <Tab value="Dashboard">
 
-In the API keys table, open the **Actions** dropdown next to the key and click **Rotate key (24h grace)**. The dashboard always uses a 24-hour grace period — use the API if you need a custom value (0–168h).
+1. In the API keys table, open the **Actions** dropdown next to the key and click **Rotate key (24h grace)**. The dashboard always uses a 24-hour grace period — use the API for a custom value (0–168h).
 
-![Actions dropdown showing Rotate key and Delete key options](/images/getting-started/api-key-rotate.png)
+   ![Actions dropdown showing Rotate key and Delete key options](/images/getting-started/api-key-rotate.png)
 
-During the grace period both the old and new key are valid. The new key value appears once in the generated key modal — save it immediately.
+2. Copy the new key value from the generated key modal — it is shown once.
 
 </Tab>
 <Tab value="API">
@@ -399,7 +553,8 @@ const response = await fetch(
   }
 );
 const { data } = await response.json();
-// data.apiKey — the new key
+// data.apiKey — the new key, only shown once
+// data.previousKey.rotationDeadline — when the old key stops working
 ```
 </Tab>
 <Tab value="Java">
@@ -415,7 +570,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-The old key remains valid for the grace period (0–168 hours).
+`gracePeriodHours` accepts 0–168 (default 24). A key cannot rotate itself — authenticate the rotation with a different key or a dashboard session.
 
 </Tab>
 </Tabs>
@@ -464,7 +619,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-The `confirmation` field must match the key's **name**. The key stops working immediately.
+The `confirmation` field must match the key's **name**. Revocation takes effect immediately, is idempotent (revoking an already-revoked key succeeds), and cannot be undone. As with rotation, a key cannot revoke itself.
 
 </Tab>
 </Tabs>
@@ -473,12 +628,51 @@ The `confirmation` field must match the key's **name**. The key stops working im
 
 ## Getting Started
 
+### Set Up Your Organization & Projects
+Source: https://platform.solana.com/docs/guides/setup-organization
+
+> Set up your SDP organization and see how projects scope work within it.
+
+Every SDP user works through an **organization** — a team workspace containing one or more **projects**, each a provisioned environment with its own API keys, wallets, and members. This guide creates your organization and covers how projects scope your resources.
+
+### 1. Sign up
+
+Go to [platform.solana.com](https://platform.solana.com) and click **Dashboard**. On the sign-in screen, click **Sign up** to create a new account.
+
+![SDP sign-in screen with Sign up link](/images/getting-started/sign-in.png)
+
+Enter your email address and a password to create your account.
+
+![Create your account screen](/images/getting-started/create-account.png)
+
+### 2. Create or select an organization
+
+After signing in you'll be prompted to set up your organization. Upload a logo and enter your organization name, then click **Continue**.
+
+![Setup your organization screen](/images/getting-started/setup-organization.png)
+
+If you already have an organization, the **Organization Switcher** in the top-left of the sidebar lets you switch between them or create a new one.
+
+<img src="/images/getting-started/org-switcher.png" alt="Organization Switcher dropdown" width="436" style={{ display: "block", maxWidth: "100%" }} />
+
+### 3. Organize with projects
+
+A **project** is a provisioned environment within your organization — sandbox or production-style — with its own API keys, wallets, tokens, and members, so teams don't share the same wallet and token surface. See the [Projects API reference](/docs/reference/api/projects) for managing them programmatically.
+
+### 4. Next steps
+
+- [Set up wallets](/docs/guides/setup-wallets) for signing transactions
+- [Create API keys](/docs/developing-with-sdp/manage-api-keys) for programmatic access
+- [Create your first token](/docs/tokens/create-a-token)
+
+---
+
 ### Set Up Wallets
 Source: https://platform.solana.com/docs/guides/setup-wallets
 
 > Initialize a custody provider and create wallets for signing transactions.
 
-Wallets are Solana keypairs managed by a custody provider. SDP uses them to sign transactions for token deployment, minting, transfers, and other onchain operations. You must initialize a signing provider before creating tokens or executing transactions.
+A **custody wallet** is a Solana keypair whose key is held and signed for by a custody provider — SDP routes signing requests to whichever provider holds the wallet's key. Initialize a provider, then create wallets for token deployment, minting, transfers, and other onchain operations.
 
 ## Supported providers
 
@@ -710,7 +904,7 @@ Use this page when you want to issue a stablecoin, tokenized security, loyalty t
 
 ## Choose a token model
 
-Pick the template that matches your asset's compliance and operational requirements:
+Pick the **Tokenization Template** that matches your asset's compliance and operational requirements:
 
 | Asset model | Template | Typical controls |
 | --- | --- | --- |
@@ -719,7 +913,7 @@ Pick the template that matches your asset's compliance and operational requireme
 | Loyalty, rewards, or utility token | `custom` | Manually selected extensions |
 | Non-standard asset | `custom` | Manually selected extensions |
 
-Use SDP-controlled custody wallets for your main authorities when you expect SDP execute flows to work without external signing.
+**Custody wallets** hold your token's authorities by default, so SDP can execute deploy, mint, and compliance actions without external signing.
 
 ## Implementation sequence
 
@@ -732,7 +926,7 @@ Each step links to its own guide with UI and API instructions:
 5. [Deploy a Token](/docs/tokens/deploy-a-token)
 6. [Mint and Burn](/docs/tokens/mint-and-burn)
 7. [Basic payment](/docs/payments/send-basic-payment) — transfer tokens between wallets
-8. [Allowlists](/docs/tokens/allowlists) — required for `tokenized-security`
+8. [Allowlists](/docs/tokens/allowlists) — Token Access Control, required for `tokenized-security`
 9. [Manage Token Settings](/docs/tokens/manage-token-settings) — freeze, pause, seize for compliance workflows
 
 ## Core API endpoints
@@ -744,7 +938,7 @@ Each step links to its own guide with UI and API instructions:
 | `POST` | `/v1/issuance/tokens/{tokenId}/deploy` | Deploy to Solana |
 | `POST` | `/v1/issuance/tokens/{tokenId}/mint` | Mint new supply |
 | `POST` | `/v1/issuance/tokens/{tokenId}/burn` | Reduce supply |
-| `POST` | `/v1/issuance/tokens/{tokenId}/allowlist` | Add an allowed address |
+| `POST` | `/v1/issuance/tokens/{tokenId}/allowlist` | Add a Token Access Control entry |
 | `POST` | `/v1/issuance/tokens/{tokenId}/freeze` | Freeze an account |
 | `POST` | `/v1/issuance/tokens/{tokenId}/pause` | Pause all transfers |
 | `POST` | `/v1/payments/transfers` | Transfer tokens |
@@ -756,7 +950,7 @@ See the full schema in the [Issuance API reference](/docs/reference/api/issuance
 - A token must be **created** before deployment, and **deployed** before minting or transfer.
 - If the token is paused, minting and transfer operations are unavailable until it is unpaused.
 - Freeze and unfreeze flows accept a holder wallet address; SDP derives the associated token account automatically.
-- If a relevant authority is held outside SDP, prefer prepare flows or rotate the authority to a controlled wallet first.
+- SDP operations require the relevant authority on a custody wallet. If an authority has been rotated outside SDP, rotate it back to a controlled wallet before deploying, minting, or running compliance actions.
 
 ## For AI agents
 
@@ -787,7 +981,7 @@ Token creation defines your token's metadata, extensions, and operational rules.
 
 <Step number={1} title="Choose a template">
 
-Select the template that matches your asset model. Templates pre-fill extensions and constraints you can review before confirming.
+Select the **Tokenization Template** that matches your asset model. Templates pre-fill extensions and constraints you can review before confirming.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
@@ -874,7 +1068,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens \
 
 <Step number={3} title="Set operational settings">
 
-Choose the wallet that will sign token operations, and configure allowlist and supply controls.
+Choose the wallet that will sign token operations, and configure Token Access Control and supply controls.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
@@ -883,7 +1077,7 @@ Choose the wallet that will sign token operations, and configure allowlist and s
 In step 3 of 3, configure:
 
 - **Main signer** — the SDP-controlled wallet for deploy and token actions
-- **Allowlist** — toggle on or off; required and locked for `tokenized-security`
+- **Allowlist** — Token Access Control's allowlist mode; toggle on or off, required and locked for `tokenized-security`
 
 Click **Create token** to save the draft.
 
@@ -1028,7 +1222,7 @@ Note the `id` field (e.g., `tok_abc123`) — required for all deploy and post-de
 
 <Step number={2} title="Deploy the token">
 
-Use **execute mode** when SDP controls the signing wallet, or **prepare mode** when you need to sign externally.
+SDP signs and submits the deploy transaction using the token's configured signer wallet.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
@@ -1046,8 +1240,6 @@ SDP submits the transaction to Solana and polls for confirmation. The page updat
 
 </Tab>
 <Tab value="API">
-
-**Execute mode** — SDP signs and submits:
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy \
@@ -1069,15 +1261,6 @@ const res = await fetch(
 const { data } = await res.json();
 // data.token.mintAddress — the onchain mint address
 ```
-
-**Prepare mode** — returns an unsigned transaction:
-
-```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy/prepare \
-  -H "Authorization: Bearer sk_test_..."
-```
-
-Sign `data.transaction.serialized` with your private key and submit to Solana. See [Prepare vs Execute](/docs/tokens/prepare-vs-execute).
 
 Always pass an `Idempotency-Key` — retrying with the same key after a network error prevents double-deployment.
 
@@ -1241,7 +1424,7 @@ const res = await fetch(
 );
 ```
 
-Add `/prepare` to the path to simulate before signing. Control priority with `options.priorityFee`: `"none"`, `"low"`, `"medium"`, `"high"`, or a micro-lamport value.
+Control priority with `options.priorityFee`: `"none"`, `"low"`, `"medium"`, `"high"`, or a micro-lamport value.
 
 </Tab>
 </Tabs>
@@ -1314,8 +1497,6 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn", {
 });
 ```
 
-Both endpoints support `/prepare` for client-side signing.
-
 </Tab>
 </Tabs>
 </StepPanel>
@@ -1361,7 +1542,9 @@ Source: https://platform.solana.com/docs/tokens/allowlists
 
 > Control which addresses can receive your token by maintaining an approved list.
 
-Tokens created with `requiresAllowlist: true` enforce a list of approved destination addresses on allowlist-aware issuance flows such as minting and administrative transfers. Required for `tokenized-security` tokens. Payment transfers use wallet-level destination allowlists instead.
+**Token Access Control** gates who may hold or receive your token. This page covers its `allowlist` mode: tokens created with `requiresAllowlist: true` enforce a list of approved destination addresses on allowlist-aware issuance flows such as minting and administrative transfers, and it's required for `tokenized-security` tokens.
+
+This is distinct from a wallet's transfer allowlist (a Wallet Policy concern) and the Platform Allowlist (deployment admission).
 
 ## Prerequisites
 
@@ -1546,7 +1729,7 @@ Source: https://platform.solana.com/docs/tokens/freeze-and-compliance
 SDP provides two categories of compliance tooling:
 
 - **Token controls** — freeze individual accounts, pause all transfers, or seize tokens. Available for tokens with `isFreezable` enabled or the `pausable` extension.
-- **Address screening** — check a wallet against configured compliance providers before approving a destination or allowlisting it.
+- **Address screening** — check a wallet against configured compliance providers before approving a destination or adding it to a token's Token Access Control allowlist.
 
 Token-control actions require `tokens:admin` permission on the API key.
 
@@ -1564,7 +1747,7 @@ Check a Solana address against configured compliance providers before onboarding
 
 Use the **Screen address** action in the Compliance section of the dashboard.
 
-Enter the wallet address and select the intent (e.g., transfer destination or allowlist candidate). Results appear per provider — each showing risk level, score, and flags.
+Enter the wallet address and select the intent (e.g., transfer destination or Token Access Control allowlist candidate). Results appear per provider — each showing risk level, score, and flags.
 
 </Tab>
 <Tab value="API">
@@ -1739,8 +1922,6 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/seize \
   }'
 ```
 
-Seize also supports `/prepare` for client-side signing.
-
 </Tab>
 </Tabs>
 </StepPanel>
@@ -1790,7 +1971,7 @@ The **Permissions** tab lists every authority and which wallet currently holds i
 
 ![Permissions tab showing Mint Authority, Freeze Authority, Metadata Authority, and Permanent Delegate Authority with Edit buttons](/images/tokens/token-settings-permissions.png)
 
-The **Extensions** tab shows the template and each operational flag — allowlist status, mintable, freezable, and default account state.
+The **Extensions** tab shows the template and each operational flag — Token Access Control (allowlist) status, mintable, freezable, and default account state.
 
 ![Extensions tab showing template, allowlist, mintable, freezable, and default account state settings](/images/tokens/token-settings-extensions.png)
 
@@ -1829,32 +2010,18 @@ On the token detail page, go to **Permissions**. Click **Edit** next to the auth
 
 ![Mint Authority modal showing current authority wallet, new authority dropdown with controlled wallets, and Save authority button](/images/tokens/token-authority-edit.png)
 
-> Once an authority is rotated to an external wallet, SDP can no longer sign on its behalf. Use execute flows with the external wallet or prepare flows for signing outside SDP.
+> Once an authority is rotated to an external wallet, SDP can no longer sign operations that require it. Rotate the authority back to a controlled wallet to resume using SDP's deploy, mint, and compliance actions.
 
 </Tab>
 <Tab value="API">
 
-**Execute mode** — SDP signs the authority rotation:
+SDP signs the authority rotation:
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: rotate-001" \
-  -d '{
-    "authority": {
-      "type": "mintAuthority",
-      "newAuthority": "9aBCd...4eEf"
-    }
-  }'
-```
-
-**Prepare mode** — returns unsigned transaction for external signing:
-
-```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority/prepare \
-  -H "Authorization: Bearer sk_test_..." \
-  -H "Content-Type: application/json" \
   -d '{
     "authority": {
       "type": "mintAuthority",
@@ -1907,119 +2074,6 @@ After revoking the mint authority, no new tokens can ever be minted. Revocation 
 
 ---
 
-### Prepare vs Execute
-Source: https://platform.solana.com/docs/tokens/prepare-vs-execute
-
-> Understand SDP's two signing modes for onchain transactions.
-
-Every SDP endpoint that produces a Solana transaction supports two signing modes. The mode you choose determines who signs and submits the transaction.
-
-## Execute mode (default)
-
-Call a mutation endpoint without the `/prepare` suffix and SDP handles everything:
-
-1. Builds the transaction
-2. Signs it using your configured custody provider
-3. Submits it to Solana
-4. Returns the confirmed result with a transaction signature
-
-```typescript title="mint-execute.ts"
-const res = await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint",
-  {
-    method: "POST",
-    headers: {
-      Authorization: "Bearer sk_test_...",
-      "Content-Type": "application/json",
-      "Idempotency-Key": "mint-001",
-    },
-    body: JSON.stringify({
-      mint: { destination: "7xKXz...9fGh", amount: "1000" },
-    }),
-  }
-);
-const { data } = await res.json();
-// data.transaction.signature — confirmed onchain
-```
-
-Issuance `amount` fields use **UI units** (decimal strings such as `"1000"` for one thousand tokens). SDP converts using the token's `decimals` before building the on-chain transaction.
-
-**When to use execute mode:**
-
-- You trust SDP's custody provider with signing
-- You want the simplest integration — one API call, confirmed result
-- Backend-to-backend workflows that don't require user signatures
-
-## Prepare mode
-
-Add `/prepare` to a mutation endpoint and SDP builds the transaction but returns it unsigned:
-
-```typescript title="mint-prepare.ts"
-const res = await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint/prepare",
-  {
-    method: "POST",
-    headers: {
-      Authorization: "Bearer sk_test_...",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      mint: { destination: "7xKXz...9fGh", amount: "1000" },
-      options: { simulate: true },
-    }),
-  }
-);
-const { data } = await res.json();
-// data.preparedTransaction.serialized — base64 transaction to sign
-// data.simulation — { success, unitsConsumed, logs }
-```
-
-**When to use prepare mode:**
-
-- You manage your own keys (hardware wallet, multisig, HSM)
-- You need user approval before signing (wallet pop-up flow)
-- You want to simulate the transaction before committing
-- Regulatory requirements mandate specific signing infrastructure
-
-## Signing a prepared transaction
-
-After receiving the serialized transaction:
-
-1. **Decode** the base64 string into a transaction object
-2. **Sign** with the required private key(s)
-3. **Submit** to Solana via `sendRawTransaction`
-4. **Confirm** the transaction using `confirmTransaction`
-
-Submit before `lastValidBlockHeight` expires. If the blockhash expires, call `/prepare` again for a fresh transaction.
-
-## Simulation
-
-Prepare endpoints accept `options.simulate: true` to dry-run the transaction before signing. The simulation returns:
-
-- `success` — whether the transaction would succeed
-- `unitsConsumed` — compute units used
-- `logs` — program execution logs
-- `error` — error details if simulation fails
-
-## Endpoints that support both modes
-
-| Resource | Execute | Prepare |
-| --- | --- | --- |
-| Deploy token | `POST .../deploy` | `POST .../deploy/prepare` |
-| Mint | `POST .../mint` | `POST .../mint/prepare` |
-| Burn | `POST .../burn` | `POST .../burn/prepare` |
-| Force-burn | `POST .../force-burn` | `POST .../force-burn/prepare` |
-| Seize | `POST .../seize` | `POST .../seize/prepare` |
-| Update authority | `POST .../authority` | `POST .../authority/prepare` |
-
-Issuance paths are prefixed with `https://api.solana.com/v1/issuance/tokens/{tokenId}`.
-
-## Idempotency
-
-Both modes support the `Idempotency-Key` header. For execute mode, the key prevents duplicate submissions. For prepare mode, the key ensures you get the same prepared transaction on retry.
-
----
-
 ## Wallet operations
 
 ### Wallet operations
@@ -2027,7 +2081,7 @@ Source: https://platform.solana.com/docs/wallet-operations
 
 > Configure custody-wallet controls, operation permissions, and balances.
 
-Wallet operations are the controls and observability attached to a custody wallet, independent of the product flow that uses it. A policy can govern payments, ramps, issuance, and signing operations when SDP evaluates them for the selected wallet.
+This section covers the controls and audit trail attached to a custody wallet: **wallet policies** that gate every wallet operation, and balance visibility. A wallet policy applies uniformly across payment, ramp, issuance, and signing activity, whichever product flow initiates the request.
 
 ## What's in this section
 
@@ -2036,13 +2090,13 @@ Wallet operations are the controls and observability attached to a custody walle
 
 ## API surface
 
-The current wallet-policy and balance endpoints remain under `/v1/payments/wallets` because they were introduced with the Payments API. Their behavior is wallet-wide: policy operation families include payment, ramp, issuance, raw signing, program interactions, and provider administration.
+The current wallet-policy and balance endpoints remain under `/v1/payments/wallets` because they were introduced with the Payments API. Their behavior is wallet-wide: policy operation families include payment, ramp, issuance, raw signing, transfer, program interactions, and provider administration.
 
 ## Related
 
 - [Set up wallets](/docs/guides/setup-wallets) — provision the wallet before configuring controls.
 - [Payments](/docs/payments) — payment and ramp flows that can use a policy-controlled wallet.
-- [Manage API keys](/docs/developing-with-sdp/manage-api-keys) — configure caller permissions separately from wallet operation permissions.
+- [Manage API keys](/docs/developing-with-sdp/manage-api-keys) — an API key policy narrows or routes to approval; it never expands what the wallet policy allows.
 
 ---
 
@@ -2051,7 +2105,7 @@ Source: https://platform.solana.com/docs/wallet-operations/policies
 
 > Wallet controls, operation permissions, and policy audit visibility.
 
-Wallet policies constrain how a custody wallet can move funds and execute supported operations. SDP starts from default allow, then applies the active wallet control profile and any policy fields you configure. Policies are managed via `GET` and `PUT` on `/v1/payments/wallets/{walletId}/policies` and enforced before wallet operations execute.
+A **wallet policy** constrains how a custody wallet can move funds and execute supported operations. SDP starts from default allow, then applies the active wallet control profile and any policy fields you configure. Policies are managed via `GET` and `PUT` on `/v1/payments/wallets/{walletId}/policies` and enforced before each wallet operation executes.
 
 Use policies for treasury wallets, automated payout wallets, or any custody wallet where unbounded outbound flow would be a liability.
 
@@ -2152,7 +2206,7 @@ The `controlProfile` object shows the active immutable revision. Treat `revision
 
 ### Dashboard actions
 
-The dashboard authoring flow exposes three actions: **Allow**, **Deny**, and **Require approval**. Choose **Require approval** when an operator must decide whether an operation can continue; it holds the operation and creates an approval request.
+The dashboard authoring flow exposes three actions: **Allow**, **Deny**, and **Require approval**. Choose **Require approval** when an operator must decide whether an operation can continue; it holds the operation and creates an **Approval Request**.
 
 `review` remains a possible API evaluation result for legacy or safety paths, such as an unrecognized policy rule. It is visible in audit records, but it is not a dashboard authoring option or a separate human-review workflow. Do not use it to model operator approval; use `approval_required` instead.
 
@@ -2163,7 +2217,7 @@ Wallet policies can match operations at two levels:
 - **Operation family** rules apply to every evaluated operation in a broad product area.
 - **Operation type** rules match one exact operation identifier and take precedence when you need a narrower decision.
 
-These are wallet-policy selectors, not API-key permissions. API-key permissions such as `payments:write` and `tokens:write` determine whether a caller may invoke an endpoint; operation permissions determine what the selected wallet may do after the request is authorized. See [Manage API keys](/docs/developing-with-sdp/manage-api-keys) for caller permissions.
+These are wallet-policy selectors, not API-key permissions. API-key permissions such as `payments:write` and `tokens:write` determine whether a caller may invoke an endpoint; operation permissions determine what the selected wallet may do after the request is authorized. The wallet policy is the baseline: an API key policy can narrow what a key may do, or route an operation into approval, but it can never expand past what the wallet policy allows. See [Manage API keys](/docs/developing-with-sdp/manage-api-keys) for caller permissions.
 
 ### Operation families
 
@@ -2195,7 +2249,7 @@ Operation-type matching is exact and case-sensitive. The API accepts custom stri
 
 ## Policy evaluation and audit records
 
-Each supported wallet operation records a wallet operation row before policy evaluation and a policy evaluation row after SDP decides what should happen. `audit.recentEvaluations` exposes the most recent decisions for the wallet so support and customer operators can review:
+Each supported action against the wallet is recorded as a **Wallet Operation** — the attempt, whatever the outcome — before evaluation runs, and its **Policy Evaluation** — the verdict, plus a point-in-time snapshot of the operation and the policy that decided it — is recorded once SDP decides what should happen. `audit.recentEvaluations` exposes the most recent decisions for the wallet so support and customer operators can review:
 
 - what operation was evaluated (`walletOperationId`, `operationFamily`, `operationType`)
 - what decision SDP made (`decision`, `reasonCode`, `reason`, `requiresApproval`)
@@ -2210,7 +2264,7 @@ Use these records to explain allow, deny, approval-required, and review outcomes
 
 ## Destination allowlist
 
-The allowlist is a list of on-chain destination addresses (32-44 character base-58 Solana pubkeys). When set, `POST /v1/payments/transfers` rejects any destination not in the list.
+This is a wallet-policy control on outbound destinations — distinct from a token's **Token Access Control** allowlist, which gates who may hold the token itself. It is a list of on-chain destination addresses (32-44 character base-58 Solana pubkeys). When set, `POST /v1/payments/transfers` rejects any destination not in the list.
 
 - Maximum entries: **500 addresses per wallet**.
 - Each entry is a single on-chain address — no patterns, ranges, or address books.
@@ -2220,7 +2274,7 @@ The allowlist exists to bound risk on automated wallets (a hot wallet that shoul
 
 ## Transfer limits
 
-Two limits, both optional:
+A **transfer limit** always targets one **Policy Asset** — identified by mint, with native SOL under its well-known mint — never a blanket cap across assets. Two limits, both optional:
 
 - **`maxTransferAmount`** — per-transfer cap. Any single `POST /v1/payments/transfers` exceeding this amount is rejected. Compared against the request's `amount` directly, so it is naturally per-token.
 - **`maxDailyAmount`** — UTC-calendar-day cap, **enforced per token**. The day window resets at 00:00 UTC; the projected total is the sum of that wallet's outbound transfers for the **same token** in the current day (`pending`/`processing`/`confirmed`/`finalized`) plus the new request's `amount`. Different tokens are summed independently — see the per-token note under [Reading a wallet's policies](#reading-a-wallets-policies).
@@ -2378,7 +2432,7 @@ Per-balance fields:
 
 When USD valuation is populated, the price comes from SDP's configured price source and reflects the most recent quote available. The cadence and source depend on deployment configuration — do not rely on `usdValue` for downstream balance-sheet decisions without confirming the price source's freshness with your operations team. When in doubt, treat `amount` / `uiAmount` as authoritative and convert with your own price feed.
 
-If no price source is configured, the `usdPrice` and `usdValue` fields are simply absent rather than zero — falling back to "I don't know" rather than "$0.00" so downstream consumers can decide how to handle the gap.
+If no price source is configured, the `usdPrice` and `usdValue` fields are absent rather than zero — the omission signals "unknown," not "$0.00," so downstream consumers can decide how to handle the gap.
 
 ## Comparison to on-chain RPC
 
@@ -2411,7 +2465,7 @@ Source: https://platform.solana.com/docs/payments
 
 SDP provides a Solana-native payments stack: stablecoin transfers, fiat on-ramps and off-ramps, and reconciliation primitives. This section mirrors the structure of the [public Solana payments documentation](https://solana.com/docs/payments) and maps each workflow to the SDP APIs you call to ship it.
 
-If you have not yet provisioned a custody wallet or token, start with [Set Up Wallets](/docs/guides/setup-wallets) and [Tokenize an Asset](/docs/guides/tokenize-an-asset).
+If you have not yet provisioned a custody wallet or token, start with [Set Up Wallets](/docs/guides/setup-wallets) and [Tokenize an Asset](/docs/tokens/tokenize-an-asset).
 
 ## What's in this section
 
@@ -2425,7 +2479,7 @@ If you have not yet provisioned a custody wallet or token, start with [Set Up Wa
   - [Verifying a payment](/docs/payments/accept-verification) — transfer-status semantics and finality.
   - [Indexing and reconciliation](/docs/payments/accept-indexing) — listing inbound transfers for your ledger.
 - **Ramps** — fiat on-ramps and off-ramps.
-  - [Ramps overview](/docs/payments/ramps) — onramp and offramp request shape, KYC handoff, status states.
+  - [Ramps overview](/docs/payments/ramps) — corridor discovery, estimates, and the Ramp Quote request shape.
   - [Ramp providers](/docs/payments/ramps-providers) — MoonPay, Lightspark, and BVNK configuration.
 
 Wallet-wide controls and balances are documented in [Wallet operations](/docs/wallet-operations).
@@ -2437,7 +2491,6 @@ Every page in this section links to specific endpoints in the auto-generated [Pa
 ## Related
 
 - [End-to-end payment flow](/docs/tutorials/end-to-end-payment-flow) — high-level tutorial covering quote through settlement.
-- [Prepare vs Execute](/docs/guides/prepare-vs-execute) — SDP's two signing modes (used throughout payments).
 
 ---
 
@@ -2446,15 +2499,13 @@ Source: https://platform.solana.com/docs/payments/concepts
 
 > Wallets, tokens, server-side signing, fees, and the data model that backs SDP payments.
 
-SDP payments move value between Solana accounts: a custody wallet sends tokens to a destination address, SDP records the transfer, and the rest of the section describes how to send those, accept incoming ones, ramp into and out of fiat, and reconcile activity against your product database.
-
-This page introduces the building blocks the rest of the section assumes.
+SDP payments move value between Solana accounts: a custody wallet sends tokens to a destination address and SDP records the resulting transfer. This page introduces the building blocks — wallets, tokens, execution, fees, and the data model — that the rest of the section assumes.
 
 ## Custody wallets
 
-Every SDP payment is anchored to a **custody wallet** — a Solana keypair whose private key SDP holds, scoped to an organization and (optionally) a project. Wallets sign outbound transfers on your behalf and contribute to balances and policies for the addresses you control.
+Every SDP payment is anchored to a **custody wallet** — an SDP-managed Solana wallet, scoped to an organization and (optionally) a project. The wallet's key is held and signed for by a custody provider; SDP presents a stable Solana address and routes signing to whichever provider holds the key. Wallets sign outbound transfers on your behalf and contribute to balances and policies for the addresses you control.
 
-You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)) and reference them by their SDP `wallet_id` (`wal_…`). Transfer endpoints expect the **source** as a custody wallet ID — the wallet is resolved server-side from the caller's custody-wallet list — and the **destination** as the on-chain Solana address of the recipient. Ramp endpoints vary by provider: MoonPay and BVNK accept either a wallet ID or a Solana address for `sourceWallet` / `destinationWallet`; Lightspark uses its own `ExternalAccount:…` identifiers (onramp `destinationWallet` also accepts a Solana address, offramp `sourceWallet` does not).
+You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)) and reference them by their SDP `wallet_id` (`wal_…`). Transfer endpoints expect the **source** as a custody wallet ID — the wallet is resolved server-side from the caller's custody-wallet list — and the **destination** as the on-chain Solana address of the recipient. Ramp quote endpoints use the same shape for every provider: `destinationWallet` (onramp) or `sourceWallet` (offramp) is a custody wallet you control, passed as its wallet ID or its Solana address. Provider-specific identifiers (customer id, payout account) are resolved server-side from the **Counterparty**'s Provider Requirements, not passed on the request — see [Ramps](/docs/payments/ramps).
 
 ## Tokens and token accounts
 
@@ -2479,7 +2530,7 @@ Every successful or attempted transfer creates a `Transfer` record. The fields t
 | Field | Meaning |
 | --- | --- |
 | `id` | SDP-internal transfer identifier (use this in API URLs). |
-| `status` | One of `pending`, `processing`, `confirmed`, `finalized`, `failed`. See [Verifying a payment](/docs/payments/accept-verification). |
+| `status` | Wallet transfers: `processing`, `confirmed`, `finalized`, `failed`. Ramp transfers: `pending`, `awaiting_payment`, `settling`, `completed`, `canceled`, `expired`, `failed`. See [Verifying a payment](/docs/payments/accept-verification). |
 | `direction` | `inbound` (someone paid you) or `outbound` (you paid someone). |
 | `source`, `destination` | On-chain addresses. |
 | `token`, `amount` | What moved and how much. `amount` is a UI-unit decimal string (e.g. `"100.00"`). |
@@ -2509,7 +2560,9 @@ Source: https://platform.solana.com/docs/payments/send-basic-payment
 
 > Send a single token transfer with SDP.
 
-SDP handles token transfers through its payments API. A basic payment moves tokens **from a custody wallet you control to any Solana wallet address**. The `source` field on the request is an SDP custody wallet ID (`wal_…`), resolved server-side from the caller's wallet list; `destination` is the recipient's on-chain **wallet (owner) address** — for SPL transfers, SDP derives the associated token account (ATA) from this address and creates it if needed, so pass the wallet pubkey, **not** a token-account address.
+SDP handles token transfers through its payments API. A basic payment moves tokens **from a custody wallet you control to any Solana wallet address**.
+
+The `source` field on the request is an SDP custody wallet ID (`wal_…`), resolved server-side from the caller's wallet list; `destination` is the recipient's on-chain **wallet (owner) address** — for SPL transfers, SDP derives the associated token account (ATA) from this address and creates it if needed, so pass the wallet pubkey, **not** a token-account address.
 
 Transfers are available through the Payments dashboard and the API.
 
@@ -2704,9 +2757,9 @@ See [Payouts and disbursements](/docs/payments/send-payouts#dedup-and-retries) f
 
 - [Payment with memo](/docs/payments/send-payment-with-memo) — using the `memo` field to carry order references
 - [Payouts and disbursements](/docs/payments/send-payouts) — batched outbound flows
-- [Mint and Burn](/docs/guides/mint-and-burn) — create or destroy token supply
-- [Manage Allowlists](/docs/guides/manage-allowlists) — define approved destinations for allowlist-enabled issuance flows
-- [Freeze and Compliance](/docs/guides/freeze-and-compliance) — halt transfers for compliance
+- [Mint and Burn](/docs/tokens/mint-and-burn) — create or destroy token supply
+- [Allowlists](/docs/tokens/allowlists) — define approved destinations for allowlist-enabled issuance flows
+- [Freeze and Compliance](/docs/tokens/freeze-and-compliance) — halt transfers for compliance
 
 ---
 
@@ -2803,7 +2856,7 @@ Memo limits: `z.string().max(256)`. UTF-8 is accepted; trim or sanitize on the w
 
 For accept flows, **Solana Pay reference accounts** are an alternative correlation mechanism: you generate a unique pubkey per order and include it in the on-chain transfer as a reference. The advantage is on-chain provenance — anyone can verify the link without trusting SDP's database — and the ability for the payer to construct the transfer themselves from a Solana Pay URL.
 
-SDP's `Prepare` endpoint accepts a `referenceAddress` field as a roadmap hook for Solana Pay-style correlation, but **does not yet attach it on-chain or expose it on inbound transfer records** — for now use `memo` for SDP-side correlation, or read the reference directly from the transaction via Solana RPC. Use [Accept overview](/docs/payments/accept-overview) and [Indexing and reconciliation](/docs/payments/accept-indexing) for the inbound side.
+SDP does not attach a Solana Pay reference on-chain or expose one on inbound transfer records today — use `memo` for SDP-side correlation, or read the reference directly from the transaction via Solana RPC. Use [Accept overview](/docs/payments/accept-overview) and [Indexing and reconciliation](/docs/payments/accept-indexing) for the inbound side.
 
 Rule of thumb: memos are simpler when **you** initiate the transfer (server-side payouts, internal moves), references are stronger when **a third party** initiates the transfer (customer checkout, donations).
 
@@ -2976,7 +3029,7 @@ Source: https://platform.solana.com/docs/payments/accept-overview
 
 > Receiving-address convention, integration options, and how to track inbound payments with SDP.
 
-SDP does not ship a hosted checkout primitive. To accept payments today, you publish a Solana address you control and detect inbound transfers via the SDP transfer list. This page explains the pattern; the two pages that follow cover [verification](/docs/payments/accept-verification) and [indexing](/docs/payments/accept-indexing) in detail.
+SDP does not ship a hosted checkout primitive. To accept payments, you publish a Solana address you control and detect inbound transfers via the SDP transfer list — this page covers the pattern; [verification](/docs/payments/accept-verification) and [indexing](/docs/payments/accept-indexing) cover the details.
 
 ## Receiving-address convention
 
@@ -2994,7 +3047,7 @@ The address you publish is the on-chain `address` of the custody wallet. Fetch i
 There are two ways customers can land a payment on the address you control:
 
 1. **Direct address share** — you display the address (and the expected token + amount) in your UI. The customer's wallet sends a transfer. This works with any Solana wallet and any client; SDP picks the transfer up purely from the on-chain side. Best for B2B settlement, treasury operations, and crypto-native flows.
-2. **Solana Pay request** — for consumer checkout, you give the customer a [Solana Pay](https://solana.com/docs/payments/accept-payments/solana-pay) URL or QR code with the destination, amount, and a per-order `reference` pubkey. The customer's wallet builds the transfer and attaches the `reference` account on-chain, so you can match the transfer back to the order by reading the transaction directly via Solana RPC (the `reference` won't be on the SDP `Transfer` record — neither will any memo the wallet sets, since SDP doesn't extract memo-program instructions for inbound transfers). SDP does not ship a hosted Solana Pay endpoint today. The [`Prepare`](/docs/guides/prepare-vs-execute) transfer endpoint accepts a `referenceAddress` field as a roadmap hook, but **does not yet attach it on-chain or echo it on the inbound transfer record** (see [Indexing and reconciliation → Solana Pay reference accounts](/docs/payments/accept-indexing#solana-pay-reference-accounts-roadmap)). For SDP-side correlation today, use **per-order destination addresses** (covered above); use the on-chain transaction (via RPC) when you need to read memo or `reference`.
+2. **Solana Pay request** — for consumer checkout, you give the customer a [Solana Pay](https://solana.com/docs/payments/accept-payments/solana-pay) URL or QR code with the destination, amount, and a per-order `reference` pubkey. The customer's wallet builds the transfer and attaches the `reference` account on-chain, so you can match the transfer back to the order by reading the transaction directly via Solana RPC (the `reference` won't be on the SDP `Transfer` record — neither will any memo the wallet sets, since SDP doesn't extract memo-program instructions for inbound transfers). SDP does not ship a hosted Solana Pay endpoint or attach a Solana Pay reference on-chain today (see [Indexing and reconciliation → Solana Pay reference accounts](/docs/payments/accept-indexing#solana-pay-reference-accounts-roadmap)). For SDP-side correlation today, use **per-order destination addresses** (covered above); use the on-chain transaction (via RPC) when you need to read memo or `reference`.
 
 ## What SDP gives you today
 
@@ -3037,17 +3090,32 @@ When a payment lands on a wallet you control, the inbound transfer moves through
 
 ## Status lifecycle
 
-The `status` field on the `Transfer` record takes one of five values:
+The `status` field on the `Transfer` record takes one of several values, depending on whether the transfer is a wallet transfer or a ramp transfer.
+
+**Wallet transfers** (`POST /v1/payments/transfers`, and inbound transfers discovered on-chain):
 
 | Status | Meaning |
 | --- | --- |
-| `pending` | Provider-backed ramp transfer setup is still underway. Wallet transfers created with `POST /v1/payments/transfers` do not start here; they start at `processing`. No wallet-transfer `signature` yet. |
-| `processing` | The transfer is in flight. For outbound wallet transfers this is the **initial state** at record creation: the request has been accepted and the transaction is being built and submitted; the `signature` field is not yet populated when the record is first written. |
+| `processing` | The transfer is in flight. For outbound transfers this is the **initial state** at record creation: the transaction is being built and submitted; `signature` is not yet populated. |
 | `confirmed` | The cluster has confirmed the transaction. `signature` and `slot` are populated. `blockTime` may also be set, but is not guaranteed at this stage — treat it as optional until `finalized`. |
-| `finalized` | The slot containing the transaction is locked in by the network — finality at the Solana cluster's strongest guarantee. `signature` and `slot` are populated; `blockTime` is best-effort and may remain `null` for wallet transfers whose finalization is observed by the `track-pending-transfers` job (which updates status and slot but does not backfill block time). When you need a definitive timestamp, resolve it from the on-chain `signature` via Solana RPC. Safe to treat as irreversible. |
+| `finalized` | The slot containing the transaction is locked in — finality at the Solana cluster's strongest guarantee. `signature` and `slot` are populated; `blockTime` is best-effort and may remain `null` for transfers finalized by the `track-pending-transfers` job (which updates status and slot but does not backfill block time). Resolve a definitive timestamp from `signature` via Solana RPC if you need one. Safe to treat as irreversible. |
 | `failed` | The transaction was built and submitted but rejected by the network (insufficient funds, frozen account, expired blockhash, etc.). The `error` field describes what reached the chain. |
 
-A wallet transfer created with `POST /v1/payments/transfers` moves forward through `processing → confirmed → finalized`. Ramp transfers may begin at `pending` before moving into provider-specific processing. **Inbound transfers** discovered via on-chain signature history surface directly at `confirmed` (or `failed` if the on-chain transaction errored) — they never appear as `pending`. Any state can transition to `failed`; `failed` is terminal.
+Outbound wallet transfers move `processing → confirmed → finalized`. Inbound transfers discovered via on-chain signature history surface directly at `confirmed` (or `failed`) — they never appear as `processing`.
+
+**Ramp transfers** (created by a [Ramp Quote](/docs/payments/ramps)):
+
+| Status | Meaning |
+| --- | --- |
+| `pending` | The quote was created; no funding has been detected yet. No `signature`. |
+| `awaiting_payment` | The quote's delivery mode is `manual_instructions` — SDP is waiting for the payer to fund the account described in the quote. |
+| `settling` | The provider has detected or started processing the payment. |
+| `completed` | The provider reports the ramp settled. |
+| `canceled` | Canceled via `POST /v1/payments/ramps/transfers/cancel` before funding. |
+| `expired` | The funding window elapsed without payment. |
+| `failed` | The provider rejected or reversed the ramp. The `error` field describes why, when set. |
+
+Any state can transition to `failed`; `failed`, `completed`, `canceled`, and `expired` are terminal.
 
 ## Finality on Solana
 
@@ -3108,7 +3176,7 @@ Source: https://platform.solana.com/docs/payments/accept-indexing
 
 > List inbound transfers, paginate, dedupe, and reconcile against your product ledger.
 
-`GET /v1/payments/transfers` is the workhorse for reconciliation. It returns transfers across your organization's custody wallets with filters for direction, status, token, wallet, and date range, paginated. Use it to maintain a local mirror of SDP transfers, to match inbound payments to orders, and to drive your delta-polling worker.
+`GET /v1/payments/transfers` is the workhorse for reconciliation: transfers across your organization's custody wallets, paginated, with filters for direction, status, token, wallet, and date range. Use it to mirror SDP transfers locally, match inbound payments to orders, and drive a delta-polling worker.
 
 ## Listing inbound transfers
 
@@ -3182,7 +3250,7 @@ If you need memo- or Solana-Pay-`reference`-based correlation (e.g., a single-wa
 
 ## Solana Pay reference accounts (roadmap)
 
-The `Prepare` transfer endpoint accepts a `referenceAddress` field — the intent is that you pass a Solana Pay reference pubkey and SDP attaches it on-chain as an account meta, then surfaces it back on the inbound transfer record so you can match payments to orders without trusting the sender's metadata. **This is not wired up today**: the prepare handler accepts the field but does not yet attach it to the transaction, and inbound transfer records do not expose a reference. Until it ships, the realistic correlation options are: (a) **per-order destination addresses** — pre-issue a fresh receiving wallet per order and match by `Transfer.destination` (the recommended pattern; see [Reconciling an order](#reconciling-an-order) above); (b) **on-chain reads via Solana RPC** keyed off the transfer's `signature`, used to recover the memo-program instruction or Solana Pay `reference` that SDP itself doesn't surface for inbound transfers.
+SDP does not attach a Solana Pay reference pubkey on-chain, and inbound transfer records do not expose a reference field today. The realistic correlation options are: (a) **per-order destination addresses** — pre-issue a fresh receiving wallet per order and match by `Transfer.destination` (the recommended pattern; see [Reconciling an order](#reconciling-an-order) above); (b) **on-chain reads via Solana RPC** keyed off the transfer's `signature`, used to recover the memo-program instruction or Solana Pay `reference` that SDP itself doesn't surface for inbound transfers.
 
 ## A delta-poll worker
 
@@ -3249,43 +3317,106 @@ Notes:
 ### Ramps
 Source: https://platform.solana.com/docs/payments/ramps
 
-> Fiat on-ramps and off-ramps — let users buy crypto with fiat or cash out from a wallet through SDP.
+> Fiat on-ramps and off-ramps — discover corridors, price a Ramp Quote just-in-time, and hand off to the provider's own execution flow.
 
-SDP wraps several ramp providers behind two endpoints: `POST /v1/payments/ramps/onramp/execute` (fiat → crypto) and `POST /v1/payments/ramps/offramp/execute` (crypto → fiat). Each call returns a provider-hosted redirect URL that you hand the end-user; the provider handles KYC, payment-method capture, and settlement. SDP does not persist a ramp record or expose a status read endpoint — log the returned `ramp.id` for your own records and observe settlement either provider-side (webhook / their dashboard) or via the resulting on-chain transfer.
+SDP wraps ramp providers behind a single pricing step: a **Ramp Quote**, priced just-in-time against the provider. There is no execute endpoint — SDP quotes the ramp and hands the end-user to the provider's own flow (hosted redirect or funding instructions) to complete it.
 
-For per-provider configuration (credentials, sandbox vs production), see [Ramp providers](/docs/payments/ramps-providers).
+Every quote is tied to a **Counterparty** — the KYC subject for the ramp — and a custody wallet you control. For per-provider configuration, see [Ramp providers](/docs/payments/ramps-providers).
 
-## Onramp flow
+## Prerequisites
 
-The end-user journey:
+1. **A Counterparty.** Create one with `POST /v1/counterparties` before requesting a quote.
+2. **Provider Requirements satisfied**, if the provider needs them. Some providers require KYC or bank details collected against the counterparty before they will price or accept a quote. Check `GET /v1/counterparties/{counterpartyId}/requirements?provider=…&direction=…` and submit collected fields with `POST` to the same path until `status` reads `ready`.
+3. **A custody wallet you control**, used as the crypto leg — the onramp destination or the offramp source.
 
-1. Your backend calls `POST /v1/payments/ramps/onramp/execute` with the destination wallet, crypto token, and fiat amount.
-2. SDP returns a `redirectUrl` from the chosen provider.
-3. You redirect the user (or open the URL in an in-app browser).
-4. The provider runs KYC and accepts the user's payment instrument.
-5. The provider settles the resulting crypto to the destination wallet on Solana.
-6. Your backend detects the resulting inbound transfer via [`GET /v1/payments/transfers?direction=inbound`](/docs/payments/accept-indexing) and/or watches the provider-side status (webhook or read endpoint). SDP does not expose a status read endpoint for the ramp execution itself.
+## Discovering corridors
+
+`GET /v1/payments/ramps/onramp/currency` and `GET /v1/payments/ramps/offramp/currency` list the fiat/crypto pairs SDP supports and which providers cover each one — the **Corridor** dimensions (currency, country coverage, entity type).
+
+<Tabs items={["curl"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl "https://api.solana.com/v1/payments/ramps/onramp/currency?source=USD&dest=usdc.solana" \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+</Tabs>
+
+| Query param | Notes |
+| --- | --- |
+| `source` | Onramp: fiat currency (ISO code). Offramp: crypto rail (`usdc.solana`, `sol.solana`, …). |
+| `dest` | Onramp: crypto rail. Offramp: fiat currency. |
+| `provider` | Narrow to one provider. |
+
+The response's `pairs` list which providers cover each source/dest combination; `providerDetails` gives each provider's country coverage and supported entity types for the direction.
+
+## Estimating a rate
+
+`POST /v1/payments/ramps/onramp/estimate` and `.../offramp/estimate` return a rate preview without creating anything — no counterparty or wallet required. SDP calls every provider on the corridor concurrently and returns one result per provider: `ok` (with the estimate), `unsupported`, or `error`.
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/payments/ramps/onramp/estimate \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "assetRail": "usdc.solana",
+    "fiatCurrency": "USD",
+    "fiatAmount": "100.00"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="estimate-onramp.ts"
+const response = await fetch(
+  "https://api.solana.com/v1/payments/ramps/onramp/estimate",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      assetRail: "usdc.solana",
+      fiatCurrency: "USD",
+      fiatAmount: "100.00",
+    }),
+  }
+);
+const { data } = await response.json();
+// data.estimates — one entry per provider on the corridor
+```
+</Tab>
+</Tabs>
+
+Each entry under `estimates` carries `fiatAmount`, `cryptoAmount`, `exchangeRate`, and `fees` when `status` is `ok`. Use this to show the user a rate before they commit to a quote.
+
+## Requesting a quote
+
+`POST /v1/payments/ramps/onramp/quote` (fiat → crypto) and `POST /v1/payments/ramps/offramp/quote` (crypto → fiat) create the actual **Ramp Quote** against the named provider. This is the step that talks to the provider and, for most providers, produces a provider-side record — unlike estimate, it requires a resolved counterparty and wallet.
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/payments/ramps/onramp/execute \
+curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "moonpay",
+    "counterpartyId": "cp_...",
     "destinationWallet": "wal_...",
     "cryptoToken": "USDC",
+    "fiatCurrency": "USD",
     "fiatAmount": "100.00",
-    "kycReference": "user_4837",
     "redirectUrl": "https://app.example.com/onramp/complete"
   }'
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript title="onramp-execute.ts"
+```typescript title="onramp-quote.ts"
 const response = await fetch(
-  "https://api.solana.com/v1/payments/ramps/onramp/execute",
+  "https://api.solana.com/v1/payments/ramps/onramp/quote",
   {
     method: "POST",
     headers: {
@@ -3294,32 +3425,33 @@ const response = await fetch(
     },
     body: JSON.stringify({
       provider: "moonpay",
+      counterpartyId: "cp_...",
       destinationWallet: "wal_...",
       cryptoToken: "USDC",
+      fiatCurrency: "USD",
       fiatAmount: "100.00",
-      kycReference: "user_4837",
       redirectUrl: "https://app.example.com/onramp/complete",
     }),
   }
 );
 const { data } = await response.json();
-// data.ramp.redirectUrl — open this in the user's browser
-// data.ramp.id — log this for your own records; SDP does not expose a read endpoint to look it up
+// data.quote.deliveryMode tells you what to do next — see below
 ```
 </Tab>
 <Tab value="Java">
-```java title="OnrampExecute.java"
+```java title="OnrampQuote.java"
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/payments/ramps/onramp/execute"))
+    .uri(URI.create("https://api.solana.com/v1/payments/ramps/onramp/quote"))
     .header("Authorization", "Bearer sk_test_...")
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
         {
           "provider": "moonpay",
+          "counterpartyId": "cp_...",
           "destinationWallet": "wal_...",
           "cryptoToken": "USDC",
+          "fiatCurrency": "USD",
           "fiatAmount": "100.00",
-          "kycReference": "user_4837",
           "redirectUrl": "https://app.example.com/onramp/complete"
         }"""))
     .build();
@@ -3332,79 +3464,68 @@ HttpRequest request = HttpRequest.newBuilder()
 | Field | Required | Notes |
 | --- | --- | --- |
 | `provider` | yes | One of `moonpay`, `lightspark`, `bvnk`. |
-| `destinationWallet` | yes | All providers require it. Provider-dependent format: **MoonPay** accepts an SDP wallet ID or a Solana address; **Lightspark** expects a Lightspark account identifier (`ExternalAccount:…`) or a Solana address (a fresh external account is created when a Solana address is passed); **BVNK** resolves the value to a Solana on-chain address and uses it as the payout destination (`payOutDetails.address`). The separate `BVNK_WALLET_ID` env var configures BVNK's *settlement* wallet on the provider side and is unrelated to this field. |
-| `cryptoToken` | yes | Token symbol (`USDC`, `USDT`, etc.). Alphanumeric and underscore. |
-| `fiatAmount` | yes | Decimal string greater than zero (e.g. `"100.00"`). |
-| `fiatCurrency` | no | Currently `USD` only. |
-| `kycReference` | conditional | Up to 128 chars; identifies the end-user across your KYC system. **Required for `lightspark` and `bvnk` on-ramp** (carries the Lightspark or BVNK customer id); optional for `moonpay`. |
-| `redirectUrl` | no | Valid URL the provider sends the user to on completion. |
-| `bvnkCompliance` | no | BVNK-only on the on-ramp side: object of the form `{ "partyDetails": [...] }` carrying compliance party records. Optional for BVNK on-ramp, **required for BVNK off-ramp** (see the offramp table below). Omit the field entirely for `moonpay` and `lightspark`. See [Ramp providers](/docs/payments/ramps-providers#bvnk). |
+| `counterpartyId` | yes | An existing Counterparty. Provider-side identity (customer id, payout account) is resolved server-side from it, not passed on the request. |
+| `destinationWallet` (onramp) / `sourceWallet` (offramp) | yes | A custody wallet you control — its `walletId` or its Solana address, resolved against your API key's wallet scope. Same shape for every provider. |
+| `cryptoToken` | yes | Token symbol (`USDC`, `USDT`, `SOL`, …). |
+| `fiatCurrency` | onramp: yes; offramp: conditional | Required for onramp and for Lightspark/BVNK offramp; providers that resolve fiat currency during their own flow can omit it on offramp. |
+| `fiatAmount` (onramp) / `cryptoAmount` (offramp) | yes | Decimal string greater than zero. |
+| `redirectUrl` | no | Where the provider sends the user back after a hosted flow completes. |
+| `rampsMemo` | no | Up to 20 key/value string pairs stored on the resulting transfer for your own correlation. |
 
-## Offramp flow
+The quote also creates the underlying **Payment Transfer** record for the ramp; log the returned `quote.id` (the transfer's `providerReference`) for your own records.
 
-The mirror image — convert from crypto to fiat from a wallet you control:
+### Delivery mode
 
-<Tabs items={["curl", "TypeScript"]}>
-<Tab value="curl">
+`quote.deliveryMode` tells you how to complete the flow with the named provider:
+
+| Provider | `deliveryMode` | What to do |
+| --- | --- | --- |
+| MoonPay | `hosted` | Redirect the user to `quote.hostedUrl`. |
+| Lightspark | `manual_instructions` | Display the funding instructions in `quote.paymentInstructions` (bank or wallet details to send fiat to). |
+| BVNK | `manual_instructions` | Same — display `quote.paymentInstructions`. |
+
+There is no further SDP endpoint to call after this — the provider owns settlement from here. Watch for the resulting on-chain transfer on the destination wallet via [`GET /v1/payments/transfers?direction=inbound`](/docs/payments/accept-indexing), or watch the provider's own side (dashboard or their webhook) for offramp payout confirmation.
+
+## Canceling a quote
+
+`POST /v1/payments/ramps/transfers/cancel` cancels the transfer behind a quote while it is still `pending` or `awaiting_payment` — before the provider has moved money.
+
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/payments/ramps/offramp/execute \
+curl -X POST https://api.solana.com/v1/payments/ramps/transfers/cancel \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
-    "provider": "moonpay",
-    "sourceWallet": "wal_...",
-    "cryptoToken": "USDC",
-    "cryptoAmount": "100.00",
-    "redirectUrl": "https://app.example.com/offramp/complete"
+    "provider": "bvnk",
+    "providerReference": "..."
   }'
 ```
-</Tab>
-<Tab value="TypeScript">
-```typescript title="offramp-execute.ts"
-const response = await fetch(
-  "https://api.solana.com/v1/payments/ramps/offramp/execute",
-  {
-    method: "POST",
-    headers: {
-      "Authorization": "Bearer sk_test_...",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      provider: "moonpay",
-      sourceWallet: "wal_...",
-      cryptoToken: "USDC",
-      cryptoAmount: "100.00",
-      redirectUrl: "https://app.example.com/offramp/complete",
-    }),
-  }
-);
-const { data } = await response.json();
-// data.ramp.redirectUrl, data.ramp.id — same envelope as onramp
-```
-</Tab>
-</Tabs>
 
-Offramp uses `sourceWallet` (the wallet you're cashing out from) and `cryptoAmount` (the crypto amount to convert). Other fields mirror the onramp request, with two provider-specific differences:
-
-- **`kycReference`** is required for `lightspark` and `bvnk` off-ramp (carries the Lightspark or BVNK customer id; Lightspark uses it as the destination account identifier) and optional for `moonpay`.
-- **`bvnkCompliance`** is **required** for BVNK off-ramp: the server validates that `partyDetails` contains at least one entry and rejects the request otherwise. Omit it for `moonpay` and `lightspark`.
+A transfer past that window (already funded or settling) returns an error instead of canceling.
 
 ## Status field
 
-The response's `ramp.status` is one of `pending`, `processing`, `completed`, `failed`. It reflects the provider's reported state **at the moment the execute call returns** — SDP does not subsequently poll the provider or update the field, and there is no read endpoint to refresh it. For the on-chain side of a successful onramp, the recommended observation is the resulting **inbound transfer** record on the destination custody wallet, surfaced via the [Accept payments](/docs/payments/accept-overview) flow.
+`quote.status` is one of `pending`, `processing`, `completed`, `failed`, reflecting the provider's reported state **at the moment the quote is created** — SDP does not subsequently poll the provider to refresh it, and there is no dedicated read endpoint for the quote itself. For the on-chain side of a successful onramp, observe the resulting **inbound transfer** on the destination wallet, surfaced via [Accept payments](/docs/payments/accept-overview).
+
+## Rate limits
+
+Estimate and quote calls carry fail-closed quotas: estimate fans out one live call per provider on the corridor, quote creates a provider-side record.
+
+| Endpoint | Per-key limit | Per-org limit |
+| --- | --- | --- |
+| `.../estimate` | 30 / minute | 120 / minute |
+| `.../quote` | 20 / minute | 60 / minute |
 
 ## Provider selection
 
-You always pass `provider` explicitly today; SDP does not auto-select. Choose based on:
+You always pass `provider` explicitly; SDP does not auto-select. Choose based on:
 
-- **Coverage** — which providers your org has configured (see [Ramp providers](/docs/payments/ramps-providers#provider-gating)).
-- **Region** — providers have different country / payment-method support.
-- **Sandbox needs** — all three providers ship sandboxes; sandbox vs production is chosen per request from the calling API key's environment (see [Sandbox vs production](/docs/payments/ramps-providers#sandbox-vs-production-selection)).
-- **Compliance attachment** — only BVNK accepts the `bvnkCompliance` field (a `{ "partyDetails": [...] }` object) today.
+- **Coverage** — which providers your org has [Provider Availability](/docs/payments/ramps-providers#provider-gating) for.
+- **Corridor** — currency, country, and entity type; check with the currency-discovery endpoints above.
+- **Sandbox needs** — sandbox vs production is chosen per request from the calling API key's environment (see [Sandbox vs production](/docs/payments/ramps-providers#sandbox-vs-production-selection)).
 
 ## Fiat currency support
 
-SDP currently accepts `USD` only on the `fiatCurrency` field. Multi-currency support depends on individual provider capabilities and is not exposed via this endpoint today.
+Fiat currency support is corridor-specific, not a fixed allowlist — use `GET /v1/payments/ramps/onramp/currency` and `.../offramp/currency` to see which fiat currencies a given provider covers for a given crypto rail.
 
 ## Related
 
@@ -3419,7 +3540,7 @@ Source: https://platform.solana.com/docs/payments/ramps-providers
 
 > MoonPay, Lightspark, and BVNK — capability matrix, configuration, and per-provider notes.
 
-SDP currently integrates three ramp providers. They are configured at the organization level via environment variables on the SDP API deployment; the same `provider` string on `POST /v1/payments/ramps/onramp/execute` and `POST /v1/payments/ramps/offramp/execute` selects between them.
+SDP currently integrates three ramp providers documented here. They are configured at the organization level via environment variables on the SDP API deployment; the same `provider` string on `POST /v1/payments/ramps/onramp/quote` and `POST /v1/payments/ramps/offramp/quote` selects between them.
 
 ## Sandbox vs production selection
 
@@ -3432,11 +3553,11 @@ Configure both credential pairs for any provider you want to expose to test and 
 
 ## Capability matrix
 
-| Provider | Onramp | Offramp | Sandbox | Compliance attachment | Notes |
+| Provider | Onramp | Offramp | Sandbox | Delivery mode | Notes |
 | --- | --- | --- | --- | --- | --- |
-| MoonPay | ✓ | ✓ | ✓ | — | Sandbox vs production is selected per request (see [Sandbox vs production](#sandbox-vs-production-selection)). |
-| Lightspark | ✓ | ✓ | ✓ | — | Grid API. Same per-request sandbox/production selection as MoonPay. |
-| BVNK | ✓ | ✓ | ✓ | ✓ (`bvnkCompliance`) | Hawk auth. |
+| MoonPay | ✓ | ✓ | ✓ | `hosted` | Sandbox vs production is selected per request (see [Sandbox vs production](#sandbox-vs-production-selection)). |
+| Lightspark | ✓ | ✓ | ✓ | `manual_instructions` | Grid API. Same per-request sandbox/production selection as MoonPay. |
+| BVNK | ✓ | ✓ | ✓ | `manual_instructions` | Hawk auth. Compliance party details are built from the Counterparty record, not passed on the request. |
 
 ## MoonPay
 
@@ -3460,7 +3581,9 @@ MoonPay normalizes token symbols internally — `USDC` is mapped to `usdc_sol`, 
 | `LIGHTSPARK_GRID_SANDBOX_CLIENT_ID` | conditional | Sandbox Grid API client identifier. Required when the request resolves to sandbox. |
 | `LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET` | conditional | Sandbox Grid API client secret. |
 
-Lightspark is integrated against the Grid API (`https://api.lightspark.com/grid/2025-10-13`); the sandbox/production choice follows the [per-request rule](#sandbox-vs-production-selection). Lightspark identifies wallets by its own `ExternalAccount:…` ids — onramp `destinationWallet` accepts that id *or* a Solana wallet address (SDP creates the external account if needed), while offramp `sourceWallet` requires the Lightspark account id.
+Lightspark is integrated against the Grid API (`https://api.lightspark.com/grid/2025-10-13`); the sandbox/production choice follows the [per-request rule](#sandbox-vs-production-selection). `destinationWallet` / `sourceWallet` are your own custody wallet, same as every other provider — Lightspark's customer id and payout account are resolved server-side from the counterparty's Provider Requirements, not passed on the quote request.
+
+Lightspark quotes always return `deliveryMode: "manual_instructions"` — the response carries funding instructions to display to the payer, not a redirect URL.
 
 ## BVNK
 
@@ -3476,25 +3599,13 @@ Lightspark is integrated against the Grid API (`https://api.lightspark.com/grid/
 
 BVNK uses Hawk authentication. Bearer-token auth is not currently supported.
 
-BVNK is the only provider that currently accepts the `bvnkCompliance` field on the ramp request — an object of the form `{ "partyDetails": [...] }` carrying compliance party records used to satisfy travel-rule and KYC sharing requirements. The exact shape of each party record is provider-defined; see BVNK's compliance docs for the field schema.
+BVNK is a travel-rule / compliance-sharing provider: it requires party details (name, address, and similar identity fields) to satisfy KYC sharing requirements. SDP builds those party details from the counterparty's own record when creating the quote — there is no compliance object to pass on the ramp request itself. Populate the counterparty's identity fields before quoting BVNK.
 
-```json title="request.json"
-{
-  "provider": "bvnk",
-  "destinationWallet": "wal_...",
-  "cryptoToken": "USDC",
-  "fiatAmount": "100.00",
-  "bvnkCompliance": {
-    "partyDetails": [
-      { "type": "individual", "firstName": "...", "lastName": "...", "...": "..." }
-    ]
-  }
-}
-```
+BVNK quotes always return `deliveryMode: "manual_instructions"` — the response carries funding-account details to display to the payer.
 
 ## Provider gating
 
-Even when all three providers' env vars are populated, an org can be restricted to a subset. SDP gates by `assertProviderAvailable` on every ramp call — if the org's entitlement does not include the requested provider, the call returns an error. To activate or change provider entitlements for a deployment, see [Provider onboarding](/docs/reference/provider-onboarding).
+Even when all three providers' env vars are populated, an org can be restricted to a subset. This is [**Provider Availability**](/docs/reference/provider-onboarding): a provider must be configured for the deployment and either generally available or manually activated for the organization. SDP checks this on every ramp call — if the org lacks availability for the requested provider, the call returns an error. To activate or change provider availability for a deployment, see [Provider onboarding](/docs/reference/provider-onboarding).
 
 ## Choosing a provider
 
@@ -3503,7 +3614,7 @@ Even when all three providers' env vars are populated, an org can be restricted 
 | Fastest sandbox iteration | MoonPay or BVNK. |
 | Travel-rule / compliance party metadata | BVNK. |
 | Lightning-aware fiat settlement | Lightspark. |
-| Broadest payment-method coverage | MoonPay (region-dependent). |
+| Broadest payment-method coverage | MoonPay (corridor-dependent). |
 
 For self-hosted deployments where only a subset of providers will ever be configured, see [Providers optional for self-hosted SDP](/docs/reference/provider-onboarding) — SDP supports running with any single provider active.
 
@@ -3706,10 +3817,10 @@ Before any API call, you decide three things: which template to start from, what
 
 ### 1. Pick the template
 
-SDP ships three public token templates, each a preset of [Token-2022](https://solana.com/docs/tokens/extensions) extensions tuned to an institutional product shape:
+SDP ships three public **Tokenization Templates**, each prescribing a fixed set of [Token-2022](https://solana.com/docs/tokens/extensions) extensions tuned to an institutional product shape:
 
-- **`stablecoin`**. 6 decimals by default. Required extensions: `permanentDelegate` and `pausable`. Allowlist off. The right template for a regulated dollar.
-- **`tokenized-security`**. 8 decimals. Required extensions: `permanentDelegate`, `pausable`, and `scaledUiAmount`. Allowlist on; accounts open frozen. The right template for a regulated security.
+- **`stablecoin`**. 6 decimals by default. Required extensions: `permanentDelegate` and `pausable`. **Token Access Control** allowlist off. The right template for a regulated dollar.
+- **`tokenized-security`**. 8 decimals. Required extensions: `permanentDelegate`, `pausable`, and `scaledUiAmount`. Token Access Control allowlist on; accounts open frozen. The right template for a regulated security.
 - **`custom`**. 9 decimals. No required extensions. Use only when neither template above fits.
 
 This tutorial uses `stablecoin`. The required extensions are what a US permitted payment stablecoin issuer needs to satisfy the GENIUS Act's technological-capability mandate covered in Section 5.
@@ -3720,7 +3831,7 @@ Four boolean flags on token creation determine the posture you deploy with:
 
 - **`isFreezable`**. Set to `true`. If `false` at create time, the token deploys with no freeze authority and freezing becomes impossible afterward.
 - **`isMintable`**. Set to `true` for an active stablecoin. You will mint as new fiat reserves arrive at the custody bank.
-- **`requiresAllowlist`**. Leave off for a payment stablecoin. The institutional pattern is screen-before-transfer, not gate-by-allowlist. The `tokenized-security` template flips this on automatically.
+- **`requiresAllowlist`**. Turns on Token Access Control's allowlist mode — only listed addresses may receive the token. Leave off for a payment stablecoin: the institutional pattern is screen-before-transfer, not gate-by-allowlist. The `tokenized-security` template flips this on automatically.
 - **`maxSupply`**. Optional cap in UI units (decimal string). Useful for pilot programs with a hard ceiling. Omit for uncapped supply.
 
 ### 3. Plan the authorities
@@ -3757,7 +3868,7 @@ With your design captured, you're ready to make the first state-mutating call.
 
 ## 4. Create and deploy
 
-Three API calls take a design from object literal to a deployed regulated stablecoin on Solana: one to create the record, one to deploy on-chain, and an optional `/prepare` call to diagnose if either fails opaquely. All three run from the Developer key (`sdp`).
+Two API calls take a design from object literal to a deployed regulated stablecoin on Solana: one to create the record, one to deploy on-chain. Both run from the Developer key (`sdp`).
 
 ### 1. Extend the client for Idempotency-Key
 
@@ -3868,39 +3979,11 @@ A successful response carries the deployed token record with `status: "active"` 
 
 The `mintAuthority`, `freezeAuthority`, and `metadataAuthority` all resolve to the custody wallet address that SDP picked from your configured custody (the project signing wallet, falling back to the org signing wallet). The `permanentDelegate` is set at the same time and appears on the token record's `extensions.permanentDelegate` field rather than as a top-level authority.
 
-### 4. When deploy fails opaquely, fall back to /prepare
-
 <Callout type="warn">
-Deploy can return a bare `500 INTERNAL_ERROR` with no `details` field. The most common cause on devnet is an unfunded custody wallet (Section 2 covered the airdrop fix), but any downstream Solana RPC failure surfaces this way. The SDP team is closing this gap so deploy will return the underlying Solana error directly; until that ships, the diagnostic move is to call the `/prepare` variant of the same endpoint.
+Deploy can return a bare `500 INTERNAL_ERROR` with no `details` field. The most common cause on devnet is an unfunded custody wallet (Section 2 covered the airdrop fix), but any downstream Solana RPC failure surfaces this way. Fund the custody wallet via the faucet and re-run `/deploy` with the same `Idempotency-Key` to replay, or a fresh key for a new attempt. SDP treats different keys as different requests; the same key with the same params replays the prior result.
 </Callout>
 
-```javascript title="deploy-prepare.js"
-const prepared = await sdp.post(
-  `/v1/issuance/tokens/${tokenId}/deploy/prepare`,
-  {}
-);
-console.log(prepared.data.simulation);
-```
-
-`/prepare` builds the transaction and runs simulation against Solana without submitting. Its response surfaces the real error in `simulation.error`:
-
-```json title="response.json"
-{
-  "data": {
-    "preparedTransaction": { "serialized": "...", "blockhash": "..." },
-    "simulation": {
-      "success": false,
-      "error": "\"AccountNotFound\""
-    }
-  }
-}
-```
-
-`"AccountNotFound"` on the fee payer means the custody wallet has zero SOL. Fund it via the faucet (Section 2, subsection 4) and re-run `/deploy` with the same `Idempotency-Key` if you want to replay, or a fresh key if you want a new attempt. SDP treats different keys as different requests; same key with the same params replays the prior result.
-
-This prepare-as-diagnostic pattern works for every endpoint that has a `/prepare` variant: mint, burn, seize, force-burn, authority. Whenever an execute call fails opaquely, the corresponding `/prepare` surfaces the underlying Solana error.
-
-### 5. Confirm the deploy
+### 4. Confirm the deploy
 
 Before moving to Section 5, confirm the on-chain state matches the record:
 
@@ -4240,7 +4323,7 @@ try {
 }
 ```
 
-Token-2022's `0x11` is `AccountFrozen` (decimal 17). Treat it as a compliance verdict, not a retry-able failure. The same pattern (outer code is the family of failure, wrapped code is the actual reason) applies whenever SDP wraps a downstream Solana RPC error. Section 4's prepare-as-diagnostic pattern handles the inverse case: when the outer error is opaque and the wrapped message is empty, `/prepare` surfaces the simulation error directly.
+Token-2022's `0x11` is `AccountFrozen` (decimal 17). Treat it as a compliance verdict, not a retry-able failure. The same pattern (outer code is the family of failure, wrapped code is the actual reason) applies whenever SDP wraps a downstream Solana RPC error.
 
 ### 5. Cleanup
 
@@ -4318,14 +4401,12 @@ This walkthrough covers a typical payment integration lifecycle:
 
 1. Create or resolve the funding wallet.
 2. Build and validate transfer intent (amount, destination, token).
-3. Choose signing mode:
-- custody execution (server signs and submits)
-- prepare mode (client signs)
-4. Execute the transfer and capture identifiers for observability.
+3. Submit the transfer — SDP builds the transaction, signs with the source custody wallet, and submits it.
+4. Capture the returned identifiers for observability.
 5. Query transfer status until finalization.
 6. Reconcile with your product ledger and user-facing state.
 
-Use the [Payments API reference](/docs/reference/api/payments), [Wallets API reference](/docs/reference/api/wallets), and [Prepare vs Execute](/docs/guides/prepare-vs-execute) guide for endpoint-level request and response details.
+Use the [Payments API reference](/docs/reference/api/payments) and [Wallets API reference](/docs/reference/api/wallets) for endpoint-level request and response details.
 
 ---
 
@@ -4615,8 +4696,8 @@ next step.
 ## Create a wallet-scoped API key
 
 Open **API keys** in the dashboard, create a sandbox key, and choose **Selected
-wallets**. Select the local wallet you just created and make it the default
-signing wallet.
+wallets**. Select the local wallet you just created and set it as the key's
+default wallet.
 
 Save the full key when the dashboard shows it. SDP only displays it once.
 
@@ -4731,7 +4812,7 @@ For the bundled database, set `POSTGRES_DB`, `POSTGRES_USER`, and
 from them. To use an external database, set `DATABASE_URL` to your own
 `postgresql://…` string and the API and migrations connect there instead. Note
 that `compose.yml` always starts the bundled `postgres` container — with an
-external `DATABASE_URL` it simply goes unused, and `POSTGRES_PASSWORD` is still
+external `DATABASE_URL` it goes unused, and `POSTGRES_PASSWORD` is still
 required for it to start.
 
 The configurator hides `POSTGRES_PASSWORD` once you select an external database
@@ -5020,24 +5101,26 @@ Source: https://platform.solana.com/docs/reference
 
 > API reference, token types, provider onboarding, and integration resources.
 
-Resources for integrating with SDP: API endpoints, supported token templates, provider onboarding, AI consumption, and the Postman collection.
+Resources for integrating with SDP: API endpoints, tokenization templates, provider onboarding, AI consumption, and the Postman collection.
 
 ---
 
-### Issuance Token Types
+### Tokenization Templates
 Source: https://platform.solana.com/docs/reference/issuance-token-types
 
 > How to choose a token template, and the default controls each one applies.
 
-The public issuance surface currently exposes three token templates:
+The public issuance surface currently exposes three **Tokenization Templates**:
 
 | Template | Defaults | Notes |
 | --- | --- | --- |
 | `stablecoin` | 6 decimals, permanent delegate + pausable extensions, default account state initialized | Intended for fiat-backed token patterns with compliance controls. |
 | `tokenized-security` | 8 decimals, allowlist required, permanent delegate + pausable + scaled UI amount extensions, default account state frozen | Regulated asset flows with stronger defaults. |
-| `custom` | 9 decimals default (up to 18 max), extension set is fully configurable | Use when your requirements do not match preset templates. |
+| `custom` | 9 decimals default (up to 18 max), extension set is fully configurable | Use when your requirements do not match the stablecoin or tokenized-security templates. |
 
 These defaults are sourced from the API implementation in `apps/sdp-api/src/services/issuance/templates/definitions.ts`.
+
+Each template also sets the token's **Token Access Control** mode — `allowlist`, `blocklist`, or `disabled` — enforced on-chain over who may hold or receive the token. This is distinct from a wallet's own destination allowlist, which is a wallet-policy concern.
 
 ## Selecting a template
 
@@ -5072,8 +5155,8 @@ template.
 Corresponds to the **Non-Security Digital Asset** classification in the issuance interface —
 assets that are neither fiat stablecoins nor regulated securities, such as commodities, real
 estate, or collectibles. The template exposes the full Token-2022 extension set (transfer fees,
-transfer hooks, non-transferable behaviour, interest, and others) and applies where the preset
-templates do not match the instrument.
+transfer hooks, non-transferable behaviour, interest, and others) and applies where the stablecoin
+and tokenized-security templates do not match the instrument.
 
 ### Summary
 
@@ -5081,7 +5164,7 @@ templates do not match the instrument.
 | --- | --- |
 | Pegged to a fiat currency, redeemable 1:1, with no yield | `stablecoin` |
 | Regulated security (equity, debt, or fund), or an instrument that pays a return | `tokenized-security` |
-| Any other asset, or one requiring extensions the presets do not offer | `custom` (Non-Security Digital Asset) |
+| Any other asset, or one requiring extensions the other templates do not offer | `custom` (Non-Security Digital Asset) |
 
 <Callout type="warn">
 Token-2022 extensions are set when the mint is created and cannot be changed afterward. The
@@ -5143,7 +5226,7 @@ At a high level, SDP evaluates:
 - Operational readiness and support.
 - Required regulatory, compliance, or security posture for the category.
 
-Providers that do not clear the required gates may be tracked for future support, but should not be presented as generally available in SDP until gaps are resolved.
+Providers that do not clear the required gates may be tracked for future support, but should not be presented as available in SDP until gaps are resolved. A provider that clears evaluation becomes available per the deployment's configuration — either generally available to every organization, or gated behind a per-organization Manual Provider Activation when commercial or operational onboarding is still required.
 
 ## Access requirements
 
