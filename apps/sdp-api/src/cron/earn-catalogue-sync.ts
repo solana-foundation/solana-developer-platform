@@ -94,7 +94,7 @@ export async function syncEarnCatalogue(env: Env): Promise<void> {
   const repo = createEarnRepository(env);
   // Providers read their own credentials from the raw env keyed by
   // environment — same contract as the route-layer earnRuntime().
-  const providerEnv = env as unknown as Record<string, string | undefined>;
+  const providerEnv = env;
 
   for (const environment of SYNCED_ENVIRONMENTS) {
     for (const client of Object.values(EARN_PROVIDER_CLIENTS)) {

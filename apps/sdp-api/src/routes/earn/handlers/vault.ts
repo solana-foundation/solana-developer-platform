@@ -1,6 +1,11 @@
+import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
 import { isDecimalString } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types";
-import { earnDepositStyle, isVaultDirectDepositEnabled } from "@sdp/types/provider-access";
+import {
+  type EarnProviderId,
+  earnDepositStyle,
+  isVaultDirectDepositEnabled,
+} from "@sdp/types/provider-access";
 import { z } from "zod";
 import { getDb } from "@/db";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
@@ -16,7 +21,9 @@ import {
   walletNotFound,
 } from "@/lib/errors";
 import { buildEarnVaultDepositFingerprint } from "@/lib/idempotency";
+import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
+import { isDryRunRequest } from "@/middleware/dry-run";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import { getLogger } from "@/runtime/logger";
@@ -63,14 +70,11 @@ export async function createEarnVaultDeposit(c: AppContext) {
     EarnVaultDepositBody,
     EarnVaultDepositResolved
   >(c);
-  const { strategy, wallet, auth, projectId, environment } = resolved;
-  const tokenMint = strategy.deposit_mints[0];
-  if (!tokenMint) {
-    throw internalError(`Earn strategy ${strategy.id} has no deposit mint`);
-  }
-  const shareMint = strategy.share_mint;
-  if (!shareMint) {
-    throw internalError(`Earn strategy ${strategy.id} has no share mint`);
+  const { strategy, wallet, auth, projectId, environment, provider, tokenMint, shareMint } =
+    resolved;
+  const requestId = resolved.requestId;
+  if (requestId === null) {
+    throw internalError("Vault deposit execution reached the handler without an idempotency key");
   }
 
   const result = await depositIntoVault(
@@ -79,14 +83,14 @@ export async function createEarnVaultDeposit(c: AppContext) {
       organizationId: auth.organizationId,
       projectId,
       environment,
-      provider: strategy.provider,
+      provider,
       providerReference: strategy.provider_reference,
       wallet,
       tokenMint,
       shareMint,
       label: strategy.name,
       amount: parsedData.amount,
-      requestId: resolved.requestId,
+      requestId,
       minSharesOut: parsedData.minSharesOut,
       userId: auth.userId ?? null,
       apiKeyId: auth.apiKeyId ?? null,
@@ -142,7 +146,10 @@ interface EarnVaultDepositResolved {
   auth: ApiKeyContext;
   projectId: string;
   environment: SdpEnvironment;
-  requestId: string;
+  provider: EarnProviderId;
+  tokenMint: string;
+  shareMint: string;
+  requestId: string | null;
   idempotencyFingerprint: string;
 }
 
@@ -171,8 +178,8 @@ export async function extractEarnVaultDepositPolicyCandidate(
     });
   }
 
-  const requestId = c.req.header(IDEMPOTENCY_KEY_HEADER);
-  if (requestId === undefined) {
+  const requestId = c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null;
+  if (requestId === null && !isDryRunRequest(c)) {
     throw badRequest(`${IDEMPOTENCY_KEY_HEADER} is required for vault deposits`);
   }
   const environment = resolveSdpEnvironment(c);
@@ -230,6 +237,15 @@ export async function extractEarnVaultDepositPolicyCandidate(
     throw notFound("Earn strategy");
   }
 
+  const tokenMint = strategy.deposit_mints[0];
+  if (!tokenMint) {
+    throw internalError(`Earn strategy ${strategy.id} has no deposit mint`);
+  }
+  const shareMint = strategy.share_mint;
+  if (!shareMint) {
+    throw internalError(`Earn strategy ${strategy.id} has no share mint`);
+  }
+
   // Shape check before anything else: a custodial provider reaching this route
   // would silently skip its wallet-provisioning model.
   if (earnDepositStyle(strategy.provider) !== "vault_direct") {
@@ -237,6 +253,12 @@ export async function extractEarnVaultDepositPolicyCandidate(
       `${strategy.provider} is a custodial provider; use POST /v1/earn/programs instead.`
     );
   }
+  if (!isEarnProviderId(strategy.provider)) {
+    throw providerNotConfigured(
+      `Earn provider ${strategy.provider} is not available in this deployment`
+    );
+  }
+  const provider = strategy.provider;
 
   // MONEY-IN GATES, in the same order and with the same meaning as
   // `POST /programs` (see routes/earn/CLAUDE.md → "Gate asymmetry"). Opening a
@@ -255,13 +277,13 @@ export async function extractEarnVaultDepositPolicyCandidate(
   //
   // Money-OUT must never inherit any of these (ADR 0002): un-offering a
   // provider closes the door in, never the door out.
-  assertEarnProviderSurfaced(strategy.provider as never);
+  assertEarnProviderSurfaced(provider);
   await assertProviderAvailable(
     c.env,
     getDb(c.env),
     auth.organizationId,
     "earn",
-    strategy.provider as never,
+    provider,
     environment === "sandbox"
   );
   assertStrategyDepositable(strategy, environment);
@@ -285,10 +307,13 @@ export async function extractEarnVaultDepositPolicyCandidate(
     auth,
     projectId,
     environment,
+    provider,
+    tokenMint,
+    shareMint,
     requestId,
     idempotencyFingerprint: buildEarnVaultDepositFingerprint({
       environment,
-      provider: strategy.provider,
+      provider,
       providerReference: strategy.provider_reference,
       custodyWalletId: wallet.id,
       amount: parsed.data.amount,
@@ -315,7 +340,7 @@ export async function extractEarnVaultDepositPolicyCandidate(
       operationType: "earn_vault_deposit",
       // The DEPOSIT token, from the catalogue row. Named so an asset-scoped
       // rule ("never move USDT") can see what is actually moving.
-      asset: strategy.deposit_mints[0] ?? null,
+      asset: tokenMint,
       amount: parsed.data.amount,
       // The vault account, which is emphatically NOT a payable address —
       // funds sent to it directly are destroyed. It is carried because a
@@ -323,15 +348,13 @@ export async function extractEarnVaultDepositPolicyCandidate(
       // into, and it is the only stable identifier for that.
       destination: strategy.provider_reference,
       context: {
-        provider: strategy.provider,
+        provider,
         strategyId: strategy.id,
         strategyName: strategy.name,
         hostCluster: strategy.host_cluster,
         environment,
         depositStyle: "vault_direct",
-        ...(parsed.data.minSharesOut === undefined
-          ? {}
-          : { minSharesOut: parsed.data.minSharesOut }),
+        minSharesOut: parsed.data.minSharesOut ?? null,
       },
       providerExtensions: {},
     },
@@ -535,7 +558,7 @@ export async function listEarnVaultPositions(c: AppContext) {
     environment,
     custodyWalletIds,
     limit: query.limit,
-    ...(before === null ? {} : { before }),
+    before,
   });
 
   // Group by provider so each client reads its whole shelf in one pass, sharing
@@ -555,7 +578,7 @@ export async function listEarnVaultPositions(c: AppContext) {
     string,
     {
       shares: string;
-      tokenValue?: string;
+      tokenValue: string | undefined;
     }
   >();
   const hydrationJobs: Array<() => Promise<void>> = [];
@@ -612,7 +635,7 @@ export async function listEarnVaultPositions(c: AppContext) {
           }
           live.set(vaultPositionLiveKey(provider, walletId, snapshot.providerReference), {
             shares: snapshot.shares,
-            ...(snapshot.tokenValue === undefined ? {} : { tokenValue: snapshot.tokenValue }),
+            tokenValue: snapshot.tokenValue,
           });
         }
       });
@@ -669,20 +692,12 @@ const vaultPositionCursorSchema = z.object({
 });
 
 function encodeVaultPositionCursor(createdAt: string, id: string): string {
-  return btoa(`${createdAt}|${id}`).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return encodeKeysetCursor(createdAt, id);
 }
 
 function decodeVaultPositionCursor(cursor: string): { createdAt: string; id: string } | null {
-  try {
-    const decoded = atob(cursor.replace(/-/g, "+").replace(/_/g, "/"));
-    const separator = decoded.indexOf("|");
-    if (separator <= 0 || separator === decoded.length - 1) return null;
-    const parsed = vaultPositionCursorSchema.safeParse({
-      createdAt: decoded.slice(0, separator),
-      id: decoded.slice(separator + 1),
-    });
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
+  const decoded = decodeKeysetCursor(cursor);
+  if (!decoded) return null;
+  const parsed = vaultPositionCursorSchema.safeParse({ createdAt: decoded.value, id: decoded.id });
+  return parsed.success ? parsed.data : null;
 }

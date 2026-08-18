@@ -336,6 +336,41 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
 });
 
 describe("POST /v1/earn/vault-deposits — request validation", () => {
+  it("allows a policy dry-run without a throwaway Idempotency-Key", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    await seedWallet({
+      configId: "cfg_earn_vault_dry_run",
+      custodyWalletId: "cwlt_earn_vault_dry_run",
+      providerWalletId: "privy_earn_vault_dry_run",
+    });
+
+    const res = await app.request(
+      "/v1/earn/vault-deposits",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+          "Dry-Run": "true",
+        },
+        body: JSON.stringify({
+          strategyId: strategy.id,
+          custodyWalletId: "cwlt_earn_vault_dry_run",
+          amount: "10",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(depositIntoVault).not.toHaveBeenCalled();
+    const operationCount = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM wallet_operations")
+      .first<{ count: number | string }>();
+    expect(Number(operationCount?.count ?? 0)).toBe(0);
+  });
+
   it("requires an Idempotency-Key header, because the chain has no dedupe of its own", async () => {
     await seedAuth();
     const strategy = await seedStrategy();
@@ -347,6 +382,25 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
     });
 
     expect(res.status).toBe(400);
+  });
+
+  it("rejects a strategy without a deposit mint before policy can approve it", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy({ depositMints: [] });
+
+    const res = await postVaultDeposit({
+      strategyId: strategy.id,
+      custodyWalletId: "cwlt_unused",
+      amount: "10",
+      requestId: crypto.randomUUID(),
+    });
+
+    expect(res.status).toBe(500);
+    expect(depositIntoVault).not.toHaveBeenCalled();
+    const operationCount = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM wallet_operations")
+      .first<{ count: number | string }>();
+    expect(Number(operationCount?.count ?? 0)).toBe(0);
   });
 
   it("rejects the retired body requestId source even when the canonical header is present", async () => {

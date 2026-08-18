@@ -122,7 +122,7 @@ export interface EarnVaultRepository {
     /** Always the current project's wallet rows plus organization fallbacks. */
     custodyWalletIds: readonly string[];
     limit: number;
-    before?: EarnVaultPositionCursor;
+    before: EarnVaultPositionCursor | null;
   }): Promise<{ rows: EarnVaultPositionRow[]; hasMore: boolean }>;
   findMovementByRequestId(params: {
     organizationId: string;

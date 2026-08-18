@@ -378,10 +378,15 @@ through `services/earn/execution-registry.ts` — the one place a provider id ma
 to an executing client. `EARN_PROVIDER_CLIENTS` stays the CATALOGUE registry so
 the hourly sync keeps its small dependency surface.
 
-**Not built yet:** the withdraw counterpart, the Active-tab snapshot, and a
-confirmation sweep (`idx_earn_vault_movements_unsettled` is the work queue
-waiting for one, so `submitted` never advances to `confirmed`). Until the first
-two land, a vault position can be entered and not exited through SDP — which is
+The every-minute vault reconciliation worker consumes
+`idx_earn_vault_movements_unsettled` in bounded pages. Both the embedded cron
+and the dedicated Cloud Run job call the same reconciler: it queries the exact
+recorded signature, confirms landed transactions, rebroadcasts the recorded
+signed bytes while the blockhash remains valid, and marks an expired, unlanded
+movement failed. Never rebuild a transaction during recovery.
+
+**Not built yet:** the withdraw counterpart and the Active-tab snapshot. Until
+both land, a vault position can be entered and not exited through SDP — which is
 why `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` fail-closes production rather than
 relying on anyone remembering ADR 0002.
 

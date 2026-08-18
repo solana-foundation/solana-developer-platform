@@ -11,6 +11,7 @@ import {
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
+import type { VaultDepositInput } from "./vault-deposit.service";
 
 const buildVaultDeposit = vi.hoisted(() => vi.fn());
 const signVaultPlan = vi.hoisted(() => vi.fn());
@@ -56,7 +57,7 @@ const wallet = {
   publicKey: WALLET_ADDRESS,
 } as unknown as CustodyWallet;
 
-function depositInput(overrides: Record<string, unknown> = {}) {
+function depositInput(overrides: Partial<VaultDepositInput> = {}): VaultDepositInput {
   return {
     organizationId: ORG,
     projectId: PROJECT,
@@ -534,6 +535,7 @@ describe("depositIntoVault — signed persistence boundary", () => {
       environment: "sandbox",
       custodyWalletIds: [WALLET_ROW_ID],
       limit: 20,
+      before: null,
     });
     expect(listed.rows).toEqual([]);
   });
@@ -583,6 +585,7 @@ describe("depositIntoVault — signed persistence boundary", () => {
       environment: "sandbox",
       custodyWalletIds: [WALLET_ROW_ID],
       limit: 20,
+      before: null,
     });
     expect(listed.rows).toHaveLength(1);
     expect(listed.rows[0]?.id).toBe(first.position.id);

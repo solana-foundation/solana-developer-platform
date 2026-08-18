@@ -3,6 +3,7 @@ import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/typ
 import { SdpKaminoError } from "@sdp/kamino";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types";
+import type { EarnProviderId } from "@sdp/types/provider-access";
 import { address } from "@solana/kit";
 import { type AppDb, getDb } from "@/db";
 import {
@@ -42,7 +43,7 @@ export interface VaultDepositInput {
   organizationId: string;
   projectId: string;
   environment: SdpEnvironment;
-  provider: string;
+  provider: EarnProviderId;
   /** Vault address — the strategy's providerReference. */
   providerReference: string;
   wallet: { id: string; walletId: string; publicKey: string };
@@ -182,7 +183,7 @@ export async function depositIntoVault(
   const deadline = createVaultDeadline();
   const client = resolveVaultDirectClient(env, input.provider, deadline);
   if (!client) {
-    throw notImplemented(input.provider as never, "direct vault deposits");
+    throw notImplemented(input.provider, "direct vault deposits");
   }
   const cluster = earnClusterFor(input.environment);
   const rpcUrl = resolveClusterRpcUrl(env, cluster);
@@ -191,7 +192,7 @@ export async function depositIntoVault(
     shareMint: input.shareMint,
   };
   const runtime: EarnRuntimeContext = {
-    env: env as unknown as Record<string, string | undefined>,
+    env,
     environment: input.environment,
   };
 
@@ -201,7 +202,7 @@ export async function depositIntoVault(
       providerReference: input.providerReference,
       owner: input.wallet.publicKey,
       amount: input.amount,
-      ...(input.minSharesOut === undefined ? {} : { minSharesOut: input.minSharesOut }),
+      minSharesOut: input.minSharesOut,
     });
     // Deterministic Solana signing plus a shared recent blockhash would make
     // otherwise independent requests produce the same signature. Bind the

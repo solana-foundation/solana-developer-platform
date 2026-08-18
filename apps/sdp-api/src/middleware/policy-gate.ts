@@ -28,7 +28,7 @@ export interface PolicyGateExtraction {
   resolved: unknown;
   rawPayload: Record<string, unknown>;
   /** Route-owned canonical key to persist on the policy operation. */
-  idempotencyKey?: string | null;
+  idempotencyKey: string | null;
 }
 
 export interface PolicyGateConfig {
@@ -97,7 +97,7 @@ export function policyGate(config: PolicyGateConfig): MiddlewareHandler<{ Bindin
       body,
       resolved,
       rawPayload,
-      idempotencyKey: persistedIdempotencyKey,
+      idempotencyKey: operationIdempotencyKey,
     } = extraction;
     const scope = getRequestTenantScope(c);
 
@@ -133,7 +133,7 @@ export function policyGate(config: PolicyGateConfig): MiddlewareHandler<{ Bindin
           ...rawPayload,
           executionRequest: walletOperationExecutionRequest(c, body),
         },
-        idempotencyKey: persistedIdempotencyKey ?? null,
+        idempotencyKey: operationIdempotencyKey,
       },
       approvedWalletOperationId(c),
       approvedWalletOperationAttemptId(c)
