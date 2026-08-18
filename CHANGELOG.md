@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.63.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.62.0...v0.63.0) (2026-08-18)
+
+### Features
+
+* **api:** add policy-gated Earn vault deposits ([#1353](https://github.com/solana-foundation/solana-developer-platform/pull/1353)) ([f7b4eff](https://github.com/solana-foundation/solana-developer-platform/commit/f7b4eff9bf1fdb0ea70a45391ad5c9937e50b92f))
+* **web:** move Earn onto the standard header-tab skeleton ([#1374](https://github.com/solana-foundation/solana-developer-platform/pull/1374)) ([4cea7cb](https://github.com/solana-foundation/solana-developer-platform/commit/4cea7cb42c53a8e16e4a343dae8add8fcbcda0e8))
+* HOO-1018 DeepSec: enforce organization access settings and invitation binding ([#1207](https://github.com/solana-foundation/solana-developer-platform/pull/1207)) ([c1ccfc8](https://github.com/solana-foundation/solana-developer-platform/commit/c1ccfc8fa3a806b01d6e4b19ec3807e0b0d79e2d))
+* **api:** add the Earn vault execution runtime ([#1352](https://github.com/solana-foundation/solana-developer-platform/pull/1352)) ([236dd40](https://github.com/solana-foundation/solana-developer-platform/commit/236dd405e5d9b577cbf88eaf2e7315b604dca380))
+* **api:** add the Earn vault movement ledger ([#1351](https://github.com/solana-foundation/solana-developer-platform/pull/1351)) ([807f802](https://github.com/solana-foundation/solana-developer-platform/commit/807f802141df06b24af1eb150bca5eff29b67660))
+* **earn:** add Kamino vault execution contracts ([#1350](https://github.com/solana-foundation/solana-developer-platform/pull/1350)) ([88aaab4](https://github.com/solana-foundation/solana-developer-platform/commit/88aaab4328b9b906571678c6f1bc96f07e9cf86d))
+* **web:** add the guidance primitives ([#1349](https://github.com/solana-foundation/solana-developer-platform/pull/1349)) ([1e5d9fe](https://github.com/solana-foundation/solana-developer-platform/commit/1e5d9febd2a28846478c3d43e52dc7827774f4ba))
+* **earn:** surface providers from one declaration and restructure the workspace into tabs ([#1340](https://github.com/solana-foundation/solana-developer-platform/pull/1340)) ([f3693f3](https://github.com/solana-foundation/solana-developer-platform/commit/f3693f3903fa91b7c77ecf88687480f3a4192d62))
+* **earn:** add Kamino as a catalogue-only vault provider ([#1300](https://github.com/solana-foundation/solana-developer-platform/pull/1300)) ([8397212](https://github.com/solana-foundation/solana-developer-platform/commit/83972128e6e325ea0e3731494f519798dcf588f2))
+* **earn:** sort the strategy catalogue by pool size and APY ([#1334](https://github.com/solana-foundation/solana-developer-platform/pull/1334)) ([e8e7ad5](https://github.com/solana-foundation/solana-developer-platform/commit/e8e7ad5c84f09b2c3e0f51e55e94b617a75b480e))
+* **earn:** surface wallet USDC and curate strategies ([#1299](https://github.com/solana-foundation/solana-developer-platform/pull/1299)) ([f27f6f3](https://github.com/solana-foundation/solana-developer-platform/commit/f27f6f34121c51c6a08e707a179eacd00116ec5f))
+
+### Bug Fixes
+
+* **sponsorship:** defer the config-unavailability trip behind a consecutive-failure threshold ([#1368](https://github.com/solana-foundation/solana-developer-platform/pull/1368)) ([990e7fc](https://github.com/solana-foundation/solana-developer-platform/commit/990e7fced10e08bf4cebf38404c0d19966520d99))
+* **web:** paint the route's own skeleton on cold load ([#1348](https://github.com/solana-foundation/solana-developer-platform/pull/1348)) ([400670e](https://github.com/solana-foundation/solana-developer-platform/commit/400670e19843265182b87a755c6afca26d77ec58))
+* **policy:** reject unmatchable policy rules and ungate the signer check ([#1358](https://github.com/solana-foundation/solana-developer-platform/pull/1358)) ([8e5934d](https://github.com/solana-foundation/solana-developer-platform/commit/8e5934d1d55ec69cbb3843b9df3ac12399208eb3))
+* **tests:** serialize the test-database reset with audit-ledger writers ([#1370](https://github.com/solana-foundation/solana-developer-platform/pull/1370)) ([8917156](https://github.com/solana-foundation/solana-developer-platform/commit/8917156d5bdbce5eba0d2eb94f02289462e07094))
+* **ci:** install pnpm before the Vercel production build ([#1366](https://github.com/solana-foundation/solana-developer-platform/pull/1366)) ([24b6f1c](https://github.com/solana-foundation/solana-developer-platform/commit/24b6f1ce3d73b987240868a9a592869c0b0e5023))
+* **payments:** retry connection failures and bound Kora call latency ([#1369](https://github.com/solana-foundation/solana-developer-platform/pull/1369)) ([7e1a1ae](https://github.com/solana-foundation/solana-developer-platform/commit/7e1a1aef0afea8930b14244e4a7d6e37dd1c1c99))
+* **sponsorship:** auto-recover the breaker after transient Kora config outages ([#1361](https://github.com/solana-foundation/solana-developer-platform/pull/1361)) ([aab30b1](https://github.com/solana-foundation/solana-developer-platform/commit/aab30b1c128979f8ee719743a7b33bbc505110bb))
+* **ci:** stage release commits off-branch so the release PR stays open ([#1357](https://github.com/solana-foundation/solana-developer-platform/pull/1357)) ([430ac73](https://github.com/solana-foundation/solana-developer-platform/commit/430ac73d3c9ebf67e31af71e1d2f43b425e1fbe7))
+* **web:** mark failed and in-flight rows in the recent transactions card ([#1313](https://github.com/solana-foundation/solana-developer-platform/pull/1313)) ([8fb1e9c](https://github.com/solana-foundation/solana-developer-platform/commit/8fb1e9c49def8592ab2f7620c1b0a946914d89bf))
+* **web:** swap private channels overview and playground tabs shallowly ([#1321](https://github.com/solana-foundation/solana-developer-platform/pull/1321)) ([fe20451](https://github.com/solana-foundation/solana-developer-platform/commit/fe2045150d6e0ada697bb423a3ec600b2cf1701c))
+* **web:** resolve token labels in approvals amount/asset column ([#1314](https://github.com/solana-foundation/solana-developer-platform/pull/1314)) ([911509f](https://github.com/solana-foundation/solana-developer-platform/commit/911509fb0738aaa7e916612bac932ebfd8b41843))
+* **api:** reuse pending approval when a recurring collection retries ([#1320](https://github.com/solana-foundation/solana-developer-platform/pull/1320)) ([33dfbcf](https://github.com/solana-foundation/solana-developer-platform/commit/33dfbcfc653187a5c0846d2c89eadc021dcdcc08))
+* **web:** keep a single divider under the private channels tab strip ([#1317](https://github.com/solana-foundation/solana-developer-platform/pull/1317)) ([6a5790b](https://github.com/solana-foundation/solana-developer-platform/commit/6a5790bf87d19a1403ec6593653dafb69e1e98df))
+* **web:** include SOL in the payments available balance card ([#1311](https://github.com/solana-foundation/solana-developer-platform/pull/1311)) ([7046c23](https://github.com/solana-foundation/solana-developer-platform/commit/7046c23c81978b5fd372240470e82e93cb486463))
+* **web:** give wallet setup step indicator breathing room below the header ([#1310](https://github.com/solana-foundation/solana-developer-platform/pull/1310)) ([49d1090](https://github.com/solana-foundation/solana-developer-platform/commit/49d1090ee59bbbad564360e038ef5083fd2eb85d))
+
+### Maintenance
+
+* **deps:** bump pnpm/action-setup in the actions group ([#1367](https://github.com/solana-foundation/solana-developer-platform/pull/1367)) ([a943e82](https://github.com/solana-foundation/solana-developer-platform/commit/a943e823edf9133ff86666c0514575fac297b298))
+* **deps:** bump undici override from 7.28.0 to 7.29.0 ([#1371](https://github.com/solana-foundation/solana-developer-platform/pull/1371)) ([6d7111c](https://github.com/solana-foundation/solana-developer-platform/commit/6d7111cc67a103243508a2ccab413db62d8c2bdf))
+* run the Token Flows integration shard against real Kora ([#1360](https://github.com/solana-foundation/solana-developer-platform/pull/1360)) ([46ebb94](https://github.com/solana-foundation/solana-developer-platform/commit/46ebb94780c20f2eb8a884658019a1239a8c3754))
+
 ## [0.62.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.61.0...v0.62.0) (2026-08-14)
 
 ### Features
