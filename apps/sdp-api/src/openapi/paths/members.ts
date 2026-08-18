@@ -65,8 +65,9 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     tags: ["Members"],
     summary: "Accept invitation",
     operationId: "acceptInvitation",
-    description: "Accepts an invitation token and activates membership.",
-    security: [{ apiKeyAuth: [] }],
+    description:
+      "Accepts an invitation token and activates membership. The caller must be signed in as the invited user: the token identifies the invitation, and the authenticated account's email address is what binds it to a person. An API key cannot accept an invitation, and the membership is always granted in the organization that issued it rather than the one the caller is currently scoped to.",
+    security: [{ sessionCookie: [] }],
     request: {
       headers: projectScopeHeaders,
       body: {
@@ -79,7 +80,7 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
         description: "Invitation accepted",
         content: jsonContent(actionSuccessResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
 
@@ -112,7 +113,8 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     tags: ["Members"],
     summary: "Remove member",
     operationId: "removeMember",
-    description: "Removes a member from the organization.",
+    description:
+      "Removes a member from the organization and revokes their pending invitations, so an unspent invitation token cannot reinstate them. Re-inviting the removed member issues a fresh invitation that works normally.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

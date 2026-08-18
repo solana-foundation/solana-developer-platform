@@ -545,10 +545,10 @@ export function DashboardShell({
   ) : null;
   const headerTabs = pageConfig.headerTabs;
   const hasHeaderTabs = Boolean(headerTabs);
-  const centeredTitle = pageConfig.centeredTitle;
   const showBackInTopBar = Boolean(backAction) && !hasHeaderTabs;
   const topBarLeadingContent = showBackInTopBar ? backAction : pageConfig.topBarLeadingContent;
-  const shouldRenderTopBarBorder = (Boolean(centeredTitle) || showBackInTopBar) && !hasHeaderTabs;
+  const shouldRenderTopBarBorder =
+    (pageConfig.titlePosition === "center" || showBackInTopBar) && !hasHeaderTabs;
   const shouldClipHorizontalOverflow =
     pathname === "/dashboard/payments" ||
     pathname === "/dashboard/payments/transactions" ||
@@ -572,6 +572,7 @@ export function DashboardShell({
     pathname === "/dashboard/api-keys/new" ||
     (pathname.startsWith("/dashboard/api-keys/") && pathname.endsWith("/edit")) ||
     pathname.startsWith("/dashboard/payments") ||
+    pathname === "/dashboard/markets/earn" ||
     pathname === "/dashboard/markets/earn/deposit" ||
     pathname === "/dashboard/wallets" ||
     pathname === "/dashboard/custody" ||
@@ -839,7 +840,7 @@ export function DashboardShell({
                   setMobileSidebarOpen={setMobileSidebarOpen}
                   hideTitle={pageConfig.hideTitle}
                   title={pageConfig.title}
-                  centeredTitle={centeredTitle}
+                  titlePosition={pageConfig.titlePosition}
                   topBarLeadingContent={topBarLeadingContent}
                   hasHeaderTabs={hasHeaderTabs}
                   showNotifications={assetProfilesEnabled}

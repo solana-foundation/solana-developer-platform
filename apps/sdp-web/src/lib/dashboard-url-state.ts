@@ -133,6 +133,24 @@ export function useDashboardTab(): string | null {
   return useDashboardSearchParam("tab");
 }
 
+/**
+ * Picks which of a route's tabs the shallow `?tab=` state selects: the entry
+ * the param names when it matches one, otherwise the first entry — the default
+ * tab, which carries no param. Shared by the header tab strip and the
+ * workspace panel shell so the two can never disagree about the active tab.
+ *
+ * @param tabs - The route's tab entries in display order.
+ * @param urlTab - The current `?tab=` value from `useDashboardTab`.
+ * @returns The active tab entry.
+ */
+export function selectActiveDashboardTab<T extends { id: string }>(
+  tabs: readonly T[],
+  urlTab: string | null
+): T {
+  const match = tabs.find((tab) => tab.id === urlTab);
+  return match === undefined ? tabs[0] : match;
+}
+
 export function useDashboardUrlState() {
   const search = useSyncExternalStore(subscribe, getSearchSnapshot, getServerSearchSnapshot);
 

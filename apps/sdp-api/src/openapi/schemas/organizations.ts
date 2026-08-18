@@ -32,7 +32,16 @@ export const organizationSettingsSchema = z
       .array(z.string())
       .optional()
       .openapi({
-        description: "Allowed IP addresses for API access.",
+        description:
+          "IPv4/IPv6 addresses and CIDR ranges allowed to authenticate against this organization, on both API and dashboard requests. An empty or absent list places no restriction. Entries are stored in canonical form, so a range with host bits set is returned as the network it selects. A list that would exclude the origin of the request setting it is rejected, since the restriction also covers the endpoint that would undo it.",
+        example: ["203.0.113.0/24"],
+      }),
+    legacyAllowedIpAddresses: z
+      .unknown()
+      .optional()
+      .openapi({
+        description:
+          "Read-only. An allowlist recorded before this setting was enforced, retained for reference and never applied. Send it back as `allowedIpAddresses` to put it into effect, which validates it first.",
         example: ["203.0.113.0/24"],
       }),
     customRateLimits: z
