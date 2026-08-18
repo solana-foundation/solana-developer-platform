@@ -31,6 +31,8 @@
     "playground:check": "tsx scripts/generate-playground-catalog.ts --check",
     "earn:inventory": "doppler run --config ${DOPPLER_CONFIG:-dev} -- tsx scripts/inventory-ground-catalogue.ts fetch",
     "earn:inventory:render": "tsx scripts/inventory-ground-catalogue.ts render",
+    "earn:inventory:kamino": "tsx scripts/inventory-kamino-catalogue.ts fetch",
+    "earn:inventory:kamino:render": "tsx scripts/inventory-kamino-catalogue.ts render",
     "rails:discover": "doppler run --config ${DOPPLER_CONFIG:-dev} -- tsx scripts/discover-ramp-rails.ts discover",
     "rails:generate": "tsx scripts/discover-ramp-rails.ts generate",
     "rails:drift": "tsx scripts/discover-ramp-rails.ts drift",
@@ -42,6 +44,7 @@
   },
   "dependencies": {
     "@clerk/backend": "3.15.0",
+    "@coinbase/cdp-sdk": "1.54.0",
     "@hono/node-server": "2.0.12",
     "@react-email/components": "1.0.12",
     "@react-email/render": "2.1.0",
@@ -49,13 +52,14 @@
     "@sdp/earn": "workspace:*",
     "@sdp/env-config": "workspace:*",
     "@sdp/issuance": "workspace:*",
+    "@sdp/kamino": "workspace:*",
     "@sdp/payments": "workspace:*",
     "@sdp/policy": "workspace:*",
     "@sdp/private-channels": "workspace:*",
     "@sdp/rpc": "workspace:*",
+    "@sdp/solana": "workspace:*",
     "@sdp/spc-escrow": "workspace:*",
     "@sdp/spc-withdraw": "workspace:*",
-    "@sdp/solana": "workspace:*",
     "@sdp/types": "workspace:*",
     "@sentry/node": "10.70.0",
     "@solana-program/system": "catalog:",
@@ -87,8 +91,7 @@
     "pino": "10.3.1",
     "react": "19.2.8",
     "resend": "6.18.1",
-    "zod": "4.4.3",
-    "@coinbase/cdp-sdk": "1.54.0"
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@asteasolutions/zod-to-openapi": "9.1.0",

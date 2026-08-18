@@ -23,7 +23,10 @@ describe("policyRuleRestricts", () => {
     assert.equal(policyRuleRestricts({ kind: "asset", asset: "USDC" }), false);
     assert.equal(policyRuleRestricts({ kind: "operation_family", families: ["payment"] }), false);
     assert.equal(
-      policyRuleRestricts({ kind: "operation_type", operationTypes: ["payment_request"] }),
+      policyRuleRestricts({
+        kind: "operation_type",
+        operationTypes: ["payment_transfer_execute"],
+      }),
       false
     );
   });

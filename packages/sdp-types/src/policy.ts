@@ -2,14 +2,26 @@ export type PolicyProfileStatus = "draft" | "active" | "disabled" | "archived";
 export type PolicyDefaultAction = "allow" | "deny" | "approval_required" | "review";
 export type EffectivePolicySource = "implicit_default_allow" | "customer_profile";
 
-export type WalletOperationFamily =
-  | "transfer"
-  | "payment"
-  | "ramp"
-  | "issuance"
-  | "raw_sign"
-  | "program"
-  | "provider_admin";
+export const WALLET_OPERATION_TYPES = [
+  "issuance_burn_execute",
+  "issuance_force_burn_execute",
+  "issuance_mint_execute",
+  "issuance_seize_execute",
+  "issuance_update_authority_execute",
+  "payment_transfer_batch_execute",
+  "payment_transfer_execute",
+  "ramp_offramp_quote",
+  "ramp_onramp_quote",
+  "recurring_payment_collection",
+  "recurring_payment_create",
+  "recurring_payment_update",
+] as const;
+
+export type WalletOperationType = (typeof WALLET_OPERATION_TYPES)[number];
+
+export const WALLET_OPERATION_FAMILIES = ["transfer", "payment", "ramp", "issuance"] as const;
+
+export type WalletOperationFamily = (typeof WALLET_OPERATION_FAMILIES)[number];
 
 export type WalletOperationStatus =
   | "created"
@@ -57,8 +69,8 @@ export interface OperationFamilyPolicyRule extends PolicyRuleBase {
 
 export interface OperationTypePolicyRule extends PolicyRuleBase {
   kind: "operation_type";
-  operationType?: string;
-  operationTypes?: string[];
+  operationType?: WalletOperationType;
+  operationTypes?: WalletOperationType[];
 }
 
 export interface AssetPolicyRule extends PolicyRuleBase {
@@ -86,7 +98,7 @@ export interface AmountPolicyRule extends PolicyRuleBase {
 export interface ApprovalPolicyRule extends PolicyRuleBase {
   kind: "approval";
   families?: WalletOperationFamily[];
-  operationTypes?: string[];
+  operationTypes?: WalletOperationType[];
   assets?: string[];
   approvalGroupId?: string;
 }
@@ -122,13 +134,18 @@ export type ApprovalRequestStatus =
   | "expired"
   | "failed";
 
+/**
+ * Historical read model: rows predating a vocabulary trim keep their retired
+ * operation family/type strings, so these fields are not narrowed to the live
+ * enums.
+ */
 export interface WalletApprovalRequestOperationSummary {
   id: string;
   custodyWalletId: string | null;
   walletId: string;
   apiKeyId: string | null;
   source: string;
-  operationFamily: WalletOperationFamily;
+  operationFamily: string;
   operationType: string;
   asset: string | null;
   amount: string | null;
@@ -322,7 +339,7 @@ export interface PolicyCandidate {
   actor: WalletOperationActor | null;
   source: string;
   operationFamily: WalletOperationFamily;
-  operationType: string;
+  operationType: WalletOperationType;
   asset: string | null;
   amount: string | null;
   destination: string | null;
@@ -408,11 +425,16 @@ export type PublicPolicyEvaluationContext = Omit<PolicyEvaluationContext, "opera
   operation: Omit<PolicyEvaluationContext["operation"], "providerExtensions" | "rawPayload">;
 };
 
+/**
+ * Historical read model: rows predating a vocabulary trim keep their retired
+ * operation family/type strings, so these fields are not narrowed to the live
+ * enums.
+ */
 export interface WalletPolicyEvaluationDetail {
   id: string;
   walletOperation: {
     id: string;
-    operationFamily: WalletOperationFamily;
+    operationFamily: string;
     operationType: string;
     asset: string | null;
     amount: string | null;

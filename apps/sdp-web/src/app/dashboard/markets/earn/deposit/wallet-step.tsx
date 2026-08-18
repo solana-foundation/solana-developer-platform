@@ -8,6 +8,7 @@ import { formatCustodyProviderName } from "@/app/dashboard/custody/provider-cata
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTranslations } from "@/i18n/provider";
+import { formatTokenQuantity } from "../earn-format";
 import {
   SelectableCard,
   SelectionAnnouncement,
@@ -21,7 +22,7 @@ import {
   matchesWalletQuery,
   shortenAddress,
   walletDisplayName,
-  walletStablecoinHoldings,
+  walletUsdcAmount,
 } from "./earn-funding-wallets";
 
 /** Above this many wallets a search field is worth the extra chrome. */
@@ -44,7 +45,7 @@ function WalletRow({
   const inputId = `earn-funding-wallet-${wallet.id}`;
   const nameId = `${inputId}-name`;
   const detailId = `${inputId}-detail`;
-  const holdings = walletStablecoinHoldings(wallet);
+  const availableUsdc = walletUsdcAmount(wallet);
 
   return (
     <SelectableCard
@@ -76,17 +77,13 @@ function WalletRow({
           <span className="mt-1 block text-[13px] leading-5 text-secondary" id={detailId}>
             {shortenAddress(wallet.publicKey)}
           </span>
-          <span className="mt-2 block text-xs leading-5 text-tertiary">
-            {holdings.length > 0
-              ? holdings
-                  .map((balance) =>
-                    t("DashboardEarn.deposit.walletHolding", {
-                      amount: balance.uiAmount,
-                      token: balance.token.toUpperCase(),
-                    })
-                  )
-                  .join(" · ")
-              : t("DashboardEarn.deposit.walletBalanceUnknown")}
+          <span className="mt-3 flex items-baseline justify-between gap-3 border-t border-border-subtle pt-3">
+            <span className="text-xs text-tertiary">
+              {t("DashboardEarn.deposit.walletAvailableToInvest")}
+            </span>
+            <span className="text-sm font-medium text-primary tabular-nums">
+              {availableUsdc === undefined ? "—" : formatTokenQuantity(availableUsdc, "USDC")}
+            </span>
           </span>
         </span>
         <SelectionMark selected={selected} />

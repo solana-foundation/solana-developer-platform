@@ -5,13 +5,13 @@ import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { TokenDisabledActionTooltip } from "../../token-disabled-action-tooltip";
-import type { FundManagementModalAction } from "../../token-fund-management-section";
+import type { FundManagementRowId } from "../../token-fund-management-section";
 import { TokenTransactionsBrowser } from "../token-transactions-browser";
 import type { TokenOperations } from "../use-token-operations";
 
 // "lock-supply" is local to this tab: it opens its own modal rather than the
-// shared fund-management one, so it stays out of FundManagementModalAction.
-type OperationRowId = FundManagementModalAction | "lock-supply";
+// shared fund-management one, so it stays out of FundManagementRowId.
+type OperationRowId = FundManagementRowId | "lock-supply";
 
 interface OperationRow {
   id: OperationRowId;
@@ -19,6 +19,7 @@ interface OperationRow {
   title: string;
   helper: string;
   actionLabel: string;
+  onAction: () => void;
   disabled: boolean;
   disabledReason: string | null;
 }
@@ -33,8 +34,9 @@ export function OperationsTab({ ops, tokenId }: { ops: TokenOperations; tokenId:
           title: t("DashboardIssuance.management.deployToken"),
           helper: t("DashboardIssuance.operations.deployHelper"),
           actionLabel: t("DashboardIssuance.header.deploy"),
-          disabled: Boolean(ops.fundManagementDisabledReasons.deploy),
-          disabledReason: ops.fundManagementDisabledReasons.deploy,
+          onAction: () => ops.deployToken(),
+          disabled: ops.isPending || Boolean(ops.deployDisabledReason),
+          disabledReason: ops.deployDisabledReason,
         },
       ]
     : [
@@ -44,6 +46,7 @@ export function OperationsTab({ ops, tokenId }: { ops: TokenOperations; tokenId:
           title: t("DashboardIssuance.management.mintTokens"),
           helper: t("DashboardIssuance.management.mintHelper"),
           actionLabel: t("DashboardIssuance.management.mint"),
+          onAction: () => ops.openFundManagementModal("mint"),
           disabled: Boolean(ops.fundManagementDisabledReasons.mint),
           disabledReason: ops.fundManagementDisabledReasons.mint,
         },
@@ -53,6 +56,7 @@ export function OperationsTab({ ops, tokenId }: { ops: TokenOperations; tokenId:
           title: t("DashboardIssuance.management.burnTokens"),
           helper: t("DashboardIssuance.management.burnHelper"),
           actionLabel: t("DashboardIssuance.management.burn"),
+          onAction: () => ops.openFundManagementModal("burn"),
           disabled: Boolean(ops.fundManagementDisabledReasons.burn),
           disabledReason: ops.fundManagementDisabledReasons.burn,
         },
@@ -68,6 +72,7 @@ export function OperationsTab({ ops, tokenId }: { ops: TokenOperations; tokenId:
       title: t("DashboardIssuance.management.lockSupplyTitle"),
       helper: t("DashboardIssuance.management.lockSupplyHelper"),
       actionLabel: t("DashboardIssuance.management.lockSupplyAction"),
+      onAction: () => ops.openLockSupplyModal(),
       disabled: Boolean(ops.lockSupplyDisabledReason),
       disabledReason: ops.lockSupplyDisabledReason,
     });
@@ -119,11 +124,7 @@ export function OperationsTab({ ops, tokenId }: { ops: TokenOperations; tokenId:
                   <Button
                     type="button"
                     className="w-[96px]"
-                    onClick={() =>
-                      row.id === "lock-supply"
-                        ? ops.openLockSupplyModal()
-                        : ops.openFundManagementModal(row.id)
-                    }
+                    onClick={row.onAction}
                     disabled={row.disabled}
                   >
                     {row.actionLabel}

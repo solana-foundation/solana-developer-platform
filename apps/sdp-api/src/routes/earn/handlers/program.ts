@@ -1,4 +1,4 @@
-import { resolveEarnProviderClient, supportsPortfolioWallets } from "@sdp/earn";
+import { isClusterFundableInEnvironment, supportsPortfolioWallets } from "@sdp/earn";
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnPortfolioWalletProvider } from "@sdp/earn/types";
 import type {
@@ -30,12 +30,14 @@ import {
 import { success } from "@/lib/response";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getLogger } from "@/runtime/logger";
+import { resolveEarnProviderClient } from "@/services/earn-provider-registry";
 import {
   applyEarnWithdrawalObservationByReference,
   applyEarnWithdrawalObservationToRow,
 } from "@/services/earn-withdrawal-ledger.service";
 import {
   assertEarnProviderConfigured,
+  assertEarnProviderSurfaced,
   assertProviderAvailable,
 } from "@/services/provider-availability.service";
 import { type AppContext, earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
@@ -243,7 +245,17 @@ async function assertKnownYieldSources(
   for (let offset = 0; ; offset += pageSize) {
     const { rows, total } = await repo.listStrategies({ environment, limit: pageSize, offset });
     for (const row of rows) {
-      if (row.provider === provider) {
+      // Being CATALOGUED in this environment is not the same as being FUNDABLE
+      // in it, and this is the last gate before a provider mutation. A
+      // mainnet-only provider's vaults are listed in sandbox so integrators can
+      // browse the real shelf; allocating devnet money to one would ask the
+      // provider to deposit into an instrument that does not exist on this
+      // cluster. `isClusterFundableInEnvironment` is the single rule — do not
+      // inline the comparison (see @sdp/earn support.ts).
+      if (
+        row.provider === provider &&
+        isClusterFundableInEnvironment(row.host_cluster, environment)
+      ) {
         known.add(row.provider_reference);
       }
     }
@@ -446,6 +458,14 @@ export const createEarnProgram = async (c: AppContext) => {
   const client = requirePortfolioClient(body.provider);
   const auth = getAuth(c);
   const environment = resolveSdpEnvironment(c);
+
+  // Platform-level "we do not offer this provider", ahead of the org-level
+  // entitlement check below: no override lifts it, so answering "requires
+  // manual activation" would send the caller to a door that does not exist.
+  // Creation is the ONLY route that takes this gate — an organization holding a
+  // program with an un-surfaced provider keeps every read, re-target,
+  // withdrawal and ledger route (ADR 0002).
+  assertEarnProviderSurfaced(client.provider);
 
   // Money-in gate: full entitlement + mode-specific credential check.
   await assertProviderAvailable(

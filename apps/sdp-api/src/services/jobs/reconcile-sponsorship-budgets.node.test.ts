@@ -3,7 +3,17 @@ import { describe, expect, it, vi } from "vitest";
 import type { SponsorshipReconciliationReservation } from "@/db/repositories/sponsorship-budget.repository";
 import type { Env } from "@/types/env";
 import { sponsorshipProviderConfigFingerprint } from "../sponsorship-budget.service";
-import { reconcileSponsorshipBudgets } from "./reconcile-sponsorship-budgets";
+import {
+  KORA_CONFIG_UNAVAILABLE_BREAKER_REASON,
+  reconcileSponsorshipBudgets,
+} from "./reconcile-sponsorship-budgets";
+
+const logEvent = vi.hoisted(() => vi.fn());
+
+vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/runtime/money-path-events")>()),
+  logEvent,
+}));
 
 const ZERO_OUTFLOW_FEE_PAYER_POLICY = {
   system: {
@@ -106,7 +116,11 @@ function harness(candidate: SponsorshipReconciliationReservation) {
     settleReservation: vi.fn().mockResolvedValue(true),
     markChargedUnknown: vi.fn().mockResolvedValue(true),
     getReservation: vi.fn().mockResolvedValue(null),
+    getGlobalPolicy: vi.fn().mockResolvedValue({ ...breakerPolicy, enabled: true }),
     tripGlobalBreaker: vi.fn().mockResolvedValue(breakerPolicy),
+    resumeGlobalBreaker: vi.fn().mockResolvedValue(null),
+    recordProviderConfigFailure: vi.fn().mockResolvedValue(1),
+    resetProviderConfigFailures: vi.fn().mockResolvedValue(undefined),
     markRedisSettled: vi.fn().mockResolvedValue(true),
   };
   const budgetRedis = {
@@ -130,6 +144,7 @@ function harness(candidate: SponsorshipReconciliationReservation) {
       isBlockhashValid,
       getProviderConfiguration: vi.fn().mockResolvedValue(PROVIDER_CONFIGURATION),
       now: () => new Date("2026-08-03T10:05:00.000Z"),
+      sleep: vi.fn().mockResolvedValue(undefined),
     });
   return { repository, budgetRedis, getTransaction, isBlockhashValid, run };
 }
@@ -185,7 +200,8 @@ describe("reconcileSponsorshipBudgets", () => {
     await run();
     expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
       "devnet",
-      expect.stringContaining("exceeded reservation")
+      expect.stringContaining("exceeded reservation"),
+      {}
     );
     expect(repository.settleReservation).toHaveBeenCalledWith(
       "reservation_1",
@@ -308,16 +324,48 @@ describe("reconcileSponsorshipBudgets", () => {
       await expect(run()).rejects.toThrow("failed reconciliation");
       expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
         "devnet",
-        expect.stringContaining("configuration changed")
+        expect.stringContaining("configuration changed"),
+        {}
       );
       expect(budgetRedis.syncPolicy).toHaveBeenCalledOnce();
       expect(getTransaction).not.toHaveBeenCalled();
     }
   );
 
-  it("trips the breaker when Kora security configuration cannot be read", async () => {
+  it("records a config failure without tripping while under the consecutive threshold", async () => {
     const candidate = reservation();
     const { repository, budgetRedis, getTransaction } = harness(candidate);
+    const getProviderConfiguration = vi.fn().mockRejectedValue(new Error("Kora unavailable"));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    await expect(
+      reconcileSponsorshipBudgets({ SOLANA_NETWORK: "devnet" } as Env, {
+        repository,
+        budgetRedis,
+        getTransaction,
+        isBlockhashValid: vi.fn(),
+        getProviderConfiguration,
+        now: () => new Date("2026-08-03T10:05:00.000Z"),
+        sleep,
+      })
+    ).rejects.toThrow("configuration is unavailable");
+    expect(getProviderConfiguration).toHaveBeenCalledTimes(3);
+    expect(sleep).toHaveBeenCalledTimes(2);
+    expect(repository.recordProviderConfigFailure).toHaveBeenCalledWith("devnet");
+    expect(repository.tripGlobalBreaker).not.toHaveBeenCalled();
+    expect(logEvent).toHaveBeenCalledWith(
+      "warn",
+      expect.objectContaining({
+        event: "sdp_api_sponsorship_config_read_failed",
+        consecutive_failures: 1,
+      })
+    );
+    expect(getTransaction).not.toHaveBeenCalled();
+  });
+
+  it("trips the breaker after the consecutive config-failure threshold", async () => {
+    const candidate = reservation();
+    const { repository, budgetRedis, getTransaction } = harness(candidate);
+    repository.recordProviderConfigFailure.mockResolvedValue(3);
     await expect(
       reconcileSponsorshipBudgets({ SOLANA_NETWORK: "devnet" } as Env, {
         repository,
@@ -326,13 +374,44 @@ describe("reconcileSponsorshipBudgets", () => {
         isBlockhashValid: vi.fn(),
         getProviderConfiguration: vi.fn().mockRejectedValue(new Error("Kora unavailable")),
         now: () => new Date("2026-08-03T10:05:00.000Z"),
+        sleep: vi.fn().mockResolvedValue(undefined),
       })
     ).rejects.toThrow("configuration is unavailable");
     expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
       "devnet",
-      expect.stringContaining("unavailable")
+      expect.stringContaining("unavailable"),
+      { recoverable: true }
     );
-    expect(getTransaction).not.toHaveBeenCalled();
+    expect(repository.resetProviderConfigFailures).not.toHaveBeenCalled();
+  });
+
+  it("resets the consecutive failure counter on a successful config read", async () => {
+    const { repository, run } = harness(reservation());
+    await expect(run()).resolves.toBeUndefined();
+    expect(repository.resetProviderConfigFailures).toHaveBeenCalledWith("devnet");
+    expect(repository.recordProviderConfigFailure).not.toHaveBeenCalled();
+  });
+
+  it("does not trip the breaker when a config read succeeds on retry", async () => {
+    const candidate = reservation();
+    const { repository, budgetRedis, getTransaction, isBlockhashValid } = harness(candidate);
+    const getProviderConfiguration = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Kora unavailable"))
+      .mockResolvedValue(PROVIDER_CONFIGURATION);
+    await expect(
+      reconcileSponsorshipBudgets({ SOLANA_NETWORK: "devnet" } as Env, {
+        repository,
+        budgetRedis,
+        getTransaction,
+        isBlockhashValid,
+        getProviderConfiguration,
+        now: () => new Date("2026-08-03T10:05:00.000Z"),
+        sleep: vi.fn().mockResolvedValue(undefined),
+      })
+    ).resolves.toBeUndefined();
+    expect(getProviderConfiguration).toHaveBeenCalledTimes(2);
+    expect(repository.tripGlobalBreaker).not.toHaveBeenCalled();
   });
 
   it("does not trip the breaker when a concurrent pass already recorded the ambiguous charge", async () => {
@@ -365,8 +444,155 @@ describe("reconcileSponsorshipBudgets", () => {
     expect(repository.getReservation).toHaveBeenCalledWith("reservation_1");
     expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
       "devnet",
-      expect.stringContaining("lost its durable transition")
+      expect.stringContaining("lost its durable transition"),
+      {}
     );
     expect(budgetRedis.syncPolicy).toHaveBeenCalledOnce();
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_sponsorship_breaker_tripped",
+        network: "devnet",
+        source: "reconciliation",
+      })
+    );
+  });
+
+  it("reports a tick that found nothing, so silence is distinguishable from a dead job", async () => {
+    const { repository, budgetRedis, run } = harness(reservation());
+    logEvent.mockClear();
+    repository.listReconciliationCandidates.mockResolvedValue([]);
+
+    await expect(run()).resolves.toBeUndefined();
+
+    expect(logEvent).toHaveBeenCalledWith(
+      "info",
+      expect.objectContaining({
+        event: "sdp_api_sponsorship_reconciliation_tick",
+        network: "devnet",
+        candidates: 0,
+        failed: 0,
+      })
+    );
+    expect(budgetRedis.settle).not.toHaveBeenCalled();
+  });
+
+  it("reports the breaker even when the Redis policy sync fails afterwards", async () => {
+    const { repository, budgetRedis, getTransaction, run } = harness(reservation());
+    logEvent.mockClear();
+    budgetRedis.syncPolicy.mockRejectedValue(new Error("redis offline"));
+    getTransaction.mockResolvedValueOnce({
+      slot: 1n,
+      err: null,
+      fee: 1n,
+      preBalances: [20n],
+      postBalances: [10n],
+      instructions: [],
+    });
+
+    await expect(run()).rejects.toThrow("failed reconciliation");
+
+    expect(repository.tripGlobalBreaker).toHaveBeenCalled();
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_sponsorship_breaker_tripped",
+        source: "reconciliation",
+      })
+    );
+  });
+
+  function trippedPolicy(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      id: "global",
+      network: "devnet" as const,
+      scopeType: "global" as const,
+      scopeId: null,
+      enabled: false,
+      perTransactionLamports: 10,
+      hourlyLamports: 100,
+      dailyLamports: 100,
+      version: 2,
+      updatedBy: "system:sponsorship-breaker",
+      updateReason: KORA_CONFIG_UNAVAILABLE_BREAKER_REASON,
+      updatedAt: "2026-08-03T10:00:00.000Z",
+      ...overrides,
+    };
+  }
+
+  it("auto-resumes a config-unavailability breaker trip once the config is readable", async () => {
+    const { repository, budgetRedis, run } = harness(reservation());
+    repository.listReconciliationCandidates.mockResolvedValue([]);
+    repository.getGlobalPolicy.mockResolvedValue(trippedPolicy());
+    const resumedPolicy = trippedPolicy({ enabled: true, version: 3 });
+    repository.resumeGlobalBreaker.mockResolvedValue(resumedPolicy);
+
+    await expect(run()).resolves.toBeUndefined();
+
+    expect(repository.resumeGlobalBreaker).toHaveBeenCalledWith(
+      "devnet",
+      KORA_CONFIG_UNAVAILABLE_BREAKER_REASON,
+      expect.stringContaining("readable again")
+    );
+    expect(budgetRedis.syncPolicy).toHaveBeenCalledWith(resumedPolicy);
+  });
+
+  it("does not auto-resume a policy disabled by an operator", async () => {
+    const { repository, run } = harness(reservation());
+    repository.listReconciliationCandidates.mockResolvedValue([]);
+    repository.getGlobalPolicy.mockResolvedValue(
+      trippedPolicy({ updatedBy: "operator:oncall", updateReason: "manual kill" })
+    );
+
+    await expect(run()).resolves.toBeUndefined();
+
+    expect(repository.resumeGlobalBreaker).not.toHaveBeenCalled();
+  });
+
+  it("does not auto-resume an integrity breaker trip", async () => {
+    const { repository, run } = harness(reservation());
+    repository.listReconciliationCandidates.mockResolvedValue([]);
+    repository.getGlobalPolicy.mockResolvedValue(
+      trippedPolicy({ updateReason: "Actual sponsorship spend 9 exceeded reservation 5" })
+    );
+
+    await expect(run()).resolves.toBeUndefined();
+
+    expect(repository.resumeGlobalBreaker).not.toHaveBeenCalled();
+  });
+
+  it("keeps the breaker down without re-tripping when the recovery probe fails", async () => {
+    const { repository, budgetRedis, getTransaction } = harness(reservation());
+    repository.listReconciliationCandidates.mockResolvedValue([]);
+    repository.getGlobalPolicy.mockResolvedValue(trippedPolicy());
+
+    await expect(
+      reconcileSponsorshipBudgets({ SOLANA_NETWORK: "devnet" } as Env, {
+        repository,
+        budgetRedis,
+        getTransaction,
+        isBlockhashValid: vi.fn(),
+        getProviderConfiguration: vi.fn().mockRejectedValue(new Error("Kora unavailable")),
+        now: () => new Date("2026-08-03T10:05:00.000Z"),
+        sleep: vi.fn().mockResolvedValue(undefined),
+      })
+    ).rejects.toThrow("configuration is unavailable");
+
+    expect(repository.tripGlobalBreaker).not.toHaveBeenCalled();
+    expect(repository.resumeGlobalBreaker).not.toHaveBeenCalled();
+  });
+
+  it("resumes the breaker and reconciles candidates in the same pass", async () => {
+    const { repository, run } = harness(
+      reservation({ status: "committed", actualLamports: 3, redisSettledAt: null })
+    );
+    repository.getGlobalPolicy.mockResolvedValue(trippedPolicy());
+    const resumedPolicy = trippedPolicy({ enabled: true, version: 3 });
+    repository.resumeGlobalBreaker.mockResolvedValue(resumedPolicy);
+
+    await expect(run()).resolves.toBeUndefined();
+
+    expect(repository.resumeGlobalBreaker).toHaveBeenCalledOnce();
+    expect(repository.markRedisSettled).toHaveBeenCalled();
   });
 });

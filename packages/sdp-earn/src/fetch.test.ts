@@ -149,6 +149,68 @@ describe("providerFetch", () => {
       earnError("PROVIDER_UNAVAILABLE", /upshift/)
     );
   });
+
+  it("passes no signal when the caller sets no timeout", async () => {
+    // Opt-in: every existing caller keeps its current unbounded behaviour, so
+    // adding the option cannot change a provider's timeout by surprise.
+    const fetchMock = mock.method(
+      globalThis,
+      "fetch",
+      async () => new Response("{}", { status: 200 })
+    );
+
+    await providerFetch("ground", "https://ground.test/sources", { method: "GET" });
+
+    const init = fetchMock.mock.calls[0]?.arguments[1] as RequestInit;
+    assert.equal(init.signal, undefined);
+  });
+
+  it("aborts a hung request at the caller's timeout", async () => {
+    // Honours the signal the way undici does, so this exercises the real
+    // contract rather than a stub that resolves on its own.
+    mock.method(
+      globalThis,
+      "fetch",
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => {
+            reject(new DOMException("aborted", "AbortError"));
+          });
+        })
+    );
+
+    await assert.rejects(
+      providerFetch("kamino", "https://api.kamino.finance/kvaults/vaults", {
+        method: "GET",
+        timeoutMs: 20,
+      }),
+      earnError("PROVIDER_UNAVAILABLE", /Timed out reaching the kamino API after 20ms/)
+    );
+  });
+
+  it("aborts a response that stalls midway through its BODY", async () => {
+    // The failure a headers-only timeout misses: the provider answers promptly
+    // and then never finishes the stream. Both halves ride one signal.
+    mock.method(globalThis, "fetch", async (_url: string, init: RequestInit) => {
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"partial":'));
+          init.signal?.addEventListener("abort", () => {
+            controller.error(new DOMException("aborted", "AbortError"));
+          });
+        },
+      });
+      return new Response(body, { status: 200 });
+    });
+
+    await assert.rejects(
+      providerFetch("kamino", "https://api.kamino.finance/kvaults/vaults", {
+        method: "GET",
+        timeoutMs: 20,
+      }),
+      earnError("PROVIDER_UNAVAILABLE", /Timed out reaching the kamino API/)
+    );
+  });
 });
 
 describe("providerFetchJson", () => {
@@ -201,6 +263,57 @@ describe("providerFetchJson", () => {
     await assert.rejects(
       providerFetchJson("veda", "https://veda.test/deposit", { method: "POST" }),
       earnError("CONFLICT", /^Position already exists$/)
+    );
+  });
+
+  it("surfaces a bare string error, the shape Ground rejects writes with", async () => {
+    // Verbatim from Ground sandbox 2026-08-14. Reading only `error.message`
+    // dropped this sentence and left the caller staring at the bare status.
+    mock.method(globalThis, "fetch", async () =>
+      jsonResponse(400, {
+        error: "Invalid query params: unknown parameter(s)",
+        code: "unknown_parameters",
+        unknownKeys: ["limit"],
+        allowedKeys: [],
+      })
+    );
+
+    await assert.rejects(
+      providerFetchJson("ground", "https://ground.test/v2/wallets", { method: "POST" }),
+      earnError("BAD_REQUEST", /^Invalid query params: unknown parameter\(s\)$/)
+    );
+  });
+
+  it("falls back when a string error is blank rather than reporting an empty reason", async () => {
+    mock.method(globalThis, "fetch", async () => jsonResponse(400, { error: "   " }));
+
+    await assert.rejects(
+      providerFetchJson("ground", "https://ground.test/v2/wallets", { method: "POST" }),
+      earnError("BAD_REQUEST", /^ground request failed with status 400$/)
+    );
+  });
+
+  it("skips a blank error in favour of an explanation the body does carry", async () => {
+    // The first NON-BLANK candidate wins. Taking the first PRESENT one would
+    // pick `error` here and then fall back, throwing away the real reason.
+    mock.method(globalThis, "fetch", async () =>
+      jsonResponse(400, { error: "", message: "Yield source is not fundable on this chain" })
+    );
+
+    await assert.rejects(
+      providerFetchJson("ground", "https://ground.test/v2/wallets", { method: "POST" }),
+      earnError("BAD_REQUEST", /^Yield source is not fundable on this chain$/)
+    );
+  });
+
+  it("falls through a blank error AND a blank message to reason", async () => {
+    mock.method(globalThis, "fetch", async () =>
+      jsonResponse(409, { error: { message: "  " }, message: "", reason: "Wallet is rebalancing" })
+    );
+
+    await assert.rejects(
+      providerFetchJson("ground", "https://ground.test/v2/wallets", { method: "POST" }),
+      earnError("CONFLICT", /^Wallet is rebalancing$/)
     );
   });
 

@@ -84,6 +84,18 @@ export interface Env {
 
   // Solana configuration
   SOLANA_RPC_URL?: string;
+  /**
+   * Optional PER-CLUSTER overrides for the Earn execution path.
+   *
+   * One API process serves both clusters — sandbox projects are devnet,
+   * production projects are mainnet-beta — so a single `SOLANA_RPC_URL` cannot
+   * be correct for both. Unset falls back to `SOLANA_RPC_URL`, which must then
+   * prove its chain by genesis hash before anything is built against it
+   * (`assertClusterEndpoint`), so a single-cluster deployment keeps working and
+   * a mismatch is a refusal rather than a confidently wrong transaction.
+   */
+  SOLANA_DEVNET_RPC_URL?: string;
+  SOLANA_MAINNET_RPC_URL?: string;
   SOLANA_RPC_DEFAULT_PROVIDER?: OrganizationRpcProvider;
   SOLANA_RPC_TRITON_URL?: string;
   SOLANA_RPC_TRITON_API_KEY?: string;
@@ -192,6 +204,7 @@ export interface Env {
   KORA_API_KEY?: string;
   KORA_CLOUD_RUN_AUDIENCE?: string;
   KORA_TIMEOUT_MS?: string;
+  KORA_PER_TRANSACTION_BUDGET_LAMPORTS?: string;
   KORA_SURFPOOL_SHIM?: string;
   KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS?: string;
 

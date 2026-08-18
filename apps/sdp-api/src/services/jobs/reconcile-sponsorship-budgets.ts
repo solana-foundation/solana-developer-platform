@@ -3,11 +3,14 @@ import * as solanaRpc from "@sdp/rpc/solana";
 import { assertIsBlockhash, assertIsSignature, type Blockhash, type Signature } from "@solana/kit";
 import { getDb } from "@/db";
 import {
+  SPONSORSHIP_BREAKER_OPERATOR,
+  type SponsorshipBudgetPolicy,
   SponsorshipBudgetRepository,
   type SponsorshipNetwork,
   type SponsorshipReconciliationReservation,
 } from "@/db/repositories/sponsorship-budget.repository";
 import { getLogger } from "@/runtime/logger";
+import { logEvent } from "@/runtime/money-path-events";
 import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
 import type { Env } from "@/types/env";
 import { getManagedSponsorshipProviderConfiguration } from "../sponsorship.service";
@@ -16,6 +19,23 @@ import { sponsorshipProviderConfigFingerprint } from "../sponsorship-budget.serv
 const RECONCILIATION_DELAY_MS = 2 * 60_000;
 const RECONCILIATION_BATCH_SIZE = 250;
 
+// Cloud Run recycles provider instances routinely; a config read that fails
+// during such a gap must not disable sponsorship on the first miss.
+const PROVIDER_CONFIG_READ_ATTEMPTS = 3;
+const PROVIDER_CONFIG_RETRY_DELAY_MS = 5_000;
+
+// Per-request admission is already fail-closed while the provider is
+// unreachable, so an immediate trip buys no safety and only extends the outage
+// past the provider's recovery. Reconciliation skips the tick instead and
+// trips only after this many consecutive failed ticks — an operator signal
+// for a sustained outage, not a lock for a blip.
+const CONSECUTIVE_CONFIG_FAILURES_BEFORE_TRIP = 3;
+
+export const KORA_CONFIG_UNAVAILABLE_BREAKER_REASON =
+  "Kora security configuration was unavailable during reconciliation";
+const BREAKER_RECOVERY_REASON =
+  "Kora security configuration became readable again during reconciliation";
+
 type ReconciliationRepository = Pick<
   SponsorshipBudgetRepository,
   | "listReconciliationCandidates"
@@ -23,10 +43,21 @@ type ReconciliationRepository = Pick<
   | "settleReservation"
   | "markChargedUnknown"
   | "getReservation"
+  | "getGlobalPolicy"
   | "tripGlobalBreaker"
+  | "resumeGlobalBreaker"
+  | "recordProviderConfigFailure"
+  | "resetProviderConfigFailures"
   | "markRedisSettled"
 >;
 type ReconciliationRedis = Pick<SponsorshipBudgetRedis, "settle" | "syncPolicy">;
+
+type ReconciliationOutcome =
+  | "redis_synced"
+  | "committed"
+  | "charged_unknown"
+  | "still_valid"
+  | "awaiting_expiry";
 
 export interface SponsorshipReconciliationDependencies {
   repository?: ReconciliationRepository;
@@ -37,6 +68,7 @@ export interface SponsorshipReconciliationDependencies {
   isBlockhashValid?: (blockhash: Blockhash) => Promise<boolean>;
   getProviderConfiguration?: () => Promise<SponsorshipProviderConfiguration>;
   now?: () => Date;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export async function reconcileSponsorshipBudgets(
@@ -54,6 +86,8 @@ export async function reconcileSponsorshipBudgets(
     dependencies.isBlockhashValid ??
     ((blockhash: Blockhash) => solanaRpc.isBlockhashValid(assertRpc(rpc), blockhash));
   const now = dependencies.now?.() ?? new Date();
+  const sleep =
+    dependencies.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   const updatedBefore = new Date(now.getTime() - RECONCILIATION_DELAY_MS).toISOString();
   const network = env.SOLANA_NETWORK === "mainnet-beta" ? "mainnet" : "devnet";
   const reservations = await repository.listReconciliationCandidates(
@@ -62,22 +96,75 @@ export async function reconcileSponsorshipBudgets(
     RECONCILIATION_BATCH_SIZE
   );
   const failures: Error[] = [];
+  const outcomes: Record<ReconciliationOutcome, number> = {
+    redis_synced: 0,
+    committed: 0,
+    charged_unknown: 0,
+    still_valid: 0,
+    awaiting_expiry: 0,
+  };
 
-  if (reservations.length === 0) return;
+  const globalPolicy = await repository.getGlobalPolicy(network);
+  const recoverableTrip = isRecoverableBreakerTrip(globalPolicy);
 
+  if (reservations.length === 0 && !recoverableTrip) {
+    logEvent("info", {
+      event: "sdp_api_sponsorship_reconciliation_tick",
+      network,
+      candidates: 0,
+      failed: 0,
+      batch_saturated: false,
+      ...outcomes,
+    });
+    return;
+  }
+
+  const getProviderConfiguration =
+    dependencies.getProviderConfiguration ??
+    (() => getManagedSponsorshipProviderConfiguration(env));
   let providerConfiguration: SponsorshipProviderConfiguration;
   try {
-    providerConfiguration = await (dependencies.getProviderConfiguration?.() ??
-      getManagedSponsorshipProviderConfiguration(env));
+    providerConfiguration = await readProviderConfiguration(getProviderConfiguration, sleep);
   } catch (error) {
-    await tripBreaker(
-      repository,
-      budgetRedis,
-      network,
-      "Kora security configuration was unavailable during reconciliation"
-    );
+    // With no live reservations there is nothing the breaker protects; the
+    // already-tripped policy stays down and the next tick probes again.
+    if (reservations.length > 0) {
+      await handleProviderConfigFailure(repository, budgetRedis, network);
+    }
     throw new Error("Kora security configuration is unavailable", { cause: error });
   }
+  await repository.resetProviderConfigFailures(network);
+
+  if (recoverableTrip) {
+    const resumed = await repository.resumeGlobalBreaker(
+      network,
+      KORA_CONFIG_UNAVAILABLE_BREAKER_REASON,
+      BREAKER_RECOVERY_REASON
+    );
+    if (resumed) {
+      logEvent("warn", {
+        event: "sdp_api_sponsorship_breaker_recovered",
+        network,
+        source: "reconciliation",
+      });
+      // A failed sync is repaired by the next admission: reserve() re-syncs
+      // every policy from Postgres before touching the Lua counters.
+      await budgetRedis.syncPolicy(resumed);
+    }
+  }
+
+  if (reservations.length === 0) {
+    logEvent("info", {
+      event: "sdp_api_sponsorship_reconciliation_tick",
+      network,
+      candidates: 0,
+      failed: 0,
+      batch_saturated: false,
+      ...outcomes,
+    });
+    return;
+  }
+
   const providerConfigFingerprint = sponsorshipProviderConfigFingerprint(providerConfiguration);
 
   for (const reservation of reservations) {
@@ -94,13 +181,14 @@ export async function reconcileSponsorshipBudgets(
         );
         throw new Error("Kora signer or security configuration does not match the reservation");
       }
-      await reconcileReservation({
+      const outcome = await reconcileReservation({
         reservation,
         repository,
         budgetRedis,
         getTransaction,
         isBlockhashValid,
       });
+      outcomes[outcome] += 1;
     } catch (error) {
       const failure = error instanceof Error ? error : new Error(String(error));
       failures.push(failure);
@@ -110,6 +198,15 @@ export async function reconcileSponsorshipBudgets(
       );
     }
   }
+
+  logEvent("info", {
+    event: "sdp_api_sponsorship_reconciliation_tick",
+    network,
+    candidates: reservations.length,
+    failed: failures.length,
+    batch_saturated: reservations.length === RECONCILIATION_BATCH_SIZE,
+    ...outcomes,
+  });
 
   if (failures.length > 0) {
     throw new AggregateError(
@@ -125,14 +222,14 @@ async function reconcileReservation(input: {
   budgetRedis: ReconciliationRedis;
   getTransaction: SponsorshipReconciliationDependencies["getTransaction"] & {};
   isBlockhashValid: SponsorshipReconciliationDependencies["isBlockhashValid"] & {};
-}): Promise<void> {
+}): Promise<ReconciliationOutcome> {
   const { reservation, repository, budgetRedis } = input;
   if (reservation.status === "committed" || reservation.status === "released") {
     if (reservation.actualLamports === null) {
       throw new Error("Terminal sponsorship reservation omitted actual lamports");
     }
     await syncRedisSettlement(repository, budgetRedis, reservation, reservation.actualLamports);
-    return;
+    return "redis_synced";
   }
   if (!reservation.signature) {
     await persistAmbiguousCharge({
@@ -143,7 +240,7 @@ async function reconcileReservation(input: {
       breakerReason: "Signature-less ambiguous reservation lost its durable transition",
       lostTransitionError: "Failed to persist signature-less ambiguous sponsorship outcome",
     });
-    return;
+    return "charged_unknown";
   }
 
   assertIsSignature(reservation.signature);
@@ -159,14 +256,14 @@ async function reconcileReservation(input: {
       );
     }
     await settleDurably(repository, budgetRedis, reservation, "committed", actualLamports);
-    return;
+    return "committed";
   }
 
   assertIsBlockhash(reservation.recentBlockhash);
-  if (await input.isBlockhashValid(reservation.recentBlockhash)) return;
+  if (await input.isBlockhashValid(reservation.recentBlockhash)) return "still_valid";
   if (reservation.missCount === 0) {
     await repository.recordReconciliationMiss(reservation.id, reservation.attempt, 0);
-    return;
+    return "awaiting_expiry";
   }
   await persistAmbiguousCharge({
     reservation,
@@ -176,6 +273,7 @@ async function reconcileReservation(input: {
     breakerReason: "Ambiguous unconfirmed reservation lost its durable transition",
     lostTransitionError: "Failed to retain ambiguous unconfirmed sponsorship charge",
   });
+  return "charged_unknown";
 }
 
 function feePayerSpendLamports(
@@ -245,13 +343,71 @@ async function syncRedisSettlement(
   }
 }
 
+function isRecoverableBreakerTrip(policy: SponsorshipBudgetPolicy | null): boolean {
+  // Only trips caused by a transient config-read failure self-heal. Operator
+  // kills and integrity trips (overspend, lost durable transitions) stay down
+  // until a human resumes them.
+  return (
+    policy !== null &&
+    !policy.enabled &&
+    policy.updatedBy === SPONSORSHIP_BREAKER_OPERATOR &&
+    policy.updateReason === KORA_CONFIG_UNAVAILABLE_BREAKER_REASON
+  );
+}
+
+async function readProviderConfiguration(
+  getProviderConfiguration: () => Promise<SponsorshipProviderConfiguration>,
+  sleep: (ms: number) => Promise<void>
+): Promise<SponsorshipProviderConfiguration> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= PROVIDER_CONFIG_READ_ATTEMPTS; attempt += 1) {
+    try {
+      return await getProviderConfiguration();
+    } catch (error) {
+      lastError = error;
+      if (attempt < PROVIDER_CONFIG_READ_ATTEMPTS) {
+        await sleep(PROVIDER_CONFIG_RETRY_DELAY_MS);
+      }
+    }
+  }
+  throw lastError;
+}
+
+async function handleProviderConfigFailure(
+  repository: ReconciliationRepository,
+  budgetRedis: ReconciliationRedis,
+  network: SponsorshipNetwork
+): Promise<void> {
+  const consecutiveFailures = await repository.recordProviderConfigFailure(network);
+  if (consecutiveFailures >= CONSECUTIVE_CONFIG_FAILURES_BEFORE_TRIP) {
+    await tripBreaker(repository, budgetRedis, network, KORA_CONFIG_UNAVAILABLE_BREAKER_REASON, {
+      recoverable: true,
+    });
+    return;
+  }
+  logEvent("warn", {
+    event: "sdp_api_sponsorship_config_read_failed",
+    network,
+    consecutive_failures: consecutiveFailures,
+    trip_threshold: CONSECUTIVE_CONFIG_FAILURES_BEFORE_TRIP,
+  });
+}
+
 async function tripBreaker(
   repository: ReconciliationRepository,
   budgetRedis: ReconciliationRedis,
   network: SponsorshipNetwork,
-  reason: string
+  reason: string,
+  options: { recoverable?: boolean } = {}
 ): Promise<void> {
-  const policy = await repository.tripGlobalBreaker(network, reason);
+  const policy = await repository.tripGlobalBreaker(network, reason, options);
+  logEvent("error", {
+    event: "sdp_api_sponsorship_breaker_tripped",
+    network,
+    reason,
+    already_tripped: policy === null,
+    source: "reconciliation",
+  });
   if (policy) await budgetRedis.syncPolicy(policy);
 }
 

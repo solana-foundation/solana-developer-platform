@@ -42,8 +42,9 @@ interface KoraClientTransport {
 
 export type KoraAdapterConfig = KoraClientOptions & {
   /**
-   * Optional request timeout in milliseconds.
-   * Note: The Kora SDK does not currently support timeouts directly.
+   * Per-call timeout in milliseconds. The Kora SDK offers no abort hook, so
+   * the adapter races each call against this deadline; the underlying fetch
+   * is abandoned rather than aborted.
    */
   timeoutMs?: number;
 
@@ -104,6 +105,7 @@ export class KoraAdapter implements FeePaymentPort {
             identityTokenProvider,
           })
         : new KoraClient({ rpcUrl, apiKey, getRecaptchaToken, hmacSecret }));
+    this.client = withCallTimeouts(this.client, config.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     this.userId = userId?.trim() || "sdp:unscoped";
   }
 
@@ -345,81 +347,59 @@ function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown error";
 }
 
-// Pinned to Kora's complete fee-payer authority schema. Managed sponsorship
-// assumes zero additional lamport outflow only when every authority is present
-// and explicitly disabled; runtime schema drift fails closed, and `satisfies
-// FeePayerPolicy` fails the build when the @solana/kora schema changes.
-const ZERO_OUTFLOW_FEE_PAYER_POLICY = {
-  system: {
-    allow_transfer: false,
-    allow_assign: false,
-    allow_create_account: false,
-    allow_allocate: false,
-    nonce: {
-      allow_initialize: false,
-      allow_advance: false,
-      allow_authorize: false,
-      allow_withdraw: false,
-    },
-  },
-  spl_token: {
-    allow_transfer: false,
-    allow_burn: false,
-    allow_close_account: false,
-    allow_approve: false,
-    allow_revoke: false,
-    allow_set_authority: false,
-    allow_mint_to: false,
-    allow_initialize_mint: false,
-    allow_initialize_account: false,
-    allow_initialize_multisig: false,
-    allow_freeze_account: false,
-    allow_thaw_account: false,
-  },
-  token_2022: {
-    allow_transfer: false,
-    allow_burn: false,
-    allow_close_account: false,
-    allow_approve: false,
-    allow_revoke: false,
-    allow_set_authority: false,
-    allow_mint_to: false,
-    allow_initialize_mint: false,
-    allow_initialize_account: false,
-    allow_initialize_multisig: false,
-    allow_freeze_account: false,
-    allow_thaw_account: false,
-  },
-} as const satisfies FeePayerPolicy;
-
-/** Only the complete pinned policy with every authority false proves zero outflow. */
+// Managed sponsorship assumes zero additional lamport outflow only when every
+// authority Kora reports is explicitly disabled. Checking the values rather than
+// pinning the schema keeps a newly added authority meaningful: one that arrives
+// disabled is still proof of zero outflow, while one that arrives enabled fails
+// closed even though this code has never heard of it.
 function policyMaySpendLamports(policy: FeePayerPolicy): boolean {
-  return !matchesPinnedFalsePolicy(policy, ZERO_OUTFLOW_FEE_PAYER_POLICY);
+  return !(reportsRequiredAuthorities(policy) && everyAuthorityDisabled(policy));
 }
 
-function matchesPinnedFalsePolicy(policy: unknown, schema: unknown): boolean {
-  if (schema === false) return policy === false;
-  if (
-    policy === null ||
-    typeof policy !== "object" ||
-    Array.isArray(policy) ||
-    schema === null ||
-    typeof schema !== "object" ||
-    Array.isArray(schema)
-  ) {
-    return false;
-  }
-  const actual = policy as Record<string, unknown>;
-  const expected = schema as Record<string, unknown>;
-  const actualKeys = Object.keys(actual).sort();
-  const expectedKeys = Object.keys(expected).sort();
-  if (
-    actualKeys.length !== expectedKeys.length ||
-    actualKeys.some((key, index) => key !== expectedKeys[index])
-  ) {
-    return false;
-  }
-  return expectedKeys.every((key) => matchesPinnedFalsePolicy(actual[key], expected[key]));
+// Kora reports its policy as JSON, so anything that is not a plain object with
+// its authorities as own properties is not a policy this code can vouch for.
+// Reading inherited or hidden members would let an empty-looking payload pass
+// as proof of zero outflow while carrying an enabled authority out of sight.
+function isPlainRecord(value: unknown): value is Record<PropertyKey, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+const REQUIRED_DISABLED_AUTHORITIES = [
+  ["system", "allow_transfer"],
+  ["system", "allow_assign"],
+  ["system", "allow_create_account"],
+  ["system", "allow_allocate"],
+  ["system", "nonce", "allow_withdraw"],
+  ["spl_token", "allow_transfer"],
+  ["spl_token", "allow_close_account"],
+  ["token_2022", "allow_transfer"],
+  ["token_2022", "allow_close_account"],
+] as const;
+
+// A policy Kora truncated, or one this code failed to parse, must not read as
+// proof of zero outflow: the authorities that move lamports have to be present
+// and explicitly disabled before the rest of the report is worth checking.
+function reportsRequiredAuthorities(policy: FeePayerPolicy): boolean {
+  return REQUIRED_DISABLED_AUTHORITIES.every((path) => {
+    let current: unknown = policy;
+    for (const key of path) {
+      if (!isPlainRecord(current) || !Object.hasOwn(current, key)) return false;
+      current = current[key];
+    }
+    return current === false;
+  });
+}
+
+function everyAuthorityDisabled(value: unknown): boolean {
+  if (typeof value === "boolean") return value === false;
+  if (!isPlainRecord(value)) return false;
+  const keys: PropertyKey[] = [
+    ...Object.getOwnPropertyNames(value),
+    ...Object.getOwnPropertySymbols(value),
+  ];
+  return keys.every((key) => everyAuthorityDisabled(value[key]));
 }
 
 function extractRpcErrorCode(error: unknown): number | undefined {
@@ -441,7 +421,16 @@ function isRetryableSignAndSendError(error: unknown): boolean {
     message.includes("502") ||
     message.includes("503") ||
     message.includes("bad gateway") ||
-    message.includes("service unavailable")
+    message.includes("service unavailable") ||
+    // Connection-level failures while a Kora instance is being replaced.
+    // Retrying is idempotent even when the first attempt may have reached
+    // Kora: the transaction bytes are fixed, ed25519 signing is
+    // deterministic, so a duplicate submit carries the same signature and
+    // the cluster deduplicates it.
+    message.includes("fetch failed") ||
+    message.includes("econnrefused") ||
+    message.includes("econnreset") ||
+    message.includes("socket hang up")
   );
 }
 
@@ -472,6 +461,45 @@ function mapKoraErrorCode(code: number): import("./port").FeePaymentErrorCode {
     default:
       return "NETWORK_ERROR";
   }
+}
+
+const DEFAULT_TIMEOUT_MS = 10_000;
+
+// The Kora SDK performs a bare fetch with no abort hook, so a hung connection
+// would otherwise hold the caller until the platform request timeout. Race
+// every call against a deadline; the timeout message is classified as
+// retryable by the transient-error checks above.
+function withCallTimeouts(client: KoraClientTransport, timeoutMs: number): KoraClientTransport {
+  return {
+    getPayerSigner: () => withTimeout(client.getPayerSigner(), timeoutMs, "getPayerSigner"),
+    signTransaction: (request) =>
+      withTimeout(client.signTransaction(request), timeoutMs, "signTransaction"),
+    signAndSendTransaction: (request) =>
+      withTimeout(client.signAndSendTransaction(request), timeoutMs, "signAndSendTransaction"),
+    estimateTransactionFee: (request) =>
+      withTimeout(client.estimateTransactionFee(request), timeoutMs, "estimateTransactionFee"),
+    getSupportedTokens: () =>
+      withTimeout(client.getSupportedTokens(), timeoutMs, "getSupportedTokens"),
+    getConfig: () => withTimeout(client.getConfig(), timeoutMs, "getConfig"),
+  };
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Kora ${label} timed out after ${ms}ms`));
+    }, ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
 }
 
 function sleep(ms: number): Promise<void> {

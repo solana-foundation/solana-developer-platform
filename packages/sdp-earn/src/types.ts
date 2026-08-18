@@ -14,6 +14,7 @@ import type {
   EarnStrategyRiskMetadata,
   EarnStrategySourceKind,
   SdpEnvironment,
+  SolanaCluster,
 } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 
@@ -57,6 +58,18 @@ export interface ProviderStrategySnapshot {
   liquidityTerm: EarnLiquidityTerm;
   redemptionDelayDays?: number;
   riskMetadata?: EarnStrategyRiskMetadata;
+  /**
+   * The cluster this strategy's instrument lives on. REQUIRED — every provider
+   * must state it rather than let the sync assume the environment's own
+   * cluster, because that assumption is exactly what a single-cluster provider
+   * catalogued into the wrong environment would violate silently (see
+   * `EarnStrategy` in @sdp/types). Ground answers with its environment's
+   * cluster. Kamino answers per data source: `mainnet-beta` from the REST shelf
+   * in production, `devnet` from the on-chain read elsewhere — and that second
+   * one is measured (genesis hash) rather than inferred from the environment,
+   * which is the whole point of this field.
+   */
+  hostCluster: SolanaCluster;
 }
 
 /**
@@ -73,6 +86,54 @@ export interface EarnVaultProvider {
   declaredSupport: EarnDeclaredStrategySupport;
   /** Live strategy catalogue; synced into `earn_strategies` by the API. */
   listStrategies(ctx: EarnRuntimeContext): Promise<ProviderStrategySnapshot[]>;
+}
+
+/**
+ * The volatile half of a catalogue row: the numbers that move on their own
+ * between syncs. Deliberately NOT a whole snapshot — a refresh may only update
+ * figures, never a strategy's identity, mints, or liquidity terms, so nothing
+ * on this shape can admit a vault the catalogue gate would refuse.
+ */
+export interface ProviderStrategyMetrics {
+  /** Must match a `providerReference` the catalogue already holds. */
+  providerReference: string;
+  /** Latest APY as a decimal string; omitted when the provider has no rate. */
+  currentApy?: string;
+  /**
+   * Volatile risk-metadata figures (TVL, holders, utilization). MERGED over the
+   * stored metadata rather than replacing it, so slow-moving fields the
+   * catalogue sync owns — curator above all — survive a refresh that does not
+   * report them.
+   */
+  riskMetadata?: EarnStrategyRiskMetadata;
+}
+
+/**
+ * Optional capability: rates fresh enough to quote.
+ *
+ * The catalogue sync runs hourly because catalogue DRIFT is slow — a provider
+ * onboarding or delisting a vault. Rates are not slow, and an hour-old APY on a
+ * comparison table is a number a customer could act on wrongly. A provider that
+ * can serve its whole shelf's live figures in a call or two implements this,
+ * and a short-cadence pass refreshes only those figures in place.
+ *
+ * Why a write pass and not a live read at request time: the strategies route
+ * reads exactly ONE source for the state it reports (ADR 0002 addendum), and
+ * overlaying live numbers onto DB rows at read time would blend two. Freshness
+ * comes from cadence instead, so the route stays a plain DB read and every
+ * consumer — API, dashboard, a partner's own cache — sees the same figures.
+ *
+ * Discovered via `supportsLiveMetrics` (capabilities.ts), never provider-id
+ * checks. A provider that would need one request per vault should NOT implement
+ * this; the pass would cost more than the staleness it removes.
+ */
+export interface EarnLiveMetricsProvider extends EarnVaultProvider {
+  /**
+   * Current figures for every strategy this provider lists. Returning a
+   * reference the catalogue does not hold is harmless — the refresh updates
+   * existing rows and never inserts.
+   */
+  listStrategyMetrics(ctx: EarnRuntimeContext): Promise<ProviderStrategyMetrics[]>;
 }
 
 export interface EarnPortfolioWalletCreateInput {
@@ -283,6 +344,174 @@ export interface EarnPortfolioWalletProvider extends EarnVaultProvider {
     ctx: EarnRuntimeContext,
     input: EarnPortfolioAddressBookEntryInput
   ): Promise<EarnPortfolioAddressBookEntryResult>;
+}
+
+/**
+ * One account slot in a built instruction.
+ *
+ * `role` mirrors `@solana/kit`'s `AccountRole` numeric enum (0 readonly,
+ * 1 writable, 2 readonly-signer, 3 writable-signer) WITHOUT importing it: this
+ * package's single dependency is `@sdp/types`, and taking `@solana/kit` here
+ * would put a chain SDK inside the hourly catalogue cron. The numbers are the
+ * wire format, and the provider client re-labels them at its own boundary.
+ */
+export interface EarnVaultAccountRef {
+  address: string;
+  role: number;
+}
+
+/** One built instruction, as plain data. `data` is base64. */
+export interface EarnVaultInstruction {
+  programAddress: string;
+  accounts: EarnVaultAccountRef[];
+  data: string;
+}
+
+/**
+ * Unsigned work for a non-custodial vault, ready for the API to compile.
+ *
+ * `transactions` is a list of TRANSACTION-SIZED batches, not one flat list: a
+ * multi-reserve vault exit emits several instructions each carrying the vault's
+ * full reserve account list and can exceed Solana's 1232-byte packet. Returning
+ * batches makes that the builder's problem, where the vault's shape is known,
+ * rather than the caller's at compile time.
+ */
+export interface EarnVaultTransactionPlan {
+  cluster: SolanaCluster;
+  transactions: EarnVaultInstruction[][];
+  /** Address lookup tables the caller should apply when compiling. */
+  lookupTables: string[];
+  /**
+   * Asset addresses observed from the live vault state used to build this plan.
+   *
+   * Required so the execution layer can compare builder truth with catalogue
+   * metadata before signing. Amount validation alone is insufficient: a stale
+   * or poisoned catalogue row could otherwise apply policy and ledger labels to
+   * one mint while the instructions actually move another.
+   */
+  assetIdentity: EarnVaultAssetIdentity;
+  /**
+   * The amounts the instructions above actually ENCODE, canonical to each
+   * mint's own precision.
+   *
+   * Separate from the request because they need not be the same number: a chain
+   * SDK converts decimals to mint atoms and typically FLOORS, so a request of
+   * `1.0000009` against a six-decimal mint encodes `1.000000`. A provider that
+   * refuses over-precise input (the right answer) still re-serialises here, so
+   * `"1.500"` returns as `"1.5"`. Ledger these rather than the raw request: only
+   * the builder knows the mint's decimals, and a movement row is a claim about
+   * what moved on chain.
+   */
+  accepted?: EarnVaultAcceptedAmounts;
+}
+
+/** Solana asset identity bound to an unsigned vault transaction plan. */
+export interface EarnVaultAssetIdentity {
+  /** Mint whose tokens the deposit instructions consume. */
+  depositTokenMint: string;
+  /** Mint whose receipt/share tokens the vault issues. */
+  shareMint: string;
+}
+
+/** What a built plan encodes, per mint. All values are decimal strings. */
+export interface EarnVaultAcceptedAmounts {
+  amount?: string;
+  minSharesOut?: string;
+  shares?: string;
+}
+
+export interface EarnVaultDepositInput {
+  /** Vault address — the strategy's `providerReference`. */
+  providerReference: string;
+  /** Address whose tokens move and whose shares are minted. */
+  owner: string;
+  /** Deposit amount in the vault token's own units, as a decimal string. */
+  amount: string;
+  /** Minimum shares to accept, as a decimal string — slippage floor. */
+  minSharesOut?: string;
+}
+
+export interface EarnVaultWithdrawInput {
+  providerReference: string;
+  owner: string;
+  /** Shares to redeem, as a decimal string. */
+  shares: string;
+}
+
+export interface EarnVaultPositionInput {
+  owner: string;
+  /** Vault addresses to read. Empty means every owner-held vault the provider can discover. */
+  providerReferences: readonly string[];
+}
+
+/** One owner's live holding in one vault. All amounts are decimal strings. */
+export interface EarnVaultPositionSnapshot {
+  providerReference: string;
+  owner: string;
+  cluster: SolanaCluster;
+  shares: string;
+  /** Value of those shares in the deposit token; omitted when unreadable. */
+  tokenValue?: string;
+  tokenMint: string;
+  shareMint: string;
+}
+
+/**
+ * Optional capability: NON-CUSTODIAL vaults the customer's own wallet deposits
+ * into (Kamino's K-Vaults; `earnDepositStyle` calls these `vault_direct`).
+ *
+ * The shape difference from `EarnPortfolioWalletProvider` is the whole point.
+ * A portfolio provider CUSTODIES: SDP asks it to provision a wallet and the
+ * customer funds that address. A vault-direct provider custodies nothing —
+ * there is no address to send to, and stablecoins sent to the vault's program
+ * account are LOST. Money moves only when a wallet SDP can sign for submits an
+ * instruction, so this capability builds unsigned plans and SDP's own custody
+ * and signing services do the rest.
+ *
+ * Everything crossing this contract is plain data (see the types above), so a
+ * provider client may speak whatever chain SDK it likes without that SDK
+ * reaching this package. Discovered via `supportsVaultDirect` (capabilities.ts),
+ * never provider-id checks.
+ */
+export interface EarnVaultDirectProvider extends EarnVaultProvider {
+  buildVaultDeposit(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultDepositInput
+  ): Promise<EarnVaultTransactionPlan>;
+  /**
+   * Live positions. Read from chain per call and never persisted — positions are
+   * provider truth (ADR 0002), and for a vault-direct provider "the provider" is
+   * the chain itself.
+   */
+  readVaultPositions(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultPositionInput
+  ): Promise<EarnVaultPositionSnapshot[]>;
+}
+
+/**
+ * Optional capability: the money-OUT half of the vault-direct model, kept
+ * SEPARATE from money-in deliberately.
+ *
+ * Splitting it is not taxonomy for its own sake. A vault EXIT is the case that
+ * genuinely needs several transactions — one withdraw instruction per reserve
+ * the vault must draw from, each carrying the vault's full remaining-accounts
+ * list — so `transactions` having more than one entry is normal here and
+ * impossible on deposit. Folding both into one capability therefore made "can
+ * build a deposit" silently assert "can build a correctly BATCHED exit", which
+ * is a different and much harder claim.
+ *
+ * Discovered via `supportsVaultWithdraw` (capabilities.ts). A provider may
+ * implement `EarnVaultDirectProvider` alone, and an exit route must then refuse
+ * rather than assume. Note this says only whether the ROUTE CAN BE BUILT — it is
+ * never a permission gate, because ADR 0002 forbids money-out inheriting any
+ * money-in gate.
+ */
+export interface EarnVaultWithdrawProvider extends EarnVaultDirectProvider {
+  buildVaultWithdrawal(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultWithdrawInput
+  ): Promise<EarnVaultTransactionPlan>;
 }
 
 /**

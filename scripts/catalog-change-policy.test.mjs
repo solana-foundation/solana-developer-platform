@@ -37,7 +37,7 @@ test("rejects product PRs that update English and localized catalogs together", 
 test("allows the automated release branch to synchronize translations", () => {
   const result = checkCatalogChangePolicy({
     changedFiles: ["apps/sdp-web/messages/en/shared.json", "apps/sdp-web/messages/fr/shared.json"],
-    headBranch: "codex/release-main",
+    headBranch: "sdp/release-main",
     headRepository: "solana-foundation/solana-developer-platform",
     baseRepository: "solana-foundation/solana-developer-platform",
   });
@@ -53,7 +53,7 @@ test("rejects a fork that spoofs the automated release branch name", () => {
           "apps/sdp-web/messages/en/shared.json",
           "apps/sdp-web/messages/fr/shared.json",
         ],
-        headBranch: "codex/release-main",
+        headBranch: "sdp/release-main",
         headRepository: "contributor/solana-developer-platform",
         baseRepository: "solana-foundation/solana-developer-platform",
       }),
@@ -69,7 +69,7 @@ test("rejects an unverified automated release branch", () => {
           "apps/sdp-web/messages/en/shared.json",
           "apps/sdp-web/messages/fr/shared.json",
         ],
-        headBranch: "codex/release-main",
+        headBranch: "sdp/release-main",
       }),
     /must change only English source catalogs/
   );
