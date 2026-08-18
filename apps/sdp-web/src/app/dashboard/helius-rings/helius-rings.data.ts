@@ -109,22 +109,31 @@ export async function createRingsWallet(input: {
   return { wallet: body.data.wallet, pendingIntegration: false };
 }
 
-export async function prepareRingsTestOperation(input: {
+export type RingsOpType =
+  | "shield"
+  | "transfer_registered"
+  | "transfer_anonymous"
+  | "withdraw"
+  | "merge"
+  | "timelock_create";
+
+export interface PrepareRingsOperationInput {
   walletId: string;
-}): Promise<{ operation?: RingsOperationDetail; error?: string }> {
+  opType: RingsOpType;
+  asset?: { mint: string; amountRaw: string };
+  to?: string;
+  zoneId?: string;
+  transferMode?: "registered" | "anonymous";
+  timelock?: { unlockAt: string; beneficiary: string };
+}
+
+export async function prepareRingsOperation(
+  input: PrepareRingsOperationInput
+): Promise<{ operation?: RingsOperationDetail; error?: string }> {
   const response = await fetch("/api/dashboard/helius-rings/operations", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      walletId: input.walletId,
-      opType: "shield",
-      asset: {
-        // Wrapped SOL on devnet; seeded in the rings asset allowlist.
-        mint: "So11111111111111111111111111111111111111112",
-        amountRaw: "1000000",
-      },
-      clientNonce: crypto.randomUUID(),
-    }),
+    body: JSON.stringify({ ...input, clientNonce: crypto.randomUUID() }),
     cache: "no-store",
   });
   const body = (await response.json().catch(() => ({}))) as Envelope<{
@@ -135,3 +144,48 @@ export async function prepareRingsTestOperation(input: {
   }
   return { operation: body.data.operation };
 }
+
+export interface RingsZone {
+  id: string;
+  name: string;
+  kind: "treasury" | "public";
+}
+
+export function fetchRingsZones(
+  walletId: string,
+  fallbackError: string
+): Promise<{ zones: RingsZone[] }> {
+  return getJson(
+    `/api/dashboard/helius-rings/wallets/${encodeURIComponent(walletId)}/zones`,
+    fallbackError
+  );
+}
+
+export async function createRingsZone(input: {
+  walletId: string;
+  name: string;
+  kind: RingsZone["kind"];
+}): Promise<{ zone?: RingsZone; error?: string }> {
+  const response = await fetch(
+    `/api/dashboard/helius-rings/wallets/${encodeURIComponent(input.walletId)}/zones`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: input.name, kind: input.kind }),
+      cache: "no-store",
+    }
+  );
+  const body = (await response.json().catch(() => ({}))) as Envelope<{ zone: RingsZone }>;
+  if (!response.ok || !body.data) {
+    return { error: body.error?.message };
+  }
+  return { zone: body.data.zone };
+}
+
+/** Devnet assets seeded in the rings allowlist. */
+export const RINGS_ALLOWLISTED_ASSETS = [
+  // biome-ignore lint/security/noSecrets: wrapped SOL mint address, not a secret.
+  { mint: "So11111111111111111111111111111111111111112", symbol: "SOL", decimals: 9 },
+  // biome-ignore lint/security/noSecrets: devnet USDC mint address, not a secret.
+  { mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", symbol: "USDC", decimals: 6 },
+] as const;
