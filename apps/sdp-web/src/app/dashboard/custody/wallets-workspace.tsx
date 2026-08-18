@@ -5,10 +5,15 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
+import {
+  dashboardWorkspaceOverviewPanelClassName,
+  dashboardWorkspacePlaygroundPanelClassName,
+} from "@/components/dashboard-workspace-panel";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
+import { cn } from "@/lib/utils";
 import type { KnownCustodyProvider } from "./provider-catalog";
 import { WalletsOverview } from "./wallets-overview";
 
@@ -108,36 +113,45 @@ export function WalletsWorkspace({
   return (
     <div className="h-full min-h-0 w-full" data-wallet-root>
       <DashboardWorkspaceTabShell
-        disableOverviewInitialAnimation
-        overviewClassName="space-y-6"
-        overview={
-          <div className="contents" data-wallet-panel="overview">
-            <WalletsOverview
-              enabledProviders={enabledProviders}
-              configsError={configsError}
-              wallets={wallets}
-              walletsError={walletsError}
-              canManageCustody={dashboardAccess.capabilities.canManageCustody}
-              onCreateWallet={openWalletSetup}
-            />
-          </div>
-        }
-        playground={
-          <WalletsPlayground
-            apiBaseUrl={apiBaseUrl}
-            apiKeyValue={playgroundApiKeyValue}
-            connectedProviders={connectedProviders}
-            configsError={configsError}
-            hasActiveApiKeys={apiKeys.length > 0}
-            wallets={wallets.map((wallet) => ({
-              walletId: wallet.walletId,
-              label: wallet.label,
-              provider: wallet.provider ?? null,
-              publicKey: wallet.publicKey,
-            }))}
-            walletsError={walletsError}
-          />
-        }
+        panels={[
+          {
+            id: "overview",
+            className: cn(dashboardWorkspaceOverviewPanelClassName, "space-y-6"),
+            disableInitialAnimation: true,
+            content: (
+              <div className="contents" data-wallet-panel="overview">
+                <WalletsOverview
+                  enabledProviders={enabledProviders}
+                  configsError={configsError}
+                  wallets={wallets}
+                  walletsError={walletsError}
+                  canManageCustody={dashboardAccess.capabilities.canManageCustody}
+                  onCreateWallet={openWalletSetup}
+                />
+              </div>
+            ),
+          },
+          {
+            id: "playground",
+            className: dashboardWorkspacePlaygroundPanelClassName,
+            content: (
+              <WalletsPlayground
+                apiBaseUrl={apiBaseUrl}
+                apiKeyValue={playgroundApiKeyValue}
+                connectedProviders={connectedProviders}
+                configsError={configsError}
+                hasActiveApiKeys={apiKeys.length > 0}
+                wallets={wallets.map((wallet) => ({
+                  walletId: wallet.walletId,
+                  label: wallet.label,
+                  provider: wallet.provider ?? null,
+                  publicKey: wallet.publicKey,
+                }))}
+                walletsError={walletsError}
+              />
+            ),
+          },
+        ]}
       />
     </div>
   );
