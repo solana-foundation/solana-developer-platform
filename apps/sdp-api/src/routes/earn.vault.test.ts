@@ -7,7 +7,10 @@ import {
   type EarnStrategyRow,
   type UpsertEarnStrategyInput,
 } from "@/db/repositories";
+import { createPostgresPolicyRepository } from "@/db/repositories/policy.repository.postgres";
 import app from "@/index";
+import { buildEarnVaultDepositFingerprint } from "@/lib/idempotency";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
@@ -96,6 +99,45 @@ async function seedWallet(params: {
         params.providerWalletId,
         params.publicKey ?? WALLET_ADDRESS
       ),
+  ]);
+}
+
+async function seedConnectionWallet(): Promise<void> {
+  await getDb(env).batch([
+    getDb(env)
+      .prepare(
+        `INSERT INTO provider_credentials (
+           id, organization_id, project_id, provider, label, scope, source,
+           storage_backend, status, created_by
+         ) VALUES ('pcred_earn_vault', ?, ?, 'privy', 'Vault BYOK', 'project',
+                   'runtime', 'runtime_env', 'active', ?)`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_connections (
+           id, organization_id, project_id, provider, scope,
+           provider_credential_id, provider_credential_scope_key, status,
+           provider_account_fingerprint, created_by
+         ) VALUES ('cconn_earn_vault', ?, ?, 'privy', 'project',
+                   'pcred_earn_vault', ?, 'pending', 'sha256:test', ?)`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_PROJECT.id, TEST_USER.id),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets (
+           id, custody_connection_id, wallet_id, public_key, status
+         ) VALUES ('cwlt_earn_vault_connection', 'cconn_earn_vault',
+                   'privy_earn_vault_connection', ?, 'active')`
+      )
+      .bind(WALLET_ADDRESS),
+    getDb(env).prepare(
+      `UPDATE custody_connections
+         SET default_custody_wallet_id = 'cwlt_earn_vault_connection',
+             status = 'active', last_check_status = 'success',
+             last_check_at = sdp_iso_now(), activated_at = sdp_iso_now()
+         WHERE id = 'cconn_earn_vault'`
+    ),
   ]);
 }
 
@@ -193,7 +235,11 @@ async function seedStrategy(
   return strategy;
 }
 
-function postVaultDeposit(body: Record<string, unknown>) {
+function postVaultDeposit(body: Record<string, unknown>, idempotencyKey?: string) {
+  const request = { ...body };
+  const key =
+    idempotencyKey ?? (typeof request.requestId === "string" ? request.requestId : undefined);
+  delete request.requestId;
   return app.request(
     "/v1/earn/vault-deposits",
     {
@@ -201,8 +247,9 @@ function postVaultDeposit(body: Record<string, unknown>) {
       headers: {
         Authorization: `Bearer ${TEST_API_KEY.raw}`,
         "Content-Type": "application/json",
+        ...(key === undefined ? {} : { "Idempotency-Key": key }),
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(request),
     },
     env
   );
@@ -289,7 +336,7 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
 });
 
 describe("POST /v1/earn/vault-deposits — request validation", () => {
-  it("requires a requestId, because the chain has no dedupe of its own", async () => {
+  it("requires an Idempotency-Key header, because the chain has no dedupe of its own", async () => {
     await seedAuth();
     const strategy = await seedStrategy();
 
@@ -300,6 +347,32 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
     });
 
     expect(res.status).toBe(400);
+  });
+
+  it("rejects the retired body requestId source even when the canonical header is present", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    const res = await app.request(
+      "/v1/earn/vault-deposits",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+          "Idempotency-Key": "vault-header-key",
+        },
+        body: JSON.stringify({
+          strategyId: strategy.id,
+          custodyWalletId: "cwlt_unused",
+          amount: "10",
+          requestId: crypto.randomUUID(),
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    expect(depositIntoVault).not.toHaveBeenCalled();
   });
 
   it("rejects a non-positive amount", async () => {
@@ -398,6 +471,91 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
       }),
       expect.any(Object)
     );
+  });
+
+  it("accepts a connection-backed custody wallet row", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    await seedConnectionWallet();
+
+    const res = await postVaultDeposit({
+      strategyId: strategy.id,
+      custodyWalletId: "cwlt_earn_vault_connection",
+      amount: "10",
+      requestId: crypto.randomUUID(),
+    });
+
+    expect(res.status).toBe(200);
+    expect(depositIntoVault).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({
+        wallet: expect.objectContaining({
+          id: "cwlt_earn_vault_connection",
+          custodyConnectionId: "cconn_earn_vault",
+        }),
+      }),
+      expect.any(Object)
+    );
+  });
+
+  it("replays a pending policy approval for the same Idempotency-Key", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    await seedWallet({
+      configId: "cfg_earn_vault_pending",
+      custodyWalletId: "cwlt_earn_vault_pending",
+      providerWalletId: "privy_earn_vault_pending",
+    });
+    const key = "vault-pending-approval-key";
+    const fingerprint = buildEarnVaultDepositFingerprint({
+      environment: "sandbox",
+      provider: strategy.provider,
+      providerReference: strategy.provider_reference,
+      custodyWalletId: "cwlt_earn_vault_pending",
+      amount: "10",
+      minSharesOut: null,
+    });
+    const policyRepo = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+    );
+    const operation = await policyRepo.createWalletOperation({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: "cwlt_earn_vault_pending",
+      walletId: "privy_earn_vault_pending",
+      apiKeyId: TEST_API_KEY.id,
+      source: "earn_vault_deposit",
+      operationFamily: "program",
+      operationType: "earn_vault_deposit",
+      asset: USDC_MINT,
+      amount: "10",
+      destination: strategy.provider_reference,
+      rawPayload: { idempotencyFingerprint: fingerprint },
+      idempotencyKey: key,
+      status: "pending_approval",
+    });
+    expect(operation).not.toBeNull();
+
+    const response = await postVaultDeposit(
+      {
+        strategyId: strategy.id,
+        custodyWalletId: "cwlt_earn_vault_pending",
+        amount: "10",
+      },
+      key
+    );
+
+    expect(response.status).toBe(202);
+    expect(depositIntoVault).not.toHaveBeenCalled();
+    const count = await getDb(env)
+      .prepare(
+        `SELECT COUNT(*) AS count FROM wallet_operations
+         WHERE organization_id = ? AND project_id = ? AND idempotency_key = ?`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id, key)
+      .first<{ count: number | string }>();
+    expect(Number(count?.count ?? 0)).toBe(1);
   });
 
   it("rejects a provider wallet id even when scoped configurations reuse it", async () => {

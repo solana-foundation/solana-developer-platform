@@ -1,5 +1,6 @@
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
+import { SdpKaminoError } from "@sdp/kamino";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types";
 import { address } from "@solana/kit";
@@ -13,7 +14,6 @@ import { badRequest, internalError } from "@/lib/errors";
 import { buildEarnVaultDepositFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import * as solanaServices from "@/services/solana";
-import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import {
   earnClusterFor,
@@ -45,7 +45,7 @@ export interface VaultDepositInput {
   provider: string;
   /** Vault address — the strategy's providerReference. */
   providerReference: string;
-  wallet: CustodyWallet;
+  wallet: { id: string; walletId: string; publicKey: string };
   /** Trusted catalogue metadata persisted so delisted positions still render. */
   tokenMint: string;
   shareMint: string;
@@ -210,6 +210,9 @@ export async function depositIntoVault(
     plan = appendRequestMemo(built, input.requestId);
   } catch (error) {
     getLogger().error({ error }, "vault deposit: build failed before signing");
+    if (error instanceof SdpKaminoError && error.code === "INVALID_AMOUNT") {
+      throw badRequest(error.message);
+    }
     throw error;
   }
 
@@ -246,11 +249,11 @@ export async function depositIntoVault(
   let signed: SignedVaultTransaction;
   try {
     const signer = await deadline.run("Resolving the vault deposit signer", () =>
-      solanaServices.createOrgSigner(
+      solanaServices.createOrgSignerForCustodyWallet(
         env,
         input.organizationId,
         input.projectId,
-        input.wallet.walletId
+        input.wallet.id
       )
     );
     if (signer.address !== input.wallet.publicKey) {

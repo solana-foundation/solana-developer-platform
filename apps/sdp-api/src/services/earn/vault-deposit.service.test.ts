@@ -1,3 +1,4 @@
+import { SdpKaminoError } from "@sdp/kamino";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresEarnVaultRepository } from "@/db/repositories/earn-vault.repository";
@@ -15,7 +16,7 @@ const buildVaultDeposit = vi.hoisted(() => vi.fn());
 const signVaultPlan = vi.hoisted(() => vi.fn());
 const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
 const simulateVaultPlan = vi.hoisted(() => vi.fn());
-const createOrgSigner = vi.hoisted(() => vi.fn());
+const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 const resolveVaultDirectClient = vi.hoisted(() => vi.fn());
 
 vi.mock("./execution-registry", async (importOriginal) => ({
@@ -33,7 +34,7 @@ vi.mock("./vault-execution.service", async (importOriginal) => ({
 
 vi.mock("@/services/solana", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/solana")>()),
-  createOrgSigner,
+  createOrgSignerForCustodyWallet,
 }));
 
 const { depositIntoVault } = await import("./vault-deposit.service");
@@ -133,7 +134,7 @@ beforeEach(async () => {
   resolveVaultDirectClient.mockReturnValue({ buildVaultDeposit });
   buildVaultDeposit.mockResolvedValue(plan());
   simulateVaultPlan.mockResolvedValue({ ok: true });
-  createOrgSigner.mockResolvedValue({ address: WALLET_ADDRESS });
+  createOrgSignerForCustodyWallet.mockResolvedValue({ address: WALLET_ADDRESS });
   signVaultPlan.mockResolvedValue({
     bytes: new Uint8Array([1]),
     signature: "sig_original",
@@ -297,6 +298,25 @@ describe("depositIntoVault — idempotency", () => {
     await expect(depositIntoVault(env, depositInput({ minSharesOut: "2" }))).rejects.toMatchObject({
       code: "CONFLICT",
     });
+  });
+});
+
+describe("depositIntoVault — validation and custody identity", () => {
+  it("maps deterministic provider amount validation to a caller 400", async () => {
+    buildVaultDeposit.mockRejectedValue(
+      new SdpKaminoError("INVALID_AMOUNT", "amount exceeds its mint precision")
+    );
+
+    await expect(depositIntoVault(env, depositInput())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "amount exceeds its mint precision",
+    });
+  });
+
+  it("resolves signing by the exact custody-wallet row id", async () => {
+    await depositIntoVault(env, depositInput());
+
+    expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(env, ORG, PROJECT, WALLET_ROW_ID);
   });
 });
 
@@ -696,8 +716,14 @@ describe("depositIntoVault — signed persistence boundary", () => {
       "simulation rejects",
       () => simulateVaultPlan.mockResolvedValue({ ok: false, error: "program error", logs: [] }),
     ],
-    ["signer lookup throws", () => createOrgSigner.mockRejectedValue(new Error("custody failed"))],
-    ["signer address mismatches", () => createOrgSigner.mockResolvedValue({ address: VAULT_A })],
+    [
+      "signer lookup throws",
+      () => createOrgSignerForCustodyWallet.mockRejectedValue(new Error("custody failed")),
+    ],
+    [
+      "signer address mismatches",
+      () => createOrgSignerForCustodyWallet.mockResolvedValue({ address: VAULT_A }),
+    ],
     ["signing throws", () => signVaultPlan.mockRejectedValue(new Error("sign failed"))],
   ])("does not invent a movement or holding when %s", async (_name, arrange) => {
     arrange();

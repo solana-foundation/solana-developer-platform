@@ -1085,10 +1085,10 @@
               "defaultAction": "allow",
               "rules": [
                 {
-                  "id": "deny-issuance",
-                  "kind": "operation_family",
-                  "family": "issuance",
-                  "action": "deny"
+                  "id": "approve-vault-deposits",
+                  "kind": "operation_type",
+                  "operationTypes": ["earn_vault_deposit"],
+                  "action": "approval_required"
                 }
               ],
               "controlProfile": {
@@ -1101,10 +1101,10 @@
                 "defaultAction": "allow",
                 "rules": [
                   {
-                    "id": "deny-issuance",
-                    "kind": "operation_family",
-                    "family": "issuance",
-                    "action": "deny"
+                    "id": "approve-vault-deposits",
+                    "kind": "operation_type",
+                    "operationTypes": ["earn_vault_deposit"],
+                    "action": "approval_required"
                   }
                 ],
                 "providerMappingStatus": "not_applicable",
@@ -1117,7 +1117,7 @@
                   {
                     "walletOperationId": "wop_example",
                     "policyEvaluationId": "peval_example",
-                    "operationFamily": "transfer",
+                    "operationFamily": "payment",
                     "operationType": "payment_transfer_execute",
                     "asset": "USDC",
                     "amount": "100.00",
@@ -1164,7 +1164,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"commitMessage\": \"Require approval for transfers above 10,000 USDC.\",\n  \"defaultAction\": \"allow\",\n  \"rules\": [\n    {\n      \"id\": \"deny-issuance\",\n      \"kind\": \"operation_family\",\n      \"family\": \"issuance\",\n      \"action\": \"deny\"\n    }\n  ]\n}",
+            "defaultValue": "{\n  \"commitMessage\": \"Require approval for transfers above 10,000 USDC.\",\n  \"defaultAction\": \"allow\",\n  \"rules\": [\n    {\n      \"id\": \"approve-vault-deposits\",\n      \"kind\": \"operation_type\",\n      \"operationTypes\": [\n        \"earn_vault_deposit\"\n      ],\n      \"action\": \"approval_required\"\n    }\n  ]\n}",
             "required": true
           }
         ],
@@ -1175,10 +1175,10 @@
               "defaultAction": "allow",
               "rules": [
                 {
-                  "id": "deny-issuance",
-                  "kind": "operation_family",
-                  "family": "issuance",
-                  "action": "deny"
+                  "id": "approve-vault-deposits",
+                  "kind": "operation_type",
+                  "operationTypes": ["earn_vault_deposit"],
+                  "action": "approval_required"
                 }
               ],
               "controlProfile": {
@@ -1191,10 +1191,10 @@
                 "defaultAction": "allow",
                 "rules": [
                   {
-                    "id": "deny-issuance",
-                    "kind": "operation_family",
-                    "family": "issuance",
-                    "action": "deny"
+                    "id": "approve-vault-deposits",
+                    "kind": "operation_type",
+                    "operationTypes": ["earn_vault_deposit"],
+                    "action": "approval_required"
                   }
                 ],
                 "providerMappingStatus": "not_applicable",
@@ -1207,7 +1207,7 @@
                   {
                     "walletOperationId": "wop_example",
                     "policyEvaluationId": "peval_example",
-                    "operationFamily": "transfer",
+                    "operationFamily": "payment",
                     "operationType": "payment_transfer_execute",
                     "asset": "USDC",
                     "amount": "100.00",
@@ -1271,10 +1271,10 @@
                 "revisionNumber": 1,
                 "rules": [
                   {
-                    "id": "deny-issuance",
-                    "kind": "operation_family",
-                    "family": "issuance",
-                    "action": "deny"
+                    "id": "approve-vault-deposits",
+                    "kind": "operation_type",
+                    "operationTypes": ["earn_vault_deposit"],
+                    "action": "approval_required"
                   }
                 ],
                 "defaultAction": "allow",
@@ -1411,6 +1411,10 @@
               {
                 "label": "issuance",
                 "value": "issuance"
+              },
+              {
+                "label": "program",
+                "value": "program"
               }
             ]
           },
@@ -1427,8 +1431,8 @@
               "id": "_example",
               "walletOperation": {
                 "id": "_example",
-                "operationFamily": "transfer",
-                "operationType": "issuance_burn_execute",
+                "operationFamily": "example",
+                "operationType": "example",
                 "asset": "example",
                 "amount": "example",
                 "destination": "example",
@@ -1460,8 +1464,8 @@
                   "apiKeyId": "apikey_example",
                   "actor": {},
                   "source": "example",
-                  "operationFamily": "transfer",
-                  "operationType": "issuance_burn_execute",
+                  "operationFamily": "example",
+                  "operationType": "example",
                   "asset": "example",
                   "amount": "example",
                   "destination": "example",
@@ -1529,8 +1533,8 @@
               "id": "_example",
               "walletOperation": {
                 "id": "_example",
-                "operationFamily": "transfer",
-                "operationType": "issuance_burn_execute",
+                "operationFamily": "example",
+                "operationType": "example",
                 "asset": "example",
                 "amount": "example",
                 "destination": "example",
@@ -1562,8 +1566,8 @@
                   "apiKeyId": "apikey_example",
                   "actor": {},
                   "source": "example",
-                  "operationFamily": "transfer",
-                  "operationType": "issuance_burn_execute",
+                  "operationFamily": "example",
+                  "operationType": "example",
                   "asset": "example",
                   "amount": "example",
                   "destination": "example",

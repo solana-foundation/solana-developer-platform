@@ -194,12 +194,12 @@ const contracts: ValueMovingContract[] = [
     family: "earn",
     trustedContext: {
       file: "apps/sdp-api/src/routes/earn/handlers/vault.ts",
-      evidence: "const { auth, wallets } = await resolveScope(c)",
+      evidence: "const wallets = await new CustodyRuntimeTargets",
     },
     authorization: {
       file: "apps/sdp-api/src/routes/earn/index.ts",
       section: '"/vault-deposits",',
-      before: "policyGate({ extract: extractEarnVaultDepositPolicyCandidate })",
+      before: "extract: extractEarnVaultDepositPolicyCandidate",
       after: "createEarnVaultDeposit",
     },
     replay: [

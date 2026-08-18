@@ -5,7 +5,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import { createPostgresEarnVaultRepository } from "@/db/repositories/earn-vault.repository";
-import { requireProjectId } from "@/lib/auth";
+import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import {
   AppError,
@@ -15,14 +15,19 @@ import {
   notFound,
   walletNotFound,
 } from "@/lib/errors";
+import { buildEarnVaultDepositFingerprint } from "@/lib/idempotency";
 import { success } from "@/lib/response";
+import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
-import { resolveScope } from "@/routes/payments/wallets";
 import { getLogger } from "@/runtime/logger";
 import {
   assertApiKeyWalletAccess,
   getAllowedApiKeyWalletIdsForPermissions,
 } from "@/services/api-key-scope.service";
+import {
+  CustodyRuntimeTargets,
+  type CustodyRuntimeWalletProjection,
+} from "@/services/domain/signing/custody-runtime-target";
 import { earnClusterFor, resolveVaultDirectClient } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { depositIntoVault } from "@/services/earn/vault-deposit.service";
@@ -36,7 +41,6 @@ import {
   assertEarnProviderSurfaced,
   assertProviderAvailable,
 } from "@/services/provider-availability.service";
-import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { AppContext } from "../context";
 import { earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
 import { earnVaultDepositSchema, earnVaultPositionsQuerySchema } from "../schemas";
@@ -82,7 +86,7 @@ export async function createEarnVaultDeposit(c: AppContext) {
       shareMint,
       label: strategy.name,
       amount: parsedData.amount,
-      requestId: parsedData.requestId,
+      requestId: resolved.requestId,
       minSharesOut: parsedData.minSharesOut,
       userId: auth.userId ?? null,
       apiKeyId: auth.apiKeyId ?? null,
@@ -97,14 +101,21 @@ export async function createEarnVaultDeposit(c: AppContext) {
     // the approved operation before returning their durable outcome. A legacy
     // unsigned row must fail closed instead of becoming a completed approval.
     await beginApprovedWalletOperationEffect(c);
-    if (!result.movement.signature) {
+    if (!result.movement.signature || result.movement.status === "failed") {
       throw conflict(
         "Approved vault deposit execution is incomplete and requires manual reconciliation"
       );
     }
   }
 
-  return success(c, {
+  return success(c, buildEarnVaultDepositResponse(result, strategy));
+}
+
+function buildEarnVaultDepositResponse(
+  result: Awaited<ReturnType<typeof depositIntoVault>>,
+  strategy: EarnStrategyRow
+) {
+  return {
     positionId: result.position.id,
     movementId: result.movement.id,
     status: result.movement.status,
@@ -120,17 +131,19 @@ export async function createEarnVaultDeposit(c: AppContext) {
       providerReference: strategy.provider_reference,
       hostCluster: strategy.host_cluster,
     },
-  });
+  };
 }
 
 type EarnVaultDepositBody = z.output<typeof earnVaultDepositSchema>;
 
 interface EarnVaultDepositResolved {
   strategy: EarnStrategyRow;
-  wallet: CustodyWallet;
-  auth: Awaited<ReturnType<typeof resolveScope>>["auth"];
+  wallet: CustodyRuntimeWalletProjection;
+  auth: ApiKeyContext;
   projectId: string;
   environment: SdpEnvironment;
+  requestId: string;
+  idempotencyFingerprint: string;
 }
 
 /**
@@ -148,6 +161,9 @@ export async function extractEarnVaultDepositPolicyCandidate(
   c: AppContext
 ): Promise<PolicyGateExtraction> {
   const body = await c.req.json().catch(() => null);
+  if (body && typeof body === "object" && Object.hasOwn(body, "requestId")) {
+    throw badRequest(`Use the ${IDEMPOTENCY_KEY_HEADER} header; body requestId is not accepted`);
+  }
   const parsed = earnVaultDepositSchema.safeParse(body);
   if (!parsed.success) {
     throw badRequest("Invalid vault deposit request", {
@@ -155,9 +171,18 @@ export async function extractEarnVaultDepositPolicyCandidate(
     });
   }
 
+  const requestId = c.req.header(IDEMPOTENCY_KEY_HEADER);
+  if (requestId === undefined) {
+    throw badRequest(`${IDEMPOTENCY_KEY_HEADER} is required for vault deposits`);
+  }
   const environment = resolveSdpEnvironment(c);
-  const { auth, wallets } = await resolveScope(c);
+  const auth = getAuth(c);
   const projectId = requireProjectId(c);
+  const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
+    organizationId: auth.organizationId,
+    projectId,
+    includeAllProviders: true,
+  });
 
   // ENVIRONMENT CAPABILITY, before anything else and before any lookup.
   //
@@ -260,6 +285,15 @@ export async function extractEarnVaultDepositPolicyCandidate(
     auth,
     projectId,
     environment,
+    requestId,
+    idempotencyFingerprint: buildEarnVaultDepositFingerprint({
+      environment,
+      provider: strategy.provider,
+      providerReference: strategy.provider_reference,
+      custodyWalletId: wallet.id,
+      amount: parsed.data.amount,
+      minSharesOut: parsed.data.minSharesOut ?? null,
+    }),
   };
 
   return {
@@ -304,14 +338,115 @@ export async function extractEarnVaultDepositPolicyCandidate(
     legs: [],
     body: parsed.data,
     resolved,
-    rawPayload: { ...(body as Record<string, unknown>) },
+    rawPayload: {
+      ...(body as Record<string, unknown>),
+      idempotencyFingerprint: resolved.idempotencyFingerprint,
+    },
+    idempotencyKey: requestId,
   };
 }
 
+/** Resolve both durable movement replays and pre-execution policy replays. */
+export async function findEarnVaultDepositIdempotentKeyReplay(
+  c: AppContext,
+  extraction: PolicyGateExtraction,
+  idempotencyKey: string
+): Promise<Response | null> {
+  // An approval executor must pass through policy resume and the handler's
+  // effect fence, even when the domain movement was already recorded.
+  if (approvedWalletOperationId(c)) return null;
+
+  const resolved = extraction.resolved as EarnVaultDepositResolved;
+  const repo = createPostgresEarnVaultRepository(getDb(c.env));
+  const movement = await repo.findMovementByRequestId({
+    organizationId: resolved.auth.organizationId,
+    requestId: idempotencyKey,
+  });
+  if (movement) {
+    if (movement.idempotency_fingerprint !== resolved.idempotencyFingerprint) {
+      throw conflict("Idempotency key already used with different request payload");
+    }
+    if (movement.status === "failed") {
+      throw conflict(
+        movement.failure_reason ?? "The recorded vault deposit failed and cannot be replayed"
+      );
+    }
+    const position = await repo.getPositionById({
+      organizationId: resolved.auth.organizationId,
+      environment: resolved.environment,
+      positionId: movement.position_id,
+    });
+    if (!position) {
+      throw internalError(`Replayed movement ${movement.id} references a missing position`);
+    }
+    return success(
+      c,
+      buildEarnVaultDepositResponse({ position, movement, replayed: true }, resolved.strategy)
+    );
+  }
+
+  const prior = await getDb(c.env)
+    .prepare(
+      `SELECT operation.id, operation.status, operation.raw_payload,
+              evaluation.id AS policy_evaluation_id,
+              evaluation.decision, evaluation.reason_code, evaluation.reason,
+              evaluation.requires_approval, evaluation.approval_request_id
+       FROM wallet_operations operation
+       LEFT JOIN LATERAL (
+         SELECT * FROM policy_evaluations
+         WHERE wallet_operation_id = operation.id
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1
+       ) evaluation ON TRUE
+       WHERE operation.organization_id = ?
+         AND operation.project_id = ?
+         AND operation.idempotency_key = ?`
+    )
+    .bind(resolved.auth.organizationId, resolved.projectId, idempotencyKey)
+    .first<{
+      id: string;
+      status: string;
+      raw_payload: Record<string, unknown>;
+      policy_evaluation_id: string | null;
+      decision: string | null;
+      reason_code: string | null;
+      reason: string | null;
+      requires_approval: boolean | null;
+      approval_request_id: string | null;
+    }>();
+  if (!prior) return null;
+  if (prior.raw_payload.idempotencyFingerprint !== resolved.idempotencyFingerprint) {
+    throw conflict("Idempotency key already used with different request payload");
+  }
+
+  const details = {
+    walletOperationId: prior.id,
+    policyEvaluationId: prior.policy_evaluation_id,
+    decision: prior.decision,
+    reasonCode: prior.reason_code,
+    reason: prior.reason,
+    requiresApproval: prior.requires_approval,
+    approvalRequestId: prior.approval_request_id,
+  };
+  if (prior.status === "pending_approval" || prior.status === "executing") {
+    throw new AppError(
+      "SIGNING_PENDING",
+      prior.status === "pending_approval"
+        ? "Wallet operation requires policy approval"
+        : "Approved vault deposit execution is still in progress",
+      details
+    );
+  }
+  if (prior.decision === "deny" || prior.status === "canceled") {
+    throw new AppError("FORBIDDEN", "Wallet operation denied by policy", details);
+  }
+  throw conflict("The prior vault deposit policy operation has no replayable movement");
+}
+
 function resolveEarnVaultCustodyWallet(
-  wallets: readonly CustodyWallet[],
+  wallets: readonly CustodyRuntimeWalletProjection[],
   custodyWalletId: string
-): CustodyWallet {
+): CustodyRuntimeWalletProjection {
   const exact = wallets.find((wallet) => wallet.id === custodyWalletId);
   if (exact) return exact;
   throw walletNotFound();
@@ -319,8 +454,8 @@ function resolveEarnVaultCustodyWallet(
 
 function assertBoundWalletIdentifierIsUnique(
   auth: EarnVaultDepositResolved["auth"],
-  wallets: readonly CustodyWallet[],
-  wallet: CustodyWallet
+  wallets: readonly CustodyRuntimeWalletProjection[],
+  wallet: CustodyRuntimeWalletProjection
 ): void {
   const selectedScope =
     auth.authType === "api_key" &&
@@ -357,7 +492,13 @@ export async function listEarnVaultPositions(c: AppContext) {
     throw badRequest("Invalid vault position pagination cursor");
   }
   const environment = resolveSdpEnvironment(c);
-  const { auth, wallets } = await resolveScope(c);
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
+    organizationId: auth.organizationId,
+    projectId,
+    includeAllProviders: true,
+  });
 
   // WALLET-BINDING SCOPE, applied before the query and therefore before any
   // chain read. A selected-wallet key must not hydrate — or even learn of —

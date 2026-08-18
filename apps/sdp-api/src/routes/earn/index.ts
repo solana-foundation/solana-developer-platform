@@ -20,6 +20,7 @@ import { getEarnStrategy, listEarnStrategies } from "./handlers/strategies";
 import {
   createEarnVaultDeposit,
   extractEarnVaultDepositPolicyCandidate,
+  findEarnVaultDepositIdempotentKeyReplay,
   listEarnVaultPositions,
 } from "./handlers/vault";
 
@@ -63,7 +64,10 @@ earn.get("/strategies/:strategyId", requirePermissions("earn:read"), getEarnStra
 earn.post(
   "/vault-deposits",
   requirePermissions("earn:write", "wallets:read"),
-  policyGate({ extract: extractEarnVaultDepositPolicyCandidate }),
+  policyGate({
+    extract: extractEarnVaultDepositPolicyCandidate,
+    findIdempotentKeyReplay: findEarnVaultDepositIdempotentKeyReplay,
+  }),
   createEarnVaultDeposit
 );
 earn.get(

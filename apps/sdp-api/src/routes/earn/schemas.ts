@@ -234,12 +234,6 @@ export const earnVaultDepositSchema = z.object({
     .max(128)
     .regex(/^\d+(\.\d+)?$/, "amount must be a positive decimal string")
     .refine((value) => /[1-9]/.test(value), "amount must be greater than zero"),
-  /**
-   * Idempotency key, REQUIRED here unlike the custodial create. The chain has
-   * no request-id dedupe of its own, so this row is the only thing preventing a
-   * retry from moving money twice.
-   */
-  requestId: z.uuidv4(),
   /** Optional slippage floor, in shares, as a decimal string. */
   minSharesOut: z
     .string()

@@ -115,6 +115,21 @@ export async function createOrgSigner(
   return signingService.getTransactionSigner(orgId, projectId ?? undefined, walletId ?? undefined);
 }
 
+/** Resolve the signer for one already-authorized custody-wallet database row. */
+export async function createOrgSignerForCustodyWallet(
+  env: Env,
+  orgId: string,
+  projectId: string | null | undefined,
+  custodyWalletId: string
+): Promise<TransactionSigner> {
+  const signingService = createSigningService(env);
+  return signingService.getTransactionSignerForWalletRecord(
+    orgId,
+    projectId ?? undefined,
+    custodyWalletId
+  );
+}
+
 /**
  * Create a KeyPairSigner specifically (only works with local provider).
  * Use createSigner() for provider-agnostic code.
