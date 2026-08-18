@@ -30,7 +30,8 @@ export const switchSigningRequestSchema = withOpenApi(switchSigningSchemaBase, {
 
 export const signerCheckRequestSchema = withOpenApi(signerCheckSchemaBase, {
   description:
-    "Optional memo payload for signer check. Signing wallet is resolved from the API key binding.",
+    "Signer-check wallet selection. walletId is optional for an API key with one bound signing wallet and required for session-authenticated dashboard requests.",
+  example: { walletId: "privy_wallet_123" },
 });
 
 export const orgCustodyProviderSchema = z
@@ -453,10 +454,6 @@ export const custodyPublicKeyResponseSchema = z
   })
   .openapi({ description: "Wallet public key response payload." });
 
-const walletOperationFamilySchema = z
-  .enum(["transfer", "payment", "ramp", "issuance", "raw_sign", "program", "provider_admin"])
-  .openapi({ description: "Normalized wallet operation family.", example: "payment" });
-
 const walletOperationStatusSchema = z
   .enum([
     "created",
@@ -527,10 +524,14 @@ const walletApprovalRequestSchema = z
         walletId: walletIdParamSchema,
         apiKeyId: z.string().nullable().openapi({ description: "API key that requested it." }),
         source: z.string().openapi({ description: "Operation source.", example: "api" }),
-        operationFamily: walletOperationFamilySchema,
+        operationFamily: z.string().openapi({
+          description:
+            "Normalized wallet operation family. Historical rows may carry retired families.",
+          example: "payment",
+        }),
         operationType: z.string().openapi({
-          description: "Normalized wallet operation type.",
-          example: "payment_transfer",
+          description: "Normalized wallet operation type. Historical rows may carry retired types.",
+          example: "payment_transfer_execute",
         }),
         asset: z.string().nullable().openapi({ description: "Asset symbol or mint." }),
         amount: z.string().nullable().openapi({ description: "Operation amount." }),
@@ -587,7 +588,7 @@ export const walletApprovalRequestResponseSchema = z
 export const signerCheckResponseSchema = z
   .object({
     walletId: walletIdParamSchema.openapi({
-      description: "Signing wallet ID bound to the API key.",
+      description: "Resolved signing wallet ID.",
       example: "privy_wallet_123",
     }),
     walletAddress: solanaAddressSchema.openapi({
@@ -597,8 +598,8 @@ export const signerCheckResponseSchema = z
       description: "Fee payer address (Kora signer).",
     }),
     memo: z.string().openapi({
-      description: "Memo text submitted on-chain.",
-      example: "SDP signer check 2026-02-20T00:00:00.000Z",
+      description: "Server-generated memo text submitted on-chain.",
+      example: "SDP signer check 123e4567-e89b-42d3-a456-426614174000",
     }),
     signature: z.string().openapi({
       description: "Submitted Solana transaction signature.",

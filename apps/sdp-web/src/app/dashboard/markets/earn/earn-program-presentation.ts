@@ -2,6 +2,7 @@
 
 import {
   EARN_PORTFOLIO_TOKENS,
+  type EarnPortfolioPosition,
   type EarnPortfolioTargetAllocations,
   type EarnPortfolioToken,
   type EarnStrategy,
@@ -136,12 +137,28 @@ export function strategiesByReference(
  *
  * Nobody thinks of a program as `earn_provider_wallet_<uuid>` — they think of it
  * as "the Kamino USDC one". V1 pins each program to a single vault per token
- * lane, so the target allocation IS the identity. Falls back to the operator's
- * own label, and only then to something id-shaped, because an unnamed row is
- * still better than a blank one.
+ * lane, so the target allocation IS the identity.
+ *
+ * **Two independent name sources, and the second is not optional.** The
+ * catalogue is tried first (canonical, and it names a target even when no money
+ * has landed on it yet), then the wallet's own POSITION labels. That fallback
+ * exists because the catalogue a browser can see is a filtered view: the API
+ * hides un-surfaced providers and Aave/Morpho-related rows, so a program held
+ * with an un-surfaced provider looks up its own vault and finds nothing —
+ * which rendered every Ground program as "Unnamed strategy" the moment Ground
+ * stopped being offered.
+ *
+ * Position labels are the right fallback because they arrive display-ready from
+ * the provider client and are already rendered directly beneath this title in
+ * "Where the money sits". A card that names its vault in the holdings list and
+ * calls itself "Unnamed" is stating two different things about one program.
+ *
+ * This is the presentation half of an ADR 0002 rule: browse visibility must
+ * never decide what a customer can see about money they already hold.
  */
 export function programTitle(
   allocations: EarnPortfolioTargetAllocations,
+  positions: readonly EarnPortfolioPosition[],
   label: string | null,
   byReference: ReadonlyMap<string, EarnStrategy>,
   fallback: string
@@ -155,6 +172,17 @@ export function programTitle(
     }
   }
   if (names.length > 0) return names.join(" · ");
+
+  // Provider-reported, so it survives any catalogue filter. Only `yield_source`
+  // slices name a vault — a cash bucket's label ("Cash (USDC)") is a rail, not
+  // an identity, and titling a program with it would be worse than the fallback.
+  for (const position of positions) {
+    if (position.kind !== "yield_source") continue;
+    const name = position.label.trim();
+    if (name && !names.includes(name)) names.push(name);
+  }
+  if (names.length > 0) return names.join(" · ");
+
   return label ?? fallback;
 }
 

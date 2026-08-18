@@ -362,6 +362,31 @@ export class SponsorshipBudgetRepository {
     });
   }
 
+  async recordProviderConfigFailure(network: SponsorshipNetwork): Promise<number> {
+    const row = await this.db.queryOne<{ consecutive_config_failures: number | string }>(
+      `INSERT INTO sponsorship_reconciliation_state (network, consecutive_config_failures)
+       VALUES (?, 1)
+       ON CONFLICT (network) DO UPDATE
+         SET consecutive_config_failures = sponsorship_reconciliation_state.consecutive_config_failures + 1,
+             updated_at = sdp_iso_now()
+       RETURNING consecutive_config_failures`,
+      [network]
+    );
+    if (!row) {
+      throw new Error("Provider config failure counter did not persist");
+    }
+    return Number(row.consecutive_config_failures);
+  }
+
+  async resetProviderConfigFailures(network: SponsorshipNetwork): Promise<void> {
+    await this.db.execute(
+      `UPDATE sponsorship_reconciliation_state
+         SET consecutive_config_failures = 0, updated_at = sdp_iso_now()
+       WHERE network = ? AND consecutive_config_failures > 0`,
+      [network]
+    );
+  }
+
   async tripGlobalBreaker(
     network: SponsorshipNetwork,
     reason: string,

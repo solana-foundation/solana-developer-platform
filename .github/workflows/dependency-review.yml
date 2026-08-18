@@ -14,7 +14,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
+      - name: Check Kamino dependency boundary
+        run: node scripts/check-kamino-dependency-boundary.mjs
       - uses: actions/dependency-review-action@v5
         with:
           fail-on-severity: high
+          # The preceding check confines this path to API -> @sdp/kamino ->
+          # klend-sdk, and build-node.mjs replaces bigint-buffer with its pure-JS
+          # browser entry before scanning every shipped API bundle for the native
+          # loader. No patched bigint-buffer release exists today.
+          allow-ghsas: GHSA-3gc7-fjrx-p6mg
           comment-summary-in-pr: on-failure

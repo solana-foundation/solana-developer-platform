@@ -7,6 +7,11 @@ on:
         description: "Git ref (tag or SHA) to deploy"
         type: string
         required: true
+      dry_run:
+        description: "Build only. Runs vercel pull and vercel build, skips vercel deploy."
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -32,6 +37,13 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.ref }}
 
+      # vercel build shells out to the repo's package manager. Without pnpm on the
+      # runner it fails with "spawn pnpm ENOENT" before any build work happens.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          version: 10.16.0
+
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -40,7 +52,7 @@ jobs:
       - name: Install Vercel CLI
         run: npm install --global vercel@58.9.4
 
-      - name: Build and deploy production artifact
+      - name: Build production artifact
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -53,4 +65,19 @@ jobs:
 
           vercel pull --yes --environment=production --token="${VERCEL_TOKEN}"
           vercel build --prod --token="${VERCEL_TOKEN}"
+
+      - name: Skip deploy (dry run)
+        if: ${{ inputs.dry_run }}
+        run: |
+          echo "::notice title=Dry run::Build succeeded. vercel deploy was skipped, production is unchanged."
+
+      - name: Deploy production artifact
+        if: ${{ !inputs.dry_run }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          : "${VERCEL_TOKEN:?VERCEL_TOKEN is not configured in the production environment}"
           vercel deploy --prebuilt --prod --token="${VERCEL_TOKEN}"

@@ -16,7 +16,7 @@ integration touches:
 | Contract | `EarnVaultProvider` + `EarnPortfolioWalletProvider` (+ approvals) | `EarnVaultProvider` + `EarnLiveMetricsProvider` |
 | `/v1/earn/programs` | the whole flow | **501** by capability detection |
 | Credential | `GROUND_API_KEY` / `GROUND_SANDBOX_API_KEY` | none — public data API |
-| Clusters | catalogued per environment's own cluster | **mainnet only**, catalogued into both |
+| Clusters | catalogued per environment's own cluster | production → mainnet (REST); non-production → **devnet, read on-chain** |
 | Dashboard | the deposit wizard | not shown — API surface only |
 
 A catalogue-only provider is a complete integration, not a partial one: there is
