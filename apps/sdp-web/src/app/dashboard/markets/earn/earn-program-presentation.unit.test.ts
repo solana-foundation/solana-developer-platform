@@ -34,6 +34,7 @@ describe("programTitle", () => {
   it("names a program after the vault it targets", () => {
     const title = programTitle(
       { usdc: [{ yieldSourceId: "kamino-usdc", weightBps: 10_000 }] },
+      [],
       null,
       catalogue,
       "fallback"
@@ -47,6 +48,7 @@ describe("programTitle", () => {
         usdc: [{ yieldSourceId: "kamino-usdc", weightBps: 10_000 }],
         usdt: [{ yieldSourceId: "jaaa-usdc", weightBps: 10_000 }],
       },
+      [],
       null,
       catalogue,
       "fallback"
@@ -60,6 +62,7 @@ describe("programTitle", () => {
         usdc: [{ yieldSourceId: "cash", weightBps: 10_000 }],
         usdt: [{ yieldSourceId: "kamino-usdc", weightBps: 0 }],
       },
+      [],
       "Treasury",
       catalogue,
       "fallback"
@@ -68,14 +71,48 @@ describe("programTitle", () => {
   });
 
   it("falls back to the label, then to the supplied fallback", () => {
-    expect(programTitle({}, "Treasury", catalogue, "fallback")).toBe("Treasury");
-    expect(programTitle({}, null, catalogue, "fallback")).toBe("fallback");
+    expect(programTitle({}, [], "Treasury", catalogue, "fallback")).toBe("Treasury");
+    expect(programTitle({}, [], null, catalogue, "fallback")).toBe("fallback");
   });
 
   // The catalogue read can still be in flight while the program renders.
   it("falls back rather than rendering a raw provider reference", () => {
     const title = programTitle(
       { usdc: [{ yieldSourceId: "kamino-usdc", weightBps: 10_000 }] },
+      [],
+      null,
+      new Map(),
+      "fallback"
+    );
+    expect(title).toBe("fallback");
+  });
+
+  /**
+   * The regression that shipped the moment Ground was un-surfaced: the browse
+   * catalogue no longer carries an un-surfaced provider's rows, so every Ground
+   * program rendered as the fallback while naming its vault in the holdings
+   * list directly beneath. Positions come from the provider, not the catalogue,
+   * so they still name it.
+   */
+  it("names the program from its positions when the catalogue hides the provider", () => {
+    const title = programTitle(
+      { usdc: [{ yieldSourceId: "jaaa-usdc", weightBps: 10_000 }] },
+      [
+        { kind: "cash", label: "Cash (USDC)", valueUsd: "5.00" },
+        { kind: "yield_source", label: "Ground JAAA USDC", valueUsd: "15.00" },
+      ],
+      null,
+      // Empty: /strategies returns no rows for an un-surfaced provider.
+      new Map(),
+      "fallback"
+    );
+    expect(title).toBe("Ground JAAA USDC");
+  });
+
+  it("never titles a program after a cash rail", () => {
+    const title = programTitle(
+      {},
+      [{ kind: "cash", label: "Cash (USDC)", valueUsd: "5.00" }],
       null,
       new Map(),
       "fallback"

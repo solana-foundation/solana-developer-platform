@@ -1,9 +1,9 @@
 {
   "DashboardEarn": {
     "overview": {
-      "programTitle": "Your strategies",
-      "programDescription": "Each strategy runs in its own provider-managed wallet, funded and withdrawn separately. Balances are read live from the provider.",
-      "programEmpty": "No strategies yet.",
+      "programTitle": "Actively Earning",
+      "programDescription": "What you have earning right now. Each one is funded and withdrawn on its own, and every balance is read live.",
+      "programEmpty": "Nothing earning yet.",
       "programUntitled": "Unnamed strategy",
       "addStrategy": "Add strategy",
       "blendedApy": "Blended APY",
@@ -30,13 +30,6 @@
       "withdrawalProcessing": "Withdrawal is still processing.",
       "programLoadError": "The earn program could not be loaded.",
       "providerNotConfigured": "Live earn data is unavailable in this environment — the provider API key is not configured yet.",
-      "startTitle": "Put idle stablecoins to work",
-      "startDescription": "Choose the wallet that funds it, compare every available strategy, and select one. Your funds stay in your custody until you send them.",
-      "startAction": "Set up Earn",
-      "startStatAvailableUsdc": "USDC available to invest",
-      "startStatStrategies": "Strategies available",
-      "startStatTopApy": "Top APY",
-      "startStatAccess": "Fastest access",
       "catalogueLoadError": "The strategy catalogue could not be loaded. Refresh to try again.",
       "catalogueEmpty": "No strategies are available in this environment yet.",
       "rateDisclosure": "APY figures are variable and shown for comparison only. Actual rates and redemption times are set by the provider.",
@@ -94,6 +87,33 @@
       "previewInsufficient": "The provider can't fill this {token} withdrawal — the withdrawable balance may sit in the other stablecoin. Try a smaller amount or switch stablecoin.",
       "previewInsufficientCeiling": "The provider can pay {amount} as {token} right now. Enter that or less.",
       "previewNoSolanaPayout": "{token} doesn't pay out on Solana — the provider settles {token} withdrawals on Ethereum only. Withdraw USDC instead."
+    },
+    "tabs": {
+      "opportunities": "Opportunities",
+      "positions": "Active",
+      "playground": "Integrate"
+    },
+    "playground": {
+      "productName": "Earn",
+      "listStrategies": "List strategies",
+      "getStrategy": "Get strategy",
+      "listPrograms": "List programs",
+      "getProgram": "Get program",
+      "listDeposits": "List deposits",
+      "previewWithdrawal": "Preview withdrawal",
+      "createWithdrawal": "Create withdrawal",
+      "listWithdrawals": "List withdrawals",
+      "getWithdrawal": "Get withdrawal",
+      "amountOptional": "Optional. Omit to ask what this lane can pay right now.",
+      "requestIdRequired": "Required UUIDv4 idempotency key — a retry must reuse it."
+    },
+    "opportunities": {
+      "title": "Opportunities",
+      "description": "Ways to put idle stablecoins to work. Compare what each one pays, how it's backed, and how fast you can withdraw \u2014 rank by pool size or APY.",
+      "deposit": "Deposit",
+      "depositDirectOnly": "Coming soon",
+      "depositProviderClosed": "Not available",
+      "columnAction": "Action"
     },
     "deposit": {
       "progressWallet": "Wallet",
@@ -214,7 +234,8 @@
       "reviewWalletAddress": "Address",
       "timingDisclosure": "Confirming saves the target immediately, but money moves on the provider's later rebalances — not instantly. Slower strategies can take hours to converge, and small balances may stay as cash where deploying them isn't economical.",
       "programMissing": "That strategy could not be found — it may have been changed or removed since this link was made. Head back to Earn to see your current strategies.",
-      "programMissingAction": "Back to Earn"
+      "programMissingAction": "Back to Earn",
+      "creationUnavailable": "Earn strategies are open for comparison only right now — no provider is accepting deposits, so there is no strategy to set up. Head back to Earn to browse what is listed."
     }
   }
 }

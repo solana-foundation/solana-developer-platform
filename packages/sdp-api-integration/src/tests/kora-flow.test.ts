@@ -332,7 +332,6 @@ describe("Kora Fee Payment (Live Smoke)", () => {
     const scopedApiKey = createdKeyBody.data.apiKey.key;
     const scopedApiKeyName = createdKeyBody.data.apiKey.name;
     const requestWithScopedKey = requestWithApiKey(scopedApiKey);
-    const memo = `kora signer check ${Date.now()}`;
     let signerCheckPassed = false;
 
     try {
@@ -341,7 +340,7 @@ describe("Kora Fee Payment (Live Smoke)", () => {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ memo }),
+        body: JSON.stringify({}),
       });
 
       const signerCheckPayload = await signerCheckRes.text();
@@ -356,7 +355,9 @@ describe("Kora Fee Payment (Live Smoke)", () => {
 
       expect(signerCheck.walletId).toBe(walletId);
       expect(signerCheck.walletAddress).toBe(walletAddress);
-      expect(signerCheck.memo).toBe(memo);
+      expect(signerCheck.memo).toMatch(
+        /^SDP signer check [0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+      );
       expect(signerCheck.signature).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,88}$/);
       expect(signerCheck.feePayer).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
       expect(signerCheck.feePayer).not.toBe(signerCheck.walletAddress);
@@ -374,7 +375,7 @@ describe("Kora Fee Payment (Live Smoke)", () => {
 
       const memoText = memoInstruction?.parsed;
       expect(typeof memoText).toBe("string");
-      expect(memoText).toBe(memo);
+      expect(memoText).toBe(signerCheck.memo);
       signerCheckPassed = true;
     } finally {
       const deleteScopedKeyRes = await request(`/v1/api-keys/${scopedApiKeyId}`, {

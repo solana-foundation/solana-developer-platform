@@ -222,9 +222,9 @@ describe("Payments routes — transfers", () => {
 
     const rules = [
       {
-        id: "deny-raw-signing",
+        id: "deny-issuance",
         kind: "operation_family",
-        family: "raw_sign",
+        family: "issuance",
         action: "deny",
       },
       {
@@ -322,9 +322,9 @@ describe("Payments routes — transfers", () => {
           defaultAction: "allow",
           rules: [
             {
-              id: "deny-programs",
+              id: "deny-issuance",
               kind: "operation_family",
-              family: "program",
+              family: "issuance",
               action: "deny",
             },
           ],
@@ -358,9 +358,9 @@ describe("Payments routes — transfers", () => {
     });
     expect(getBody.data.policy.rules).toEqual([
       {
-        id: "deny-programs",
+        id: "deny-issuance",
         kind: "operation_family",
-        family: "program",
+        family: "issuance",
         action: "deny",
       },
     ]);
@@ -389,7 +389,9 @@ describe("Payments routes — transfers", () => {
     };
     expect(body.error.code).toBe("BAD_REQUEST");
     expect(body.error.message).toContain("Invalid request body");
-    expect(body.error.details?.errors?.rules).toContain("operationType must not be empty");
+    expect(body.error.details?.errors?.rules).toContain(
+      "operation type must be one of the supported wallet operation types"
+    );
   });
 
   it("rejects wallet policy payloads with duplicate rule ids", async () => {
