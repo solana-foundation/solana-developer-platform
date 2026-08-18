@@ -5,6 +5,7 @@ import {
   DEFAULT_STRATEGY_SORT,
   fundableStrategies,
   nextStrategySort,
+  opportunityDepositability,
   rankedFundableStrategies,
   rankedStrategies,
   singleStrategyAllocation,
@@ -45,10 +46,14 @@ describe("fundableStrategies", () => {
   });
 
   /**
-   * The devnet-money guard, dashboard side. Kamino's mainnet-only vaults are
-   * catalogued into sandbox so integrators can browse the real shelf; the API
-   * marks them `fundable: false` and the wizard must never offer one, or a user
-   * walks to a confirm step that provisions nothing.
+   * The devnet-money guard, dashboard side. `fundable` is the API's per-request
+   * answer to "does this instrument exist on the caller's cluster", and the
+   * wizard must never offer a `false` one or a user walks to a confirm step
+   * that provisions nothing. Kamino used to be the live example — mainnet
+   * vaults catalogued into sandbox — and no longer is, since each environment
+   * now catalogues its own cluster; the guard still stands for Ground and any
+   * single-cluster provider, which is why this seeds clusters directly rather
+   * than naming a provider.
    */
   it("drops a strategy the API says is not fundable in this environment", () => {
     const local = strategy({ id: "ground-devnet" });
@@ -92,6 +97,59 @@ describe("fundableStrategies", () => {
     const refused = strategy({ id: "mainnet-only", fundable: false });
 
     expect(fundableStrategies([refused])).toEqual([]);
+  });
+});
+
+/**
+ * The Opportunities tab's per-row verb. Greptile caught the gap these pin:
+ * checking
+ * only cluster + token let a PRODUCTION Kamino row render an enabled Deposit
+ * link straight into `EarnDepositUnavailable`, because the route it points at
+ * creates custodial programs only. Sandbox hid it — every Kamino row is
+ * `wrong-cluster` there — so the third check has to be asserted, not eyeballed.
+ */
+describe("opportunityDepositability", () => {
+  it("refuses a fundable vault-direct vault: SDP has no route for its deposit", () => {
+    const kamino = strategy({
+      id: "kamino-production",
+      provider: "kamino",
+      hostCluster: "mainnet-beta",
+      // The exact shape that used to slip through: on-cluster and USDC.
+      fundable: true,
+    });
+
+    expect(opportunityDepositability(kamino)).toEqual({
+      kind: "no-sdp-route",
+      style: "vault_direct",
+    });
+  });
+
+  it("refuses a custodial vault while no custodial provider is offered", () => {
+    // Ground is un-surfaced, so EARN_PROGRAM_CREATION_ENABLED is false and the
+    // deposit route answers with its unavailable notice.
+    expect(opportunityDepositability(strategy({ id: "ground-devnet" }))).toEqual({
+      kind: "no-sdp-route",
+      style: "custodial",
+    });
+  });
+
+  it("reports the cluster before anything else — the most actionable answer", () => {
+    const kamino = strategy({
+      id: "kamino-sandbox",
+      provider: "kamino",
+      hostCluster: "mainnet-beta",
+      fundable: false,
+    });
+
+    expect(opportunityDepositability(kamino)).toEqual({ kind: "wrong-cluster" });
+  });
+
+  it("reports an unroutable mint once the cluster is fine", () => {
+    expect(
+      opportunityDepositability(strategy({ id: "odd", depositMints: [UNROUTABLE_MINT] }))
+    ).toEqual({
+      kind: "asset-unsupported",
+    });
   });
 });
 

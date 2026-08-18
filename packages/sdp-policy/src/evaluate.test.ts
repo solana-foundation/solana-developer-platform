@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { WalletOperationFamily } from "@sdp/types";
+import type { WalletOperationFamily, WalletOperationType } from "@sdp/types";
 import { createPolicyEvaluationInput } from "./enforce";
 import {
   describeCandidateRuleCriteria,
@@ -9,14 +9,11 @@ import {
 } from "./evaluate";
 import { apiKeyPolicy, leg, operation, walletPolicy } from "./test-support";
 
-const representativeFamilies: Array<[WalletOperationFamily, string]> = [
-  ["transfer", "token_transfer"],
-  ["payment", "payment_request"],
-  ["ramp", "ramp_transfer"],
-  ["issuance", "issuance_admin"],
-  ["raw_sign", "sign_message"],
-  ["program", "program_call"],
-  ["provider_admin", "provider_policy_update"],
+const representativeFamilies: Array<[WalletOperationFamily, WalletOperationType]> = [
+  ["transfer", "payment_transfer_execute"],
+  ["payment", "recurring_payment_create"],
+  ["ramp", "ramp_onramp_quote"],
+  ["issuance", "issuance_mint_execute"],
 ];
 
 describe("evaluateWalletOperationPolicies", () => {
@@ -159,8 +156,8 @@ describe("evaluateWalletOperationPolicies", () => {
     const result = evaluateWalletOperationPolicies({
       operation: {
         ...operation,
-        operationFamily: "program",
-        operationType: "program_call",
+        operationFamily: "issuance",
+        operationType: "issuance_update_authority_execute",
         amount: null,
       },
       legs: [],

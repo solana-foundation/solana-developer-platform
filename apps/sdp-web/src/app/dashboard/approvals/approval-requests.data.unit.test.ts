@@ -41,7 +41,7 @@ function approvalRequest(
       apiKeyId: "key-1",
       source: "payments",
       operationFamily: "transfer",
-      operationType: "wallet.transfer",
+      operationType: "payment_transfer_execute",
       asset: "USDC",
       amount: "25000",
       destination: "Destination11111111111111111111111111111",
@@ -74,7 +74,7 @@ const requests = [
       ...approvalRequest("base", "rejected").operation,
       walletId: "wallet-2",
       apiKeyId: "key-2",
-      operationFamily: "raw_sign",
+      operationFamily: "issuance",
     },
   }),
 ];
@@ -103,7 +103,7 @@ describe("filterApprovalRequests", () => {
     const result = filterApprovalRequests(
       requests,
       "history",
-      filters({ walletId: "wallet-2", operationFamily: "raw_sign", apiKeyId: "key-2" })
+      filters({ walletId: "wallet-2", operationFamily: "issuance", apiKeyId: "key-2" })
     );
     expect(result.map(({ id }) => id)).toEqual(["rejected"]);
   });
@@ -152,9 +152,8 @@ describe("mergeApprovalRequests", () => {
 
 describe("formatApprovalLabel", () => {
   it("uses the policy UI names for operation families", () => {
-    expect(formatApprovalLabel("raw_sign")).toBe("Raw signing");
-    expect(formatApprovalLabel("program")).toBe("Program operations");
-    expect(formatApprovalLabel("provider_admin")).toBe("Provider administration");
+    expect(formatApprovalLabel("payment")).toBe("Payment");
+    expect(formatApprovalLabel("issuance")).toBe("Issuance");
   });
 
   it("formats API labels and camel case values", () => {

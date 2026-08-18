@@ -14,7 +14,7 @@ export {
   initializeSigning,
   switchSigning,
 } from "./handlers/provider";
-export { extractSignerCheckPolicyCandidate, signerCheck } from "./handlers/signer-check";
+export { signerCheck } from "./handlers/signer-check";
 export {
   createWallet,
   deleteWallet,

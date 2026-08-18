@@ -1,10 +1,13 @@
-import type {
-  EarnPortfolioAllocationInput,
-  EarnPortfolioToken,
-  EarnProviderId,
-  EarnStrategy,
+import {
+  type EarnDepositStyle,
+  type EarnPortfolioAllocationInput,
+  type EarnPortfolioToken,
+  type EarnProviderId,
+  type EarnStrategy,
+  earnDepositStyle,
 } from "@sdp/types";
 import { strategyApy, strategyPoolUsd, strategyToken } from "../earn-program-presentation";
+import { EARN_PROGRAM_CREATION_ENABLED } from "../earn-surfacing";
 
 /**
  * Pure model for the Earn deposit flow: full catalogue → ranked comparison
@@ -33,11 +36,12 @@ import { strategyApy, strategyPoolUsd, strategyToken } from "../earn-program-pre
  * Strategies that can actually be funded: their deposit mint is routable AND
  * the API says the instrument exists on this environment's cluster.
  *
- * The `fundable` half is not decoration. The catalogue lists what EXISTS, which
- * since Kamino is a larger set than what can take a deposit here — Kamino's
- * K-Vaults are mainnet-only and are catalogued into sandbox too, so an
- * integrator can browse the real shelf. Making one of those rows selectable in
- * the wizard would walk a user to a confirm step that provisions nothing.
+ * The `fundable` half is not decoration: the catalogue lists what EXISTS, which
+ * can be a larger set than what takes a deposit here, and making one of those
+ * rows selectable would walk a user to a confirm step that provisions nothing.
+ * Kamino was the example (mainnet vaults catalogued into sandbox) and no longer
+ * is — it catalogues per cluster now — but the API still derives the flag per
+ * request, so the filter stays.
  *
  * The API derives the flag per request (`hostCluster` vs. the caller's
  * environment) and its own `assertKnownYieldSources` refuses the allocation
@@ -62,6 +66,57 @@ export function fundableStrategies(strategies: readonly EarnStrategy[]): readonl
   );
 }
 
+/**
+ * Whether a catalogue row can start a deposit run that can actually FINISH, and
+ * if not, why.
+ *
+ * Three questions, in the order that gives the reader the most actionable
+ * answer:
+ *
+ * 1. Does the instrument exist on this cluster (`wrong-cluster`)? Definitive and
+ *    environment-specific, so it wins — a sandbox reader looking at a
+ *    mainnet-only Kamino row needs that before they wonder about its token.
+ * 2. Does its mint map to a supported stablecoin lane (`asset-unsupported`)?
+ * 3. **Does SDP have a deposit path for this provider's shape at all
+ *    (`no-sdp-route`)?**
+ *
+ * The third check is the one that is easy to omit and was: without it, a
+ * production Kamino row is fundable, has a supported token, renders an enabled
+ * Deposit link — and lands on `EarnDepositUnavailable`, because the route it
+ * points at only creates custodial programs. Sandbox hides that (every Kamino
+ * row is `wrong-cluster` there), which is exactly why the check belongs in the
+ * model rather than in a manual pass.
+ *
+ * It answers differently per provider shape, and today both answer "no":
+ *
+ * - `custodial` — needs a surfaced provider with a program model. With Ground
+ *   un-surfaced there is none, so `EARN_PROGRAM_CREATION_ENABLED` is false.
+ * - `vault_direct` — needs the wallet -> amount -> hand-off run, which is not
+ *   built. SDP moves no money into a K-Vault and holds no address to point at.
+ *
+ * Re-enabling is therefore a real change in both cases, not a flag flip, and
+ * this predicate is where the compiler will bring you.
+ */
+export type OpportunityDepositability =
+  | { kind: "depositable" }
+  | { kind: "wrong-cluster" }
+  | { kind: "asset-unsupported" }
+  | { kind: "no-sdp-route"; style: EarnDepositStyle };
+
+export function opportunityDepositability(strategy: EarnStrategy): OpportunityDepositability {
+  // `=== false`, not falsy: an API old enough to omit `fundable` predates any
+  // mainnet-only provider, so absent must read as "no cluster objection" rather
+  // than blanking every row. Same rule as `fundableStrategies` above.
+  if (strategy.fundable === false) return { kind: "wrong-cluster" };
+  if (strategyToken(strategy) === undefined) return { kind: "asset-unsupported" };
+
+  const style = earnDepositStyle(strategy.provider);
+  if (style === "custodial" && EARN_PROGRAM_CREATION_ENABLED) {
+    return { kind: "depositable" };
+  }
+  return { kind: "no-sdp-route", style };
+}
+
 /** Why a catalogue row cannot advance through this portfolio-deposit flow. */
 export type StrategyDepositEligibility =
   | "eligible"
@@ -84,10 +139,16 @@ export type StrategyDepositEligibility =
  */
 export function strategyDepositEligibility(
   strategy: EarnStrategy,
-  portfolioProvider: EarnProviderId
+  // `undefined` when no OFFERED provider has a program model. Every row is then
+  // provider-unsupported, which is exactly right: this eligibility answers "can
+  // the portfolio flow create a program for this row", and with no such provider
+  // the answer is no for all of them.
+  portfolioProvider: EarnProviderId | undefined
 ): StrategyDepositEligibility {
   if (strategy.fundable === false) return "environment-mismatch";
-  if (strategy.provider !== portfolioProvider) return "provider-unsupported";
+  if (portfolioProvider === undefined || strategy.provider !== portfolioProvider) {
+    return "provider-unsupported";
+  }
   if (strategyToken(strategy) === undefined) return "asset-unsupported";
   return "eligible";
 }
