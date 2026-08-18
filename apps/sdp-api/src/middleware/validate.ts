@@ -1,4 +1,4 @@
-import type { Context } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import { validator } from "hono/validator";
 import { z } from "zod";
 import { type AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
@@ -22,8 +22,9 @@ export type ValidatedBodyContext<S extends z.ZodType> = ValidatedContext<{ json:
 
 /**
  * Builds the zod validation function shared by the route-level validators:
- * parse with the schema, throw the target-appropriate 400 on failure, and
- * hand the typed output to `c.req.valid(target)`.
+ * parse with the schema (async, so refinements may be async — mirroring
+ * `@hono/zod-validator`'s `safeParseAsync`), throw the target-appropriate 400
+ * on failure, and hand the typed output to `c.req.valid(target)`.
  *
  * @param schema - The zod schema the target must satisfy.
  * @param toError - Error factory receiving the flattened field errors.
@@ -33,8 +34,8 @@ function zodValidation<S extends z.ZodType>(
   schema: S,
   toError: (details: Record<string, unknown>) => AppError
 ) {
-  return (value: unknown): z.output<S> => {
-    const parsed = schema.safeParse(value);
+  return async (value: unknown): Promise<z.output<S>> => {
+    const parsed = await schema.safeParseAsync(value);
     if (!parsed.success) {
       const flattened = z.flattenError(parsed.error);
       throw toError({
@@ -51,18 +52,36 @@ function zodValidation<S extends z.ZodType>(
  * validation runs before downstream middleware (metered quotas, policy gates)
  * and the handler. Handlers read the typed body via `c.req.valid("json")`.
  *
- * Requests without a JSON Content-Type reach the schema as an empty object,
- * and malformed JSON is rejected by the core validator with a 400 before the
- * schema runs.
+ * Mirrors `@hono/zod-validator`'s json target with one deliberate deviation:
+ * the raw body is parsed regardless of the Content-Type header, where the
+ * upstream validator's content-type gate leaves the body unread as `{}`. That
+ * gate silently no-ops mistyped requests into 200s on all-optional schemas
+ * and 400s bodyless requests that do send a JSON header. An empty or
+ * whitespace-only body reaches the schema as an empty object; malformed JSON
+ * is rejected with a 400. Reading via `c.req.text()` fills hono's body cache,
+ * so downstream `c.req.json()` reads stay valid.
  *
  * @param schema - The zod schema the body must satisfy.
  * @returns Route-level middleware that rejects invalid bodies with a 400.
  */
-export function validateBody<S extends z.ZodType>(schema: S) {
-  return validator(
-    "json",
-    zodValidation(schema, (details) => badRequest("Invalid request body", details))
-  );
+export function validateBody<S extends z.ZodType<object>>(
+  schema: S
+  // biome-ignore lint/suspicious/noExplicitAny: mirrors hono's own validator() env default.
+): MiddlewareHandler<any, string, { in: { json: z.input<S> }; out: { json: z.output<S> } }> {
+  const parse = zodValidation(schema, (details) => badRequest("Invalid request body", details));
+  return async (c, next) => {
+    const raw = await c.req.text();
+    let value: unknown = {};
+    if (raw.trim().length > 0) {
+      try {
+        value = JSON.parse(raw);
+      } catch {
+        throw badRequest("Malformed JSON in request body");
+      }
+    }
+    c.req.addValidatedData("json", await parse(value));
+    await next();
+  };
 }
 
 /**

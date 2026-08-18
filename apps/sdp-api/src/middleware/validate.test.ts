@@ -71,10 +71,40 @@ describe("validateBody", () => {
     });
   });
 
-  it("rejects a non-JSON content type as an empty body", async () => {
+  it("parses a JSON body even without a JSON content type", async () => {
+    const res = await post(createApp(), JSON.stringify({ name: "abc", count: 2 }), "text/plain");
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ name: "abc", count: 2 });
+  });
+
+  it("rejects a non-JSON body as malformed", async () => {
     const res = await post(createApp(), "name=abc", "application/x-www-form-urlencoded");
 
     expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.message).toBe("Malformed JSON in request body");
+  });
+
+  it("treats an empty body with a JSON content type as an empty object", async () => {
+    const emptyBodySchema = z.object({ note: z.string().optional() });
+    const app = new Hono<{ Bindings: Env }>();
+    app.onError((err, c) => {
+      if (err instanceof AppError) {
+        return c.json({ error: err.toResponse().error }, 400);
+      }
+      throw err;
+    });
+    app.post(
+      "/",
+      validateBody(emptyBodySchema),
+      (c: ValidatedBodyContext<typeof emptyBodySchema>) => c.json(c.req.valid("json"))
+    );
+
+    const res = await post(app, "");
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({});
   });
 });
 

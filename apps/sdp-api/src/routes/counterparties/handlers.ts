@@ -451,15 +451,13 @@ export const updateCounterparty = async (
     entityType: body.entityType,
     identity: body.identity,
   });
-  if (validatedIdentity !== undefined) {
-    body.identity = validatedIdentity;
-  }
+  const update = validatedIdentity === undefined ? body : { ...body, identity: validatedIdentity };
 
   const updated = await repo.updateCounterparty({
     counterpartyId,
     organizationId: auth.organizationId,
     projectId,
-    ...body,
+    ...update,
   });
 
   if (!updated) {
