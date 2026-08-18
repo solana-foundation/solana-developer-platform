@@ -4,6 +4,7 @@ import {
   EARN_PORTFOLIO_POSITION_KINDS,
   EARN_PORTFOLIO_TOKENS,
   EARN_PORTFOLIO_WITHDRAWAL_STATUSES,
+  EARN_PROGRAM_SOLANA_PAYOUT_TOKENS,
   type EarnPortfolioAllocationInput,
   type EarnPortfolioDeposit,
   type EarnPortfolioDepositsPage,
@@ -75,11 +76,12 @@ const GROUND_SOLANA_CHAINS = { sandbox: "solana_devnet", production: "solana" } 
  * the Solana addresses SDP surfaces, so `listStrategies` keeps it out of the
  * catalogue on every cluster, withdrawal preview/create refuse it before any
  * network call (`assertSolanaRoutable` — Ground's own rejection is wire text
- * partners can't act on), and the dashboard's withdraw-token whitelist
- * mirrors this set (apps/sdp-web/src/app/dashboard/markets/earn/
- * earn-withdraw-modal.tsx, `SOLANA_PAYOUT_TOKENS`).
+ * partners can't act on). The shared provider capability also drives the
+ * dashboard's withdraw-token choices.
  */
-const GROUND_SOLANA_ROUTED_TOKENS: ReadonlySet<string> = new Set(["usdc"]);
+const GROUND_SOLANA_ROUTED_TOKENS: ReadonlySet<string> = new Set(
+  EARN_PROGRAM_SOLANA_PAYOUT_TOKENS.ground
+);
 
 /**
  * Fail fast on a token Ground cannot route on Solana rails. Gates on a static

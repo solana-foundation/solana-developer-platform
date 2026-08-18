@@ -2,6 +2,7 @@
 
 import {
   EARN_PORTFOLIO_TOKENS,
+  EARN_PROGRAM_SOLANA_PAYOUT_TOKENS,
   type EarnPortfolioToken,
   type EarnPortfolioWithdrawal,
   type EarnPortfolioWithdrawalPreview,
@@ -32,14 +33,17 @@ const PREVIEW_DEBOUNCE_MS = 400;
 
 /**
  * Stablecoins Ground pays out on the Solana rail — a GROUND constraint, not an
- * SDP preference, mirrored from `GROUND_SOLANA_ROUTED_TOKENS` in the provider
- * client (packages/sdp-earn/src/providers/ground/client.ts; Ground's
- * supported-chains doc: "Solana = USDC deposits and withdrawals only", USDT
- * rides Ethereum). SDP's surface is Solana-only, so tokens outside this set
+ * SDP preference, read from the shared payout registry in @sdp/types rather
+ * than restated here (Ground's supported-chains doc: "Solana = USDC deposits
+ * and withdrawals only", USDT rides Ethereum). The provider client refuses the
+ * same registry entry before any network call, so the button and the server
+ * cannot disagree. SDP's surface is Solana-only, so tokens outside this set
  * are not offered AT ALL — they can never complete a withdrawal here, and the
  * same constraint already keeps their strategies out of the catalogue.
  */
-const SOLANA_PAYOUT_TOKENS: ReadonlySet<EarnPortfolioToken> = new Set(["usdc"]);
+const SOLANA_PAYOUT_TOKENS: ReadonlySet<EarnPortfolioToken> = new Set(
+  EARN_PROGRAM_SOLANA_PAYOUT_TOKENS.ground
+);
 
 /** The withdraw token choices: only lanes Ground can actually pay out. */
 const WITHDRAW_TOKEN_OPTIONS = EARN_PORTFOLIO_TOKENS.filter((candidate) =>
