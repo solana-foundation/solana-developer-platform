@@ -80,6 +80,7 @@ async function relayToTarget(
 
   await recordRpcRelayTelemetry(c.var.kv.cache, {
     providerId: target.providerId,
+    connectionId: target.connectionId,
     methodNames,
     statusCode: upstream.status,
     latencyMs: elapsedMs,
@@ -197,6 +198,7 @@ export const relayRpcRequest = async (c: AppContext) => {
         lastError = error;
         await recordRpcRelayTelemetry(c.var.kv.cache, {
           providerId: target.providerId,
+          connectionId: target.connectionId,
           methodNames,
           statusCode: 0,
           latencyMs: Date.now() - startedAt,
@@ -238,6 +240,7 @@ export const relayRpcRequest = async (c: AppContext) => {
   } catch (error) {
     await recordRpcRelayTelemetry(c.var.kv.cache, {
       providerId: target.providerId,
+      connectionId: target.connectionId,
       methodNames,
       statusCode: 0,
       latencyMs: Date.now() - startedAt,
@@ -282,6 +285,7 @@ export const testRpcConnection = async (c: AppContext) => {
 
     await recordRpcRelayTelemetry(c.var.kv.cache, {
       providerId: target.providerId,
+      connectionId: target.connectionId,
       methodNames,
       statusCode: upstream.status,
       latencyMs: elapsedMs,
@@ -307,6 +311,7 @@ export const testRpcConnection = async (c: AppContext) => {
   } catch (error) {
     await recordRpcRelayTelemetry(c.var.kv.cache, {
       providerId: target.providerId,
+      connectionId: target.connectionId,
       methodNames,
       statusCode: 0,
       latencyMs: Date.now() - startedAt,

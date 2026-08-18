@@ -119,6 +119,8 @@ export interface ResolvedRpcTarget {
 
 export interface RelayTelemetryInput {
   providerId: ResolvedRpcProviderId;
+  /** Set for tenant-owned targets so their traffic keeps its own bucket. */
+  connectionId?: string;
   methodNames: string[];
   statusCode: number;
   latencyMs: number;
@@ -128,6 +130,22 @@ export interface RelayTelemetryInput {
 
 const ROUND_ROBIN_CURSOR_KEY = "rpc:relay:round-robin-cursor";
 const STATS_KEY_PREFIX = "rpc:relay:stats:";
+
+/**
+ * Where a target's counters live.
+ *
+ * A tenant connection resolves to the vendor's own id, so keying on
+ * `providerId` alone put an organization's BYOK traffic in the same bucket as
+ * the platform's endpoint for that vendor. The provider list then reported
+ * requests, errors and latency SDP never served as its own. Tenant traffic is
+ * keyed by connection instead, which also keeps one organization's volume out
+ * of another's.
+ */
+function statsKey(providerId: ResolvedRpcProviderId, connectionId?: string): string {
+  return connectionId
+    ? `${STATS_KEY_PREFIX}tenant:${connectionId}`
+    : `${STATS_KEY_PREFIX}${providerId}`;
+}
 const MAX_ORIGIN_BUCKETS = 20;
 const SEND_TRANSACTION_METHOD = ["send", "Transaction"].join("");
 const SEND_RAW_TRANSACTION_METHOD = ["sendRaw", "Transaction"].join("");
@@ -787,7 +805,7 @@ export async function resolveRoundRobinRpcTargets(
 }
 
 export async function recordRpcRelayTelemetry(cache: KVStore, telemetry: RelayTelemetryInput) {
-  const key = `${STATS_KEY_PREFIX}${telemetry.providerId}`;
+  const key = statsKey(telemetry.providerId, telemetry.connectionId);
   const existing = (await cache.get(key, "json")) as Partial<RpcProviderStatsRecord> | null;
   const stats: RpcProviderStatsRecord = {
     ...emptyStats(),
@@ -823,9 +841,10 @@ export async function recordRpcRelayTelemetry(cache: KVStore, telemetry: RelayTe
 
 async function getProviderStats(
   cache: KVStore,
-  providerId: ResolvedRpcProviderId
+  providerId: ResolvedRpcProviderId,
+  connectionId?: string
 ): Promise<RpcProviderStatsSummary> {
-  const key = `${STATS_KEY_PREFIX}${providerId}`;
+  const key = statsKey(providerId, connectionId);
   const existing = (await cache.get(key, "json")) as RpcProviderStatsRecord | null;
   return toStatsSummary(existing ?? emptyStats());
 }
@@ -855,7 +874,11 @@ export async function listRpcProviders(input: ResolveRpcTargetInput) {
       projectId: resolvedTarget.projectId,
       selectionMode: resolvedTarget.selectionMode,
       endpoint: resolvedTarget.endpointLabel,
-      stats: await getProviderStats(input.kv.cache, resolvedTarget.providerId),
+      stats: await getProviderStats(
+        input.kv.cache,
+        resolvedTarget.providerId,
+        resolvedTarget.connectionId
+      ),
     },
     roundRobinOrder: enabledManagedProviders.map((provider) => provider.id),
   };

@@ -3,7 +3,11 @@ import type {
   TenantRpcConnectionLookup,
   TenantRpcConnectionResolution,
 } from "@sdp/rpc/relay";
-import { resolveRoundRobinRpcTargets, resolveRpcTarget } from "@sdp/rpc/relay";
+import {
+  recordRpcRelayTelemetry,
+  resolveRoundRobinRpcTargets,
+  resolveRpcTarget,
+} from "@sdp/rpc/relay";
 import { describe, expect, it, vi } from "vitest";
 
 /**
@@ -203,5 +207,66 @@ describe("tenant RPC connection precedence", () => {
         connections: lookupReturning({}),
       })
     ).rejects.toThrow(FELL_THROUGH);
+  });
+});
+
+/**
+ * Telemetry buckets.
+ *
+ * A tenant connection resolves to the vendor's own id, so keying counters on
+ * `providerId` alone mixed an organization's BYOK traffic into the platform's
+ * bucket for that vendor, and the provider list reported requests SDP never
+ * served as its own. Separation is asserted through the keys actually written.
+ */
+describe("relay telemetry keys", () => {
+  function recordingCache() {
+    const writes: string[] = [];
+    const cache = {
+      get: async () => null,
+      put: async (key: string) => {
+        writes.push(key);
+      },
+      delete: async () => undefined,
+      list: async () => ({ keys: [] }),
+    } as unknown as ResolveRpcTargetInput["kv"]["cache"];
+    return { cache, writes };
+  }
+
+  const telemetry = {
+    methodNames: ["getVersion"],
+    statusCode: 200,
+    latencyMs: 12,
+    ok: true,
+    origin: null,
+  };
+
+  it("keeps a tenant connection out of the platform provider's bucket", async () => {
+    const { cache, writes } = recordingCache();
+
+    await recordRpcRelayTelemetry(cache, {
+      ...telemetry,
+      providerId: "helius",
+      connectionId: "rconn_1",
+    });
+    await recordRpcRelayTelemetry(cache, { ...telemetry, providerId: "helius" });
+
+    expect(writes).toEqual(["rpc:relay:stats:tenant:rconn_1", "rpc:relay:stats:helius"]);
+  });
+
+  it("gives two organizations on the same vendor separate buckets", async () => {
+    const { cache, writes } = recordingCache();
+
+    await recordRpcRelayTelemetry(cache, {
+      ...telemetry,
+      providerId: "helius",
+      connectionId: "rconn_org_a",
+    });
+    await recordRpcRelayTelemetry(cache, {
+      ...telemetry,
+      providerId: "helius",
+      connectionId: "rconn_org_b",
+    });
+
+    expect(new Set(writes).size).toBe(2);
   });
 });
