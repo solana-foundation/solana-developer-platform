@@ -30,10 +30,6 @@ export const prepareRingsOperationSchema = z.object({
   clientNonce: z.string().min(1).max(128),
 });
 
-export const executeRingsOperationSchema = z.object({
-  approvalStatus: z.enum(["approved", "rejected", "pending"]).optional(),
-});
-
 export const retryRingsOperationSchema = z.object({
   clientNonce: z.string().min(1).max(128),
 });

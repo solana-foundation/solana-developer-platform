@@ -206,12 +206,14 @@ describe("HeliusRingsService", () => {
   });
 
   describe("executeOperation", () => {
-    it("advances an approved operation and is inert while approval is pending", async () => {
+    it("advances only once the stored approval reads approved", async () => {
+      let approvalStatus: "pending" | "approved" = "pending";
       const svc = liveishService({
         enforcePolicy: policyStub("approval_required", {
           requiresApproval: true,
           approvalRequestId: "apr_1",
         }),
+        getApprovalStatus: async () => approvalStatus,
       });
       const paused = await svc.prepareOperation(
         operationInput({ clientNonce: "nonce-exec" }),
@@ -219,10 +221,13 @@ describe("HeliusRingsService", () => {
       );
       expect(paused.state).toBe("approval_required");
 
-      const stillPaused = await svc.executeOperation(paused.id, { approvalStatus: "pending" });
+      // The verdict comes from the approval request, never the caller: while
+      // it reads pending, execute is inert no matter how often it is called.
+      const stillPaused = await svc.executeOperation(paused.id);
       expect(stillPaused.state).toBe("approval_required");
 
-      const advanced = await svc.executeOperation(paused.id, { approvalStatus: "approved" });
+      approvalStatus = "approved";
+      const advanced = await svc.executeOperation(paused.id);
       expect(advanced.state).toBe("indexing");
     });
 
@@ -232,13 +237,14 @@ describe("HeliusRingsService", () => {
           requiresApproval: true,
           approvalRequestId: "apr_1",
         }),
+        getApprovalStatus: async () => "rejected",
       });
       const paused = await svc.prepareOperation(
         operationInput({ clientNonce: "nonce-reject" }),
         actorContext
       );
 
-      const rejected = await svc.executeOperation(paused.id, { approvalStatus: "rejected" });
+      const rejected = await svc.executeOperation(paused.id);
       expect(rejected.state).toBe("failed");
       expect(rejected.failure).toMatchObject({ code: "approval_rejected", retryable: false });
     });
@@ -277,7 +283,7 @@ describe("HeliusRingsService", () => {
       );
       expect(failed.state).toBe("failed");
 
-      const retry = await svc.retryOperation(failed.id, "nonce-retry-2");
+      const retry = await svc.retryOperation(failed.id, "nonce-retry-2", actorContext);
 
       expect(retry.id).not.toBe(failed.id);
       expect(retry.intentKey).not.toBe(failed.intentKey);
@@ -295,8 +301,32 @@ describe("HeliusRingsService", () => {
         actorContext
       );
 
-      await expect(svc.retryOperation(denied.id, "nonce-noretry-2")).rejects.toMatchObject({
+      await expect(
+        svc.retryOperation(denied.id, "nonce-noretry-2", actorContext)
+      ).rejects.toMatchObject({
         code: "CONFLICT",
+      });
+    });
+
+    it("caps the retry lineage depth", async () => {
+      const svc = service();
+      let current = await svc.prepareOperation(
+        operationInput({ clientNonce: "nonce-depth-0" }),
+        actorContext
+      );
+      expect(current.state).toBe("failed");
+
+      // Depth 1 is the original; four retries reach the cap of five.
+      for (let attempt = 1; attempt < 5; attempt++) {
+        current = await svc.retryOperation(current.id, `nonce-depth-${attempt}`, actorContext);
+        expect(current.state).toBe("failed");
+      }
+
+      await expect(
+        svc.retryOperation(current.id, "nonce-depth-5", actorContext)
+      ).rejects.toMatchObject({
+        code: "CONFLICT",
+        message: expect.stringContaining("retry limit"),
       });
     });
 
@@ -308,7 +338,7 @@ describe("HeliusRingsService", () => {
       );
       expect(inFlight.state).toBe("indexing");
 
-      await expect(svc.retryOperation(inFlight.id, "again")).rejects.toMatchObject({
+      await expect(svc.retryOperation(inFlight.id, "again", actorContext)).rejects.toMatchObject({
         code: "CONFLICT",
       });
     });

@@ -131,10 +131,12 @@ function buildSummaryRows(
 export function OperationComposer({
   wallets,
   zones,
+  gatewayRed,
   onPrepared,
 }: {
   wallets: RingsWallet[];
   zones: RingsZone[];
+  gatewayRed: boolean;
   onPrepared: () => Promise<void>;
 }) {
   const t = useTranslations();
@@ -218,6 +220,7 @@ export function OperationComposer({
             isAnonymous={draft.opType === "transfer_anonymous"}
             acknowledged={anonymousAcknowledged}
             onAcknowledge={setAnonymousAcknowledged}
+            gatewayRed={gatewayRed}
             error={error}
             submitting={submitting}
             onBack={() => setStep("compose")}
@@ -384,6 +387,7 @@ function ReviewStep({
   isAnonymous,
   acknowledged,
   onAcknowledge,
+  gatewayRed,
   error,
   submitting,
   onBack,
@@ -393,6 +397,7 @@ function ReviewStep({
   isAnonymous: boolean;
   acknowledged: boolean;
   onAcknowledge: (acknowledged: boolean) => void;
+  gatewayRed: boolean;
   error: string | null;
   submitting: boolean;
   onBack: () => void;
@@ -401,6 +406,9 @@ function ReviewStep({
   const t = useTranslations();
   return (
     <>
+      {gatewayRed ? (
+        <Callout variant="info">{t("DashboardHeliusRings.composer.gatewayRedNotice")}</Callout>
+      ) : null}
       <dl className="flex flex-col gap-2">
         {rows.map(([label, value]) => (
           <div key={label} className="flex items-baseline justify-between gap-4">

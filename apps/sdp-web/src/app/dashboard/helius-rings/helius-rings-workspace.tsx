@@ -31,6 +31,7 @@ import {
 } from "./helius-rings.data";
 import { OperationComposer } from "./operation-composer";
 import { OperationDetailDrawer } from "./operation-detail-drawer";
+import { RecoveryCard } from "./recovery-card";
 import { ZonesCard } from "./zones-card";
 
 interface CustodyWalletOption {
@@ -263,9 +264,16 @@ export function HeliusRingsWorkspace({
         </CardContent>
       </Card>
 
-      <OperationComposer wallets={wallets} zones={zones} onPrepared={refresh} />
+      <OperationComposer
+        wallets={wallets}
+        zones={zones}
+        gatewayRed={gatewayPending}
+        onPrepared={refresh}
+      />
 
       <ZonesCard wallets={wallets} onZonesChanged={setZones} />
+
+      <RecoveryCard operations={operations} onRetried={refresh} />
 
       <Card>
         <CardHeader>
