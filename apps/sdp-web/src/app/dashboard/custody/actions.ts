@@ -114,7 +114,6 @@ async function initializeCustodyWallet(formData: FormData): Promise<OnboardingPr
     | "utila";
   const walletLabel = getOptionalString(formData, "walletLabel");
   const network = getOptionalString(formData, "network");
-  const walletAddress = getOptionalString(formData, "walletAddress");
   const accountPolicy = getOptionalString(formData, "accountPolicy");
 
   const payload: Record<string, unknown> = {
@@ -125,9 +124,6 @@ async function initializeCustodyWallet(formData: FormData): Promise<OnboardingPr
   if (provider !== "fireblocks") {
     if (network) {
       payload.network = network;
-    }
-    if (walletAddress) {
-      payload.walletAddress = walletAddress;
     }
     if (accountPolicy) {
       payload.accountPolicy = accountPolicy;

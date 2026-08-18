@@ -86,7 +86,9 @@ function createSdpApiRequest(
     if (!headers.has("Authorization")) {
       headers.set("Authorization", `Bearer ${token}`);
     }
-    headers.set("Content-Type", "application/json");
+    if (options.body !== undefined && options.body !== null) {
+      headers.set("Content-Type", "application/json");
+    }
     headers.set(TRACE_ID_HEADER, traceId);
     headers.set(TRACE_SOURCE_HEADER, source);
     headers.set("X-Request-ID", requestId);
@@ -354,8 +356,11 @@ export async function proxyToSdpApi({
   try {
     const apiClient = await createSdpApiClient(trace.childContext(`${traceSource}.api`));
     const method = request.method;
-    const body = method === "GET" || method === "HEAD" ? undefined : await request.text();
-    const response = await apiClient.request(path, { method, body });
+    const rawBody = method === "GET" || method === "HEAD" ? "" : await request.text();
+    const response = await apiClient.request(path, {
+      method,
+      body: rawBody === "" ? undefined : rawBody,
+    });
 
     logRouteResult(trace, response.status);
 

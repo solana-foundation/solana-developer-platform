@@ -171,9 +171,9 @@ function interpretApiError(error: unknown): ConnectPrivateChannelResult {
     return interpretProbeError(details);
   }
 
-  if (details?.fieldErrors) {
+  if (details?.errors) {
     const fieldErrors: FieldErrors = {};
-    for (const [field, messages] of Object.entries(details.fieldErrors)) {
+    for (const [field, messages] of Object.entries(details.errors)) {
       const first = Array.isArray(messages) ? messages[0] : undefined;
       if (typeof first === "string") {
         fieldErrors[field as keyof PrivateChannelInstanceInput] = first;
@@ -221,7 +221,7 @@ interface ErrorDetails {
   gateway?: ConnectionProbeResult["gateway"];
   rpc?: ConnectionProbeResult["rpc"];
   auth?: ConnectionProbeResult["auth"];
-  fieldErrors?: Record<string, unknown>;
+  errors?: Record<string, unknown>;
   requiresReactivateConfirmation?: boolean;
   existingInstance?: PrivateChannelInstance;
   activeInstance?: PrivateChannelInstance;
