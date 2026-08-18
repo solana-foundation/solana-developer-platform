@@ -22,9 +22,12 @@ api/dashboard/markets/earn/
     withdrawals/[withdrawalRef]/     GET detail
 ```
 
-`proxyToSdpApi` forwards `{method, body}` and builds its own headers, so an
-inbound `Idempotency-Key` never reaches the API — the dashboard's create sends
-the body `requestId` form, which is the only one that can get through.
+`proxyToSdpApi` never copies the inbound header bag — auth, project scope and
+tracing stay server-owned — so a client-set `Idempotency-Key` never reaches the
+API on its own. A route forwards one deliberately, per header, through the
+optional `upstreamHeaders` argument, spelling it `IDEMPOTENCY_KEY_HEADER`
+(`src/lib/idempotency.ts`). No Earn route opts in yet: the dashboard's create
+sends the body `requestId` form.
 
 ## Module map
 
