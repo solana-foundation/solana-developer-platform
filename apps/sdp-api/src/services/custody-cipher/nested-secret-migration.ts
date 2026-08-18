@@ -1,12 +1,5 @@
 import { type CustodyCipher, isV2Ciphertext } from "./cipher-router";
 
-/**
- * Provider config fields that hold ciphertext of their own, encrypted with the
- * same custody cipher as the enclosing config: fireblocks stores its API
- * secret PEM, local stores the raw signing key. Re-wrapping the outer config
- * does not touch these, so retiring the legacy key requires migrating them
- * explicitly.
- */
 const NESTED_SECRET_FIELDS = ["apiSecretEncrypted", "encryptedPrivateKey"] as const;
 
 export interface NestedSecretMigrationResult {

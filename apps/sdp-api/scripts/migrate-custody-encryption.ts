@@ -32,13 +32,6 @@ interface PassCounters {
   failed: number;
 }
 
-// Walks custody_configs rows of one encryption_version with a keyset cursor,
-// re-encrypting each row's config (nested secrets included) and flipping the
-// version to v2. The UPDATE is guarded by the previously read ciphertext, so a
-// row rewritten concurrently is left to its writer: the live cipher router
-// encrypts new writes with the active scheme, making the fresh value v2
-// already. Contested and failed rows are counted so the operator reruns
-// instead of trusting a false success.
 async function migratePass(env: Env, version: string, label: string): Promise<PassCounters> {
   const db = getDb(env);
   const cipher = createCustodyCipher(env);
@@ -113,10 +106,6 @@ async function main(): Promise<void> {
   }
 
   try {
-    // Nested-only pass first: rows migrated before nested-secret support have a
-    // v2 outer envelope around legacy inner ciphertext and cannot be found by
-    // encryption_version. Running it before the legacy pass keeps rows migrated
-    // below (nested secrets included) out of this scan.
     const nested = await migratePass(env, V2_VERSION, "custody_configs:nested");
     const legacy = await migratePass(env, LEGACY_VERSION, "custody_configs");
 
