@@ -348,36 +348,28 @@ function getCounterpartyRoutePageConfig(
   return null;
 }
 
-function getEarnRoutePageConfig(
+function getMarketsRoutePageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
-  if (pathname === "/dashboard/markets/earn/deposit") {
-    return actionPageConfig({
-      title: t("Shared.dashboardShell.earnNewDeposit"),
-      backHref: "/dashboard/markets/earn",
-      backLabel: t("Shared.dashboardShell.backToEarn"),
+  if (pathname === "/dashboard/markets/treasury-solutions") {
+    return {
+      title: t("Shared.dashboardShell.treasurySolutions"),
+      titlePosition: "center",
       contentWidthClass: "max-w-none",
-    });
+    };
   }
   if (pathname === "/dashboard/markets/earn") {
     return {
-      title: t("Shared.dashboardShell.earn"),
+      title: t("Shared.dashboardShell.earnProgram"),
       titlePosition: "center",
       contentWidthClass: "max-w-none",
-      headerTabs: {
-        tabs: [
-          { id: "opportunities", label: t("DashboardEarn.tabs.opportunities") },
-          { id: "positions", label: t("DashboardEarn.tabs.positions") },
-          { id: "playground", label: t("DashboardEarn.tabs.playground") },
-        ],
-        hideOnMobile: false,
-      },
     };
   }
-  if (pathname.startsWith("/dashboard/markets/earn/")) {
+  if (pathname === "/dashboard/markets/earn/button-builder") {
     return {
-      title: t("Shared.dashboardShell.earn"),
+      title: t("Shared.dashboardShell.configureEarnButton"),
+      titlePosition: "center",
       contentWidthClass: "max-w-none",
     };
   }
@@ -654,9 +646,9 @@ export function getDashboardPageConfig(
   if (counterpartyRouteConfig) {
     return counterpartyRouteConfig;
   }
-  const earnRouteConfig = getEarnRoutePageConfig(pathname, t);
-  if (earnRouteConfig) {
-    return earnRouteConfig;
+  const marketsRouteConfig = getMarketsRoutePageConfig(pathname, t);
+  if (marketsRouteConfig) {
+    return marketsRouteConfig;
   }
   if (pathname === "/dashboard/payments") {
     return {
@@ -732,7 +724,10 @@ export function getDashboardPageConfig(
     // wide empty gutter beside its cards. Widened rather than set to `max-w-none`:
     // the members table and the RPC form are label/value rows, and letting them span
     // an ultrawide display pushes each value far from its label.
-    return { title: t("Shared.dashboardShell.settings"), contentWidthClass: "max-w-7xl" };
+    return {
+      title: t("Shared.dashboardShell.settings"),
+      contentWidthClass: "max-w-7xl",
+    };
   }
   if (pathname.startsWith("/dashboard/allowlist")) {
     return { title: t("Shared.dashboardShell.allowlist") };

@@ -30,6 +30,7 @@ describe("dashboard loading route", () => {
     ["/dashboard/payments/recurring", "recurring-payments"],
     ["/dashboard/payments/recurring/create", "recurring-payment-create"],
     ["/dashboard/payments/recurring/payment-1", "recurring-payment-detail"],
+    ["/dashboard/markets/treasury-solutions", "treasury-solutions"],
     ["/dashboard/markets/earn", "earn-program"],
     ["/dashboard/markets/earn/button-builder", "earn-program"],
     ["/dashboard/tokens", "token-holdings"],
@@ -71,15 +72,28 @@ describe("integrations route", () => {
 });
 
 describe("dashboard navigation active state", () => {
-  it.each(["/dashboard/markets/earn", "/dashboard/markets/earn/button-builder"])(
-    "keeps Markets active throughout the Earn flow at %s",
-    (pathname) => {
-      expect(isDashboardNavItemActive(pathname, "/dashboard/markets/earn")).toBe(true);
-    }
-  );
+  it.each([
+    "/dashboard/markets/treasury-solutions",
+    "/dashboard/markets/earn",
+    "/dashboard/markets/earn/button-builder",
+  ])("keeps Markets active at %s", (pathname) => {
+    expect(isDashboardNavItemActive(pathname, "/dashboard/markets")).toBe(true);
+  });
+
+  it("keeps each Markets child active only on its own route", () => {
+    expect(
+      isDashboardNavItemActive(
+        "/dashboard/markets/treasury-solutions",
+        "/dashboard/markets/treasury-solutions"
+      )
+    ).toBe(true);
+    expect(
+      isDashboardNavItemActive("/dashboard/markets/earn", "/dashboard/markets/treasury-solutions")
+    ).toBe(false);
+  });
 
   it("does not claim unrelated dashboard routes for Markets", () => {
-    expect(isDashboardNavItemActive("/dashboard/payments", "/dashboard/markets/earn")).toBe(false);
+    expect(isDashboardNavItemActive("/dashboard/payments", "/dashboard/markets")).toBe(false);
   });
 });
 

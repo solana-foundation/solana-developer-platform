@@ -30,7 +30,10 @@ import {
   IssuancePageSkeleton,
 } from "@/app/dashboard/issuance/issuance-page-skeleton";
 import DashboardLoading from "@/app/dashboard/loading";
-import { EarnProgramSkeleton } from "@/app/dashboard/markets/markets-route-skeletons";
+import {
+  EarnProgramSkeleton,
+  TreasurySolutionsSkeleton,
+} from "@/app/dashboard/markets/markets-route-skeletons";
 import {
   CompactOperationsCardSkeleton,
   SettingsPageSkeleton,
@@ -151,6 +154,8 @@ function resolvePageLoadingComponent(
       return IssuanceDetailSkeleton;
     case "payments-overview":
       return PaymentsPageSkeleton;
+    case "treasury-solutions":
+      return TreasurySolutionsSkeleton;
     case "earn-program":
       return EarnProgramSkeleton;
     case "payments-transactions":
@@ -728,7 +733,9 @@ export function DashboardShell({
         ].join(" ")}
       >
         <aside
-          style={{ width: isSidebarOpen ? sidebarExpandedWidth : sidebarCollapsedWidth }}
+          style={{
+            width: isSidebarOpen ? sidebarExpandedWidth : sidebarCollapsedWidth,
+          }}
           className="relative z-10 hidden bg-[var(--sdp-shell-bg)] xl:sticky xl:top-0 xl:flex xl:h-screen xl:flex-col xl:justify-between"
         >
           <DashboardSidebarContent
