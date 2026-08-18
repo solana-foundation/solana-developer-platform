@@ -46,8 +46,14 @@ export function tokenSymbol(mint: string): string {
 
 const amountFormatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 
+export function formatTokenQuantity(value: number | string, symbol: string): string {
+  const amount = typeof value === "string" ? Number(value) : value;
+  if (!Number.isFinite(amount)) return "—";
+  return `${amountFormatter.format(amount)} ${symbol}`;
+}
+
 export function formatTokenAmount(value: number, mint: string): string {
-  return `${amountFormatter.format(value)} ${tokenSymbol(mint)}`;
+  return formatTokenQuantity(value, tokenSymbol(mint));
 }
 
 /** Simple-interest projection for preview panels (display only). */

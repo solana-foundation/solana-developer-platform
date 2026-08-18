@@ -170,8 +170,10 @@ function withRequestTimeout(transport: RpcTransport, timeoutMs: number): RpcTran
  * Create a configured Solana RPC client from environment
  */
 export function createRpc(env: RpcEnv, options?: RpcClientOptions): SolanaRpc {
-  const config = getSolanaConfig(env);
-  const rpcUrl = options?.rpcUrl ?? config.rpcUrl;
+  // An explicit URL is already the complete endpoint selection. Do not force
+  // callers with a per-request/per-cluster URL to also configure the legacy
+  // process default merely to construct a client for that explicit endpoint.
+  const rpcUrl = options?.rpcUrl ?? getSolanaConfig(env).rpcUrl;
   const timeoutMs = options?.requestTimeoutMs ?? DEFAULT_RPC_REQUEST_TIMEOUT_MS;
 
   let transport: RpcTransport;

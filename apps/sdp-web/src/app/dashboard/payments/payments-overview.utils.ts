@@ -7,6 +7,7 @@ import {
   type PaymentsDashboardWallet as WalletRecord,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
+import type { BadgeVariant } from "@/components/ui/badge";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { toTitleCase } from "../activity-format-utils";
 import type { PaymentsIssuedTokenSymbol } from "./payments-page.data";
@@ -322,6 +323,45 @@ export function formatRampQuoteTimeRemaining(
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+/**
+ * Transfer/transaction status → catalog key, the same keys the transactions
+ * filter labels use, so status copy localizes instead of leaking raw English.
+ * Unknown statuses return null; callers fall back to `formatStatus`.
+ */
+const STATUS_MESSAGE_KEYS: Partial<Record<string, MessageKey>> = {
+  pending: "DashboardPayments.transactions.pending",
+  processing: "DashboardPayments.transactions.processing",
+  confirmed: "DashboardPayments.transactions.confirmed",
+  finalized: "DashboardPayments.transactions.finalized",
+  failed: "DashboardPayments.transactions.failed",
+  awaiting_payment: "DashboardPayments.transactions.awaitingPayment",
+  settling: "DashboardPayments.transactions.settling",
+  completed: "DashboardPayments.transactions.completed",
+  canceled: "DashboardPayments.transactions.canceled",
+  expired: "DashboardPayments.transactions.expired",
+};
+
+export function statusMessageKey(status: string): MessageKey | null {
+  return STATUS_MESSAGE_KEYS[status] ?? null;
+}
+
+export function statusVariant(status: string): BadgeVariant {
+  if (["completed", "confirmed", "finalized"].includes(status)) return "success";
+  if (["pending", "processing", "awaiting_payment", "settling"].includes(status)) {
+    return "warning";
+  }
+  if (status === "failed") return "danger";
+  return "default";
+}
+
+export function formatStatus(status: string): string {
+  return status
+    .split("_")
+    .filter(Boolean)
+    .map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`)
+    .join(" ");
+}
+
 export function formatDirection(direction: string | undefined, t: Translate): string {
   if (!direction) {
     return t("DashboardPayments.unknown");
@@ -439,11 +479,15 @@ export function aggregateBalancesFromWallets(wallets: WalletRecord[]): CustodyWa
   }));
 }
 
+/**
+ * Native SOL is a balance row like any other: wallets hold it, the API prices
+ * it, and hiding it made the Available balance card disagree with the total on
+ * the home page. Only balances without a resolvable USD value are dropped.
+ */
 export function normalizeAggregateBalances(
   balances: CustodyWalletTokenBalance[]
 ): CustodyWalletTokenBalance[] {
   return balances
-    .filter((balance) => !isSolBalance(balance))
     .filter((balance) => resolveUsdBalanceValue(balance) !== null)
     .sort((left, right) => {
       const leftIsUsdc = left.token.trim().toUpperCase() === "USDC";

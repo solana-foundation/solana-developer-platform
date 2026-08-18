@@ -27,11 +27,11 @@ interface WalletPolicyBody {
 }
 
 const SEED_RULES: PolicyRule[] = [
-  { id: "deny-raw-signing", kind: "operation_family", family: "raw_sign", action: "deny" },
+  { id: "deny-issuance", kind: "operation_family", family: "issuance", action: "deny" },
 ];
 
 const PATCHED_RULES: PolicyRule[] = [
-  { id: "deny-programs", kind: "operation_family", family: "program", action: "deny" },
+  { id: "deny-ramp", kind: "operation_family", family: "ramp", action: "deny" },
 ];
 
 async function putPolicy(body: Record<string, unknown>): Promise<Response> {
