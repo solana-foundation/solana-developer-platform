@@ -45,10 +45,11 @@ export interface EarnStrategyRow {
   risk_metadata: EarnStrategyRiskMetadata;
   status: EarnStrategyStatus;
   /**
-   * Cluster the instrument lives on — NOT implied by `environment`. A
-   * mainnet-only provider (Kamino) is catalogued into both environments, so a
-   * sandbox row may legitimately read `mainnet-beta`; that row is browsable and
-   * never fundable. See migration 0057 and `isClusterFundableInEnvironment`.
+   * Cluster the instrument lives on — NOT implied by `environment`, which is
+   * why it is a column. Note the catalogue sync now REFUSES to write a
+   * `mainnet-beta` row outside production, so a sandbox row reading
+   * `mainnet-beta` is not legitimate: it predates that guard and is waiting for
+   * a delist pass. See migration 0057 and `isClusterFundableInEnvironment`.
    */
   host_cluster: SolanaCluster;
   environment: SdpEnvironment;
@@ -188,6 +189,36 @@ export interface ListEarnStrategiesInput {
    * the sync still persists the provider's complete routable catalogue.
    */
   excludeRelatedTerms?: readonly string[];
+  /**
+   * Server-owned provider allowlist — the offered set
+   * (`SURFACED_EARN_PROVIDERS`), never a caller's filter.
+   *
+   * An EMPTY array means "no provider is offered" and returns nothing. That is
+   * the whole point of accepting the array rather than an optional single id:
+   * the caller passes the offered set as-is, and the degenerate case cannot
+   * quietly invert into "no filter, show everything" at a call site that forgot
+   * to check. Filtering belongs in the query for the same reason
+   * `excludeRelatedTerms` does — so pagination and totals describe the rows the
+   * caller can actually see.
+   */
+  providers?: readonly string[];
+  /**
+   * Server-owned per-vault denylist, as `<provider>:<providerReference>` keys.
+   *
+   * Keyed on the provider REFERENCE — a vault address — never on the name.
+   * Kamino's vault registry is permissionless and the name is free text chosen
+   * by whoever created the vault, so a name-keyed rule is one an outsider can
+   * dodge (rename) or trip (impersonate a curated vault's name).
+   */
+  excludeProviderKeys?: readonly string[];
+  /**
+   * Per-provider allowlists: `{ kamino: [ref, ...] }` shows ONLY those
+   * references for that provider and hides the rest of its shelf. A provider
+   * absent from this map is unrestricted; a provider mapped to an EMPTY array
+   * shows nothing, which is the literal reading of an empty allowlist and is
+   * pinned by a repository test.
+   */
+  allowedProviderReferences?: Readonly<Record<string, readonly string[]>>;
   limit: number;
   offset: number;
 }

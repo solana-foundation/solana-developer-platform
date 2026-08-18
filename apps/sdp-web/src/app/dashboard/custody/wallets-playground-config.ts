@@ -243,12 +243,6 @@ export function buildWalletsPlaygroundEndpointConfigs({
           t("DashboardCustody.walletId"),
           walletOptions
         ),
-        {
-          key: "memo",
-          label: t("DashboardCustody.playgroundMemoField"),
-          placeholder: t("DashboardCustody.ownershipProof"),
-          defaultValue: t("DashboardCustody.ownershipProof"),
-        },
       ],
       expectedResponse: {
         data: {

@@ -123,11 +123,8 @@ These are wallet-policy selectors, not API-key permissions. API-key permissions 
 | --- | --- | --- |
 | `payment` | Outbound single and batch payments. | Single and batch transfer execution |
 | `ramp` | Fiat-to-crypto and crypto-to-fiat ramp activity. | On-ramp and off-ramp quote creation |
-| `issuance` | Token lifecycle actions signed by the wallet. | Mint execution and authority updates |
-| `raw_sign` | Low-level signing and signer verification. | Custody signer checks |
+| `issuance` | Token lifecycle actions signed by the wallet. | Mint, burn, seize, and authority-update execution |
 | `transfer` | Generic direct-transfer family reserved for operations outside the payment workflow. | No current public operation type |
-| `program` | General Solana program interactions. | No current public operation type |
-| `provider_admin` | Custody-provider administration. | No current public operation type |
 
 Family values with no current public operation type are valid policy values, but they do not match a public SDP flow until an operation is emitted in that family.
 
@@ -140,10 +137,15 @@ Family values with no current public operation type are valid policy values, but
 | `ramp_onramp_quote` | `ramp` | Creates an on-ramp quote that delivers crypto to the destination wallet. |
 | `ramp_offramp_quote` | `ramp` | Creates an off-ramp quote that draws crypto from the source wallet. |
 | `issuance_mint_execute` | `issuance` | Executes a token mint using the configured signing wallet. |
+| `issuance_burn_execute` | `issuance` | Executes a token burn using the configured signing wallet. |
+| `issuance_force_burn_execute` | `issuance` | Force-burns tokens from a holder account. |
+| `issuance_seize_execute` | `issuance` | Seizes tokens into the issuer-controlled destination. |
 | `issuance_update_authority_execute` | `issuance` | Changes a token authority using the current authority wallet. |
-| `custody_signer_check` | `raw_sign` | Runs the custody signer-check transaction for the wallet. |
+| `recurring_payment_create` | `payment` | Creates a recurring payment schedule. |
+| `recurring_payment_update` | `payment` | Updates a recurring payment schedule. |
+| `recurring_payment_collection` | `payment` | Collects a due recurring payment. |
 
-Operation-type matching is exact and case-sensitive. The API accepts custom strings up to 120 characters so future or privately integrated operations can be represented, but a rule only affects an operation when SDP emits the same identifier. For current public flows, use one of the identifiers above.
+Operation-type matching is exact and case-sensitive. The API accepts only the supported identifiers above, so a rule cannot be activated for an operation SDP never emits.
 
 ## Policy evaluation and audit records
 

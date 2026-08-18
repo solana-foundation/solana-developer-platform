@@ -209,7 +209,7 @@ describe("summarizePolicyChanges", () => {
         {
           id: "operation-families-deny",
           kind: "operation_family",
-          families: ["transfer", "raw_sign"],
+          families: ["transfer", "issuance"],
           action: "deny",
           name: "Operation families: deny",
         },
@@ -233,7 +233,7 @@ describe("summarizePolicyChanges", () => {
         direction: "added",
         group: "operations",
         label: "Operation controls",
-        value: "TRANSFER, RAW_SIGN · deny",
+        value: "TRANSFER, ISSUANCE · deny",
       },
     ]);
   });
@@ -445,7 +445,7 @@ describe("summarizePolicyChanges field coverage", () => {
         {
           id: "operation-types-deny",
           kind: "operation_type",
-          operationTypes: ["custom:op"],
+          operationTypes: ["issuance_update_authority_execute"],
           action: "deny",
         },
       ],
@@ -456,7 +456,7 @@ describe("summarizePolicyChanges field coverage", () => {
         direction: "removed",
         group: "operations",
         label: "Operation controls",
-        value: "CUSTOM:OP · deny",
+        value: "ISSUANCE_UPDATE_AUTHORITY_EXECUTE · deny",
       },
     ]);
   });

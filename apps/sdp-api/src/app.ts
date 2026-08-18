@@ -443,6 +443,20 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
     if (err instanceof FeePaymentError) {
       const mapped = mapFeePaymentError(err);
+      // The response message is sanitized; without this log entry the actual
+      // failure (breaker trip, provider outage, budget denial) is invisible.
+      getLogger().warn(
+        redactCredentialSecrets({
+          requestId,
+          traceId,
+          source: requestSource,
+          code: err.code,
+          mapped_status: mapped.status,
+          error: err.message,
+          cause: err.cause?.message,
+        }),
+        "Fee payment error"
+      );
       c.header("X-SDP-Trace-ID", traceId);
       return c.json(
         {
