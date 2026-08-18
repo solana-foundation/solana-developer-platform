@@ -1,19 +1,8 @@
 import type { TokenAllowlistEntry } from "@sdp/types";
 import { NextResponse } from "next/server";
+import { parseErrorMessage } from "@/lib/api-error";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, proxyToSdpApi } from "@/lib/sdp-api";
-
-function parseErrorMessage(body: string): string {
-  try {
-    const parsed = JSON.parse(body) as {
-      error?: { message?: string };
-      message?: string;
-    };
-    return parsed?.error?.message ?? parsed?.message ?? body;
-  } catch {
-    return body || "Unknown error";
-  }
-}
 
 // Matches the API's server-side pageSize cap for the allowlist list handler.
 const MAX_PAGE_SIZE = 500;

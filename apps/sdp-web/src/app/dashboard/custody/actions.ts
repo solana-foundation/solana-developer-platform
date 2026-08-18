@@ -31,7 +31,7 @@ function getApiErrorMessageFromText(body: string): string {
   if (!body) return "";
 
   try {
-    const json = JSON.parse(body) as unknown;
+    const json: unknown = JSON.parse(body);
     if (
       json &&
       typeof json === "object" &&

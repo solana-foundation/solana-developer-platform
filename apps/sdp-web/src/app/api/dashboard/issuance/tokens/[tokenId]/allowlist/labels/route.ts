@@ -1,18 +1,7 @@
 import { NextResponse } from "next/server";
+import { parseErrorMessage } from "@/lib/api-error";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
-
-function parseErrorMessage(body: string): string {
-  try {
-    const parsed = JSON.parse(body) as {
-      error?: { message?: string };
-      message?: string;
-    };
-    return parsed?.error?.message ?? parsed?.message ?? body;
-  } catch {
-    return body || "Unknown error";
-  }
-}
 
 export async function GET(request: Request, { params }: { params: Promise<{ tokenId: string }> }) {
   const trace = createTimedTrace("route.dashboard.issuance.token.allowlist_labels", request);
