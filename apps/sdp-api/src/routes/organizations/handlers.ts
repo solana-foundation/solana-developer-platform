@@ -10,7 +10,9 @@ import type { Context } from "hono";
 import { getDb } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { getAuth } from "@/lib/auth";
+import { getClientIp } from "@/lib/client-ip";
 import { AppError, badRequest, notFound } from "@/lib/errors";
+import { isClientIpAllowed } from "@/lib/ip-allowlist";
 import { noContent, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
@@ -107,6 +109,28 @@ export const getOrganization = async (c: AppContext) => {
   return success(c, response);
 };
 
+/**
+ * Refuses an allowlist that would shut out the request installing it. The
+ * restriction covers this endpoint and the dashboard, so such a list is
+ * unrecoverable through the API — only database access could undo it. A
+ * missing client IP is refused too: enforcement fails closed without one.
+ */
+function assertAllowlistAdmitsCaller(c: AppContext, allowedIps: string[] | undefined): void {
+  if (allowedIps === undefined || allowedIps.length === 0) {
+    return;
+  }
+
+  const clientIp = getClientIp(c);
+
+  if (!isClientIpAllowed(clientIp, allowedIps)) {
+    throw badRequest(
+      clientIp
+        ? `The allowed IP list must include the address this request came from (${clientIp}), or it would lock the organization out.`
+        : "No client IP could be determined for this request, so an allowed IP list cannot be verified. It would lock the organization out."
+    );
+  }
+}
+
 export const updateOrganization = async (c: ValidatedBodyContext<typeof updateOrgSchema>) => {
   const { orgId } = c.req.param();
   const auth = getAuth(c);
@@ -117,59 +141,74 @@ export const updateOrganization = async (c: ValidatedBodyContext<typeof updateOr
 
   const body = c.req.valid("json");
 
-  const updates: string[] = [];
-  const params: (string | null)[] = [];
+  const settingsPatch = body.settings;
 
-  const existing = await getDb(c.env)
-    .prepare(
-      `SELECT id, name, slug, tier, status, settings, created_at, updated_at
-     FROM organizations WHERE id = ?`
-    )
-    .bind(orgId)
-    .first<OrganizationRow>();
-
-  if (!existing) {
-    throw notFound("Organization");
-  }
-
-  if (body.name) {
-    updates.push("name = ?");
-    params.push(body.name);
-  }
-
-  if (body.settings !== undefined) {
-    if (body.settings.rpcProvider) {
-      await assertProviderAvailable(c.env, getDb(c.env), orgId, "rpc", body.settings.rpcProvider);
-    }
-
-    const mergedSettings: OrganizationSettings = {
-      ...(parseOrganizationSettings(existing.settings) ?? {}),
-      ...body.settings,
-    };
-    updates.push("settings = ?");
-    params.push(JSON.stringify(mergedSettings));
-  }
-
-  if (updates.length === 0) {
+  if (body.name === undefined && settingsPatch === undefined) {
     throw badRequest("No valid updates provided");
   }
 
-  updates.push("updated_at = datetime('now')");
-  params.push(orgId);
+  assertAllowlistAdmitsCaller(c, settingsPatch?.allowedIpAddresses);
 
-  await getDb(c.env)
-    .prepare(`UPDATE organizations SET ${updates.join(", ")} WHERE id = ?`)
-    .bind(...params)
-    .run();
+  // Checked outside the transaction so the row is not held while it runs.
+  if (settingsPatch?.rpcProvider) {
+    await assertProviderAvailable(c.env, getDb(c.env), orgId, "rpc", settingsPatch.rpcProvider);
+  }
 
-  // Fetch updated org
-  const org = await getDb(c.env)
-    .prepare(
-      `SELECT id, name, slug, tier, status, settings, created_at, updated_at
+  // Settings are one JSON column patched by read-merge-write. Unsynchronized,
+  // the second commit silently drops the first — an unrelated edit could revert
+  // a just-installed allowlist. The row lock makes concurrent merges compose.
+  const org = await getDb(c.env).transaction(async (tx) => {
+    const existing = await tx
+      .prepare(
+        `SELECT id, name, slug, tier, status, settings, created_at, updated_at
+     FROM organizations WHERE id = ? FOR UPDATE`
+      )
+      .bind(orgId)
+      .first<OrganizationRow>();
+
+    if (!existing) {
+      throw notFound("Organization");
+    }
+
+    const updates: string[] = [];
+    const params: (string | null)[] = [];
+
+    if (body.name !== undefined) {
+      updates.push("name = ?");
+      params.push(body.name);
+    }
+
+    if (settingsPatch !== undefined) {
+      const mergedSettings: OrganizationSettings = {
+        ...(parseOrganizationSettings(existing.settings) ?? {}),
+        ...settingsPatch,
+      };
+      updates.push("settings = ?");
+      params.push(JSON.stringify(mergedSettings));
+    }
+
+    updates.push("updated_at = datetime('now')");
+    params.push(orgId);
+
+    await tx
+      .prepare(`UPDATE organizations SET ${updates.join(", ")} WHERE id = ?`)
+      .bind(...params)
+      .run();
+
+    const updated = await tx
+      .prepare(
+        `SELECT id, name, slug, tier, status, settings, created_at, updated_at
      FROM organizations WHERE id = ?`
-    )
-    .bind(orgId)
-    .first<OrganizationRow>();
+      )
+      .bind(orgId)
+      .first<OrganizationRow>();
+
+    if (!updated) {
+      throw notFound("Organization");
+    }
+
+    return updated;
+  });
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));
@@ -177,12 +216,9 @@ export const updateOrganization = async (c: ValidatedBodyContext<typeof updateOr
     action: "update",
     resourceType: "organization",
     resourceId: orgId,
-    metadata: body,
+    // Canonical form, not the submitted spelling: the trail records what was granted.
+    metadata: { ...body, ...(settingsPatch ? { settings: settingsPatch } : {}) },
   });
-
-  if (!org) {
-    throw notFound("Organization");
-  }
 
   return success(c, toOrganizationResponse(org));
 };
