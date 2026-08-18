@@ -3,10 +3,14 @@ import { describe, expect, it } from "vitest";
 import {
   availableTokens,
   DEFAULT_STRATEGY_SORT,
+  fundableStrategies,
   nextStrategySort,
+  opportunityDepositability,
   rankedFundableStrategies,
+  rankedStrategies,
   singleStrategyAllocation,
   sortStrategies,
+  strategyDepositEligibility,
 } from "./earn-deposit-model";
 
 const TIMESTAMP = "2026-07-18T09:00:00.000Z";
@@ -25,11 +29,167 @@ function strategy(partial: Partial<EarnStrategy> & { id: string }): EarnStrategy
     currentApy: "0.05",
     liquidityTerm: "instant",
     status: "active",
+    hostCluster: "devnet",
+    fundable: true,
     createdAt: TIMESTAMP,
     updatedAt: TIMESTAMP,
     ...partial,
   };
 }
+
+describe("fundableStrategies", () => {
+  it("drops a strategy whose deposit mint is not a routable stablecoin", () => {
+    const kept = strategy({ id: "usdc" });
+    const dropped = strategy({ id: "sol", depositMints: [UNROUTABLE_MINT] });
+
+    expect(fundableStrategies([kept, dropped]).map((s) => s.id)).toEqual(["usdc"]);
+  });
+
+  /**
+   * The devnet-money guard, dashboard side. `fundable` is the API's per-request
+   * answer to "does this instrument exist on the caller's cluster", and the
+   * wizard must never offer a `false` one or a user walks to a confirm step
+   * that provisions nothing. Kamino used to be the live example — mainnet
+   * vaults catalogued into sandbox — and no longer is, since each environment
+   * now catalogues its own cluster; the guard still stands for Ground and any
+   * single-cluster provider, which is why this seeds clusters directly rather
+   * than naming a provider.
+   */
+  it("drops a strategy the API says is not fundable in this environment", () => {
+    const local = strategy({ id: "ground-devnet" });
+    const elsewhere = strategy({
+      id: "kamino-mainnet",
+      provider: "kamino",
+      hostCluster: "mainnet-beta",
+      fundable: false,
+    });
+
+    expect(fundableStrategies([local, elsewhere]).map((s) => s.id)).toEqual(["ground-devnet"]);
+  });
+
+  it("keeps a routable, fundable strategy — the filter is opt-in, not opt-out", () => {
+    const kept = strategy({ id: "keeper" });
+
+    expect(fundableStrategies([kept])).toEqual([kept]);
+  });
+
+  /**
+   * Version skew, and the reason this is `!== false` rather than a truthiness
+   * check. The API is a separate deployable: a Vercel preview is a web-only
+   * deploy pointed at the already-deployed API, and any rollout can put web
+   * ahead of API. Both serve strategies with no `fundable` field at all.
+   *
+   * Reading that as "not fundable" blanks the whole catalogue — which is what
+   * the first preview of this branch actually did. Admitting it is safe: an API
+   * that omits the field has no mainnet-only provider registered, so it cannot
+   * be serving a row this filter would need to hide.
+   */
+  it("keeps strategies from an API too old to send `fundable`", () => {
+    // Built without the key rather than deleting it, so this really is the wire
+    // shape an older API returns — the field never existed on that response.
+    const { fundable: _omitted, ...fromOlderApi } = strategy({ id: "legacy" });
+
+    expect(fundableStrategies([fromOlderApi as EarnStrategy]).map((s) => s.id)).toEqual(["legacy"]);
+  });
+
+  it("still hides an explicit fundable:false from a current API", () => {
+    // The control: tolerating `undefined` must not tolerate a real `false`.
+    const refused = strategy({ id: "mainnet-only", fundable: false });
+
+    expect(fundableStrategies([refused])).toEqual([]);
+  });
+});
+
+/**
+ * The Opportunities tab's per-row verb. Greptile caught the gap these pin:
+ * checking
+ * only cluster + token let a PRODUCTION Kamino row render an enabled Deposit
+ * link straight into `EarnDepositUnavailable`, because the route it points at
+ * creates custodial programs only. Sandbox hid it — every Kamino row is
+ * `wrong-cluster` there — so the third check has to be asserted, not eyeballed.
+ */
+describe("opportunityDepositability", () => {
+  it("refuses a fundable vault-direct vault: SDP has no route for its deposit", () => {
+    const kamino = strategy({
+      id: "kamino-production",
+      provider: "kamino",
+      hostCluster: "mainnet-beta",
+      // The exact shape that used to slip through: on-cluster and USDC.
+      fundable: true,
+    });
+
+    expect(opportunityDepositability(kamino)).toEqual({
+      kind: "no-sdp-route",
+      style: "vault_direct",
+    });
+  });
+
+  it("refuses a custodial vault while no custodial provider is offered", () => {
+    // Ground is un-surfaced, so EARN_PROGRAM_CREATION_ENABLED is false and the
+    // deposit route answers with its unavailable notice.
+    expect(opportunityDepositability(strategy({ id: "ground-devnet" }))).toEqual({
+      kind: "no-sdp-route",
+      style: "custodial",
+    });
+  });
+
+  it("reports the cluster before anything else — the most actionable answer", () => {
+    const kamino = strategy({
+      id: "kamino-sandbox",
+      provider: "kamino",
+      hostCluster: "mainnet-beta",
+      fundable: false,
+    });
+
+    expect(opportunityDepositability(kamino)).toEqual({ kind: "wrong-cluster" });
+  });
+
+  it("reports an unroutable mint once the cluster is fine", () => {
+    expect(
+      opportunityDepositability(strategy({ id: "odd", depositMints: [UNROUTABLE_MINT] }))
+    ).toEqual({
+      kind: "asset-unsupported",
+    });
+  });
+});
+
+describe("strategyDepositEligibility", () => {
+  it("keeps a mainnet-only Kamino row visible but reports the environment mismatch", () => {
+    const kamino = strategy({
+      id: "kamino-mainnet",
+      provider: "kamino",
+      hostCluster: "mainnet-beta",
+      fundable: false,
+    });
+
+    expect(strategyDepositEligibility(kamino, "ground")).toBe("environment-mismatch");
+    expect(rankedStrategies([kamino])).toEqual([kamino]);
+  });
+
+  it("keeps a catalogue-only provider ineligible even when its cluster matches", () => {
+    const kamino = strategy({
+      id: "kamino-production",
+      provider: "kamino",
+      hostCluster: "mainnet-beta",
+      fundable: true,
+    });
+
+    expect(strategyDepositEligibility(kamino, "ground")).toBe("provider-unsupported");
+  });
+
+  it("accepts the pinned provider when its cluster and asset are supported", () => {
+    expect(strategyDepositEligibility(strategy({ id: "ground-devnet" }), "ground")).toBe(
+      "eligible"
+    );
+  });
+
+  it("refuses an unsupported deposit asset without hiding its catalogue row", () => {
+    const unknownAsset = strategy({ id: "unknown-asset", depositMints: [UNROUTABLE_MINT] });
+
+    expect(strategyDepositEligibility(unknownAsset, "ground")).toBe("asset-unsupported");
+    expect(rankedStrategies([unknownAsset])).toEqual([unknownAsset]);
+  });
+});
 
 describe("rankedFundableStrategies", () => {
   const instantHigh = strategy({ id: "instant-high", currentApy: "0.09" });
@@ -152,14 +312,14 @@ describe("nextStrategySort", () => {
 });
 
 describe("availableTokens", () => {
-  it("returns only stablecoins the catalogue can actually fund", () => {
+  it("returns routable stablecoins from both selectable and browse-only rows", () => {
     expect(
       availableTokens([
         strategy({ id: "a", depositMints: [USDC] }),
-        strategy({ id: "b", depositMints: [USDC] }),
+        strategy({ id: "b", depositMints: [USDT], fundable: false }),
         strategy({ id: "c", depositMints: [UNROUTABLE_MINT] }),
       ])
-    ).toEqual(["usdc"]);
+    ).toEqual(["usdc", "usdt"]);
   });
 
   it("reports both lanes when both are present", () => {

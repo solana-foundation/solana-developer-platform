@@ -8,7 +8,6 @@ import type {
   PolicyProfileStatus,
   PolicyProviderSyncStatus,
   PolicyRule,
-  WalletOperationFamily,
   WalletOperationStatus,
 } from "./policy";
 import type { PrivateTransferRequest } from "./private-transfers";
@@ -77,10 +76,15 @@ export interface PaymentWalletPolicyAudit {
   recentEvaluations: PaymentWalletPolicyAuditEntry[];
 }
 
+/**
+ * Historical read model: rows predating a vocabulary trim keep their retired
+ * operation family/type strings, so these fields are not narrowed to the live
+ * enums.
+ */
 export interface PaymentWalletPolicyAuditEntry {
   walletOperationId: string;
   policyEvaluationId: string;
-  operationFamily: WalletOperationFamily;
+  operationFamily: string;
   operationType: string;
   asset: string | null;
   amount: string | null;

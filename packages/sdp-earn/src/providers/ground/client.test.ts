@@ -157,6 +157,12 @@ describe("GroundEarnClient.listStrategies", () => {
         sourceKind: "defi",
         underlyingSource: "morpho",
         depositMints: [wellKnownMint("USDC", "devnet")],
+        // The environment's own cluster, because Ground's DEPOSIT is Solana-side
+        // here — this row is catalogued with a devnet mint and Ground bridges to
+        // wherever it hosts the source (Morpho is Ethereum-hosted, and #1299
+        // deliberately indexes it). A non-custodial provider cannot say this —
+        // see Kamino, whose rows read `mainnet-beta` in sandbox too.
+        hostCluster: "devnet",
         apyType: "variable",
         currentApy: "0.0356",
         liquidityTerm: "instant",

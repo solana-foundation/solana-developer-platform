@@ -1,4 +1,4 @@
-import type { WellKnownTokenSymbol } from "./well-known-tokens";
+import type { SolanaCluster, WellKnownTokenSymbol } from "./well-known-tokens";
 
 /**
  * Solana Earn (SDP Markets V1) — shared wire contracts.
@@ -118,6 +118,45 @@ export interface EarnStrategy {
   redemptionDelayDays?: number;
   riskMetadata?: EarnStrategyRiskMetadata;
   status: EarnStrategyStatus;
+  /**
+   * The cluster the strategy's INSTRUMENT actually lives on — not the cluster
+   * of the environment that catalogued it, and the two can differ.
+   *
+   * A provider may front instruments that do not exist on every cluster, so a
+   * row can name a live mainnet vault while sitting in a sandbox catalogue:
+   * everything about it true, none of it fundable from devnet. Kamino was the
+   * original example and no longer is — it has a devnet deployment, so each
+   * environment now catalogues its own cluster, and the sync refuses to store a
+   * mainnet instrument outside production. The column stays because the
+   * mismatch is structural, not Kamino-shaped: rows written before that guard
+   * survive until a delist pass, and the next single-cluster provider brings it
+   * straight back.
+   *
+   * `status: "active"` cannot express that — it is the operator's stop switch,
+   * and reusing it here would both lie about why and collide with the
+   * repository's refusal to overwrite an operator pause. So the row states the
+   * cluster and every gate reads it. `fundable` below is the derived answer
+   * callers should branch on.
+   */
+  hostCluster: SolanaCluster;
+  /**
+   * Whether this strategy's instrument exists on **the caller's environment's
+   * cluster** — derived per request from `hostCluster`, never stored.
+   *
+   * `false` is the load-bearing half and is definitive: the instrument does not
+   * exist on your cluster, so a deposit cannot succeed. Read it rather than
+   * assuming a listed strategy is fundable — the catalogue lists what EXISTS,
+   * which is a larger set.
+   *
+   * `true` is necessary but NOT sufficient. It answers only the cluster
+   * question; a deposit additionally needs the provider to expose SDP a
+   * money-movement surface (a catalogue-only provider like Kamino answers 501
+   * on `POST /v1/earn/programs`) and your organization to be entitled to that
+   * provider. Those are deliberately not folded in here: this field describes
+   * the INSTRUMENT, and entitlement in particular is a property of the caller,
+   * not of a platform-global catalogue row.
+   */
+  fundable: boolean;
   createdAt: string;
   updatedAt: string;
 }

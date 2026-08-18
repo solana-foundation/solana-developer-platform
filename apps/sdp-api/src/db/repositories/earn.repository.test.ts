@@ -94,6 +94,7 @@ describe("EarnRepository (postgres)", () => {
       redemptionDelayDays: null,
       riskMetadata: { curator: "gauntlet" },
       status: "active",
+      hostCluster: "devnet",
       environment: "sandbox",
       ...overrides,
     };
@@ -123,6 +124,103 @@ describe("EarnRepository (postgres)", () => {
       await setCreatedAt(table, id, SHARED_CREATED_AT);
     }
   }
+
+  /**
+   * The five-minute metrics refresh writes through here. Its whole safety
+   * argument is that it can only rewrite FIGURES on rows the hourly catalogue
+   * sync already admitted — these cases are that argument.
+   */
+  describe("updateStrategyMetrics", () => {
+    const metricsInput = (overrides: Record<string, unknown> = {}) => ({
+      provider: "veda" as const,
+      providerReference: "vault-usdc-prime",
+      environment: "sandbox" as const,
+      currentApy: "0.0731",
+      riskMetadata: { tvlUsd: 4_200_000 },
+      ...overrides,
+    });
+
+    it("refreshes the rate and merges volatile metadata over the stored object", async () => {
+      const seeded = await seedStrategy();
+
+      const applied = await repo.updateStrategyMetrics(metricsInput());
+
+      expect(applied).toBe(true);
+      const row = await repo.getStrategyById(seeded.id);
+      expect(row?.current_apy).toBe("0.0731");
+      // curator came from the catalogue sync and is NOT in the refresh payload;
+      // a replacing write would drop it and the dashboard would lose the label.
+      expect(row?.risk_metadata).toEqual({ curator: "gauntlet", tvlUsd: 4_200_000 });
+    });
+
+    it("never inserts — an unknown reference is a silent no-op", async () => {
+      // This is what lets the refresh hand over a provider's whole shelf
+      // without first working out which of it we catalogue. If it could
+      // insert, it would be a second way into the catalogue that skips every
+      // admission gate in the provider clients.
+      const applied = await repo.updateStrategyMetrics(
+        metricsInput({ providerReference: "a-vault-we-never-catalogued" })
+      );
+
+      expect(applied).toBe(false);
+      const { total } = await repo.listStrategies({
+        environment: "sandbox",
+        includeInactive: true,
+        limit: 10,
+        offset: 0,
+      });
+      expect(total).toBe(0);
+    });
+
+    it("does not cross environments or providers", async () => {
+      const seeded = await seedStrategy();
+
+      expect(await repo.updateStrategyMetrics(metricsInput({ environment: "production" }))).toBe(
+        false
+      );
+      expect(await repo.updateStrategyMetrics(metricsInput({ provider: "ground" }))).toBe(false);
+
+      expect((await repo.getStrategyById(seeded.id))?.current_apy).toBe("0.052");
+    });
+
+    it("clears a rate the provider has stopped reporting", async () => {
+      const seeded = await seedStrategy();
+
+      await repo.updateStrategyMetrics(metricsInput({ currentApy: null }));
+
+      // Null, not the last-known figure: a rate with no source behind it is
+      // worse than no rate — the UI renders "—" for null.
+      expect((await repo.getStrategyById(seeded.id))?.current_apy).toBeNull();
+    });
+
+    it("leaves identity alone — name, mints and liquidity term are the sync's", async () => {
+      const seeded = await seedStrategy();
+
+      await repo.updateStrategyMetrics(metricsInput());
+
+      const row = await repo.getStrategyById(seeded.id);
+      expect(row?.name).toBe(seeded.name);
+      expect(row?.deposit_mints).toEqual(seeded.deposit_mints);
+      expect(row?.liquidity_term).toBe(seeded.liquidity_term);
+      expect(row?.host_cluster).toBe(seeded.host_cluster);
+      expect(row?.source_kind).toBe(seeded.source_kind);
+    });
+
+    it("refreshes an operator-paused row's figures without reviving it", async () => {
+      // A pause stops deposits; it does not freeze the vault's real-world
+      // numbers. An operator deciding whether to unpause wants current figures,
+      // not the ones from the moment they hit stop.
+      const seeded = await seedStrategy();
+      await repo.upsertStrategy(strategyInput({ status: "paused" }));
+
+      const applied = await repo.updateStrategyMetrics(metricsInput());
+
+      expect(applied).toBe(true);
+      const row = await repo.getStrategyById(seeded.id);
+      expect(row?.status).toBe("paused");
+      expect(row?.current_apy).toBe("0.0731");
+    });
+  });
 
   describe("upsertStrategy", () => {
     it("inserts a catalogue row and round-trips the jsonb columns", async () => {
@@ -199,6 +297,40 @@ describe("EarnRepository (postgres)", () => {
         offset: 0,
       });
       expect(total).toBe(1);
+    });
+
+    /**
+     * The expand half of migration 0057 leaves `host_cluster` NULLABLE, because
+     * the deploy applies migrations BEFORE it rolls the service and the cron
+     * image — and a rollback restores the old image over the new schema. So a
+     * writer that predates the column can and will write a NULL row here.
+     *
+     * Both halves of that contract are pinned: the write must be ACCEPTED (a
+     * NOT NULL would fail every upsert in that window, stalling the catalogue
+     * refresh), and the read must resolve the row to the environment's own
+     * cluster so it stays fundable instead of silently leaving the wizard.
+     */
+    it("admits a row from a writer that predates host_cluster, and reads it as this environment's cluster", async () => {
+      const db = getDb(env);
+      const legacyId = "earn_strategy_pre_host_cluster";
+      for (const [id, environment, expected] of [
+        [legacyId, "sandbox", "devnet"],
+        [`${legacyId}_prod`, "production", "mainnet-beta"],
+      ] as const) {
+        await db
+          .prepare(
+            `INSERT INTO earn_strategies
+               (id, provider, provider_reference, name, source_kind, deposit_mints,
+                apy_type, current_apy, liquidity_term, risk_metadata, status, environment)
+             VALUES (?, 'ground', ?, 'Legacy Ground Vault', 'defi', ?::jsonb,
+                     'variable', '0.041', 'instant', '{}'::jsonb, 'active', ?)`
+          )
+          .bind(id, `${id}-ref`, JSON.stringify([USDC_MINT]), environment)
+          .run();
+
+        const row = await repo.getStrategyById(id);
+        expect(row?.host_cluster).toBe(expected);
+      }
     });
 
     it("keys the sync on environment — one provider reference, separate sandbox/production rows", async () => {
@@ -346,6 +478,80 @@ describe("EarnRepository (postgres)", () => {
         offset: 0,
       });
       expect(all.total).toBe(2);
+    });
+  });
+
+  /**
+   * The per-vault curation knobs behind the API's HIDDEN_VAULTS / CURATED_VAULTS
+   * config. Both filter in SQL, so `total` has to move with the rows — a
+   * curated page that still counted the hidden vaults would paginate a reader
+   * into empty windows.
+   */
+  describe("listStrategies per-vault curation", () => {
+    it("drops a denied vault from rows AND total, keyed on provider:reference", async () => {
+      const kept = await seedStrategy({ providerReference: "vault-kept" });
+      await seedStrategy({ providerReference: "vault-denied" });
+
+      const { rows, total } = await repo.listStrategies({
+        environment: "sandbox",
+        // `veda` is this suite's default seed provider — deliberately not Ground,
+        // so the curation is proven against the canonical contract, not one
+        // provider's quirks.
+        excludeProviderKeys: ["veda:vault-denied"],
+        limit: 10,
+        offset: 0,
+      });
+
+      expect(total).toBe(1);
+      expect(rows.map((row) => row.id)).toEqual([kept.id]);
+    });
+
+    it("scopes the denylist to its provider, so a shared reference is not collateral", async () => {
+      // Same reference under two providers: only the keyed one may disappear.
+      const ground = await seedStrategy({ provider: "ground", providerReference: "shared-ref" });
+      const kamino = await seedStrategy({ provider: "kamino", providerReference: "shared-ref" });
+
+      const { rows } = await repo.listStrategies({
+        environment: "sandbox",
+        excludeProviderKeys: ["ground:shared-ref"],
+        limit: 10,
+        offset: 0,
+      });
+
+      expect(rows.map((row) => row.id)).toEqual([kamino.id]);
+      expect(rows.map((row) => row.id)).not.toContain(ground.id);
+    });
+
+    it("shows only the allowlisted references for a curated provider", async () => {
+      const picked = await seedStrategy({ provider: "kamino", providerReference: "kv-picked" });
+      await seedStrategy({ provider: "kamino", providerReference: "kv-other" });
+      // An uncurated provider passes through untouched.
+      const ground = await seedStrategy({ provider: "ground", providerReference: "ground-vault" });
+
+      const { rows, total } = await repo.listStrategies({
+        environment: "sandbox",
+        allowedProviderReferences: { kamino: ["kv-picked"] },
+        limit: 10,
+        offset: 0,
+      });
+
+      expect(total).toBe(2);
+      expect(rows.map((row) => row.id).sort()).toEqual([ground.id, picked.id].sort());
+    });
+
+    it("reads an EMPTY allowlist literally — that provider shows nothing", async () => {
+      await seedStrategy({ provider: "kamino", providerReference: "kv-any" });
+      const ground = await seedStrategy({ provider: "ground", providerReference: "ground-vault" });
+
+      const { rows, total } = await repo.listStrategies({
+        environment: "sandbox",
+        allowedProviderReferences: { kamino: [] },
+        limit: 10,
+        offset: 0,
+      });
+
+      expect(total).toBe(1);
+      expect(rows.map((row) => row.id)).toEqual([ground.id]);
     });
   });
 

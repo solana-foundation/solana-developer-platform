@@ -159,7 +159,11 @@ async function seedStrategy(
   overrides: Partial<UpsertEarnStrategyInput> = {}
 ): Promise<EarnStrategyRow> {
   const strategy = await createPostgresEarnRepository(getDb(env)).upsertStrategy({
-    provider: "veda",
+    // A SURFACED provider (EARN_PROVIDER_SURFACING in @sdp/types). Catalogue
+    // reads hide un-surfaced providers wholesale, so seeding one here would make
+    // every test in this file assert 404s for a reason it never meant to test.
+    // The provider-visibility rule gets its own test below.
+    provider: "kamino",
     providerReference: `vault-${crypto.randomUUID()}`,
     name: "Test USDC Vault",
     sourceKind: "defi",
@@ -172,6 +176,7 @@ async function seedStrategy(
     redemptionDelayDays: null,
     riskMetadata: {},
     status: "active",
+    hostCluster: "devnet",
     environment: "sandbox",
     ...overrides,
   });
@@ -482,22 +487,71 @@ describe("Earn routes — strategy catalogue", () => {
     expect(body.data.pageSize).toBe(20);
   });
 
+  /**
+   * `fundable` is derived per request, so the SAME row answers differently to a
+   * sandbox and a production caller. This is the wire-level warning a partner
+   * reads before treating a listed strategy as depositable. Kamino used to be
+   * the live example (mainnet vaults listed in sandbox) and no longer is — each
+   * environment catalogues its own cluster, and the sync refuses to store a
+   * mainnet instrument outside production. The derivation still matters for
+   * Ground, for rows written before that guard, and for the next single-cluster
+   * provider, which is why this seeds the cluster directly.
+   */
+  it("derives fundable from hostCluster against the caller's environment", async () => {
+    await seedAuth();
+    const local = await seedStrategy({ hostCluster: "devnet" });
+    const elsewhere = await seedStrategy({ hostCluster: "mainnet-beta" });
+
+    const res = await getEarn("/v1/earn/strategies");
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        strategies: Array<{ id: string; hostCluster: string; fundable: boolean }>;
+      };
+    };
+    const byId = new Map(body.data.strategies.map((s) => [s.id, s]));
+    expect(byId.get(local.id)).toMatchObject({ hostCluster: "devnet", fundable: true });
+    // Listed, and explicitly not fundable — the row is honest about both.
+    expect(byId.get(elsewhere.id)).toMatchObject({
+      hostCluster: "mainnet-beta",
+      fundable: false,
+    });
+  });
+
+  it("carries hostCluster and fundable on the single-strategy read too", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy({ hostCluster: "mainnet-beta" });
+
+    const res = await getEarn(`/v1/earn/strategies/${strategy.id}`);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { strategy: { hostCluster: string; fundable: boolean } };
+    };
+    expect(body.data.strategy).toMatchObject({ hostCluster: "mainnet-beta", fundable: false });
+  });
+
+  /**
+   * Browse policy, which is a DIFFERENT question from `fundable` above and must
+   * not be collapsed into it: a hidden row is absent from the response entirely,
+   * while an un-fundable row is present and says so. Hiding is SDP's editorial
+   * choice about a source; `fundable` is a fact about where the instrument
+   * lives.
+   */
   it("stores Morpho and Aave rows but never returns them from strategy reads", async () => {
     await seedAuth();
     const visible = await seedStrategy({
-      provider: "ground",
       providerReference: "kamino-steakhouse-usdc",
       name: "Kamino Steakhouse USDC",
       underlyingSource: "kamino",
     });
     const morpho = await seedStrategy({
-      provider: "ground",
       providerReference: "morpho-gauntlet-usdc",
       name: "Gauntlet USDC Prime",
       underlyingSource: "morpho",
     });
     const aave = await seedStrategy({
-      provider: "ground",
       providerReference: "aave-v3-usdc",
       name: "Aave V3 Core USDC",
       // Pin the fallback matching path too: a related row remains hidden even
@@ -522,5 +576,44 @@ describe("Earn routes — strategy catalogue", () => {
       const detail = await getEarn(`/v1/earn/strategies/${hidden.id}`);
       expect(detail.status).toBe(404);
     }
+  });
+
+  /**
+   * The OTHER visibility rule, and the one that scales: a provider SDP does not
+   * currently offer (`EARN_PROVIDER_SURFACING` in @sdp/types) contributes no
+   * rows at all, whatever they are named.
+   *
+   * Asserted against the stored row so the two halves stay honest: the sync
+   * keeps writing an un-surfaced provider's catalogue — which is what makes
+   * re-surfacing a deploy rather than an hour's wait — and only the read hides
+   * it. Ground is the un-surfaced provider today; if that flips, this test
+   * should move to whichever provider is off rather than be deleted.
+   */
+  it("stores an un-surfaced provider's rows but never returns them from strategy reads", async () => {
+    await seedAuth();
+    const surfaced = await seedStrategy({ providerReference: "kamino-visible-usdc" });
+    const unsurfaced = await seedStrategy({
+      provider: "ground",
+      providerReference: "ground-hidden-usdc",
+      name: "Ground Institutional USDC",
+      underlyingSource: "centrifuge",
+    });
+
+    // Still stored — hiding is a read-time policy, never a refusal to persist.
+    const repository = createPostgresEarnRepository(getDb(env));
+    expect(await repository.getStrategyById(unsurfaced.id)).not.toBeNull();
+
+    const list = await getEarn("/v1/earn/strategies");
+    expect(list.status).toBe(200);
+    const listBody = (await list.json()) as {
+      data: { strategies: Array<{ id: string }>; total: number };
+    };
+    expect(listBody.data.strategies.map((strategy) => strategy.id)).toEqual([surfaced.id]);
+    // The filter runs in SQL, so the total describes the rows the caller can
+    // see rather than counting a row the page then drops.
+    expect(listBody.data.total).toBe(1);
+
+    const detail = await getEarn(`/v1/earn/strategies/${unsurfaced.id}`);
+    expect(detail.status).toBe(404);
   });
 });

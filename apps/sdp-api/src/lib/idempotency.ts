@@ -138,6 +138,57 @@ export const buildTransferBatchFingerprint = (input: TransferBatchFingerprintInp
     })
   );
 
+export interface EarnVaultDepositFingerprintInput {
+  environment: string;
+  provider: string;
+  /** The vault address. */
+  providerReference: string;
+  /** The `custody_wallets` row id that signs and holds the shares. */
+  custodyWalletId: string;
+  amount: string;
+  /** The slippage floor, or null when none applies. */
+  minSharesOut: string | null;
+}
+
+/** Canonicalize decimal spelling without rounding or passing through a float. */
+function normalizeDecimalString(value: string): string {
+  const [integer = "0", fraction = ""] = value.split(".");
+  const normalizedInteger = integer.replace(/^0+(?=\d)/, "") || "0";
+  const normalizedFraction = fraction.replace(/0+$/, "");
+  return normalizedFraction === ""
+    ? normalizedInteger
+    : `${normalizedInteger}.${normalizedFraction}`;
+}
+
+/**
+ * Fingerprint for a non-custodial vault deposit.
+ *
+ * Every field here changes WHAT MOVES, which is the whole test for inclusion.
+ * `minSharesOut` earns its place for a reason that is easy to miss: the floor is
+ * baked into the built instruction, so omitting it would let a caller reuse a
+ * key with a weaker floor — or none — and get a silent `replayed: true` for the
+ * original, stricter deposit. `environment` is included because the same key
+ * arriving in sandbox and in production is two requests against two chains.
+ *
+ * Decimal spelling is normalized without rounding. The builder accepts
+ * insignificant zeroes and canonicalizes them to the same mint atoms, so `1`
+ * and `1.000000` are one intent. Non-zero sub-atom precision remains distinct
+ * here and is rejected by the provider builder before anything is signed.
+ */
+export const buildEarnVaultDepositFingerprint = (input: EarnVaultDepositFingerprintInput): string =>
+  JSON.stringify(
+    normalizeForFingerprint({
+      scope: "earn_vault_deposit",
+      environment: input.environment,
+      provider: input.provider,
+      providerReference: input.providerReference,
+      custodyWalletId: input.custodyWalletId,
+      direction: "deposit",
+      amount: normalizeDecimalString(input.amount),
+      minSharesOut: input.minSharesOut === null ? null : normalizeDecimalString(input.minSharesOut),
+    })
+  );
+
 export interface EarnWithdrawalFingerprintInput {
   providerWalletRef: string;
   amountUsd: string;

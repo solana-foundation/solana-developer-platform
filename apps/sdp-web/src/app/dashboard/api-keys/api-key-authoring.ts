@@ -7,6 +7,7 @@ import type {
   PolicyDefaultAction,
   PolicyRule,
   WalletOperationFamily,
+  WalletOperationType,
 } from "@sdp/types";
 
 export const API_KEY_AUTHORING_STEPS = ["details", "permissions", "wallets", "review"] as const;
@@ -26,7 +27,7 @@ export interface ApiKeyAuthoringDraft {
   restrictionsEdited: boolean;
   defaultAction: PolicyDefaultAction;
   operationFamilies: WalletOperationFamily[];
-  operationTypes: string;
+  operationTypes: WalletOperationType[];
   assets: string;
   maximumAmount: string;
   maximumAmountAssets: string;
@@ -87,7 +88,7 @@ export function createApiKeyAuthoringDraft(): ApiKeyAuthoringDraft {
     restrictionsEdited: false,
     defaultAction: "allow",
     operationFamilies: [],
-    operationTypes: "",
+    operationTypes: [],
     assets: "",
     maximumAmount: "",
     maximumAmountAssets: "",
@@ -123,13 +124,12 @@ export function buildApiKeyPolicyRules(draft: ApiKeyAuthoringDraft): PolicyRule[
     });
   }
 
-  const operationTypes = splitPolicyValues(draft.operationTypes);
-  if (operationTypes.length > 0) {
+  if (draft.operationTypes.length > 0) {
     rules.push({
       id: "additional-operation-types",
       name: "Additional restriction: operation types",
       kind: "operation_type",
-      operationTypes,
+      operationTypes: draft.operationTypes,
       action: "deny",
     });
   }
