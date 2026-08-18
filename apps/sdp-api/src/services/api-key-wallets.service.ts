@@ -1,6 +1,7 @@
 import type { ApiKeyWalletScope, Permission } from "@sdp/types";
 import type { PreparedStatement } from "@/db";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
+import { getLogger } from "@/runtime/logger";
 
 export interface ApiKeyWalletBinding {
   walletId: string;
@@ -133,6 +134,20 @@ export async function loadApiKeyWalletAuthorization(
 
   const resolvedRows = permissionRows.map((row): ApiKeyWalletPermissionRow => {
     const matches = candidatesByWalletId.get(row.wallet_id) ?? [];
+    if (matches.length !== 1) {
+      // The binding hydrates as deny-only (selected scope, no usable wallet),
+      // so the key silently loses access; surface it for operators.
+      getLogger().warn(
+        {
+          apiKeyId,
+          organizationId,
+          projectId,
+          walletId: row.wallet_id,
+          candidateCount: matches.length,
+        },
+        "api_key_wallet_binding_unresolved"
+      );
+    }
     return {
       ...row,
       custody_wallet_id: matches.length === 1 ? matches[0] : null,
