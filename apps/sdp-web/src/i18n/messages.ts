@@ -2,6 +2,9 @@ import type { AppLocale } from "@/i18n/config";
 import dashboardApprovals from "../../messages/en/dashboard-approvals.json";
 import dashboardCustody from "../../messages/en/dashboard-custody.json";
 import dashboardEarn from "../../messages/en/dashboard-earn.json";
+// No localized dashboard-helius-rings.json yet: product branches ship English
+// source only; localized copy lands via the translation bot on the release PR.
+import dashboardHeliusRings from "../../messages/en/dashboard-helius-rings.json";
 import dashboardIssuance from "../../messages/en/dashboard-issuance.json";
 import dashboardPayments from "../../messages/en/dashboard-payments.json";
 import dashboardPolicies from "../../messages/en/dashboard-policies.json";
@@ -49,6 +52,7 @@ const enMessages = {
   ...dashboardApprovals,
   ...dashboardCustody,
   ...dashboardEarn,
+  ...dashboardHeliusRings,
   ...dashboardIssuance,
   ...dashboardPayments,
   ...dashboardPolicies,
