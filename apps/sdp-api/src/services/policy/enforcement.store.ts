@@ -6,15 +6,18 @@ import type {
   RecordPolicyEvaluationInput,
 } from "@sdp/policy";
 import { IMPLICIT_DEFAULT_ALLOW_POLICY } from "@sdp/policy";
-import type {
-  EffectiveApiKeyPolicy,
-  PolicyCandidate,
-  PolicyEvaluation,
-  WalletOperationActor,
-  WalletOperationContext,
-  WalletOperationEnvelope,
-  WalletOperationProviderExtensions,
+import {
+  type EffectiveApiKeyPolicy,
+  type PolicyCandidate,
+  type PolicyEvaluation,
+  WALLET_OPERATION_FAMILIES,
+  WALLET_OPERATION_TYPES,
+  type WalletOperationActor,
+  type WalletOperationContext,
+  type WalletOperationEnvelope,
+  type WalletOperationProviderExtensions,
 } from "@sdp/types";
+import { z } from "zod";
 import type { PolicyEvaluationRow, PolicyRepository, WalletOperationRow } from "@/db/repositories";
 import { internalError } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
@@ -150,8 +153,13 @@ export class PostgresPolicyEnforcementStore implements PolicyEnforcementStore {
   }
 }
 
+const walletOperationFamilySchema = z.enum(WALLET_OPERATION_FAMILIES);
+const walletOperationTypeSchema = z.enum(WALLET_OPERATION_TYPES);
+
 /**
- * Map a wallet-operation row onto its domain envelope.
+ * Map a wallet-operation row onto its domain envelope. Envelopes feed the
+ * policy engine, so the family and type must be live vocabulary; historical
+ * rows carrying retired values fail loudly rather than reach evaluation.
  *
  * @param row - The persisted row.
  * @returns The domain envelope.
@@ -166,8 +174,8 @@ function mapWalletOperation(row: WalletOperationRow): WalletOperationEnvelope {
     apiKeyId: row.api_key_id,
     actor: getWalletOperationActor(row),
     source: row.source,
-    operationFamily: row.operation_family,
-    operationType: row.operation_type,
+    operationFamily: walletOperationFamilySchema.parse(row.operation_family),
+    operationType: walletOperationTypeSchema.parse(row.operation_type),
     asset: row.asset,
     amount: row.amount,
     destination: row.destination,

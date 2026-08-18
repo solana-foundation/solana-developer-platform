@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useTranslations } from "@/i18n/provider";
 
@@ -25,13 +25,22 @@ const CONTENT_CARD_IDS = ["shell-skeleton-card-1", "shell-skeleton-card-2"];
  * read as a hang. Same markup cost, same control flow — only what gets painted
  * changed, so the navigation loading contract is untouched.
  *
+ * Callers that know which route is loading pass that route's skeleton as
+ * `children`, so the chrome silhouette wraps the shape the page actually
+ * settles into. Callers without a route in scope — the pre-workspace state and
+ * the dedicated interstitial — omit it and keep the generic content blocks.
+ *
  * The status text stays in the accessibility tree; sighted users get the shape.
  */
 export function FullscreenLoadingIndicator({
   allowDelayedReload = false,
+  children,
+  contentWidthClass = "max-w-7xl",
   reloadDelayMs = DEFAULT_RELOAD_DELAY_MS,
 }: {
   allowDelayedReload?: boolean;
+  children?: ReactNode;
+  contentWidthClass?: string;
   reloadDelayMs?: number;
 }) {
   const t = useTranslations();
@@ -85,13 +94,23 @@ export function FullscreenLoadingIndicator({
           </div>
         </div>
 
-        <div aria-hidden="true" className="mx-auto w-full max-w-7xl space-y-6 px-6 py-8">
-          <div className="grid gap-4 sm:grid-cols-2">
-            {CONTENT_CARD_IDS.map((id) => (
-              <SkeletonBlock key={id} className="h-28 w-full rounded-[18px]" />
-            ))}
-          </div>
-          <SkeletonBlock className="h-64 w-full rounded-[18px]" />
+        {/* Padding tracks the settled shell's content section (px-3 py-5 md:p-6) so the
+            skeleton and the page that replaces it occupy the same measure at every
+            breakpoint. */}
+        <div
+          aria-hidden="true"
+          className={`mx-auto w-full ${contentWidthClass} space-y-6 px-3 py-5 md:p-6`}
+        >
+          {children ?? (
+            <div data-shell-loading-generic-content="true" className="space-y-6">
+              <div className="grid gap-4 sm:grid-cols-2">
+                {CONTENT_CARD_IDS.map((id) => (
+                  <SkeletonBlock key={id} className="h-28 w-full rounded-[18px]" />
+                ))}
+              </div>
+              <SkeletonBlock className="h-64 w-full rounded-[18px]" />
+            </div>
+          )}
         </div>
 
         {showReload ? (

@@ -7,18 +7,25 @@ import { nextReleaseVersion, releaseCommitSemantics } from "./release-version.mj
 const mode = process.argv[2];
 const dryRun = process.argv.includes("--dry-run");
 
-const repo = process.env.GITHUB_REPOSITORY ?? detectRepositoryFromGit();
+const repo = process.env.GITHUB_REPOSITORY;
 const token = process.env.GITHUB_TOKEN;
-const [repoOwner] = repo?.split("/") ?? [];
-const releaseBranch = "codex/release-main";
+const releaseBranch = "sdp/release-main";
+const releaseStagingBranch = `${releaseBranch}-staging`;
 
 if (!["plan", "prepare", "publish"].includes(mode)) {
   console.error("Usage: node .github/scripts/release-flow.mjs <plan|prepare|publish> [--dry-run]");
   process.exit(1);
 }
 
-if (["prepare", "publish"].includes(mode) && !dryRun && (!repo || !token)) {
-  console.error("GITHUB_REPOSITORY and GITHUB_TOKEN are required");
+if (!repo) {
+  console.error("GITHUB_REPOSITORY is required");
+  process.exit(1);
+}
+
+const [repoOwner] = repo.split("/");
+
+if (["prepare", "publish"].includes(mode) && !dryRun && !token) {
+  console.error("GITHUB_TOKEN is required");
   process.exit(1);
 }
 
@@ -38,28 +45,13 @@ const changelogSections = [
 ];
 
 function git(args, options = {}) {
+  const capture = options.capture !== false;
   const output = execFileSync("git", args, {
     encoding: "utf8",
-    stdio: options.capture === false ? "inherit" : ["ignore", "pipe", "pipe"],
+    stdio: capture ? ["ignore", "pipe", "pipe"] : "inherit",
   });
 
-  if (typeof output !== "string") {
-    return "";
-  }
-
-  return output.trim();
-}
-
-function detectRepositoryFromGit() {
-  try {
-    const remote = git(["remote", "get-url", "origin"]);
-    const match =
-      remote.match(/github\.com[:/](.+?)(?:\.git)?$/) ??
-      remote.match(/^https:\/\/x-access-token:[^@]+@github\.com\/(.+?)(?:\.git)?$/);
-    return match?.[1] ?? null;
-  } catch {
-    return null;
-  }
+  return capture ? output.trim() : "";
 }
 
 function readJson(filePath) {
@@ -250,7 +242,7 @@ function prependChangelog(sectionMarkdown) {
 }
 
 async function githubRequest(method, resourcePath, body) {
-  const response = await fetch(`https://api.github.com${resourcePath}`, {
+  const init = {
     method,
     headers: {
       Accept: "application/vnd.github+json",
@@ -258,8 +250,13 @@ async function githubRequest(method, resourcePath, body) {
       "X-GitHub-Api-Version": "2022-11-28",
       "Content-Type": "application/json",
     },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  };
+
+  if (body !== undefined) {
+    init.body = JSON.stringify(body);
+  }
+
+  const response = await fetch(`https://api.github.com${resourcePath}`, init);
 
   if (!response.ok) {
     const text = await response.text();
@@ -339,12 +336,21 @@ function releaseFileAddition(relativePath) {
   };
 }
 
-async function resetReleaseBranch(baseSha) {
-  const encodedBranch = releaseBranch.split("/").map(encodeURIComponent).join("/");
-  const refPath = `/repos/${repo}/git/refs/heads/${encodedBranch}`;
+/**
+ * Points a branch at a commit, creating the branch if it does not exist.
+ *
+ * @param {string} branchName Branch to move.
+ * @param {string} sha Commit the branch should point at.
+ * @returns {Promise<void>} Resolves once the ref is updated.
+ */
+async function forceUpdateBranch(branchName, sha) {
+  const encodedBranch = branchName.split("/").map(encodeURIComponent).join("/");
 
   try {
-    await githubRequest("PATCH", refPath, { sha: baseSha, force: true });
+    await githubRequest("PATCH", `/repos/${repo}/git/refs/heads/${encodedBranch}`, {
+      sha,
+      force: true,
+    });
   } catch (error) {
     // Updating a missing ref returns 422 "Reference does not exist", not 404.
     if (error.status !== 404 && error.status !== 422) {
@@ -352,19 +358,29 @@ async function resetReleaseBranch(baseSha) {
     }
 
     await githubRequest("POST", `/repos/${repo}/git/refs`, {
-      ref: `refs/heads/${releaseBranch}`,
-      sha: baseSha,
+      ref: `refs/heads/${branchName}`,
+      sha,
     });
   }
 }
 
+/**
+ * Builds the release commit on a staging branch, then force-moves the release
+ * branch directly onto it. The release branch never points at main's HEAD, so
+ * GitHub never sees the open release PR with an empty diff and auto-closes it.
+ * The staging branch persists between runs and is force-overwritten each time;
+ * deleting it would add a failure mode to the retry loop for pure cleanup.
+ *
+ * @param {string} version Release version being prepared.
+ * @returns {Promise<string>} OID of the release commit.
+ */
 async function createReleaseBranchCommit(version) {
   const expectedHeadOid = git(["rev-parse", "HEAD"]);
-  await resetReleaseBranch(expectedHeadOid);
+  await forceUpdateBranch(releaseStagingBranch, expectedHeadOid);
 
   const commit = await createCommitOnBranch({
     repository: repo,
-    branch: releaseBranch,
+    branch: releaseStagingBranch,
     expectedHeadOid,
     headline: `chore(main): release ${version}`,
     additions: [
@@ -374,6 +390,8 @@ async function createReleaseBranchCommit(version) {
     ],
     token,
   });
+
+  await forceUpdateBranch(releaseBranch, commit.oid);
 
   console.log(`Created release branch commit ${commit.oid}`);
   return commit.oid;

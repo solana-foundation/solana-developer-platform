@@ -1,11 +1,39 @@
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
 import {
+  buildEarnVaultDepositFingerprint,
   buildPaymentTransferFingerprint,
   buildTransferBatchFingerprint,
   normalizeForFingerprint,
   resolveIdempotencyReplay,
 } from "./idempotency";
+
+describe("buildEarnVaultDepositFingerprint", () => {
+  const base = {
+    environment: "sandbox",
+    provider: "kamino",
+    providerReference: "vault_1",
+    custodyWalletId: "cwlt_1",
+    amount: "1",
+    minSharesOut: "0.5",
+  };
+
+  it("normalizes insignificant decimal zeroes without rounding", () => {
+    expect(buildEarnVaultDepositFingerprint(base)).toBe(
+      buildEarnVaultDepositFingerprint({
+        ...base,
+        amount: "0001.000000",
+        minSharesOut: "00.5000",
+      })
+    );
+  });
+
+  it("keeps different exact decimal magnitudes distinct", () => {
+    expect(buildEarnVaultDepositFingerprint(base)).not.toBe(
+      buildEarnVaultDepositFingerprint({ ...base, amount: "1.000001" })
+    );
+  });
+});
 
 describe("resolveIdempotencyReplay", () => {
   it("returns null when no row has claimed the key", async () => {

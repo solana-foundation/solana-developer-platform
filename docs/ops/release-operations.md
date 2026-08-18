@@ -101,7 +101,7 @@ Also exercise the affected authenticated, webhook, or provider flow; `/health` o
 
 ### 2. Review the generated release pull request
 
-The Release Flow workflow maintains `codex/release-main` and opens a pull request titled `chore(main): release X.Y.Z`. It updates:
+The Release Flow workflow maintains `sdp/release-main` and opens a pull request titled `chore(main): release X.Y.Z`. It updates:
 
 - `package.json`
 - `.github/.release-please-manifest.json`

@@ -24,7 +24,10 @@ describe("evaluateApprovalRule", () => {
       null
     );
     assert.equal(
-      evaluateApprovalRule({ kind: "approval", operationTypes: ["token_transfer"] }, operation),
+      evaluateApprovalRule(
+        { kind: "approval", operationTypes: ["issuance_mint_execute"] },
+        operation
+      ),
       null
     );
     assert.equal(evaluateApprovalRule({ kind: "approval", assets: ["SOL"] }, operation), null);

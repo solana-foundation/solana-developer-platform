@@ -218,7 +218,7 @@ async function createAndActivateApiKeyPolicy(apiKeyId: string): Promise<{
       headers: authenticatedJsonHeaders(),
       body: JSON.stringify({
         rules: [
-          { id: "deny-raw-sign", kind: "operation_family", family: "raw_sign", action: "deny" },
+          { id: "deny-issuance", kind: "operation_family", family: "issuance", action: "deny" },
         ],
         defaultAction: "review",
       }),
