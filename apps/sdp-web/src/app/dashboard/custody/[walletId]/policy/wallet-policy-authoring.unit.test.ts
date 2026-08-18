@@ -176,8 +176,8 @@ describe("wallet policy authoring", () => {
     };
     const state = createPolicyAuthoringState(emptyPolicy());
     state.passthroughRules = [
-      { id: "dead-families", kind: "operation_family", families: ["transfer", "provider_admin"] },
-      { id: "dead-approval", kind: "approval", families: ["raw_sign"] },
+      { id: "uneditable-families", kind: "operation_family", families: ["transfer"] },
+      { id: "dead-approval", kind: "approval", families: ["transfer"] },
       { id: "asset-less-cap", kind: "amount", max: "150", action: "allow" },
       liveRule,
     ];
@@ -204,7 +204,7 @@ describe("wallet policy authoring", () => {
     state.destinationMode = "allowlist";
     state.destinationAllowText = ADDRESS_B;
     state.familyActions = { payment: "deny", ramp: "approval_required" };
-    state.operationTypeRules = [{ value: "payment.create", action: "approval_required" }];
+    state.operationTypeRules = [{ value: "recurring_payment_create", action: "approval_required" }];
 
     const payload = buildPolicyPayload(WALLET_ID, state);
 
@@ -228,7 +228,7 @@ describe("wallet policy authoring", () => {
         }),
         expect.objectContaining({
           kind: "operation_type",
-          operationTypes: ["payment.create"],
+          operationTypes: ["recurring_payment_create"],
           action: "approval_required",
         }),
         expect.objectContaining({ kind: "asset", assets: [ADDRESS_A], action: "allow" }),
@@ -336,7 +336,7 @@ describe("wallet policy authoring", () => {
         {
           id: "types",
           kind: "operation_type",
-          operationTypes: ["payment.create"],
+          operationTypes: ["recurring_payment_create"],
           action: "review",
         },
         { id: "assets", kind: "asset", assets: [ADDRESS_A], action: "allow" },
@@ -370,7 +370,7 @@ describe("wallet policy authoring", () => {
       destinationMode: "blocklist",
       destinationBlockText: ADDRESS_B,
       familyActions: { payment: "deny", ramp: "approval_required", issuance: "deny" },
-      operationTypeRules: [{ value: "payment.create", action: "approval_required" }],
+      operationTypeRules: [{ value: "recurring_payment_create", action: "approval_required" }],
     });
     expect(rebuilt.rules).toEqual(
       expect.arrayContaining([
@@ -513,45 +513,48 @@ describe("wallet policy authoring", () => {
   });
 
   it.each([
-    { label: "raw_sign", families: ["raw_sign"] },
-    { label: "payment + raw_sign", families: ["payment", "raw_sign"] },
-  ] as const)("erases retired families from an operation-family rule: $label", ({ families }) => {
-    const rule: PaymentWalletPolicy["rules"][number] = {
-      id: `historical-${families.join("-")}`,
-      kind: "operation_family",
-      families: [...families],
-      action: "deny",
-    };
-    const state = createPolicyAuthoringState({
-      walletId: WALLET_ID,
-      defaultAction: "allow",
-      controlProfile: null,
-      rules: [rule],
-    });
+    { label: "transfer", families: ["transfer"] },
+    { label: "payment + transfer", families: ["payment", "transfer"] },
+  ] as const)(
+    "erases non-authorable families from an operation-family rule: $label",
+    ({ families }) => {
+      const rule: PaymentWalletPolicy["rules"][number] = {
+        id: `historical-${families.join("-")}`,
+        kind: "operation_family",
+        families: [...families],
+        action: "deny",
+      };
+      const state = createPolicyAuthoringState({
+        walletId: WALLET_ID,
+        defaultAction: "allow",
+        controlProfile: null,
+        rules: [rule],
+      });
 
-    const authorable = families.filter((family) => family === "payment");
-    expect(state.familyActions).toEqual(authorable.length ? { payment: "deny" } : {});
-    expect(state.passthroughRules).toEqual([]);
-    expect(buildPolicyPayload(WALLET_ID, state).rules).toEqual(
-      authorable.length
-        ? [
-            {
-              id: "operation-families-deny",
-              kind: "operation_family",
-              families: ["payment"],
-              action: "deny",
-              name: "Operation families: deny",
-            },
-          ]
-        : []
-    );
-  });
+      const authorable = families.filter((family) => family === "payment");
+      expect(state.familyActions).toEqual(authorable.length ? { payment: "deny" } : {});
+      expect(state.passthroughRules).toEqual([]);
+      expect(buildPolicyPayload(WALLET_ID, state).rules).toEqual(
+        authorable.length
+          ? [
+              {
+                id: "operation-families-deny",
+                kind: "operation_family",
+                families: ["payment"],
+                action: "deny",
+                name: "Operation families: deny",
+              },
+            ]
+          : []
+      );
+    }
+  );
 
-  it("drops a family-only approval rule naming only retired families", () => {
+  it("drops a family-only approval rule naming only non-authorable families", () => {
     const rule: PaymentWalletPolicy["rules"][number] = {
-      id: "historical-raw-sign-approval",
+      id: "transfer-approval",
       kind: "approval",
-      families: ["raw_sign"],
+      families: ["transfer"],
       action: "approval_required",
     };
     const state = createPolicyAuthoringState({
@@ -577,7 +580,7 @@ describe("wallet policy authoring", () => {
       step: "destinations-operations",
       state: {
         ...state,
-        familyActions: { payment: "deny", raw_sign: "approval_required" },
+        familyActions: { payment: "deny", transfer: "approval_required" },
       },
       updatedAt: "2026-07-15T20:00:00.000Z",
     };

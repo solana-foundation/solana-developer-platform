@@ -44,6 +44,7 @@
   },
   "dependencies": {
     "@clerk/backend": "3.15.0",
+    "@coinbase/cdp-sdk": "1.54.0",
     "@hono/node-server": "2.0.12",
     "@react-email/components": "1.0.12",
     "@react-email/render": "2.1.0",
@@ -51,13 +52,14 @@
     "@sdp/earn": "workspace:*",
     "@sdp/env-config": "workspace:*",
     "@sdp/issuance": "workspace:*",
+    "@sdp/kamino": "workspace:*",
     "@sdp/payments": "workspace:*",
     "@sdp/policy": "workspace:*",
     "@sdp/private-channels": "workspace:*",
     "@sdp/rpc": "workspace:*",
+    "@sdp/solana": "workspace:*",
     "@sdp/spc-escrow": "workspace:*",
     "@sdp/spc-withdraw": "workspace:*",
-    "@sdp/solana": "workspace:*",
     "@sdp/types": "workspace:*",
     "@sentry/node": "10.70.0",
     "@solana-program/system": "catalog:",
@@ -89,8 +91,7 @@
     "pino": "10.3.1",
     "react": "19.2.8",
     "resend": "6.18.1",
-    "zod": "4.4.3",
-    "@coinbase/cdp-sdk": "1.54.0"
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@asteasolutions/zod-to-openapi": "9.1.0",

@@ -7,6 +7,30 @@ import type {
 } from "@sdp/types";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+/**
+ * Ground is the only portfolio-capable provider and it is currently UN-SURFACED
+ * (`EARN_PROVIDER_SURFACING` in @sdp/types), so `POST /programs` answers 403 for
+ * it in the shipped configuration. That is the product's business state, not a
+ * property of the create machinery this file tests — idempotency, replay,
+ * gate order, environment isolation and the yield-source gate all have to keep
+ * working for whichever provider is offered next.
+ *
+ * So surfacing is forced ON here and the gate gets its own explicit test, which
+ * flips this flag off. Deliberately a partial mock: everything else in
+ * `@sdp/types` is the real module.
+ */
+const surfacing = vi.hoisted(() => ({ forceOn: true }));
+
+vi.mock("@sdp/types", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@sdp/types")>();
+  return {
+    ...actual,
+    isEarnProviderSurfaced: (provider: string) =>
+      surfacing.forceOn || actual.isEarnProviderSurfaced(provider),
+  };
+});
+
 import { getDb } from "@/db";
 import {
   createPostgresEarnRepository,
@@ -417,6 +441,7 @@ beforeEach(async () => {
   // credential stays absent unless a test opts in.
   env.GROUND_SANDBOX_API_KEY = GROUND_SANDBOX_KEY;
   env.GROUND_API_KEY = undefined;
+  surfacing.forceOn = true;
   await seedTestDatabase(env);
 });
 
@@ -770,10 +795,12 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
   });
 
   /**
-   * The devnet-money guard. A mainnet-only provider is catalogued into sandbox
-   * on purpose, so `assertKnownYieldSources` must refuse a reference whose
-   * instrument does not live on this environment's cluster — being listed here
-   * is not the same as being fundable here.
+   * The devnet-money guard. `assertKnownYieldSources` must refuse a reference
+   * whose instrument does not live on this environment's cluster — being listed
+   * is not the same as being fundable. The row is seeded with a flipped cluster
+   * rather than borrowed from a provider: Kamino was the original example and
+   * now catalogues per cluster, so a real provider reference would no longer
+   * exercise this at all.
    *
    * Deliberately uses a GROUND row with its cluster flipped rather than a
    * Kamino row: a Kamino reference is already refused for being another
@@ -1375,6 +1402,96 @@ describe("Earn program — live reads", () => {
       providerWalletRef: WALLET_REF,
       cursor: "cursor-1",
     });
+  });
+});
+
+/**
+ * The surfacing gate — the only place `EARN_PROVIDER_SURFACING` is allowed to
+ * refuse anything. These tests turn the forced-on flag OFF, so they run against
+ * the real shipped map (Ground un-surfaced today).
+ */
+describe("Earn program — un-surfaced provider", () => {
+  beforeEach(() => {
+    surfacing.forceOn = false;
+  });
+
+  it("refuses to open a new position, even for a fully entitled and credentialed org", async () => {
+    await seedAuth();
+    await seedGroundStrategy();
+    const createWallet = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet");
+
+    const res = await requestEarn(
+      "POST",
+      PROGRAMS_PATH,
+      createProgramBody({ requestId: crypto.randomUUID() })
+    );
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { message: string } };
+    // Not the entitlement copy: no override lifts this, so pointing the caller
+    // at manual activation would send them to a door that does not exist.
+    expect(body.error.message).toContain("not currently offered");
+    expect(body.error.message).not.toContain("manual activation");
+    // Refused BEFORE the provider is touched — no orphaned wallet to reconcile.
+    expect(createWallet).not.toHaveBeenCalled();
+  });
+
+  /**
+   * ADR 0002: un-surfacing closes the door IN, never the door out. An
+   * organization holding a program taken while the provider was offered keeps
+   * every route that reads or exits it.
+   */
+  it("keeps an existing program readable, re-targetable and withdrawable", async () => {
+    await seedAuth();
+    await seedGroundStrategy();
+    const program = await seedProgramWallet();
+    stubProgramReads();
+    const updateStrategy = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "updatePortfolioStrategy")
+      .mockResolvedValue({ allocations: WALLET_SNAPSHOT.allocations });
+    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal").mockResolvedValue(
+      WITHDRAWAL
+    );
+
+    const read = await requestEarn("GET", programPath(program.id));
+    expect(read.status).toBe(200);
+
+    const list = await requestEarn("GET", `${PROGRAMS_PATH}?provider=ground`);
+    expect(list.status).toBe(200);
+
+    const retarget = await requestEarn("PUT", programPath(program.id), {
+      allocations: VALID_ALLOCATIONS,
+    });
+    expect(retarget.status).toBe(200);
+    expect(updateStrategy).toHaveBeenCalledTimes(1);
+
+    const withdrawal = await requestEarn("POST", programPath(program.id, "/withdrawals"), {
+      requestId: "0a1f4c2e-9b6d-4e83-8a11-5c7d2e9f4b60",
+      amountUsd: "25.50",
+      token: "usdc",
+      destinationAddress: SOLANA_DESTINATION,
+    });
+    expect(withdrawal.status).toBe(201);
+  });
+
+  /**
+   * The catalogue an existing program allocates into is hidden from
+   * `/strategies` reads, and `assertKnownYieldSources` must NOT inherit that:
+   * it validates against the STORED catalogue precisely so a position can keep
+   * pointing at a row the browse surface no longer shows. Covered by the
+   * re-target above; pinned here so collapsing the two filters fails loudly.
+   */
+  it("still validates re-target allocations against the stored catalogue", async () => {
+    await seedAuth();
+    await seedGroundStrategy();
+    const program = await seedProgramWallet();
+    stubProgramReads();
+
+    const res = await requestEarn("PUT", programPath(program.id), {
+      allocations: [{ token: "usdc", entries: [{ yieldSourceId: "not-in-catalogue", pct: 100 }] }],
+    });
+
+    expect(res.status).toBe(400);
   });
 });
 

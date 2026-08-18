@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { AppDb, DatabaseExecutor } from "@/db";
 
+export const SPONSORSHIP_BREAKER_OPERATOR = "system:sponsorship-breaker";
+
 export type SponsorshipNetwork = "devnet" | "mainnet";
 export type SponsorshipBudgetScopeType = "global" | "organization" | "project";
 export type SponsorshipReservationStatus =
@@ -124,6 +126,15 @@ function mapPolicy(row: PolicyRow): SponsorshipBudgetPolicy {
 
 export class SponsorshipBudgetRepository {
   constructor(private readonly db: AppDb) {}
+
+  async getGlobalPolicy(network: SponsorshipNetwork): Promise<SponsorshipBudgetPolicy | null> {
+    const row = await this.db.queryOne<PolicyRow>(
+      `SELECT * FROM sponsorship_budget_policies
+       WHERE network = ? AND scope_type = 'global' AND scope_id IS NULL`,
+      [network]
+    );
+    return row ? mapPolicy(row) : null;
+  }
 
   async listPolicies(network?: SponsorshipNetwork): Promise<SponsorshipBudgetPolicy[]> {
     const rows = await this.db.queryMany<PolicyRow>(
@@ -313,12 +324,23 @@ export class SponsorshipBudgetRepository {
     enabled: boolean;
     operator: string;
     reason: string;
+    overwriteDisabledProvenance?: boolean;
   }): Promise<SponsorshipBudgetPolicy | null> {
+    const overwriteDisabledProvenance = input.overwriteDisabledProvenance ?? true;
     return this.db.transaction(async (tx) => {
+      // A disable over an already-disabled policy must still record who asked
+      // and why: auto-recovery resumes only the breaker's config-unavailability
+      // trips, so an operator kill or integrity trip layered on top of one has
+      // to overwrite that provenance or it would be silently resumed later.
+      // The recoverable config-unavailability trip opts out of the overwrite:
+      // it must never downgrade a stronger disable to auto-recoverable.
+      // Identical repeated disables stay no-ops.
       const row = await tx.queryOne<PolicyRow>(
         `UPDATE sponsorship_budget_policies
            SET enabled = ?, version = version + 1, updated_by = ?, update_reason = ?, updated_at = sdp_iso_now()
-         WHERE network = ? AND scope_type = ? AND scope_id IS NOT DISTINCT FROM ? AND enabled <> ?
+         WHERE network = ? AND scope_type = ? AND scope_id IS NOT DISTINCT FROM ?
+           AND (enabled <> ?
+                OR (? = TRUE AND ? = FALSE AND (updated_by <> ? OR update_reason <> ?)))
          RETURNING *`,
         [
           input.enabled,
@@ -328,6 +350,10 @@ export class SponsorshipBudgetRepository {
           input.scopeType,
           input.scopeId,
           input.enabled,
+          overwriteDisabledProvenance,
+          input.enabled,
+          input.operator,
+          input.reason,
         ]
       );
       if (!row) return null;
@@ -336,17 +362,73 @@ export class SponsorshipBudgetRepository {
     });
   }
 
+  async recordProviderConfigFailure(network: SponsorshipNetwork): Promise<number> {
+    const row = await this.db.queryOne<{ consecutive_config_failures: number | string }>(
+      `INSERT INTO sponsorship_reconciliation_state (network, consecutive_config_failures)
+       VALUES (?, 1)
+       ON CONFLICT (network) DO UPDATE
+         SET consecutive_config_failures = sponsorship_reconciliation_state.consecutive_config_failures + 1,
+             updated_at = sdp_iso_now()
+       RETURNING consecutive_config_failures`,
+      [network]
+    );
+    if (!row) {
+      throw new Error("Provider config failure counter did not persist");
+    }
+    return Number(row.consecutive_config_failures);
+  }
+
+  async resetProviderConfigFailures(network: SponsorshipNetwork): Promise<void> {
+    await this.db.execute(
+      `UPDATE sponsorship_reconciliation_state
+         SET consecutive_config_failures = 0, updated_at = sdp_iso_now()
+       WHERE network = ? AND consecutive_config_failures > 0`,
+      [network]
+    );
+  }
+
   async tripGlobalBreaker(
     network: SponsorshipNetwork,
-    reason: string
+    reason: string,
+    options: { recoverable?: boolean } = {}
   ): Promise<SponsorshipBudgetPolicy | null> {
     return this.setPolicyEnabled({
       network,
       scopeType: "global",
       scopeId: null,
       enabled: false,
-      operator: "system:sponsorship-breaker",
+      operator: SPONSORSHIP_BREAKER_OPERATOR,
       reason,
+      overwriteDisabledProvenance: !(options.recoverable ?? false),
+    });
+  }
+
+  async resumeGlobalBreaker(
+    network: SponsorshipNetwork,
+    expectedTripReason: string,
+    reason: string
+  ): Promise<SponsorshipBudgetPolicy | null> {
+    return this.db.transaction(async (tx) => {
+      // Compare-and-set on the trip provenance: an operator kill or integrity
+      // trip that lands after the recovery decision changes updated_by or
+      // update_reason and must not be overwritten by a stale resume.
+      const row = await tx.queryOne<PolicyRow>(
+        `UPDATE sponsorship_budget_policies
+           SET enabled = TRUE, version = version + 1, updated_by = ?, update_reason = ?, updated_at = sdp_iso_now()
+         WHERE network = ? AND scope_type = 'global' AND scope_id IS NULL
+           AND enabled = FALSE AND updated_by = ? AND update_reason = ?
+         RETURNING *`,
+        [
+          SPONSORSHIP_BREAKER_OPERATOR,
+          reason,
+          network,
+          SPONSORSHIP_BREAKER_OPERATOR,
+          expectedTripReason,
+        ]
+      );
+      if (!row) return null;
+      await this.insertRevision(tx, row, SPONSORSHIP_BREAKER_OPERATOR, reason);
+      return mapPolicy(row);
     });
   }
 

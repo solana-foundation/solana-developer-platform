@@ -14,8 +14,11 @@ const webWorkflow = fs.readFileSync(
   "utf8"
 );
 
-function assertVercelProductionStep(workflow) {
-  const stepStart = workflow.indexOf("      - name: Build and deploy production artifact");
+function assertVercelProductionStep(
+  workflow,
+  buildStepName = "Build and deploy production artifact"
+) {
+  const stepStart = workflow.indexOf(`      - name: ${buildStepName}`);
 
   assert.notEqual(stepStart, -1);
   assert.doesNotMatch(workflow.slice(0, stepStart), /secrets\.VERCEL_/);
@@ -27,6 +30,19 @@ function assertVercelProductionStep(workflow) {
   assert.match(step, /vercel pull --yes --environment=production/);
   assert.match(step, /vercel build --prod/);
   assert.match(step, /vercel deploy --prebuilt --prod/);
+}
+
+// vercel build shells out to pnpm. Without this step the job dies on
+// "spawn pnpm ENOENT" after pulling env vars, which is what broke the
+// v0.62.0 dashboard deploy. Assert the setup exists and precedes the build.
+function assertPnpmSetupPrecedesBuild(workflow, buildStepName) {
+  const pnpmSetup = workflow.indexOf("      - name: Setup pnpm");
+  const stepStart = workflow.indexOf(`      - name: ${buildStepName}`);
+
+  assert.notEqual(pnpmSetup, -1, "the Vercel build job must set up pnpm");
+  assert.notEqual(stepStart, -1);
+  assert.ok(pnpmSetup < stepStart, "pnpm must be installed before vercel build runs");
+  assert.match(workflow.slice(pnpmSetup, stepStart), /uses: pnpm\/action-setup@[0-9a-f]{40}/);
 }
 
 test("release publication passes an immutable identity to both production deployments", () => {
@@ -62,6 +78,7 @@ test("release publication passes an immutable identity to both production deploy
     /verify-release-identity\.sh[\s\S]*needs\.publish-release\.outputs\.release_tag[\s\S]*needs\.publish-release\.outputs\.release_sha/
   );
   assertVercelProductionStep(webJob);
+  assertPnpmSetupPrecedesBuild(webJob, "Build and deploy production artifact");
 
   assert.doesNotMatch(releaseWorkflow, /secrets:\s+inherit/);
 });
@@ -73,6 +90,28 @@ test("manual web production deploys remain protected and use environment secrets
   assert.match(webWorkflow, /github\.ref == 'refs\/heads\/main'/);
   assert.match(webWorkflow, /environment: production/);
   assert.match(webWorkflow, /ref: \$\{\{ inputs\.ref \}\}/);
-  assertVercelProductionStep(webWorkflow);
+  assertVercelProductionStep(webWorkflow, "Build production artifact");
+  assertPnpmSetupPrecedesBuild(webWorkflow, "Build production artifact");
   assert.doesNotMatch(webWorkflow, /secrets:\s+inherit/);
+});
+
+test("the manual web deploy can build without deploying", () => {
+  assert.match(webWorkflow, /dry_run:\n\s+description:[\s\S]*type: boolean/);
+  assert.match(webWorkflow, /default: false/);
+
+  // The deploy must be the only thing the dry run skips: pull and build stay
+  // in an unconditional step so a dry run exercises the real build path.
+  const buildStep = webWorkflow.slice(
+    webWorkflow.indexOf("      - name: Build production artifact"),
+    webWorkflow.indexOf("      - name: Skip deploy (dry run)")
+  );
+  assert.doesNotMatch(buildStep, /^\s+if:/m);
+  assert.match(buildStep, /vercel pull --yes --environment=production/);
+  assert.match(buildStep, /vercel build --prod/);
+
+  const deployStep = webWorkflow.slice(
+    webWorkflow.indexOf("      - name: Deploy production artifact")
+  );
+  assert.match(deployStep, /if: \$\{\{ !inputs\.dry_run \}\}/);
+  assert.match(deployStep, /vercel deploy --prebuilt --prod/);
 });

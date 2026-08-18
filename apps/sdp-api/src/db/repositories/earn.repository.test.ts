@@ -481,6 +481,80 @@ describe("EarnRepository (postgres)", () => {
     });
   });
 
+  /**
+   * The per-vault curation knobs behind the API's HIDDEN_VAULTS / CURATED_VAULTS
+   * config. Both filter in SQL, so `total` has to move with the rows — a
+   * curated page that still counted the hidden vaults would paginate a reader
+   * into empty windows.
+   */
+  describe("listStrategies per-vault curation", () => {
+    it("drops a denied vault from rows AND total, keyed on provider:reference", async () => {
+      const kept = await seedStrategy({ providerReference: "vault-kept" });
+      await seedStrategy({ providerReference: "vault-denied" });
+
+      const { rows, total } = await repo.listStrategies({
+        environment: "sandbox",
+        // `veda` is this suite's default seed provider — deliberately not Ground,
+        // so the curation is proven against the canonical contract, not one
+        // provider's quirks.
+        excludeProviderKeys: ["veda:vault-denied"],
+        limit: 10,
+        offset: 0,
+      });
+
+      expect(total).toBe(1);
+      expect(rows.map((row) => row.id)).toEqual([kept.id]);
+    });
+
+    it("scopes the denylist to its provider, so a shared reference is not collateral", async () => {
+      // Same reference under two providers: only the keyed one may disappear.
+      const ground = await seedStrategy({ provider: "ground", providerReference: "shared-ref" });
+      const kamino = await seedStrategy({ provider: "kamino", providerReference: "shared-ref" });
+
+      const { rows } = await repo.listStrategies({
+        environment: "sandbox",
+        excludeProviderKeys: ["ground:shared-ref"],
+        limit: 10,
+        offset: 0,
+      });
+
+      expect(rows.map((row) => row.id)).toEqual([kamino.id]);
+      expect(rows.map((row) => row.id)).not.toContain(ground.id);
+    });
+
+    it("shows only the allowlisted references for a curated provider", async () => {
+      const picked = await seedStrategy({ provider: "kamino", providerReference: "kv-picked" });
+      await seedStrategy({ provider: "kamino", providerReference: "kv-other" });
+      // An uncurated provider passes through untouched.
+      const ground = await seedStrategy({ provider: "ground", providerReference: "ground-vault" });
+
+      const { rows, total } = await repo.listStrategies({
+        environment: "sandbox",
+        allowedProviderReferences: { kamino: ["kv-picked"] },
+        limit: 10,
+        offset: 0,
+      });
+
+      expect(total).toBe(2);
+      expect(rows.map((row) => row.id).sort()).toEqual([ground.id, picked.id].sort());
+    });
+
+    it("reads an EMPTY allowlist literally — that provider shows nothing", async () => {
+      await seedStrategy({ provider: "kamino", providerReference: "kv-any" });
+      const ground = await seedStrategy({ provider: "ground", providerReference: "ground-vault" });
+
+      const { rows, total } = await repo.listStrategies({
+        environment: "sandbox",
+        allowedProviderReferences: { kamino: [] },
+        limit: 10,
+        offset: 0,
+      });
+
+      expect(total).toBe(1);
+      expect(rows.map((row) => row.id)).toEqual([ground.id]);
+    });
+  });
+
   describe("provider wallets (earn_provider_wallets)", () => {
     const GROUND_WALLET_REF = "1b6d5a1e-8f4c-4c1a-9e2b-3d7f6a8c9e01";
     const OTHER_ORG = {

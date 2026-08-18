@@ -42,8 +42,9 @@ interface KoraClientTransport {
 
 export type KoraAdapterConfig = KoraClientOptions & {
   /**
-   * Optional request timeout in milliseconds.
-   * Note: The Kora SDK does not currently support timeouts directly.
+   * Per-call timeout in milliseconds. The Kora SDK offers no abort hook, so
+   * the adapter races each call against this deadline; the underlying fetch
+   * is abandoned rather than aborted.
    */
   timeoutMs?: number;
 
@@ -104,6 +105,7 @@ export class KoraAdapter implements FeePaymentPort {
             identityTokenProvider,
           })
         : new KoraClient({ rpcUrl, apiKey, getRecaptchaToken, hmacSecret }));
+    this.client = withCallTimeouts(this.client, config.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     this.userId = userId?.trim() || "sdp:unscoped";
   }
 
@@ -419,7 +421,16 @@ function isRetryableSignAndSendError(error: unknown): boolean {
     message.includes("502") ||
     message.includes("503") ||
     message.includes("bad gateway") ||
-    message.includes("service unavailable")
+    message.includes("service unavailable") ||
+    // Connection-level failures while a Kora instance is being replaced.
+    // Retrying is idempotent even when the first attempt may have reached
+    // Kora: the transaction bytes are fixed, ed25519 signing is
+    // deterministic, so a duplicate submit carries the same signature and
+    // the cluster deduplicates it.
+    message.includes("fetch failed") ||
+    message.includes("econnrefused") ||
+    message.includes("econnreset") ||
+    message.includes("socket hang up")
   );
 }
 
@@ -450,6 +461,45 @@ function mapKoraErrorCode(code: number): import("./port").FeePaymentErrorCode {
     default:
       return "NETWORK_ERROR";
   }
+}
+
+const DEFAULT_TIMEOUT_MS = 10_000;
+
+// The Kora SDK performs a bare fetch with no abort hook, so a hung connection
+// would otherwise hold the caller until the platform request timeout. Race
+// every call against a deadline; the timeout message is classified as
+// retryable by the transient-error checks above.
+function withCallTimeouts(client: KoraClientTransport, timeoutMs: number): KoraClientTransport {
+  return {
+    getPayerSigner: () => withTimeout(client.getPayerSigner(), timeoutMs, "getPayerSigner"),
+    signTransaction: (request) =>
+      withTimeout(client.signTransaction(request), timeoutMs, "signTransaction"),
+    signAndSendTransaction: (request) =>
+      withTimeout(client.signAndSendTransaction(request), timeoutMs, "signAndSendTransaction"),
+    estimateTransactionFee: (request) =>
+      withTimeout(client.estimateTransactionFee(request), timeoutMs, "estimateTransactionFee"),
+    getSupportedTokens: () =>
+      withTimeout(client.getSupportedTokens(), timeoutMs, "getSupportedTokens"),
+    getConfig: () => withTimeout(client.getConfig(), timeoutMs, "getConfig"),
+  };
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Kora ${label} timed out after ${ms}ms`));
+    }, ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
 }
 
 function sleep(ms: number): Promise<void> {

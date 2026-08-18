@@ -89,41 +89,6 @@ function parseApiActionError(error: unknown): { status: number; message: string 
   };
 }
 
-async function sdpApiFetchWithApiKey<T>(
-  path: string,
-  apiKey: string,
-  options: RequestInit = {}
-): Promise<T> {
-  const client = await createSdpApiClient();
-  const res = await client.request(path, {
-    ...options,
-    headers: {
-      ...(options.headers ?? {}),
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-  });
-
-  if (!res.ok) {
-    // Carry the raw body, not just its `message`. The callers that format this
-    // parse the body themselves, and a policy denial keeps the rule that fired in
-    // `error.details` — reducing it here threw that away before anyone read it.
-    const body = await res.text();
-    throw new Error(`SDP API request failed (${res.status}): ${body}`);
-  }
-
-  if (res.status === 204) {
-    return {} as T;
-  }
-
-  const json = (await res.json()) as unknown;
-  if (json && typeof json === "object" && "data" in json) {
-    return (json as { data: T }).data;
-  }
-
-  return json as T;
-}
-
 export async function initializeCustody(formData: FormData) {
   await initializeCustodyWallet(formData);
   revalidateWalletPaths();
@@ -396,14 +361,6 @@ export async function updateWalletLabelAction(
   }
 }
 
-interface EphemeralApiKeyResponse {
-  apiKey: {
-    id: string;
-    name: string;
-    key: string;
-  };
-}
-
 interface WalletSignerCheckResponse {
   walletId: string;
   signature: string;
@@ -464,50 +421,18 @@ export async function checkWalletSignerMemoAction(
     return { status: "error", message: t("DashboardCustody.walletIdRequired") };
   }
 
-  const now = Date.now();
-  const keyName = `wallet-check-${resolvedWalletId.slice(-8)}-${now.toString(36)}`;
-  const memo = `Wallet signer check (${resolvedWalletId}) ${new Date(now).toISOString()}`;
-
   try {
     const client = await createSdpApiClient();
-    const created = await client.fetch<EphemeralApiKeyResponse>("/v1/api-keys", {
+    const check = await client.fetch<WalletSignerCheckResponse>("/v1/wallets/signer-check", {
       method: "POST",
-      body: JSON.stringify({
-        name: keyName,
-        role: "api_developer",
-        walletScope: "selected",
-        signingWalletId: resolvedWalletId,
-        signingWalletIds: [resolvedWalletId],
-        expiresAt: new Date(now + 10 * 60 * 1000).toISOString(),
-      }),
+      body: JSON.stringify({ walletId: resolvedWalletId }),
     });
-    const ephemeralKey = created.apiKey;
 
-    try {
-      const check = await sdpApiFetchWithApiKey<WalletSignerCheckResponse>(
-        "/v1/wallets/signer-check",
-        ephemeralKey.key,
-        {
-          method: "POST",
-          body: JSON.stringify({ memo }),
-        }
-      );
-
-      return {
-        status: "success",
-        walletId: check.walletId,
-        signature: check.signature,
-      };
-    } finally {
-      try {
-        await client.fetch(`/v1/api-keys/${ephemeralKey.id}`, {
-          method: "DELETE",
-          body: JSON.stringify({ confirmation: ephemeralKey.name }),
-        });
-      } catch {
-        // Best-effort cleanup of short-lived key.
-      }
-    }
+    return {
+      status: "success",
+      walletId: check.walletId,
+      signature: check.signature,
+    };
   } catch (error) {
     return {
       status: "error",

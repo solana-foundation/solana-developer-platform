@@ -1,11 +1,12 @@
-import type {
-  CustodyWalletMetadataResponse,
-  ListApiKeysResponse,
-  PolicyDecision,
-  WalletControlProfileRevisionHistory,
-  WalletOperationFamily,
-  WalletOperationStatus,
-  WalletPolicyEvaluationDetail,
+import {
+  type CustodyWalletMetadataResponse,
+  type ListApiKeysResponse,
+  type PolicyDecision,
+  WALLET_OPERATION_FAMILIES,
+  type WalletControlProfileRevisionHistory,
+  type WalletOperationFamily,
+  type WalletOperationStatus,
+  type WalletPolicyEvaluationDetail,
 } from "@sdp/types";
 import { resolveMemberIdentity } from "@/app/dashboard/settings/member-identity";
 import type { Member } from "@/app/members/actions";
@@ -36,15 +37,7 @@ export const POLICY_AUDIT_OPERATION_STATUSES = [
   "canceled",
 ] as const satisfies readonly WalletOperationStatus[];
 
-export const POLICY_AUDIT_OPERATION_FAMILIES = [
-  "transfer",
-  "payment",
-  "ramp",
-  "issuance",
-  "raw_sign",
-  "program",
-  "provider_admin",
-] as const satisfies readonly WalletOperationFamily[];
+export const POLICY_AUDIT_OPERATION_FAMILIES = WALLET_OPERATION_FAMILIES;
 
 export interface PolicyAuditFilters {
   page: number;
