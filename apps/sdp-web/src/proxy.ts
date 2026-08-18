@@ -22,7 +22,6 @@ export const isPublicRoute = createRouteMatcher([
   // extensionless metadata routes are not excluded by the proxy matcher.
   "/opengraph-image",
   "/twitter-image",
-  "/scratch-primitives",
 ]);
 
 const needsSelectedProject = createRouteMatcher([
