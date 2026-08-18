@@ -22,7 +22,11 @@
  * the constants.
  */
 
-export { assertNotPortfolioProvider, KaminoVaultDirectClient } from "./client";
+export {
+  assertNotPortfolioProvider,
+  KaminoVaultDirectClient,
+  type KaminoVaultOperationRunner,
+} from "./client";
 export { SdpKaminoError, type SdpKaminoErrorCode } from "./errors";
 export {
   assertPlanTargetsCluster,

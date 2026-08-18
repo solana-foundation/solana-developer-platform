@@ -19,9 +19,20 @@ import type { KaminoInstructionPlan, KaminoRuntime } from "./types";
 /** One portfolio request may fan out over many vaults; never fan out the RPCs without a bound. */
 export const KAMINO_POSITION_READ_CONCURRENCY = 4;
 
+/**
+ * API-owned execution guard for one provider operation. The API injects its
+ * absolute vault deadline here without creating a dependency from this package
+ * back to the application layer.
+ */
+export type KaminoVaultOperationRunner = <T>(
+  label: string,
+  operation: (assertActive: () => void) => Promise<T>
+) => Promise<T>;
+
 async function mapSettledWithConcurrency<T, U>(
   items: readonly T[],
   concurrency: number,
+  assertActive: () => void,
   mapper: (item: T) => Promise<U>
 ): Promise<Array<PromiseSettledResult<U>>> {
   const results = new Array<PromiseSettledResult<U>>(items.length);
@@ -31,6 +42,9 @@ async function mapSettledWithConcurrency<T, U>(
   await Promise.all(
     Array.from({ length: workerCount }, async () => {
       while (nextIndex < items.length) {
+        // A timed-out aggregate read cannot cancel an in-flight SDK request,
+        // but it must never dequeue another vault after the budget expires.
+        assertActive();
         const index = nextIndex;
         nextIndex += 1;
         try {
@@ -90,24 +104,29 @@ export function toEarnVaultTransactionPlan(plan: KaminoInstructionPlan): EarnVau
  */
 export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVaultDirectProvider {
   /**
-   * Where the RPC endpoint comes from.
+   * Where a PROVEN RPC endpoint comes from and how its operation is bounded.
    *
    * Injected rather than read from `ctx.env.SOLANA_RPC_URL` directly, because
    * that variable is PROCESS-level while the cluster is PER-REQUEST: syncing the
    * sandbox environment inside a production deployment reaches this code with a
-   * MAINNET url. The API resolves the right endpoint for the cluster it is
-   * serving and hands it in; `listKaminoDevnetVaults` guards the same hazard
-   * with a genesis-hash check.
+   * MAINNET url. The API must prove the resolved URL's genesis before returning
+   * it. Keeping that resolver inside `runtime` makes proof a class invariant for
+   * deposit, positions, and future chain capabilities rather than something a
+   * route has to remember.
    */
   constructor(
-    private readonly resolveRpcUrl: (ctx: EarnRuntimeContext, cluster: SolanaCluster) => string
+    private readonly resolveProvenRpcUrl: (
+      ctx: EarnRuntimeContext,
+      cluster: SolanaCluster
+    ) => Promise<string>,
+    private readonly runOperation: KaminoVaultOperationRunner
   ) {
     super();
   }
 
-  private runtime(ctx: EarnRuntimeContext): KaminoRuntime {
+  private async runtime(ctx: EarnRuntimeContext): Promise<KaminoRuntime> {
     const cluster = CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment];
-    const rpcUrl = this.resolveRpcUrl(ctx, cluster);
+    const rpcUrl = await this.resolveProvenRpcUrl(ctx, cluster);
     if (!rpcUrl.trim()) {
       throw new SdpKaminoError(
         "VAULT_UNREADABLE",
@@ -115,6 +134,21 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
       );
     }
     return { cluster, rpcUrl };
+  }
+
+  /** Every chain capability enters through this proof-then-deadline boundary. */
+  private async withRuntime<T>(
+    ctx: EarnRuntimeContext,
+    label: string,
+    operation: (runtime: KaminoRuntime, assertActive: () => void) => Promise<T>
+  ): Promise<T> {
+    return this.runOperation(label, async (assertActive) => {
+      // Endpoint resolution/proof and provider work are one operation, so they
+      // consume one deadline rather than receiving independent budgets.
+      const runtime = await this.runtime(ctx);
+      assertActive();
+      return operation(runtime, assertActive);
+    });
   }
 
   /**
@@ -132,12 +166,21 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
     ctx: EarnRuntimeContext,
     input: EarnVaultDepositInput
   ): Promise<EarnVaultTransactionPlan> {
-    const plan = await buildKaminoDepositPlan(this.runtime(ctx), {
-      vault: address(input.providerReference),
-      owner: this.owner(input.owner),
-      amount: input.amount,
-      ...(input.minSharesOut === undefined ? {} : { minSharesOut: input.minSharesOut }),
-    });
+    const plan = await this.withRuntime(
+      ctx,
+      "Building the vault deposit",
+      (runtime, assertActive) =>
+        buildKaminoDepositPlan(
+          runtime,
+          {
+            vault: address(input.providerReference),
+            owner: this.owner(input.owner),
+            amount: input.amount,
+            ...(input.minSharesOut === undefined ? {} : { minSharesOut: input.minSharesOut }),
+          },
+          assertActive
+        )
+    );
     return toEarnVaultTransactionPlan(plan);
   }
 
@@ -179,68 +222,73 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
     ctx: EarnRuntimeContext,
     input: EarnVaultPositionInput
   ): Promise<EarnVaultPositionSnapshot[]> {
-    const runtime = this.runtime(ctx);
-    const owner: Address = address(input.owner);
-    const readAllHoldings = input.providerReferences.length === 0;
-    const providerReferences = readAllHoldings
-      ? await discoverKaminoPositionVaults(runtime, owner)
-      : input.providerReferences;
-    if (providerReferences.length === 0) return [];
+    return this.withRuntime(ctx, "Reading vault positions", async (runtime, assertActive) => {
+      const owner: Address = address(input.owner);
+      const readAllHoldings = input.providerReferences.length === 0;
+      const providerReferences = readAllHoldings
+        ? await discoverKaminoPositionVaults(runtime, owner, assertActive)
+        : input.providerReferences;
+      assertActive();
+      if (providerReferences.length === 0) return [];
 
-    // One shared slot makes the page internally consistent. The client carries
-    // the same transport deadline as every nested Kamino SDK read below.
-    const slot = await createKaminoRpc(runtime.rpcUrl).getSlot().send();
+      // One shared slot makes the page internally consistent. The client carries
+      // the same transport deadline as every nested Kamino SDK read below.
+      const slot = await createKaminoRpc(runtime.rpcUrl).getSlot().send();
+      assertActive();
 
-    const results = await mapSettledWithConcurrency(
-      providerReferences,
-      KAMINO_POSITION_READ_CONCURRENCY,
-      (reference) => readKaminoPosition(runtime, { vault: address(reference), owner, slot })
-    );
-
-    const failures = results.flatMap((result, index) =>
-      result.status === "rejected"
-        ? [{ providerReference: providerReferences[index], cause: result.reason }]
-        : []
-    );
-    if (failures.length > 0) {
-      throw new SdpKaminoError(
-        "VAULT_UNREADABLE",
-        `Kamino could not read ${failures.length} of ${providerReferences.length} requested ` +
-          "vault positions; refusing to return a partial portfolio.",
-        {
-          cause: new AggregateError(
-            failures.map(({ providerReference, cause }) =>
-              cause instanceof Error
-                ? new Error(`Kamino vault ${providerReference} read failed`, { cause })
-                : new Error(`Kamino vault ${providerReference} read failed: ${String(cause)}`)
-            ),
-            "Kamino vault position reads failed"
-          ),
-        }
+      const results = await mapSettledWithConcurrency(
+        providerReferences,
+        KAMINO_POSITION_READ_CONCURRENCY,
+        assertActive,
+        (reference) =>
+          readKaminoPosition(runtime, { vault: address(reference), owner, slot }, assertActive)
       );
-    }
 
-    return results.flatMap((result) => {
-      // All rejected results were handled above, so only fulfilled values can
-      // reach the serializer. Keep the guard for TypeScript's settled-result
-      // narrowing and as a defensive assertion if this block is later moved.
-      if (result.status !== "fulfilled") return [];
-      const position = result.value;
-      // Exact reads serialize zero canonically as "0". A full-portfolio read
-      // reports holdings, while an explicitly requested vault may still return
-      // a truthful zero balance.
-      if (readAllHoldings && position.shares === "0") return [];
-      return [
-        {
-          providerReference: String(position.vault),
-          owner: String(position.owner),
-          cluster: position.cluster,
-          shares: position.shares,
-          ...(position.tokenValue === undefined ? {} : { tokenValue: position.tokenValue }),
-          tokenMint: String(position.tokenMint),
-          shareMint: String(position.sharesMint),
-        },
-      ];
+      const failures = results.flatMap((result, index) =>
+        result.status === "rejected"
+          ? [{ providerReference: providerReferences[index], cause: result.reason }]
+          : []
+      );
+      if (failures.length > 0) {
+        throw new SdpKaminoError(
+          "VAULT_UNREADABLE",
+          `Kamino could not read ${failures.length} of ${providerReferences.length} requested ` +
+            "vault positions; refusing to return a partial portfolio.",
+          {
+            cause: new AggregateError(
+              failures.map(({ providerReference, cause }) =>
+                cause instanceof Error
+                  ? new Error(`Kamino vault ${providerReference} read failed`, { cause })
+                  : new Error(`Kamino vault ${providerReference} read failed: ${String(cause)}`)
+              ),
+              "Kamino vault position reads failed"
+            ),
+          }
+        );
+      }
+
+      return results.flatMap((result) => {
+        // All rejected results were handled above, so only fulfilled values can
+        // reach the serializer. Keep the guard for TypeScript's settled-result
+        // narrowing and as a defensive assertion if this block is later moved.
+        if (result.status !== "fulfilled") return [];
+        const position = result.value;
+        // Exact reads serialize zero canonically as "0". A full-portfolio read
+        // reports holdings, while an explicitly requested vault may still return
+        // a truthful zero balance.
+        if (readAllHoldings && position.shares === "0") return [];
+        return [
+          {
+            providerReference: String(position.vault),
+            owner: String(position.owner),
+            cluster: position.cluster,
+            shares: position.shares,
+            ...(position.tokenValue === undefined ? {} : { tokenValue: position.tokenValue }),
+            tokenMint: String(position.tokenMint),
+            shareMint: String(position.sharesMint),
+          },
+        ];
+      });
     });
   }
 }

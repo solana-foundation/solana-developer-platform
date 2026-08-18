@@ -6,19 +6,31 @@ import {
 import type { EarnRuntimeContext, EarnVaultProvider } from "@sdp/earn/types";
 import { assertNotPortfolioProvider, KaminoVaultDirectClient } from "@sdp/kamino";
 import type { EarnProviderId, SolanaCluster } from "@sdp/types";
+import type { Env } from "@/types/env";
+import { assertClusterEndpoint, resolveClusterRpcUrl } from "./earn/execution-registry";
+import { createVaultDeadline } from "./earn/vault-deadline";
 
 /**
- * Resolve the process RPC only when it is not known to serve the other cluster.
- * The runtime context is request-scoped; reading it here avoids capturing one
- * process-level URL inside the provider while serving both SDP environments.
+ * Resolve the request's cluster-specific RPC and prove its genesis before the
+ * singleton provider performs any chain work. The runtime context is
+ * request-scoped, so one API process can safely serve both SDP environments.
  */
-function resolveKaminoRpcUrl(ctx: EarnRuntimeContext, cluster: SolanaCluster): string {
-  const configuredCluster = ctx.env.SOLANA_NETWORK?.trim();
-  if (configuredCluster && configuredCluster !== cluster) return "";
-  return ctx.env.SOLANA_RPC_URL ?? "";
+async function resolveKaminoRpcUrl(
+  ctx: EarnRuntimeContext,
+  cluster: SolanaCluster
+): Promise<string> {
+  // The API constructs this runtime from `Env`; the shared provider contract
+  // deliberately narrows it to a dependency-free string record.
+  const env = ctx.env as unknown as Env;
+  const rpcUrl = resolveClusterRpcUrl(env, cluster);
+  await assertClusterEndpoint(env, cluster, rpcUrl);
+  return rpcUrl;
 }
 
-const kamino = new KaminoVaultDirectClient(resolveKaminoRpcUrl);
+const kamino = new KaminoVaultDirectClient(resolveKaminoRpcUrl, (label, operation) => {
+  const deadline = createVaultDeadline();
+  return deadline.run(label, () => operation(() => deadline.assertActive(label)));
+});
 assertNotPortfolioProvider(kamino);
 
 /**

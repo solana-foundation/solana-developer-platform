@@ -39,6 +39,8 @@ import type {
 /** klend-sdk's kit-2 surface, as far as this module needs to name it. */
 // biome-ignore lint/suspicious/noExplicitAny: the kit-2 <-> kit-6.8 seam; see the header.
 type Kit2 = any;
+type AssertActive = () => void;
+const alwaysActive: AssertActive = () => undefined;
 
 /**
  * Bind a vault so that READS AND WRITES USE THE SAME PROGRAM. Every entry point
@@ -78,7 +80,12 @@ function createVaultClient(runtime: KaminoRuntime) {
   return { client, config, rpc };
 }
 
-async function bindVault(runtime: KaminoRuntime, vaultAddress: Address) {
+async function bindVault(
+  runtime: KaminoRuntime,
+  vaultAddress: Address,
+  assertActive: AssertActive = alwaysActive
+) {
+  assertActive();
   const { client, config, rpc } = createVaultClient(runtime);
 
   // The probe exists only to fetch state under the right program id; it is never
@@ -97,6 +104,7 @@ async function bindVault(runtime: KaminoRuntime, vaultAddress: Address) {
   } catch (cause) {
     throw vaultUnreadable(vaultAddress, runtime.cluster, cause);
   }
+  assertActive();
 
   const vault = KaminoVault.loadWithClientAndState(client, vaultAddress as Kit2, state);
   if (String(vault.programId) !== String(config.kvaultProgramId)) {
@@ -159,9 +167,14 @@ function asInstructions(raw: readonly Kit2[]): readonly Instruction[] {
  */
 export async function buildKaminoDepositPlan(
   runtime: KaminoRuntime,
-  input: KaminoDepositInput
+  input: KaminoDepositInput,
+  assertActive: AssertActive = alwaysActive
 ): Promise<KaminoInstructionPlan> {
-  const { client, vault, state, config, assetIdentity } = await bindVault(runtime, input.vault);
+  const { client, vault, state, config, assetIdentity } = await bindVault(
+    runtime,
+    input.vault,
+    assertActive
+  );
 
   // Precision is checked against the MINT, so it can only be checked once the
   // vault has been read — the token and share mints have independent decimals
@@ -174,7 +187,9 @@ export async function buildKaminoDepositPlan(
   if (isZeroAmount(acceptedAmount)) throw invalidAmount("amount", input.amount);
   const amount = toDecimal(acceptedAmount, "amount");
 
+  assertActive();
   const reserves = await client.loadVaultReserves(state);
+  assertActive();
 
   let acceptedMinSharesOut: string | undefined;
   let minSharesOut: Decimal | undefined;
@@ -202,6 +217,7 @@ export async function buildKaminoDepositPlan(
     undefined,
     minSharesOut
   );
+  assertActive();
 
   const instructions = asInstructions([
     ...(bundle.depositIxs ?? []),
@@ -305,12 +321,14 @@ export async function buildKaminoWithdrawPlan(
  */
 export async function discoverKaminoPositionVaults(
   runtime: KaminoRuntime,
-  owner: Address
+  owner: Address,
+  assertActive: AssertActive = alwaysActive
 ): Promise<Address[]> {
+  assertActive();
   const { client } = createVaultClient(runtime);
+  let candidateBalances: Map<Kit2, Kit2>;
   try {
-    const candidateBalances = await client.getUserSharesBalanceAllVaults(owner as Kit2);
-    return [...candidateBalances.keys()].map((vault) => vault as Address);
+    candidateBalances = await client.getUserSharesBalanceAllVaults(owner as Kit2);
   } catch (cause) {
     throw new SdpKaminoError(
       "VAULT_UNREADABLE",
@@ -318,6 +336,8 @@ export async function discoverKaminoPositionVaults(
       { cause }
     );
   }
+  assertActive();
+  return [...candidateBalances.keys()].map((vault) => vault as Address);
 }
 
 /**
@@ -357,9 +377,14 @@ async function readUnstakedShareBaseUnits(
  */
 export async function readKaminoPosition(
   runtime: KaminoRuntime,
-  input: { vault: Address; owner: Address; slot: bigint }
+  input: { vault: Address; owner: Address; slot: bigint },
+  assertActive: AssertActive = alwaysActive
 ): Promise<KaminoPosition> {
-  const { vault, state, config, rpc, assetIdentity } = await bindVault(runtime, input.vault);
+  const { vault, state, config, rpc, assetIdentity } = await bindVault(
+    runtime,
+    input.vault,
+    assertActive
+  );
   const shareDecimals = mintDecimals(state.sharesMintDecimals, "sharesMintDecimals");
 
   // UNSTAKED shares are counted here rather than taken from the SDK, and that is
@@ -373,8 +398,11 @@ export async function readKaminoPosition(
   // STAKED shares still come from the SDK: that half is derived from farm state
   // as an exact `Decimal`, never through `uiAmount`, so re-implementing it would
   // duplicate the farm lookup for no precision gain.
+  assertActive();
   const staked = await vault.getUserShares(input.owner as Kit2);
+  assertActive();
   const unstakedBase = await readUnstakedShareBaseUnits(rpc, input.owner, assetIdentity.shareMint);
+  assertActive();
   const shares = requireNonNegativeFiniteDecimal(
     "total share balance",
     new Decimal(formatDecimalAmount(unstakedBase, shareDecimals)).add(
@@ -383,11 +411,16 @@ export async function readKaminoPosition(
   );
 
   let tokenValue: string | undefined;
+  let rawRate: unknown;
   try {
-    const rate = requireNonNegativeFiniteDecimal(
-      "vault exchange rate",
-      await vault.getExchangeRate(input.slot as Kit2)
-    );
+    rawRate = await vault.getExchangeRate(input.slot as Kit2);
+  } catch {
+    rawRate = undefined;
+  }
+  assertActive();
+  try {
+    if (rawRate === undefined) throw new Error("vault exchange rate unavailable");
+    const rate = requireNonNegativeFiniteDecimal("vault exchange rate", rawRate);
     const decimals = mintDecimals(state.tokenMintDecimals, "tokenMintDecimals");
     // Round-trip through the repo's own fixed-point helpers so the string that
     // leaves this package is scaled exactly like every other amount in SDP.
