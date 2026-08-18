@@ -53,6 +53,11 @@
       "types": "./src/providers/ground/client.ts",
       "import": "./src/providers/ground/client.ts",
       "default": "./src/providers/ground/client.ts"
+    },
+    "./providers/kamino/client": {
+      "types": "./src/providers/kamino/client.ts",
+      "import": "./src/providers/kamino/client.ts",
+      "default": "./src/providers/kamino/client.ts"
     }
   },
   "scripts": {

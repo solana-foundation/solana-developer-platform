@@ -48,6 +48,16 @@ describe("WorkflowFlowGraph", () => {
     expect(markup).not.toContain("flowCapabilityNone");
   });
 
+  it("hangs the capability off the action node instead of giving it a step of its own", () => {
+    const markup = render({
+      action: action({ kind: "base", action: "mint" }, "automated"),
+    });
+    // The requirement reads after the action it gates, inside the same node — when it was a
+    // step of its own it came before the review leg, so this ordering pins the change.
+    expect(markup.indexOf("flowRuns")).toBeLessThan(markup.indexOf("flowCapabilityBase"));
+    expect(markup.indexOf("flowAutoApplies")).toBeLessThan(markup.indexOf("flowRuns"));
+  });
+
   it("shows a blocked wallet-gap step when the trigger can't identify a wallet", () => {
     const markup = render({
       action: action({ kind: "base", action: "mint" }, "requires_approval"),

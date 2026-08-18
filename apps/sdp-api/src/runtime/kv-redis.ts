@@ -99,6 +99,22 @@ function ensureClient(url: string): Promise<Redis> {
   return promise;
 }
 
+/**
+ * The shared (per-URL) command client for callers outside the KVStore façade: features
+ * needing atomic Redis scripts (sponsorship budget admission) and pub/sub PUBLISH —
+ * legal on a normal connection, since only SUBSCRIBE needs the dedicated subscriber
+ * client in pubsub-redis.ts. Fails fast on missing REDIS_URL.
+ */
+export function getRedisClient(env: Pick<Env, "REDIS_URL">): Promise<Redis> {
+  const url = env.REDIS_URL?.trim();
+  if (!url) {
+    throw new Error(
+      "REDIS_URL is required. Set it in the environment (e.g. redis://localhost:6379)."
+    );
+  }
+  return ensureClient(url);
+}
+
 export class RedisKVStore implements KVStore {
   // Union accepts a raw connected client for test fixtures; Promise.resolve
   // normalizes both shapes so the rest of the class can just `await`.
@@ -245,21 +261,6 @@ export function createKVStoreSet(env: Env): KVStoreSet {
     rateLimits: new RedisKVStore(clientPromise, STORE_PREFIXES.rateLimits),
     cache: new RedisKVStore(clientPromise, STORE_PREFIXES.cache),
   };
-}
-
-/**
- * The shared (per-URL) command client for callers outside the KVStore façade —
- * e.g. pub/sub PUBLISH (legal on a normal connection; only SUBSCRIBE needs the
- * dedicated subscriber client in pubsub-redis.ts). Fails fast on missing REDIS_URL.
- */
-export function getRedisClient(env: Env): Promise<Redis> {
-  const url = env.REDIS_URL?.trim();
-  if (!url) {
-    throw new Error(
-      "REDIS_URL is required. Set it in the environment (e.g. redis://localhost:6379)."
-    );
-  }
-  return ensureClient(url);
 }
 
 /** Verify that the configured Redis backend is reachable. */

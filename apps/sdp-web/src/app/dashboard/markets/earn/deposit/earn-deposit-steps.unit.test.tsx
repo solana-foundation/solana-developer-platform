@@ -14,8 +14,7 @@ vi.mock("next/link", () => ({
   default: ({ children, ...props }: ComponentProps<"a">) => <a {...props}>{children}</a>,
 }));
 
-import { profileFilters, profileSummaries, visibleStrategies } from "./earn-deposit-model";
-import { ProfileStep } from "./profile-step";
+import { rankedStrategies } from "./earn-deposit-model";
 import { ReviewStep } from "./review-step";
 import { StrategyStep } from "./strategy-step";
 import { WalletStep } from "./wallet-step";
@@ -35,15 +34,20 @@ function strategy(partial: Partial<EarnStrategy> & { id: string }): EarnStrategy
     liquidityTerm: "instant",
     riskMetadata: { tvlUsd: 40_000_000, curator: "gauntlet" },
     status: "active",
+    hostCluster: "devnet",
+    fundable: true,
     createdAt: TIMESTAMP,
     updatedAt: TIMESTAMP,
     ...partial,
   };
 }
 
-function wallet(partial: Partial<CustodyWalletSummary> = {}): CustodyWalletSummary {
+function wallet(
+  partial: Partial<Omit<CustodyWalletSummary, "custodyConfigId" | "custodyConnectionId">> = {}
+): CustodyWalletSummary {
   return {
     id: "cw_1",
+    custodyConfigId: "custody-config-1",
     walletId: "wallet_1",
     publicKey: "7M6bFdwsXQZX9MjoD4PDxQJb9FZbwdQh6VS8sK7F3WcQ",
     label: "Treasury Ops",
@@ -51,12 +55,20 @@ function wallet(partial: Partial<CustodyWalletSummary> = {}): CustodyWalletSumma
     status: "active",
     createdAt: TIMESTAMP,
     provider: "fireblocks",
+    isRuntimeExecutionAllowed: true,
     ...partial,
   };
 }
 
 const CATALOGUE = [
-  strategy({ id: "Kamino Gauntlet USDC", currentApy: "0.061", underlyingSource: "kamino" }),
+  strategy({
+    id: "Kamino Gauntlet USDC",
+    currentApy: "0.061",
+    underlyingSource: "kamino",
+    provider: "kamino",
+    hostCluster: "mainnet-beta",
+    fundable: false,
+  }),
   strategy({
     id: "Ground JTRSY USDC",
     currentApy: "0.104",
@@ -65,6 +77,7 @@ const CATALOGUE = [
     redemptionDelayDays: 2,
   }),
 ];
+const GROUND_STRATEGY = CATALOGUE[1];
 
 describe("WalletStep", () => {
   it("renders a wallet row with its name first and address second", () => {
@@ -102,7 +115,35 @@ describe("WalletStep", () => {
         ]}
       />
     );
-    expect(html).toContain("DashboardEarn.deposit.walletHolding(1250,USDC)");
+    expect(html).toContain("DashboardEarn.deposit.walletAvailableToInvest");
+    expect(html).toContain("1,250 USDC");
+  });
+
+  it("distinguishes an unavailable balance read from a confirmed zero", () => {
+    const unavailable = renderToStaticMarkup(
+      <WalletStep
+        fireblocksEnabled
+        hasError={false}
+        isLoading={false}
+        onSelect={() => {}}
+        selectedWalletId={null}
+        wallets={[wallet()]}
+      />
+    );
+    const confirmedZero = renderToStaticMarkup(
+      <WalletStep
+        fireblocksEnabled
+        hasError={false}
+        isLoading={false}
+        onSelect={() => {}}
+        selectedWalletId={null}
+        wallets={[wallet({ balances: [] })]}
+      />
+    );
+
+    expect(unavailable).toContain(">—</span>");
+    expect(unavailable).not.toContain("0 USDC");
+    expect(confirmedZero).toContain("0 USDC");
   });
 
   it("offers the connect path when the org has no wallets", () => {
@@ -137,130 +178,117 @@ describe("WalletStep", () => {
   });
 });
 
-describe("ProfileStep", () => {
-  it("states live catalogue figures and disclaims any risk rating", () => {
-    const html = renderToStaticMarkup(
-      <ProfileStep
-        hasError={false}
-        isLoading={false}
-        onSelect={() => {}}
-        selectedProfile="balanced"
-        summaries={profileSummaries(CATALOGUE)}
-      />
-    );
-    // Liquidity-first reaches only the instant 6.1% source; yield-first reaches 10.4%.
-    expect(html).toContain("DashboardEarn.deposit.profileTopApyLabel");
-    expect(html).toContain("6.1%");
-    expect(html).toContain("10.4%");
-    // The meta line carries count + the access constraint — the differentiator
-    // when two profiles tie on top APY.
-    expect(html).toContain(
-      "DashboardEarn.deposit.profileMeta(1,DashboardEarn.deposit.profileLiquidityAccess)"
-    );
-    expect(html).toContain(
-      "DashboardEarn.deposit.profileMeta(2,DashboardEarn.deposit.profileYieldAccess)"
-    );
-    expect(html).toContain("DashboardEarn.deposit.profileBasisBody");
-  });
-
-  it("states an empty profile as a dash and a zero count, never a fabricated rate", () => {
-    const html = renderToStaticMarkup(
-      <ProfileStep
-        hasError={false}
-        isLoading={false}
-        onSelect={() => {}}
-        selectedProfile={null}
-        summaries={profileSummaries([
-          strategy({ id: "slow", liquidityTerm: "delayed", redemptionDelayDays: 30 }),
-        ])}
-      />
-    );
-    expect(html).toContain("—");
-    expect(html).toContain(
-      "DashboardEarn.deposit.profileMeta(0,DashboardEarn.deposit.profileLiquidityAccess)"
-    );
-  });
-});
-
 describe("StrategyStep", () => {
-  const filters = profileFilters("yield");
-
-  it("renders each strategy with rate, access, pool and metadata", () => {
+  it("renders the full catalogue and marks an environment mismatch unavailable", () => {
     const html = renderToStaticMarkup(
       <StrategyStep
-        filters={filters}
         hasError={false}
         isLoading={false}
-        onFiltersChange={() => {}}
-        onReset={() => {}}
         onSelect={() => {}}
+        portfolioProvider="ground"
         selectedStrategyId={null}
-        strategies={visibleStrategies(CATALOGUE, filters)}
+        strategies={rankedStrategies(CATALOGUE)}
         tokens={["usdc"]}
       />
     );
+    expect(html).toContain("<table");
+    expect(html).toContain("<thead");
+    expect(html).toContain("<tbody");
+    expect(html.match(/name="earn-strategy"/g)).toHaveLength(2);
+    expect(html).toContain("Kamino Gauntlet USDC");
+    expect(html).toContain("Ground JTRSY USDC");
+    expect(html).toContain("DashboardEarn.deposit.strategyEnvironmentOnly(Mainnet)");
+    expect(html.match(/disabled=""/g)).toHaveLength(1);
     expect(html).toContain("10.4%");
-    // Access and pool share one quiet facts line.
     expect(html).toContain("DashboardEarn.liquidity.delayed(2)");
-    expect(html).toContain("DashboardEarn.deposit.poolMeta($40M)");
+    expect(html).toContain("$40M");
     // Curator survives as metadata only — never as a selection step.
     expect(html).toContain("DashboardEarn.deposit.curatedBy(Gauntlet)");
-    expect(html).toContain("DashboardEarn.deposit.resultCount(2)");
-    // Single-stablecoin catalogue: no per-row token chip.
-    expect(html).not.toContain(">USDC<");
+    expect(html).not.toContain("DashboardEarn.deposit.filterAccess");
+    expect(html).not.toContain("DashboardEarn.deposit.filterSort");
+    // Single-stablecoin catalogue: no redundant column.
+    expect(html).not.toContain("DashboardEarn.deposit.strategyStablecoinColumn");
   });
 
-  it("hides the stablecoin filter when the catalogue has a single lane", () => {
+  it("renders no filter banner for the short catalogue", () => {
     const html = renderToStaticMarkup(
       <StrategyStep
-        filters={filters}
         hasError={false}
         isLoading={false}
-        onFiltersChange={() => {}}
-        onReset={() => {}}
         onSelect={() => {}}
+        portfolioProvider="ground"
         selectedStrategyId={null}
-        strategies={visibleStrategies(CATALOGUE, filters)}
+        strategies={rankedStrategies(CATALOGUE)}
         tokens={["usdc"]}
       />
     );
-    expect(html).not.toContain("DashboardEarn.deposit.filterTokenAny");
+    expect(html).not.toContain("<select");
+    expect(html).not.toContain("DashboardEarn.deposit.clearFilters");
   });
 
-  it("invites widening the filters instead of showing a blank list", () => {
+  it("shows a clear notice instead of a blank list", () => {
     const html = renderToStaticMarkup(
       <StrategyStep
-        filters={filters}
         hasError={false}
         isLoading={false}
-        onFiltersChange={() => {}}
-        onReset={() => {}}
         onSelect={() => {}}
+        portfolioProvider="ground"
         selectedStrategyId={null}
         strategies={[]}
         tokens={["usdc"]}
       />
     );
     expect(html).toContain("DashboardEarn.deposit.strategiesEmpty");
-    expect(html).toContain("DashboardEarn.deposit.clearFilters");
+    expect(html).not.toContain("DashboardEarn.deposit.clearFilters");
+  });
+
+  /**
+   * Overlap regressions. Neither renderer here does layout, so the rendered
+   * classes are the only observable — and that is exactly where both bugs lived:
+   * a class that silently never applied, and one that applied when it should not
+   * have.
+   */
+  it("keeps a long provider name inside its own column", () => {
+    const html = renderToStaticMarkup(
+      <StrategyStep
+        hasError={false}
+        isLoading={false}
+        onSelect={() => {}}
+        portfolioProvider="ground"
+        selectedStrategyId={null}
+        strategies={[
+          strategy({ id: "long", name: "Janus Henderson JTRSY tokenized by Centrifuge" }),
+        ]}
+        tokens={["usdc"]}
+      />
+    );
+
+    // `TableCell` merges its own classes with a plain join (no tailwind-merge)
+    // and `.whitespace-nowrap` is emitted last, so wrapping only takes effect
+    // when it is declared on the span — where an own value beats an inherited
+    // one. The clamp then bounds the row height instead of the column width.
+    const nameClasses = /<span class="([^"]*)" id="earn-strategy-long-name"/.exec(html)?.[1] ?? "";
+    expect(nameClasses).toContain("whitespace-normal");
+    expect(nameClasses).toContain("line-clamp-2");
+    expect(nameClasses).toContain("break-words");
+    // The full name stays reachable on hover even when the clamp bites.
+    expect(html).toContain('title="Janus Henderson JTRSY tokenized by Centrifuge"');
   });
 
   it("renders an unreported pool without inventing a number", () => {
     const html = renderToStaticMarkup(
       <StrategyStep
-        filters={filters}
         hasError={false}
         isLoading={false}
-        onFiltersChange={() => {}}
-        onReset={() => {}}
         onSelect={() => {}}
+        portfolioProvider="ground"
         selectedStrategyId={null}
         strategies={[strategy({ id: "no-pool", riskMetadata: {} })]}
         tokens={["usdc"]}
       />
     );
-    // An unreported pool is omitted from the facts line, not placeholdered.
-    expect(html).not.toContain("DashboardEarn.deposit.poolMeta");
+    expect(html).toContain('id="earn-strategy-no-pool-pool"');
+    expect(html).toContain(">—</td>");
     expect(html).not.toContain("$0");
   });
 });
@@ -273,7 +301,7 @@ describe("ReviewStep", () => {
         onEditWallet={() => {}}
         programExists={false}
         providerUnconfigured={false}
-        strategy={CATALOGUE[0]}
+        strategy={GROUND_STRATEGY}
         submitError={null}
         wallet={wallet()}
       />
@@ -290,7 +318,7 @@ describe("ReviewStep", () => {
         onEditWallet={() => {}}
         programExists
         providerUnconfigured={false}
-        strategy={CATALOGUE[0]}
+        strategy={GROUND_STRATEGY}
         submitError={null}
         wallet={undefined}
       />
@@ -307,7 +335,7 @@ describe("ReviewStep", () => {
         onEditWallet={() => {}}
         programExists
         providerUnconfigured={false}
-        strategy={CATALOGUE[0]}
+        strategy={GROUND_STRATEGY}
         submitError={null}
         wallet={wallet()}
       />
@@ -323,13 +351,35 @@ describe("ReviewStep", () => {
         onEditWallet={() => {}}
         programExists={false}
         providerUnconfigured
-        strategy={CATALOGUE[0]}
+        strategy={GROUND_STRATEGY}
         submitError={null}
         wallet={wallet()}
       />
     );
     expect(html).toContain("DashboardEarn.overview.providerNotConfigured");
     expect(html).not.toContain("DashboardEarn.deposit.createTitle");
+  });
+
+  it("lets a long summary value wrap instead of running back over its label", () => {
+    const html = renderToStaticMarkup(
+      <ReviewStep
+        onEditStrategy={() => {}}
+        onEditWallet={() => {}}
+        programExists={false}
+        providerUnconfigured={false}
+        strategy={strategy({ id: "long", name: "Janus Henderson JTRSY tokenized by Centrifuge" })}
+        submitError={null}
+        wallet={wallet()}
+      />
+    );
+
+    expect(html).toContain("Janus Henderson JTRSY tokenized by Centrifuge");
+    // A `shrink-0 whitespace-nowrap` value did not merely overflow the row:
+    // `justify-between` distributes negative free space, so it slid back over
+    // the label. The value now takes the slack (`ml-auto`) and wraps in it.
+    expect(html).not.toContain("whitespace-nowrap");
+    expect(html).toContain("ml-auto");
+    expect(html).toContain("break-words");
   });
 
   it("surfaces a submit failure inline", () => {
@@ -339,7 +389,7 @@ describe("ReviewStep", () => {
         onEditWallet={() => {}}
         programExists={false}
         providerUnconfigured={false}
-        strategy={CATALOGUE[0]}
+        strategy={GROUND_STRATEGY}
         submitError="Ground requires manual activation for this organization."
         wallet={wallet()}
       />

@@ -357,8 +357,8 @@ export function CardSelect({
 // stands out against the cards (flat: no shadow, colour reserved for status).
 export function ConnectorBadge({ icon: Icon }: { icon: LucideIcon }) {
   return (
-    <span className="flex size-7 items-center justify-center rounded-full border border-border-strong bg-surface-raised text-secondary">
-      <Icon className="size-4" />
+    <span className="flex size-9 items-center justify-center rounded-full border border-border-strong bg-surface-raised text-secondary">
+      <Icon className="size-[18px]" />
     </span>
   );
 }

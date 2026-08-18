@@ -111,6 +111,7 @@ export type InitializeSigningRequest = z.infer<typeof initializeSigningSchema>;
 // ═══════════════════════════════════════════════════════════════════════════
 
 export const createWalletSchema = z.object({
+  connectionId: z.string().min(1).optional(),
   provider: custodyProviderSchema.optional(),
   label: z.string().max(100).optional(),
   purpose: z

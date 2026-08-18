@@ -21,13 +21,13 @@ flowchart LR
 
     subgraph SDP["sdp-api  /v1/earn"]
         ROUTES["earn routes<br/>auth · project scope · earn:read/write"]
-        SVC["@sdp/earn provider clients<br/>(Ground live; Veda/Upshift/Perena stubs)"]
+        SVC["@sdp/earn provider clients<br/>(Ground portfolio · Kamino catalogue-only; Veda/Upshift/Perena stubs)"]
         DB[("Postgres<br/>earn_strategies · earn_provider_wallets<br/>earn_program_withdrawals")]
-        CRON["cron: catalogue sync"]
+        CRON["cron: catalogue sync (hourly) · metrics refresh (5 min)"]
     end
 
     subgraph External
-        VAULT["Vault-infra APIs<br/>Ground (+ future providers)"]
+        VAULT["Vault-infra APIs<br/>Ground · Kamino (+ future providers)"]
         CHAIN["Solana<br/>(funding: customer → wallet deposit address)"]
         CURATOR["Curator risk frameworks<br/>Gauntlet · Steakhouse · Sentora<br/>(via vault-infra metadata)"]
     end
@@ -53,12 +53,14 @@ PRO-1634 owns whatever returns.
 
 | Surface | Serving read | Fed by | Freshness |
 |---|---|---|---|
-| Strategy catalogue | `earn_strategies` (DB) | Cron sync ← provider `listStrategies` (curator/risk metadata rides along as `risk_metadata`); snapshots outside the client's `declaredSupport` are skipped fail-closed (`isStrategyWithinDeclaredSupport`, `@sdp/earn/support`) | Hourly (`cron/earn-catalogue-sync.ts`) |
-| APY (headline + program-level) | `earn_strategies.current_apy` (latest observed, overwritten by sync) + live `getPortfolioYield` | Catalogue sync; live provider read | Hourly / real-time |
-| Positions & balances | **Live provider snapshot** (`GET /v1/earn/program` ← `getPortfolioWallet`) — never persisted | Provider | Real-time |
-| Deposits | **Live provider** (`GET /program/deposits` ← provider-observed on-chain deposits) — customer-initiated, so SDP has no intent moment to ledger | Provider | Real-time |
-| Withdrawals (detail) | **Live provider** (`GET /program/withdrawals/:ref`); the matching ledger row advances as a side effect | Provider | Real-time |
-| Withdrawals (history/audit) | `earn_program_withdrawals` (**DB ledger** — `GET /program/withdrawals`) | Written at intent by `POST /program/withdrawals`; advanced by guarded CAS on every observation (`services/earn-withdrawal-ledger.service.ts`) | Intent = immediate; status = each observation (+ ledger sweep) |
+| Strategy catalogue | `earn_strategies` (DB) | Cron sync ← provider `listStrategies` (curator/risk metadata rides along as `risk_metadata`); snapshots outside the client's `declaredSupport` are skipped fail-closed (`isStrategyWithinDeclaredSupport`, `@sdp/earn/support`) | Hourly (`cron/earn-catalogue-sync.ts`) — identity, mints, liquidity terms and **admission** only |
+| APY + vault TVL/holders | `earn_strategies.current_apy` / `risk_metadata` (DB) + live `getPortfolioYield` for the program-level rate | Metrics refresh ← provider `listStrategyMetrics` (`supportsLiveMetrics`); live provider read | **Every 5 min** (`cron/earn-metrics-refresh.ts`) / real-time |
+| Whether a strategy is fundable *here* | Derived per request from `earn_strategies.host_cluster` vs the caller's environment — the `fundable` field on `GET /strategies` | `isClusterFundableInEnvironment` (`@sdp/earn`) | Real-time (never stored) |
+| Program list | `earn_provider_wallets` (**DB**, oldest first) joined per row with a **live provider snapshot** — `GET /v1/earn/programs` | Rows written by create; snapshots fetched in parallel per listed program | Real-time |
+| Positions & balances | **Live provider snapshot** (`GET /v1/earn/programs/:programId` ← `getPortfolioWallet`) — never persisted | Provider | Real-time |
+| Deposits | **Live provider** (`GET /programs/:programId/deposits` ← provider-observed on-chain deposits) — customer-initiated, so SDP has no intent moment to ledger | Provider | Real-time |
+| Withdrawals (detail) | **Live provider** (`GET /programs/:programId/withdrawals/:ref`); the matching ledger row advances as a side effect | Provider | Real-time |
+| Withdrawals (history/audit) | `earn_program_withdrawals` (**DB ledger** — `GET /programs/:programId/withdrawals`) | Written at intent by `POST /programs/:programId/withdrawals`; advanced by guarded CAS on every observation (`services/earn-withdrawal-ledger.service.ts`) | Intent = immediate; status = each observation (+ ledger sweep) |
 | Wallet balances (funding) | Existing wallet/custody surfaces | Existing RPC relay + token account reads — nothing Earn-specific | Existing behavior |
 | Provider on/off state | `getProviderAvailability` (existing service, `earn` family already wired) | Org entitlements + env credentials | Real-time |
 
@@ -73,6 +75,25 @@ PRO-1634 owns whatever returns.
 > by guarded CAS on every observation, and listed as the audit surface. The
 > provider remains the authority for live status and final amounts; the
 > ledger relays provider truth, never replaces it.
+
+> **Catalogue vs figures — split by how fast the thing moves (2026-08-13).**
+> The catalogue row and the numbers on it now have different cadences and
+> different writers. The hourly sync owns identity, mints, liquidity terms and
+> ADMISSION; a five-minute refresh owns `current_apy` and volatile
+> `risk_metadata`, and it is UPDATE-only — it cannot insert, so it can never
+> admit a vault the catalogue gates refused, and its input type carries figures
+> only, so it cannot change what a strategy is. This keeps rates quotable
+> without breaking the one-source rule above: `GET /strategies` is still a plain
+> DB read, and freshness comes from cadence rather than from blending a live
+> overlay onto stored rows.
+>
+> **Catalogued ≠ fundable (2026-08-13).** With Kamino, the catalogue lists
+> instruments that do not exist on every cluster: its K-Vaults are mainnet-only
+> and are catalogued into BOTH environments so sandbox integrators browse the
+> real shelf. `host_cluster` states where the instrument lives, and the derived
+> `fundable` answers the caller's actual question. Three gates read the one
+> predicate — `assertKnownYieldSources` before any provider mutation, the wire
+> field, and the dashboard's strategy filter.
 
 **No new indexer.** V1 needs no event-sourced chain indexer: the catalogue
 comes from provider APIs and position truth is the live provider snapshot.
@@ -100,7 +121,7 @@ guarded-CAS shape is the pattern to extend.
 | Existing component | Where | Earn uses it for | Status |
 |---|---|---|---|
 | Auth + API keys + permissions | `middleware/auth.ts`, `@sdp/types/permissions` | `earn:read`/`earn:write` gating, partner `sk_live` access | ✅ wired in scaffold |
-| Org/project tenancy | `projectContextMiddleware` | Program + withdrawal-ledger scoping (rows carry org/project; the ledger anchors on the shared wallet) | ✅ wired |
+| Org/project tenancy | `projectContextMiddleware` | Program + withdrawal-ledger scoping (rows carry org/project; every program lookup is scoped to org **and** environment, and the ledger anchors on the program wallet) | ✅ wired |
 | Provider entitlements | `services/provider-availability.service.ts` | Per-org enable/disable (override-only: every org needs an explicit `providerOverrides.earn.<id>`), env kill-switch, exit-safe gate | ✅ wired (`earn` family) |
 | Custody + signing | `services/domain/signing.service.ts`, `@sdp/custody` | Nothing in V1 (funding is a customer-initiated transfer) | ⏸ execution era (PRO-1634) |
 | Fee sponsorship | `@sdp/payments/fee-payment` (Kora) | Nothing in V1 (no SDP-built earn txs) | ⏸ execution era (PRO-1634) |
@@ -108,7 +129,7 @@ guarded-CAS shape is the pattern to extend.
 | Helius DAS | `services/helius-das.service.ts` | No V1 consumer — positions are live provider reads, nothing to reconcile | ⏸ none in V1 |
 | Webhook dispatch + signature verify | `routes/webhooks/handlers.ts`, `lib/webhook-signature.ts` | Provider settlement events land on the withdrawal ledger via the same applier the poll path uses (`earn-withdrawal-ledger.service.ts`) | ⏸ PRO-1631 (polling works today; the neutral event contract returns with it) |
 | Cron infra (3 entrypoints) | `cron/runner.ts`, `index.ts scheduled`, `job.ts`; precedent `cron/pending-transfers.ts` | Catalogue sync + the withdrawal-ledger sweep (heals ref-less intent rows; launch-coupled follow-up ticket) | ✅ catalogue sync (`cron/earn-catalogue-sync.ts`, hourly, gated on `isEarnEnabled` — `MARKETS_ENABLED` **and** `EARN_ENABLED`) · 🔨 ledger sweep |
-| Idempotency | `middleware/idempotency-key.ts` + `lib/idempotency.ts` (derived request id, fingerprint replay) + `earn_program_withdrawals` (wallet, request_id) unique | Two-layer withdrawal retry safety: SDP intent row first, provider request-id dedupe as the crash-window backstop | ✅ wired (PRO-1628) |
+| Idempotency | `middleware/idempotency-key.ts` + `lib/idempotency.ts` (derived request id, fingerprint replay) + `earn_program_withdrawals` (wallet, request_id) unique + `earn_provider_wallets` (provider, provider_wallet_ref) unique | Two-layer withdrawal retry safety: SDP intent row first, provider request-id dedupe as the crash-window backstop. Program **creation** is key-required too (PRO-1670) and derives against (org, environment, provider); the provider replays a retried create with the original wallet ref, so the global wallet-ref unique is what catches it — a violation there means "already created", answered 200, never 409 | ✅ wired (PRO-1628, PRO-1670) |
 | Compliance providers | `services/compliance/`, compliance family | RWA strategy KYC / depositor checks (open decision) | ⏸ decision pending |
 | Policies + approvals | policy/approval domains (`policy.repository`, approvals UI) | Graft point for doc's risk tooling (whitelists, buffers, limits, timelocks, maker-checker) | ⏸ the audit's flagged gap — decide V1 vs later |
 | Audit log | `services/audit.service.ts` | Deposit/withdraw/config audit events | 🔨 execution phase |
@@ -120,9 +141,10 @@ guarded-CAS shape is the pattern to extend.
 carrying `provider` + `declaredSupport`, filled in method-by-method), the
 portfolio-wallet capability (`EarnPortfolioWalletProvider` +
 `supportsPortfolioWallets` in `@sdp/earn/capabilities`), the
-`earn_provider_wallets` table (migration `0049`, one shared wallet per
-org+environment+provider — SDP's model, not a provider limit: one provider
-account holds many wallets, one per org), the withdrawal ledger
+`earn_provider_wallets` table (migration `0049`; migration `0056` lifted its
+one-per-org cap so an org may hold N programs per environment+provider, and
+moved uniqueness onto the provider wallet itself — one link row per
+`(provider, provider_wallet_ref)` platform-wide), the withdrawal ledger
 (`earn_program_withdrawals`, migration `0055`) with its status machine in
 `services/earn-withdrawal-ledger.service.ts`, and the catalogue-sync cron
 (`cron/earn-catalogue-sync.ts`) + dev seed (`db:seed:earn` →
@@ -142,7 +164,7 @@ flowchart LR
     SYNC -->|declared-support validated| ES[("earn_strategies")]
     ES --> CAT["GET /v1/earn/strategies"]
 
-    PROG["PUT/GET /v1/earn/program"] --> EPW[("earn_provider_wallets")]
+    PROG["/v1/earn/programs<br/>list · create · get · re-target"] --> EPW[("earn_provider_wallets")]
     PROG -->|create wallet / update strategy / snapshot| GW["Ground /v2/wallets"]
 
     FUND["Solana deposit address<br/>(from wallet snapshot)"] -.->|user sends USDC| GW
@@ -168,11 +190,19 @@ flowchart LR
   `not_solana_routable` — USDT twins of vaults already catalogued in USDC
   (`docs/earn/ground-catalogue-inventory.md`). Rows land in `earn_strategies`
   via the standard sync.
-- **Program (shared wallet).** One Ground wallet per org+environment,
-  recorded in `earn_provider_wallets`. First strategy selection creates the
-  wallet (`POST /v2/wallets`, idempotent via UUIDv4 requestId, polled from
-  `creating` to `ready`); later selections replace the strategy
-  (`PATCH /v2/wallets/{id}/strategy`). A selection is exactly ONE strategy at
+- **Programs.** One Ground wallet = one SDP program, recorded in
+  `earn_provider_wallets`; an org may hold several per environment (PRO-1670),
+  and the only uniqueness left is global on `(provider, provider_wallet_ref)`.
+  `POST /v1/earn/programs` creates one (`POST /v2/wallets`, polled from
+  `creating` to `ready`); `PUT /v1/earn/programs/:programId` replaces that
+  program's strategy in place (`PATCH /v2/wallets/{id}/strategy`). Create
+  **requires** a caller idempotency key — exactly one of body `requestId` or the
+  `Idempotency-Key` header — because with N programs legal nothing downstream
+  can tell a retry from a genuine second program; SDP derives it against
+  (org, environment, provider) before it reaches Ground, and answers a provider
+  replay (which returns the original wallet ref, so the insert hits the global
+  unique) with the existing program at **200** instead of **201**.
+  A selection is exactly ONE strategy at
   `pct: 100` of that strategy's stablecoin lane (`singleStrategyAllocation`) —
   a shape the API enforces, not just a wizard convention: PRO-1667 caps each
   token group at one allocation entry per program, leaving the weighted wire
@@ -194,7 +224,10 @@ flowchart LR
   (`assertSolanaRoutable`) agree on one stablecoin. Deposits are tracked via
   Ground's cursor-paginated deposits API. No custody signing in V1.
 - **Withdrawals.** Portfolio-level: preview
-  (`POST .../withdrawal-preview`) then create
+  (`POST .../withdrawal-preview`) — whose `amountUsd` is **optional**, so the
+  same call serves two jobs: omitted it is the LIQUIDITY read (what the lane can
+  pay right now, PRO-1675), present it also validates that amount and quotes its
+  fee — then create
   (`POST .../withdrawals`, caller-owned requestId — a 409
   `request_id_conflict` surfaces as `CONFLICT`), pinned to the environment's
   Solana rail, then status-polled over `EARN_PORTFOLIO_WITHDRAWAL_STATUSES`

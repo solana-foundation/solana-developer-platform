@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { notFound, redirect } from "next/navigation";
+import { fetchIssuedTokensByMint } from "@/app/dashboard/payments/payments-page.data";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
@@ -38,9 +39,10 @@ export default async function WalletPolicyAuditPage({
 
   try {
     const apiClient = await createSdpApiClient();
-    const [context, result] = await Promise.all([
+    const [context, result, issuedTokensByMint] = await Promise.all([
       fetchPolicyAuditContext(apiClient.request, resolvedWalletId),
       fetchPolicyAuditList(apiClient.request, resolvedWalletId, filters),
+      fetchIssuedTokensByMint(apiClient.request),
     ]);
 
     return (
@@ -53,6 +55,7 @@ export default async function WalletPolicyAuditPage({
           revisionHistory={context.revisionHistory}
           apiKeyNames={context.apiKeyNames}
           userNames={context.userNames}
+          issuedTokensByMint={issuedTokensByMint}
           locale={locale}
           t={t}
         />

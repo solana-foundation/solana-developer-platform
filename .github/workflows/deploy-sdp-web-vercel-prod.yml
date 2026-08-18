@@ -7,8 +7,6 @@ on:
         description: "Git ref (tag or SHA) to deploy"
         type: string
         required: true
-  release:
-    types: [published]
 
 permissions:
   contents: read
@@ -20,18 +18,19 @@ concurrency:
 jobs:
   deploy:
     name: Deploy production build
-    if: github.repository == 'solana-foundation/solana-developer-platform'
+    if: >-
+      github.repository == 'solana-foundation/solana-developer-platform' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.ref != ''
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: production
-    env:
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+          fetch-depth: 0
+          ref: ${{ inputs.ref }}
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -41,11 +40,17 @@ jobs:
       - name: Install Vercel CLI
         run: npm install --global vercel@58.9.4
 
-      - name: Pull Vercel environment
-        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Build and deploy production artifact
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          : "${VERCEL_ORG_ID:?VERCEL_ORG_ID is not configured in the production environment}"
+          : "${VERCEL_PROJECT_ID:?VERCEL_PROJECT_ID is not configured in the production environment}"
+          : "${VERCEL_TOKEN:?VERCEL_TOKEN is not configured in the production environment}"
 
-      - name: Build production artifact
-        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
-
-      - name: Deploy prebuilt artifact
-        run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+          vercel pull --yes --environment=production --token="${VERCEL_TOKEN}"
+          vercel build --prod --token="${VERCEL_TOKEN}"
+          vercel deploy --prebuilt --prod --token="${VERCEL_TOKEN}"

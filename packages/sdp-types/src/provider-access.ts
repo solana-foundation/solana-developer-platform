@@ -20,8 +20,24 @@ export const RAMP_PROVIDERS = [
 ] as const;
 export type RampProviderId = (typeof RAMP_PROVIDERS)[number];
 
-/** Vault-infra partners fronting Earn yield strategies. */
-export const EARN_PROVIDERS = ["veda", "upshift", "perena", "ground"] as const;
+/**
+ * Vault-infra partners fronting Earn yield strategies.
+ *
+ * Two shapes live here and the difference is load-bearing:
+ *
+ * - **Custodial portfolio providers** (Ground) front an omnibus wallet SDP
+ *   provisions and moves money through. They implement the optional
+ *   `EarnPortfolioWalletProvider` capability.
+ * - **Catalogue-only providers** (Kamino) front on-chain vaults the customer's
+ *   own wallet deposits into. They implement the base `EarnVaultProvider`
+ *   contract and nothing else, so every money-moving route answers 501 for
+ *   them by capability detection — never by a provider-id check.
+ *
+ * Kamino is also the first provider with NO credential: its data API is public,
+ * which is why `keyPairCredentialDefinition` in the API's availability service
+ * excludes it rather than demanding a `KAMINO_API_KEY` that nothing reads.
+ */
+export const EARN_PROVIDERS = ["veda", "upshift", "perena", "ground", "kamino"] as const;
 export type EarnProviderId = (typeof EARN_PROVIDERS)[number];
 
 export const ORGANIZATION_PROVIDER_FAMILIES = [

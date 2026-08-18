@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 
 import * as Sentry from "@sentry/node";
 import { runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
+import { runEarnMetricsRefreshTick } from "@/cron/earn-metrics-refresh";
 import { PENDING_TRANSFERS_CRON, PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
 import { runRetentionPurgeIfDue } from "@/cron/retention-purge";
 import { WORKFLOW_EXECUTIONS_CRON, WORKFLOW_EXECUTIONS_MONITOR } from "@/cron/workflow-executions";
@@ -16,6 +17,7 @@ import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import { getSentryOptions, isSentryEnabled } from "@/runtime/observability";
 import { initNodeSentry, nodeObservability } from "@/runtime/observability-node";
+import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
 import { runDueWorkflowExecutions } from "@/services/jobs/run-workflow-executions";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
@@ -44,8 +46,23 @@ export async function runCronJob(): Promise<void> {
     // Approved-wallet-operation replay rides the pending-transfers tick (same
     // cadence/monitor), matching the in-process cron runner.
     await monitored(PENDING_TRANSFERS_MONITOR, PENDING_TRANSFERS_CRON, async () => {
-      await trackPendingTransfers(env);
-      await recoverApprovedWalletOperations(env);
+      const outcomes = await Promise.allSettled([
+        (async () => {
+          await trackPendingTransfers(env);
+          await recoverApprovedWalletOperations(env);
+        })(),
+        reconcileSponsorshipBudgets(env),
+      ]);
+      const rejected = outcomes.filter(
+        (outcome): outcome is PromiseRejectedResult => outcome.status === "rejected"
+      );
+      if (rejected.length === 1) throw rejected[0].reason;
+      if (rejected.length > 1) {
+        throw new AggregateError(
+          rejected.map((outcome) => outcome.reason),
+          "pending-transfers tick had multiple failures"
+        );
+      }
     });
     // The workflow engine has no other tick in the Cloud Run deployment shape (the
     // in-process cron scheduler is skipped under K_SERVICE) — without this, enqueued
@@ -77,6 +94,22 @@ export async function runCronJob(): Promise<void> {
     // its own Sentry monitor, so a sync failure never masquerades as a
     // reconciliation failure (and vice versa).
     if (isEarnEnabled(env)) {
+      // Unslotted — this job's five-minute schedule IS its cadence (see
+      // runEarnMetricsRefreshTick's docstring) — and ordered FIRST so a slow
+      // catalogue pass cannot eat the tick and leave rates stale. That
+      // freshness promise is also why it goes through the MONITORED tick:
+      // "it silently stopped running" is this pass's worst failure.
+      await runEarnMetricsRefreshTick(env, sentryEnabled ? nodeObservability : undefined).catch(
+        (error: unknown) => {
+          // Never fails the job: the refresh degrades per provider internally,
+          // so anything escaping is infrastructure-level, and rates going one
+          // tick stale must not stop the catalogue sync that follows.
+          getLogger().error(
+            { error: error instanceof Error ? error.message : String(error) },
+            "reconciliation job: earn metrics refresh failed"
+          );
+        }
+      );
       await runEarnCatalogueSyncIfDue(env, sentryEnabled ? nodeObservability : undefined);
     }
     // Daily retention purge behind a Redis date slot (the job itself ticks every five
@@ -96,12 +129,24 @@ export async function runCronJob(): Promise<void> {
   }
 }
 
+export function describeCronFailure(error: unknown): Record<string, unknown> {
+  if (!(error instanceof AggregateError)) return { error };
+  return {
+    error,
+    causes: error.errors.map((cause: unknown) =>
+      cause instanceof Error
+        ? { message: cause.message, stack: cause.stack }
+        : { message: String(cause) }
+    ),
+  };
+}
+
 const invokedPath = process.argv[1];
 if (invokedPath && import.meta.url === pathToFileURL(invokedPath).href) {
   runCronJob()
     .then(() => process.exit(0))
     .catch((err: unknown) => {
-      getLogger().error({ error: err }, "Reconciliation job failed");
+      getLogger().error(describeCronFailure(err), "Reconciliation job failed");
       process.exit(1);
     });
 }

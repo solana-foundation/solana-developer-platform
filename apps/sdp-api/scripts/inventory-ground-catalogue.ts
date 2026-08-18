@@ -7,9 +7,11 @@
  * rails, and for tokens without a mint on the environment's cluster. This
  * script pulls the RAW catalogue, runs the exact distillation the sync uses
  * (`distillGroundYieldSource` — shared code, not a reimplementation), and
- * reports both sides: what enters the catalogue and what was dropped, why,
+ * reports both sides: what the sync persists and what was dropped, why,
  * and how each source classifies (rwa/defi) and attributes (curator). It then
- * renders the delta against the product doc's named RWA targets.
+ * renders the delta against the product doc's named RWA targets. API visibility
+ * is deliberately separate: strategy reads hide Aave- and Morpho-related rows
+ * after they have been indexed.
  *
  * Layout mirrors discover-ramp-rails.ts:
  *   - raw dumps            apps/sdp-api/.earn-catalogue/raw/   (gitignored)
@@ -37,7 +39,7 @@ import {
   RWA_ALLOCATION_TYPE,
 } from "@sdp/earn/providers/ground/client";
 import type { EarnRuntimeContext } from "@sdp/earn/types";
-import { CLUSTER_BY_SDP_ENVIRONMENT, earnCuratorLabel, type SdpEnvironment } from "@sdp/types";
+import { earnCuratorLabel, type SdpEnvironment } from "@sdp/types";
 import { z } from "zod";
 
 const INVENTORY_ROOT = path.resolve(process.cwd(), ".earn-catalogue");
@@ -89,7 +91,15 @@ const sourceRowSchema = z.object({
   curator: z.string().nullable(),
   outcome: z.enum(["catalogued", "dropped"]),
   dropReason: z
-    .enum(["inactive_mode", "not_solana_routable", "unknown_token_symbol", "no_cluster_mint"])
+    .enum([
+      "inactive_mode",
+      "not_solana_routable",
+      // Accepted so older committed snapshots remain renderable. Current
+      // distillation no longer drops a source because of its host chain.
+      "not_solana_hosted",
+      "unknown_token_symbol",
+      "no_cluster_mint",
+    ])
     .nullable(),
   liquidityTerm: z.enum(["instant", "delayed"]).nullable(),
   redemptionDelayDays: z.number().nullable(),
@@ -115,7 +125,7 @@ async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
 }
 
 function toSourceRow(source: GroundYieldSource, environment: SdpEnvironment): SourceRow {
-  const distilled = distillGroundYieldSource(source, CLUSTER_BY_SDP_ENVIRONMENT[environment]);
+  const distilled = distillGroundYieldSource(source, environment);
   return {
     id: source.id,
     name: source.name,
@@ -209,13 +219,7 @@ function renderCataloguedTable(rows: readonly SourceRow[]): string {
   return lines.join("\n");
 }
 
-/**
- * Where the catalogued shelf actually lives. SDP's Solana-only mandate governs
- * the rails the CUSTOMER touches, not where Ground routes capital afterwards,
- * so a source hosted off Solana is catalogued by design — but "how much of what
- * we offer is Solana-native" is a product question the gates never answer, and
- * this is where it gets answered.
- */
+/** Where Ground hosts the sources the sync persists. */
 function renderHostChainCensus(rows: readonly SourceRow[]): string {
   const counts = new Map<string, { total: number; rwa: number }>();
   for (const row of rows) {
@@ -327,11 +331,10 @@ function renderEnvironmentSection(inventory: Inventory): string {
     "",
     "### Host-chain census — what is actually Solana-native",
     "",
-    "SDP's Solana-only mandate governs the rails the CUSTOMER touches: deposits and",
-    "payouts move USDC on Solana. Where a yield source itself lives is Ground's",
-    "internal routing (the `bridge` position kind), so an off-Solana source funded by",
-    "Solana USDC is catalogued on purpose. This table is how much of the shelf would",
-    "remain if that decision were ever narrowed to Solana-hosted sources only.",
+    "SDP's customer-facing deposit and payout rails remain Solana-only. Ground may",
+    "bridge that USDC to a source it hosts elsewhere, so host chain is inventory",
+    "metadata rather than a persistence gate. Aave- and Morpho-related rows are",
+    "still represented here even though strategy API reads hide them.",
     "",
     renderHostChainCensus(catalogued),
     "",
@@ -395,7 +398,8 @@ async function renderReport(): Promise<void> {
     "([PRO-1638](https://linear.app/solana-fndn/issue/PRO-1638)). Raw catalogue pulled from",
     "`GET /v2/wallets/yield-sources`, distilled with the same `distillGroundYieldSource`",
     "the catalogue sync uses, so the catalogued/dropped split below is exactly what the",
-    "platform does — not a parallel interpretation.",
+    "sync persists — not a parallel interpretation. Strategy API reads separately hide",
+    "Aave- and Morpho-related rows while retaining them in the database.",
     "",
     ...sections,
     "",
