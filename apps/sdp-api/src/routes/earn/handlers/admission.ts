@@ -1,0 +1,69 @@
+import { isClusterFundableInEnvironment } from "@sdp/earn/support";
+import type { SdpEnvironment } from "@sdp/types";
+import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
+import { badRequest } from "@/lib/errors";
+
+/**
+ * The ONE money-in admission predicate for an Earn catalogue row.
+ *
+ * Both money-in paths reach this: `POST /programs` (custodial allocations) and
+ * `POST /vault-deposits` (non-custodial). Before it existed the two disagreed,
+ * and the disagreement was not theoretical — the vault path resolved its row
+ * with a bare `getStrategyById` and so would happily fund a `paused` or
+ * `deprecated` strategy that `POST /programs` refused. `paused` is the operator
+ * stop switch: the hourly sync goes out of its way NOT to clobber it and the
+ * delist pass deliberately leaves such rows behind, precisely so a human can
+ * halt deposits during an exploit or a depeg. A second money-in path that
+ * ignored it made that switch a suggestion.
+ *
+ * ── What this deliberately does NOT check ───────────────────────────────────
+ * Browse policy — hidden terms, curation, provider surfacing. Those live in
+ * `handlers/strategies.ts` and gate what a reader SEES, not what an existing
+ * customer may fund; see routes/earn/CLAUDE.md. Surfacing and entitlement are
+ * separate, earlier gates with their own error codes, because "SDP does not
+ * offer this" and "this instrument is halted" are different answers.
+ */
+export function assertStrategyDepositable(
+  strategy: EarnStrategyRow,
+  environment: SdpEnvironment
+): void {
+  if (strategy.environment !== environment) {
+    // Phrased as "not found" upstream; reaching here means a caller crossed
+    // project environments with a valid id from the other one.
+    throw badRequest(`Strategy ${strategy.id} does not belong to this ${environment} project.`);
+  }
+
+  if (strategy.status !== "active") {
+    throw badRequest(
+      `Strategy ${strategy.id} is ${strategy.status} and cannot accept new deposits. ` +
+        "An operator pauses a strategy to stop money going in — existing positions are unaffected.",
+      { strategyId: strategy.id, status: strategy.status }
+    );
+  }
+
+  // The single fundability rule. Do NOT re-derive the cluster comparison here
+  // or anywhere else (@sdp/earn support.ts): a second copy is a second thing
+  // that can drift toward permissive.
+  if (!isClusterFundableInEnvironment(strategy.host_cluster, environment)) {
+    throw badRequest(
+      `This strategy lives on ${strategy.host_cluster}, which is not fundable from a ${environment} project.`,
+      { strategyId: strategy.id, hostCluster: strategy.host_cluster, environment }
+    );
+  }
+}
+
+/**
+ * Non-throwing form, for callers filtering a page of rows rather than admitting
+ * one named row. Keeps the two uses on the same definition.
+ */
+export function isStrategyDepositable(
+  strategy: EarnStrategyRow,
+  environment: SdpEnvironment
+): boolean {
+  try {
+    assertStrategyDepositable(strategy, environment);
+    return true;
+  } catch {
+    return false;
+  }
+}

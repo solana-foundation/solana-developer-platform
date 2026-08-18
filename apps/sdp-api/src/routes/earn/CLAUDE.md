@@ -289,6 +289,116 @@ other's balance.
   `GET /strategies/:id/nav` (no writer, no reachable reader). A regression
   test in `../earn.test.ts` pins all of them at 404.
 
+## Vault-direct routes (non-custodial positions)
+
+A second money model, added for Kamino. A `vault_direct` provider custodies
+nothing: there is no wallet to provision and no address to fund — the vault's
+account is a PROGRAM account and stablecoins sent to it are destroyed. Money
+moves only when SDP builds an instruction and signs it with one of the
+organization's own custody wallets.
+
+- `POST /vault-deposits` — **build + simulate + sign + record + broadcast**, in
+  that order. Body
+  `{strategyId, custodyWalletId, amount, requestId, minSharesOut?}`.
+  Registered as
+  `requirePermissions("earn:write", "wallets:read")` → `policyGate` → handler.
+  The caller names a CATALOGUE row, never a raw vault address, so the sync's
+  admission gates still bound this path.
+  - **POLICY-GATED.** `policyGate({ extract:
+    extractEarnVaultDepositPolicyCandidate })` resolves everything (strategy,
+    wallet, amount) and enforces wallet policy BEFORE `createOrgSigner` is
+    reached. The extractor owns all the gates below; the handler only ledgers.
+    Registered as the `earn` family in
+    `src/security/value-moving-conformance.node.test.ts`, whose
+    `valueMovingSourceRoots` now includes `src/services/earn` — it did not, which
+    is how a whole money-moving surface stayed invisible to the sink inventory.
+    The policy envelope is `program` / `earn_vault_deposit`; migration 0060
+    re-opens that live family after the earlier vocabulary trim.
+  - **Environment capability first.** `isVaultDirectDepositEnabled(environment)`
+    (`@sdp/types/provider-access`) fail-closes PRODUCTION while SDP has no
+    vault-withdraw route and no Active-tab surface. Entitlement cannot express
+    this — it is org-scoped, not environment-scoped. The dashboard visibly
+    disables the affordance from the same constant so the opportunity remains
+    discoverable without advertising an action the API will refuse.
+  - `minSharesOut` is **required in production** and optional in sandbox: the
+    pinned Kamino SDK picks the LEGACY deposit instruction when it is absent, so
+    there is no implicit floor at all.
+  - `requestId` is **REQUIRED**, unlike the custodial create. There is no
+    provider-side dedupe to fall back on: the chain will happily accept the same
+    transfer twice. It is stored with a canonical
+    `buildEarnVaultDepositFingerprint`, and the replay is resolved BEFORE the
+    position is claimed — reusing a key with a different intent is a **409**, not
+    a silent replay, and writes nothing.
+  - Gate order: schema → environment capability → production floor → strategy
+    resolution → deposit-style check → surfacing → entitlement →
+    **catalogue admission** → wallet. `assertStrategyDepositable`
+    (`handlers/admission.ts`) is shared with the custodial path and asserts
+    `status = 'active'` plus `isClusterFundableInEnvironment`; without it a
+    `paused` row — an operator's deliberate stop — stayed fundable by id.
+  - Wallet binding takes **`earn:write`**, not `wallets:read`. A read-only
+    binding must not be able to spend. Note this is the first `earn:*` scope
+    asserted on a BINDING: a selected-scope key provisioned only with
+    payments-family binding permissions will now 403 here.
+    `custodyWalletId` is the exact `custody_wallets.id` (`cwlt_…`) returned by
+    the wallet surface, never the provider-local `walletId` or public key. The
+    latter can repeat across configurations; a selected binding whose provider
+    id maps to multiple scoped rows fails closed.
+  - Simulates before signing. The instructions come from a third-party SDK built
+    against live vault state, so a stale reserve set surfaces as a readable
+    program error instead of a landed, failed transaction the customer paid for.
+    Provider build, simulation, custody lookup, signing, and broadcast share one
+    absolute `VaultDeadline`; a slow early stage cannot reset the timeout before
+    a later side effect.
+  - **The signed outbox is recorded BEFORE broadcast.** `signVaultPlan` signs
+    without sending; one transaction stores the signature, base64 wire bytes,
+    last-valid block height, movement and activated claim while still `pending`.
+    Only the insert winner broadcasts. A send error leaves that row `pending`
+    and never `failed`, because a lost response does not prove the transaction
+    did not land.
+  - Fee payer is the CUSTODY WALLET. Kora only sponsors allow-listed programs and
+    the kvault/klend ids are not on that list. The shared execution runtime can
+    add a sponsor signature without broadcasting, preserving record-before-send,
+    but this route deliberately selects `wallet-pays` until those programs are
+    eligible for sponsorship.
+- `GET /vault-positions` — DB claim rows **hydrated live from chain**. Shares and
+  value are never persisted: for a non-custodial vault the chain IS the provider.
+  Takes **no provider gate at all** — it is a read of money the org already
+  holds, and hiding it when a provider is un-offered would close the door out.
+  It DOES take wallet-binding scope: `getAllowedApiKeyWalletIdsForPermissions(auth,
+  ["earn:read"])`, applied in the repository query before any chain read. Mind
+  the id spaces — that helper returns provider `walletId`s (`privy_…`) while
+  `earn_vault_positions.custody_wallet_id` is the `cwlt_…` row id, so the handler
+  translates through `scope.wallets`. Passing the allow-list straight through
+  matches nothing and silently returns an empty page.
+  A failed chain read leaves a position UNHYDRATED rather than zero; reporting
+  zero is a claim about someone's money that a failed RPC call cannot support.
+
+Capability dispatch is `supportsVaultDirect` (`@sdp/earn/capabilities`), resolved
+through `services/earn/execution-registry.ts` — the one place a provider id maps
+to an executing client. `EARN_PROVIDER_CLIENTS` stays the CATALOGUE registry so
+the hourly sync keeps its small dependency surface.
+
+The every-minute vault reconciliation worker consumes
+`idx_earn_vault_movements_unsettled` in bounded pages. Both the embedded cron
+and the dedicated Cloud Run job call the same reconciler: it queries the exact
+recorded signature, confirms landed transactions, rebroadcasts the recorded
+signed bytes while the blockhash remains valid, and marks an expired, unlanded
+movement failed. Never rebuild a transaction during recovery.
+
+**Not built yet:** the withdraw counterpart and the Active-tab snapshot. Until
+both land, a vault position can be entered and not exited through SDP — which is
+why `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` fail-closes production rather than
+relying on anyone remembering ADR 0002.
+
+**Per-cluster RPC.** `resolveClusterRpcUrl` reads `SOLANA_DEVNET_RPC_URL` /
+`SOLANA_MAINNET_RPC_URL`, falling back to the canonical default only when its
+configured `SOLANA_NETWORK` matches the requested cluster, and
+`assertClusterEndpoint` proves the endpoint by GENESIS HASH before anything is
+built against it (cached per endpoint). One process serves both environments, so
+the old cluster-agnostic read silently built against whichever chain the single
+URL happened to serve — and a mismatch does not error, because Kamino's mainnet
+kvault program id also resolves on devnet with no accounts under it.
+
 ## Gate asymmetry — DO NOT BREAK (ADR 0002 exit-safety)
 
 - **Money-in** (`POST /programs`, `PUT /programs/:programId`):
@@ -334,10 +444,10 @@ other's balance.
 - Zod schemas in schemas.ts; parse/paginate/envelope helpers in
   handlers/shared.ts — don't hand-roll either.
 - Capability gating: `supportsPortfolioWallets(client)` → NOT_IMPLEMENTED for
-  providers lacking the surface. This is how a **catalogue-only** provider is
-  handled: Kamino lists real strategies but moves no money through SDP (its
-  vaults are non-custodial — the customer's own wallet deposits), so every
-  program route answers 501 for it by capability, never by a provider-id check.
+  providers lacking the surface. Kamino implements NONE of it, so every
+  **program** route still answers 501 for it by capability, never by a
+  provider-id check — its money moves through the vault-direct routes above
+  instead. The two capabilities are asserted mutually exclusive.
 - Withdrawal approval is a SECOND optional capability
   (`supportsWithdrawalApprovals`) with **no public route on purpose**: casting
   a vote needs the account-level Turnkey signer (platform ops — one shared

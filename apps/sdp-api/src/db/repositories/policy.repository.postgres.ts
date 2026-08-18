@@ -999,15 +999,29 @@ async function tenantOwnsWallet(
     .prepare(
       `SELECT w.id
        FROM custody_wallets w
-       INNER JOIN custody_configs c ON c.id = w.custody_config_id
+       LEFT JOIN custody_configs c ON c.id = w.custody_config_id
+       LEFT JOIN custody_connections connection ON connection.id = w.custody_connection_id
        WHERE (w.id = ? OR w.wallet_id = ?)
-         AND c.organization_id = ?
-         AND (c.project_id IS NOT DISTINCT FROM ? OR c.project_id IS NULL)
          AND w.status = 'active'
-         AND c.status = 'active'
+         AND (
+           (c.organization_id = ?
+            AND (c.project_id IS NOT DISTINCT FROM ? OR c.project_id IS NULL)
+            AND c.status = 'active')
+           OR
+           (connection.organization_id = ?
+            AND connection.project_id IS NOT DISTINCT FROM ?
+            AND connection.status = 'active')
+         )
        LIMIT 1`
     )
-    .bind(walletId, walletId, scope.organizationId, scope.projectId)
+    .bind(
+      walletId,
+      walletId,
+      scope.organizationId,
+      scope.projectId,
+      scope.organizationId,
+      scope.projectId
+    )
     .first<{ id: string }>();
   return Boolean(row);
 }
@@ -1024,18 +1038,27 @@ async function tenantOwnsWalletTarget(
     .prepare(
       `SELECT w.id
        FROM custody_wallets w
-       INNER JOIN custody_configs c ON c.id = w.custody_config_id
+       LEFT JOIN custody_configs c ON c.id = w.custody_config_id
+       LEFT JOIN custody_connections connection ON connection.id = w.custody_connection_id
        WHERE w.wallet_id = ?
          ${custodyPredicate}
-         AND c.organization_id = ?
-         AND (c.project_id IS NOT DISTINCT FROM ? OR c.project_id IS NULL)
          AND w.status = 'active'
-         AND c.status = 'active'
+         AND (
+           (c.organization_id = ?
+            AND (c.project_id IS NOT DISTINCT FROM ? OR c.project_id IS NULL)
+            AND c.status = 'active')
+           OR
+           (connection.organization_id = ?
+            AND connection.project_id IS NOT DISTINCT FROM ?
+            AND connection.status = 'active')
+         )
        LIMIT 1`
     )
     .bind(
       walletId,
       ...(hasCustodyWalletId ? [custodyWalletId] : []),
+      scope.organizationId,
+      scope.projectId,
       scope.organizationId,
       scope.projectId
     )

@@ -10,7 +10,7 @@ export { resolveSdpEnvironment } from "@/lib/sdp-environment";
 
 export function earnRuntime(c: AppContext): EarnRuntimeContext {
   return {
-    env: c.env as unknown as Record<string, string | undefined>,
+    env: c.env,
     environment: resolveSdpEnvironment(c),
   };
 }
