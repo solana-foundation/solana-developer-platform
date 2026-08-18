@@ -9,6 +9,7 @@ describe("Earn dashboard headers", () => {
   it("labels the Earn overview", () => {
     expect(getDashboardPageConfig("/dashboard/markets/earn", t, false, false)).toMatchObject({
       title: "Shared.dashboardShell.earn",
+      titlePosition: "center",
       headerTabs: {
         tabs: [
           { id: "opportunities", label: "DashboardEarn.tabs.opportunities" },
@@ -30,9 +31,8 @@ describe("Earn dashboard headers", () => {
     }>;
 
     expect(config).toMatchObject({
-      title: "",
-      hideTitle: true,
-      centeredTitle: "Shared.dashboardShell.earnNewDeposit",
+      title: "Shared.dashboardShell.earnNewDeposit",
+      titlePosition: "center",
       contentWidthClass: "max-w-none",
     });
     expect(backAction.props).toMatchObject({
