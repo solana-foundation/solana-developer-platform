@@ -90,10 +90,15 @@ CREATE TABLE IF NOT EXISTS rpc_connections (
             (status = 'deactivated' AND deactivated_at IS NOT NULL)
             OR (status <> 'deactivated' AND deactivated_at IS NULL)
         ),
+    -- `activated_at` is history, not current state: once a connection has been
+    -- live, a later failed probe must not have to erase the fact that it was.
+    -- Leaving 'failed' out here made re-checking a live connection whose
+    -- provider had started rejecting the key violate this constraint instead of
+    -- recording the failure, so the row stayed 'active' with a stale success.
     CONSTRAINT rpc_connections_activated_at_lifecycle_check
         CHECK (
             activated_at IS NULL
-            OR status IN ('active', 'deactivated')
+            OR status IN ('active', 'failed', 'deactivated')
         ),
     -- Only a live connection can be the one the relay picks.
     CONSTRAINT rpc_connections_default_requires_active
