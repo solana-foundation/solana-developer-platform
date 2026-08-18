@@ -10,7 +10,7 @@ import type { PaymentSubscriptionCollectionAttemptRow } from "@/db/repositories"
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
-import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
+import { AppError, badRequestParams, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
@@ -30,12 +30,10 @@ import { type AppContext, getPaymentRecurringPaymentsRepository } from "../conte
 import { mapTransferRow } from "../mappers";
 import {
   type activateRecurringPaymentSchema,
-  cancelRecurringPaymentSchema,
   type collectRecurringPaymentSchema,
   type createRecurringPaymentSchema,
   listRecurringPaymentsQuerySchema,
   recurringPaymentIdParamsSchema,
-  resumeRecurringPaymentSchema,
   type updateRecurringPaymentSchema,
 } from "../schemas";
 import { resolveScope, resolveWallet } from "../wallets";
@@ -126,19 +124,6 @@ export const createRecurringPayment = async (
   };
   return created(c, response);
 };
-
-async function readOptionalJsonBody(c: AppContext): Promise<unknown> {
-  const text = await c.req.text();
-  if (!text.trim()) {
-    return {};
-  }
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw badRequest("Invalid request body");
-  }
-}
 
 export const updateRecurringPayment = async (
   c: ValidatedBodyContext<typeof updateRecurringPaymentSchema>
@@ -244,15 +229,6 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
 
   if (!params.success) {
     throw badRequestParams();
-  }
-
-  const body = await readOptionalJsonBody(c);
-  const parsed =
-    operation === "cancel"
-      ? cancelRecurringPaymentSchema.safeParse(body)
-      : resumeRecurringPaymentSchema.safeParse(body);
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
   }
 
   const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["payments:write"]);

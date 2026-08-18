@@ -24,6 +24,7 @@ import {
   apiKeyControlProfileRevisionCreateSchema,
   apiKeyCreateSchema,
   apiKeyPolicyBindingsWriteSchema,
+  apiKeyRevokeSchema,
   apiKeyRotateSchema,
   apiKeyUpdateSchema,
 } from "./schemas";
@@ -77,6 +78,11 @@ apiKeys.post(
   validateBody(apiKeyRotateSchema),
   rotateApiKey
 );
-apiKeys.delete("/:keyId", requirePermissions("api-keys:write"), revokeApiKey);
+apiKeys.delete(
+  "/:keyId",
+  requirePermissions("api-keys:write"),
+  validateBody(apiKeyRevokeSchema),
+  revokeApiKey
+);
 
 export default apiKeys;

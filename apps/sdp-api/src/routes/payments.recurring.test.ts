@@ -1284,7 +1284,7 @@ describe("Payments routes — recurring", () => {
 
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1321,7 +1321,7 @@ describe("Payments routes — recurring", () => {
 
     const replayRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1345,7 +1345,7 @@ describe("Payments routes — recurring", () => {
 
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1398,14 +1398,14 @@ describe("Payments routes — recurring", () => {
     const activated = await activateRecurringPaymentForTest(headers);
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(cancelRes.status).toBe(200);
 
     const resumeRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/resume`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1444,7 +1444,7 @@ describe("Payments routes — recurring", () => {
 
     const replayRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/resume`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1520,7 +1520,7 @@ describe("Payments routes — recurring", () => {
 
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1580,7 +1580,7 @@ describe("Payments routes — recurring", () => {
     const activated = await activateRecurringPaymentForTest(headers);
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(cancelRes.status).toBe(200);
@@ -1626,7 +1626,7 @@ describe("Payments routes — recurring", () => {
 
     const resumeRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/resume`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1729,7 +1729,7 @@ describe("Payments routes — recurring", () => {
 
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1774,7 +1774,7 @@ describe("Payments routes — recurring", () => {
 
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1930,7 +1930,7 @@ describe("Payments routes — recurring", () => {
 
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 

@@ -36,6 +36,7 @@ import type {
   apiKeyControlProfileRevisionCreateSchema,
   apiKeyCreateSchema,
   apiKeyPolicyBindingsWriteSchema,
+  apiKeyRevokeSchema,
   apiKeyRotateSchema,
   apiKeyUpdateSchema,
 } from "./schemas";
@@ -590,7 +591,7 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
   return created(c, response);
 };
 
-export const revokeApiKey = async (c: AppContext) => {
+export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSchema>) => {
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
@@ -600,13 +601,7 @@ export const revokeApiKey = async (c: AppContext) => {
     throw badRequest("Cannot revoke the API key being used for this request");
   }
 
-  const body = await c.req.json().catch(() => ({}));
-  const confirmation =
-    body &&
-    typeof body === "object" &&
-    typeof (body as { confirmation?: unknown }).confirmation === "string"
-      ? String((body as { confirmation: string }).confirmation).trim()
-      : "";
+  const { confirmation } = c.req.valid("json");
 
   const existing = await getDb(c.env)
     .prepare(

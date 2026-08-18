@@ -51,7 +51,9 @@ import {
   prepareResumeSubscription,
   prepareSubscriptionAuthorization,
   prepareSubscriptionCollection,
-  recordRampProviderEvent,
+  recordCoinbaseRampEvent,
+  recordMoneygramRampEvent,
+  rejectUnsupportedRampEventProvider,
   resumeRecurringPayment,
   simulateSandboxTransfer,
   updateRecurringPayment,
@@ -62,6 +64,8 @@ import { createPaymentRequestSchema } from "./handlers/payment-requests";
 import {
   activateRecurringPaymentSchema,
   cancelRampTransferSchema,
+  cancelRecurringPaymentSchema,
+  coinbaseRampEventSchema,
   collectRecurringPaymentSchema,
   createOfframpQuoteSchema,
   createOnrampQuoteSchema,
@@ -73,10 +77,12 @@ import {
   estimateOfframpSchema,
   estimateOnrampSchema,
   estimateTransferBatchSchema,
+  moneygramRampEventSchema,
   prepareSubscriptionAuthorizationSchema,
   prepareSubscriptionCollectionSchema,
   prepareSubscriptionLifecycleSchema,
   prepareSubscriptionPlanCreateSchema,
+  resumeRecurringPaymentSchema,
   simulateSandboxTransferSchema,
   updateRecurringPaymentSchema,
   updateSubscriptionPlanSchema,
@@ -147,6 +153,7 @@ payments.post(
 payments.post(
   "/recurring-payments/:id/cancel",
   requirePermissions("payments:write", "wallets:read"),
+  validateBody(cancelRecurringPaymentSchema),
   cancelRecurringPayment
 );
 payments.post(
@@ -158,6 +165,7 @@ payments.post(
 payments.post(
   "/recurring-payments/:id/resume",
   requirePermissions("payments:write", "wallets:read"),
+  validateBody(resumeRecurringPaymentSchema),
   resumeRecurringPayment
 );
 payments.get("/recurring-payments/:id", requirePermissions("payments:read"), getRecurringPayment);
@@ -292,9 +300,21 @@ payments.post(
   createOfframpQuote
 );
 payments.post(
+  "/ramps/moneygram/events",
+  requirePermissions("payments:write"),
+  validateBody(moneygramRampEventSchema),
+  recordMoneygramRampEvent
+);
+payments.post(
+  "/ramps/coinbase/events",
+  requirePermissions("payments:write"),
+  validateBody(coinbaseRampEventSchema),
+  recordCoinbaseRampEvent
+);
+payments.post(
   "/ramps/:provider/events",
   requirePermissions("payments:write"),
-  recordRampProviderEvent
+  rejectUnsupportedRampEventProvider
 );
 payments.post(
   "/ramps/transfers/cancel",

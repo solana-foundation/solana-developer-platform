@@ -36,7 +36,11 @@ function zodValidation<S extends z.ZodType>(
   return (value: unknown): z.output<S> => {
     const parsed = schema.safeParse(value);
     if (!parsed.success) {
-      throw toError({ errors: z.flattenError(parsed.error).fieldErrors });
+      const flattened = z.flattenError(parsed.error);
+      throw toError({
+        errors: flattened.fieldErrors,
+        ...(flattened.formErrors.length > 0 && { formErrors: flattened.formErrors }),
+      });
     }
     return parsed.data;
   };

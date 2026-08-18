@@ -34,8 +34,10 @@ import {
 import {
   createWalletSchema,
   deleteWalletSchema,
+  initializeSigningSchema,
   setDefaultWalletSchema,
   signerCheckSchema,
+  switchSigningSchema,
   updateWalletSchema,
 } from "./schemas";
 
@@ -46,8 +48,18 @@ wallets.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true })
 wallets.use("*", projectContextMiddleware());
 
 // Initialize signing (requires admin)
-wallets.post("/initialize", requirePermissions("custody:admin"), initializeSigning);
-wallets.post("/switch", requirePermissions("custody:admin"), switchSigning);
+wallets.post(
+  "/initialize",
+  requirePermissions("custody:admin"),
+  validateBody(initializeSigningSchema),
+  initializeSigning
+);
+wallets.post(
+  "/switch",
+  requirePermissions("custody:admin"),
+  validateBody(switchSigningSchema),
+  switchSigning
+);
 wallets.post(
   "/",
   requirePermissions("custody:admin"),
