@@ -153,15 +153,6 @@ export interface UpdateEarnStrategyMetricsInput {
 }
 
 /**
- * Provider-reference prefix the dev seed stamps on every fixture row it writes
- * (apps/sdp-api/scripts/seed-earn-demo.ts). Canonical HERE, not in the script,
- * because it partitions this table's key space and the delist pass has to honour
- * that partition: providers only ever list their own bare ids, so a prefixed row
- * is by construction not a row any provider can confirm or deny.
- */
-export const EARN_SEED_REFERENCE_PREFIX = "seed-demo-";
-
-/**
  * Delist pass input: everything the provider still lists for (provider,
  * environment). Anything else the table holds is stale — a vault the provider
  * delisted or one a tightened catalogue gate now refuses — and is deleted.
@@ -331,10 +322,10 @@ export interface EarnRepository {
    * keep set matches nothing.
    *
    * Deleted, not flagged: this table is a cache of the provider catalogue (the
-   * sync is its only writer besides the dev seed) and nothing references a
-   * strategy id — no foreign key, and a program's allocations carry the
-   * PROVIDER's reference, resolved against Ground's live response. A status flag
-   * would leave rows SDP must not carry sitting in the table indefinitely.
+   * sync is its only admitting writer) and nothing references a strategy id — no
+   * foreign key, and a program's allocations carry the PROVIDER's reference,
+   * resolved against live provider state. A status flag would leave rows SDP
+   * must not carry sitting in the table indefinitely.
    */
   deleteUnlistedStrategies(input: DeleteUnlistedEarnStrategiesInput): Promise<string[]>;
 
@@ -357,13 +348,12 @@ export interface EarnRepository {
    */
   listProviderWallets(input: ListEarnProviderWalletsInput): Promise<ListEarnProviderWalletsResult>;
   /**
-   * Lookup by the provider-side wallet ref, keyed on 0056's global unique. Two
-   * callers need it and neither has an organization to scope by: the create path
-   * resolves a provider replay (the provider answers a retried create with the
-   * ORIGINAL ref, so the insert lands on that unique and the row it collided with
-   * IS the caller's program), and the dev seed asks whether the shared sandbox
-   * wallet is already linked anywhere. Callers assert ownership after the fetch,
-   * exactly as getProgramWithdrawalByProviderReference does.
+   * Lookup by the provider-side wallet ref, keyed on 0056's global unique. The
+   * create path needs this without an organization scope to resolve a provider
+   * replay: the provider answers a retried create with the ORIGINAL ref, so the
+   * insert lands on that unique and the row it collided with IS the caller's
+   * program. The caller asserts ownership after the fetch, exactly as
+   * getProgramWithdrawalByProviderReference does.
    */
   getProviderWalletByRef(params: {
     provider: EarnProviderId;

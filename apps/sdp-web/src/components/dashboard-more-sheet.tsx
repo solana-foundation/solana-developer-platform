@@ -53,7 +53,7 @@ function getMoreGroups(
     {
       title: t("Shared.dashboardShell.manage"),
       items: [
-        ...(options.marketsEnabled
+        ...(options.marketsEnabled && options.earnEnabled
           ? [
               {
                 label: t("Shared.dashboardShell.markets"),

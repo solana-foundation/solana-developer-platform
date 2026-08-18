@@ -61,15 +61,10 @@ describe("Markets dashboard navigation", () => {
     expect(JSON.stringify(getNavSections(t, options))).not.toContain("dashboardShell.markets");
   });
 
-  it("keeps Treasury Solutions available while hiding Earn Program when Earn is off", () => {
-    const markets = findMarketsItem(navOptions({ marketsEnabled: true, earnEnabled: false }));
-
-    expect(markets?.children).toEqual([
-      {
-        label: "Shared.dashboardShell.treasurySolutions",
-        href: "/dashboard/markets/treasury-solutions",
-      },
-    ]);
+  it("hides provider-backed Markets when the Earn runtime is off", () => {
+    expect(
+      findMarketsItem(navOptions({ marketsEnabled: true, earnEnabled: false }))
+    ).toBeUndefined();
   });
 
   it("keeps Markets out of the mobile More sheet when the module flag is off", () => {
@@ -94,7 +89,7 @@ describe("Markets dashboard navigation", () => {
         pathname="/dashboard/markets/treasury-solutions"
         canReadApprovals={false}
         canManageOrgSettings={false}
-        earnEnabled={false}
+        earnEnabled
         heliusRingsEnabled={false}
         marketsEnabled
         onClose={() => {}}

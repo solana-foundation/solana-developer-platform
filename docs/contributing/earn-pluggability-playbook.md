@@ -85,21 +85,12 @@ warn-logged and skipped, not persisted), and upserts via `upsertStrategy`
 starts reporting appears on the next run; one provider failing (or still
 being a `NOT_IMPLEMENTED` stub) never sinks the others' pass.
 
-**Local dev.** Provider credentials aren't needed to get a catalogue:
-
-```bash
-pnpm -C apps/sdp-api db:seed:earn                            # sandbox catalogue fixtures
-pnpm -C apps/sdp-api db:seed:earn -- --clean                 # remove seeded rows again
-```
-
-The seed is **local-development only**: it refuses any non-local
-`DATABASE_URL` and only ever writes `sandbox` fixtures (there is no
-`--environment production` — passing it exits with an error).
-
-The script (`apps/sdp-api/scripts/seed-earn-demo.ts`) writes through the same
-`upsertStrategy` API and declared-support validation the sync uses, so seeded
-rows behave exactly like synced ones; it is idempotent on the `seed-demo-`
-provider-reference prefix.
+**Local dev.** Use sandbox provider credentials and enable both
+`MARKETS_ENABLED` and `EARN_ENABLED` before starting the API. The hourly
+catalogue sync is the only admitting writer, so a fresh database remains empty
+until a live provider pass succeeds. Do not insert catalogue rows by hand: that
+would bypass the provider's declared-support checks and leave data the delist
+pass cannot justify.
 
 **Update.** Sync-owned fields (name, APY, mints, risk metadata, ...) converge
 on the next run; manual edits to those columns get overwritten. `status` is the

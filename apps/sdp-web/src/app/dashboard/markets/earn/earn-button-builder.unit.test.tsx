@@ -1,27 +1,48 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import type { EarnStrategy, SdpEnvironment } from "@sdp/types";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { EarnButtonBuilder } from "./earn-button-builder";
-import { EARN_PROGRAM_STORAGE_KEY, readAcceptedEarnButtons } from "./earn-program-model";
 
-const mocks = vi.hoisted(() => ({
-  push: vi.fn(),
-  toastError: vi.fn(),
-  toastSuccess: vi.fn(),
-  writeText: vi.fn(),
+const liveStrategy: EarnStrategy = {
+  id: "earn_strategy_live",
+  provider: "kamino",
+  providerReference: "Kvault11111111111111111111111111111111111",
+  name: "Kamino USDC Vault",
+  sourceKind: "defi",
+  depositMints: ["So11111111111111111111111111111111111111112"],
+  shareMint: "Share1111111111111111111111111111111111111",
+  apyType: "variable",
+  currentApy: "0.062",
+  liquidityTerm: "instant",
+  status: "active",
+  hostCluster: "devnet",
+  fundable: true,
+  createdAt: "2026-08-18T00:00:00.000Z",
+  updatedAt: "2026-08-18T00:00:00.000Z",
+};
+
+const mocks = vi.hoisted(() => ({ environment: "sandbox" as SdpEnvironment }));
+
+vi.mock("@/contexts/dashboard-workspace-context", () => ({
+  useDashboardWorkspace: () => ({ sdpEnvironment: mocks.environment }),
 }));
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: mocks.push }),
+vi.mock("./earn-program-data", () => ({
+  useEarnStrategies: () => ({ strategies: [liveStrategy], error: undefined, isLoading: false }),
 }));
 
-vi.mock("sonner", () => ({
-  toast: { error: mocks.toastError, success: mocks.toastSuccess },
+vi.mock("@/components/ui/code-block", () => ({
+  CodeBlock: ({ code, title }: { code: string; title?: ReactNode }) => (
+    <figure>
+      <figcaption>{title}</figcaption>
+      <pre>{code}</pre>
+    </figure>
+  ),
 }));
 
 function renderWithEnglish(children: ReactNode) {
@@ -32,91 +53,81 @@ function renderWithEnglish(children: ReactNode) {
   );
 }
 
-function renderBuilder(strategyId?: string) {
-  return renderWithEnglish(
-    <EarnButtonBuilder earnHref="/demo/markets/earn" strategyId={strategyId} />
-  );
-}
-
 function previewFigure(label: string): HTMLElement {
   const figure = screen.getByText(label).closest("figure");
   if (!figure) throw new Error(`Could not find the ${label} figure`);
   return figure;
 }
 
-beforeEach(() => {
-  window.localStorage.clear();
-  vi.clearAllMocks();
-  mocks.writeText.mockResolvedValue(undefined);
-});
-
 afterEach(() => {
+  mocks.environment = "sandbox";
   cleanup();
-  window.localStorage.clear();
 });
 
 describe("EarnButtonBuilder", () => {
-  it("updates both previews, copies the exact handoff link, and accepts the button", async () => {
-    const user = userEvent.setup();
-    Object.defineProperty(window.navigator, "clipboard", {
-      configurable: true,
-      value: { writeText: mocks.writeText },
-    });
-    renderBuilder("ethena-pyusd-prime");
+  const providerAccess = {
+    kamino: { entitled: true, configured: true, enabled: true },
+  } as const;
+
+  it("shows a disabled visual preview and emits the real header-idempotent server contract", () => {
+    renderWithEnglish(
+      <EarnButtonBuilder
+        earnHref="/dashboard/markets/earn"
+        providerAccess={providerAccess}
+        strategyId="earn_strategy_live"
+      />
+    );
 
     const iosPreview = previewFigure("iOS preview");
     const webPreview = previewFigure("Web browser preview");
-    const inkRadio = screen.getByRole("radio", { name: /^Ink/ }) as HTMLInputElement;
+    expect(within(iosPreview).getByText("Kamino USDC Vault")).toBeTruthy();
+    expect(within(webPreview).getByText("6.2% variable APY")).toBeTruthy();
+
     const accentRadio = screen.getByRole("radio", { name: /^Accent/ }) as HTMLInputElement;
-    expect(inkRadio.checked).toBe(true);
+    expect(accentRadio.disabled).toBe(true);
     expect(accentRadio.checked).toBe(false);
-
-    await user.click(accentRadio);
-
-    expect(inkRadio.checked).toBe(false);
-    expect(accentRadio.checked).toBe(true);
+    expect(
+      screen.getByText(/Button style export and persistence are not available yet/)
+    ).toBeTruthy();
     for (const preview of [iosPreview, webPreview]) {
-      const buttonPreview = within(preview).getByText("Deposit & earn");
-      expect(buttonPreview.className).toContain("bg-[#14F195]");
+      expect(within(preview).getByText("Deposit & earn").className).toContain("bg-primary");
     }
 
-    const integrationLink =
-      "https://developers.solana.com/earn/buttons/ethena-pyusd-prime?appearance=accent";
-    expect(screen.getByText(integrationLink)).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Copy link" }));
-
-    await waitFor(() => {
-      expect(mocks.writeText).toHaveBeenCalledWith(integrationLink);
-    });
-    expect(mocks.toastSuccess).toHaveBeenCalledWith("Integration link copied.");
-
-    await user.click(screen.getByRole("button", { name: "Accept and create button" }));
-
-    const stored = readAcceptedEarnButtons(window.localStorage.getItem(EARN_PROGRAM_STORAGE_KEY));
-    expect(stored).toHaveLength(1);
-    expect(stored[0]).toEqual(
-      expect.objectContaining({
-        id: "earn-button-ethena-pyusd-prime-1",
-        sequence: 1,
-        strategyId: "ethena-pyusd-prime",
-        style: "accent",
-      })
+    const code = screen.getByText(/v1\/earn\/vault-deposits/).textContent ?? "";
+    expect(code).toContain('"Idempotency-Key": idempotencyKey');
+    expect(code).not.toContain("crypto.randomUUID()");
+    expect(code).toContain('strategyId: "earn_strategy_live"');
+    expect(code).toContain("response.status === 202");
+    expect(code).not.toContain("requestId");
+    expect(code).not.toContain("developers.solana.com/earn/buttons");
+    expect(screen.getByRole("link", { name: "Done" }).getAttribute("href")).toBe(
+      "/dashboard/markets/earn"
     );
-    expect(mocks.toastSuccess).toHaveBeenCalledWith("Earn button created.");
-    expect(mocks.push).toHaveBeenCalledWith("/demo/markets/earn");
   });
 
-  it("offers a recovery route when no valid strategy was supplied", () => {
-    renderBuilder();
+  it("offers a recovery route when the live strategy id no longer resolves", () => {
+    renderWithEnglish(
+      <EarnButtonBuilder earnHref="/dashboard/markets/earn" providerAccess={providerAccess} />
+    );
 
     expect(screen.getByText("Choose a strategy first")).toBeTruthy();
-    expect(
-      screen.getByText("Return to Earn Program and select the strategy this button should fund.")
-    ).toBeTruthy();
     expect(screen.getByRole("link", { name: "Return to Earn Program" }).getAttribute("href")).toBe(
-      "/demo/markets/earn?create=1"
+      "/dashboard/markets/earn"
     );
     expect(screen.queryByText("iOS preview")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Accept and create button" })).toBeNull();
+  });
+
+  it("refuses a deep link when the selected environment cannot fund the strategy", () => {
+    mocks.environment = "production";
+    renderWithEnglish(
+      <EarnButtonBuilder
+        earnHref="/dashboard/markets/earn"
+        providerAccess={providerAccess}
+        strategyId="earn_strategy_live"
+      />
+    );
+
+    expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
+    expect(screen.queryByText("Server integration")).toBeNull();
   });
 });

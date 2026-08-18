@@ -1,21 +1,16 @@
 "use client";
 
-import { WELL_KNOWN_TOKENS } from "@sdp/types";
+import { DEFAULT_SDP_API_URL, type EarnStrategy } from "@sdp/types";
 import {
   ArrowLeftIcon,
   CheckIcon,
   Code2Icon,
-  CopyIcon,
   InfoIcon,
   MonitorIcon,
   SmartphoneIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
-import { toast } from "sonner";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,26 +22,21 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { CodeBlock } from "@/components/ui/code-block";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
-import { EarnDepositButtonPreview } from "./earn-button-preview";
+import { EarnProgramSkeleton } from "../markets-route-skeletons";
 import {
-  createAcceptedEarnButton,
-  EARN_PROGRAM_STORAGE_KEY,
-  EARN_STRATEGIES,
+  EARN_BUTTON_STYLES,
   type EarnButtonStyle,
-  readAcceptedEarnButtons,
-  serializeAcceptedEarnButtons,
-} from "./earn-program-model";
-
-const MINT_BY_ASSET = {
-  PYUSD: WELL_KNOWN_TOKENS.PYUSD.mints["mainnet-beta"].address,
-  USDC: WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address,
-  USDG: WELL_KNOWN_TOKENS.USDG.mints["mainnet-beta"].address,
-};
+  EarnDepositButtonPreview,
+} from "./earn-button-preview";
+import { EarnStrategyIdentity, formatProviderApy } from "./earn-market-presentation";
+import { useEarnStrategies } from "./earn-program-data";
+import { type EarnProviderAccess, earnVaultDepositAvailability } from "./earn-surfacing";
 
 const STYLE_OPTIONS = [
   {
@@ -70,23 +60,65 @@ const STYLE_OPTIONS = [
   descriptionKey: MessageKey;
 }>;
 
-function buildIntegrationLink(strategyId: string, style: EarnButtonStyle): string {
-  const url = new URL(`https://developers.solana.com/earn/buttons/${strategyId}`);
-  url.searchParams.set("appearance", style);
-  return url.toString();
+if (STYLE_OPTIONS.some((option) => !EARN_BUTTON_STYLES.includes(option.value))) {
+  throw new Error("Earn button style options are out of sync");
 }
 
-function PreviewContent({ style }: { style: EarnButtonStyle }) {
+function buildServerIntegration(strategy: EarnStrategy): string {
+  return `const SDP_API_URL = ${JSON.stringify(DEFAULT_SDP_API_URL)};
+
+export async function depositIntoEarnVault({
+  custodyWalletId,
+  amount,
+  idempotencyKey,
+}: {
+  custodyWalletId: string;
+  amount: string;
+  idempotencyKey: string;
+}) {
+  const apiKey = process.env.SDP_API_KEY;
+  if (!apiKey) throw new Error("SDP_API_KEY is required");
+
+  const response = await fetch(\`\${SDP_API_URL}/v1/earn/vault-deposits\`, {
+    method: "POST",
+    headers: {
+      Authorization: \`Bearer \${apiKey}\`,
+      "Content-Type": "application/json",
+      // Reuse this caller-owned key when retrying the same logical deposit.
+      "Idempotency-Key": idempotencyKey,
+    },
+    body: JSON.stringify({
+      strategyId: ${JSON.stringify(strategy.id)},
+      custodyWalletId,
+      amount,
+    }),
+  });
+
+  const result = await response.json();
+  if (response.status === 202) {
+    return { kind: "approval_pending", result };
+  }
+  if (!response.ok) {
+    throw new Error(result?.error?.message ?? "Vault deposit failed");
+  }
+  return { kind: "submitted", deposit: result.data };
+}`;
+}
+
+function PreviewContent({ strategy, style }: { strategy: EarnStrategy; style: EarnButtonStyle }) {
   const t = useTranslations();
+  const locale = useLocale();
   return (
     <div className="flex h-full flex-col">
       <div>
-        <p className="text-xs text-tertiary">{t("DashboardMarkets.earnProgram.previewBalance")}</p>
-        <p className="mt-1 text-2xl font-medium tracking-tight text-primary tabular-nums">
-          {t("DashboardMarkets.earnProgram.previewBalanceValue")}
+        <p className="text-xs text-tertiary">{t("DashboardMarkets.earnProgram.previewStrategy")}</p>
+        <p className="mt-1 line-clamp-2 text-lg font-medium tracking-tight text-primary">
+          {strategy.name}
         </p>
-        <p className="mt-3 max-w-xs text-sm leading-5 text-secondary">
-          {t("DashboardMarkets.earnProgram.previewPrompt")}
+        <p className="mt-2 text-sm text-secondary tabular-nums">
+          {t("DashboardMarkets.earnProgram.previewRate", {
+            apy: formatProviderApy(strategy.currentApy, locale),
+          })}
         </p>
       </div>
       <div className="mt-auto pt-8">
@@ -99,7 +131,7 @@ function PreviewContent({ style }: { style: EarnButtonStyle }) {
   );
 }
 
-function IosButtonPreview({ style }: { style: EarnButtonStyle }) {
+function IosButtonPreview({ strategy, style }: { strategy: EarnStrategy; style: EarnButtonStyle }) {
   const t = useTranslations();
   return (
     <figure className="min-w-0">
@@ -111,10 +143,10 @@ function IosButtonPreview({ style }: { style: EarnButtonStyle }) {
         <div className="flex min-h-[22rem] flex-col overflow-hidden rounded-[1.55rem] bg-surface-raised px-5 pt-4 pb-5">
           <div aria-hidden="true" className="mx-auto h-1.5 w-16 rounded-full bg-fill-strong" />
           <p className="mt-5 border-b border-border-subtle pb-3 text-sm font-medium text-primary">
-            {t("DashboardMarkets.earnProgram.previewAppName")}
+            {t("DashboardMarkets.earnProgram.previewProduct")}
           </p>
           <div className="min-h-0 flex-1 pt-6">
-            <PreviewContent style={style} />
+            <PreviewContent strategy={strategy} style={style} />
           </div>
         </div>
       </div>
@@ -122,7 +154,7 @@ function IosButtonPreview({ style }: { style: EarnButtonStyle }) {
   );
 }
 
-function WebButtonPreview({ style }: { style: EarnButtonStyle }) {
+function WebButtonPreview({ strategy, style }: { strategy: EarnStrategy; style: EarnButtonStyle }) {
   const t = useTranslations();
   return (
     <figure className="min-w-0">
@@ -137,16 +169,13 @@ function WebButtonPreview({ style }: { style: EarnButtonStyle }) {
             <span className="size-2 rounded-full bg-fill-strong" />
             <span className="size-2 rounded-full bg-fill-strong" />
           </span>
-          <span className="min-w-0 flex-1 truncate rounded-md bg-surface-raised px-3 py-1.5 text-center text-[11px] text-tertiary">
-            {t("DashboardMarkets.earnProgram.previewWebUrl")}
+          <span className="text-[11px] text-tertiary">
+            {t("DashboardMarkets.earnProgram.previewProduct")}
           </span>
         </div>
         <div className="min-h-[22rem] px-7 py-6">
-          <p className="border-b border-border-subtle pb-3 text-sm font-medium text-primary">
-            {t("DashboardMarkets.earnProgram.previewWebName")}
-          </p>
-          <div className="mt-7 h-[15.5rem] max-w-sm">
-            <PreviewContent style={style} />
+          <div className="h-[17rem] max-w-sm">
+            <PreviewContent strategy={strategy} style={style} />
           </div>
         </div>
       </div>
@@ -156,127 +185,91 @@ function WebButtonPreview({ style }: { style: EarnButtonStyle }) {
 
 export function EarnButtonBuilder({
   earnHref,
+  providerAccess,
   strategyId,
 }: {
   earnHref: string;
+  providerAccess: EarnProviderAccess | null;
   strategyId?: string;
 }) {
   const t = useTranslations();
-  const locale = useLocale();
-  const router = useRouter();
-  const { copied, copy } = useCopy(1600);
-  const [style, setStyle] = useState<EarnButtonStyle>("ink");
-  const strategy = EARN_STRATEGIES.find((entry) => entry.id === strategyId);
-  const apy = useMemo(
-    () =>
-      new Intl.NumberFormat(locale, {
-        style: "percent",
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }),
-    [locale]
-  );
+  const { sdpEnvironment } = useDashboardWorkspace();
+  const { strategies, error, isLoading } = useEarnStrategies();
+  // SDP has no button-configuration resource or client-component export yet.
+  // Keep the new layout visible, but lock the preview to a non-persisted style
+  // instead of pretending these controls save or generate a real button.
+  const style: EarnButtonStyle = "ink";
 
-  if (!strategy) {
+  if (isLoading) return <EarnProgramSkeleton />;
+
+  const strategy = strategies?.find((entry) => entry.id === strategyId);
+  const availability = strategy
+    ? earnVaultDepositAvailability(strategy, sdpEnvironment, providerAccess)
+    : undefined;
+  if (error || !strategy || availability !== "available") {
+    const unavailable = Boolean(strategy && !error);
     return (
       <DashboardWorkspaceOverviewPanel>
         <ListEmptyState
           action={
             <Button asChild variant="secondary">
-              <Link href={`${earnHref}?create=1`}>
-                {t("DashboardMarkets.earnProgram.returnToEarn")}
-              </Link>
+              <Link href={earnHref}>{t("DashboardMarkets.earnProgram.returnToEarn")}</Link>
             </Button>
           }
-          description={t("DashboardMarkets.earnProgram.missingStrategyDescription")}
+          description={t(
+            error
+              ? "DashboardMarkets.earnProgram.catalogueErrorDescription"
+              : unavailable
+                ? "DashboardMarkets.earnProgram.unavailableStrategyDescription"
+                : "DashboardMarkets.earnProgram.missingStrategyDescription"
+          )}
           icon={<InfoIcon aria-hidden="true" className="size-5" />}
-          message={t("DashboardMarkets.earnProgram.missingStrategyTitle")}
+          message={t(
+            error
+              ? "DashboardMarkets.earnProgram.catalogueErrorTitle"
+              : unavailable
+                ? "DashboardMarkets.earnProgram.unavailableStrategyTitle"
+                : "DashboardMarkets.earnProgram.missingStrategyTitle"
+          )}
         />
       </DashboardWorkspaceOverviewPanel>
     );
   }
 
-  const integrationLink = buildIntegrationLink(strategy.id, style);
-
-  const copyIntegrationLink = async () => {
-    try {
-      await copy(integrationLink);
-      toast.success(t("DashboardMarkets.earnProgram.copied"));
-    } catch {
-      toast.error(t("DashboardMarkets.earnProgram.copyFailed"));
-    }
-  };
-
-  const acceptButton = () => {
-    try {
-      const existing = readAcceptedEarnButtons(
-        window.localStorage.getItem(EARN_PROGRAM_STORAGE_KEY)
-      );
-      const lastSequence = existing
-        .filter((button) => button.strategyId === strategy.id)
-        .reduce((maximum, button) => Math.max(maximum, button.sequence), 0);
-      const accepted = createAcceptedEarnButton({
-        strategyId: strategy.id,
-        style,
-        sequence: lastSequence + 1,
-      });
-      if (!accepted) throw new Error("invalid mock Earn button");
-
-      window.localStorage.setItem(
-        EARN_PROGRAM_STORAGE_KEY,
-        serializeAcceptedEarnButtons([...existing, accepted])
-      );
-      toast.success(t("DashboardMarkets.earnProgram.acceptedSuccess"));
-      router.push(earnHref);
-    } catch {
-      toast.error(t("DashboardMarkets.earnProgram.saveFailed"));
-    }
-  };
+  const integrationCode = buildServerIntegration(strategy);
 
   return (
     <DashboardWorkspaceOverviewPanel>
       <div className="mx-auto w-full max-w-6xl space-y-5">
         <Button asChild iconLeft={<ArrowLeftIcon />} size="sm" variant="secondary">
-          <Link href={`${earnHref}?create=1`}>{t("DashboardMarkets.earnProgram.back")}</Link>
+          <Link href={earnHref}>{t("DashboardMarkets.earnProgram.back")}</Link>
         </Button>
 
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="max-w-3xl">
-            <p className="text-xs font-medium uppercase tracking-wide text-tertiary">
-              {t("DashboardMarkets.earnProgram.builderEyebrow")}
-            </p>
-            <h2 className="mt-2 text-2xl font-medium tracking-tight text-primary">
-              {t("DashboardMarkets.earnProgram.builderTitle")}
-            </h2>
-            <p className="mt-2 text-sm leading-6 text-secondary">
-              {t("DashboardMarkets.earnProgram.builderDescription")}
-            </p>
-          </div>
-          <Badge variant="outline">{t("DashboardMarkets.earnProgram.mockData")}</Badge>
+        <div className="max-w-3xl">
+          <p className="text-xs font-medium uppercase tracking-wide text-tertiary">
+            {t("DashboardMarkets.earnProgram.builderEyebrow")}
+          </p>
+          <h2 className="mt-2 text-2xl font-medium tracking-tight text-primary">
+            {t("DashboardMarkets.earnProgram.builderTitle")}
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-secondary">
+            {t("DashboardMarkets.earnProgram.builderDescription")}
+          </p>
         </div>
 
         <Card>
           <CardHeader>
             <CardTitle>{t("DashboardMarkets.earnProgram.selectedStrategy")}</CardTitle>
-            <CardDescription>{strategy.name}</CardDescription>
+            <CardDescription>{strategy.provider}</CardDescription>
             <CardAction>
               <Button asChild size="sm" variant="ghost">
-                <Link href={`${earnHref}?create=1`}>
-                  {t("DashboardMarkets.earnProgram.changeStrategy")}
-                </Link>
+                <Link href={earnHref}>{t("DashboardMarkets.earnProgram.changeStrategy")}</Link>
               </Button>
             </CardAction>
           </CardHeader>
           <CardContent>
-            <div className="flex items-center gap-3 rounded-xl border border-border-default px-4 py-4">
-              <TokenMark mint={MINT_BY_ASSET[strategy.asset]} size="md" symbol={strategy.asset} />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm text-primary">{strategy.name}</p>
-                <p className="mt-0.5 text-xs text-tertiary">{strategy.asset}</p>
-              </div>
-              <p className="text-2xl font-medium tracking-tight text-primary tabular-nums">
-                {apy.format(strategy.apyPercent / 100)}
-              </p>
+            <div className="rounded-xl border border-border-default px-4 py-4">
+              <EarnStrategyIdentity strategy={strategy} />
             </div>
           </CardContent>
         </Card>
@@ -299,18 +292,19 @@ export function EarnButtonBuilder({
                   return (
                     <label
                       className={cn(
-                        "relative cursor-pointer rounded-xl border px-4 py-4 transition-colors focus-within:ring-2 focus-within:ring-border-default focus-within:ring-offset-2",
+                        "relative cursor-not-allowed rounded-xl border px-4 py-4 opacity-60",
                         selected
                           ? "border-primary bg-fill-subtle"
-                          : "border-border-default bg-surface-raised hover:bg-fill-subtle"
+                          : "border-border-default bg-surface-raised"
                       )}
                       key={option.value}
                     >
                       <input
                         checked={selected}
                         className="sr-only"
+                        disabled
                         name="earn-button-style"
-                        onChange={() => setStyle(option.value)}
+                        readOnly
                         type="radio"
                         value={option.value}
                       />
@@ -341,9 +335,14 @@ export function EarnButtonBuilder({
               </div>
             </fieldset>
 
+            <div className="flex items-start gap-2 rounded-xl border border-border-default bg-fill-subtle px-4 py-3 text-xs leading-5 text-secondary">
+              <InfoIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+              <p>{t("DashboardMarkets.earnProgram.appearanceUnavailable")}</p>
+            </div>
+
             <div className="grid gap-6 border-t border-border-subtle pt-6 lg:grid-cols-[0.82fr_1.18fr]">
-              <IosButtonPreview style={style} />
-              <WebButtonPreview style={style} />
+              <IosButtonPreview strategy={strategy} style={style} />
+              <WebButtonPreview strategy={strategy} style={style} />
             </div>
           </CardContent>
         </Card>
@@ -357,43 +356,25 @@ export function EarnButtonBuilder({
             <CardDescription className="max-w-3xl leading-6">
               {t("DashboardMarkets.earnProgram.integrationDescription")}
             </CardDescription>
+            <CardAction>
+              <Badge variant="outline">{t("DashboardMarkets.earnProgram.serverOnly")}</Badge>
+            </CardAction>
           </CardHeader>
-          <CardContent>
-            <p className="text-xs font-medium text-secondary">
-              {t("DashboardMarkets.earnProgram.handoffLabel")}
-            </p>
-            <div className="mt-2 flex flex-col gap-2 rounded-xl border border-border-default bg-fill-subtle p-2 sm:flex-row sm:items-center">
-              <span
-                className="min-w-0 flex-1 truncate px-2 text-sm text-primary"
-                title={integrationLink}
-              >
-                {integrationLink}
-              </span>
-              <Button
-                iconLeft={copied ? <CheckIcon /> : <CopyIcon />}
-                onClick={() => void copyIntegrationLink()}
-                size="sm"
-                type="button"
-                variant="secondary"
-              >
-                {t(
-                  copied
-                    ? "DashboardMarkets.earnProgram.copiedButton"
-                    : "DashboardMarkets.earnProgram.copyLink"
-                )}
-              </Button>
-            </div>
-            <div className="mt-3 flex items-start gap-2 text-xs leading-5 text-tertiary">
+          <CardContent className="space-y-3">
+            <CodeBlock
+              code={integrationCode}
+              language="typescript"
+              title={t("DashboardMarkets.earnProgram.serverExample")}
+              viewportClassName="max-h-[32rem]"
+            />
+            <div className="flex items-start gap-2 text-xs leading-5 text-tertiary">
               <InfoIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-              <p>{t("DashboardMarkets.earnProgram.handoffHint")}</p>
+              <p>{t("DashboardMarkets.earnProgram.secretKeyDisclosure")}</p>
             </div>
           </CardContent>
-          <CardFooter className="justify-end gap-2 border-t border-border-default">
-            <Button asChild variant="secondary">
-              <Link href={`${earnHref}?create=1`}>{t("DashboardMarkets.earnProgram.back")}</Link>
-            </Button>
-            <Button onClick={acceptButton} type="button">
-              {t("DashboardMarkets.earnProgram.acceptButton")}
+          <CardFooter className="justify-end border-t border-border-default">
+            <Button asChild>
+              <Link href={earnHref}>{t("DashboardMarkets.earnProgram.done")}</Link>
             </Button>
           </CardFooter>
         </Card>

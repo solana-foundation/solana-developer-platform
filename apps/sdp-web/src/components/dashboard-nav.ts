@@ -117,7 +117,7 @@ export function getPaymentsActions(
   ];
 }
 
-/** Each Markets sub-module carries its own flag, so the group's children are whatever is enabled. */
+/** Markets currently consumes Earn provider contracts, so both destinations share its gate. */
 export function getMarketsActions(
   t: ReturnType<typeof useTranslations>,
   earnEnabled: boolean
@@ -182,9 +182,7 @@ export function getNavSections(
           children: getPaymentsActions(t, options.privateChannelsEnabled),
           subnavKey: "payments",
         },
-        // Markets owns Treasury Solutions. Earn Program adds its own nested
-        // flag so it can remain hidden independently while Treasury stays usable.
-        ...(options.marketsEnabled && marketsActions.length > 0
+        ...(options.marketsEnabled && options.earnEnabled && marketsActions.length > 0
           ? [
               {
                 label: t("Shared.dashboardShell.markets"),

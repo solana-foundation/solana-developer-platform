@@ -2,7 +2,9 @@
 
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
-import type { EarnButtonStyle } from "./earn-program-model";
+
+export const EARN_BUTTON_STYLES = ["ink", "light", "accent"] as const;
+export type EarnButtonStyle = (typeof EARN_BUTTON_STYLES)[number];
 
 export const EARN_BUTTON_STYLE_CLASS_NAMES: Record<EarnButtonStyle, string> = {
   ink: "bg-primary text-on-primary shadow-sm",
