@@ -2,8 +2,10 @@ export type DashboardFetchResult<T> =
   | { ok: true; data: T; status: number }
   | { ok: false; error: string; status: number | null; body: unknown };
 
-interface DashboardFetchOptions {
+export interface DashboardFetchOptions {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  /** Headers intentionally supplied by the caller; nothing is inferred from browser state. */
+  headers?: HeadersInit;
   body?: unknown;
   signal?: AbortSignal;
 }
@@ -12,13 +14,17 @@ export async function dashboardFetch<T = unknown>(
   path: string,
   options: DashboardFetchOptions = {}
 ): Promise<DashboardFetchResult<T>> {
-  const { method = "GET", body, signal } = options;
+  const { method = "GET", headers: suppliedHeaders, body, signal } = options;
+  const headers = new Headers(suppliedHeaders);
+  if (body !== undefined && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
 
   let response: Response;
   try {
     response = await fetch(path, {
       method,
-      headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+      headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal,
     });
