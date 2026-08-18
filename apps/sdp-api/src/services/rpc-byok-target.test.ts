@@ -127,6 +127,41 @@ describe("assertReachableTenantEndpoint", () => {
     }
   });
 
+  it("refuses IPv6 loopback, unique-local and link-local literals", () => {
+    // `URL.hostname` keeps the brackets on an IPv6 literal, so a blocklist that
+    // anchors on the address itself has to strip them first. These are the
+    // cases that got through when it did not.
+    for (const host of [
+      "https://[::1]/rpc",
+      "https://[0:0:0:0:0:0:0:1]/rpc",
+      "https://[::]/rpc",
+      "https://[fd00::1]/rpc",
+      "https://[fc00::1]/rpc",
+      "https://[fe80::1]/rpc",
+      "https://[fe80::a00:27ff:fe4e:66a1]/rpc",
+      // The IPv6 form of the metadata endpoint.
+      "https://[fe80::a9fe:a9fe]/rpc",
+    ]) {
+      expect(() => assertReachableTenantEndpoint(host)).toThrow(/not reachable/i);
+    }
+  });
+
+  it("refuses an IPv4-mapped private address the parser rewrites to hex", () => {
+    // `new URL("https://[::ffff:127.0.0.1]/")` reports `[::ffff:7f00:1]`, which
+    // no dotted-quad pattern can match. Loopback must not re-enter that way.
+    expect(() => assertReachableTenantEndpoint("https://[::ffff:127.0.0.1]/rpc")).toThrow(
+      /not reachable/i
+    );
+    expect(() => assertReachableTenantEndpoint("https://[::ffff:169.254.169.254]/rpc")).toThrow(
+      /not reachable/i
+    );
+  });
+
+  it("still allows a routable IPv6 endpoint", () => {
+    // The blocklist is about private reachability, not about IPv6.
+    expect(() => assertReachableTenantEndpoint("https://[2606:4700::1111]/rpc")).not.toThrow();
+  });
+
   it("refuses plaintext http", () => {
     expect(() => assertReachableTenantEndpoint("http://rpc.example.com")).toThrow(/https/i);
   });

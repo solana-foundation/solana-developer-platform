@@ -5,7 +5,7 @@ import { seedTestDatabase } from "@/test/mocks/db";
 
 /**
  * The database, not the service layer, is the boundary that has to hold: these
- * assert the constraints in 0058_rpc_connections.sql directly, so a future
+ * assert the constraints in 0060_rpc_connections.sql directly, so a future
  * service refactor cannot quietly become the only thing preventing a
  * cross-tenant credential reference or a second live default.
  */
@@ -231,6 +231,42 @@ describe("rpc_connections constraints", () => {
         isDefault: true,
       })
     ).rejects.toThrow(/rpc_connections_default_requires_active/);
+  });
+
+  it("lets a connection that was live record a later failed check", async () => {
+    await insertCredential("pcred_rpc_failed_after_active");
+    await insertConnection("rconn_failed_after_active", "pcred_rpc_failed_after_active", {
+      status: "active",
+      isDefault: true,
+    });
+
+    // Re-checking a live connection whose provider has started rejecting the
+    // key is the ordinary case, and it must be recordable. While the lifecycle
+    // check excluded 'failed', this update raised a constraint violation, the
+    // 409 turned into a 500, and the row kept reading active with a stale
+    // success — the relay would go on trusting a connection that was down.
+    await expect(
+      getDb(env)
+        .prepare(
+          `UPDATE rpc_connections
+              SET status = 'failed',
+                  is_default = FALSE,
+                  last_check_status = 'failed',
+                  last_check_failure_code = 'provider_rejected'
+            WHERE id = ?`
+        )
+        .bind("rconn_failed_after_active")
+        .run()
+    ).resolves.toBeDefined();
+
+    const row = await getDb(env)
+      .prepare("SELECT status, activated_at FROM rpc_connections WHERE id = ?")
+      .bind("rconn_failed_after_active")
+      .first<{ status: string; activated_at: string | null }>();
+
+    // activated_at survives: it is history, not a claim about current health.
+    expect(row?.status).toBe("failed");
+    expect(row?.activated_at).toBe(CHECKED_AT);
   });
 
   it("refuses an unknown network", async () => {

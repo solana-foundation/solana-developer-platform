@@ -216,6 +216,45 @@ export class RpcConnectionStore {
   }
 
   /**
+   * Promote the credential the connection points at, in the same transaction
+   * that activates the connection.
+   *
+   * `insertCredential` writes `pending`, and a successful activation probe is
+   * the only evidence the key works. Without this the credential stays pending
+   * forever while the connection reads active, `findEffectiveConnection` never
+   * matches, and the organization's traffic keeps leaving on SDP's keys — the
+   * exact silent fallback this whole path exists to prevent.
+   *
+   * Reached through the connection rather than by id so the organization and
+   * scope checks are the same ones the caller already passed. `deactivated`
+   * and `retired` are excluded: neither may be resurrected by an activation.
+   */
+  async activateConnectionCredential(params: {
+    organizationId: string;
+    connectionId: string;
+    scopeKeys: readonly string[];
+    executor?: DatabaseExecutor;
+  }): Promise<number> {
+    const db = params.executor ?? this.db;
+    return db.execute(
+      `UPDATE provider_credentials
+          SET status = 'active',
+              last_validated_at = sdp_iso_now(),
+              last_failure_code = NULL,
+              updated_at = sdp_iso_now()
+        WHERE id = (
+                SELECT c.provider_credential_id
+                  FROM rpc_connections c
+                 WHERE c.id = ?
+                   AND c.organization_id = ?
+                   AND c.scope_key IN (${params.scopeKeys.map(() => "?").join(", ")})
+              )
+          AND status IN ('pending', 'failed_validation', 'active')`,
+      [params.connectionId, params.organizationId, ...params.scopeKeys]
+    );
+  }
+
+  /**
    * Deactivation drops the default flag in the same statement. Leaving it set
    * would keep a dead connection occupying the slot the relay reads.
    */

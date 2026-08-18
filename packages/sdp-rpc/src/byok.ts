@@ -60,7 +60,6 @@ const BLOCKED_HOST_PATTERNS: RegExp[] = [
   /\.localhost$/i,
   /^127\./,
   /^0\./,
-  /^\[?::1\]?$/,
   /^10\./,
   /^192\.168\./,
   /^172\.(1[6-9]|2\d|3[01])\./,
@@ -69,6 +68,48 @@ const BLOCKED_HOST_PATTERNS: RegExp[] = [
   /\.internal$/i,
   /\.local$/i,
 ];
+
+/**
+ * IPv6 literals, tested against the bracket-stripped host.
+ *
+ * `URL.hostname` returns an IPv6 literal still wrapped in brackets
+ * (`https://[fd00::1]/` -> `"[fd00::1]"`), so a pattern anchored with `^fd`
+ * silently matches nothing. Stripping first is what makes these anchors mean
+ * what they read as.
+ */
+const BLOCKED_IPV6_PATTERNS: RegExp[] = [
+  // Loopback, in the compressed form the URL parser always normalises to.
+  /^::1$/,
+  // Unspecified address: on many stacks a connect() to it reaches loopback.
+  /^::$/,
+  // fc00::/7 unique local. Exactly four hex digits: a shorter group such as
+  // `fd0:` is 0x0fd0, a different address that must not be caught here.
+  /^f[cd][0-9a-f]{2}:/i,
+  // fe80::/10 link local, which is where the IPv6 metadata endpoint lives.
+  /^fe[89ab][0-9a-f]:/i,
+];
+
+/**
+ * The host with IPv6 brackets removed, lowercased.
+ *
+ * `URL` also rewrites an IPv4-mapped literal into hex (`::ffff:127.0.0.1`
+ * becomes `::ffff:7f00:1`), so the mapped IPv4 tail is expanded back to dotted
+ * quad before the IPv4 patterns run — otherwise loopback re-enters as hex.
+ */
+function normalizeHost(hostname: string): { host: string; mappedIpv4: string | null } {
+  const host = hostname.replace(/^\[/, "").replace(/\]$/, "").toLowerCase();
+  const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(host);
+  if (!mapped) {
+    return { host, mappedIpv4: null };
+  }
+
+  const high = Number.parseInt(mapped[1], 16);
+  const low = Number.parseInt(mapped[2], 16);
+  return {
+    host,
+    mappedIpv4: [high >> 8, high & 0xff, low >> 8, low & 0xff].join("."),
+  };
+}
 
 export function assertReachableTenantEndpoint(endpointUrl: string): void {
   let parsed: URL;
@@ -82,7 +123,13 @@ export function assertReachableTenantEndpoint(endpointUrl: string): void {
     throw new SdpRpcError("BAD_REQUEST", "An RPC endpoint must use https");
   }
 
-  if (BLOCKED_HOST_PATTERNS.some((pattern) => pattern.test(parsed.hostname))) {
+  const { host, mappedIpv4 } = normalizeHost(parsed.hostname);
+  const candidates = mappedIpv4 ? [host, mappedIpv4] : [host];
+
+  if (
+    BLOCKED_IPV6_PATTERNS.some((pattern) => pattern.test(host)) ||
+    candidates.some((candidate) => BLOCKED_HOST_PATTERNS.some((pattern) => pattern.test(candidate)))
+  ) {
     throw new SdpRpcError("BAD_REQUEST", "That RPC endpoint host is not reachable from SDP");
   }
 }
