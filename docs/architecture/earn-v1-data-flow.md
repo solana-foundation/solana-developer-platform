@@ -105,11 +105,27 @@ V1 precisely because observing customer-initiated transfers from chain is
 indexer-shaped work. If V2 needs richer on-chain history (per-block share
 price, protocol events), that's the point to evaluate an indexer — not V1.
 
-## Execution era (PRO-1634 — not V1, and no longer in the tree)
+## Execution era (PRO-1634 — arrived for `vault_direct`)
 
-V1's funding model is "send stablecoins to the program's Solana deposit
-address"; there are no SDP-built deposit/withdrawal transactions, no custody
-signing, and no per-strategy movement ledger. The execution-era design that
+**This is now half true.** For the CUSTODIAL shape it still holds exactly: a
+Ground program is funded by sending stablecoins to its deposit address, with no
+SDP-built transaction and no custody signing.
+
+For the NON-CUSTODIAL (`vault_direct`) shape it no longer does. A K-Vault has no
+address to send to, so the only way money moves is SDP building an instruction,
+signing it with an organization custody wallet and submitting it. That path
+exists: `@sdp/kamino` builds the plan, `POST /v1/earn/vault-deposits` signs and
+submits, and `earn_vault_movements` (migration 0058) ledgers it — written at
+intent BEFORE signing, because the chain has no request-id dedupe and a crash
+between signing and recording is otherwise unrecoverable. `earn_vault_positions`
+records only WHICH (wallet, vault) pairs an org holds; shares and value stay live
+chain reads, so the ledger-vs-live rule above is unchanged.
+
+Still outstanding for that shape: the withdraw counterpart and the Active-tab
+snapshot. Until both land, a vault position can be entered and not exited through
+SDP — so Kamino must not become creatable on mainnet.
+
+The original V1 note, still accurate for the custodial model: The execution-era design that
 used to be diagrammed here (per-strategy `createDeposit`/`createWithdrawal`,
 `/movements/:id/submit`, movement webhooks + `getMovementStatus` reconcile
 polling) was **removed from the codebase by PRO-1628** because none of it had
@@ -126,15 +142,15 @@ guarded-CAS shape is the pattern to extend.
 | Auth + API keys + permissions | `middleware/auth.ts`, `@sdp/types/permissions` | `earn:read`/`earn:write` gating, partner `sk_live` access | ✅ wired in scaffold |
 | Org/project tenancy | `projectContextMiddleware` | Program + withdrawal-ledger scoping (rows carry org/project; every program lookup is scoped to org **and** environment, and the ledger anchors on the program wallet) | ✅ wired |
 | Provider entitlements | `services/provider-availability.service.ts` | Per-org enable/disable (override-only: every org needs an explicit `providerOverrides.earn.<id>`), env kill-switch, exit-safe gate | ✅ wired (`earn` family) |
-| Custody + signing | `services/domain/signing.service.ts`, `@sdp/custody` | Nothing in V1 (funding is a customer-initiated transfer) | ⏸ execution era (PRO-1634) |
-| Fee sponsorship | `@sdp/payments/fee-payment` (Kora) | Nothing in V1 (no SDP-built earn txs) | ⏸ execution era (PRO-1634) |
-| RPC relay (org-selected providers) | `@sdp/rpc` (`packages/sdp-rpc/src/relay.ts`) | No V1 consumer — the NAV/reconcile designs that wanted it were unpublished (PRO-1628); returns if a real NAV consumer appears | ⏸ none in V1 |
+| Custody + signing | `services/solana`, `@sdp/custody` | Vault-direct deposits sign provider-built instructions with the admitted organization wallet after policy enforcement | ✅ vault deposits |
+| Fee sponsorship | `@sdp/payments/fee-payment` (Kora) | The execution runtime supports sign-only sponsorship, but Kamino deposits use the custody wallet as fee payer until kvault/klend programs are allow-listed | ✅ runtime · ⏸ Kamino route |
+| Solana RPC | `@sdp/rpc`, `services/earn/execution-registry.ts` | Cluster-proved provider build, simulation, broadcast, and live vault-position hydration | ✅ vault-direct paths |
 | Helius DAS | `services/helius-das.service.ts` | No V1 consumer — positions are live provider reads, nothing to reconcile | ⏸ none in V1 |
 | Webhook dispatch + signature verify | `routes/webhooks/handlers.ts`, `lib/webhook-signature.ts` | Provider settlement events land on the withdrawal ledger via the same applier the poll path uses (`earn-withdrawal-ledger.service.ts`) | ⏸ PRO-1631 (polling works today; the neutral event contract returns with it) |
 | Cron infra (3 entrypoints) | `cron/runner.ts`, `index.ts scheduled`, `job.ts`; precedent `cron/pending-transfers.ts` | Catalogue sync + the withdrawal-ledger sweep (heals ref-less intent rows; launch-coupled follow-up ticket) | ✅ catalogue sync (`cron/earn-catalogue-sync.ts`, hourly, gated on `isEarnEnabled` — `MARKETS_ENABLED` **and** `EARN_ENABLED`) · 🔨 ledger sweep |
 | Idempotency | `middleware/idempotency-key.ts` + `lib/idempotency.ts` (derived request id, fingerprint replay) + `earn_program_withdrawals` (wallet, request_id) unique + `earn_provider_wallets` (provider, provider_wallet_ref) unique | Two-layer withdrawal retry safety: SDP intent row first, provider request-id dedupe as the crash-window backstop. Program **creation** is key-required too (PRO-1670) and derives against (org, environment, provider); the provider replays a retried create with the original wallet ref, so the global wallet-ref unique is what catches it — a violation there means "already created", answered 200, never 409 | ✅ wired (PRO-1628, PRO-1670) |
 | Compliance providers | `services/compliance/`, compliance family | RWA strategy KYC / depositor checks (open decision) | ⏸ decision pending |
-| Policies + approvals | policy/approval domains (`policy.repository`, approvals UI) | Graft point for doc's risk tooling (whitelists, buffers, limits, timelocks, maker-checker) | ⏸ the audit's flagged gap — decide V1 vs later |
+| Policies + approvals | policy/approval domains (`policy.repository`, approvals UI) | Vault deposits emit `program` / `earn_vault_deposit`, enforce before custody, and fence approved retries against the signed-intent transaction | ✅ vault deposits · ⏸ remaining Earn writes |
 | Audit log | `services/audit.service.ts` | Deposit/withdraw/config audit events | 🔨 execution phase |
 | Secrets/env plumbing | Doppler → `secret-keys.mjs` → workers | Provider API keys (already registered) | ✅ wired |
 | OpenAPI → docs pipeline | `openapi/spec.ts` → sdp-docs | Public `/v1/earn` reference once the Markets/Earn flags flip | ⏸ deliberately deferred |

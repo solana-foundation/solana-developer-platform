@@ -263,6 +263,7 @@ export async function extractUpdateAuthorityPolicyCandidate(
       currentAuthority: currentAuthorityRaw,
       newAuthority,
     },
+    idempotencyKey: null,
   };
 }
 
