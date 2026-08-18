@@ -1,7 +1,7 @@
 import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 import defaultMdxComponents from "fumadocs-ui/mdx";
-import { ArrowUpRightIcon } from "lucide-react";
 import type React from "react";
+import { ExternalDocsLink } from "@/components/docs-shell/external-link";
 import { DocsHome } from "@/components/docs-shell/home";
 import { HowItWorks, Step, StepPanel } from "@/components/docs-shell/how-it-works";
 import { EnvConfigurator } from "@/components/EnvConfigurator";
@@ -45,16 +45,9 @@ function MDXLink({ className, href, children, ...props }: React.ComponentPropsWi
 
   if (isExternal) {
     return (
-      <a
-        href={href}
-        className={cn("launch-mdx-link launch-mdx-link-external", className)}
-        target="_blank"
-        rel="noreferrer"
-        {...props}
-      >
+      <ExternalDocsLink href={href} className={className} {...props}>
         {children}
-        <ArrowUpRightIcon size={13} aria-hidden="true" />
-      </a>
+      </ExternalDocsLink>
     );
   }
 
