@@ -156,9 +156,10 @@ the body `requestId` form, which is the only one that can get through.
   A token Ground never routes to Solana (USDT: Ethereum
   only, per their supported-chains doc — sandbox USDT is Ground's mock Sepolia
   asset) is NOT OFFERED at all: the token select renders only
-  `SOLANA_PAYOUT_TOKENS`, mirroring `GROUND_SOLANA_ROUTED_TOKENS` in the
-  provider client, which also keeps un-routable strategies out of the
-  catalogue at sync time. Preview failures render TRANSLATED copy naming the per-lane
+  `SOLANA_PAYOUT_TOKENS`, read from the shared
+  `EARN_PROGRAM_SOLANA_PAYOUT_TOKENS` registry in `@sdp/types` that the
+  provider client gates on too, which also keeps un-routable strategies out of
+  the catalogue at sync time. Preview failures render TRANSLATED copy naming the per-lane
   reality — never the provider's wire text ("ground request failed with status
   409" explains nothing).
 - `deposit/` — the deposit flow: funding wallet → full strategy catalogue →
