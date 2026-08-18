@@ -2,6 +2,7 @@ import { type Context, Hono, type Next } from "hono";
 import { AppError } from "@/lib/errors";
 import { isEarnEnabled } from "@/lib/feature-flags";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
 import {
@@ -16,6 +17,12 @@ import {
   retargetEarnProgram,
 } from "./handlers/program";
 import { getEarnStrategy, listEarnStrategies } from "./handlers/strategies";
+import {
+  createEarnVaultDeposit,
+  extractEarnVaultDepositPolicyCandidate,
+  findEarnVaultDepositIdempotentKeyReplay,
+  listEarnVaultPositions,
+} from "./handlers/vault";
 
 const earn = new Hono<{ Bindings: Env }>();
 
@@ -37,6 +44,37 @@ earn.use("*", projectContextMiddleware());
 // Strategy catalogue (source: DB, written only by the sync cron + dev seed).
 earn.get("/strategies", requirePermissions("earn:read"), listEarnStrategies);
 earn.get("/strategies/:strategyId", requirePermissions("earn:read"), getEarnStrategy);
+
+// Non-custodial ("vault_direct") positions: SDP builds and signs the deposit
+// from a custody wallet, so unlike /programs there is no provider wallet to
+// provision and no address to fund afterwards.
+//
+// Both routes take the GLOBAL `wallets:read` alongside their earn scope, the
+// same pairing every money-moving payments route uses. That is not belt and
+// braces: for an API key with NO wallet bindings the per-wallet assertion in
+// the handler is a documented NO-OP, so the router permission is the only gate
+// such a key ever meets when it names a wallet.
+//
+// `policyGate` is what makes this route governed at all. It reaches
+// `createOrgSigner` and broadcasts a value-moving transaction, so without the
+// gate an org's wallet deny rules, approval requirements, amount/asset limits
+// and destination controls were all bypassed — the handler simply never asked.
+// The gate must sit AFTER `requirePermissions` and immediately before the
+// handler, so a denial is decided before any KMS or relay access.
+earn.post(
+  "/vault-deposits",
+  requirePermissions("earn:write", "wallets:read"),
+  policyGate({
+    extract: extractEarnVaultDepositPolicyCandidate,
+    findIdempotentKeyReplay: findEarnVaultDepositIdempotentKeyReplay,
+  }),
+  createEarnVaultDeposit
+);
+earn.get(
+  "/vault-positions",
+  requirePermissions("earn:read", "wallets:read"),
+  listEarnVaultPositions
+);
 
 // Portfolio programs: N provider wallets per org+environment+provider
 // (PRO-1670), each addressed by its own id. Money-in (create, re-target) takes

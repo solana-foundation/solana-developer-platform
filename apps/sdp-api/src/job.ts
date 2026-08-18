@@ -3,6 +3,10 @@ import { pathToFileURL } from "node:url";
 import * as Sentry from "@sentry/node";
 import { runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
 import { runEarnMetricsRefreshTick } from "@/cron/earn-metrics-refresh";
+import {
+  EARN_VAULT_MOVEMENTS_CRON,
+  EARN_VAULT_MOVEMENTS_MONITOR,
+} from "@/cron/earn-vault-movements";
 import { PENDING_TRANSFERS_CRON, PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
 import { WORKFLOW_EXECUTIONS_CRON, WORKFLOW_EXECUTIONS_MONITOR } from "@/cron/workflow-executions";
 import {
@@ -16,6 +20,7 @@ import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import { getSentryOptions, isSentryEnabled } from "@/runtime/observability";
 import { initNodeSentry, nodeObservability } from "@/runtime/observability-node";
+import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
 import { runDueWorkflowExecutions } from "@/services/jobs/run-workflow-executions";
@@ -63,6 +68,11 @@ export async function runCronJob(): Promise<void> {
         );
       }
     });
+    // Signed vault intents are an outbox, not feature state. Reconcile them
+    // outside the Earn gate so disabling new deposits cannot strand old ones.
+    await monitored(EARN_VAULT_MOVEMENTS_MONITOR, EARN_VAULT_MOVEMENTS_CRON, () =>
+      reconcileEarnVaultMovements(env)
+    );
     // The workflow engine has no other tick in the Cloud Run deployment shape (the
     // in-process cron scheduler is skipped under K_SERVICE) — without this, enqueued
     // executions would sit 'pending' forever in production.

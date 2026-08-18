@@ -14,6 +14,7 @@ const representativeFamilies: Array<[WalletOperationFamily, WalletOperationType]
   ["payment", "recurring_payment_create"],
   ["ramp", "ramp_onramp_quote"],
   ["issuance", "issuance_mint_execute"],
+  ["program", "earn_vault_deposit"],
 ];
 
 describe("evaluateWalletOperationPolicies", () => {

@@ -6,6 +6,10 @@ import {
   APPROVED_WALLET_OPERATIONS_CRON,
   runApprovedWalletOperationRecovery,
 } from "./approved-wallet-operations";
+import {
+  EARN_VAULT_MOVEMENTS_CRON,
+  runEarnVaultMovementsReconciliation,
+} from "./earn-vault-movements";
 import { runPendingDepositsReconciliation } from "./pending-deposits";
 import { PENDING_TRANSFERS_CRON, runPendingTransfersReconciliation } from "./pending-transfers";
 import { runPendingWithdrawalsReconciliation } from "./pending-withdrawals";
@@ -42,6 +46,11 @@ vi.mock("node-cron", () => ({
 vi.mock("./approved-wallet-operations", () => ({
   APPROVED_WALLET_OPERATIONS_CRON: "* * * * *",
   runApprovedWalletOperationRecovery: vi.fn(),
+}));
+
+vi.mock("./earn-vault-movements", () => ({
+  EARN_VAULT_MOVEMENTS_CRON: "* * * * *",
+  runEarnVaultMovementsReconciliation: vi.fn(),
 }));
 
 vi.mock("./pending-transfers", async (importOriginal) => {
@@ -104,6 +113,7 @@ describe("startCron", () => {
     stopMock.mockReset();
     scheduleMock.mockReturnValue(fakeTask);
     vi.mocked(runApprovedWalletOperationRecovery).mockReset();
+    vi.mocked(runEarnVaultMovementsReconciliation).mockReset();
     vi.mocked(runPendingTransfersReconciliation).mockReset();
     vi.mocked(runRecurringPaymentsCollection).mockReset();
     vi.mocked(runWorkflowExecutions).mockReset();
@@ -134,11 +144,12 @@ describe("startCron", () => {
 
   it("schedules a task with PENDING_TRANSFERS_CRON when DISABLE_CRON is unset", () => {
     startCron({ env: {} as Env, bg: makeBg() });
-    expect(scheduleMock).toHaveBeenCalledTimes(4);
+    expect(scheduleMock).toHaveBeenCalledTimes(5);
     expect(scheduleMock.mock.calls[0][0]).toBe(APPROVED_WALLET_OPERATIONS_CRON);
     expect(scheduleMock.mock.calls[1][0]).toBe(PENDING_TRANSFERS_CRON);
     expect(scheduleMock.mock.calls[2][0]).toBe(WORKFLOW_EXECUTIONS_CRON);
     expect(scheduleMock.mock.calls[3][0]).toBe(WORKFLOW_SECRET_RETIREMENTS_CRON);
+    expect(scheduleMock.mock.calls[4][0]).toBe(EARN_VAULT_MOVEMENTS_CRON);
   });
 
   it("schedules workflow executions by default, and its tick runs the engine", () => {
@@ -157,7 +168,7 @@ describe("startCron", () => {
   it("omits workflow executions when asset profiles is off", () => {
     startCron({ env: SELF_HOSTED_NO_PROFILES, bg: makeBg() });
 
-    expect(scheduleMock).toHaveBeenCalledTimes(3);
+    expect(scheduleMock).toHaveBeenCalledTimes(4);
     for (const call of scheduleMock.mock.calls) {
       (call[1] as () => void)();
     }
@@ -197,7 +208,7 @@ describe("startCron", () => {
       env: { K_SERVICE: "sdp-api", DISABLE_CRON: "false" } as Env,
       bg: makeBg(),
     });
-    expect(scheduleMock).toHaveBeenCalledTimes(4);
+    expect(scheduleMock).toHaveBeenCalledTimes(5);
     expect(scheduleMock.mock.calls[0][0]).toBe(APPROVED_WALLET_OPERATIONS_CRON);
     expect(scheduleMock.mock.calls[1][0]).toBe(PENDING_TRANSFERS_CRON);
   });
@@ -205,7 +216,7 @@ describe("startCron", () => {
   it("does not schedule recurring collection unless collection is enabled", () => {
     startCron({ env: {} as Env, bg: makeBg() });
 
-    expect(scheduleMock).toHaveBeenCalledTimes(4);
+    expect(scheduleMock).toHaveBeenCalledTimes(5);
     expect(scheduleMock.mock.calls[0][0]).toBe(APPROVED_WALLET_OPERATIONS_CRON);
     expect(scheduleMock.mock.calls[1][0]).toBe(PENDING_TRANSFERS_CRON);
     expect(runRecurringPaymentsCollection).not.toHaveBeenCalled();
@@ -217,7 +228,7 @@ describe("startCron", () => {
       bg: makeBg(),
     });
 
-    expect(scheduleMock).toHaveBeenCalledTimes(5);
+    expect(scheduleMock).toHaveBeenCalledTimes(6);
     expect(scheduleMock.mock.calls[0][0]).toBe(APPROVED_WALLET_OPERATIONS_CRON);
     expect(scheduleMock.mock.calls[1][0]).toBe(PENDING_TRANSFERS_CRON);
     expect(scheduleMock.mock.calls[2][0]).toBe(RECURRING_PAYMENTS_COLLECTION_CRON);
@@ -230,7 +241,7 @@ describe("startCron", () => {
 
     // approved-operation recovery + transfers + workflow executions + deposits +
     // withdrawals (recurring stays off).
-    expect(scheduleMock).toHaveBeenCalledTimes(6);
+    expect(scheduleMock).toHaveBeenCalledTimes(7);
 
     // Fire every scheduled tick; the two private-channels reconcilers must run.
     for (const call of scheduleMock.mock.calls) {
@@ -251,7 +262,7 @@ describe("startCron", () => {
   it("schedules when DISABLE_CRON is set to a recognised falsy value ('false' / '0')", () => {
     startCron({ env: { DISABLE_CRON: "false" } as Env, bg: makeBg() });
     startCron({ env: { DISABLE_CRON: "0" } as Env, bg: makeBg() });
-    expect(scheduleMock).toHaveBeenCalledTimes(8);
+    expect(scheduleMock).toHaveBeenCalledTimes(10);
   });
 
   it("throws on an unrecognised DISABLE_CRON value to surface env typos", () => {
@@ -297,6 +308,20 @@ describe("startCron", () => {
     expect(runApprovedWalletOperationRecovery).toHaveBeenCalledWith({ env, bg, observability });
   });
 
+  it("tick invokes vault-movement recovery outside the Earn feature gate", () => {
+    const bg = makeBg();
+    const env = SELF_HOSTED_NO_PROFILES;
+    const observability = makeObservability();
+    startCron({ env, bg, observability });
+    const tick = scheduleMock.mock.calls.at(-1)?.[1] as () => void;
+    tick();
+    expect(runEarnVaultMovementsReconciliation).toHaveBeenCalledWith({
+      env,
+      bg,
+      observability,
+    });
+  });
+
   it("recurring tick invokes runRecurringPaymentsCollection with the supplied deps", () => {
     const bg = makeBg();
     const env = { PAYMENTS_RECURRING_COLLECTION_ENABLED: "true" } as Env;
@@ -333,7 +358,7 @@ describe("startCron", () => {
     const handle = startCron({ env: {} as Env, bg: makeBg() });
     expect(handle).not.toBeNull();
     await handle?.stop();
-    expect(stopMock).toHaveBeenCalledTimes(4);
+    expect(stopMock).toHaveBeenCalledTimes(5);
   });
 
   it("returned handle.stop() stops every scheduled task", async () => {
@@ -343,6 +368,6 @@ describe("startCron", () => {
     });
     expect(handle).not.toBeNull();
     await handle?.stop();
-    expect(stopMock).toHaveBeenCalledTimes(5);
+    expect(stopMock).toHaveBeenCalledTimes(6);
   });
 });
