@@ -8,7 +8,11 @@ import {
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createRequestScopedSdpApiClients } from "@/lib/sdp-api";
-import { EarnDepositWizard } from "./earn-deposit-wizard";
+// From `earn-surfacing`, NOT `earn-program-data`: the latter is a client module,
+// and a Server Component importing a value from one receives a client-reference
+// proxy (truthy) instead of the boolean, which makes the guard below dead code.
+import { EARN_PROGRAM_CREATION_ENABLED } from "../earn-surfacing";
+import { EarnDepositUnavailable, EarnDepositWizard } from "./earn-deposit-wizard";
 import type { EarnApiKeyView } from "./integration-screen";
 
 export const dynamic = "force-dynamic";
@@ -57,6 +61,13 @@ export default async function EarnDepositPage({ searchParams }: EarnDepositPageP
   // new one. Resolved here like `strategy` — this server shell owns search
   // params, the client wizard receives props.
   const retargetProgramId = firstParam(resolved, "program");
+
+  // Nothing below is worth fetching when no surfaced provider can hold a
+  // program: both run shapes are dead, so the route refuses before it spends
+  // three API calls resolving context for a flow that cannot complete.
+  if (!EARN_PROGRAM_CREATION_ENABLED) {
+    return <EarnDepositUnavailable />;
+  }
 
   let apiKeys: EarnApiKeyView[] = [];
   let fireblocksEnabled = false;

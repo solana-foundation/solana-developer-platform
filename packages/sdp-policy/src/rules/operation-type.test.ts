@@ -17,7 +17,7 @@ describe("evaluateOperationTypeRule", () => {
   it("abstains when the operation type is not named", () => {
     assert.equal(
       evaluateOperationTypeRule(
-        { kind: "operation_type", operationTypes: ["token_transfer"] },
+        { kind: "operation_type", operationTypes: ["issuance_mint_execute"] },
         operation
       ),
       null
@@ -26,7 +26,11 @@ describe("evaluateOperationTypeRule", () => {
 
   it("matches the operation type across singular and plural forms", () => {
     const evaluation = evaluateOperationTypeRule(
-      { kind: "operation_type", operationType: "payment_request", action: "approval_required" },
+      {
+        kind: "operation_type",
+        operationType: "payment_transfer_execute",
+        action: "approval_required",
+      },
       operation
     );
     assert.equal(evaluation?.decision, "approval_required");

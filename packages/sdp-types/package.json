@@ -34,6 +34,11 @@
       "import": "./src/earn.ts",
       "default": "./src/earn.ts"
     },
+    "./kamino-programs": {
+      "types": "./src/kamino-programs.ts",
+      "import": "./src/kamino-programs.ts",
+      "default": "./src/kamino-programs.ts"
+    },
     "./payments": {
       "types": "./src/payments.ts",
       "import": "./src/payments.ts",

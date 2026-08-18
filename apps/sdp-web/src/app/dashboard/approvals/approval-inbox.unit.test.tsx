@@ -49,7 +49,7 @@ function pendingRequest(
       apiKeyId: null,
       source: "api",
       operationFamily: "transfer",
-      operationType: "transfer.spl",
+      operationType: "payment_transfer_execute",
       asset: null,
       amount: null,
       destination: null,

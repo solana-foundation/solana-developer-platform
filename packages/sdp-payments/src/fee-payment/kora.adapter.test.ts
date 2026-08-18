@@ -65,6 +65,60 @@ function makeAdapterRejectingSend(rpcErrorMessage: string): KoraAdapter {
   return new KoraAdapter({ rpcUrl: "https://kora.example", userId: "u1", client: transport });
 }
 
+function makeAdapterFlakySend(failures: number, failure: () => Error): KoraAdapter {
+  let attempts = 0;
+  const transport = {
+    getPayerSigner: async () => ({ signer_address: SIGNER }),
+    signTransaction: async () => ({ signed_transaction: "" }),
+    signAndSendTransaction: async () => {
+      attempts += 1;
+      if (attempts <= failures) throw failure();
+      return { signature: "sig111" };
+    },
+    estimateTransactionFee: async () => ({ fee_in_lamports: 0 }),
+    getSupportedTokens: async () => ({ tokens: [] }),
+    getConfig: async () => ({}),
+  } as unknown as KoraTransport;
+  return new KoraAdapter({ rpcUrl: "https://kora.example", userId: "u1", client: transport });
+}
+
+describe("KoraAdapter transient-failure handling", () => {
+  it("retries signAndSend through a connection-level failure", async () => {
+    const adapter = makeAdapterFlakySend(2, () => new TypeError("fetch failed"));
+    const signature = await adapter.signAndSend(new Uint8Array([1]));
+    assert.equal(signature, "sig111");
+  });
+
+  it("gives up after exhausting retries on connection-level failures", async () => {
+    const adapter = makeAdapterFlakySend(3, () => new TypeError("fetch failed"));
+    await assert.rejects(
+      adapter.signAndSend(new Uint8Array([1])),
+      (error: unknown) => error instanceof FeePaymentError && error.message.includes("fetch failed")
+    );
+  });
+
+  it("fails a hung call at the configured timeout instead of hanging", async () => {
+    const transport = {
+      getPayerSigner: () => new Promise(() => {}),
+      signTransaction: async () => ({ signed_transaction: "" }),
+      signAndSendTransaction: async () => ({ signed_transaction: "" }),
+      estimateTransactionFee: async () => ({ fee_in_lamports: 0 }),
+      getSupportedTokens: async () => ({ tokens: [] }),
+      getConfig: async () => ({}),
+    } as unknown as KoraTransport;
+    const adapter = new KoraAdapter({
+      rpcUrl: "https://kora.example",
+      userId: "u1",
+      client: transport,
+      timeoutMs: 20,
+    });
+    await assert.rejects(
+      adapter.getFeePayer(),
+      (error: unknown) => error instanceof FeePaymentError && error.message.includes("timed out")
+    );
+  });
+});
+
 describe("KoraAdapter error classification", () => {
   it("treats a generic Kora server error as ambiguous, not a deterministic rejection", async () => {
     const adapter = makeAdapterRejectingSend("RPC Error -32000: server exploded");

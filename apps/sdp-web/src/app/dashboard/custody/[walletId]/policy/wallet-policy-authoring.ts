@@ -6,6 +6,7 @@ import {
   type PolicyRuleAction,
   type SdpEnvironment,
   type WalletOperationFamily,
+  type WalletOperationType,
   WELL_KNOWN_TOKEN_BY_MINT,
   WELL_KNOWN_TOKENS,
   type WellKnownTokenCategory,
@@ -33,7 +34,7 @@ export const WALLET_OPERATION_FAMILIES = [
 export type AuthorableOperationFamily = (typeof WALLET_OPERATION_FAMILIES)[number];
 
 export interface OperationTypeRuleInput {
-  value: string;
+  value: WalletOperationType;
   action: AuthoringRuleAction;
 }
 
@@ -268,8 +269,10 @@ function operationFamiliesFromRule(
   return families;
 }
 
-function operationTypesFromRule(rule: Extract<PolicyRule, { kind: "operation_type" }>): string[] {
-  return uniqueValues(rule.operationTypes ?? (rule.operationType ? [rule.operationType] : []));
+function operationTypesFromRule(
+  rule: Extract<PolicyRule, { kind: "operation_type" }>
+): WalletOperationType[] {
+  return [...new Set(rule.operationTypes ?? (rule.operationType ? [rule.operationType] : []))];
 }
 
 function assetsFromRule(rule: Extract<PolicyRule, { kind: "asset" }>): string[] {

@@ -84,6 +84,18 @@ export interface Env {
 
   // Solana configuration
   SOLANA_RPC_URL?: string;
+  /**
+   * Optional PER-CLUSTER overrides for the Earn execution path.
+   *
+   * One API process serves both clusters — sandbox projects are devnet,
+   * production projects are mainnet-beta — so a single `SOLANA_RPC_URL` cannot
+   * be correct for both. Unset falls back to `SOLANA_RPC_URL`, which must then
+   * prove its chain by genesis hash before anything is built against it
+   * (`assertClusterEndpoint`), so a single-cluster deployment keeps working and
+   * a mismatch is a refusal rather than a confidently wrong transaction.
+   */
+  SOLANA_DEVNET_RPC_URL?: string;
+  SOLANA_MAINNET_RPC_URL?: string;
   SOLANA_RPC_DEFAULT_PROVIDER?: OrganizationRpcProvider;
   SOLANA_RPC_TRITON_URL?: string;
   SOLANA_RPC_TRITON_API_KEY?: string;

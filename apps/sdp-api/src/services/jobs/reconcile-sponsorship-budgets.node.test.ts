@@ -119,6 +119,8 @@ function harness(candidate: SponsorshipReconciliationReservation) {
     getGlobalPolicy: vi.fn().mockResolvedValue({ ...breakerPolicy, enabled: true }),
     tripGlobalBreaker: vi.fn().mockResolvedValue(breakerPolicy),
     resumeGlobalBreaker: vi.fn().mockResolvedValue(null),
+    recordProviderConfigFailure: vi.fn().mockResolvedValue(1),
+    resetProviderConfigFailures: vi.fn().mockResolvedValue(undefined),
     markRedisSettled: vi.fn().mockResolvedValue(true),
   };
   const budgetRedis = {
@@ -330,7 +332,7 @@ describe("reconcileSponsorshipBudgets", () => {
     }
   );
 
-  it("trips the breaker only after exhausting config read retries", async () => {
+  it("records a config failure without tripping while under the consecutive threshold", async () => {
     const candidate = reservation();
     const { repository, budgetRedis, getTransaction } = harness(candidate);
     const getProviderConfiguration = vi.fn().mockRejectedValue(new Error("Kora unavailable"));
@@ -348,12 +350,46 @@ describe("reconcileSponsorshipBudgets", () => {
     ).rejects.toThrow("configuration is unavailable");
     expect(getProviderConfiguration).toHaveBeenCalledTimes(3);
     expect(sleep).toHaveBeenCalledTimes(2);
+    expect(repository.recordProviderConfigFailure).toHaveBeenCalledWith("devnet");
+    expect(repository.tripGlobalBreaker).not.toHaveBeenCalled();
+    expect(logEvent).toHaveBeenCalledWith(
+      "warn",
+      expect.objectContaining({
+        event: "sdp_api_sponsorship_config_read_failed",
+        consecutive_failures: 1,
+      })
+    );
+    expect(getTransaction).not.toHaveBeenCalled();
+  });
+
+  it("trips the breaker after the consecutive config-failure threshold", async () => {
+    const candidate = reservation();
+    const { repository, budgetRedis, getTransaction } = harness(candidate);
+    repository.recordProviderConfigFailure.mockResolvedValue(3);
+    await expect(
+      reconcileSponsorshipBudgets({ SOLANA_NETWORK: "devnet" } as Env, {
+        repository,
+        budgetRedis,
+        getTransaction,
+        isBlockhashValid: vi.fn(),
+        getProviderConfiguration: vi.fn().mockRejectedValue(new Error("Kora unavailable")),
+        now: () => new Date("2026-08-03T10:05:00.000Z"),
+        sleep: vi.fn().mockResolvedValue(undefined),
+      })
+    ).rejects.toThrow("configuration is unavailable");
     expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
       "devnet",
       expect.stringContaining("unavailable"),
       { recoverable: true }
     );
-    expect(getTransaction).not.toHaveBeenCalled();
+    expect(repository.resetProviderConfigFailures).not.toHaveBeenCalled();
+  });
+
+  it("resets the consecutive failure counter on a successful config read", async () => {
+    const { repository, run } = harness(reservation());
+    await expect(run()).resolves.toBeUndefined();
+    expect(repository.resetProviderConfigFailures).toHaveBeenCalledWith("devnet");
+    expect(repository.recordProviderConfigFailure).not.toHaveBeenCalled();
   });
 
   it("does not trip the breaker when a config read succeeds on retry", async () => {
