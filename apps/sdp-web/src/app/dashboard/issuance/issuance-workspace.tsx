@@ -16,6 +16,10 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  dashboardWorkspaceOverviewPanelClassName,
+  dashboardWorkspacePlaygroundPanelClassName,
+} from "@/components/dashboard-workspace-panel";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Button } from "@/components/ui/button";
@@ -642,41 +646,51 @@ export function IssuanceWorkspace({
   if (!assetProfilesEnabled) {
     return (
       <DashboardWorkspaceTabShell
-        overviewClassName="space-y-6"
-        overviewKey="tokens-tab"
-        overview={
-          <IssuanceLegacyOverview
-            tokens={tokens}
-            search={search}
-            onSearchChange={setSearch}
-            onCreate={startTokenCreation}
-            isRefreshing={isRefreshing}
-            tokensNotice={tokensNotice}
-            emptyResultsNotice={emptyResultsNotice}
-            pagination={pagination}
-            createModal={
-              <CreateIssuanceTokenModal
-                open={isCreateTokenModalOpen}
-                onOpenChange={setIsCreateTokenModalOpen}
-                signerWallets={signerWallets}
-                signerWalletsError={signerWalletsError}
-                hideTrigger
+        panels={[
+          {
+            id: "overview",
+            className: cn(dashboardWorkspaceOverviewPanelClassName, "space-y-6"),
+            content: (
+              <IssuanceLegacyOverview
+                tokens={tokens}
+                search={search}
+                onSearchChange={setSearch}
+                onCreate={startTokenCreation}
+                isRefreshing={isRefreshing}
+                tokensNotice={tokensNotice}
+                emptyResultsNotice={emptyResultsNotice}
+                pagination={pagination}
+                createModal={
+                  <CreateIssuanceTokenModal
+                    open={isCreateTokenModalOpen}
+                    onOpenChange={setIsCreateTokenModalOpen}
+                    signerWallets={signerWallets}
+                    signerWalletsError={signerWalletsError}
+                    hideTrigger
+                  />
+                }
               />
-            }
-          />
-        }
-        playground={playgroundContent}
+            ),
+          },
+          {
+            id: "playground",
+            className: dashboardWorkspacePlaygroundPanelClassName,
+            content: playgroundContent,
+          },
+        ]}
       />
     );
   }
 
   return (
     <DashboardWorkspaceTabShell
-      overviewClassName={ISSUANCE_OVERVIEW_PANEL_CLASS}
-      overviewKey="tokens-tab"
-      overview={
-        <>
-          {/* Pinned header — same in both views. Negative margins bleed the backdrop
+      panels={[
+        {
+          id: "overview",
+          className: cn(dashboardWorkspaceOverviewPanelClassName, ISSUANCE_OVERVIEW_PANEL_CLASS),
+          content: (
+            <>
+              {/* Pinned header — same in both views. Negative margins bleed the backdrop
               across the panel's horizontal padding so nothing shows through at the
               edges as content scrolls behind it.
 
@@ -686,102 +700,102 @@ export function IssuanceWorkspace({
               inside the filter popover paint above that popover's panel, and a row
               kebab menu paint above this header. The list's per-row rungs stay out of
               the comparison because the list isolates them (see IssuanceTokenList). */}
-          <div
-            // `pb-3` == PINNED_HEADER_FADE_PX: the fade owns the whole bottom padding
-            // and nothing more, so the asset-count row and the expand/collapse control
-            // sit close to the rows they label. Smoothstep holds the band near-opaque
-            // through its first few px, so that row still reads as being on solid
-            // backdrop without reserving separate air for it.
-            className="sticky top-0 z-20 -mx-3 space-y-4 px-3 pt-6 pb-3 md:-mx-6 md:px-6"
-            style={PINNED_HEADER_STYLE}
-          >
-            {tokensNotice && tokens.length > 0 ? (
-              <div className="rounded-xl border border-border-default bg-fill-subtle px-4 py-3">
-                <p className="text-sm font-medium text-primary">
-                  {t("DashboardIssuance.workspace.tokenListUnavailable")}
-                </p>
-                <p className="mt-1 text-sm text-secondary">{tokensNotice}</p>
-              </div>
-            ) : null}
+              <div
+                // `pb-3` == PINNED_HEADER_FADE_PX: the fade owns the whole bottom padding
+                // and nothing more, so the asset-count row and the expand/collapse control
+                // sit close to the rows they label. Smoothstep holds the band near-opaque
+                // through its first few px, so that row still reads as being on solid
+                // backdrop without reserving separate air for it.
+                className="sticky top-0 z-20 -mx-3 space-y-4 px-3 pt-6 pb-3 md:-mx-6 md:px-6"
+                style={PINNED_HEADER_STYLE}
+              >
+                {tokensNotice && tokens.length > 0 ? (
+                  <div className="rounded-xl border border-border-default bg-fill-subtle px-4 py-3">
+                    <p className="text-sm font-medium text-primary">
+                      {t("DashboardIssuance.workspace.tokenListUnavailable")}
+                    </p>
+                    <p className="mt-1 text-sm text-secondary">{tokensNotice}</p>
+                  </div>
+                ) : null}
 
-            {/* Toolbar: stacks into two rows below sm, one row from sm up. The
+                {/* Toolbar: stacks into two rows below sm, one row from sm up. The
               breakpoint is the viewport, not the toolbar width — at ≥sm the sidebar
               is hidden below xl, so even iPad portrait has room for a single row. */}
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              <div className="flex items-center gap-3 sm:flex-1">
-                <div className="flex-1">
-                  <SearchInput
-                    value={search}
-                    onChange={(event) => {
-                      const value = event.currentTarget.value;
-                      setSearch(value);
-                    }}
-                    placeholder={t("DashboardIssuance.workspace.search")}
-                    // Keystrokes are debounced and answered by the server, so the
-                    // input says so — otherwise typing has no acknowledgement at
-                    // all until the rows change.
-                    pending={isSearchPending}
-                  />
-                </div>
-                {/* Filter & sort — icon-only trigger opening a popover. */}
-                <IssuanceFilterPopover
-                  filters={query}
-                  onChange={updateFilters}
-                  onClear={clearFilters}
-                  templateOptions={templateOptions}
-                />
-                {/* Grid ⇄ list toggle — icon shows the view it switches to (grid
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <div className="flex items-center gap-3 sm:flex-1">
+                    <div className="flex-1">
+                      <SearchInput
+                        value={search}
+                        onChange={(event) => {
+                          const value = event.currentTarget.value;
+                          setSearch(value);
+                        }}
+                        placeholder={t("DashboardIssuance.workspace.search")}
+                        // Keystrokes are debounced and answered by the server, so the
+                        // input says so — otherwise typing has no acknowledgement at
+                        // all until the rows change.
+                        pending={isSearchPending}
+                      />
+                    </div>
+                    {/* Filter & sort — icon-only trigger opening a popover. */}
+                    <IssuanceFilterPopover
+                      filters={query}
+                      onChange={updateFilters}
+                      onClear={clearFilters}
+                      templateOptions={templateOptions}
+                    />
+                    {/* Grid ⇄ list toggle — icon shows the view it switches to (grid
                   shows the list icon, and vice versa). */}
-                <button
-                  type="button"
-                  aria-label={t(
-                    view === "grid"
-                      ? "DashboardIssuance.workspace.viewSwitchToList"
-                      : "DashboardIssuance.workspace.viewSwitchToGrid"
-                  )}
-                  onClick={() => changeView(view === "grid" ? "list" : "grid")}
-                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] border border-border-default bg-surface-raised text-secondary outline-none transition-colors hover:border-border-strong hover:text-primary focus-visible:ring-2 focus-visible:ring-[var(--button-focus-ring)]"
-                >
-                  {view === "grid" ? (
-                    <List className="h-4 w-4" />
-                  ) : (
-                    <LayoutGrid className="h-4 w-4" />
-                  )}
-                </button>
-              </div>
-              <Button
-                type="button"
-                className="h-10 w-full rounded-[10px] bg-primary px-4 text-on-primary hover:opacity-90 sm:w-auto"
-                onClick={startTokenCreation}
-                iconLeft={<Plus className="h-4 w-4" />}
-              >
-                {t("DashboardIssuance.workspace.createDraft")}
-              </Button>
-            </div>
+                    <button
+                      type="button"
+                      aria-label={t(
+                        view === "grid"
+                          ? "DashboardIssuance.workspace.viewSwitchToList"
+                          : "DashboardIssuance.workspace.viewSwitchToGrid"
+                      )}
+                      onClick={() => changeView(view === "grid" ? "list" : "grid")}
+                      className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] border border-border-default bg-surface-raised text-secondary outline-none transition-colors hover:border-border-strong hover:text-primary focus-visible:ring-2 focus-visible:ring-[var(--button-focus-ring)]"
+                    >
+                      {view === "grid" ? (
+                        <List className="h-4 w-4" />
+                      ) : (
+                        <LayoutGrid className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                  <Button
+                    type="button"
+                    className="h-10 w-full rounded-[10px] bg-primary px-4 text-on-primary hover:opacity-90 sm:w-auto"
+                    onClick={startTokenCreation}
+                    iconLeft={<Plus className="h-4 w-4" />}
+                  >
+                    {t("DashboardIssuance.workspace.createDraft")}
+                  </Button>
+                </div>
 
-            {/* Asset count, and — in list view — the expand/collapse-all control.
+                {/* Asset count, and — in list view — the expand/collapse-all control.
                 Fixed height and always mounted, so the header's height never
                 changes as rows open and close. */}
-            <div className="flex h-6 items-center justify-between px-1">
-              {/* Range over the filtered total, not the loaded rows — with paging,
+                <div className="flex h-6 items-center justify-between px-1">
+                  {/* Range over the filtered total, not the loaded rows — with paging,
                   "24 assets" would be a lie about a project holding 400.
                   While a new result set is loading the count belongs to the old
                   one, so it gives way to a placeholder rather than asserting a
                   number that is about to change. */}
-              {isLoadingNewResults ? (
-                <SkeletonBlock className="h-3 w-28" />
-              ) : (
-                <p className="text-xs text-tertiary">
-                  {total > 0 && pageCount > 1
-                    ? t("DashboardIssuance.pagination.rangeAssets", {
-                        start: rangeStart,
-                        end: rangeEnd,
-                        total,
-                      })
-                    : t("DashboardIssuance.list.assetsCount", { count: total })}
-                </p>
-              )}
-              {/* Mirrors the grid ⇄ list cross-fade below: same key, same
+                  {isLoadingNewResults ? (
+                    <SkeletonBlock className="h-3 w-28" />
+                  ) : (
+                    <p className="text-xs text-tertiary">
+                      {total > 0 && pageCount > 1
+                        ? t("DashboardIssuance.pagination.rangeAssets", {
+                            start: rangeStart,
+                            end: rangeEnd,
+                            total,
+                          })
+                        : t("DashboardIssuance.list.assetsCount", { count: total })}
+                    </p>
+                  )}
+                  {/* Mirrors the grid ⇄ list cross-fade below: same key, same
                   `mode="wait"`, same transition. Both presences are driven by the
                   one `view` change in the same render, so the control fades out
                   with the outgoing view and in with the incoming one instead of
@@ -789,64 +803,70 @@ export function IssuanceWorkspace({
                   placeholder rather than nothing so there is always a child to
                   wait on — that wait is what puts the fade-in on the list's beat
                   rather than a third of a second ahead of it. */}
-              <AnimatePresence mode="wait" initial={false}>
-                <motion.div
-                  key={view}
-                  initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
-                  transition={viewTransition}
-                  className="flex items-center"
-                >
-                  {view === "list" ? (
-                    <button
-                      type="button"
-                      data-testid="token-collapse-all"
-                      onClick={hasOpenTokenRows ? collapseAllTokenRows : expandAllTokenRows}
-                      className="-mr-1.5 inline-flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-xs font-medium text-secondary outline-none transition-colors hover:bg-fill hover:text-primary focus-visible:ring-2 focus-visible:ring-[var(--button-focus-ring)]"
+                  <AnimatePresence mode="wait" initial={false}>
+                    <motion.div
+                      key={view}
+                      initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
+                      transition={viewTransition}
+                      className="flex items-center"
                     >
-                      {hasOpenTokenRows ? (
-                        <ChevronsDownUp className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                      ) : (
-                        <ChevronsUpDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                      )}
-                      {t(
-                        hasOpenTokenRows
-                          ? "DashboardIssuance.workspace.collapseAll"
-                          : "DashboardIssuance.workspace.expandAll"
-                      )}
-                    </button>
-                  ) : null}
-                </motion.div>
-              </AnimatePresence>
-            </div>
-          </div>
+                      {view === "list" ? (
+                        <button
+                          type="button"
+                          data-testid="token-collapse-all"
+                          onClick={hasOpenTokenRows ? collapseAllTokenRows : expandAllTokenRows}
+                          className="-mr-1.5 inline-flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-xs font-medium text-secondary outline-none transition-colors hover:bg-fill hover:text-primary focus-visible:ring-2 focus-visible:ring-[var(--button-focus-ring)]"
+                        >
+                          {hasOpenTokenRows ? (
+                            <ChevronsDownUp className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                          ) : (
+                            <ChevronsUpDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                          )}
+                          {t(
+                            hasOpenTokenRows
+                              ? "DashboardIssuance.workspace.collapseAll"
+                              : "DashboardIssuance.workspace.expandAll"
+                          )}
+                        </button>
+                      ) : null}
+                    </motion.div>
+                  </AnimatePresence>
+                </div>
+              </div>
 
-          {listErrorMessage ? (
-            <p className="mb-4 text-sm text-error" role="alert">
-              {listErrorMessage}
-            </p>
-          ) : null}
-          {emptyResultsNotice}
+              {listErrorMessage ? (
+                <p className="mb-4 text-sm text-error" role="alert">
+                  {listErrorMessage}
+                </p>
+              ) : null}
+              {emptyResultsNotice}
 
-          <IssuanceResults
-            view={view}
-            reduceMotion={Boolean(reduceMotion)}
-            isLoadingNewResults={isLoadingNewResults}
-            isLoadingAnotherPage={isLoadingAnotherPage}
-            skeletonCount={skeletonCount}
-            tokens={tokens}
-            signerWallets={signerWallets}
-            openTokenIds={openTokenIds}
-            onToggleRow={toggleTokenRow}
-            onCreate={startTokenCreation}
-            pagination={pagination}
-            t={t}
-            locale={locale}
-          />
-        </>
-      }
-      playground={playgroundContent}
+              <IssuanceResults
+                view={view}
+                reduceMotion={Boolean(reduceMotion)}
+                isLoadingNewResults={isLoadingNewResults}
+                isLoadingAnotherPage={isLoadingAnotherPage}
+                skeletonCount={skeletonCount}
+                tokens={tokens}
+                signerWallets={signerWallets}
+                openTokenIds={openTokenIds}
+                onToggleRow={toggleTokenRow}
+                onCreate={startTokenCreation}
+                pagination={pagination}
+                t={t}
+                locale={locale}
+              />
+            </>
+          ),
+        },
+        {
+          id: "playground",
+          className: dashboardWorkspacePlaygroundPanelClassName,
+          content: playgroundContent,
+        },
+      ]}
     />
   );
 }
