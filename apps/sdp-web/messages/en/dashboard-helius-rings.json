@@ -95,7 +95,8 @@
       "summaryZone": "Zone",
       "summaryUnlockAt": "Unlocks at",
       "summaryBeneficiary": "Beneficiary",
-      "anonymousWarning": "I understand the counterparty is not disclosed on-chain. Anonymous transfers are subject to the same wallet policy and approval rules as any other transfer — they are not lower-risk."
+      "anonymousWarning": "I understand the counterparty is not disclosed on-chain. Anonymous transfers are subject to the same wallet policy and approval rules as any other transfer — they are not lower-risk.",
+      "gatewayRedNotice": "The Rings gateway is unavailable. You can still compose and confirm — the operation will run through policy and record an honest gateway failure."
     },
     "zones": {
       "title": "Zones",
@@ -115,6 +116,13 @@
       "timelineEmpty": "No events recorded.",
       "retryable": "A retry can succeed.",
       "notRetryable": "Not retryable."
+    },
+    "recovery": {
+      "title": "Recovery",
+      "description": "Failed operations. A retry files a fresh operation linked to the original and re-runs policy; retry chains are capped server-side.",
+      "empty": "Nothing to recover.",
+      "retry": "Retry",
+      "retrying": "Retrying…"
     }
   }
 }

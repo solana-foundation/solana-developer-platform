@@ -15,12 +15,13 @@ import {
   type RingsGatewayPort,
 } from "@sdp/helius-rings";
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
-import type { WalletOperationActor } from "@sdp/types";
+import type { ApprovalRequestStatus, WalletOperationActor } from "@sdp/types";
 import {
   createHeliusRingsEventRepository,
   createHeliusRingsHealthRepository,
   createHeliusRingsOperationRepository,
   createHeliusRingsWalletRepository,
+  createPolicyRepository,
   type HeliusRingsEventRepository,
   type HeliusRingsHealthRepository,
   type HeliusRingsOperationRepository,
@@ -69,8 +70,16 @@ export interface HeliusRingsServiceDependencies {
   enforcePolicy?: typeof enforceWalletOperationPolicy;
   signOuterTransaction?: typeof signRingsOuterTransaction;
   submitOuterTransaction?: typeof submitRingsOuterTransaction;
+  /** Reads the approval verdict; defaults to the policy repository. */
+  getApprovalStatus?: (approvalRequestId: string) => Promise<ApprovalRequestStatus | null>;
   now?: () => string;
 }
+
+/**
+ * How deep a retry chain may grow. Retrying the same failure past this depth
+ * is churn, not recovery, and the operator should look at the failure code.
+ */
+export const RINGS_MAX_RETRY_DEPTH = 5;
 
 export interface ProvisionPrivateWalletInput {
   sdpWalletId: string;
@@ -104,6 +113,9 @@ export class HeliusRingsService {
   private readonly enforcePolicy: typeof enforceWalletOperationPolicy;
   private readonly signOuterTransaction: typeof signRingsOuterTransaction;
   private readonly submitOuterTransaction: typeof submitRingsOuterTransaction;
+  private readonly getApprovalStatus: (
+    approvalRequestId: string
+  ) => Promise<ApprovalRequestStatus | null>;
   private readonly now: () => string;
 
   constructor(
@@ -125,6 +137,20 @@ export class HeliusRingsService {
     this.signOuterTransaction = dependencies.signOuterTransaction ?? signRingsOuterTransaction;
     this.submitOuterTransaction =
       dependencies.submitOuterTransaction ?? submitRingsOuterTransaction;
+    this.getApprovalStatus =
+      dependencies.getApprovalStatus ??
+      (async (approvalRequestId) => {
+        const scope = createTenantScope({
+          organizationId: tenant.organizationId,
+          projectId: tenant.projectId,
+        });
+        const detail = await createPolicyRepository(env, scope).getApprovalRequestDetail({
+          organizationId: tenant.organizationId,
+          projectId: tenant.projectId,
+          approvalRequestId,
+        });
+        return detail?.approval_status ?? null;
+      });
     this.now = dependencies.now ?? (() => new Date().toISOString());
   }
 
@@ -177,7 +203,8 @@ export class HeliusRingsService {
    */
   async prepareOperation(
     input: PrivateOperationInput,
-    context: PrepareOperationContext
+    context: PrepareOperationContext,
+    retryOfOperationId: string | null = null
   ): Promise<PrivateOperation> {
     const wallet = await this.requireWallet(input.walletId);
     const intentKey = computeIntentKey(input);
@@ -193,6 +220,7 @@ export class HeliusRingsService {
       toAddr: input.to ?? null,
       zoneId: input.zoneId ?? null,
       transferMode: input.transferMode ?? null,
+      retryOfOperationId,
       timelock: input.timelock
         ? { unlockAt: input.timelock.unlockAt, beneficiaryAddr: input.timelock.beneficiary }
         : null,
@@ -201,7 +229,11 @@ export class HeliusRingsService {
       return this.toPrivateOperation(operation);
     }
 
-    await this.events.append({ operationId: operation.id, kind: "operation.created" });
+    await this.events.append({
+      operationId: operation.id,
+      kind: retryOfOperationId ? "operation.retried" : "operation.created",
+      payload: retryOfOperationId ? { retryOfOperationId } : undefined,
+    });
     const preparing = await this.transition(operation.id, "draft", undefined);
     if (!preparing) return this.toPrivateOperation(await this.requireOperation(operation.id));
 
@@ -278,21 +310,29 @@ export class HeliusRingsService {
    * per state: an approval still pending or a signature not yet indexed leaves
    * the row untouched.
    */
-  async executeOperation(
-    operationId: string,
-    options: { approvalStatus?: "approved" | "rejected" | "pending" } = {}
-  ): Promise<PrivateOperation> {
+  async executeOperation(operationId: string): Promise<PrivateOperation> {
     const operation = await this.requireOperation(operationId);
     if (!EXECUTABLE_STATES.has(operation.state)) {
       return this.toPrivateOperation(operation);
     }
 
     if (operation.state === "approval_required") {
-      const status = options.approvalStatus ?? "pending";
-      if (status === "rejected") {
+      // The approval verdict is read from the approval request itself — never
+      // from the caller. Trusting the request body here would let anyone with
+      // write access skip a reviewer.
+      if (!operation.approval_request_id) {
+        const failed = await this.fail(operation.id, "approval_required", {
+          code: "invalid_input",
+          message: "approval_required without an approval request",
+          retryable: false,
+        });
+        return this.toPrivateOperation(failed ?? (await this.requireOperation(operation.id)));
+      }
+      const status = await this.getApprovalStatus(operation.approval_request_id);
+      if (status === "rejected" || status === "canceled" || status === "expired") {
         const failed = await this.fail(operation.id, "approval_required", {
           code: "approval_rejected",
-          message: "approval request was rejected",
+          message: `approval request was ${status}`,
           retryable: false,
         });
         return this.toPrivateOperation(failed ?? (await this.requireOperation(operation.id)));
@@ -335,11 +375,16 @@ export class HeliusRingsService {
   }
 
   /**
-   * Files a fresh operation linked to a failed, retryable one. The retry gets
-   * its own intent key (new client nonce), so the original row stays exactly
-   * as it failed — the lineage is audit evidence.
+   * Files a fresh operation linked to a failed, retryable one and runs it
+   * through the same prepare-through-policy path — a retry re-earns its policy
+   * verdict, never inherits one. The original row stays exactly as it failed;
+   * the lineage is audit evidence, capped at RINGS_MAX_RETRY_DEPTH.
    */
-  async retryOperation(operationId: string, clientNonce: string): Promise<PrivateOperation> {
+  async retryOperation(
+    operationId: string,
+    clientNonce: string,
+    context: PrepareOperationContext
+  ): Promise<PrivateOperation> {
     const failed = await this.requireOperation(operationId);
     if (failed.state !== "failed") {
       throw new AppError("CONFLICT", "only a failed operation can be retried");
@@ -347,6 +392,7 @@ export class HeliusRingsService {
     if (!failed.retryable) {
       throw new AppError("CONFLICT", "operation failure is not retryable");
     }
+    await this.assertRetryDepth(failed);
 
     const timelock = failed.timelock_unlock_at
       ? await this.operations.getTimelock({ operationId: failed.id })
@@ -369,31 +415,7 @@ export class HeliusRingsService {
       clientNonce,
     };
 
-    const intentKey = computeIntentKey(input);
-    const { operation, reserved } = await this.operations.reserveIntent({
-      ...this.tenant,
-      walletId: failed.wallet_id,
-      opType: failed.op_type,
-      intentKey,
-      assetMint: failed.asset_mint,
-      amountRaw: failed.amount_raw,
-      fromAddr: failed.from_addr,
-      toAddr: failed.to_addr,
-      zoneId: failed.zone_id,
-      transferMode: failed.transfer_mode,
-      retryOfOperationId: failed.id,
-      timelock: timelock
-        ? { unlockAt: timelock.unlock_at, beneficiaryAddr: timelock.beneficiary_addr }
-        : null,
-    });
-    if (reserved) {
-      await this.events.append({
-        operationId: operation.id,
-        kind: "operation.retried",
-        payload: { retryOfOperationId: failed.id },
-      });
-    }
-    return this.toPrivateOperation(operation);
+    return this.prepareOperation(input, context, failed.id);
   }
 
   async getOperation(operationId: string): Promise<PrivateOperation> {
@@ -559,6 +581,31 @@ export class HeliusRingsService {
       });
     }
     return row;
+  }
+
+  /**
+   * Walks the retry lineage toward the original operation and refuses once the
+   * chain reaches RINGS_MAX_RETRY_DEPTH. The DB's retry_not_self CHECK rules
+   * out a self-loop; the walk is still bounded in case of a longer cycle.
+   */
+  private async assertRetryDepth(operation: HeliusRingsOperationRow): Promise<void> {
+    let depth = 1;
+    let ancestorId = operation.retry_of_operation_id;
+    while (ancestorId && depth < RINGS_MAX_RETRY_DEPTH + 1) {
+      depth += 1;
+      const ancestor = await this.operations.getOperationById({
+        ...this.tenant,
+        id: ancestorId,
+      });
+      ancestorId = ancestor?.retry_of_operation_id ?? null;
+    }
+    // The retry being filed would sit at depth + 1.
+    if (depth + 1 > RINGS_MAX_RETRY_DEPTH) {
+      throw new AppError(
+        "CONFLICT",
+        `retry limit reached (${RINGS_MAX_RETRY_DEPTH}); inspect the failure instead of retrying`
+      );
+    }
   }
 
   private async requireWallet(walletId: string) {

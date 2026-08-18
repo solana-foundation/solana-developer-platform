@@ -161,6 +161,27 @@ export async function prepareRingsOperation(
   return { operation: body.data.operation };
 }
 
+export async function retryRingsOperation(
+  operationId: string
+): Promise<{ operation?: RingsOperationDetail; error?: string }> {
+  const response = await fetch(
+    `/api/dashboard/helius-rings/operations/${encodeURIComponent(operationId)}/retry`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientNonce: crypto.randomUUID() }),
+      cache: "no-store",
+    }
+  );
+  const body = (await response.json().catch(() => ({}))) as Envelope<{
+    operation: RingsOperationDetail;
+  }>;
+  if (!response.ok || !body.data) {
+    return { error: body.error?.message };
+  }
+  return { operation: body.data.operation };
+}
+
 export interface RingsZone {
   id: string;
   name: string;

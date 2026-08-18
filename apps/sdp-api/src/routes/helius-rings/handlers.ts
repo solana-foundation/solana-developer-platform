@@ -20,7 +20,6 @@ import {
 import {
   createRingsWalletSchema,
   createRingsZoneSchema,
-  executeRingsOperationSchema,
   listLimitSchema,
   prepareRingsOperationSchema,
   retryRingsOperationSchema,
@@ -170,28 +169,53 @@ export async function getRingsOperation(c: AppContext) {
   return success(c, { operation });
 }
 
-/** POST /operations/:operationId/execute — advance a waiting operation. */
+/**
+ * POST /operations/:operationId/execute — advance a waiting operation. The
+ * approval verdict is read server-side from the approval request; the request
+ * carries no body worth trusting.
+ */
 export async function executeRingsOperation(c: AppContext) {
-  const parsed = executeRingsOperationSchema.safeParse(await c.req.json().catch(() => ({})));
-  if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? "invalid body");
-
   const { tenant } = tenantOf(c);
   const service = getHeliusRingsService(c, tenant);
   const operation = await withRingsErrors(() =>
-    service.executeOperation(requireParam(c, "operationId"), parsed.data)
+    service.executeOperation(requireParam(c, "operationId"))
   );
   return success(c, { operation });
 }
 
-/** POST /operations/:operationId/retry — file a linked retry of a failed op. */
+/**
+ * POST /operations/:operationId/retry — file a linked retry of a failed op.
+ * The retry runs the full prepare-through-policy path, so it re-earns its
+ * policy verdict under the current caller's context.
+ */
 export async function retryRingsOperation(c: AppContext) {
   const parsed = retryRingsOperationSchema.safeParse(await c.req.json());
   if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? "invalid body");
 
-  const { tenant } = tenantOf(c);
+  const { auth, tenant } = tenantOf(c);
+  const failedId = requireParam(c, "operationId");
+  const failed = await getHeliusRingsOperationRepository(c).getOperationById({
+    ...tenant,
+    id: failedId,
+  });
+  if (!failed) throw notFound("rings operation");
+
+  const ringsWallet = await getHeliusRingsWalletRepository(c).getWalletById({
+    ...tenant,
+    id: failed.wallet_id,
+  });
+  const scope = await resolveScope(c);
+  const custodyWallet = ringsWallet
+    ? scope.wallets.find((entry) => entry.walletId === ringsWallet.sdp_wallet_id)
+    : undefined;
+
   const service = getHeliusRingsService(c, tenant);
   const operation = await withRingsErrors(() =>
-    service.retryOperation(requireParam(c, "operationId"), parsed.data.clientNonce)
+    service.retryOperation(failedId, parsed.data.clientNonce, {
+      apiKeyId: auth.apiKeyId,
+      actor: walletOperationActorFromAuth(auth),
+      custodyWalletId: custodyWallet?.id ?? null,
+    })
   );
   return success(c, { operation }, 201);
 }
