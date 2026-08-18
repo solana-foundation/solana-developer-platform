@@ -231,13 +231,6 @@ export const FIELDS: EnvField[] = [
     help: "https://<slug>.clerk.accounts.dev for dev instances",
   },
   {
-    key: "CLERK_JWT_TEMPLATE",
-    section: "clerk",
-    kind: "text",
-    label: "JWT template name",
-    defaultValue: "sdp-api",
-  },
-  {
     key: "CLERK_WEBHOOK_SECRET",
     section: "clerk",
     kind: "password",
@@ -251,11 +244,11 @@ export const FIELDS: EnvField[] = [
     key: "SIGNING_PROVIDERS",
     section: "signing",
     kind: "multiselect",
-    label: "Signing providers",
+    label: "Deployment signing providers",
     defaultValue: "local",
     required: true,
     options: SIGNING_PROVIDER_OPTIONS,
-    help: "Providers to prepare credentials for in this .env. The runtime default is chosen below; orgs/projects can later activate any configured provider from the dashboard.",
+    help: "Providers whose credentials are available from this deployment. The runtime default is chosen below; dashboard-stored Connections are configured separately.",
   },
   {
     key: "SIGNING_PROVIDER",
@@ -307,7 +300,7 @@ export const FIELDS: EnvField[] = [
     key: "PRIVY_APP_ID",
     section: "signing",
     kind: "text",
-    label: "Privy app ID",
+    label: "Privy deployment app ID",
     required: true,
     visibleWhen: listIncludes("SIGNING_PROVIDERS", "privy"),
   },
@@ -315,7 +308,7 @@ export const FIELDS: EnvField[] = [
     key: "PRIVY_APP_SECRET",
     section: "signing",
     kind: "password",
-    label: "Privy app secret",
+    label: "Privy deployment app secret",
     required: true,
     visibleWhen: listIncludes("SIGNING_PROVIDERS", "privy"),
   },
@@ -325,7 +318,8 @@ export const FIELDS: EnvField[] = [
     kind: "text",
     label: "Privy wallet ID",
     required: true,
-    visibleWhen: listIncludes("SIGNING_PROVIDERS", "privy"),
+    visibleWhen: (v) =>
+      parseList(v.SIGNING_PROVIDERS).includes("privy") && v.PRIVY_BYOK_ENABLED !== "true",
   },
   {
     key: "COINBASE_CDP_API_KEY_ID",
@@ -527,6 +521,15 @@ export const FIELDS: EnvField[] = [
     pattern: /^https?:\/\//,
     visibleWhen: isProvider("FEE_PAYMENT_PROVIDER", "kora"),
   },
+  {
+    key: "KORA_CLOUD_RUN_AUDIENCE",
+    section: "fee",
+    kind: "url",
+    label: "Private Kora Cloud Run audience",
+    pattern: /^https?:\/\//,
+    visibleWhen: isProvider("FEE_PAYMENT_PROVIDER", "kora"),
+    help: "Optional. Fetches a Google service identity token for a private Kora Cloud Run service while retaining Kora API-key authentication.",
+  },
 
   // Secrets (auto-generated locally)
   {
@@ -535,6 +538,14 @@ export const FIELDS: EnvField[] = [
     kind: "secret",
     label: "API key pepper",
     required: true,
+  },
+  {
+    key: "CREDENTIAL_FINGERPRINT_PEPPER",
+    section: "secrets",
+    kind: "secret",
+    label: "Credential fingerprint pepper",
+    required: true,
+    help: "HMAC key for stored/runtime Credential submission fingerprints. Keep it stable so committed requests remain replayable.",
   },
   {
     key: "CUSTODY_ENCRYPTION_KEY",
@@ -551,6 +562,22 @@ export const FIELDS: EnvField[] = [
     label: "Cloud KMS key name",
     pattern: /^projects\/[^/]+\/locations\/[^/]+\/keyRings\/[^/]+\/cryptoKeys\/[^/]+$/,
     help: "Optional Cloud KMS key used for custody envelope encryption. Keep the custody encryption key configured so existing legacy rows remain readable.",
+  },
+  {
+    key: "COUNTERPARTY_PII_ENCRYPTION_KEY",
+    section: "secrets",
+    kind: "secret",
+    secretEncoding: "base64",
+    label: "Counterparty PII encryption key",
+    help: "Required for self-hosted deployments. Use a dedicated 32-byte key and never reuse the custody encryption key.",
+  },
+  {
+    key: "COUNTERPARTY_PII_KMS_KEY_NAME",
+    section: "secrets",
+    kind: "text",
+    label: "Counterparty PII Cloud KMS key name",
+    pattern: /^projects\/[^/]+\/locations\/[^/]+\/keyRings\/[^/]+\/cryptoKeys\/[^/]+$/,
+    help: "Required for managed deployments. Dedicated Cloud KMS key used for counterparty PII envelope encryption.",
   },
 
   // Advanced (defaulted, collapsed)
@@ -625,7 +652,7 @@ export const FIELDS: EnvField[] = [
     derive: (v) => v.SOLANA_NETWORK ?? "devnet",
   },
   {
-    key: "ASSET_PROFILES_ENABLED",
+    key: "SDP_FLAG_ASSET_PROFILES",
     section: "advanced",
     kind: "select",
     label: "Asset Profiles production opt-in",
@@ -635,6 +662,30 @@ export const FIELDS: EnvField[] = [
       { value: "true", label: "Enabled" },
     ],
     help: "Development is always enabled. This setting controls production only.",
+  },
+  {
+    key: "PRIVY_BYOK_ENABLED",
+    section: "advanced",
+    kind: "select",
+    label: "Privy BYOK Connections",
+    defaultValue: "false",
+    options: [
+      { value: "false", label: "Disabled" },
+      { value: "true", label: "Enabled" },
+    ],
+    help: "Enables Privy Custody Connections. Self-hosted deployments use runtime credentials unless stored setup is enabled below.",
+  },
+  {
+    key: "SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED",
+    section: "advanced",
+    kind: "select",
+    label: "Self-hosted stored credential setup",
+    defaultValue: "false",
+    options: [
+      { value: "false", label: "Disabled" },
+      { value: "true", label: "Enabled" },
+    ],
+    help: "Allows dashboard-stored custody Connection setup without provider credentials in this deployment.",
   },
   {
     key: "PAYMENTS_RECURRING_COLLECTION_ENABLED",
@@ -656,6 +707,34 @@ export const FIELDS: EnvField[] = [
     kind: "text",
     label: "Recurring payment collection retry delay (minutes)",
     defaultValue: "30",
+  },
+  {
+    key: "PRIVATE_CHANNELS_ENABLED",
+    section: "advanced",
+    kind: "select",
+    label: "Private Channels enabled",
+    defaultValue: "false",
+    options: [
+      { value: "false", label: "Disabled" },
+      { value: "true", label: "Enabled" },
+    ],
+    help: "Gates Private Channels API routes and deposit/withdrawal reconcilers.",
+  },
+  {
+    key: "SPC_CREDENTIAL_ENCRYPTION_KEY",
+    section: "secrets",
+    kind: "secret",
+    secretEncoding: "base64",
+    label: "SPC credential encryption key",
+    help: "Base64-encoded 256-bit key for encrypting invited SPC user passwords. Separate from the custody key so compromising one cannot expose the other.",
+  },
+  {
+    key: "SPC_CREDENTIAL_KMS_KEY_NAME",
+    section: "secrets",
+    kind: "text",
+    label: "SPC credential Cloud KMS key name",
+    pattern: /^projects\/[^/]+\/locations\/[^/]+\/keyRings\/[^/]+\/cryptoKeys\/[^/]+$/,
+    help: "Optional Cloud KMS key used for SPC credential envelope encryption. Keep the SPC credential encryption key configured too: KMS authenticates through the GCE metadata server, so non-GCP deployments run on the key-in-environment path.",
   },
   {
     key: "SENTRY_DSN",

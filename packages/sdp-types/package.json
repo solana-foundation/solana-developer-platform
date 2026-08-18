@@ -29,6 +29,16 @@
       "import": "./src/api-keys.ts",
       "default": "./src/api-keys.ts"
     },
+    "./earn": {
+      "types": "./src/earn.ts",
+      "import": "./src/earn.ts",
+      "default": "./src/earn.ts"
+    },
+    "./kamino-programs": {
+      "types": "./src/kamino-programs.ts",
+      "import": "./src/kamino-programs.ts",
+      "default": "./src/kamino-programs.ts"
+    },
     "./payments": {
       "types": "./src/payments.ts",
       "import": "./src/payments.ts",
@@ -38,6 +48,11 @@
       "types": "./src/payment-rails.ts",
       "import": "./src/payment-rails.ts",
       "default": "./src/payment-rails.ts"
+    },
+    "./private-channels": {
+      "types": "./src/private-channels.ts",
+      "import": "./src/private-channels.ts",
+      "default": "./src/private-channels.ts"
     },
     "./provider-access": {
       "types": "./src/provider-access.ts",
@@ -78,6 +93,6 @@
     "@solana/addresses": "catalog:"
   },
   "devDependencies": {
-    "typescript": "^6.0.3"
+    "typescript": "6.0.3"
   }
 }

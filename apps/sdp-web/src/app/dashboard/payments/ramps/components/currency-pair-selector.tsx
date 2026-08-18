@@ -121,7 +121,7 @@ export function CurrencyPairSelector() {
     <div className="flex flex-col gap-4">
       <div className="grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_200px]">
         <div className="flex flex-col gap-2">
-          <Label className="text-sm font-medium text-tertiary" htmlFor={`${direction}-ramp-amount`}>
+          <Label className="text-tertiary" htmlFor={`${direction}-ramp-amount`}>
             {t("DashboardPayments.ramps.amount")}
           </Label>
           <Input
@@ -135,7 +135,6 @@ export function CurrencyPairSelector() {
             onBlur={onAmountBlur}
             placeholder={isOfframp ? "1.0" : "20.00"}
             size="xl"
-            className="h-[var(--input-height-xl)] shadow-none ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [&>span:first-child]:h-[var(--input-height-xl)] [&>span:first-child]:border-0 [&>span:first-child]:bg-fill-subtle"
             action={
               offrampBalance !== null ? (
                 <AmountBalanceReadout

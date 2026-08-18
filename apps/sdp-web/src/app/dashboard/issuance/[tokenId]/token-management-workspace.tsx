@@ -1,14 +1,15 @@
 "use client";
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
-import { Loader2Icon, SparklesIcon, WalletIcon } from "lucide-react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Loader2Icon } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
+import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { getTokenAccessControlMode, hasAccessControlList } from "../access-control.utils";
 import { TokenActionConfirmationDialog } from "./token-action-confirmation-dialog";
 import { TokenActionForms } from "./token-action-forms";
@@ -17,6 +18,7 @@ import { TokenControlListsSection } from "./token-control-lists-section";
 import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
 import {
   type FundManagementModalAction,
+  type FundManagementRow,
   TokenFundManagementSection,
 } from "./token-fund-management-section";
 import { TokenManagementHeader } from "./token-management-header";
@@ -30,7 +32,6 @@ import {
 import type {
   ActionExecutionInput,
   AdminAction,
-  DeployFeePayment,
   PermissionRow,
   RunActionOptions,
   TokenManagementTab,
@@ -69,7 +70,6 @@ import {
 } from "./token-management-workspace.utils";
 import { TokenOverviewSection } from "./token-overview-section";
 import { TokenSettingsSection } from "./token-settings-section";
-import { TokenSignerSelect } from "./token-signer-select";
 import { TokenTransactionsSection } from "./token-transactions-section";
 import { useTokenActionRunner } from "./use-token-action-runner";
 
@@ -187,9 +187,8 @@ export function TokenManagementWorkspace({
 }: TokenManagementWorkspaceProps) {
   const t = useTranslations();
   const { dashboardAccess } = useDashboardWorkspace();
-  const pathname = usePathname();
-  const router = useRouter();
   const searchParams = useSearchParams();
+  const { pushSearchParams, replaceSearchParams } = useDashboardUrlState();
   const {
     isPending,
     actionConfirmation,
@@ -207,7 +206,6 @@ export function TokenManagementWorkspace({
   const [authorityModalSignerWalletId, setAuthorityModalSignerWalletId] = useState("");
   const [fundManagementModalAction, setFundManagementModalAction] =
     useState<FundManagementModalAction | null>(null);
-  const [deploySignerWalletId, setDeploySignerWalletId] = useState("");
   const [metadataForm, setMetadataForm] = useState(() => createInitialMetadataForm(token));
   const [mintForm, setMintForm] = useState(createInitialMintForm);
   const [burnForm, setBurnForm] = useState(createInitialBurnForm);
@@ -412,7 +410,7 @@ export function TokenManagementWorkspace({
   const frozenAccountsTotal = resolvedSupportingData.frozenAccountsTotal;
   const frozenAccountsHasMore = resolvedSupportingData.frozenAccountsHasMore;
 
-  const tokenBasePath = `/v1/issuance/tokens/${token.id}`;
+  const tokenBasePath = `/api/dashboard/issuance/tokens/${token.id}`;
   const explorerHref = getExplorerHref(token.mintAddress);
   const canDeployToken = token.status === "pending" && !token.mintAddress;
   const {
@@ -438,7 +436,9 @@ export function TokenManagementWorkspace({
 
     return selection;
   };
-  const deploySignerSelection = withWalletLoadError(
+  // Deploy needs no signer picker (the server resolves the signing wallet), only
+  // the yes/no gate that at least one custody wallet exists to sign the mint.
+  const deployDisabledReason = withWalletLoadError(
     getSignerSelectionForAction({
       action: "deploy",
       token,
@@ -446,7 +446,7 @@ export function TokenManagementWorkspace({
       metadataAuthority,
       t,
     })
-  );
+  ).unavailableReason;
   const mintSignerSelection = withWalletLoadError(
     getSignerSelectionForAction({
       action: "mint",
@@ -627,7 +627,6 @@ export function TokenManagementWorkspace({
     t,
   });
   const fundManagementDisabledReasons: Record<FundManagementModalAction, string | null> = {
-    deploy: deploySignerSelection.unavailableReason,
     mint: effectiveMintDisabledReason ?? mintValidationReason,
     burn: effectiveBurnDisabledReason ?? burnValidationReason,
   };
@@ -637,42 +636,33 @@ export function TokenManagementWorkspace({
     freeze: effectiveFreezeDisabledReason,
     pause: effectivePauseDisabledReason,
   };
-  const fundManagementRows = canDeployToken
+  const fundManagementRows: FundManagementRow[] = canDeployToken
     ? [
         {
           id: "deploy" as const,
           title: t("DashboardIssuance.management.deployToken"),
           helper: t("DashboardIssuance.management.deployHelper"),
           actionLabel: t("DashboardIssuance.header.deploy"),
-          disabled: Boolean(fundManagementDisabledReasons.deploy),
-          disabledReason: fundManagementDisabledReasons.deploy,
+          onAction: () => deployToken(),
+          disabled: isPending || Boolean(deployDisabledReason),
+          disabledReason: deployDisabledReason,
         },
       ]
     : liveFundManagementRows.map((row) => ({
         ...row,
+        onAction: () => openFundManagementModal(row.id),
         disabled: Boolean(fundManagementDisabledReasons[row.id]),
         disabledReason: fundManagementDisabledReasons[row.id],
       }));
 
+  // Shallow update: the tabs are fully client-rendered, so a router.push RSC
+  // refetch on every tab switch would only add latency.
   const syncActiveTabInUrl = useCallback(
     (nextTab: TokenManagementTab, mode: "push" | "replace" = "push") => {
-      const nextSearchParams = new URLSearchParams(searchParams.toString());
-      if (nextTab === "overview") {
-        nextSearchParams.delete("tab");
-      } else {
-        nextSearchParams.set("tab", nextTab);
-      }
-
-      const nextQuery = nextSearchParams.toString();
-      const nextUrl = nextQuery ? `${pathname}?${nextQuery}` : pathname;
-      if (mode === "replace") {
-        router.replace(nextUrl, { scroll: false });
-        return;
-      }
-
-      router.push(nextUrl, { scroll: false });
+      const sync = mode === "replace" ? replaceSearchParams : pushSearchParams;
+      sync({ tab: nextTab === "overview" ? null : nextTab });
     },
-    [pathname, router, searchParams]
+    [pushSearchParams, replaceSearchParams]
   );
 
   useEffect(() => {
@@ -742,16 +732,17 @@ export function TokenManagementWorkspace({
     });
   };
 
-  const deployToken = (feePayment: DeployFeePayment) => {
-    closeFundManagementModal();
+  // Fees are always Kora-sponsored and the server resolves the signing wallet
+  // (token signer, then org custody fallback), so deploy fires immediately —
+  // no modal, no confirmation dialog.
+  const deployToken = () => {
     void runActionImmediately(
       {
         label: t("DashboardIssuance.management.deployToken"),
         method: "POST",
         path: `${tokenBasePath}/deploy`,
         body: {
-          signingWalletId: deploySignerWalletId || undefined,
-          feePayment,
+          feePayment: "sponsored",
         },
       },
       {
@@ -765,7 +756,7 @@ export function TokenManagementWorkspace({
     runAction({
       label: t("DashboardIssuance.management.refreshSupply"),
       method: "POST",
-      path: `${tokenBasePath}/supply/refresh`,
+      path: `${tokenBasePath}/refresh-supply`,
       body: {},
     });
   };
@@ -1212,9 +1203,6 @@ export function TokenManagementWorkspace({
     }
 
     switch (action) {
-      case "deploy":
-        setDeploySignerWalletId(deploySignerSelection.defaultWalletId);
-        break;
       case "mint":
         setMintForm((previous) => ({
           ...previous,
@@ -1239,6 +1227,8 @@ export function TokenManagementWorkspace({
     }
 
     setFundManagementModalAction(null);
+    setMintForm(createInitialMintForm);
+    setBurnForm(createInitialBurnForm);
   };
 
   const submitFundManagementAction = (action: FundManagementModalAction) => {
@@ -1359,6 +1349,7 @@ export function TokenManagementWorkspace({
         setFreezeForm={setFreezeForm}
         allowlistForm={allowlistForm}
         setAllowlistForm={setAllowlistForm}
+        tokenId={token.id}
         allowlistEntries={allowlistEntries}
         allowlistError={allowlistError}
         controlListLabel={controlListCopy?.label ?? null}
@@ -1409,7 +1400,7 @@ export function TokenManagementWorkspace({
         explorerHref={explorerHref}
         canDeployToken={canDeployToken}
         isPending={isPending}
-        deployDisabledReason={deploySignerSelection.unavailableReason}
+        deployDisabledReason={deployDisabledReason}
         pauseDisabledReason={pauseDisabledReason}
         canManageTokenAdmin={canManageTokenAdmin}
         onCopyAddress={() => void handleCopy(token.mintAddress)}
@@ -1420,7 +1411,7 @@ export function TokenManagementWorkspace({
           if (!canDeployToken) {
             return;
           }
-          openFundManagementModal("deploy");
+          syncActiveTabInUrl("fund-management");
         }}
         onUnpause={() => handlePause(false)}
       />
@@ -1503,6 +1494,7 @@ export function TokenManagementWorkspace({
               mode="permissions"
               permissionRows={permissionRows}
               extensionRows={extensionRows}
+              authorityWallets={authorityWallets}
               showTitle={false}
               canEditAuthorities={!canDeployToken && canManageTokenAdmin}
               onCopy={handleCopy}
@@ -1518,6 +1510,7 @@ export function TokenManagementWorkspace({
             mode="extensions"
             permissionRows={permissionRows}
             extensionRows={extensionRows}
+            authorityWallets={authorityWallets}
             showTitle={false}
             canEditAuthorities={!canDeployToken && canManageTokenAdmin}
             onCopy={handleCopy}
@@ -1569,10 +1562,7 @@ export function TokenManagementWorkspace({
 
       {activeTab === "fund-management" ? (
         <div className="space-y-4">
-          <TokenFundManagementSection
-            rows={fundManagementRows}
-            onOpenAction={openFundManagementModal}
-          />
+          <TokenFundManagementSection rows={fundManagementRows} />
           <TokenTransactionsSection
             transactions={transactions}
             transactionsError={transactionsError}
@@ -1601,58 +1591,7 @@ export function TokenManagementWorkspace({
         isPending={isPending}
         onClose={closeFundManagementModal}
       >
-        {fundManagementModalAction === "deploy" ? (
-          <div className="rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]">
-            <p className="pr-12 text-[20px] leading-[1.2] font-medium text-primary">
-              {t("DashboardIssuance.management.deployToken")}
-            </p>
-            <p className="mt-2 text-[14px] leading-[1.45] text-secondary">
-              {t("DashboardIssuance.workspace.deployHint")}
-            </p>
-            <div className="mt-5 space-y-5">
-              <TokenSignerSelect
-                signerWallets={deploySignerSelection.wallets}
-                signerWalletId={deploySignerWalletId}
-                signerUnavailableReason={deploySignerSelection.unavailableReason}
-                onSignerWalletIdChange={setDeploySignerWalletId}
-                helperText={t("DashboardIssuance.management.deploySignerHint")}
-              />
-              <div className="flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={closeFundManagementModal}
-                  disabled={isPending}
-                  className="inline-flex h-10 items-center rounded-[12px] border border-border-default bg-surface-raised px-4 text-sm font-medium text-primary transition-colors hover:bg-fill-subtle disabled:pointer-events-none disabled:opacity-50"
-                >
-                  {t("DashboardIssuance.workspace.cancel")}
-                </button>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => deployToken("wallet")}
-                    disabled={isPending || Boolean(deploySignerSelection.unavailableReason)}
-                    className="inline-flex h-10 items-center gap-2 rounded-[12px] border border-border-default bg-surface-raised px-4 text-sm font-medium text-primary transition-colors hover:bg-fill-subtle disabled:pointer-events-none disabled:opacity-50"
-                  >
-                    <WalletIcon className="size-4" />
-                    {t("DashboardIssuance.management.deployWithWallet")}
-                  </button>
-                  <TokenDisabledActionTooltip
-                    reason={t("DashboardIssuance.management.koraUnavailable")}
-                  >
-                    <button
-                      type="button"
-                      disabled
-                      className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-primary px-4 text-sm font-medium text-on-primary transition hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
-                    >
-                      <SparklesIcon className="size-4" />
-                      {t("DashboardIssuance.management.deployWithKora")}
-                    </button>
-                  </TokenDisabledActionTooltip>
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : fundManagementModalAction ? (
+        {fundManagementModalAction ? (
           <TokenActionForms
             activeAction={fundManagementModalAction}
             isPending={isPending}
@@ -1673,6 +1612,7 @@ export function TokenManagementWorkspace({
             setFreezeForm={setFreezeForm}
             allowlistForm={allowlistForm}
             setAllowlistForm={setAllowlistForm}
+            tokenId={token.id}
             allowlistEntries={allowlistEntries}
             allowlistError={allowlistError}
             controlListLabel={controlListCopy?.label ?? null}

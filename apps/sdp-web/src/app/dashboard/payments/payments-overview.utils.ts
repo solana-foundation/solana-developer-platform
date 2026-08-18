@@ -1,14 +1,16 @@
 import {
   type CustodyWalletAggregate,
   type CustodyWalletTokenBalance,
+  SOL_DECIMALS,
   SOL_MINT,
   type PaymentTransferSummary as TransferRecord,
   type PaymentsDashboardWallet as WalletRecord,
   WELL_KNOWN_TOKEN_BY_MINT,
-  WELL_KNOWN_TOKENS,
 } from "@sdp/types";
+import type { BadgeVariant } from "@/components/ui/badge";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { toTitleCase } from "../activity-format-utils";
+import type { PaymentsIssuedTokenSymbol } from "./payments-page.data";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
@@ -69,23 +71,146 @@ export function shortenAddress(address: string): string {
   return address.length > 12 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address;
 }
 
+/**
+ * Turns a transfer's `token` field into something displayable. The field holds a
+ * mint address, so rendering it directly puts a 44-character base58 string in a
+ * table cell. Every surface that shows a transfer token should go through here,
+ * otherwise the same transfer reads as "USDC" on one screen and
+ * "4zMMC9srt5…" on another.
+ */
+export function resolveTransferTokenLabel(
+  token: string | null | undefined,
+  /**
+   * Symbols the caller has already resolved, keyed by mint. Surfaces that load
+   * balances get this for free and can name tokens the catalogue has never
+   * heard of; surfaces without it fall back to the shortened mint.
+   */
+  symbolsByMint?: Readonly<Record<string, string>>
+): string | undefined {
+  const trimmed = token?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const resolvedSymbol = symbolsByMint?.[trimmed]?.trim();
+  if (resolvedSymbol && resolvedSymbol !== trimmed) {
+    return resolvedSymbol;
+  }
+
+  const knownSymbol = WELL_KNOWN_TOKEN_BY_MINT.get(trimmed)?.symbol;
+  if (knownSymbol) {
+    return knownSymbol;
+  }
+
+  return trimmed.length > 10 ? shortenAddress(trimmed) : trimmed;
+}
+
 const TOKEN_AMOUNT_PATTERN = /^-?\d+(?:\.\d+)?$/;
+
+/**
+ * Formats a token amount for display with locale-appropriate grouping and
+ * decimal separators. Exact decimal strings keep every input digit; other
+ * numeric input falls back to standard number formatting.
+ *
+ * @param value - The amount as a number or exact decimal string.
+ * @param locale - Locale used for grouping and decimal separators.
+ * @returns The locale-formatted amount.
+ */
 export function formatTokenAmount(value: number | string, locale?: string): string {
   const rawValue = String(value).trim();
+  const formatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 9 });
   if (TOKEN_AMOUNT_PATTERN.test(rawValue)) {
-    const [whole = "", fraction] = rawValue.split(".");
-    const groupedWhole = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-    return fraction ? `${groupedWhole}.${fraction}` : groupedWhole;
+    const negative = rawValue.startsWith("-");
+    const [whole, fraction] = (negative ? rawValue.slice(1) : rawValue).split(".");
+    const sign = negative ? "-" : "";
+    const groupedWhole = `${sign}${formatter.format(BigInt(whole))}`;
+    if (fraction === undefined) {
+      return groupedWhole;
+    }
+    const decimalPart = formatter.formatToParts(1.1).find((part) => part.type === "decimal");
+    if (decimalPart === undefined) {
+      throw new Error(`Locale ${locale} produced no decimal separator`);
+    }
+    return `${groupedWhole}${decimalPart.value}${fraction}`;
   }
 
   const numericValue = Number(rawValue);
-  return Number.isFinite(numericValue)
-    ? new Intl.NumberFormat(locale, { maximumFractionDigits: 9 }).format(numericValue)
-    : String(value);
+  return Number.isFinite(numericValue) ? formatter.format(numericValue) : String(value);
 }
 
 export function formatLamportsAsSol(lamports: bigint, locale?: string): string {
-  return `${formatTokenAmount(formatUiAmountFromRaw(lamports, WELL_KNOWN_TOKENS.SOL.decimals), locale)} SOL`;
+  return `${formatTokenAmount(formatUiAmountFromRaw(lamports, SOL_DECIMALS), locale)} SOL`;
+}
+
+/**
+ * Builds an amount-input placeholder that communicates an asset's precision.
+ *
+ * @param decimals - The asset's fractional digit count.
+ * @returns A zero amount padded to the asset's decimals, e.g. `0.000000` for 6.
+ */
+export function amountInputPlaceholder(decimals: number): string {
+  return decimals <= 0 ? "0" : `0.${"0".repeat(decimals)}`;
+}
+
+/**
+ * Checks that a stored URL is safe to render as a link target: parseable and
+ * http(s). `new URL` alone accepts `javascript:` and `data:` schemes, which
+ * must never reach an href.
+ *
+ * @param value - The candidate URL.
+ * @returns Whether the value parses as an http or https URL.
+ */
+export function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+export interface ResolvedTokenPresentation {
+  /** Issued-token id (`tok_…`) when the mint belongs to a token issued on SDP. */
+  tokenId: string | null;
+  tokenName: string;
+  /** Issuer-supplied metadata image, when the issued token declares one. */
+  metadataImageUrl: string | null;
+  mint: string;
+  /** Whether the mint is in the verified well-known registry. */
+  isWellKnown: boolean;
+}
+
+/**
+ * Resolves a mint to the token identity the dashboard should present: the
+ * well-known registry name when the mint is verified, the issued token's name,
+ * id, and metadata image when it was issued on SDP, and the caller's fallback
+ * name otherwise. Rendering stays with the caller.
+ *
+ * The literal "SOL" is accepted as the native alias: rows written by the
+ * native send path record it in place of the wrapped SOL mint, and only the
+ * API writes that value, so it can never be a self-reported symbol.
+ *
+ * @param mint - The mint address to resolve, or the native "SOL" alias.
+ * @param issuedTokensByMint - The org's issued tokens keyed by mint address.
+ * @param fallbackName - Name used when the mint is neither well known nor issued.
+ * @returns The resolved token identity.
+ */
+export function resolveTokenByMint(
+  mint: string,
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>,
+  fallbackName?: string
+): ResolvedTokenPresentation {
+  const trimmed = mint.trim();
+  const normalized = trimmed.toUpperCase() === "SOL" ? SOL_MINT : trimmed;
+  const wellKnown = WELL_KNOWN_TOKEN_BY_MINT.get(normalized);
+  const issued = issuedTokensByMint[normalized];
+  return {
+    tokenId: issued ? issued.id : null,
+    tokenName: wellKnown?.symbol ?? issued?.symbol ?? fallbackName ?? shortenAddress(normalized),
+    metadataImageUrl: issued ? issued.imageUrl : null,
+    mint: normalized,
+    isWellKnown: wellKnown !== undefined,
+  };
 }
 
 export function formatDisplayAmount(value?: string, token?: string, locale?: string): string {
@@ -198,6 +323,45 @@ export function formatRampQuoteTimeRemaining(
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+/**
+ * Transfer/transaction status → catalog key, the same keys the transactions
+ * filter labels use, so status copy localizes instead of leaking raw English.
+ * Unknown statuses return null; callers fall back to `formatStatus`.
+ */
+const STATUS_MESSAGE_KEYS: Partial<Record<string, MessageKey>> = {
+  pending: "DashboardPayments.transactions.pending",
+  processing: "DashboardPayments.transactions.processing",
+  confirmed: "DashboardPayments.transactions.confirmed",
+  finalized: "DashboardPayments.transactions.finalized",
+  failed: "DashboardPayments.transactions.failed",
+  awaiting_payment: "DashboardPayments.transactions.awaitingPayment",
+  settling: "DashboardPayments.transactions.settling",
+  completed: "DashboardPayments.transactions.completed",
+  canceled: "DashboardPayments.transactions.canceled",
+  expired: "DashboardPayments.transactions.expired",
+};
+
+export function statusMessageKey(status: string): MessageKey | null {
+  return STATUS_MESSAGE_KEYS[status] ?? null;
+}
+
+export function statusVariant(status: string): BadgeVariant {
+  if (["completed", "confirmed", "finalized"].includes(status)) return "success";
+  if (["pending", "processing", "awaiting_payment", "settling"].includes(status)) {
+    return "warning";
+  }
+  if (status === "failed") return "danger";
+  return "default";
+}
+
+export function formatStatus(status: string): string {
+  return status
+    .split("_")
+    .filter(Boolean)
+    .map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`)
+    .join(" ");
+}
+
 export function formatDirection(direction: string | undefined, t: Translate): string {
   if (!direction) {
     return t("DashboardPayments.unknown");
@@ -233,8 +397,11 @@ export function resolveTransferFlow(transfer: TransferRecord): {
   receive: string | null;
 } {
   const isInbound = transfer.type === "onramp" || transfer.direction === "inbound";
+  const transferTokenLabel = resolveTransferTokenLabel(transfer.token);
   const cryptoLabel =
-    transfer.amount && transfer.token ? formatDisplayAmount(transfer.amount, transfer.token) : null;
+    transfer.amount && transferTokenLabel
+      ? formatDisplayAmount(transfer.amount, transferTokenLabel)
+      : null;
   const fiatLabel =
     transfer.fiatAmount && transfer.fiatCurrency
       ? `${transfer.fiatAmount} ${transfer.fiatCurrency.toUpperCase()}`
@@ -312,11 +479,15 @@ export function aggregateBalancesFromWallets(wallets: WalletRecord[]): CustodyWa
   }));
 }
 
+/**
+ * Native SOL is a balance row like any other: wallets hold it, the API prices
+ * it, and hiding it made the Available balance card disagree with the total on
+ * the home page. Only balances without a resolvable USD value are dropped.
+ */
 export function normalizeAggregateBalances(
   balances: CustodyWalletTokenBalance[]
 ): CustodyWalletTokenBalance[] {
   return balances
-    .filter((balance) => !isSolBalance(balance))
     .filter((balance) => resolveUsdBalanceValue(balance) !== null)
     .sort((left, right) => {
       const leftIsUsdc = left.token.trim().toUpperCase() === "USDC";

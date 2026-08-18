@@ -92,6 +92,27 @@ const FOREIGN_METADATA: IssuanceMetadata = {
 };
 
 describe("profileToDraftState", () => {
+  it("hydrates the supply cap from the token row", () => {
+    // maxSupply is a `tokens` column, not issuance_metadata, so this is the only
+    // path that can restore it into the draft. (The mint's freeze authority is
+    // not mirrored here — it rides along as the "freezeAccounts" setting.)
+    const draft = profileToDraftState(
+      makeProfile(FOREIGN_METADATA),
+      makeToken({ maxSupply: "1000000", isFreezable: false })
+    );
+
+    expect(draft.maxSupply).toBe("1000000");
+  });
+
+  it("renders an absent cap as an empty field rather than 'null'", () => {
+    const draft = profileToDraftState(
+      makeProfile(FOREIGN_METADATA),
+      makeToken({ maxSupply: null })
+    );
+
+    expect(draft.maxSupply).toBe("");
+  });
+
   it("hydrates form fields from metadata with token-row precedence", () => {
     const token = makeToken({ name: "Renamed On Token", description: "Token-side description" });
     const draft = profileToDraftState(makeProfile(FOREIGN_METADATA), token);
@@ -359,6 +380,19 @@ describe("areDraftsEquivalent", () => {
     const b = { ...profileToDraftState(profile, token), issuerName: "Changed" };
 
     expect(areDraftsEquivalent(a, b)).toBe(false);
+  });
+
+  it("detects a max-supply change but ignores its decimal formatting", () => {
+    const token = makeToken({ maxSupply: "1000.5" });
+    const profile = makeProfile(FOREIGN_METADATA);
+    const a = profileToDraftState(profile, token);
+    // The API round-trips the cap through base units and returns it trimmed, so
+    // the same number typed differently must not strand the form as "unsaved".
+    expect(areDraftsEquivalent(a, { ...a, maxSupply: "1000.50" })).toBe(true);
+    expect(areDraftsEquivalent(a, { ...a, maxSupply: "01000.5" })).toBe(true);
+    expect(areDraftsEquivalent(a, { ...a, maxSupply: "2000" })).toBe(false);
+    // Blank means uncapped — clearing the cap is a real change.
+    expect(areDraftsEquivalent(a, { ...a, maxSupply: "" })).toBe(false);
   });
 
   it("detects a public-field visibility change but ignores its order", () => {

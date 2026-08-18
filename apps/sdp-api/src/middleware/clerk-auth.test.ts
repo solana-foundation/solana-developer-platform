@@ -5,10 +5,10 @@ import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
-import { rateLimitMiddleware } from "@/middleware/rate-limit";
+import { DASHBOARD_ACTOR_MAX_REQUESTS, skipRateLimitPaths } from "@/middleware/rate-limit";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores } from "@/test/mocks/kv";
+import { seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
 const TEST_ORG = {
@@ -87,7 +87,6 @@ describe("Clerk auth request cache", () => {
 
   afterEach(async () => {
     vi.restoreAllMocks();
-    await clearTestDatabase(env);
     await clearKVStores(env);
     env.CLERK_ISSUER = undefined;
     env.CLERK_JWKS_URL = undefined;
@@ -104,11 +103,12 @@ describe("Clerk auth request cache", () => {
       c.set("verifiedClerkJwt", { token, payload });
       await next();
     });
-    app.use("*", rateLimitMiddleware());
+    app.use("*", skipRateLimitPaths());
     app.use("*", unifiedAuthMiddleware({ allowClerk: true }));
     app.get("/protected", requirePermissions("org:read"), (c) => {
       return c.json({
         organizationId: c.get("clerk")?.organizationId ?? null,
+        email: c.get("clerk")?.email ?? null,
       });
     });
     app.onError((error, c) => {
@@ -147,6 +147,7 @@ describe("Clerk auth request cache", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       organizationId: TEST_ORG.id,
+      email: "clerk-cache@example.com",
     });
 
     const projects = await getDb(env)
@@ -157,6 +158,55 @@ describe("Clerk auth request cache", () => {
       "default-production",
       "default-sandbox",
     ]);
+  });
+
+  it("counts Clerk dashboard requests against a per-user per-org limit", async () => {
+    const payload: ClerkJwtPayload = {
+      sub: "clerk_user_cached",
+      org_id: "clerk_org_cached",
+      org_role: "org:admin",
+      org_slug: TEST_ORG.slug,
+      email: "clerk-cache@example.com",
+      iss: "https://clerk.example.test",
+    };
+    env.CLERK_ISSUER = payload.iss;
+    const { app, token } = createProtectedApp(payload);
+
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(await readRateLimitCount(env, `user:usr_clerk_cached:org:${TEST_ORG.id}`)).toBe(1);
+  });
+
+  it("429s Clerk dashboard traffic once the per-user limit is exhausted", async () => {
+    const payload: ClerkJwtPayload = {
+      sub: "clerk_user_cached",
+      org_id: "clerk_org_cached",
+      org_role: "org:admin",
+      org_slug: TEST_ORG.slug,
+      email: "clerk-cache@example.com",
+      iss: "https://clerk.example.test",
+    };
+    env.CLERK_ISSUER = payload.iss;
+    const { app, token } = createProtectedApp(payload);
+    await seedRateLimit(
+      env,
+      `user:usr_clerk_cached:org:${TEST_ORG.id}`,
+      DASHBOARD_ACTOR_MAX_REQUESTS
+    );
+
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).not.toBeNull();
   });
 
   it("rejects a stale Clerk JWT after the local organization membership is removed", async () => {
@@ -302,6 +352,198 @@ describe("Clerk auth request cache", () => {
       "default-production",
       "default-sandbox",
     ]);
+  });
+
+  /**
+   * Clerk's acceptance link outlives a local revocation, so signing in through
+   * it is the other way a withdrawn invitation could still be redeemed.
+   */
+  async function seedInvitation(status: string, createdAt: string, expiresInDays = 7) {
+    await getDb(env)
+      .prepare(
+        `INSERT INTO invitations
+           (id, organization_id, email, role, invited_by, token_hash, expires_at, status, created_at)
+         VALUES (?, ?, 'clerk-cache@example.com', 'member', 'usr_clerk_cached', ?, ?, ?, ?)`
+      )
+      .bind(
+        `inv_${status}_${createdAt}`,
+        TEST_ORG.id,
+        `hash_${status}_${createdAt}`,
+        new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString(),
+        status,
+        createdAt
+      )
+      .run();
+  }
+
+  function cachedUserPayload(): ClerkJwtPayload {
+    return {
+      sub: "clerk_user_cached",
+      org_id: "clerk_org_cached",
+      org_role: "org:admin",
+      org_slug: TEST_ORG.slug,
+      email: "clerk-cache@example.com",
+      iss: "https://clerk.example.test",
+    };
+  }
+
+  it("refuses to provision a membership when the invitation was revoked", async () => {
+    await getDb(env)
+      .prepare("DELETE FROM organization_members WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .run();
+    await seedInvitation("revoked", "2026-01-01T00:00:00.000Z");
+
+    const { app, token } = createProtectedApp(cachedUserPayload());
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    expect(res.status).toBe(401);
+    const membership = await getDb(env)
+      .prepare("SELECT id FROM organization_members WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .first<{ id: string }>();
+    expect(membership).toBeNull();
+  });
+
+  /**
+   * A misconfigured Clerk token customization stored the literal
+   * `{{user.primary_email_address.email_address}}` as an identity email. It is matched
+   * against `invitations.email` here, so an affected user silently missed their own
+   * pending invitation: they were provisioned with the Clerk role instead of the invited
+   * one, and the invitation stayed pending forever.
+   */
+  it("applies an invited role when the stored identity email is a template placeholder", async () => {
+    await getDb(env)
+      .prepare("DELETE FROM organization_members WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE auth_user_identities SET email = ? WHERE id = 'aui_clerk_cached'")
+      .bind("{{user.primary_email_address.email_address}}")
+      .run();
+    await seedInvitation("pending", "2026-02-01T00:00:00.000Z");
+
+    // The token claims org:admin while the invitation grants member, so the invited role
+    // is only visible in the result if the invitation was actually matched.
+    const { app, token } = createProtectedApp(cachedUserPayload());
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    expect(res.status).toBe(200);
+
+    const membership = await getDb(env)
+      .prepare("SELECT role FROM organization_members WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .first<{ role: string }>();
+    expect(membership?.role).toBe("member");
+
+    const invitation = await getDb(env)
+      .prepare("SELECT status FROM invitations WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .first<{ status: string }>();
+    expect(invitation?.status).toBe("accepted");
+  });
+
+  /**
+   * The established-user path returns before any provisioning runs, so it resolves the
+   * email straight out of storage. A placeholder is a non-null string, so it would win a
+   * COALESCE over the good copy sitting next to it.
+   */
+  it("skips a stored placeholder email for a user who is already a member", async () => {
+    await getDb(env)
+      .prepare("UPDATE auth_user_identities SET email = ? WHERE id = 'aui_clerk_cached'")
+      .bind("{{user.primary_email_address.email_address}}")
+      .run();
+
+    const { app, token } = createProtectedApp(cachedUserPayload());
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      organizationId: TEST_ORG.id,
+      email: "clerk-cache@example.com",
+    });
+  });
+
+  /**
+   * Reading around the placeholder is not enough on its own. `inviteMember` matches
+   * `users.email` literally, so a row left corrupted keeps letting an existing member be
+   * re-invited — and the established-member path returns before `ensureClerkUser`, which
+   * used to be the only thing that repaired anything.
+   */
+  it("repairs both stored copies for a member who is already established", async () => {
+    const placeholder = "{{user.primary_email_address.email_address}}";
+    await getDb(env)
+      .prepare("UPDATE auth_user_identities SET email = ? WHERE id = 'aui_clerk_cached'")
+      .bind(placeholder)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE users SET email = ? WHERE id = 'usr_clerk_cached'")
+      .bind(placeholder)
+      .run();
+
+    const { app, token } = createProtectedApp(cachedUserPayload());
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+    expect(res.status).toBe(200);
+
+    const identity = await getDb(env)
+      .prepare("SELECT email FROM auth_user_identities WHERE id = 'aui_clerk_cached'")
+      .first<{ email: string }>();
+    const user = await getDb(env)
+      .prepare("SELECT email FROM users WHERE id = 'usr_clerk_cached'")
+      .first<{ email: string }>();
+
+    expect(identity?.email).toBe("clerk-cache@example.com");
+    expect(user?.email).toBe("clerk-cache@example.com");
+  });
+
+  it("still provisions when a revoked invitation was superseded by a live one", async () => {
+    await getDb(env)
+      .prepare("DELETE FROM organization_members WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .run();
+    await seedInvitation("revoked", "2026-01-01T00:00:00.000Z");
+    await seedInvitation("pending", "2026-02-01T00:00:00.000Z");
+
+    const { app, token } = createProtectedApp(cachedUserPayload());
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    // Re-inviting a previously revoked address has to keep working.
+    expect(res.status).toBe(200);
+  });
+
+  it("does not lock out an existing member carrying a stale revoked invitation", async () => {
+    await seedInvitation("revoked", "2026-01-01T00:00:00.000Z");
+
+    const { app, token } = createProtectedApp(cachedUserPayload());
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    // The guard runs only where no membership exists, so it can decline a join
+    // but never strip access from somebody who already has it.
+    expect(res.status).toBe(200);
   });
 
   it("bootstraps an unlinked Clerk organization on the first authenticated request", async () => {

@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { escapeMarkdownTableCell } from "./lib/markdown-escaping.mjs";
 import {
   getPrimaryTagName,
   isPublicTag,
@@ -18,10 +19,8 @@ const rootMetaPath = path.resolve(__dirname, "../content/docs/meta.json");
 
 const HTTP_METHODS = new Set(["get", "post", "put", "patch", "delete", "head", "options"]);
 const SOURCE_PATH = "apps/sdp-api/generated/openapi.json";
-const escapeTableText = (value) => value.replace(/\|/g, "\\|");
-
 const renderOperationRow = (operation) =>
-  `| \`${operation.method}\` | \`${operation.path}\` | ${escapeTableText(operation.summary || "-")} |`;
+  `| \`${operation.method}\` | \`${operation.path}\` | ${escapeMarkdownTableCell(operation.summary || "-")} |`;
 
 const parseJsonSpec = (spec) => {
   const tagDescriptions = new Map();

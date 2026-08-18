@@ -2,6 +2,7 @@
 
 import { DEFAULT_SDP_DOCS_URL, type PaymentsDashboardWallet } from "@sdp/types";
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
+import { Coins } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { Label } from "@/components/ui/label";
@@ -12,7 +13,6 @@ import { AdvancedSettingsEditor } from "../advanced-settings-editor";
 import { getDetailSections } from "../asset-details-config";
 import { DocumentRows } from "../document-rows";
 import {
-  buildDeployConfigPreview,
   buildIssuanceMetadata,
   getAssetDetailsErrors,
   getRequiredAssetDetailKeys,
@@ -21,6 +21,7 @@ import { CustomFieldRows, DetailField, FormCard, TextField } from "../form-primi
 import type { DraftState } from "../issuance-draft-wizard.types";
 import { MetadataJsonPanel, MetadataJsonToggle } from "../metadata-json";
 import { useIssuanceDraft } from "../use-issuance-draft";
+import { WorkflowPreview } from "../workflow-preview";
 
 const TAB_IDS = ["overview", "compliance", "operational", "custom"] as const;
 
@@ -51,7 +52,6 @@ export function StepAssetDetails({
   const [jsonOpen, setJsonOpen] = useState(false);
   const sections = getDetailSections(draft.assetCategory, draft.assetType);
   const metadata = buildIssuanceMetadata(draft);
-  const deployConfig = buildDeployConfigPreview(draft);
   const errors = getAssetDetailsErrors(draft, t);
   const requiredKeys = getRequiredAssetDetailKeys(draft);
   const hasErrors = Object.keys(errors).length > 0;
@@ -68,10 +68,19 @@ export function StepAssetDetails({
     return hasContent || showErrors ? message : undefined;
   };
   const descriptionError = fieldError("description");
+  const signerError = fieldError("signingWalletId");
+  // The neutral "optional signer" hint only applies when a signer isn't required
+  // and a real choice exists (>1 wallet) that the user hasn't made yet.
+  const showOptionalSignerHint =
+    !signerError &&
+    !signerWalletsError &&
+    signerWallets.length > 1 &&
+    !draft.signingWalletId.trim();
 
   // A failed continue attempt jumps to the tab holding the problem: most
-  // required fields live on Overview, but advanced-settings values live on
-  // Compliance. Prefer Overview when it has an error, else Compliance.
+  // required fields live on Overview, advanced-settings values on Compliance,
+  // and the signing wallet on Operational. Prefer Overview, then Operational
+  // (signer), then Compliance.
   //
   // Jump ONCE, guarded by a ref — `errors` is rebuilt every render, so keying
   // the jump off it would re-fire on each keystroke and pin the user to the
@@ -84,8 +93,16 @@ export function StepAssetDetails({
       return;
     }
     jumpedToErrorTab.current = true;
-    const overviewHasError = Object.keys(errors).some((key) => key !== "advancedSettings");
-    setTab(overviewHasError ? "overview" : "compliance");
+    const overviewHasError = Object.keys(errors).some(
+      (key) => key !== "advancedSettings" && key !== "signingWalletId"
+    );
+    if (overviewHasError) {
+      setTab("overview");
+    } else if (errors.signingWalletId) {
+      setTab("operational");
+    } else {
+      setTab("compliance");
+    }
   }, [showErrors, hasErrors, errors]);
 
   return (
@@ -192,6 +209,23 @@ export function StepAssetDetails({
             </div>
           </FormCard>
 
+          <FormCard
+            title={t("DashboardIssuance.assetDetails.supplyControls")}
+            description={t("DashboardIssuance.assetDetails.supplyControlsDescription")}
+            icon={Coins}
+          >
+            <div className="grid items-start gap-4 sm:grid-cols-2">
+              <TextField
+                label={t("DashboardIssuance.assetDetails.maxSupply")}
+                value={draft.maxSupply}
+                onChange={(value) => updateDraft({ maxSupply: value })}
+                placeholder={t("DashboardIssuance.assetDetails.maxSupplyPlaceholder")}
+                help={t("DashboardIssuance.assetDetails.maxSupplyHint")}
+                error={fieldError("maxSupply")}
+              />
+            </div>
+          </FormCard>
+
           {sections.map((section) => (
             <FormCard
               key={section.titleKey}
@@ -238,7 +272,12 @@ export function StepAssetDetails({
             accessControl={draft.accessControl}
             onAccessControlChange={(accessControl) => updateDraft({ accessControl })}
             accessControlDocsHref={ACCESS_CONTROL_DOCS_HREF}
-            deployConfig={deployConfig}
+          />
+          <WorkflowPreview
+            category={draft.assetCategory}
+            type={draft.assetType}
+            settings={draft.advancedSettings}
+            accessControl={draft.accessControl}
           />
         </div>
       ) : null}
@@ -256,13 +295,19 @@ export function StepAssetDetails({
               onSignerWalletIdChange={(value) => updateDraft({ signingWalletId: value })}
               label={t("DashboardIssuance.assetDetails.signingWallet")}
               showSelectionSummary
-              optional
+              optional={!signerError}
             />
-            {/* Signer is optional at draft stage — clarify the fallback only
-                when a choice is actually possible (more than one wallet) and
-                none is made. The 0-wallet and single-wallet cases show their
-                own message inside the field. */}
-            {!signerWalletsError && signerWallets.length > 1 && !draft.signingWalletId.trim() ? (
+            {/* A signer is normally optional at draft stage, but authority-valued
+                advanced settings (e.g. permanent delegate) require one — surface
+                that as an error. Otherwise clarify the fallback only when a real
+                choice exists (>1 wallet) and none is made; the 0-wallet and
+                single-wallet cases show their own message inside the field. */}
+            {signerError ? (
+              <p className="mt-1.5 text-xs text-destructive" role="alert">
+                {signerError}
+              </p>
+            ) : null}
+            {showOptionalSignerHint ? (
               <p className="mt-1.5 text-xs text-tertiary">
                 {t("DashboardIssuance.assetDetails.optionalSignerHint")}
               </p>

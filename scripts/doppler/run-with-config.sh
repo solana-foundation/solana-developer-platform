@@ -14,6 +14,12 @@ done
 # consumer of these files (Next.js and dev-local.mjs): split on the
 # first "=", keep the value literal. Never `source` them — shell parsing would
 # expand/execute characters like $, #, and backticks inside secret values.
+#
+# One layer of matching surrounding quotes is stripped, because that is what
+# dotenv (Next.js) and dev-local.mjs both do when they read the same file.
+# Exporting `KEY="value"` verbatim puts literal quote characters in the value,
+# and since the process environment wins over Next.js's own .env.local parsing,
+# every quoted var reaches the app malformed — Clerk rejects such a key outright.
 load_env_files() {
   local file line key value
   for file in "$@"; do
@@ -22,6 +28,16 @@ load_env_files() {
       case "$line" in '' | '#'*) continue ;; esac
       key="${line%%=*}"
       value="${line#*=}"
+      case "$value" in
+      '"'*'"')
+        value="${value#\"}"
+        value="${value%\"}"
+        ;;
+      "'"*"'")
+        value="${value#\'}"
+        value="${value%\'}"
+        ;;
+      esac
       case "$key" in
       [A-Za-z_]*) export "$key=$value" ;;
       esac

@@ -8,6 +8,7 @@ import {
   RampClient,
   type RampDiscoveryResponseDump,
 } from "@sdp/payments/ramps";
+import { isActiveIso4217CurrencyCode } from "@sdp/payments/ramps/shared";
 import {
   type CryptoRailId,
   OFFRAMP_CRYPTO_RAILS,
@@ -95,6 +96,35 @@ function sortCurrencyRecord(
       .sort()
       .map((code) => [code, currencies[code]])
   );
+}
+
+/**
+ * Snapshots record what a provider claims, retired currencies included — their
+ * catalogues keep dead codes for years. The generated types are what the
+ * platform offers, so the union is filtered here rather than trusting snapshots
+ * distilled before a code died. Providers apply the same predicate at distill
+ * time, so a refreshed snapshot arrives clean and this drops nothing.
+ */
+function takeActiveCurrencies(
+  provider: RampProviderId,
+  directionName: "onramp" | "offramp",
+  currencies: Readonly<Record<string, RampCurrencyLimit>>
+): Record<string, RampCurrencyLimit> {
+  const active: Record<string, RampCurrencyLimit> = {};
+  const retired: string[] = [];
+  for (const code of Object.keys(currencies)) {
+    if (isActiveIso4217CurrencyCode(code)) {
+      active[code] = currencies[code];
+      continue;
+    }
+    retired.push(code);
+  }
+  if (retired.length > 0) {
+    console.log(
+      `[${provider}] ${directionName}: skipped ${retired.length} inactive ISO 4217 codes in the committed snapshot: ${retired.sort().join(", ")}`
+    );
+  }
+  return active;
 }
 
 function sortCountrySupport(countrySupport: RampCountrySupport): RampCountrySupport {
@@ -195,14 +225,15 @@ function mergeDirectionSupport(
     countrySupport = declaredCountrySupport;
   }
 
-  const hasCurrencies = Object.keys(snapshot.currencies).length > 0;
+  const currencies = takeActiveCurrencies(provider, directionName, snapshot.currencies);
+  const hasCurrencies = Object.keys(currencies).length > 0;
   const hasCryptos = snapshot.cryptos.length > 0;
   if ((hasCurrencies || hasCryptos) && declared.entityTypes.length === 0) {
     throw new Error(`${provider} ${directionName} has rails but no declared entity types.`);
   }
 
   return {
-    currencies: sortCurrencyRecord(snapshot.currencies),
+    currencies: sortCurrencyRecord(currencies),
     cryptos: [...snapshot.cryptos].sort(),
     countrySupport: sortCountrySupport(countrySupport),
     entityTypes: [...declared.entityTypes].sort(),

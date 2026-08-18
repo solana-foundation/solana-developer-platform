@@ -29,12 +29,92 @@
   max-height: min(var(--sdp-select-popover-max-height), var(--available-height));
 }
 
+/* Tailwind v3's preflight forced `cursor: pointer` onto buttons; v4 dropped that,
+   so the UA default (`cursor: default`) shows through and every control reads as
+   inert under the pointer unless it spells out `cursor-pointer` itself. Restore
+   the pointer once, here, for the elements that are genuinely clickable.
+
+   Deliberately in `@layer base`, not unlayered: utilities beat layered rules
+   regardless of specificity, so a component asking for a different cursor still
+   wins — `disabled:cursor-not-allowed` on inputs, the click-catcher overlay
+   behind a modal. Unlayered here would silently outrank all of them.
+
+   Disabled controls are excluded so they never advertise an action they can't
+   take; `[data-disabled]` covers the Radix / Base UI convention. */
+@layer base {
+  :is(
+    button,
+    summary,
+    select,
+    input:is([type="checkbox"], [type="radio"], [type="file"], [type="range"], [type="color"]),
+    [role="button"],
+    [role="tab"],
+    [role="switch"],
+    [role="checkbox"],
+    [role="radio"],
+    [role="menuitem"],
+    [role="menuitemcheckbox"],
+    [role="menuitemradio"],
+    [role="option"]
+  ):not(:disabled, [aria-disabled="true"], [data-disabled]) {
+    cursor: pointer;
+  }
+}
+
 :root {
   color-scheme: light;
+
+  /* Categorical series colors for the balance allocation.
+   *
+   * Derived from the design system's --chart-* hues, with OKLCH lightness and
+   * chroma snapped into the readable band. The package's own values do not pass:
+   * in light mode --chart-4 and --chart-5 are near-identical oranges (ΔE 7.4 to
+   * normal vision, below the 15 floor), --chart-3 falls under the chroma floor
+   * and reads gray, and three of five sit outside the lightness band.
+   *
+   * Ordered so no two adjacent segments collide. Validated for lightness band,
+   * chroma floor, protan/deutan/tritan separation, normal-vision separation and
+   * surface contrast. --sdp-series-3 sits at 2.5:1 against white, which is
+   * permitted only because every row carries a visible symbol, share and value —
+   * identity is never color alone here.
+   */
+  --sdp-series-1: #dc4500;
+  --sdp-series-2: #009689;
+  --sdp-series-3: #d39a00;
+  --sdp-series-4: #007fb0;
 }
 
 :root.dark {
   color-scheme: dark;
+
+  /* Re-stepped against the dark surface rather than flipped: the same hue family
+   * needs different lightness to stay legible on a dark card. */
+  --sdp-series-1: #4176f6;
+  --sdp-series-2: #00af71;
+  --sdp-series-3: #a457ef;
+  --sdp-series-4: #d27b00;
+}
+
+/* Written as real rules rather than generated utilities.
+ *
+ * The class names live in a TypeScript string array, because the segment colour
+ * is chosen per mint at runtime. Tailwind's scanner does not reliably find them
+ * there: an `@theme` mapping compiled correctly in a production build but emitted
+ * nothing in dev — neither the `bg-series-*` utilities nor the custom properties
+ * they reference survived, so every segment computed to rgba(0,0,0,0) and the bar
+ * was invisible. Declaring the rules outright removes the scanner from the path,
+ * and referencing the properties here is also what keeps them in `:root`. */
+.bg-series-1 {
+  background-color: var(--sdp-series-1);
+}
+.bg-series-2 {
+  background-color: var(--sdp-series-2);
+}
+.bg-series-3 {
+  background-color: var(--sdp-series-3);
+}
+.bg-series-4 {
+  background-color: var(--sdp-series-4);
 }
 
 html,
@@ -44,6 +124,19 @@ body {
 
 html {
   scrollbar-gutter: stable;
+}
+
+/* Radix modal overlays (dropdown menus, dialogs, selects) mount react-remove-scroll,
+   which locks <body> and adds `margin-right` sized to the scrollbar it "removed". But
+   `scrollbar-gutter: stable` above reserves that track permanently, so nothing is ever
+   actually removed and the compensation is phantom width. It measures 0 on macOS/Chrome
+   overlay scrollbars (invisible) but equals the reserved gutter on Firefox's classic
+   scrollbars, shoving the whole page left on every menu open. Zero it; the scroll lock
+   (overflow: hidden) still applies. The library sets its margin with `!important`, so the
+   override must too — the extra `html` type selector outranks its `body[data-scroll-locked]`. */
+html body[data-scroll-locked] {
+  /* biome-ignore lint/complexity/noImportantStyles: must override react-remove-scroll's own !important compensation. */
+  margin-right: 0 !important;
 }
 
 * {
@@ -59,6 +152,97 @@ input:-webkit-autofill:active {
   -webkit-text-fill-color: var(--emph-xh);
   caret-color: var(--emph-xh);
   transition: background-color 100000s ease-in-out 0s;
+}
+
+/* react-day-picker month-switch animations (Calendar `animate` prop).
+   Copied from react-day-picker/src/style.css; RTL rules omitted (app is en/fr). */
+.rdp-root {
+  --rdp-animation_duration: 0.3s;
+  --rdp-animation_timing: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes rdp-slide_in_left {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@keyframes rdp-slide_in_right {
+  0% {
+    transform: translateX(100%);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@keyframes rdp-slide_out_left {
+  0% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+}
+
+@keyframes rdp-slide_out_right {
+  0% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+.rdp-weeks_before_enter {
+  animation: rdp-slide_in_left var(--rdp-animation_duration) var(--rdp-animation_timing) forwards;
+}
+
+.rdp-weeks_before_exit {
+  animation: rdp-slide_out_left var(--rdp-animation_duration) var(--rdp-animation_timing) forwards;
+}
+
+.rdp-weeks_after_enter {
+  animation: rdp-slide_in_right var(--rdp-animation_duration) var(--rdp-animation_timing) forwards;
+}
+
+.rdp-weeks_after_exit {
+  animation: rdp-slide_out_right var(--rdp-animation_duration) var(--rdp-animation_timing) forwards;
+}
+
+@keyframes rdp-fade_in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes rdp-fade_out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.rdp-caption_after_enter,
+.rdp-caption_before_enter {
+  animation: rdp-fade_in var(--rdp-animation_duration) var(--rdp-animation_timing) forwards;
+}
+
+.rdp-caption_after_exit,
+.rdp-caption_before_exit {
+  animation: rdp-fade_out var(--rdp-animation_duration) var(--rdp-animation_timing) forwards;
 }
 
 vercel-live-feedback {

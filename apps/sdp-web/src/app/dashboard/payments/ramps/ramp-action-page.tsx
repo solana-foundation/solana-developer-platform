@@ -1,6 +1,7 @@
 "use client";
 
 import type { ComplianceProviderId, Counterparty, PaymentsDashboardWallet } from "@sdp/types";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import useSWR, { preload } from "swr";
 import {
@@ -11,11 +12,15 @@ import {
 } from "@/app/dashboard/payments/payments-workspace.data";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider, type RampProviderAccess } from "@/lib/provider-availability";
-import { useDashboardRouter } from "@/lib/use-dashboard-router";
+import { WizardSummaryList } from "../wizard-summary-list";
 import { BatchSendRail } from "./batch-send-rail";
 import { CounterpartyPicker } from "./components/counterparty-picker";
 import { CounterpartyRecentTransfers } from "./components/counterparty-recent-transfers";
-import { type PaymentMethod, PaymentMethodStep } from "./components/payment-method-step";
+import {
+  getPaymentMethodLabel,
+  type PaymentMethod,
+  PaymentMethodStep,
+} from "./components/payment-method-step";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
 import { type SendMode, SendModeToggle } from "./components/send-mode-toggle";
 import { PAYMENTS_ACTION_WALLETS_KEY } from "./hooks/use-payments-action-wallets";
@@ -23,6 +28,7 @@ import { OfframpRail } from "./offramp-rail";
 import { OnchainReceiveRail } from "./onchain-receive-rail";
 import { OnchainSendRail } from "./onchain-send-rail";
 import { OnrampRail } from "./onramp-rail";
+import { preStepSummaryDetails } from "./wizard-summary";
 
 interface PaymentsActionPageProps {
   mode: "send" | "receive";
@@ -47,6 +53,7 @@ export interface RailProps {
   selectedCounterparty: Counterparty | null;
   counterpartyId: string;
   counterpartyName: string;
+  methodLabel: string;
   preSteps: WizardStep[];
   onExit: () => void;
 }
@@ -56,7 +63,7 @@ type RampsPhase = "counterparty" | "method" | "rail";
 export function PaymentsActionPage(props: PaymentsActionPageProps) {
   const t = useTranslations();
   const { mode, rampProviderAccess } = props;
-  const router = useDashboardRouter();
+  const router = useRouter();
 
   const [phase, setPhase] = useState<RampsPhase>("counterparty");
   const [sendMode, setSendMode] = useState<SendMode>("single");
@@ -104,6 +111,7 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
   );
 
   const effectiveMethod: PaymentMethod = showMethodStep ? (method ?? "onchain") : "onchain";
+  const methodLabel = getPaymentMethodLabel(t, mode, effectiveMethod);
   const selectedCounterparty = useMemo(() => {
     const found = liveCounterparties.data.find((cp) => cp.id === counterpartyId);
     return found ? found : null;
@@ -144,6 +152,7 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
       selectedCounterparty,
       counterpartyId,
       counterpartyName,
+      methodLabel,
       preSteps,
       onExit: railOnExit,
     };
@@ -200,6 +209,15 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
       counterpartyDialogOpen={counterpartyDialogOpen}
       setCounterpartyDialogOpen={setCounterpartyDialogOpen}
       onCounterpartyCreated={handleCounterpartyCreated}
+      summary={
+        <WizardSummaryList
+          details={preStepSummaryDetails(
+            t,
+            counterpartyName,
+            method === null ? null : getPaymentMethodLabel(t, mode, method)
+          )}
+        />
+      }
       header={
         mode === "send" && phase === "counterparty" ? (
           <SendModeToggle value={sendMode} onChange={setSendMode} />

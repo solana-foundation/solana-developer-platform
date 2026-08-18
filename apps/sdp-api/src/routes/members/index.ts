@@ -6,7 +6,13 @@ import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
-import { acceptInvitation, inviteMember, listMembers, removeMember } from "./handlers";
+import {
+  acceptInvitation,
+  inviteMember,
+  listMembers,
+  removeMember,
+  revokeInvitation,
+} from "./handlers";
 
 const members = new Hono<{ Bindings: Env }>();
 
@@ -22,6 +28,8 @@ members.post("/invite", requirePermissions("org:write"), inviteMember);
 // the authorizing credential.
 members.post("/accept", acceptInvitation);
 
+// Declared before /:memberId so "invitations" is not read as a member id.
+members.delete("/invitations/:invitationId", requirePermissions("org:write"), revokeInvitation);
 members.delete("/:memberId", requirePermissions("org:admin"), removeMember);
 
 export default members;

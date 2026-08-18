@@ -2,7 +2,9 @@
 
 import type { CustodyProvider, OrganizationRpcProvider } from "@sdp/types";
 import { ArrowLeft, ArrowRight } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { type FormEvent, useMemo, useState, useTransition } from "react";
+import type { OnboardingProvisionedWallet } from "@/app/dashboard/custody/actions";
 import {
   CUSTODY_PROVIDER_CATALOG,
   type CustodyProviderCatalogEntry,
@@ -12,14 +14,15 @@ import { Button } from "@/components/ui/button";
 import { ProviderSelectionCard } from "@/components/ui/provider-selection-card";
 import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useTranslations } from "@/i18n/provider";
-import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { completeOrganizationOnboardingAction, saveOnboardingRpcAction } from "./actions";
+import { OnboardingCompletePanel } from "./onboarding-complete-panel";
 import { RpcProviderMark } from "./rpc-provider-mark";
 
 const RPC_LABELS: Record<OrganizationRpcProvider, string> = {
   alchemy: "Alchemy",
   default: "SDP RPC",
   helius: "Helius",
+  nodit: "Nodit",
   quicknode: "QuickNode",
   triton: "Triton",
   validationcloud: "Validation Cloud",
@@ -30,6 +33,7 @@ const RPC_DESCRIPTION_KEYS: Record<
   | "DashboardCustody.onboardingRpcDefaultDescription"
   | "DashboardCustody.onboardingRpcAlchemyDescription"
   | "DashboardCustody.onboardingRpcHeliusDescription"
+  | "DashboardCustody.onboardingRpcNoditDescription"
   | "DashboardCustody.onboardingRpcQuickNodeDescription"
   | "DashboardCustody.onboardingRpcTritonDescription"
   | "DashboardCustody.onboardingRpcValidationCloudDescription"
@@ -37,6 +41,7 @@ const RPC_DESCRIPTION_KEYS: Record<
   alchemy: "DashboardCustody.onboardingRpcAlchemyDescription",
   default: "DashboardCustody.onboardingRpcDefaultDescription",
   helius: "DashboardCustody.onboardingRpcHeliusDescription",
+  nodit: "DashboardCustody.onboardingRpcNoditDescription",
   quicknode: "DashboardCustody.onboardingRpcQuickNodeDescription",
   triton: "DashboardCustody.onboardingRpcTritonDescription",
   validationcloud: "DashboardCustody.onboardingRpcValidationCloudDescription",
@@ -50,21 +55,31 @@ export function OrganizationOnboardingFlow({
   initialRpcProvider,
   rpcProviders,
   custodyProviders,
+  useDefaultRpc = false,
 }: {
   organizationId: string;
   currentStep: "rpc" | "custody";
   initialRpcProvider: OrganizationRpcProvider | null;
   rpcProviders: OrganizationRpcProvider[];
   custodyProviders: CustodyProvider[];
+  useDefaultRpc?: boolean;
 }) {
   const t = useTranslations();
-  const router = useDashboardRouter();
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [currentStep, setCurrentStep] = useState(initialStep);
   const [rpcProvider, setRpcProvider] = useState<OrganizationRpcProvider | null>(
-    initialRpcProvider === "default" ? null : initialRpcProvider
+    initialRpcProvider !== null &&
+      initialRpcProvider !== "default" &&
+      rpcProviders.includes(initialRpcProvider)
+      ? initialRpcProvider
+      : null
   );
   const [custodyProvider, setCustodyProvider] = useState<CustodyProvider | null>(null);
+  const [completion, setCompletion] = useState<{
+    provider: CustodyProvider;
+    wallet: OnboardingProvisionedWallet;
+  } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const custodyEntries = useMemo(() => {
     const providers = new Set(custodyProviders);
@@ -95,17 +110,34 @@ export function OrganizationOnboardingFlow({
     if (!custodyProvider || isPending) return;
     setErrorMessage(null);
     startTransition(async () => {
-      const result = await completeOrganizationOnboardingAction(custodyProvider);
+      const result = await completeOrganizationOnboardingAction({
+        custodyProvider,
+        useDefaultRpc,
+      });
       if (result.status === "error") {
         setErrorMessage(result.message);
         return;
       }
-      router.refresh();
-      router.push("/dashboard");
+      // Setup provisions a real wallet. Redirecting straight out of the wizard
+      // spent that moment silently and left the user to discover it, so the
+      // flow ends by naming what was created and where to go next.
+      //
+      // Deliberately no router.refresh() here: setup is complete now, so
+      // re-rendering this route's server page would hit its completion redirect
+      // and unmount this panel. The panel's exits are full navigations, which
+      // refetch every server boundary on the way out.
+      setCompletion({ provider: custodyProvider, wallet: result.wallet });
     });
   };
 
-  const stepIndex = ONBOARDING_STEPS.indexOf(currentStep);
+  if (completion) {
+    return <OnboardingCompletePanel provider={completion.provider} wallet={completion.wallet} />;
+  }
+
+  const onboardingSteps: readonly ("rpc" | "custody")[] = useDefaultRpc
+    ? ["custody"]
+    : ONBOARDING_STEPS;
+  const stepIndex = onboardingSteps.indexOf(currentStep);
   const formId = `organization-onboarding-${currentStep}`;
 
   return (
@@ -126,9 +158,9 @@ export function OrganizationOnboardingFlow({
               currentStep={stepIndex}
               progressLabel={t("DashboardCustody.stepOf", {
                 current: stepIndex + 1,
-                total: ONBOARDING_STEPS.length,
+                total: onboardingSteps.length,
               })}
-              steps={ONBOARDING_STEPS}
+              steps={onboardingSteps}
             />
           </div>
         </div>
@@ -136,11 +168,16 @@ export function OrganizationOnboardingFlow({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 md:px-8">
         <div className="mx-auto w-full max-w-4xl pb-10">
-          <h2 className="mb-6 text-2xl font-medium tracking-tight text-primary">
-            {currentStep === "rpc"
-              ? t("DashboardCustody.onboardingChooseRpc")
-              : t("DashboardCustody.onboardingChooseCustody")}
-          </h2>
+          <div className="mb-6">
+            <h2 className="text-2xl font-medium tracking-tight text-primary">
+              {currentStep === "rpc"
+                ? t("DashboardCustody.onboardingChooseRpc")
+                : t("DashboardCustody.onboardingChooseCustody")}
+            </h2>
+            <p className="mt-1 text-sm leading-6 text-tertiary">
+              {t("DashboardCustody.onboardingProvidersChangeLater")}
+            </p>
+          </div>
 
           {currentStep === "rpc" ? (
             <form id={formId} onSubmit={submitRpc} className="grid gap-4 md:grid-cols-2">
@@ -204,11 +241,11 @@ export function OrganizationOnboardingFlow({
       </div>
 
       <footer
-        className="shrink-0 border-t border-border-default bg-surface-raised/95 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-8"
+        className="shrink-0 border-t border-border-default px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-8"
         data-organization-onboarding-actions="true"
       >
         <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-3">
-          {currentStep === "custody" ? (
+          {currentStep === "custody" && !useDefaultRpc && visibleRpcProviders.length > 0 ? (
             <Button
               type="button"
               variant="secondary"

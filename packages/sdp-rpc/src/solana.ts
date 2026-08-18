@@ -14,8 +14,11 @@ import {
   type createSolanaRpc,
   createSolanaRpcFromTransport,
   createSolanaRpcSubscriptions,
+  getBase64Decoder,
+  getTransactionDecoder,
   type RpcTransport,
   type Signature,
+  type TransactionMessageBytesBase64,
 } from "@solana/kit";
 import { getSolanaConfig } from "./config";
 import { solanaRpcError } from "./errors";
@@ -167,8 +170,10 @@ function withRequestTimeout(transport: RpcTransport, timeoutMs: number): RpcTran
  * Create a configured Solana RPC client from environment
  */
 export function createRpc(env: RpcEnv, options?: RpcClientOptions): SolanaRpc {
-  const config = getSolanaConfig(env);
-  const rpcUrl = options?.rpcUrl ?? config.rpcUrl;
+  // An explicit URL is already the complete endpoint selection. Do not force
+  // callers with a per-request/per-cluster URL to also configure the legacy
+  // process default merely to construct a client for that explicit endpoint.
+  const rpcUrl = options?.rpcUrl ?? getSolanaConfig(env).rpcUrl;
   const timeoutMs = options?.requestTimeoutMs ?? DEFAULT_RPC_REQUEST_TIMEOUT_MS;
 
   let transport: RpcTransport;
@@ -233,6 +238,21 @@ export async function isBlockhashValid(
 ): Promise<boolean> {
   const response = await rpc.isBlockhashValid(blockhash, { commitment }).send();
 
+  return response.value;
+}
+
+/** Estimate only the Solana network fee from the exact compiled message. */
+export async function getTransactionNetworkFee(
+  rpc: SolanaRpc,
+  transaction: Uint8Array,
+  commitment: Commitment = "confirmed"
+): Promise<bigint> {
+  const { messageBytes } = getTransactionDecoder().decode(transaction);
+  const message = getBase64Decoder().decode(messageBytes) as TransactionMessageBytesBase64;
+  const response = await rpc.getFeeForMessage(message, { commitment }).send();
+  if (response.value === null) {
+    throw solanaRpcError("Solana RPC could not price the transaction message");
+  }
   return response.value;
 }
 
@@ -582,6 +602,10 @@ export async function getSignatureStatuses(
 
 export interface ParsedInstruction {
   programId: string;
+  /** Ordered account addresses for non-parsed program instructions. */
+  accounts?: string[];
+  /** Base58-encoded instruction data for non-parsed program instructions. */
+  data?: string | null;
   /** Present only for instructions the RPC could decode (e.g. spl-token-2022). */
   parsedType: string | null;
   /** Decoded instruction fields, when available. */
@@ -591,12 +615,17 @@ export interface ParsedInstruction {
 export interface ParsedTransaction {
   slot: bigint;
   err: unknown | null;
+  fee?: bigint;
+  preBalances?: readonly bigint[];
+  postBalances?: readonly bigint[];
   /** Top-level + inner instructions flattened, in no particular order. */
   instructions: ParsedInstruction[];
 }
 
 interface RawParsedInstruction {
   programId?: string;
+  accounts?: string[];
+  data?: string;
   parsed?: { type?: string; info?: Record<string, unknown> };
 }
 
@@ -604,6 +633,9 @@ interface RawGetTransactionResponse {
   slot: bigint;
   meta: {
     err: unknown | null;
+    fee: bigint;
+    preBalances: readonly bigint[];
+    postBalances: readonly bigint[];
     innerInstructions?: Array<{ instructions?: RawParsedInstruction[] }> | null;
   } | null;
   transaction: {
@@ -613,6 +645,8 @@ interface RawGetTransactionResponse {
 
 const toParsedInstruction = (ix: RawParsedInstruction): ParsedInstruction => ({
   programId: ix.programId ?? "",
+  accounts: ix.accounts ?? [],
+  data: ix.data ?? null,
   parsedType: ix.parsed?.type ?? null,
   info: ix.parsed?.info ?? null,
 });
@@ -651,6 +685,9 @@ export async function getTransaction(
   return {
     slot: response.slot,
     err: response.meta?.err ?? null,
+    fee: response.meta?.fee ?? 0n,
+    preBalances: response.meta?.preBalances ?? [],
+    postBalances: response.meta?.postBalances ?? [],
     instructions: [...topLevel, ...inner].map(toParsedInstruction),
   };
 }

@@ -1,4 +1,5 @@
-import type { TokenTransactionListItem } from "@sdp/types";
+import type { PaymentTransferSummary, TokenTransactionListItem } from "@sdp/types";
+import { WELL_KNOWN_TOKENS } from "@sdp/types";
 import { describe, expect, it, vi } from "vitest";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { buildHomeActivityRows, fetchOrgIssuanceActivity } from "./home-page.data";
@@ -57,7 +58,119 @@ describe("home issuance activity", () => {
         token: "USDC",
         amount: "12.5",
         address: "wallet_1",
+        status: "confirmed",
       }),
     ]);
+  });
+
+  it("carries a failed deploy's status so the card can mark it", () => {
+    // A failed deploy has no destination and often no signature; before the
+    // status rode along, the row was indistinguishable from a successful one.
+    const failedDeploy = {
+      ...issuanceItem,
+      transaction: {
+        ...issuanceItem.transaction,
+        id: "ttx_2",
+        type: "deploy",
+        status: "failed",
+        signature: null,
+        params: {},
+        error: "insufficient funds",
+      },
+    } satisfies TokenTransactionListItem;
+
+    expect(buildHomeActivityRows([], [failedDeploy], t)).toEqual([
+      expect.objectContaining({
+        id: "issuance-ttx_2",
+        type: "Deploy",
+        status: "failed",
+        address: "—",
+      }),
+    ]);
+  });
+
+  it("carries the payment transfer status", () => {
+    const transfer = {
+      id: "xfr_status",
+      direction: "outbound",
+      status: "pending",
+      token: "mint",
+      amount: "1",
+      destination: "wallet_9",
+      createdAt: "2026-07-17T15:00:00.000Z",
+    } as unknown as PaymentTransferSummary;
+
+    const [row] = buildHomeActivityRows([transfer], [], t);
+
+    expect(row?.status).toBe("pending");
+  });
+
+  it("renders a well-known mint as its symbol rather than the raw address", () => {
+    const transfer = {
+      id: "xfr_1",
+      direction: "outbound",
+      token: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
+      amount: "100",
+      destination: "wallet_2",
+      createdAt: "2026-07-17T15:00:00.000Z",
+    } as unknown as PaymentTransferSummary;
+
+    const [row] = buildHomeActivityRows([transfer], [], t);
+
+    expect(row?.token).toBe("USDC");
+  });
+
+  it("names a token this org issued rather than shortening its mint", () => {
+    const mint = "AcmeQA1111111111111111111111111111111111111";
+    const transfer = {
+      id: "xfr_issued",
+      direction: "outbound",
+      token: mint,
+      amount: "100",
+      destination: "wallet_2",
+      createdAt: "2026-07-17T15:00:00.000Z",
+    } as unknown as PaymentTransferSummary;
+
+    const [row] = buildHomeActivityRows([transfer], [], t, { [mint]: "ACME" });
+
+    expect(row?.token).toBe("ACME");
+  });
+
+  it("shortens an uncatalogued mint instead of printing all 44 characters", () => {
+    const transfer = {
+      id: "xfr_2",
+      direction: "outbound",
+      token: "9xQeWvG816bUx9EPfuxEzHh9VY5kvJkFqRk3nJvHnLpQ",
+      amount: "5",
+      destination: "wallet_3",
+      createdAt: "2026-07-17T15:00:00.000Z",
+    } as unknown as PaymentTransferSummary;
+
+    const [row] = buildHomeActivityRows([transfer], [], t);
+
+    expect(row?.token).toBe("9xQeWv…nLpQ");
+  });
+});
+
+describe("token mint passthrough", () => {
+  it("keeps the raw mint so the client can name a token this builder cannot", () => {
+    // The builder only knows issued-token symbols. A holding the organization did
+    // not issue used to degrade to a shortened mint with no way back to a symbol.
+    const mint = "9xQeWvG816bUx9EPfuxEzHh9VY5kvJkFqRk3nJvHnLpQ";
+    const [row] = buildHomeActivityRows(
+      [
+        {
+          id: "t1",
+          createdAt: "2026-07-30T10:00:00.000Z",
+          token: mint,
+          amount: "12",
+          direction: "inbound",
+        } as never,
+      ],
+      [],
+      ((key: string) => key) as never
+    );
+
+    expect(row.tokenMint).toBe(mint);
   });
 });

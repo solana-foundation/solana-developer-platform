@@ -26,6 +26,7 @@ export interface FeePaymentEnv extends RpcEnv {
   FEE_PAYMENT_PROVIDER?: "kora" | "native";
   KORA_RPC_URL?: string;
   KORA_API_KEY?: string;
+  KORA_CLOUD_RUN_AUDIENCE?: string;
   KORA_TIMEOUT_MS?: string;
   FEE_PAYER_PRIVATE_KEY?: string;
   CUSTODY_PRIVATE_KEY?: string;
@@ -66,6 +67,17 @@ export interface FeePaymentPort {
    * @returns Transaction signature
    */
   signAndSend(transaction: Uint8Array): Promise<Signature>;
+
+  /** Conservative provider-side lamport outflow ceiling used for admission. */
+  getSponsorshipConfiguration?(): Promise<SponsorshipProviderConfiguration>;
+}
+
+export interface SponsorshipProviderConfiguration {
+  signerAddress: Address;
+  maxAllowedLamports: bigint;
+  feePayerMayTransferLamports: boolean;
+  /** Raw authority policy used to pin security-relevant provider configuration. */
+  feePayerPolicy: unknown;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

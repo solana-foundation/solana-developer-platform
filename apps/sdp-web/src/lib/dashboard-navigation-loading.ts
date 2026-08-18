@@ -3,10 +3,13 @@ export const DASHBOARD_SIDE_NAV_HREFS = {
   wallets: "/dashboard/wallets",
   issuance: "/dashboard/issuance",
   payments: "/dashboard/payments",
+  markets: "/dashboard/markets/earn",
+  heliusRings: "/dashboard/helius-rings",
   apiKeys: "/dashboard/api-keys",
   policies: "/dashboard/policies",
   approvals: "/dashboard/approvals",
   settings: "/dashboard/settings",
+  integrations: "/dashboard/integrations",
 } as const;
 
 export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
@@ -16,21 +19,25 @@ export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
   deposit: "/dashboard/payments/deposit",
   requests: "/dashboard/payments/requests",
   recurring: "/dashboard/payments/recurring",
+  privateChannels: "/dashboard/payments/private-channels",
 } as const;
 
 export type DashboardLoadingRoute =
   | "home"
+  | "token-holdings"
   | "wallets-overview"
   | "wallet-setup"
   | "wallet-detail"
   | "wallet-policy"
   | "wallet-policy-audit-list"
   | "wallet-policy-audit-detail"
-  | "wallet-policy-revisions"
   | "issuance-overview"
   | "issuance-create"
   | "issuance-detail"
   | "payments-overview"
+  | "earn-overview"
+  | "earn-deposit"
+  | "earn-strategy-detail"
   | "payments-transactions"
   | "payments-pay"
   | "payments-deposit"
@@ -47,8 +54,9 @@ export type DashboardLoadingRoute =
   | "policies"
   | "approvals-list"
   | "approval-detail"
-  | "members"
   | "settings"
+  | "integrations"
+  | "integration-detail"
   | "allowlist";
 
 function normalizePathname(pathname: string): string {
@@ -71,7 +79,6 @@ function resolveWalletLoadingRoute(pathname: string): DashboardLoadingRoute | nu
   if (suffix.length < 1) return null;
   if (suffix[1] !== "policy") return "wallet-detail";
   if (suffix.length === 2) return "wallet-policy";
-  if (suffix[2] === "revisions" && suffix.length === 3) return "wallet-policy-revisions";
   if (suffix[2] === "audit" && suffix.length === 3) return "wallet-policy-audit-list";
   if (suffix[2] === "audit" && suffix.length === 4) return "wallet-policy-audit-detail";
   return null;
@@ -81,6 +88,7 @@ function resolveWalletLoadingRoute(pathname: string): DashboardLoadingRoute | nu
 export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoadingRoute | null {
   const pathname = normalizePathname(rawPathname);
   if (pathname === "/dashboard") return "home";
+  if (pathname === "/dashboard/tokens") return "token-holdings";
 
   const walletRoute = resolveWalletLoadingRoute(pathname);
   if (walletRoute) return walletRoute;
@@ -88,6 +96,12 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
   if (pathname === "/dashboard/issuance") return "issuance-overview";
   if (pathname === "/dashboard/issuance/create") return "issuance-create";
   if (/^\/dashboard\/issuance\/[^/]+$/.test(pathname)) return "issuance-detail";
+
+  if (pathname === "/dashboard/markets/earn") return "earn-overview";
+  if (pathname === "/dashboard/markets/earn/deposit") return "earn-deposit";
+  if (/^\/dashboard\/markets\/earn\/strategies\/[^/]+$/.test(pathname)) {
+    return "earn-strategy-detail";
+  }
 
   if (pathname === "/dashboard/payments") return "payments-overview";
   if (pathname === "/dashboard/payments/transactions") return "payments-transactions";
@@ -111,109 +125,38 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
   if (pathname === "/dashboard/policies") return "policies";
   if (pathname === "/dashboard/approvals") return "approvals-list";
   if (/^\/dashboard\/approvals\/[^/]+$/.test(pathname)) return "approval-detail";
-  if (pathname === "/dashboard/members") return "members";
   if (pathname === "/dashboard/settings") return "settings";
+  if (pathname === "/dashboard/integrations") return "integrations";
+  if (/^\/dashboard\/integrations\/[^/]+$/.test(pathname)) return "integration-detail";
   if (pathname === "/dashboard/allowlist") return "allowlist";
 
   return null;
 }
 
-export type DashboardNavigationIntentInput = {
-  currentHref: string;
-  targetHref: string;
-  button?: number;
-  metaKey?: boolean;
-  ctrlKey?: boolean;
-  shiftKey?: boolean;
-  altKey?: boolean;
-  target?: string | null;
-  download?: boolean;
-};
-
-export const DASHBOARD_NAVIGATION_START_EVENT = "sdp:dashboard-navigation-start";
-export const DASHBOARD_NAVIGATION_RECOVERY_TIMEOUT_MS = 10_000;
-
-export type DashboardNavigationStartDetail = {
-  fromPathname: string;
-  toPathname: string;
-  toSearch: string;
-};
-
-export type DashboardNavigationTarget = {
-  pathname: string;
-  search: string;
-};
-
 /**
- * Resolves a normal same-tab dashboard click to the pathname whose loading UI
- * should be shown immediately. Modified, external, same-route, and unsupported
- * links keep their native behavior without changing the shell.
+ * Whether a top-level nav destination is the one currently being viewed.
+ *
+ * Lives here rather than in the shell so the sidebar and the mobile bottom bar
+ * cannot drift apart on which tab is highlighted. Wallets deliberately claims the
+ * `/dashboard/custody` tree too — they are the same destination under two paths.
  */
-export function resolveDashboardNavigationTarget({
-  currentHref,
-  targetHref,
-  button = 0,
-  metaKey = false,
-  ctrlKey = false,
-  shiftKey = false,
-  altKey = false,
-  target,
-  download = false,
-}: DashboardNavigationIntentInput): DashboardNavigationTarget | null {
-  if (
-    button !== 0 ||
-    metaKey ||
-    ctrlKey ||
-    shiftKey ||
-    altKey ||
-    download ||
-    (target && target !== "_self")
-  ) {
-    return null;
+export function isDashboardNavItemActive(pathname: string, href: string): boolean {
+  if (href === "/dashboard") {
+    // Holdings has no nav entry of its own and is only reached from the home
+    // allocation card, so Home keeps the highlight rather than the sidebar going
+    // blank while you are on it.
+    return pathname === "/dashboard" || pathname === "/dashboard/tokens";
   }
-
-  let currentUrl: URL;
-  let targetUrl: URL;
-  try {
-    currentUrl = new URL(currentHref);
-    targetUrl = new URL(targetHref, currentUrl);
-  } catch {
-    return null;
+  if (href === "/dashboard/integrations") {
+    return (
+      pathname === "/dashboard/integrations" || pathname.startsWith("/dashboard/integrations/")
+    );
   }
-
-  if (targetUrl.origin !== currentUrl.origin) return null;
-
-  const targetPathname = normalizePathname(targetUrl.pathname);
-  const currentPathname = normalizePathname(currentUrl.pathname);
-  if (targetPathname === currentPathname) return null;
-  if (!resolveDashboardLoadingRoute(targetPathname)) return null;
-
-  return { pathname: targetPathname, search: targetUrl.search };
-}
-
-export function resolveDashboardNavigationIntent(
-  input: DashboardNavigationIntentInput
-): string | null {
-  return resolveDashboardNavigationTarget(input)?.pathname ?? null;
-}
-
-/** Announces programmatic router navigation to the shell before the RSC request starts. */
-export function announceDashboardNavigation(targetHref: string): void {
-  if (typeof window === "undefined") return;
-
-  const target = resolveDashboardNavigationTarget({
-    currentHref: window.location.href,
-    targetHref,
-  });
-  if (!target) return;
-
-  window.dispatchEvent(
-    new CustomEvent<DashboardNavigationStartDetail>(DASHBOARD_NAVIGATION_START_EVENT, {
-      detail: {
-        fromPathname: window.location.pathname,
-        toPathname: target.pathname,
-        toSearch: target.search,
-      },
-    })
-  );
+  if (href === "/dashboard/wallets") {
+    return pathname.startsWith("/dashboard/wallets") || pathname.startsWith("/dashboard/custody");
+  }
+  if (href === "/dashboard/payments") {
+    return pathname === "/dashboard/payments" || pathname.startsWith("/dashboard/payments/");
+  }
+  return pathname === href || pathname.startsWith(`${href}/`);
 }

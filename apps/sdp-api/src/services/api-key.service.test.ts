@@ -1,6 +1,10 @@
+import { hashString } from "@sdp/payments/hash";
 import { describe, expect, it } from "vitest";
 import type { DatabaseClient, PreparedStatement, QueryManyResult } from "@/db/client";
+import { createTenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { ApiKeyService } from "./api-key.service";
+
+const TEST_SCOPE = createTenantScope({ organizationId: "org_1", projectId: "prj_1" });
 
 type RunCall = { sql: string; values: unknown[] };
 
@@ -57,10 +61,116 @@ class RecordingDb implements DatabaseClient {
   }
 }
 
+type FirstCall = { sql: string; values: unknown[] };
+
+class LookupStatement implements PreparedStatement {
+  constructor(
+    private readonly row: Record<string, unknown> | null,
+    private readonly calls: FirstCall[],
+    private readonly sql: string,
+    private readonly values: unknown[] = []
+  ) {}
+
+  bind(...values: unknown[]): PreparedStatement {
+    return new LookupStatement(this.row, this.calls, this.sql, values);
+  }
+
+  async first<T = Record<string, unknown>>(): Promise<T | null> {
+    this.calls.push({ sql: this.sql, values: this.values });
+    return this.row as T | null;
+  }
+
+  async all<T = Record<string, unknown>>(): Promise<QueryManyResult<T>> {
+    return { results: [], rows: [] };
+  }
+
+  async run(): Promise<number> {
+    return 0;
+  }
+}
+
+class LookupDb extends RecordingDb {
+  readonly lookups: FirstCall[] = [];
+
+  constructor(private readonly row: Record<string, unknown> | null) {
+    super();
+  }
+
+  override prepare(query: string): PreparedStatement {
+    return new LookupStatement(this.row, this.lookups, query);
+  }
+}
+
+describe("ApiKeyService.ownsUsableApiKey", () => {
+  it("rejects forged organization and project claims before database access", async () => {
+    const db = new LookupDb({ status: "active", expires_at: null });
+    const service = new ApiKeyService(db, TEST_SCOPE);
+
+    await expect(
+      service.ownsUsableApiKey({
+        apiKey: "sk_test_foreign_secret",
+        organizationId: "org_foreign",
+        projectId: "prj_foreign",
+        pepper: "test-pepper",
+      })
+    ).rejects.toBeInstanceOf(TenantScopeViolationError);
+    expect(db.lookups).toHaveLength(0);
+  });
+
+  it("matches exact key material inside the organization and project boundary", async () => {
+    const db = new LookupDb({ status: "active", expires_at: null });
+    const service = new ApiKeyService(db, TEST_SCOPE);
+    const apiKey = "sk_test_owned_secret";
+    const pepper = "test-pepper";
+
+    await expect(
+      service.ownsUsableApiKey({
+        apiKey,
+        organizationId: "org_1",
+        projectId: "prj_1",
+        pepper,
+      })
+    ).resolves.toBe(true);
+
+    expect(db.lookups).toHaveLength(1);
+    expect(db.lookups[0]?.sql).toContain("key_hash = ? AND organization_id = ? AND project_id = ?");
+    expect(db.lookups[0]?.values).toEqual([await hashString(apiKey, pepper), "org_1", "prj_1"]);
+  });
+
+  it("fails closed when no scoped exact-key match exists", async () => {
+    const service = new ApiKeyService(new LookupDb(null), TEST_SCOPE);
+
+    await expect(
+      service.ownsUsableApiKey({
+        apiKey: "sk_live_foreign_secret",
+        organizationId: "org_1",
+        projectId: "prj_1",
+        pepper: "test-pepper",
+      })
+    ).resolves.toBe(false);
+  });
+
+  it.each([
+    ["deactivated", null],
+    ["active", "2000-01-01T00:00:00.000Z"],
+  ])("rejects an unusable key with status %s and expiry %s", async (status, expiresAt) => {
+    const service = new ApiKeyService(new LookupDb({ status, expires_at: expiresAt }), TEST_SCOPE);
+
+    await expect(
+      service.ownsUsableApiKey({
+        apiKey: "sk_test_unusable_secret",
+        organizationId: "org_1",
+        projectId: "prj_1",
+        pepper: "test-pepper",
+      })
+    ).resolves.toBe(false);
+  });
+});
+
 describe("ApiKeyService.createApiKey permission guard", () => {
   it("rejects a non-admin minting an api_admin key before touching the database", async () => {
     const db = new RecordingDb();
-    const service = new ApiKeyService(db);
+    const service = new ApiKeyService(db, TEST_SCOPE);
 
     await expect(
       service.createApiKey({
@@ -87,7 +197,7 @@ describe("ApiKeyService.updateApiKey", () => {
 
   it("rejects a non-admin raising permissions to a wildcard", async () => {
     const db = new RecordingDb();
-    const service = new ApiKeyService(db);
+    const service = new ApiKeyService(db, TEST_SCOPE);
 
     await expect(
       service.updateApiKey({
@@ -102,7 +212,7 @@ describe("ApiKeyService.updateApiKey", () => {
 
   it("scopes the update to organization and project", async () => {
     const db = new RecordingDb();
-    const service = new ApiKeyService(db);
+    const service = new ApiKeyService(db, TEST_SCOPE);
 
     await service.updateApiKey({
       ...base,
@@ -117,7 +227,7 @@ describe("ApiKeyService.updateApiKey", () => {
 
   it("lets a non-admin narrow permissions to a subset of its own", async () => {
     const db = new RecordingDb();
-    const service = new ApiKeyService(db);
+    const service = new ApiKeyService(db, TEST_SCOPE);
 
     await service.updateApiKey({
       ...base,
@@ -136,7 +246,7 @@ describe("ApiKeyService.updateApiKey", () => {
 
   it("throws when there are no fields to update", async () => {
     const db = new RecordingDb();
-    const service = new ApiKeyService(db);
+    const service = new ApiKeyService(db, TEST_SCOPE);
 
     await expect(
       service.updateApiKey({ ...base, actorPermissions: ["org:admin"] })

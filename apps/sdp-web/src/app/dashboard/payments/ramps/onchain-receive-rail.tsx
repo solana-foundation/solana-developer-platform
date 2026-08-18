@@ -1,15 +1,19 @@
 "use client";
 
 import { useTranslations } from "@/i18n/provider";
+import { WizardSummaryList } from "../wizard-summary-list";
 import { OnchainReceiveStepContent } from "./components/onchain-receive-step-content";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
 import { useOnchainReceiveWizard } from "./hooks/use-onchain-receive-wizard";
 import type { RailProps } from "./ramp-action-page";
+import { preStepSummaryDetails } from "./wizard-summary";
 
 export function OnchainReceiveRail({
   wallets,
   walletsError,
   counterpartyId,
+  counterpartyName,
+  methodLabel,
   preSteps,
   onExit,
 }: RailProps) {
@@ -34,6 +38,14 @@ export function OnchainReceiveRail({
       counterpartyDialogOpen={false}
       setCounterpartyDialogOpen={() => {}}
       onCounterpartyCreated={() => {}}
+      summary={
+        <WizardSummaryList
+          details={[
+            ...preStepSummaryDetails(t, counterpartyName, methodLabel),
+            ...wizard.summaryDetails,
+          ]}
+        />
+      }
     >
       <OnchainReceiveStepContent wizard={wizard} />
     </RampWizardShell>

@@ -8,7 +8,7 @@ import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import { credentialAdminAuthMiddleware } from "./credential-admin-auth";
@@ -103,7 +103,6 @@ describe("credentialAdminAuthMiddleware", () => {
   });
 
   afterEach(async () => {
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 
@@ -124,6 +123,27 @@ describe("credentialAdminAuthMiddleware", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ authType: "clerk" });
+  });
+
+  it("allows an organization admin dashboard session", async () => {
+    const sessionId = "ses_credential_admin_auth";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+         VALUES (?, ?, ?, 'session', ?)`
+      )
+      .bind(sessionId, ADMIN_USER_ID, ORG_ID, "2999-01-01T00:00:00.000Z")
+      .run();
+    const { app } = buildProbe();
+
+    const response = await app.request(
+      "/probe",
+      { headers: { Cookie: `sdp_session=${sessionId}` } },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ authType: "session" });
   });
 
   it("denies a Clerk organization member before the handler", async () => {
@@ -163,24 +183,27 @@ describe("credentialAdminAuthMiddleware", () => {
   it.each([
     ["standard", "api_developer", ["custody:admin"]],
     ["wildcard admin", "api_admin", ["*"]],
-  ] as const)("rejects a valid %s API key before the handler", async (_label, role, permissions) => {
-    const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, keyHash, {
-      ...TEST_CACHED_API_KEY,
-      role,
-      permissions: [...permissions],
-    });
-    const { app, wasHandlerReached } = buildProbe();
+  ] as const)(
+    "rejects a valid %s API key before the handler",
+    async (_label, role, permissions) => {
+      const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
+      await seedCachedApiKey(env, keyHash, {
+        ...TEST_CACHED_API_KEY,
+        role,
+        permissions: [...permissions],
+      });
+      const { app, wasHandlerReached } = buildProbe();
 
-    const response = await app.request(
-      "/probe",
-      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
-      env
-    );
+      const response = await app.request(
+        "/probe",
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
 
-    expect(response.status).toBe(403);
-    expect(wasHandlerReached()).toBe(false);
-  });
+      expect(response.status).toBe(403);
+      expect(wasHandlerReached()).toBe(false);
+    }
+  );
 
   it("returns unauthorized for missing authentication before the handler", async () => {
     const { app, wasHandlerReached } = buildProbe();

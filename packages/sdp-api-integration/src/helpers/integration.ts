@@ -22,7 +22,6 @@ import { getIntegrationCustodyProvider } from "./custody-provider";
 
 const {
   app,
-  clearTestDatabase,
   createKVStoreSet,
   createFeePaymentAdapter,
   createMosaicService,
@@ -57,7 +56,9 @@ let cachedCustodyAddress: string | null = null;
 // stablecoin shape; the ScaledUiAmount extension on tokenized-security
 // pushed the mint rent ~0.0004 SOL higher and tipped tests over.
 const INTEGRATION_CUSTODY_FUND_LAMPORTS = 50_000_000;
-const KORA_MAX_TRANSFER_LAMPORTS = 10_000_000n;
+// Fallback when the relay does not expose its policy; matches the deployed
+// devnet max_allowed_lamports.
+const KORA_MAX_TRANSFER_LAMPORTS = 9_900_000n;
 
 type SolanaRpcResponse<T> =
   | { jsonrpc: "2.0"; id: number; result: T }
@@ -205,7 +206,7 @@ export async function resetIntegrationState(
 }
 
 export async function cleanupIntegrationSuite() {
-  await clearTestDatabase(env);
+  await seedTestDatabase(env);
 }
 
 type IntegrationRequestInit = RequestInit & {
@@ -482,13 +483,17 @@ async function fundAddressViaKoraFeePayer(
   const feePayment = createFeePaymentAdapter(env);
   const feePayer = await feePayment.getFeePayer();
   const rpc = createRpc(env);
+  const maxTransferLamports =
+    (await feePayment
+      .getSponsorshipConfiguration?.()
+      .then((configuration) => configuration.maxAllowedLamports)
+      .catch(() => 0n)
+      .then((cap) => (cap > 0n ? cap : undefined))) ?? KORA_MAX_TRANSFER_LAMPORTS;
   let remainingLamports = lamports;
 
   while (remainingLamports > 0n) {
     const requestedAmount =
-      remainingLamports > KORA_MAX_TRANSFER_LAMPORTS
-        ? KORA_MAX_TRANSFER_LAMPORTS
-        : remainingLamports;
+      remainingLamports > maxTransferLamports ? maxTransferLamports : remainingLamports;
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
     const minimumLamports = await getMinimumBalanceForRentExemption(rpc, 0);
     const amount = requestedAmount > minimumLamports ? requestedAmount : minimumLamports + 1n;
@@ -617,7 +622,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function solanaRpc<T>(rpcUrl: string, method: string, params: unknown[]): Promise<T> {
-  const maxRetries = 2;
+  const maxRetries = 4;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const response = await fetch(rpcUrl, {
@@ -649,6 +654,7 @@ function isRetryableSolanaRpcError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const message = error.message.toLowerCase();
   return (
+    message.includes("internal error") ||
     message.includes("unable to complete request") ||
     message.includes("request timed out") ||
     message.includes("timed out") ||

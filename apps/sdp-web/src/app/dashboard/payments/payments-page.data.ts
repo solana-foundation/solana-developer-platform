@@ -1,4 +1,5 @@
 import type {
+  CustodyProvider,
   CustodyWalletAggregate,
   PaymentsDashboardWallet,
   PaymentTransferSummary,
@@ -19,8 +20,11 @@ interface FetchPaymentsWalletsOptions {
 }
 
 export interface PaymentsIssuedTokenSymbol {
+  /** Issued-token id (`tok_…`). Null when the listing omits it. */
+  id: string | null;
   mintAddress: string;
   symbol: string;
+  imageUrl: string | null;
 }
 
 export async function fetchPaymentsWallets(
@@ -50,6 +54,7 @@ export async function fetchPaymentsWallets(
           walletId?: string;
           publicKey?: string;
           label?: string | null;
+          provider?: string;
           balances?: PaymentsDashboardWallet["balances"];
         }>;
       };
@@ -74,6 +79,7 @@ export async function fetchPaymentsWallets(
         walletId: wallet.walletId,
         publicKey: wallet.publicKey,
         label: wallet.label ?? null,
+        ...(wallet.provider ? { provider: wallet.provider as CustodyProvider } : {}),
         ...(Array.isArray(wallet.balances) ? { balances: wallet.balances } : {}),
       }));
 
@@ -137,6 +143,7 @@ function normalizePaymentTransfer(
     token,
     amount,
     memo,
+    rampsMemo,
     provider,
     counterpartyId,
     counterpartyDisplayName,
@@ -163,6 +170,7 @@ function normalizePaymentTransfer(
       token,
       amount,
       memo,
+      rampsMemo,
       provider,
       counterpartyId,
       counterpartyDisplayName,
@@ -297,6 +305,21 @@ export async function fetchDashboardPaymentTransfersForWallets(
   };
 }
 
+/**
+ * Fetches the org's issued tokens keyed by mint address — the lookup shape
+ * `resolveTokenByMint` takes. A failed fetch degrades to an empty map so
+ * balance surfaces still render with well-known symbols.
+ *
+ * @param request - The authenticated SDP API request function.
+ * @returns The issued tokens keyed by mint address.
+ */
+export async function fetchIssuedTokensByMint(
+  request: SdpApiClient["request"]
+): Promise<Record<string, PaymentsIssuedTokenSymbol>> {
+  const result = await fetchPaymentsIssuedTokenSymbols(request);
+  return Object.fromEntries((result.data ?? []).map((token) => [token.mintAddress, token]));
+}
+
 export async function fetchPaymentsIssuedTokenSymbols(
   request: SdpApiClient["request"],
   pageSize = 100
@@ -325,13 +348,17 @@ export async function fetchPaymentsIssuedTokenSymbols(
       const json = (await response.json()) as {
         data?:
           | Array<{
+              id?: string;
               mintAddress?: string | null;
               symbol?: string;
+              imageUrl?: string | null;
             }>
           | {
               tokens?: Array<{
+                id?: string;
                 mintAddress?: string | null;
                 symbol?: string;
+                imageUrl?: string | null;
               }>;
             };
         meta?: {
@@ -346,13 +373,20 @@ export async function fetchPaymentsIssuedTokenSymbols(
             (
               token
             ): token is {
+              id?: string;
               mintAddress: string;
               symbol?: string;
+              imageUrl?: string | null;
             } => typeof token?.mintAddress === "string" && token.mintAddress.length > 0
           )
           .map((token) => ({
+            id: typeof token.id === "string" && token.id.length > 0 ? token.id : null,
             mintAddress: token.mintAddress,
             symbol: token.symbol?.trim() || token.mintAddress,
+            imageUrl:
+              typeof token.imageUrl === "string" && token.imageUrl.trim().length > 0
+                ? token.imageUrl
+                : null,
           }))
       );
 

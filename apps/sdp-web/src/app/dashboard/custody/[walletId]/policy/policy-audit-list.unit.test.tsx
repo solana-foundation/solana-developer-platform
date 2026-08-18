@@ -4,9 +4,15 @@ import type {
   WalletPolicyEvaluationDetail,
 } from "@sdp/types";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { getMessages, translate } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => "/dashboard/wallets/w/policy/audit",
+}));
+
 import type { PolicyTranslate } from "./policy-audit.shared";
 import { PolicyAuditDetail } from "./policy-audit-detail";
 import { PolicyAuditList } from "./policy-audit-list";
@@ -81,6 +87,7 @@ const revisionHistory: WalletControlProfileRevisionHistory = {
       revisionNumber: 1,
       rules: [],
       defaultAction: "allow",
+      commitMessage: null,
       createdBy: null,
       createdAt: "2026-07-18T13:30:00.000Z",
       activatedAt: "2026-07-18T13:35:00.000Z",
@@ -93,6 +100,7 @@ const wallet: CustodyWalletByIdResponse["wallet"] = {
   id: "custody-wallet-1",
   custodyConfigId: "custody-config-1",
   provider: "dfns",
+  isRuntimeExecutionAllowed: true,
   walletId: "wallet-1",
   publicKey: "wallet-public-key",
   label: "Mobile overflow proof signer",
@@ -111,24 +119,30 @@ const wallet: CustodyWalletByIdResponse["wallet"] = {
 describe("policy audit presentation", () => {
   it("contains a long actor and the longest decision inside fixed desktop columns", () => {
     const html = renderToStaticMarkup(
-      <PolicyAuditList
-        walletId="wallet-1"
-        walletLabel="Mobile overflow proof signer"
-        result={{ evaluations: [evaluation], total: 1, page: 1, pageSize: 25 }}
-        filters={{ page: 1 }}
-        revisionHistory={revisionHistory}
-        apiKeyNames={{}}
-        locale="en-US"
-        t={t}
-      />
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <PolicyAuditList
+          walletId="wallet-1"
+          walletLabel="Mobile overflow proof signer"
+          result={{ evaluations: [evaluation], total: 1, page: 1, pageSize: 25 }}
+          filters={{ page: 1, pageSize: 25 }}
+          revisionHistory={revisionHistory}
+          apiKeyNames={{}}
+          userNames={{}}
+          issuedTokensByMint={{}}
+          locale="en-US"
+          t={t}
+        />
+      </I18nProvider>
     );
 
     expect(html).toContain('data-policy-audit-actor="true"');
     expect(html).toContain('class="min-w-0 truncate"');
     expect(html).toContain(`title="User · ${LONG_ACTOR_ID}"`);
     expect(html).toContain("Approval required");
-    expect(html).toContain("w-[160px]");
-    expect(html).toContain("w-[195px]");
+    expect(html).toContain("History Range");
+    expect(html).toContain("w-[150px]");
+    expect(html).toContain("w-[110px]");
+    expect(html).toContain("w-[180px]");
   });
 
   it("truncates a long actor in the mobile detail metadata row", () => {
@@ -139,9 +153,9 @@ describe("policy audit presentation", () => {
           evaluation={evaluation}
           revisionHistory={revisionHistory}
           apiKeyNames={{}}
+          userNames={{}}
           neighbors={{ previous: null, next: null }}
-          filters={{ page: 1 }}
-          tab="decision"
+          filters={{ page: 1, pageSize: 25 }}
           locale="en-US"
           t={t}
         />
@@ -149,7 +163,6 @@ describe("policy audit presentation", () => {
     );
 
     expect(html).toContain('data-policy-audit-detail-actor="true"');
-    expect(html).toContain('data-policy-audit-detail-rail-actor="true"');
     expect(html).toContain('class="min-w-0 flex-1 truncate"');
     expect(html).toContain(`title="User · ${LONG_ACTOR_ID}"`);
     expect(html).toContain("inline-flex min-w-0 max-w-full items-center gap-2");

@@ -14,6 +14,7 @@ import type {
   WalletOperationFamily,
   WalletOperationProviderExtensions,
   WalletOperationStatus,
+  WalletOperationType,
 } from "@sdp/types";
 import type { RepositoryDbClient } from "./base";
 
@@ -70,6 +71,7 @@ export interface WalletControlProfileRevisionRow {
   revision_number: number;
   rules: Record<string, unknown>[];
   default_action: PolicyDefaultAction;
+  commit_message: string | null;
   created_by: string | null;
   created_at: string;
   activated_at: string | null;
@@ -174,7 +176,7 @@ export interface WalletOperationRow {
   wallet_id: string;
   api_key_id: string | null;
   source: string;
-  operation_family: WalletOperationFamily;
+  operation_family: string;
   operation_type: string;
   asset: string | null;
   amount: string | null;
@@ -182,6 +184,14 @@ export interface WalletOperationRow {
   raw_payload: Record<string, unknown>;
   idempotency_key: string | null;
   status: WalletOperationStatus;
+  execution_started_at: string | null;
+  execution_completed_at: string | null;
+  execution_error: string | null;
+  execution_result: Record<string, unknown> | null;
+  execution_attempt_id: string | null;
+  execution_lease_expires_at: string | null;
+  execution_effect_started_at: string | null;
+  execution_attempts: number;
   created_at: string;
   updated_at: string;
 }
@@ -204,7 +214,7 @@ export interface PolicyEvaluationRow {
 export interface WalletPolicyEvaluationAuditRow {
   wallet_operation_id: string;
   policy_evaluation_id: string;
-  operation_family: WalletOperationFamily;
+  operation_family: string;
   operation_type: string;
   asset: string | null;
   amount: string | null;
@@ -265,12 +275,15 @@ export interface ApprovalRequestDetailRow {
   wallet_label: string | null;
   api_key_id: string | null;
   source: string;
-  operation_family: WalletOperationFamily;
+  operation_family: string;
   operation_type: string;
   asset: string | null;
   amount: string | null;
   destination: string | null;
   operation_status: WalletOperationStatus;
+  operation_execution_started_at: string | null;
+  operation_execution_completed_at: string | null;
+  operation_execution_error: string | null;
   operation_created_at: string;
   operation_updated_at: string;
   policy_evaluation_id: string | null;
@@ -327,6 +340,7 @@ export interface CreateWalletControlProfileRevisionInput {
   profileId: string;
   rules?: PolicyRule[];
   defaultAction?: PolicyDefaultAction;
+  commitMessage?: string | null;
   createdBy?: string | null;
 }
 
@@ -374,7 +388,7 @@ export type UpsertApiKeyWalletPolicyBindingInput = UpsertApiKeyWalletPolicyBindi
     | {
         bindingScope: "selected";
         walletId: string;
-        custodyWalletId?: string | null;
+        custodyWalletId: string;
       }
   );
 
@@ -392,7 +406,7 @@ export interface CreateWalletOperationInput {
   actor?: WalletOperationActor | null;
   source?: string;
   operationFamily: WalletOperationFamily;
-  operationType: string;
+  operationType: WalletOperationType;
   asset?: string | null;
   amount?: string | null;
   destination?: string | null;
@@ -430,12 +444,20 @@ export interface CreateApprovalRequestInput {
 
 export interface UpdateApprovalRequestStatusInput {
   organizationId: string;
-  projectId?: string | null;
+  projectId: string | null;
   approvalRequestId: string;
   status: ApprovalRequestStatus;
   operationStatus?: WalletOperationStatus;
   resolvedBy?: string | null;
   resolvedAt?: string;
+}
+
+export interface CompleteWalletOperationExecutionInput {
+  walletOperationId: string;
+  executionAttemptId: string;
+  status: "completed" | "failed";
+  result?: Record<string, unknown> | null;
+  error?: string | null;
 }
 
 export interface ListApprovalRequestDetailsInput {
@@ -552,11 +574,11 @@ export interface PolicyRepository {
   ): Promise<ActivePolicyProfileRevisionRefRow[]>;
   getApiKeyWalletPolicyBindingResolution(
     apiKeyId: string,
-    walletId: string
+    custodyWalletId: string
   ): Promise<ApiKeyWalletPolicyBindingResolutionRow>;
   getApiKeyWalletPolicyTarget(
     apiKeyId: string,
-    walletId: string
+    custodyWalletId: string
   ): Promise<ApiKeyWalletPolicyTargetRow | null>;
 
   createWalletOperation(input: CreateWalletOperationInput): Promise<WalletOperationRow | null>;
@@ -565,6 +587,23 @@ export interface PolicyRepository {
     walletOperationId: string,
     status: WalletOperationStatus
   ): Promise<WalletOperationRow | null>;
+  claimWalletOperationExecution(
+    walletOperationId: string,
+    executionAttemptId: string
+  ): Promise<WalletOperationRow | null>;
+  renewWalletOperationExecutionLease(
+    walletOperationId: string,
+    executionAttemptId: string
+  ): Promise<boolean>;
+  beginWalletOperationExecutionEffect(
+    walletOperationId: string,
+    executionAttemptId: string
+  ): Promise<boolean>;
+  completeWalletOperationExecution(
+    input: CompleteWalletOperationExecutionInput
+  ): Promise<WalletOperationRow | null>;
+  getApiKeyCreatorUserId(apiKeyId: string): Promise<string | null>;
+  isApprovalGroupMember(approvalGroupId: string, userId: string): Promise<boolean>;
   createPolicyEvaluation(input: CreatePolicyEvaluationInput): Promise<PolicyEvaluationRow | null>;
   listPolicyEvaluationsForOperation(walletOperationId: string): Promise<PolicyEvaluationRow[]>;
   listWalletPolicyEvaluationAudits(

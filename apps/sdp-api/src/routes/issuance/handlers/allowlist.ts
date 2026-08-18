@@ -1,17 +1,21 @@
 import { assertValidAddress } from "@sdp/solana/address";
-import type { TokenAllowlistResponse } from "@sdp/types";
+import type { TokenAllowlistEntry, TokenAllowlistResponse } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { AppError, badRequest, notFound } from "@/lib/errors";
-import { created, noContent, paginated } from "@/lib/response";
+import { AppError, badRequest, badRequestQuery, notFound } from "@/lib/errors";
+import { created, noContent, paginated, success } from "@/lib/response";
+import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
-import { createMosaicService } from "@/services/mosaic";
 import { createOrgSigner } from "@/services/solana";
-import { TokenService } from "@/services/token.service";
+import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
-import { requireProjectScope } from "../helpers";
-import { addAllowlistSchema } from "../schemas";
+import {
+  createIssuanceMosaicService,
+  getTenantTokenService,
+  requireProjectScope,
+} from "../helpers";
+import { addAllowlistSchema, listAllowlistQuerySchema } from "../schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -55,20 +59,12 @@ async function withTimeout<T>(
 }
 
 /**
- * On-chain add for an allowlist row that was just inserted or reactivated,
- * with TOCTOU-safe rollback.
+ * On-chain add for an allowlist row that is durably recorded as pending.
  *
- * If `addToList` errors, re-checks `isWalletOnList`. When membership is
- * confirmed, the DB row is kept and success bubbles up — the RPC/confirmation
- * error was transient and the on-chain write actually landed. Otherwise the
- * rollback path depends on `wasReactivated`:
- *
- *  - `false` (freshly inserted): hard-delete the row. Soft-revoking would
- *    leave a tombstone that the mint auto-add guard treats as an operator
- *    revoke and would block every subsequent mint to the address.
- *  - `true` (reactivated from `revoked`): re-revoke to restore the operator's
- *    prior revocation record. Hard-deleting would erase the original status
- *    history (the same row was operator-revoked earlier for KYC/compliance).
+ * A failed or timed-out submission can still land on-chain, so an ambiguous
+ * failure must never delete the DB record or its audit trail. The row remains
+ * pending and a retry can reconcile it. Confirmed membership promotes it to
+ * active.
  */
 async function syncNewAllowlistEntryOnChain(opts: {
   c: AppContext;
@@ -77,43 +73,26 @@ async function syncNewAllowlistEntryOnChain(opts: {
   signingWalletId: string | null | undefined;
   tokenService: TokenService;
   entryId: string;
-  wasReactivated: boolean;
   list: ReturnType<typeof assertValidAddress>;
   wallet: ReturnType<typeof assertValidAddress>;
-}): Promise<void> {
+}): Promise<TokenAllowlistEntry> {
   const signer = await createOrgSigner(
     opts.c.env,
     opts.organizationId,
     opts.projectId,
     opts.signingWalletId ?? undefined
   );
-  const mosaic = createMosaicService(opts.c.env, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(opts.c, signer, "sponsored");
 
   try {
     await mosaic.addToList({ list: opts.list, wallet: opts.wallet });
   } catch (error) {
-    if (await mosaic.isWalletOnList(opts.list, opts.wallet)) {
-      return;
+    if (!(await mosaic.isWalletOnList(opts.list, opts.wallet))) {
+      throw error;
     }
-    try {
-      if (opts.wasReactivated) {
-        await opts.tokenService.revokeAllowlistEntry(opts.entryId);
-      } else {
-        await opts.tokenService.deleteAllowlistEntry(opts.entryId);
-      }
-    } catch (rollbackError) {
-      throw new AppError(
-        "INTERNAL_ERROR",
-        "Failed to roll back control-list entry after sync error",
-        {
-          originalError: error instanceof Error ? error.message : "Unknown add error",
-          restoreError:
-            rollbackError instanceof Error ? rollbackError.message : "Unknown rollback error",
-        }
-      );
-    }
-    throw error;
   }
+
+  return opts.tokenService.activateAllowlistEntry(opts.entryId);
 }
 
 async function removeExistingAllowlistEntryOnChain(opts: {
@@ -130,33 +109,58 @@ async function removeExistingAllowlistEntryOnChain(opts: {
     opts.projectId,
     opts.signingWalletId ?? undefined
   );
-  const mosaic = createMosaicService(opts.c.env, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(opts.c, signer, "sponsored");
   const removeOperation = mosaic.removeFromList({
     list: opts.list,
     wallet: opts.wallet,
   });
 
-  if (opts.c.env.KORA_SURFPOOL_SHIM !== "true") {
-    await removeOperation;
-    return;
-  }
-
   try {
-    await withTimeout(
-      removeOperation,
-      getSurfpoolAblRemoveTimeoutMs(opts.c.env),
-      "Surfpool control-list removal timed out"
-    );
+    if (opts.c.env.KORA_SURFPOOL_SHIM === "true") {
+      await withTimeout(
+        removeOperation,
+        getSurfpoolAblRemoveTimeoutMs(opts.c.env),
+        "Surfpool control-list removal timed out"
+      );
+    } else {
+      await removeOperation;
+    }
   } catch (error) {
-    if (!isTimeoutLikeError(error)) {
-      throw error;
+    // Submission and confirmation errors are ambiguous: the removal may have
+    // landed despite the client error, and retrying an already-absent member
+    // must remain idempotent. Verify the authoritative on-chain state before
+    // deciding whether the operation failed.
+    try {
+      if (!(await mosaic.isWalletOnList(opts.list, opts.wallet))) {
+        return;
+      }
+    } catch (verificationError) {
+      getLogger().warn(
+        {
+          list: opts.list,
+          wallet: opts.wallet,
+          error:
+            verificationError instanceof Error
+              ? verificationError.message
+              : "Unknown verification error",
+        },
+        "Unable to verify control-list state after removal error"
+      );
     }
 
-    console.warn("Surfpool control-list removal timed out; keeping DB revocation as test truth", {
-      list: opts.list,
-      wallet: opts.wallet,
-      error: error.message,
-    });
+    if (opts.c.env.KORA_SURFPOOL_SHIM === "true" && isTimeoutLikeError(error)) {
+      getLogger().warn(
+        {
+          list: opts.list,
+          wallet: opts.wallet,
+          error: error.message,
+        },
+        "Surfpool control-list removal timed out; keeping DB revocation as test truth"
+      );
+      return;
+    }
+
+    throw error;
   }
 }
 
@@ -164,7 +168,13 @@ export const listAllowlist = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const { projectId, orgId } = requireProjectScope(c);
 
-  const tokenService = new TokenService(getDb(c.env));
+  const parsed = listAllowlistQuerySchema.safeParse(c.req.query());
+  if (!parsed.success) {
+    throw badRequestQuery({ errors: z.treeifyError(parsed.error) });
+  }
+  const { page, pageSize, search, label } = parsed.data;
+
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -175,16 +185,36 @@ export const listAllowlist = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  const page = Number.parseInt(c.req.query("page") ?? "1", 10);
-  const pageSize = Math.min(Number.parseInt(c.req.query("pageSize") ?? "50", 10), 100);
   const offset = (page - 1) * pageSize;
 
   const { entries, total } = await tokenService.listAllowlistEntries(tokenId, {
+    search,
+    label,
     limit: pageSize,
     offset,
   });
 
   return paginated(c, entries, { total, page, pageSize });
+};
+
+export const listAllowlistLabels = async (c: AppContext) => {
+  const { tokenId } = c.req.param();
+  const { projectId, orgId } = requireProjectScope(c);
+
+  const tokenService = getTenantTokenService(c);
+  const token = await tokenService.getToken({
+    tokenId,
+    organizationId: orgId,
+    projectId,
+  });
+
+  if (!token) {
+    throw notFound("Token");
+  }
+
+  const { labels, total } = await tokenService.listAllowlistLabels(tokenId);
+
+  return success(c, { labels, total });
 };
 
 export const addAllowlistEntry = async (c: AppContext) => {
@@ -200,7 +230,7 @@ export const addAllowlistEntry = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -212,28 +242,14 @@ export const addAllowlistEntry = async (c: AppContext) => {
   }
 
   try {
-    const { entry, wasReactivated } = await tokenService.addAllowlistEntry({
+    let { entry } = await tokenService.addAllowlistEntry({
       tokenId,
       address: parsed.data.address,
       addedBy: auth.id,
       label: parsed.data.label,
+      initialStatus: token.ablListAddress ? "pending" : "active",
     });
 
-    if (token.ablListAddress) {
-      await syncNewAllowlistEntryOnChain({
-        c,
-        organizationId: auth.organizationId,
-        projectId,
-        signingWalletId: token.signingWalletId,
-        tokenService,
-        entryId: entry.id,
-        wasReactivated,
-        list: assertValidAddress(token.ablListAddress, "ablListAddress"),
-        wallet: assertValidAddress(parsed.data.address, "address"),
-      });
-    }
-
-    // Audit log
     const auditService = new AuditService(getDb(c.env));
     await auditService.log(c, {
       action: "create",
@@ -244,8 +260,22 @@ export const addAllowlistEntry = async (c: AppContext) => {
         address: parsed.data.address,
         label: parsed.data.label,
         mode: token.ablListAddress ? "on-chain" : "database",
+        syncStatus: token.ablListAddress ? "pending" : "not_required",
       },
     });
+
+    if (token.ablListAddress) {
+      entry = await syncNewAllowlistEntryOnChain({
+        c,
+        organizationId: auth.organizationId,
+        projectId,
+        signingWalletId: token.signingWalletId,
+        tokenService,
+        entryId: entry.id,
+        list: assertValidAddress(token.ablListAddress, "ablListAddress"),
+        wallet: assertValidAddress(parsed.data.address, "address"),
+      });
+    }
 
     const response: TokenAllowlistResponse = { entry };
     return created(c, response);
@@ -261,7 +291,7 @@ export const removeAllowlistEntry = async (c: AppContext) => {
   const { tokenId, entryId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -276,46 +306,12 @@ export const removeAllowlistEntry = async (c: AppContext) => {
   if (!entry || entry.tokenId !== tokenId) {
     throw notFound("Allowlist entry");
   }
-
-  await tokenService.revokeAllowlistEntry(entryId);
-
-  try {
-    if (token.ablListAddress) {
-      await removeExistingAllowlistEntryOnChain({
-        c,
-        organizationId: auth.organizationId,
-        projectId,
-        signingWalletId: token.signingWalletId,
-        list: assertValidAddress(token.ablListAddress, "ablListAddress"),
-        wallet: assertValidAddress(entry.address, "address"),
-      });
-    }
-  } catch (error) {
-    try {
-      await tokenService.addAllowlistEntry({
-        tokenId,
-        address: entry.address,
-        addedBy: entry.addedBy,
-        label: entry.label ?? undefined,
-      });
-    } catch (restoreError) {
-      throw new AppError(
-        "INTERNAL_ERROR",
-        "Failed to restore control-list entry after sync error",
-        {
-          originalError: error instanceof Error ? error.message : "Unknown removal error",
-          restoreError:
-            restoreError instanceof Error ? restoreError.message : "Unknown restore error",
-        }
-      );
-    }
-
-    throw error;
+  if (entry.status === "revoked") {
+    return noContent(c);
   }
 
-  // Audit log
   const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
+  const auditIntent = await auditService.beginCritical(c, {
     action: "revoke",
     resourceType: "token_allowlist",
     resourceId: entryId,
@@ -325,6 +321,37 @@ export const removeAllowlistEntry = async (c: AppContext) => {
       mode: token.ablListAddress ? "on-chain" : "database",
     },
   });
+  let authoritativeEffectCompleted = false;
 
-  return noContent(c);
+  try {
+    // For on-chain lists, confirm authoritative removal before publishing the
+    // final DB state. The helper reconciles ambiguous submission errors by
+    // reading membership, so a timeout that landed still completes, while a
+    // definite failure leaves the entry accurately active and safely retryable.
+    if (token.ablListAddress) {
+      await removeExistingAllowlistEntryOnChain({
+        c,
+        organizationId: auth.organizationId,
+        projectId,
+        signingWalletId: token.signingWalletId,
+        list: assertValidAddress(token.ablListAddress, "ablListAddress"),
+        wallet: assertValidAddress(entry.address, "address"),
+      });
+      authoritativeEffectCompleted = true;
+    }
+
+    await tokenService.revokeAllowlistEntry(entryId);
+    authoritativeEffectCompleted = true;
+    await auditService.completeCritical(c, auditIntent);
+
+    return noContent(c);
+  } catch (error) {
+    if (!authoritativeEffectCompleted) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+      });
+    }
+    throw error;
+  }
 };

@@ -1,5 +1,5 @@
 import type { Address } from "@solana/addresses";
-import type { CustodyWalletAggregate, CustodyWalletTokenBalance } from "./custody";
+import type { CustodyProvider, CustodyWalletAggregate, CustodyWalletTokenBalance } from "./custody";
 import type { RampFiatCurrency } from "./generated/ramp-support.generated";
 import type { CryptoAssetSymbol, CryptoRailId, CryptoRailNetwork } from "./payment-rails";
 import type {
@@ -8,7 +8,6 @@ import type {
   PolicyProfileStatus,
   PolicyProviderSyncStatus,
   PolicyRule,
-  WalletOperationFamily,
   WalletOperationStatus,
 } from "./policy";
 import type { PrivateTransferRequest } from "./private-transfers";
@@ -19,6 +18,7 @@ export interface PaymentsDashboardWallet {
   walletId: string;
   publicKey: string;
   label: string | null;
+  provider?: CustodyProvider;
   balances?: CustodyWalletTokenBalance[];
 }
 
@@ -42,12 +42,9 @@ export interface PaymentsWalletAggregateEnvelope {
 
 export interface PaymentWalletPolicy {
   walletId: string;
-  destinationAllowlist: string[];
-  maxTransferAmount?: string;
-  maxDailyAmount?: string;
-  defaultAction?: PolicyDefaultAction;
-  rules?: PolicyRule[];
-  controlProfile?: PaymentWalletControlProfileSummary;
+  defaultAction: PolicyDefaultAction;
+  rules: PolicyRule[];
+  controlProfile: PaymentWalletControlProfileSummary | null;
   audit?: PaymentWalletPolicyAudit;
 }
 
@@ -57,6 +54,7 @@ export interface PaymentWalletControlProfileSummary {
   activeRevisionId: string | null;
   revisionId: string | null;
   revisionNumber: number | null;
+  commitMessage: string | null;
   defaultAction: PolicyDefaultAction;
   rules: PolicyRule[];
   providerMappingStatus: PolicyProviderSyncStatus;
@@ -78,10 +76,15 @@ export interface PaymentWalletPolicyAudit {
   recentEvaluations: PaymentWalletPolicyAuditEntry[];
 }
 
+/**
+ * Historical read model: rows predating a vocabulary trim keep their retired
+ * operation family/type strings, so these fields are not narrowed to the live
+ * enums.
+ */
 export interface PaymentWalletPolicyAuditEntry {
   walletOperationId: string;
   policyEvaluationId: string;
-  operationFamily: WalletOperationFamily;
+  operationFamily: string;
   operationType: string;
   asset: string | null;
   amount: string | null;
@@ -197,6 +200,7 @@ export interface PaymentTransferSummary {
   token?: string;
   amount?: string;
   memo?: string;
+  rampsMemo: Record<string, string>;
   provider?: RampProviderId;
   counterpartyId?: string;
   counterpartyDisplayName?: string;
@@ -856,6 +860,35 @@ export interface PaymentRampEstimateEnvelope {
   };
 }
 
+export const RAMPS_MEMO_LIMITS = {
+  maxEntries: 20,
+  maxKeyLength: 64,
+  maxValueLength: 256,
+} as const satisfies Record<string, number>;
+
+export interface PaymentOnrampQuoteRequest {
+  provider: RampProviderId;
+  counterpartyId: string;
+  destinationWallet: string;
+  cryptoToken: string;
+  fiatCurrency: RampFiatCurrency;
+  fiatAmount: string;
+  redirectUrl?: string;
+  domain?: string;
+  rampsMemo?: Record<string, string>;
+}
+
+export interface PaymentOfframpQuoteRequest {
+  provider: RampProviderId;
+  counterpartyId: string;
+  sourceWallet: string;
+  cryptoToken: string;
+  fiatCurrency?: RampFiatCurrency;
+  cryptoAmount: string;
+  redirectUrl?: string;
+  rampsMemo?: Record<string, string>;
+}
+
 export type PaymentRampQuoteDeliveryMode = "manual_instructions" | "hosted" | "session_widget";
 
 export interface PaymentRampQuoteCurrency {
@@ -944,10 +977,8 @@ export type RampEventProvider = (typeof RAMP_EVENT_PROVIDERS)[number];
 /**
  * Coinbase headless on-ramp events, forwarded from the payment-link iframe's
  * postMessage stream (`onramp_api.*`). `orderId` is the create-order id used as
- * the transfer's provider reference. Client events are provisional and only
- * advance the transfer to non-terminal states; the server-side webhook is the
- * settlement authority — it alone completes the transfer, carrying the actual
- * delivered crypto amount, which a client-set terminal status would block.
+ * the transfer's provider reference. Client events are advisory telemetry only;
+ * the signature-verified server-side webhook is the sole settlement authority.
  */
 export type CoinbaseRampEvent =
   | { kind: "committed"; orderId: string }

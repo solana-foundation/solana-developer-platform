@@ -5,20 +5,17 @@ import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createSdpApiClient } from "@/lib/sdp-api";
+import {
+  fetchPaymentsIssuedTokenSymbols,
+  type PaymentsIssuedTokenSymbol,
+} from "../payments/payments-page.data";
 import { ApprovalInbox } from "./approval-inbox";
-import type { ApprovalInboxTab } from "./approval-requests.data";
 import { fetchApprovalApiKeyNames, fetchApprovalRequests } from "./approval-requests.server";
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = Promise<Record<string, string | string[] | undefined>>;
-
-export default async function ApprovalsPage({ searchParams }: { searchParams: SearchParams }) {
-  const [t, { userId, orgId, orgRole }, resolvedSearchParams] = await Promise.all([
-    getTranslations(),
-    auth(),
-    searchParams,
-  ]);
+export default async function ApprovalsPage() {
+  const [t, { userId, orgId, orgRole }] = await Promise.all([getTranslations(), auth()]);
   if (!userId) redirect(await getAuthEntryPath());
   if (!orgId) redirect("/dashboard");
 
@@ -36,19 +33,25 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Se
     );
   }
 
-  const rawTab = resolvedSearchParams.tab;
-  const tabValue = Array.isArray(rawTab) ? rawTab[0] : rawTab;
-  const initialTab: ApprovalInboxTab = tabValue === "history" ? "history" : "pending";
   let requests: WalletApprovalRequestSummary[] = [];
   let apiKeyNames: Record<string, string> = {};
+  let issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol> = {};
   let loadError = false;
 
   try {
     const apiClient = await createSdpApiClient();
-    [requests, apiKeyNames] = await Promise.all([
+    // Issued tokens are absent from the well-known catalogue, so without this
+    // map every token this org minted renders as a shortened mint address.
+    const [fetchedRequests, fetchedApiKeyNames, issuedTokenSymbolsResult] = await Promise.all([
       fetchApprovalRequests(apiClient),
       fetchApprovalApiKeyNames(apiClient),
+      fetchPaymentsIssuedTokenSymbols(apiClient.request),
     ]);
+    requests = fetchedRequests;
+    apiKeyNames = fetchedApiKeyNames;
+    issuedTokensByMint = Object.fromEntries(
+      (issuedTokenSymbolsResult.data ?? []).map((token) => [token.mintAddress, token])
+    );
   } catch {
     loadError = true;
   }
@@ -57,8 +60,8 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Se
     <ApprovalInbox
       initialRequests={requests}
       apiKeyNames={apiKeyNames}
+      issuedTokensByMint={issuedTokensByMint}
       canDecide={dashboardAccess.capabilities.canDecideApprovals}
-      initialTab={initialTab}
       renderedAt={Date.now()}
       loadError={loadError}
     />

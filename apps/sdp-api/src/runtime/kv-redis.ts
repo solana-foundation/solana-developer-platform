@@ -1,6 +1,6 @@
 /**
  * Redis-backed KVStore implementation. One ioredis client per REDIS_URL is shared
- * across the four logical stores (apiKeys / rateLimits / cache / sessions);
+ * across the three logical stores (apiKeys / rateLimits / cache);
  * each store prefixes its keys so list() doesn't bleed across domains.
  *
  * ioredis is loaded lazily — the top-level `import type` is erased at emit
@@ -9,11 +9,60 @@
  * actually used.
  */
 
+import { createHash } from "node:crypto";
 import type { Redis } from "ioredis";
 import type { Env } from "@/types/env";
-import type { KVListResult, KVPutOptions, KVStore, KVStoreSet } from "./kv";
+import type {
+  KVListResult,
+  KVPutOptions,
+  KVStore,
+  KVStoreSet,
+  SlidingWindowAdmission,
+  SlidingWindowOptions,
+} from "./kv";
 
 const SCAN_COUNT = 100;
+
+const ADMIT_SLIDING_WINDOW_LUA = `
+local max = tonumber(ARGV[1])
+local weight = tonumber(ARGV[2])
+local ttl = tonumber(ARGV[3])
+local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+local previous = tonumber(redis.call('GET', KEYS[2]) or '0')
+if current + previous * weight >= max then
+  return {0, current, previous}
+end
+current = redis.call('INCR', KEYS[1])
+redis.call('PEXPIRE', KEYS[1], ttl)
+return {1, current, previous}
+`;
+
+const ADMIT_SLIDING_WINDOW_SHA = createHash("sha1").update(ADMIT_SLIDING_WINDOW_LUA).digest("hex");
+
+const COMPARE_AND_SET_LUA = `
+local current = redis.call('GET', KEYS[1])
+if ARGV[1] == 'missing' then
+  if current ~= false then
+    return 0
+  end
+elseif current ~= ARGV[2] then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[3])
+return 1
+`;
+
+const COMPARE_AND_SET_SHA = createHash("sha1").update(COMPARE_AND_SET_LUA).digest("hex");
+
+const COMPARE_AND_DELETE_LUA = `
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+  return 0
+end
+redis.call('DEL', KEYS[1])
+return 1
+`;
+
+const COMPARE_AND_DELETE_SHA = createHash("sha1").update(COMPARE_AND_DELETE_LUA).digest("hex");
 
 // One Promise<Redis> per URL, shared by every RedisKVStore at that backend.
 // Storing the Promise (not the resolved client) means concurrent first-
@@ -48,6 +97,15 @@ function ensureClient(url: string): Promise<Redis> {
     }
   });
   return promise;
+}
+
+/** Shared low-level client for features that require atomic Redis scripts. */
+export function getRedisClient(env: Pick<Env, "REDIS_URL">): Promise<Redis> {
+  const url = env.REDIS_URL?.trim();
+  if (!url) {
+    throw new Error("REDIS_URL is required for sponsorship budget admission.");
+  }
+  return ensureClient(url);
 }
 
 export class RedisKVStore implements KVStore {
@@ -94,6 +152,64 @@ export class RedisKVStore implements KVStore {
     await client.del(this.namespaced(key));
   }
 
+  async compareAndSet(key: string, expected: string | null, value: string): Promise<boolean> {
+    const client = await this.clientPromise;
+    const args = expected === null ? ["missing", "", value] : ["present", expected, value];
+    let result: unknown;
+    try {
+      result = await client.evalsha(COMPARE_AND_SET_SHA, 1, this.namespaced(key), ...args);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("NOSCRIPT")) {
+        result = await client.eval(COMPARE_AND_SET_LUA, 1, this.namespaced(key), ...args);
+      } else {
+        throw err;
+      }
+    }
+    return result === 1;
+  }
+
+  async compareAndDelete(key: string, expected: string): Promise<boolean> {
+    const client = await this.clientPromise;
+    let result: unknown;
+    try {
+      result = await client.evalsha(COMPARE_AND_DELETE_SHA, 1, this.namespaced(key), expected);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("NOSCRIPT")) {
+        result = await client.eval(COMPARE_AND_DELETE_LUA, 1, this.namespaced(key), expected);
+      } else {
+        throw err;
+      }
+    }
+    return result === 1;
+  }
+
+  async admitSlidingWindow(
+    currentKey: string,
+    previousKey: string,
+    options: SlidingWindowOptions
+  ): Promise<SlidingWindowAdmission> {
+    const client = await this.clientPromise;
+    const args: (string | number)[] = [
+      this.namespaced(currentKey),
+      this.namespaced(previousKey),
+      options.maxRequests,
+      options.previousWeight,
+      Math.ceil(options.expirationTtl * 1000),
+    ];
+    let raw: unknown;
+    try {
+      raw = await client.evalsha(ADMIT_SLIDING_WINDOW_SHA, 2, ...args);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("NOSCRIPT")) {
+        raw = await client.eval(ADMIT_SLIDING_WINDOW_LUA, 2, ...args);
+      } else {
+        throw err;
+      }
+    }
+    const [admitted, current, previous] = raw as [number, number, number];
+    return { admitted: admitted === 1, current, previous };
+  }
+
   async list(): Promise<KVListResult> {
     const client = await this.clientPromise;
     const pattern = `${this.prefix}:*`;
@@ -118,7 +234,6 @@ const STORE_PREFIXES = {
   apiKeys: "apiKeys",
   rateLimits: "rateLimits",
   cache: "cache",
-  sessions: "sessions",
 } as const;
 
 /**
@@ -126,7 +241,7 @@ const STORE_PREFIXES = {
  * the stores hold a Promise<Redis>; the import and connection happen lazily
  * on the first method call. Fails fast on missing/whitespace REDIS_URL.
  */
-export function createRedisKVStoreSet(env: Env): KVStoreSet {
+export function createKVStoreSet(env: Env): KVStoreSet {
   const url = env.REDIS_URL?.trim();
   if (!url) {
     throw new Error(
@@ -138,7 +253,6 @@ export function createRedisKVStoreSet(env: Env): KVStoreSet {
     apiKeys: new RedisKVStore(clientPromise, STORE_PREFIXES.apiKeys),
     rateLimits: new RedisKVStore(clientPromise, STORE_PREFIXES.rateLimits),
     cache: new RedisKVStore(clientPromise, STORE_PREFIXES.cache),
-    sessions: new RedisKVStore(clientPromise, STORE_PREFIXES.sessions),
   };
 }
 

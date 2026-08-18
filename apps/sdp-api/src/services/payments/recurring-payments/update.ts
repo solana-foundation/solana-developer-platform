@@ -1,4 +1,3 @@
-import { createFeePaymentAdapter } from "@sdp/payments/fee-payment";
 import {
   decideRecurringPaymentUpdateTransition,
   getRecurringPaymentOperationStaleBefore,
@@ -7,7 +6,7 @@ import {
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import type { UpdatePaymentRecurringPaymentRequest } from "@sdp/types";
+import type { UpdatePaymentRecurringPaymentRequest, WalletOperationActor } from "@sdp/types";
 import {
   type Address,
   createNoopSigner,
@@ -32,17 +31,20 @@ import {
   type PaymentSubscriptionsRepository,
 } from "@/db/repositories";
 import { AppError, badRequest } from "@/lib/errors";
+import { createTenantScope } from "@/lib/tenant-scope";
 import {
   resolveMintTokenProgram,
   resolveSourceTokenAccountOrAta,
 } from "@/routes/payments/token-accounts";
+import { getLogger } from "@/runtime/logger";
 import { parseU64String } from "@/services/payment-operation.service";
 import * as solanaServices from "@/services/solana";
+import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { resolveSolanaCounterpartyAccount } from "../counterparty-account-resolution";
-import { assertWalletPolicyAllowsTransferWithRepository } from "../wallet-policy";
 import { recoverOrBlockLifecycleCollection } from "./collection";
+import { enforceRecurringPaymentPolicy } from "./policy";
 import {
   activationErrorMessage,
   assertRecurringPaymentTokenMint,
@@ -87,6 +89,13 @@ const REPLACEMENT_UPDATE_FIELDS = new Set<keyof RecurringPaymentUpdateSnapshot>(
   "amount",
   "periodHours",
 ]);
+
+function tenantScope(input: { organizationId: string; projectId: string }) {
+  return createTenantScope({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+  });
+}
 
 function recurringPaymentSnapshot(row: PaymentRecurringPaymentRow): RecurringPaymentUpdateSnapshot {
   return {
@@ -189,6 +198,8 @@ async function resolveRecurringPaymentUpdate(input: {
   sourceWallet: CustodyWallet;
   nextSourceWallet?: CustodyWallet;
   request: UpdatePaymentRecurringPaymentRequest;
+  apiKeyId: string | null;
+  actor: WalletOperationActor | null;
 }): Promise<ResolvedRecurringPaymentUpdate> {
   const finalSourceWallet = input.nextSourceWallet ?? input.sourceWallet;
   const requestedSourceWalletId =
@@ -205,7 +216,12 @@ async function resolveRecurringPaymentUpdate(input: {
     counterpartyAccountId !== input.recurringPayment.counterparty_account_id;
   const [token, destination] = await Promise.all([
     input.request.token !== undefined
-      ? assertRecurringPaymentTokenMint(input.request.token, input.projectId, input.env)
+      ? assertRecurringPaymentTokenMint(
+          input.request.token,
+          input.organizationId,
+          input.projectId,
+          input.env
+        )
       : input.recurringPayment.token,
     accountChanged
       ? resolveSolanaCounterpartyAccount({
@@ -232,14 +248,23 @@ async function resolveRecurringPaymentUpdate(input: {
       ? input.request.metadataUri
       : input.recurringPayment.metadata_uri;
 
-  await assertWalletPolicyAllowsTransferWithRepository(createPaymentsRepository(input.env), {
+  await enforceRecurringPaymentPolicy({
+    env: input.env,
     organizationId: input.organizationId,
     projectId: input.projectId,
-    wallet: finalSourceWallet,
-    destinationAddress: destination.destinationAddress,
-    enforceDailyLimit: false,
+    sourceWallet: finalSourceWallet,
+    operationType: "recurring_payment_update",
     token,
     amount,
+    destination: destination.destinationAddress,
+    apiKeyId: input.apiKeyId,
+    actor: input.actor,
+    rawPayload: {
+      recurringPaymentId: input.recurringPayment.id,
+      counterpartyId,
+      counterpartyAccountId,
+      periodHours,
+    },
   });
 
   const before = recurringPaymentSnapshot(input.recurringPayment);
@@ -317,7 +342,7 @@ async function updatePendingRecurringPayment(input: {
     input.resolved.destinationAddress !== input.recurringPayment.destination_address ||
     input.resolved.token !== input.recurringPayment.token;
   const updatedAt = new Date().toISOString();
-  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env);
+  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env, tenantScope(input));
   const updated = await recurringRepo.updateRecurringPayment({
     recurringPaymentId: input.recurringPayment.id,
     organizationId: input.organizationId,
@@ -601,7 +626,7 @@ async function runMetadataScheduleUpdate(input: {
   request: UpdatePaymentRecurringPaymentRequest;
   createdBy: string | null;
 }): Promise<PaymentRecurringPaymentRow> {
-  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env);
+  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env, tenantScope(input));
   const rpc = solanaRpc.createRpc(input.env);
   let attempt = input.attempt;
   let planUpdateSignature = attempt.plan_update_signature as Signature | null;
@@ -655,7 +680,7 @@ async function runMetadataScheduleUpdate(input: {
         stage: "update_plan",
         updatedAt: new Date().toISOString(),
       });
-      const instruction = subscriptionsProgram.getUpdatePlanOverlayInstruction({
+      const instruction = await subscriptionsProgram.getUpdatePlanOverlayInstruction({
         endTs: onChainPlan.data.data.endTs,
         metadataUri: input.resolved.metadataUri ?? "",
         owner: sourceSigner,
@@ -1040,7 +1065,7 @@ async function runReplacementUpdate(input: {
   }
   const oldSubscription =
     input.subscription ??
-    (await createPaymentSubscriptionsRepository(input.env).getSubscriptionById({
+    (await createPaymentSubscriptionsRepository(input.env, tenantScope(input)).getSubscriptionById({
       subscriptionId: input.claimed.subscription_id,
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -1049,8 +1074,8 @@ async function runReplacementUpdate(input: {
     throw new AppError("NOT_FOUND", "Subscription not found");
   }
 
-  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env);
-  const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env);
+  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env, tenantScope(input));
+  const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env, tenantScope(input));
   const rpc = solanaRpc.createRpc(input.env);
   let attempt = input.attempt;
   let planCreationSignature = attempt.plan_creation_signature as Signature | null;
@@ -1214,7 +1239,12 @@ async function runReplacementUpdate(input: {
       subscriptionAuthorityAddress,
       { commitment: "confirmed" }
     );
-    const feePayer = await createFeePaymentAdapter(input.env).getFeePayer();
+    const feePayment = await createProjectSponsorshipFeePayment(input.env, {
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      actor: { type: "wallet", id: input.resolved.sourceWallet.walletId },
+    });
+    const feePayer = await feePayment.getFeePayer();
     const payer = createNoopSigner(feePayer);
     subscriptionAuthority = await prepareSubscriptionAuthorityForUpdate({
       env: input.env,
@@ -1389,6 +1419,8 @@ export async function updateRecurringPayment(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   request: UpdatePaymentRecurringPaymentRequest;
   createdBy: string | null;
+  apiKeyId: string | null;
+  actor: WalletOperationActor | null;
 }): Promise<PaymentRecurringPaymentRow> {
   if (input.recurringPayment.source_wallet_id !== input.sourceWallet.walletId) {
     throw badRequest("Recurring payment source wallet does not match request");
@@ -1419,9 +1451,9 @@ export async function updateRecurringPayment(input: {
     throw badRequest("firstCollectionAt can only be updated before activation");
   }
 
-  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env);
-  const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env);
-  const paymentsRepo = createPaymentsRepository(input.env);
+  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env, tenantScope(input));
+  const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env, tenantScope(input));
+  const paymentsRepo = createPaymentsRepository(input.env, tenantScope(input));
   const settled = await recoverOrBlockLifecycleCollection({
     env: input.env,
     recurringRepo,
@@ -1517,10 +1549,13 @@ export async function updateRecurringPayment(input: {
         resetToActive =
           !hasReplacementAuthorization && (!hasSubmittedMetadataUpdate || transactionFailed);
       } catch (latestAttemptError) {
-        console.error("Failed to fetch latest recurring payment update attempt after failure", {
-          error: activationErrorMessage(latestAttemptError),
-          recurringPaymentId: claimed.id,
-        });
+        getLogger().error(
+          {
+            error: activationErrorMessage(latestAttemptError),
+            recurring_payment_id: claimed.id,
+          },
+          "Failed to fetch latest recurring payment update attempt after failure"
+        );
       }
 
       await recordRecurringPaymentUpdateFailure({
@@ -1533,10 +1568,13 @@ export async function updateRecurringPayment(input: {
         resetToActive,
       });
     } catch (journalError) {
-      console.error("Failed to journal/reset recurring payment update after failure", {
-        error: activationErrorMessage(journalError),
-        recurringPaymentId: claimed.id,
-      });
+      getLogger().error(
+        {
+          error: activationErrorMessage(journalError),
+          recurring_payment_id: claimed.id,
+        },
+        "Failed to journal/reset recurring payment update after failure"
+      );
     }
 
     throw error;

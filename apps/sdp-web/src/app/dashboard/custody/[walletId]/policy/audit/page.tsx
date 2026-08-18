@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { notFound, redirect } from "next/navigation";
+import { fetchIssuedTokensByMint } from "@/app/dashboard/payments/payments-page.data";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
@@ -38,13 +39,14 @@ export default async function WalletPolicyAuditPage({
 
   try {
     const apiClient = await createSdpApiClient();
-    const [context, result] = await Promise.all([
+    const [context, result, issuedTokensByMint] = await Promise.all([
       fetchPolicyAuditContext(apiClient.request, resolvedWalletId),
       fetchPolicyAuditList(apiClient.request, resolvedWalletId, filters),
+      fetchIssuedTokensByMint(apiClient.request),
     ]);
 
     return (
-      <DashboardWorkspaceOverviewPanel>
+      <DashboardWorkspaceOverviewPanel className="flex flex-col">
         <PolicyAuditList
           walletId={resolvedWalletId}
           walletLabel={context.wallet.label?.trim() || context.wallet.walletId}
@@ -52,6 +54,8 @@ export default async function WalletPolicyAuditPage({
           filters={filters}
           revisionHistory={context.revisionHistory}
           apiKeyNames={context.apiKeyNames}
+          userNames={context.userNames}
+          issuedTokensByMint={issuedTokensByMint}
           locale={locale}
           t={t}
         />
@@ -61,7 +65,11 @@ export default async function WalletPolicyAuditPage({
     if (error instanceof PolicyAuditRequestError && error.status === 404) notFound();
     return (
       <DashboardWorkspaceOverviewPanel>
-        <PolicyAuditLoadError backHref={policyHref} t={t} />
+        <PolicyAuditLoadError
+          backHref={policyHref}
+          backLabel={t("DashboardCustody.policyAuditBackToWalletControls")}
+          t={t}
+        />
       </DashboardWorkspaceOverviewPanel>
     );
   }

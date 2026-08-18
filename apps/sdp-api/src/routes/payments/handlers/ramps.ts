@@ -44,6 +44,7 @@ import type {
 } from "@/db/repositories/payments.repository";
 import { requireProjectId } from "@/lib/auth";
 import { getClientIp } from "@/lib/client-ip";
+import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import {
   AppError,
   badRequest,
@@ -55,11 +56,11 @@ import {
   unsupportedRampCorridor,
 } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
-import {
-  enforceWalletOperationPolicy,
-  walletOperationActorFromAuth,
-} from "@/services/policy-enforcement.service";
+import { rampTransferTokenMint } from "@/services/payment-operation.service";
+import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
+import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
 import {
   type AppContext,
@@ -196,7 +197,17 @@ function assertRampCorridorSupported(
 }
 type ScopedRampWallet = ResolvedScope["wallets"][number];
 
-type RampPolicyOperationType = "ramp_onramp_quote" | "ramp_offramp_quote";
+type CreateOnrampQuoteBody = z.output<typeof createOnrampQuoteSchema>;
+
+type CreateOfframpQuoteBody = z.output<typeof createOfframpQuoteSchema>;
+
+interface RampQuotePolicyResolved {
+  scope: ResolvedScope;
+  projectId: string;
+  counterparty: CounterpartyRow;
+  wallet: ScopedRampWallet;
+  walletAddress: string;
+}
 
 interface PersistRampQuoteTransferInput {
   scope: ResolvedScope;
@@ -210,6 +221,7 @@ interface PersistRampQuoteTransferInput {
   cryptoAmount: string | null;
   fiatCurrency: RampFiatCurrency | null;
   fiatAmount: string | null;
+  rampsMemo: Record<string, string> | undefined;
   providerData?: Record<string, unknown>;
 }
 
@@ -228,39 +240,163 @@ function requireRampTransferWallet(
   return wallet;
 }
 
-async function enforceRampWalletOperationPolicy(
+/**
+ * Resolve the state shared by both ramp-quote extractions: corridor support,
+ * provider availability, the counterparty, and the SDP wallet on the crypto
+ * leg.
+ *
+ * @param c - Request context.
+ * @param direction - The quote direction.
+ * @param input - The validated quote request body.
+ * @param walletFieldName - The request field naming the wallet.
+ * @param walletIdOrAddress - The requested wallet id or address.
+ * @returns The resolved scope, project, counterparty, wallet, and address.
+ */
+async function resolveRampQuoteRequest(
   c: AppContext,
-  input: {
-    scope: ResolvedScope;
-    wallet: ScopedRampWallet;
-    operationType: RampPolicyOperationType;
-    provider: RampProviderId;
-    counterpartyId: string;
-    asset: string;
-    amount?: string | null;
-    destination?: string | null;
-    rawPayload?: Record<string, unknown>;
+  direction: RampQuoteDirection,
+  input: CreateOnrampQuoteBody | CreateOfframpQuoteBody,
+  walletFieldName: "destinationWallet" | "sourceWallet",
+  walletIdOrAddress: string
+): Promise<RampQuotePolicyResolved> {
+  assertRampCorridorSupported(direction, input);
+  const scope = await resolveScope(c);
+  await assertRampProviderAvailable(c, input.provider, scope.auth.organizationId);
+
+  const projectId = requireProjectId(c);
+  const counterparty = await getCounterpartiesRepository(c).getCounterpartyById({
+    counterpartyId: input.counterpartyId,
+    organizationId: scope.auth.organizationId,
+    projectId,
+  });
+  if (!counterparty) {
+    throw new AppError("NOT_FOUND", "Counterparty not found");
   }
-) {
-  return enforceWalletOperationPolicy(c.env, {
-    organizationId: input.scope.auth.organizationId,
-    projectId: input.scope.auth.projectId,
-    custodyWalletId: input.wallet.id,
-    walletId: input.wallet.walletId,
-    apiKeyId: input.scope.auth.apiKeyId,
-    actor: walletOperationActorFromAuth(input.scope.auth),
-    operationFamily: "ramp",
-    operationType: input.operationType,
-    asset: input.asset,
-    amount: input.amount ?? null,
-    destination: input.destination ?? null,
-    providerExtensions: { provider: input.provider },
+
+  const walletAddress = resolveWalletAddress(
+    scope.wallets,
+    walletIdOrAddress,
+    walletFieldName,
+    scope.auth,
+    ["payments:write"]
+  );
+  const wallet = requireRampTransferWallet(
+    scope,
+    walletIdOrAddress,
+    walletAddress,
+    walletFieldName
+  );
+  return { scope, projectId, counterparty, wallet, walletAddress };
+}
+
+/**
+ * Parse and resolve an on-ramp quote into its wallet-operation policy candidate.
+ *
+ * @param c - Request context.
+ * @returns The candidate, validated body, resolved resources, and raw payload.
+ */
+export async function extractOnrampQuotePolicyCandidate(
+  c: AppContext
+): Promise<PolicyGateExtraction> {
+  const parsed = createOnrampQuoteSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
+    });
+  }
+
+  const input = parsed.data;
+  const { scope, projectId, counterparty, wallet, walletAddress } = await resolveRampQuoteRequest(
+    c,
+    "onramp",
+    input,
+    "destinationWallet",
+    input.destinationWallet
+  );
+
+  return {
+    candidate: {
+      organizationId: scope.auth.organizationId,
+      projectId: scope.auth.projectId,
+      custodyWalletId: wallet.id,
+      walletId: wallet.walletId,
+      apiKeyId: scope.auth.apiKeyId,
+      actor: walletOperationActorFromAuth(scope.auth),
+      source: "api",
+      operationFamily: "ramp",
+      operationType: "ramp_onramp_quote",
+      asset: input.cryptoToken,
+      amount: input.fiatAmount,
+      destination: walletAddress,
+      context: {},
+      providerExtensions: { provider: input.provider },
+    },
+    legs: [],
+    body: input,
+    resolved: { scope, projectId, counterparty, wallet, walletAddress },
     rawPayload: {
       provider: input.provider,
       counterpartyId: input.counterpartyId,
-      ...(input.rawPayload ?? {}),
+      fiatCurrency: input.fiatCurrency,
+      fiatAmount: input.fiatAmount,
+      cryptoToken: input.cryptoToken,
     },
-  });
+  };
+}
+
+/**
+ * Parse and resolve an off-ramp quote into its wallet-operation policy candidate.
+ *
+ * @param c - Request context.
+ * @returns The candidate, validated body, resolved resources, and raw payload.
+ */
+export async function extractOfframpQuotePolicyCandidate(
+  c: AppContext
+): Promise<PolicyGateExtraction> {
+  const parsed = createOfframpQuoteSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
+    });
+  }
+
+  const input = parsed.data;
+  const { scope, projectId, counterparty, wallet, walletAddress } = await resolveRampQuoteRequest(
+    c,
+    "offramp",
+    input,
+    "sourceWallet",
+    input.sourceWallet
+  );
+
+  return {
+    candidate: {
+      organizationId: scope.auth.organizationId,
+      projectId: scope.auth.projectId,
+      custodyWalletId: wallet.id,
+      walletId: wallet.walletId,
+      apiKeyId: scope.auth.apiKeyId,
+      actor: walletOperationActorFromAuth(scope.auth),
+      source: "api",
+      operationFamily: "ramp",
+      operationType: "ramp_offramp_quote",
+      asset: input.cryptoToken,
+      amount: input.cryptoAmount,
+      destination: null,
+      context: {},
+      providerExtensions: { provider: input.provider },
+    },
+    legs: [],
+    body: input,
+    resolved: { scope, projectId, counterparty, wallet, walletAddress },
+    rawPayload: {
+      provider: input.provider,
+      counterpartyId: input.counterpartyId,
+      fiatCurrency: input.fiatCurrency,
+      cryptoAmount: input.cryptoAmount,
+      cryptoToken: input.cryptoToken,
+    },
+  };
 }
 
 function rampQuoteTransferStatus(quote: PaymentRampQuote): PaymentTransferStatus {
@@ -294,7 +430,7 @@ async function persistRampQuoteTransfer(
     counterpartyId: input.counterparty.id,
     sourceAddress: isOnramp ? null : input.walletAddress,
     destinationAddress: isOnramp ? input.walletAddress : null,
-    token: input.cryptoToken,
+    token: rampTransferTokenMint(input.cryptoToken, c.env),
     amount: input.cryptoAmount,
     memo: null,
     type: input.direction,
@@ -305,6 +441,7 @@ async function persistRampQuoteTransfer(
     deliveryMode: input.quote.deliveryMode,
     fiatCurrency: input.fiatCurrency,
     fiatAmount: input.fiatAmount,
+    rampsMemo: input.rampsMemo,
     providerData: input.providerData ?? {},
     serializedTx: null,
     signature: null,
@@ -330,7 +467,7 @@ export async function advanceCounterpartyRequirements(
       const customer = await ensureLightsparkCustomer(c, {
         counterparty: input.counterparty,
         projectId: input.projectId,
-        collectedData: input.direction === "offramp" ? input.collectedData : undefined,
+        collectedData: input.collectedData,
       });
       if (input.direction === "offramp") {
         await ensureLightsparkPayoutAccount(c, {
@@ -408,6 +545,9 @@ export async function advanceCounterpartyRequirements(
   }
 }
 
+/** Ceiling on simultaneous live provider estimate calls per request. */
+export const RAMP_ESTIMATE_PROVIDER_CONCURRENCY = 3;
+
 async function estimateAcrossProviders(
   c: AppContext,
   providers: readonly RampProviderId[],
@@ -416,8 +556,10 @@ async function estimateAcrossProviders(
   const scope = await resolveScope(c);
   const ctx = rampRuntime(c);
 
-  return Promise.all(
-    providers.map(async (provider): Promise<RampProviderEstimateResult> => {
+  const settled = await mapSettledWithConcurrency(
+    [...providers],
+    RAMP_ESTIMATE_PROVIDER_CONCURRENCY,
+    async (provider): Promise<RampProviderEstimateResult> => {
       try {
         await assertRampProviderAvailable(c, provider, scope.auth.organizationId);
         const estimate = await runProvider(provider, ctx);
@@ -432,8 +574,11 @@ async function estimateAcrossProviders(
           error: error instanceof Error ? error.message : String(error),
         };
       }
-    })
+    }
   );
+
+  // The mapper catches internally, so every result is fulfilled.
+  return settled.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
 }
 
 export async function estimateOnramp(c: AppContext) {
@@ -491,59 +636,18 @@ export async function estimateOfframp(c: AppContext) {
 }
 
 export async function createOnrampQuote(c: AppContext): Promise<Response> {
-  const body = await c.req.json();
-  const parsed = createOnrampQuoteSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-
-  const input = parsed.data;
-  assertRampCorridorSupported("onramp", input);
-  const scope = await resolveScope(c);
-  await assertRampProviderAvailable(c, input.provider, scope.auth.organizationId);
-
-  const projectId = requireProjectId(c);
-  const repo = getCounterpartiesRepository(c);
-  const counterparty = await repo.getCounterpartyById({
-    counterpartyId: input.counterpartyId,
-    organizationId: scope.auth.organizationId,
-    projectId,
-  });
-  if (!counterparty) {
-    throw new AppError("NOT_FOUND", "Counterparty not found");
-  }
-
-  const destinationWalletAddress = resolveWalletAddress(
-    scope.wallets,
-    input.destinationWallet,
-    "destinationWallet",
-    scope.auth,
-    ["payments:write"]
-  );
-  const destinationWallet = requireRampTransferWallet(
-    scope,
-    input.destinationWallet,
-    destinationWalletAddress,
-    "destinationWallet"
-  );
-  await enforceRampWalletOperationPolicy(c, {
-    scope,
-    wallet: destinationWallet,
-    operationType: "ramp_onramp_quote",
-    provider: input.provider,
-    counterpartyId: input.counterpartyId,
-    asset: input.cryptoToken,
-    amount: input.fiatAmount,
-    destination: destinationWalletAddress,
-    rawPayload: {
-      fiatCurrency: input.fiatCurrency,
-      fiatAmount: input.fiatAmount,
-      cryptoToken: input.cryptoToken,
+  const {
+    body: input,
+    resolved: {
+      scope,
+      projectId,
+      counterparty,
+      wallet: destinationWallet,
+      walletAddress: destinationWalletAddress,
     },
-  });
+  } = getPolicyGateContext<CreateOnrampQuoteBody, RampQuotePolicyResolved>(c);
+
+  await beginApprovedWalletOperationEffect(c);
 
   let quote: PaymentRampQuote;
   let transferProviderData: Record<string, unknown> | undefined;
@@ -599,6 +703,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         throw counterpartyNotProvisioned("mural", "onramp");
       }
       quote = muralOnrampQuote({ account, fiatCurrency: input.fiatCurrency });
+      transferProviderData = { mural: { accountId: account.id } };
       break;
     }
     case "moneygram": {
@@ -656,6 +761,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
     cryptoAmount: null,
     fiatCurrency: input.fiatCurrency ? input.fiatCurrency : null,
     fiatAmount: input.fiatAmount,
+    rampsMemo: input.rampsMemo,
     providerData: transferProviderData,
   });
 
@@ -663,58 +769,18 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
 }
 
 export async function createOfframpQuote(c: AppContext): Promise<Response> {
-  const body = await c.req.json();
-  const parsed = createOfframpQuoteSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-
-  const input = parsed.data;
-  assertRampCorridorSupported("offramp", input);
-  const scope = await resolveScope(c);
-  await assertRampProviderAvailable(c, input.provider, scope.auth.organizationId);
-
-  const projectId = requireProjectId(c);
-  const repo = getCounterpartiesRepository(c);
-  const counterparty = await repo.getCounterpartyById({
-    counterpartyId: input.counterpartyId,
-    organizationId: scope.auth.organizationId,
-    projectId,
-  });
-  if (!counterparty) {
-    throw new AppError("NOT_FOUND", "Counterparty not found");
-  }
-
-  const sourceWalletAddress = resolveWalletAddress(
-    scope.wallets,
-    input.sourceWallet,
-    "sourceWallet",
-    scope.auth,
-    ["payments:write"]
-  );
-  const sourceWallet = requireRampTransferWallet(
-    scope,
-    input.sourceWallet,
-    sourceWalletAddress,
-    "sourceWallet"
-  );
-  await enforceRampWalletOperationPolicy(c, {
-    scope,
-    wallet: sourceWallet,
-    operationType: "ramp_offramp_quote",
-    provider: input.provider,
-    counterpartyId: input.counterpartyId,
-    asset: input.cryptoToken,
-    amount: input.cryptoAmount,
-    rawPayload: {
-      fiatCurrency: input.fiatCurrency,
-      cryptoToken: input.cryptoToken,
-      cryptoAmount: input.cryptoAmount,
+  const {
+    body: input,
+    resolved: {
+      scope,
+      projectId,
+      counterparty,
+      wallet: sourceWallet,
+      walletAddress: sourceWalletAddress,
     },
-  });
+  } = getPolicyGateContext<CreateOfframpQuoteBody, RampQuotePolicyResolved>(c);
+
+  await beginApprovedWalletOperationEffect(c);
 
   let quote: PaymentRampQuote;
   let pendingTransfer: PaymentTransferRow | undefined;
@@ -778,6 +844,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         cryptoToken: input.cryptoToken,
         cryptoAmount: input.cryptoAmount,
         fiatCurrency: input.fiatCurrency,
+        rampsMemo: input.rampsMemo,
       });
       try {
         quote = await RAMP_PROVIDER_CLIENTS.bvnk.createOfframpQuote(rampRuntime(c), {
@@ -849,6 +916,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       cryptoAmount: input.cryptoAmount,
       fiatCurrency: input.fiatCurrency ? input.fiatCurrency : null,
       fiatAmount: null,
+      rampsMemo: input.rampsMemo,
     });
   }
 

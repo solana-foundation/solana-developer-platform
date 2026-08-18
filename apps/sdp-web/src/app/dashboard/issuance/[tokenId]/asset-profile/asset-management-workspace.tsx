@@ -4,20 +4,23 @@ import type { AssetProfile, Token } from "@sdp/types";
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
 import { Loader2, Play } from "lucide-react";
 import { motion } from "motion/react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { useDashboardUrlState } from "@/lib/dashboard-url-state";
+import { getTokenAccessControlMode, hasAccessControlList } from "../../access-control.utils";
 import { togglePublicField } from "../../create/draft-mapping";
+import { resolveVerifiedHolders } from "../../issuance-token-fields";
 import { TokenActionConfirmationDialog } from "../token-action-confirmation-dialog";
 import { TokenAuthorityModal } from "../token-authority-modal";
 import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
-import type { FundManagementModalAction } from "../token-fund-management-section";
+import { TokenLockSupplyModal } from "../token-lock-supply-modal";
 import { TokenManagementModalShell } from "../token-management-modal-shell";
-import { TokenSignerSelect } from "../token-signer-select";
 import { AssetProfileHeader } from "./asset-profile-header";
 import { AssetProfileSaveBar } from "./asset-profile-save-bar";
+import { ActivityTab } from "./tabs/activity-tab";
 import { ComplianceTab } from "./tabs/compliance-tab";
 import { DetailsTab } from "./tabs/details-tab";
 import { OperationsTab } from "./tabs/operations-tab";
@@ -25,6 +28,7 @@ import { OpsActionForms } from "./tabs/ops-action-forms";
 import { OverviewTab } from "./tabs/overview-tab";
 import { PermissionsTab } from "./tabs/permissions-tab";
 import { PublicInfoTab } from "./tabs/public-info-tab";
+import { WorkflowsTab } from "./tabs/workflows-tab";
 import { useAssetProfileForm } from "./use-asset-profile-form";
 import { useTokenOperations } from "./use-token-operations";
 
@@ -34,7 +38,9 @@ type AssetManagementTab =
   | "public-info"
   | "compliance"
   | "operations"
-  | "permissions";
+  | "permissions"
+  | "workflows"
+  | "activity";
 
 const managementTabIds: AssetManagementTab[] = [
   "overview",
@@ -43,6 +49,8 @@ const managementTabIds: AssetManagementTab[] = [
   "compliance",
   "operations",
   "permissions",
+  "workflows",
+  "activity",
 ];
 
 // Deep links minted for the legacy workspace keep working.
@@ -62,16 +70,6 @@ function resolveTab(value: string | null): AssetManagementTab {
   return "overview";
 }
 
-export function shouldOpenPendingFundManagementModal({
-  activeTab,
-  pendingFundManagementModalAction,
-}: {
-  activeTab: AssetManagementTab;
-  pendingFundManagementModalAction: FundManagementModalAction | null;
-}) {
-  return Boolean(pendingFundManagementModalAction && activeTab === "operations");
-}
-
 export function AssetManagementWorkspace({
   token,
   assetProfile,
@@ -84,20 +82,28 @@ export function AssetManagementWorkspace({
   const t = useTranslations();
   const { dashboardAccess } = useDashboardWorkspace();
   const canManageTokenAdmin = dashboardAccess.capabilities.canManageTokenAdmin;
-  const pathname = usePathname();
-  const router = useRouter();
+  const canManageTokenWrite = dashboardAccess.capabilities.canManageTokenWrite;
+  // Admins get the full compliance tab (policy editor + controls). Non-admins
+  // see it only for tokens that have a control list, and then only the allowlist
+  // controls — the policy editor stays admin-only (also enforced server-side).
+  const showControlList = hasAccessControlList(getTokenAccessControlMode(token));
+  const canViewComplianceTab = canManageTokenAdmin || showControlList;
   const searchParams = useSearchParams();
+  const { pushSearchParams, replaceSearchParams } = useDashboardUrlState();
 
   const requestedTabParam = searchParams.get("tab");
-  const activeTab = resolveTab(requestedTabParam);
-  const [pendingFundManagementModalAction, setPendingFundManagementModalAction] = useState<
-    "deploy" | "mint" | "burn" | null
-  >(null);
+  const requestedTab = resolveTab(requestedTabParam);
+  // A direct ?tab=compliance deep link falls back to the overview when the tab
+  // isn't available to this user.
+  const activeTab: AssetManagementTab =
+    requestedTab === "compliance" && !canViewComplianceTab ? "overview" : requestedTab;
 
   const ops = useTokenOperations({
     token,
     shouldLoadSupportingData: activeTab !== "overview",
-    shouldLoadAuthorityWallets: activeTab !== "overview" || token.status === "pending",
+    // Authority wallets are also needed on the overview for the SDP-controlled
+    // authorities tile (custody-vs-external roll-up), so load them everywhere.
+    shouldLoadAuthorityWallets: true,
     canManageTokenAdmin,
   });
   const form = useAssetProfileForm({ token, assetProfile });
@@ -105,47 +111,25 @@ export function AssetManagementWorkspace({
     { id: "overview", label: t("DashboardIssuance.tabs.overview") },
     { id: "details", label: t("DashboardIssuance.tabs.details") },
     { id: "public-info", label: t("DashboardIssuance.tabs.publicInformation") },
-    { id: "compliance", label: t("DashboardIssuance.tabs.compliance") },
+    // Full tab for admins; allowlist-only for non-admins on control-list tokens.
+    ...(canViewComplianceTab
+      ? [{ id: "compliance" as const, label: t("DashboardIssuance.tabs.compliance") }]
+      : []),
     { id: "operations", label: t("DashboardIssuance.tabs.operations") },
     { id: "permissions", label: t("DashboardIssuance.tabs.permissions") },
+    { id: "workflows", label: t("DashboardIssuance.tabs.workflows") },
+    { id: "activity", label: t("DashboardIssuance.tabs.activity") },
   ];
 
+  // Shallow update: the tabs are fully client-rendered, so a router.push RSC
+  // refetch on every tab switch would only add latency.
   const syncActiveTabInUrl = useCallback(
     (nextTab: AssetManagementTab, mode: "push" | "replace" = "push") => {
-      const nextSearchParams = new URLSearchParams(searchParams.toString());
-      if (nextTab === "overview") {
-        nextSearchParams.delete("tab");
-      } else {
-        nextSearchParams.set("tab", nextTab);
-      }
-
-      const nextQuery = nextSearchParams.toString();
-      const nextUrl = nextQuery ? `${pathname}?${nextQuery}` : pathname;
-      if (mode === "replace") {
-        router.replace(nextUrl, { scroll: false });
-        return;
-      }
-
-      router.push(nextUrl, { scroll: false });
+      const sync = mode === "replace" ? replaceSearchParams : pushSearchParams;
+      sync({ tab: nextTab === "overview" ? null : nextTab });
     },
-    [pathname, router, searchParams]
+    [pushSearchParams, replaceSearchParams]
   );
-
-  // Deploy from anywhere in the workspace: jump to Operations and open the
-  // deploy modal (shared by the header CTA and the overview readiness card).
-  const handleDeploy = useCallback(() => {
-    if (!ops.canDeployToken) {
-      return;
-    }
-
-    if (activeTab === "operations") {
-      ops.openFundManagementModal("deploy");
-      return;
-    }
-
-    setPendingFundManagementModalAction("deploy");
-    syncActiveTabInUrl("operations");
-  }, [activeTab, ops.canDeployToken, ops.openFundManagementModal, syncActiveTabInUrl]);
 
   // Normalize legacy/unknown tab params in the URL.
   useEffect(() => {
@@ -157,31 +141,18 @@ export function AssetManagementWorkspace({
     }
   }, [activeTab, requestedTabParam, syncActiveTabInUrl]);
 
-  // The deploy/mint/burn modal belongs to the Operations tab.
+  // The mint/burn modal belongs to the Operations tab.
   useEffect(() => {
     if (activeTab !== "operations" && ops.fundManagementModalAction) {
       ops.closeFundManagementModal();
     }
   }, [activeTab, ops.fundManagementModalAction, ops.closeFundManagementModal]);
 
-  useEffect(() => {
-    if (
-      !shouldOpenPendingFundManagementModal({
-        activeTab,
-        pendingFundManagementModalAction,
-      }) ||
-      !pendingFundManagementModalAction
-    ) {
-      return;
-    }
-
-    ops.openFundManagementModal(pendingFundManagementModalAction);
-    setPendingFundManagementModalAction(null);
-  }, [activeTab, ops.openFundManagementModal, pendingFundManagementModalAction]);
-
   const effectivePauseDisabledReason = ops.effectivePauseDisabledReason;
 
   return (
+    // Width + centering come from the dashboard shell's action-page layout;
+    // the workspace just fills the column it's given.
     <div className="space-y-4 pb-8">
       <AssetProfileHeader
         token={token}
@@ -189,19 +160,21 @@ export function AssetManagementWorkspace({
         explorerHref={ops.explorerHref}
         canDeployToken={ops.canDeployToken}
         isPending={ops.isPending}
-        deployDisabledReason={ops.deploySignerSelection.unavailableReason}
+        deployDisabledReason={ops.deployDisabledReason}
         pauseDisabledReason={ops.pauseDisabledReason}
         canManageTokenAdmin={canManageTokenAdmin}
         onCopyAddress={() => void ops.handleCopy(token.mintAddress)}
         onCopyTokenId={() =>
           void ops.handleCopy(token.id, t("DashboardIssuance.management.tokenIdCopied"))
         }
-        onDeploy={handleDeploy}
+        onDeploy={() => syncActiveTabInUrl("operations")}
         onUnpause={() => ops.handlePause(false)}
       />
 
       <Tabs
-        bordered
+        // No rule under the tab strip: the tab content below is already carded,
+        // so the border would read as a second, competing edge.
+        bordered={false}
         value={activeTab}
         onValueChange={(value) => syncActiveTabInUrl(value as AssetManagementTab)}
       >
@@ -258,7 +231,8 @@ export function AssetManagementWorkspace({
             assetProfile={form.assetProfile}
             draft={form.draft}
             ops={ops}
-            onDeploy={handleDeploy}
+            onViewActivity={() => syncActiveTabInUrl("activity")}
+            onViewPermissions={() => syncActiveTabInUrl("permissions")}
           />
         ) : null}
         {activeTab === "details" ? <DetailsTab token={token} form={form} ops={ops} /> : null}
@@ -283,10 +257,23 @@ export function AssetManagementWorkspace({
             canManageTokenAdmin={canManageTokenAdmin}
           />
         ) : null}
-        {activeTab === "operations" ? <OperationsTab ops={ops} /> : null}
+        {activeTab === "operations" ? <OperationsTab ops={ops} tokenId={token.id} /> : null}
         {activeTab === "permissions" ? (
           <PermissionsTab ops={ops} canManageTokenAdmin={canManageTokenAdmin} />
         ) : null}
+        {activeTab === "workflows" ? (
+          <WorkflowsTab
+            tokenId={token.id}
+            canManage={canManageTokenWrite}
+            canManagePrivileged={canManageTokenAdmin}
+            // Enrollment defines who counts as a *verified holder* of the asset, so the
+            // roster only belongs on assets that gate on that (the "Verified holders"
+            // access mode = KYC capacity). On an ungated asset, enrolling a wallet does
+            // nothing, so the card is hidden rather than shown as dead UI.
+            verifiedHolders={resolveVerifiedHolders(form.draft)}
+          />
+        ) : null}
+        {activeTab === "activity" ? <ActivityTab tokenId={token.id} /> : null}
       </motion.div>
 
       <AssetProfileSaveBar
@@ -315,42 +302,7 @@ export function AssetManagementWorkspace({
         isPending={ops.isPending}
         onClose={ops.closeFundManagementModal}
       >
-        {ops.fundManagementModalAction === "deploy" ? (
-          <div className="rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]">
-            <p className="pr-12 text-[20px] leading-[1.2] font-medium text-primary">
-              {t("DashboardIssuance.workspace.deployToken")}
-            </p>
-            <p className="mt-2 text-[14px] leading-[1.45] text-secondary">
-              {t("DashboardIssuance.workspace.deployHint")}
-            </p>
-            <div className="mt-5 space-y-5">
-              <TokenSignerSelect
-                signerWallets={ops.deploySignerSelection.wallets}
-                signerWalletId={ops.deploySignerWalletId}
-                signerUnavailableReason={ops.deploySignerSelection.unavailableReason}
-                onSignerWalletIdChange={ops.setDeploySignerWalletId}
-              />
-              <div className="flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={ops.closeFundManagementModal}
-                  disabled={ops.isPending}
-                  className="inline-flex h-10 items-center rounded-[12px] border border-border-default bg-surface-raised px-4 text-sm font-medium text-primary transition-colors hover:bg-fill-subtle disabled:pointer-events-none disabled:opacity-50"
-                >
-                  {t("DashboardIssuance.workspace.cancel")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => ops.submitFundManagementAction("deploy")}
-                  disabled={ops.isPending || Boolean(ops.deploySignerSelection.unavailableReason)}
-                  className="inline-flex h-10 items-center rounded-[12px] bg-primary px-4 text-sm font-medium text-on-primary transition hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
-                >
-                  {t("DashboardIssuance.workspace.deployNow")}
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : ops.fundManagementModalAction ? (
+        {ops.fundManagementModalAction ? (
           <OpsActionForms
             ops={ops}
             token={token}
@@ -359,6 +311,38 @@ export function AssetManagementWorkspace({
             onMint={() => ops.submitFundManagementAction("mint")}
             onBurn={() => ops.submitFundManagementAction("burn")}
           />
+        ) : null}
+      </TokenManagementModalShell>
+
+      {/* Its own shell, not a fund-management branch: this flow stays open across
+          submission so a failed revoke can be retried after a successful mint. */}
+      <TokenManagementModalShell
+        isOpen={ops.lockSupplyModalOpen && ops.lockSupplyRemaining !== null}
+        isPending={ops.isPending}
+        onClose={ops.closeLockSupplyModal}
+      >
+        {ops.lockSupplyRemaining !== null ? (
+          <div className="rounded-2xl border border-border-default bg-surface-raised p-5">
+            <TokenLockSupplyModal
+              token={token}
+              remaining={ops.lockSupplyRemaining}
+              alreadyMinted={ops.lockSupplyMinted}
+              revokeFailed={ops.lockSupplyRevokeFailed}
+              destination={ops.lockSupplyForm.destination}
+              onDestinationChange={(destination) =>
+                ops.setLockSupplyForm((previous) => ({ ...previous, destination }))
+              }
+              signerWallets={ops.lockSupplySignerSelection.wallets}
+              signerWalletId={ops.lockSupplyForm.signingWalletId}
+              signerUnavailableReason={ops.lockSupplySignerSelection.unavailableReason}
+              onSignerWalletIdChange={(signingWalletId) =>
+                ops.setLockSupplyForm((previous) => ({ ...previous, signingWalletId }))
+              }
+              isPending={ops.isPending}
+              onCancel={ops.closeLockSupplyModal}
+              onConfirm={() => void ops.handleLockSupply()}
+            />
+          </div>
         ) : null}
       </TokenManagementModalShell>
 

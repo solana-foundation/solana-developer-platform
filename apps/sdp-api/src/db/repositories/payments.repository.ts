@@ -24,16 +24,6 @@ export function isRampTransferType(type: PaymentTransferType): type is RampTrans
 }
 export type PaymentTransferDeliveryMode = "hosted" | "manual_instructions" | "session_widget";
 export type { PaymentTransferStatus };
-export type PaymentWalletPolicyType = string;
-
-export interface PaymentWalletPolicyRow {
-  id: string;
-  custody_wallet_id: string;
-  policy_type: PaymentWalletPolicyType;
-  policy: string;
-  created_at: string;
-  updated_at: string;
-}
 
 export interface PaymentTransferRow {
   id: string;
@@ -55,6 +45,7 @@ export interface PaymentTransferRow {
   delivery_mode: PaymentTransferDeliveryMode | null;
   fiat_currency: string | null;
   fiat_amount: string | null;
+  ramps_memo: Record<string, string>;
   provider_data: Record<string, unknown>;
   signature: string | null;
   serialized_tx: string | null;
@@ -91,6 +82,7 @@ export interface CreatePaymentTransferInput {
   deliveryMode: PaymentTransferDeliveryMode | null;
   fiatCurrency: string | null;
   fiatAmount: string | null;
+  rampsMemo?: Record<string, string>;
   providerData: Record<string, unknown>;
   serializedTx: string | null;
   signature: string | null;
@@ -104,6 +96,7 @@ export interface UpdatePaymentTransferInput {
   transferId: string;
   organizationId?: string;
   projectId?: string | null;
+  expectedStatus?: PaymentTransferStatus;
   status?: PaymentTransferStatus;
   signature?: string | null;
   serializedTx?: string | null;
@@ -116,15 +109,6 @@ export interface UpdatePaymentTransferInput {
   deliveryMode?: PaymentTransferDeliveryMode | null;
   providerData?: Record<string, unknown>;
   error?: string | null;
-  updatedAt: string;
-}
-
-export interface UpsertPaymentWalletPolicyInput {
-  id: string;
-  custodyWalletId: string;
-  policyType: PaymentWalletPolicyType;
-  policy: string;
-  createdAt: string;
   updatedAt: string;
 }
 
@@ -203,7 +187,10 @@ export interface PaymentsRepository {
     fromStatuses: readonly PaymentTransferStatus[];
     toStatus: PaymentTransferStatus;
     updatedAt: string;
-    amount?: string;
+    amount?: string | null;
+    fiatAmount?: string | null;
+    providerData?: Record<string, unknown>;
+    error?: string | null;
   }): Promise<PaymentTransferRow | null>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
   getTransferById(params: {
@@ -216,6 +203,11 @@ export interface PaymentsRepository {
     organizationId: string;
     projectId: string | null;
   }): Promise<PaymentTransferRow | null>;
+  listTransfersByIds(params: {
+    transferIds: string[];
+    organizationId: string;
+    projectId: string | null;
+  }): Promise<PaymentTransferRow[]>;
   getTransferByProviderReference(
     params: GetTransferByProviderReferenceInput
   ): Promise<PaymentTransferRow | null>;
@@ -225,16 +217,4 @@ export interface PaymentsRepository {
     projectId: string | null;
   }): Promise<PaymentTransferRow[]>;
   listTransfers(params: ListTransfersInput): Promise<ListTransfersResult>;
-  listTransferAmounts(params: {
-    organizationId: string;
-    projectId: string | null;
-    walletId: string;
-    token: string;
-    direction: PaymentTransferDirection;
-    statuses: PaymentTransferStatus[];
-    createdAtFrom: string;
-    createdAtTo: string;
-  }): Promise<string[]>;
-  getWalletPoliciesByCustodyWalletId(custodyWalletId: string): Promise<PaymentWalletPolicyRow[]>;
-  upsertWalletPolicies(input: UpsertPaymentWalletPolicyInput[]): Promise<PaymentWalletPolicyRow[]>;
 }

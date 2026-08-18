@@ -6,6 +6,7 @@
 
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
 import {
@@ -43,7 +44,12 @@ wallets.post("/", requirePermissions("custody:admin"), createWallet);
 wallets.delete("/", requirePermissions("custody:admin"), deleteWallet);
 wallets.post("/default-wallet", requirePermissions("custody:admin"), setDefaultWallet);
 wallets.patch("/:walletId", requirePermissions("custody:admin"), updateWallet);
-wallets.post("/signer-check", requirePermissions("wallets:write"), signerCheck);
+wallets.post(
+  "/signer-check",
+  requirePermissions("wallets:write"),
+  meteredQuota({ name: "signer-check", actorMax: 2, orgMax: 10 }),
+  signerCheck
+);
 
 // Read configuration and wallets
 wallets.get("/config", requirePermissions("wallets:read"), getConfig);

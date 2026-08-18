@@ -1,10 +1,11 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyConfigsResponse } from "@sdp/types";
+import type { CustodyConfigsResponse, InitializeSigningResponse } from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getTranslations } from "@/i18n/server";
+import { extractPolicyDenialReason, withPolicyDenialReason } from "@/lib/policy-denial-reason";
 import { createSdpApiClient } from "@/lib/sdp-api";
 
 const DEVNET_FAUCET_LAMPORTS = 1_000_000_000;
@@ -63,8 +64,9 @@ function toApiActionErrorMessage(
 
   const status = match[1];
   const body = match[2] ?? "";
+  const base = getApiErrorMessageFromText(body) || t("DashboardCustody.requestFailed");
   return t("DashboardCustody.httpRequestFailed", {
-    error: getApiErrorMessageFromText(body) || t("DashboardCustody.requestFailed"),
+    error: withPolicyDenialReason(base, extractPolicyDenialReason(body)),
     status,
   });
 }
@@ -87,46 +89,18 @@ function parseApiActionError(error: unknown): { status: number; message: string 
   };
 }
 
-async function sdpApiFetchWithApiKey<T>(
-  path: string,
-  apiKey: string,
-  options: RequestInit = {}
-): Promise<T> {
-  const client = await createSdpApiClient();
-  const res = await client.request(path, {
-    ...options,
-    headers: {
-      ...(options.headers ?? {}),
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    const apiError = getApiErrorMessageFromText(body);
-    throw new Error(`SDP API request failed (${res.status}): ${apiError}`);
-  }
-
-  if (res.status === 204) {
-    return {} as T;
-  }
-
-  const json = (await res.json()) as unknown;
-  if (json && typeof json === "object" && "data" in json) {
-    return (json as { data: T }).data;
-  }
-
-  return json as T;
-}
-
 export async function initializeCustody(formData: FormData) {
   await initializeCustodyWallet(formData);
   revalidateWalletPaths();
   redirect("/dashboard/wallets");
 }
 
-async function initializeCustodyWallet(formData: FormData) {
+/**
+ * Returns the wallet the call provisioned so callers can show it. Onboarding
+ * previously discarded this and left the user with no evidence of what setup
+ * created for them.
+ */
+async function initializeCustodyWallet(formData: FormData): Promise<OnboardingProvisionedWallet> {
   const provider = (getString(formData, "provider") || "privy") as
     | "privy"
     | "local"
@@ -142,7 +116,6 @@ async function initializeCustodyWallet(formData: FormData) {
   const network = getOptionalString(formData, "network");
   const walletAddress = getOptionalString(formData, "walletAddress");
   const accountPolicy = getOptionalString(formData, "accountPolicy");
-  const apiBaseUrl = getOptionalString(formData, "apiBaseUrl");
 
   const payload: Record<string, unknown> = {
     provider,
@@ -150,9 +123,6 @@ async function initializeCustodyWallet(formData: FormData) {
   };
 
   if (provider !== "fireblocks") {
-    if (apiBaseUrl) {
-      payload.apiBaseUrl = apiBaseUrl;
-    }
     if (network) {
       payload.network = network;
     }
@@ -167,10 +137,11 @@ async function initializeCustodyWallet(formData: FormData) {
   const client = await createSdpApiClient();
 
   try {
-    await client.fetch("/v1/wallets/initialize", {
+    const initialized = await client.fetch<InitializeSigningResponse>("/v1/wallets/initialize", {
       method: "POST",
       body: JSON.stringify(payload),
     });
+    return { publicKey: initialized.publicKey, walletId: initialized.walletId };
   } catch (error) {
     const apiError = parseApiActionError(error);
 
@@ -179,7 +150,20 @@ async function initializeCustodyWallet(formData: FormData) {
       apiError.message.includes("Signing already initialized for org")
     ) {
       const configurations = await client.fetch<CustodyConfigsResponse>("/v1/wallets/configs");
-      const readyConfiguration = configurations.configs.some(
+
+      // Repair must never cross providers. If another provider already owns the
+      // default configuration, "repairing" with setDefault would silently flip
+      // the organization's signing default to whatever provider this caller
+      // submitted; changing providers is the switch flow's decision, behind its
+      // own confirmation. Surface the conflict instead.
+      const defaultConfiguration = configurations.configs.find(
+        (configuration) => configuration.isDefault
+      );
+      if (defaultConfiguration && defaultConfiguration.provider !== provider) {
+        throw error;
+      }
+
+      const readyConfiguration = configurations.configs.find(
         (configuration) =>
           configuration.provider === provider &&
           configuration.isDefault &&
@@ -187,20 +171,30 @@ async function initializeCustodyWallet(formData: FormData) {
       );
 
       if (readyConfiguration) {
-        return;
+        // Already provisioned by an earlier attempt; the configuration carries
+        // the wallet, so completion can still show it.
+        return {
+          publicKey: readyConfiguration.publicKey,
+          walletId: readyConfiguration.defaultWalletId as string,
+        };
       }
 
       // Repair a provider connection whose first wallet did not finish
       // persisting instead of leaving the organization trapped in onboarding.
-      await client.fetch("/v1/wallets", {
-        method: "POST",
-        body: JSON.stringify({
-          provider,
-          label: walletLabel,
-          purpose: "root",
-          setDefault: true,
-        }),
-      });
+      // This endpoint nests its wallet, unlike initialize.
+      const repaired = await client.fetch<{ wallet: { walletId: string; publicKey: string } }>(
+        "/v1/wallets",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            provider,
+            label: walletLabel,
+            purpose: "root",
+            setDefault: true,
+          }),
+        }
+      );
+      return { publicKey: repaired.wallet.publicKey, walletId: repaired.wallet.walletId };
     } else {
       throw error;
     }
@@ -240,6 +234,22 @@ async function createCustodyWalletForProvider(formData: FormData) {
   });
 }
 
+/** A provisioned wallet is `null` when an earlier attempt had already created it. */
+export interface OnboardingProvisionedWallet {
+  publicKey: string;
+  walletId: string;
+}
+
+export type OnboardingCustodyActionResult =
+  | {
+      status: "success";
+      wallet: OnboardingProvisionedWallet;
+    }
+  | {
+      status: "error";
+      message: string;
+    };
+
 export type WalletSetupActionResult =
   | {
       status: "success";
@@ -267,12 +277,19 @@ export async function initializeCustodySetupAction(
 
 export async function initializeOnboardingCustodyAction(
   formData: FormData
-): Promise<WalletSetupActionResult> {
+): Promise<OnboardingCustodyActionResult> {
   const t = await getTranslations();
   try {
-    await initializeCustodyWallet(formData);
-    revalidateWalletPaths();
-    return { status: "success" };
+    const wallet = await initializeCustodyWallet(formData);
+    // No revalidation here: any revalidatePath from this action invalidates the
+    // client router cache and re-runs the onboarding route, whose server page
+    // redirects once setup is complete, sweeping the completion panel away
+    // after a beat. The panel exits through full document navigations, which
+    // fetch fresh state without any help.
+    return {
+      status: "success",
+      wallet: { publicKey: wallet.publicKey, walletId: wallet.walletId },
+    };
   } catch (error) {
     return {
       status: "error",
@@ -344,14 +361,6 @@ export async function updateWalletLabelAction(
   }
 }
 
-interface EphemeralApiKeyResponse {
-  apiKey: {
-    id: string;
-    name: string;
-    key: string;
-  };
-}
-
 interface WalletSignerCheckResponse {
   walletId: string;
   signature: string;
@@ -412,50 +421,18 @@ export async function checkWalletSignerMemoAction(
     return { status: "error", message: t("DashboardCustody.walletIdRequired") };
   }
 
-  const now = Date.now();
-  const keyName = `wallet-check-${resolvedWalletId.slice(-8)}-${now.toString(36)}`;
-  const memo = `Wallet signer check (${resolvedWalletId}) ${new Date(now).toISOString()}`;
-
   try {
     const client = await createSdpApiClient();
-    const created = await client.fetch<EphemeralApiKeyResponse>("/v1/api-keys", {
+    const check = await client.fetch<WalletSignerCheckResponse>("/v1/wallets/signer-check", {
       method: "POST",
-      body: JSON.stringify({
-        name: keyName,
-        role: "api_developer",
-        walletScope: "selected",
-        signingWalletId: resolvedWalletId,
-        signingWalletIds: [resolvedWalletId],
-        expiresAt: new Date(now + 10 * 60 * 1000).toISOString(),
-      }),
+      body: JSON.stringify({ walletId: resolvedWalletId }),
     });
-    const ephemeralKey = created.apiKey;
 
-    try {
-      const check = await sdpApiFetchWithApiKey<WalletSignerCheckResponse>(
-        "/v1/wallets/signer-check",
-        ephemeralKey.key,
-        {
-          method: "POST",
-          body: JSON.stringify({ memo }),
-        }
-      );
-
-      return {
-        status: "success",
-        walletId: check.walletId,
-        signature: check.signature,
-      };
-    } finally {
-      try {
-        await client.fetch(`/v1/api-keys/${ephemeralKey.id}`, {
-          method: "DELETE",
-          body: JSON.stringify({ confirmation: ephemeralKey.name }),
-        });
-      } catch {
-        // Best-effort cleanup of short-lived key.
-      }
-    }
+    return {
+      status: "success",
+      walletId: check.walletId,
+      signature: check.signature,
+    };
   } catch (error) {
     return {
       status: "error",

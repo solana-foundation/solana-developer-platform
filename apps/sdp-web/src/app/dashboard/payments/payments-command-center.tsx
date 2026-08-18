@@ -8,9 +8,9 @@ import {
   ShieldCheckIcon,
   UsersIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { Suspense } from "react";
-import { DashboardNavigationLink } from "@/components/dashboard-navigation-link";
-import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { TokenMark } from "@/components/token-mark";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
@@ -30,21 +30,30 @@ import {
   formatDirection,
   formatTimestamp,
   normalizeAggregateBalances,
-  resolveAggregateBalanceDisplayToken,
+  resolveTokenByMint,
   resolveTotalBalance,
+  resolveTransferTokenLabel,
   resolveTransferTypeLabel,
   resolveUsdBalanceValue,
   selectTopAggregateBalanceRows,
   shortenAddress,
 } from "./payments-overview.utils";
-import { fetchPaymentsAggregate, fetchPaymentTransfers } from "./payments-page.data";
+import {
+  fetchIssuedTokensByMint,
+  fetchPaymentsAggregate,
+  fetchPaymentsIssuedTokenSymbols,
+  fetchPaymentTransfers,
+} from "./payments-page.data";
 import { fetchRecurringPayments } from "./recurring/recurring-payments.data";
 import { fetchPaymentRequests } from "./requests/payment-requests-page.data";
 
 type ApiClientPromise = Promise<{ request: SdpApiClient["request"] }>;
 
 const sectionClassName = "min-w-0 rounded-lg border border-border-default bg-surface-raised p-4";
-const activityColumns = "grid-cols-[6.5rem_8rem_minmax(8rem,1fr)_8rem_7.5rem_1rem]";
+// Type carries the longest strings here ("Outbound · Transfer"), so it takes the larger
+// share of the slack. Counterparty is a shortened address of predictable width, and
+// giving it every spare pixel left a dead gap between it and the amount.
+const activityColumns = "grid-cols-[6.5rem_minmax(10rem,1.4fr)_minmax(8rem,1fr)_8rem_7.5rem_1rem]";
 
 function SectionHeading({ title }: { title: string }) {
   return <h2 className="text-base font-semibold tracking-[-0.01em] text-primary">{title}</h2>;
@@ -86,7 +95,7 @@ async function MoveMoneyActions() {
         {actions.map((action) => {
           const Icon = action.icon;
           return (
-            <DashboardNavigationLink
+            <Link
               key={action.href}
               href={action.href}
               className="group flex min-h-36 min-w-0 flex-col items-center justify-center rounded-md border border-border-default px-3 py-4 text-center transition-colors hover:border-border-strong hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none xl:min-h-44"
@@ -96,7 +105,7 @@ async function MoveMoneyActions() {
               </span>
               <span className="mt-3 text-base font-semibold text-primary">{action.label}</span>
               <span className="mt-1 text-sm leading-5 text-secondary">{action.description}</span>
-            </DashboardNavigationLink>
+            </Link>
           );
         })}
       </div>
@@ -111,10 +120,13 @@ async function AvailableBalance({ apiClientPromise }: { apiClientPromise: ApiCli
     getRequestLocale(),
   ]);
   const trace = createTimedTrace("dashboard.payments.overview.balance");
-  const result = await trace.step("fetch_aggregate", () => fetchPaymentsAggregate(request));
+  const [result, issuedTokensByMint] = await Promise.all([
+    trace.step("fetch_aggregate", () => fetchPaymentsAggregate(request)),
+    trace.step("fetch_issued_token_symbols", () => fetchIssuedTokensByMint(request)),
+  ]);
   trace.log({
     ok: result.ok,
-    requestCount: 1,
+    requestCount: 2,
     responseBytes: new TextEncoder().encode(JSON.stringify(result.data ?? null)).byteLength,
   });
   if (!result.ok || !result.data) {
@@ -146,7 +158,8 @@ async function AvailableBalance({ apiClientPromise }: { apiClientPromise: ApiCli
       </p>
       <div className="mt-4 divide-y divide-border-subtle border-t border-border-default">
         {topBalances.map((balance) => {
-          const label = resolveAggregateBalanceDisplayToken(balance, {});
+          const resolved = resolveTokenByMint(balance.mint, issuedTokensByMint, balance.token);
+          const label = resolved.tokenName;
           const usdValue = resolveUsdBalanceValue(balance);
           return (
             <div
@@ -154,11 +167,21 @@ async function AvailableBalance({ apiClientPromise }: { apiClientPromise: ApiCli
               className="flex min-w-0 items-center justify-between gap-3 py-2.5 text-sm"
             >
               <span className="flex min-w-0 items-center gap-2 font-medium text-primary">
-                <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-fill-subtle text-[11px] font-semibold text-secondary">
-                  {label.slice(0, 1).toUpperCase()}
-                </span>
-                <span className="truncate" title={label}>
-                  {label.length > 12 ? shortenAddress(label) : label}
+                <TokenMark
+                  mint={resolved.mint}
+                  symbol={label}
+                  logoUrl={resolved.metadataImageUrl}
+                  size="sm"
+                />
+                <span className="flex min-w-0 items-baseline gap-2">
+                  <span className="truncate" title={label}>
+                    {label.length > 12 ? shortenAddress(label) : label}
+                  </span>
+                  {resolved.tokenId ? (
+                    <Badge variant="outline" className="shrink-0">
+                      {t("Shared.SharedComponents.sdpMintedToken")}
+                    </Badge>
+                  ) : null}
                 </span>
               </span>
               <span className="shrink-0 text-secondary">
@@ -190,16 +213,18 @@ function formatStatus(status: string): string {
     .join(" ");
 }
 
-function compactAmount(transfer: PaymentTransferSummary): string {
+function compactAmount(
+  transfer: PaymentTransferSummary,
+  issuedTokenSymbolsByMint?: Readonly<Record<string, string>>
+): string {
   if (!transfer.amount) return "—";
   const sign =
     transfer.direction === "inbound" ? "+" : transfer.direction === "outbound" ? "−" : "";
   const amount = transfer.amount.replace(/^-/, "");
-  const asset = transfer.token
-    ? transfer.token.length > 10
-      ? shortenAddress(transfer.token)
-      : transfer.token
-    : "";
+  // Shared resolver rather than a local shortening rule, so this card agrees with the
+  // Transactions table: it names well-known mints and tokens this org issued, and only
+  // shortens what neither can name. Shortening first meant even USDC read as a mint here.
+  const asset = resolveTransferTokenLabel(transfer.token, issuedTokenSymbolsByMint) ?? "";
   return `${sign}${amount}${asset ? ` ${asset}` : ""}`;
 }
 
@@ -218,8 +243,14 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
     getRequestLocale(),
   ]);
   const trace = createTimedTrace("dashboard.payments.overview.activity");
-  const result = await trace.step("fetch_recent_transfers", () =>
-    fetchPaymentTransfers(request, 5, { includeObserved: false })
+  const [result, issuedTokenSymbolsResult] = await Promise.all([
+    trace.step("fetch_recent_transfers", () =>
+      fetchPaymentTransfers(request, 5, { includeObserved: false })
+    ),
+    fetchPaymentsIssuedTokenSymbols(request),
+  ]);
+  const issuedTokenSymbolsByMint = Object.fromEntries(
+    (issuedTokenSymbolsResult.data ?? []).map((token) => [token.mintAddress, token.symbol])
   );
   trace.log({
     ok: result.ok,
@@ -230,21 +261,23 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
   const transfers = result.data ?? [];
 
   return (
-    <section className={sectionClassName} data-payments-overview-section="activity">
+    // self-start keeps this card at its content height instead of stretching to match the
+    // taller Upcoming/Network column, which otherwise leaves dead space inside the card.
+    <section className={`${sectionClassName} self-start`} data-payments-overview-section="activity">
       <SectionHeading title={t("DashboardPayments.commandCenter.activity")} />
       <div className="mt-3 flex items-end gap-5 border-b border-border-default text-sm">
-        <DashboardNavigationLink
+        <Link
           href="/dashboard/payments/transactions?type=transfer"
           className="border-b-2 border-primary px-0.5 pb-2 font-medium text-primary"
         >
           {t("DashboardPayments.commandCenter.transfers")}
-        </DashboardNavigationLink>
-        <DashboardNavigationLink
+        </Link>
+        <Link
           href="/dashboard/payments/transactions?type=transfer_batch"
           className="px-0.5 pb-2 text-secondary hover:text-primary"
         >
           {t("DashboardPayments.commandCenter.batches")}
-        </DashboardNavigationLink>
+        </Link>
       </div>
       {!result.ok ? (
         <p className="py-8 text-sm text-tertiary">
@@ -269,7 +302,7 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
               {transfers.map((transfer) => {
                 const counterparty = resolveCommandCenterCounterparty(transfer);
                 return (
-                  <DashboardNavigationLink
+                  <Link
                     key={transfer.id}
                     href={`/dashboard/payments/transactions?search=${encodeURIComponent(transfer.id)}`}
                     className={`grid min-h-12 ${activityColumns} items-center gap-2 px-3 text-sm transition-colors hover:bg-fill-subtle`}
@@ -290,15 +323,15 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
                     </span>
                     <span
                       className="truncate font-medium text-primary"
-                      title={compactAmount(transfer)}
+                      title={compactAmount(transfer, issuedTokenSymbolsByMint)}
                     >
-                      {compactAmount(transfer)}
+                      {compactAmount(transfer, issuedTokenSymbolsByMint)}
                     </span>
                     <span className="truncate text-xs text-secondary">
                       {formatTimestamp(transfer.createdAt, t, locale)}
                     </span>
                     <ChevronRightIcon className="size-4 text-tertiary" aria-hidden="true" />
-                  </DashboardNavigationLink>
+                  </Link>
                 );
               })}
             </div>
@@ -307,7 +340,7 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
             {transfers.map((transfer) => {
               const counterparty = resolveCommandCenterCounterparty(transfer);
               return (
-                <DashboardNavigationLink
+                <Link
                   key={transfer.id}
                   href={`/dashboard/payments/transactions?search=${encodeURIComponent(transfer.id)}`}
                   className="block space-y-2 py-3 text-sm"
@@ -324,22 +357,22 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
                   <span className="flex min-w-0 items-center justify-between gap-3">
                     <span className="truncate text-secondary">{counterparty}</span>
                     <span className="shrink-0 font-medium text-primary">
-                      {compactAmount(transfer)}
+                      {compactAmount(transfer, issuedTokenSymbolsByMint)}
                     </span>
                   </span>
-                </DashboardNavigationLink>
+                </Link>
               );
             })}
           </div>
         </>
       )}
-      <DashboardNavigationLink
+      <Link
         href="/dashboard/payments/transactions"
         className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-link hover:underline"
       >
         {t("DashboardPayments.viewAllTransactions")}
         <ChevronRightIcon className="size-4" aria-hidden="true" />
-      </DashboardNavigationLink>
+      </Link>
     </section>
   );
 }
@@ -379,7 +412,7 @@ async function UpcomingOpen({ apiClientPromise }: { apiClientPromise: ApiClientP
         {rows.map((row) => {
           const Icon = row.icon;
           return (
-            <DashboardNavigationLink
+            <Link
               key={row.href}
               href={row.href}
               className="flex min-h-14 items-center gap-3 py-2 text-sm hover:bg-fill-subtle"
@@ -392,7 +425,7 @@ async function UpcomingOpen({ apiClientPromise }: { apiClientPromise: ApiClientP
                 {row.label}
               </span>
               <ChevronRightIcon className="size-4 shrink-0 text-tertiary" aria-hidden="true" />
-            </DashboardNavigationLink>
+            </Link>
           );
         })}
       </div>
@@ -456,13 +489,13 @@ async function PaymentNetwork({
           </span>
         </div>
       </div>
-      <DashboardNavigationLink
+      <Link
         href="/dashboard/payments/counterparty"
         className="-mx-4 mt-4 flex h-11 items-center gap-1 border-t border-border-default px-4 text-sm font-medium text-link hover:bg-fill-subtle"
       >
         {t("DashboardPayments.commandCenter.manageCounterparties")}
         <ChevronRightIcon className="size-4" aria-hidden="true" />
-      </DashboardNavigationLink>
+      </Link>
     </section>
   );
 }
@@ -475,7 +508,7 @@ export function PaymentsCommandCenter({
   organizationId: string;
 }) {
   return (
-    <DashboardWorkspaceOverviewPanel
+    <div
       className="grid content-start gap-4 xl:grid-cols-[minmax(0,1.63fr)_minmax(20rem,1fr)]"
       data-payments-command-center
     >
@@ -494,6 +527,6 @@ export function PaymentsCommandCenter({
           <PaymentNetwork apiClientPromise={apiClientPromise} organizationId={organizationId} />
         </Suspense>
       </div>
-    </DashboardWorkspaceOverviewPanel>
+    </div>
   );
 }

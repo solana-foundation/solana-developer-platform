@@ -16,7 +16,6 @@ import {
   ChevronRight,
   ClipboardCheck,
   Clock,
-  Code2,
   Coins,
   ExternalLink,
   FileText,
@@ -52,7 +51,6 @@ import {
   summarizeCapacityConfig,
 } from "./asset-details-config";
 import { CapacityConfigModal } from "./capacity-config-modal";
-import type { DeployConfigPreview } from "./draft-mapping";
 import {
   type AccessControlMode,
   type AdvancedSettingsDraft,
@@ -60,7 +58,6 @@ import {
   type CapacityKey,
   type CapacitySelection,
 } from "./issuance-draft-wizard.types";
-import { JsonCodeBlock } from "./metadata-json";
 import { SegmentedControl } from "./segmented-control";
 import {
   applyCombo,
@@ -88,7 +85,8 @@ const COMBO_ICONS: Record<string, LucideIcon> = {
 
 // Icons keep the list scannable (SDP reserves colour for status).
 const SETTING_ICONS: Record<string, LucideIcon> = {
-  freezeTransfers: Snowflake,
+  pauseTransfers: Pause,
+  freezeAccounts: Snowflake,
   permanentDelegate: Undo2,
   transferFee: Percent,
   interestBearing: TrendingUp,
@@ -130,7 +128,6 @@ const CAPACITY_EXPERT_DESCRIPTIONS: Partial<Record<CapacityKey, MessageKey>> = {
   redemptionApprovals: "DashboardIssuance.config.redemptionApprovalsDescriptionExpert",
 };
 
-// Returns the effect description for each access-control mode.
 function accessDescriptionKey(mode: AccessControlMode | ""): MessageKey {
   switch (mode) {
     case "allowlist":
@@ -155,16 +152,19 @@ interface AdvancedSettingsEditorProps {
   // Reveal Configure button for policies; only the compliance tab opts in.
   allowCapacityConfig?: boolean;
   showErrors?: boolean;
+  // Scenario presets are creation-only; the compliance tab opts out. Defaults on.
+  showScenarios?: boolean;
   // Locks on-chain settings (deployed token) while keeping off-chain capacities editable.
   settingsReadOnly?: boolean;
   disabled?: boolean;
-  // OPTIONAL: create wizard opts in; compliance tab keeps its own card.
+  // When wired, access control renders inside the permanent section.
   accessControl?: AccessControlMode | "";
   onAccessControlChange?: (mode: AccessControlMode | "") => void;
   accessControlReadOnly?: boolean;
   accessControlDocsHref?: string;
-  // Deploy-config preview (technical mode only). Built by parent, not wired here.
-  deployConfig?: DeployConfigPreview | null;
+  // Collapse the inner grids on the editor's own width (container query) instead
+  // of the viewport — for the compliance tab's narrow two-column layout.
+  containerResponsive?: boolean;
 }
 
 function Pill({ children }: { children: ReactNode }) {
@@ -183,15 +183,62 @@ function Tag({ children }: { children: ReactNode }) {
   );
 }
 
-// Convert underscore_case action IDs to spaced words for badges.
 function humanizeAction(action: string): string {
   const text = action.replace(/_/g, " ");
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-// Convert camelCase extension names to human-friendly spaced words.
 function humanizeExtension(name: string): string {
   return name.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+}
+
+/**
+ * The two settings the basic view presents as one "Freeze transfers" control.
+ *
+ * They are genuinely separate on-chain mechanisms — `pauseTransfers` is the
+ * Token-2022 `pausable` extension, `freezeAccounts` is the base mint's freeze
+ * authority — so the technical view shows both and lets them be chosen
+ * independently. Managers who don't want that distinction get one row.
+ */
+const FREEZE_PAIR_KEYS = ["pauseTransfers", "freezeAccounts"] as const;
+
+function isFreezePairKey(key: string): boolean {
+  return FREEZE_PAIR_KEYS.includes(key as (typeof FREEZE_PAIR_KEYS)[number]);
+}
+
+function getCombinedFreezeState(
+  visible: readonly GroupedSetting[],
+  settings: AdvancedSettingsDraft
+): { entries: GroupedSetting[]; checked: boolean; locked: boolean } {
+  const entries = visible.filter((entry) => isFreezePairKey(entry.key));
+  return {
+    entries,
+    checked: entries.every(
+      (entry) => entry.availability === "locked" || settings[entry.key] !== undefined
+    ),
+    // Locked only when every half is forced. If just one were, the row stays
+    // interactive and the toggle simply can't move the locked half.
+    locked: entries.length > 0 && entries.every((entry) => entry.availability === "locked"),
+  };
+}
+
+function applyFreezePairToggle(
+  settings: AdvancedSettingsDraft,
+  entries: readonly GroupedSetting[],
+  enabled: boolean
+): AdvancedSettingsDraft {
+  const next = { ...settings };
+  for (const entry of entries) {
+    if (entry.availability === "locked") {
+      continue;
+    }
+    if (enabled) {
+      next[entry.key] = settings[entry.key] ?? {};
+    } else {
+      delete next[entry.key];
+    }
+  }
+  return next;
 }
 
 function extensionTitle(extensions: readonly string[]): string {
@@ -217,10 +264,12 @@ function SettingShell({
   checked,
   disabled,
   dimmed,
+  locked,
   onToggle,
   label,
   badges,
   actions,
+  trailing,
   description,
   children,
 }: {
@@ -228,13 +277,38 @@ function SettingShell({
   checked: boolean;
   disabled?: boolean;
   dimmed?: boolean;
+  // Permanently-on settings (required or deployed) show a lock, not a disabled
+  // checkbox: the box reads "you could change this", the lock reads "fixed".
+  locked?: boolean;
   onToggle: (checked: boolean) => void;
   label: string;
   badges?: ReactNode;
   actions?: ReactNode;
+  // Right-aligned action, outside the label so clicking it doesn't toggle the checkbox.
+  trailing?: ReactNode;
   description: string;
   children?: ReactNode;
 }) {
+  const t = useTranslations();
+  // Locked rows have no control, so the <label> becomes a plain <div> (a label
+  // with no associated control is invalid). Padding sits on the row so the whole
+  // surface is clickable.
+  const rowClassName = cn(
+    "flex min-w-0 flex-1 items-center gap-3 p-3",
+    disabled || locked ? "cursor-default" : "cursor-pointer",
+    dimmed && "opacity-55"
+  );
+  const rowText = (
+    <span className="min-w-0 flex-1">
+      <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+        <span className="text-sm font-medium text-primary">{label}</span>
+        {badges}
+      </span>
+      <span className="mt-0.5 block text-xs text-tertiary">{description}</span>
+      {actions ? <span className="mt-2 flex flex-wrap items-center gap-2.5">{actions}</span> : null}
+    </span>
+  );
+
   return (
     <div
       className={cn(
@@ -242,34 +316,33 @@ function SettingShell({
         checked ? "border-primary" : "border-border-default"
       )}
     >
-      <label
-        className={cn(
-          // Padding on label (not card) makes entire surface clickable and centered.
-          "flex flex-1 items-center gap-3 p-3",
-          disabled ? "cursor-default" : "cursor-pointer",
-          dimmed && "opacity-55"
+      <div className="flex items-center">
+        {locked ? (
+          <div className={rowClassName}>
+            <span
+              className="flex h-4 w-4 shrink-0 items-center justify-center text-tertiary"
+              title={t("DashboardIssuance.config.settingLockedHint")}
+            >
+              <Lock className="h-3.5 w-3.5" aria-hidden />
+            </span>
+            <IconTile icon={icon} active={checked} />
+            {rowText}
+          </div>
+        ) : (
+          <label className={rowClassName}>
+            <input
+              type="checkbox"
+              checked={checked}
+              disabled={disabled}
+              onChange={(event) => onToggle(event.currentTarget.checked)}
+              className="h-4 w-4 shrink-0 accent-primary disabled:opacity-60"
+            />
+            <IconTile icon={icon} active={checked} />
+            {rowText}
+          </label>
         )}
-      >
-        <input
-          type="checkbox"
-          checked={checked}
-          disabled={disabled}
-          onChange={(event) => onToggle(event.currentTarget.checked)}
-          className="h-4 w-4 shrink-0 accent-primary disabled:opacity-60"
-        />
-        <IconTile icon={icon} active={checked} />
-        <span className="min-w-0 flex-1">
-          <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-            <span className="text-sm font-medium text-primary">{label}</span>
-            {badges}
-          </span>
-          <span className="mt-0.5 block text-xs text-tertiary">{description}</span>
-          {actions ? (
-            <span className="mt-2 flex flex-wrap items-center gap-2.5">{actions}</span>
-          ) : null}
-        </span>
-      </label>
-      {/* Params/conflict outside label so input clicks don't toggle checkbox. */}
+        {trailing ? <div className="shrink-0 pr-3 pl-2">{trailing}</div> : null}
+      </div>
       {children ? <div className="px-3 pb-3">{children}</div> : null}
     </div>
   );
@@ -284,17 +357,17 @@ export function AdvancedSettingsEditor({
   onCapacitiesChange,
   allowCapacityConfig,
   showErrors,
+  showScenarios = true,
   settingsReadOnly,
   disabled,
   accessControl,
   onAccessControlChange,
   accessControlReadOnly,
   accessControlDocsHref,
-  deployConfig,
+  containerResponsive,
 }: AdvancedSettingsEditorProps) {
   const t = useTranslations();
   const [showTechnical, setShowTechnical] = useState(false);
-  const [showDeployConfig, setShowDeployConfig] = useState(false);
   const [configuringCapacity, setConfiguringCapacity] = useState<CapacityKey | null>(null);
 
   if (!category || !type) {
@@ -302,6 +375,13 @@ export function AdvancedSettingsEditor({
   }
 
   const permanent = listSettingsForType(category, type);
+  // Once deployed, an extension not baked into the mint can't be added — show
+  // only the ones in effect (required or selected at deploy), not dead rows.
+  const visiblePermanent = settingsReadOnly
+    ? permanent.filter(
+        (entry) => entry.availability === "locked" || settings[entry.key] !== undefined
+      )
+    : permanent;
 
   const access = accessControl ?? "";
   const combos = getCombosForCategory(category);
@@ -337,6 +417,12 @@ export function AdvancedSettingsEditor({
     onSettingsChange(next);
   };
 
+  const combinedFreeze = getCombinedFreezeState(visiblePermanent, settings);
+  const showCombinedFreeze = !showTechnical && combinedFreeze.entries.length > 0;
+  const rowEntries = showCombinedFreeze
+    ? visiblePermanent.filter((entry) => !isFreezePairKey(entry.key))
+    : visiblePermanent;
+
   const setParam = (key: string, paramKey: string, paramValue: string) => {
     const current = settings[key] ?? {};
     onSettingsChange({
@@ -363,7 +449,13 @@ export function AdvancedSettingsEditor({
   };
 
   return (
-    <div className="rounded-2xl border border-border-default bg-surface-raised p-5">
+    <div
+      className={cn(
+        "rounded-2xl border border-border-default bg-surface-raised p-5",
+        // Query container for the container-responsive inner grids.
+        containerResponsive && "@container"
+      )}
+    >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="min-w-0">
           <p className="text-base font-medium text-primary">
@@ -385,8 +477,8 @@ export function AdvancedSettingsEditor({
         </button>
       </div>
 
-      {/* Quick-fill presets — hidden once on-chain settings are locked. */}
-      {!settingsReadOnly && combos.length > 0 ? (
+      {/* Add-on bundles — creation-only, and hidden once on-chain settings are locked. */}
+      {showScenarios && !settingsReadOnly && combos.length > 0 ? (
         <section className="mt-5">
           <p className="text-xs font-semibold uppercase tracking-wide text-secondary">
             {t("DashboardIssuance.config.quickFillLabel")}
@@ -431,50 +523,20 @@ export function AdvancedSettingsEditor({
 
       {/* Permanent · on-chain, set at creation --------------------------- */}
       <section className="mt-6">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-wide text-secondary">
-              {t(
-                showTechnical
-                  ? "DashboardIssuance.config.settingsOnchainTitle"
-                  : "DashboardIssuance.config.settingsPermanentTitle"
-              )}
-            </p>
-            <p className="mt-0.5 text-xs text-tertiary">
-              {t(
-                settingsReadOnly
-                  ? "DashboardIssuance.config.settingsPermanentLockedSubtitle"
-                  : "DashboardIssuance.config.settingsPermanentSubtitle"
-              )}
-            </p>
-          </div>
-          {showTechnical && deployConfig ? (
-            <button
-              type="button"
-              aria-pressed={showDeployConfig}
-              onClick={() => setShowDeployConfig((value) => !value)}
-              className={cn(
-                "inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border-default px-3 py-1 text-xs font-medium transition-colors",
-                showDeployConfig
-                  ? "bg-fill-subtle text-primary"
-                  : "text-tertiary hover:text-primary"
-              )}
-            >
-              <Code2 className="h-3.5 w-3.5" />
-              {t("DashboardIssuance.config.deployPreview")}
-            </button>
-          ) : null}
-        </div>
-
-        {/* Deploy payload preview in technical mode. */}
-        {showTechnical && showDeployConfig && deployConfig ? (
-          <div className="mt-3">
-            <p className="mb-2 text-xs text-tertiary">
-              {t("DashboardIssuance.assetDetails.deployConfigAuthorityNote")}
-            </p>
-            <JsonCodeBlock value={deployConfig} />
-          </div>
-        ) : null}
+        <p className="text-xs font-semibold uppercase tracking-wide text-secondary">
+          {t(
+            showTechnical
+              ? "DashboardIssuance.config.settingsOnchainTitle"
+              : "DashboardIssuance.config.settingsPermanentTitle"
+          )}
+        </p>
+        <p className="mt-0.5 text-xs text-tertiary">
+          {t(
+            settingsReadOnly
+              ? "DashboardIssuance.config.settingsPermanentLockedSubtitle"
+              : "DashboardIssuance.config.settingsPermanentSubtitle"
+          )}
+        </p>
 
         <div className="mt-3 grid gap-2.5">
           {onAccessControlChange ? (
@@ -486,7 +548,17 @@ export function AdvancedSettingsEditor({
               docsHref={accessControlDocsHref}
             />
           ) : null}
-          {permanent.map((entry) => (
+          {showCombinedFreeze ? (
+            <CombinedFreezeRow
+              state={combinedFreeze}
+              disabled={disabled}
+              readOnly={settingsReadOnly}
+              onToggle={(enabled) =>
+                onSettingsChange(applyFreezePairToggle(settings, combinedFreeze.entries, enabled))
+              }
+            />
+          ) : null}
+          {rowEntries.map((entry) => (
             <PermanentRow
               key={entry.key}
               entry={entry}
@@ -494,7 +566,9 @@ export function AdvancedSettingsEditor({
               showTechnical={showTechnical}
               showErrors={showErrors}
               disabled={disabled || settingsReadOnly}
+              readOnly={settingsReadOnly}
               conflictWith={conflictBlocker(entry.key)}
+              containerResponsive={containerResponsive}
               onToggle={(enabled) => setEnabled(entry, enabled)}
               onParam={setParam}
             />
@@ -518,7 +592,13 @@ export function AdvancedSettingsEditor({
               : "DashboardIssuance.config.settingsOngoingSubtitleDraft"
           )}
         </p>
-        <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
+        <div
+          className={cn(
+            "mt-3 grid gap-2.5",
+            // Two up only when there's room (container width vs. viewport).
+            containerResponsive ? "@2xl:grid-cols-2" : "sm:grid-cols-2"
+          )}
+        >
           {CAPACITY_KEYS.map((key) => {
             const selection = capacities[key];
             const configurable = capacityHasConfig(key);
@@ -634,13 +714,46 @@ function AccessControlRow({
   );
 }
 
+/**
+ * The basic view's single "Freeze transfers" row, standing in for the
+ * pauseTransfers + freezeAccounts pair. Reuses the existing combined copy, since
+ * that is exactly what this control used to be before the settings were split.
+ */
+function CombinedFreezeRow({
+  state,
+  disabled,
+  readOnly,
+  onToggle,
+}: {
+  state: { checked: boolean; locked: boolean };
+  disabled?: boolean;
+  readOnly?: boolean;
+  onToggle: (enabled: boolean) => void;
+}) {
+  const t = useTranslations();
+  return (
+    <SettingShell
+      icon={Snowflake}
+      checked={state.checked}
+      disabled={disabled || readOnly || state.locked}
+      locked={state.locked || Boolean(readOnly && state.checked)}
+      onToggle={onToggle}
+      label={t("DashboardIssuance.config.freezeTransfers")}
+      description={t("DashboardIssuance.config.freezeTransfersDescription")}
+      badges={state.locked ? <Pill>{t("DashboardIssuance.config.settingRequired")}</Pill> : null}
+    />
+  );
+}
+
 function PermanentRow({
   entry,
   selection,
   showTechnical,
   showErrors,
   disabled,
+  readOnly,
   conflictWith,
+  containerResponsive,
   onToggle,
   onParam,
 }: {
@@ -649,7 +762,10 @@ function PermanentRow({
   showTechnical?: boolean;
   showErrors?: boolean;
   disabled?: boolean;
+  // Deployed token: on-chain settings are read-only, so an enabled one locks.
+  readOnly?: boolean;
   conflictWith?: string;
+  containerResponsive?: boolean;
   onToggle: (enabled: boolean) => void;
   onParam: (key: string, paramKey: string, value: string) => void;
 }) {
@@ -658,6 +774,8 @@ function PermanentRow({
   const isLocked = availability === "locked";
   const checked = isLocked || selection !== undefined;
   const blocked = !checked && conflictWith !== undefined;
+  // Required always locks; a read-only setting locks only when it's actually on.
+  const locked = isLocked || Boolean(readOnly && checked);
   const params = setting.params ?? [];
 
   return (
@@ -666,8 +784,16 @@ function PermanentRow({
       checked={checked}
       disabled={disabled || isLocked || blocked}
       dimmed={blocked}
+      locked={locked}
       onToggle={onToggle}
-      label={showTechnical ? extensionTitle(setting.extensions) : t(setting.labelKey as MessageKey)}
+      // Technical mode names the row after its extension(s) — but a setting can
+      // map to a base-mint field instead (freezeAccounts), in which case there is
+      // no extension to name and the product label is the accurate one.
+      label={
+        showTechnical && setting.extensions.length > 0
+          ? extensionTitle(setting.extensions)
+          : t(setting.labelKey as MessageKey)
+      }
       description={t(setting.descriptionKey as MessageKey)}
       badges={
         isLocked ? (
@@ -697,7 +823,12 @@ function PermanentRow({
           <Tag>{conflictWith}</Tag>
         </p>
       ) : checked && params.length > 0 ? (
-        <div className="grid items-start gap-x-3 gap-y-2 border-t border-border-subtle pt-2.5 sm:grid-cols-2">
+        <div
+          className={cn(
+            "grid items-start gap-x-3 gap-y-2 border-t border-border-subtle pt-2.5",
+            containerResponsive ? "@2xl:grid-cols-2" : "sm:grid-cols-2"
+          )}
+        >
           {params.map((param) => (
             <ParamField
               key={param.key}
@@ -744,6 +875,8 @@ function CapacityRow({
   const meta = CAPACITY_META[capKey];
   const expertLabel = CAPACITY_EXPERT_LABELS[capKey];
   const expertDescription = CAPACITY_EXPERT_DESCRIPTIONS[capKey];
+  // Config affordance appears only when the capacity is on and configurable here.
+  const showConfig = Boolean(checked && configurable && allowConfig);
   return (
     <SettingShell
       icon={CAPACITY_ICONS[capKey]}
@@ -754,24 +887,25 @@ function CapacityRow({
       description={
         showTechnical && expertDescription ? t(expertDescription) : t(meta.descriptionKey)
       }
-    >
-      {checked && configurable && allowConfig ? (
-        <div className="mt-2.5 flex items-center justify-between gap-3 border-t border-border-subtle pt-2.5">
-          <span className="min-w-0 flex-1 truncate text-xs text-tertiary">
-            {summary ?? t("DashboardIssuance.config.capacityConfig.notConfigured")}
-          </span>
+      badges={
+        showConfig ? (
+          <Pill>{summary ?? t("DashboardIssuance.config.capacityConfig.notConfigured")}</Pill>
+        ) : null
+      }
+      trailing={
+        showConfig ? (
           <button
             type="button"
             onClick={onConfigure}
             disabled={disabled}
-            className="inline-flex shrink-0 items-center gap-0.5 text-xs font-medium text-primary transition-colors hover:underline"
+            className="inline-flex shrink-0 items-center gap-0.5 text-xs font-medium text-primary transition-colors hover:underline disabled:pointer-events-none disabled:opacity-50"
           >
             {t("DashboardIssuance.config.capacityConfig.configure")}
             <ChevronRight className="h-3 w-3" />
           </button>
-        </div>
-      ) : null}
-    </SettingShell>
+        ) : null
+      }
+    />
   );
 }
 

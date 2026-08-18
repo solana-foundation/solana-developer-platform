@@ -10,8 +10,10 @@ import type { ExecutionContext } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { SessionService } from "@/services/session.service";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const WEBHOOK_SECRET = `whsec_${Buffer.from("test_clerk_webhook_secret_1234567890").toString(
   "base64"
@@ -108,7 +110,7 @@ describe("Clerk webhooks", () => {
     env.CLERK_SECRET_KEY = undefined;
     env.CLERK_API_URL = undefined;
     env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
-    await clearTestDatabase(env);
+    await clearKVStores(env);
   });
 
   it("creates and updates the SDP organization mapping from Clerk organization events", async () => {
@@ -396,6 +398,92 @@ describe("Clerk webhooks", () => {
     expect(reconciledMembership).toEqual({ role: "admin", status: "active" });
   });
 
+  /**
+   * Seeds a Clerk-linked org plus an invitation in the given state, then has
+   * Clerk report the invitee joining. Returns the resulting membership row.
+   */
+  async function syncMembershipAfterInvitation(
+    invitationStatuses: string[]
+  ): Promise<{ status: string } | null> {
+    const clerkOrgId = `org_clerk_revoked_${invitationStatuses.join("_")}`;
+    const organizationId = `org_revoked_${invitationStatuses.join("_")}`;
+    const email = "withdrawn@example.com";
+    const db = getDb(env);
+
+    await db.batch([
+      db
+        .prepare(
+          "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, 'Revoked Invite Org', ?, 'individual', 'active')"
+        )
+        .bind(organizationId, organizationId),
+      db
+        .prepare(
+          `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
+           VALUES (?, 'clerk', ?, ?, ?)`
+        )
+        .bind(`aoi_${organizationId}`, clerkOrgId, organizationId, organizationId),
+      db
+        .prepare(
+          "INSERT INTO users (id, email, email_verified, status) VALUES (?, 'revoked-inviter@example.com', 1, 'active')"
+        )
+        .bind(`usr_inviter_${organizationId}`),
+    ]);
+
+    // created_at is set explicitly so "most recent invitation" is deterministic
+    // rather than dependent on insert timing within the same second.
+    for (const [index, status] of invitationStatuses.entries()) {
+      await db
+        .prepare(
+          `INSERT INTO invitations
+             (id, organization_id, email, role, invited_by, token_hash, expires_at, status, created_at)
+           VALUES (?, ?, ?, 'member', ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          `inv_${organizationId}_${index}`,
+          organizationId,
+          email,
+          `usr_inviter_${organizationId}`,
+          `hash_${organizationId}_${index}`,
+          new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          status,
+          new Date(Date.UTC(2026, 0, index + 1)).toISOString()
+        )
+        .run();
+    }
+
+    mockClerkUserLookup(`user_revoked_${organizationId}`, email);
+    const response = await simulateClerkWebhook({
+      type: "organizationMembership.created",
+      data: {
+        organization: { id: clerkOrgId, name: "Revoked Invite Org", slug: organizationId },
+        role: "org:member",
+        public_user_data: { user_id: `user_revoked_${organizationId}`, identifier: email },
+      },
+    });
+    expect(response.status).toBe(200);
+
+    return db
+      .prepare(
+        `SELECT om.status
+           FROM organization_members om
+           JOIN users u ON u.id = om.user_id
+          WHERE om.organization_id = ? AND u.email = ?`
+      )
+      .bind(organizationId, email)
+      .first<{ status: string }>();
+  }
+
+  it("declines a Clerk membership when the invitation was revoked", async () => {
+    // Clerk mints the acceptance link and we cannot expire it, so this sync is
+    // the last point that can honour the revocation.
+    expect(await syncMembershipAfterInvitation(["revoked"])).toBeNull();
+  });
+
+  it("admits a Clerk membership when a revoked invitation was superseded by a new one", async () => {
+    const membership = await syncMembershipAfterInvitation(["revoked", "pending"]);
+    expect(membership?.status).toBe("active");
+  });
+
   it("syncs organization memberships without creating records on delete-only events", async () => {
     const deleteOnly = await simulateClerkWebhook({
       type: "organizationMembership.deleted",
@@ -452,20 +540,66 @@ describe("Clerk webhooks", () => {
 
     const membership = await getDb(env)
       .prepare(
-        `SELECT u.email, om.role, om.status
+        `SELECT u.email, om.user_id, om.organization_id, om.role, om.status
          FROM organization_members om
          JOIN users u ON u.id = om.user_id
          JOIN auth_user_identities aui ON aui.user_id = u.id
          WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`
       )
       .bind("user_clerk_member")
-      .first<{ email: string; role: string; status: string }>();
+      .first<{
+        email: string;
+        user_id: string;
+        organization_id: string;
+        role: string;
+        status: string;
+      }>();
 
-    expect(membership).toEqual({
+    expect(membership).toMatchObject({
       email: "admin@example.com",
       role: "admin",
       status: "active",
     });
+
+    if (!membership) {
+      throw new Error("Expected the Clerk membership to exist");
+    }
+
+    const sessionService = new SessionService(getDb(env));
+    const elevatedSession = await sessionService.createSession(
+      membership.user_id,
+      membership.organization_id,
+      {}
+    );
+
+    const roleUpdated = await simulateClerkWebhook({
+      type: "organizationMembership.updated",
+      data: {
+        organization: {
+          id: "org_clerk_membership",
+          name: "Membership Org",
+          slug: "membership-org",
+        },
+        role: "org:member",
+        public_user_data: {
+          user_id: "user_clerk_member",
+          identifier: "admin@example.com",
+        },
+      },
+    });
+
+    expect(roleUpdated.status).toBe(200);
+    const elevatedSessionRow = await getDb(env)
+      .prepare("SELECT revoked_at FROM sessions WHERE id = ?")
+      .bind(elevatedSession.id)
+      .first<{ revoked_at: string | null }>();
+    expect(elevatedSessionRow?.revoked_at).not.toBeNull();
+
+    const memberSession = await sessionService.createSession(
+      membership.user_id,
+      membership.organization_id,
+      {}
+    );
 
     const deleted = await simulateClerkWebhook({
       type: "organizationMembership.deleted",
@@ -492,6 +626,11 @@ describe("Clerk webhooks", () => {
       .first<{ status: string }>();
 
     expect(removed?.status).toBe("removed");
+    const memberSessionRow = await getDb(env)
+      .prepare("SELECT revoked_at FROM sessions WHERE id = ?")
+      .bind(memberSession.id)
+      .first<{ revoked_at: string | null }>();
+    expect(memberSessionRow?.revoked_at).not.toBeNull();
 
     const delayedUserUpdate = await simulateClerkWebhook({
       type: "user.updated",
@@ -604,6 +743,27 @@ describe("Clerk webhooks", () => {
 
     const userId = user?.id;
     expect(userId).toBeTruthy();
+    if (!userId) {
+      throw new Error("Expected the Clerk user mapping to exist");
+    }
+
+    const organization = await getDb(env)
+      .prepare(
+        `SELECT organization_id
+         FROM auth_organization_identities
+         WHERE provider = 'clerk' AND provider_org_id = ?`
+      )
+      .bind("org_clerk_lifecycle")
+      .first<{ organization_id: string }>();
+    if (!organization) {
+      throw new Error("Expected the Clerk organization mapping to exist");
+    }
+    const sessionService = new SessionService(getDb(env));
+    const userSession = await sessionService.createSession(
+      userId,
+      organization.organization_id,
+      {}
+    );
 
     const apiKeyHash = "webhook_lifecycle_key_hash";
     const lifecycleProjectId = "prj_webhook_lifecycle";
@@ -660,6 +820,11 @@ describe("Clerk webhooks", () => {
       .first<{ status: string }>();
 
     expect(removedUser?.status).toBe("deleted");
+    const userSessionRow = await getDb(env)
+      .prepare("SELECT revoked_at FROM sessions WHERE id = ?")
+      .bind(userSession.id)
+      .first<{ revoked_at: string | null }>();
+    expect(userSessionRow?.revoked_at).not.toBeNull();
 
     const deletedOrg = await simulateClerkWebhook({
       type: "organization.deleted",
@@ -792,7 +957,6 @@ describe("BVNK ramp webhook", () => {
 
   afterEach(async () => {
     env.BVNK_SANDBOX_WEBHOOK_SECRET = undefined;
-    await clearTestDatabase(env);
   });
 
   async function readBvnk() {
@@ -1212,6 +1376,141 @@ describe("BVNK ramp webhook", () => {
     expect(Number(transfer?.fiat_amount)).toBe(100);
   });
 
+  it("refuses to guess between ambiguous BVNK pay-in transfers", async () => {
+    const ruleId = "rule_webhook_payment_ambiguous";
+    for (const [index, createdAt] of [
+      [1, "2026-06-05T00:00:00.000Z"],
+      [2, "2026-06-05T00:01:00.000Z"],
+    ] as const) {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO payment_transfers (
+             id, organization_id, project_id, wallet_id, counterparty_id,
+             source_address, destination_address, token, amount, memo, type,
+             direction, status, provider, provider_reference, delivery_mode,
+             fiat_currency, fiat_amount, provider_data, signature, serialized_tx,
+             initiated_by_key_id, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          `pt_bvnk_ambiguous_${index}`,
+          ORG_ID,
+          PROJECT_ID,
+          "wallet_bvnk_webhook",
+          COUNTERPARTY_ID,
+          null,
+          "dest",
+          "USDC",
+          null,
+          null,
+          "onramp",
+          "inbound",
+          "awaiting_payment",
+          "bvnk",
+          `bvnk_onramp_quote_ambiguous_${index}`,
+          "manual_instructions",
+          "USD",
+          "100.00",
+          JSON.stringify({ bvnk: { ruleId, fundingWalletId: WALLET_ID } }),
+          null,
+          null,
+          null,
+          createdAt,
+          createdAt
+        )
+        .run();
+    }
+
+    const res = await sendBvnkWebhook({
+      event: "bvnk:payment:payin:status-change",
+      data: {
+        customerReference: CUSTOMER_REFERENCE,
+        beneficiary: { walletId: WALLET_ID },
+        status: "COMPLETED",
+        amount: { value: 100, currencyCode: "USD" },
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const rows = await getDb(env)
+      .prepare(
+        "SELECT status FROM payment_transfers WHERE id LIKE 'pt_bvnk_ambiguous_%' ORDER BY id"
+      )
+      .all<{ status: string }>();
+    expect(rows.results.map((row) => row.status)).toEqual(["awaiting_payment", "awaiting_payment"]);
+  });
+
+  it("matches a BVNK pay-in against the complete eligible transfer set", async () => {
+    const ruleId = "rule_webhook_payment_complete_set";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers (
+           id, organization_id, project_id, wallet_id, counterparty_id,
+           destination_address, token, type, direction, status, provider,
+           provider_reference, delivery_mode, fiat_currency, fiat_amount,
+           provider_data, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
+      )
+      .bind(
+        "pt_bvnk_complete_set_match",
+        ORG_ID,
+        PROJECT_ID,
+        "wallet_bvnk_webhook",
+        COUNTERPARTY_ID,
+        "dest",
+        "USDC",
+        "onramp",
+        "inbound",
+        "awaiting_payment",
+        "bvnk",
+        "bvnk_onramp_quote_complete_set_match",
+        "manual_instructions",
+        "USD",
+        "100.00",
+        { bvnk: { ruleId, fundingWalletId: WALLET_ID } },
+        "2026-06-05T00:00:00.000Z",
+        "2026-06-05T00:00:00.000Z"
+      )
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers (
+           id, organization_id, project_id, wallet_id, counterparty_id,
+           destination_address, token, type, direction, status, provider,
+           provider_reference, delivery_mode, fiat_currency, fiat_amount,
+           provider_data, created_at, updated_at
+         )
+         SELECT
+           'pt_bvnk_complete_set_decoy_' || candidate,
+           ?, ?, ?, ?, 'dest', 'USDC', 'onramp', 'inbound', 'awaiting_payment',
+           'bvnk', 'bvnk_onramp_quote_complete_set_decoy_' || candidate,
+           'manual_instructions', 'USD', (100 + candidate)::text,
+           jsonb_build_object('bvnk', jsonb_build_object(
+             'ruleId', ?::text, 'fundingWalletId', ?::text
+           )),
+           '2026-06-05T01:00:00.000Z', '2026-06-05T01:00:00.000Z'
+         FROM generate_series(1, 100) AS candidate`
+      )
+      .bind(ORG_ID, PROJECT_ID, "wallet_bvnk_webhook", COUNTERPARTY_ID, ruleId, WALLET_ID)
+      .run();
+
+    const res = await sendBvnkWebhook({
+      event: "bvnk:payment:payin:status-change",
+      data: {
+        customerReference: CUSTOMER_REFERENCE,
+        beneficiary: { walletId: WALLET_ID },
+        status: "COMPLETED",
+        amount: { value: 100, currencyCode: "USD" },
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const transfer = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = 'pt_bvnk_complete_set_match'")
+      .first<{ status: string }>();
+    expect(transfer?.status).toBe("completed");
+  });
+
   it("moves a BVNK off-ramp transfer to settling when a channel transaction is detected", async () => {
     const transferId = "xfr_d7a72b93-cd7e-405b-96b5-73ca368a7bd7";
     await getDb(env)
@@ -1605,7 +1904,6 @@ describe("Lightspark ramp webhook", () => {
 
   afterEach(async () => {
     env.LIGHTSPARK_GRID_SANDBOX_WEBHOOK_PUBLIC_KEY = undefined;
-    await clearTestDatabase(env);
   });
 
   it("marks a lightspark onramp transfer awaiting payment from the quote-time PENDING webhook", async () => {
@@ -1928,7 +2226,6 @@ describe("MoonPay ramp webhook", () => {
 
   afterEach(async () => {
     env.MOONPAY_SANDBOX_WEBHOOK_KEY = undefined;
-    await clearTestDatabase(env);
   });
 
   const completedPayload = {

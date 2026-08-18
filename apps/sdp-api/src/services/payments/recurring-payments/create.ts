@@ -1,13 +1,14 @@
+import type { WalletOperationActor } from "@sdp/types";
 import {
   createPaymentRecurringPaymentsRepository,
-  createPaymentsRepository,
   type PaymentRecurringPaymentRow,
 } from "@/db/repositories";
 import { AppError } from "@/lib/errors";
+import { createTenantScope } from "@/lib/tenant-scope";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { resolveSolanaCounterpartyAccount } from "../counterparty-account-resolution";
-import { assertWalletPolicyAllowsTransferWithRepository } from "../wallet-policy";
+import { enforceRecurringPaymentPolicy } from "./policy";
 import { assertRecurringPaymentTokenMint } from "./shared";
 
 export async function createRecurringPayment(input: {
@@ -23,9 +24,11 @@ export async function createRecurringPayment(input: {
   firstCollectionAt?: string | null;
   metadataUri?: string | null;
   createdBy: string | null;
+  apiKeyId: string | null;
+  actor: WalletOperationActor | null;
 }): Promise<PaymentRecurringPaymentRow> {
   const [tokenMint, destination] = await Promise.all([
-    assertRecurringPaymentTokenMint(input.token, input.projectId, input.env),
+    assertRecurringPaymentTokenMint(input.token, input.organizationId, input.projectId, input.env),
     resolveSolanaCounterpartyAccount({
       env: input.env,
       organizationId: input.organizationId,
@@ -35,19 +38,32 @@ export async function createRecurringPayment(input: {
     }),
   ]);
 
-  await assertWalletPolicyAllowsTransferWithRepository(createPaymentsRepository(input.env), {
+  const scope = createTenantScope({
     organizationId: input.organizationId,
     projectId: input.projectId,
-    wallet: input.sourceWallet,
-    destinationAddress: destination.destinationAddress,
-    enforceDailyLimit: false,
+  });
+  await enforceRecurringPaymentPolicy({
+    env: input.env,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    sourceWallet: input.sourceWallet,
+    operationType: "recurring_payment_create",
     token: tokenMint,
     amount: input.amount,
+    destination: destination.destinationAddress,
+    apiKeyId: input.apiKeyId,
+    actor: input.actor,
+    rawPayload: {
+      counterpartyId: input.counterpartyId,
+      counterpartyAccountId: input.counterpartyAccountId,
+      periodHours: input.periodHours,
+    },
   });
 
   const now = new Date().toISOString();
   const recurringPayment = await createPaymentRecurringPaymentsRepository(
-    input.env
+    input.env,
+    scope
   ).createRecurringPayment({
     id: `prp_${crypto.randomUUID()}`,
     organizationId: input.organizationId,

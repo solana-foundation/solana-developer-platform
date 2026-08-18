@@ -23,10 +23,13 @@ export type AccessControlMode = "allowlist" | "blocklist" | "disabled";
 // under compliance.capacities.* in the issuance metadata. On-chain, extension-
 // backed controls (e.g. freeze via the pausable extension) live in the advanced
 // settings editor instead (issuance_metadata.settings), not here.
+// Display order: the checkbox-only policies (kyc, issueRetireControls) come
+// first, then the configurable ones, so simple toggles aren't interleaved with
+// rows that carry a Configure affordance.
 export const CAPACITY_KEYS = [
   "kyc",
-  "restrictTradingHours",
   "issueRetireControls",
+  "restrictTradingHours",
   "redemptionApprovals",
   "investorReporting",
   "transferApprovals",
@@ -132,6 +135,14 @@ export interface DraftState {
   description: string;
   website: string;
   imageUrl: string;
+  // Step 2 — supply cap. SPL/Token-2022 have no supply-cap field, so this is an
+  // SDP policy limit enforced by our mint endpoint only. Empty = uncapped. A true
+  // on-chain cap requires minting to the cap and then revoking the mint authority
+  // (the asset workspace's "lock supply" action).
+  //
+  // The mint's freeze authority is NOT here: it is the "freezeAccounts" advanced
+  // setting, so it lives in `advancedSettings` alongside its pausable sibling.
+  maxSupply: string;
   // Step 2 — stablecoin financial details
   backingType: string;
   pegCurrency: string;
@@ -230,6 +241,7 @@ export function createInitialDraft(): DraftState {
     description: "",
     website: "",
     imageUrl: "",
+    maxSupply: "",
     backingType: "",
     pegCurrency: "",
     pegTarget: "",

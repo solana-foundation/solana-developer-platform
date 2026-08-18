@@ -37,7 +37,8 @@ pnpm test:integration
 At minimum, the configs used by local development and CI should contain the values needed by the exercised features:
 
 - API database and cache values such as `DATABASE_URL` and `REDIS_URL`
-- application secrets such as `API_KEY_PEPPER` and `CUSTODY_ENCRYPTION_KEY`
+- application secrets such as `API_KEY_PEPPER`, `CUSTODY_ENCRYPTION_KEY`, and
+  `CREDENTIAL_FINGERPRINT_PEPPER` when stored-credential provisioning is enabled
 - authentication values under `CLERK_*`
 - Solana RPC URLs and API keys
 - Kora and custody-provider values used by integration tests
@@ -54,7 +55,6 @@ The web and docs configs additionally provide their public URLs and browser-safe
 - `SDP_DOCS_PROXY_ORIGIN`
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
 - `CLERK_SECRET_KEY`
-- `CLERK_JWT_TEMPLATE`
 - `NEXT_PUBLIC_SENTRY_DSN`
 
 `SDP_DOCS_PROXY_ORIGIN` is the internal rewrite target for `sdp-web` `/docs` traffic. In production it must point to the docs project origin, `https://docs.platform.solana.com`, rather than the public canonical URL `https://platform.solana.com/docs`; otherwise the web app rewrites `/docs` back to itself.

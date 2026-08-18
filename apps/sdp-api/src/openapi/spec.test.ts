@@ -1,6 +1,29 @@
 import { describe, expect, it } from "vitest";
 import { createOpenApiDocument, createPublicOpenApiDocument } from "./spec";
 
+interface TestJsonSchema {
+  example?: unknown;
+  items?: TestJsonSchema;
+  not?: { required?: string[] };
+  oneOf?: TestJsonSchema[];
+  properties?: Record<string, TestJsonSchema>;
+  required?: string[];
+}
+
+function getJsonSchema(value: unknown): TestJsonSchema {
+  return (value as { content: Record<string, { schema: TestJsonSchema }> }).content[
+    "application/json"
+  ].schema;
+}
+
+function getWalletResponseSchema(value: unknown): TestJsonSchema {
+  return getJsonSchema(value).properties?.data?.properties?.wallet ?? {};
+}
+
+function getWalletListItemSchema(value: unknown): TestJsonSchema {
+  return getJsonSchema(value).properties?.data?.properties?.wallets?.items ?? {};
+}
+
 describe("OpenAPI spec", () => {
   it("documents path-based versioning policy", () => {
     const doc = createOpenApiDocument();
@@ -25,6 +48,59 @@ describe("OpenAPI spec", () => {
     expect(refreshPath?.operationId).toBe("refreshTokenSupply");
   });
 
+  it("documents allowlist search/label filters and the labels endpoint", () => {
+    const doc = createOpenApiDocument();
+
+    const listPath = doc.paths?.["/v1/issuance/tokens/{tokenId}/allowlist"]?.get;
+    const queryParamNames = listPath?.parameters
+      ?.filter((parameter) => "in" in parameter && parameter.in === "query")
+      .map((parameter) => ("name" in parameter ? parameter.name : undefined));
+    expect(queryParamNames).toEqual(expect.arrayContaining(["search", "label"]));
+
+    const labelsPath = doc.paths?.["/v1/issuance/tokens/{tokenId}/allowlist/labels"]?.get;
+    expect(labelsPath).toBeDefined();
+    expect(labelsPath?.operationId).toBe("listTokenAllowlistLabels");
+  });
+
+  it("documents the token list search/filter/sort params and the facets endpoint", () => {
+    const doc = createOpenApiDocument();
+
+    const listPath = doc.paths?.["/v1/issuance/tokens"]?.get;
+    const queryParamNames = listPath?.parameters
+      ?.filter((parameter) => "in" in parameter && parameter.in === "query")
+      .map((parameter) => ("name" in parameter ? parameter.name : undefined));
+    expect(queryParamNames).toEqual(
+      expect.arrayContaining([
+        "search",
+        "status",
+        "deploymentStatus",
+        "template",
+        "createdAfter",
+        "createdBefore",
+        "sortBy",
+        "sortDirection",
+        "page",
+        "pageSize",
+      ])
+    );
+    // Invalid query params are rejected, so 400 has to be a documented outcome.
+    expect(listPath?.responses?.["400"]).toBeDefined();
+
+    const facetsPath = doc.paths?.["/v1/issuance/tokens/facets"]?.get;
+    expect(facetsPath).toBeDefined();
+    expect(facetsPath?.operationId).toBe("listTokenFacets");
+  });
+
+  it("documents the transaction type filter", () => {
+    const doc = createOpenApiDocument();
+
+    const listPath = doc.paths?.["/v1/issuance/tokens/{tokenId}/transactions"]?.get;
+    const queryParamNames = listPath?.parameters
+      ?.filter((parameter) => "in" in parameter && parameter.in === "query")
+      .map((parameter) => ("name" in parameter ? parameter.name : undefined));
+    expect(queryParamNames).toEqual(expect.arrayContaining(["type", "status", "page", "pageSize"]));
+  });
+
   it("documents the wallet metadata fast path and balance-on default", () => {
     const doc = createOpenApiDocument();
     const operation = doc.paths?.["/v1/wallets/{walletId}"]?.get;
@@ -41,6 +117,85 @@ describe("OpenAPI spec", () => {
     expect(JSON.stringify(includeBalance)).toContain("Defaults to true");
     expect(JSON.stringify(operation?.responses?.["200"])).toContain(
       "Omitted when includeBalance=false"
+    );
+  });
+
+  it("documents exact Connection wallet creation without requiring provider", () => {
+    const doc = createOpenApiDocument();
+    const operation = doc.paths?.["/v1/wallets"]?.post;
+    const requestSchema = getJsonSchema(operation?.requestBody);
+
+    expect(requestSchema.properties?.connectionId).toMatchObject({
+      type: "string",
+      minLength: 1,
+    });
+    expect(requestSchema.properties?.connectionId?.example).toBeUndefined();
+    expect(requestSchema.required ?? []).not.toContain("connectionId");
+    expect(requestSchema.required ?? []).not.toContain("provider");
+    expect(requestSchema.example).toEqual({
+      provider: "privy",
+      label: "Mint authority wallet",
+      purpose: "mint_authority",
+      setDefault: true,
+    });
+  });
+
+  it("documents exact-one wallet ownership and request-time runtime admission", () => {
+    const doc = createOpenApiDocument();
+    const createWallet = getWalletResponseSchema(
+      doc.paths?.["/v1/wallets"]?.post?.responses?.["201"]
+    );
+    const listWallet = getWalletListItemSchema(doc.paths?.["/v1/wallets"]?.get?.responses?.["200"]);
+    const updateWallet = getWalletResponseSchema(
+      doc.paths?.["/v1/wallets/{walletId}"]?.patch?.responses?.["200"]
+    );
+    const detailWallet = getWalletResponseSchema(
+      doc.paths?.["/v1/wallets/{walletId}"]?.get?.responses?.["200"]
+    );
+    const ownerConstraint = [
+      {
+        required: ["custodyConfigId"],
+        not: { required: ["custodyConnectionId"] },
+      },
+      {
+        required: ["custodyConnectionId"],
+        not: { required: ["custodyConfigId"] },
+      },
+    ];
+
+    for (const walletSchema of [createWallet, listWallet, updateWallet, detailWallet]) {
+      expect(walletSchema.properties).toHaveProperty("custodyConfigId");
+      expect(walletSchema.properties).toHaveProperty("custodyConnectionId");
+      expect(walletSchema.oneOf).toEqual(ownerConstraint);
+      expect(walletSchema.required).toContain("isRuntimeExecutionAllowed");
+      expect(walletSchema.example).toMatchObject({
+        custodyConfigId: "cfg_example",
+        isRuntimeExecutionAllowed: true,
+        walletId: "privy_wallet_123",
+      });
+    }
+
+    for (const walletSchema of [createWallet, listWallet, updateWallet]) {
+      expect(walletSchema.required ?? []).not.toContain("provider");
+    }
+    expect(detailWallet.required).toContain("provider");
+    expect(detailWallet.required ?? []).not.toContain("balance");
+  });
+
+  it("documents Connection-aware wallet resolution failures", () => {
+    const doc = createOpenApiDocument();
+
+    expect(doc.paths?.["/v1/wallets"]?.post?.responses).toHaveProperty("404");
+    expect(doc.paths?.["/v1/wallets"]?.post?.responses).toHaveProperty("503");
+    expect(doc.paths?.["/v1/wallets"]?.get?.responses).toHaveProperty("400");
+    expect(doc.paths?.["/v1/wallets"]?.get?.responses).toHaveProperty("409");
+    expect(doc.paths?.["/v1/wallets/aggregate"]?.get?.responses).toHaveProperty("400");
+    expect(doc.paths?.["/v1/wallets/aggregate"]?.get?.responses).toHaveProperty("409");
+    expect(doc.paths?.["/v1/wallets/public-key"]?.get?.responses).toHaveProperty("409");
+    expect(doc.paths?.["/v1/wallets/{walletId}"]?.get?.responses).toHaveProperty("409");
+    expect(doc.paths?.["/v1/wallets/{walletId}"]?.patch?.responses).toHaveProperty("409");
+    expect(doc.paths?.["/v1/payments/wallets/{walletId}/balances"]?.get?.responses).toHaveProperty(
+      "409"
     );
   });
 
@@ -79,6 +234,7 @@ describe("OpenAPI spec", () => {
 
   it("limits the public document to supported public API families", () => {
     const doc = createPublicOpenApiDocument();
+    const updateProject = JSON.stringify(doc.paths?.["/v1/projects/{projectId}"]?.patch);
 
     expect(doc.tags?.map((tag) => tag.name)).toEqual([
       "Health",
@@ -101,10 +257,21 @@ describe("OpenAPI spec", () => {
     expect(doc.paths?.["/v1/onboarding/status"]).toBeUndefined();
     expect(doc.components?.securitySchemes?.sessionCookie).toBeUndefined();
     expect(doc.components?.securitySchemes?.adminKey).toBeUndefined();
+    expect(updateProject).toContain('"rpcProvider"');
+    expect(updateProject).toContain('"nodit"');
 
     expect(doc.paths?.["/health"]?.get).toBeDefined();
     expect(doc.paths?.["/v1/wallets"]?.get).toBeDefined();
     expect(doc.paths?.["/v1/payments/transfers"]?.post).toBeDefined();
     expect(doc.paths?.["/v1/policies"]?.get).toBeDefined();
+  });
+
+  it("documents the managed RPC round-robin order", () => {
+    const doc = createOpenApiDocument();
+    const rpcProviders = JSON.stringify(doc.paths?.["/v1/rpc/providers"]?.get);
+
+    expect(rpcProviders).toContain(
+      '"example":["triton","helius","alchemy","quicknode","validationcloud","nodit","default"]'
+    );
   });
 });

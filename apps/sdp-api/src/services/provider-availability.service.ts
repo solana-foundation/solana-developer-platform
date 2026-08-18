@@ -1,8 +1,12 @@
 import {
   COMPLIANCE_PROVIDERS,
   type ComplianceProviderId,
+  CUSTODY_PROVIDER_CATALOG_BY_ID,
   CUSTODY_PROVIDERS,
   type CustodyProvider,
+  EARN_PROVIDERS,
+  type EarnProviderId,
+  isEarnProviderSurfaced,
   normalizeOrganizationTier,
   ORGANIZATION_RPC_PROVIDERS,
   type OrganizationProviderAvailabilityResponse,
@@ -18,6 +22,7 @@ import {
 } from "@sdp/types";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
+import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import type { Env } from "@/types/env";
 
@@ -34,6 +39,15 @@ type ClerkOrganizationWithMetadata = {
 type ProviderAvailabilityDefinition = {
   label: string;
   isConfigured: (env: Env, testMode?: boolean) => boolean;
+  /**
+   * Env keys this definition actually consults, when it consults any.
+   *
+   * Declared so the drift guard can assert over the keys that are really read
+   * rather than re-deriving them from a naming convention — which would demand
+   * a credential for a provider that has none. Absent means the provider needs
+   * no configuration (a public API).
+   */
+  credentialEnvKeys?: readonly (keyof Env)[];
 };
 
 type ProviderAvailabilityDefinitions = {
@@ -41,6 +55,15 @@ type ProviderAvailabilityDefinitions = {
   rpc: Record<OrganizationRpcProvider, ProviderAvailabilityDefinition>;
   compliance: Record<ComplianceProviderId, ProviderAvailabilityDefinition>;
   ramps: Record<RampProviderId, ProviderAvailabilityDefinition>;
+  earn: Record<EarnProviderId, ProviderAvailabilityDefinition>;
+};
+
+type ProviderIdByFamily = {
+  custody: CustodyProvider;
+  rpc: OrganizationRpcProvider;
+  compliance: ComplianceProviderId;
+  ramps: RampProviderId;
+  earn: EarnProviderId;
 };
 
 function hasEnv(env: Env, key: keyof Env): boolean {
@@ -50,6 +73,63 @@ function hasEnv(env: Env, key: keyof Env): boolean {
 
 function hasAllEnv(env: Env, keys: readonly (keyof Env)[]): boolean {
   return keys.every((key) => hasEnv(env, key));
+}
+
+/**
+ * Earn providers SDP reaches with a credential, which is most but not all of
+ * them — see `publicApiDefinition` below. Excluding the keyless ones here is
+ * what stops `keyPairCredentialDefinition` from requiring a `KAMINO_API_KEY`
+ * member on `Env`: the template literal below must resolve to a `keyof Env` for
+ * every member of this union, so widening it silently demands a credential.
+ */
+type KeyPairedEarnProviderId = Exclude<EarnProviderId, "kamino">;
+
+/**
+ * Credentialed earn providers share one shape: `<PREFIX>_API_KEY` for
+ * production and `<PREFIX>_SANDBOX_API_KEY` for sandbox. Binding the derived
+ * keys to `keyof Env` makes a provider whose keys are missing from env.d.ts a
+ * compile error; provider-availability.drift.test.ts guards the projections
+ * (turbo.json globalEnv, scripts/secret-keys.mjs) the type system cannot see.
+ */
+function keyPairCredentialDefinition(
+  label: string,
+  envPrefix: Uppercase<KeyPairedEarnProviderId>
+): ProviderAvailabilityDefinition {
+  const prodKey: keyof Env = `${envPrefix}_API_KEY`;
+  const sandboxKey: keyof Env = `${envPrefix}_SANDBOX_API_KEY`;
+  return {
+    label,
+    credentialEnvKeys: [prodKey, sandboxKey],
+    isConfigured: (env, testMode) => {
+      const prod = hasEnv(env, prodKey);
+      const sandbox = hasEnv(env, sandboxKey);
+      if (testMode === true) return sandbox;
+      if (testMode === false) return prod;
+      return prod || sandbox;
+    },
+  };
+}
+
+/**
+ * A provider reached over a PUBLIC API, with nothing to configure.
+ *
+ * Kamino's vault data API takes no credential, so "is it configured" has no
+ * meaningful negative answer — there is no key to be missing, no sandbox
+ * account to mistake for production, and no way to point it at a wrong tenant.
+ * It reports configured everywhere, which is honest: a catalogue read either
+ * succeeds or fails at the network, and both are the client's business.
+ *
+ * Deliberately NOT given placeholder `KAMINO_API_KEY` / `KAMINO_SANDBOX_API_KEY`
+ * entries. scripts/secret-keys.mjs is "every env key the SDP API reads" and
+ * projects into the local and Docker env files; a declared secret nothing reads
+ * is a standing question for whoever next provisions this service.
+ *
+ * Note what this does NOT relax: entitlement. An org still needs the
+ * `providerOverrides.earn.<provider>` override for any money-in path, and a
+ * catalogue-only provider has none to gate.
+ */
+function publicApiDefinition(label: string): ProviderAvailabilityDefinition {
+  return { label, isConfigured: () => true };
 }
 
 const PROVIDER_AVAILABILITY_DEFINITIONS = {
@@ -128,6 +208,10 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
     helius: {
       label: "Helius",
       isConfigured: (env) => hasEnv(env, "SOLANA_RPC_HELIUS_URL"),
+    },
+    nodit: {
+      label: "Nodit",
+      isConfigured: (env) => hasEnv(env, "SOLANA_RPC_NODIT_URL"),
     },
     quicknode: {
       label: "QuickNode",
@@ -240,7 +324,45 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
         hasAllEnv(env, ["STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET"]),
     },
   },
+  earn: {
+    veda: keyPairCredentialDefinition("Veda", "VEDA"),
+    upshift: keyPairCredentialDefinition("Upshift", "UPSHIFT"),
+    perena: keyPairCredentialDefinition("Perena", "PERENA"),
+    ground: keyPairCredentialDefinition("Ground", "GROUND"),
+    kamino: publicApiDefinition("Kamino"),
+  },
 } as const satisfies ProviderAvailabilityDefinitions;
+
+/**
+ * Every env key an earn availability definition actually reads — the drift
+ * guard's source of truth (provider-availability.drift.test.ts), which checks
+ * these against turbo.json globalEnv and scripts/secret-keys.mjs.
+ *
+ * Derived from the definitions rather than from `EARN_PROVIDERS` by naming
+ * convention, so it stays correct for a provider that needs no credential and
+ * for any future one whose credential is not a key pair.
+ */
+export const EARN_CREDENTIAL_ENV_KEYS: readonly string[] = Object.values(
+  PROVIDER_AVAILABILITY_DEFINITIONS.earn
+).flatMap((definition) => definition.credentialEnvKeys ?? []);
+
+/**
+ * Reuse the deployment configuration checks without exposing credential values.
+ * Setup/status surfaces use this for side-effect-free checks; provider runtimes
+ * continue to enforce availability through getProviderAvailability.
+ */
+export function isProviderConfigured<Family extends OrganizationProviderFamily>(
+  env: Env,
+  family: Family,
+  providerId: ProviderIdByFamily[Family],
+  testMode?: boolean
+): boolean {
+  const definitions = PROVIDER_AVAILABILITY_DEFINITIONS[family] as Record<
+    string,
+    ProviderAvailabilityDefinition
+  >;
+  return definitions[providerId]?.isConfigured(env, testMode) ?? false;
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object") {
@@ -332,6 +454,11 @@ export function parseProviderOverridesFromClerkMetadata(
     next.ramps = ramps;
   }
 
+  const earn = parseBooleanOverrides(record.earn, EARN_PROVIDERS);
+  if (earn) {
+    next.earn = earn;
+  }
+
   return hasOwnEntries(next as Record<string, unknown>) ? next : undefined;
 }
 
@@ -389,6 +516,7 @@ function getConfiguredProviders(env: Env) {
     rpc: buildConfiguredProviderEntries(PROVIDER_AVAILABILITY_DEFINITIONS.rpc, env),
     compliance: buildConfiguredProviderEntries(PROVIDER_AVAILABILITY_DEFINITIONS.compliance, env),
     ramps: buildConfiguredProviderEntries(PROVIDER_AVAILABILITY_DEFINITIONS.ramps, env),
+    earn: buildConfiguredProviderEntries(PROVIDER_AVAILABILITY_DEFINITIONS.earn, env),
   };
 }
 
@@ -459,6 +587,7 @@ export async function getProviderAvailability(
       rpc: applySelfHostedEntitlements(entitled.rpc, overrides?.rpc),
       compliance: applySelfHostedEntitlements(entitled.compliance, overrides?.compliance),
       ramps: applySelfHostedEntitlements(entitled.ramps, overrides?.ramps),
+      earn: applySelfHostedEntitlements(entitled.earn, overrides?.earn),
     };
   }
 
@@ -469,8 +598,34 @@ export async function getProviderAvailability(
       rpc: buildAvailabilityEntries(entitled.rpc, configured.rpc),
       compliance: buildAvailabilityEntries(entitled.compliance, configured.compliance),
       ramps: buildAvailabilityEntries(entitled.ramps, configured.ramps),
+      earn: buildAvailabilityEntries(entitled.earn, configured.earn),
     },
   };
+}
+
+export async function isPersistedCustodyCompletionEnabled(
+  env: Env,
+  db: DatabaseClient,
+  organizationId: string,
+  provider: CustodyProvider,
+  source: "stored" | "runtime"
+): Promise<boolean> {
+  if (!isCustodyConnectionRuntimeEnabled(env, provider)) {
+    return false;
+  }
+
+  if (
+    source === "stored" &&
+    CUSTODY_PROVIDER_CATALOG_BY_ID[provider].storedCredentialSetup.mode !== "self_service"
+  ) {
+    return false;
+  }
+
+  const availability = await getProviderAvailability(env, db, organizationId);
+  const providerAvailability = availability.providers.custody[provider];
+  return source === "runtime"
+    ? providerAvailability?.enabled === true
+    : providerAvailability?.entitled === true;
 }
 
 function getAvailabilityMessage(
@@ -529,6 +684,14 @@ export async function assertProviderAvailable(
   env: Env,
   db: DatabaseClient,
   organizationId: string,
+  family: "earn",
+  providerId: EarnProviderId,
+  testMode: boolean
+): Promise<void>;
+export async function assertProviderAvailable(
+  env: Env,
+  db: DatabaseClient,
+  organizationId: string,
   family: OrganizationProviderFamily,
   providerId: string,
   testMode?: boolean
@@ -555,12 +718,17 @@ export async function assertProviderAvailable(
     );
   }
 
-  // Secondary mode-specific check for ramps: the general availability check uses
-  // a union of sandbox + production credentials, but the runtime handler only uses
-  // credentials for the requested mode. Re-check with the specific mode so callers
-  // get a clear PROVIDER_NOT_CONFIGURED (503) instead of a silent runtime failure.
-  if (family === "ramps" && testMode !== undefined) {
-    const def = PROVIDER_AVAILABILITY_DEFINITIONS.ramps[providerId as RampProviderId];
+  // Secondary mode-specific check for ramps/earn: the general availability check
+  // uses a union of sandbox + production credentials, but the runtime handler only
+  // uses credentials for the requested mode. Re-check with the specific mode so
+  // callers get a clear PROVIDER_NOT_CONFIGURED (503) instead of a silent runtime
+  // failure.
+  if ((family === "ramps" || family === "earn") && testMode !== undefined) {
+    const definitions = PROVIDER_AVAILABILITY_DEFINITIONS[family] as Record<
+      string,
+      ProviderAvailabilityDefinition
+    >;
+    const def = definitions[providerId];
     if (def && !def.isConfigured(env, testMode)) {
       const mode = testMode ? "sandbox" : "production";
       throw new AppError(
@@ -568,6 +736,52 @@ export async function assertProviderAvailable(
         `${def.label} is not configured for ${mode} mode.`
       );
     }
+  }
+}
+
+/**
+ * Platform-level gate: opening a NEW position with a provider SDP does not
+ * currently offer (`EARN_PROVIDER_SURFACING` in @sdp/types).
+ *
+ * Deliberately NOT folded into `assertProviderAvailable`, which answers an
+ * ORGANIZATION-scoped question and whose refusal tells the caller to ask for
+ * manual activation. No override lifts this one, so it runs FIRST and says
+ * something different — pointing a caller at an activation door that does not
+ * exist is worse than a plain "not offered".
+ *
+ * This is the ONLY place surfacing is allowed to refuse anything. Every
+ * money-out route, every read, and re-targeting an existing program ignore it
+ * entirely, so un-surfacing a provider can never strand a position taken while
+ * it was offered (ADR 0002).
+ */
+export function assertEarnProviderSurfaced(providerId: EarnProviderId): void {
+  if (!isEarnProviderSurfaced(providerId)) {
+    throw new AppError(
+      "FORBIDDEN",
+      `${PROVIDER_AVAILABILITY_DEFINITIONS.earn[providerId].label} is not currently offered.`
+    );
+  }
+}
+
+/**
+ * Exit-safety gate for Earn withdrawals: money OUT must keep working when a
+ * provider is commercially disabled for an organization (entitlement off), so
+ * funds can never be trapped behind a sales/tier decision. Only the
+ * credential/mode check applies here — deposits use the full
+ * assertProviderAvailable gate.
+ */
+export function assertEarnProviderConfigured(
+  env: Env,
+  providerId: EarnProviderId,
+  testMode: boolean
+): void {
+  const def = PROVIDER_AVAILABILITY_DEFINITIONS.earn[providerId];
+  if (!def?.isConfigured(env, testMode)) {
+    const mode = testMode ? "sandbox" : "production";
+    throw new AppError(
+      "PROVIDER_NOT_CONFIGURED",
+      `${def?.label ?? providerId} is not configured for ${mode} mode.`
+    );
   }
 }
 
@@ -582,6 +796,7 @@ export async function getEnabledProviders(env: Env, db: DatabaseClient, organiza
       (provider) => access.providers.compliance[provider]?.enabled
     ),
     ramps: RAMP_PROVIDERS.filter((provider) => access.providers.ramps[provider]?.enabled),
+    earn: EARN_PROVIDERS.filter((provider) => access.providers.earn[provider]?.enabled),
   };
 }
 

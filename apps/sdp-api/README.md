@@ -6,11 +6,11 @@ The core Solana Developer Platform API, built as a Node.js service with Postgres
 
 The SDP API provides a unified interface for blockchain operations on Solana, including:
 
-- **Wallets & Custody** — create and manage wallets with custodial integrations (Privy, Coinbase CDP, Turnkey, Fireblocks, Para)
+- **Wallets & Custody** — create and manage wallets with the built-in local signer or a custodial integration (Privy, Coinbase CDP, Turnkey, Fireblocks, Para, DFNS, IBM Digital Asset Haven, Utila). Anchorage is provisioning-only: it has no keychain signing adapter, so it can create and delete wallets but never signs.
 - **Token Issuance** — mint, freeze, and manage SPL tokens
 - **Payments** — send SOL and SPL token transfers with compliance screening
 - **Compliance** — AML/KYC screening via TRM, Chainalysis, Elliptic, or Range
-- **On/Off Ramps** — integrate fiat on/off-ramps via MoonPay, Lightspark, or BVNK
+- **On/Off Ramps** — integrate fiat on/off-ramps via MoonPay, Lightspark, BVNK, MoneyGram, Coinbase, Mural, or Stripe
 - **Organizations & Projects** — multi-tenant project management with API key authentication
 
 ## Public API Routes
@@ -29,19 +29,19 @@ The API exposes these public REST endpoints (all require API key or session toke
 
 ## Internal Routes (Maintainers Only)
 
-- `/allowlist/*` — Admin allowlist management
+- `/admin/allowlist/*` — Admin allowlist management
 - `/webhooks/clerk/link-orgs` — Clerk org sync webhook
-- `/auth/*` — Session/token auth flows
+- `/v1/auth/*` — Session/token auth flows
 - `/v1/rpc/*` — Solana RPC proxy (internal)
 - `/v1/organizations/*` — Multi-tenant org management (internal)
 - `/v1/members/*` — Team member management (internal)
-- `/onboarding/*` — Internal onboarding status
+- `/v1/onboarding/*` — Internal onboarding status
 
 ## Local Development
 
 ### Prerequisites
 
-- **Node.js 22+**
+- **Node.js 24+**
 - **pnpm 10.16+**
 - **Docker or another Compose-compatible runtime** — Runs local Postgres 16 and Redis 7
 - **Doppler CLI** — Recommended for team configuration. Install: `brew install dopplerhq/cli/doppler`; external contributors can use `.env.local` instead.
@@ -184,7 +184,7 @@ In self-hosted mode every configured provider is automatically entitled
 regardless of organization tier. Per-org `providerOverrides` still apply as
 a disable-only mechanism.
 
-For the Clerk side of self-hosting (account creation, JWT template, webhook
+For the Clerk side of self-hosting (account creation, session token customization, webhook
 relay via an ngrok tunnel), follow [`docs/self-hosting/clerk-setup.md`](docs/self-hosting/clerk-setup.md).
 The webhook handler is the only path that creates `organizations` rows
 outside `pnpm db:seed:local`.
@@ -306,6 +306,12 @@ See [`docs/ops/release-operations.md`](../../docs/ops/release-operations.md) for
 - **Redis** — API-key, rate-limit, cache, and session storage
 - **Cloud Run jobs and scheduler** — Database migrations and transfer reconciliation
 - **Kora** — Optional local fee-payer service
+
+### Reconciliation cron
+
+- **Transfer reconciliation** and **approved wallet-operation recovery** are the two ungated jobs: they register on every in-process `startCron` and both also run in the dedicated Cloud Run Job (`src/job.ts`). Web service replicas skip in-process cron by default when `K_SERVICE` is set (`DISABLE_CRON=false` opts a service back in).
+- The **Earn strategy-catalogue sync** runs on both paths behind its gates (`MARKETS_ENABLED` plus `EARN_ENABLED`): hourly via in-process `startCron` (`src/cron/runner.ts`) on self-hosted and opted-in services, and in the Cloud Run Job on managed deployments — no replica needs `DISABLE_CRON=false`. The job is scheduled every five minutes, so each tick claims an hourly Redis slot first (`runEarnCatalogueSyncIfDue` in `src/cron/earn-catalogue-sync.ts`) and skips while the slot is held, keeping the effective cadence at `EARN_CATALOGUE_SYNC_CRON`. The slot is a unique claim token embedding its expiry: claims and expired-slot takeovers are single compare-and-set transitions, and a failed sync releases via compare-and-delete on its own token — atomically a no-op if a newer tick took the slot over — so the next tick retries and a crashed run self-heals once the claim expires. The sync itself is deadline-bounded (10 minutes, far under the claim expiry) so an execution can never still be running when its claim lapses. The sync reports to its own Sentry monitor, and the flags plus provider credentials reach the job container through sdp-infra (`sdp_api_job_env` / `app_secret_keys`).
+- **Recurring payment collection** and the **Private Channels deposit/withdrawal reconcilers** still register only on in-process `startCron` when their env gates are enabled (`PAYMENTS_RECURRING_COLLECTION_ENABLED`, `PRIVATE_CHANNELS_ENABLED`), so on managed deployments they run only on a replica opted back in with `DISABLE_CRON=false`. Moving them onto the Cloud Run Job — the Earn slot pattern generalizes — is [PRO-1664](https://linear.app/solana-fndn/issue/PRO-1664).
 
 ## Contributing
 

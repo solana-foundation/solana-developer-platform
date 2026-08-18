@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { getDb } from "@/db";
-import { createAssetProfilesRepository } from "@/db/repositories";
+import { createSystemAssetProfilesRepository } from "@/db/repositories";
 import { isAssetProfilesEnabled } from "@/lib/feature-flags";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
@@ -121,9 +121,9 @@ export const serveTokenMetadata = async (c: AppContext) => {
   // Gated by the same flag as the Asset Profiles family, so the canonical URI
   // already burned into deployed tokens serves the projection once it ships.
   if (isAssetProfilesEnabled(c.env)) {
-    const publicMetadata = await createAssetProfilesRepository(c.env).getPublicMetadataByTokenId(
-      tokenId
-    );
+    const publicMetadata = await createSystemAssetProfilesRepository(
+      c.env
+    ).getPublicMetadataByTokenId(tokenId);
     if (publicMetadata) {
       return c.json({ ...publicMetadata, ...body });
     }

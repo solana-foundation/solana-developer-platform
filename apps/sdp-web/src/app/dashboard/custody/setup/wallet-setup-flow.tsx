@@ -1,25 +1,29 @@
 "use client";
 
 import { ArrowLeft, ArrowRight } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   createCustodySetupWalletAction,
   initializeCustodySetupAction,
 } from "@/app/dashboard/custody/actions";
 import {
-  CUSTODY_PROVIDER_CATALOG,
-  type CustodyProviderCatalogEntry,
   type KnownCustodyProvider,
+  WALLET_PROVIDER_CATEGORIES,
+  WALLET_PROVIDER_CATEGORY_DETAILS,
 } from "@/app/dashboard/custody/provider-catalog";
+import {
+  type CustodyProviderAvailability,
+  resolveCustodyProviderAvailability,
+} from "@/app/dashboard/custody/provider-display-status";
+import { PrivyCredentialForm } from "@/app/dashboard/custody/setup/privy-credential-form";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
-import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ProviderSelectionCard } from "@/components/ui/provider-selection-card";
 import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useTranslations } from "@/i18n/provider";
-import { useDashboardRouter } from "@/lib/use-dashboard-router";
 
 type SetupStep = "provider" | "details";
 
@@ -65,26 +69,25 @@ interface WalletSetupFlowProps {
   connectedProviders: KnownCustodyProvider[];
   enabledProviders: KnownCustodyProvider[];
   initialProvider?: KnownCustodyProvider | null;
-}
-
-function getEnabledProviderEntries(
-  enabledProviders: KnownCustodyProvider[]
-): CustodyProviderCatalogEntry[] {
-  const enabledProviderSet = new Set(enabledProviders);
-  return CUSTODY_PROVIDER_CATALOG.filter((provider) => enabledProviderSet.has(provider.id));
+  /** Stored-credential install for Privy; ships dark until the flag is on. */
+  privyByokEnabled?: boolean;
 }
 
 function getInitialSelection(input: {
-  enabledProviders: KnownCustodyProvider[];
+  availability: CustodyProviderAvailability[];
   initialProvider?: KnownCustodyProvider | null;
 }): {
   provider: KnownCustodyProvider | null;
   step: SetupStep;
 } {
-  const { enabledProviders, initialProvider } = input;
-  if (initialProvider && enabledProviders.includes(initialProvider)) {
+  const { availability, initialProvider } = input;
+  const requested = initialProvider
+    ? availability.find((provider) => provider.entry.id === initialProvider)
+    : undefined;
+
+  if (requested?.isSelectable) {
     return {
-      provider: initialProvider,
+      provider: requested.entry.id,
       step: "details",
     };
   }
@@ -96,42 +99,89 @@ function getInitialSelection(input: {
 }
 
 function ProviderStep({
-  connectedProviders,
+  availability,
   onSelect,
-  providers,
   selectedProvider,
 }: {
-  connectedProviders: KnownCustodyProvider[];
+  availability: CustodyProviderAvailability[];
   onSelect: (provider: KnownCustodyProvider) => void;
-  providers: CustodyProviderCatalogEntry[];
   selectedProvider: KnownCustodyProvider | null;
 }) {
   const t = useTranslations();
-  const connectedProviderSet = new Set(connectedProviders);
+  const hasSelectableProvider = availability.some((provider) => provider.isSelectable);
 
   return (
-    <div className="grid gap-4">
-      {providers.map((provider) => {
-        const isSelected = selectedProvider === provider.id;
-        const isConnected = connectedProviderSet.has(provider.id);
+    <div className="grid gap-8">
+      {hasSelectableProvider ? null : (
+        <p
+          role="status"
+          className="rounded-2xl border border-border-default bg-fill-subtle px-5 py-4 text-sm leading-6 text-secondary"
+        >
+          {t("DashboardCustody.walletCreationAvailable")}
+        </p>
+      )}
+
+      {WALLET_PROVIDER_CATEGORIES.map((category) => {
+        const providers = availability.filter((provider) => provider.entry.category === category);
+        if (providers.length === 0) {
+          return null;
+        }
+        const details = WALLET_PROVIDER_CATEGORY_DETAILS[category];
 
         return (
-          <ProviderSelectionCard
-            key={provider.id}
-            onSelect={() => onSelect(provider.id)}
-            isSelected={isSelected}
-            advanceOnEnter={isSelected}
-            icon={<WalletProviderMark provider={provider.id} size="sm" />}
-            title={provider.label}
-            description={t(provider.descriptionKey)}
-            badge={
-              isConnected ? (
-                <span className="rounded-full bg-surface-raised px-3 py-1 text-xs font-medium text-secondary ring-1 ring-border-subtle">
-                  {t("DashboardCustody.active")}
-                </span>
-              ) : undefined
-            }
-          />
+          <section key={category} className="grid gap-4">
+            <div className="space-y-1">
+              <h3 className="text-sm font-medium text-primary">{t(details.labelKey)}</h3>
+              <p className="text-sm leading-5 text-tertiary">{t(details.descriptionKey)}</p>
+            </div>
+
+            {providers.map((provider) => {
+              const isSelected = selectedProvider === provider.entry.id;
+
+              return (
+                <ProviderSelectionCard
+                  key={provider.entry.id}
+                  onSelect={() => onSelect(provider.entry.id)}
+                  isSelected={isSelected}
+                  isSelectable={provider.isSelectable}
+                  advanceOnEnter={isSelected}
+                  icon={<WalletProviderMark provider={provider.entry.id} size="sm" />}
+                  title={provider.entry.label}
+                  description={t(provider.entry.descriptionKey)}
+                  badge={
+                    provider.status === "active" ? (
+                      <span className="rounded-full bg-surface-raised px-3 py-1 text-xs font-medium text-secondary ring-1 ring-border-subtle">
+                        {t("DashboardCustody.active")}
+                      </span>
+                    ) : provider.status === "request_access" ? (
+                      // Visible but not self-serve installable (HOO-772): the
+                      // pill says why the card cannot be selected.
+                      <span className="rounded-full bg-fill-subtle px-3 py-1 text-xs font-medium text-secondary">
+                        {t("Shared.integrations.statusRequestAccess")}
+                      </span>
+                    ) : provider.status === "not_configured" ? (
+                      <span className="rounded-full bg-fill-subtle px-3 py-1 text-xs font-medium text-tertiary">
+                        {t("Shared.integrations.statusNotConfigured")}
+                      </span>
+                    ) : undefined
+                  }
+                  action={
+                    provider.requestAccessUrl ? (
+                      <Button asChild variant="secondary">
+                        <a
+                          href={provider.requestAccessUrl}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                        >
+                          {t("DashboardCustody.providerRequestAccess")}
+                        </a>
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              );
+            })}
+          </section>
         );
       })}
     </div>
@@ -142,42 +192,51 @@ export function WalletSetupFlow({
   connectedProviders,
   enabledProviders,
   initialProvider = null,
+  privyByokEnabled = false,
 }: WalletSetupFlowProps) {
   const t = useTranslations();
-  const router = useDashboardRouter();
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const enabledProviderEntries = useMemo(
-    () => getEnabledProviderEntries(enabledProviders),
-    [enabledProviders]
+  const availability = useMemo(
+    () => resolveCustodyProviderAvailability({ connectedProviders, enabledProviders }),
+    [connectedProviders, enabledProviders]
   );
   const initialSelection = useMemo(
     () =>
       getInitialSelection({
-        enabledProviders,
+        availability,
         initialProvider,
       }),
-    [enabledProviders, initialProvider]
+    [availability, initialProvider]
   );
   const [currentStep, setCurrentStep] = useState<SetupStep>(initialSelection.step);
   const [selectedProvider, setSelectedProvider] = useState<KnownCustodyProvider | null>(
     initialSelection.provider
   );
   const [walletLabel, setWalletLabel] = useState("");
+  // While a BYOK submission is in an unknown state, leaving the step would
+  // unmount the frozen payload and key that are the only path to recovery.
+  const [byokRecoveryLocked, setByokRecoveryLocked] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const submissionInFlightRef = useRef(false);
 
-  const connectedProviderSet = useMemo(() => new Set(connectedProviders), [connectedProviders]);
-  const selectedProviderEntry = useMemo(
-    () => enabledProviderEntries.find((provider) => provider.id === selectedProvider) ?? null,
-    [enabledProviderEntries, selectedProvider]
+  const selectedAvailability = useMemo(
+    () =>
+      availability.find(
+        (provider) => provider.isSelectable && provider.entry.id === selectedProvider
+      ) ?? null,
+    [availability, selectedProvider]
   );
-  const isConnected = selectedProviderEntry
-    ? connectedProviderSet.has(selectedProviderEntry.id)
-    : false;
+  const selectedProviderEntry = selectedAvailability?.entry ?? null;
+  const isConnected = selectedAvailability?.status === "active";
   const canProvisionWallet = selectedProviderEntry
     ? !isConnected || selectedProviderEntry.supportsAdditionalWallets
     : false;
   const formAction = isConnected ? createCustodySetupWalletAction : initializeCustodySetupAction;
+  // An uninstalled Privy under BYOK goes through provider details (credential
+  // submission + connection check) instead of the legacy initialize path,
+  // which the API refuses once stored-credential setup is enforced.
+  const isByokDetails = privyByokEnabled && selectedProviderEntry?.id === "privy" && !isConnected;
 
   const continueFromProvider = () => {
     if (!selectedProviderEntry) {
@@ -278,28 +337,12 @@ export function WalletSetupFlow({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  if (enabledProviderEntries.length === 0) {
-    return (
-      <div className="h-full overflow-y-auto px-4 py-6 md:px-6">
-        <div className="mx-auto max-w-3xl rounded-lg border border-border-default bg-surface-raised p-6">
-          <p className="text-lg font-medium text-primary">
-            {t("DashboardCustody.noWalletProvidersEnabled")}
-          </p>
-          <p className="mt-2 text-sm leading-6 text-secondary">
-            {t("DashboardCustody.walletCreationAvailable")}
-          </p>
-          <Button asChild variant="secondary" className="mt-5">
-            <Link href="/dashboard/wallets">{t("DashboardCustody.backToWallets")}</Link>
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
   const heading =
     currentStep === "provider"
       ? t("DashboardCustody.chooseProvider")
-      : t("DashboardCustody.walletDetails");
+      : isByokDetails
+        ? t("DashboardCustody.byokProviderDetails")
+        : t("DashboardCustody.walletDetails");
   const canContinue = Boolean(selectedProviderEntry);
   const stepIndex = SETUP_STEPS.indexOf(currentStep);
 
@@ -352,7 +395,7 @@ export function WalletSetupFlow({
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-wallet-setup-flow="true">
-      <div className="shrink-0 px-4 pt-2 pb-6 md:px-6">
+      <div className="shrink-0 px-4 pt-8 pb-6 md:px-6">
         <div className="mx-auto w-full max-w-3xl">
           <WizardStepProgress
             data-wallet-setup-stepper="true"
@@ -377,15 +420,19 @@ export function WalletSetupFlow({
             {currentStep === "provider" ? (
               <form id={PROVIDER_FORM_ID} onSubmit={handleProviderSubmit}>
                 <ProviderStep
-                  connectedProviders={connectedProviders}
+                  availability={availability}
                   onSelect={(provider) => {
                     setSelectedProvider(provider);
                     setErrorMessage(null);
                   }}
-                  providers={enabledProviderEntries}
                   selectedProvider={selectedProvider}
                 />
               </form>
+            ) : isByokDetails ? (
+              <PrivyCredentialForm
+                formId={DETAILS_FORM_ID}
+                onRecoveryLockChange={setByokRecoveryLocked}
+              />
             ) : (
               <form id={DETAILS_FORM_ID} onSubmit={handleDetailsSubmit} className="grid gap-4">
                 {formContent}
@@ -396,19 +443,25 @@ export function WalletSetupFlow({
       </div>
 
       <footer
-        className="shrink-0 border-t border-border-default bg-surface-raised/95 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6"
+        className="shrink-0 border-t border-border-default px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6"
         data-wallet-setup-actions="true"
       >
         <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3">
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={goBack}
-            disabled={isPending}
-            iconLeft={currentStep === "details" ? <ArrowLeft className="size-4" /> : undefined}
-          >
-            {currentStep === "provider" ? t("DashboardCustody.cancel") : t("DashboardCustody.back")}
-          </Button>
+          {byokRecoveryLocked ? (
+            <span />
+          ) : (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={goBack}
+              disabled={isPending}
+              iconLeft={currentStep === "details" ? <ArrowLeft className="size-4" /> : undefined}
+            >
+              {currentStep === "provider"
+                ? t("DashboardCustody.cancel")
+                : t("DashboardCustody.back")}
+            </Button>
+          )}
 
           {currentStep === "provider" ? (
             <Button
@@ -419,7 +472,7 @@ export function WalletSetupFlow({
             >
               {t("DashboardCustody.next")}
             </Button>
-          ) : (
+          ) : isByokDetails ? null : (
             <Button
               type="submit"
               form={DETAILS_FORM_ID}

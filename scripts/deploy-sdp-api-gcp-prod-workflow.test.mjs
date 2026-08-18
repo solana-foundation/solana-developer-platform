@@ -19,30 +19,46 @@ test("manual production deploy requires an immutable SHA-tagged image", () => {
   assert.match(workflow, /\^sha256:\[0-9a-f\]\{64\}\$/);
 });
 
+test("automatic production deploys are called from the protected main release flow", () => {
+  assert.match(workflow, /workflow_call:\n\s+inputs:/);
+  assert.match(workflow, /release_sha:\n\s+description:/);
+  assert.match(workflow, /release_tag:\n\s+description:/);
+  assert.doesNotMatch(workflow, /\n\s+release:\n/);
+  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /\.github\/scripts\/verify-release-identity\.sh/);
+});
+
 test("manual production redeploy always skips builds and migrations", () => {
   assert.doesNotMatch(workflow, /run_migrations:/);
   assert.match(
     workflow,
-    /- name: Build and push image\n\s+if: \$\{\{ github\.event_name == 'push' \}\}/
+    /- name: Build and push image\n\s+if: \$\{\{ inputs\.release_sha != '' \}\}/
   );
   assert.match(
     workflow,
-    /- name: Run database migrations\n\s+if: \$\{\{ github\.event_name == 'push' \}\}/
+    /- name: Run database migrations\n\s+if: \$\{\{ inputs\.release_sha != '' \}\}/
   );
+  assert.match(workflow, /--build-arg GIT_SHA="\$\{DEPLOY_IMAGE_SHA\}"/);
+  assert.match(workflow, /sdp-api-public:\$\{DEPLOY_IMAGE_SHA\}/);
 });
 
-test("candidate is revision-specific and proven ready before promotion", () => {
+test("candidate is revision-specific and Cloud Run-ready before promotion", () => {
   assert.match(workflow, /echo "IMAGE=\$\{resolved_image\}" >> "\$\{GITHUB_ENV\}"/);
   assert.match(workflow, /--no-traffic --tag "\$\{candidate_tag\}"/);
   assert.match(workflow, /CANDIDATE_TAG=\$\{candidate_tag\}/);
   assert.match(workflow, /status\.imageDigest/);
-  assert.match(workflow, /"\$\{CANDIDATE_URL\}\/health\/ready"/);
+  assert.match(
+    workflow,
+    /gcloud run revisions describe "\$\{CANDIDATE_REVISION\}"[\s\S]*--format=json/
+  );
+  assert.match(workflow, /\.status\.conditions\[\]/);
+  assert.doesNotMatch(workflow, /CANDIDATE_URL/);
   assert.match(workflow, /\.revision == \$revision/);
   assert.match(workflow, /\.checks\.database == "ok"/);
   assert.match(workflow, /\.checks\.redis == "ok"/);
 
   const candidateDeploy = workflow.indexOf("- name: Deploy candidate without production traffic");
-  const candidateReadiness = workflow.indexOf("- name: Verify candidate readiness");
+  const candidateReadiness = workflow.indexOf("- name: Verify candidate revision readiness");
   const promotion = workflow.indexOf("- name: Promote service and cron with rollback");
   assert.ok(candidateDeploy !== -1 && candidateDeploy < candidateReadiness);
   assert.ok(candidateReadiness < promotion);

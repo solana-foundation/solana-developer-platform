@@ -25,24 +25,16 @@ function getApiBaseUrl(): string {
   return base.replace(/\/$/, "");
 }
 
-type ClerkGetToken = (options?: { template?: string }) => Promise<string | null>;
+type ClerkGetToken = () => Promise<string | null>;
 
 /**
- * Acquires the sdp-api bearer token from a Clerk `getToken`, honoring
- * CLERK_JWT_TEMPLATE when configured. Takes `getToken` as a parameter because
- * server contexts get it from `auth()` while the proxy middleware gets it from
- * its `clerkMiddleware` callback.
+ * Acquires the sdp-api bearer token: the Clerk session token, whose custom
+ * claims (org_id, org_role, org_slug, email) come from the instance's
+ * session-token customization. Takes `getToken` as a parameter because server
+ * contexts get it from `auth()` while the proxy middleware gets it from its
+ * `clerkMiddleware` callback.
  */
 export async function acquireClerkToken(getToken: ClerkGetToken): Promise<string> {
-  const template = process.env.CLERK_JWT_TEMPLATE;
-  if (template) {
-    const token = await getToken({ template });
-    if (!token) {
-      throw new Error(`Failed to acquire Clerk token from template '${template}'`);
-    }
-    return token;
-  }
-
   const token = await getToken();
   if (!token) {
     throw new Error("Failed to acquire Clerk token");
@@ -159,6 +151,24 @@ async function parseSdpApiResponse<T>(res: Response): Promise<T> {
   return json as T;
 }
 
+/**
+ * Pull a human-readable message out of the `SDP API request failed (N): {body}`
+ * error thrown by {@link parseSdpApiResponse}: prefer the JSON `error.message`,
+ * then the raw body, then the original error text.
+ */
+export function extractSdpApiErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) return "Unknown error.";
+  const match = /^SDP API request failed \(\d+\):\s*([\s\S]*)$/.exec(error.message);
+  if (!match) return error.message;
+  const body = match[1] ?? "";
+  try {
+    const payload = JSON.parse(body) as { error?: { message?: string } };
+    return payload.error?.message ?? body ?? error.message;
+  } catch {
+    return body || error.message;
+  }
+}
+
 export interface SdpApiClient {
   request: SdpApiRequestFn;
   fetch: <T>(path: string, options?: RequestInit) => Promise<T>;
@@ -189,28 +199,35 @@ function assembleSdpApiClient(request: SdpApiRequestFn): SdpApiClient {
 }
 
 /**
- * Builds the org- and project-scoped clients a server page needs from one
- * request-bound Clerk token. This avoids acquiring the same token twice while
- * preserving the absence of a project header on organization endpoints.
+ * Org- and project-scoped clients for one request, built from one request-bound Clerk
+ * token so the same token is not acquired twice, and without a project header on the
+ * organization client.
  *
- * A missing project is represented by a null project client so onboarding
- * pages can still query organization state before a project has been selected.
+ * A missing project is represented by a null project client, so onboarding pages can
+ * still query organization state before a project has been selected.
+ *
+ * `getToken` is optional and should normally be omitted. Passing it bypasses the
+ * request-scoped cache that the layout has usually already populated. The parameter
+ * stays for callers that hold a token source without a request-bound `auth()` context.
  */
 export async function createRequestScopedSdpApiClients({
   getToken,
   organizationTraceContext,
   projectTraceContext,
 }: {
-  getToken: ClerkGetToken;
+  getToken?: ClerkGetToken;
   organizationTraceContext?: TraceContext;
   projectTraceContext?: TraceContext;
-}): Promise<{
+} = {}): Promise<{
   organizationClient: SdpApiClient;
   projectClient: SdpApiClient | null;
 }> {
+  // Only the token half ever duplicated work. `getSelectedProjectId` is a thin wrapper
+  // over `getRequestSelectedProjectId`, so branching on `getToken` here called the same
+  // function either way and read as though the project lookup were duplicated too.
   const [token, projectId] = await Promise.all([
-    acquireClerkToken(getToken),
-    getSelectedProjectId(),
+    getToken ? acquireClerkToken(getToken) : getRequestClerkToken(),
+    getRequestSelectedProjectId(),
   ]);
 
   return {
@@ -287,7 +304,7 @@ export async function createOrgSdpApiClient(traceContext?: TraceContext): Promis
   return buildSdpApiClient(null, traceContext);
 }
 
-function proxyFailure(
+export function proxyFailure(
   trace: ReturnType<typeof createTimedTrace>,
   status: number,
   message: string

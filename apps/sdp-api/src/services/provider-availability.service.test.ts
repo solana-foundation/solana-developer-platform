@@ -2,12 +2,14 @@ import { resolveOrganizationProviderEntitlements } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import {
+  assertEarnProviderConfigured,
   assertProviderAvailable,
   getProviderAvailability,
+  isPersistedCustodyCompletionEnabled,
   syncProviderAccessFromClerk,
 } from "@/services/provider-availability.service";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 
 const TEST_ORG_ID = "org_provider_availability_test";
 
@@ -40,6 +42,8 @@ const providerEnvKeys = [
   "SOLANA_RPC_QUICKNODE_URL",
   "SOLANA_RPC_TRITON_URL",
   "SOLANA_RPC_VALIDATIONCLOUD_URL",
+  "SOLANA_RPC_NODIT_URL",
+  "SOLANA_RPC_NODIT_API_KEY",
   "RANGE_API_KEY",
   "ELLIPTIC_API_TOKEN",
   "ELLIPTIC_API_KEY",
@@ -53,6 +57,10 @@ const providerEnvKeys = [
   "BVNK_HAWK_AUTH_ID",
   "BVNK_HAWK_SECRET_KEY",
   "BVNK_WALLET_ID",
+  "VEDA_API_KEY",
+  "VEDA_SANDBOX_API_KEY",
+  "UPSHIFT_API_KEY",
+  "UPSHIFT_SANDBOX_API_KEY",
 ] as const;
 
 type ProviderEnvKey = (typeof providerEnvKeys)[number];
@@ -80,6 +88,8 @@ function setBaseProviderEnv(): void {
     SOLANA_RPC_HELIUS_URL: "https://rpc.helius.test",
     SOLANA_RPC_TRITON_URL: "https://rpc.triton.test",
     SOLANA_RPC_VALIDATIONCLOUD_URL: "https://rpc.validationcloud.test/v1/{API_KEY}",
+    SOLANA_RPC_NODIT_URL: "https://solana-devnet.nodit.io/{API_KEY}",
+    SOLANA_RPC_NODIT_API_KEY: "nodit_test_key",
     RANGE_API_KEY: "range_test_key",
     MOONPAY_API_KEY: "moonpay_test_key",
     MOONPAY_SECRET_KEY: "moonpay_test_secret",
@@ -103,10 +113,14 @@ async function setOrganizationTier(tier: "individual" | "enterprise"): Promise<v
 describe("provider-availability.service", () => {
   let originalProviderEnv: ProviderEnvSnapshot;
   let originalDeploymentMode: "managed" | "self_hosted" | undefined;
+  let originalPrivyByokEnabled: string | undefined;
+  let originalSelfHostedStoredSetupEnabled: string | undefined;
 
   beforeEach(async () => {
     originalProviderEnv = readProviderEnv();
     originalDeploymentMode = env.SDP_DEPLOYMENT_MODE;
+    originalPrivyByokEnabled = env.PRIVY_BYOK_ENABLED;
+    originalSelfHostedStoredSetupEnabled = env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED;
 
     writeProviderEnv({});
     setBaseProviderEnv();
@@ -129,8 +143,8 @@ describe("provider-availability.service", () => {
   afterEach(async () => {
     writeProviderEnv(originalProviderEnv);
     env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
-
-    await clearTestDatabase(env);
+    env.PRIVY_BYOK_ENABLED = originalPrivyByokEnabled;
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = originalSelfHostedStoredSetupEnabled;
   });
 
   it("resolves general defaults independently of the legacy tier value", () => {
@@ -162,6 +176,7 @@ describe("provider-availability.service", () => {
     expect(resolved.providers.rpc.helius).toBe(true);
     expect(resolved.providers.rpc.triton).toBe(true);
     expect(resolved.providers.rpc.validationcloud).toBe(true);
+    expect(resolved.providers.rpc.nodit).toBe(true);
     expect(resolved.providers.compliance.range).toBe(true);
     expect(resolved.providers.ramps.moonpay).toBe(true);
     expect(resolved.providers.ramps.lightspark).toBe(true);
@@ -183,6 +198,11 @@ describe("provider-availability.service", () => {
     expect(availability.providers.rpc.helius.enabled).toBe(true);
     expect(availability.providers.rpc.triton.enabled).toBe(true);
     expect(availability.providers.rpc.validationcloud).toEqual({
+      entitled: true,
+      configured: true,
+      enabled: true,
+    });
+    expect(availability.providers.rpc.nodit).toEqual({
       entitled: true,
       configured: true,
       enabled: true,
@@ -236,6 +256,45 @@ describe("provider-availability.service", () => {
       entitled: true,
       configured: false,
       enabled: false,
+    });
+  });
+
+  it.each(["individual", "enterprise"] as const)(
+    "treats configured Nodit as general for the legacy %s tier and honors an explicit disable",
+    async (tier) => {
+      await setOrganizationTier(tier);
+
+      const enabled = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+      expect(enabled.providers.rpc.nodit).toEqual({
+        entitled: true,
+        configured: true,
+        enabled: true,
+      });
+
+      await getDb(env)
+        .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+        .bind(JSON.stringify({ providerOverrides: { rpc: { nodit: false } } }), TEST_ORG_ID)
+        .run();
+
+      const disabled = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+      expect(disabled.providers.rpc.nodit).toEqual({
+        entitled: false,
+        configured: true,
+        enabled: false,
+      });
+    }
+  );
+
+  it("treats Nodit as configured when its URL is present like other RPC providers", async () => {
+    env.SOLANA_RPC_NODIT_URL = "https://rpc.proxy.test/nodit";
+    env.SOLANA_RPC_NODIT_API_KEY = undefined;
+
+    const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+
+    expect(availability.providers.rpc.nodit).toEqual({
+      entitled: true,
+      configured: true,
+      enabled: true,
     });
   });
 
@@ -344,6 +403,64 @@ describe("provider-availability.service", () => {
     expect(availability.providers.ramps.bvnk.entitled).toBe(true);
   });
 
+  it("keeps persisted Privy sources eligible when the fresh setup preference changes", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    env.PRIVY_BYOK_ENABLED = "true";
+
+    for (const storedSetupEnabled of ["false", "true"]) {
+      env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = storedSetupEnabled;
+
+      await expect(
+        isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "stored")
+      ).resolves.toBe(true);
+      await expect(
+        isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "runtime")
+      ).resolves.toBe(true);
+    }
+  });
+
+  it("requires a configured runtime binding but not deployment credentials for a persisted stored source", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    env.PRIVY_BYOK_ENABLED = "true";
+    env.PRIVY_APP_ID = undefined;
+    env.PRIVY_APP_SECRET = undefined;
+
+    await expect(
+      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "stored")
+    ).resolves.toBe(true);
+    await expect(
+      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "runtime")
+    ).resolves.toBe(false);
+  });
+
+  it("requires BYOK enablement for both persisted Credential sources", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    env.PRIVY_BYOK_ENABLED = "false";
+
+    await expect(
+      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "stored")
+    ).resolves.toBe(false);
+    await expect(
+      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "runtime")
+    ).resolves.toBe(false);
+  });
+
+  it("requires custody entitlement for both persisted Credential sources", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    env.PRIVY_BYOK_ENABLED = "true";
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ providerOverrides: { custody: { privy: false } } }), TEST_ORG_ID)
+      .run();
+
+    await expect(
+      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "stored")
+    ).resolves.toBe(false);
+    await expect(
+      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "runtime")
+    ).resolves.toBe(false);
+  });
+
   it("respects providerOverrides[id] === false in self-hosted mode", async () => {
     env.SDP_DEPLOYMENT_MODE = "self_hosted";
     env.CUSTODY_PRIVATE_KEY =
@@ -420,5 +537,85 @@ describe("provider-availability.service", () => {
     expect(organization?.settings ? JSON.parse(organization.settings) : null).toEqual({
       rpcProvider: "helius",
     });
+  });
+
+  it("resolves earn entitlements as override-only, regardless of tier", () => {
+    // Earn providers require manual activation: no tier grants them by default.
+    const individual = resolveOrganizationProviderEntitlements({
+      tier: "individual",
+      providerOverrides: { earn: { veda: true } },
+    });
+    expect(individual.providers.earn.veda).toBe(true);
+    expect(individual.providers.earn.upshift).toBe(false);
+
+    const enterprise = resolveOrganizationProviderEntitlements({ tier: "enterprise" });
+    // Exhaustive on purpose: a new earn provider must show up here as a failing
+    // assertion, so nobody adds one that a tier silently entitles. `kamino`
+    // defaults false like the rest even though it needs no credential —
+    // entitlement and configuration are separate gates, and only money-in
+    // consults entitlement (a catalogue-only provider never reaches it).
+    expect(enterprise.providers.earn).toEqual({
+      veda: false,
+      upshift: false,
+      perena: false,
+      ground: false,
+      kamino: false,
+    });
+  });
+
+  it("reports earn provider availability from override entitlement plus configured credentials", async () => {
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ providerOverrides: { earn: { veda: true } } }), TEST_ORG_ID)
+      .run();
+    env.VEDA_API_KEY = "veda_test_key";
+
+    const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+
+    expect(availability.providers.earn.veda).toEqual({
+      entitled: true,
+      configured: true,
+      enabled: true,
+    });
+    expect(availability.providers.earn.upshift).toEqual({
+      entitled: false,
+      configured: false,
+      enabled: false,
+    });
+  });
+
+  it("re-checks earn credentials for the requested mode like ramps", async () => {
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ providerOverrides: { earn: { veda: true } } }), TEST_ORG_ID)
+      .run();
+    env.VEDA_API_KEY = "veda_production_key";
+
+    await expect(
+      assertProviderAvailable(env, getDb(env), TEST_ORG_ID, "earn", "veda", false)
+    ).resolves.toBeUndefined();
+
+    await expect(
+      assertProviderAvailable(env, getDb(env), TEST_ORG_ID, "earn", "veda", true)
+    ).rejects.toMatchObject({
+      code: "PROVIDER_NOT_CONFIGURED",
+      message: "Veda is not configured for sandbox mode.",
+    });
+  });
+
+  it("assertEarnProviderConfigured gates on credentials only, ignoring entitlement (exit safety)", () => {
+    // No earn override is granted, so zero providers are entitled, but
+    // withdrawals must still pass as long as the provider credentials exist
+    // for the mode.
+    env.VEDA_API_KEY = "veda_production_key";
+
+    expect(() => assertEarnProviderConfigured(env, "veda", false)).not.toThrow();
+
+    expect(() => assertEarnProviderConfigured(env, "veda", true)).toThrow(
+      "Veda is not configured for sandbox mode."
+    );
+    expect(() => assertEarnProviderConfigured(env, "upshift", false)).toThrow(
+      "Upshift is not configured for production mode."
+    );
   });
 });

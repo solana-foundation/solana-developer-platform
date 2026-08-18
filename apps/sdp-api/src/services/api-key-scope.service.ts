@@ -354,6 +354,23 @@ export function assertGrantableApiKeyPermissions(
   }
 }
 
+/**
+ * Reject wallet-scoped API keys outright. For scope-level custody mutations
+ * (create wallet, initialize/switch provider) where the result is by
+ * definition outside the key's bindings.
+ */
+export function assertApiKeyNotWalletScoped(auth: ApiKeyContext, action: string): void {
+  if (auth.authType !== "api_key") {
+    return;
+  }
+
+  if (normalizeBindings(auth).length === 0) {
+    return;
+  }
+
+  throw new AppError("FORBIDDEN", `Wallet-scoped API keys cannot ${action}`);
+}
+
 export function assertApiKeyWalletAccess(
   auth: ApiKeyContext,
   walletId: string,

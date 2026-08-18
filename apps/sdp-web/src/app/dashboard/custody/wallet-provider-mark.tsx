@@ -47,7 +47,9 @@ const PROVIDER_LOGOS: Partial<
   },
   anchorage: {
     src: "/provider-logos/anchorage.svg",
-    backgroundClassName: "bg-primary",
+    // The artwork is white-only. bg-primary flips to near-white in dark mode
+    // and swallowed the logo, so the chip pins the dark it had in light mode.
+    backgroundClassName: "bg-[#1c1c1d]",
     paddingClassName: "p-2.5",
   },
   utila: {
@@ -63,12 +65,12 @@ const PROVIDER_LOGOS: Partial<
 };
 
 interface WalletProviderMarkProps {
-  provider: KnownCustodyProvider;
+  provider?: KnownCustodyProvider | null;
   size?: "xs" | "sm" | "md";
 }
 
 export function WalletProviderMark({ provider, size = "md" }: WalletProviderMarkProps) {
-  const logo = PROVIDER_LOGOS[provider];
+  const logo = provider ? PROVIDER_LOGOS[provider] : undefined;
   const dimensionClass =
     size === "xs"
       ? "h-6 w-6 rounded-md"
@@ -81,11 +83,11 @@ export function WalletProviderMark({ provider, size = "md" }: WalletProviderMark
   return (
     <div
       className={[
-        "inline-flex items-center justify-center overflow-hidden border border-border-subtle",
+        "inline-flex shrink-0 items-center justify-center overflow-hidden border border-border-subtle",
         logo?.backgroundClassName ?? "bg-fill-subtle",
         dimensionClass,
       ].join(" ")}
-      title={formatCustodyProviderName(provider)}
+      title={provider ? formatCustodyProviderName(provider) : undefined}
       aria-hidden="true"
     >
       {logo ? (

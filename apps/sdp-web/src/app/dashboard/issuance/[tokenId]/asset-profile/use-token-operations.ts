@@ -3,6 +3,7 @@
 import type { PaymentsDashboardWallet, Token } from "@sdp/types";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useSWRConfig } from "swr";
 import { useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { getTokenAccessControlMode, hasAccessControlList } from "../../access-control.utils";
@@ -15,11 +16,13 @@ import {
 import type {
   ActionExecutionInput,
   AdminAction,
+  PermissionControlStatus,
   PermissionRow,
   RunActionOptions,
 } from "../token-management-workspace.types";
 import {
   asOptionalString,
+  classifyAuthorityControl,
   createInitialAllowlistForm,
   createInitialAuthorityForm,
   createInitialBurnForm,
@@ -36,22 +39,29 @@ import {
   getExtensionRows,
   getForceBurnValidationErrors,
   getForceBurnValidationReason,
+  getLockSupplyDisabledReason,
   getMintValidationErrors,
   getMintValidationReason,
   getPermissionRows,
+  getRemainingMintableSupply,
   getSeizeValidationErrors,
   getSeizeValidationReason,
   getSignerSelectionForAction,
   getTokenActionDisabledReasons,
   isPositiveAmount,
   resolveAuthorityAddressForRole,
+  summarizeAuthorityControl,
 } from "../token-management-workspace.utils";
 import { useTokenActionRunner } from "../use-token-action-runner";
+import { fetchTokenAllowlistLabels } from "./allowlist.data";
+import { isTokenAllowlistKey, TOKEN_ALLOWLIST_LABELS_KEY } from "./allowlist-cache";
+import { isTokenTransactionsKey } from "./transactions-cache";
 
 // Same cache keys and TTLs as the old TokenManagementWorkspace, so the two UIs
 // share warm caches for a given token.
 const TOKEN_AUTHORITY_WALLETS_CACHE_TTL_MS = 60_000;
 const TOKEN_SUPPORTING_DATA_CACHE_TTL_MS = 60_000;
+const TOKEN_ALLOWLIST_LABELS_CACHE_TTL_MS = 30_000;
 
 const EMPTY_SUPPORTING_DATA: TokenManagementSupportingData = {
   authorityWallets: [],
@@ -121,6 +131,7 @@ export function useTokenOperations({
   canManageTokenAdmin: boolean;
 }) {
   const t = useTranslations();
+  const { mutate: globalMutate } = useSWRConfig();
   const {
     isPending,
     actionConfirmation,
@@ -138,7 +149,6 @@ export function useTokenOperations({
   const [authorityModalSignerWalletId, setAuthorityModalSignerWalletId] = useState("");
   const [fundManagementModalAction, setFundManagementModalAction] =
     useState<FundManagementModalAction | null>(null);
-  const [deploySignerWalletId, setDeploySignerWalletId] = useState("");
   const [mintForm, setMintForm] = useState(createInitialMintForm);
   const [burnForm, setBurnForm] = useState(createInitialBurnForm);
   const [seizeForm, setSeizeForm] = useState(createInitialSeizeForm);
@@ -146,6 +156,20 @@ export function useTokenOperations({
   const [authorityForm, setAuthorityForm] = useState(createInitialAuthorityForm);
   const [freezeForm, setFreezeForm] = useState(createInitialFreezeForm);
   const [allowlistForm, setAllowlistForm] = useState(createInitialAllowlistForm);
+  // Lock-supply has its own modal state rather than joining FundManagementModalAction:
+  // it composes two endpoint calls instead of mapping to one, it must keep the modal
+  // open across submission to offer a retry, and it exists only on this workspace —
+  // widening the shared union would force dead entries into the legacy workspace and
+  // the playground deep-links.
+  const [lockSupplyModalOpen, setLockSupplyModalOpen] = useState(false);
+  const [lockSupplyForm, setLockSupplyForm] = useState({
+    destination: "",
+    signingWalletId: "",
+  });
+  // Records that lock-supply's mint leg already landed, so a failed revoke can be
+  // retried without minting twice. Cleared when the modal closes cleanly.
+  const [lockSupplyMinted, setLockSupplyMinted] = useState(false);
+  const [lockSupplyRevokeFailed, setLockSupplyRevokeFailed] = useState(false);
 
   const accessControlMode = getTokenAccessControlMode(token);
   const controlListCopy = getControlListCopy(accessControlMode, t);
@@ -174,7 +198,14 @@ export function useTokenOperations({
     mutate: mutateSupportingData,
   } = usePersistedDashboardSWR(
     shouldLoadSupportingData ? ["token-management-supporting-data", token.id] : null,
-    ([, tokenId]: readonly [string, string]) => fetchTokenManagementSupportingData(tokenId, t),
+    // Skip the allowlist and transactions here — the control list is owned by
+    // ControlListEntries (paged/search), transactions by TokenTransactionsBrowser
+    // (paged/filtered), and the allowlist count comes from the labels endpoint below.
+    ([, tokenId]: readonly [string, string]) =>
+      fetchTokenManagementSupportingData(tokenId, t, {
+        includeAllowlist: false,
+        includeTransactions: false,
+      }),
     {
       refreshInterval: 60_000,
       revalidateOnFocus: true,
@@ -185,6 +216,17 @@ export function useTokenOperations({
       ttlMs: TOKEN_SUPPORTING_DATA_CACHE_TTL_MS,
     }
   );
+
+  // Distinct labels + unfiltered entry count for the control list. Same SWR key
+  // ControlListEntries uses, so its dropdown fetch is deduped; here it feeds the
+  // compliance tab's summary count without touching supporting-data.
+  const { data: allowlistLabelsData, error: allowlistLabelsRequestError } =
+    usePersistedDashboardSWR(
+      showControlList ? [TOKEN_ALLOWLIST_LABELS_KEY, token.id] : null,
+      ([, tokenId]: readonly [string, string]) => fetchTokenAllowlistLabels(tokenId),
+      { revalidateOnFocus: true, revalidateIfStale: true },
+      { key: `token.${token.id}.allowlist-labels`, ttlMs: TOKEN_ALLOWLIST_LABELS_CACHE_TTL_MS }
+    );
 
   const supportingDataError = supportingDataRequestError
     ? supportingDataRequestError instanceof Error
@@ -209,6 +251,13 @@ export function useTokenOperations({
     if (shouldLoadSupportingData) {
       await mutateSupportingData();
     }
+    // The control-list search/labels fetch lives inside ControlListEntries with
+    // its own SWR keys; refresh every cached page + labels facet for this token
+    // so add/remove is reflected there and in the count.
+    await globalMutate((key) => isTokenAllowlistKey(key, token.id));
+    // TokenTransactionsBrowser owns its own paged/filtered SWR keys; refresh them
+    // so a mint/burn/etc. shows up in the transactions list right away.
+    await globalMutate((key) => isTokenTransactionsKey(key, token.id));
   };
   const runAction = (input: ActionExecutionInput, options: RunActionOptions = {}) =>
     runActionBase(input, {
@@ -240,16 +289,23 @@ export function useTokenOperations({
   const transactionsError = supportingDataError ?? resolvedSupportingData.transactionsError;
   const transactionsTotal = resolvedSupportingData.transactionsTotal;
   const transactionsHasMore = resolvedSupportingData.transactionsHasMore;
+  // The control list is served by ControlListEntries (paged/search); asset-profile
+  // no longer pulls entries through supporting-data. Count + error come from the
+  // labels fetch above.
   const allowlistEntries = resolvedSupportingData.allowlistEntries;
-  const allowlistError = supportingDataError ?? resolvedSupportingData.allowlistError;
-  const allowlistTotal = resolvedSupportingData.allowlistTotal;
-  const allowlistHasMore = resolvedSupportingData.allowlistHasMore;
+  const allowlistError = allowlistLabelsRequestError
+    ? allowlistLabelsRequestError instanceof Error
+      ? allowlistLabelsRequestError.message
+      : t("DashboardIssuance.management.unableToLoadData")
+    : null;
+  const allowlistTotal = allowlistLabelsData?.total ?? null;
+  const allowlistHasMore = false;
   const frozenAccounts = resolvedSupportingData.frozenAccounts;
   const frozenAccountsError = supportingDataError ?? resolvedSupportingData.frozenAccountsError;
   const frozenAccountsTotal = resolvedSupportingData.frozenAccountsTotal;
   const frozenAccountsHasMore = resolvedSupportingData.frozenAccountsHasMore;
 
-  const tokenBasePath = `/v1/issuance/tokens/${token.id}`;
+  const tokenBasePath = `/api/dashboard/issuance/tokens/${token.id}`;
   const explorerHref = getExplorerHref(token.mintAddress);
   const canDeployToken = token.status === "pending" && !token.mintAddress;
   const {
@@ -280,7 +336,9 @@ export function useTokenOperations({
     withWalletLoadError(
       getSignerSelectionForAction({ action, token, authorityWallets, metadataAuthority, t })
     );
-  const deploySignerSelection = signerSelectionFor("deploy");
+  // Deploy needs no signer picker (the server resolves the signing wallet), only
+  // the yes/no gate that at least one custody wallet exists to sign the mint.
+  const deployDisabledReason = signerSelectionFor("deploy").unavailableReason;
   const mintSignerSelection = signerSelectionFor("mint");
   const burnSignerSelection = signerSelectionFor("burn");
   const seizeSignerSelection = signerSelectionFor("seize");
@@ -288,6 +346,9 @@ export function useTokenOperations({
   const freezeSignerSelection = signerSelectionFor("freeze");
   const pauseSignerSelection = signerSelectionFor("pause");
 
+  // Custody control is only knowable once the authority wallets have loaded
+  // without error; until then a row's control status is "unknown" (no badge).
+  const authorityControlKnown = !authorityWalletsLoading && !authorityWalletsError;
   const permissionRows = getPermissionRows(token, metadataAuthority, t).map((row) => {
     const displayedAuthorityAddress = getDisplayedAuthorityAddress({
       token,
@@ -296,9 +357,15 @@ export function useTokenOperations({
       authorityWallets,
     });
     const rowWithDisplayedValue = { ...row, value: displayedAuthorityAddress };
+    const controlStatus: PermissionControlStatus = classifyAuthorityControl(
+      displayedAuthorityAddress,
+      authorityWallets,
+      authorityControlKnown
+    );
 
     return {
       ...rowWithDisplayedValue,
+      controlStatus,
       editDisabledReason: canManageTokenAdmin
         ? withWalletLoadError(
             getSignerSelectionForAction({
@@ -312,6 +379,16 @@ export function useTokenOperations({
           ).unavailableReason
         : t("DashboardIssuance.management.onlyAdminsCanEditAuthorities"),
     };
+  });
+
+  // Roll-up for the overview "Managed authorities: N of M" tile and the
+  // permissions-tab external-authority warning. Shared with the issuance list's
+  // expanded card so both surfaces count identically.
+  const authoritySummary = summarizeAuthorityControl({
+    token,
+    authorityWallets,
+    controlKnown: authorityControlKnown,
+    t,
   });
   const displayedMintAuthority = getDisplayedAuthorityAddress({
     token,
@@ -331,6 +408,13 @@ export function useTokenOperations({
     freezeDisabledReason ?? freezeSignerSelection.unavailableReason;
   const effectivePauseDisabledReason =
     pauseDisabledReason ?? pauseSignerSelection.unavailableReason;
+
+  // Lock supply = mint the remainder, then revoke the mint authority. Both legs
+  // are signed by the current mint authority, so mintSignerSelection covers the
+  // whole flow and the modal needs only one signer picker.
+  const lockSupplyRemaining = getRemainingMintableSupply(token);
+  const effectiveLockSupplyDisabledReason =
+    getLockSupplyDisabledReason(token, t) ?? mintSignerSelection.unavailableReason;
 
   const selectedBurnSignerWallet =
     findWalletByWalletId(
@@ -403,15 +487,23 @@ export function useTokenOperations({
   });
 
   const fundManagementDisabledReasons: Record<FundManagementModalAction, string | null> = {
-    deploy: deploySignerSelection.unavailableReason,
     mint: effectiveMintDisabledReason ?? mintValidationReason,
     burn: effectiveBurnDisabledReason ?? burnValidationReason,
   };
+  // Allowlist mutations only touch the chain when the token has an on-chain ABL
+  // list; then the list is governed by the freeze-authority delegate (sRFC-37
+  // Token ACL), so it needs the freeze authority under SDP custody — same check
+  // as freeze. DB-only allowlists need no signer and stay ungated.
+  const allowlistDisabledReason = token.ablListAddress
+    ? freezeSignerSelection.unavailableReason
+    : null;
+
   const complianceActionDisabledReasons: Partial<Record<AdminAction, string | null>> = {
     seize: effectiveSeizeDisabledReason ?? seizeValidationReason,
     "force-burn": effectiveForceBurnDisabledReason ?? forceBurnValidationReason,
     freeze: effectiveFreezeDisabledReason,
     pause: effectivePauseDisabledReason,
+    allowlist: allowlistDisabledReason,
   };
 
   const handleCopy = async (
@@ -429,21 +521,20 @@ export function useTokenOperations({
     }
   };
 
-  const handleDeploy = () => {
-    runAction(
+  // Fees are always Kora-sponsored and the server resolves the signing wallet
+  // (token signer, then org custody fallback), so deploy fires immediately —
+  // no modal, no confirmation dialog.
+  const deployToken = () => {
+    void runActionImmediately(
       {
         label: t("DashboardIssuance.management.deployToken"),
         method: "POST",
         path: `${tokenBasePath}/deploy`,
         body: {
-          signingWalletId: deploySignerWalletId || undefined,
+          feePayment: "sponsored",
         },
       },
       {
-        requiresConfirmation: true,
-        confirmationTitle: t("DashboardIssuance.management.deployConfirmationTitle"),
-        confirmationDescription: t("DashboardIssuance.management.deployConfirmationDescription"),
-        confirmButtonLabel: t("DashboardIssuance.management.deployNow"),
         submitToast: t("DashboardIssuance.management.submittingDeploy"),
         successToast: t("DashboardIssuance.management.deployFinalized"),
       }
@@ -454,7 +545,7 @@ export function useTokenOperations({
     runAction({
       label: t("DashboardIssuance.management.refreshSupply"),
       method: "POST",
-      path: `${tokenBasePath}/supply/refresh`,
+      path: `${tokenBasePath}/refresh-supply`,
       body: {},
     });
   };
@@ -766,6 +857,10 @@ export function useTokenOperations({
   };
 
   const handleAddAllowlist = () => {
+    if (allowlistDisabledReason) {
+      toast.error(allowlistDisabledReason);
+      return;
+    }
     const address = allowlistForm.address.trim();
     if (!address) {
       toast.error(
@@ -787,42 +882,19 @@ export function useTokenOperations({
   };
 
   const handleRemoveAllowlist = (entryId: string) => {
-    runAction(
-      {
-        label:
-          controlListCopy?.removeActionLabel ??
-          t("DashboardIssuance.management.removeAllowlistEntry"),
-        method: "DELETE",
-        path: `${tokenBasePath}/allowlist/${entryId}`,
-      },
-      {
-        onSuccess: async () => {
-          await mutateSupportingData(
-            (current) => {
-              if (!current) {
-                return current;
-              }
-
-              const nextAllowlistEntries = current.allowlistEntries.filter(
-                (entry) => entry.id !== entryId
-              );
-              const removedCount = current.allowlistEntries.length - nextAllowlistEntries.length;
-              const nextAllowlistTotal =
-                current.allowlistTotal === null
-                  ? null
-                  : Math.max(0, current.allowlistTotal - removedCount);
-
-              return {
-                ...current,
-                allowlistEntries: nextAllowlistEntries,
-                allowlistTotal: nextAllowlistTotal,
-              };
-            },
-            { revalidate: false }
-          );
-        },
-      }
-    );
+    if (allowlistDisabledReason) {
+      toast.error(allowlistDisabledReason);
+      return;
+    }
+    // The list + labels/count refresh via the allowlist SWR keys in
+    // revalidateAfterSuccess, so no local optimistic update is needed here.
+    runAction({
+      label:
+        controlListCopy?.removeActionLabel ??
+        t("DashboardIssuance.management.removeAllowlistEntry"),
+      method: "DELETE",
+      path: `${tokenBasePath}/allowlist/${entryId}`,
+    });
   };
 
   const handleAuthorityModalOpen = (row: PermissionRow) => {
@@ -918,9 +990,6 @@ export function useTokenOperations({
     }
 
     switch (action) {
-      case "deploy":
-        setDeploySignerWalletId(deploySignerSelection.defaultWalletId);
-        break;
       case "mint":
         setMintForm((previous) => ({
           ...previous,
@@ -938,21 +1007,133 @@ export function useTokenOperations({
     setFundManagementModalAction(action);
   };
 
+  const openLockSupplyModal = () => {
+    if (effectiveLockSupplyDisabledReason) {
+      return;
+    }
+
+    setLockSupplyForm({
+      destination: "",
+      // The same authority signs both the mint and the revoke.
+      signingWalletId: mintSignerSelection.defaultWalletId,
+    });
+    setLockSupplyMinted(false);
+    setLockSupplyRevokeFailed(false);
+    setLockSupplyModalOpen(true);
+  };
+
+  const closeLockSupplyModal = () => {
+    if (isPending) {
+      return;
+    }
+
+    setLockSupplyModalOpen(false);
+  };
+
   const closeFundManagementModal = () => {
     if (isPending) {
       return;
     }
 
     setFundManagementModalAction(null);
+    setMintForm(createInitialMintForm);
+    setBurnForm(createInitialBurnForm);
+  };
+
+  /**
+   * Make the configured max supply a real on-chain cap: mint the remainder, then
+   * revoke the mint authority. SPL has no supply-cap field and `InitializeMint`
+   * requires a mint authority, so a fixed-supply mint can only be reached this
+   * way — mint everything, then set the authority to None (irreversible).
+   *
+   * Two transactions, so there is a real window where the mint lands and the
+   * revoke does not. That leaves the token fully minted with a live authority, so
+   * the flow reports the partial state and lets the operator retry just the
+   * revoke: `lockSupplyMinted` suppresses the mint leg in-session, and after the
+   * token refetches `lockSupplyRemaining` is "0" anyway, which suppresses it for
+   * any later attempt. The revoke is idempotent — re-revoking an already-revoked
+   * authority is rejected by the API, not silently duplicated.
+   */
+  const handleLockSupply = async () => {
+    if (effectiveLockSupplyDisabledReason) {
+      toast.error(effectiveLockSupplyDisabledReason);
+      return;
+    }
+    if (lockSupplyRemaining === null) {
+      toast.error(t("DashboardIssuance.management.lockSupplyAmountUnavailable"));
+      return;
+    }
+
+    const signingWalletId = lockSupplyForm.signingWalletId || undefined;
+    const destination = lockSupplyForm.destination.trim();
+    const needsMint = !lockSupplyMinted && isPositiveAmount(lockSupplyRemaining);
+
+    if (needsMint && !destination) {
+      toast.error(t("DashboardIssuance.management.lockSupplyDestinationRequired"));
+      return;
+    }
+
+    if (needsMint) {
+      const mintResult = await runActionImmediately(
+        {
+          label: t("DashboardIssuance.management.lockSupplyMintLabel"),
+          method: "POST",
+          path: `${tokenBasePath}/mint`,
+          body: {
+            signingWalletId,
+            mint: { destination, amount: lockSupplyRemaining },
+          },
+        },
+        {
+          submitToast: t("DashboardIssuance.management.lockSupplyMinting", {
+            amount: lockSupplyRemaining,
+          }),
+          successToast: t("DashboardIssuance.management.lockSupplyMinted", {
+            amount: lockSupplyRemaining,
+          }),
+        }
+      );
+
+      if (!mintResult.ok) {
+        // Nothing landed, so there is no partial state to report — the operator
+        // can just resubmit.
+        return;
+      }
+      setLockSupplyMinted(true);
+    }
+
+    const revokeResult = await runActionImmediately(
+      {
+        label: t("DashboardIssuance.management.lockSupplyRevokeLabel"),
+        method: "POST",
+        path: `${tokenBasePath}/authority`,
+        body: {
+          signingWalletId,
+          authority: { role: "mint", newAuthority: null },
+        },
+      },
+      {
+        submitToast: t("DashboardIssuance.management.lockSupplyRevoking"),
+        successToast: t("DashboardIssuance.management.lockSupplyLocked"),
+      }
+    );
+
+    if (revokeResult.ok) {
+      setLockSupplyRevokeFailed(false);
+      setLockSupplyMinted(false);
+      setLockSupplyModalOpen(false);
+      return;
+    }
+
+    // Mint landed, revoke did not: surface it in the modal so the operator sees
+    // the supply is now at the cap but still mintable, with a retry for leg 2.
+    setLockSupplyRevokeFailed(true);
   };
 
   const submitFundManagementAction = (action: FundManagementModalAction) => {
     closeFundManagementModal();
 
     switch (action) {
-      case "deploy":
-        handleDeploy();
-        return;
       case "mint":
         handleMint();
         return;
@@ -1008,6 +1189,14 @@ export function useTokenOperations({
           // Pause authority is always single
           onSignerWalletIdChange: (_value: string) => {},
         };
+      case "allowlist":
+        return {
+          signerWallets: [] as PaymentsDashboardWallet[],
+          // On-chain allowlist mutations are signed by the freeze-authority
+          // delegate, so gate on the same custody availability.
+          signerUnavailableReason: allowlistDisabledReason,
+          onSignerWalletIdChange: (_value: string) => {},
+        };
       default:
         return {
           signerWallets: [] as PaymentsDashboardWallet[],
@@ -1054,6 +1243,7 @@ export function useTokenOperations({
     frozenAccountsHasMore,
     // rows
     permissionRows,
+    authoritySummary,
     extensionRows,
     displayedMintAuthority,
     // form state
@@ -1080,14 +1270,23 @@ export function useTokenOperations({
     seizeValidationReason,
     forceBurnValidationErrors,
     forceBurnValidationReason,
-    // deploy modal
-    deploySignerSelection,
-    deploySignerWalletId,
-    setDeploySignerWalletId,
+    deployDisabledReason,
     fundManagementModalAction,
     openFundManagementModal,
     closeFundManagementModal,
     submitFundManagementAction,
+    // lock supply (mint to cap, then revoke the mint authority)
+    lockSupplyModalOpen,
+    openLockSupplyModal,
+    closeLockSupplyModal,
+    lockSupplyForm,
+    setLockSupplyForm,
+    lockSupplyRemaining,
+    lockSupplyMinted,
+    lockSupplyRevokeFailed,
+    lockSupplyDisabledReason: effectiveLockSupplyDisabledReason,
+    lockSupplySignerSelection: mintSignerSelection,
+    handleLockSupply,
     // authority modal
     authorityModalRow,
     authorityModalCurrentAuthority,
@@ -1099,7 +1298,7 @@ export function useTokenOperations({
     handleAuthorityModalConfirm,
     // handlers
     handleCopy,
-    handleDeploy,
+    deployToken,
     handleRefreshSupply,
     handleMint,
     handleBurn,

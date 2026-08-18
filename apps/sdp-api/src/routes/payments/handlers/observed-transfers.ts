@@ -2,19 +2,27 @@ import { getSolanaConfig } from "@sdp/rpc";
 import { withHeliusApiKey } from "@sdp/rpc/relay";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
-import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import { SOL_MINT } from "@sdp/types";
 import type { Address } from "@solana/kit";
-import { getDb } from "@/db";
 import type {
   PaymentTransferDirection as TransferDirection,
   PaymentTransferRow as TransferRow,
   PaymentTransferStatus as TransferStatus,
 } from "@/db/repositories/payments.repository";
+import { mapSettledWithConcurrency } from "@/lib/concurrency";
+import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import type { AppContext } from "../context";
 import * as tokenAccounts from "../token-accounts";
 
 export const SIGNATURE_HISTORY_LOOKUP_CONCURRENCY = 5;
+
+/**
+ * Cap on token-account addresses added to the signature search alongside the
+ * owner address. A wallet's token-account count is unbounded external data;
+ * without the cap it directly scales the getSignaturesForAddress fan-out.
+ */
+export const MAX_TOKEN_ACCOUNT_SIGNATURE_LOOKUPS = 24;
 
 interface ParsedInstructionPayload {
   info?: Record<string, unknown>;
@@ -75,7 +83,6 @@ interface ParsedTransactionResponse {
 interface ObservedTransferContext {
   organizationId: string;
   projectId: string | null;
-  tokenSymbolsByMint: Map<string, string>;
   walletIdsByAddress: Map<string, string>;
 }
 
@@ -111,21 +118,6 @@ function resolveSignatureHistoryRpcUrl(env: Env): string {
   return env.SOLANA_RPC_HELIUS_URL
     ? withHeliusApiKey(env.SOLANA_RPC_HELIUS_URL, env.SOLANA_RPC_HELIUS_API_KEY)
     : getSolanaConfig(env).rpcUrl;
-}
-
-function resolveObservedTokenSymbol(mint: string, tokenSymbolsByMint: Map<string, string>): string {
-  const normalizedMint = mint.trim();
-  const known = tokenSymbolsByMint.get(normalizedMint)?.trim();
-  if (known) {
-    return known;
-  }
-
-  const wellKnownSymbol = WELL_KNOWN_TOKEN_BY_MINT.get(normalizedMint)?.symbol;
-  if (wellKnownSymbol) {
-    return wellKnownSymbol;
-  }
-
-  return normalizedMint;
 }
 
 function resolveParsedAccountKey(accountKey: string | ParsedAccountKey | undefined): string | null {
@@ -277,39 +269,6 @@ export function dedupeSignatureHistory(
   return Array.from(bySignature.values()).sort(compareSignatureHistoryDesc).slice(0, limit);
 }
 
-export async function mapSettledWithConcurrency<T, U>(
-  items: T[],
-  concurrency: number,
-  mapper: (item: T) => Promise<U>
-): Promise<Array<PromiseSettledResult<U>>> {
-  const results = new Array<PromiseSettledResult<U>>(items.length);
-  let nextIndex = 0;
-  const workerCount = Math.min(concurrency, items.length);
-
-  await Promise.all(
-    Array.from({ length: workerCount }, async () => {
-      while (nextIndex < items.length) {
-        const currentIndex = nextIndex;
-        nextIndex += 1;
-
-        try {
-          results[currentIndex] = {
-            status: "fulfilled",
-            value: await mapper(items[currentIndex] as T),
-          };
-        } catch (reason) {
-          results[currentIndex] = {
-            status: "rejected",
-            reason,
-          };
-        }
-      }
-    })
-  );
-
-  return results;
-}
-
 export async function resolveWalletTokenAccountAddresses(
   c: AppContext,
   rpc: ReturnType<typeof solanaRpc.createRpc>,
@@ -319,45 +278,17 @@ export async function resolveWalletTokenAccountAddresses(
   try {
     return await tokenAccounts.getSplTokenAccountAddresses(rpc, owner);
   } catch (error) {
-    console.error("listTransfers: failed to fetch token accounts for wallet history", {
-      requestId: c.get("requestId"),
-      walletId,
-      owner,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    getLogger().error(
+      {
+        requestId: c.get("requestId"),
+        walletId,
+        owner,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      "listTransfers: failed to fetch token accounts for wallet history"
+    );
     return [];
   }
-}
-
-export async function resolveObservedTokenSymbols(env: Env): Promise<Map<string, string>> {
-  const symbolsByMint = new Map<string, string>();
-
-  try {
-    const result = await getDb(env)
-      .prepare(
-        `SELECT mint_address, symbol
-         FROM issued_tokens
-        WHERE mint_address IS NOT NULL
-          AND deployed_at IS NOT NULL`
-      )
-      .all<{
-        mint_address?: string | null;
-        symbol?: string | null;
-      }>();
-
-    for (const row of result.results ?? []) {
-      const mint = row.mint_address?.trim();
-      if (!mint) {
-        continue;
-      }
-
-      symbolsByMint.set(mint, row.symbol?.trim() || mint);
-    }
-  } catch {
-    // Ignore symbol resolution failures and fall back to mint addresses.
-  }
-
-  return symbolsByMint;
 }
 
 async function fetchParsedTransaction(
@@ -487,7 +418,7 @@ function buildObservedTransferRows(
         counterparty_id: null,
         source_address: sourceAddress,
         destination_address: destinationAddress,
-        token: "SOL",
+        token: SOL_MINT,
         amount: formatDecimalAmount(lamports, 9),
         memo: null,
         type: "transfer",
@@ -498,6 +429,7 @@ function buildObservedTransferRows(
         delivery_mode: null,
         fiat_currency: null,
         fiat_amount: null,
+        ramps_memo: {},
         provider_data: {},
         signature,
         serialized_tx: null,
@@ -566,7 +498,7 @@ function buildObservedTransferRows(
         counterparty_id: null,
         source_address: readInstructionInfoString(info, "mintAuthority") ?? mint,
         destination_address: destinationOwner ?? destinationTokenAccount,
-        token: resolveObservedTokenSymbol(mint, context.tokenSymbolsByMint),
+        token: mint,
         amount: resolvedUiAmount,
         memo: null,
         type: "transfer",
@@ -577,6 +509,7 @@ function buildObservedTransferRows(
         delivery_mode: null,
         fiat_currency: null,
         fiat_amount: null,
+        ramps_memo: {},
         provider_data: {},
         signature,
         serialized_tx: null,
@@ -654,7 +587,7 @@ function buildObservedTransferRows(
       counterparty_id: null,
       source_address: sourceOwner ?? sourceTokenAccount,
       destination_address: destinationOwner ?? destinationTokenAccount,
-      token: resolveObservedTokenSymbol(mint, context.tokenSymbolsByMint),
+      token: mint,
       amount: resolvedUiAmount,
       memo: null,
       type: "transfer",
@@ -665,6 +598,7 @@ function buildObservedTransferRows(
       delivery_mode: null,
       fiat_currency: null,
       fiat_amount: null,
+      ramps_memo: {},
       provider_data: {},
       signature,
       serialized_tx: null,
@@ -692,8 +626,13 @@ export async function buildObservedTransfersForSignatures(
     return [];
   }
 
-  const settled = await Promise.allSettled(
-    signatures.map(async (signatureInfo) => {
+  // Bounded: the signature list is capped at historyLimit (200), and a bare
+  // Promise.allSettled would open that many concurrent getTransaction calls
+  // against the billed RPC per request.
+  const settled = await mapSettledWithConcurrency(
+    signatures,
+    SIGNATURE_HISTORY_LOOKUP_CONCURRENCY,
+    async (signatureInfo) => {
       const parsedTransaction = await fetchParsedTransaction(env, String(signatureInfo.signature));
       return buildObservedTransferRows(
         parsedTransaction,
@@ -701,7 +640,7 @@ export async function buildObservedTransfersForSignatures(
         signatureInfo.blockTime,
         context
       );
-    })
+    }
   );
 
   return settled.flatMap((result) => (result.status === "fulfilled" ? result.value : []));

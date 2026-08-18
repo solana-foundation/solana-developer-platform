@@ -1664,7 +1664,7 @@ Use the search field to find a specific address by label or public key.
 <Tab value="API">
 
 ```bash title="Terminal"
-curl https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
+curl "https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist?search=So1&label=Treasury" \
   -H "Authorization: Bearer sk_test_..."
 ```
 
@@ -1673,7 +1673,26 @@ const { data, meta } = await res.json();
 // meta: { total, page, pageSize, hasMore }
 ```
 
-Supports `page` and `pageSize` query parameters.
+Query parameters:
+
+- `page`, `pageSize` — pagination (`pageSize` max 500, default 50).
+- `search` — contains-style match over the entry address **and** label. A blank value is treated as no filter.
+- `label` — restrict to entries with this exact label.
+
+Search and the label filter run server-side over the whole list, so results aren't limited to the current page.
+
+To populate a label filter, fetch the distinct labels in use (the response also
+includes `total`, the unfiltered entry count, for a summary display):
+
+```bash
+curl https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist/labels \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+```typescript
+const { data } = await res.json();
+// data: { labels: ["Market maker", "Treasury"], total: 42 }
+```
 
 </Tab>
 </Tabs>
@@ -2090,7 +2109,7 @@ This section covers the controls and audit trail attached to a custody wallet: *
 
 ## API surface
 
-The current wallet-policy and balance endpoints remain under `/v1/payments/wallets` because they were introduced with the Payments API. Their behavior is wallet-wide: policy operation families include payment, ramp, issuance, raw signing, transfer, program interactions, and provider administration.
+The current wallet-policy and balance endpoints remain under `/v1/payments/wallets` because they were introduced with the Payments API. Their behavior is wallet-wide: policy operation families include transfer, payment, ramp, and issuance.
 
 ## Related
 
@@ -2225,11 +2244,8 @@ These are wallet-policy selectors, not API-key permissions. API-key permissions 
 | --- | --- | --- |
 | `payment` | Outbound single and batch payments. | Single and batch transfer execution |
 | `ramp` | Fiat-to-crypto and crypto-to-fiat ramp activity. | On-ramp and off-ramp quote creation |
-| `issuance` | Token lifecycle actions signed by the wallet. | Mint execution and authority updates |
-| `raw_sign` | Low-level signing and signer verification. | Custody signer checks |
+| `issuance` | Token lifecycle actions signed by the wallet. | Mint, burn, seize, and authority-update execution |
 | `transfer` | Generic direct-transfer family reserved for operations outside the payment workflow. | No current public operation type |
-| `program` | General Solana program interactions. | No current public operation type |
-| `provider_admin` | Custody-provider administration. | No current public operation type |
 
 Family values with no current public operation type are valid policy values, but they do not match a public SDP flow until an operation is emitted in that family.
 
@@ -2242,10 +2258,15 @@ Family values with no current public operation type are valid policy values, but
 | `ramp_onramp_quote` | `ramp` | Creates an on-ramp quote that delivers crypto to the destination wallet. |
 | `ramp_offramp_quote` | `ramp` | Creates an off-ramp quote that draws crypto from the source wallet. |
 | `issuance_mint_execute` | `issuance` | Executes a token mint using the configured signing wallet. |
+| `issuance_burn_execute` | `issuance` | Executes a token burn using the configured signing wallet. |
+| `issuance_force_burn_execute` | `issuance` | Force-burns tokens from a holder account. |
+| `issuance_seize_execute` | `issuance` | Seizes tokens into the issuer-controlled destination. |
 | `issuance_update_authority_execute` | `issuance` | Changes a token authority using the current authority wallet. |
-| `custody_signer_check` | `raw_sign` | Runs the custody signer-check transaction for the wallet. |
+| `recurring_payment_create` | `payment` | Creates a recurring payment schedule. |
+| `recurring_payment_update` | `payment` | Updates a recurring payment schedule. |
+| `recurring_payment_collection` | `payment` | Collects a due recurring payment. |
 
-Operation-type matching is exact and case-sensitive. The API accepts custom strings up to 120 characters so future or privately integrated operations can be represented, but a rule only affects an operation when SDP emits the same identifier. For current public flows, use one of the identifiers above.
+Operation-type matching is exact and case-sensitive. The API accepts only the supported identifiers above, so a rule cannot be activated for an operation SDP never emits.
 
 ## Policy evaluation and audit records
 
@@ -4604,7 +4625,9 @@ In your Clerk development app:
 
 - Copy the publishable key, secret key, and issuer into the
   [configurator](/docs/self-hosting/configurator).
-- Create a JWT template named `sdp-api`.
+- Customize the session token (Clerk dashboard → **Sessions** → **Customize
+  session token**) with the claims from the
+  [Clerk setup guide](https://github.com/solana-foundation/solana-developer-platform/blob/main/apps/sdp-api/docs/self-hosting/clerk-setup.md).
 - Expose your local API with the webhook tunnel: reserve a free stable domain
   at [dashboard.ngrok.com/domains](https://dashboard.ngrok.com/domains), set it
   as `WEBHOOK_INGEST_DOMAIN` in `apps/sdp-api/.env.local`, and run
@@ -4628,7 +4651,7 @@ Open the [configurator](/docs/self-hosting/configurator), keep the defaults for
 the first deployment, and fill in:
 
 - `SOLANA_RPC_URL` with a devnet RPC endpoint.
-- Clerk publishable key, secret key, issuer, JWT template, and webhook secret.
+- Clerk publishable key, secret key, issuer, and webhook secret.
 - Local signing with native fee payment.
 
 The signing step generates a local Solana signer in the browser and shows the
@@ -4662,7 +4685,7 @@ If the dashboard loads but organization state does not appear, check the API log
 docker compose logs -f sdp-api
 ```
 
-Look for Clerk webhook errors, JWT template mismatches, or missing
+Look for Clerk webhook errors, session token claim mismatches, or missing
 `CLERK_WEBHOOK_SECRET`.
 
 </Step>
@@ -5444,6 +5467,8 @@ Source: https://platform.solana.com/docs/reference/api/issuance
 | `GET` | `/v1/issuance/tokens/{tokenId}/allowlist` | List token allowlist |
 | `POST` | `/v1/issuance/tokens/{tokenId}/allowlist` | Add token allowlist entry |
 | `DELETE` | `/v1/issuance/tokens/{tokenId}/allowlist/{entryId}` | Remove token allowlist entry |
+| `GET` | `/v1/issuance/tokens/{tokenId}/allowlist/labels` | List token allowlist labels |
+| `GET` | `/v1/issuance/tokens/{tokenId}/audit` | Get asset audit history |
 | `POST` | `/v1/issuance/tokens/{tokenId}/authority` | Execute authority update |
 | `POST` | `/v1/issuance/tokens/{tokenId}/authority/prepare` | Prepare authority update |
 | `POST` | `/v1/issuance/tokens/{tokenId}/burn` | Execute burn |
@@ -5456,6 +5481,8 @@ Source: https://platform.solana.com/docs/reference/api/issuance
 | `POST` | `/v1/issuance/tokens/{tokenId}/force-burn/prepare` | Prepare force burn transaction |
 | `POST` | `/v1/issuance/tokens/{tokenId}/freeze` | Freeze account |
 | `GET` | `/v1/issuance/tokens/{tokenId}/frozen` | List frozen accounts |
+| `GET` | `/v1/issuance/tokens/{tokenId}/holders` | List verified holders |
+| `POST` | `/v1/issuance/tokens/{tokenId}/holders` | Enroll a verified holder |
 | `GET` | `/v1/issuance/tokens/{tokenId}/metadata.json` | Get public token metadata JSON |
 | `POST` | `/v1/issuance/tokens/{tokenId}/mint` | Execute mint |
 | `POST` | `/v1/issuance/tokens/{tokenId}/mint/prepare` | Prepare mint transaction |
@@ -5466,6 +5493,16 @@ Source: https://platform.solana.com/docs/reference/api/issuance
 | `GET` | `/v1/issuance/tokens/{tokenId}/transactions` | List token transactions |
 | `POST` | `/v1/issuance/tokens/{tokenId}/unfreeze` | Unfreeze account |
 | `POST` | `/v1/issuance/tokens/{tokenId}/unpause` | Unpause token transfers |
+| `GET` | `/v1/issuance/tokens/{tokenId}/workflows` | List workflow rules |
+| `POST` | `/v1/issuance/tokens/{tokenId}/workflows` | Create a workflow rule |
+| `DELETE` | `/v1/issuance/tokens/{tokenId}/workflows/{workflowId}` | Delete a workflow rule |
+| `PATCH` | `/v1/issuance/tokens/{tokenId}/workflows/{workflowId}` | Update a workflow rule |
+| `GET` | `/v1/issuance/tokens/{tokenId}/workflows/catalog` | List the workflow catalog for an asset |
+| `GET` | `/v1/issuance/tokens/{tokenId}/workflows/executions` | List workflow executions |
+| `POST` | `/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/approve` | Approve a held execution |
+| `POST` | `/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/reject` | Reject a held execution |
+| `POST` | `/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/retry` | Retry a failed execution |
+| `GET` | `/v1/issuance/tokens/facets` | List token filter facets |
 | `GET` | `/v1/issuance/transactions` | List issuance transactions |
 
 ---
@@ -5497,9 +5534,7 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `GET` | `/v1/payments/subscriptions` | List subscriptions |
 | `POST` | `/v1/payments/subscriptions` | Create subscription |
 | `GET` | `/v1/payments/subscriptions/{subscriptionId}` | Get subscription |
-| `PATCH` | `/v1/payments/subscriptions/{subscriptionId}` | Update subscription |
 | `GET` | `/v1/payments/subscriptions/{subscriptionId}/collection-attempts` | List subscription collection attempts |
-| `POST` | `/v1/payments/subscriptions/{subscriptionId}/collection-attempts` | Create subscription collection attempt |
 | `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-authorization` | Prepare subscription authorization |
 | `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-cancel` | Prepare subscription cancellation |
 | `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-collection` | Prepare subscription collection |

@@ -1,5 +1,4 @@
 import { SigningError } from "@sdp/custody/signing";
-import { createFeePaymentAdapter } from "@sdp/payments/fee-payment";
 import { resolveRpcTarget } from "@sdp/rpc/relay";
 import { confirmTransaction, createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
 import type { Address } from "@solana/kit";
@@ -18,16 +17,11 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
-import { resolveKoraUserId } from "@/lib/kora-user";
 import { success } from "@/lib/response";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
-import {
-  enforceWalletOperationPolicy,
-  resolvePolicyCustodyWallet,
-  walletOperationActorFromAuth,
-} from "@/services/policy-enforcement.service";
 import { FeePaymentError } from "@/services/ports";
 import { createOrgSigner } from "@/services/solana";
+import { createAuthenticatedSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { AppContext } from "../context";
 import { type SignerCheckResponse, signerCheckSchema } from "../schemas";
 
@@ -45,67 +39,41 @@ function isKoraMemoProgramPolicyError(message: string): boolean {
 }
 
 export const signerCheck = async (c: AppContext) => {
-  const auth = getAuth(c);
-  if (auth.authType !== "api_key") {
-    throw new AppError("UNAUTHORIZED", "API key authentication is required");
-  }
-
-  const body = await c.req.json().catch(() => ({}));
+  const body = await c.req.json();
   const parsed = signerCheckSchema.safeParse(body);
-
   if (!parsed.success) {
     throw badRequest("Invalid request body", {
       errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
+  const auth = getAuth(c);
 
-  const memo = parsed.data.memo?.trim() || `SDP signer check ${new Date().toISOString()}`;
   const resolvedWalletId = resolveApiKeySigningWalletId(auth, parsed.data.walletId, [
     "wallets:write",
   ]);
-
-  if (!resolvedWalletId) {
-    throw badRequest("API key is not bound to a signing wallet");
+  if (resolvedWalletId === null) {
+    throw badRequest(
+      auth.authType === "api_key"
+        ? "API key is not bound to a signing wallet"
+        : "walletId is required for session or Clerk authentication"
+    );
   }
-
-  const policyWallet = await resolvePolicyCustodyWallet(c.env, auth, resolvedWalletId);
-  await enforceWalletOperationPolicy(c.env, {
-    organizationId: auth.organizationId,
-    projectId: auth.projectId,
-    custodyWalletId: policyWallet?.id ?? null,
-    walletId: resolvedWalletId,
-    apiKeyId: auth.apiKeyId,
-    actor: walletOperationActorFromAuth(auth),
-    operationFamily: "raw_sign",
-    operationType: "custody_signer_check",
-    context: {
-      memo,
-    },
-    rawPayload: {
-      requestedWalletId: parsed.data.walletId ?? null,
-      memo,
-    },
-  });
+  const memo = `SDP signer check ${crypto.randomUUID()}`;
 
   try {
-    const signer = await createOrgSigner(
-      c.env,
-      auth.organizationId,
-      auth.projectId ?? undefined,
-      resolvedWalletId
-    );
-
-    const feePayment = createFeePaymentAdapter(c.env, resolveKoraUserId(c));
-    const feePayer = await feePayment.getFeePayer();
-
-    const rpcTarget = await resolveRpcTarget({
-      env: c.env,
-      kv: c.var.kv,
-      db: getDb(c.env),
-      organizationId: auth.organizationId,
-      authProjectId: auth.projectId ?? null,
-      requestedProjectId: null,
-    });
+    const feePayment = createAuthenticatedSponsorshipFeePayment(c);
+    const [signer, feePayer, rpcTarget] = await Promise.all([
+      createOrgSigner(c.env, auth.organizationId, auth.projectId, resolvedWalletId),
+      feePayment.getFeePayer(),
+      resolveRpcTarget({
+        env: c.env,
+        kv: c.var.kv,
+        db: getDb(c.env),
+        organizationId: auth.organizationId,
+        authProjectId: auth.projectId,
+        requestedProjectId: null,
+      }),
+    ]);
 
     const rpc = createRpc(c.env, {
       rpcUrl: rpcTarget.endpoint,

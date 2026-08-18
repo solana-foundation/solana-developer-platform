@@ -20,7 +20,7 @@ test.describe
       const keyName = `Playwright Selected Wallet Key ${Date.now()}`;
 
       await page.goto("/dashboard/api-keys");
-      await page.getByRole("link", { name: "New API key" }).click();
+      await page.getByRole("link", { name: /^(Create new API key|New API key)$/ }).click();
 
       await page.getByLabel("Name").fill(keyName);
       await page.getByRole("button", { name: "Continue" }).click();
@@ -55,6 +55,23 @@ test.describe
       await expect(keyRow).toContainText("Developer access");
       await expect(keyRow).toContainText("1 selected");
       await expect(keyRow).toContainText("No API-key policy");
+
+      const tableBeforeMenu = await page.getByRole("table").boundingBox();
+      const bodyOverflowBeforeMenu = await page.evaluate(
+        () => window.getComputedStyle(document.body).overflow
+      );
+
+      await keyRow.getByRole("button", { name: "Actions" }).click();
+      await expect(page.getByRole("menuitem", { name: "Edit API key" })).toBeVisible();
+
+      const tableAfterMenu = await page.getByRole("table").boundingBox();
+      expect(tableBeforeMenu).not.toBeNull();
+      expect(tableAfterMenu).not.toBeNull();
+      expect(tableAfterMenu?.x).toBe(tableBeforeMenu?.x);
+      expect(tableAfterMenu?.width).toBe(tableBeforeMenu?.width);
+      expect(await page.evaluate(() => window.getComputedStyle(document.body).overflow)).toBe(
+        bodyOverflowBeforeMenu
+      );
     });
 
     test("user can replace and clear a restricted all-wallet binding without rotation loss", async ({
@@ -63,12 +80,12 @@ test.describe
       const keyName = `Playwright Restricted Key ${Date.now()}`;
 
       await page.goto("/dashboard/api-keys");
-      await page.getByRole("link", { name: "New API key" }).click();
+      await page.getByRole("link", { name: /^(Create new API key|New API key)$/ }).click();
       await page.getByLabel("Name").fill(keyName);
       await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("switch", { name: "Add API-key restrictions" }).click();
-      await page.getByRole("checkbox", { name: "Raw signing" }).check();
+      await page.getByRole("checkbox", { name: "Issuance" }).check();
       await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("button", { name: "Create key" }).click();
 

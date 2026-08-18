@@ -4,8 +4,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPolicyRepository } from "@/db/repositories";
 import app from "@/index";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const TEST_ORG_ID = "org_policy_inventory";
@@ -512,7 +513,6 @@ describe("GET /v1/policies", () => {
   });
 
   afterEach(async () => {
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 
@@ -657,7 +657,10 @@ describe("GET /v1/policies", () => {
     expect(targetIds).not.toContain("cw_policy_inventory_foreign");
     expect(targetIds).not.toContain("key_policy_inventory_other_project");
 
-    const nullScoped = await createPostgresPolicyRepository(getDb(env)).listPolicyControlInventory({
+    const nullScoped = await createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG_ID, projectId: null })
+    ).listPolicyControlInventory({
       organizationId: TEST_ORG_ID,
       projectId: null,
     });
@@ -713,7 +716,10 @@ describe("GET /v1/policies", () => {
       },
     });
 
-    const result = await createPostgresPolicyRepository(countingDb).listPolicyControlInventory({
+    const result = await createPostgresPolicyRepository(
+      countingDb,
+      createTenantScope({ organizationId: TEST_ORG_ID, projectId: TEST_PROJECT_ID })
+    ).listPolicyControlInventory({
       organizationId: TEST_ORG_ID,
       projectId: TEST_PROJECT_ID,
       pageSize: 100,

@@ -13,6 +13,7 @@ import {
   setDefaultWalletResponseSchema,
   signerCheckRequestSchema,
   switchSigningRequestSchema,
+  switchSigningResponseSchema,
   updateCustodyWalletRequestSchema,
   walletIdParamSchema,
 } from "../schemas";
@@ -63,7 +64,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Switch wallet signing provider",
     operationId: "switchWalletSigningProvider",
     description:
-      "Ensures the target provider is active and sets it as the default signing provider for the requested scope. Existing on-chain authorities are not rotated.",
+      "Selects an active provider config or exact Custody Connection as the default signing target for the requested scope. Existing on-chain authorities are not rotated.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -74,9 +75,9 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     responses: {
       201: {
         description: "Wallet signing provider switched",
-        content: jsonContent(initializeSigningResponseSchema),
+        content: jsonContent(switchSigningResponseSchema),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -87,7 +88,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Create wallet",
     operationId: "createWallet",
     description:
-      "Provisions a new wallet for the resolved default signing provider configuration, or for an explicitly targeted provider.",
+      "Provisions a new wallet for the effective custody target, a provider-only resolved target, or an exact Custody Connection selected by connectionId.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -100,7 +101,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Wallet created",
         content: jsonContent(custodyWalletResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
     },
   });
 
@@ -111,7 +112,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Delete wallet",
     operationId: "deleteWallet",
     description:
-      "Deletes a wallet from the resolved default signing provider configuration, or from an explicitly targeted provider when that provider supports wallet deletion.",
+      "Deletes the wallet from its exact owning custody target when that Provider supports wallet deletion. Provider, when supplied, is a consistency assertion.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -135,7 +136,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Set default wallet",
     operationId: "setDefaultWallet",
     description:
-      "Sets the default wallet for the resolved default provider config, or for an explicitly targeted provider.",
+      "Resolves walletId to its exact Config or Connection owner and changes only that owner's default wallet. Provider, when supplied, is a consistency assertion.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -159,7 +160,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Get wallet signing config",
     operationId: "getWalletConfig",
     description:
-      "Returns the resolved default wallet signing configuration for the organization or project. Resolution is DB-backed only (no environment fallback).",
+      "Returns the resolved Config when the effective custody target is Config-owned. An effective Connection does not fabricate a Config and returns 404.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -180,7 +181,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "List wallet signing configs",
     operationId: "listWalletConfigs",
     description:
-      "Returns active wallet signing configurations for the requested scope plus the resolved default configuration ID.",
+      "Returns active Config-owned wallet signing configurations for the requested scope. When a Connection is effective, defaultConfigId is null rather than a fabricated Config ID.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -201,7 +202,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "List wallets",
     operationId: "listWallets",
     description:
-      "Lists wallets across all active providers for the requested scope. Use provider to filter to a specific provider.",
+      "Lists active wallets under active Config and Connection owners. Omitted or true includeAllProviders includes every eligible owner; false uses target-selection semantics. Provider narrows either mode.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -217,7 +218,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Wallets",
         content: jsonContent(custodyWalletsResponse),
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500]),
     },
   });
 
@@ -228,7 +229,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Aggregate wallet balances",
     operationId: "aggregateWalletBalances",
     description:
-      "Aggregates tracked wallet balances for the requested scope. Defaults to aggregating across all active providers for the organization scope.",
+      "Aggregates tracked balances for active wallets under the same owner-aware inclusion rules as the wallet list, without exposing one aggregate-level owner or runtime-admission value.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -242,7 +243,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Aggregated wallet balances",
         content: jsonContent(custodyWalletAggregateResponse),
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500]),
     },
   });
 
@@ -253,7 +254,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "List switch provider options",
     operationId: "listSwitchProviderOptions",
     description:
-      "Returns provider capability metadata, including active/default status for the requested scope.",
+      "Returns Provider-level switching metadata for the effective Config or Connection target while preserving durable wallet-reuse facts during temporary runtime unavailability.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -274,7 +275,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Get wallet public key",
     operationId: "getWalletPublicKey",
     description:
-      "Returns the resolved wallet public key for transaction construction. Resolution is DB-backed only (no environment fallback).",
+      "Returns the persisted public key for an exact active walletId, or for the effective active custody target when walletId is omitted. Resolution is DB-backed only.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -287,7 +288,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Wallet public key",
         content: jsonContent(custodyPublicKeyResponseSchema),
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 409, 500]),
     },
   });
 
@@ -298,11 +299,12 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Check signer via memo transaction",
     operationId: "checkWalletSigner",
     description:
-      "Submits a memo transaction using the wallet bound to the authenticated API key. This endpoint requires API-key authentication.",
+      "Submits a server-authored memo transaction using the wallet selected by an authenticated API key or dashboard session. The wallet is the only readonly signer, Kora pays the fee, and the request cannot supply memo text.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       body: {
-        required: false,
+        required: true,
         content: jsonContent(signerCheckRequestSchema),
       },
     },
@@ -373,13 +375,17 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
   });
 
   for (const action of ["approve", "reject", "cancel"] as const) {
+    const authorization =
+      action === "cancel"
+        ? "The requester may cancel its own request; otherwise the resolver must be an active member of the assigned approval group, or an organization/API admin when no group is assigned. A user and the API keys they created are treated as the same requester."
+        : "The resolver must differ from the requester, including across a user session and API keys created by that user, and be an active member of the assigned approval group, or an organization/API admin when no group is assigned.";
     registry.registerPath({
       method: "post",
       path: `/v1/wallets/approval-requests/{approvalRequestId}/${action}`,
       tags: ["Wallets"],
       summary: `${action[0].toUpperCase()}${action.slice(1)} wallet approval request`,
       operationId: `${action}WalletApprovalRequest`,
-      description: `${action[0].toUpperCase()}${action.slice(1)}s a pending wallet operation approval request.`,
+      description: `${action[0].toUpperCase()}${action.slice(1)}s a pending wallet operation approval request. ${authorization}`,
       security: [{ apiKeyAuth: [] }],
       request: {
         headers: projectScopeHeaders,
@@ -407,7 +413,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Get wallet by ID",
     operationId: "getWalletById",
     description:
-      "Returns wallet metadata, custody provider, public key, and by default the current SOL balance for a specific wallet ID. Set includeBalance=false for metadata-only reads that must not call Solana RPC or pricing services. This endpoint requires authenticated access.",
+      "Returns active wallet metadata, exact Config or Connection ownership, runtime execution admission, Provider, public key, and by default the current SOL balance. Set includeBalance=false for a metadata-only read.",
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({
@@ -427,7 +433,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Wallet details",
         content: jsonContent(custodyWalletByIdResponse),
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 409, 500]),
     },
   });
 
@@ -437,7 +443,8 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     tags: ["Wallets"],
     summary: "Update wallet",
     operationId: "updateWallet",
-    description: "Updates editable wallet metadata such as the display label.",
+    description:
+      "Updates the display label of an active wallet under its exact Config or Connection owner.",
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({
@@ -454,7 +461,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Wallet updated",
         content: jsonContent(custodyWalletResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 }

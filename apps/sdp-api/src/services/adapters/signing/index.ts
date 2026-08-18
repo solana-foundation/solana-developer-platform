@@ -151,7 +151,7 @@ export async function createSigningAdapterFromConfig(
 ): Promise<SigningPort> {
   switch (record.provider) {
     case "fireblocks":
-      return createFireblocksAdapterFromRecord(record);
+      return createFireblocksAdapterFromRecord(record, env);
     case "privy":
       return createPrivyAdapterFromRecord(record, env);
     case "coinbase_cdp":
@@ -409,7 +409,10 @@ function createUtilaAdapterFromEnv(env: Env): KeychainUtilaAdapter {
   );
 }
 
-function createFireblocksAdapterFromRecord(record: SigningConfigRecord): KeychainFireblocksAdapter {
+function createFireblocksAdapterFromRecord(
+  record: SigningConfigRecord,
+  env: Env
+): KeychainFireblocksAdapter {
   const parsed = parseSigningConfigJson<FireblocksConfigJson>(record, "Fireblocks");
 
   if (parsed.provider && parsed.provider !== "fireblocks") {
@@ -428,7 +431,7 @@ function createFireblocksAdapterFromRecord(record: SigningConfigRecord): Keychai
     apiSecretPem: parsed.apiSecretEncrypted,
     vaultAccountId: parsed.vaultAccountId,
     assetId: parsed.assetId ?? "SOL",
-    apiBaseUrl: parsed.apiBaseUrl,
+    apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
     pollIntervalMs: parsed.pollIntervalMs,
     maxPollAttempts: parsed.maxPollAttempts,
     requestDelayMs: parsed.requestDelayMs,
@@ -458,7 +461,7 @@ function createPrivyAdapterFromRecord(record: SigningConfigRecord, env: Env): Ke
   const config: KeychainPrivyConfig = {
     appId,
     appSecret,
-    apiBaseUrl: parsed.apiBaseUrl,
+    apiBaseUrl: env.PRIVY_API_BASE_URL,
     requestDelayMs: parsed.requestDelayMs,
     defaultWalletId,
   };
@@ -492,7 +495,7 @@ function createCoinbaseAdapterFromRecord(
     apiKeyId,
     apiKeySecret,
     walletSecret,
-    apiBaseUrl: parsed.apiBaseUrl ?? env.COINBASE_CDP_API_BASE_URL,
+    apiBaseUrl: env.COINBASE_CDP_API_BASE_URL,
     requestDelayMs: parsed.requestDelayMs,
     defaultWalletId,
   };
@@ -543,7 +546,7 @@ function createTurnkeyAdapterFromRecord(
     apiPublicKey,
     apiPrivateKey,
     organizationId,
-    apiBaseUrl: parsed.apiBaseUrl ?? env.TURNKEY_API_BASE_URL,
+    apiBaseUrl: env.TURNKEY_API_BASE_URL,
     requestDelayMs,
     defaultWalletId,
     defaultWalletPublicKey,
@@ -579,7 +582,7 @@ function createParaAdapterFromRecord(record: SigningConfigRecord, env: Env): Key
 
   const config: KeychainParaConfig = {
     apiKey,
-    apiBaseUrl: parsed.apiBaseUrl ?? env.PARA_API_BASE_URL,
+    apiBaseUrl: env.PARA_API_BASE_URL,
     requestDelayMs,
     defaultWalletId,
   };
@@ -610,7 +613,7 @@ async function createDfnsAdapterFromRecord(
   }
 
   const config: KeychainDfnsConfig = {
-    client: await createDfnsApiClient(env, { apiBaseUrl: parsed.apiBaseUrl }),
+    client: await createDfnsApiClient(env),
     defaultWalletId,
   };
 
@@ -657,7 +660,7 @@ async function createIbmHavenAdapterFromRecord(
   }
 
   const config: KeychainDfnsConfig = {
-    client: await createIbmHavenApiClient(env, { apiBaseUrl: parsed.apiBaseUrl }),
+    client: await createIbmHavenApiClient(env),
     defaultWalletId,
   };
 
@@ -673,7 +676,6 @@ function createUtilaAdapterFromRecord(record: SigningConfigRecord, env: Env): Ke
 
   return new KeychainUtilaAdapter(
     buildKeychainUtilaConfig(env, {
-      apiBaseUrl: parsed.apiBaseUrl,
       defaultWalletId: record.defaultWalletId,
       missingMessage: "Utila config missing service account credentials or vault ID",
       network: parsed.network,

@@ -1,27 +1,127 @@
+import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
+import type { TokenTransaction } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
+import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
+import { getLogger } from "@/runtime/logger";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
-import { AuditService } from "@/services/audit.service";
-import { createMosaicService } from "@/services/mosaic";
+import { type AuditIntent, AuditService } from "@/services/audit.service";
+import {
+  approvedWalletOperationId,
+  beginApprovedWalletOperationEffect,
+  reserveMintSupplyAtApprovedEffectBoundary,
+} from "@/services/policy/approved-operation-replay";
+import { resolvePolicyCustodyWallet } from "@/services/policy/enforcement.service";
 import { createOrgSigner } from "@/services/solana";
-import { TokenService } from "@/services/token.service";
+import type { TokenService } from "@/services/token.service";
 import { resolveMintOperationAmount } from "@/services/token-operation.service";
+import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
 import type { Env } from "@/types/env";
-import { requireProjectScope } from "../helpers";
+import {
+  createIssuanceMosaicService,
+  getTenantTokenService,
+  requireProjectScope,
+} from "../helpers";
 import { mintSchema } from "../schemas";
 import {
   assertDestinationAllowedByControlList,
   getOnChainAllowlistMutationForMint,
 } from "./access-control";
 import { buildIdempotencyMetadata } from "./idempotency";
-import { enforceIssuanceWalletOperationPolicy } from "./policy";
+import { buildIssuancePolicyCandidate } from "./policy";
+import {
+  persistSettledTransaction,
+  persistSettledTransactionThenOutcome,
+} from "./settled-transaction";
 
 type AppContext = Context<{ Bindings: Env }>;
+
+type MintBody = z.output<typeof mintSchema>;
+
+type MintOperationAmount = ReturnType<typeof resolveMintOperationAmount>;
+
+interface MintPolicyResolved {
+  tokenId: string;
+  auth: ApiKeyContext;
+  tokenService: TokenService;
+  mintAddress: ReturnType<typeof assertValidAddress>;
+  destination: ReturnType<typeof assertValidAddress>;
+  mosaicAmount: MintOperationAmount["mosaicAmount"];
+  amountBaseUnits: MintOperationAmount["amountBaseUnits"];
+  ablListAddress: string | null;
+  signingWalletId: string | null;
+}
+
+interface SettledMintEvidence {
+  signature: string;
+  slot: number;
+  tokenAccount: string;
+}
+
+function parseSettledMintEvidence(metadata: Record<string, unknown>): SettledMintEvidence | null {
+  const slot =
+    typeof metadata.slot === "string" && /^\d+$/.test(metadata.slot)
+      ? Number(metadata.slot)
+      : metadata.slot;
+  if (
+    typeof metadata.signature !== "string" ||
+    metadata.signature.length === 0 ||
+    !Number.isSafeInteger(slot) ||
+    Number(slot) < 0 ||
+    typeof metadata.tokenAccount !== "string" ||
+    metadata.tokenAccount.length === 0
+  ) {
+    return null;
+  }
+  return {
+    signature: metadata.signature,
+    slot: Number(slot),
+    tokenAccount: metadata.tokenAccount,
+  };
+}
+
+async function persistSettledMintTransaction(
+  tokenService: TokenService,
+  transaction: TokenTransaction,
+  evidence: SettledMintEvidence
+): Promise<TokenTransaction> {
+  return persistSettledTransaction(tokenService, transaction, evidence, {
+    tokenAccount: evidence.tokenAccount,
+  });
+}
+
+async function recoverSettledMintReplay(
+  auditService: AuditService,
+  tokenService: TokenService,
+  transaction: TokenTransaction
+): Promise<TokenTransaction> {
+  if (transaction.status !== "pending") return transaction;
+  const journaledEvidence = parseSettledMintEvidence({
+    ...transaction.params,
+    signature: transaction.signature,
+    slot: transaction.slot,
+  });
+  if (journaledEvidence) {
+    return persistSettledMintTransaction(tokenService, transaction, journaledEvidence);
+  }
+  const outcome = await auditService.findCriticalOutcome({
+    organizationId: transaction.organizationId,
+    action: "mint",
+    resourceType: "token_transaction",
+    resourceId: transaction.id,
+  });
+  if (outcome?.status !== "success") return transaction;
+  const evidence = parseSettledMintEvidence(outcome.metadata);
+  return evidence
+    ? persistSettledMintTransaction(tokenService, transaction, evidence)
+    : transaction;
+}
 
 type AllowlistInsertArgs = {
   tokenId: string;
@@ -103,8 +203,9 @@ async function rollbackCreatedAllowlistEntry(
  * Throws when the on-chain write fails and membership cannot be confirmed.
  */
 async function syncDestinationToOnChainAllowlist(opts: {
+  c: AppContext;
   tokenService: TokenService;
-  mosaic: ReturnType<typeof createMosaicService>;
+  mosaic: ReturnType<typeof createIssuanceMosaicService>;
   tokenId: string;
   ablListAddress: string;
   destinationRaw: string;
@@ -151,6 +252,7 @@ async function syncDestinationToOnChainAllowlist(opts: {
   }
 
   try {
+    await beginApprovedWalletOperationEffect(opts.c);
     await opts.mosaic.addToList({
       list: listAddress,
       wallet: opts.destination,
@@ -195,7 +297,7 @@ export const prepareMint = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
@@ -206,10 +308,11 @@ export const prepareMint = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  const { mintAddress: mintAddressRaw, mosaicAmount } = resolveMintOperationAmount(
-    token,
-    parsed.data.mint.amount
-  );
+  const {
+    mintAddress: mintAddressRaw,
+    mosaicAmount,
+    amountBaseUnits,
+  } = resolveMintOperationAmount(token, parsed.data.mint.amount);
 
   const ablListAddress = getOnChainAllowlistMutationForMint(token);
   if (!ablListAddress) {
@@ -238,22 +341,24 @@ export const prepareMint = async (c: AppContext) => {
 
   // Build unsigned transaction using Mosaic
   // Note: amount is decimal (e.g., 100 for 100 tokens), SDK converts to raw
-  const mosaic = createMosaicService(c.env, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
-  // For allowlist tokens with on-chain ABL, sync the destination wallet to
-  // the on-chain list (and DB mirror) before preparing the mint tx so the
-  // SDK's permissionless-thaw can succeed when the client submits.
-  const addedToAllowlist = ablListAddress
-    ? await syncDestinationToOnChainAllowlist({
-        tokenService,
-        mosaic,
-        tokenId,
-        ablListAddress,
-        destinationRaw: parsed.data.mint.destination,
-        destination,
-        addedBy: auth.id,
-      })
-    : false;
+  // Preparation must not mutate on-chain compliance state. A destination that
+  // is not already on the ABL can only be added by the execute route after its
+  // wallet-operation policy and approval gate have run.
+  if (ablListAddress) {
+    const existingStatus = await tokenService.getAllowlistEntryStatusByAddress(
+      tokenId,
+      parsed.data.mint.destination
+    );
+    if (existingStatus === "revoked") {
+      throw new AppError("DESTINATION_REVOKED");
+    }
+    const listAddress = assertValidAddress(ablListAddress, "ablListAddress");
+    if (!(await mosaic.isWalletOnList(listAddress, destination))) {
+      throw new AppError("NOT_ON_TOKEN_ALLOWLIST");
+    }
+  }
 
   const prepared = await mosaic.prepareMintTo({
     mint: mintAddress,
@@ -270,7 +375,12 @@ export const prepareMint = async (c: AppContext) => {
     simulation = await simulateTransaction(rpc, txBytes);
   }
 
-  // Create transaction record with serialized tx
+  // The row goes in before the reservation and without the serialized transaction.
+  // Before: the row is what tells `POST /supply/refresh` a mint is unsettled, so a
+  // reservation without one sits exposed to a concurrent refresh erasing it.
+  // Without: a serialized transaction in the row is readable through the
+  // transactions API and, in the wallet-authority flow, submittable by whoever
+  // reads it — it may not exist anywhere durable until the cap has admitted it.
   const { transaction: tx } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
@@ -280,8 +390,29 @@ export const prepareMint = async (c: AppContext) => {
       amount: parsed.data.mint.amount,
       memo: parsed.data.mint.memo,
     },
-    serializedTx: prepared.serializedTx,
     initiatedByKeyId: auth.id,
+  });
+
+  // Counted against the cap before the transaction leaves SDP, exactly as an
+  // executed mint is counted before submission — a prepared transaction is a mint
+  // the client can settle at any point until its blockhash expires, so handing it
+  // out IS the point of no return. The pre-flight check above read a cached total
+  // in this process, which a concurrent mint or cap change can invalidate; this
+  // conditional UPDATE contends for the token row itself, so it either sees the
+  // new cap and refuses, or lands first and the cap change fails its own
+  // supply-unchanged guard. If the client never submits, the reservation comes
+  // back through `POST /supply/refresh` once the transaction can no longer land.
+  const reservedSupply = await tokenService.reserveMintSupply(tokenId, amountBaseUnits.toString());
+  if (reservedSupply === null) {
+    await tokenService.updateTransaction(tx.id, {
+      status: "failed",
+      error: "Mint amount would exceed maximum supply",
+    });
+    throw new AppError("MAX_SUPPLY_EXCEEDED", "Mint amount would exceed maximum supply");
+  }
+
+  const preparedTx = await tokenService.updateTransaction(tx.id, {
+    serializedTx: prepared.serializedTx,
   });
 
   // Audit log
@@ -295,12 +426,12 @@ export const prepareMint = async (c: AppContext) => {
       destination: parsed.data.mint.destination,
       amount: parsed.data.mint.amount,
       mode: "prepare",
-      addedToAllowlist,
+      addedToAllowlist: false,
     },
   });
 
   return success(c, {
-    transaction: tx,
+    transaction: preparedTx,
     preparedTransaction: {
       serialized: prepared.serializedTx,
       blockhash: prepared.blockhash,
@@ -311,70 +442,144 @@ export const prepareMint = async (c: AppContext) => {
   });
 };
 
-export const executeMint = async (c: AppContext) => {
+async function recordPreSubmissionMintFailure(options: {
+  c: AppContext;
+  auditService: AuditService;
+  auditIntent: AuditIntent;
+  tokenService: TokenService;
+  transactionId: string;
+  error: unknown;
+}): Promise<void> {
+  const errorMessage = options.error instanceof Error ? options.error.message : "Unknown error";
+  await options.auditService.completeCritical(options.c, options.auditIntent, {
+    status: "failure",
+    metadata: { error: errorMessage },
+  });
+
+  // A failed approved replay that never reserved supply did not cross the
+  // mint submission boundary. Release its durable idempotency key so a
+  // recovered execution can retry instead of replaying a stale failure.
+  const removedPreEffectReplay = approvedWalletOperationId(options.c)
+    ? await options.tokenService.deleteUnsubmittedTransaction(options.transactionId)
+    : false;
+  if (!removedPreEffectReplay) {
+    await options.tokenService.updateTransaction(options.transactionId, {
+      status: "failed",
+      error: errorMessage,
+    });
+  }
+}
+
+/**
+ * Parse and resolve an execute-mint request into its wallet-operation policy candidate.
+ *
+ * @param c - Request context.
+ * @returns The candidate or ungoverned marker, validated body, resources, and raw payload.
+ */
+export async function extractMintPolicyCandidate(c: AppContext): Promise<PolicyGateExtraction> {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
-
-  const body = await c.req.json();
-  const parsed = mintSchema.safeParse(body);
-
+  const parsed = mintSchema.safeParse(await c.req.json());
   if (!parsed.success) {
     throw badRequest("Invalid request body", {
       errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
-  const tokenService = new TokenService(getDb(c.env));
+  const input = parsed.data;
+  const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,
     organizationId: orgId,
     projectId,
   });
-
   if (!token) {
     throw notFound("Token");
   }
 
-  const { mintAddress: mintAddressRaw, mosaicAmount } = resolveMintOperationAmount(
-    token,
-    parsed.data.mint.amount
-  );
-
+  const {
+    mintAddress: mintAddressRaw,
+    mosaicAmount,
+    amountBaseUnits,
+  } = resolveMintOperationAmount(token, input.mint.amount);
   const ablListAddress = getOnChainAllowlistMutationForMint(token);
   if (!ablListAddress) {
-    const isOnControlList = await tokenService.isAddressAllowed(
-      tokenId,
-      parsed.data.mint.destination
-    );
+    const isOnControlList = await tokenService.isAddressAllowed(tokenId, input.mint.destination);
     assertDestinationAllowedByControlList({
       token,
-      destination: parsed.data.mint.destination,
+      destination: input.mint.destination,
       isOnControlList,
     });
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(
-    auth,
-    parsed.data.signingWalletId ?? token.signingWalletId,
-    ["tokens:write"]
-  );
+  const requestedSigningWalletId =
+    input.signingWalletId === undefined || input.signingWalletId === null
+      ? token.signingWalletId
+      : input.signingWalletId;
+  const signingWalletId = resolveApiKeySigningWalletId(auth, requestedSigningWalletId, [
+    "tokens:write",
+  ]);
   const mintAddress = assertValidAddress(mintAddressRaw, "mintAddress");
-  const destination = assertValidAddress(parsed.data.mint.destination, "destination");
+  const destination = assertValidAddress(input.mint.destination, "destination");
+  const policyWallet =
+    signingWalletId === null
+      ? null
+      : await resolvePolicyCustodyWallet(c.env, auth, signingWalletId);
 
-  await enforceIssuanceWalletOperationPolicy(c, {
-    auth,
-    token,
-    walletId: signingWalletId,
-    operationType: "issuance_mint_execute",
-    amount: parsed.data.mint.amount,
-    destination: parsed.data.mint.destination,
-    rawPayload: {
-      action: "mint",
-      destination: parsed.data.mint.destination,
-      amount: parsed.data.mint.amount,
-      memo: parsed.data.mint.memo ?? null,
+  return {
+    candidate:
+      signingWalletId === null
+        ? null
+        : buildIssuancePolicyCandidate({
+            auth,
+            token,
+            custodyWalletId: policyWallet === null ? null : policyWallet.id,
+            walletId: signingWalletId,
+            operationType: "issuance_mint_execute",
+            amount: input.mint.amount,
+            destination: input.mint.destination,
+          }),
+    legs: [],
+    body: input,
+    resolved: {
+      tokenId,
+      auth,
+      tokenService,
+      mintAddress,
+      destination,
+      mosaicAmount,
+      amountBaseUnits,
+      ablListAddress,
+      signingWalletId,
     },
-  });
+    rawPayload: {
+      tokenId: token.id,
+      mintAddress: token.mintAddress,
+      action: "mint",
+      destination: input.mint.destination,
+      amount: input.mint.amount,
+      memo: input.mint.memo === undefined ? null : input.mint.memo,
+    },
+  };
+}
+
+export const executeMint = async (c: AppContext) => {
+  const {
+    body: input,
+    resolved: {
+      tokenId,
+      auth,
+      tokenService,
+      mintAddress,
+      destination,
+      mosaicAmount,
+      amountBaseUnits,
+      ablListAddress,
+      signingWalletId,
+    },
+  } = getPolicyGateContext<MintBody, MintPolicyResolved, WalletOperationPolicyEnforcement | null>(
+    c
+  );
 
   // Resolve signer + sync the destination on-chain BEFORE createTransaction.
   // If sync (or its inner revoke check) throws inside the try block below,
@@ -386,14 +591,15 @@ export const executeMint = async (c: AppContext) => {
   // (`isWalletOnList` returns true) since the original call drove the
   // wallet on-chain.
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
-  const mosaic = createMosaicService(c.env, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
   const addedToAllowlist = ablListAddress
     ? await syncDestinationToOnChainAllowlist({
+        c,
         tokenService,
         mosaic,
         tokenId,
         ablListAddress,
-        destinationRaw: parsed.data.mint.destination,
+        destinationRaw: input.mint.destination,
         destination,
         addedBy: auth.id,
       })
@@ -403,7 +609,7 @@ export const executeMint = async (c: AppContext) => {
     tokenId,
     operation: "mint",
     mode: "execute",
-    params: parsed.data,
+    params: input,
   });
 
   // Create transaction record after sync so a sync-time error does not poison
@@ -413,72 +619,143 @@ export const executeMint = async (c: AppContext) => {
     organizationId: auth.organizationId,
     type: "mint",
     params: {
-      destination: parsed.data.mint.destination,
-      amount: parsed.data.mint.amount,
-      memo: parsed.data.mint.memo,
+      destination: input.mint.destination,
+      amount: input.mint.amount,
+      memo: input.mint.memo,
     },
     initiatedByKeyId: auth.id,
     idempotencyKey: idempotencyMetadata.idempotencyKey,
     idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
   });
 
+  const auditService = new AuditService(getDb(c.env));
   if (replayed) {
+    const replayedTransaction = await recoverSettledMintReplay(auditService, tokenService, tx);
     const txTokenAccount =
-      typeof tx.params.tokenAccount === "string" ? tx.params.tokenAccount : undefined;
+      typeof replayedTransaction.params.tokenAccount === "string"
+        ? replayedTransaction.params.tokenAccount
+        : undefined;
     return success(c, {
-      transaction: tx,
-      tokenAccount: txTokenAccount ?? parsed.data.mint.destination,
+      transaction: replayedTransaction,
+      tokenAccount: txTokenAccount === undefined ? input.mint.destination : txTokenAccount,
     });
   }
 
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "mint",
+    resourceType: "token_transaction",
+    resourceId: tx.id,
+    metadata: {
+      tokenId,
+      destination: input.mint.destination,
+      amount: input.mint.amount,
+      mode: "execute",
+    },
+  });
+
+  // Counted against the cap in the last moment before the transaction is submitted,
+  // and only then. The check above ran against a cached total in this process, which
+  // two concurrent mints — or a concurrent cap change — can both pass; this is a
+  // conditional UPDATE on the token row, so the database serializes it and the second
+  // caller sees the first's result. Refusing here aborts the submission, so a cap
+  // that has no room does not spend a transaction.
+  //
+  // Placement is the point: building the transaction, resolving the token account and
+  // signing can all fail without anything reaching the chain, and holding a
+  // reservation through those failures would retire headroom no token ever used, down
+  // to false MAX_SUPPLY_EXCEEDED on the next legitimate mint. Past this line no
+  // failure proves that much, which is why the reservation then stands.
+  let reservedSupply: string | null = null;
   try {
-    const result = await mosaic.mintTo({
-      mint: mintAddress,
-      destination,
-      amount: mosaicAmount,
-      mintAuthority: signer.address,
-      feePayer: signer.address,
+    const result = await mosaic.mintTo(
+      {
+        mint: mintAddress,
+        destination,
+        amount: mosaicAmount,
+        mintAuthority: signer.address,
+        feePayer: signer.address,
+      },
+      async () => {
+        reservedSupply = await reserveMintSupplyAtApprovedEffectBoundary(
+          c,
+          tokenId,
+          amountBaseUnits.toString()
+        );
+      }
+    );
+
+    const settledTokenAccount =
+      result.tokenAccount === undefined ? input.mint.destination : result.tokenAccount;
+    const settledEvidence: SettledMintEvidence = {
+      signature: result.signature,
+      slot: Number(result.slot),
+      tokenAccount: settledTokenAccount,
+    };
+    const settledTransaction = await persistSettledTransactionThenOutcome({
+      tokenService,
+      transaction: tx,
+      evidence: settledEvidence,
+      params: { tokenAccount: settledTokenAccount },
+      persistOutcome: () =>
+        auditService.completeCritical(c, auditIntent, {
+          metadata: {
+            signature: result.signature,
+            slot: result.slot.toString(),
+            tokenAccount: settledTokenAccount,
+            addedToAllowlist,
+          },
+        }),
     });
 
-    // Update transaction with confirmation
-    // Update token supply
-    await tokenService.updateSupply(tokenId, parsed.data.mint.amount, "mint");
-
-    // Audit log
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "mint",
-      resourceType: "token_transaction",
-      resourceId: tx.id,
-      metadata: {
-        tokenId,
-        destination: parsed.data.mint.destination,
-        amount: parsed.data.mint.amount,
-        signature: result.signature,
-        slot: result.slot.toString(),
-        mode: "execute",
-        addedToAllowlist,
-      },
+    // This handler now takes its inputs from the policy gate, whose `auth.projectId` is
+    // nullable; the emit needs the resolved project scope, as every other one does.
+    const { projectId } = requireProjectScope(c);
+    emitTokenOperationCompleted(c, {
+      organizationId: auth.organizationId,
+      projectId,
+      tokenId,
+      operation: "mint",
+      signature: result.signature,
+      slot: result.slot.toString(),
     });
 
     return success(c, {
-      transaction: await tokenService.updateTransaction(tx.id, {
-        status: "confirmed",
-        signature: result.signature,
-        slot: Number(result.slot),
-        params: {
-          ...tx.params,
-          tokenAccount: result.tokenAccount,
-        },
-      }),
-      tokenAccount: result.tokenAccount,
+      transaction: settledTransaction,
+      tokenAccount: settledTokenAccount,
     });
   } catch (error) {
-    // Update transaction as failed
-    await tokenService.updateTransaction(tx.id, {
-      status: "failed",
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
+    if (reservedSupply === null) {
+      await recordPreSubmissionMintFailure({
+        c,
+        auditService,
+        auditIntent,
+        tokenService,
+        transactionId: tx.id,
+        error,
+      });
+    }
+
+    // A reservation exists only if the gate ran, which means the transaction was
+    // submitted — and then it stands. Reaching here does not mean nothing landed: a
+    // timeout during confirmation leaves a transaction the cluster may still accept,
+    // and the audit write and status write above run *after* the mint has settled.
+    // Handing the headroom back on any of those would let a second mint reserve supply
+    // the first already minted, and both would be above the cap with no way to undo
+    // it. `POST /supply/refresh` reconciles from the mint account once the transaction
+    // can no longer land — which is also what returns the headroom if it never did.
+    if (reservedSupply !== null) {
+      getLogger().warn(
+        {
+          event: "mint_supply_reservation_retained",
+          tokenId,
+          transactionId: tx.id,
+          reservedBaseUnits: amountBaseUnits.toString(),
+          recordedSupplyBaseUnits: reservedSupply,
+          error: error instanceof Error ? error.message : "Unknown error",
+        },
+        "Mint failed after it was submitted and its supply reserved; the reservation is kept because the transaction may still land. Refresh the token's supply to reconcile."
+      );
+    }
     throw error;
   }
 };

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { createPostgresCounterpartiesRepository } from "./counterparty.repository.postgres";
 import { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 import type { PaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository";
@@ -18,7 +18,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
   });
 
   afterAll(async () => {
-    await clearTestDatabase(env as Parameters<typeof clearTestDatabase>[0]);
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
   });
 
   beforeEach(async () => {
@@ -54,8 +54,12 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
   });
 
   async function seedCounterpartyAccount() {
-    const counterpartiesRepo = createPostgresCounterpartiesRepository(getDb(env));
-    const counterpartyAccountsRepo = createPostgresCounterpartyAccountsRepository(getDb(env));
+    const piiCipher = env.counterpartyPiiCipher;
+    const counterpartiesRepo = createPostgresCounterpartiesRepository(getDb(env), piiCipher);
+    const counterpartyAccountsRepo = createPostgresCounterpartyAccountsRepository(
+      getDb(env),
+      piiCipher
+    );
     const counterparty = await counterpartiesRepo.createCounterparty({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,

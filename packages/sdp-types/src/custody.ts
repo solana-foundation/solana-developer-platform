@@ -14,14 +14,32 @@ export const CUSTODY_PROVIDERS = [
 export type CustodyProvider = (typeof CUSTODY_PROVIDERS)[number];
 export type ManagedCustodyProvider = Exclude<CustodyProvider, "local">;
 
+/**
+ * Every provider the catalog shows is built and runnable, so the status only
+ * ever answers "what is my next step" — never "does this exist". The two
+ * non-actionable states are deliberately distinct (HOO-772/775 and the
+ * remove-signup-waitlist decision map): `request_access` is organization
+ * access the SDP team grants, `not_configured` is environment availability —
+ * the deployment does not hold that provider's credentials. Presenting one as
+ * the other is how both prior vocabularies went wrong.
+ */
 export const CUSTODY_PROVIDER_DISPLAY_STATUSES = [
   "available",
   "active",
-  "pending",
   "request_access",
-  "unavailable",
+  "not_configured",
 ] as const;
 export type CustodyProviderDisplayStatus = (typeof CUSTODY_PROVIDER_DISPLAY_STATUSES)[number];
+
+/**
+ * Launch classification from the remove-signup-waitlist decision map: `general`
+ * providers are open to every organization and gate only on deployment
+ * credentials; `manual` providers additionally need the SDP team to grant the
+ * organization access.
+ */
+export const CUSTODY_PROVIDER_AVAILABILITY_CLASSES = ["general", "manual"] as const;
+export type CustodyProviderAvailabilityClass =
+  (typeof CUSTODY_PROVIDER_AVAILABILITY_CLASSES)[number];
 
 export const FULL_SIGNING_CUSTODY_PROVIDERS = [
   "fireblocks",
@@ -147,16 +165,21 @@ export type CustodyProviderSetupField = CustodyProviderSetupFieldBase &
   CustodyProviderSetupFieldInput &
   CustodyProviderSetupFieldValueHandling;
 
+/**
+ * How this provider's credentials come to exist: a self-service form, an
+ * external request route, or none — the deployment supplies them via env.
+ */
 export type CustodyProviderStoredCredentialSetup =
   | { mode: "self_service"; fields: readonly CustodyProviderSetupField[] }
   | { mode: "request_access"; requestAccessUrl: string }
-  | { mode: "unavailable" };
+  | { mode: "none" };
 
 interface CustodyProviderCatalogEntryShape {
   id: CustodyProvider;
   label: string;
   descriptionKey: string;
   category: CustodyProviderCategory;
+  availability: CustodyProviderAvailabilityClass;
   visible: boolean;
   technicalCapabilities: CustodyProviderCapabilities;
   useCases: readonly CustodyProviderUseCase[];
@@ -175,16 +198,18 @@ export const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     label: "Local Signer",
     descriptionKey: "DashboardCustody.providerLocalDescription",
     category: "server",
+    availability: "general",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.local,
     useCases: ["issuance", "transfers"],
-    storedCredentialSetup: { mode: "unavailable" },
+    storedCredentialSetup: { mode: "none" },
   },
   privy: {
     id: "privy",
     label: "Privy",
     descriptionKey: "DashboardCustody.providerPrivyDescription",
     category: "server",
+    availability: "general",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.privy,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
@@ -236,14 +261,6 @@ export const CUSTODY_PROVIDER_CATALOG_BY_ID = {
           required: true,
           valueHandling: "secret",
         },
-        {
-          key: "walletLabel",
-          labelKey: "DashboardCustody.providerInitialWalletLabel",
-          helpTextKey: "DashboardCustody.providerInitialWalletLabelDescription",
-          kind: "text",
-          required: false,
-          valueHandling: "plain",
-        },
       ],
     },
   },
@@ -252,9 +269,14 @@ export const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     label: "Fireblocks",
     descriptionKey: "DashboardCustody.providerFireblocksDescription",
     category: "institutional",
+    availability: "manual",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.fireblocks,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
+    // The one provider with an established external request route. The other
+    // manual providers get a CTA when the request-access endpoint with
+    // organization/provider attribution exists (decision-map.md #4) — not a
+    // recycled link whose audience we have not confirmed.
     storedCredentialSetup: {
       mode: "request_access",
       requestAccessUrl: "https://solanafoundation.typeform.com/to/wShiq9SN",
@@ -265,70 +287,77 @@ export const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     label: "Coinbase CDP",
     descriptionKey: "DashboardCustody.providerCoinbaseCdpDescription",
     category: "server",
+    availability: "general",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.coinbase_cdp,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
-    storedCredentialSetup: { mode: "unavailable" },
+    storedCredentialSetup: { mode: "none" },
   },
   para: {
     id: "para",
     label: "Para",
     descriptionKey: "DashboardCustody.providerParaDescription",
     category: "server",
+    availability: "general",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.para,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
-    storedCredentialSetup: { mode: "unavailable" },
+    storedCredentialSetup: { mode: "none" },
   },
   turnkey: {
     id: "turnkey",
     label: "Turnkey",
     descriptionKey: "DashboardCustody.providerTurnkeyDescription",
     category: "server",
+    availability: "general",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.turnkey,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
-    storedCredentialSetup: { mode: "unavailable" },
+    storedCredentialSetup: { mode: "none" },
   },
   dfns: {
     id: "dfns",
     label: "DFNS",
     descriptionKey: "DashboardCustody.providerDfnsDescription",
     category: "institutional",
+    availability: "manual",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.dfns,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
-    storedCredentialSetup: { mode: "unavailable" },
+    storedCredentialSetup: { mode: "none" },
   },
   ibm_haven: {
     id: "ibm_haven",
     label: "IBM Digital Asset Haven",
     descriptionKey: "DashboardCustody.providerIbmHavenDescription",
     category: "institutional",
+    availability: "manual",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.ibm_haven,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
-    storedCredentialSetup: { mode: "unavailable" },
+    storedCredentialSetup: { mode: "none" },
   },
   anchorage: {
     id: "anchorage",
     label: "Anchorage",
     descriptionKey: "DashboardCustody.providerAnchorageDescription",
     category: "institutional",
+    availability: "manual",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.anchorage,
     useCases: ["transfers", "compliance"],
-    storedCredentialSetup: { mode: "unavailable" },
+    storedCredentialSetup: { mode: "none" },
   },
   utila: {
     id: "utila",
     label: "Utila",
     descriptionKey: "DashboardCustody.providerUtilaDescription",
     category: "institutional",
+    availability: "manual",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.utila,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
-    storedCredentialSetup: { mode: "unavailable" },
+    storedCredentialSetup: { mode: "none" },
   },
 } as const satisfies CustodyProviderCatalogByIdShape;
 
@@ -355,14 +384,12 @@ export interface FireblocksCustodyOptions {
 
 export interface PrivyCustodyOptions {
   provider: "privy";
-  apiBaseUrl?: string;
   requestDelayMs?: number;
   walletId?: string;
 }
 
 export interface CoinbaseCdpCustodyOptions {
   provider: "coinbase_cdp";
-  apiBaseUrl?: string;
   network?: SolanaCustodyNetwork;
   walletAddress?: string;
   accountPolicy?: string;
@@ -370,21 +397,18 @@ export interface CoinbaseCdpCustodyOptions {
 
 export interface ParaCustodyOptions {
   provider: "para";
-  apiBaseUrl?: string;
   requestDelayMs?: number;
   walletId?: string;
 }
 
 export interface TurnkeyCustodyOptions {
   provider: "turnkey";
-  apiBaseUrl?: string;
   requestDelayMs?: number;
   privateKeyId?: string;
 }
 
 export interface DfnsCustodyOptions {
   provider: "dfns";
-  apiBaseUrl?: string;
   network?: DfnsCustodyNetwork;
   walletId?: string;
   signingKeyId?: string;
@@ -394,7 +418,6 @@ export interface DfnsCustodyOptions {
 // reuses the Dfns request/signing surface with an IBM-hosted base URL.
 export interface IbmHavenCustodyOptions {
   provider: "ibm_haven";
-  apiBaseUrl?: string;
   network?: DfnsCustodyNetwork;
   walletId?: string;
   signingKeyId?: string;
@@ -402,7 +425,6 @@ export interface IbmHavenCustodyOptions {
 
 export interface AnchorageCustodyOptions {
   provider: "anchorage";
-  apiBaseUrl?: string;
   walletId?: string;
   network?: SolanaCustodyNetwork;
 }
@@ -478,7 +500,13 @@ export interface SwitchFireblocksSigningRequest extends FireblocksCustodyOptions
   projectId?: string;
 }
 
+export interface SwitchConnectionSigningRequest {
+  connectionId: string;
+  provider?: CustodyProvider;
+}
+
 export type SwitchSigningRequest =
+  | SwitchConnectionSigningRequest
   | InitializeLocalSigningRequest
   | SwitchFireblocksSigningRequest
   | InitializePrivySigningRequest
@@ -492,6 +520,7 @@ export type SwitchSigningRequest =
 
 export interface CreateWalletRequest {
   projectId?: string;
+  connectionId?: string;
   provider?: CustodyProvider;
   label?: string;
   purpose?: CustodyWalletPurpose;
@@ -511,7 +540,6 @@ export interface DeleteWalletRequest {
 }
 
 export interface SignerCheckRequest {
-  memo?: string;
   walletId?: string;
 }
 
@@ -526,11 +554,15 @@ export interface CustodyConfigSummary {
   createdAt: string;
 }
 
-export interface CustodyWalletSummary {
+export type CustodyWalletOwner =
+  | { custodyConfigId: string; custodyConnectionId?: never }
+  | { custodyConfigId?: never; custodyConnectionId: string };
+
+export type CustodyWalletSummary = CustodyWalletOwner & {
   id: string;
-  custodyConfigId?: string;
   provider?: CustodyProvider;
   isDefaultProvider?: boolean;
+  isRuntimeExecutionAllowed: boolean;
   walletId: string;
   publicKey: string;
   label: string | null;
@@ -538,7 +570,7 @@ export interface CustodyWalletSummary {
   status: CustodyWalletStatus;
   createdAt: string;
   balances?: CustodyWalletTokenBalance[];
-}
+};
 
 export interface CustodyWalletBalance {
   token: "SOL";
@@ -560,14 +592,13 @@ export interface CustodyWalletTokenBalance {
   usdValue?: number;
 }
 
-export interface CustodyWalletMetadata extends CustodyWalletSummary {
-  custodyConfigId: string;
+export type CustodyWalletMetadata = CustodyWalletSummary & {
   provider: CustodyProvider;
-}
+};
 
-export interface CustodyWalletWithBalance extends CustodyWalletMetadata {
+export type CustodyWalletWithBalance = CustodyWalletMetadata & {
   balance: CustodyWalletBalance;
-}
+};
 
 export interface CustodyConfigWithDefault extends CustodyConfigSummary {
   isDefault: boolean;
@@ -630,6 +661,14 @@ export interface InitializeSigningResponse {
   walletId: string;
 }
 
+export type SwitchSigningResponse =
+  | InitializeSigningResponse
+  | {
+      connectionId: string;
+      publicKey: string;
+      walletId: string;
+    };
+
 export interface SignerCheckResponse {
   walletId: string;
   walletAddress: string;
@@ -638,4 +677,40 @@ export interface SignerCheckResponse {
   signature: string;
   slot: number;
   blockTime: string;
+}
+
+/**
+ * Lifecycle a custody Connection can be in. Counts of these are safe to publish
+ * per provider; the Connections themselves are read from their own resource.
+ */
+export const CUSTODY_CONNECTION_LIFECYCLES = [
+  "pending",
+  "checking",
+  "active",
+  "failed",
+  "deactivated",
+] as const;
+export type CustodyConnectionLifecycle = (typeof CUSTODY_CONNECTION_LIFECYCLES)[number];
+
+/**
+ * Which record actually backs signing for a provider in the current scope.
+ *
+ * `none` covers the case that matters most for setup: a provider the deployment
+ * has environment credentials for is *available to install*, not installed. Only
+ * an explicit initialize produces a Config, and only a checked credential
+ * produces a Connection.
+ */
+export type CustodyEffectiveTargetType = "none" | "config" | "connection";
+
+export interface CustodyProviderSetupStatus {
+  provider: CustodyProvider;
+  /** An active `custody_configs` row exists in this scope — the legacy path. */
+  hasLegacyConfig: boolean;
+  effectiveTargetType: CustodyEffectiveTargetType;
+  /** Bounded per provider: counts only, never a nested Connection inventory. */
+  connectionCounts: Record<CustodyConnectionLifecycle, number>;
+}
+
+export interface CustodySetupStatusResponse {
+  providers: CustodyProviderSetupStatus[];
 }

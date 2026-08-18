@@ -7,6 +7,10 @@ import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
 import { buildIssuanceMetadata, getAssetDetailsErrors } from "../../create/draft-mapping";
 import type { DraftState } from "../../create/issuance-draft-wizard.types";
+import {
+  isMaxSupplyBelowMintedSupply,
+  isSupplyLockedOnChain,
+} from "../token-management-workspace.utils";
 import { updateAssetProfileAction } from "./actions";
 import { areDraftsEquivalent, profileToDraftState } from "./asset-profile-mapping";
 
@@ -57,9 +61,26 @@ export function useAssetProfileForm({
     setDraft((previous) => ({ ...previous, ...patch }));
   };
 
+  // The cap is frozen once the mint authority is revoked; until then it stays
+  // editable, and this decides both the field's mode and whether save sends it.
+  const supplyLocked = isSupplyLockedOnChain(token);
+
   const errors = getAssetDetailsErrors(draft, t);
   if (!draft.name.trim()) {
     errors.name = t("DashboardIssuance.errors.assetNameRequired");
+  }
+  // Unlike the creation wizard, this form knows how much is already minted — a
+  // cap under that could never be satisfied, so catch it before the round-trip.
+  if (
+    !supplyLocked &&
+    !errors.maxSupply &&
+    draft.maxSupply.trim() &&
+    isMaxSupplyBelowMintedSupply(draft.maxSupply, token.totalSupply)
+  ) {
+    errors.maxSupply = t("DashboardIssuance.errors.maxSupplyBelowMinted", {
+      amount: token.totalSupply,
+      symbol: token.symbol,
+    });
   }
   const errorCount = Object.keys(errors).length;
 
@@ -90,9 +111,18 @@ export function useAssetProfileForm({
           description: draft.description.trim() || null,
           uri: draft.metadataUri.trim() || null,
           imageUrl: draft.imageUrl.trim() || null,
-          // Access-control enforcement can only change while undeployed; the
-          // API rejects the field after deploy.
-          ...(isDeployed ? {} : { requiresAllowlist: draft.accessControl === "allowlist" }),
+          // Symbol, decimals, and access-control are baked into the mint at
+          // deploy — editable only while undeployed; the API rejects them after.
+          ...(isDeployed
+            ? {}
+            : {
+                symbol: draft.symbol.trim(),
+                decimals: Number(draft.decimals),
+                requiresAllowlist: draft.accessControl === "allowlist",
+              }),
+          // Blank means uncapped. Withheld once the supply is locked on-chain:
+          // the field is read-only then, and the API rejects it.
+          ...(supplyLocked ? {} : { maxSupply: draft.maxSupply.trim() || null }),
         },
       });
 
@@ -143,17 +173,23 @@ export function useAssetProfileForm({
     save,
     discard,
     assetProfile,
+    supplyLocked,
   };
 }
 
 // The token fields the save action just wrote — applied optimistically so the
 // re-derived baseline matches the saved draft before router.refresh lands.
+// Read-only fields are included too: the form can't have changed them, so they
+// carry the token's own value.
 function draftTokenPatch(draft: DraftState): Partial<Token> {
   return {
     name: draft.name.trim(),
+    symbol: draft.symbol.trim(),
+    decimals: Number(draft.decimals),
     description: draft.description.trim() || null,
     uri: draft.metadataUri.trim() || null,
     imageUrl: draft.imageUrl.trim() || null,
+    maxSupply: draft.maxSupply.trim() || null,
   };
 }
 

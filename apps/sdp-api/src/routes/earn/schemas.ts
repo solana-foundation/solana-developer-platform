@@ -1,0 +1,215 @@
+import { isAddress } from "@sdp/solana/address";
+import {
+  EARN_APY_TYPES,
+  EARN_LIQUIDITY_TERMS,
+  EARN_PORTFOLIO_TOKENS,
+  EARN_STRATEGY_SOURCE_KINDS,
+} from "@sdp/types";
+import { EARN_PROVIDERS } from "@sdp/types/provider-access";
+import { z } from "zod";
+
+export const earnStrategyIdParamsSchema = z.object({
+  strategyId: z.string().min(1),
+});
+
+/** The page window every earn list shares (see handlers/shared.ts pageWindow). */
+const earnPageQueryShape = {
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+};
+
+export const listEarnStrategiesQuerySchema = z.object({
+  ...earnPageQueryShape,
+  sourceKind: z.enum(EARN_STRATEGY_SOURCE_KINDS).optional(),
+  apyType: z.enum(EARN_APY_TYPES).optional(),
+  liquidityTerm: z.enum(EARN_LIQUIDITY_TERMS).optional(),
+});
+
+// ---------------------------------------------------------------------------
+// Portfolio programs. An organization holds N per (environment, provider)
+// since PRO-1670 — each pinned to one vault, addressed by its own id.
+//
+// `provider` appears ONLY on the create body and as an optional list filter.
+// Every `/programs/:programId` route takes it from the stored row instead: the
+// id already identifies the program, and a caller-supplied provider that
+// disagreed with the row would have no sensible answer.
+// ---------------------------------------------------------------------------
+
+/** Writes stay closed to registered provider ids (ADR 0002 drift rule). */
+const earnProviderSchema = z.enum(EARN_PROVIDERS);
+
+/**
+ * Strategy weights are authored in percent with 0.1 granularity (the wire
+ * contract converts to basis points). Validate the step in tenths — a naive
+ * `multipleOf(0.1)` trips on binary-float remainders like 0.3 % 0.1.
+ */
+const allocationPctSchema = z
+  .number()
+  .gt(0)
+  .max(100)
+  .refine((pct) => Math.abs(pct * 10 - Math.round(pct * 10)) < 1e-9, {
+    message: "pct must be a multiple of 0.1",
+  });
+
+const allocationSchema = z.object({
+  yieldSourceId: z.string().min(1),
+  pct: allocationPctSchema,
+});
+
+const allocationGroupSchema = z
+  .array(allocationSchema)
+  .min(1)
+  // Earn V1 is single-vault (PRO-1667): exactly one entry per token group, so
+  // the sum rule below forces it to pct: 100. The weighted multi-entry surface
+  // is dormant, not removed — everything downstream still handles N entries,
+  // so this bound is all the API side of re-enablement touches. Relaxing it
+  // alone does NOT ship weights: the dashboard has no weight authoring or
+  // share display (removed by design) and needs that work back first, or the
+  // API accepts portfolios the dashboard cannot manage.
+  .max(1, { message: "Earn V1 accepts exactly one allocation entry per token group" })
+  .superRefine((entries, ctx) => {
+    if (new Set(entries.map((entry) => entry.yieldSourceId)).size !== entries.length) {
+      ctx.addIssue({ code: "custom", message: "Duplicate yieldSourceId in allocation group" });
+    }
+    // Sum in integer tenths so 33.3 + 33.3 + 33.4 lands exactly on 100.
+    const tenths = entries.reduce((sum, entry) => sum + Math.round(entry.pct * 10), 0);
+    if (tenths !== 1000) {
+      ctx.addIssue({ code: "custom", message: "Allocation weights must sum to exactly 100" });
+    }
+  });
+
+// Keys mirror EARN_PORTFOLIO_TOKENS; tokens omitted keep their current allocation.
+const earnProgramAllocationsSchema = z
+  .object({
+    usdc: allocationGroupSchema.optional(),
+    usdt: allocationGroupSchema.optional(),
+  })
+  .refine((groups) => EARN_PORTFOLIO_TOKENS.some((token) => groups[token] !== undefined), {
+    message: "allocations must include at least one deposit token group",
+  });
+
+export const earnProgramCreateSchema = z.object({
+  provider: earnProviderSchema,
+  label: z.string().trim().min(1).max(120).optional(),
+  allocations: earnProgramAllocationsSchema,
+  /**
+   * Caller-owned idempotency key (UUIDv4). Optional HERE only because the
+   * `Idempotency-Key` header is the other accepted source — the handler requires
+   * EXACTLY one and refuses both neither and both, identically to the withdrawal
+   * path and for the same reason: no precedence rule can tell which of two
+   * sources a caller's retry keeps stable.
+   *
+   * Creation became key-REQUIRED with PRO-1670. While an organization could hold
+   * only one program per (environment, provider), a DB unique constraint caught a
+   * retried create; now that N programs are legal, nothing downstream can tell a
+   * retry from a genuine second program, and an unkeyed retry provisions a
+   * duplicate wallet the customer may then fund.
+   */
+  requestId: z.uuidv4().optional(),
+});
+
+/**
+ * Re-target the program's single vault in place. No `provider` (the row owns
+ * it) and no `label` (write-once by design — the update path has never
+ * forwarded it and there is no repository update path, so accepting one here
+ * would silently no-op).
+ */
+export const earnProgramRetargetSchema = z.object({
+  allocations: earnProgramAllocationsSchema,
+  /**
+   * Optional, unlike create's: re-targeting moves no money and is naturally
+   * idempotent on the provider (the same allocations re-applied are a no-op),
+   * so an absent key costs a duplicate provider mutation rather than a duplicate
+   * wallet. Send one anyway — the provider replays a matching payload and 409s a
+   * reused key with changed allocations, which is what makes a double-submitted
+   * confirm safe. The `Idempotency-Key` header is the other accepted source,
+   * exactly as on create and withdrawals; sending both is a 400.
+   */
+  requestId: z.uuidv4().optional(),
+});
+
+export const earnProgramParamsSchema = z.object({
+  programId: z.string().min(1),
+});
+
+/** The collection list: `provider` narrows it, absent lists every provider. */
+export const earnProgramsListQuerySchema = z.object({
+  provider: earnProviderSchema.optional(),
+  ...earnPageQueryShape,
+});
+
+export const earnProgramDepositsQuerySchema = z.object({
+  cursor: z.string().min(1).optional(),
+});
+
+/** Portfolio flows travel in USD decimal strings, never floats. */
+const usdAmountSchema = z
+  .string()
+  .regex(/^(?!0+(?:\.0+)?$)\d+(?:\.\d{1,6})?$/, "Amount must be a positive USD decimal string");
+
+// Same trim + isAddress convention as payments' solanaAddressSchema: validate
+// here for an actionable 400 instead of a provider-side failure downstream.
+const solanaDestinationSchema = z.preprocess(
+  (value) => (typeof value === "string" ? value.trim() : value),
+  z.string().refine((value) => value.length >= 32 && value.length <= 44 && isAddress(value), {
+    message: "destinationAddress must be a base58 Solana address",
+  })
+);
+
+/**
+ * The preview and the create used to share a schema by `.extend()`, and they
+ * deliberately no longer do.
+ *
+ * PRO-1675 made the preview's `amountUsd` OPTIONAL — asked without one it
+ * answers what the lane can pay right now instead of validating a request. Had
+ * the create kept extending the preview, that single edit would have silently
+ * made the amount optional on the PAYOUT path too: `POST .../withdrawals` would
+ * have accepted a body with no amount. Each schema now DECLARES its own
+ * `amountUsd`, so optionality cannot travel between them at all — the
+ * relationship a reviewer has to verify is gone rather than merely corrected.
+ * Pinned by "keeps amountUsd required even though the preview made it optional"
+ * in `../earn-program.test.ts`.
+ */
+const earnProgramWithdrawalTokenShape = {
+  token: z.enum(EARN_PORTFOLIO_TOKENS),
+} as const;
+
+export const earnProgramWithdrawalPreviewSchema = z.object({
+  /**
+   * Omit to ask the liquidity question — "how much can this lane pay right
+   * now?" — which is what the withdraw modal asks before the user types
+   * anything. Present, it also validates that specific amount is fillable.
+   */
+  amountUsd: usdAmountSchema.optional(),
+  ...earnProgramWithdrawalTokenShape,
+});
+
+export const earnProgramWithdrawalCreateSchema = z.object({
+  /** REQUIRED — a payout with no amount is not a request. See the note above. */
+  amountUsd: usdAmountSchema,
+  ...earnProgramWithdrawalTokenShape,
+  /**
+   * Caller-owned idempotency key (UUIDv4). Optional HERE only because the
+   * `Idempotency-Key` header is the other accepted source — the handler
+   * requires EXACTLY one and refuses both neither and both, since the provider
+   * dedupes a withdrawal on this key alone and no precedence rule can tell
+   * which of two sources a caller's retry keeps stable. Either way the value
+   * is derived against the program wallet before it reaches the provider, so
+   * one organization's key can never collide with another's on the shared
+   * account.
+   */
+  requestId: z.uuidv4().optional(),
+  destinationAddress: solanaDestinationSchema,
+});
+
+export const earnProgramWithdrawalParamsSchema = earnProgramParamsSchema.extend({
+  withdrawalRef: z.string().min(1),
+});
+
+/**
+ * Withdrawal-ledger list (DB read). Scoped by the path program alone — the
+ * provider comes from that row, so there is no query param left to registry-gate
+ * and this route keeps taking no provider gate whatsoever (ADR 0002: the audit
+ * trail outlives credential removal).
+ */
+export const earnProgramWithdrawalsListQuerySchema = z.object(earnPageQueryShape);

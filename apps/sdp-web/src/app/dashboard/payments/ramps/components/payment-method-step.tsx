@@ -23,18 +23,41 @@ type MethodOption = {
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
+/**
+ * Resolves the visible label for a payments action method.
+ *
+ * @param t - Translator resolved from the i18n provider.
+ * @param mode - Whether the action sends or receives funds.
+ * @param method - The selected payment method.
+ * @returns The localized payment method label.
+ */
+export function getPaymentMethodLabel(
+  t: Translate,
+  mode: "send" | "receive",
+  method: PaymentMethod
+): string {
+  if (mode === "send") {
+    return method === "onchain"
+      ? t("DashboardPayments.paymentMethods.onchainTransfer")
+      : t("DashboardPayments.paymentMethods.payWithFiat");
+  }
+  return method === "onchain"
+    ? t("DashboardPayments.paymentMethods.onchainDeposit")
+    : t("DashboardPayments.paymentMethods.depositWithFiat");
+}
+
 function buildOptions(t: Translate, mode: "send" | "receive"): MethodOption[] {
   if (mode === "send") {
     return [
       {
         id: "onchain",
-        title: t("DashboardPayments.paymentMethods.onchainTransfer"),
+        title: getPaymentMethodLabel(t, mode, "onchain"),
         description: t("DashboardPayments.paymentMethods.onchainTransferDescription"),
         icon: <ArrowLeftRight className="size-5" />,
       },
       {
         id: "ramp",
-        title: t("DashboardPayments.paymentMethods.payWithFiat"),
+        title: getPaymentMethodLabel(t, mode, "ramp"),
         description: t("DashboardPayments.paymentMethods.payWithFiatDescription"),
         icon: <Banknote className="size-5" />,
       },
@@ -43,13 +66,13 @@ function buildOptions(t: Translate, mode: "send" | "receive"): MethodOption[] {
   return [
     {
       id: "onchain",
-      title: t("DashboardPayments.paymentMethods.onchainDeposit"),
+      title: getPaymentMethodLabel(t, mode, "onchain"),
       description: t("DashboardPayments.paymentMethods.onchainDepositDescription"),
       icon: <ArrowLeftRight className="size-5" />,
     },
     {
       id: "ramp",
-      title: t("DashboardPayments.paymentMethods.depositWithFiat"),
+      title: getPaymentMethodLabel(t, mode, "ramp"),
       description: t("DashboardPayments.paymentMethods.depositWithFiatDescription"),
       icon: <Banknote className="size-5" />,
     },
@@ -68,7 +91,7 @@ export function PaymentMethodStep({ mode, value, onChange }: PaymentMethodStepPr
           className={cn(
             "flex w-full items-center gap-3 rounded-2xl bg-fill-subtle px-4 py-4 text-left outline outline-2 -outline-offset-2 transition-colors focus-visible:ring-2 focus-visible:ring-primary/50",
             value === option.id
-              ? "outline-border-strong ring-2 ring-tertiary ring-offset-2 ring-offset-white"
+              ? "outline-border-strong ring-2 ring-tertiary ring-offset-2 ring-offset-surface-raised"
               : "outline-transparent hover:bg-fill-strong"
           )}
         >

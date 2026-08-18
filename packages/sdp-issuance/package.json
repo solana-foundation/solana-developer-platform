@@ -34,6 +34,11 @@
       "import": "./src/capabilities/index.ts",
       "default": "./src/capabilities/index.ts"
     },
+    "./workflows": {
+      "types": "./src/workflows/index.ts",
+      "import": "./src/workflows/index.ts",
+      "default": "./src/workflows/index.ts"
+    },
     "./templates": {
       "types": "./src/templates/index.ts",
       "import": "./src/templates/index.ts",
@@ -61,10 +66,10 @@
     "@solana/kit": "catalog:",
     "@solana/mosaic-sdk": "catalog:",
     "@solana/signers": "catalog:",
-    "@solana/token-acl-gate-sdk": "0.2.0"
+    "@solana/token-acl-gate-sdk": "0.3.0"
   },
   "devDependencies": {
-    "tsx": "4.22.4",
-    "typescript": "^6.0.3"
+    "tsx": "4.23.5",
+    "typescript": "6.0.3"
   }
 }

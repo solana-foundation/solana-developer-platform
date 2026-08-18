@@ -45,6 +45,6 @@
     "@solana/signers": "catalog:"
   },
   "devDependencies": {
-    "tsx": "4.22.4"
+    "tsx": "4.23.5"
   }
 }

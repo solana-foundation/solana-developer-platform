@@ -1,6 +1,8 @@
 /** Environment variables consumed by the Node API runtime. */
 
+import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
+import type { PolicyGateContext } from "@/middleware/policy-gate";
 import type { KVStoreSet } from "@/runtime/kv";
 import type { ApiKeyEnvironment, CachedSession, OrganizationRpcProvider, Permission } from "@sdp/types";
 
@@ -17,9 +19,10 @@ export interface Env {
   // Environment variables
   ENVIRONMENT: "development" | "production";
   API_VERSION: string;
-  // Injected automatically by Cloud Run services. Local processes and jobs omit them.
+  // Injected automatically by Cloud Run services and jobs.
   K_SERVICE?: string;
   K_REVISION?: string;
+  CLOUD_RUN_JOB?: string;
 
   // Public-facing origin of this API (e.g. "https://api.example.com"). When set,
   // it overrides the request-derived origin used to build the SDP-hosted token
@@ -44,13 +47,22 @@ export interface Env {
   GCP_SECRET_MANAGER_PROJECT_ID?: string;
   GCP_SECRET_MANAGER_SECRET_PREFIX?: string;
   GCP_SECRET_MANAGER_API_BASE_URL?: string;
+  PRIVY_BYOK_ENABLED?: string;
+  SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED?: string;
 
   // Application secrets
   API_KEY_PEPPER?: string;
+  CREDENTIAL_FINGERPRINT_PEPPER?: string;
   CUSTODY_ENCRYPTION_KEY?: string; // For encrypting org private keys in DB
   CUSTODY_KMS_KEY_NAME?: string;
   CUSTODY_KMS_API_BASE_URL?: string;
   CUSTODY_KMS_METADATA_TOKEN_URL?: string;
+  SPC_CREDENTIAL_ENCRYPTION_KEY?: string; // For encrypting invited SPC user passwords
+  SPC_CREDENTIAL_KMS_KEY_NAME?: string; // Optional Cloud KMS key for SPC credential envelopes
+  COUNTERPARTY_PII_KMS_KEY_NAME?: string;
+  COUNTERPARTY_PII_KMS_API_BASE_URL?: string;
+  COUNTERPARTY_PII_KMS_METADATA_TOKEN_URL?: string;
+  COUNTERPARTY_PII_ENCRYPTION_KEY?: string;
   SENTRY_DSN?: string;
   SENTRY_TRACES_SAMPLE_RATE?: string;
 
@@ -62,7 +74,6 @@ export interface Env {
   // Clerk configuration
   CLERK_ISSUER?: string;
   CLERK_JWKS_URL?: string;
-  CLERK_AUDIENCE?: string;
   CLERK_SECRET_KEY?: string;
   CLERK_API_URL?: string;
   CLERK_WEBHOOK_SECRET?: string;
@@ -73,17 +84,34 @@ export interface Env {
 
   // Solana configuration
   SOLANA_RPC_URL?: string;
+  /**
+   * Optional PER-CLUSTER overrides for the Earn execution path.
+   *
+   * One API process serves both clusters — sandbox projects are devnet,
+   * production projects are mainnet-beta — so a single `SOLANA_RPC_URL` cannot
+   * be correct for both. Unset falls back to `SOLANA_RPC_URL`, which must then
+   * prove its chain by genesis hash before anything is built against it
+   * (`assertClusterEndpoint`), so a single-cluster deployment keeps working and
+   * a mismatch is a refusal rather than a confidently wrong transaction.
+   */
+  SOLANA_DEVNET_RPC_URL?: string;
+  SOLANA_MAINNET_RPC_URL?: string;
   SOLANA_RPC_DEFAULT_PROVIDER?: OrganizationRpcProvider;
   SOLANA_RPC_TRITON_URL?: string;
   SOLANA_RPC_TRITON_API_KEY?: string;
   SOLANA_RPC_HELIUS_URL?: string;
   SOLANA_RPC_HELIUS_API_KEY?: string;
+  /** Defaults to Jupiter's rate-limited lite endpoint; set both to use the keyed tier. */
+  JUPITER_PRICE_API_URL?: string;
+  JUPITER_PRICE_API_KEY?: string;
   SOLANA_RPC_ALCHEMY_URL?: string;
   SOLANA_RPC_ALCHEMY_API_KEY?: string;
   SOLANA_RPC_QUICKNODE_URL?: string;
   SOLANA_RPC_QUICKNODE_API_KEY?: string;
   SOLANA_RPC_VALIDATIONCLOUD_URL?: string;
   SOLANA_RPC_VALIDATIONCLOUD_API_KEY?: string;
+  SOLANA_RPC_NODIT_URL?: string;
+  SOLANA_RPC_NODIT_API_KEY?: string;
   SOLANA_NETWORK?: "devnet" | "mainnet-beta";
   CUSTODY_PRIVATE_KEY?: string;
   SOLANA_MOCK?: string;
@@ -174,7 +202,9 @@ export interface Env {
   FEE_PAYMENT_PROVIDER?: "kora" | "native";
   KORA_RPC_URL?: string;
   KORA_API_KEY?: string;
+  KORA_CLOUD_RUN_AUDIENCE?: string;
   KORA_TIMEOUT_MS?: string;
+  KORA_PER_TRANSACTION_BUDGET_LAMPORTS?: string;
   KORA_SURFPOOL_SHIM?: string;
   KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS?: string;
 
@@ -187,8 +217,11 @@ export interface Env {
   PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE?: string;
   PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES?: string;
 
-  // Asset Profiles production opt-in; development is always enabled.
-  ASSET_PROFILES_ENABLED?: string;
+  // Self-hosted Asset Profiles production opt-in; managed rollout uses Vercel.
+  SDP_FLAG_ASSET_PROFILES?: string;
+
+  // Private Channels (SPC) feature gate — API routes + deposit/withdrawal cron.
+  PRIVATE_CHANNELS_ENABLED?: string;
 
   // Compliance providers
   RANGE_API_KEY?: string;
@@ -255,6 +288,21 @@ export interface Env {
   STRIPE_SECRET_KEY?: string;
   STRIPE_PUBLISHABLE_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
+
+  // Markets module gate (parent) and its Earn sub-module gate (child). Earn
+  // needs both; clearing MARKETS_ENABLED dark-launches the whole module.
+  MARKETS_ENABLED?: string;
+  EARN_ENABLED?: string;
+
+  // Earn vault-infra provider configuration
+  VEDA_API_KEY?: string;
+  VEDA_SANDBOX_API_KEY?: string;
+  UPSHIFT_API_KEY?: string;
+  UPSHIFT_SANDBOX_API_KEY?: string;
+  PERENA_API_KEY?: string;
+  PERENA_SANDBOX_API_KEY?: string;
+  GROUND_API_KEY?: string;
+  GROUND_SANDBOX_API_KEY?: string;
 }
 
 // Extend Hono's context with our bindings
@@ -262,6 +310,11 @@ declare module "hono" {
   interface ContextVariableMap {
     // API key auth context set by middleware
     projectId?: string;
+    projectEnvironment?: ApiKeyEnvironment;
+    approvedWalletOperationId?: string;
+    approvedWalletOperationAttemptId?: string;
+    // Set by policyGate middleware for gated routes
+    policyGate?: PolicyGateContext<unknown, unknown, WalletOperationPolicyEnforcement | null>;
     apiKey?: {
       id: string;
       organizationId: string;

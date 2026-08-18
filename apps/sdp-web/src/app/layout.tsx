@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Archivo_Narrow } from "next/font/google";
 import { headers } from "next/headers";
 import Script from "next/script";
 import { AppToaster } from "@/components/app-toaster";
@@ -9,11 +10,46 @@ import { getI18nRequest, getTranslations } from "@/i18n/server";
 import { shouldLoadClerkForPath } from "@/lib/auth-entry";
 import "./globals.css";
 
+// The issuance header's exchange-ticker face — the one deliberate exception to
+// the Inter-only rule, used for the token symbol and nothing else. Downloaded by
+// next/font at build time and served from our own origin, so there is no request
+// to Google at runtime. Pared to exactly what the ticker renders: latin subset,
+// weight 600, upright — every extra weight or style is another file.
+const archivoNarrow = Archivo_Narrow({
+  subsets: ["latin"],
+  weight: ["600"],
+  style: ["normal"],
+  variable: "--font-ticker-archivo",
+  display: "swap",
+});
+
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations();
+  const title = t("Metadata.title");
+  const description = t("Metadata.description");
   return {
-    title: t("Metadata.title"),
-    description: t("Metadata.description"),
+    // Resolves the og/twitter image file conventions to absolute URLs, which
+    // link unfurlers require. Vercel previews inherit the canonical origin on
+    // purpose: preview links unfurl with production media instead of leaking
+    // preview hostnames into caches.
+    metadataBase: new URL(process.env.NEXT_PUBLIC_SDP_WEB_URL ?? "https://platform.solana.com"),
+    title: {
+      default: title,
+      template: `%s · ${title}`,
+    },
+    description,
+    applicationName: title,
+    openGraph: {
+      type: "website",
+      siteName: title,
+      title,
+      description,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+    },
   };
 }
 
@@ -32,7 +68,7 @@ export default async function RootLayout({
   );
 
   return (
-    <html lang={locale} suppressHydrationWarning>
+    <html lang={locale} className={archivoNarrow.variable} suppressHydrationWarning>
       <head>
         {process.env.NODE_ENV === "development" && (
           <Script

@@ -1,7 +1,7 @@
 {
   "Metadata": {
     "title": "Solana Developer Platform",
-    "description": "SDP dashboard"
+    "description": "Build any financial product on Solana without worrying about the infrastructure. SDP provides the APIs for custody, payments, issuance, and policy controls behind stablecoins, cross-border payments, and tokenized assets."
   },
   "Home": {
     "solanaLogo": "Solana",
@@ -25,6 +25,9 @@
   },
   "Error": {
     "tryAgain": "Try again",
-    "reportIssue": "Report this issue"
+    "reportIssue": "Report this issue",
+    "viewTitle": "This view couldn't load",
+    "viewDescription": "Something went wrong while loading this page. The rest of the dashboard still works, so you can retry or move on.",
+    "reference": "Reference {digest}"
   }
 }

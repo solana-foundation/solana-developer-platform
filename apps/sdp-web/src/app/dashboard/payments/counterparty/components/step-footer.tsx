@@ -1,9 +1,9 @@
 "use client";
 
 import { ArrowLeftIcon, ArrowRightIcon, Loader2Icon } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
-import { useDashboardRouter } from "@/lib/use-dashboard-router";
 import { useCounterpartyCreate } from "../counterparty-create-context";
 
 interface StepFooterProps {
@@ -12,7 +12,7 @@ interface StepFooterProps {
 
 export function StepFooter({ onCancel }: StepFooterProps) {
   const t = useTranslations();
-  const router = useDashboardRouter();
+  const router = useRouter();
   const { step, currentStepId, goNext, goBack, submit, submitting } = useCounterpartyCreate();
 
   const isFirst = step === 0;

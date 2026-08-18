@@ -2,12 +2,16 @@ import { auth } from "@clerk/nextjs/server";
 import type { OrganizationRpcProvider } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { assetProfiles } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { isDeveloperControlsEnabled } from "@/lib/developer-controls";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createOrgSdpApiClient } from "@/lib/sdp-api";
+import { AppearanceSection } from "./appearance-section";
+import { MembersSection } from "./members-section";
 import { OrganizationRpcSettingsForm } from "./organization-rpc-settings-form";
 
 type OrganizationSettings = {
@@ -32,8 +36,25 @@ type ProjectListResponse = {
   }>;
 };
 
-export default async function SettingsPage() {
-  const [t, { userId, orgId, orgRole }] = await Promise.all([getTranslations(), auth()]);
+/** Anything that is not a positive integer falls back to the first page. */
+function resolveMembersPage(value: string | string[] | undefined): number {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const parsed = Number.parseInt(raw ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const membersPage = resolveMembersPage((await searchParams).membersPage);
+
+  const [t, { userId, orgId, orgRole }, assetProfilesEnabled] = await Promise.all([
+    getTranslations(),
+    auth(),
+    assetProfiles(),
+  ]);
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -155,6 +176,28 @@ export default async function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Same gate as the settings form above: canManageOrgSettings resolves to
+          org:write, which is what inviting a member requires. */}
+      {dashboardAccess.capabilities.canManageOrgSettings ? (
+        <MembersSection page={membersPage} />
+      ) : null}
+
+      {/* Not permission-gated: the colour theme is a per-device personal preference,
+          not organization state, so every role gets to set it. */}
+      {/* The asset-header controls tune a surface that is itself still behind the
+          asset-profiles flag, and they are ours to tune rather than a customer
+          setting — so they only appear where both hold. */}
+      <AppearanceSection
+        showAssetHeaderControls={
+          assetProfilesEnabled &&
+          isDeveloperControlsEnabled({
+            nodeEnvironment: process.env.NODE_ENV,
+            sdpEnvironment: process.env.NEXT_PUBLIC_SDP_ENVIRONMENT,
+            vercelEnvironment: process.env.VERCEL_ENV,
+          })
+        }
+      />
     </div>
   );
 }

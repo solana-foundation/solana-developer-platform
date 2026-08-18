@@ -1,16 +1,35 @@
 "use client";
 
-import type {
-  ApprovalRequestStatus,
-  WalletApprovalRequestSummary,
-  WalletOperationFamily,
+import {
+  type ApprovalRequestStatus,
+  type WalletApprovalRequestSummary,
+  type WalletOperationFamily,
+  WELL_KNOWN_TOKENS,
 } from "@sdp/types";
-import { ChevronLeft, ChevronRight, RotateCw } from "lucide-react";
+import {
+  ArrowLeftRightIcon,
+  CalendarIcon,
+  ChevronRight,
+  CircleDotIcon,
+  InboxIcon,
+  KeyRoundIcon,
+  RotateCw,
+  WalletIcon,
+} from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { DashboardNavigationLink as Link } from "@/components/dashboard-navigation-link";
+import {
+  DashboardWorkspaceCard,
+  DashboardWorkspaceOverviewPanel,
+} from "@/components/dashboard-workspace-panel";
+import { TokenMark } from "@/components/token-mark";
 import { Button } from "@/components/ui/button";
+import { DateRangePicker, formatDateValue } from "@/components/ui/date-picker";
+import { ListEmptyState } from "@/components/ui/list-empty-state";
+import { PaginatedFooter, usePaginationUrlState } from "@/components/ui/paginated-footer";
+import { Select, SelectItem } from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -19,7 +38,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useDashboardTab } from "@/lib/dashboard-url-state";
+import { cn } from "@/lib/utils";
+import { formatDisplayAmount, resolveTokenByMint } from "../payments/payments-overview.utils";
+import type { PaymentsIssuedTokenSymbol } from "../payments/payments-page.data";
 import { ApprovalStatusBadge } from "./approval-request-shared";
 import {
   APPROVAL_HISTORY_STATUSES,
@@ -27,7 +51,6 @@ import {
   APPROVAL_OPERATION_FAMILIES,
   type ApprovalInboxFilters,
   type ApprovalInboxTab,
-  approvalAmount,
   approvalApiKeyLabel,
   approvalReason,
   approvalWalletLabel,
@@ -40,8 +63,7 @@ import {
   shortApprovalIdentifier,
 } from "./approval-requests.data";
 
-const filterControlClassName =
-  "h-10 w-full rounded-md border border-border-default bg-surface-raised px-3 text-sm text-primary outline-none transition-[border-color,box-shadow] duration-150 focus:border-primary focus:ring-2 focus:ring-primary/10";
+const AUTO_REFRESH_INTERVAL_MS = 5000;
 
 function approvalRequestHref(approvalRequestId: string): string {
   return `/dashboard/approvals/${encodeURIComponent(approvalRequestId)}`;
@@ -50,8 +72,9 @@ function approvalRequestHref(approvalRequestId: string): string {
 interface ApprovalInboxProps {
   initialRequests: WalletApprovalRequestSummary[];
   apiKeyNames: Record<string, string>;
+  /** The org's issued tokens keyed by mint, so SDP-minted assets resolve to a symbol. */
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
   canDecide: boolean;
-  initialTab: ApprovalInboxTab;
   renderedAt: number;
   loadError?: boolean;
 }
@@ -59,21 +82,28 @@ interface ApprovalInboxProps {
 export function ApprovalInbox({
   initialRequests,
   apiKeyNames,
+  issuedTokensByMint,
   canDecide,
-  initialTab,
   renderedAt,
   loadError = false,
 }: ApprovalInboxProps) {
   const t = useTranslations();
   const locale = useLocale();
   const reduceMotion = useReducedMotion();
+  const tab: ApprovalInboxTab = useDashboardTab() === "history" ? "history" : "pending";
+  const { page, pageSize, setPage, setPageSize } = usePaginationUrlState(APPROVAL_INBOX_PAGE_SIZE);
   const [requests, setRequests] = useState(initialRequests);
-  const [tab, setTab] = useState<ApprovalInboxTab>(initialTab);
   const [filters, setFilters] = useState<ApprovalInboxFilters>(EMPTY_APPROVAL_FILTERS);
-  const [page, setPage] = useState(1);
   const [isReloading, setReloading] = useState(false);
+  const [spinning, setSpinning] = useState(false);
+  if (isReloading && !spinning) setSpinning(true);
   const [hasLoadError, setLoadError] = useState(loadError);
   const [relativeTimeBase, setRelativeTimeBase] = useState(renderedAt);
+  const [previousTab, setPreviousTab] = useState(tab);
+  if (previousTab !== tab) {
+    setPreviousTab(tab);
+    setFilters(EMPTY_APPROVAL_FILTERS);
+  }
 
   const pendingCount = useMemo(
     () => requests.filter((request) => request.status === "pending").length,
@@ -99,15 +129,14 @@ export function ApprovalInbox({
     () => filterApprovalRequests(requests, tab, filters),
     [filters, requests, tab]
   );
-  const pageCount = Math.max(1, Math.ceil(filteredRequests.length / APPROVAL_INBOX_PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(filteredRequests.length / pageSize));
   const currentPage = Math.min(page, pageCount);
   const visibleRequests = filteredRequests.slice(
-    (currentPage - 1) * APPROVAL_INBOX_PAGE_SIZE,
-    currentPage * APPROVAL_INBOX_PAGE_SIZE
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
   );
-  const rangeStart =
-    filteredRequests.length === 0 ? 0 : (currentPage - 1) * APPROVAL_INBOX_PAGE_SIZE + 1;
-  const rangeEnd = Math.min(currentPage * APPROVAL_INBOX_PAGE_SIZE, filteredRequests.length);
+  const rangeStart = filteredRequests.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const rangeEnd = Math.min(currentPage * pageSize, filteredRequests.length);
 
   function updateFilter<TKey extends keyof ApprovalInboxFilters>(
     key: TKey,
@@ -117,13 +146,19 @@ export function ApprovalInbox({
     setPage(1);
   }
 
-  function selectTab(nextTab: ApprovalInboxTab) {
-    setTab(nextTab);
-    setFilters(EMPTY_APPROVAL_FILTERS);
+  function patchFilters(patch: Partial<ApprovalInboxFilters>) {
+    setFilters((current) => ({ ...current, ...patch }));
     setPage(1);
   }
 
-  async function reload() {
+  /**
+   * Refetches pending and recent approval requests and merges them into state.
+   *
+   * @param options - `silent` suppresses the failure toast for background auto-refreshes;
+   * manual reloads pass `silent: false` to surface the error.
+   */
+  async function reload(options: { silent: boolean }) {
+    if (isReloading) return;
     setReloading(true);
     try {
       const [pendingResponse, recentResponse] = await Promise.all([
@@ -149,13 +184,24 @@ export function ApprovalInbox({
       window.dispatchEvent(new Event("sdp:approval-requests-updated"));
     } catch {
       setLoadError(true);
-      if (requests.length > 0) {
+      if (!options.silent && requests.length > 0) {
         toast.error(t("DashboardApprovals.refreshFailed"), { position: "bottom-right" });
       }
     } finally {
       setReloading(false);
     }
   }
+
+  const reloadRef = useRef(reload);
+  useEffect(() => {
+    reloadRef.current = reload;
+  });
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      void reloadRef.current({ silent: true });
+    }, AUTO_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   if (hasLoadError && requests.length === 0) {
     return (
@@ -170,9 +216,16 @@ export function ApprovalInbox({
           <Button
             className="mt-5"
             variant="outline"
-            onClick={reload}
+            onClick={() => reload({ silent: false })}
             disabled={isReloading}
-            iconLeft={<RotateCw className={isReloading ? "size-4 animate-spin" : "size-4"} />}
+            iconLeft={
+              <RotateCw
+                className={cn("size-4", spinning && "animate-spin")}
+                onAnimationIteration={() => {
+                  if (!isReloading) setSpinning(false);
+                }}
+              />
+            }
           >
             {t("DashboardApprovals.reload")}
           </Button>
@@ -194,53 +247,18 @@ export function ApprovalInbox({
       : t("DashboardApprovals.emptyHistoryDescription");
 
   return (
-    <div className="h-full overflow-y-auto px-3 pb-8 outline-none md:px-6">
-      <div className="mx-auto w-full max-w-[1500px] py-6">
-        <header className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-medium text-primary sm:text-3xl">
-              {t("DashboardApprovals.title")}
-            </h1>
-            <p className="mt-1 text-sm text-secondary">{t("DashboardApprovals.description")}</p>
-          </div>
-          <div className="flex items-center gap-3 text-sm text-secondary">
-            <span>{t("DashboardApprovals.pendingCount", { count: pendingCount })}</span>
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="ghost"
-              onClick={reload}
-              disabled={isReloading}
-              aria-label={t("DashboardApprovals.reload")}
-              title={t("DashboardApprovals.reload")}
-            >
-              <RotateCw className={isReloading ? "size-4 animate-spin" : "size-4"} />
-            </Button>
-          </div>
-        </header>
-
+    <DashboardWorkspaceOverviewPanel className="flex flex-col">
+      <DashboardWorkspaceCard>
         {!canDecide ? (
-          <p className="mt-4 border-y border-border-default bg-fill-subtle px-3 py-2 text-sm text-secondary">
+          <p className="border-b border-border-default bg-fill-subtle px-4 py-2 text-sm text-secondary">
             {t("DashboardApprovals.viewOnly")}
           </p>
         ) : null}
 
-        <div
-          className="mt-6 flex h-10 items-end gap-8 border-b border-border-default"
-          role="tablist"
-          aria-label={t("DashboardApprovals.title")}
-        >
-          <TabButton active={tab === "pending"} onClick={() => selectTab("pending")}>
-            {t("DashboardApprovals.pendingTab")}
-          </TabButton>
-          <TabButton active={tab === "history"} onClick={() => selectTab("history")}>
-            {t("DashboardApprovals.historyTab")}
-          </TabButton>
-        </div>
-
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
             key={tab}
+            className="flex min-w-0 flex-1 flex-col"
             initial={reduceMotion ? false : { opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={reduceMotion ? undefined : { opacity: 0, y: -3 }}
@@ -252,21 +270,20 @@ export function ApprovalInbox({
               walletOptions={walletOptions}
               apiKeyOptions={apiKeyOptions}
               updateFilter={updateFilter}
-              clear={() => {
-                setFilters(EMPTY_APPROVAL_FILTERS);
-                setPage(1);
-              }}
+              patchFilters={patchFilters}
             />
 
             {visibleRequests.length === 0 ? (
-              <div className="border-y border-border-default py-16 text-center">
-                <p className="text-sm font-medium text-primary">{emptyTitle}</p>
-                <p className="mt-1 text-sm text-secondary">{emptyDescription}</p>
-              </div>
+              <ListEmptyState
+                icon={<InboxIcon className="size-5" />}
+                message={emptyTitle}
+                description={emptyDescription}
+              />
             ) : (
               <ApprovalRequestRows
                 requests={visibleRequests}
                 apiKeyNames={apiKeyNames}
+                issuedTokensByMint={issuedTokensByMint}
                 locale={locale}
                 relativeTimeBase={relativeTimeBase}
               />
@@ -274,70 +291,48 @@ export function ApprovalInbox({
           </motion.div>
         </AnimatePresence>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xs text-secondary">
-            {t("DashboardApprovals.range", {
+        {filteredRequests.length === 0 ? null : (
+          <PaginatedFooter
+            className="mt-auto"
+            page={currentPage}
+            pageCount={pageCount}
+            onPageChange={setPage}
+            summary={t("DashboardApprovals.range", {
               from: rangeStart,
               to: rangeEnd,
               total: filteredRequests.length,
             })}
-          </p>
-          {pageCount > 1 ? (
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                disabled={currentPage <= 1}
-                onClick={() => setPage((current) => Math.max(1, current - 1))}
-                aria-label={t("DashboardApprovals.previousPage")}
-              >
-                <ChevronLeft className="size-4" />
-              </Button>
-              <span className="min-w-20 text-center text-xs text-secondary">
-                {t("DashboardApprovals.pageOf", { page: currentPage, pageCount })}
-              </span>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                disabled={currentPage >= pageCount}
-                onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
-                aria-label={t("DashboardApprovals.nextPage")}
-              >
-                <ChevronRight className="size-4" />
-              </Button>
+            pageSizeControl={{ pageSize, onPageSizeChange: setPageSize }}
+          >
+            <div className="flex items-center gap-2 text-xs text-secondary">
+              <span>{t("DashboardApprovals.pendingCount", { count: pendingCount })}</span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    onClick={() => reload({ silent: false })}
+                    disabled={isReloading}
+                    aria-label={t("DashboardApprovals.reload")}
+                  >
+                    <RotateCw
+                      className={cn("size-4", spinning && "animate-spin")}
+                      onAnimationIteration={() => {
+                        if (!isReloading) setSpinning(false);
+                      }}
+                    />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">
+                  {t("DashboardApprovals.autoRefresh")}
+                </TooltipContent>
+              </Tooltip>
             </div>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={
-        active
-          ? "relative h-10 text-sm font-medium text-primary after:absolute after:right-0 after:bottom-0 after:left-0 after:h-0.5 after:bg-primary"
-          : "h-10 text-sm font-medium text-secondary transition-colors hover:text-primary"
-      }
-    >
-      {children}
-    </button>
+          </PaginatedFooter>
+        )}
+      </DashboardWorkspaceCard>
+    </DashboardWorkspaceOverviewPanel>
   );
 }
 
@@ -347,7 +342,7 @@ function ApprovalFilters({
   walletOptions,
   apiKeyOptions,
   updateFilter,
-  clear,
+  patchFilters,
 }: {
   tab: ApprovalInboxTab;
   filters: ApprovalInboxFilters;
@@ -357,132 +352,193 @@ function ApprovalFilters({
     key: TKey,
     value: ApprovalInboxFilters[TKey]
   ) => void;
-  clear: () => void;
+  patchFilters: (patch: Partial<ApprovalInboxFilters>) => void;
 }) {
   const t = useTranslations();
   return (
-    <div className="grid gap-3 border-b border-border-default py-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-[repeat(4,minmax(140px,1fr))_minmax(135px,0.75fr)_minmax(135px,0.75fr)_auto]">
-      <FilterField label={t("DashboardApprovals.walletFilter")}>
-        <select
-          value={filters.walletId}
-          onChange={(event) => updateFilter("walletId", event.target.value)}
-          className={filterControlClassName}
+    <div className="flex flex-wrap items-end gap-3 border-b border-border-default p-3">
+      <FilterField className="min-w-44 flex-1" label={t("DashboardApprovals.walletFilter")}>
+        <Select
+          ariaLabel={t("DashboardApprovals.walletFilter")}
+          size="xl"
+          iconLeft={<WalletIcon />}
+          value={filters.walletId || "all"}
+          onValueChange={(value) => updateFilter("walletId", value === "all" ? "" : (value ?? ""))}
         >
-          <option value="">{t("DashboardApprovals.allWallets")}</option>
+          <SelectItem value="all">{t("DashboardApprovals.allWallets")}</SelectItem>
           {walletOptions.map(([walletId, label]) => (
-            <option key={walletId} value={walletId}>
+            <SelectItem key={walletId} value={walletId}>
               {label}
-            </option>
+            </SelectItem>
           ))}
-        </select>
+        </Select>
       </FilterField>
 
       {tab === "history" ? (
-        <FilterField label={t("DashboardApprovals.statusFilter")}>
-          <select
-            value={filters.status}
-            onChange={(event) =>
-              updateFilter("status", event.target.value as "" | ApprovalRequestStatus)
+        <FilterField className="min-w-44 flex-1" label={t("DashboardApprovals.statusFilter")}>
+          <Select
+            ariaLabel={t("DashboardApprovals.statusFilter")}
+            size="xl"
+            iconLeft={<CircleDotIcon />}
+            value={filters.status || "all"}
+            onValueChange={(value) =>
+              updateFilter("status", value === "all" ? "" : (value as ApprovalRequestStatus))
             }
-            className={filterControlClassName}
           >
-            <option value="">{t("DashboardApprovals.allStatuses")}</option>
+            <SelectItem value="all">{t("DashboardApprovals.allStatuses")}</SelectItem>
             {APPROVAL_HISTORY_STATUSES.map((status) => (
-              <option key={status} value={status}>
+              <SelectItem key={status} value={status}>
                 {formatApprovalLabel(status)}
-              </option>
+              </SelectItem>
             ))}
-          </select>
-        </FilterField>
-      ) : (
-        <FilterField label={t("DashboardApprovals.operationFilter")}>
-          <select
-            value={filters.operationFamily}
-            onChange={(event) =>
-              updateFilter("operationFamily", event.target.value as "" | WalletOperationFamily)
-            }
-            className={filterControlClassName}
-          >
-            <option value="">{t("DashboardApprovals.allOperations")}</option>
-            {APPROVAL_OPERATION_FAMILIES.map((family) => (
-              <option key={family} value={family}>
-                {formatApprovalLabel(family)}
-              </option>
-            ))}
-          </select>
-        </FilterField>
-      )}
-
-      {tab === "history" ? (
-        <FilterField label={t("DashboardApprovals.operationFilter")}>
-          <select
-            value={filters.operationFamily}
-            onChange={(event) =>
-              updateFilter("operationFamily", event.target.value as "" | WalletOperationFamily)
-            }
-            className={filterControlClassName}
-          >
-            <option value="">{t("DashboardApprovals.allOperations")}</option>
-            {APPROVAL_OPERATION_FAMILIES.map((family) => (
-              <option key={family} value={family}>
-                {formatApprovalLabel(family)}
-              </option>
-            ))}
-          </select>
+          </Select>
         </FilterField>
       ) : null}
 
-      <FilterField label={t("DashboardApprovals.apiKeyFilter")}>
-        <select
-          value={filters.apiKeyId}
-          onChange={(event) => updateFilter("apiKeyId", event.target.value)}
-          className={filterControlClassName}
+      <FilterField className="min-w-44 flex-1" label={t("DashboardApprovals.operationFilter")}>
+        <Select
+          ariaLabel={t("DashboardApprovals.operationFilter")}
+          size="xl"
+          iconLeft={<ArrowLeftRightIcon />}
+          value={filters.operationFamily || "all"}
+          onValueChange={(value) =>
+            updateFilter("operationFamily", value === "all" ? "" : (value as WalletOperationFamily))
+          }
         >
-          <option value="">{t("DashboardApprovals.allApiKeys")}</option>
-          {apiKeyOptions.map(([apiKeyId, label]) => (
-            <option key={apiKeyId} value={apiKeyId}>
-              {label}
-            </option>
+          <SelectItem value="all">{t("DashboardApprovals.allOperations")}</SelectItem>
+          {APPROVAL_OPERATION_FAMILIES.map((family) => (
+            <SelectItem key={family} value={family}>
+              {formatApprovalLabel(family)}
+            </SelectItem>
           ))}
-        </select>
+        </Select>
       </FilterField>
 
-      <FilterField label={t("DashboardApprovals.fromFilter")}>
-        <input
-          type="date"
-          value={filters.from}
-          max={filters.to || undefined}
-          onChange={(event) => updateFilter("from", event.target.value)}
-          className={filterControlClassName}
-        />
-      </FilterField>
-      <FilterField label={t("DashboardApprovals.toFilter")}>
-        <input
-          type="date"
-          value={filters.to}
-          min={filters.from || undefined}
-          onChange={(event) => updateFilter("to", event.target.value)}
-          className={filterControlClassName}
-        />
-      </FilterField>
-      <div className="flex items-end">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={clear}
-          disabled={!hasApprovalFilters(filters)}
+      <FilterField className="min-w-44 flex-1" label={t("DashboardApprovals.apiKeyFilter")}>
+        <Select
+          ariaLabel={t("DashboardApprovals.apiKeyFilter")}
+          size="xl"
+          iconLeft={<KeyRoundIcon />}
+          value={filters.apiKeyId || "all"}
+          onValueChange={(value) => updateFilter("apiKeyId", value === "all" ? "" : (value ?? ""))}
         >
-          {t("DashboardApprovals.clearFilters")}
-        </Button>
-      </div>
+          <SelectItem value="all">{t("DashboardApprovals.allApiKeys")}</SelectItem>
+          {apiKeyOptions.map(([apiKeyId, label]) => (
+            <SelectItem key={apiKeyId} value={apiKeyId}>
+              {label}
+            </SelectItem>
+          ))}
+        </Select>
+      </FilterField>
+
+      <DateRangeFilter
+        from={filters.from}
+        to={filters.to}
+        onChange={(from, to) => patchFilters({ from, to })}
+      />
     </div>
   );
 }
 
-function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
+const DATE_PRESETS = [7, 30, 90] as const;
+type DatePreset = "all" | "7" | "30" | "90" | "custom";
+
+function presetRange(days: number): { from: string; to: string } {
+  const now = new Date();
+  const start = new Date(now);
+  start.setDate(start.getDate() - (days - 1));
+  return { from: formatDateValue(start), to: formatDateValue(now) };
+}
+
+function activeDatePreset(from: string, to: string): DatePreset {
+  if (!from && !to) return "all";
+  for (const days of DATE_PRESETS) {
+    const range = presetRange(days);
+    if (range.from === from && range.to === to) return `${days}` as DatePreset;
+  }
+  return "custom";
+}
+
+function DateRangeFilter({
+  from,
+  to,
+  onChange,
+}: {
+  from: string;
+  to: string;
+  onChange: (from: string, to: string) => void;
+}) {
+  const t = useTranslations();
+  const derived = activeDatePreset(from, to);
+  const [customOpen, setCustomOpen] = useState(derived === "custom");
+  // An external reset (Clear filters, tab switch) collapses the custom fields.
+  useEffect(() => {
+    if (derived !== "custom") setCustomOpen(false);
+  }, [derived]);
+  const showCustom = customOpen || derived === "custom";
+  const active: DatePreset = showCustom ? "custom" : derived;
+
+  function selectPreset(preset: DatePreset) {
+    if (preset === "all") {
+      setCustomOpen(false);
+      onChange("", "");
+      return;
+    }
+    if (preset === "custom") {
+      setCustomOpen(true);
+      return;
+    }
+    setCustomOpen(false);
+    const range = presetRange(Number(preset));
+    onChange(range.from, range.to);
+  }
+
   return (
-    <fieldset className="space-y-1.5">
+    <>
+      <FilterField className="min-w-44 flex-1" label={t("DashboardApprovals.dateRangeLabel")}>
+        <Select
+          ariaLabel={t("DashboardApprovals.dateRangeLabel")}
+          size="xl"
+          iconLeft={<CalendarIcon />}
+          value={active}
+          onValueChange={(value) => selectPreset(value as DatePreset)}
+        >
+          <SelectItem value="all">{t("DashboardApprovals.dateAllTime")}</SelectItem>
+          <SelectItem value="7">{t("DashboardApprovals.dateLast7")}</SelectItem>
+          <SelectItem value="30">{t("DashboardApprovals.dateLast30")}</SelectItem>
+          <SelectItem value="90">{t("DashboardApprovals.dateLast90")}</SelectItem>
+          <SelectItem value="custom">{t("DashboardApprovals.dateCustom")}</SelectItem>
+        </Select>
+      </FilterField>
+      {showCustom ? (
+        <FilterField
+          className="min-w-72 flex-[2] sm:min-w-[22rem]"
+          label={t("DashboardApprovals.dateCustom")}
+        >
+          <DateRangePicker
+            size="xl"
+            from={from}
+            to={to}
+            onChange={onChange}
+            ariaLabel={`${t("DashboardApprovals.fromFilter")} – ${t("DashboardApprovals.toFilter")}`}
+          />
+        </FilterField>
+      ) : null}
+    </>
+  );
+}
+
+function FilterField({
+  label,
+  className,
+  children,
+}: {
+  label: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <fieldset className={cn("space-y-1.5", className)}>
       <legend className="block text-xs font-medium text-secondary">{label}</legend>
       {children}
     </fieldset>
@@ -492,18 +548,20 @@ function FilterField({ label, children }: { label: string; children: React.React
 function ApprovalRequestRows({
   requests,
   apiKeyNames,
+  issuedTokensByMint,
   locale,
   relativeTimeBase,
 }: {
   requests: WalletApprovalRequestSummary[];
   apiKeyNames: Record<string, string>;
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
   locale: string;
   relativeTimeBase: number;
 }) {
   const t = useTranslations();
   return (
     <>
-      <div className="divide-y divide-border-default border-b border-border-default 2xl:hidden">
+      <div className="divide-y divide-border-default lg:hidden">
         {requests.map((request) => {
           const reason = approvalReason(request, t("DashboardApprovals.approvalRequiredByPolicy"));
           const apiKeyLabel = approvalApiKeyLabel(
@@ -515,7 +573,7 @@ function ApprovalRequestRows({
             <Link
               key={request.id}
               href={approvalRequestHref(request.id)}
-              className="group grid grid-cols-[minmax(0,1fr)_auto] gap-4 py-4 outline-none transition-colors hover:bg-fill-subtle focus-visible:bg-fill-subtle"
+              className="group grid grid-cols-[minmax(0,1fr)_auto] gap-4 p-4 outline-none transition-colors hover:bg-fill-subtle focus-visible:bg-fill-subtle"
             >
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
@@ -535,7 +593,7 @@ function ApprovalRequestRows({
                   />
                   <MobileValue
                     label={t("DashboardApprovals.amountAssetColumn")}
-                    value={approvalAmount(request)}
+                    value={approvalAmountLabel(request, issuedTokensByMint, locale)}
                   />
                   <MobileValue
                     label={t("DashboardApprovals.requestedByColumn")}
@@ -553,8 +611,8 @@ function ApprovalRequestRows({
         })}
       </div>
 
-      <div className="hidden overflow-x-auto 2xl:block">
-        <Table className="min-w-0 [&_table]:min-w-[1118px] [&_table]:table-fixed">
+      <div className="hidden lg:block">
+        <Table className="min-w-0 rounded-none border-0 [&_table]:min-w-[1118px] [&_table]:table-fixed">
           <TableHeader>
             <TableRow>
               <TableHead className="w-[88px]">{t("DashboardApprovals.statusColumn")}</TableHead>
@@ -619,9 +677,18 @@ function ApprovalRequestRows({
                       {request.operation.operationType}
                     </p>
                   </ApprovalCell>
-                  <ApprovalCell>{approvalAmount(request)}</ApprovalCell>
                   <ApprovalCell>
-                    <span title={request.operation.destination ?? undefined}>
+                    <ApprovalAmountAsset
+                      request={request}
+                      issuedTokensByMint={issuedTokensByMint}
+                      locale={locale}
+                    />
+                  </ApprovalCell>
+                  <ApprovalCell>
+                    <span
+                      className="whitespace-nowrap"
+                      title={request.operation.destination ?? undefined}
+                    >
                       {shortApprovalIdentifier(request.operation.destination)}
                     </span>
                   </ApprovalCell>
@@ -660,6 +727,61 @@ function ApprovalRequestRows({
         </Table>
       </div>
     </>
+  );
+}
+
+/**
+ * Formats an operation's amount and asset for display. The `asset` field holds
+ * a mint address, so it resolves through the shared token helpers — the
+ * well-known catalogue, then the org's issued tokens — before falling back to
+ * a shortened mint, exactly like the transactions tables.
+ */
+function approvalAmountLabel(
+  request: WalletApprovalRequestSummary,
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>,
+  locale: string
+): string {
+  const { amount, asset } = request.operation;
+  const tokenName = asset ? resolveTokenByMint(asset, issuedTokensByMint).tokenName : undefined;
+  if (!amount) return tokenName ?? "-";
+  return formatDisplayAmount(amount, tokenName, locale);
+}
+
+/**
+ * Operation payloads carry platform token keys ("USDC") for rail-native
+ * assets rather than mints. Those keys come from our own API, not issuer
+ * metadata, so resolving them to the registry mint does not open the
+ * spoofed-symbol hole TokenMark guards against; either cluster's mint maps
+ * to the same registry entry, so the mainnet address suffices for the mark.
+ */
+function wellKnownMintForAssetKey(asset: string): string | null {
+  const entry = WELL_KNOWN_TOKENS[asset.trim().toUpperCase() as keyof typeof WELL_KNOWN_TOKENS];
+  return entry ? entry.mints["mainnet-beta"].address : null;
+}
+
+function ApprovalAmountAsset({
+  request,
+  issuedTokensByMint,
+  locale,
+}: {
+  request: WalletApprovalRequestSummary;
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
+  locale: string;
+}) {
+  const asset = request.operation.asset;
+  const label = approvalAmountLabel(request, issuedTokensByMint, locale);
+  if (!asset) return label;
+  const resolvedToken = resolveTokenByMint(asset, issuedTokensByMint);
+  return (
+    <span className="flex min-w-0 items-center gap-2" title={asset}>
+      <TokenMark
+        mint={wellKnownMintForAssetKey(asset) ?? resolvedToken.mint}
+        symbol={resolvedToken.tokenName}
+        logoUrl={resolvedToken.metadataImageUrl}
+        size="xs"
+      />
+      <span className="truncate">{label}</span>
+    </span>
   );
 }
 

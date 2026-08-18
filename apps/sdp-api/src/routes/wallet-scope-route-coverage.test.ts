@@ -14,18 +14,12 @@ function extractRoutes(router: unknown): string[] {
 describe("wallet-scoped route coverage inventory", () => {
   it("tracks every wallet-scoped custody route", () => {
     const allRoutes = extractRoutes(custodyRoutes);
-    const nonWalletScopedRoutes = new Set([
-      "DELETE /",
-      "GET /config",
-      "GET /configs",
-      "GET /switch-options",
-      "POST /",
-      "POST /default-wallet",
-      "POST /initialize",
-      "POST /switch",
-    ]);
+    const nonWalletScopedRoutes = new Set(["GET /config", "GET /configs", "GET /switch-options"]);
 
     expect(allRoutes.filter((route) => !nonWalletScopedRoutes.has(route))).toEqual([
+      // Wallet lifecycle mutations enforce bindings (or reject wallet-scoped
+      // keys outright): see custody-wallet-scope.test.ts.
+      "DELETE /",
       "GET /",
       "GET /:walletId",
       "GET /aggregate",
@@ -33,10 +27,14 @@ describe("wallet-scoped route coverage inventory", () => {
       "GET /approval-requests/:approvalRequestId",
       "GET /public-key",
       "PATCH /:walletId",
+      "POST /",
       "POST /approval-requests/:approvalRequestId/approve",
       "POST /approval-requests/:approvalRequestId/cancel",
       "POST /approval-requests/:approvalRequestId/reject",
+      "POST /default-wallet",
+      "POST /initialize",
       "POST /signer-check",
+      "POST /switch",
     ]);
   });
 
@@ -59,14 +57,12 @@ describe("wallet-scoped route coverage inventory", () => {
       "GET /subscriptions/:subscriptionId/collection-attempts",
       "GET /transfer-batches",
       "GET /transfer-batches/:batchId",
-      "PATCH /subscriptions/:subscriptionId",
       "POST /ramps/:provider/events",
       "POST /ramps/offramp/estimate",
       "POST /ramps/onramp/estimate",
       "POST /ramps/sandbox/simulate",
       "POST /ramps/transfers/cancel",
       "POST /subscriptions",
-      "POST /subscriptions/:subscriptionId/collection-attempts",
       "POST /subscriptions/:subscriptionId/prepare-authorization",
       "POST /subscriptions/:subscriptionId/prepare-cancel",
       "POST /subscriptions/:subscriptionId/prepare-resume",
@@ -110,7 +106,11 @@ describe("wallet-scoped route coverage inventory", () => {
       "GET /templates/:templateId",
       "GET /tokens",
       "GET /tokens/:tokenId",
+      // Read-only filter facets for the token list: no signing wallet resolved.
+      "GET /tokens/facets",
       "GET /tokens/:tokenId/allowlist",
+      "GET /tokens/:tokenId/allowlist/labels",
+      "GET /tokens/:tokenId/audit",
       "GET /tokens/:tokenId/frozen",
       "GET /tokens/:tokenId/metadata.json",
       "GET /tokens/:tokenId/transactions",
@@ -118,6 +118,25 @@ describe("wallet-scoped route coverage inventory", () => {
       "POST /tokens",
       "POST /tokens/:tokenId/allowlist",
       "POST /tokens/:tokenId/supply/refresh",
+      // Asset profiles: holder enrollment and the workflow builder. None of these
+      // resolves a signing wallet — they read and write rule/holder rows and flip
+      // execution status. The signing wallet for a rule's on-chain effect is resolved
+      // by the cron engine at execution time (workflows/actions/onchain.ts), which is
+      // also where that effect is bound to the wallet's operation policy, since no
+      // request is in scope by then.
+      "ALL /tokens/:tokenId/workflows",
+      "ALL /tokens/:tokenId/workflows/*",
+      "DELETE /tokens/:tokenId/workflows/:workflowId",
+      "GET /tokens/:tokenId/holders",
+      "GET /tokens/:tokenId/workflows",
+      "GET /tokens/:tokenId/workflows/catalog",
+      "GET /tokens/:tokenId/workflows/executions",
+      "PATCH /tokens/:tokenId/workflows/:workflowId",
+      "POST /tokens/:tokenId/holders",
+      "POST /tokens/:tokenId/workflows",
+      "POST /tokens/:tokenId/workflows/executions/:executionId/approve",
+      "POST /tokens/:tokenId/workflows/executions/:executionId/reject",
+      "POST /tokens/:tokenId/workflows/executions/:executionId/retry",
     ]);
 
     expect(allRoutes.filter((route) => !nonWalletScopedRoutes.has(route))).toEqual([

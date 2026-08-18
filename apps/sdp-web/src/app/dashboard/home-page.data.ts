@@ -6,17 +6,37 @@ import type {
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { parseErrorMessage, readTransactionParam, toTitleCase } from "./activity-format-utils";
+import { resolveTransferTokenLabel } from "./payments/payments-overview.utils";
 import type { FetchResult } from "./payments/payments-page.data";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
+
+export interface HomeActivityExplorerRef {
+  kind: "tx" | "address";
+  value: string;
+}
 
 export interface HomeActivityRow {
   id: string;
   createdAt: string;
   type: string;
   token: string;
+  /**
+   * Raw mint behind `token`, when there is one. `token` is already resolved here,
+   * but this builder only sees issued-token symbols — a holding the organization
+   * did not issue degrades to a shortened mint. Carrying the mint lets the client,
+   * which has the symbols that came back with the balances, name it properly.
+   */
+  tokenMint: string | null;
   amount: string;
+  /**
+   * Raw source status ("confirmed", "failed", …). Both sources carry one, and
+   * without it a failed deploy rendered identically to a successful one — the
+   * only tell was the missing address.
+   */
+  status: string;
   address: string;
+  explorer: HomeActivityExplorerRef | null;
   sourceKind: "payments" | "issuance";
 }
 
@@ -70,6 +90,34 @@ function resolvePaymentsAddress(transfer: PaymentTransferSummary): string {
   return transfer.destination ?? transfer.source ?? "—";
 }
 
+// Prefer the counterparty address (what the row shows) and fall back to the tx signature so the
+// row is still linkable before an address is known. Cluster is applied later, in the client.
+function resolvePaymentsExplorer(transfer: PaymentTransferSummary): HomeActivityExplorerRef | null {
+  const address = resolvePaymentsAddress(transfer);
+  if (address !== "—") {
+    return { kind: "address", value: address };
+  }
+  if (transfer.signature) {
+    return { kind: "tx", value: transfer.signature };
+  }
+  return null;
+}
+
+function resolveIssuanceExplorer(transaction: TokenTransaction): HomeActivityExplorerRef | null {
+  const destination = readTransactionParam(transaction.params, "destination");
+  if (destination !== null) {
+    return { kind: "address", value: String(destination) };
+  }
+  const source = readTransactionParam(transaction.params, "source");
+  if (source !== null) {
+    return { kind: "address", value: String(source) };
+  }
+  if (transaction.signature) {
+    return { kind: "tx", value: transaction.signature };
+  }
+  return null;
+}
+
 export function computeTodaysVolume(transfers: PaymentTransferSummary[]): number | null {
   const now = new Date();
   const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
@@ -100,7 +148,9 @@ export function computeTodaysVolume(transfers: PaymentTransferSummary[]): number
 export function buildHomeActivityRows(
   transfers: PaymentTransferSummary[],
   issuanceTransactions: TokenTransactionListItem[],
-  t: Translate
+  t: Translate,
+  /** Symbols for tokens this org issued, keyed by mint. The catalogue never knows them. */
+  issuedTokenSymbolsByMint?: Readonly<Record<string, string>>
 ): HomeActivityRow[] {
   const paymentRows = transfers
     .filter(
@@ -111,9 +161,14 @@ export function buildHomeActivityRows(
       id: `payment-${transfer.id}`,
       createdAt: transfer.createdAt,
       type: resolvePaymentsType(transfer, t),
-      token: transfer.token ?? "—",
+      // transfer.token is a mint address; without this the row renders the raw
+      // base58 while the Transactions table shows the symbol for the same row.
+      token: resolveTransferTokenLabel(transfer.token, issuedTokenSymbolsByMint) ?? "—",
+      tokenMint: transfer.token?.trim() || null,
       amount: transfer.amount ?? "—",
+      status: transfer.status,
       address: resolvePaymentsAddress(transfer),
+      explorer: resolvePaymentsExplorer(transfer),
       sourceKind: "payments" as const,
     }));
 
@@ -130,8 +185,11 @@ export function buildHomeActivityRows(
       createdAt: transaction.createdAt,
       type: toTitleCase(transaction.type),
       token: token.symbol || token.name || "—",
+      tokenMint: token.mintAddress?.trim() || null,
       amount: resolveIssuanceAmount(transaction),
+      status: transaction.status,
       address: resolveIssuanceAddress(transaction),
+      explorer: resolveIssuanceExplorer(transaction),
       sourceKind: "issuance" as const,
     }));
 

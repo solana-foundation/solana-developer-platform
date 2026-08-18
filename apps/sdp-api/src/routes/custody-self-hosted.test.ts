@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const TEST_ORG = {
@@ -143,7 +143,6 @@ describe("Custody routes — self-hosted deployment mode", () => {
     env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
     env.CUSTODY_PRIVATE_KEY = originalCustodyPrivateKey;
     writeManagedProviderEnv(originalManagedProviderEnv);
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 
@@ -207,7 +206,6 @@ describe("Custody routes — managed-mode regression", () => {
     env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
     env.CUSTODY_PRIVATE_KEY = originalCustodyPrivateKey;
     writeManagedProviderEnv(originalManagedProviderEnv);
-    await clearTestDatabase(env);
     await clearKVStores(env);
   });
 

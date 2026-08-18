@@ -24,7 +24,7 @@ SDP Web is a Next.js application with two main surfaces:
 
 ### Prerequisites
 
-- **Node.js 22+**
+- **Node.js 24+**
 - **pnpm 10.16+**
 - **Clerk account** (free tier) — required for authentication
 - **SDP API running** — the dashboard proxies to `sdp-api` via BFF routes
@@ -94,11 +94,10 @@ See `apps/sdp-web/.env.local.example` for all available options.
 ## Architecture
 
 ### Tech Stack
-- **Next.js 15** — React framework
+- **Next.js 16** — React framework (App Router)
 - **TypeScript** — Type safety
 - **Clerk** — Authentication & organization management
-- **React Query** — Server state management
-- **TanStack Router** — Client-side routing
+- **SWR** — Server state management
 - **Tailwind CSS** — Styling
 
 ### Project Structure
@@ -148,18 +147,18 @@ Requires:
 
 ### Hot Reload
 
-Changes to `app/`, `components/`, and `lib/` automatically reload in the browser.
+Changes to `src/app/`, `src/components/`, and `src/lib/` automatically reload in the browser.
 
 ### Adding a New Page
 
-1. Create file in `app/dashboard/your-page/page.tsx`
+1. Create file in `src/app/dashboard/your-page/page.tsx`
 2. Use Clerk's `useAuth()` hook for authentication
 3. Proxy requests to SDP API via `/api/dashboard/*`
 
 Example:
 
 ```typescript
-// app/dashboard/users/page.tsx
+// src/app/dashboard/users/page.tsx
 "use client";
 import { useAuth } from "@clerk/nextjs";
 

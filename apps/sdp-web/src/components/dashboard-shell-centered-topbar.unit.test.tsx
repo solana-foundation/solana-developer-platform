@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { CenteredDashboardTopBar, StandardDashboardTopBar } from "./dashboard-shell";
+import { CenteredDashboardTopBar, StandardDashboardTopBar } from "./dashboard-header";
 
 describe("CenteredDashboardTopBar", () => {
   it("gives a 390px viewport a full-width title row without widening the document", () => {

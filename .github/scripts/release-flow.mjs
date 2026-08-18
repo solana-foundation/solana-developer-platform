@@ -1,22 +1,31 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { createCommitOnBranch, githubGraphqlRequest } from "./github-commit-on-branch.mjs";
+import { nextReleaseVersion, releaseCommitSemantics } from "./release-version.mjs";
 
 const mode = process.argv[2];
 const dryRun = process.argv.includes("--dry-run");
 
-const repo = process.env.GITHUB_REPOSITORY ?? detectRepositoryFromGit();
+const repo = process.env.GITHUB_REPOSITORY;
 const token = process.env.GITHUB_TOKEN;
-const [repoOwner] = repo?.split("/") ?? [];
-const releaseBranch = "codex/release-main";
+const releaseBranch = "sdp/release-main";
+const releaseStagingBranch = `${releaseBranch}-staging`;
 
 if (!["plan", "prepare", "publish"].includes(mode)) {
   console.error("Usage: node .github/scripts/release-flow.mjs <plan|prepare|publish> [--dry-run]");
   process.exit(1);
 }
 
-if (["prepare", "publish"].includes(mode) && !dryRun && (!repo || !token)) {
-  console.error("GITHUB_REPOSITORY and GITHUB_TOKEN are required");
+if (!repo) {
+  console.error("GITHUB_REPOSITORY is required");
+  process.exit(1);
+}
+
+const [repoOwner] = repo.split("/");
+
+if (["prepare", "publish"].includes(mode) && !dryRun && !token) {
+  console.error("GITHUB_TOKEN is required");
   process.exit(1);
 }
 
@@ -36,28 +45,13 @@ const changelogSections = [
 ];
 
 function git(args, options = {}) {
+  const capture = options.capture !== false;
   const output = execFileSync("git", args, {
     encoding: "utf8",
-    stdio: options.capture === false ? "inherit" : ["ignore", "pipe", "pipe"],
+    stdio: capture ? ["ignore", "pipe", "pipe"] : "inherit",
   });
 
-  if (typeof output !== "string") {
-    return "";
-  }
-
-  return output.trim();
-}
-
-function detectRepositoryFromGit() {
-  try {
-    const remote = git(["remote", "get-url", "origin"]);
-    const match =
-      remote.match(/github\.com[:/](.+?)(?:\.git)?$/) ??
-      remote.match(/^https:\/\/x-access-token:[^@]+@github\.com\/(.+?)(?:\.git)?$/);
-    return match?.[1] ?? null;
-  } catch {
-    return null;
-  }
+  return capture ? output.trim() : "";
 }
 
 function readJson(filePath) {
@@ -143,14 +137,14 @@ function parseConventionalCommit(subject, body) {
   const match = subject.match(/^([a-z]+)(?:\(([^)]+)\))?(!)?: (.+)$/i);
   const prMatch = subject.match(/\(#(\d+)\)$/);
   const prNumber = prMatch ? prMatch[1] : null;
-  const breaking = Boolean(match?.[3]) || body.includes("BREAKING CHANGE");
+  const semantics = releaseCommitSemantics(subject, body);
 
   if (!match) {
     return {
-      type: "other",
+      type: semantics.type,
       description: subject.replace(/\s+\(#\d+\)$/, ""),
       prNumber,
-      breaking,
+      breaking: semantics.breaking,
     };
   }
 
@@ -159,34 +153,7 @@ function parseConventionalCommit(subject, body) {
   const baseDescription = rawDescription.replace(/\s+\(#\d+\)$/, "").trim();
   const description = scope ? `**${scope}:** ${baseDescription}` : baseDescription;
 
-  return { type, description, prNumber, breaking };
-}
-
-function bumpLevel(commits) {
-  if (commits.some((commit) => commit.breaking)) {
-    return "major";
-  }
-  if (commits.some((commit) => commit.type === "feat")) {
-    return "minor";
-  }
-  return "patch";
-}
-
-function incrementVersion(version, level) {
-  const [major, minor, patch] = version.split(".").map((part) => Number.parseInt(part, 10));
-
-  if ([major, minor, patch].some(Number.isNaN)) {
-    throw new Error(`Invalid semver version: ${version}`);
-  }
-
-  switch (level) {
-    case "major":
-      return `${major + 1}.0.0`;
-    case "minor":
-      return `${major}.${minor + 1}.0`;
-    default:
-      return `${major}.${minor}.${patch + 1}`;
-  }
+  return { type, description, prNumber, breaking: semantics.breaking };
 }
 
 function escapeRegExp(value) {
@@ -275,7 +242,7 @@ function prependChangelog(sectionMarkdown) {
 }
 
 async function githubRequest(method, resourcePath, body) {
-  const response = await fetch(`https://api.github.com${resourcePath}`, {
+  const init = {
     method,
     headers: {
       Accept: "application/vnd.github+json",
@@ -283,8 +250,13 @@ async function githubRequest(method, resourcePath, body) {
       "X-GitHub-Api-Version": "2022-11-28",
       "Content-Type": "application/json",
     },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  };
+
+  if (body !== undefined) {
+    init.body = JSON.stringify(body);
+  }
+
+  const response = await fetch(`https://api.github.com${resourcePath}`, init);
 
   if (!response.ok) {
     const text = await response.text();
@@ -298,33 +270,6 @@ async function githubRequest(method, resourcePath, body) {
   }
 
   return response.json();
-}
-
-async function githubGraphqlRequest(query, variables) {
-  const response = await fetch("https://api.github.com/graphql", {
-    method: "POST",
-    headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ query, variables }),
-  });
-
-  const text = await response.text();
-  let payload = {};
-  try {
-    payload = text ? JSON.parse(text) : {};
-  } catch {
-    throw new Error(`GraphQL request failed: ${response.status} ${text}`);
-  }
-
-  if (!response.ok || payload.errors?.length) {
-    const message = payload.errors?.map((error) => error.message).join("; ") || text;
-    throw new Error(`GraphQL request failed: ${response.status} ${message}`);
-  }
-
-  return payload.data;
 }
 
 async function githubReleaseExists(tagName) {
@@ -391,12 +336,21 @@ function releaseFileAddition(relativePath) {
   };
 }
 
-async function resetReleaseBranch(baseSha) {
-  const encodedBranch = releaseBranch.split("/").map(encodeURIComponent).join("/");
-  const refPath = `/repos/${repo}/git/refs/heads/${encodedBranch}`;
+/**
+ * Points a branch at a commit, creating the branch if it does not exist.
+ *
+ * @param {string} branchName Branch to move.
+ * @param {string} sha Commit the branch should point at.
+ * @returns {Promise<void>} Resolves once the ref is updated.
+ */
+async function forceUpdateBranch(branchName, sha) {
+  const encodedBranch = branchName.split("/").map(encodeURIComponent).join("/");
 
   try {
-    await githubRequest("PATCH", refPath, { sha: baseSha, force: true });
+    await githubRequest("PATCH", `/repos/${repo}/git/refs/heads/${encodedBranch}`, {
+      sha,
+      force: true,
+    });
   } catch (error) {
     // Updating a missing ref returns 422 "Reference does not exist", not 404.
     if (error.status !== 404 && error.status !== 422) {
@@ -404,48 +358,41 @@ async function resetReleaseBranch(baseSha) {
     }
 
     await githubRequest("POST", `/repos/${repo}/git/refs`, {
-      ref: `refs/heads/${releaseBranch}`,
-      sha: baseSha,
+      ref: `refs/heads/${branchName}`,
+      sha,
     });
   }
 }
 
+/**
+ * Builds the release commit on a staging branch, then force-moves the release
+ * branch directly onto it. The release branch never points at main's HEAD, so
+ * GitHub never sees the open release PR with an empty diff and auto-closes it.
+ * The staging branch persists between runs and is force-overwritten each time;
+ * deleting it would add a failure mode to the retry loop for pure cleanup.
+ *
+ * @param {string} version Release version being prepared.
+ * @returns {Promise<string>} OID of the release commit.
+ */
 async function createReleaseBranchCommit(version) {
   const expectedHeadOid = git(["rev-parse", "HEAD"]);
-  await resetReleaseBranch(expectedHeadOid);
+  await forceUpdateBranch(releaseStagingBranch, expectedHeadOid);
 
-  const query = `
-    mutation CreateReleaseBranchCommit($input: CreateCommitOnBranchInput!) {
-      createCommitOnBranch(input: $input) {
-        commit {
-          oid
-          url
-        }
-      }
-    }
-  `;
-
-  const data = await githubGraphqlRequest(query, {
-    input: {
-      branch: {
-        repositoryNameWithOwner: repo,
-        branchName: releaseBranch,
-      },
-      expectedHeadOid,
-      message: {
-        headline: `chore(main): release ${version}`,
-      },
-      fileChanges: {
-        additions: [
-          releaseFileAddition("package.json"),
-          releaseFileAddition("CHANGELOG.md"),
-          releaseFileAddition(".github/.release-please-manifest.json"),
-        ],
-      },
-    },
+  const commit = await createCommitOnBranch({
+    repository: repo,
+    branch: releaseStagingBranch,
+    expectedHeadOid,
+    headline: `chore(main): release ${version}`,
+    additions: [
+      releaseFileAddition("package.json"),
+      releaseFileAddition("CHANGELOG.md"),
+      releaseFileAddition(".github/.release-please-manifest.json"),
+    ],
+    token,
   });
 
-  const commit = data.createCommitOnBranch.commit;
+  await forceUpdateBranch(releaseBranch, commit.oid);
+
   console.log(`Created release branch commit ${commit.oid}`);
   return commit.oid;
 }
@@ -469,9 +416,13 @@ async function enableAutoMerge(pullRequestId, version) {
   `;
 
   try {
-    await githubGraphqlRequest(query, {
-      pullRequestId,
-      commitHeadline: `chore(main): release ${version}`,
+    await githubGraphqlRequest({
+      query,
+      variables: {
+        pullRequestId,
+        commitHeadline: `chore(main): release ${version}`,
+      },
+      token,
     });
   } catch (error) {
     if (error.message.includes("Auto merge is already enabled")) {
@@ -726,7 +677,7 @@ async function prepareRelease(attempt = 1) {
     return;
   }
 
-  const nextVersion = incrementVersion(packageJson.version, bumpLevel(parsedCommits));
+  const nextVersion = nextReleaseVersion(packageJson.version, parsedCommits);
   const sectionMarkdown = buildSectionMarkdown(nextVersion, previousTag, parsedCommits);
 
   console.log(`Preparing release ${nextVersion}`);

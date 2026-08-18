@@ -1,6 +1,7 @@
-import type { ApiKeyWalletPolicyBindingSummary, WalletOperationFamily } from "@sdp/types";
+import type { ApiKeyWalletPolicyBindingSummary } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import {
+  type ApiKeyAuthoringDraft,
   buildApiKeyPolicyRules,
   buildEndpointWalletPayload,
   buildPolicyBindingTargets,
@@ -54,14 +55,15 @@ describe("API-key authoring", () => {
   });
 
   it("authors every additional restriction section as narrowing rules", () => {
-    const draft = {
+    const draft: ApiKeyAuthoringDraft = {
       ...createApiKeyAuthoringDraft(),
       restrictionsEnabled: true,
       restrictionsEdited: true,
-      operationFamilies: ["raw_sign", "provider_admin"] as WalletOperationFamily[],
-      operationTypes: "payment_transfer_execute, token_mint",
+      operationFamilies: ["ramp", "issuance"],
+      operationTypes: ["payment_transfer_execute", "issuance_mint_execute"],
       assets: "USDC\nSOL",
       maximumAmount: "2500",
+      maximumAmountAssets: "USDC, SOL",
       destinations: "address_a,address_b",
       approvalRequired: true,
     };
@@ -75,10 +77,26 @@ describe("API-key authoring", () => {
       "approval",
     ]);
     expect(buildApiKeyPolicyRules(draft)[0]).toMatchObject({ action: "deny" });
+    expect(buildApiKeyPolicyRules(draft)[3]).toMatchObject({
+      action: "allow",
+      max: "2500",
+      assets: ["USDC", "SOL"],
+    });
     expect(buildApiKeyPolicyRules(draft)[4]).toMatchObject({
       action: "allow",
       allowlist: ["address_a", "address_b"],
     });
+  });
+
+  it("emits no amount rule when the maximum names no assets", () => {
+    const draft = {
+      ...createApiKeyAuthoringDraft(),
+      restrictionsEnabled: true,
+      restrictionsEdited: true,
+      maximumAmount: "2500",
+    };
+
+    expect(buildApiKeyPolicyRules(draft)).toEqual([]);
   });
 
   it("builds bindings for selected-wallet and all-wallet restrictions", () => {

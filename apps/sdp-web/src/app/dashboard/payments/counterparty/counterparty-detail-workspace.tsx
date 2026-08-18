@@ -16,8 +16,10 @@ import {
   CheckIcon,
   ChevronDownIcon,
   CopyIcon,
+  DownloadIcon,
   ExternalLinkIcon,
   HashIcon,
+  LoaderCircleIcon,
   MailIcon,
   MapPinIcon,
   PhoneIcon,
@@ -30,9 +32,11 @@ import {
   WalletIcon,
 } from "lucide-react";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { MemoJsonView } from "@/app/dashboard/payments/wizard-summary-list";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,9 +48,11 @@ import {
 import { Modal } from "@/components/ui/modal";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { downloadResponseBlob } from "@/lib/download";
+import { explorerTxUrl } from "@/lib/explorer";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { useCopy } from "@/lib/use-copy";
-import { useDashboardRouter } from "@/lib/use-dashboard-router";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime, toTitleCase } from "../../activity-format-utils";
 import {
@@ -57,7 +63,6 @@ import {
   resolveTransferTypeLabel,
   shortenAddress,
 } from "../payments-overview.utils";
-import { getDevnetExplorerUrl } from "../payments-workspace.data";
 import { AddExternalAccountDialog } from "./add-external-account-dialog";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
 
@@ -221,9 +226,11 @@ function FilterChip({
 }
 
 function CounterpartyTransactions({
+  counterpartyId,
   transfers,
   counterpartyName,
 }: {
+  counterpartyId: string;
   transfers: PaymentTransferSummary[];
   counterpartyName: string;
 }) {
@@ -263,6 +270,8 @@ function CounterpartyTransactions({
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [providerFilter, setProviderFilter] = useState<RampProviderId | null>(null);
   const [selectedTransfer, setSelectedTransfer] = useState<PaymentTransferSummary | null>(null);
+  const [csvDownloading, setCsvDownloading] = useState(false);
+  const [csvError, setCsvError] = useState<string | null>(null);
 
   const availableTypes = useMemo(() => {
     const types = new Set<string>();
@@ -299,6 +308,40 @@ function CounterpartyTransactions({
   );
 
   const showFilters = availableTypes.length > 1 || availableProviders.length > 1;
+  const exportHref = useMemo(() => {
+    const query = new URLSearchParams({ counterparty: counterpartyId });
+    if (typeFilter) query.set("type", typeFilter);
+    if (providerFilter) query.set("provider", providerFilter);
+    return `/api/dashboard/payments/transactions/export?${query.toString()}`;
+  }, [counterpartyId, providerFilter, typeFilter]);
+
+  const downloadCsv = async () => {
+    if (csvDownloading) return;
+    setCsvDownloading(true);
+    setCsvError(null);
+
+    try {
+      const response = await fetch(exportHref);
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as {
+          error?: { message?: string };
+        };
+        throw new Error(
+          body.error?.message ?? t("DashboardPayments.transactions.downloadCsvFailed")
+        );
+      }
+
+      await downloadResponseBlob(response, "sdp-transactions.csv");
+    } catch (error) {
+      setCsvError(
+        error instanceof Error
+          ? error.message
+          : t("DashboardPayments.transactions.downloadCsvFailed")
+      );
+    } finally {
+      setCsvDownloading(false);
+    }
+  };
 
   return (
     <section className="space-y-3">
@@ -311,46 +354,65 @@ function CounterpartyTransactions({
         </div>
       ) : (
         <>
-          {showFilters ? (
-            <div className="flex flex-wrap items-center gap-2">
-              {availableTypes.length > 1 ? (
-                <>
-                  <FilterChip active={typeFilter === null} onClick={() => setTypeFilter(null)}>
-                    {t("DashboardPayments.counterparty.allTypes")}
-                  </FilterChip>
-                  {availableTypes.map((type) => (
-                    <FilterChip
-                      key={type}
-                      active={typeFilter === type}
-                      onClick={() => setTypeFilter(type)}
-                    >
-                      {resolveTransferTypeLabel(type, t)}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            {showFilters ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {availableTypes.length > 1 ? (
+                  <>
+                    <FilterChip active={typeFilter === null} onClick={() => setTypeFilter(null)}>
+                      {t("DashboardPayments.counterparty.allTypes")}
                     </FilterChip>
-                  ))}
-                </>
-              ) : null}
-              {availableProviders.length > 1 ? (
-                <>
-                  <span className="mx-1 h-4 w-px bg-fill-strong" />
-                  <FilterChip
-                    active={providerFilter === null}
-                    onClick={() => setProviderFilter(null)}
-                  >
-                    {t("DashboardPayments.counterparty.allProviders")}
-                  </FilterChip>
-                  {availableProviders.map((provider) => (
+                    {availableTypes.map((type) => (
+                      <FilterChip
+                        key={type}
+                        active={typeFilter === type}
+                        onClick={() => setTypeFilter(type)}
+                      >
+                        {resolveTransferTypeLabel(type, t)}
+                      </FilterChip>
+                    ))}
+                  </>
+                ) : null}
+                {availableProviders.length > 1 ? (
+                  <>
+                    <span className="mx-1 h-4 w-px bg-fill-strong" />
                     <FilterChip
-                      key={provider}
-                      active={providerFilter === provider}
-                      onClick={() => setProviderFilter(provider)}
+                      active={providerFilter === null}
+                      onClick={() => setProviderFilter(null)}
                     >
-                      {getRampProviderLabel(provider)}
+                      {t("DashboardPayments.counterparty.allProviders")}
                     </FilterChip>
-                  ))}
-                </>
-              ) : null}
-            </div>
-          ) : null}
+                    {availableProviders.map((provider) => (
+                      <FilterChip
+                        key={provider}
+                        active={providerFilter === provider}
+                        onClick={() => setProviderFilter(provider)}
+                      >
+                        {getRampProviderLabel(provider)}
+                      </FilterChip>
+                    ))}
+                  </>
+                ) : null}
+              </div>
+            ) : (
+              <span />
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={csvDownloading}
+              iconLeft={
+                csvDownloading ? <LoaderCircleIcon className="animate-spin" /> : <DownloadIcon />
+              }
+              onClick={downloadCsv}
+            >
+              {csvDownloading
+                ? t("DashboardPayments.transactions.downloadingCsv")
+                : t("DashboardPayments.transactions.downloadCsv")}
+            </Button>
+          </div>
+          {csvError ? <p className="text-xs text-error">{csvError}</p> : null}
 
           <div className="overflow-x-auto rounded-lg border border-border-default bg-surface-raised">
             <table className="w-full min-w-[760px] table-fixed border-collapse">
@@ -542,9 +604,16 @@ function TransferDetailModal({
   onClose: () => void;
 }) {
   const t = useTranslations();
+  const cluster = useSolanaCluster();
+  const [memoJsonOpen, setMemoJsonOpen] = useState(false);
   if (!transfer) {
     return null;
   }
+
+  const closeModal = () => {
+    setMemoJsonOpen(false);
+    onClose();
+  };
 
   const isInbound = transfer.type === "onramp" || transfer.direction === "inbound";
   const walletAddress = isInbound ? transfer.destination : transfer.source;
@@ -574,7 +643,7 @@ function TransferDetailModal({
     <Modal
       isOpen
       ariaLabel={t("DashboardPayments.counterparty.transactionDetails")}
-      onClose={onClose}
+      onClose={closeModal}
       size="lg"
     >
       <div className="space-y-5 p-6">
@@ -651,6 +720,16 @@ function TransferDetailModal({
                 value={transfer.memo}
               />
             ) : null}
+            {Object.keys(transfer.rampsMemo).length > 0 ? (
+              <DetailRow
+                label={t("DashboardPayments.transferDetails.memo")}
+                value={
+                  <Button type="button" size="xs" onClick={() => setMemoJsonOpen(true)}>
+                    {t("DashboardPayments.ramps.memoViewJson")}
+                  </Button>
+                }
+              />
+            ) : null}
             {transfer.settlement ? <RampSettlementRows settlement={transfer.settlement} /> : null}
             {moneygram?.referenceNumber ? (
               <DetailRow
@@ -718,13 +797,24 @@ function TransferDetailModal({
             className="w-full"
             iconLeft={<ExternalLinkIcon className="size-4" />}
             onClick={() =>
-              window.open(getDevnetExplorerUrl(signature), "_blank", "noopener,noreferrer")
+              window.open(explorerTxUrl(signature, cluster), "_blank", "noopener,noreferrer")
             }
           >
             {t("DashboardPayments.counterparty.viewOnExplorer")}
           </Button>
         ) : null}
       </div>
+
+      <Modal
+        isOpen={memoJsonOpen}
+        onClose={() => setMemoJsonOpen(false)}
+        ariaLabel={t("DashboardPayments.ramps.memoJsonTitle")}
+        size="lg"
+      >
+        <div className="p-6">
+          <MemoJsonView json={transfer.rampsMemo} />
+        </div>
+      </Modal>
     </Modal>
   );
 }
@@ -820,7 +910,7 @@ export function CounterpartyDetailWorkspace({
 }: CounterpartyDetailWorkspaceProps) {
   const t = useTranslations();
   const locale = useLocale();
-  const router = useDashboardRouter();
+  const router = useRouter();
   const { copy, copied } = useCopy(1200);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [accounts, setAccounts] = useState(initialAccounts);
@@ -897,6 +987,7 @@ export function CounterpartyDetailWorkspace({
 
         {activeTab === "transactions" ? (
           <CounterpartyTransactions
+            counterpartyId={counterparty.id}
             transfers={initialTransfers}
             counterpartyName={counterparty.displayName}
           />

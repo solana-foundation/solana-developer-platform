@@ -64,10 +64,6 @@ export interface PaymentWalletBalancesSnapshot {
 export type RiskTone = "green" | "yellow" | "red" | "neutral";
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
-export function getDevnetExplorerUrl(signature: string): string {
-  return `https://explorer.solana.com/tx/${encodeURIComponent(signature)}?cluster=devnet`;
-}
-
 export function toProviderLabel(value: string): string {
   const labels: Record<string, string> = {
     range: "Range",
@@ -239,32 +235,6 @@ export async function fetchWalletAggregate(
   }
 
   return body.data.aggregate;
-}
-
-export async function fetchWalletPolicy(walletId: string, t: Translate): Promise<WalletPolicy> {
-  const response = await fetch(
-    `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/policies`,
-    {
-      method: "GET",
-      cache: "no-store",
-    }
-  );
-  const body = (await response.json().catch(() => ({}))) as WalletPolicyEnvelope;
-  if (!response.ok) {
-    throw new Error(
-      getApiError(
-        body,
-        t("DashboardPayments.workspace.walletPolicyRequestFailed", { status: response.status })
-      )
-    );
-  }
-
-  return (
-    body.data?.policy ?? {
-      walletId,
-      destinationAllowlist: [],
-    }
-  );
 }
 
 interface TransferListEnvelope {
@@ -511,9 +481,12 @@ export async function fetchWalletBalances(
 
 export async function updateWalletPolicy(
   walletId: string,
-  policy: WalletPolicy,
-  t: Translate
+  policy: Pick<WalletPolicy, "defaultAction" | "rules">,
+  t: Translate,
+  commitMessage?: string
 ): Promise<WalletPolicy> {
+  const trimmedCommitMessage = commitMessage?.trim();
+
   const response = await fetch(
     `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/policies`,
     {
@@ -522,11 +495,9 @@ export async function updateWalletPolicy(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        destinationAllowlist: policy.destinationAllowlist,
-        ...(policy.maxTransferAmount ? { maxTransferAmount: policy.maxTransferAmount } : {}),
-        ...(policy.maxDailyAmount ? { maxDailyAmount: policy.maxDailyAmount } : {}),
-        ...(policy.defaultAction ? { defaultAction: policy.defaultAction } : {}),
-        ...(policy.rules ? { rules: policy.rules } : {}),
+        defaultAction: policy.defaultAction,
+        rules: policy.rules,
+        ...(trimmedCommitMessage ? { commitMessage: trimmedCommitMessage } : {}),
       }),
     }
   );

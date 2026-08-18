@@ -21,11 +21,17 @@ const MODULE_METADATA = [
     purpose: "Node.js API and application composition root.",
     allowedDependencies: [
       "@sdp/custody",
+      "@sdp/earn",
       "@sdp/env-config",
       "@sdp/issuance",
+      "@sdp/kamino",
       "@sdp/payments",
+      "@sdp/policy",
+      "@sdp/private-channels",
       "@sdp/rpc",
       "@sdp/solana",
+      "@sdp/spc-escrow",
+      "@sdp/spc-withdraw",
       "@sdp/types",
     ],
   },
@@ -41,19 +47,43 @@ const MODULE_METADATA = [
     purpose: "Dashboard application.",
     // @sdp/issuance is imported only through its mosaic-free `capabilities`
     // subpath (the advanced-settings catalog + lookups the editor renders).
-    allowedDependencies: ["@sdp/issuance", "@sdp/solana", "@sdp/types"],
+    allowedDependencies: [
+      "@sdp/issuance",
+      "@sdp/policy",
+      "@sdp/private-channels",
+      "@sdp/solana",
+      "@sdp/types",
+    ],
+  },
+  {
+    name: "@sdp/kit-augment",
+    directory: "packages/kit-augment",
+    purpose: "Shared @solana/kit type augmentation for the generated Codama clients.",
+    allowedDependencies: [],
   },
   {
     name: "@sdp/api-integration",
     directory: "packages/sdp-api-integration",
     purpose: "Maintainer integration harness for API endpoint and provider coverage.",
-    allowedDependencies: ["@sdp/api", "@sdp/rpc", "@sdp/types"],
+    allowedDependencies: [
+      "@sdp/api",
+      "@sdp/private-channels",
+      "@sdp/rpc",
+      "@sdp/spc-escrow",
+      "@sdp/types",
+    ],
   },
   {
     name: "@sdp/custody",
     directory: "packages/sdp-custody",
     purpose: "Custody provider abstractions and keychain adapters.",
     allowedDependencies: ["@sdp/types"],
+  },
+  {
+    name: "@sdp/earn",
+    directory: "packages/sdp-earn",
+    purpose: "Earn domain services, yield strategies, and vault-infra providers.",
+    allowedDependencies: ["@sdp/payments", "@sdp/rpc", "@sdp/solana", "@sdp/types"],
   },
   {
     name: "@sdp/env-config",
@@ -68,10 +98,40 @@ const MODULE_METADATA = [
     allowedDependencies: ["@sdp/payments", "@sdp/rpc", "@sdp/solana", "@sdp/types"],
   },
   {
+    name: "@sdp/kamino",
+    directory: "packages/sdp-kamino",
+    purpose: "Kit-native Kamino K-Vault deposit/withdraw instruction plans over klend-sdk.",
+    // The arrow points INWARD and only inward: this package depends on
+    // @sdp/earn (for the provider contract and the catalogue client it extends),
+    // and @sdp/earn must never depend back — its hourly catalogue cron would
+    // then load klend-sdk (13MB, built against a different @solana/kit major).
+    // That one-way edge is also why the Kamino program-id table lives in
+    // @sdp/types, which both reach without a cycle.
+    allowedDependencies: ["@sdp/earn", "@sdp/solana", "@sdp/types"],
+  },
+  {
     name: "@sdp/payments",
     directory: "packages/sdp-payments",
     purpose: "Payment domain services, fee payment, and ramp providers.",
     allowedDependencies: ["@sdp/rpc", "@sdp/solana", "@sdp/types"],
+  },
+  {
+    name: "@sdp/policy",
+    directory: "packages/sdp-policy",
+    purpose: "Wallet-operation policy engine: rule evaluation and enforcement orchestration.",
+    allowedDependencies: ["@sdp/solana", "@sdp/types"],
+  },
+  {
+    name: "@sdp/helius-rings",
+    directory: "packages/sdp-helius-rings",
+    purpose: "Helius Rings shielded-wallet domain types, state machine, and gateway port (devnet).",
+    allowedDependencies: [],
+  },
+  {
+    name: "@sdp/private-channels",
+    directory: "packages/sdp-private-channels",
+    purpose: "Solana Private Channels gateway, auth, and instance clients.",
+    allowedDependencies: ["@sdp/rpc", "@sdp/types"],
   },
   {
     name: "@sdp/rpc",
@@ -84,6 +144,18 @@ const MODULE_METADATA = [
     directory: "packages/sdp-solana",
     purpose: "Solana transaction and token-program services.",
     allowedDependencies: ["@sdp/rpc", "@sdp/types"],
+  },
+  {
+    name: "@sdp/spc-escrow",
+    directory: "packages/sdp-spc-escrow",
+    purpose: "Generated @solana/kit client for the Private Channels escrow program.",
+    allowedDependencies: ["@sdp/kit-augment"],
+  },
+  {
+    name: "@sdp/spc-withdraw",
+    directory: "packages/sdp-spc-withdraw",
+    purpose: "Generated @solana/kit client for the Private Channels withdraw program.",
+    allowedDependencies: ["@sdp/kit-augment"],
   },
   {
     name: "@sdp/types",
@@ -284,6 +356,57 @@ export function forbiddenPackageSourceImport({ module, filePath, specifier, appS
   return undefined;
 }
 
+const FEE_PAYMENT_CONSTRUCTORS = new Set([
+  "createFeePaymentAdapter",
+  "createKoraAdapter",
+  "KoraAdapter",
+]);
+
+export function forbiddenFeePaymentConstructorImport({ filePath, source, apiSourceRoot }) {
+  if (!isWithin(filePath, apiSourceRoot)) return undefined;
+  const relative = toPosixPath(path.relative(apiSourceRoot, filePath));
+  if (
+    relative === "services/sponsorship.service.ts" ||
+    relative.startsWith("test/") ||
+    relative.includes("/test/") ||
+    relative.endsWith(".test.ts") ||
+    relative.endsWith(".spec.ts")
+  ) {
+    return undefined;
+  }
+
+  const feePaymentSpecifier = "@sdp/payments/fee-payment(?:/[^\"']*)?";
+  const opaqueImportPatterns = [
+    new RegExp(String.raw`import\s+\*\s+as\s+[\w$]+\s+from\s+["']${feePaymentSpecifier}["']`),
+    new RegExp(String.raw`import\s+(?!type\b)[\w$]+\s+from\s+["']${feePaymentSpecifier}["']`),
+    new RegExp(
+      String.raw`import\s+(?!type\b)[\w$]+\s*,[^;]*\sfrom\s+["']${feePaymentSpecifier}["']`
+    ),
+    new RegExp(String.raw`export\s+\*(?:\s+as\s+[\w$]+)?\s+from\s+["']${feePaymentSpecifier}["']`),
+    new RegExp(String.raw`require\(\s*["']${feePaymentSpecifier}["']\s*\)`),
+    new RegExp(String.raw`import\(\s*["']${feePaymentSpecifier}["']\s*\)`),
+  ];
+  if (opaqueImportPatterns.some((pattern) => pattern.test(source))) {
+    return "uses an opaque fee-payment import that can bypass the owned sponsorship boundary";
+  }
+
+  const importPattern =
+    /(?:import|export)\s*{([^}]+)}\s*from\s*["']@sdp\/payments\/fee-payment(?:\/[^"']*)?["']/g;
+  for (const match of source.matchAll(importPattern)) {
+    const importedNames = match[1].split(",").map(
+      (entry) =>
+        entry
+          .trim()
+          .replace(/^type\s+/, "")
+          .split(/\s+as\s+/)[0]
+    );
+    const constructorName = importedNames.find((name) => FEE_PAYMENT_CONSTRUCTORS.has(name));
+    if (constructorName)
+      return `imports fee-payment constructor ${constructorName} outside the owned sponsorship boundary`;
+  }
+  return undefined;
+}
+
 export function validateModuleBoundaries({ modules, sourceImports, appSourceRoots }) {
   const errors = [];
   const moduleNames = new Set(modules.map((module) => module.name));
@@ -402,6 +525,15 @@ export function checkModuleBoundaries(repositoryRoot = REPOSITORY_ROOT, { write 
       appSourceRoots,
     }),
   ];
+  const apiSourceRoot = path.join(repositoryRoot, "apps/sdp-api/src");
+  for (const filePath of listFiles(apiSourceRoot)) {
+    const violation = forbiddenFeePaymentConstructorImport({
+      filePath,
+      source: readFileSync(filePath, "utf8"),
+      apiSourceRoot,
+    });
+    if (violation) errors.push(`${toPosixPath(filePath)} ${violation}.`);
+  }
   const moduleMapPath = path.join(repositoryRoot, MODULE_MAP_PATH);
 
   if (write) {

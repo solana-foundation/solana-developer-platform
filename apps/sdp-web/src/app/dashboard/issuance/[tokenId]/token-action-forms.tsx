@@ -40,6 +40,8 @@ interface TokenActionFormsProps {
   setFreezeForm: Dispatch<SetStateAction<FreezeFormState>>;
   allowlistForm: AllowlistFormState;
   setAllowlistForm: Dispatch<SetStateAction<AllowlistFormState>>;
+  tokenId: string;
+  enableControlListSearch?: boolean;
   allowlistEntries: TokenAllowlistEntry[];
   allowlistError: string | null;
   controlListLabel: string | null;
@@ -60,6 +62,10 @@ interface TokenActionFormsProps {
   forceBurnValidationErrors: ForceBurnValidationErrors;
   forceBurnValidationReason: string | null;
   submitAlignment?: "start" | "end";
+  // Action-panel chrome for the whole form set; forwarded to TokenActionCard
+  // (see there for variants) via the primary/admin form groups.
+  variant?: "card" | "flat" | "bare";
+  hideAllowlistTitle?: boolean;
   onSignerWalletIdChange: (value: string) => void;
   onUpdateMetadata: () => void;
   onMint: () => void;
@@ -93,6 +99,7 @@ export function TokenActionForms(props: TokenActionFormsProps) {
         burnValidationErrors={props.burnValidationErrors}
         burnValidationReason={props.burnValidationReason}
         submitAlignment={props.submitAlignment}
+        variant={props.variant}
         onSignerWalletIdChange={props.onSignerWalletIdChange}
         onUpdateMetadata={props.onUpdateMetadata}
         onMint={props.onMint}
@@ -112,6 +119,8 @@ export function TokenActionForms(props: TokenActionFormsProps) {
         setFreezeForm={props.setFreezeForm}
         allowlistForm={props.allowlistForm}
         setAllowlistForm={props.setAllowlistForm}
+        tokenId={props.tokenId}
+        enableControlListSearch={props.enableControlListSearch}
         allowlistEntries={props.allowlistEntries}
         allowlistError={props.allowlistError}
         controlListLabel={props.controlListLabel}
@@ -119,6 +128,7 @@ export function TokenActionForms(props: TokenActionFormsProps) {
         controlListAddActionLabel={props.controlListAddActionLabel}
         controlListEmptyState={props.controlListEmptyState}
         freezeHint={props.freezeHint}
+        hideAllowlistTitle={props.hideAllowlistTitle}
         signerWallets={props.signerWallets}
         defaultSignerWalletId={props.defaultSignerWalletId}
         walletOptions={props.walletOptions}
@@ -128,6 +138,7 @@ export function TokenActionForms(props: TokenActionFormsProps) {
         forceBurnValidationErrors={props.forceBurnValidationErrors}
         forceBurnValidationReason={props.forceBurnValidationReason}
         submitAlignment={props.submitAlignment}
+        variant={props.variant}
         onSignerWalletIdChange={props.onSignerWalletIdChange}
         onSeize={props.onSeize}
         onForceBurn={props.onForceBurn}

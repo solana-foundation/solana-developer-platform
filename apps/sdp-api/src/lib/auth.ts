@@ -12,11 +12,7 @@ import { AppError, badRequest } from "./errors";
 
 export type AuthType = "api_key" | "clerk" | "session";
 
-/**
- * Normalized auth context returned by getAuth().
- * Supports API key, Clerk JWT, and session-authenticated requests.
- */
-export interface ApiKeyContext {
+interface AuthContextBase {
   id: string;
   organizationId: string;
   projectId: string | null;
@@ -26,10 +22,18 @@ export interface ApiKeyContext {
   signingWalletId: string | null;
   signingWalletIds: string[];
   walletBindings: ApiKeyWalletBinding[];
-  authType: AuthType;
-  userId: string | null;
-  apiKeyId: string | null;
 }
+
+/**
+ * Normalized auth context returned by getAuth(), discriminated on authType:
+ * API key requests always carry apiKeyId, dashboard requests (Clerk JWT or
+ * cookie session) always carry userId.
+ */
+export type ApiKeyContext = AuthContextBase &
+  (
+    | { authType: "api_key"; apiKeyId: string; userId: null }
+    | { authType: "clerk" | "session"; apiKeyId: null; userId: string }
+  );
 
 export interface ClerkAuthContext {
   userId: string;
@@ -88,7 +92,7 @@ export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
       projectId,
       role: clerk.role,
       permissions: clerk.permissions,
-      environment: "dashboard",
+      environment: c.get("projectEnvironment") ?? "dashboard",
       signingWalletId: null,
       signingWalletIds: [],
       walletBindings: [],
@@ -106,7 +110,7 @@ export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
       projectId,
       role: "session",
       permissions: session.permissions,
-      environment: "dashboard",
+      environment: c.get("projectEnvironment") ?? "dashboard",
       signingWalletId: null,
       signingWalletIds: [],
       walletBindings: [],

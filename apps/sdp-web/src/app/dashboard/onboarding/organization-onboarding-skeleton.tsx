@@ -3,6 +3,7 @@ import { SkeletonBlock } from "@/components/ui/skeleton-block";
 const RPC_CARD_SKELETON_IDS = [
   "rpc-card-alchemy",
   "rpc-card-helius",
+  "rpc-card-nodit",
   "rpc-card-quicknode",
   "rpc-card-triton",
   "rpc-card-validation-cloud",
@@ -52,7 +53,7 @@ export function OrganizationOnboardingSkeleton() {
         </div>
       </div>
 
-      <footer className="shrink-0 border-t border-border-default bg-surface-raised/95 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-8">
+      <footer className="shrink-0 border-t border-border-default px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-8">
         <div className="mx-auto flex w-full max-w-4xl items-center justify-end">
           <SkeletonBlock className="h-10 w-24 rounded-[10px]" />
         </div>

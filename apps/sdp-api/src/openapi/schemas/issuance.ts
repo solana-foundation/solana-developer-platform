@@ -12,6 +12,7 @@ import {
   createTokenSchema as createTokenSchemaBase,
   forceBurnSchema as forceBurnSchemaBase,
   freezeSchema as freezeSchemaBase,
+  listTokensQuerySchema as listTokensQuerySchemaBase,
   mintSchema as mintSchemaBase,
   pauseTokenSchema as pauseTokenSchemaBase,
   seizeSchema as seizeSchemaBase,
@@ -772,6 +773,56 @@ export const createTokenRequestSchema = createTokenSchemaBase
   })
   .openapi({ description: "Create token request body." });
 
+/**
+ * Documented straight off the runtime validator, so the published contract and
+ * what the handler accepts can't drift apart.
+ */
+export const listTokensQueryOpenApiSchema = listTokensQuerySchemaBase.extend({
+  search: withOpenApi(listTokensQuerySchemaBase.shape.search, {
+    description:
+      "Contains-style, case-insensitive match over name, symbol, mint address and token id. LIKE wildcards are matched literally. A blank value is treated as no search filter.",
+    example: "usdc",
+  }),
+  status: withOpenApi(listTokensQuerySchemaBase.shape.status, {
+    description: "Filter by the stored lifecycle column.",
+    example: "active",
+  }),
+  deploymentStatus: withOpenApi(listTokensQuerySchemaBase.shape.deploymentStatus, {
+    description:
+      "Filter by derived lifecycle state: draft until the token has a mint, paused when the mint is paused, active otherwise.",
+    example: "active",
+  }),
+  template: withOpenApi(listTokensQuerySchemaBase.shape.template, {
+    description:
+      "Exact-match template id. Use GET /v1/issuance/tokens/facets for the ids present in the project (older tokens may hold legacy ids).",
+    example: "stablecoin",
+  }),
+  createdAfter: withOpenApi(listTokensQuerySchemaBase.shape.createdAfter, {
+    description: "Inclusive lower bound on creation time (ISO 8601).",
+    example: "2026-01-01T00:00:00.000Z",
+  }),
+  createdBefore: withOpenApi(listTokensQuerySchemaBase.shape.createdBefore, {
+    description: "Inclusive upper bound on creation time (ISO 8601).",
+    example: "2026-06-30T23:59:59.999Z",
+  }),
+  sortBy: withOpenApi(listTokensQuerySchemaBase.shape.sortBy, {
+    description: "Field used to sort the token list.",
+    example: "createdAt",
+  }),
+  sortDirection: withOpenApi(listTokensQuerySchemaBase.shape.sortDirection, {
+    description: "Sort direction.",
+    example: "desc",
+  }),
+  page: withOpenApi(listTokensQuerySchemaBase.shape.page, {
+    description: "Page number (1-based).",
+    example: 1,
+  }),
+  pageSize: withOpenApi(listTokensQuerySchemaBase.shape.pageSize, {
+    description: "Items per page (max 100).",
+    example: 50,
+  }),
+});
+
 const combinedIssuanceMetadataExample = {
   asset: { name: "Acme USD", issuerName: "Acme Financial Inc.", pegCurrency: "USD" },
   compliance: { transferRestrictions: "reg_d" },
@@ -837,6 +888,11 @@ export const updateTokenRequestSchema = updateTokenSchemaBase
       description:
         "Whether transfers are restricted to allowlisted accounts. Only accepted while the token is undeployed (pending, no mint address); returns 400 after deployment.",
       example: true,
+    }),
+    maxSupply: withOpenApi(updateTokenSchemaBase.shape.maxSupply, {
+      description:
+        "Updated maximum supply as a string (UI units); null removes the cap. Enforced by SDP at mint time while it holds the mint authority, so it is rejected with 400 once the supply is locked on-chain (mint authority revoked), and cannot be set below the already-minted supply.",
+      example: "1000000",
     }),
   })
   .openapi({ description: "Update token request body." });

@@ -41,14 +41,8 @@ import { useTranslations } from "@/i18n/provider";
 import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
 import { getAssetTypeLabel, getCategoryLabelKey } from "./asset-taxonomy";
-import {
-  buildPublicMetadata,
-  getDefaultPublicFields,
-  getPublicFieldCandidates,
-  safeLinkHref,
-} from "./draft-mapping";
+import { getDefaultPublicFields, getPublicFieldCandidates, safeLinkHref } from "./draft-mapping";
 import type { DraftState } from "./issuance-draft-wizard.types";
-import { MetadataJsonPanel, MetadataJsonToggle } from "./metadata-json";
 
 interface StaticField {
   key: string;
@@ -212,11 +206,9 @@ export function PublicInfoPreview({
   const t = useTranslations();
   const [showOptional, setShowOptional] = useState(false);
   const [surface, setSurface] = useState<PreviewSurface>("token");
-  const [jsonOpen, setJsonOpen] = useState(false);
   const categoryLabelKey = getCategoryLabelKey(draft.assetCategory);
   const categoryLabel = categoryLabelKey ? t(categoryLabelKey) : null;
   const typeLabel = getAssetTypeLabel(draft.assetCategory, draft.assetType, t);
-  const publicMetadata = buildPublicMetadata(draft);
 
   // Core identity + classification: inherent to the token / served from the
   // token record, so always public and not toggleable.
@@ -329,16 +321,13 @@ export function PublicInfoPreview({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h3 className="text-xl font-medium text-primary">
-            {t("DashboardIssuance.publicInfo.publicTokenInformation")}
-          </h3>
-          <p className="mt-0.5 text-sm text-tertiary">
-            {t("DashboardIssuance.publicInfo.publicTokenInfoHelp")}
-          </p>
-        </div>
-        <MetadataJsonToggle open={jsonOpen} onToggle={() => setJsonOpen((prev) => !prev)} />
+      <div>
+        <h3 className="text-xl font-medium text-primary">
+          {t("DashboardIssuance.publicInfo.publicTokenInformation")}
+        </h3>
+        <p className="mt-0.5 text-sm text-tertiary">
+          {t("DashboardIssuance.publicInfo.publicTokenInfoHelp")}
+        </p>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -429,8 +418,7 @@ export function PublicInfoPreview({
           ) : null}
         </div>
 
-        {/* Preview — how the asset appears publicly, across surfaces. The JSON
-            viewer sits under this column when toggled open. */}
+        {/* Preview — how the asset appears publicly, across surfaces. */}
         <div>
           <div className="mb-2 flex h-8 items-center justify-between gap-3">
             <p className="text-sm font-medium text-primary">
@@ -443,12 +431,6 @@ export function PublicInfoPreview({
             {surface === "explorer" ? <ExplorerPreview {...previewProps} /> : null}
             {surface === "token" ? <TokenPreview {...previewProps} /> : null}
           </div>
-
-          {jsonOpen ? (
-            <div className="mt-3">
-              <MetadataJsonPanel metadata={publicMetadata} />
-            </div>
-          ) : null}
         </div>
       </div>
     </div>
