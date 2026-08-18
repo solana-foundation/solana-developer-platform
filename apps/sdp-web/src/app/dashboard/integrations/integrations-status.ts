@@ -107,18 +107,20 @@ export function resolveCustodyIntegrations(input: {
 }
 
 /**
- * The organization runs exactly one RPC provider, chosen in onboarding or
- * Settings — that one is active. The rest of the enabled set is available to
- * switch to; `default` is SDP's own key and is only worth naming while it is
- * what the organization actually uses.
+ * The organization runs exactly one RPC provider, chosen in onboarding or on an
+ * integration's own page — that one is active. The rest of the enabled set is
+ * available to switch to.
+ *
+ * `default` is listed like any other provider, including while the organization
+ * is on a vendor. Hiding it left an organization that had moved to Helius with
+ * no page offering SDP RPC and a 404 at its route, so the only way back was the
+ * Settings dropdown this family replaced (HOO-787).
  */
 export function resolveRpcIntegrations(input: {
   selectedProvider: OrganizationRpcProvider | null;
   entries: Partial<Record<OrganizationRpcProvider, ProviderAvailabilityEntry>>;
 }): IntegrationEntry<OrganizationRpcProvider>[] {
-  return ORGANIZATION_RPC_PROVIDERS.filter(
-    (provider) => provider !== "default" || input.selectedProvider === "default"
-  ).map((provider) => {
+  return ORGANIZATION_RPC_PROVIDERS.map((provider) => {
     const entry = input.entries[provider];
     // Every RPC provider is generally available; an unconfigured one lacks a
     // URL in this deployment, which is never organization access.
