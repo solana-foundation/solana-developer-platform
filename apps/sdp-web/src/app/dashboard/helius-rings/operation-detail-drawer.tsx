@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Callout } from "@/components/ui/callout";
 import { Drawer, DrawerContent, DrawerTitle } from "@/components/ui/drawer";
@@ -33,6 +33,19 @@ export function OperationDetailDrawer({
       .then((result) => setDetail(result.operation))
       .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : loadFailedCopy));
   }, [operationId, loadFailedCopy]);
+
+  // Content-derived keys: the timeline is append-only, so kind + timestamp
+  // plus an occurrence counter is stable across re-renders without leaning on
+  // the array index.
+  const keyedEvents = useMemo(() => {
+    const seen = new Map<string, number>();
+    return (detail?.events ?? []).map((event) => {
+      const base = `${event.kind}:${event.createdAt}`;
+      const occurrence = (seen.get(base) ?? 0) + 1;
+      seen.set(base, occurrence);
+      return { ...event, key: `${base}:${occurrence}` };
+    });
+  }, [detail]);
 
   return (
     <Drawer open={operationId !== null} onOpenChange={(open) => !open && onClose()}>
@@ -91,11 +104,8 @@ export function OperationDetailDrawer({
                 </p>
               ) : (
                 <ol className="flex flex-col gap-1.5">
-                  {detail.events.map((event, index) => (
-                    <li
-                      key={`${event.kind}-${index}`}
-                      className="flex items-baseline justify-between gap-4"
-                    >
+                  {keyedEvents.map((event) => (
+                    <li key={event.key} className="flex items-baseline justify-between gap-4">
                       <span className="text-sm text-primary">{event.kind}</span>
                       <span className="text-sm text-secondary">
                         {new Date(event.createdAt).toLocaleTimeString()}
