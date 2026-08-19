@@ -148,7 +148,9 @@ fn check_timestamp(raw: &str) -> Result<(), GatewayError> {
         .map_err(|_| GatewayError::Internal("system clock is before the unix epoch".into()))?
         .as_secs() as i64;
 
-    if (now - claimed).abs() > HMAC_TIMESTAMP_TOLERANCE_SECS {
+    // `abs_diff` is unsigned, so i64::MIN cannot overflow the window check
+    // the way `(now - claimed).abs()` does.
+    if now.abs_diff(claimed) > HMAC_TIMESTAMP_TOLERANCE_SECS as u64 {
         return Err(GatewayError::Unauthorized);
     }
     Ok(())
@@ -278,6 +280,12 @@ mod tests {
         assert!(check_timestamp(&stale).is_err());
         assert!(check_timestamp(&ahead).is_err());
         assert!(check_timestamp(&now.to_string()).is_ok());
+    }
+
+    #[test]
+    fn rejects_extreme_timestamps_without_overflow() {
+        assert!(check_timestamp(&i64::MIN.to_string()).is_err());
+        assert!(check_timestamp(&i64::MAX.to_string()).is_err());
     }
 
     #[test]
