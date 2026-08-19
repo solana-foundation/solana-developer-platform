@@ -13,6 +13,10 @@ const selectedRpcProviderIdSchema = z.enum(PROJECT_RPC_PROVIDERS).openapi({
 
 const rpcSelectionModeSchema = z
   .enum([
+    // Tenant-owned connections outrank platform selection, so they lead the
+    // union here the same way they do in the resolver.
+    "project_connection",
+    "organization_connection",
     "project_provider",
     "project_custom_provider",
     "organization_provider",
