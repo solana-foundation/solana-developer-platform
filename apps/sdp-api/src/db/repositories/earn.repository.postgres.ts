@@ -30,7 +30,6 @@ import type {
   UpsertEarnStrategyInput,
 } from "./earn.repository";
 import {
-  EARN_SEED_REFERENCE_PREFIX,
   generateEarnProgramWithdrawalId,
   generateEarnProviderWalletId,
   generateEarnStrategyId,
@@ -272,11 +271,6 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       // one thing this pass leaves behind; it is invisible to every read anyway
       // (the catalogue and program-creation paths both filter `status = 'active'`).
       //
-      // Dev-seed fixtures are outside every provider's key space (providers list
-      // bare ids, fixtures carry the prefix), so "the provider did not list it"
-      // says nothing about them — the seed relies on exactly that to keep its
-      // deliberately-paused fixture paused, and prunes its own stale rows.
-      //
       // An empty keep set would match EVERY active row (`= ANY('{}')` is false,
       // so `NOT` admits everything) and delete the provider's whole shelf.
       // "The provider listed nothing" is indistinguishable from a misconfigured
@@ -292,13 +286,10 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
             WHERE provider = ?
               AND environment = ?
               AND status = 'active'
-              AND provider_reference NOT LIKE ?
               AND NOT (provider_reference = ANY(?))
             RETURNING provider_reference`
         )
-        .bind(input.provider, input.environment, `${EARN_SEED_REFERENCE_PREFIX}%`, [
-          ...input.listedProviderReferences,
-        ])
+        .bind(input.provider, input.environment, [...input.listedProviderReferences])
         .all<{ provider_reference: string }>();
 
       return (rows.results ?? []).map((row) => row.provider_reference);

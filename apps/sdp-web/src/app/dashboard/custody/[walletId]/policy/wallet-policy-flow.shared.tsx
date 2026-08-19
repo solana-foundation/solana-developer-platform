@@ -94,6 +94,7 @@ export const FAMILY_LABEL_KEYS = {
   payment: "DashboardCustody.policyPayments",
   ramp: "DashboardCustody.policyRamps",
   issuance: "DashboardCustody.policyIssuance",
+  program: "DashboardCustody.policyProgramOperations",
 } as const satisfies Record<WalletOperationFamily, MessageKey>;
 
 export const FAMILY_DESCRIPTION_KEYS = {
@@ -101,6 +102,7 @@ export const FAMILY_DESCRIPTION_KEYS = {
   payment: "DashboardCustody.policyPaymentsDescription",
   ramp: "DashboardCustody.policyRampsDescription",
   issuance: "DashboardCustody.policyIssuanceDescription",
+  program: "DashboardCustody.policyProgramOperationsDescription",
 } as const satisfies Record<WalletOperationFamily, MessageKey>;
 
 export function toggleValue<TValue extends string>(values: TValue[], value: TValue): TValue[] {

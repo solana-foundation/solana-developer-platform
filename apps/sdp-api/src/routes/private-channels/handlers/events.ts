@@ -7,33 +7,13 @@ import { hasPermission, PRIVATE_CHANNEL_EVENT_DISPLAY_PAYLOAD_KEYS } from "@sdp/
 import type { PrivateChannelEventRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
+import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
 import type { AppContext } from "../context";
 import { getPrivateChannelEventRepository, getPrivateChannelRepository } from "../context";
 import { resolveEventViewer } from "../event-access";
 import { requireActiveInstance } from "../helpers";
 import { privateChannelEventsQuerySchema } from "../schemas";
-
-/**
- * Opaque page cursor encoding the last row's (occurredAt, id). Base64url so
- * clients treat it as opaque; occurred_at never contains "|".
- */
-function encodeCursor(occurredAt: string, id: string): string {
-  return btoa(`${occurredAt}|${id}`).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function decodeCursor(cursor: string): { occurredAt: string; id: string } | null {
-  try {
-    const decoded = atob(cursor.replace(/-/g, "+").replace(/_/g, "/"));
-    const separator = decoded.indexOf("|");
-    if (separator <= 0 || separator === decoded.length - 1) {
-      return null;
-    }
-    return { occurredAt: decoded.slice(0, separator), id: decoded.slice(separator + 1) };
-  } catch {
-    return null;
-  }
-}
 
 function displayEventPayload(payload: Record<string, unknown>): Record<string, unknown> {
   const displayPayload: Record<string, unknown> = {};
@@ -87,7 +67,8 @@ function parseEventsQuery(c: AppContext): ParsedEventsQuery {
     throw badRequest("Invalid events query");
   }
   const { family, type, status, before } = parsed.data;
-  const cursor = before ? decodeCursor(before) : null;
+  const decodedCursor = before ? decodeKeysetCursor(before) : null;
+  const cursor = decodedCursor ? { occurredAt: decodedCursor.value, id: decodedCursor.id } : null;
   if (before && !cursor) {
     throw badRequest("Invalid pagination cursor");
   }
@@ -96,7 +77,7 @@ function parseEventsQuery(c: AppContext): ParsedEventsQuery {
 
 function eventsEnvelope(c: AppContext, rows: PrivateChannelEventRow[], hasMore: boolean) {
   const last = rows.at(-1);
-  const nextCursor = hasMore && last ? encodeCursor(last.occurred_at, last.id) : null;
+  const nextCursor = hasMore && last ? encodeKeysetCursor(last.occurred_at, last.id) : null;
   const auth = getAuth(c);
   const includeRawPayload =
     auth.authType !== "api_key" && hasPermission(auth.permissions, "org:admin");

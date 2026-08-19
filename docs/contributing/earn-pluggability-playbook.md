@@ -85,21 +85,37 @@ warn-logged and skipped, not persisted), and upserts via `upsertStrategy`
 starts reporting appears on the next run; one provider failing (or still
 being a `NOT_IMPLEMENTED` stub) never sinks the others' pass.
 
-**Local dev.** Provider credentials aren't needed to get a catalogue:
+**Local dev.** Use sandbox provider credentials and enable both
+`MARKETS_ENABLED` and `EARN_ENABLED` before starting the API. The hourly
+catalogue sync is the only admitting writer, so a fresh database stays empty
+until a live provider pass succeeds. Do not insert catalogue rows by hand: that
+bypasses the provider's declared-support checks and leaves rows the delist pass
+cannot justify.
 
-```bash
-pnpm -C apps/sdp-api db:seed:earn                            # sandbox catalogue fixtures
-pnpm -C apps/sdp-api db:seed:earn -- --clean                 # remove seeded rows again
+**Carrying rows from the old `db:seed:earn`?** That script wrote
+`seed-demo-`-prefixed strategies and one wallet link, and only ever into a
+local database (it refused any non-loopback `DATABASE_URL`). The next sync pass
+prunes the *active* fixtures on its own now that the delist exemption is gone,
+but two kinds of row outlive it by design: the deliberately `paused` fixture
+(the pass never deletes an operator stop) and the wallet link, which holds the
+global `UNIQUE (provider, provider_wallet_ref)` claim on the shared sandbox
+wallet. Clear both once, against your local database:
+
+```sql
+DELETE FROM earn_strategies WHERE provider_reference LIKE 'seed-demo-%';
+
+DELETE FROM earn_provider_wallets
+ WHERE label = 'Seeded sandbox wallet (local dev)'
+   AND NOT EXISTS (
+     SELECT 1 FROM earn_program_withdrawals x
+      WHERE x.wallet_id = earn_provider_wallets.id
+   );
 ```
 
-The seed is **local-development only**: it refuses any non-local
-`DATABASE_URL` and only ever writes `sandbox` fixtures (there is no
-`--environment production` — passing it exits with an error).
-
-The script (`apps/sdp-api/scripts/seed-earn-demo.ts`) writes through the same
-`upsertStrategy` API and declared-support validation the sync uses, so seeded
-rows behave exactly like synced ones; it is idempotent on the `seed-demo-`
-provider-reference prefix.
+`earn_program_withdrawals` FKs the link row with no cascade — history is
+undeletable by design (migration `0055`) — so a link you have withdrawn against
+stays put, which is where its history belongs anyway. Recreating the local
+database from scratch is the other valid answer.
 
 **Update.** Sync-owned fields (name, APY, mints, risk metadata, ...) converge
 on the next run; manual edits to those columns get overwritten. `status` is the

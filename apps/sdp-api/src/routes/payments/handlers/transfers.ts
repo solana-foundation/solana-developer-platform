@@ -378,6 +378,7 @@ export async function extractTransferPolicyCandidate(c: AppContext): Promise<Pol
       token: parsed.data.token,
       amount: parsed.data.amount,
     },
+    idempotencyKey: null,
   };
 }
 
