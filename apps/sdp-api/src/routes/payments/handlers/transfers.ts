@@ -27,7 +27,7 @@ import {
   partiallySignTransactionWithSigners,
 } from "@solana/signers";
 import { getTransferSolInstruction } from "@solana-program/system";
-import { z } from "zod";
+import type { z } from "zod";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
   type PaymentsRepository,
@@ -47,6 +47,7 @@ import { paginated, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import {
   assertApiKeyWalletAccess,
@@ -79,7 +80,7 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import { type AppContext, getFeePayment, getPaymentsRepository } from "../context";
 import { mapTransferRow } from "../mappers";
 import {
-  createTransferSchema,
+  type createTransferSchema,
   listTransfersQuerySchema,
   transferIdParamsSchema,
   walletIdParamsSchema,
@@ -342,41 +343,38 @@ interface TransferPolicyResolved {
  * @param c - Request context.
  * @returns The candidate, validated body, resolved resources, and raw payload.
  */
-export async function extractTransferPolicyCandidate(c: AppContext): Promise<PolicyGateExtraction> {
-  const parsed = createTransferSchema.safeParse(await c.req.json());
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+export async function extractTransferPolicyCandidate(
+  c: ValidatedBodyContext<typeof createTransferSchema>
+): Promise<PolicyGateExtraction> {
+  const body = c.req.valid("json");
 
   const scope = await resolveScope(c);
-  assertPaymentProjectScope(parsed.data.projectId, scope.auth.projectId);
+  assertPaymentProjectScope(body.projectId, scope.auth.projectId);
   const operation = resolveOutboundPaymentOperation({
     auth: scope.auth,
     wallets: scope.wallets,
-    source: parsed.data.source,
-    destination: parsed.data.destination,
-    token: parsed.data.token,
-    amount: parsed.data.amount,
+    source: body.source,
+    destination: body.destination,
+    token: body.token,
+    amount: body.amount,
     env: c.env,
     requiredWalletPermissions: ["payments:write"],
   });
-  const privateTransfer = parsed.data.privateTransfer as PrivateTransferRequest | undefined;
+  const privateTransfer = body.privateTransfer as PrivateTransferRequest | undefined;
 
   return {
     candidate: buildTransferPolicyCandidate(scope, operation, {
-      memo: parsed.data.memo === undefined ? null : parsed.data.memo,
+      memo: body.memo === undefined ? null : body.memo,
       privateTransfer: Boolean(privateTransfer),
     }),
     legs: [],
-    body: parsed.data,
+    body,
     resolved: { scope, operation, privateTransfer },
     rawPayload: {
-      source: parsed.data.source,
-      destination: parsed.data.destination,
-      token: parsed.data.token,
-      amount: parsed.data.amount,
+      source: body.source,
+      destination: body.destination,
+      token: body.token,
+      amount: body.amount,
     },
     idempotencyKey: null,
   };

@@ -1,8 +1,8 @@
-import { z } from "zod";
 import { mapPrivateChannelInstanceRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound, unauthorized, walletNotFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { resolveScope, resolveWalletAddress } from "@/routes/payments/wallets";
 import {
   createChannelDeposit,
@@ -13,7 +13,7 @@ import {
 import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
 import type { AppContext } from "../context";
 import { getPrivateChannelInstanceRepository } from "../context";
-import { createDepositBodySchema, depositIdParamSchema } from "../schemas";
+import { type createDepositBodySchema, depositIdParamSchema } from "../schemas";
 
 async function loadActiveInstance(c: AppContext, organizationId: string, projectId: string) {
   const row = await getPrivateChannelInstanceRepository(c).getActiveByProject({
@@ -37,14 +37,10 @@ async function loadActiveInstance(c: AppContext, organizationId: string, project
  * belong to, per `private_channel_verified_wallets` and
  * `private_channel_memberships`.
  */
-export async function createPrivateChannelDeposit(c: AppContext) {
-  const body = await c.req.json().catch(() => null);
-  const parsed = createDepositBodySchema.safeParse(body);
-  if (!parsed.success) {
-    throw badRequest("Invalid deposit request", {
-      fieldErrors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+export async function createPrivateChannelDeposit(
+  c: ValidatedBodyContext<typeof createDepositBodySchema>
+) {
+  const body = c.req.valid("json");
 
   try {
     const { auth, wallets } = await resolveScope(c);
@@ -56,7 +52,7 @@ export async function createPrivateChannelDeposit(c: AppContext) {
     const instance = await loadActiveInstance(c, auth.organizationId, projectId);
 
     // Source wallet must be a custody wallet we can sign for.
-    const depositorPubkey = resolveWalletAddress(wallets, parsed.data.walletId, "walletId", auth, [
+    const depositorPubkey = resolveWalletAddress(wallets, body.walletId, "walletId", auth, [
       "wallets:read",
     ]);
     const wallet = wallets.find((w) => w.publicKey === depositorPubkey);
@@ -65,8 +61,8 @@ export async function createPrivateChannelDeposit(c: AppContext) {
     }
 
     // Recipient may be another member's wallet/address; defaults to the depositor.
-    const recipient = parsed.data.recipient
-      ? resolveWalletAddress(wallets, parsed.data.recipient, "recipient", auth, ["wallets:read"])
+    const recipient = body.recipient
+      ? resolveWalletAddress(wallets, body.recipient, "recipient", auth, ["wallets:read"])
       : undefined;
 
     // Auth-enabled instances JWT-gate the gateway baseline read.
@@ -83,8 +79,8 @@ export async function createPrivateChannelDeposit(c: AppContext) {
       projectId,
       userId,
       wallet,
-      amount: parsed.data.amount,
-      mint: parsed.data.mint,
+      amount: body.amount,
+      mint: body.mint,
       recipient,
       gatewayAuth,
     });

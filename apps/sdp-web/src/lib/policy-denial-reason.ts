@@ -23,12 +23,20 @@ export function extractPolicyDenialReason(body: string): string | null {
     return null;
   }
 
-  const details = (parsed as { error?: { details?: { reason?: unknown } } } | null)?.error?.details;
-  if (!details) {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return null;
+  }
+  const error = "error" in parsed ? parsed.error : undefined;
+  if (typeof error !== "object" || error === null || Array.isArray(error)) {
+    return null;
+  }
+  const details = "details" in error ? error.details : undefined;
+  if (typeof details !== "object" || details === null || Array.isArray(details)) {
     return null;
   }
 
-  const reason = typeof details.reason === "string" ? details.reason.trim() : "";
+  const reason =
+    "reason" in details && typeof details.reason === "string" ? details.reason.trim() : "";
   return reason || null;
 }
 

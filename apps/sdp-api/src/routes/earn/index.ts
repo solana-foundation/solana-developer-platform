@@ -4,6 +4,7 @@ import { isEarnEnabled } from "@/lib/feature-flags";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
   createEarnProgram,
@@ -23,6 +24,13 @@ import {
   findEarnVaultDepositIdempotentKeyReplay,
   listEarnVaultPositions,
 } from "./handlers/vault";
+import {
+  earnProgramCreateSchema,
+  earnProgramRetargetSchema,
+  earnProgramWithdrawalCreateSchema,
+  earnProgramWithdrawalPreviewSchema,
+  earnVaultDepositSchema,
+} from "./schemas";
 
 const earn = new Hono<{ Bindings: Env }>();
 
@@ -59,11 +67,13 @@ earn.get("/strategies/:strategyId", requirePermissions("earn:read"), getEarnStra
 // `createOrgSigner` and broadcasts a value-moving transaction, so without the
 // gate an org's wallet deny rules, approval requirements, amount/asset limits
 // and destination controls were all bypassed — the handler simply never asked.
-// The gate must sit AFTER `requirePermissions` and immediately before the
-// handler, so a denial is decided before any KMS or relay access.
+// The gate must sit AFTER `requirePermissions` and `validateBody`, and
+// immediately before the handler, so a denial is decided before any KMS or
+// relay access.
 earn.post(
   "/vault-deposits",
   requirePermissions("earn:write", "wallets:read"),
+  validateBody(earnVaultDepositSchema),
   policyGate({
     extract: extractEarnVaultDepositPolicyCandidate,
     findIdempotentKeyReplay: findEarnVaultDepositIdempotentKeyReplay,
@@ -88,18 +98,30 @@ earn.get(
 // The collection is declared BEFORE the `:programId` routes so a literal
 // segment can never be captured as an id.
 earn.get("/programs", requirePermissions("earn:read"), listEarnPrograms);
-earn.post("/programs", requirePermissions("earn:write"), createEarnProgram);
+earn.post(
+  "/programs",
+  requirePermissions("earn:write"),
+  validateBody(earnProgramCreateSchema),
+  createEarnProgram
+);
 earn.get("/programs/:programId", requirePermissions("earn:read"), getEarnProgram);
-earn.put("/programs/:programId", requirePermissions("earn:write"), retargetEarnProgram);
+earn.put(
+  "/programs/:programId",
+  requirePermissions("earn:write"),
+  validateBody(earnProgramRetargetSchema),
+  retargetEarnProgram
+);
 earn.get("/programs/:programId/deposits", requirePermissions("earn:read"), listEarnProgramDeposits);
 earn.post(
   "/programs/:programId/withdrawal-preview",
   requirePermissions("earn:read"),
+  validateBody(earnProgramWithdrawalPreviewSchema),
   previewEarnProgramWithdrawal
 );
 earn.post(
   "/programs/:programId/withdrawals",
   requirePermissions("earn:write"),
+  validateBody(earnProgramWithdrawalCreateSchema),
   createEarnProgramWithdrawal
 );
 earn.get(

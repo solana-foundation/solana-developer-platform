@@ -10,13 +10,14 @@ import { badRequest, notFound } from "@/lib/errors";
 import { parsePagination } from "@/lib/query";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { emitKycApprovedForClearedEnrollments } from "@/services/workflows/clearance";
 import type { Env } from "@/types/env";
 import { getTenantTokenService, requireProjectScope } from "../helpers";
 
 type AppContext = Context<{ Bindings: Env }>;
 
-const enrollHolderSchema = z.object({
+export const enrollHolderSchema = z.object({
   walletAddress: z.string(),
   counterpartyId: z.string().nullish(),
   reviewMode: z.enum(["auto", "manual"]).optional(),
@@ -25,15 +26,12 @@ const enrollHolderSchema = z.object({
 // Enroll a holder for an asset — the v1 "clearance" act: upsert the SDP-owned
 // kyc_wallets identity row (+ counterparty link) and an active enrollment. If the
 // wallet is already verified, this completes clearance and emits kyc_approved.
-export const enrollHolder = async (c: AppContext) => {
+export const enrollHolder = async (c: ValidatedBodyContext<typeof enrollHolderSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
 
-  const parsed = enrollHolderSchema.safeParse(await c.req.json());
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.flattenError(parsed.error).fieldErrors });
-  }
-  assertValidAddress(parsed.data.walletAddress, "walletAddress");
+  const body = c.req.valid("json");
+  assertValidAddress(body.walletAddress, "walletAddress");
 
   const token = await getTenantTokenService(c).getToken({
     tokenId,
@@ -48,7 +46,7 @@ export const enrollHolder = async (c: AppContext) => {
   // the table — including another org's. Resolving it in scope first turns a cross-tenant
   // reference into a 404 instead of a successful link, and an unknown id into a 404
   // instead of an FK violation surfacing as a 500.
-  const counterpartyId = parsed.data.counterpartyId ?? null;
+  const counterpartyId = body.counterpartyId ?? null;
   if (counterpartyId) {
     const counterparty = await createCounterpartiesRepository(
       c.env,
@@ -66,7 +64,7 @@ export const enrollHolder = async (c: AppContext) => {
   const wallet = await createKycWalletsRepository(c.env).upsertKycWallet({
     organizationId: orgId,
     projectId,
-    walletAddress: parsed.data.walletAddress,
+    walletAddress: body.walletAddress,
     counterpartyId,
     createdBy: auth.id,
   });
@@ -79,7 +77,7 @@ export const enrollHolder = async (c: AppContext) => {
     projectId,
     kycWalletId: wallet.id,
     tokenId,
-    reviewMode: parsed.data.reviewMode,
+    reviewMode: body.reviewMode,
     createdBy: auth.id,
   });
 

@@ -9,7 +9,6 @@ import type {
   PolicyRule,
 } from "@sdp/types";
 import type { Address } from "@solana/kit";
-import { z } from "zod";
 import { type DatabaseExecutor, getDb } from "@/db";
 import type {
   ActiveWalletControlProfileResult,
@@ -22,6 +21,7 @@ import {
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, walletNotFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
@@ -30,7 +30,7 @@ import {
   attachUsdValuesToBalances,
 } from "@/services/helius-das.service";
 import { type AppContext, getPolicyRepository } from "../context";
-import { updateWalletPolicySchema, walletIdParamsSchema } from "../schemas";
+import { type updateWalletPolicySchema, walletIdParamsSchema } from "../schemas";
 import * as tokenAccounts from "../token-accounts";
 import { resolveIssuedTokenLabelsByMint } from "../token-labels";
 import { resolveWalletFromParams } from "./transfers";
@@ -341,17 +341,10 @@ export async function getWalletPolicy(c: AppContext) {
   return success(c, { policy: walletPolicyResponse(wallet.walletId, controlProfile, audit) });
 }
 
-export async function updateWalletPolicy(c: AppContext) {
+export async function updateWalletPolicy(c: ValidatedBodyContext<typeof updateWalletPolicySchema>) {
   const { auth, wallet } = await resolveWalletFromParams(c, ["wallets:write"]);
 
-  const body = await c.req.json();
-  const parsed = updateWalletPolicySchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const now = new Date().toISOString();
   await getDb(c.env).transaction(async (tx) => {
@@ -361,9 +354,9 @@ export async function updateWalletPolicy(c: AppContext) {
       projectId: auth.projectId ?? null,
       custodyWalletId: wallet.id,
       profileName: `${wallet.label ?? wallet.walletId} controls`,
-      rules: parsed.data.rules,
-      defaultAction: parsed.data.defaultAction,
-      commitMessage: parsed.data.commitMessage,
+      rules: body.rules,
+      defaultAction: body.defaultAction,
+      commitMessage: body.commitMessage,
       createdBy: auth.userId ?? auth.apiKeyId ?? null,
       activatedAt: now,
     });
