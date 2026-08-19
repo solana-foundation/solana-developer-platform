@@ -184,8 +184,6 @@ export async function createRingsZone(input: {
 
 /** Devnet assets seeded in the rings allowlist. */
 export const RINGS_ALLOWLISTED_ASSETS = [
-  // biome-ignore lint/security/noSecrets: wrapped SOL mint address, not a secret.
   { mint: "So11111111111111111111111111111111111111112", symbol: "SOL", decimals: 9 },
-  // biome-ignore lint/security/noSecrets: devnet USDC mint address, not a secret.
   { mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", symbol: "USDC", decimals: 6 },
 ] as const;
