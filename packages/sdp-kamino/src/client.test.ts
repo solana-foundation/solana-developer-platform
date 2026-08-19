@@ -207,14 +207,15 @@ describe("KaminoVaultDirectClient capabilities", () => {
         sharesMint: address(SHARE_MINT),
       })
     );
+    const processEnv = {
+      SOLANA_RPC_URL: "https://process-mainnet.example.invalid",
+      UNRELATED: "preserved",
+    };
 
     const positions = await probe.readVaultPositions(
       {
         environment: "sandbox",
-        env: {
-          SOLANA_RPC_URL: "https://process-mainnet.example.invalid",
-          UNRELATED: "preserved",
-        },
+        env: processEnv,
       },
       {
         owner,
@@ -225,10 +226,7 @@ describe("KaminoVaultDirectClient capabilities", () => {
     expect(resolveRpcUrl).toHaveBeenCalledWith(
       {
         environment: "sandbox",
-        env: {
-          SOLANA_RPC_URL: "https://process-mainnet.example.invalid",
-          UNRELATED: "preserved",
-        },
+        env: processEnv,
       },
       "devnet"
     );

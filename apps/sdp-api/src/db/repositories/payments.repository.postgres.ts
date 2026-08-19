@@ -51,7 +51,14 @@ function buildTransferListWhere(params: ListTransfersInput): {
 
   addEquals("pt.project_id", params.projectId ?? undefined);
   addEquals("pt.wallet_id", params.walletId);
-  addIn("pt.wallet_id", params.walletIds);
+  // walletIds is an authorization allowlist, not an optional filter: an empty
+  // list means "authorized for no wallet" and must match nothing, while the
+  // other addIn params legitimately treat an empty/absent list as no filter.
+  if (params.walletIds !== undefined && params.walletIds.length === 0) {
+    clauses.push("1 = 0");
+  } else {
+    addIn("pt.wallet_id", params.walletIds);
+  }
   addEquals("pt.counterparty_id", params.counterpartyId);
 
   if (params.walletAddress) {

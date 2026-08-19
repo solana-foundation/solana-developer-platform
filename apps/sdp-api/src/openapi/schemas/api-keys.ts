@@ -407,6 +407,7 @@ export const revokeApiKeyResponseSchema = z
   .openapi({ description: "API key revocation response payload." });
 
 export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
+  .omit({ connectionId: true })
   .extend({
     name: withOpenApi(apiKeyCreateSchemaBase.shape.name, {
       description: "Friendly name for the API key.",
@@ -451,8 +452,9 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
         "Optional wallet-level permission bindings. Use this to attach multiple wallets with scoped permissions.",
     }),
     provisionWallet: withOpenApi(apiKeyCreateSchemaBase.shape.provisionWallet, {
-      description: "If true, provisions a new custody wallet and binds it to the key.",
-      example: false,
+      description:
+        "Set true to provision for the effective custody target, or provide a connectionId object to provision for an exact Custody Connection.",
+      example: { connectionId: "cconn_123" },
     }),
     walletLabel: withOpenApi(apiKeyCreateSchemaBase.shape.walletLabel, {
       description: "Optional label for a provisioned wallet.",
@@ -463,7 +465,17 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
       example: "mint_authority",
     }),
   })
-  .openapi({ description: "Create API key request body." });
+  .openapi({
+    description: "Create API key request body.",
+    example: {
+      name: "Primary Key",
+      role: "api_developer",
+      walletScope: "selected",
+      provisionWallet: { connectionId: "cconn_123" },
+      walletLabel: "Mint authority wallet",
+      walletPurpose: "mint_authority",
+    },
+  });
 
 export const updateApiKeyRequestSchema = apiKeyUpdateSchemaBase
   .extend({

@@ -11,6 +11,7 @@ import {
 import { AppError } from "@/lib/errors";
 import { createTenantScope, getRequestTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
+import { loadApiKeyWalletAuthorization } from "@/services/api-key-wallets.service";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 
@@ -239,21 +240,14 @@ async function loadActiveApiKey(
     }
   }
 
-  const bindings = await db
-    .prepare(
-      `SELECT wallet_id, permissions FROM api_key_wallet_permissions
-       WHERE api_key_id = ? ORDER BY created_at ASC`
-    )
-    .bind(apiKeyId)
-    .all<{ wallet_id: string; permissions: unknown }>();
-  const walletBindings = bindings.results.map((binding) => ({
-    walletId: binding.wallet_id,
-    permissions: parsePostgresJsonOr<Permission[]>(binding.permissions, ["*"]),
-  }));
-  const signingWalletId = (row.signing_wallet_id as string | null | undefined) ?? null;
-  if (walletBindings.length === 0 && signingWalletId) {
-    walletBindings.push({ walletId: signingWalletId, permissions: ["*"] });
-  }
+  const { walletScope, signingWalletId, signingWalletIds, walletBindings } =
+    await loadApiKeyWalletAuthorization(
+      db,
+      apiKeyId,
+      organizationId,
+      projectId as string,
+      (row.signing_wallet_id as string | null | undefined) ?? null
+    );
   const { getPermissionsForApiKeyRole } = await import("@sdp/types");
   const role = row.role as "api_admin" | "api_developer" | "api_readonly";
   return {
@@ -266,8 +260,9 @@ async function loadActiveApiKey(
       getPermissionsForApiKeyRole(role)
     ),
     environment: row.environment as "sandbox" | "production",
+    walletScope,
     signingWalletId,
-    signingWalletIds: walletBindings.map((binding) => binding.walletId),
+    signingWalletIds,
     walletBindings,
   };
 }

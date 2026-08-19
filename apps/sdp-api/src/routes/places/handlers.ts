@@ -1,10 +1,9 @@
 import type { Context } from "hono";
-import { z } from "zod";
-import { badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
 import { autocompletePlaces, fetchPlaceDetails, fetchStaticMap } from "@/lib/places/google";
 import { success } from "@/lib/response";
+import type { ValidatedBodyContext, ValidatedContext } from "@/middleware/validate";
 import type { Env } from "@/types/env";
-import {
+import type {
   placeDetailsQuerySchema,
   placeIdParamsSchema,
   placesAutocompleteSchema,
@@ -17,46 +16,29 @@ function placesEnv(c: AppContext): Record<string, string | undefined> {
   return c.env as unknown as Record<string, string | undefined>;
 }
 
-export async function autocomplete(c: AppContext) {
-  const parsed = placesAutocompleteSchema.safeParse(await c.req.json());
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+export async function autocomplete(c: ValidatedBodyContext<typeof placesAutocompleteSchema>) {
+  const body = c.req.valid("json");
 
-  const suggestions = await autocompletePlaces(placesEnv(c), parsed.data);
+  const suggestions = await autocompletePlaces(placesEnv(c), body);
   return success(c, { suggestions });
 }
 
-export async function getPlace(c: AppContext) {
-  const params = placeIdParamsSchema.safeParse(c.req.param());
-  if (!params.success) {
-    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
-  }
+export async function getPlace(
+  c: ValidatedContext<{ param: typeof placeIdParamsSchema; query: typeof placeDetailsQuerySchema }>
+) {
+  const { placeId } = c.req.valid("param");
+  const { sessionToken } = c.req.valid("query");
 
-  const parsed = placeDetailsQuerySchema.safeParse(c.req.query());
-  if (!parsed.success) {
-    throw badRequestQuery({ errors: z.flattenError(parsed.error).fieldErrors });
-  }
-
-  const place = await fetchPlaceDetails(
-    placesEnv(c),
-    params.data.placeId,
-    parsed.data.sessionToken
-  );
+  const place = await fetchPlaceDetails(placesEnv(c), placeId, sessionToken);
   return success(c, { place });
 }
 
 const STATIC_MAP_SIZE = { width: 576, height: 112 };
 
-export async function getStaticMap(c: AppContext) {
-  const parsed = staticMapQuerySchema.safeParse(c.req.query());
-  if (!parsed.success) {
-    throw badRequestQuery({ errors: z.flattenError(parsed.error).fieldErrors });
-  }
+export async function getStaticMap(c: ValidatedContext<{ query: typeof staticMapQuerySchema }>) {
+  const query = c.req.valid("query");
 
-  const upstream = await fetchStaticMap(placesEnv(c), { ...parsed.data, ...STATIC_MAP_SIZE });
+  const upstream = await fetchStaticMap(placesEnv(c), { ...query, ...STATIC_MAP_SIZE });
   return new Response(upstream.body, {
     status: 200,
     headers: { "Content-Type": "image/png", "Cache-Control": "private, max-age=3600" },

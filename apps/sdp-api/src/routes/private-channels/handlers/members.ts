@@ -11,6 +11,7 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { sendInviteEmail } from "@/lib/spc-invite-email";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { inviteMember, mapPrivateChannelError } from "@/services/private-channels";
 import type { AppContext } from "../context";
@@ -21,7 +22,7 @@ import {
   getProjectUserRepository,
 } from "../context";
 import { emitMember } from "../helpers";
-import { addMembershipBodySchema, inviteMemberBodySchema } from "../schemas";
+import type { addMembershipBodySchema, inviteMemberBodySchema } from "../schemas";
 
 function toDto(
   row: PrivateChannelUserWithIdentityRow,
@@ -94,15 +95,13 @@ export const getPrivateChannelUser = async (c: AppContext) => {
   return success(c, { user: toDto(row, memberships) });
 };
 
-export const invitePrivateChannelUser = async (c: AppContext) => {
+export const invitePrivateChannelUser = async (
+  c: ValidatedBodyContext<typeof inviteMemberBodySchema>
+) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
-  const body = await c.req.json();
-  const parsed = inviteMemberBodySchema.safeParse(body);
-  if (!parsed.success) {
-    throw badRequest("Invalid invite payload");
-  }
+  const body = c.req.valid("json");
 
   const scope = { organizationId: auth.organizationId, projectId };
 
@@ -116,10 +115,7 @@ export const invitePrivateChannelUser = async (c: AppContext) => {
     );
   }
 
-  const target = await getProjectUserRepository(c).getByProjectAndUserId(
-    projectId,
-    parsed.data.userId
-  );
+  const target = await getProjectUserRepository(c).getByProjectAndUserId(projectId, body.userId);
   if (!target) throw notFound("Project user");
 
   try {
@@ -127,7 +123,7 @@ export const invitePrivateChannelUser = async (c: AppContext) => {
     const { member, inviteToken } = await inviteMember(c.env, repo, {
       ...scope,
       authUrl: instance.auth_url,
-      targetUserId: parsed.data.userId,
+      targetUserId: body.userId,
       targetUserEmail: target.email,
       invitedBy: auth.userId ?? null,
     });
@@ -200,20 +196,20 @@ export const deletePrivateChannelUser = async (c: AppContext) => {
   return success(c, { deleted: true });
 };
 
-export const addChannelMembership = async (c: AppContext) => {
+export const addChannelMembership = async (
+  c: ValidatedBodyContext<typeof addMembershipBodySchema>
+) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const channelId = c.req.param("channelId");
   if (!channelId) throw badRequest("channelId is required");
 
-  const body = await c.req.json();
-  const parsed = addMembershipBodySchema.safeParse(body);
-  if (!parsed.success) throw badRequest("Invalid membership payload");
+  const body = c.req.valid("json");
 
   const scope = { organizationId: auth.organizationId, projectId };
   const repo = getPrivateChannelUserRepository(c);
 
-  const user = await repo.getById(scope, parsed.data.privateChannelUserId);
+  const user = await repo.getById(scope, body.privateChannelUserId);
   if (!user) throw notFound("Private channel user");
 
   const channel = await getPrivateChannelRepository(c).findInProject({

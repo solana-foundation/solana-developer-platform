@@ -4,6 +4,7 @@ import type { PaymentsDashboardWallet } from "@sdp/types";
 import { motion } from "motion/react";
 import {
   formatCurrencyAmount,
+  resolveTransferTokenLabel,
   resolveUsdBalanceValue,
 } from "@/app/dashboard/payments/payments-overview.utils";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -22,7 +23,9 @@ function breakdownRows(wallet: PaymentsDashboardWallet): BreakdownRow[] {
     }
     return [
       {
-        token: balance.token.trim().toUpperCase(),
+        token:
+          resolveTransferTokenLabel(balance.mint, { [balance.mint]: balance.token }) ??
+          balance.mint,
         amount,
         usdValue: resolveUsdBalanceValue(balance),
       },

@@ -42,7 +42,51 @@ function emptyPolicy(): PaymentWalletPolicy {
 
 describe("wallet policy authoring", () => {
   it("offers only operation families with active enforcement call sites", () => {
-    expect(WALLET_OPERATION_FAMILIES).toEqual(["payment", "ramp", "issuance"]);
+    expect(WALLET_OPERATION_FAMILIES).toEqual(["payment", "ramp", "issuance", "program"]);
+  });
+
+  it("round-trips program-family protections without silently deleting them", () => {
+    const rules: PaymentWalletPolicy["rules"] = [
+      {
+        id: "deny-program",
+        kind: "operation_family",
+        families: ["program"],
+        action: "deny",
+      },
+      {
+        id: "approve-earn-deposits",
+        kind: "operation_type",
+        operationTypes: ["earn_vault_deposit"],
+        action: "approval_required",
+      },
+    ];
+
+    const state = createPolicyAuthoringState({
+      walletId: WALLET_ID,
+      defaultAction: "allow",
+      controlProfile: null,
+      rules,
+    });
+    const rebuilt = buildPolicyPayload(WALLET_ID, state);
+
+    expect(state.familyActions).toEqual({ program: "deny" });
+    expect(state.operationTypeRules).toEqual([
+      { value: "earn_vault_deposit", action: "approval_required" },
+    ]);
+    expect(rebuilt.rules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "operation_family",
+          families: ["program"],
+          action: "deny",
+        }),
+        expect.objectContaining({
+          kind: "operation_type",
+          operationTypes: ["earn_vault_deposit"],
+          action: "approval_required",
+        }),
+      ])
+    );
   });
 
   it("identifies whether the limits and assets step has selected controls", () => {

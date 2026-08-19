@@ -4,13 +4,14 @@ import { PRIVATE_CHANNEL_EVENT_TYPES, type PrivateChannelDto } from "@sdp/types"
 import { getAuth } from "@/lib/auth";
 import { badRequest, conflict, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
   type AppContext,
   getPrivateChannelRepository,
   getPrivateChannelUserRepository,
 } from "../context";
 import { emitLifecycle, emitMember, requireActiveInstance } from "../helpers";
-import { createChannelBodySchema } from "../schemas";
+import type { createChannelBodySchema } from "../schemas";
 
 function toPrivateChannelDto(row: PrivateChannelRow): PrivateChannelDto {
   return {
@@ -32,17 +33,13 @@ export async function listChannels(c: AppContext) {
 }
 
 /** POST /channels — create a named channel in the active instance. */
-export async function createChannel(c: AppContext) {
+export async function createChannel(c: ValidatedBodyContext<typeof createChannelBodySchema>) {
   const instance = await requireActiveInstance(c);
   const auth = getAuth(c);
 
-  const body = await c.req.json().catch(() => null);
-  const parsed = createChannelBodySchema.safeParse(body);
-  if (!parsed.success) {
-    throw badRequest("Invalid channel payload");
-  }
+  const body = c.req.valid("json");
 
-  const name = parsed.data.name.trim();
+  const name = body.name.trim();
   const nameError = validatePrivateChannelName(name);
   if (nameError) {
     throw badRequest(nameError);
@@ -53,7 +50,7 @@ export async function createChannel(c: AppContext) {
     organizationId: instance.organization_id,
     projectId: instance.project_id,
     name,
-    description: parsed.data.description?.trim() || null,
+    description: body.description?.trim() || null,
   });
   if (!channel) {
     throw conflict("A channel with this name already exists in the instance");

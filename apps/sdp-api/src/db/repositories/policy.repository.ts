@@ -148,7 +148,7 @@ export interface ListPolicyControlInventoryInput {
   target?: PolicyControlInventoryTarget;
   status?: PolicyControlInventoryStatus;
   query?: string;
-  walletIds?: string[];
+  custodyWalletIds?: string[];
   page?: number;
   pageSize?: number;
 }

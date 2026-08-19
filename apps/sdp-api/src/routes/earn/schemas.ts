@@ -7,6 +7,7 @@ import {
 } from "@sdp/types";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
 import { z } from "zod";
+import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 
 export const earnStrategyIdParamsSchema = z.object({
   strategyId: z.string().min(1),
@@ -213,3 +214,84 @@ export const earnProgramWithdrawalParamsSchema = earnProgramParamsSchema.extend(
  * trail outlives credential removal).
  */
 export const earnProgramWithdrawalsListQuerySchema = z.object(earnPageQueryShape);
+
+/**
+ * Open a position in a NON-CUSTODIAL vault, or add to one, from an SDP custody
+ * wallet.
+ *
+ * Unlike the custodial create this carries an AMOUNT and a WALLET, because for
+ * a `vault_direct` provider opening the position and funding it are the same
+ * on-chain action — there is no wallet to provision first and no address to
+ * fund afterwards.
+ */
+export const earnVaultDepositSchema = z.object({
+  /** Catalogue strategy id, resolved to a vault address server-side. */
+  strategyId: z.string().min(1),
+  /** SDP custody-wallet row that signs and holds the shares (`id`, not provider `walletId`). */
+  custodyWalletId: z.string().min(1),
+  /** Deposit amount in the vault token's units, as a decimal string. */
+  amount: z
+    .string()
+    .max(128)
+    .regex(/^\d+(\.\d+)?$/, "amount must be a positive decimal string")
+    .refine((value) => /[1-9]/.test(value), "amount must be greater than zero"),
+  /** Optional slippage floor, in shares, as a decimal string. */
+  minSharesOut: z
+    .string()
+    .max(128)
+    .regex(/^\d+(\.\d+)?$/, "minSharesOut must be a decimal string")
+    .refine((value) => /[1-9]/.test(value), "minSharesOut must be greater than zero")
+    .optional(),
+  /**
+   * Retired on this route: the chain has no request dedupe to anchor a body
+   * key to, so the `Idempotency-Key` header is the only accepted source.
+   * Declared as `never` rather than omitted so the stray key is rejected with
+   * this message instead of being silently stripped.
+   */
+  requestId: z
+    .never(`Use the ${IDEMPOTENCY_KEY_HEADER} header; body requestId is not accepted`)
+    .optional(),
+});
+
+/**
+ * The recorded movement a caller polls. Bounded because the value goes
+ * straight into a bind parameter; the row lookup is org-scoped, so anything
+ * this organization does not own answers 404 rather than a validation error.
+ */
+export const earnVaultDepositParamsSchema = z.object({
+  movementId: z.string().min(1).max(128),
+});
+
+/**
+ * Bounded keyset page over recorded deposits, newest first.
+ *
+ * `requestId` narrows to the caller's OWN idempotency key, which is how an
+ * approval-gated deposit becomes findable: the approval executor replays the
+ * original `Idempotency-Key`, so the movement it eventually creates carries it.
+ * A key is caller-chosen and only `[\x20-\x7e]{1,255}` (see
+ * `middleware/idempotency-key.ts`), so it can be short and guessable and can
+ * contain `/` or `?` — hence a QUERY filter rather than a path segment, and
+ * hence the route re-applies every scoping rule the detail route applies
+ * instead of treating the key as a capability.
+ */
+export const earnVaultDepositsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  before: z.string().min(1).optional(),
+  requestId: z.string().min(1).max(255).optional(),
+  /**
+   * `settled=false` returns only movements that can still change, which is what
+   * recovery wants. Without it a client has to page an unbounded history and
+   * filter locally — and a workspace busy enough to push an in-flight deposit
+   * past the first page would silently stop tracking it.
+   */
+  settled: z
+    .enum(["true", "false"])
+    .transform((value) => value === "true")
+    .optional(),
+});
+
+/** Bounded keyset page over active vault holdings, newest first. */
+export const earnVaultPositionsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  before: z.string().min(1).optional(),
+});

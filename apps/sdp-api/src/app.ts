@@ -13,11 +13,12 @@ import { SdpEarnError } from "@sdp/earn/errors";
 import { SdpPaymentsError } from "@sdp/payments/errors";
 import { SdpRpcError } from "@sdp/rpc/errors";
 import { type Context, Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { logger } from "hono/logger";
 import { prettyJSON } from "hono/pretty-json";
 import { secureHeaders } from "hono/secure-headers";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { AppError } from "@/lib/errors";
+import { AppError, badRequest } from "@/lib/errors";
 import { corsMiddleware } from "@/middleware/cors";
 import { dryRunMiddleware } from "@/middleware/dry-run";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
@@ -36,6 +37,7 @@ import docs from "@/routes/docs";
 import earn from "@/routes/earn";
 import health from "@/routes/health";
 import internalCustody from "@/routes/internal-custody";
+import internalRpc from "@/routes/internal-rpc";
 import issuance from "@/routes/issuance";
 import llms from "@/routes/llms";
 import members from "@/routes/members";
@@ -379,6 +381,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // public OpenAPI and AI discovery surfaces.
   app.route("/internal/playground", playgroundInternal);
   app.route("/internal/dashboard/custody", internalCustody);
+  app.route("/internal/dashboard/rpc", internalRpc);
 
   // Admin routes (internal)
   app.route("/admin/allowlist", allowlist);
@@ -395,14 +398,19 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     const traceId = c.get("traceId");
     const requestSource = c.get("requestSource");
 
-    if (err instanceof AppError) {
+    // Hono core throws HTTPException(400) for malformed JSON bodies before
+    // route-level body validation runs; normalize it into the AppError envelope.
+    const normalizedError =
+      err instanceof HTTPException && err.status === 400 ? badRequest(err.message) : err;
+
+    if (normalizedError instanceof AppError) {
       c.header("X-SDP-Trace-ID", traceId);
       return c.json(
         {
-          error: err.toResponse().error,
+          error: normalizedError.toResponse().error,
           meta: { requestId },
         },
-        mapErrorStatusCode(err.statusCode)
+        mapErrorStatusCode(normalizedError.statusCode)
       );
     }
 

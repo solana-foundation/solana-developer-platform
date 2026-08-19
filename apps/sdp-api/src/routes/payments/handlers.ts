@@ -17,7 +17,7 @@ export {
   listOnrampCurrencies,
   simulateSandboxTransfer,
 } from "./handlers/ramps";
-export { recordRampProviderEvent } from "./handlers/ramps/events";
+export { recordCoinbaseRampEvent, recordMoneygramRampEvent } from "./handlers/ramps/events";
 export {
   activateRecurringPayment,
   cancelRecurringPayment,

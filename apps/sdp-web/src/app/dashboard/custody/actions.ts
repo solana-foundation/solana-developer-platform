@@ -31,7 +31,7 @@ function getApiErrorMessageFromText(body: string): string {
   if (!body) return "";
 
   try {
-    const json = JSON.parse(body) as unknown;
+    const json: unknown = JSON.parse(body);
     if (
       json &&
       typeof json === "object" &&
@@ -114,7 +114,6 @@ async function initializeCustodyWallet(formData: FormData): Promise<OnboardingPr
     | "utila";
   const walletLabel = getOptionalString(formData, "walletLabel");
   const network = getOptionalString(formData, "network");
-  const walletAddress = getOptionalString(formData, "walletAddress");
   const accountPolicy = getOptionalString(formData, "accountPolicy");
 
   const payload: Record<string, unknown> = {
@@ -125,9 +124,6 @@ async function initializeCustodyWallet(formData: FormData): Promise<OnboardingPr
   if (provider !== "fireblocks") {
     if (network) {
       payload.network = network;
-    }
-    if (walletAddress) {
-      payload.walletAddress = walletAddress;
     }
     if (accountPolicy) {
       payload.accountPolicy = accountPolicy;

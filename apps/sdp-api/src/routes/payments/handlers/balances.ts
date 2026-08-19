@@ -9,7 +9,6 @@ import type {
   PolicyRule,
 } from "@sdp/types";
 import type { Address } from "@solana/kit";
-import { z } from "zod";
 import { type DatabaseExecutor, getDb } from "@/db";
 import { asPostgresJsonArray } from "@/db/postgres-utils";
 import type {
@@ -20,21 +19,19 @@ import {
   generateWalletControlProfileId,
   generateWalletControlProfileRevisionId,
 } from "@/db/repositories/policy.repository";
-import { getAuth } from "@/lib/auth";
-import { AppError, badRequest, conflict, walletNotFound } from "@/lib/errors";
+import { AppError, conflict, walletNotFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import {
   attachTokenSymbolsToBalances,
   attachUsdValuesToBalances,
 } from "@/services/helius-das.service";
 import { type AppContext, getPolicyRepository } from "../context";
-import { updateWalletPolicySchema, walletIdParamsSchema } from "../schemas";
+import type { updateWalletPolicySchema } from "../schemas";
 import * as tokenAccounts from "../token-accounts";
 import { resolveIssuedTokenLabelsByMint } from "../token-labels";
-import { resolveWalletFromParams } from "./transfers";
+import { resolvePolicyWalletFromParams } from "../wallets";
 
 function mapWalletControlProfileSummary(
   active: ActiveWalletControlProfileResult
@@ -305,25 +302,7 @@ async function activateWalletControlProfileRevisionInTransaction({
 }
 
 export async function getWalletBalances(c: AppContext) {
-  const params = walletIdParamsSchema.safeParse(c.req.param());
-  if (!params.success) {
-    throw badRequest("Invalid wallet ID");
-  }
-
-  const auth = getAuth(c);
-  const wallet = await new CustodyRuntimeTargets(
-    getDb(c.env),
-    c.env,
-    new Map()
-  ).findOperationalWallet({
-    organizationId: auth.organizationId,
-    projectId: auth.projectId ?? undefined,
-    walletId: params.data.walletId,
-  });
-  if (!wallet) {
-    throw walletNotFound();
-  }
-  assertApiKeyWalletAccess(auth, wallet.walletId, ["wallets:read"]);
+  const { wallet } = await resolvePolicyWalletFromParams(c, ["wallets:read"]);
 
   const rpc = solanaRpc.createRpc(c.env);
   const tokenLabelsByMint = await resolveIssuedTokenLabelsByMint(c);
@@ -406,7 +385,7 @@ function walletPolicyResponse(
 }
 
 export async function getWalletPolicy(c: AppContext) {
-  const { auth, wallet } = await resolveWalletFromParams(c, ["wallets:read"]);
+  const { auth, wallet } = await resolvePolicyWalletFromParams(c, ["wallets:read"]);
 
   const controlProfile = await getWalletControlProfileSummary(c, wallet.id);
   const audit = await getWalletPolicyAudit(c, {
@@ -418,19 +397,11 @@ export async function getWalletPolicy(c: AppContext) {
   return success(c, { policy: walletPolicyResponse(wallet.walletId, controlProfile, audit) });
 }
 
-export async function updateWalletPolicy(c: AppContext) {
-  const { auth, wallet } = await resolveWalletFromParams(c, ["wallets:write"]);
+export async function updateWalletPolicy(c: ValidatedBodyContext<typeof updateWalletPolicySchema>) {
+  const { auth, wallet } = await resolvePolicyWalletFromParams(c, ["wallets:write"]);
 
-  const body = await c.req.json();
-  const parsed = updateWalletPolicySchema.safeParse(body);
+  const body = c.req.valid("json");
 
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-
-  const patch = parsed.data;
   const now = new Date().toISOString();
   const controlProfile = await getDb(c.env).transaction(async (tx) => {
     // Serializes per-wallet updates. Locking the profile alone is not enough:
@@ -448,8 +419,8 @@ export async function updateWalletPolicy(c: AppContext) {
     const activeProfile = await lockActiveWalletControlProfile(tx, wallet.id);
 
     if (
-      patch.expectedRevisionId !== undefined &&
-      patch.expectedRevisionId !== (activeProfile?.revision_id ?? null)
+      body.expectedRevisionId !== undefined &&
+      body.expectedRevisionId !== (activeProfile?.revision_id ?? null)
     ) {
       throw conflict(
         "Wallet policy was changed by another update; refresh and retry with the current revision"
@@ -463,9 +434,9 @@ export async function updateWalletPolicy(c: AppContext) {
       projectId: auth.projectId ?? null,
       custodyWalletId: wallet.id,
       profileName: `${wallet.label ?? wallet.walletId} controls`,
-      rules: patch.rules,
-      defaultAction: patch.defaultAction,
-      commitMessage: patch.commitMessage,
+      rules: body.rules,
+      defaultAction: body.defaultAction,
+      commitMessage: body.commitMessage,
       createdBy: auth.userId ?? auth.apiKeyId ?? null,
       activatedAt: now,
     });
