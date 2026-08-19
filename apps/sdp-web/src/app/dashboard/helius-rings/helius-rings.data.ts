@@ -29,9 +29,21 @@ export type RingsOperationState =
   | "completed"
   | "failed";
 
+/** Mirrors OP_TYPES in @sdp/helius-rings; a literal union so the typed i18n
+ * keys (`activity.opType_*`) resolve. */
+export type RingsOperationOpType =
+  | "shield"
+  | "transfer_registered"
+  | "transfer_anonymous"
+  | "withdraw"
+  | "merge"
+  | "timelock_create"
+  | "timelock_settle"
+  | "zone_create";
+
 export interface RingsOperationSummary {
   id: string;
-  opType: string;
+  opType: RingsOperationOpType;
   state: RingsOperationState;
   assetMint: string | null;
   amountRaw: string | null;
