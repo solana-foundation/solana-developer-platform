@@ -10,8 +10,10 @@ import { getDb } from "@/db";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { AppError, badRequest, forbidden, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
+import type { completeOnboardingSchema } from "./schemas";
 import { ONBOARDING_VERSION, resolveOnboardingSetup } from "./state";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -149,7 +151,9 @@ export const getOnboardingStatus = async (c: AppContext) => {
   return success(c, { linked: true, organization: organizationResponse, setup });
 };
 
-export const completeOnboarding = async (c: AppContext) => {
+export const completeOnboarding = async (
+  c: ValidatedBodyContext<typeof completeOnboardingSchema>
+) => {
   const clerk = c.get("clerkOnboarding");
   if (!clerk) {
     throw new AppError("UNAUTHORIZED", "Clerk session required");
@@ -172,20 +176,9 @@ export const completeOnboarding = async (c: AppContext) => {
   }
 
   const organization = await fetchOrganization(db, mapping.organization_id);
-  const requestBody = await c.req.json().catch(() => ({}));
-  const requestedProvider =
-    requestBody && typeof requestBody === "object" && "custodyProvider" in requestBody
-      ? (requestBody as { custodyProvider?: unknown }).custodyProvider
-      : null;
-  if (!CUSTODY_PROVIDERS.includes(requestedProvider as CustodyProvider)) {
-    throw badRequest("Choose a supported custody provider before finishing setup");
-  }
+  const requestedProvider = c.req.valid("json").custodyProvider;
   const rpcProvider = resolveRpcProvider(organization.settings);
-  const custodyProvider = await fetchCustodyProvider(
-    db,
-    organization.id,
-    requestedProvider as CustodyProvider
-  );
+  const custodyProvider = await fetchCustodyProvider(db, organization.id, requestedProvider);
   if (!rpcProvider) {
     throw badRequest("Select an RPC provider before finishing setup");
   }

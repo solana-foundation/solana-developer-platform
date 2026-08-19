@@ -4,13 +4,13 @@ import * as solanaRpc from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { CustodyWalletSummary, CustodyWalletTokenBalance } from "@sdp/types";
 import type { Address } from "@solana/kit";
-import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { resolveIssuedTokenLabelsByMint } from "@/routes/payments/token-labels";
 import { getLogger } from "@/runtime/logger";
@@ -32,14 +32,14 @@ import {
 } from "@/services/helius-das.service";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
 import { type AppContext, parseBooleanQueryParam, resolveActor } from "../context";
-import {
-  type CustodyWalletAggregateResponse,
-  type CustodyWalletByIdResponse,
-  type CustodyWalletMetadataResponse,
-  type CustodyWalletResponse,
-  type CustodyWalletsResponse,
+import type {
+  CustodyWalletAggregateResponse,
+  CustodyWalletByIdResponse,
+  CustodyWalletMetadataResponse,
+  CustodyWalletResponse,
+  CustodyWalletsResponse,
   createWalletSchema,
-  type DeleteWalletResponse,
+  DeleteWalletResponse,
   deleteWalletSchema,
   setDefaultWalletSchema,
   updateWalletSchema,
@@ -262,7 +262,7 @@ async function getBalancesByWalletId(
   return attachUsdValuesToBalanceMap(c.env, balancesMap);
 }
 
-export const createWallet = async (c: AppContext) => {
+export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSchema>) => {
   const actor = resolveActor(c);
   const projectId = c.get("projectId");
 
@@ -270,35 +270,28 @@ export const createWallet = async (c: AppContext) => {
   // bindings (and setDefault would re-point the scope's default signer).
   assertApiKeyNotWalletScoped(getAuth(c), "create custody wallets");
 
-  const body = await c.req.json();
-  const parsed = createWalletSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const signingService = signingServiceModule.createSigningService(c.env, getRequestTenantScope(c));
 
   try {
     const runtimeTargets = new CustodyRuntimeTargets(getDb(c.env), c.env, new Map());
-    const target = parsed.data.connectionId
+    const target = body.connectionId
       ? projectId
         ? await runtimeTargets.resolve({
             kind: "connection",
             organizationId: actor.organizationId,
             projectId,
-            connectionId: parsed.data.connectionId,
+            connectionId: body.connectionId,
           })
         : null
       : await runtimeTargets.resolve(
-          parsed.data.provider
+          body.provider
             ? {
                 kind: "provider",
                 organizationId: actor.organizationId,
                 projectId,
-                provider: parsed.data.provider,
+                provider: body.provider,
               }
             : {
                 kind: "effective",
@@ -306,7 +299,7 @@ export const createWallet = async (c: AppContext) => {
                 projectId,
               }
         );
-    if (parsed.data.connectionId && !target) {
+    if (body.connectionId && !target) {
       throw new AppError("NOT_FOUND", "Custody Connection not found");
     }
     if (target?.kind === "connection") {
@@ -314,20 +307,20 @@ export const createWallet = async (c: AppContext) => {
         organizationId: actor.organizationId,
         projectId: target.projectId,
         connectionId: target.connectionId,
-        provider: parsed.data.provider,
-        label: parsed.data.label,
-        purpose: parsed.data.purpose,
-        setDefault: parsed.data.setDefault,
+        provider: body.provider,
+        label: body.label,
+        purpose: body.purpose,
+        setDefault: body.setDefault,
       });
       clearWalletCaches();
       return created(c, { wallet } satisfies CustodyWalletResponse);
     }
 
     const wallet = await signingService.createWallet(actor.organizationId, projectId, {
-      provider: parsed.data.provider,
-      label: parsed.data.label,
-      purpose: parsed.data.purpose,
-      setDefault: parsed.data.setDefault,
+      provider: body.provider,
+      label: body.label,
+      purpose: body.purpose,
+      setDefault: body.setDefault,
     });
 
     const response: CustodyWalletResponse = {
@@ -358,20 +351,13 @@ export const createWallet = async (c: AppContext) => {
   }
 };
 
-export const deleteWallet = async (c: AppContext) => {
+export const deleteWallet = async (c: ValidatedBodyContext<typeof deleteWalletSchema>) => {
   const actor = resolveActor(c);
 
-  const body = await c.req.json();
-  const parsed = deleteWalletSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   try {
-    assertApiKeyWalletAccess(getAuth(c), parsed.data.walletId, ["wallets:write"]);
+    assertApiKeyWalletAccess(getAuth(c), body.walletId, ["wallets:write"]);
   } catch (error) {
     if (error instanceof AppError && error.code === "FORBIDDEN") {
       throw new AppError("NOT_FOUND", "Custody wallet not found");
@@ -390,25 +376,25 @@ export const deleteWallet = async (c: AppContext) => {
     ).findOwnedWalletForMutation({
       organizationId: actor.organizationId,
       projectId,
-      walletId: parsed.data.walletId,
+      walletId: body.walletId,
     });
     if (!ownedWallet) {
       const config = await signingService.getConfigurationForMutation(
         actor.organizationId,
         projectId,
-        parsed.data.provider
+        body.provider
       );
       throw new AppError(
         "NOT_FOUND",
         config
           ? "Custody wallet not found"
-          : parsed.data.provider
-            ? `Custody not initialized for provider: ${parsed.data.provider}`
+          : body.provider
+            ? `Custody not initialized for provider: ${body.provider}`
             : "Custody not initialized"
       );
     }
     if (ownedWallet.custodyConnectionId) {
-      if (parsed.data.provider && parsed.data.provider !== ownedWallet.provider) {
+      if (body.provider && body.provider !== ownedWallet.provider) {
         throw badRequest("Provider does not match custody wallet");
       }
       assertCustodyProviderCanDeleteWallet(ownedWallet.provider);
@@ -416,25 +402,25 @@ export const deleteWallet = async (c: AppContext) => {
     }
 
     await signingService.deleteWallet(actor.organizationId, projectId, {
-      provider: parsed.data.provider,
-      walletId: parsed.data.walletId,
+      provider: body.provider,
+      walletId: body.walletId,
     });
 
     const auditService = new AuditService(getDb(c.env));
     await auditService.log(c, {
       action: "delete",
       resourceType: "custody_wallet",
-      resourceId: parsed.data.walletId,
+      resourceId: body.walletId,
       metadata: {
         event: "wallet_deleted",
-        walletId: parsed.data.walletId,
-        provider: parsed.data.provider ?? null,
+        walletId: body.walletId,
+        provider: body.provider ?? null,
         projectId: projectId ?? null,
       },
     });
 
     const response: DeleteWalletResponse = {
-      walletId: parsed.data.walletId,
+      walletId: body.walletId,
       deleted: true,
     };
 
@@ -452,22 +438,15 @@ export const deleteWallet = async (c: AppContext) => {
   }
 };
 
-export const setDefaultWallet = async (c: AppContext) => {
+export const setDefaultWallet = async (c: ValidatedBodyContext<typeof setDefaultWalletSchema>) => {
   const actor = resolveActor(c);
 
-  const body = await c.req.json();
-  const parsed = setDefaultWalletSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   // A wallet-scoped key may only re-default to a wallet it is bound to.
   // Unbound wallets are indistinguishable from unknown ones.
   try {
-    assertApiKeyWalletAccess(getAuth(c), parsed.data.walletId, ["wallets:write"]);
+    assertApiKeyWalletAccess(getAuth(c), body.walletId, ["wallets:write"]);
   } catch (error) {
     if (error instanceof AppError && error.code === "FORBIDDEN") {
       throw badRequest("Unknown walletId for this wallet signing configuration");
@@ -483,12 +462,12 @@ export const setDefaultWallet = async (c: AppContext) => {
   ).findOperationalWallet({
     organizationId: actor.organizationId,
     projectId,
-    walletId: parsed.data.walletId,
+    walletId: body.walletId,
   });
   if (!wallet) {
     throw badRequest("Unknown walletId for this wallet signing configuration");
   }
-  if (parsed.data.provider && parsed.data.provider !== wallet.provider) {
+  if (body.provider && body.provider !== wallet.provider) {
     throw badRequest("Provider does not match custody wallet");
   }
 
@@ -596,7 +575,7 @@ export const setDefaultWallet = async (c: AppContext) => {
   return success(c, { defaultWalletId: wallet.walletId });
 };
 
-export const updateWallet = async (c: AppContext) => {
+export const updateWallet = async (c: ValidatedBodyContext<typeof updateWalletSchema>) => {
   const actor = resolveActor(c);
   const auth = getAuth(c);
   const projectId = c.get("projectId");
@@ -606,14 +585,7 @@ export const updateWallet = async (c: AppContext) => {
     throw badRequest("Invalid wallet ID");
   }
 
-  const body = await c.req.json();
-  const parsed = updateWalletSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const wallet = await new CustodyRuntimeTargets(
     getDb(c.env),
@@ -639,7 +611,7 @@ export const updateWallet = async (c: AppContext) => {
     throw error;
   }
 
-  const nextLabel = parsed.data.label?.trim() ? parsed.data.label.trim() : null;
+  const nextLabel = body.label?.trim() ? body.label.trim() : null;
 
   await getDb(c.env)
     .prepare(

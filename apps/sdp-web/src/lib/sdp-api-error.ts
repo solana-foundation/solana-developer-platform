@@ -1,3 +1,5 @@
+import { readApiErrorMessage } from "./api-error";
+
 /**
  * SDP API failures surface as `SDP API request failed (400): {"error":{…}}`.
  * Rendering that verbatim puts a JSON blob in front of the user, so pull out
@@ -14,11 +16,8 @@ export function readableApiError(error: unknown): string {
   }
 
   try {
-    const parsed = JSON.parse(raw.slice(jsonStart)) as {
-      error?: { message?: string };
-      message?: string;
-    };
-    return parsed.error?.message ?? parsed.message ?? raw;
+    const parsed: unknown = JSON.parse(raw.slice(jsonStart));
+    return readApiErrorMessage(parsed) ?? raw;
   } catch {
     return raw;
   }

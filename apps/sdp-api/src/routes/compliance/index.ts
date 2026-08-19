@@ -2,8 +2,10 @@ import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import { screenAddress } from "./handlers";
+import { screenAddressSchema } from "./schemas";
 
 const compliance = new Hono<{ Bindings: Env }>();
 
@@ -15,6 +17,7 @@ compliance.use("*", projectContextMiddleware());
 compliance.post(
   "/address-screenings",
   requirePermissions("payments:read"),
+  validateBody(screenAddressSchema),
   meteredQuota({ name: "compliance-screening", actorMax: 30, orgMax: 120 }),
   screenAddress
 );

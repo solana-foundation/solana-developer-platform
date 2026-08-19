@@ -1,4 +1,3 @@
-import { RAMP_EVENT_PROVIDERS, type RampEventProvider } from "@sdp/types";
 import {
   CRYPTO_RAIL_ASSET_LABELS,
   type CryptoAssetSymbol,
@@ -45,10 +44,6 @@ function getCountryDisplayNames(): Intl.DisplayNames {
     countryDisplayNames = new Intl.DisplayNames(["en"], { type: "region" });
   }
   return countryDisplayNames;
-}
-
-export function isRampEventProvider(value: string | undefined): value is RampEventProvider {
-  return value !== undefined && (RAMP_EVENT_PROVIDERS as readonly string[]).includes(value);
 }
 
 export type SolanaCryptoAsset = CryptoAssetSymbol;

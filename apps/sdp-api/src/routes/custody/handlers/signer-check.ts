@@ -13,17 +13,16 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
-import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { FeePaymentError } from "@/services/ports";
 import { createOrgSigner } from "@/services/solana";
 import { createAuthenticatedSponsorshipFeePayment } from "@/services/sponsorship.service";
-import type { AppContext } from "../context";
-import { type SignerCheckResponse, signerCheckSchema } from "../schemas";
+import type { SignerCheckResponse, signerCheckSchema } from "../schemas";
 
 // biome-ignore lint/security/noSecrets: Solana Memo program id constant, not a secret.
 const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr" as Address;
@@ -38,19 +37,11 @@ function isKoraMemoProgramPolicyError(message: string): boolean {
   );
 }
 
-export const signerCheck = async (c: AppContext) => {
-  const body = await c.req.json();
-  const parsed = signerCheckSchema.safeParse(body);
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSchema>) => {
+  const body = c.req.valid("json");
   const auth = getAuth(c);
 
-  const resolvedWalletId = resolveApiKeySigningWalletId(auth, parsed.data.walletId, [
-    "wallets:write",
-  ]);
+  const resolvedWalletId = resolveApiKeySigningWalletId(auth, body.walletId, ["wallets:write"]);
   if (resolvedWalletId === null) {
     throw badRequest(
       auth.authType === "api_key"

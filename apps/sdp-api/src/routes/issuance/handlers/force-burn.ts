@@ -1,10 +1,9 @@
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { Context } from "hono";
-import { z } from "zod";
 import { getDb } from "@/db";
 import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
 import {
   assertTokenAllowsOperation,
@@ -12,13 +11,12 @@ import {
   parsePositiveTokenAmount,
 } from "@/services/token-operation.service";
 import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
-import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
   getTenantTokenService,
   requireProjectScope,
 } from "../helpers";
-import { forceBurnSchema } from "../schemas";
+import type { forceBurnSchema } from "../schemas";
 import { resolveAuthoritySigner, resolvePermanentDelegateAuthority } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
 import {
@@ -26,20 +24,11 @@ import {
   recoverSettledTransactionReplay,
 } from "./settled-transaction";
 
-type AppContext = Context<{ Bindings: Env }>;
-
-export const prepareForceBurn = async (c: AppContext) => {
+export const prepareForceBurn = async (c: ValidatedBodyContext<typeof forceBurnSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
 
-  const body = await c.req.json();
-  const parsed = forceBurnSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
@@ -55,10 +44,10 @@ export const prepareForceBurn = async (c: AppContext) => {
   assertTokenAllowsOperation(token, "force_burn");
   assertTokenIsDeployed(token);
 
-  const { mosaicAmount } = parsePositiveTokenAmount(parsed.data.forceBurn.amount, token.decimals);
+  const { mosaicAmount } = parsePositiveTokenAmount(body.forceBurn.amount, token.decimals);
 
   const permanentDelegateRaw =
-    parsed.data.forceBurn.delegateAuthority ??
+    body.forceBurn.delegateAuthority ??
     (await resolvePermanentDelegateAuthority(c.env, tokenService, token));
   if (!permanentDelegateRaw) {
     throw badRequest("Permanent delegate is not configured for this token");
@@ -68,11 +57,11 @@ export const prepareForceBurn = async (c: AppContext) => {
     env: c.env,
     auth,
     token,
-    requestedWalletId: parsed.data.signingWalletId,
+    requestedWalletId: body.signingWalletId,
     currentAuthority: permanentDelegateRaw,
   });
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
-  const source = assertValidAddress(parsed.data.forceBurn.source, "source");
+  const source = assertValidAddress(body.forceBurn.source, "source");
   const permanentDelegate = assertValidAddress(permanentDelegateRaw, "delegateAuthority");
 
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
@@ -85,7 +74,7 @@ export const prepareForceBurn = async (c: AppContext) => {
   });
 
   let simulation: unknown;
-  if (parsed.data.options?.simulate) {
+  if (body.options?.simulate) {
     const rpc = createRpc(c.env);
     const txBytes = Buffer.from(prepared.serializedTx, "base64");
     simulation = await simulateTransaction(rpc, txBytes);
@@ -96,10 +85,10 @@ export const prepareForceBurn = async (c: AppContext) => {
     organizationId: auth.organizationId,
     type: "force_burn",
     params: {
-      source: parsed.data.forceBurn.source,
-      amount: parsed.data.forceBurn.amount,
+      source: body.forceBurn.source,
+      amount: body.forceBurn.amount,
       delegateAuthority: permanentDelegateRaw,
-      memo: parsed.data.forceBurn.memo,
+      memo: body.forceBurn.memo,
       supplyBaselineUpdatedAt: token.totalSupplyUpdatedAt ?? null,
     },
     serializedTx: prepared.serializedTx,
@@ -113,8 +102,8 @@ export const prepareForceBurn = async (c: AppContext) => {
     resourceId: tx.id,
     metadata: {
       tokenId,
-      source: parsed.data.forceBurn.source,
-      amount: parsed.data.forceBurn.amount,
+      source: body.forceBurn.source,
+      amount: body.forceBurn.amount,
       delegateAuthority: permanentDelegateRaw,
       mode: "prepare",
     },
@@ -131,18 +120,11 @@ export const prepareForceBurn = async (c: AppContext) => {
   });
 };
 
-export const executeForceBurn = async (c: AppContext) => {
+export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
 
-  const body = await c.req.json();
-  const parsed = forceBurnSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
@@ -158,10 +140,10 @@ export const executeForceBurn = async (c: AppContext) => {
   assertTokenAllowsOperation(token, "force_burn");
   assertTokenIsDeployed(token);
 
-  const { mosaicAmount } = parsePositiveTokenAmount(parsed.data.forceBurn.amount, token.decimals);
+  const { mosaicAmount } = parsePositiveTokenAmount(body.forceBurn.amount, token.decimals);
 
   const permanentDelegateRaw =
-    parsed.data.forceBurn.delegateAuthority ??
+    body.forceBurn.delegateAuthority ??
     (await resolvePermanentDelegateAuthority(c.env, tokenService, token));
   if (!permanentDelegateRaw) {
     throw badRequest("Permanent delegate is not configured for this token");
@@ -171,18 +153,18 @@ export const executeForceBurn = async (c: AppContext) => {
     env: c.env,
     auth,
     token,
-    requestedWalletId: parsed.data.signingWalletId,
+    requestedWalletId: body.signingWalletId,
     currentAuthority: permanentDelegateRaw,
   });
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
-  const source = assertValidAddress(parsed.data.forceBurn.source, "source");
+  const source = assertValidAddress(body.forceBurn.source, "source");
 
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
     tokenId,
     operation: "force_burn",
     mode: "execute",
-    params: parsed.data,
+    params: body,
   });
 
   const { transaction: tx, replayed } = await tokenService.createTransaction({
@@ -190,10 +172,10 @@ export const executeForceBurn = async (c: AppContext) => {
     organizationId: auth.organizationId,
     type: "force_burn",
     params: {
-      source: parsed.data.forceBurn.source,
-      amount: parsed.data.forceBurn.amount,
+      source: body.forceBurn.source,
+      amount: body.forceBurn.amount,
       delegateAuthority: permanentDelegateRaw,
-      memo: parsed.data.forceBurn.memo,
+      memo: body.forceBurn.memo,
       supplyBaselineUpdatedAt: token.totalSupplyUpdatedAt ?? null,
     },
     idempotencyKey: idempotencyMetadata.idempotencyKey,
@@ -210,7 +192,7 @@ export const executeForceBurn = async (c: AppContext) => {
       action: "force_burn",
     });
     if (transaction.status === "confirmed") {
-      await tokenService.applySettledBurnSupply(tx.id, tokenId, parsed.data.forceBurn.amount);
+      await tokenService.applySettledBurnSupply(tx.id, tokenId, body.forceBurn.amount);
     }
     return success(c, { transaction });
   }
@@ -222,8 +204,8 @@ export const executeForceBurn = async (c: AppContext) => {
     resourceId: tx.id,
     metadata: {
       tokenId,
-      source: parsed.data.forceBurn.source,
-      amount: parsed.data.forceBurn.amount,
+      source: body.forceBurn.source,
+      amount: body.forceBurn.amount,
       delegateAuthority: permanentDelegateRaw,
       mode: "execute",
     },
@@ -256,7 +238,7 @@ export const executeForceBurn = async (c: AppContext) => {
         }),
     });
 
-    await tokenService.applySettledBurnSupply(tx.id, tokenId, parsed.data.forceBurn.amount);
+    await tokenService.applySettledBurnSupply(tx.id, tokenId, body.forceBurn.amount);
 
     emitTokenOperationCompleted(c, {
       organizationId: orgId,

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "@/i18n/server";
+import { readApiErrorMessage } from "@/lib/api-error";
 import { createSdpApiClient } from "@/lib/sdp-api";
 
 interface SafeProviderCredential {
@@ -64,13 +65,12 @@ function extractApiMessage(error: unknown): { status: number | null; message: st
   }
   let message = match[2] ?? "";
   try {
-    const json = JSON.parse(message) as { error?: { message?: string } };
-    if (json.error?.message) {
-      message = json.error.message;
+    const json: unknown = JSON.parse(message);
+    const apiMessage = readApiErrorMessage(json);
+    if (apiMessage) {
+      message = apiMessage;
     }
-  } catch {
-    // Non-JSON body.
-  }
+  } catch {}
   return { status: Number.parseInt(match[1] ?? "", 10), message };
 }
 

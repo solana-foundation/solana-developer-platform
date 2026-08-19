@@ -389,9 +389,10 @@ describe("Payments routes — transfers", () => {
     };
     expect(body.error.code).toBe("BAD_REQUEST");
     expect(body.error.message).toContain("Invalid request body");
-    expect(body.error.details?.errors?.rules).toContain(
+    expect(body.error.message).toContain(
       "operation type must be one of the supported wallet operation types"
     );
+    expect(body.error.message).toContain("→ at rules[0].operationType");
   });
 
   it("rejects wallet policy payloads with duplicate rule ids", async () => {
@@ -419,7 +420,7 @@ describe("Payments routes — transfers", () => {
       error: { code: string; message: string; details?: { errors?: Record<string, string[]> } };
     };
     expect(body.error.code).toBe("BAD_REQUEST");
-    expect(body.error.details?.errors?.rules).toContain("Duplicate rule id: duplicated");
+    expect(body.error.message).toContain("Duplicate rule id: duplicated");
   });
 
   it("dry-runs a gated transfer with zero writes and full rule criteria", async () => {
@@ -1266,7 +1267,7 @@ describe("Payments routes — transfers", () => {
     };
     expect(body.error.code).toBe("BAD_REQUEST");
     expect(body.error.message).toContain("Invalid request body");
-    expect(body.error.details?.errors?.amount).toContain("Amount must be greater than zero");
+    expect(body.error.message).toContain("Amount must be greater than zero");
 
     const transfers = await getDb(env).prepare("SELECT id FROM payment_transfers").all<{
       id: string;

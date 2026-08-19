@@ -46,6 +46,10 @@ export const apiKeyRotateSchema = z.object({
   gracePeriodHours: z.number().min(0).max(168).optional(), // Max 7 days
 });
 
+export const apiKeyRevokeSchema = z.strictObject({
+  confirmation: z.string().trim().min(1).optional(),
+});
+
 const policyDefaultActionSchema = z.enum(["allow", "deny", "approval_required", "review"]);
 
 export const apiKeyControlProfileCreateSchema = z.object({

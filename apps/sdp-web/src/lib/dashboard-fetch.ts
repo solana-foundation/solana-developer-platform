@@ -1,3 +1,5 @@
+import { readApiErrorMessage } from "./api-error";
+
 export type DashboardFetchResult<T> =
   | { ok: true; data: T; status: number }
   | { ok: false; error: string; status: number | null; body: unknown };
@@ -53,20 +55,10 @@ export async function dashboardFetch<T = unknown>(
     let message = `Request failed (${response.status})`;
     let errorBody: unknown = text;
     try {
-      const json = JSON.parse(text) as {
-        error?: string | { message?: string };
-        message?: string;
-      };
+      const json: unknown = JSON.parse(text);
       errorBody = json;
-      const errObj = json?.error;
-      message =
-        (typeof errObj === "string" ? errObj : null) ??
-        (typeof errObj === "object" && errObj !== null ? errObj.message : undefined) ??
-        json?.message ??
-        message;
-    } catch {
-      // keep status-based message
-    }
+      message = readApiErrorMessage(json) ?? message;
+    } catch {}
     return { ok: false, error: message, status: response.status, body: errorBody };
   }
 
