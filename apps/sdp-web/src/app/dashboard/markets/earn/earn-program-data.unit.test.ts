@@ -294,6 +294,54 @@ describe("createEarnVaultDeposit", () => {
     expect(String(options?.body)).not.toContain("requestId");
   });
 
+  it("rejects a success envelope whose deposit record is incomplete", async () => {
+    // The `as unknown as EarnVaultDeposit` this replaced asserted the record
+    // rather than checking it, so a movement with no signature type-checked as
+    // a settled deposit and failed further downstream.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ data: { positionId: "position_1" } }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          })
+      )
+    );
+
+    const result = await createEarnVaultDeposit(
+      { strategyId: "strategy_1", custodyWalletId: "cwlt_1", amount: "10" },
+      "deposit-key"
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result).toMatchObject({ error: "Invalid vault deposit response", status: 201 });
+  });
+
+  it("refuses an approval hold that did not arrive as a 202", async () => {
+    // Created AND held is a contradiction; it must not resolve in the
+    // customer's favour.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              error: { code: "SIGNING_PENDING", message: "Requires policy approval" },
+            }),
+            { status: 201, headers: { "Content-Type": "application/json" } }
+          )
+      )
+    );
+
+    const result = await createEarnVaultDeposit(
+      { strategyId: "strategy_1", custodyWalletId: "cwlt_1", amount: "10" },
+      "deposit-key"
+    );
+
+    expect(result.ok).toBe(false);
+  });
+
   it("normalizes a policy-held 202 into an approval-pending outcome", async () => {
     vi.stubGlobal(
       "fetch",

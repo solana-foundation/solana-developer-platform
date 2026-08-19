@@ -80,7 +80,9 @@ fires on the hour, so a freshly started API has an empty catalogue until a live
 pass succeeds. This is intentional: the sync is the only admitting writer and
 every row must pass the provider's declared-support checks.
 
-See README.md → "Catalogue data" for cadence and failure behaviour.
+See README.md → "Catalogue data" for cadence and failure behaviour. A database
+still holding `seed-demo-` rows from the removed `db:seed:earn` needs a one-time
+clear — SQL in `docs/contributing/earn-pluggability-playbook.md` § 3.
 
 ### 4b. Get a program — create one through the API
 

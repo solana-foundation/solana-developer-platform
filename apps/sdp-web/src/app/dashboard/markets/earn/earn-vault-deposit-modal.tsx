@@ -1,24 +1,25 @@
 "use client";
 
-import { type CustodyWalletSummary, type EarnStrategy, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import { decimalScale } from "@sdp/solana/amount";
+import { type EarnStrategy, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import { ExternalLinkIcon, Loader2Icon } from "lucide-react";
 import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
+import { useModalFocus } from "@/lib/use-modal-focus";
 import { cn } from "@/lib/utils";
-import { useEarnFundingWallets, walletDisplayName } from "./deposit/earn-funding-wallets";
 import {
-  compareUnsignedDecimals,
-  parseUnsignedDecimal,
-  unsignedDecimalScale,
-} from "./earn-decimal";
+  type EarnFundingWallet,
+  useEarnFundingWallets,
+  walletDisplayName,
+} from "./deposit/earn-funding-wallets";
+import { compareUnsignedDecimals, parseUnsignedDecimal } from "./earn-decimal";
 import { formatTokenQuantity, tokenSymbol } from "./earn-format";
 import { shortenMarketAddress } from "./earn-market-presentation";
-import { useEarnModalFocus } from "./earn-modal-focus";
 import { createEarnVaultDeposit, type EarnVaultDeposit } from "./earn-program-data";
 import { strategySourceLabel, strategyToken } from "./earn-program-presentation";
 
@@ -47,7 +48,7 @@ export function validateVaultDepositAmount(
   }
   if (decimals === undefined) return { kind: "unknown_scale" };
 
-  if (unsignedDecimalScale(amount, { ignoreTrailingZeros: true }) > decimals) {
+  if (decimalScale(amount.canonical) > decimals) {
     return { kind: "over_precision", decimals };
   }
 
@@ -67,7 +68,7 @@ function atomsToDecimalString(atoms: bigint, decimals: number): string {
  * or malformed; a successful observation with no row for the mint is real zero.
  */
 export function walletBalanceForMint(
-  wallet: CustodyWalletSummary,
+  wallet: EarnFundingWallet,
   mint: string,
   decimals: number
 ): string | undefined {
@@ -153,7 +154,7 @@ function amountValidationMessage(
 }
 
 interface DepositWalletPickerProps {
-  wallets: readonly CustodyWalletSummary[] | undefined;
+  wallets: readonly EarnFundingWallet[] | undefined;
   walletsError: unknown;
   walletsLoading: boolean;
   selectedWalletId: string | null;
@@ -176,6 +177,7 @@ function DepositWalletPicker({
   onSelect,
 }: DepositWalletPickerProps) {
   const t = useTranslations();
+  const locale = useLocale();
 
   let walletContent: ReactNode;
   if (walletsLoading && wallets === undefined) {
@@ -253,7 +255,7 @@ function DepositWalletPicker({
               : balance === undefined
                 ? t("DashboardEarn.deposit.vaultBalanceUnknown")
                 : t("DashboardEarn.deposit.vaultBalanceAvailable", {
-                    amount: formatTokenQuantity(balance, symbol),
+                    amount: formatTokenQuantity(balance, locale, symbol),
                   })}
           </span>
         </label>
@@ -281,6 +283,7 @@ function DepositResult({
   onClose: () => void;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
 
   if (outcome.kind === "approval_pending") {
     return (
@@ -361,7 +364,7 @@ function DepositResult({
         <div className="flex items-baseline justify-between gap-5 py-1">
           <dt className="text-tertiary">{t("DashboardEarn.withdraw.amountLabel")}</dt>
           <dd className="text-right tabular-nums text-primary">
-            {formatTokenQuantity(outcome.amount, symbol)}
+            {formatTokenQuantity(outcome.amount, locale, symbol)}
           </dd>
         </div>
         <div className="flex items-baseline justify-between gap-5 py-1">
@@ -408,6 +411,7 @@ export function EarnVaultDepositModal({
   onDeposited,
 }: EarnVaultDepositModalProps) {
   const t = useTranslations();
+  const locale = useLocale();
   const { wallets, error: walletsError, isLoading: walletsLoading } = useEarnFundingWallets();
   const [walletId, setWalletId] = useState<string | null>(null);
   const [amountInput, setAmountInput] = useState("");
@@ -418,7 +422,7 @@ export function EarnVaultDepositModal({
   const requestRef = useRef<{ signature: string; key: string } | null>(null);
   const requestControllerRef = useRef<AbortController | null>(null);
   const panelKey = outcome ? `outcome:${outcome.kind}` : "form";
-  const contentRef = useEarnModalFocus({
+  const contentRef = useModalFocus({
     focusKey: panelKey,
     initialFocusSelector: "[data-modal-focus-target]",
     fallbackAttribute: "data-earn-vault-deposit-focus-fallback",
@@ -583,7 +587,7 @@ export function EarnVaultDepositModal({
               ? selectedWalletBalance === undefined
                 ? t("DashboardEarn.deposit.vaultBalanceUnknown")
                 : t("DashboardEarn.deposit.vaultBalanceAvailable", {
-                    amount: formatTokenQuantity(selectedWalletBalance, symbol),
+                    amount: formatTokenQuantity(selectedWalletBalance, locale, symbol),
                   })
               : null}
           </div>

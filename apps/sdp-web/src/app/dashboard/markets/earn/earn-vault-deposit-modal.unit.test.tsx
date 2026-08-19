@@ -1,14 +1,10 @@
 // @vitest-environment jsdom
 
-import type {
-  CustodyWalletSummary,
-  EarnStrategy,
-  EarnVaultDeposit,
-  EarnVaultMovementStatus,
-} from "@sdp/types";
+import type { EarnStrategy, EarnVaultDeposit, EarnVaultMovementStatus } from "@sdp/types";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { EarnFundingWallet } from "./deposit/earn-funding-wallets";
 import {
   EarnVaultDepositModal,
   validateVaultDepositAmount,
@@ -80,10 +76,11 @@ vi.mock("@/i18n/provider", () => ({
       String(values?.[name] ?? `{${name}}`)
     );
   },
+  useLocale: () => "en",
 }));
 
 vi.mock("./deposit/earn-funding-wallets", () => ({
-  walletDisplayName: (wallet: CustodyWalletSummary | undefined, fallback: string) =>
+  walletDisplayName: (wallet: EarnFundingWallet | undefined, fallback: string) =>
     wallet?.label?.trim() || fallback,
   useEarnFundingWallets: mocks.useEarnFundingWallets,
 }));
@@ -111,19 +108,15 @@ const strategy: EarnStrategy = {
   updatedAt: "2026-08-18T00:00:00.000Z",
 };
 
-function fundingWallet(balances: CustodyWalletSummary["balances"]): CustodyWalletSummary {
+function fundingWallet(balances: EarnFundingWallet["balances"]): EarnFundingWallet {
   return {
     id: "wallet_1",
-    custodyConfigId: "custody_1",
-    provider: "privy",
-    isDefaultProvider: true,
     isRuntimeExecutionAllowed: true,
     walletId: "provider_wallet_1",
     publicKey: "7YkWnDF8W6B3gC3xZ1gRzuCUzPmGp7s1e3gHcWw6Xx5p",
     label: "Treasury wallet",
     purpose: "treasury",
     status: "active",
-    createdAt: "2026-08-18T00:00:00.000Z",
     balances,
   };
 }

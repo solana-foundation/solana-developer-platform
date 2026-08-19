@@ -1,5 +1,6 @@
 "use client";
 
+import { decimalScale } from "@sdp/solana/amount";
 import {
   EARN_PORTFOLIO_TOKENS,
   type EarnPortfolioToken,
@@ -16,14 +17,10 @@ import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { Select, SelectItem } from "@/components/ui/select";
 import type { MessageKey } from "@/i18n/messages";
-import { useTranslations } from "@/i18n/provider";
-import {
-  compareUnsignedDecimals,
-  parseUnsignedDecimal,
-  unsignedDecimalScale,
-} from "./earn-decimal";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { useModalFocus } from "@/lib/use-modal-focus";
+import { compareUnsignedDecimals, parseUnsignedDecimal } from "./earn-decimal";
 import { formatDurationRange, formatUsd, isoDurationDays } from "./earn-format";
-import { useEarnModalFocus } from "./earn-modal-focus";
 import {
   createEarnWithdrawal,
   previewEarnWithdrawal,
@@ -41,7 +38,7 @@ export function isPositiveUsdAmount(value: string): boolean {
   const amount = parseUnsignedDecimal(value, { trim: false });
   return (
     amount !== undefined &&
-    unsignedDecimalScale(amount) <= 6 &&
+    decimalScale(value) <= 6 &&
     compareUnsignedDecimals(amount.canonical, "0") === 1
   );
 }
@@ -49,7 +46,8 @@ export function isPositiveUsdAmount(value: string): boolean {
 export function withdrawalRequestSignature(
   programId: string,
   amountUsd: string,
-  token: EarnPortfolioToken,
+  /** Absent until a payout lane exists; no submit is reachable before then. */
+  token: EarnPortfolioToken | undefined,
   destinationAddress: string
 ): string {
   return JSON.stringify([programId, amountUsd, token, destinationAddress]);
@@ -60,10 +58,7 @@ const SOLANA_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 const PREVIEW_DEBOUNCE_MS = 400;
 
-const WITHDRAWAL_STATUS_BADGES: Record<
-  EarnPortfolioWithdrawal["status"],
-  { variant: "success" | "warning" | "danger"; key: MessageKey }
-> = {
+const WITHDRAWAL_STATUS_BADGES = {
   processing: { variant: "warning", key: "DashboardEarn.withdraw.statusProcessing" },
   pending_approval: { variant: "warning", key: "DashboardEarn.withdraw.statusPendingApproval" },
   completed: { variant: "success", key: "DashboardEarn.withdraw.statusCompleted" },
@@ -73,9 +68,12 @@ const WITHDRAWAL_STATUS_BADGES: Record<
   },
   failed: { variant: "danger", key: "DashboardEarn.withdraw.statusFailed" },
   cancelled: { variant: "danger", key: "DashboardEarn.withdraw.statusCancelled" },
-};
+} as const satisfies Record<
+  EarnPortfolioWithdrawal["status"],
+  { variant: "success" | "warning" | "danger"; key: MessageKey }
+>;
 
-const WITHDRAWAL_STATUS_DESCRIPTIONS: Record<EarnPortfolioWithdrawal["status"], MessageKey> = {
+const WITHDRAWAL_STATUS_DESCRIPTIONS = {
   processing: "DashboardEarn.withdraw.createdDescription",
   // SDP does not expose Ground's customer-approval actions yet. Say where the
   // withdrawal is parked and prevent an unsafe duplicate submission.
@@ -84,7 +82,7 @@ const WITHDRAWAL_STATUS_DESCRIPTIONS: Record<EarnPortfolioWithdrawal["status"], 
   partially_completed: "DashboardEarn.overview.withdrawalPartiallyCompleted",
   failed: "DashboardEarn.overview.withdrawalFailed",
   cancelled: "DashboardEarn.overview.withdrawalCancelled",
-};
+} as const satisfies Record<EarnPortfolioWithdrawal["status"], MessageKey>;
 
 type PreviewState =
   | { phase: "idle" }
@@ -217,6 +215,7 @@ function LaneAvailableLine({
   token: EarnPortfolioToken;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   return (
     <>
       <div id="earn-withdraw-available" className="flex items-baseline justify-between gap-3">
@@ -225,7 +224,7 @@ function LaneAvailableLine({
         </span>
         {liquidity.phase === "ready" ? (
           <span className="text-xs font-medium tabular-nums text-primary">
-            {formatUsd(liquidity.withdrawableUsd)}
+            {formatUsd(liquidity.withdrawableUsd, locale)}
           </span>
         ) : (
           <span className="text-xs tabular-nums text-tertiary">
@@ -247,16 +246,17 @@ function LaneAvailableLine({
  * provider has told us one, so the reader gets an answer rather than advice.
  */
 function AmountError({
-  shapeValid,
+  formatValid,
   laneCeiling,
   token,
 }: {
-  shapeValid: boolean;
+  formatValid: boolean;
   laneCeiling: string | undefined;
   token: EarnPortfolioToken;
 }) {
   const t = useTranslations();
-  if (!shapeValid) {
+  const locale = useLocale();
+  if (!formatValid) {
     return (
       <p id="earn-withdraw-error" className="text-xs text-error" role="alert">
         {t("DashboardEarn.withdraw.errorAmountRequired")}
@@ -269,7 +269,7 @@ function AmountError({
         ? t("DashboardEarn.withdraw.errorExceedsWithdrawable", { token: token.toUpperCase() })
         : t("DashboardEarn.withdraw.errorExceedsCeiling", {
             token: token.toUpperCase(),
-            amount: formatUsd(laneCeiling),
+            amount: formatUsd(laneCeiling, locale),
           })}
     </p>
   );
@@ -283,6 +283,7 @@ function WithdrawPreviewPanel({
   token: EarnPortfolioToken;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   if (preview.phase === "idle") return null;
   return (
     <div className="mt-4 rounded-md border border-border-default bg-fill-subtle p-3">
@@ -301,7 +302,7 @@ function WithdrawPreviewPanel({
             ? t("DashboardEarn.withdraw.previewInsufficient", { token: token.toUpperCase() })
             : t("DashboardEarn.withdraw.previewInsufficientCeiling", {
                 token: token.toUpperCase(),
-                amount: formatUsd(preview.laneCeilingUsd),
+                amount: formatUsd(preview.laneCeilingUsd, locale),
               })}
         </p>
       ) : null}
@@ -310,12 +311,14 @@ function WithdrawPreviewPanel({
           <dl className="mt-1 text-xs">
             <div className="flex items-baseline justify-between gap-4 py-1">
               <dt className="text-tertiary">{t("DashboardEarn.withdraw.previewFee")}</dt>
-              <dd className="text-primary tabular-nums">{formatUsd(preview.preview.feeUsd)}</dd>
+              <dd className="text-primary tabular-nums">
+                {formatUsd(preview.preview.feeUsd, locale)}
+              </dd>
             </div>
             <div className="flex items-baseline justify-between gap-4 py-1">
               <dt className="text-tertiary">{t("DashboardEarn.withdraw.previewTotalAfter")}</dt>
               <dd className="text-primary tabular-nums">
-                {formatUsd(preview.preview.totalUsdAfterWithdrawal)}
+                {formatUsd(preview.preview.totalUsdAfterWithdrawal, locale)}
               </dd>
             </div>
           </dl>
@@ -340,6 +343,7 @@ function WithdrawalCreatedView({
   onClose: () => void;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const badge = WITHDRAWAL_STATUS_BADGES[withdrawal.status];
   return (
     <>
@@ -357,7 +361,8 @@ function WithdrawalCreatedView({
         <div className="flex items-baseline justify-between gap-4 py-1">
           <dt className="text-tertiary">{t("DashboardEarn.withdraw.amountLabel")}</dt>
           <dd className="text-primary tabular-nums">
-            {formatUsd(withdrawal.amountRequestedUsd ?? fallbackAmountUsd)} · {token.toUpperCase()}
+            {formatUsd(withdrawal.amountRequestedUsd ?? fallbackAmountUsd, locale)} ·{" "}
+            {token.toUpperCase()}
           </dd>
         </div>
         <div className="flex items-baseline justify-between gap-4 py-1">
@@ -430,7 +435,8 @@ export function EarnWithdrawModal({
   onWithdrawalCreated,
 }: EarnWithdrawModalProps) {
   const t = useTranslations();
-  const contentRef = useEarnModalFocus({
+  const locale = useLocale();
+  const contentRef = useModalFocus({
     focusKey: programId,
     initialFocusSelector: 'input:not([type="hidden"]):not([disabled])',
     fallbackAttribute: "data-earn-withdraw-focus-fallback",
@@ -441,16 +447,20 @@ export function EarnWithdrawModal({
   const withdrawTokenOptions = EARN_PORTFOLIO_TOKENS.filter((candidate) =>
     earnProgramSolanaPayoutTokens(provider).includes(candidate)
   );
-  const withdrawalAvailable = withdrawTokenOptions.length > 0;
-  // The caller disables providers with no declared Solana payout lane. The
-  // fallback keeps hook state typed; every read/write below still fails closed.
-  const [token, setToken] = useState<EarnPortfolioToken>(withdrawTokenOptions[0] ?? "usdc");
+  // `undefined` when the provider declares no Solana payout lane, and it stays
+  // undefined — seeding a token the provider cannot pay out would make every
+  // read below depend on remembering to fail closed. The form only renders once
+  // this is a real lane, so nothing downstream handles a fabricated one.
+  const [token, setToken] = useState<EarnPortfolioToken | undefined>(withdrawTokenOptions[0]);
   const [destinationInput, setDestinationInput] = useState("");
   const [preview, setPreview] = useState<PreviewState>({ phase: "idle" });
   const [laneLiquidity, setLaneLiquidity] = useState<LaneLiquidity>({ phase: "loading" });
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [created, setCreated] = useState<EarnPortfolioWithdrawal | null>(null);
+  const [created, setCreated] = useState<{
+    withdrawal: EarnPortfolioWithdrawal;
+    token: EarnPortfolioToken;
+  } | null>(null);
 
   // The provider's own ceiling for the selected lane, or `undefined` while it
   // is still being read (or if the read failed). Never a locally-derived
@@ -466,14 +476,14 @@ export function EarnWithdrawModal({
   const maxFillAmount =
     laneLiquidity.phase === "ready" ? floorUsdToCents(laneLiquidity.withdrawableUsd) : undefined;
   const amount = amountInput.trim();
-  const amountShapeValid = isPositiveUsdAmount(amount);
+  const amountFormatValid = isPositiveUsdAmount(amount);
   // An unresolved ceiling validates SHAPE only. Blocking the confirm because
   // our own read is slow or broken would gate an exit on provider
   // availability, which ADR 0002 forbids — the provider decides, as it always
   // did; we just no longer pretend to know the answer first.
   const amountValid =
-    withdrawalAvailable &&
-    amountShapeValid &&
+    token !== undefined &&
+    amountFormatValid &&
     (laneCeiling === undefined || compareUsdDecimals(amount, laneCeiling) !== 1);
   const destination = destinationInput.trim();
   const destinationValid = SOLANA_ADDRESS_PATTERN.test(destination);
@@ -544,8 +554,10 @@ export function EarnWithdrawModal({
    * is already 2N provider round trips against an account every org shares.
    */
   useEffect(() => {
-    if (!withdrawalAvailable || created) {
-      if (!withdrawalAvailable) setLaneLiquidity({ phase: "error" });
+    if (token === undefined || created) {
+      // No declared payout lane means there is no ceiling to read, and the
+      // available line must say so rather than sit on "checking…" forever.
+      if (token === undefined) setLaneLiquidity({ phase: "error" });
       return;
     }
     const controller = new AbortController();
@@ -577,14 +589,14 @@ export function EarnWithdrawModal({
       );
     })();
     return () => controller.abort();
-  }, [programId, token, created, commitLaneLiquidity, withdrawalAvailable]);
+  }, [programId, token, created, commitLaneLiquidity]);
 
   // The amount-specific preview — fee, resulting portfolio, processing window —
   // which needs only amount + token, so it refreshes as those settle. Every
   // response also carries a fresher `withdrawableUsd` than the on-open read, so
   // both calls feed the one ceiling the modal quotes.
   useEffect(() => {
-    if (!amountValid || created) {
+    if (token === undefined || !amountValid || created) {
       setPreview({ phase: "idle" });
       return;
     }
@@ -624,7 +636,7 @@ export function EarnWithdrawModal({
   }, [amount, amountValid, token, created, programId, commitLaneLiquidity]);
 
   const submit = async () => {
-    if (!withdrawalAvailable || !amountValid || !destinationValid || submitting) return;
+    if (token === undefined || !amountValid || !destinationValid || submitting) return;
     setSubmitting(true);
     setSubmitError(null);
     const result = await createEarnWithdrawal(programId, {
@@ -655,12 +667,12 @@ export function EarnWithdrawModal({
       setSubmitError(
         t("DashboardEarn.withdraw.previewInsufficientCeiling", {
           token: token.toUpperCase(),
-          amount: formatUsd(laneCeilingUsd),
+          amount: formatUsd(laneCeilingUsd, locale),
         })
       );
       return;
     }
-    setCreated(result.data.data.withdrawal);
+    setCreated({ withdrawal: result.data.data.withdrawal, token });
     onWithdrawalCreated(result.data.data.withdrawal.withdrawalRef);
   };
 
@@ -674,9 +686,9 @@ export function EarnWithdrawModal({
       >
         <div ref={contentRef} className="p-5">
           <WithdrawalCreatedView
-            withdrawal={created}
+            withdrawal={created.withdrawal}
             fallbackAmountUsd={amount}
-            token={token}
+            token={created.token}
             onClose={onClose}
           />
         </div>
@@ -698,108 +710,120 @@ export function EarnWithdrawModal({
           {t("DashboardEarn.withdraw.description")}
         </p>
 
-        {!withdrawalAvailable ? (
+        {token === undefined ? (
           <p className="mt-4 text-sm leading-5 text-secondary" role="status">
             {t("DashboardEarn.withdraw.providerUnavailable")}
           </p>
-        ) : null}
-
-        {/* Token FIRST: it scopes everything below — the available figure is
-            read per lane, so changing this re-asks the provider. Options carry
-            no amount of their own: a figure beside an UNSELECTED lane would
-            cost one preview call per option against a provider account every
-            org shares, and the estimate that used to fill them is exactly what
-            this flow stopped quoting (PRO-1675). */}
-        <div className="mt-4 space-y-2">
-          <p className="text-sm font-medium text-primary">
-            {t("DashboardEarn.withdraw.tokenLabel")}
-          </p>
-          <Select
-            ariaLabel={t("DashboardEarn.withdraw.tokenLabel")}
-            value={token}
-            disabled={submitting || !withdrawalAvailable}
-            onValueChange={(nextToken) => {
-              if (!nextToken || nextToken === token) return;
-              setToken(nextToken as EarnPortfolioToken);
-              // A different lane is different money — an amount typed against
-              // one says nothing about the other.
-              setAmountInput("");
-            }}
-          >
-            {withdrawTokenOptions.map((candidate) => (
-              <SelectItem key={candidate} value={candidate}>
-                {candidate.toUpperCase()}
-              </SelectItem>
-            ))}
-          </Select>
-        </div>
-
-        <div className="mt-4 space-y-2">
-          <Label htmlFor="earn-withdraw-amount">{t("DashboardEarn.withdraw.amountLabel")}</Label>
-          <Input
-            size="lg"
-            id="earn-withdraw-amount"
-            inputMode="decimal"
-            placeholder="0.00"
-            disabled={submitting || !withdrawalAvailable}
-            value={amountInput}
-            aria-invalid={Boolean(amountInput && !amountValid)}
-            aria-describedby={
-              amountInput && !amountValid
-                ? "earn-withdraw-available earn-withdraw-error"
-                : "earn-withdraw-available"
-            }
-            onChange={(event: ChangeEvent<HTMLInputElement>) => setAmountInput(event.target.value)}
-            iconRight={
-              // Disabled until the ceiling resolves: a Max with nothing
-              // authoritative behind it is the exact affordance this removed.
-              <button
-                type="button"
-                disabled={
-                  submitting ||
-                  maxFillAmount === undefined ||
-                  compareUsdDecimals(maxFillAmount, "0") !== 1
-                }
-                onClick={() => {
-                  if (maxFillAmount !== undefined) setAmountInput(maxFillAmount);
+        ) : (
+          <>
+            {/* Token FIRST: it scopes everything below — the available figure is
+              read per lane, so changing this re-asks the provider. Options carry
+              no amount of their own: a figure beside an UNSELECTED lane would
+              cost one preview call per option against a provider account every
+              org shares, and the estimate that used to fill them is exactly what
+              this flow stopped quoting (PRO-1675). */}
+            <div className="mt-4 space-y-2">
+              <p className="text-sm font-medium text-primary">
+                {t("DashboardEarn.withdraw.tokenLabel")}
+              </p>
+              <Select
+                ariaLabel={t("DashboardEarn.withdraw.tokenLabel")}
+                value={token}
+                disabled={submitting}
+                onValueChange={(nextToken) => {
+                  if (!nextToken || nextToken === token) return;
+                  setToken(nextToken as EarnPortfolioToken);
+                  // A different lane is different money — an amount typed against
+                  // one says nothing about the other.
+                  setAmountInput("");
                 }}
-                className="pointer-events-auto text-xs font-medium text-primary disabled:text-tertiary"
               >
-                {t("DashboardEarn.withdraw.useMax")}
-              </button>
-            }
-          />
-          <LaneAvailableLine liquidity={laneLiquidity} token={token} />
-          {amountInput && !amountValid ? (
-            <AmountError shapeValid={amountShapeValid} laneCeiling={laneCeiling} token={token} />
-          ) : null}
-        </div>
+                {withdrawTokenOptions.map((candidate) => (
+                  <SelectItem key={candidate} value={candidate}>
+                    {candidate.toUpperCase()}
+                  </SelectItem>
+                ))}
+              </Select>
+            </div>
 
-        <div className="mt-4 space-y-2">
-          <Label htmlFor="earn-withdraw-destination">
-            {t("DashboardEarn.withdraw.destinationLabel")}
-          </Label>
-          <Input
-            id="earn-withdraw-destination"
-            placeholder={t("DashboardEarn.withdraw.destinationPlaceholder")}
-            disabled={submitting || !withdrawalAvailable}
-            value={destinationInput}
-            aria-invalid={Boolean(destinationInput && !destinationValid)}
-            aria-describedby={
-              destinationInput && !destinationValid ? "earn-withdraw-destination-error" : undefined
-            }
-            onChange={(event: ChangeEvent<HTMLInputElement>) =>
-              setDestinationInput(event.target.value)
-            }
-          />
-          {destinationInput && !destinationValid ? (
-            <p id="earn-withdraw-destination-error" className="text-xs text-error" role="alert">
-              {t("DashboardEarn.withdraw.errorDestinationInvalid")}
-            </p>
-          ) : null}
-        </div>
+            <div className="mt-4 space-y-2">
+              <Label htmlFor="earn-withdraw-amount">
+                {t("DashboardEarn.withdraw.amountLabel")}
+              </Label>
+              <Input
+                size="lg"
+                id="earn-withdraw-amount"
+                inputMode="decimal"
+                placeholder="0.00"
+                disabled={submitting}
+                value={amountInput}
+                aria-invalid={Boolean(amountInput && !amountValid)}
+                aria-describedby={
+                  amountInput && !amountValid
+                    ? "earn-withdraw-available earn-withdraw-error"
+                    : "earn-withdraw-available"
+                }
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  setAmountInput(event.target.value)
+                }
+                iconRight={
+                  // Disabled until the ceiling resolves: a Max with nothing
+                  // authoritative behind it is the exact affordance this removed.
+                  <button
+                    type="button"
+                    disabled={
+                      submitting ||
+                      maxFillAmount === undefined ||
+                      compareUsdDecimals(maxFillAmount, "0") !== 1
+                    }
+                    onClick={() => {
+                      if (maxFillAmount !== undefined) setAmountInput(maxFillAmount);
+                    }}
+                    className="pointer-events-auto text-xs font-medium text-primary disabled:text-tertiary"
+                  >
+                    {t("DashboardEarn.withdraw.useMax")}
+                  </button>
+                }
+              />
+              <LaneAvailableLine liquidity={laneLiquidity} token={token} />
+              {amountInput && !amountValid ? (
+                <AmountError
+                  formatValid={amountFormatValid}
+                  laneCeiling={laneCeiling}
+                  token={token}
+                />
+              ) : null}
+            </div>
 
-        <WithdrawPreviewPanel preview={preview} token={token} />
+            <div className="mt-4 space-y-2">
+              <Label htmlFor="earn-withdraw-destination">
+                {t("DashboardEarn.withdraw.destinationLabel")}
+              </Label>
+              <Input
+                id="earn-withdraw-destination"
+                placeholder={t("DashboardEarn.withdraw.destinationPlaceholder")}
+                disabled={submitting}
+                value={destinationInput}
+                aria-invalid={Boolean(destinationInput && !destinationValid)}
+                aria-describedby={
+                  destinationInput && !destinationValid
+                    ? "earn-withdraw-destination-error"
+                    : undefined
+                }
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  setDestinationInput(event.target.value)
+                }
+              />
+              {destinationInput && !destinationValid ? (
+                <p id="earn-withdraw-destination-error" className="text-xs text-error" role="alert">
+                  {t("DashboardEarn.withdraw.errorDestinationInvalid")}
+                </p>
+              ) : null}
+            </div>
+
+            <WithdrawPreviewPanel preview={preview} token={token} />
+          </>
+        )}
 
         {submitError ? (
           <p className="mt-4 text-xs text-error" role="alert">
@@ -813,7 +837,7 @@ export function EarnWithdrawModal({
           </Button>
           <Button
             onClick={submit}
-            disabled={submitting || !withdrawalAvailable || !amountValid || !destinationValid}
+            disabled={submitting || !amountValid || !destinationValid}
             iconLeft={submitting ? <Loader2Icon className="animate-spin" /> : undefined}
           >
             {submitting

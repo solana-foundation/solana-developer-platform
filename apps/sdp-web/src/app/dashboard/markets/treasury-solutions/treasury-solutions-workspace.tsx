@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  type CustodyWalletSummary,
   type EarnProgramWithdrawalRecord,
   type EarnStrategy,
   type EarnVaultPosition,
@@ -41,7 +40,10 @@ import {
 } from "@/components/ui/table";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { useEarnFundingWallets } from "../earn/deposit/earn-funding-wallets";
+import {
+  type EarnFundingWallet,
+  useEarnFundingWallets,
+} from "../earn/deposit/earn-funding-wallets";
 import {
   EarnStrategyIdentity,
   earnMintAsset,
@@ -63,8 +65,9 @@ import { type EarnProviderAccess, earnVaultDepositAvailability } from "../earn/e
 import { EarnVaultDepositModal } from "../earn/earn-vault-deposit-modal";
 import { EarnWithdrawalOutcomeTracker, EarnWithdrawModal } from "../earn/earn-withdraw-modal";
 
-function WalletBalanceList({ wallet }: { wallet: CustodyWalletSummary }) {
+function WalletBalanceList({ wallet }: { wallet: EarnFundingWallet }) {
   const t = useTranslations();
+  const locale = useLocale();
   if (wallet.balances === undefined) {
     return (
       <p className="text-sm text-tertiary">{t("DashboardMarkets.treasury.balanceUnavailable")}</p>
@@ -87,7 +90,7 @@ function WalletBalanceList({ wallet }: { wallet: CustodyWalletSummary }) {
           <div className="min-w-0">
             <dt className="truncate text-xs text-tertiary">{balance.token}</dt>
             <dd className="mt-0.5 truncate text-sm font-medium text-primary tabular-nums">
-              {formatProviderAmount(balance.uiAmount)}
+              {formatProviderAmount(balance.uiAmount, locale)}
             </dd>
           </div>
         </div>
@@ -103,7 +106,7 @@ function TreasuryWalletsCard({
 }: {
   error: unknown;
   isLoading: boolean;
-  wallets: readonly CustodyWalletSummary[];
+  wallets: readonly EarnFundingWallet[];
 }) {
   const t = useTranslations();
   return (
@@ -234,7 +237,7 @@ function StrategyTable({
                       ? "—"
                       : position.count === 0
                         ? t("DashboardMarkets.treasury.noBalance")
-                        : formatProviderAmount(position.value, asset?.symbol)}
+                        : formatProviderAmount(position.value, locale, asset?.symbol)}
                   </p>
                   {position === null || (position.count > 0 && position.value === undefined) ? (
                     <p className="mt-1 text-xs text-tertiary">
@@ -288,9 +291,10 @@ function ActiveVaultPositionsCard({
   error: unknown;
   isLoading: boolean;
   positions: readonly EarnVaultPosition[] | undefined;
-  wallets: readonly CustodyWalletSummary[];
+  wallets: readonly EarnFundingWallet[];
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const activePositions = (positions ?? []).filter((position) => position.closedAt === null);
   const walletById = new Map(wallets.map((wallet) => [wallet.id, wallet] as const));
 
@@ -362,10 +366,10 @@ function ActiveVaultPositionsCard({
                         </TableCell>
                         <TableCell className="text-sm text-secondary">{asset.symbol}</TableCell>
                         <TableCell className="text-sm text-primary tabular-nums">
-                          {formatProviderAmount(position.tokenValue, asset.symbol)}
+                          {formatProviderAmount(position.tokenValue, locale, asset.symbol)}
                         </TableCell>
                         <TableCell className="text-sm text-secondary tabular-nums">
-                          {formatProviderAmount(position.shares)}
+                          {formatProviderAmount(position.shares, locale)}
                         </TableCell>
                         <TableCell className="text-sm text-secondary">
                           {wallet?.label?.trim() ||
@@ -424,6 +428,7 @@ function ExistingProgramsCard({
   onWithdraw: (program: EarnProgram) => void;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   if (programs.length === 0) return null;
 
   return (
@@ -461,6 +466,7 @@ function ExistingProgramsCard({
                     <TableCell className="text-sm text-primary tabular-nums">
                       {formatProviderAmount(
                         program.wallet.balance.totalUsd,
+                        locale,
                         t("DashboardMarkets.treasury.usdSymbol"),
                         2,
                         2

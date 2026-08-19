@@ -1,3 +1,5 @@
+import { compareDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
+
 export interface ParsedUnsignedDecimal {
   /** Leading-zero and trailing-fraction-zero normalized representation. */
   canonical: string;
@@ -14,7 +16,16 @@ interface ParseUnsignedDecimalOptions {
   maxLength?: number;
 }
 
-/** Parse one unsigned, non-exponent decimal without touching a JavaScript number. */
+/**
+ * Parse one unsigned, non-exponent decimal without touching a JavaScript number.
+ *
+ * Stricter than `isDecimalString` in `@sdp/solana/amount` on purpose: this is
+ * the seam between a typed money field and free text, so it requires digits on
+ * BOTH sides of the point (`.5` and `5.` are rejected, not coerced), can refuse
+ * untrimmed input, and can cap length. It also returns the canonical form,
+ * which the shared helpers do not expose. Scale and ordering are NOT
+ * reimplemented here — use `decimalScale` and `compareUnsignedDecimals`.
+ */
 export function parseUnsignedDecimal(
   value: string,
   { trim = true, maxLength }: ParseUnsignedDecimalOptions = {}
@@ -35,30 +46,19 @@ export function parseUnsignedDecimal(
   };
 }
 
-/** Fractional scale, optionally ignoring harmless trailing zeroes. */
-export function unsignedDecimalScale(
-  decimal: Pick<ParsedUnsignedDecimal, "fraction">,
-  { ignoreTrailingZeros = false }: { ignoreTrailingZeros?: boolean } = {}
-): number {
-  return (ignoreTrailingZeros ? decimal.fraction.replace(/0+$/, "") : decimal.fraction).length;
-}
-
-/** Exact ordering for unsigned decimal strings of arbitrary magnitude. */
+/**
+ * `compareDecimalAmounts` with the fail-soft contract the money surfaces need.
+ *
+ * The shared comparator THROWS `AmountError` on a non-decimal input, and these
+ * call sites read provider-supplied strings during render — a lane ceiling the
+ * API returned malformed would crash the withdraw modal while a reader is
+ * trying to exit a position. ADR 0002 (money out beats money off) forbids that,
+ * so an unparseable side answers `undefined` and every caller treats "cannot
+ * compare" as "do not offer", never as a pass.
+ */
 export function compareUnsignedDecimals(left: string, right: string): -1 | 0 | 1 | undefined {
-  const leftParts = parseUnsignedDecimal(left);
-  const rightParts = parseUnsignedDecimal(right);
-  if (!leftParts || !rightParts) return undefined;
-
-  if (leftParts.whole.length !== rightParts.whole.length) {
-    return leftParts.whole.length < rightParts.whole.length ? -1 : 1;
-  }
-  if (leftParts.whole !== rightParts.whole) {
-    return leftParts.whole < rightParts.whole ? -1 : 1;
-  }
-
-  const fractionLength = Math.max(leftParts.fraction.length, rightParts.fraction.length);
-  const leftFraction = leftParts.fraction.padEnd(fractionLength, "0");
-  const rightFraction = rightParts.fraction.padEnd(fractionLength, "0");
-  if (leftFraction === rightFraction) return 0;
-  return leftFraction < rightFraction ? -1 : 1;
+  if (!isDecimalString(left.trim()) || !isDecimalString(right.trim())) return undefined;
+  const ordering = compareDecimalAmounts(left, right);
+  if (ordering === 0) return 0;
+  return ordering < 0 ? -1 : 1;
 }
