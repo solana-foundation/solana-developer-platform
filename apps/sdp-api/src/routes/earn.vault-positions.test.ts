@@ -2,6 +2,10 @@ import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import {
+  projectEarnMovementFromVaultMovement,
+  projectEarnPositionFromVaultPosition,
+} from "@/db/repositories/earn-movements.repository";
 import { createPostgresEarnVaultRepository } from "@/db/repositories/earn-vault.repository";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
@@ -404,6 +408,22 @@ describe("GET /v1/earn/vault-positions", () => {
  * `listReadableEarnVaultWallets`, and a binding that hides a position has to
  * hide that position's deposits too. Testing them apart is how the two drift.
  */
+/**
+ * Mirror a legacy row into the unified ledger, which is what the reads serve.
+ *
+ * These fixtures write `earn_vault_movements` directly to build states no writer
+ * can produce (a withdraw direction, a foreign environment, an orphaned project).
+ * Production mirrors every such write in the same transaction, so a fixture that
+ * skipped this would leave the row invisible to the read and the assertion would
+ * pass for the wrong reason — proving only that the row was missing, not that the
+ * gate it targets works.
+ */
+async function reprojectLegacyMovement(positionId: string, movementId: string): Promise<void> {
+  const db = getDb(env);
+  await projectEarnPositionFromVaultPosition(db, positionId);
+  await projectEarnMovementFromVaultMovement(db, movementId);
+}
+
 describe("GET /v1/earn/vault-deposits/:movementId", () => {
   it("reports the recorded deposit so an unconfirmed signature stays answerable", async () => {
     const created = await createPosition({ providerReference: "vault_read_own" });
@@ -481,6 +501,7 @@ describe("GET /v1/earn/vault-deposits/:movementId", () => {
       .prepare("UPDATE earn_vault_movements SET direction = 'withdraw' WHERE id = ?")
       .bind(created.movement.id)
       .run();
+    await reprojectLegacyMovement(created.position.id, created.movement.id);
 
     expect((await getDeposit(created.movement.id)).status).toBe(404);
   });
@@ -525,6 +546,7 @@ describe("GET /v1/earn/vault-deposits/:movementId", () => {
           USER
         ),
     ]);
+    await reprojectLegacyMovement(positionId, movementId);
 
     expect((await getDeposit(movementId)).status).toBe(404);
   });
@@ -585,6 +607,7 @@ describe("GET /v1/earn/vault-deposits", () => {
       .prepare("UPDATE earn_vault_movements SET direction = 'withdraw' WHERE id = ?")
       .bind(withdrawal.movement.id)
       .run();
+    await reprojectLegacyMovement(withdrawal.position.id, withdrawal.movement.id);
 
     const body = (await (await listDeposits()).json()) as {
       data: { deposits: Array<{ movementId: string }> };
@@ -700,6 +723,7 @@ describe("GET /v1/earn/vault-deposits", () => {
       .prepare("UPDATE earn_vault_movements SET project_id = NULL WHERE id = ?")
       .bind(orphaned.movement.id)
       .run();
+    await reprojectLegacyMovement(orphaned.position.id, orphaned.movement.id);
 
     expect((await getDeposit(orphaned.movement.id)).status).toBe(404);
     const body = (await (await listDeposits()).json()) as {

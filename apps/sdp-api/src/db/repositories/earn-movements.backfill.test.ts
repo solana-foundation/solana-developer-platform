@@ -19,10 +19,16 @@ import type { EarnMovementRow, EarnPositionRow } from "./earn-movements.reposito
  * against a transcription would pass while the shipped artifact was broken.
  */
 
-const BACKFILL_SQL = path.join(
-  __dirname,
-  "../migrations/postgres/0064_earn_movements_backfill.sql"
-);
+const MIGRATIONS = path.join(__dirname, "../migrations/postgres");
+const BACKFILL_SQL = path.join(MIGRATIONS, "0064_earn_movements_backfill.sql");
+/**
+ * The later release re-runs the same projection to sweep rows the outgoing
+ * revision wrote during the rollout window. It is a deliberate COPY of 0064 —
+ * a migration records what ran when, and editing an applied one to run twice
+ * would rewrite history — so the thing worth testing is that the copy still
+ * behaves identically.
+ */
+const BACKFILL_SWEEP_SQL = path.join(MIGRATIONS, "0065_earn_movements_backfill_sweep.sql");
 
 const ORG = "org_earn_bf";
 const USER = "usr_earn_bf";
@@ -40,8 +46,8 @@ const VAULT = "BackfillVaultAddress1111111111111111111111";
  * INSERTs with `--` comments, no dollar-quoting and no semicolons inside
  * literals.
  */
-function backfillStatements(): string[] {
-  return readFileSync(BACKFILL_SQL, "utf8")
+function backfillStatements(file: string = BACKFILL_SQL): string[] {
+  return readFileSync(file, "utf8")
     .split("\n")
     .filter((line) => !line.trimStart().startsWith("--"))
     .join("\n")
@@ -50,8 +56,8 @@ function backfillStatements(): string[] {
     .filter((statement) => statement.length > 0);
 }
 
-async function runBackfill(db: AppDb): Promise<void> {
-  for (const statement of backfillStatements()) {
+async function runBackfill(db: AppDb, file: string = BACKFILL_SQL): Promise<void> {
+  for (const statement of backfillStatements(file)) {
     await db.prepare(statement).run();
   }
 }
@@ -373,5 +379,50 @@ describe("Earn movement backfill (migration 0064)", () => {
     const rows = await ledger(db);
     expect(rows.map((row) => row.id)).toContain("earn_vault_movement_bf_pending");
     expect(rows).toHaveLength(4);
+  });
+
+  it("sweeps a rollout-window row through the LATER migration exactly as the first pass would", async () => {
+    const db = getDb(env);
+    await seedLegacyHistory(db);
+    await runBackfill(db);
+    const before = await ledger(db);
+
+    // The window 0065 exists for: migrations finish before the new revision takes
+    // traffic, so the outgoing revision writes legacy alone for a moment.
+    await db
+      .prepare(
+        `INSERT INTO earn_vault_movements
+           (id, organization_id, project_id, environment, position_id, provider,
+            provider_reference, custody_wallet_id, direction, status,
+            requested_amount, amount, signature, signed_transaction,
+            last_valid_block_height, request_id, idempotency_fingerprint,
+            created_at, updated_at)
+         VALUES ('earn_vault_movement_bf_window', ?, ?, 'sandbox', 'earn_vault_position_bf',
+            'kamino', ?, ?, 'deposit', 'pending', '7', '7.000000',
+            'BfSigWindow', 'BfBytesWindow', 424242, 'bf-v-window', 'bf-vfp-window',
+            '2026-03-20T00:00:00.000Z', '2026-03-20T00:00:00.000Z')`
+      )
+      .bind(ORG, PROJECT, VAULT, WALLET)
+      .run();
+
+    await runBackfill(db, BACKFILL_SWEEP_SQL);
+
+    const after = await ledger(db);
+    expect(after).toHaveLength(before.length + 1);
+    expect(after.find((row) => row.id === "earn_vault_movement_bf_window")).toMatchObject({
+      status: "requested",
+      amount_requested: "7",
+      denomination: TOKEN_MINT,
+      source_address: WALLET_PUBKEY,
+    });
+    // The sweep is additive only: every row the first pass wrote is byte-identical.
+    for (const row of before) {
+      expect(after.find((candidate) => candidate.id === row.id)).toEqual(row);
+    }
+
+    // And it is itself idempotent, because it will run on databases that already
+    // have nothing left to sweep.
+    await runBackfill(db, BACKFILL_SWEEP_SQL);
+    expect(await ledger(db)).toEqual(after);
   });
 });

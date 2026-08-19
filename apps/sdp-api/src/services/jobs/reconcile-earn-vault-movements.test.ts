@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { createPostgresEarnVaultRepository } from "@/db/repositories/earn-vault.repository";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -82,6 +83,14 @@ async function seedMovement(lastValidBlockHeight = "100") {
   });
 }
 
+/** The ledger row, which is where settlement now lives. */
+async function ledgerRow(movementId: string) {
+  return createPostgresEarnMovementsRepository(getDb(env)).getMovementById({
+    movementId,
+    organizationId: ORG,
+  });
+}
+
 describe("reconcileEarnVaultMovements", () => {
   it("marks an observed successful signature confirmed", async () => {
     const seeded = await seedMovement();
@@ -135,5 +144,110 @@ describe("reconcileEarnVaultMovements", () => {
         organizationId: ORG,
       })
     ).resolves.toMatchObject({ status: "submitted" });
+  });
+
+  it("keeps a confirmed movement in the queue until the chain finalizes it", async () => {
+    const seeded = await seedMovement();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: 1n, err: null, confirmationStatus: "confirmed" },
+    ]);
+    await reconcileEarnVaultMovements(env);
+
+    // Commitment is not settlement (PRO-1716): the row is confirmed, carries no
+    // settled_at, and is STILL unsettled work as far as the sweep is concerned.
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+      status: "confirmed",
+      settled_at: null,
+    });
+    const queued = await createPostgresEarnMovementsRepository(
+      getDb(env)
+    ).listUnsettledVaultMovements(256);
+    expect(queued.map((row) => row.id)).toContain(seeded.movement.id);
+
+    // A later tick sees finalization and settles it.
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+    await reconcileEarnVaultMovements(env);
+
+    const finalized = await ledgerRow(seeded.movement.id);
+    expect(finalized).toMatchObject({ status: "finalized" });
+    expect(finalized?.settled_at).not.toBeNull();
+    expect(finalized?.confirmed_at).not.toBeNull();
+    expect(
+      (
+        await createPostgresEarnMovementsRepository(getDb(env)).listUnsettledVaultMovements(256)
+      ).map((row) => row.id)
+    ).not.toContain(seeded.movement.id);
+  });
+
+  it("settles a movement whose first observation is already finalized", async () => {
+    const seeded = await seedMovement();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+
+    await reconcileEarnVaultMovements(env);
+
+    // It never reported a separate commitment, so confirmed_at is stamped from
+    // the moment finalization was observed rather than left null — which 0062's
+    // confirmation biconditional would reject outright.
+    const row = await ledgerRow(seeded.movement.id);
+    expect(row).toMatchObject({ status: "finalized" });
+    expect(row?.confirmed_at).not.toBeNull();
+    expect(row?.settled_at).not.toBeNull();
+
+    // The legacy row is left as close to the truth as its vocabulary allows, so a
+    // rollback shows a settled deposit rather than one still in flight.
+    await expect(
+      createPostgresEarnVaultRepository(getDb(env)).getMovementById({
+        movementId: seeded.movement.id,
+        organizationId: ORG,
+      })
+    ).resolves.toMatchObject({ status: "confirmed" });
+  });
+
+  it("does not expire a confirmed movement whose signature aged out of RPC history", async () => {
+    const seeded = await seedMovement("100");
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: 1n, err: null, confirmationStatus: "confirmed" },
+    ]);
+    await reconcileEarnVaultMovements(env);
+
+    // The transaction demonstrably landed, so an unknown signature later is the
+    // RPC forgetting it — never grounds to expire it on the blockhash rule, which
+    // only ever applied to a transaction that never made it on chain.
+    getSignatureStatuses.mockResolvedValue([null]);
+    getBlockHeight.mockResolvedValue(100_000n);
+    await reconcileEarnVaultMovements(env);
+
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({ status: "confirmed" });
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("fails a finalized-then-errored signature without regressing a settled row", async () => {
+    const seeded = await seedMovement();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+    await reconcileEarnVaultMovements(env);
+    expect((await ledgerRow(seeded.movement.id))?.status).toBe("finalized");
+
+    // Finalization is irreversible, so nothing may move the row afterwards — not
+    // even a chain error, which at this point can only be noise.
+    getSignatureStatuses.mockResolvedValue([
+      {
+        slot: 1n,
+        confirmations: null,
+        err: { InstructionError: [0, "Custom"] },
+        confirmationStatus: "finalized",
+      },
+    ]);
+    await reconcileEarnVaultMovements(env);
+
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+      status: "finalized",
+      failure_reason: null,
+    });
   });
 });

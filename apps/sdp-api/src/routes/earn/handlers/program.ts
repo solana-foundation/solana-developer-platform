@@ -23,6 +23,10 @@ import type {
   EarnProviderWalletRow,
   EarnRepository,
 } from "@/db/repositories";
+import {
+  createPostgresEarnMovementsRepository,
+  type EarnMovementRow,
+} from "@/db/repositories/earn-movements.repository";
 import { getAuth } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
@@ -873,23 +877,36 @@ export const getEarnProgramWithdrawal = async (c: AppContext) => {
   return success(c, response);
 };
 
-function mapToEarnProgramWithdrawalRecord(
-  row: EarnProgramWithdrawalRow
-): EarnProgramWithdrawalRecord {
+/**
+ * Ledger row -> the published withdrawal record.
+ *
+ * The custodial status vocabulary needs no translation: 0055's values ARE the
+ * ledger's custodial values. What the unified columns rename is the DENOMINATION
+ * story — `amount_requested`/`amount_settled`/`fee_amount` are denominated in the
+ * row's `denomination`, which is `usd` for every custodial movement, and the
+ * payout stablecoin moved to `payout_token` because naming the coin is not the
+ * same fact as naming the unit. `settled_at` is the provider's completion time.
+ */
+function mapToEarnProgramWithdrawalRecord(row: EarnMovementRow): EarnProgramWithdrawalRecord {
+  if (row.denomination !== "usd") {
+    // A non-USD custodial movement would mean this DTO's `*Usd` field names are
+    // lying about the unit. Refuse rather than mislabel money.
+    throw internalError(`Earn withdrawal ${row.id} is denominated in ${row.denomination}, not usd`);
+  }
   return {
     id: row.id,
     provider: row.provider,
-    status: row.status,
-    amountRequestedUsd: row.amount_requested_usd,
-    amountPaidUsd: row.amount_paid_usd ?? undefined,
-    feeUsd: row.fee_usd ?? undefined,
-    token: row.token,
-    destinationAddress: row.destination_address,
+    status: row.status as EarnProgramWithdrawalRecord["status"],
+    amountRequestedUsd: row.amount_requested,
+    amountPaidUsd: row.amount_settled ?? undefined,
+    feeUsd: row.fee_amount ?? undefined,
+    token: (row.payout_token ?? undefined) as EarnProgramWithdrawalRecord["token"],
+    destinationAddress: row.destination_address ?? "",
     failureReason: row.failure_reason ?? undefined,
     withdrawalRef: row.provider_reference ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    completedAt: row.completed_at ?? undefined,
+    completedAt: row.settled_at ?? undefined,
   };
 }
 
@@ -907,9 +924,11 @@ export const listEarnProgramWithdrawals = async (c: AppContext) => {
   const query = parseQuery(c, earnProgramWithdrawalsListQuerySchema);
   const row = await requireProgram(c, programId);
 
-  const { rows, total } = await getEarnRepository(c).listProgramWithdrawals({
+  const { rows, total } = await createPostgresEarnMovementsRepository(
+    getDb(c.env)
+  ).listCustodialMovements({
     organizationId: getAuth(c).organizationId,
-    walletId: row.id,
+    providerWalletId: row.id,
     ...pageWindow(query),
   });
 

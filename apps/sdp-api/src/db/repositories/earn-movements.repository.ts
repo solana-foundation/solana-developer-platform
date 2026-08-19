@@ -4,6 +4,7 @@ import type {
   EarnMovementStatus,
   SdpEnvironment,
 } from "@sdp/types";
+import { EARN_MOVEMENT_TRANSITIONS } from "@sdp/types";
 import type { AppDb } from "@/db";
 
 /**
@@ -15,10 +16,10 @@ import type { AppDb } from "@/db";
  *
  * ── What this module is, during the transition ────────────────────────────
  * The legacy tables (`earn_program_withdrawals`, `earn_vault_movements`,
- * `earn_vault_positions`) are still the authoritative writers and readers. This
- * module MIRRORS each of their writes into the unified shape, in the SAME
- * transaction, so the new tables are continuously current before any read
- * switches to them. The invariant is exactly:
+ * `earn_vault_positions`) are still the authoritative WRITERS, and every read
+ * below serves from the unified tables. This module MIRRORS each legacy write
+ * into the unified shape, in the SAME transaction, so what the reads serve is
+ * never behind what was written. The invariant is exactly:
  *
  *     a unified row IS the projection of its legacy row
  *
@@ -411,4 +412,404 @@ export async function mintEarnPositionForProviderWallet(
       `Earn ledger could not open a custodial holding for program wallet ${providerWalletId}`
     );
   }
+}
+
+/**
+ * ── Reads ──────────────────────────────────────────────────────────────────
+ *
+ * Every Earn read serves from the unified tables. The wire contracts are
+ * unchanged: ids were preserved by the projection, so a movement is still found
+ * by the id a caller already holds, and both paging styles the two families
+ * published are kept as they were (offset+total for withdrawal history, keyset
+ * for vault deposits and holdings) rather than harmonised behind the callers'
+ * backs.
+ *
+ * Scoping is preserved statement-for-statement from the legacy queries, because
+ * these are the rules that decide who may see whose money. Where a rule was
+ * enforced in SQL it stays in SQL — moving one into a handler would make it
+ * skippable by the next caller.
+ */
+
+export interface EarnMovementCursor {
+  createdAt: string;
+  id: string;
+}
+
+export interface EarnMovementsRepository {
+  /**
+   * One movement by id, organization-scoped in the QUERY (BOLA): a caller who
+   * may not see a movement must not be able to tell it exists.
+   */
+  getMovementById(params: {
+    movementId: string;
+    organizationId: string;
+  }): Promise<EarnMovementRow | null>;
+  /** Vault replay lookup — ORG-scoped, matching 0059's anchor. */
+  findVaultMovementByRequestId(params: {
+    organizationId: string;
+    requestId: string;
+  }): Promise<EarnMovementRow | null>;
+  /** Custodial replay lookup — HOLDING-scoped, matching 0055's wallet anchor. */
+  findCustodialMovementByRequestId(params: {
+    organizationId: string;
+    providerWalletId: string;
+    requestId: string;
+  }): Promise<EarnMovementRow | null>;
+  /** Observation lookup — global index; callers assert the org after the fetch. */
+  findMovementByProviderReference(params: {
+    provider: string;
+    providerReference: string;
+  }): Promise<EarnMovementRow | null>;
+  /** One workspace's recorded vault DEPOSITS, newest first, as a keyset page. */
+  listVaultDeposits(params: {
+    organizationId: string;
+    environment: SdpEnvironment;
+    projectId: string;
+    custodyWalletIds: readonly string[];
+    limit: number;
+    before: EarnMovementCursor | null;
+    settled?: boolean;
+  }): Promise<{ rows: EarnMovementRow[]; hasMore: boolean }>;
+  /** One program's withdrawal history, offset-paged with a total. */
+  listCustodialMovements(params: {
+    organizationId: string;
+    providerWalletId: string;
+    limit: number;
+    offset: number;
+  }): Promise<{ rows: EarnMovementRow[]; total: number }>;
+  getPositionById(params: {
+    organizationId: string;
+    environment: SdpEnvironment;
+    positionId: string;
+  }): Promise<EarnPositionRow | null>;
+  /** Vault holdings with live movement evidence, newest first, as a keyset page. */
+  listVaultPositions(params: {
+    organizationId: string;
+    environment: SdpEnvironment;
+    custodyWalletIds: readonly string[];
+    limit: number;
+    before: EarnMovementCursor | null;
+  }): Promise<{ rows: EarnPositionRow[]; hasMore: boolean }>;
+  /** Global bounded outbox scan for the reconciliation worker. */
+  listUnsettledVaultMovements(limit: number): Promise<EarnMovementRow[]>;
+  /**
+   * Guarded CAS to `finalized` — irreversible chain settlement.
+   *
+   * The one transition written HERE and nowhere else, because `finalized` is the
+   * one status no legacy table can express. Everything before it still flows
+   * through the legacy writer and is mirrored, so this is not a second authority
+   * over a movement: it is the only authority over a fact the old shape had no
+   * word for. Returns null when the row was not in a finalizable state.
+   */
+  finalizeVaultMovement(input: {
+    movementId: string;
+    organizationId: string;
+    settledAt: string;
+  }): Promise<EarnMovementRow | null>;
+}
+
+/**
+ * The legal source states for a transition, read from the shared matrix rather
+ * than spelled again here — so the guard cannot drift from the vocabulary it is
+ * supposed to enforce.
+ */
+function allowedSourceStatuses(model: EarnExecutionModel, toStatus: string): readonly string[] {
+  const matrix: Record<string, readonly string[]> = EARN_MOVEMENT_TRANSITIONS[model];
+  const sources = matrix[toStatus];
+  if (!sources || sources.length === 0) {
+    throw new Error(`Illegal earn movement transition: ${model} -> ${toStatus}`);
+  }
+  return sources;
+}
+
+/**
+ * The statuses a CLIENT of the legacy wire sees as final.
+ *
+ * `confirmed` is in it, and that is deliberate for as long as the legacy
+ * vault-deposit DTO is served: that vocabulary has no `finalized`, so a client
+ * reads chain commitment as the end of the story, and `?settled=` must keep
+ * answering the question the client is actually asking. The ledger's own terminal
+ * set (`EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct`) is narrower, and becomes
+ * the filter when a caller reads the unified vocabulary directly.
+ */
+const WIRE_SETTLED_VAULT_STATUSES = ["confirmed", "finalized", "failed"] as const;
+
+function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
+  return {
+    id: row.id as string,
+    organization_id: row.organization_id as string,
+    project_id: row.project_id as string | null,
+    environment: row.environment as SdpEnvironment,
+    provider: row.provider as string,
+    execution_model: row.execution_model as EarnExecutionModel,
+    direction: row.direction as EarnMovementDirection,
+    position_id: row.position_id as string,
+    status: row.status as EarnMovementStatus,
+    failure_reason: row.failure_reason as string | null,
+    confirmed_at: row.confirmed_at as string | null,
+    settled_at: row.settled_at as string | null,
+    denomination: row.denomination as string,
+    amount_requested: row.amount_requested as string,
+    amount_settled: row.amount_settled as string | null,
+    fee_amount: row.fee_amount as string | null,
+    min_shares_out: row.min_shares_out as string | null,
+    shares_out: row.shares_out as string | null,
+    payout_token: row.payout_token as string | null,
+    custody_wallet_id: row.custody_wallet_id as string | null,
+    vault_address: row.vault_address as string | null,
+    source_address: row.source_address as string | null,
+    destination_address: row.destination_address as string | null,
+    provider_reference: row.provider_reference as string | null,
+    signature: row.signature as string | null,
+    signed_transaction: row.signed_transaction as string | null,
+    last_valid_block_height: row.last_valid_block_height as string | null,
+    request_id: row.request_id as string,
+    idempotency_fingerprint: row.idempotency_fingerprint as string,
+    provider_data: (row.provider_data ?? {}) as Record<string, unknown>,
+    created_by: row.created_by as string | null,
+    initiated_by_key_id: row.initiated_by_key_id as string | null,
+    created_at: row.created_at as string,
+    updated_at: row.updated_at as string,
+  };
+}
+
+export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsRepository {
+  return {
+    async getMovementById(params) {
+      const row = await db
+        .prepare(`SELECT * FROM earn_movements WHERE id = ? AND organization_id = ?`)
+        .bind(params.movementId, params.organizationId)
+        .first<Record<string, unknown>>();
+      return row ? mapMovementRow(row) : null;
+    },
+
+    async findVaultMovementByRequestId(params) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM earn_movements
+             WHERE organization_id = ?
+               AND request_id = ?
+               AND execution_model = 'vault_direct'`
+        )
+        .bind(params.organizationId, params.requestId)
+        .first<Record<string, unknown>>();
+      return row ? mapMovementRow(row) : null;
+    },
+
+    async findCustodialMovementByRequestId(params) {
+      // Anchored on the HOLDING, which is 1:1 with the program wallet, so sibling
+      // projects sharing that program resolve the same replay row — 0055's rule.
+      const row = await db
+        .prepare(
+          `SELECT movement.* FROM earn_movements movement
+             INNER JOIN earn_positions position
+               ON position.id = movement.position_id
+              AND position.kind = 'custodial'
+             WHERE movement.organization_id = ?
+               AND position.provider_wallet_id = ?
+               AND movement.request_id = ?
+               AND movement.execution_model = 'custodial'`
+        )
+        .bind(params.organizationId, params.providerWalletId, params.requestId)
+        .first<Record<string, unknown>>();
+      return row ? mapMovementRow(row) : null;
+    },
+
+    async findMovementByProviderReference(params) {
+      const row = await db
+        .prepare(`SELECT * FROM earn_movements WHERE provider = ? AND provider_reference = ?`)
+        .bind(params.provider, params.providerReference)
+        .first<Record<string, unknown>>();
+      return row ? mapMovementRow(row) : null;
+    },
+
+    async listVaultDeposits(params) {
+      if (params.custodyWalletIds.length === 0) {
+        throw new Error("listVaultDeposits requires at least one project-scoped custody wallet id");
+      }
+      const beforeClause = params.before ? "AND (created_at, id) < (?, ?)" : "";
+      const beforeValues = params.before ? [params.before.createdAt, params.before.id] : [];
+      const settledClause =
+        params.settled === undefined
+          ? ""
+          : params.settled
+            ? "AND status = ANY (?::text[])"
+            : "AND NOT (status = ANY (?::text[]))";
+      const settledValues = params.settled === undefined ? [] : [[...WIRE_SETTLED_VAULT_STATUSES]];
+      const result = await db
+        .prepare(
+          // An EXACT project match. `project_id` is nullable only through
+          // ON DELETE SET NULL, so a null means the project was deleted — and
+          // accepting it here would expose that project's deposits to every
+          // sibling project sharing an organization-level custody wallet.
+          `SELECT * FROM earn_movements
+             WHERE organization_id = ?
+               AND environment = ?
+               AND execution_model = 'vault_direct'
+               AND direction = 'deposit'
+               AND custody_wallet_id = ANY (?::text[])
+               AND project_id = ?
+               ${settledClause}
+               ${beforeClause}
+             ORDER BY created_at DESC, id DESC
+             LIMIT ?`
+        )
+        .bind(
+          params.organizationId,
+          params.environment,
+          params.custodyWalletIds,
+          params.projectId,
+          ...settledValues,
+          ...beforeValues,
+          params.limit + 1
+        )
+        .all<Record<string, unknown>>();
+      const rows = (result.results ?? []).map(mapMovementRow);
+      return { rows: rows.slice(0, params.limit), hasMore: rows.length > params.limit };
+    },
+
+    async listCustodialMovements(params) {
+      // Program-scoped, not (org, project): every project in the environment
+      // reaches the same programs, and since PRO-1670 an organization may hold
+      // several — so the program is what joins sibling projects' history while
+      // keeping a sibling PROGRAM's payouts out. One program = one history.
+      const conditions = [
+        "movement.organization_id = ?",
+        "position.provider_wallet_id = ?",
+        "movement.execution_model = 'custodial'",
+      ];
+      const bindings: unknown[] = [params.organizationId, params.providerWalletId];
+      const where = conditions.join(" AND ");
+      const from = `FROM earn_movements movement
+             INNER JOIN earn_positions position
+               ON position.id = movement.position_id
+              AND position.kind = 'custodial'`;
+
+      const [page, countRow] = await Promise.all([
+        db
+          .prepare(
+            `SELECT movement.* ${from}
+               WHERE ${where}
+               ORDER BY movement.created_at DESC, movement.id DESC
+               LIMIT ? OFFSET ?`
+          )
+          .bind(...bindings, params.limit, params.offset)
+          .all<Record<string, unknown>>(),
+        db
+          .prepare(`SELECT COUNT(*)::int AS total ${from} WHERE ${where}`)
+          .bind(...bindings)
+          .first<{ total: number }>(),
+      ]);
+
+      return {
+        rows: (page.results ?? []).map(mapMovementRow),
+        total: countRow?.total ?? 0,
+      };
+    },
+
+    async getPositionById(params) {
+      return db
+        .prepare(
+          `SELECT * FROM earn_positions
+             WHERE id = ? AND organization_id = ? AND environment = ?`
+        )
+        .bind(params.positionId, params.organizationId, params.environment)
+        .first<EarnPositionRow>();
+    },
+
+    async listVaultPositions(params) {
+      if (params.custodyWalletIds.length === 0) {
+        throw new Error(
+          "listVaultPositions requires at least one project-scoped custody wallet id"
+        );
+      }
+      const beforeClause = params.before ? "AND (created_at, id) < (?, ?)" : "";
+      const beforeValues = params.before ? [params.before.createdAt, params.before.id] : [];
+      const result = await db
+        .prepare(
+          `SELECT * FROM earn_positions
+             WHERE organization_id = ?
+               AND environment = ?
+               AND kind = 'vault_direct'
+               AND activated_at IS NOT NULL
+               AND (
+                 closed_at IS NULL
+                 OR EXISTS (
+                   SELECT 1
+                   FROM earn_movements reentry
+                   WHERE reentry.position_id = earn_positions.id
+                     AND reentry.direction = 'deposit'
+                     AND reentry.status IN ('requested', 'submitted')
+                 )
+               )
+               AND custody_wallet_id = ANY (?::text[])
+               AND EXISTS (
+                 SELECT 1
+                 FROM earn_movements movement
+                 WHERE movement.position_id = earn_positions.id
+                   AND movement.status IN ('requested', 'submitted', 'confirmed', 'finalized')
+               )
+               ${beforeClause}
+             ORDER BY created_at DESC, id DESC
+             LIMIT ?`
+        )
+        .bind(
+          params.organizationId,
+          params.environment,
+          params.custodyWalletIds,
+          ...beforeValues,
+          params.limit + 1
+        )
+        .all<EarnPositionRow>();
+      const rows = result.results ?? [];
+      return { rows: rows.slice(0, params.limit), hasMore: rows.length > params.limit };
+    },
+
+    async listUnsettledVaultMovements(limit) {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 256) {
+        throw new Error("listUnsettledVaultMovements limit must be an integer from 1 to 256");
+      }
+      // `confirmed` is IN the queue: the sweep's job no longer ends at chain
+      // commitment now that finalization is the terminal state. `requested` is in
+      // it because a broadcast timeout or crash leaves a row unsubmitted WITH a
+      // signature, which is precisely the ambiguous case reconciliation is for.
+      const result = await db
+        .prepare(
+          `SELECT * FROM earn_movements
+             WHERE execution_model = 'vault_direct'
+               AND status IN ('requested', 'submitted', 'confirmed')
+             ORDER BY created_at ASC, id ASC
+             LIMIT ?`
+        )
+        .bind(limit)
+        .all<Record<string, unknown>>();
+      return (result.results ?? []).map(mapMovementRow);
+    },
+
+    async finalizeVaultMovement(input) {
+      const sources = allowedSourceStatuses("vault_direct", "finalized");
+      const guards = sources.map(() => "?").join(", ");
+      const row = await db
+        .prepare(
+          // `confirmed_at` is COALESCEd rather than assumed: a sweep whose FIRST
+          // observation is already finalized never saw a separate commitment, and
+          // 0062's confirmation biconditional requires the column to be set for
+          // any finalized row. Stamping the moment we learned of it is the honest
+          // reading — and leaving it null would fail the write outright.
+          `UPDATE earn_movements
+              SET status = 'finalized',
+                  settled_at = ?,
+                  confirmed_at = COALESCE(confirmed_at, ?),
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND execution_model = 'vault_direct'
+              AND status IN (${guards})
+            RETURNING *`
+        )
+        .bind(input.settledAt, input.settledAt, input.movementId, input.organizationId, ...sources)
+        .first<Record<string, unknown>>();
+      return row ? mapMovementRow(row) : null;
+    },
+  };
 }
