@@ -27,6 +27,7 @@ import {
 } from "@/db/repositories/sponsorship-budget.repository";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
+import { DETERMINISTIC_REJECTION_CODES } from "@/services/payments/submission-outcome";
 import type { Env } from "@/types/env";
 import type { SponsorshipScope } from "./sponsorship.service";
 
@@ -262,7 +263,8 @@ export class BudgetedFeePayment implements FeePaymentPort {
         resolveNetwork(this.env),
         "Submitted sponsorship outcome could not be persisted",
         "Submitted sponsorship persistence failed",
-        error
+        error,
+        { signature, reservationId: reservation.id }
       );
     }
     if (result === "duplicate_signature") {
@@ -276,7 +278,9 @@ export class BudgetedFeePayment implements FeePaymentPort {
       return this.accountingUnavailable(
         resolveNetwork(this.env),
         "Submitted sponsorship outcome could not be persisted",
-        "Submitted sponsorship outcome lost its durable state transition"
+        "Submitted sponsorship outcome lost its durable state transition",
+        undefined,
+        { signature, reservationId: reservation.id }
       );
     }
     return signature;
@@ -697,7 +701,11 @@ export class BudgetedFeePayment implements FeePaymentPort {
     network: SponsorshipNetwork,
     message: string,
     breakerReason: string,
-    error?: unknown
+    error?: unknown,
+    // On post-broadcast paths, carry the one fact that makes the forced manual
+    // reconciliation trivial: the broadcast signature (a public on-chain
+    // identifier — redaction-safe) and the reservation it belongs to.
+    submission?: { signature: string; reservationId: string }
   ): Promise<never> {
     logEvent("error", {
       event: "sdp_api_sponsorship_accounting_unavailable",
@@ -705,6 +713,9 @@ export class BudgetedFeePayment implements FeePaymentPort {
       reason: breakerReason,
       organization_id: this.scope.organizationId,
       project_id: this.scope.projectId,
+      ...(submission === undefined
+        ? {}
+        : { signature: submission.signature, reservation_id: submission.reservationId }),
       ...(error === undefined ? {} : describeError(error)),
     });
     try {
@@ -799,12 +810,13 @@ export class BudgetedFeePayment implements FeePaymentPort {
 }
 
 function isDeterministicProviderRejection(error: unknown): boolean {
-  return (
-    error instanceof FeePaymentError &&
-    ["SIGNING_FAILED", "TRANSACTION_TOO_LARGE", "INSUFFICIENT_BALANCE", "RATE_LIMITED"].includes(
-      error.code
-    )
-  );
+  if (error instanceof FeePaymentError && error.maybeBroadcast) {
+    // An earlier attempt may have broadcast; the rejection can be CAUSED by
+    // that hidden broadcast (spent funds -> INSUFFICIENT_BALANCE), so it must
+    // not release the budget as "definitely not sent".
+    return false;
+  }
+  return error instanceof FeePaymentError && DETERMINISTIC_REJECTION_CODES.has(error.code);
 }
 
 function reservationHasResponse(

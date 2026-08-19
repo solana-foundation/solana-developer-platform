@@ -274,6 +274,11 @@ describe("BudgetedFeePayment", () => {
         network: "devnet",
         organization_id: "org_1",
         error_name: "Error",
+        // The broadcast already happened: the log must carry the signature and
+        // reservation so the forced manual reconciliation is a lookup, not an
+        // address-history search.
+        signature: expect.any(String),
+        reservation_id: expect.any(String),
       })
     );
     expect(logEvent).toHaveBeenCalledWith(
@@ -333,6 +338,23 @@ describe("BudgetedFeePayment", () => {
       1,
       "request timed out"
     );
+    expect(repository.markReleased).not.toHaveBeenCalled();
+    expect(budgetRedis.cancel).not.toHaveBeenCalled();
+  });
+
+  it("treats a deterministic-looking rejection as ambiguous when it may have broadcast", async () => {
+    // After a lost response the retry's INSUFFICIENT_BALANCE can be CAUSED by
+    // the hidden broadcast — the budget must stay charged_unknown, not release.
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    vi.mocked(provider.signAndSend).mockRejectedValueOnce(
+      new FeePaymentError("insufficient balance for fee", "INSUFFICIENT_BALANCE", undefined, {
+        maybeBroadcast: true,
+      })
+    );
+    await expect(feePayment.signAndSend(buildTransaction())).rejects.toThrow(
+      "insufficient balance"
+    );
+    expect(repository.markChargedUnknown).toHaveBeenCalledOnce();
     expect(repository.markReleased).not.toHaveBeenCalled();
     expect(budgetRedis.cancel).not.toHaveBeenCalled();
   });
