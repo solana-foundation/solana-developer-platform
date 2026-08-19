@@ -15,10 +15,10 @@ import {
 import { SPL_TOKEN_PROGRAMS, type TokenResponse } from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
 import type { Context } from "hono";
-import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
@@ -31,7 +31,7 @@ import {
   getTenantTokenService,
   requireProjectScope,
 } from "../helpers";
-import { confirmDeploySchema, deployTokenSchema } from "../schemas";
+import type { confirmDeploySchema, deployTokenSchema } from "../schemas";
 import { getMosaicAclMode, shouldEnableOnChainAcl } from "./access-control";
 import { getInitialPermanentDelegateAuthority } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
@@ -248,17 +248,10 @@ async function completeDeployFailureBeforeEffect(
   });
 }
 
-export const deployToken = async (c: AppContext) => {
+export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
-  const body = await c.req.json().catch(() => ({}));
-  const parsed = deployTokenSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const tokenService = getTenantTokenService(c);
   let token = await tokenService.getToken({
@@ -283,7 +276,7 @@ export const deployToken = async (c: AppContext) => {
     throw badRequest("Token already has a mint address");
   }
 
-  const { feePayment } = parsed.data;
+  const { feePayment } = body;
 
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
     tokenId,
@@ -367,7 +360,7 @@ export const deployToken = async (c: AppContext) => {
     // `deploying`, uneditable and un-redeployable.
     const signingWalletId = resolveApiKeySigningWalletId(
       auth,
-      parsed.data.signingWalletId ?? token.signingWalletId,
+      body.signingWalletId ?? token.signingWalletId,
       ["tokens:write"]
     );
 
@@ -519,17 +512,10 @@ export const deployToken = async (c: AppContext) => {
   }
 };
 
-export const prepareDeploy = async (c: AppContext) => {
+export const prepareDeploy = async (c: ValidatedBodyContext<typeof deployTokenSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
-  const body = await c.req.json().catch(() => ({}));
-  const parsed = deployTokenSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
@@ -555,7 +541,7 @@ export const prepareDeploy = async (c: AppContext) => {
 
   const signingWalletId = resolveApiKeySigningWalletId(
     auth,
-    parsed.data.signingWalletId ?? token.signingWalletId,
+    body.signingWalletId ?? token.signingWalletId,
     ["tokens:write"]
   );
 
@@ -691,17 +677,10 @@ const findMintInitialization = (
  * the request) so a caller can't record a mint under authorities it doesn't
  * control.
  */
-export const confirmDeploy = async (c: AppContext) => {
+export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploySchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
-  const body = await c.req.json().catch(() => ({}));
-  const parsed = confirmDeploySchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
@@ -729,13 +708,13 @@ export const confirmDeploy = async (c: AppContext) => {
     throw badRequest("Token already has a mint address");
   }
 
-  const mint = parsed.data.mint as Address;
+  const mint = body.mint as Address;
 
   // Verify the deploy actually landed before recording it: any tokens:write
   // caller could otherwise pin an arbitrary mint to this token and poison the
   // public metadata.json. The create tx must be confirmed (no error, past the
   // `processed`-only stage) and the mint account must now exist on-chain.
-  const signature = parsed.data.signature as Signature;
+  const signature = body.signature as Signature;
   const rpc = createRpc(c.env);
   const [status] = await getSignatureStatuses(rpc, [signature]);
 
@@ -845,7 +824,7 @@ export const confirmDeploy = async (c: AppContext) => {
       custodyAddress,
       freezeAuthority,
       listAddress,
-      signature: parsed.data.signature,
+      signature: body.signature,
       slot: status.slot,
       deployedToken,
     });
@@ -877,17 +856,9 @@ export const confirmDeploy = async (c: AppContext) => {
  * The update authority is the same signing wallet used for the create tx, so no
  * server key is involved.
  */
-export const prepareDeployMetadata = async (c: AppContext) => {
+export const prepareDeployMetadata = async (c: ValidatedBodyContext<typeof deployTokenSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
-  const body = await c.req.json().catch(() => ({}));
-  const parsed = deployTokenSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
-    });
-  }
 
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({

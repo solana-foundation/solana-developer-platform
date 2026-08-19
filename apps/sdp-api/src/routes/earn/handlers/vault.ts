@@ -31,6 +31,7 @@ import { success } from "@/lib/response";
 import { isDryRunRequest } from "@/middleware/dry-run";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import {
   assertApiKeyWalletAccess,
@@ -57,7 +58,7 @@ import type { AppContext } from "../context";
 import { earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
 import {
   earnVaultDepositParamsSchema,
-  earnVaultDepositSchema,
+  type earnVaultDepositSchema,
   earnVaultDepositsQuerySchema,
   earnVaultPositionsQuerySchema,
 } from "../schemas";
@@ -75,7 +76,9 @@ import { parseParams, parseQuery } from "./shared";
  * endpoint that meant both would have to explain which half happened when the
  * chain rejected the transfer.
  */
-export async function createEarnVaultDeposit(c: AppContext) {
+export async function createEarnVaultDeposit(
+  c: ValidatedBodyContext<typeof earnVaultDepositSchema>
+) {
   const { body: parsedData, resolved } = getPolicyGateContext<
     EarnVaultDepositBody,
     EarnVaultDepositResolved
@@ -175,18 +178,13 @@ interface EarnVaultDepositResolved {
  * have touched custody.
  */
 export async function extractEarnVaultDepositPolicyCandidate(
-  c: AppContext
+  c: ValidatedBodyContext<typeof earnVaultDepositSchema>
 ): Promise<PolicyGateExtraction> {
-  const body = await c.req.json().catch(() => null);
-  if (body && typeof body === "object" && Object.hasOwn(body, "requestId")) {
-    throw badRequest(`Use the ${IDEMPOTENCY_KEY_HEADER} header; body requestId is not accepted`);
-  }
-  const parsed = earnVaultDepositSchema.safeParse(body);
-  if (!parsed.success) {
-    throw badRequest("Invalid vault deposit request", {
-      fieldErrors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  // The raw body (cached by `validateBody`'s read) is carried verbatim into
+  // the policy envelope's rawPayload; the retired body `requestId` is rejected
+  // by the schema itself, so it can never reach here.
+  const rawBody: Record<string, unknown> = await c.req.json();
+  const body = c.req.valid("json");
 
   const requestId = c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null;
   if (requestId === null && !isDryRunRequest(c)) {
@@ -232,7 +230,7 @@ export async function extractEarnVaultDepositPolicyCandidate(
   // path), and whoever lifts that gate must not silently also ship
   // unprotected deposits. This check is what makes the floor a prerequisite of
   // that change rather than something to remember.
-  if (environment === "production" && parsed.data.minSharesOut === undefined) {
+  if (environment === "production" && body.minSharesOut === undefined) {
     throw badRequest(
       "minSharesOut is required for a production vault deposit: without a floor the pinned " +
         "Kamino SDK builds the legacy deposit instruction, which accepts any number of shares."
@@ -242,7 +240,7 @@ export async function extractEarnVaultDepositPolicyCandidate(
   // Resolve the strategy first: the caller names a catalogue row, never a raw
   // vault address. That keeps the deposit target inside what SDP catalogues and
   // means the admission gates the sync applied still bound this path.
-  const strategy = await getEarnRepository(c).getStrategyById(parsed.data.strategyId);
+  const strategy = await getEarnRepository(c).getStrategyById(body.strategyId);
   if (!strategy || strategy.environment !== environment) {
     throw notFound("Earn strategy");
   }
@@ -307,7 +305,7 @@ export async function extractEarnVaultDepositPolicyCandidate(
   // Resolve only the exposed custody row id. Provider wallet ids are unique
   // only within one custody configuration, and public keys may also repeat, so
   // neither is a safe identifier for this money-in route.
-  const wallet = resolveEarnVaultCustodyWallet(wallets, parsed.data.custodyWalletId);
+  const wallet = resolveEarnVaultCustodyWallet(wallets, body.custodyWalletId);
   assertBoundWalletIdentifierIsUnique(auth, wallets, wallet);
   assertApiKeyWalletAccess(auth, wallet.walletId, ["earn:write"]);
 
@@ -326,8 +324,8 @@ export async function extractEarnVaultDepositPolicyCandidate(
       provider,
       providerReference: strategy.provider_reference,
       custodyWalletId: wallet.id,
-      amount: parsed.data.amount,
-      minSharesOut: parsed.data.minSharesOut ?? null,
+      amount: body.amount,
+      minSharesOut: body.minSharesOut ?? null,
     }),
   };
 
@@ -351,7 +349,7 @@ export async function extractEarnVaultDepositPolicyCandidate(
       // The DEPOSIT token, from the catalogue row. Named so an asset-scoped
       // rule ("never move USDT") can see what is actually moving.
       asset: tokenMint,
-      amount: parsed.data.amount,
+      amount: body.amount,
       // The vault account, which is emphatically NOT a payable address —
       // funds sent to it directly are destroyed. It is carried because a
       // destination-scoped rule still needs to name the thing being deposited
@@ -364,15 +362,15 @@ export async function extractEarnVaultDepositPolicyCandidate(
         hostCluster: strategy.host_cluster,
         environment,
         depositStyle: "vault_direct",
-        minSharesOut: parsed.data.minSharesOut ?? null,
+        minSharesOut: body.minSharesOut ?? null,
       },
       providerExtensions: {},
     },
     legs: [],
-    body: parsed.data,
+    body,
     resolved,
     rawPayload: {
-      ...(body as Record<string, unknown>),
+      ...rawBody,
       idempotencyFingerprint: resolved.idempotencyFingerprint,
     },
     idempotencyKey: requestId,

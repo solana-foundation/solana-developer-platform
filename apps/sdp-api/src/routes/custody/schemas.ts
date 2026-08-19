@@ -28,23 +28,23 @@ const custodyProviderSchema = z.enum(CUSTODY_PROVIDERS);
 // Initialize Signing
 // ═══════════════════════════════════════════════════════════════════════════
 
-export const initializeLocalSchema = z.object({
+export const initializeLocalSchema = z.strictObject({
   provider: z.literal("local"),
   walletLabel: z.string().max(100).optional(),
 });
 
-export const initializeFireblocksSchema = z.object({
+export const initializeFireblocksSchema = z.strictObject({
   provider: z.literal("fireblocks"),
   walletLabel: z.string().max(100).optional(),
 });
 
-export const initializePrivySchema = z.object({
+export const initializePrivySchema = z.strictObject({
   provider: z.literal("privy"),
   requestDelayMs: z.number().int().min(0).max(3000).optional(),
   walletLabel: z.string().max(100).optional(),
 });
 
-export const initializeCoinbaseCdpSchema = z.object({
+export const initializeCoinbaseCdpSchema = z.strictObject({
   provider: z.literal("coinbase_cdp"),
   network: z.enum(["solana", "solana-devnet"]).optional(),
   accountPolicy: z
@@ -54,31 +54,31 @@ export const initializeCoinbaseCdpSchema = z.object({
   walletLabel: z.string().max(100).optional(),
 });
 
-export const initializeParaSchema = z.object({
+export const initializeParaSchema = z.strictObject({
   provider: z.literal("para"),
   requestDelayMs: z.number().int().min(0).max(3000).optional(),
   walletLabel: z.string().max(100).optional(),
 });
 
-export const initializeTurnkeySchema = z.object({
+export const initializeTurnkeySchema = z.strictObject({
   provider: z.literal("turnkey"),
   requestDelayMs: z.number().int().min(0).max(3000).optional(),
   walletLabel: z.string().max(100).optional(),
 });
 
-export const initializeDfnsSchema = z.object({
+export const initializeDfnsSchema = z.strictObject({
   provider: z.literal("dfns"),
   network: z.enum(["Solana", "SolanaDevnet"]).optional(),
   walletLabel: z.string().max(100).optional(),
 });
 
-export const initializeIbmHavenSchema = z.object({
+export const initializeIbmHavenSchema = z.strictObject({
   provider: z.literal("ibm_haven"),
   network: z.enum(["Solana", "SolanaDevnet"]).optional(),
   walletLabel: z.string().max(100).optional(),
 });
 
-export const initializeAnchorageSchema = z.object({
+export const initializeAnchorageSchema = z.strictObject({
   provider: z.literal("anchorage"),
   walletLabel: z.string().max(100).optional(),
   network: z.enum(["solana", "solana-devnet"]).optional(),
@@ -86,7 +86,7 @@ export const initializeAnchorageSchema = z.object({
 
 // Utila is platform-managed (single configured vault); connecting only needs an
 // optional label for the first wallet, like the other hosted providers.
-export const initializeUtilaSchema = z.object({
+export const initializeUtilaSchema = z.strictObject({
   provider: z.literal("utila"),
   walletLabel: z.string().max(100).optional(),
 });

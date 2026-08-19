@@ -8,13 +8,15 @@
 
 import { Hono } from "hono";
 import { clerkOnboardingMiddleware } from "@/middleware/clerk-onboarding";
+import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import { completeOnboarding, getOnboardingStatus } from "./handlers";
+import { completeOnboardingSchema } from "./schemas";
 
 const onboarding = new Hono<{ Bindings: Env }>();
 
 onboarding.use("*", clerkOnboardingMiddleware());
 onboarding.get("/status", getOnboardingStatus);
-onboarding.post("/complete", completeOnboarding);
+onboarding.post("/complete", validateBody(completeOnboardingSchema), completeOnboarding);
 
 export default onboarding;

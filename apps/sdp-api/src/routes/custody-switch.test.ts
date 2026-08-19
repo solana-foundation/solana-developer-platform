@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import * as custodyProvisioning from "@/services/custody/provisioning";
-import { parseConfigRecord } from "@/services/domain/signing/provider-config";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -219,7 +218,7 @@ describe("Custody switch rollback", () => {
     expect(scopeDefault?.default_custody_config_id).toBe(TEST_CONFIG_ID);
   });
 
-  it("ignores client endpoints and does not persist them when switching providers", async () => {
+  it("rejects client endpoints outright when switching providers", async () => {
     provisionParaWalletMock.mockResolvedValue({
       walletId: "wal_para_trusted",
       address: "11111111111111111111111111111111",
@@ -243,23 +242,14 @@ describe("Custody switch rollback", () => {
       env
     );
 
-    expect(res.status).toBe(201);
-    expect(provisionParaWalletMock).toHaveBeenCalledWith(
-      env,
-      expect.not.objectContaining({ apiBaseUrl: expect.anything() })
-    );
+    expect(res.status).toBe(400);
+    expect(provisionParaWalletMock).not.toHaveBeenCalled();
 
     const record = await new CustodyConfigStore(getDb(env), env).findByProvider(
       TEST_ORG.id,
       TEST_PROJECT.id,
       "para"
     );
-    expect(record).not.toBeNull();
-    if (!record) {
-      throw new Error("Expected the Para config to be persisted");
-    }
-
-    const parsed = await parseConfigRecord(env, TEST_ORG.id, record);
-    expect(parsed).not.toHaveProperty("apiBaseUrl");
+    expect(record).toBeNull();
   });
 });

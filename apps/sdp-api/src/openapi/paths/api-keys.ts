@@ -66,7 +66,7 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
         description: "API key created",
         content: jsonContent(apiKeyCreateResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
     },
   });
 

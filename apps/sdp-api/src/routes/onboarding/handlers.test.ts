@@ -3,10 +3,12 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
+import { validateBody } from "@/middleware/validate";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 import { completeOnboarding, getOnboardingStatus } from "./handlers";
+import { completeOnboardingSchema } from "./schemas";
 
 const ORGANIZATION_ID = "org_onboarding_test";
 const CLERK_ORGANIZATION_ID = "org_clerk_onboarding_test";
@@ -40,7 +42,7 @@ function createApp() {
     await next();
   });
   app.get("/status", getOnboardingStatus);
-  app.post("/complete", completeOnboarding);
+  app.post("/complete", validateBody(completeOnboardingSchema), completeOnboarding);
   return app;
 }
 
