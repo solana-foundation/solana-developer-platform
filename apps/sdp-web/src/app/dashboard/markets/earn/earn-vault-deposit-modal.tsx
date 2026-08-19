@@ -107,6 +107,15 @@ type DepositOutcome =
       amount: string;
       deposit: EarnVaultDeposit;
       walletName: string;
+      /**
+       * The approval executor won the race: it executed this exact intent
+       * between the held-key pre-flight and this POST, so the server absorbed
+       * the submission as a replay of the approval's movement. Real money DID
+       * move — once, via the approval — but THIS submission moved nothing, and
+       * saying "deposit submitted" would leave the customer believing two
+       * deposits happened, or none.
+       */
+      absorbedByApproval?: true;
     };
 
 type DepositSubmissionResolution =
@@ -117,7 +126,8 @@ function resolveDepositSubmission(
   result: Awaited<ReturnType<typeof createEarnVaultDeposit>>,
   amount: string,
   walletName: string,
-  fallbackError: string
+  fallbackError: string,
+  keyWasHeld: boolean
 ): DepositSubmissionResolution {
   if (!result.ok) {
     return { kind: "error", message: result.error || fallbackError };
@@ -140,6 +150,22 @@ function resolveDepositSubmission(
   const deposit = result.data.deposit;
   if (deposit.status === "failed") {
     return { kind: "error", message: deposit.failureReason || fallbackError };
+  }
+  // A replay of a HELD key can only be the approval's own execution: the key is
+  // client-minted, so the executor replaying the original Idempotency-Key is
+  // the sole other writer under it. The pre-flight said "absent", the answer
+  // says "already recorded" — the approval landed in between, and no client
+  // read could have closed that window. Announce what actually happened rather
+  // than crediting this submission; the caller still refreshes and watches the
+  // movement, because it is real and may still be settling. Deliberately NOT
+  // retried with a fresh key: auto-resubmitting money after a race is the
+  // double-deposit hazard, so making a second deposit stays a human decision.
+  if (deposit.replayed && keyWasHeld) {
+    return {
+      kind: "outcome",
+      outcome: { kind: "deposit", amount, deposit, walletName, absorbedByApproval: true },
+      deposited: deposit,
+    };
   }
   return {
     kind: "outcome",
@@ -208,7 +234,18 @@ function applyVaultDepositIdempotencyKeyOutcome(
  * `unavailable` is the honest third answer, not a defensive extra. See below.
  */
 type VaultDepositKeyResolution =
-  | { kind: "key"; key: string }
+  | {
+      kind: "key";
+      key: string;
+      /**
+       * True only when this is a HELD key being knowingly reused. The caller
+       * needs it to interpret the response: the pre-flight and the POST are two
+       * operations, so the approval can execute BETWEEN them, and no further
+       * read can close that race — only the answer can. See
+       * `resolveDepositSubmission`.
+       */
+      wasHeld: boolean;
+    }
   | { kind: "aborted" }
   | { kind: "unavailable" };
 
@@ -239,17 +276,19 @@ async function resolveVaultDepositIdempotencyKey(
   signal: AbortSignal
 ): Promise<VaultDepositKeyResolution> {
   const key = claimVaultDepositIdempotencyKey(fingerprint);
-  if (!isVaultDepositIdempotencyKeyHeld(fingerprint)) return { kind: "key", key };
+  if (!isVaultDepositIdempotencyKeyHeld(fingerprint)) return { kind: "key", key, wasHeld: false };
 
   const recorded = await fetchEarnVaultDepositByRequestId(key);
   if (signal.aborted) return { kind: "aborted" };
   if (recorded.kind === "unavailable") return { kind: "unavailable" };
   // Absent: the hold may still be pending, so the key STAYS — that is what stops
-  // a resubmit opening a second approval request.
-  if (recorded.kind === "absent") return { kind: "key", key };
+  // a resubmit opening a second approval request. `wasHeld` travels with it,
+  // because "absent" was true at CHECK time only; the approval can execute
+  // before the POST lands, and the response is the only place that shows.
+  if (recorded.kind === "absent") return { kind: "key", key, wasHeld: true };
 
   releaseVaultDepositIdempotencyKey(fingerprint);
-  return { kind: "key", key: claimVaultDepositIdempotencyKey(fingerprint) };
+  return { kind: "key", key: claimVaultDepositIdempotencyKey(fingerprint), wasHeld: false };
 }
 
 type Translation = ReturnType<typeof useTranslations>;
@@ -442,8 +481,15 @@ function DepositResult({
   }
 
   const { deposit } = outcome;
-  const copy =
-    deposit.status === "confirmed"
+  // The absorbed case overrides the status copy: whatever state the movement is
+  // in, the headline is that THIS submission moved nothing.
+  const copy = outcome.absorbedByApproval
+    ? {
+        title: t("DashboardEarn.deposit.vaultAbsorbedTitle"),
+        body: t("DashboardEarn.deposit.vaultAbsorbedBody"),
+        note: t("DashboardEarn.deposit.vaultAbsorbedNote"),
+      }
+    : deposit.status === "confirmed"
       ? {
           title: t("DashboardEarn.deposit.vaultConfirmedTitle"),
           body: t("DashboardEarn.deposit.vaultConfirmedBody"),
@@ -674,7 +720,8 @@ export function EarnVaultDepositModal({
         result,
         amount,
         walletDisplayName(selectedWallet, t("DashboardEarn.deposit.walletUnnamed")),
-        t("DashboardEarn.deposit.vaultSubmitError")
+        t("DashboardEarn.deposit.vaultSubmitError"),
+        resolvedKey.wasHeld
       );
       if (resolution.kind === "error") {
         setSubmitError(resolution.message);

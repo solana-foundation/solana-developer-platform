@@ -74,6 +74,11 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
   "DashboardEarn.deposit.vaultApprovalBody":
     "This deposit has not moved funds. It will execute only after wallet-policy approval.",
   "DashboardEarn.deposit.vaultApprovalRequest": "Approval request",
+  "DashboardEarn.deposit.vaultAbsorbedTitle": "Deposit already completed by your approval",
+  "DashboardEarn.deposit.vaultAbsorbedBody":
+    "Your earlier approval for this exact deposit executed just before this submission, so the request was absorbed as a retry of it. Funds moved once, through the approval — this submission moved nothing additional.",
+  "DashboardEarn.deposit.vaultAbsorbedNote":
+    "The details below are the approved deposit. If you intended a second deposit of the same amount, submit again.",
   "DashboardEarn.deposit.vaultHeldKeyUnavailable":
     "SDP could not check whether your earlier approved deposit already went through, so nothing was submitted. Try again in a moment.",
 }));
@@ -426,6 +431,82 @@ describe("EarnVaultDepositModal", () => {
     expect(claimVaultDepositIdempotencyKey(fingerprint)).toBe(
       mocks.createEarnVaultDeposit.mock.calls[0][1]
     );
+  });
+
+  it("announces the approval's win when it races the held-key check, instead of claiming this submission deposited", async () => {
+    // TOCTOU: the pre-flight and the POST are two operations. The approval can
+    // execute BETWEEN them — the lookup honestly says "absent", then the POST
+    // finds the approval's movement under the key and answers replayed:true.
+    // No client read can close that window; only the response can, and it must
+    // be announced as the approval's execution — not as this submission
+    // succeeding, and never as an auto-retry with a fresh key.
+    mocks.createEarnVaultDeposit.mockResolvedValue({
+      ok: true,
+      status: 202,
+      data: { kind: "approval_pending", message: "Approval required" },
+    });
+    const held = render(
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />
+    );
+    await enterDepositAmount();
+    await screen.findByText("Approval required");
+    held.unmount();
+
+    // Check time: not yet executed. POST time: the approval just landed.
+    mocks.fetchEarnVaultDepositByRequestId.mockResolvedValue({ kind: "absent" });
+    mocks.createEarnVaultDeposit.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { kind: "submitted", deposit: { ...vaultDeposit("submitted"), replayed: true } },
+    });
+    const onDeposited = vi.fn();
+    render(
+      <EarnVaultDepositModal
+        projectId={PROJECT_ID}
+        strategy={strategy}
+        onClose={vi.fn()}
+        onDeposited={onDeposited}
+      />
+    );
+    await enterDepositAmount();
+
+    // The truthful headline, not the success screen.
+    expect(await screen.findByText("Deposit already completed by your approval")).toBeTruthy();
+    expect(screen.queryByText("Deposit submitted")).toBeNull();
+    // The SAME held key was knowingly reused — no fresh key, no second approval.
+    expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).toBe(
+      mocks.createEarnVaultDeposit.mock.calls[0][1]
+    );
+    // The movement is real and may still be settling: refresh and watch it.
+    expect(onDeposited).toHaveBeenCalledWith(
+      expect.objectContaining({ movementId: "movement_1", replayed: true })
+    );
+    // Recorded deposit retires the key, so a deliberate second deposit mints
+    // fresh and genuinely moves money.
+    const fingerprint = vaultDepositRequestFingerprint({
+      projectId: PROJECT_ID,
+      strategyId: strategy.id,
+      custodyWalletId: "wallet_1",
+      amount: "1",
+    });
+    expect(claimVaultDepositIdempotencyKey(fingerprint)).not.toBe(
+      mocks.createEarnVaultDeposit.mock.calls[1][1]
+    );
+  });
+
+  it("keeps the plain success screen for an ordinary same-session retry replay", async () => {
+    // replayed:true WITHOUT a held key is the classic own-retry case — the
+    // absorbed copy must not fire there.
+    mocks.createEarnVaultDeposit.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { kind: "submitted", deposit: { ...vaultDeposit("submitted"), replayed: true } },
+    });
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
+    await enterDepositAmount();
+
+    expect(await screen.findByText("Deposit submitted")).toBeTruthy();
+    expect(screen.queryByText("Deposit already completed by your approval")).toBeNull();
   });
 
   it("retires a held key once its approval has actually executed", async () => {

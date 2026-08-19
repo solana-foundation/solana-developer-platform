@@ -174,7 +174,17 @@ the body `requestId` form.
     REFUSES the submit rather than picking a key, because both guesses are wrong
     in a different direction: reusing a possibly-spent key moves no money when
     the customer asked it to, and minting a fresh one opens a second approval
-    request. Same rule as an unavailable balance, which must never read as zero. A REJECTED approval
+    request. Same rule as an unavailable balance, which must never read as zero.
+  - The pre-flight and the POST are two operations, so the approval can execute
+    BETWEEN them — a TOCTOU no further client read can close. Detection lives on
+    the RESPONSE instead: the key is client-minted and the approval executor
+    replaying it is the only other writer, so `replayed: true` on a key that was
+    HELD at check time is necessarily the approval's execution.
+    `resolveDepositSubmission` marks that outcome `absorbedByApproval` and the
+    modal announces "your approval completed this; this submission moved
+    nothing" — never the plain success screen, and never an auto-retry with a
+    fresh key, because auto-resubmitting money after a race IS the
+    double-deposit hazard. A second deposit stays a human decision. A REJECTED approval
     produces no movement, so its key survives until the next submit reuses it
     and the API answers 403 "denied by policy" — visible, and a 4xx retires the
     key, so the attempt after that mints a fresh one.
