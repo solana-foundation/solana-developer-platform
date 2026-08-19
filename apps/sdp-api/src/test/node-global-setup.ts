@@ -64,10 +64,9 @@ function handleSignal(): void {
 
 /**
  * Clones the migrated base database into one database per vitest worker
- * (`<base>_w0_test` .. `<base>_wN_test`). Workers select theirs by
- * VITEST_WORKER_ID (else VITEST_POOL_ID) in src/test/helpers/env.ts, so
- * parallel test files never share tables. Index 0 is included because some
- * vitest pools are 0-based. The `_test` suffix is load-bearing: the append-only audit
+ * (`<base>_w1_test` .. `<base>_wN_test`). Workers select theirs by
+ * VITEST_POOL_ID in src/test/helpers/env.ts, so parallel test files never
+ * share tables. The `_test` suffix is load-bearing: the append-only audit
  * triggers (migration 0047) only permit TRUNCATE in databases named `test`
  * or `*_test`.
  *
@@ -82,7 +81,7 @@ async function createWorkerDatabases(databaseUrl: string): Promise<void> {
   const client = new pg.Client({ connectionString: adminUrl.toString() });
   await client.connect();
   try {
-    for (let workerId = 0; workerId <= TEST_WORKER_COUNT; workerId++) {
+    for (let workerId = 1; workerId <= TEST_WORKER_COUNT; workerId++) {
       await client.query(`CREATE DATABASE "${baseName}_w${workerId}_test" TEMPLATE "${baseName}"`);
     }
   } finally {

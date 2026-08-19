@@ -237,12 +237,12 @@ const STORE_PREFIXES = {
 } as const;
 
 /**
- * Vitest workers used to share Redis keys when `VITEST_POOL_ID` was not unique
- * (or SELECT-by-pathname failed). Prefix every store so parallel files cannot
- * clobber API-key cache or the audit-ledger checkpoint. Empty in production.
+ * Prefix stores with the vitest pool id so parallel workers cannot clobber
+ * API-key cache or the audit-ledger checkpoint if Redis SELECT-by-pathname
+ * is ignored. Empty in production.
  */
 function testWorkerStorePrefix(): string {
-  const worker = process.env.VITEST_WORKER_ID ?? process.env.VITEST_POOL_ID;
+  const worker = process.env.VITEST_POOL_ID;
   return worker ? `vitest-${worker}:` : "";
 }
 

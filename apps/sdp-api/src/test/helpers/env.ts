@@ -2,14 +2,12 @@ import { getDb } from "@/db";
 import { LocalPiiCipher } from "@/services/pii-cipher/pii-cipher";
 import type { Env } from "@/types/env";
 
-const workerId = process.env.VITEST_WORKER_ID ?? process.env.VITEST_POOL_ID;
+const workerId = process.env.VITEST_POOL_ID;
 const baseDatabaseUrl = process.env.TEST_DATABASE_URL;
 const baseRedisUrl = process.env.REDIS_URL;
 
 if (!workerId) {
-  throw new Error(
-    "Test environment requires VITEST_WORKER_ID or VITEST_POOL_ID (unit tests must run under vitest)."
-  );
+  throw new Error("Test environment requires VITEST_POOL_ID (unit tests must run under vitest).");
 }
 if (!baseDatabaseUrl) {
   throw new Error("Test environment requires TEST_DATABASE_URL.");
@@ -23,7 +21,7 @@ if (!baseRedisUrl) {
  * node-global-setup.ts, so parallel workers never share tables.
  *
  * @param baseUrl - Connection URI of the migrated base database.
- * @param id - This worker's VITEST_WORKER_ID (falls back to VITEST_POOL_ID).
+ * @param id - This worker's VITEST_POOL_ID.
  * @returns The worker-scoped Postgres connection URI.
  */
 function workerDatabaseUrl(baseUrl: string, id: string): string {
@@ -33,12 +31,11 @@ function workerDatabaseUrl(baseUrl: string, id: string): string {
 }
 
 /**
- * Points this worker at the Redis logical database matching its worker id,
- * isolating KV state between parallel workers. Key prefixes in kv-redis
- * provide a second isolation layer if SELECT-by-pathname is ignored.
+ * Points this worker at the Redis logical database matching its
+ * VITEST_POOL_ID, isolating KV state between parallel workers.
  *
  * @param baseUrl - Connection URI of the shared Redis container.
- * @param id - This worker's VITEST_WORKER_ID (falls back to VITEST_POOL_ID).
+ * @param id - This worker's VITEST_POOL_ID.
  * @returns The worker-scoped Redis connection URI.
  */
 function workerRedisUrl(baseUrl: string, id: string): string {
