@@ -1,8 +1,8 @@
 /**
  * Integration tests for RedisKVStore against a real Redis. Runs in plain
  * Node via vitest.config.ts so ioredis can open real TCP sockets.
- * Requires REDIS_URL (defaults to localhost:6379); each test FLUSHALLs
- * first so runs are isolated.
+ * Requires REDIS_URL (defaults to localhost:6379); each test flushes its
+ * dedicated Redis database first so runs are isolated.
  */
 
 import Redis from "ioredis";
@@ -10,7 +10,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import type { Env } from "@/types/env";
 import { closeAllRedisClients, createKVStoreSet, RedisKVStore } from "./kv-redis";
 
-const REDIS_URL = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
+// Dedicated Redis DB index: parallel vitest workers share one Redis instance,
+// so flushing the default database would wipe other suites' keys mid-test.
+const REDIS_URL = `${process.env.REDIS_URL ?? "redis://127.0.0.1:6379"}/13`;
 
 describe("RedisKVStore (HOO-510)", () => {
   let raw: Redis;
@@ -24,7 +26,7 @@ describe("RedisKVStore (HOO-510)", () => {
   });
 
   beforeEach(async () => {
-    await raw.flushall();
+    await raw.flushdb();
   });
 
   describe("get / put / delete", () => {
