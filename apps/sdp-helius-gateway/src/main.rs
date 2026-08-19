@@ -66,8 +66,20 @@ async fn main() -> ExitCode {
 ///
 /// Liveness only, so any response below 500 counts as alive — matching the
 /// convention in `apps/sdp-api/Dockerfile`. It reads the port from the same
-/// variable the server binds, so the two cannot drift.
+/// variable the server binds, so the two cannot drift. Connect, write and read
+/// share one wall-clock bound so a stalled accept queue cannot outrun Docker's
+/// `HEALTHCHECK --timeout`.
 async fn health_check() -> ExitCode {
+    match tokio::time::timeout(PROBE_TIMEOUT, probe_health()).await {
+        Ok(code) => code,
+        Err(_) => {
+            eprintln!("health: probe timed out after {PROBE_TIMEOUT:?}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn probe_health() -> ExitCode {
     use tokio::io::AsyncWriteExt as _;
 
     let port = std::env::var("HELIUS_GATEWAY_PORT")
@@ -90,20 +102,10 @@ async fn health_check() -> ExitCode {
     // Read until the status line is complete rather than trusting one `read` to
     // deliver it. TCP is a stream: a short read is legal even on loopback, and
     // treating a fragmented response as a bad one would restart a healthy
-    // container. The whole probe is bounded so that a server which accepts the
-    // connection and then never answers fails as a clear timeout instead of
-    // hanging until the orchestrator kills the process.
-    let status_line = match tokio::time::timeout(PROBE_TIMEOUT, read_status_line(&mut stream)).await
-    {
-        Ok(Some(line)) => line,
-        Ok(None) => {
-            eprintln!("health: connection closed before a status line arrived");
-            return ExitCode::FAILURE;
-        }
-        Err(_) => {
-            eprintln!("health: no status line within {PROBE_TIMEOUT:?}");
-            return ExitCode::FAILURE;
-        }
+    // container.
+    let Some(status_line) = read_status_line(&mut stream).await else {
+        eprintln!("health: connection closed before a status line arrived");
+        return ExitCode::FAILURE;
     };
 
     let alive = status_line
