@@ -4,7 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   claimVaultDepositIdempotencyKey,
   holdVaultDepositIdempotencyKey,
+  isVaultDepositIdempotencyKeyHeld,
   releaseVaultDepositIdempotencyKey,
+  resetVaultDepositTrackingStateForTests,
   vaultDepositRequestFingerprint,
 } from "./earn-vault-deposit-tracking";
 
@@ -21,6 +23,7 @@ let nextUuid = 0;
 
 beforeEach(() => {
   sessionStorage.clear();
+  resetVaultDepositTrackingStateForTests();
   nextUuid = 0;
   vi.spyOn(globalThis.crypto, "randomUUID").mockImplementation(() => {
     nextUuid += 1;
@@ -183,6 +186,64 @@ describe("an approval hold suspends expiry", () => {
     );
 
     expect(claimVaultDepositIdempotencyKey(fingerprint)).toBe("legacy-key");
+  });
+});
+
+describe("a quota-diverged storage", () => {
+  it("keeps serving the just-claimed key when writes fail but reads still work", () => {
+    // The asymmetric failure a quota produces: setItem throws, getItem keeps
+    // serving the STALE previous state. Preferring readable storage here
+    // un-writes the entry that was just claimed — the next call minted a fresh
+    // key for a request already in flight.
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("QuotaExceededError");
+    });
+    const fingerprint = vaultDepositRequestFingerprint(request);
+
+    const first = claimVaultDepositIdempotencyKey(fingerprint);
+    expect(claimVaultDepositIdempotencyKey(fingerprint)).toBe(first);
+  });
+
+  it("keeps a hold visible when its write never reached storage", () => {
+    // The absorbed-by-approval detection and the spent-key pre-flight both key
+    // off "was this held" — losing the marker presents an executed approval
+    // replay as a fresh successful submission.
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("QuotaExceededError");
+    });
+    const fingerprint = vaultDepositRequestFingerprint(request);
+    claimVaultDepositIdempotencyKey(fingerprint);
+
+    holdVaultDepositIdempotencyKey(fingerprint);
+
+    expect(isVaultDepositIdempotencyKeyHeld(fingerprint)).toBe(true);
+  });
+
+  it("hands authority back to storage once a write lands, syncing what failed", () => {
+    // Divergence is a state, not a verdict: the next successful write persists
+    // the full memory snapshot — including entries whose own writes failed —
+    // and storage is the authority again, so external state is honoured.
+    const original = Storage.prototype.setItem;
+    const failing = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("QuotaExceededError");
+    });
+    const fingerprint = vaultDepositRequestFingerprint(request);
+    const key = claimVaultDepositIdempotencyKey(fingerprint);
+
+    // Quota clears; the next write (a different claim) syncs everything.
+    failing.mockImplementation(original);
+    claimVaultDepositIdempotencyKey(vaultDepositRequestFingerprint({ ...request, amount: "7" }));
+
+    const persisted = JSON.parse(sessionStorage.getItem(IDEMPOTENCY_STORE_KEY) ?? "[]") as Array<{
+      id: string;
+      value: string;
+    }>;
+    expect(persisted.find((entry) => entry.id === fingerprint)?.value).toBe(key);
+
+    // Storage is authoritative again: an external edit is honoured, not
+    // shadowed by memory.
+    sessionStorage.setItem(IDEMPOTENCY_STORE_KEY, JSON.stringify([]));
+    expect(claimVaultDepositIdempotencyKey(fingerprint)).not.toBe(key);
   });
 });
 

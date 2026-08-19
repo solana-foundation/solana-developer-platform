@@ -163,6 +163,34 @@ function storage(): Storage | null {
 const memoryEntries = new Map<string, readonly StoredEntry[]>();
 
 /**
+ * Store keys whose LAST write failed to reach `sessionStorage` while reads
+ * still work — the asymmetric failure a quota produces: `setItem` throws,
+ * `getItem` keeps serving the stale previous state.
+ *
+ * That asymmetry is why "read storage when it answers" is not sufficient on
+ * its own. Every write lands in `memoryEntries` unconditionally before the
+ * storage attempt, so memory is always the newest complete snapshot; a
+ * readable storage can only be EQUAL to it (the write succeeded) or OLDER (it
+ * failed). Preferring readable-but-stale storage after a failed write is how a
+ * just-claimed key vanished on the next read — minting a fresh key for a
+ * request already in flight — and how a hold marker written only to memory was
+ * lost, letting an executed approval present as a fresh submission.
+ *
+ * So: a failed write flips the key to memory-preferred; the next successful
+ * write means storage has caught up and flips it back. While storage is
+ * healthy it stays the authority, so an external clear genuinely clears and a
+ * state written by a previous page load is honoured.
+ *
+ * The residual, stated honestly: memory dies with the page, so a failed write
+ * followed by a RELOAD serves the stale storage. Nothing client-side can close
+ * that — durability was refused — which is exactly why the server double-checks
+ * every reused key (`?requestId=` pre-flight, `assertMovementIsOwnReplay`) and
+ * why a fresh key's worst case is a second approval REQUEST awaiting a human,
+ * never a silent second broadcast.
+ */
+const storageDivergedKeys = new Set<string>();
+
+/**
  * `usable: false` means this browser will not hand anything back at all —
  * distinct from a usable store that simply holds nothing under this key. Only
  * the first falls through to memory: a store that answers is the authority, so
@@ -181,17 +209,24 @@ function readStoredText(
 }
 
 function readEntries(storeKey: string, ttlMs: number): StoredEntry[] {
-  const stored = readStoredText(storeKey);
   let parsed: unknown;
-  if (!stored.usable) {
+  if (storageDivergedKeys.has(storeKey)) {
+    // Storage is behind memory for this key (a write failed after the page
+    // loaded), so the readable state is stale by construction — see the flag's
+    // docstring.
     parsed = memoryEntries.get(storeKey) ?? [];
-  } else if (stored.raw === null) {
-    return [];
   } else {
-    try {
-      parsed = JSON.parse(stored.raw);
-    } catch {
+    const stored = readStoredText(storeKey);
+    if (!stored.usable) {
+      parsed = memoryEntries.get(storeKey) ?? [];
+    } else if (stored.raw === null) {
       return [];
+    } else {
+      try {
+        parsed = JSON.parse(stored.raw);
+      } catch {
+        return [];
+      }
     }
   }
   if (!Array.isArray(parsed)) return [];
@@ -216,10 +251,27 @@ function writeEntries(storeKey: string, entries: readonly StoredEntry[]): void {
   if (!store) return;
   try {
     store.setItem(storeKey, JSON.stringify(bounded));
+    // Storage has caught up with memory; it is the authority again.
+    storageDivergedKeys.delete(storeKey);
   } catch {
     // Quota or a refusing store. Losing the durability is strictly better than
-    // losing the deposit, and `memoryEntries` still answers for this page.
+    // losing the deposit — but a still-READABLE storage is now behind memory,
+    // and serving it would un-write the entry we just wrote. Flip this key to
+    // memory-preferred until a write lands.
+    storageDivergedKeys.add(storeKey);
   }
+}
+
+/**
+ * Test-only: clear the module-scope tiers so specs are order-independent.
+ * Production never calls this — the whole point of the tiers is surviving
+ * everything short of the page itself.
+ *
+ * @internal
+ */
+export function resetVaultDepositTrackingStateForTests(): void {
+  memoryEntries.clear();
+  storageDivergedKeys.clear();
 }
 
 /**

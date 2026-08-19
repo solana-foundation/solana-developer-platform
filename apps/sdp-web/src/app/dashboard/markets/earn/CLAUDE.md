@@ -209,6 +209,19 @@ the body `requestId` form.
   - A store that refuses every operation falls back to a module-scope map, so a
     dead store costs DURABILITY across a reload and never the answer to "is this
     the same request". Failing soft must not mean failing open.
+  - A PARTIALLY dead store — quota: `setItem` throws while `getItem` keeps
+    serving the stale previous state — is the trap in that design. Every write
+    lands in memory unconditionally, so memory is always the newest complete
+    snapshot and a readable storage can only be equal or OLDER; serving it after
+    a failed write un-writes the just-claimed key (fresh mint → second approval)
+    and loses hold markers (an executed approval presents as a fresh
+    submission). A failed write therefore flips that store key to
+    memory-preferred (`storageDivergedKeys`); the next successful write syncs
+    the full snapshot back and returns authority to storage, so an external
+    clear only ever means something when storage is actually keeping up.
+    Residual, stated honestly: a failed write followed by a RELOAD serves stale
+    storage — durability was refused, nothing client-side can close it — which
+    is why the server independently re-checks every reused key.
   - It deliberately does NOT track which deposits are in flight any more. That
     was browser state pretending to be a ledger: it could not see a deposit
     signed in another tab, and it restored the previous project's watches after
