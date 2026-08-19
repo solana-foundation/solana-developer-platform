@@ -8,14 +8,25 @@ invariants (the 2026-08-11 addendum owns the ledger-vs-live rules below).
 ## In flight: the unified movement ledger (PRO-1705)
 
 Earn is mid-migration from two movement tables split by execution mechanism to
-ONE. Migrations `0062`-`0064` add `earn_movements` (every money movement, both
-directions, both execution models) and `earn_positions` (every holding, vault
-and custodial), and backfill all existing history into them.
+ONE. Migrations `0062`-`0065` add `earn_movements` (every money movement, both
+directions, both execution models) and `earn_positions` (every holding, vault and
+custodial), and backfill all existing history into them. See ADR 0002's
+2026-08-19 addendum for the decisions.
 
-**Nothing reads the new tables yet.** `earn_program_withdrawals`,
-`earn_vault_movements` and `earn_vault_positions` remain authoritative for every
-route below; the unified tables are kept current by a dual-write so the read
-switch is a later, separate release.
+**Every READ now serves from the unified tables**; the legacy ones remain the
+authoritative WRITERS and are mirrored into the unified shape in the same
+transaction, so a read is never behind a write. Writes flip in a later release,
+and the legacy tables are dropped last of all.
+
+Two consequences to know when touching a read:
+
+- The published vault-deposit DTO is served through a vocabulary shim
+  (`LEGACY_VAULT_DEPOSIT_STATUS` in `handlers/vault.ts`): `requested` goes out as
+  `pending`, and `finalized` — which that DTO has no word for — goes out as
+  `confirmed`. `?settled=` matches the same client-visible notion. Delete both
+  when the DTO adopts the ledger vocabulary.
+- `GET /v1/earn/movements` is the one read that speaks the ledger vocabulary
+  directly, because it is a new contract with no client to keep compatible.
 
 **The rule while both shapes exist — if you add or change a writer of any legacy
 earn table, it MUST mirror into the unified ledger in the SAME transaction.**
@@ -35,12 +46,28 @@ knowing before touching it:
   wallet is linked (`insertProviderWallet`); without it a withdrawal cannot
   project and the write fails loudly rather than going unrecorded.
 - `finalized` is the one status no legacy table can express, so a legacy write
-  never regresses a unified row that already reached it.
+  never regresses a unified row that already reached it — and it is written by
+  `finalizeVaultMovement` to the unified ledger ALONE. The reconciliation sweep
+  still records the commitment through the legacy writer first, so a rollback
+  shows a settled deposit rather than one still in flight.
+- `confirmed` is NOT terminal any more (PRO-1716). The sweep keeps polling a
+  confirmed movement until the chain says `finalized`, and a confirmed row whose
+  signature has aged out of RPC history is left alone rather than expired — the
+  transaction demonstrably landed, and the blockhash rule only ever applied to one
+  that never made it on chain.
 - The vocabulary tables `earn_execution_models`, `earn_movement_directions` and
   `earn_movement_statuses` are seeded reference data, pinned to `@sdp/types` by a
   conformance test. Never truncate them in a test fixture.
 
 ## Route map — with each route's single source of truth
+
+`GET /movements` is the cross-provider feed over `earn_movements`: one
+chronological history spanning both execution models, which no per-family list can
+serve. It takes NO provider gate (ADR 0002 exit safety — it reports on money that
+already moved) and its visibility is the UNION of what the per-family reads grant,
+enforced in the repository query: vault rows stay project-and-wallet scoped,
+custodial rows stay program scoped. A new read over a table that holds every
+movement is the obvious place for a scoping rule to go missing — do not widen it.
 
 Every route reads exactly ONE source for the STATE it reports (DB or live
 provider) and never blends them; that is an ADR 0002 addendum acceptance

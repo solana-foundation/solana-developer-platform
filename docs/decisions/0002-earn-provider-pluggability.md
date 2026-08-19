@@ -584,3 +584,88 @@ both — but they still guard Ground, production Kamino, rows already stored und
 the old behaviour, and the next genuinely single-cluster provider. The
 simplification here is to the mental model ("catalogued but not fundable" was a
 Kamino-shaped special case), not to the safety machinery.
+
+## Addendum (2026-08-19) — one provider-neutral movement ledger (PRO-1705)
+
+Earn ended up with **two authoritative movement tables split by execution
+mechanism**, not by business meaning:
+
+- `earn_program_withdrawals` (0055) — provider-API portfolio withdrawals.
+- `earn_vault_movements` (0059) — signed, on-chain vault deposits.
+
+Both record the same fact — money moved through Earn — so idempotency,
+lifecycle, reconciliation, history and reporting existed twice, in two shapes,
+and no single query could answer "what moved on this organization". Each new
+provider or direction deepened the split.
+
+**Decision: one `earn_movements` ledger, and one `earn_positions` holdings table
+behind it.** One row per real-world money movement, both directions, both
+execution models, discriminated by an `execution_model` column rather than by
+which table it lives in. Migrations 0062-0065.
+
+### What this supersedes
+
+Two earlier plans of record, both explicitly:
+
+- **This addendum's own 2026-08-11 note** that 0048's `earn_movements` was
+  "dropped rather than retrofitted", with a movements ledger deferred to the
+  execution era. The execution era arrived (0059), and it arrived as a *second*
+  ledger. The name is reclaimed; the 0048 SHAPE is not — that table was
+  position-scoped with base-unit amounts, a nullable provider, no environment, no
+  fingerprint, and a foreign key into the delist-pruned catalogue.
+- **Migration 0061's header**, which anticipated the vault withdraw direction
+  landing as more columns on `earn_vault_movements`. It lands in the unified
+  ledger instead, where `withdrawal` is already a seeded direction.
+
+### What did NOT change
+
+The ledger-vs-live rule from 2026-08-11 stands unaltered: **SDP ledgers what it
+initiates; SDP reads live what the provider observes; positions stay live.**
+`earn_positions` is a claim index, never a balance — balances and share counts
+are still read live on every request, and for a non-custodial vault the chain is
+the provider. Customer-initiated custodial deposits remain unledgered because SDP
+has no intent moment for them; when an observed-deposit feed is built, it writes
+rows into this ledger rather than a third table.
+
+Exit safety is unchanged and extended to the new read: `GET /v1/earn/movements`
+takes **no provider gate**, like the reads it generalises. It reports on money
+that has already moved, so un-offering a provider, removing its credentials, or
+un-entitling an organization closes the door IN and must never remove the record
+of what already went through it.
+
+### The parts that carry judgement
+
+- **Amounts carry an explicit `denomination`; shares live only in share-named
+  columns.** The concrete accounting hazard a merge could have introduced is USD,
+  mint units and vault share counts sharing a column. `denomination` is `usd` for
+  a custodial movement and the token MINT for a vault one, and no read may sum
+  across rows without grouping by it.
+- **Both idempotency anchors survive**, as partial unique indexes over their own
+  model's rows: custodial is holding-scoped (a custodial holding is 1:1 with its
+  program wallet, so this is 0055's wallet scope in the new shape), vault is
+  org-scoped per 0059. Flattening to one anchor would break whichever side lost.
+  No fingerprint builder or request-id derivation changed: those values are
+  persisted in `wallet_operations.raw_payload.executionRequest`, so altering one
+  would 409 every in-flight approved retry across a deploy.
+- **`provider_reference` means one thing again.** On 0059's positions it meant the
+  INSTRUMENT; on 0059's movements the same name meant the provider's id for the
+  movement. The unified ledger keeps the second meaning and names the first
+  `vault_address`. This overload is why the two tables could not simply be merged.
+- **Closed, earn-owned vocabularies are lookup tables with foreign keys**, not
+  `CHECK (x IN (...))` lists. The composite `(execution_model, status)` key makes
+  a custodial status unrepresentable on a vault movement. `provider` stays an open
+  registry string (ADR 0001) — a new provider must never require a migration.
+- **`finalized` is a real state, and `confirmed` is not terminal.** Optimistic
+  chain commitment can be dropped in a fork rollback, so settlement means
+  finalization for a vault movement and provider completion for a custodial one —
+  one meaning of settled across SDP, matching payments (PRO-1716).
+
+### Migration posture
+
+Expand → backfill → switch → contract, with every intermediate deploy
+rollback-safe. The legacy tables keep their writers while their writes are
+mirrored into the unified shape in the same transaction; reads switch in a later
+release; the legacy tables are dropped last, alone. Each projection is defined
+ONCE as a SQL view shared by the bulk backfill and the runtime mirror, because a
+projection spelled twice would drift, and history disagreeing with new rows is
+the worst outcome this migration could produce.

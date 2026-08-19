@@ -734,3 +734,70 @@ export const EARN_MOVEMENT_TRANSITIONS = {
     >
   >;
 };
+
+/**
+ * One row of the unified Earn ledger — the cross-provider movement record.
+ *
+ * This is the read PRO-1669 asked for and neither legacy shape could serve: one
+ * chronological history of every money movement an organization made through
+ * Earn, whichever provider executed it and whichever way. `EarnVaultDepositRecord`
+ * and `EarnProgramWithdrawalRecord` remain the per-family views, and both are
+ * projections of this same row.
+ *
+ * Unlike those two, this speaks the ledger's own vocabulary — `requested` and
+ * `finalized` included — because it is a new contract with no client to keep
+ * compatible. A consumer reads `executionModel` to know which optional fields to
+ * expect.
+ *
+ * Every amount is denominated in `denomination`: `usd` for a custodial movement,
+ * the token MINT for a vault one. Never sum across rows without grouping by it.
+ * Share quantities appear only in the share-named fields and are not comparable
+ * to the amounts.
+ */
+export interface EarnMovementRecord {
+  id: string;
+  /** Open string — a row can outlive its provider's registry entry. */
+  provider: string;
+  executionModel: EarnExecutionModel;
+  direction: EarnMovementDirection;
+  status: EarnMovementStatus;
+  /** The holding this movement belongs to; every movement has exactly one. */
+  positionId: string;
+  /** `usd`, or the token mint. The unit of every amount below. */
+  denomination: string;
+  amountRequested: string;
+  /** What actually moved, once the provider or the chain has said so. */
+  amountSettled?: string;
+  feeAmount?: string;
+  /** Share units (vault movements only). */
+  minSharesOut?: string;
+  sharesOut?: string;
+  /** Payout stablecoin symbol for a custodial withdrawal; not the unit. */
+  payoutToken?: string;
+  /** The vault's on-chain address (vault movements only). */
+  vaultAddress?: string;
+  /** Where the money came from and went, when SDP observed either. */
+  sourceAddress?: string;
+  destinationAddress?: string;
+  /** The provider's own id for THIS movement, when it has one. */
+  providerReference?: string;
+  /** Solana transaction signature (vault movements only). */
+  signature?: string;
+  failureReason?: string;
+  /** Who moved it: a dashboard user, an API key, or neither for a system write. */
+  createdBy?: string;
+  initiatedByKeyId?: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Optimistic chain commitment; not settlement. */
+  confirmedAt?: string;
+  /** Success-terminal: finalization, or provider completion. */
+  settledAt?: string;
+}
+
+/** Response body of GET /v1/earn/movements — newest first, keyset-paged. */
+export interface EarnMovementsPage {
+  movements: EarnMovementRecord[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}

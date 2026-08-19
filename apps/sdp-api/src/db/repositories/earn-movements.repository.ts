@@ -490,6 +490,31 @@ export interface EarnMovementsRepository {
     limit: number;
     before: EarnMovementCursor | null;
   }): Promise<{ rows: EarnPositionRow[]; hasMore: boolean }>;
+  /**
+   * The cross-provider movement feed: one chronological history spanning both
+   * execution models, which is what neither legacy table could serve alone.
+   *
+   * Visibility is the UNION of what the two per-family reads already grant, and
+   * not a wider grant dressed up as a new endpoint — vault rows stay
+   * project-and-wallet scoped, custodial rows stay program scoped (every project
+   * in an environment reaches every program). A caller sees exactly the rows the
+   * existing endpoints would have shown it, in one list.
+   */
+  listMovements(params: {
+    organizationId: string;
+    environment: SdpEnvironment;
+    projectId: string;
+    /** Wallet-binding scope for vault rows; empty means no vault row is visible. */
+    custodyWalletIds: readonly string[];
+    limit: number;
+    before: EarnMovementCursor | null;
+    direction?: EarnMovementDirection;
+    status?: string;
+    provider?: string;
+    positionId?: string;
+    sourceAddress?: string;
+    destinationAddress?: string;
+  }): Promise<{ rows: EarnMovementRow[]; hasMore: boolean }>;
   /** Global bounded outbox scan for the reconciliation worker. */
   listUnsettledVaultMovements(limit: number): Promise<EarnMovementRow[]>;
   /**
@@ -762,6 +787,61 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         )
         .all<EarnPositionRow>();
       const rows = result.results ?? [];
+      return { rows: rows.slice(0, params.limit), hasMore: rows.length > params.limit };
+    },
+
+    async listMovements(params) {
+      const conditions = ["organization_id = ?", "environment = ?"];
+      const bindings: unknown[] = [params.organizationId, params.environment];
+
+      // The visibility union, spelled in SQL so no caller can skip half of it.
+      // A vault row needs BOTH the exact project and an in-scope signing wallet;
+      // a custodial row is reachable by every project in the environment, which
+      // is how `/programs/:id/withdrawals` has always behaved.
+      if (params.custodyWalletIds.length > 0) {
+        conditions.push(
+          `(
+             execution_model = 'custodial'
+             OR (
+               project_id = ?
+               AND custody_wallet_id = ANY (?::text[])
+             )
+           )`
+        );
+        bindings.push(params.projectId, params.custodyWalletIds);
+      } else {
+        conditions.push("execution_model = 'custodial'");
+      }
+
+      for (const [column, value] of [
+        ["direction", params.direction],
+        ["status", params.status],
+        ["provider", params.provider],
+        ["position_id", params.positionId],
+        ["source_address", params.sourceAddress],
+        ["destination_address", params.destinationAddress],
+      ] as const) {
+        if (value !== undefined) {
+          conditions.push(`${column} = ?`);
+          bindings.push(value);
+        }
+      }
+
+      if (params.before) {
+        conditions.push("(created_at, id) < (?, ?)");
+        bindings.push(params.before.createdAt, params.before.id);
+      }
+
+      const result = await db
+        .prepare(
+          `SELECT * FROM earn_movements
+             WHERE ${conditions.join(" AND ")}
+             ORDER BY created_at DESC, id DESC
+             LIMIT ?`
+        )
+        .bind(...bindings, params.limit + 1)
+        .all<Record<string, unknown>>();
+      const rows = (result.results ?? []).map(mapMovementRow);
       return { rows: rows.slice(0, params.limit), hasMore: rows.length > params.limit };
     },
 

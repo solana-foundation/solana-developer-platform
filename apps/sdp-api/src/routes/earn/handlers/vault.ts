@@ -541,7 +541,7 @@ function assertBoundWalletIdentifierIsUnique(
  * A provider wallet id that maps to more than one scoped custody row is
  * dropped: the binding cannot say which row it meant, so it authorizes neither.
  */
-async function listReadableEarnVaultWallets(
+export async function listReadableEarnVaultWallets(
   c: AppContext,
   auth: ApiKeyContext,
   projectId: string

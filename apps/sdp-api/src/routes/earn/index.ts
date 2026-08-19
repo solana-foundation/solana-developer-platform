@@ -6,6 +6,7 @@ import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
+import { listEarnMovements } from "./handlers/movements";
 import {
   createEarnProgram,
   createEarnProgramWithdrawal,
@@ -104,6 +105,14 @@ earn.get(
   requirePermissions("earn:read", "wallets:read"),
   listEarnVaultPositions
 );
+
+// The cross-provider movement feed (source: earn_movements). One chronological
+// history spanning both execution models, which no per-family list can serve —
+// and like them it takes NO provider gate, because it reports on money that has
+// already moved. `wallets:read` is required for the same reason the vault reads
+// require it: the wallet-binding scope it enforces is what keeps a key bound to
+// particular wallets from seeing movements signed by others.
+earn.get("/movements", requirePermissions("earn:read", "wallets:read"), listEarnMovements);
 
 // Portfolio programs: N provider wallets per org+environment+provider
 // (PRO-1670), each addressed by its own id. Money-in (create, re-target) takes

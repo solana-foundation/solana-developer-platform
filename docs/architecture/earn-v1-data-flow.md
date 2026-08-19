@@ -22,7 +22,7 @@ flowchart LR
     subgraph SDP["sdp-api  /v1/earn"]
         ROUTES["earn routes<br/>auth · project scope · earn:read/write"]
         SVC["@sdp/earn provider clients<br/>(Ground portfolio · Kamino catalogue-only; Veda/Upshift/Perena stubs)"]
-        DB[("Postgres<br/>earn_strategies · earn_provider_wallets<br/>earn_program_withdrawals")]
+        DB[("Postgres<br/>earn_strategies · earn_provider_wallets<br/>earn_movements · earn_positions")]
         CRON["cron: catalogue sync (hourly) · metrics refresh (5 min)"]
     end
 
@@ -60,7 +60,10 @@ PRO-1634 owns whatever returns.
 | Positions & balances | **Live provider snapshot** (`GET /v1/earn/programs/:programId` ← `getPortfolioWallet`) — never persisted | Provider | Real-time |
 | Deposits | **Live provider** (`GET /programs/:programId/deposits` ← provider-observed on-chain deposits) — customer-initiated, so SDP has no intent moment to ledger | Provider | Real-time |
 | Withdrawals (detail) | **Live provider** (`GET /programs/:programId/withdrawals/:ref`); the matching ledger row advances as a side effect | Provider | Real-time |
-| Withdrawals (history/audit) | `earn_program_withdrawals` (**DB ledger** — `GET /programs/:programId/withdrawals`) | Written at intent by `POST /programs/:programId/withdrawals`; advanced by guarded CAS on every observation (`services/earn-withdrawal-ledger.service.ts`) | Intent = immediate; status = each observation (+ ledger sweep) |
+| Withdrawals (history/audit) | `earn_movements` (**DB ledger** — `GET /programs/:programId/withdrawals`) | Written at intent by `POST /programs/:programId/withdrawals`; advanced by guarded CAS on every observation (`services/earn-withdrawal-ledger.service.ts`) | Intent = immediate; status = each observation (+ ledger sweep) |
+| Vault deposits (history/audit) | `earn_movements` (**DB ledger** — `GET /vault-deposits`, `GET /vault-deposits/:movementId`) | Written at intent BEFORE broadcast; advanced by the reconciliation sweep to `confirmed` and then `finalized` | Intent = immediate; settlement ≈ 90s (`cron/earn-vault-movements.ts`) |
+| Vault holdings | `earn_positions` (**DB claim index**, never a balance) **hydrated live from chain** — `GET /vault-positions` | Claim written with the first durable signed intent; shares and value read live per request | Claim = immediate; value = real-time |
+| Movement history, ALL providers | `earn_movements` (**DB ledger** — `GET /v1/earn/movements`) | Every movement above, one chronological feed across both execution models; no provider gate (ADR 0002 exit safety) | Same as the rows it serves |
 | Wallet balances (funding) | Existing wallet/custody surfaces | Existing RPC relay + token account reads — nothing Earn-specific | Existing behavior |
 | Provider on/off state | `getProviderAvailability` (existing service, `earn` family already wired) | Org entitlements + env credentials | Real-time |
 
@@ -115,11 +118,20 @@ For the NON-CUSTODIAL (`vault_direct`) shape it no longer does. A K-Vault has no
 address to send to, so the only way money moves is SDP building an instruction,
 signing it with an organization custody wallet and submitting it. That path
 exists: `@sdp/kamino` builds the plan, `POST /v1/earn/vault-deposits` signs and
-submits, and `earn_vault_movements` (migration 0058) ledgers it — written at
-intent BEFORE signing, because the chain has no request-id dedupe and a crash
-between signing and recording is otherwise unrecoverable. `earn_vault_positions`
-records only WHICH (wallet, vault) pairs an org holds; shares and value stay live
-chain reads, so the ledger-vs-live rule above is unchanged.
+submits, and `earn_movements` ledgers it — written at intent BEFORE signing,
+because the chain has no request-id dedupe and a crash between signing and
+recording is otherwise unrecoverable. `earn_positions` records only WHICH
+(wallet, vault) pairs an org holds; shares and value stay live chain reads, so the
+ledger-vs-live rule above is unchanged.
+
+That ledger started as `earn_vault_movements` (migration 0059, *not* 0058 as this
+document previously said) beside the custodial `earn_program_withdrawals` — two
+authoritative tables split by execution mechanism. PRO-1705 merged them into one
+`earn_movements` root and one `earn_positions` holdings table (migrations
+0062-0065; ADR 0002 addendum 2026-08-19). The legacy tables still take the writes
+and are mirrored into the unified shape in the same transaction until a later
+release retires them, so the sources of truth in the table above are the unified
+ones for every READ.
 
 Still outstanding for that shape: the withdraw counterpart. The dashboard now
 hydrates and shows durable vault positions, but their SDP exit action stays
