@@ -37,6 +37,7 @@ import docs from "@/routes/docs";
 import earn from "@/routes/earn";
 import health from "@/routes/health";
 import internalCustody from "@/routes/internal-custody";
+import internalRpc from "@/routes/internal-rpc";
 import issuance from "@/routes/issuance";
 import llms from "@/routes/llms";
 import members from "@/routes/members";
@@ -380,6 +381,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // public OpenAPI and AI discovery surfaces.
   app.route("/internal/playground", playgroundInternal);
   app.route("/internal/dashboard/custody", internalCustody);
+  app.route("/internal/dashboard/rpc", internalRpc);
 
   // Admin routes (internal)
   app.route("/admin/allowlist", allowlist);

@@ -15,7 +15,8 @@ export interface ProviderCredentialRow {
   id: string;
   organization_id: string;
   project_id: string | null;
-  provider: "privy";
+  /** Widened from the privy-only literal: RPC connections store credentials here too. */
+  provider: string;
   label: string;
   scope: "organization" | "project";
   scope_key: string;
@@ -681,6 +682,8 @@ export class ProviderCredentialStore {
     id: string;
     organizationId: string;
     projectId: string | null;
+    /** Provider family this credential belongs to; RPC connections reuse this insert. */
+    provider: string;
     label: string;
     scope: "organization" | "project";
     source: "stored" | "runtime";
@@ -701,7 +704,7 @@ export class ProviderCredentialStore {
          rotated_from_provider_credential_id, idempotency_key,
          idempotency_fingerprint, created_by
        ) VALUES (
-         ?, ?, ?, 'privy', ?, ?, ?,
+         ?, ?, ?, ?, ?, ?, ?,
          ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?
        )
        RETURNING id, organization_id, project_id, provider, label, scope, scope_key,
@@ -712,6 +715,7 @@ export class ProviderCredentialStore {
         params.id,
         params.organizationId,
         params.projectId,
+        params.provider,
         params.label,
         params.scope,
         params.source,
