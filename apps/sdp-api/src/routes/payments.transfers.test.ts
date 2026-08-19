@@ -389,7 +389,7 @@ describe("Payments routes — transfers", () => {
     };
     expect(body.error.code).toBe("BAD_REQUEST");
     expect(body.error.message).toContain("Invalid request body");
-    expect(body.error.details?.errors?.rules).toContain(
+    expect(body.error.details?.errors?.["rules.0.operationType"]).toContain(
       "operation type must be one of the supported wallet operation types"
     );
   });
