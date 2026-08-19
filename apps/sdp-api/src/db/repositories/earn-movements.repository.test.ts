@@ -80,9 +80,6 @@ describe("Unified earn movement ledger (postgres)", () => {
     for (const table of [
       "earn_movements",
       "earn_positions",
-      "earn_vault_movements",
-      "earn_vault_positions",
-      "earn_program_withdrawals",
       "earn_provider_wallets",
     ]) {
       await db
@@ -443,7 +440,7 @@ describe("Unified earn movement ledger (postgres)", () => {
       // A closed holding that is re-entered reuses its row, and the mirror has to
       // follow the reopening rather than leave a stale closed_at behind.
       await db
-        .prepare("UPDATE earn_vault_positions SET closed_at = sdp_iso_now() WHERE id = ?")
+        .prepare("UPDATE earn_positions SET closed_at = sdp_iso_now() WHERE id = ?")
         .bind(first.position.id)
         .run();
       await ledger.advanceVaultMovement({
@@ -515,11 +512,11 @@ describe("Unified earn movement ledger (postgres)", () => {
         .bind(ORG_OTHER)
         .run();
       await db
-        .prepare("DELETE FROM earn_vault_movements WHERE organization_id = ?")
+        .prepare("DELETE FROM earn_movements WHERE organization_id = ?")
         .bind(ORG_OTHER)
         .run();
       await db
-        .prepare("DELETE FROM earn_vault_positions WHERE organization_id = ?")
+        .prepare("DELETE FROM earn_positions WHERE organization_id = ?")
         .bind(ORG_OTHER)
         .run();
       await db.prepare("DELETE FROM custody_wallets WHERE id = 'cw_earn_mv_other'").run();
@@ -724,14 +721,10 @@ describe("Unified earn movement ledger (postgres)", () => {
         .bind(wallet.id)
         .run();
 
+      // Loud, and nothing written: a movement with nowhere to belong must fail
+      // rather than go unrecorded.
       await expect(createWithdrawal({ walletId: wallet.id })).rejects.toThrow();
       expect(await movements()).toHaveLength(0);
-      // The legacy write rolled back with the mirror, so neither shape holds it.
-      const legacy = await db
-        .prepare("SELECT COUNT(*)::int AS total FROM earn_program_withdrawals WHERE wallet_id = ?")
-        .bind(wallet.id)
-        .first<{ total: number }>();
-      expect(legacy?.total).toBe(0);
     });
   });
 
