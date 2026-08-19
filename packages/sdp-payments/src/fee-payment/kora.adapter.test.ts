@@ -193,15 +193,15 @@ describe("KoraAdapter.getSponsorshipConfiguration", () => {
 });
 
 describe("signAndSend ambiguity verdict (maybeBroadcast)", () => {
-  function makeAdapterWithSendSequence(errors: string[]): KoraAdapter {
+  function makeAdapterWithSendSequence(errors: Array<string | Error>): KoraAdapter {
     let call = 0;
     const transport = {
       getPayerSigner: async () => ({ signer_address: SIGNER }),
       signTransaction: async () => ({ signed_transaction: "" }),
       signAndSendTransaction: async () => {
-        const message = errors[Math.min(call, errors.length - 1)];
+        const entry = errors[Math.min(call, errors.length - 1)];
         call += 1;
-        throw new Error(message);
+        throw entry instanceof Error ? entry : new Error(entry);
       },
       estimateTransactionFee: async () => ({ fee_in_lamports: 0 }),
       getSupportedTokens: async () => ({ tokens: [] }),
@@ -270,5 +270,43 @@ describe("signAndSend ambiguity verdict (maybeBroadcast)", () => {
     );
     assert.equal(error.code, "NETWORK_ERROR");
     assert.equal(error.maybeBroadcast, true);
+  });
+
+  // Node's fetch (undici) never says "econnrefused" in the top-level message:
+  // it throws "fetch failed" and keeps the socket error in `cause`.
+  function undiciRefusedConnection(): Error {
+    return new TypeError("fetch failed", {
+      cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:8080"), {
+        code: "ECONNREFUSED",
+      }),
+    });
+  }
+
+  it("certifies pre-broadcast when every attempt is a refused connection (undici shape)", async () => {
+    // A refused connection was never established, so a total Kora outage is a
+    // provably pre-broadcast failure — terminal failed, not a 409 wedge.
+    const error = await captureSendError(makeAdapterWithSendSequence([undiciRefusedConnection()]));
+    assert.equal(error.code, "NETWORK_ERROR");
+    assert.equal(error.maybeBroadcast, false);
+    assert.equal(error.preBroadcast, true);
+  });
+
+  it("certifies pre-broadcast for a raw-message refused connection as the final error", async () => {
+    const error = await captureSendError(
+      makeAdapterWithSendSequence(["connect ECONNREFUSED 127.0.0.1:8080"])
+    );
+    assert.equal(error.maybeBroadcast, false);
+    assert.equal(error.preBroadcast, true);
+  });
+
+  it("keeps a refused final connection ambiguous once an earlier attempt may have broadcast", async () => {
+    const error = await captureSendError(
+      makeAdapterWithSendSequence([
+        "Kora signAndSendTransaction timed out after 10000ms",
+        undiciRefusedConnection(),
+      ])
+    );
+    assert.equal(error.maybeBroadcast, true);
+    assert.equal(error.preBroadcast, false);
   });
 });

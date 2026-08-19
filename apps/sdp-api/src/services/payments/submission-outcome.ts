@@ -46,10 +46,19 @@ export const DETERMINISTIC_REJECTION_CODES: ReadonlySet<FeePaymentErrorCode> = n
  * response, a deterministic-looking rejection can be CAUSED by the hidden
  * broadcast (spent funds -> INSUFFICIENT_BALANCE, consumed quota ->
  * RATE_LIMITED), so it must not vouch that nothing was sent.
+ *
+ * The `preBroadcast` flag (set by throw sites that can PROVE nothing was
+ * submitted — the budget wrapper's admission/preflight rejections) beats the
+ * code list the other way: those sites share `PROVIDER_NOT_AVAILABLE` with
+ * genuinely ambiguous outcomes, so only the structural verdict, never the
+ * code, may certify a terminal failure for them.
  */
 export function isPreBroadcastRejection(error: unknown): boolean {
   if (error instanceof FeePaymentError && error.maybeBroadcast) {
     return false;
+  }
+  if (error instanceof FeePaymentError && error.preBroadcast) {
+    return true;
   }
   if (error instanceof FeePaymentError && DETERMINISTIC_REJECTION_CODES.has(error.code)) {
     return true;

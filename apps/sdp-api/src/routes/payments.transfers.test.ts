@@ -2599,6 +2599,30 @@ describe("Payments routes — transfers", () => {
       expect(row.providerData ?? {}).not.toMatchObject({ submission_outcome: "unknown" });
     });
 
+    it("records a pre-send admission rejection as a plain failed transfer", async () => {
+      // The budget wrapper's admission runs inside signAndSend but BEFORE any
+      // provider submission. A preflight outage must fail the transfer
+      // terminally — not wedge it behind the manual-reconciliation marker.
+      const signAndSendMock = vi.fn();
+      createFeePaymentAdapterMock.mockReturnValue({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue(KORA_FEE_PAYER_B58),
+        getSponsorshipConfiguration: vi.fn().mockRejectedValue(new Error("Kora config timed out")),
+        signAsFeePayer: vi.fn(),
+        signAndSend: signAndSendMock,
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+      const res = await transferRequest("1");
+
+      expect(res.status).toBeGreaterThanOrEqual(400);
+      expect(res.status).not.toBe(409);
+      expect(signAndSendMock).not.toHaveBeenCalled();
+      const row = await latestTransferRow();
+      expect(row).toMatchObject({ status: "failed", signature: null });
+      expect(row.error).toContain("Sponsorship preflight is unavailable");
+      expect(row.providerData ?? {}).not.toMatchObject({ submission_outcome: "unknown" });
+    });
+
     it("keeps a submitted transfer processing with its signature when confirmation fails", async () => {
       const submittedSignature =
         "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";

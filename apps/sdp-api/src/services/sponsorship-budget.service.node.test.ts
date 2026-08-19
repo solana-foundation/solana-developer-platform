@@ -238,6 +238,8 @@ describe("BudgetedFeePayment", () => {
 
     await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
       code: "PROVIDER_NOT_AVAILABLE",
+      // Admission proves nothing was submitted; consumers may fail terminally.
+      preBroadcast: true,
     });
     expect(repository.createReservation).toHaveBeenCalledOnce();
     expect(repository.markReleased).toHaveBeenCalledWith(
@@ -388,6 +390,9 @@ describe("BudgetedFeePayment", () => {
     });
     await expect(feePayment.signAsFeePayer(transaction)).rejects.toMatchObject({
       code: "PROVIDER_NOT_AVAILABLE",
+      // Genuinely ambiguous: the previous attempt may have broadcast, so this
+      // rejection must NOT carry the structural pre-broadcast verdict.
+      preBroadcast: false,
     });
     expect(provider.signAsFeePayer).toHaveBeenCalledOnce();
     expect(budgetRedis.reserve).toHaveBeenCalledOnce();
@@ -407,6 +412,7 @@ describe("BudgetedFeePayment", () => {
     });
     await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
       code: "PROVIDER_NOT_AVAILABLE",
+      preBroadcast: true,
     });
     expect(provider.signAndSend).not.toHaveBeenCalled();
     expect(budgetRedis.reserve).not.toHaveBeenCalled();

@@ -206,7 +206,13 @@ export class KoraAdapter implements FeePaymentPort {
           continue;
         }
 
-        throw this.wrapError(error, "Failed to sign and send transaction", { maybeBroadcast });
+        throw this.wrapError(error, "Failed to sign and send transaction", {
+          maybeBroadcast,
+          // A refused final connection provably never reached Kora; when no
+          // earlier attempt was ambiguous either, the whole call is provably
+          // pre-broadcast — a terminal failure is safe, no 409 wedge.
+          preBroadcast: !maybeBroadcast && isRefusedConnection(error),
+        });
       }
     }
 
@@ -314,7 +320,7 @@ export class KoraAdapter implements FeePaymentPort {
   private wrapError(
     error: unknown,
     message: string,
-    options?: { maybeBroadcast?: boolean }
+    options?: { maybeBroadcast?: boolean; preBroadcast?: boolean }
   ): FeePaymentError {
     const rpcCode = extractRpcErrorCode(error);
     if (rpcCode !== undefined) {
@@ -424,6 +430,22 @@ function extractRpcErrorCode(error: unknown): number | undefined {
   return Number.parseInt(match[1], 10);
 }
 
+// A refused connection was never established, so its outcome IS known:
+// nothing reached Kora. Node's fetch (undici) reports it as "fetch failed"
+// with the socket error in `cause`, so walk the cause chain instead of
+// trusting the top-level message.
+function isRefusedConnection(error: unknown): boolean {
+  for (let current = error; current instanceof Error; current = current.cause) {
+    if (
+      current.message.toLowerCase().includes("econnrefused") ||
+      (current as { code?: unknown }).code === "ECONNREFUSED"
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // The request may have REACHED Kora even though no usable response came
 // back. Derived from the retryable set so a future transport class cannot be
 // retried-but-unflagged by list drift; the two exclusions are the cases where
@@ -434,7 +456,7 @@ function isAmbiguousTransportError(error: unknown): boolean {
   const message = error.message.toLowerCase();
   return (
     isRetryableSignAndSendError(error) &&
-    !message.includes("econnrefused") &&
+    !isRefusedConnection(error) &&
     !message.includes("blockhash not found")
   );
 }

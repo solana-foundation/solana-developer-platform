@@ -63,6 +63,30 @@ describe("isPreBroadcastRejection", () => {
     expect(isPreBroadcastRejection("custom program error: 0x1")).toBe(false);
     expect(isPreBroadcastRejection(null)).toBe(false);
   });
+
+  it("certifies a structurally pre-broadcast rejection whatever the code", () => {
+    // Admission/preflight throws in the budget wrapper prove nothing was
+    // submitted, but share PROVIDER_NOT_AVAILABLE with genuinely ambiguous
+    // outcomes — only the structural flag may certify them.
+    const admission = new FeePaymentError(
+      "Sponsorship is disabled for this scope",
+      "PROVIDER_NOT_AVAILABLE",
+      undefined,
+      { preBroadcast: true }
+    );
+    expect(isPreBroadcastRejection(admission)).toBe(true);
+  });
+
+  it("lets maybeBroadcast win over preBroadcast (fail closed)", () => {
+    // The combination is a contract violation; the constructor normalizes it
+    // away and the classifier resolves it to the safe side regardless.
+    const contradictory = new FeePaymentError("boom", "PROVIDER_NOT_AVAILABLE", undefined, {
+      maybeBroadcast: true,
+      preBroadcast: true,
+    });
+    expect(contradictory.preBroadcast).toBe(false);
+    expect(isPreBroadcastRejection(contradictory)).toBe(false);
+  });
 });
 
 describe("SUBMISSION_OUTCOME_UNKNOWN_MARKER", () => {

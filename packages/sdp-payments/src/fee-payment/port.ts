@@ -119,15 +119,25 @@ export class FeePaymentError extends Error {
    */
   public readonly maybeBroadcast: boolean;
 
+  /**
+   * True when the throw site can prove the transaction never left the
+   * process — the failure happened before any provider submission (admission,
+   * preflight, configuration) — so a plain terminal failure is safe whatever
+   * the code. The constructor enforces mutual exclusion: when maybeBroadcast
+   * is set, preBroadcast is forced false (fail closed).
+   */
+  public readonly preBroadcast: boolean;
+
   constructor(
     message: string,
     public readonly code: FeePaymentErrorCode,
     public readonly cause?: Error,
-    options?: { maybeBroadcast?: boolean }
+    options?: { maybeBroadcast?: boolean; preBroadcast?: boolean }
   ) {
     super(message);
     this.name = "FeePaymentError";
     this.maybeBroadcast = options?.maybeBroadcast ?? false;
+    this.preBroadcast = !this.maybeBroadcast && (options?.preBroadcast ?? false);
   }
 }
 
