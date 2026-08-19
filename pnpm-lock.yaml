@@ -328,6 +328,8 @@ importers:
         specifier: 6.0.3
         version: 6.0.3
 
+  apps/sdp-helius-gateway: {}
+
   apps/sdp-web:
     dependencies:
       '@base-ui/react':
