@@ -16,6 +16,7 @@ import {
   replaceProviderCredential,
   submitProviderCredential,
 } from "@/services/provider-credential-submission.service";
+import { probeRpcEndpoint } from "@/services/rpc-probe";
 import type { Env } from "@/types/env";
 
 export const PROVIDER_SETUP_FAMILIES = ["custody", "rpc", "compliance", "ramps"] as const;
@@ -138,31 +139,22 @@ export interface RpcConnectionCheckResult {
   upstreamBody: unknown;
 }
 
-/** Run the same read-only JSON-RPC probe used by POST /rpc/test. */
+/**
+ * Run the same read-only JSON-RPC probe used by POST /rpc/test.
+ *
+ * `custom` is the project's own stored endpoint, `projects.settings.rpcEndpoint`,
+ * which is validated as a URL when written and nothing more. That makes it as
+ * customer-supplied as a tenant connection, so it resolves under the same guard
+ * rather than through the ordinary fetch. Managed providers keep it: their
+ * endpoints come from deployment config and are private on purpose in local
+ * development and in the Surfpool suites.
+ */
 export async function checkResolvedRpcTargetConnection(
   input: RpcConnectionCheckInput
 ): Promise<RpcConnectionCheckResult> {
-  const startedAt = Date.now();
-  const upstream = await fetch(input.target.endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...input.target.headers,
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: "rpc-connectivity-test",
-      method: "getVersion",
-      params: [],
-    }),
+  return probeRpcEndpoint(input.target, {
+    enforcePublicEgress: input.target.providerId === "custom",
   });
-
-  const rawBody = await upstream.text();
-  return {
-    elapsedMs: Date.now() - startedAt,
-    upstream,
-    upstreamBody: rawBody ? tryParseJson(rawBody) : null,
-  };
 }
 
 export interface ProviderConfigurationCheckInput {
@@ -287,12 +279,4 @@ export function getProviderSetupDefinition<
   const Provider extends keyof ProviderSetupRegistry[Family],
 >(family: Family, provider: Provider): ProviderSetupRegistry[Family][Provider] {
   return PROVIDER_SETUP_REGISTRY[family][provider];
-}
-
-function tryParseJson(value: string): unknown {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return value;
-  }
 }
