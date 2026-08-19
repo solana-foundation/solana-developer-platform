@@ -13,6 +13,48 @@ const OTHER_PROJECT_ID = "prj_payments_repo_test_other";
 const TEST_WALLET_ID = "wallet_payments_repo_test";
 const CANCELABLE = ["pending", "awaiting_payment"] as const;
 
+/** Wipes payment_transfers and re-upserts the test organization for filter suites. */
+async function resetPaymentTransfers(): Promise<void> {
+  const db = getDb(env);
+  await db.prepare("DELETE FROM payment_transfers").run();
+  await db
+    .prepare(
+      "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
+    )
+    .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
+    .run();
+}
+
+function transferInput(overrides: { suffix: string; token?: string; walletId?: string }) {
+  const { suffix, token = "SOL", walletId = TEST_WALLET_ID } = overrides;
+  return {
+    organizationId: TEST_ORG.id,
+    projectId: null,
+    walletId,
+    counterpartyId: null,
+    sourceAddress: `Source${suffix}`,
+    destinationAddress: `Dest${suffix}`,
+    token,
+    amount: "1",
+    memo: null,
+    type: "transfer" as const,
+    direction: "outbound" as const,
+    status: "processing" as const,
+    provider: null,
+    providerReference: null,
+    deliveryMode: null,
+    fiatCurrency: null,
+    fiatAmount: null,
+    providerData: {},
+    serializedTx: null,
+    signature: null,
+    slot: null,
+    initiatedByKeyId: null,
+    idempotencyKey: `fixture-${suffix}`,
+    idempotencyFingerprint: `fp-${suffix}`,
+  };
+}
+
 describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
   let repo: PaymentsRepository;
 
@@ -410,53 +452,15 @@ describe("PaymentsRepository.listTransfers token filter (postgres)", () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
   });
 
-  beforeEach(async () => {
-    const db = getDb(env);
-    await db.prepare("DELETE FROM payment_transfers").run();
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
-      )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-      .run();
-  });
-
-  function transfer(token: string, suffix: string) {
-    return {
-      organizationId: TEST_ORG.id,
-      projectId: null,
-      walletId: TEST_WALLET_ID,
-      counterpartyId: null,
-      sourceAddress: `Source${suffix}`,
-      destinationAddress: `Dest${suffix}`,
-      token,
-      amount: "1",
-      memo: null,
-      type: "transfer" as const,
-      direction: "outbound" as const,
-      status: "processing" as const,
-      provider: null,
-      providerReference: null,
-      deliveryMode: null,
-      fiatCurrency: null,
-      fiatAmount: null,
-      providerData: {},
-      serializedTx: null,
-      signature: null,
-      slot: null,
-      initiatedByKeyId: null,
-      idempotencyKey: `token-filter-${suffix}`,
-      idempotencyFingerprint: `fp-${suffix}`,
-    };
-  }
+  beforeEach(resetPaymentTransfers);
 
   async function seedMixedForms() {
     // Exactly the shape the local ledger holds: the same asset written as a bare
     // symbol on some rows and as its mint on others, all with type = transfer.
     const repo = createPostgresPaymentsRepository(getDb(env));
-    await repo.createTransfer(transfer("SOL", "sym-1"));
-    await repo.createTransfer(transfer("SOL", "sym-2"));
-    await repo.createTransfer(transfer(SOL_MINT_ADDRESS, "mint-1"));
+    await repo.createTransfer(transferInput({ token: "SOL", suffix: "sym-1" }));
+    await repo.createTransfer(transferInput({ token: "SOL", suffix: "sym-2" }));
+    await repo.createTransfer(transferInput({ token: SOL_MINT_ADDRESS, suffix: "mint-1" }));
     return repo;
   }
 
@@ -476,7 +480,7 @@ describe("PaymentsRepository.listTransfers token filter (postgres)", () => {
 
   it("does not pull in a different asset that happens to share the catalogue", async () => {
     const repo = await seedMixedForms();
-    await repo.createTransfer(transfer("USDC", "usdc-1"));
+    await repo.createTransfer(transferInput({ token: "USDC", suffix: "usdc-1" }));
 
     const bySymbol = await repo.listTransfers({ ...listArgs, token: "SOL" });
 
@@ -501,5 +505,59 @@ describe("PaymentsRepository.listTransfers token filter (postgres)", () => {
     const none = await repo.listTransfers({ ...listArgs, token: "JUP" });
 
     expect(none.rows).toHaveLength(0);
+  });
+});
+
+describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
+  const WALLET_A = "wallet_allowlist_a";
+  const WALLET_B = "wallet_allowlist_b";
+
+  beforeAll(async () => {
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+  });
+
+  afterAll(async () => {
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+  });
+
+  beforeEach(resetPaymentTransfers);
+
+  async function seedTwoWallets() {
+    const repo = createPostgresPaymentsRepository(getDb(env));
+    await repo.createTransfer(transferInput({ walletId: WALLET_A, suffix: "a-1" }));
+    await repo.createTransfer(transferInput({ walletId: WALLET_A, suffix: "a-2" }));
+    await repo.createTransfer(transferInput({ walletId: WALLET_B, suffix: "b-1" }));
+    return repo;
+  }
+
+  const listArgs = { organizationId: TEST_ORG.id, projectId: null, limit: 50, offset: 0 };
+
+  it("matches nothing for an empty allowlist instead of dropping the filter", async () => {
+    const repo = await seedTwoWallets();
+
+    // walletIds carries an API key's authorized-wallet allowlist. An empty
+    // allowlist means "authorized for no wallet"; silently dropping the
+    // filter would hand that key every transfer in scope.
+    const denied = await repo.listTransfers({ ...listArgs, walletIds: [] });
+
+    expect(denied.rows).toHaveLength(0);
+    expect(denied.total).toBe(0);
+  });
+
+  it("scopes a non-empty allowlist to exactly its wallets", async () => {
+    const repo = await seedTwoWallets();
+
+    const scoped = await repo.listTransfers({ ...listArgs, walletIds: [WALLET_A] });
+
+    expect(scoped.rows).toHaveLength(2);
+    expect(scoped.rows.every((row) => row.wallet_id === WALLET_A)).toBe(true);
+  });
+
+  it("keeps an absent allowlist unfiltered", async () => {
+    const repo = await seedTwoWallets();
+
+    const all = await repo.listTransfers({ ...listArgs, walletIds: undefined });
+
+    expect(all.rows).toHaveLength(3);
   });
 });

@@ -253,7 +253,7 @@ export function registerProjectPaths(registry: OpenAPIRegistry) {
         description: "Project API key created",
         content: jsonContent(apiKeyCreateResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
     },
   });
 }

@@ -18,22 +18,19 @@ import {
   generateWalletControlProfileId,
   generateWalletControlProfileRevisionId,
 } from "@/db/repositories/policy.repository";
-import { getAuth } from "@/lib/auth";
-import { AppError, badRequest, walletNotFound } from "@/lib/errors";
+import { AppError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import {
   attachTokenSymbolsToBalances,
   attachUsdValuesToBalances,
 } from "@/services/helius-das.service";
 import { type AppContext, getPolicyRepository } from "../context";
-import { type updateWalletPolicySchema, walletIdParamsSchema } from "../schemas";
+import type { updateWalletPolicySchema } from "../schemas";
 import * as tokenAccounts from "../token-accounts";
 import { resolveIssuedTokenLabelsByMint } from "../token-labels";
-import { resolveWalletFromParams } from "./transfers";
+import { resolvePolicyWalletFromParams } from "../wallets";
 
 function mapWalletControlProfileSummary(
   active: ActiveWalletControlProfileResult
@@ -228,25 +225,7 @@ async function activateWalletControlProfileRevisionInTransaction({
 }
 
 export async function getWalletBalances(c: AppContext) {
-  const params = walletIdParamsSchema.safeParse(c.req.param());
-  if (!params.success) {
-    throw badRequest("Invalid wallet ID");
-  }
-
-  const auth = getAuth(c);
-  const wallet = await new CustodyRuntimeTargets(
-    getDb(c.env),
-    c.env,
-    new Map()
-  ).findOperationalWallet({
-    organizationId: auth.organizationId,
-    projectId: auth.projectId ?? undefined,
-    walletId: params.data.walletId,
-  });
-  if (!wallet) {
-    throw walletNotFound();
-  }
-  assertApiKeyWalletAccess(auth, wallet.walletId, ["wallets:read"]);
+  const { wallet } = await resolvePolicyWalletFromParams(c, ["wallets:read"]);
 
   const rpc = solanaRpc.createRpc(c.env);
   const tokenLabelsByMint = await resolveIssuedTokenLabelsByMint(c);
@@ -329,7 +308,7 @@ function walletPolicyResponse(
 }
 
 export async function getWalletPolicy(c: AppContext) {
-  const { auth, wallet } = await resolveWalletFromParams(c, ["wallets:read"]);
+  const { auth, wallet } = await resolvePolicyWalletFromParams(c, ["wallets:read"]);
 
   const controlProfile = await getWalletControlProfileSummary(c, wallet.id);
   const audit = await getWalletPolicyAudit(c, {
@@ -342,7 +321,7 @@ export async function getWalletPolicy(c: AppContext) {
 }
 
 export async function updateWalletPolicy(c: ValidatedBodyContext<typeof updateWalletPolicySchema>) {
-  const { auth, wallet } = await resolveWalletFromParams(c, ["wallets:write"]);
+  const { auth, wallet } = await resolvePolicyWalletFromParams(c, ["wallets:write"]);
 
   const body = c.req.valid("json");
 
