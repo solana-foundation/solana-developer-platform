@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.64.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.63.0...v0.64.0) (2026-08-19)
+
+### Features
+
+* **web:** add Earn vault deposit and vault position BFF routes ([#1395](https://github.com/solana-foundation/solana-developer-platform/pull/1395)) ([f9ee6dc](https://github.com/solana-foundation/solana-developer-platform/commit/f9ee6dcc827ea0ef880c1909a4810d6ab3ad9517))
+* **web:** let dashboard routes forward opt-in upstream headers ([#1394](https://github.com/solana-foundation/solana-developer-platform/pull/1394)) ([b81c9f1](https://github.com/solana-foundation/solana-developer-platform/commit/b81c9f1b14ca2cf722da60d77d0bf7c0b5476307))
+
+### Bug Fixes
+
+* **earn:** fail closed on malformed Ground responses and blend APY exactly ([#1392](https://github.com/solana-foundation/solana-developer-platform/pull/1392)) ([68c5628](https://github.com/solana-foundation/solana-developer-platform/commit/68c56287c470178d054073acb59c42ab14cb234b))
+
+### Refactors
+
+* **earn:** share program envelopes and payout capability via @sdp/types ([#1391](https://github.com/solana-foundation/solana-developer-platform/pull/1391)) ([456da99](https://github.com/solana-foundation/solana-developer-platform/commit/456da99cce0af19c8f6447cb5004f6116c642381))
+
+### Maintenance
+
+* deploy sdp-web to prod via Vercel git integration on release merges ([#1390](https://github.com/solana-foundation/solana-developer-platform/pull/1390)) ([4286ce3](https://github.com/solana-foundation/solana-developer-platform/commit/4286ce3be9ca6540f17280c6905a098a2857ff31))
+* **earn:** remove the demo seed and its catalogue delist exemption ([#1393](https://github.com/solana-foundation/solana-developer-platform/pull/1393)) ([61ac1b5](https://github.com/solana-foundation/solana-developer-platform/commit/61ac1b58fc69ba1f16c63f3dc3e57c953ffc5276))
+
 ## [0.63.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.62.0...v0.63.0) (2026-08-18)
 
 ### Features

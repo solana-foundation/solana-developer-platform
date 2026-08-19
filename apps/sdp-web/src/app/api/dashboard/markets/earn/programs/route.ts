@@ -11,10 +11,9 @@ export async function GET(request: Request) {
 
 /**
  * Explicit create (PRO-1670). The API requires exactly one of a body
- * `requestId` or an `Idempotency-Key` header — the dashboard sends the body
- * form, which is the only one that can reach the API at all: proxyToSdpApi
- * forwards `{ method, body }` and builds its own headers, so an inbound
- * `Idempotency-Key` is dropped rather than relayed.
+ * `requestId` or an `Idempotency-Key` header — this legacy program client sends
+ * the body form. The route intentionally supplies no upstream headers, so an
+ * inbound `Idempotency-Key` is still dropped rather than implicitly relayed.
  */
 export async function POST(request: Request) {
   return proxyToSdpApi({
