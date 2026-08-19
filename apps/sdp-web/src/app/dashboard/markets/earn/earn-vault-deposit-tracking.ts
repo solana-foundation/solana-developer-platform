@@ -25,8 +25,11 @@
  * ledger list instead; see `EarnWithdrawalLedgerRecovery`).
  *
  * Every read fails soft. Storage throws outright in some privacy modes, and a
- * deposit must never be blocked because a browser refused to remember it — the
- * fallback is exactly today's in-memory behaviour, not an error.
+ * deposit must never be blocked because a browser refused to remember it — but
+ * failing soft must not mean failing OPEN. A refusing store falls back to the
+ * module-scope map below, which keeps the key stable for as long as the page
+ * lives; what is lost there is durability across a reload, never the answer to
+ * "is this the same request".
  */
 
 const IDEMPOTENCY_STORE_KEY = "sdp:earn:vault-deposit:idempotency:v1";
@@ -70,22 +73,49 @@ function storage(): Storage | null {
   }
 }
 
-function readEntries(storeKey: string, ttlMs: number): StoredEntry[] {
-  const store = storage();
-  if (!store) return [];
-  let raw: string | null;
-  try {
-    raw = store.getItem(storeKey);
-  } catch {
-    return [];
-  }
-  if (!raw) return [];
+/**
+ * The in-memory tier, authoritative only when the browser refuses to store.
+ *
+ * A dead store must cost DURABILITY, never correctness. Re-deriving nothing and
+ * minting a fresh key on each call would turn an ambiguous retry into a second
+ * on-chain deposit — the precise failure this module exists to prevent — so the
+ * degraded path still has to answer "is this the same request" for as long as
+ * the page lives. Written on every save so it is warm the moment storage stops
+ * answering mid-session.
+ */
+const memoryEntries = new Map<string, readonly StoredEntry[]>();
 
-  let parsed: unknown;
+/**
+ * `usable: false` means this browser will not hand anything back at all —
+ * distinct from a usable store that simply holds nothing under this key. Only
+ * the first falls through to memory: a store that answers is the authority, so
+ * clearing it genuinely clears, rather than being undone by a warm shadow copy.
+ */
+function readStoredText(
+  storeKey: string
+): { usable: true; raw: string | null } | { usable: false } {
+  const store = storage();
+  if (!store) return { usable: false };
   try {
-    parsed = JSON.parse(raw);
+    return { usable: true, raw: store.getItem(storeKey) };
   } catch {
+    return { usable: false };
+  }
+}
+
+function readEntries(storeKey: string, ttlMs: number): StoredEntry[] {
+  const stored = readStoredText(storeKey);
+  let parsed: unknown;
+  if (!stored.usable) {
+    parsed = memoryEntries.get(storeKey) ?? [];
+  } else if (stored.raw === null) {
     return [];
+  } else {
+    try {
+      parsed = JSON.parse(stored.raw);
+    } catch {
+      return [];
+    }
   }
   if (!Array.isArray(parsed)) return [];
 
@@ -109,14 +139,18 @@ function readEntries(storeKey: string, ttlMs: number): StoredEntry[] {
 }
 
 function writeEntries(storeKey: string, entries: readonly StoredEntry[]): void {
+  const bounded = entries.slice(-MAX_STORED_ENTRIES);
+  // Memory first and unconditionally: it is the tier that cannot fail, and it
+  // has to already hold the value if the store refuses the very next write.
+  memoryEntries.set(storeKey, bounded);
+
   const store = storage();
   if (!store) return;
   try {
-    store.setItem(storeKey, JSON.stringify(entries.slice(-MAX_STORED_ENTRIES)));
+    store.setItem(storeKey, JSON.stringify(bounded));
   } catch {
-    // Quota or a refusing store. The caller already holds the value it wanted
-    // remembered; losing the durability is strictly better than losing the
-    // deposit.
+    // Quota or a refusing store. Losing the durability is strictly better than
+    // losing the deposit, and `memoryEntries` still answers for this page.
   }
 }
 

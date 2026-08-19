@@ -95,19 +95,44 @@ describe("vault deposit idempotency keys", () => {
     expect(claimVaultDepositIdempotencyKey(fingerprint)).not.toBe(stale);
   });
 
-  it("mints rather than throwing when the browser refuses to store anything", () => {
+  it("stays stable in-memory when the browser refuses to store anything", () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("QuotaExceededError");
     });
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new Error("SecurityError");
     });
+    // A distinct amount per dead-store test: the in-memory tier is module
+    // scope by design, so it outlives `sessionStorage.clear()` between tests.
+    const fingerprint = vaultDepositRequestFingerprint({ ...request, amount: "11" });
 
-    // No durability, but a deposit must never be blocked because a browser
-    // refused to remember it — this is exactly the old in-memory behaviour.
-    expect(claimVaultDepositIdempotencyKey(vaultDepositRequestFingerprint(request))).toBe(
-      "00000000-0000-4000-8000-000000000001"
-    );
+    const first = claimVaultDepositIdempotencyKey(fingerprint);
+
+    // A refusing store costs DURABILITY, never correctness. Minting again here
+    // would make an ambiguous retry a second on-chain deposit — failing soft
+    // must not mean failing open.
+    expect(first).toBe("00000000-0000-4000-8000-000000000001");
+    expect(claimVaultDepositIdempotencyKey(fingerprint)).toBe(first);
+    expect(
+      claimVaultDepositIdempotencyKey(vaultDepositRequestFingerprint({ ...request, amount: "12" }))
+    ).not.toBe(first);
+    expect(crypto.randomUUID).toHaveBeenCalledTimes(2);
+  });
+
+  it("still retires an in-memory key once the API has answered", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("QuotaExceededError");
+    });
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("SecurityError");
+    });
+    const fingerprint = vaultDepositRequestFingerprint({ ...request, amount: "13" });
+    const first = claimVaultDepositIdempotencyKey(fingerprint);
+
+    releaseVaultDepositIdempotencyKey(fingerprint);
+
+    expect(first).toBe("00000000-0000-4000-8000-000000000001");
+    expect(claimVaultDepositIdempotencyKey(fingerprint)).not.toBe(first);
   });
 });
 

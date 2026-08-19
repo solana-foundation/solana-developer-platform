@@ -1,6 +1,6 @@
 import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
 import { isDecimalString } from "@sdp/solana/amount";
-import type { EarnVaultDepositRecord, SdpEnvironment } from "@sdp/types";
+import type { EarnVaultDepositRecord, EarnVaultDepositResponse, SdpEnvironment } from "@sdp/types";
 import {
   type EarnProviderId,
   earnDepositStyle,
@@ -614,7 +614,8 @@ export async function getEarnVaultDeposit(c: AppContext) {
     createdAt: movement.created_at,
     confirmedAt: movement.confirmed_at,
   };
-  return success(c, { deposit });
+  const response: EarnVaultDepositResponse = { deposit };
+  return success(c, response);
 }
 
 /**

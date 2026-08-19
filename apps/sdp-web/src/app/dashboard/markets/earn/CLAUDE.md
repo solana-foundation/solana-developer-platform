@@ -148,8 +148,11 @@ the body `requestId` form.
     transaction in flight. The cost is that a deposit made in one tab is not
     watched in another, which is acceptable only while there is no movement-LIST
     endpoint to recover from — the custodial withdrawal path recovers from its
-    ledger list instead (`EarnWithdrawalLedgerRecovery`). Every read fails soft;
-    a browser refusing to store must never block a deposit.
+    ledger list instead (`EarnWithdrawalLedgerRecovery`). Every read fails soft —
+    but soft is not OPEN: a store that refuses every operation falls back to a
+    module-scope map, so a dead store costs DURABILITY across a reload and never
+    the answer to "is this the same request". Minting per call there would make
+    an ambiguous retry a second on-chain deposit.
 - `earn-decimal.ts` — the strict decimal parser: digits required on BOTH sides
   of the point, optional no-trim and length caps, plus the canonical form. Scale
   and ordering are NOT reimplemented — `decimalScale` and `compareDecimalAmounts`
