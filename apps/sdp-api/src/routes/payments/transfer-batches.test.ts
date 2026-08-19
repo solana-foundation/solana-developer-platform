@@ -1976,7 +1976,7 @@ describe("payment transfer batches", () => {
     }
   });
 
-  it("records a submitted chunk's signature even when both bookkeeping writes are lost", async () => {
+  it("parks a submitted chunk when both bookkeeping writes are lost", async () => {
     const createRepository = paymentsRepositoryPostgres.createPostgresPaymentsRepository;
     const batchesSpy = vi.spyOn(paymentsRepositoryPostgres, "createPostgresPaymentsRepository");
     let signaturePersistFailures = 0;
@@ -2063,23 +2063,29 @@ describe("payment transfer batches", () => {
 
       // A broadcast chunk is never stranded as an unsigned row that the
       // pending-transfers job would time out into a false `failed` for every
-      // recipient: the recorder retries once and the settle carries the
-      // signature. The row may already have settled from that signature, so
-      // assert what this test owns: it landed and the chunk is not failed.
+      // recipient. Both writes were lost, so it parks: still `processing`
+      // after the job ran, carrying the signature its column refused.
       const transferRow = await getDb(env)
-        .prepare("SELECT status, signature FROM payment_transfers WHERE id = ?")
+        .prepare("SELECT status, signature, provider_data FROM payment_transfers WHERE id = ?")
         .bind(linkedRecipient?.transfer_id)
-        .first<{ status: string; signature: string | null }>();
-      expect(transferRow?.signature).toBe(FIRST_SIGNATURE);
-      expect(["processing", "confirmed", "finalized"]).toContain(transferRow?.status);
+        .first<{ status: string; signature: string | null; provider_data: unknown }>();
+      expect(transferRow?.status).toBe("processing");
+      const parkedProviderData =
+        typeof transferRow?.provider_data === "string"
+          ? JSON.parse(transferRow.provider_data)
+          : transferRow?.provider_data;
+      expect(parkedProviderData).toMatchObject({
+        submission_outcome: "unknown",
+        submitted_signature: FIRST_SIGNATURE,
+      });
 
       const settledRecipient = await getDb(env)
         .prepare("SELECT status, transfer_id FROM payment_transfer_recipients WHERE batch_id = ?")
         .bind(body.data.batch.id)
         .first<{ status: string; transfer_id: string | null }>();
-      // The chunk is on chain with its signature, so neither the recipient nor
-      // the batch is cascaded to `failed` by a lost bookkeeping write.
-      expect(["processing", "confirmed", "finalized"]).toContain(settledRecipient?.status);
+      // The chunk may be on chain, so neither the recipient nor the batch is
+      // cascaded to `failed` by a lost bookkeeping write.
+      expect(settledRecipient?.status).toBe("processing");
       expect(settledRecipient?.transfer_id).toBe(linkedRecipient?.transfer_id);
 
       const batchRow = await getDb(env)

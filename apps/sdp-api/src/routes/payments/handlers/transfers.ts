@@ -472,8 +472,8 @@ async function updateTransferRecord(
  * happens, so a caller that never reads `submittedRow` still gets both
  * attempts. If both fail the durable row is still unsigned, which the
  * pending-transfers job would time out into a false `failed`, so
- * `onSignatureLost` runs last for the caller to close that row another way.
- * Used by the transfer and transfer-batch submit paths, and by unit tests.
+ * `onSignatureLost` runs last for the caller to close that row another way;
+ * like the writes, it never throws out of here.
  */
 export function createSubmissionRecorder(
   transfer: TransferRow,
@@ -503,8 +503,22 @@ export function createSubmissionRecorder(
       if (!row) {
         await persist(sig);
       }
-      if (!row) {
-        await onSignatureLost?.(sig);
+      if (!row && onSignatureLost) {
+        try {
+          await onSignatureLost(sig);
+        } catch (error) {
+          // Same contract as the writes above: this runs after a broadcast, so
+          // a throw here would surface as a 500 and invite the client to send
+          // the payment again.
+          getLogger().error(
+            {
+              transfer_id: transfer.id,
+              signature: sig,
+              error: error instanceof Error ? error.message : String(error),
+            },
+            "failed to close a lost submitted transfer signature"
+          );
+        }
       }
     },
     submittedRow: async (): Promise<TransferRow | null> => {
@@ -524,7 +538,7 @@ function createTransferSubmissionRecorder(c: AppContext, transfer: TransferRow) 
     // reading that failure sends the payment a second time. Park it instead,
     // with the signature in `provider_data`: the column refused it, JSON still
     // takes it, and the operator reconciles from there.
-    (signature) => markTransferOutcomeUnknown(c, transfer.id, { submitted_signature: signature })
+    (signature) => markTransferOutcomeUnknown(c, transfer.id, signature)
   );
 }
 
@@ -537,10 +551,10 @@ function createTransferSubmissionRecorder(c: AppContext, transfer: TransferRow) 
 function markTransferOutcomeUnknown(
   c: AppContext,
   transferId: string,
-  providerData?: Record<string, unknown>
+  submittedSignature?: string
 ): Promise<void> {
   return persistOutcomeUnknownMarker(
-    () => updateTransferRecord(c, transferId, submissionOutcomeUnknownPatch(providerData)),
+    () => updateTransferRecord(c, transferId, submissionOutcomeUnknownPatch(submittedSignature)),
     transferId
   );
 }

@@ -186,9 +186,13 @@ WHERE status = 'processing'
 ORDER BY created_at;
 ```
 
+Keep the `status = 'processing'` filter: a row whose outcome later became known keeps the marker
+key (`provider_data` is only ever merged into), so without it the list fills with settled transfers.
+
 A signatureless parked row waits indefinitely, so resolve parked rows promptly. Reconcile every one
 before a planned rollback to a pre-fence image. If the row carries
-`provider_data ->> 'submitted_signature'`, start from that signature; otherwise look up the source
+`provider_data ->> 'submitted_signature'`, it was broadcast and only the bookkeeping write was lost
+— start from that signature. Otherwise look up the source
 address on chain around `created_at` for a matching transaction. Then:
 
 ```sql
@@ -219,8 +223,8 @@ again.
 The query above already spans every wallet transfer type, so it also lists parked **batch chunks** —
 resolve such a chunk exactly as a single transfer and its recipients and parent batch follow on the
 next `trackPendingTransfers` run — and parked **recurring collections**, which need a second step.
-A chunk that was broadcast but could not record its signature carries it in
-`provider_data ->> 'submitted_signature'`; start there instead of searching the chain by address.
+That applies to transfers and chunks alike: whichever could not record its signature carries it in
+`provider_data ->> 'submitted_signature'`.
 
 #### Parked recurring collections
 

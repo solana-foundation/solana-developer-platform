@@ -271,12 +271,14 @@ export async function executeChunk(params: {
     });
   };
 
-  // A chunk that may already be on chain is parked, never failed: `providerData`
-  // carries anything the operator needs beyond the marker itself.
-  const parkChunk = (providerData?: Record<string, unknown>) =>
+  // A chunk that may already be on chain is parked, never failed.
+  const parkChunk = (submittedSignature?: string) =>
     persistOutcomeUnknownMarker(
       () =>
-        settle({ ...submissionOutcomeUnknownPatch(providerData), recipientStatus: "processing" }),
+        settle({
+          ...submissionOutcomeUnknownPatch(submittedSignature),
+          recipientStatus: "processing",
+        }),
       transfer.id
     );
 
@@ -315,33 +317,11 @@ export async function executeChunk(params: {
         serializedTx,
         error: null,
       }),
-    // Both writes lost after the broadcast. One more attempt through `settle`:
-    // a signed `processing` row settles itself from chain on the next
-    // pending-transfers run, while an unsigned one is timed out into a false
-    // `failed` for every recipient. If even that is refused — a duplicate
-    // signature, say — park the chunk with the signature in `provider_data`,
-    // the only place left that can still hold it.
-    async (sig) => {
-      try {
-        await settle({
-          status: "processing",
-          recipientStatus: "processing",
-          signature: sig,
-          error: null,
-        });
-      } catch (persistError) {
-        getLogger().warn(
-          {
-            transfer_id: transfer.id,
-            signature: sig,
-            reason: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
-            error: persistError instanceof Error ? persistError.message : String(persistError),
-          },
-          "Batch chunk signature could not be recorded; parking the chunk with the signature"
-        );
-        await parkChunk({ submitted_signature: sig });
-      }
-    }
+    // Both writes lost after the broadcast. A third attempt would be the same
+    // write through a longer path, so park the chunk instead, with the
+    // signature in `provider_data` — the column refused it, JSON still takes
+    // it, and the operator reconciles from there.
+    (sig) => parkChunk(sig)
   );
   let signature: Awaited<ReturnType<typeof params.feePayment.signAndSend>>;
   try {

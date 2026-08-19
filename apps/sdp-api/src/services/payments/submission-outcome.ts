@@ -70,26 +70,28 @@ export function isPreBroadcastRejection(error: unknown): boolean {
 }
 
 /**
+ * The write that parks a row: `processing`, the reconciliation notice and the
+ * durable marker, in one place so a new consumer cannot park a row half-way.
+ * A signature whose own column refused it rides along in `provider_data`, which
+ * is where the operator is told to look for it.
+ */
+export function submissionOutcomeUnknownPatch(submittedSignature?: string) {
+  return {
+    status: "processing" as const,
+    error: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
+    providerData: submittedSignature
+      ? { ...SUBMISSION_OUTCOME_UNKNOWN_MARKER, submitted_signature: submittedSignature }
+      : { ...SUBMISSION_OUTCOME_UNKNOWN_MARKER },
+  };
+}
+
+/**
  * Persist the manual-reconciliation marker without ever throwing: a DB blip
  * here is likely correlated with the provider trouble that made the outcome
  * ambiguous, and replacing the caller's outcome-unknown 409 with a raw 500
  * invites the exact double-send retry the marker exists to prevent. Retries
  * once; an unmarked row is loudly logged for operator reconciliation.
  */
-/**
- * The write that parks a row: `processing`, the reconciliation notice and the
- * durable marker, in one place so a new consumer cannot park a row half-way.
- * `providerData` merges into the marker — anything the operator should find on
- * the row, such as a signature its own column refused.
- */
-export function submissionOutcomeUnknownPatch(providerData?: Record<string, unknown>) {
-  return {
-    status: "processing" as const,
-    error: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
-    providerData: { ...SUBMISSION_OUTCOME_UNKNOWN_MARKER, ...providerData },
-  };
-}
-
 export async function persistOutcomeUnknownMarker(
   persistMarker: () => Promise<unknown>,
   transferId: string
