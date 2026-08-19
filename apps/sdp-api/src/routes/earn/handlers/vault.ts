@@ -194,12 +194,12 @@ export async function extractEarnVaultDepositPolicyCandidate(
   // ENVIRONMENT CAPABILITY, before anything else and before any lookup.
   //
   // SDP can move money INTO a vault and not back out: there is no vault
-  // withdraw route, and the Active tab does not surface vault positions. Until
-  // both land, opening a position with real funds is a one-way door, so
-  // production is refused server-side. Entitlement cannot express this — it is
-  // org-scoped, not environment-scoped — which is exactly why an entitled org
-  // would otherwise reach mainnet. The dashboard hides the affordance from the
-  // same constant, so the button and the route agree by construction.
+  // withdraw route. The dashboard surfaces the durable position but disables
+  // its exit action, so production remains refused server-side. Entitlement
+  // cannot express this — it is org-scoped, not environment-scoped — which is
+  // exactly why an entitled org would otherwise reach mainnet. The dashboard
+  // hides the affordance from the same constant, so the button and the route
+  // agree by construction.
   if (!isVaultDirectDepositEnabled(environment)) {
     throw new AppError(
       "FORBIDDEN",

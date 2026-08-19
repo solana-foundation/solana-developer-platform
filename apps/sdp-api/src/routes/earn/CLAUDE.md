@@ -14,10 +14,9 @@ record, not state: a route may resolve which provider wallet a program is and
 then read all of its money live — what it may never do is mix a persisted
 balance with a live one.
 
-- `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Written only
-  by the hourly sync cron, the 5-minute metrics refresh
-  (`cron/earn-metrics-refresh.ts`, figures only — it can never insert a row),
-  and the local dev seed.
+- `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Rows are
+  admitted only by the hourly sync cron; the 5-minute metrics refresh
+  (`cron/earn-metrics-refresh.ts`) updates figures only and can never insert.
   - **FOUR visibility filters, all server-side, all in `handlers/strategies.ts`.**
     `EARN_PROVIDER_SURFACING` (@sdp/types) hides every row of a provider SDP does
     not currently OFFER — Ground today, so the shipped catalogue is Kamino only;
@@ -298,8 +297,8 @@ moves only when SDP builds an instruction and signs it with one of the
 organization's own custody wallets.
 
 - `POST /vault-deposits` — **build + simulate + sign + record + broadcast**, in
-  that order. Body
-  `{strategyId, custodyWalletId, amount, requestId, minSharesOut?}`.
+  that order. Body `{strategyId, custodyWalletId, amount, minSharesOut?}` and a
+  required `Idempotency-Key` header; body `requestId` is rejected.
   Registered as
   `requirePermissions("earn:write", "wallets:read")` → `policyGate` → handler.
   The caller names a CATALOGUE row, never a raw vault address, so the sync's
@@ -316,16 +315,17 @@ organization's own custody wallets.
     re-opens that live family after the earlier vocabulary trim.
   - **Environment capability first.** `isVaultDirectDepositEnabled(environment)`
     (`@sdp/types/provider-access`) fail-closes PRODUCTION while SDP has no
-    vault-withdraw route and no Active-tab surface. Entitlement cannot express
-    this — it is org-scoped, not environment-scoped. The dashboard visibly
-    disables the affordance from the same constant so the opportunity remains
-    discoverable without advertising an action the API will refuse.
+    vault-withdraw route. The dashboard surfaces the durable position but
+    visibly disables its exit action. Entitlement cannot express this — it is
+    org-scoped, not environment-scoped. The dashboard disables the deposit
+    affordance from the same constant so the opportunity remains discoverable
+    without advertising an action the API will refuse.
   - `minSharesOut` is **required in production** and optional in sandbox: the
     pinned Kamino SDK picks the LEGACY deposit instruction when it is absent, so
     there is no implicit floor at all.
-  - `requestId` is **REQUIRED**, unlike the custodial create. There is no
-    provider-side dedupe to fall back on: the chain will happily accept the same
-    transfer twice. It is stored with a canonical
+  - `Idempotency-Key` is **REQUIRED** and body `requestId` is rejected. There is
+    no provider-side dedupe to fall back on: the chain will happily accept the
+    same transfer twice. The header value is stored with a canonical
     `buildEarnVaultDepositFingerprint`, and the replay is resolved BEFORE the
     position is claimed — reusing a key with a different intent is a **409**, not
     a silent replay, and writes nothing.
@@ -385,10 +385,11 @@ recorded signature, confirms landed transactions, rebroadcasts the recorded
 signed bytes while the blockhash remains valid, and marks an expired, unlanded
 movement failed. Never rebuild a transaction during recovery.
 
-**Not built yet:** the withdraw counterpart and the Active-tab snapshot. Until
-both land, a vault position can be entered and not exited through SDP — which is
-why `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` fail-closes production rather than
-relying on anyone remembering ADR 0002.
+**Not built yet:** the withdraw counterpart. The dashboard now hydrates the
+durable vault-position record and shows it with a disabled exit action. Until
+the withdrawal path lands, a vault position can be entered and not exited
+through SDP — which is why `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` fail-closes
+production rather than relying on anyone remembering ADR 0002.
 
 **Per-cluster RPC.** `resolveClusterRpcUrl` reads `SOLANA_DEVNET_RPC_URL` /
 `SOLANA_MAINNET_RPC_URL`, falling back to the canonical default only when its
@@ -459,11 +460,10 @@ kvault program id also resolves on devnet with no accounts under it.
   `packages/sdp-earn/README.md` → "Withdrawals unwind in reverse").
 - Provider ids from DB rows are open strings — always dispatch via
   `resolveEarnProviderClient`.
-- Catalogue writes happen ONLY via the sync cron
-  (`src/cron/earn-catalogue-sync.ts` — the production path), the metrics refresh
-  (`src/cron/earn-metrics-refresh.ts` — every 5 minutes, figures only, UPDATE-only
-  so it can never admit a row), and the dev seed (`db:seed:earn` — local only,
-  refuses non-local databases). Cadence, failure behaviour, and which to use:
+- Catalogue rows are admitted ONLY via the sync cron
+  (`src/cron/earn-catalogue-sync.ts`). The metrics refresh
+  (`src/cron/earn-metrics-refresh.ts`) runs every 5 minutes and is UPDATE-only,
+  so it can never admit a row. Cadence and failure behaviour:
   `packages/sdp-earn/README.md` → "Catalogue data".
 - Whole-stack local setup (ports, flags, Ground key, entitlement, troubleshooting):
   `packages/sdp-earn/CLAUDE.md` → "Local development".

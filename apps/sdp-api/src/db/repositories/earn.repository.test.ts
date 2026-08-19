@@ -20,7 +20,6 @@ import type {
   ListEarnProviderWalletsResult,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
-import { EARN_SEED_REFERENCE_PREFIX } from "./earn.repository";
 import { createPostgresEarnRepository } from "./earn.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_earn_repo_test";
@@ -404,21 +403,6 @@ describe("EarnRepository (postgres)", () => {
         listedProviderReferences: ["kamino-allez-usdc"],
       });
       expect(second).toEqual([]);
-    });
-
-    it("never touches dev-seed fixtures, which no provider lists", async () => {
-      const fixture = await seedStrategy({
-        providerReference: `${EARN_SEED_REFERENCE_PREFIX}kamino-allez-usdc`,
-      });
-
-      const deleted = await repo.deleteUnlistedStrategies({
-        provider: "ground",
-        environment: "sandbox",
-        listedProviderReferences: ["kamino-steakhouse-usdc"],
-      });
-
-      expect(deleted).toEqual([]);
-      expect((await repo.getStrategyById(fixture.id))?.status).toBe("active");
     });
 
     it("refuses an empty keep set rather than deleting the whole shelf", async () => {
