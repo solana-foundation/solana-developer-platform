@@ -39,6 +39,11 @@
       "import": "./src/kamino-programs.ts",
       "default": "./src/kamino-programs.ts"
     },
+    "./veda-programs": {
+      "types": "./src/veda-programs.ts",
+      "import": "./src/veda-programs.ts",
+      "default": "./src/veda-programs.ts"
+    },
     "./payments": {
       "types": "./src/payments.ts",
       "import": "./src/payments.ts",
