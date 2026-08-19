@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
-import { createPostgresEarnVaultRepository } from "@/db/repositories/earn-vault.repository";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 
@@ -63,18 +62,19 @@ beforeEach(async () => {
 });
 
 async function seedMovement(lastValidBlockHeight = "100") {
-  return createPostgresEarnVaultRepository(getDb(env)).createSignedDepositIntent({
+  return createPostgresEarnMovementsRepository(getDb(env)).createSignedVaultDepositIntent({
     organizationId: ORG,
     projectId: PROJECT,
     environment: "sandbox",
     provider: "kamino",
-    providerReference: `vault_${crypto.randomUUID()}`,
+    vaultAddress: `vault_${crypto.randomUUID()}`,
     custodyWalletId: WALLET,
     shareMint: "So11111111111111111111111111111111111111112",
     tokenMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     label: "USDC Vault",
     requestedAmount: "1",
     acceptedAmount: "1",
+    sourceAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
     signature: `sig_${crypto.randomUUID()}`,
     signedTransaction: Buffer.from([1, 2, 3]).toString("base64"),
     lastValidBlockHeight,
@@ -100,12 +100,11 @@ describe("reconcileEarnVaultMovements", () => {
 
     await reconcileEarnVaultMovements(env);
 
-    await expect(
-      createPostgresEarnVaultRepository(getDb(env)).getMovementById({
-        movementId: seeded.movement.id,
-        organizationId: ORG,
-      })
-    ).resolves.toMatchObject({ status: "confirmed" });
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+      status: "confirmed",
+      // Recorded, but NOT settled: settlement waits for finalization.
+      settled_at: null,
+    });
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
   });
 
@@ -116,12 +115,7 @@ describe("reconcileEarnVaultMovements", () => {
 
     await reconcileEarnVaultMovements(env);
 
-    await expect(
-      createPostgresEarnVaultRepository(getDb(env)).getMovementById({
-        movementId: seeded.movement.id,
-        organizationId: ORG,
-      })
-    ).resolves.toMatchObject({
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
       status: "failed",
       failure_reason: "Transaction blockhash expired before confirmation",
     });
@@ -138,12 +132,7 @@ describe("reconcileEarnVaultMovements", () => {
       env,
       expect.objectContaining({ bytes: new Uint8Array([1, 2, 3]) })
     );
-    await expect(
-      createPostgresEarnVaultRepository(getDb(env)).getMovementById({
-        movementId: seeded.movement.id,
-        organizationId: ORG,
-      })
-    ).resolves.toMatchObject({ status: "submitted" });
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({ status: "submitted" });
   });
 
   it("keeps a confirmed movement in the queue until the chain finalizes it", async () => {
@@ -196,15 +185,6 @@ describe("reconcileEarnVaultMovements", () => {
     expect(row).toMatchObject({ status: "finalized" });
     expect(row?.confirmed_at).not.toBeNull();
     expect(row?.settled_at).not.toBeNull();
-
-    // The legacy row is left as close to the truth as its vocabulary allows, so a
-    // rollback shows a settled deposit rather than one still in flight.
-    await expect(
-      createPostgresEarnVaultRepository(getDb(env)).getMovementById({
-        movementId: seeded.movement.id,
-        organizationId: ORG,
-      })
-    ).resolves.toMatchObject({ status: "confirmed" });
   });
 
   it("does not expire a confirmed movement whose signature aged out of RPC history", async () => {
