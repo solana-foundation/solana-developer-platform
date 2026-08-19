@@ -9,8 +9,8 @@ BASE_REF="${BASE_REF:-origin/main}"
 
 git diff --name-only -z "${BASE_REF}...HEAD" \
   | tr '\0' '\n' \
-  | LC_ALL=C grep -E '^(apps|packages)/[A-Za-z0-9_.-]+/' \
+  | { LC_ALL=C grep -E '^(apps|packages)/[A-Za-z0-9_.-]+/' || true; } \
   | awk -F/ '{print $1 "/" $2}' \
   | sort -u \
   | tr '\n' ' ' \
-  | sed 's/ $//' || true
+  | sed 's/ $//'

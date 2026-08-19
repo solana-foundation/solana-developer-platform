@@ -157,7 +157,8 @@ jobs:
       - name: Detect changed packages
         id: changed
         run: |
-          echo "packages=$(bash scripts/ci/changed-packages.sh)" >> "$GITHUB_OUTPUT"
+          PACKAGES=$(bash scripts/ci/changed-packages.sh)
+          echo "packages=${PACKAGES}" >> "$GITHUB_OUTPUT"
 
       - name: Typecheck
         if: steps.changed.outputs.packages != ''
