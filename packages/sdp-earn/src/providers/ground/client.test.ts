@@ -202,6 +202,7 @@ describe("GroundEarnClient.listStrategies", () => {
         yieldSource({ id: "c", apyBps: 10_000 }),
         yieldSource({ id: "d", apyBps: 12_345 }),
         yieldSource({ id: "e", apyBps: null }),
+        yieldSource({ id: "f", apyBps: -5 }),
       ]),
     });
 
@@ -209,7 +210,7 @@ describe("GroundEarnClient.listStrategies", () => {
 
     assert.deepEqual(
       strategies.map((s) => s.currentApy),
-      ["0.0005", "0.062", "1", "1.2345", undefined]
+      ["0.0005", "0.062", "1", "1.2345", undefined, "-0.0005"]
     );
   });
 
@@ -233,7 +234,6 @@ describe("GroundEarnClient.listStrategies", () => {
             redeem: { processingTimeBasis: "banking_days", typicalMinUnits: 1, typicalMaxUnits: 3 },
           },
         }),
-        yieldSource({ id: "no-policy", processingPolicies: null }),
       ]),
     });
 
@@ -257,13 +257,35 @@ describe("GroundEarnClient.listStrategies", () => {
           liquidityTerm: "delayed",
           redemptionDelayDays: 3,
         },
-        {
-          providerReference: "no-policy",
-          liquidityTerm: "instant",
-          redemptionDelayDays: undefined,
-        },
       ]
     );
+  });
+
+  it("fails closed when an active source omits or malforms its redeem policy", async () => {
+    for (const processingPolicies of [
+      null,
+      {},
+      {
+        redeem: {
+          processingTimeBasis: "elapsed_seconds",
+          typicalMinUnits: 0,
+          typicalMaxUnits: "soon",
+        },
+      },
+    ]) {
+      mock.restoreAll();
+      stubGroundFetch({
+        body: page([yieldSource({ id: "bad-policy", processingPolicies })]),
+      });
+
+      await assert.rejects(
+        client.listStrategies(sandboxCtx),
+        earnError(
+          "PROVIDER_UNAVAILABLE",
+          /Ground provider contract violation: processingPolicies\.redeem/
+        )
+      );
+    }
   });
 
   it("skips every non-active mode so no exit-frozen source becomes depositable", async () => {
@@ -435,6 +457,16 @@ describe("distillGroundYieldSource", () => {
     assert.equal(distilled.snapshot.sourceKind, "defi");
     assert.equal(distilled.snapshot.riskMetadata?.curator, "gauntlet");
     assert.deepEqual(distilled.snapshot.depositMints, [wellKnownMint("USDC", "devnet")]);
+  });
+
+  it("preserves missing or malformed optional catalogue APY as unavailable", () => {
+    for (const apyBps of [undefined, null, Number.NaN, Number.POSITIVE_INFINITY, 12.5, "356"]) {
+      const distilled = distill({ apyBps });
+      if (distilled.outcome !== "catalogued") {
+        assert.fail(`expected catalogued, got dropped: ${distilled.reason}`);
+      }
+      assert.equal(distilled.snapshot.currentApy, undefined, `apyBps=${String(apyBps)}`);
+    }
   });
 });
 
@@ -879,7 +911,76 @@ describe("GroundEarnClient.getPortfolioYield", () => {
 
     // Deployed weighting (0.9*2% + 0.1*10% = 2.8%) — not the 6% a naive
     // target-weight blend would report.
-    assert.equal(Number(result.currentApy).toFixed(4), "0.0280");
+    assert.equal(result.currentApy, "0.028000");
+  });
+
+  it("rounds an exact half-unit rate without binary-float drift", async () => {
+    stubGroundFetch({
+      body: groundYield([
+        { yieldSourceId: "a", name: "A", apyBps: 0, pct: 50, deployedValueUsd: "199" },
+        { yieldSourceId: "b", name: "B", apyBps: 1, pct: 50, deployedValueUsd: "1" },
+      ]),
+    });
+
+    const result = await client.getPortfolioYield(sandboxCtx, { providerWalletRef: "wal_1" });
+
+    // 1 / 200 bps = 0.0000005 as a decimal rate: exactly halfway, so the
+    // six-place contract rounds up. Number(...).toFixed(6) rounds this down.
+    assert.equal(result.currentApy, "0.000001");
+  });
+
+  it("preserves a negative rate through exact weighting and rounding", async () => {
+    stubGroundFetch({
+      body: groundYield([
+        { yieldSourceId: "a", name: "A", apyBps: 0, pct: 50, deployedValueUsd: "199" },
+        { yieldSourceId: "b", name: "B", apyBps: -1, pct: 50, deployedValueUsd: "1" },
+      ]),
+    });
+
+    const result = await client.getPortfolioYield(sandboxCtx, { providerWalletRef: "wal_1" });
+
+    assert.equal(result.currentApy, "-0.000001");
+    assert.equal(result.positions[1]?.apy, "-0.0001");
+  });
+
+  it("keeps a large skewed weight on the correct side of the rounding boundary", async () => {
+    stubGroundFetch({
+      body: groundYield([
+        {
+          yieldSourceId: "a",
+          name: "A",
+          apyBps: 0,
+          pct: 50,
+          deployedValueUsd: "1792432651693457606",
+        },
+        {
+          yieldSourceId: "b",
+          name: "B",
+          apyBps: 1,
+          pct: 50,
+          deployedValueUsd: "9007199254740993",
+        },
+      ]),
+    });
+
+    const result = await client.getPortfolioYield(sandboxCtx, { providerWalletRef: "wal_1" });
+
+    // The high-rate weight is just over 1/200. Both values exceed 2^53, and a
+    // Number blend sees the ratio as just under half a six-decimal unit.
+    assert.equal(result.currentApy, "0.000001");
+  });
+
+  it("uses exact fractional target percentages when no value is deployed", async () => {
+    stubGroundFetch({
+      body: groundYield([
+        { yieldSourceId: "a", name: "A", apyBps: -100, pct: 0.1, deployedValueUsd: "0" },
+        { yieldSourceId: "b", name: "B", apyBps: 100, pct: 99.9, deployedValueUsd: "0" },
+      ]),
+    });
+
+    const result = await client.getPortfolioYield(sandboxCtx, { providerWalletRef: "wal_1" });
+
+    assert.equal(result.currentApy, "0.009980");
   });
 
   it("omits the rate for an all-cash program rather than reporting 0%", async () => {
@@ -889,6 +990,64 @@ describe("GroundEarnClient.getPortfolioYield", () => {
 
     assert.equal(result.currentApy, undefined);
     assert.deepEqual(result.positions, []);
+  });
+
+  it("fails closed instead of fabricating zero for invalid required yield metrics", async () => {
+    const validPosition = {
+      yieldSourceId: "source-a",
+      name: "A",
+      apyBps: 250,
+      pct: 100,
+      deployedValueUsd: "10.000000",
+    };
+    const cases: Array<{ field: string; overrides: Record<string, unknown> }> = [
+      { field: "apyBps", overrides: { apyBps: undefined } },
+      { field: "apyBps", overrides: { apyBps: null } },
+      { field: "apyBps", overrides: { apyBps: 12.5 } },
+      { field: "apyBps", overrides: { apyBps: "250" } },
+      { field: "pct", overrides: { pct: undefined } },
+      { field: "pct", overrides: { pct: null } },
+      { field: "pct", overrides: { pct: Number.NaN } },
+      { field: "pct", overrides: { pct: 101 } },
+      { field: "deployedValueUsd", overrides: { deployedValueUsd: "not-a-decimal" } },
+      { field: "deployedValueUsd", overrides: { deployedValueUsd: "1e3" } },
+      { field: "deployedValueUsd", overrides: { deployedValueUsd: undefined } },
+      { field: "deployedValueUsd", overrides: { deployedValueUsd: "9".repeat(257) } },
+    ];
+
+    for (const testCase of cases) {
+      mock.restoreAll();
+      stubGroundFetch({
+        body: groundYield([{ ...validPosition, ...testCase.overrides }]),
+      });
+
+      await assert.rejects(
+        client.getPortfolioYield(sandboxCtx, { providerWalletRef: "wal_1" }),
+        (error: unknown) => {
+          assert.ok(error instanceof SdpEarnError);
+          assert.equal(error.code, "PROVIDER_UNAVAILABLE");
+          assert.match(error.message, /Ground provider contract violation/);
+          assert.equal(error.details?.field, `yield.positions[0].${testCase.field}`);
+          assert.equal(error.details?.provider, "ground");
+          return true;
+        }
+      );
+    }
+  });
+
+  it("keeps explicit zero yield metrics distinct from unavailable metrics", async () => {
+    stubGroundFetch({
+      body: groundYield([
+        { yieldSourceId: "a", name: "A", apyBps: 0, pct: 0, deployedValueUsd: "0.000000" },
+      ]),
+    });
+
+    const result = await client.getPortfolioYield(sandboxCtx, { providerWalletRef: "wal_1" });
+
+    assert.equal(result.currentApy, undefined);
+    assert.deepEqual(result.positions, [
+      { yieldSourceId: "a", name: "A", apy: "0", pct: 0, deployedValueUsd: "0.000000" },
+    ]);
   });
 
   it("classifies provider failures through the shared taxonomy", async () => {
@@ -1012,7 +1171,7 @@ describe("GroundEarnClient.listPortfolioDeposits", () => {
             chain: "solana_devnet",
             fromAddress: null,
             txHash: null,
-            status: null,
+            status: "processing",
             createdAt: "2026-08-03T09:00:00Z",
             completedAt: null,
           },
@@ -1046,7 +1205,6 @@ describe("GroundEarnClient.listPortfolioDeposits", () => {
           id: "dep_2",
           amountUsd: "25.000000",
           token: "usdt",
-          // A null provider status is a deposit still being tracked.
           status: "processing",
           fromAddress: undefined,
           transactionSignature: undefined,
@@ -1064,6 +1222,36 @@ describe("GroundEarnClient.listPortfolioDeposits", () => {
     await client.listPortfolioDeposits(sandboxCtx, { providerWalletRef: "wal_1" });
 
     assert.equal(requestUrl(fetchMock), "https://sandbox.groundtech.co/v2/wallets/wal_1/deposits");
+  });
+
+  it("fails closed when required deposit token or status vocabulary drifts", async () => {
+    const validDeposit = {
+      id: "dep_bad",
+      amount: "25.000000",
+      token: "usdc",
+      chain: "solana_devnet",
+      status: "processing",
+      createdAt: "2026-08-03T09:00:00Z",
+    };
+    for (const testCase of [
+      { field: "deposit.token", overrides: { token: "future-token" } },
+      { field: "deposit.status", overrides: { status: "queued" } },
+      { field: "deposit.status", overrides: { status: null } },
+    ]) {
+      mock.restoreAll();
+      stubGroundFetch({ body: page([{ ...validDeposit, ...testCase.overrides }]) });
+
+      await assert.rejects(
+        client.listPortfolioDeposits(sandboxCtx, { providerWalletRef: "wal_1" }),
+        (error: unknown) => {
+          assert.ok(error instanceof SdpEarnError);
+          assert.equal(error.code, "PROVIDER_UNAVAILABLE");
+          assert.equal(error.details?.field, testCase.field);
+          assert.equal(error.details?.providerReference, "dep_bad");
+          return true;
+        }
+      );
+    }
   });
 });
 
@@ -1314,6 +1502,35 @@ describe("GroundEarnClient.getPortfolioWithdrawal", () => {
     assert.equal(withdrawal.status, "completed");
     assert.equal(withdrawal.amountPaidUsd, "49.900000");
     assert.equal(withdrawal.completedAt, "2026-08-03T00:30:00Z");
+  });
+
+  it("preserves an unknown optional withdrawal token as unavailable", async () => {
+    stubGroundFetch({ body: groundWithdrawal({ destinationToken: "future-token" }) });
+
+    const withdrawal = await client.getPortfolioWithdrawal(sandboxCtx, {
+      providerWalletRef: "wal_1",
+      withdrawalRef: "wd_1",
+    });
+
+    assert.equal(withdrawal.token, undefined);
+  });
+
+  it("fails closed when the required withdrawal status is unknown", async () => {
+    stubGroundFetch({ body: groundWithdrawal({ status: "queued" }) });
+
+    await assert.rejects(
+      client.getPortfolioWithdrawal(sandboxCtx, {
+        providerWalletRef: "wal_1",
+        withdrawalRef: "wd_1",
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof SdpEarnError);
+        assert.equal(error.code, "PROVIDER_UNAVAILABLE");
+        assert.equal(error.details?.field, "withdrawal.status");
+        assert.equal(error.details?.providerReference, "wd_1");
+        return true;
+      }
+    );
   });
 });
 

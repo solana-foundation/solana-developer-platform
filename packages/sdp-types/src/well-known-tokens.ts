@@ -1,6 +1,13 @@
 import type { SdpEnvironment } from "./api-keys";
 
-export type SolanaCluster = "devnet" | "mainnet-beta";
+/**
+ * The clusters SDP addresses, as a value so runtime validators (zod enums,
+ * parsers at a wire boundary) can be derived from the same declaration the type
+ * comes from instead of restating the members.
+ */
+export const SOLANA_CLUSTERS = ["devnet", "mainnet-beta"] as const;
+
+export type SolanaCluster = (typeof SOLANA_CLUSTERS)[number];
 
 export const SOLANA_CLUSTER_LABELS = {
   devnet: "Devnet",

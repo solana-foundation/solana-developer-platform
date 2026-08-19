@@ -560,6 +560,7 @@ export async function extractMintPolicyCandidate(c: AppContext): Promise<PolicyG
       amount: input.mint.amount,
       memo: input.mint.memo === undefined ? null : input.mint.memo,
     },
+    idempotencyKey: null,
   };
 }
 

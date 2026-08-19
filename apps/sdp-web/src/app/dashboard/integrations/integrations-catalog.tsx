@@ -297,13 +297,6 @@ export function IntegrationsCatalog({
                   {t(familyDescriptionKey(sectionFamily))}
                 </p>
               </div>
-              {sectionFamily === "rpc" ? (
-                <Button asChild variant="ghost" size="sm">
-                  <Link href="/dashboard/settings">
-                    {t("Shared.integrations.rpcSectionAction")}
-                  </Link>
-                </Button>
-              ) : null}
             </div>
 
             {custodyUnknown ? (

@@ -11,6 +11,7 @@ const CASES = [
   ["ramp", "ramp_offramp_quote"],
   ["issuance", "issuance_mint_execute"],
   ["issuance", "issuance_update_authority_execute"],
+  ["program", "earn_vault_deposit"],
 ] as const;
 
 describe("approved wallet-operation type resumption", () => {
