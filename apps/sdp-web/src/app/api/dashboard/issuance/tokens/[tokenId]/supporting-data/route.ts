@@ -1,24 +1,13 @@
 import type { FrozenAccount, TokenAllowlistEntry, TokenTransaction } from "@sdp/types";
 import { NextResponse } from "next/server";
 import { fetchPaymentsWallets } from "@/app/dashboard/payments/payments-page.data";
+import { parseErrorMessage } from "@/lib/api-error";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 
 interface PaginatedMeta {
   total?: number;
   hasMore?: boolean;
-}
-
-function parseErrorMessage(body: string): string {
-  try {
-    const parsed = JSON.parse(body) as {
-      error?: { message?: string };
-      message?: string;
-    };
-    return parsed?.error?.message ?? parsed?.message ?? body;
-  } catch {
-    return body || "Unknown error";
-  }
 }
 
 async function fetchList<T>(

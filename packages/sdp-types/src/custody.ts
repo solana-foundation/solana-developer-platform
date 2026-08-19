@@ -692,6 +692,34 @@ export const CUSTODY_CONNECTION_LIFECYCLES = [
 ] as const;
 export type CustodyConnectionLifecycle = (typeof CUSTODY_CONNECTION_LIFECYCLES)[number];
 
+/** Outcome of a single connection install check. */
+export const CUSTODY_CONNECTION_CHECK_STATUSES = [
+  "running",
+  "success",
+  "failed",
+  "retry_unknown",
+] as const;
+export type CustodyConnectionCheckStatus = (typeof CUSTODY_CONNECTION_CHECK_STATUSES)[number];
+
+/** Why a connection install check concluded unsuccessfully. */
+export const CUSTODY_CONNECTION_FAILURE_CODES = [
+  "invalid_credentials",
+  "provider_response_unknown",
+  "provider_account_already_connected",
+  "wallet_conflict",
+] as const;
+export type CustodyConnectionFailureCode = (typeof CUSTODY_CONNECTION_FAILURE_CODES)[number];
+
+/** Lifecycle of the stored provider credential backing a connection. */
+export const PROVIDER_CREDENTIAL_STATUSES = [
+  "pending",
+  "active",
+  "failed_validation",
+  "retired",
+  "deactivated",
+] as const;
+export type ProviderCredentialStatus = (typeof PROVIDER_CREDENTIAL_STATUSES)[number];
+
 /**
  * Which record actually backs signing for a provider in the current scope.
  *

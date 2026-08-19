@@ -72,89 +72,43 @@ DOPPLER_PRESERVE_ENV=NEXT_PUBLIC_SDP_API_BASE_URL,MARKETS_ENABLED,EARN_ENABLED \
 A `.claude/launch.json` (untracked) encodes both for the editor's preview
 runner. Doppler supplies Clerk keys, so the dashboard needs `doppler login`.
 
-### 4. Get catalogue data — two independent paths
+### 4. Get catalogue data — live provider sync
 
-- **Live (real Ground data):** with the sandbox key set and both flags on, the
-  hourly catalogue-sync cron registers and populates `earn_strategies` from
-  Ground's real yield sources. It fires on the hour, so a freshly started API
-  shows nothing until then — seed if you don't want to wait.
-- **Offline (no key needed):** `DATABASE_URL=… pnpm -C apps/sdp-api db:seed:earn`
-  writes a compact 5-source Solana-hosted subset as fixtures (prefixed
-  `seed-demo-`, removable with `--clean`, never confusable with synced rows).
-  This is a deterministic UI seed, not a complete mirror of the sync. Every run
-  also PRUNES prefixed rows the fixture set no longer defines — an upsert-only
-  seed would leave dropped fixtures behind forever. The seed's key space is
-  excluded from the sync's delete pass (providers never list a prefixed ref), so
-  fixtures and the paused fixture survive a sync.
+With sandbox provider credentials set and both flags on, the hourly
+catalogue-sync cron populates `earn_strategies` from live provider sources. It
+fires on the hour, so a freshly started API has an empty catalogue until a live
+pass succeeds. This is intentional: the sync is the only admitting writer and
+every row must pass the provider's declared-support checks.
 
-Running both is fine but leaves near-twin rows (same vault names, different
-reference prefix); `--clean` removes only the fixtures.
+See README.md → "Catalogue data" for cadence and failure behaviour. A database
+still holding `seed-demo-` rows from the removed `db:seed:earn` needs a one-time
+clear — SQL in `docs/contributing/earn-pluggability-playbook.md` § 3.
 
-See README.md → "Catalogue data: the sync cron vs the dev seed" for cadence,
-failure behaviour, and when to prefer each.
+### 4b. Get a program — create one through the API
 
-### 4b. Get a program — the seed links one, the API allows many
+Create programs through the dashboard or `POST /v1/earn/programs`. Since
+PRO-1670 an org may hold N programs per (environment, provider), each pinned to
+one vault. Migration 0056 replaced the old per-org cap with the global
+`UNIQUE (provider, provider_wallet_ref)`, so a provider wallet can belong to
+exactly one SDP link row.
 
-`db:seed:earn` also links your org to a real Ground sandbox portfolio wallet, so
-the dashboard opens onto a live program instead of an empty onboarding screen.
-
-**The seed links exactly one program; that is a seed choice, not a cap.** Since
-PRO-1670 an org may hold N programs per (environment, provider) — each pinned to
-one vault, created explicitly through `POST /v1/earn/programs` — and the
-`(organization_id, environment, provider)` unique that used to cap it at one is
-dropped (migration 0056). What replaces it is GLOBAL: `UNIQUE (provider,
-provider_wallet_ref)`, so one provider wallet is claimable by exactly one link
-row platform-wide. That is the constraint the seed actually has to respect —
-Ground has no concept of an SDP org and one Ground account holds many portfolio
-wallets; every SDP org shares a single account per environment
-(`readGroundConfig` resolves one API key, never a per-org credential). So the
-sibling wallets you see in Ground's dashboard stand in for *other* orgs, and the
-seed deliberately does not hand them to yours.
-
-This is also why **your local total won't match Ground's dashboard**: Ground's
-console sums every wallet in the shared sandbox account, SDP shows only the
-wallets your org holds. Both numbers are right.
+Ground has no concept of an SDP organization: one provider account holds many
+portfolio wallets, while SDP returns only the wallets linked to the current
+organization. That is why the Ground console total and the SDP organization
+total can legitimately differ.
 
 Practical notes:
 
-- **Which org gets it:** the org you sign into (the Clerk-backed one), ahead of
-  the `db:seed:local` test fixture. Other local orgs stay unlinked on purpose —
-  the shared wallet can only be claimed once, and handing it around is worse
-  than leaving them empty.
-- **Re-run the seed after your first Clerk sign-in.** On a fresh machine the only
-  org is the test fixture, so an early seed lands the program there. The seed
-  *moves* its own link to follow your real org — but only when you re-run it. A
-  program you created through the wizard is never moved; the seed says so and
-  stops rather than colliding on the global wallet-ref unique.
-- **Want a second program locally?** Create it through the dashboard (Add
-  strategy) against a *different* Ground sandbox wallet — the seed only ever
-  manages its own one link, and re-pointing `SEED_PROVIDER_WALLET` moves that
-  link rather than adding to it.
-- **The API-key path has no program.** `db:seed:local`'s dev key belongs to the
-  test org, so `curl /v1/earn/programs?provider=ground` with it returns an empty
-  list by design. Use the dashboard, or mint a key for your own org.
-- **The seeded program starts at whatever the shared wallet currently holds.**
-  It carries a live single-strategy allocation (one strategy at 100% — the
-  only shape the V1 API accepts, PRO-1667), so the overview shows a real
-  forward APY.
-  The wallet is shared with teammates and IS funded from time to time for
-  exit-path testing, so do not treat any particular balance as the baseline —
-  read it from the dashboard. Fund it by sending devnet USDC to the wallet's
-  Solana deposit address, which exercises the real two-phase deposit (arrives
-  as `cash`, deploys on a later Ground rebalance).
-- **Getting devnet USDC: Circle's faucet — <https://faucet.circle.com/>**
-  (select **USDC** + **Solana Devnet**, paste the address). It mints the
-  official devnet USDC mint (`4zMMC…`, the one pinned in well-known-tokens),
-  so faucet funds credit deposits directly. Rate-limited per address.
-- **Don't "fix" the $0 by pointing the seed at a funded sandbox wallet.** The
-  funded ones hold USDT cash on a non-Solana rail, and Ground enforces the lane
-  split at the API: USDC→Solana returns `409 insufficient_funds` (lane
-  withdrawable `0`) while USDT is refused on Solana entirely. A zero you can act
-  on beats a balance you cannot.
-  Since PRO-1675 the withdraw modal no longer *compounds* this by capping on the
-  wallet-level `balance.withdrawableUsd`: it asks the provider per lane and
-  quotes that. The "max button that 409s" this note used to warn about is gone —
-  if you see one again, the client-side estimate has been reintroduced.
+- Use the signed-in Clerk organization in the dashboard, or mint an API key for
+  that organization's sandbox project. The `db:seed:local` development key
+  belongs to the test organization and has no Earn program by default.
+- Program creation uses a single-strategy allocation at 100% (the only V1 shape,
+  PRO-1667). Add another strategy by creating another program.
+- Fund a sandbox program by sending devnet USDC to its Solana deposit address.
+  Circle's faucet (<https://faucet.circle.com/>, USDC + Solana Devnet) mints the
+  official devnet USDC used by the provider flow.
+- Ground enforces asset and network lanes. If a withdrawal has no quoted Solana
+  USDC availability, do not substitute a wallet-level balance from another lane.
 
 ### 5. The last gate: org entitlement
 
@@ -193,12 +147,12 @@ pattern are in `docs/contributing/earn-pluggability-playbook.md` §6 and ADR 000
 | "requires manual activation" | org lacks the earn provider override |
 | API waits then dies on boot | `DATABASE_URL` not preserved → Doppler's Cloud SQL URL won |
 | Web typecheck fails in `.next/dev/types` | stale generated cache: `rm -rf apps/sdp-web/.next/dev/types` |
-| Dashboard shows empty onboarding, but a program exists in the DB | it is linked to another local org — re-run `db:seed:earn` to move it to the org you sign into |
+| Dashboard shows empty onboarding, but a program exists in the DB | the selected Clerk organization or environment does not own that program; verify both scopes |
 | `GET /v1/earn/programs` → `programs: []` with the dev API key | that key is the test org's, which has no program by design (§4b) |
 | A key you minted yourself returns `strategies: []` **and** `programs: []` | the key inherited the **production** environment. An API key has no environment column — it comes from `projects.environment` (the JOIN in `middleware/auth.ts`), and every org has both a `default-sandbox` and a `default-production` project. A key on the production project sees no sandbox catalogue and no sandbox programs, which reads as "everything is missing" rather than as a scoping error. Mint against the sandbox project, and refuse anything else: a production key would drive Ground's **production** API from a laptop. |
 | `POST /v1/earn/programs` → 400 "needs an idempotency key" | creation is key-REQUIRED since PRO-1670: send exactly one of body `requestId` (UUIDv4) or the `Idempotency-Key` header — never both |
 | Local total ≠ Ground console total | Ground sums the whole shared account; SDP shows only the wallets your org holds (§4b) |
-| Catalogue empty right after boot | sync cron runs on the hour — seed instead of waiting |
+| Catalogue empty right after boot | sync cron runs on the hour; verify flags, provider credentials, and scheduler registration, then wait for a live pass |
 | Kamino rows appear disabled in the dashboard | expected, but NOT for a cluster reason any more — sandbox now catalogues real devnet vaults, so they are `fundable: true`. They stay browse-only because SDP has no deposit path for a `vault_direct` provider (`no-sdp-route`) |
 | Kamino APY is blank in sandbox | correct: the metrics endpoint is mainnet's and 404s for devnet pubkeys, so `listStrategyMetrics` returns `[]` outside production and the row renders "—" rather than a fabricated rate |
 | Kamino APY looks stale in production | the 5-minute metrics refresh is a separate cron — check it registered (`isEarnEnabled`), not the hourly sync |

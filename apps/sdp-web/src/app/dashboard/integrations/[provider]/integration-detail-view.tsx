@@ -1,4 +1,4 @@
-import type { OrganizationRpcProvider } from "@sdp/types";
+import type { OrganizationRpcProvider, SafeRpcConnection } from "@sdp/types";
 import Image from "next/image";
 import Link from "next/link";
 import { CUSTODY_CAPABILITY_LABEL_KEYS } from "@/app/dashboard/custody/provider-catalog";
@@ -10,6 +10,26 @@ import { getTranslations } from "@/i18n/server";
 import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
 import { RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import type { IntegrationDetail } from "../integration-detail";
+import { RpcByokSection } from "../rpc-byok-section";
+import { RpcConnectionPanel } from "../rpc-connection-panel";
+
+/**
+ * What the RPC family needs beyond the shared detail shape. Absent for every
+ * other family, and absent for RPC only if the organization could not be
+ * resolved — in which case the page falls back to the Settings link.
+ */
+export interface RpcConnectionContext {
+  activeProvider: OrganizationRpcProvider;
+  canManage: boolean;
+  /** Whether this deployment holds an endpoint for the provider on the page. */
+  isEnabledInDeployment: boolean;
+  organizationId: string;
+  /**
+   * Tenant-owned connections for this provider; absent for SDP's own rail,
+   * `null` when the read failed and we must not claim there are none.
+   */
+  byokConnections?: SafeRpcConnection[] | null | "restricted";
+}
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
 
@@ -103,17 +123,19 @@ function resolvePrimaryAction(detail: IntegrationDetail, t: Translate) {
       </Button>
     );
   }
-  if (detail.family === "rpc") {
-    return (
-      <Button asChild variant="secondary">
-        <Link href="/dashboard/settings">{t("Shared.integrations.rpcSectionAction")}</Link>
-      </Button>
-    );
-  }
+  // RPC acts through the connection panel below. When the organization could
+  // not be resolved the panel does not render either, and there is no honest
+  // action left to offer -- Settings no longer holds RPC (HOO-787).
   return null;
 }
 
-export async function IntegrationDetailView({ detail }: { detail: IntegrationDetail }) {
+export async function IntegrationDetailView({
+  detail,
+  rpc,
+}: {
+  detail: IntegrationDetail;
+  rpc?: RpcConnectionContext;
+}) {
   const t = await getTranslations();
   const entry = detail.custodyEntry;
 
@@ -150,9 +172,36 @@ export async function IntegrationDetailView({ detail }: { detail: IntegrationDet
         {primaryAction}
       </header>
 
+      {/* Leads the page: on an integration you can actually act on, what the
+          organization runs right now outranks what the provider is. */}
+      {detail.family === "rpc" && rpc ? (
+        <Section title={t("Shared.integrations.rpcConnectionTitle")}>
+          <RpcConnectionPanel
+            activeProvider={rpc.activeProvider}
+            canManage={rpc.canManage}
+            isEnabledInDeployment={rpc.isEnabledInDeployment}
+            organizationId={rpc.organizationId}
+            provider={detail.provider as OrganizationRpcProvider}
+            status={detail.status}
+          />
+        </Section>
+      ) : null}
+
+      {detail.family === "rpc" && rpc?.byokConnections !== undefined ? (
+        <Section title={t("Shared.integrations.rpcByokTitle")}>
+          <RpcByokSection
+            canManage={rpc.canManage}
+            connections={rpc.byokConnections}
+            provider={detail.provider}
+          />
+        </Section>
+      ) : null}
+
       {detail.descriptionKey ? (
         <Section title={t("Shared.integrations.detailAbout")}>
-          <p className="max-w-2xl text-sm leading-6 text-secondary">{t(detail.descriptionKey)}</p>
+          <p className="max-w-3xl text-sm leading-6 text-pretty text-secondary">
+            {t(detail.descriptionKey)}
+          </p>
         </Section>
       ) : null}
 
@@ -187,7 +236,7 @@ export async function IntegrationDetailView({ detail }: { detail: IntegrationDet
       <Section title={t("Shared.integrations.detailHowItConnects")}>
         {entry?.storedCredentialSetup.mode === "self_service" ? (
           <div className="space-y-3">
-            <p className="max-w-2xl text-sm leading-6 text-secondary">
+            <p className="max-w-3xl text-sm leading-6 text-pretty text-secondary">
               {t("Shared.integrations.connectSelfServe")}
             </p>
             <p className="text-xs font-medium tracking-wide text-tertiary uppercase">
@@ -210,13 +259,13 @@ export async function IntegrationDetailView({ detail }: { detail: IntegrationDet
           // Manual providers, whether or not a request route is wired yet
           // (HOO-775): access is granted by the SDP team, and the page must say
           // so even when the header has no request button to offer.
-          <p className="max-w-2xl text-sm leading-6 text-secondary">
+          <p className="max-w-3xl text-sm leading-6 text-pretty text-secondary">
             {t("Shared.integrations.connectByArrangement")}
           </p>
         ) : (
           // Generally available providers riding deployment credentials, and
           // the deployment-wide rails: the SDP operator turns these on.
-          <p className="max-w-2xl text-sm leading-6 text-secondary">
+          <p className="max-w-3xl text-sm leading-6 text-pretty text-secondary">
             {t("Shared.integrations.connectManaged")}
           </p>
         )}

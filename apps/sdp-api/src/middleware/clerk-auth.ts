@@ -22,6 +22,7 @@ import {
 } from "@/lib/clerk-token";
 import { AppError, unauthorized } from "@/lib/errors";
 import { invitationWasRevoked } from "@/lib/invitations";
+import { enforceOrganizationIpAllowlist } from "@/lib/organization-ip-allowlist";
 import { ensureClerkOrganizationMapping } from "@/services/clerk-organization-provisioning.service";
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
 import {
@@ -403,6 +404,16 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
       "UNAUTHORIZED",
       "Clerk token has no usable email claim. Check the session token customization: an invalid shortcode is passed through unsubstituted rather than resolved."
     );
+  }
+
+  // Everything below writes — user provisioning, membership, default projects,
+  // email repair — so the allowlist gates entry here rather than the response
+  // after: a blocked origin must not leave state behind. Only an organization
+  // that already exists can carry a restriction; one first provisioned by this
+  // request cannot have one yet, so the callers need no second check.
+  const knownOrganization = await resolveClerkOrganization(getDb(c.env), payload.org_id as string);
+  if (knownOrganization) {
+    await enforceOrganizationIpAllowlist(c, knownOrganization.organization_id);
   }
 
   const existingContext = await resolveExistingClerkContext(getDb(c.env), {

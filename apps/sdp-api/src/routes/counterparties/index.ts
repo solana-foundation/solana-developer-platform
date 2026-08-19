@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { validateBody } from "@/middleware/validate";
+import { submitCounterpartyRequirementsSchema } from "@/routes/payments/schemas";
 import type { Env } from "@/types/env";
 import counterpartyAccounts from "../counterparty-accounts";
 import {
@@ -14,6 +16,7 @@ import {
   submitCounterpartyRequirements,
   updateCounterparty,
 } from "./handlers";
+import { createCounterpartySchema, updateCounterpartySchema } from "./schemas";
 
 const counterparties = new Hono<{ Bindings: Env }>();
 
@@ -31,7 +34,12 @@ counterparties.get(
   listProjectCounterpartyAccounts
 );
 counterparties.get("/", requirePermissions("counterparties:read"), listCounterparties);
-counterparties.post("/", requirePermissions("counterparties:write"), createCounterparty);
+counterparties.post(
+  "/",
+  requirePermissions("counterparties:write"),
+  validateBody(createCounterpartySchema),
+  createCounterparty
+);
 counterparties.get("/:counterpartyId", requirePermissions("counterparties:read"), getCounterparty);
 counterparties.get(
   "/:counterpartyId/requirements",
@@ -41,11 +49,13 @@ counterparties.get(
 counterparties.post(
   "/:counterpartyId/requirements",
   requirePermissions("counterparties:write"),
+  validateBody(submitCounterpartyRequirementsSchema),
   submitCounterpartyRequirements
 );
 counterparties.patch(
   "/:counterpartyId",
   requirePermissions("counterparties:write"),
+  validateBody(updateCounterpartySchema),
   updateCounterparty
 );
 counterparties.delete(

@@ -190,7 +190,7 @@ export class ApiKeyService {
       .prepare(
         `SELECT ak.id, ak.name, ak.description, ak.key_prefix, ak.role, p.environment, ak.status,
                 CASE
-                  WHEN EXISTS (
+                  WHEN ak.signing_wallet_id IS NOT NULL OR EXISTS (
                     SELECT 1
                     FROM api_key_wallet_permissions akw
                     WHERE akw.api_key_id = ak.id
@@ -223,7 +223,7 @@ export class ApiKeyService {
         `SELECT ak.id, ak.name, ak.description, ak.key_prefix, ak.role, p.environment, ak.status,
                 ak.project_id, ak.allowed_ips, ak.permissions, ak.signing_wallet_id,
                 CASE
-                  WHEN EXISTS (
+                  WHEN ak.signing_wallet_id IS NOT NULL OR EXISTS (
                     SELECT 1
                     FROM api_key_wallet_permissions akw
                     WHERE akw.api_key_id = ak.id

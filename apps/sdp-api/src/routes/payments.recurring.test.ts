@@ -204,6 +204,7 @@ async function activateRecurringPaymentForTest(headers: Record<string, string>) 
     {
       method: "POST",
       headers,
+      body: "{}",
     },
     env
   );
@@ -456,6 +457,7 @@ describe("Payments routes — recurring", () => {
       {
         method: "POST",
         headers,
+        body: "{}",
       },
       env
     );
@@ -520,6 +522,7 @@ describe("Payments routes — recurring", () => {
       {
         method: "POST",
         headers,
+        body: "{}",
       },
       env
     );
@@ -551,6 +554,7 @@ describe("Payments routes — recurring", () => {
       {
         method: "POST",
         headers,
+        body: "{}",
       },
       env
     );
@@ -1231,6 +1235,7 @@ describe("Payments routes — recurring", () => {
       {
         method: "POST",
         headers,
+        body: "{}",
       },
       env
     );
@@ -1279,7 +1284,7 @@ describe("Payments routes — recurring", () => {
 
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1316,7 +1321,7 @@ describe("Payments routes — recurring", () => {
 
     const replayRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1340,7 +1345,7 @@ describe("Payments routes — recurring", () => {
 
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1393,14 +1398,14 @@ describe("Payments routes — recurring", () => {
     const activated = await activateRecurringPaymentForTest(headers);
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(cancelRes.status).toBe(200);
 
     const resumeRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/resume`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1439,7 +1444,7 @@ describe("Payments routes — recurring", () => {
 
     const replayRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/resume`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1515,7 +1520,7 @@ describe("Payments routes — recurring", () => {
 
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1575,7 +1580,7 @@ describe("Payments routes — recurring", () => {
     const activated = await activateRecurringPaymentForTest(headers);
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(cancelRes.status).toBe(200);
@@ -1621,7 +1626,7 @@ describe("Payments routes — recurring", () => {
 
     const resumeRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/resume`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1724,7 +1729,7 @@ describe("Payments routes — recurring", () => {
 
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1769,7 +1774,7 @@ describe("Payments routes — recurring", () => {
 
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1925,7 +1930,7 @@ describe("Payments routes — recurring", () => {
 
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1981,7 +1986,7 @@ describe("Payments routes — recurring", () => {
 
     const activateRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(activateRes.status).toBe(200);
@@ -2013,7 +2018,7 @@ describe("Payments routes — recurring", () => {
 
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -2143,7 +2148,7 @@ describe("Payments routes — recurring", () => {
 
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/collect`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -2199,7 +2204,7 @@ describe("Payments routes — recurring", () => {
 
       const activateRes = await app.request(
         `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-        { method: "POST", headers },
+        { method: "POST", headers, body: "{}" },
         env
       );
       expect(activateRes.status).toBe(200);
@@ -2303,7 +2308,7 @@ describe("Payments routes — recurring", () => {
 
       const collectRes = await app.request(
         `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-        { method: "POST", headers },
+        { method: "POST", headers, body: "{}" },
         env
       );
 
@@ -2481,7 +2486,7 @@ describe("Payments routes — recurring", () => {
 
     const activateRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(activateRes.status).toBe(200);
@@ -2599,7 +2604,7 @@ describe("Payments routes — recurring", () => {
 
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -2659,7 +2664,7 @@ describe("Payments routes — recurring", () => {
 
     const activateRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(activateRes.status).toBe(200);
@@ -2767,7 +2772,7 @@ describe("Payments routes — recurring", () => {
 
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -2839,7 +2844,7 @@ describe("Payments routes — recurring", () => {
 
     const activateRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(activateRes.status).toBe(200);
@@ -2894,7 +2899,7 @@ describe("Payments routes — recurring", () => {
 
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -2943,7 +2948,7 @@ describe("Payments routes — recurring", () => {
 
     const activateRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(activateRes.status).toBe(200);
@@ -3044,7 +3049,7 @@ describe("Payments routes — recurring", () => {
 
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -3107,7 +3112,7 @@ describe("Payments routes — recurring", () => {
 
     const activateRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(activateRes.status).toBe(200);
@@ -3216,7 +3221,7 @@ describe("Payments routes — recurring", () => {
 
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -3289,7 +3294,7 @@ describe("Payments routes — recurring", () => {
 
     const activateRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(activateRes.status).toBe(200);
@@ -3394,7 +3399,7 @@ describe("Payments routes — recurring", () => {
     );
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -3460,14 +3465,14 @@ describe("Payments routes — recurring", () => {
 
     const activateRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(activateRes.status).toBe(200);
 
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -3509,7 +3514,7 @@ describe("Payments routes — recurring", () => {
 
     const activateRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(activateRes.status).toBe(200);
@@ -3529,7 +3534,7 @@ describe("Payments routes — recurring", () => {
 
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -3620,7 +3625,7 @@ describe("Payments routes — recurring", () => {
 
     const failedRes = await app.request(
       `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -3653,7 +3658,7 @@ describe("Payments routes — recurring", () => {
 
     const retryRes = await app.request(
       `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -3802,7 +3807,7 @@ describe("Payments routes — recurring", () => {
 
     const freshRetryRes = await app.request(
       `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(freshRetryRes.status).toBe(409);
@@ -3817,7 +3822,7 @@ describe("Payments routes — recurring", () => {
 
     const staleRetryRes = await app.request(
       `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -3998,7 +4003,7 @@ describe("Payments routes — recurring", () => {
 
     const staleRetryRes = await app.request(
       `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -4086,7 +4091,7 @@ describe("Payments routes — recurring", () => {
 
     const failedRes = await app.request(
       `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -4121,7 +4126,7 @@ describe("Payments routes — recurring", () => {
 
     const retryRes = await app.request(
       `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -4205,7 +4210,7 @@ describe("Payments routes — recurring", () => {
 
     const failedRes = await app.request(
       `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -4247,7 +4252,7 @@ describe("Payments routes — recurring", () => {
 
     const retryRes = await app.request(
       `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 

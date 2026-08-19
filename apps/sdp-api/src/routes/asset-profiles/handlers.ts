@@ -28,13 +28,14 @@ import {
 } from "@/lib/issuance/advanced-settings";
 import { projectPublicMetadata } from "@/lib/issuance/public-metadata";
 import { noContent, success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
 import { type AppContext, getAssetProfilesRepository } from "./context";
 import {
   assetProfileIdParamsSchema,
   assetProfileTokenIdParamsSchema,
   listAssetProfilesQuerySchema,
-  updateAssetProfileSchema,
+  type updateAssetProfileSchema,
 } from "./schemas";
 
 export function mapToAssetProfile(row: AssetProfileRow): AssetProfile {
@@ -218,7 +219,9 @@ export const getAssetProfileByTokenId = async (c: AppContext) => {
   return success(c, response);
 };
 
-export const updateAssetProfile = async (c: AppContext) => {
+export const updateAssetProfile = async (
+  c: ValidatedBodyContext<typeof updateAssetProfileSchema>
+) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const params = assetProfileIdParamsSchema.safeParse(c.req.param());
@@ -227,12 +230,7 @@ export const updateAssetProfile = async (c: AppContext) => {
     throw badRequestParams();
   }
 
-  const body = await c.req.json();
-  const parsed = updateAssetProfileSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
-  }
+  const body = c.req.valid("json");
 
   const { profileId } = params.data;
   const repo = getAssetProfilesRepository(c);
@@ -251,8 +249,8 @@ export const updateAssetProfile = async (c: AppContext) => {
   // access-control mode requires tokens:admin — mirroring the admin-only
   // compliance tab in the dashboard.
   if (
-    parsed.data.issuanceMetadata !== undefined &&
-    compliancePolicyChanged(current.issuance_metadata, parsed.data.issuanceMetadata) &&
+    body.issuanceMetadata !== undefined &&
+    compliancePolicyChanged(current.issuance_metadata, body.issuanceMetadata) &&
     !hasPermission(auth.permissions, "tokens:admin")
   ) {
     throw new AppError(
@@ -263,8 +261,8 @@ export const updateAssetProfile = async (c: AppContext) => {
 
   // Resolve the effective category/type by merging the patch over the existing
   // row, then validate the pair (the schema can only check it when both are sent).
-  const nextCategory = parsed.data.assetCategory ?? current.asset_category;
-  const nextType = parsed.data.assetType ?? current.asset_type;
+  const nextCategory = body.assetCategory ?? current.asset_category;
+  const nextType = body.assetType ?? current.asset_type;
   if (!isAssetTypeSupported(nextCategory, nextType)) {
     throw badRequest(`Unsupported assetType "${nextType}" for category "${nextCategory}"`);
   }
@@ -275,11 +273,11 @@ export const updateAssetProfile = async (c: AppContext) => {
   }
 
   const typeChanged = nextCategory !== current.asset_category || nextType !== current.asset_type;
-  const metadataChanged = parsed.data.issuanceMetadata !== undefined;
+  const metadataChanged = body.issuanceMetadata !== undefined;
 
   // Validate settings when metadata or type changed; catches unsupported by type change too.
   if (metadataChanged || typeChanged) {
-    const effectiveMetadata = parsed.data.issuanceMetadata ?? current.issuance_metadata;
+    const effectiveMetadata = body.issuanceMetadata ?? current.issuance_metadata;
     const settingErrors = validateAdvancedSettings(nextCategory, nextType, effectiveMetadata);
     if (settingErrors.length > 0) {
       throw badRequest("Invalid advanced settings", { errors: settingErrors });
@@ -292,8 +290,8 @@ export const updateAssetProfile = async (c: AppContext) => {
 
   // Stamp version only on metadata we persist.
   const persistedMetadata =
-    parsed.data.issuanceMetadata !== undefined
-      ? stampAdvancedSettingsVersion(parsed.data.issuanceMetadata)
+    body.issuanceMetadata !== undefined
+      ? stampAdvancedSettingsVersion(body.issuanceMetadata)
       : undefined;
   const nextMetadata = persistedMetadata ?? current.issuance_metadata;
 
@@ -307,8 +305,8 @@ export const updateAssetProfile = async (c: AppContext) => {
     profileId,
     organizationId: auth.organizationId,
     projectId,
-    assetCategory: parsed.data.assetCategory,
-    assetType: parsed.data.assetType,
+    assetCategory: body.assetCategory,
+    assetType: body.assetType,
     assetTypeVersion: typeChanged ? registryEntry.version : undefined,
     issuanceMetadata: persistedMetadata,
     publicMetadata,
@@ -326,7 +324,7 @@ export const updateAssetProfile = async (c: AppContext) => {
     action: "update",
     resourceType: "asset_profile",
     resourceId: profileId,
-    metadata: { changedFields: Object.keys(parsed.data) },
+    metadata: { changedFields: Object.keys(body) },
   });
 
   const response: AssetProfileResponse = { assetProfile: mapToAssetProfile(updated) };

@@ -1,11 +1,10 @@
 import { createRpcForSdk } from "@sdp/rpc/solana";
 import { type Address, assertValidAddress } from "@sdp/solana/address";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
-import type { Context } from "hono";
-import { z } from "zod";
 import { getDb } from "@/db";
-import { AppError, badRequest, notFound } from "@/lib/errors";
+import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { createOrgSigner } from "@/services/solana";
@@ -21,14 +20,13 @@ import {
   getTenantTokenService,
   requireProjectScope,
 } from "../helpers";
-import { burnSchema } from "../schemas";
+import type { burnSchema } from "../schemas";
 import { buildIdempotencyMetadata } from "./idempotency";
 import {
   persistSettledTransactionThenOutcome,
   recoverSettledTransactionReplay,
 } from "./settled-transaction";
 
-type AppContext = Context<{ Bindings: Env }>;
 type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
 
 function toBurnOperationAppError(error: unknown): AppError | null {
@@ -128,18 +126,11 @@ async function resolveValidatedBurnSource(
   return normalizedSource;
 }
 
-export const prepareBurn = async (c: AppContext) => {
+export const prepareBurn = async (c: ValidatedBodyContext<typeof burnSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
 
-  const body = await c.req.json();
-  const parsed = burnSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
@@ -157,16 +148,16 @@ export const prepareBurn = async (c: AppContext) => {
 
   const signingWalletId = resolveApiKeySigningWalletId(
     auth,
-    parsed.data.signingWalletId ?? token.signingWalletId,
+    body.signingWalletId ?? token.signingWalletId,
     ["tokens:write"]
   );
 
   // Validate addresses and get custody authority (via 3-tier resolution)
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
-  const source = assertValidAddress(parsed.data.burn.source, "source");
+  const source = assertValidAddress(body.burn.source, "source");
   const { amountBaseUnits, mosaicAmount } = parsePositiveTokenAmount(
-    parsed.data.burn.amount,
+    body.burn.amount,
     token.decimals
   );
   const normalizedSource = await resolveValidatedBurnSource(
@@ -189,7 +180,7 @@ export const prepareBurn = async (c: AppContext) => {
           amount: mosaicAmount,
           authority: signer.address,
         },
-        parsed.data.options?.simulate ?? false
+        body.options?.simulate ?? false
       );
     } catch (error) {
       const appError = toBurnOperationAppError(error);
@@ -206,9 +197,9 @@ export const prepareBurn = async (c: AppContext) => {
     organizationId: auth.organizationId,
     type: "burn",
     params: {
-      source: parsed.data.burn.source,
-      amount: parsed.data.burn.amount,
-      memo: parsed.data.burn.memo,
+      source: body.burn.source,
+      amount: body.burn.amount,
+      memo: body.burn.memo,
       supplyBaselineUpdatedAt: token.totalSupplyUpdatedAt ?? null,
     },
     serializedTx: prepared.serializedTx,
@@ -223,8 +214,8 @@ export const prepareBurn = async (c: AppContext) => {
     resourceId: tx.id,
     metadata: {
       tokenId,
-      source: parsed.data.burn.source,
-      amount: parsed.data.burn.amount,
+      source: body.burn.source,
+      amount: body.burn.amount,
       mode: "prepare",
     },
   });
@@ -240,18 +231,11 @@ export const prepareBurn = async (c: AppContext) => {
   });
 };
 
-export const executeBurn = async (c: AppContext) => {
+export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
 
-  const body = await c.req.json();
-  const parsed = burnSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
@@ -269,13 +253,13 @@ export const executeBurn = async (c: AppContext) => {
 
   const signingWalletId = resolveApiKeySigningWalletId(
     auth,
-    parsed.data.signingWalletId ?? token.signingWalletId,
+    body.signingWalletId ?? token.signingWalletId,
     ["tokens:write"]
   );
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
-  const source = assertValidAddress(parsed.data.burn.source, "source");
+  const source = assertValidAddress(body.burn.source, "source");
   const { amountBaseUnits, mosaicAmount } = parsePositiveTokenAmount(
-    parsed.data.burn.amount,
+    body.burn.amount,
     token.decimals
   );
 
@@ -283,7 +267,7 @@ export const executeBurn = async (c: AppContext) => {
     tokenId,
     operation: "burn",
     mode: "execute",
-    params: parsed.data,
+    params: body,
   });
 
   // Create transaction record first
@@ -292,9 +276,9 @@ export const executeBurn = async (c: AppContext) => {
     organizationId: auth.organizationId,
     type: "burn",
     params: {
-      source: parsed.data.burn.source,
-      amount: parsed.data.burn.amount,
-      memo: parsed.data.burn.memo,
+      source: body.burn.source,
+      amount: body.burn.amount,
+      memo: body.burn.memo,
       supplyBaselineUpdatedAt: token.totalSupplyUpdatedAt ?? null,
     },
     initiatedByKeyId: auth.id,
@@ -311,7 +295,7 @@ export const executeBurn = async (c: AppContext) => {
       action: "burn",
     });
     if (transaction.status === "confirmed") {
-      await tokenService.applySettledBurnSupply(tx.id, tokenId, parsed.data.burn.amount);
+      await tokenService.applySettledBurnSupply(tx.id, tokenId, body.burn.amount);
     }
     return success(c, { transaction });
   }
@@ -321,8 +305,8 @@ export const executeBurn = async (c: AppContext) => {
     resourceId: tx.id,
     metadata: {
       tokenId,
-      source: parsed.data.burn.source,
-      amount: parsed.data.burn.amount,
+      source: body.burn.source,
+      amount: body.burn.amount,
       mode: "execute",
     },
   });
@@ -374,7 +358,7 @@ export const executeBurn = async (c: AppContext) => {
     });
 
     // Update token supply
-    await tokenService.applySettledBurnSupply(tx.id, tokenId, parsed.data.burn.amount);
+    await tokenService.applySettledBurnSupply(tx.id, tokenId, body.burn.amount);
 
     emitTokenOperationCompleted(c, {
       organizationId: orgId,
