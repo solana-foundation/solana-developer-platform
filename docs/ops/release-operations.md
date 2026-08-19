@@ -186,8 +186,9 @@ WHERE status = 'processing'
 ORDER BY created_at;
 ```
 
-Keep the `status = 'processing'` filter: a row whose outcome later became known keeps the marker
-key (`provider_data` is only ever merged into), so without it the list fills with settled transfers.
+Keep the `status = 'processing'` filter: nothing in the code removes the marker key — only the
+resolution SQL below does — so a row that settled on its own still carries it, and without the
+filter the list fills with transfers that need nothing.
 
 A signatureless parked row waits indefinitely, so resolve parked rows promptly. Reconcile every one
 before a planned rollback to a pre-fence image. If the row carries
@@ -223,15 +224,15 @@ again.
 The query above already spans every wallet transfer type, so it also lists parked **batch chunks** —
 resolve such a chunk exactly as a single transfer and its recipients and parent batch follow on the
 next `trackPendingTransfers` run — and parked **recurring collections**, which need a second step.
-That applies to transfers and chunks alike: whichever could not record its signature carries it in
-`provider_data ->> 'submitted_signature'`.
 
 #### Parked recurring collections
 
 The collection attempt stays `processing` alongside its parked transfer, so the subscription stops
 collecting until an operator resolves it — deliberately, because failing the attempt would
 reschedule the cycle and charge the payer a second time. Each park is logged once where it happens, with the attempt and transfer ids
-(`Recurring payment collection parked; awaiting manual reconciliation`). List them with:
+(`Recurring payment collection parked; awaiting manual reconciliation`). A transfer that could not
+even be parked logs `failed to close a lost submitted transfer signature` and needs the same
+treatment, from the signature in that line. List the parked collections with:
 
 ```sql
 SELECT a.id AS attempt_id, a.subscription_id, a.due_at, a.transfer_id, t.source_address, t.amount

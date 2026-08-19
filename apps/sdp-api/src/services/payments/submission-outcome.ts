@@ -79,9 +79,9 @@ export function submissionOutcomeUnknownPatch(submittedSignature?: string) {
   return {
     status: "processing" as const,
     error: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
-    providerData: submittedSignature
-      ? { ...SUBMISSION_OUTCOME_UNKNOWN_MARKER, submitted_signature: submittedSignature }
-      : { ...SUBMISSION_OUTCOME_UNKNOWN_MARKER },
+    // An absent signature writes no key: the repository JSON.stringifies this
+    // before the `provider_data || ?::jsonb` merge, and that drops undefined.
+    providerData: { ...SUBMISSION_OUTCOME_UNKNOWN_MARKER, submitted_signature: submittedSignature },
   };
 }
 

@@ -2661,6 +2661,15 @@ describe("Payments routes — transfers", () => {
         const res = await transferRequest("1");
 
         expect(res.status).toBe(200);
+        // Declared in PR-1's Impact: the caller is handed a signature the row
+        // never took, and that row waits for an operator instead of settling.
+        const body = (await res.json()) as {
+          data: { transfer: { status: string; signature: string | null } };
+        };
+        expect(body.data.transfer).toMatchObject({
+          status: "processing",
+          signature: SUBMITTED_SIGNATURE,
+        });
         const row = await latestTransferRow();
         expect(row).toMatchObject({ status: "processing", signature: null });
         // The column refused the signature, so provider_data carries it — that

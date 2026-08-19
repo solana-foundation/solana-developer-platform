@@ -482,18 +482,20 @@ export function createSubmissionRecorder(
 ) {
   let signature: string | null = null;
   let row: TransferRow | null = null;
+  const logFailure = (sig: string, error: unknown, message: string) =>
+    getLogger().error(
+      {
+        transfer_id: transfer.id,
+        signature: sig,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      message
+    );
   const persist = async (sig: string) => {
     try {
       row = await persistSignature(sig);
     } catch (error) {
-      getLogger().error(
-        {
-          transfer_id: transfer.id,
-          signature: sig,
-          error: error instanceof Error ? error.message : String(error),
-        },
-        "failed to persist submitted transfer signature"
-      );
+      logFailure(sig, error, "failed to persist submitted transfer signature");
     }
   };
   return {
@@ -510,14 +512,7 @@ export function createSubmissionRecorder(
           // Same contract as the writes above: this runs after a broadcast, so
           // a throw here would surface as a 500 and invite the client to send
           // the payment again.
-          getLogger().error(
-            {
-              transfer_id: transfer.id,
-              signature: sig,
-              error: error instanceof Error ? error.message : String(error),
-            },
-            "failed to close a lost submitted transfer signature"
-          );
+          logFailure(sig, error, "failed to close a lost submitted transfer signature");
         }
       }
     },

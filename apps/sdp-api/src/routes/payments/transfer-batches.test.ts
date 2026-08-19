@@ -1985,8 +1985,9 @@ describe("payment transfer batches", () => {
       return {
         ...repository,
         updateTransfer: async (input) => {
-          // Both of the recorder's attempts fail, so the chunk falls through to
-          // the settle that carries the signature.
+          // Only the recorder's two attempts are refused: a third write, if one
+          // is ever added back, would succeed — and the assertions below would
+          // catch it, because a parked chunk must carry no signature.
           if (
             signaturePersistFailures < 2 &&
             input.status === "processing" &&
@@ -2070,6 +2071,7 @@ describe("payment transfer batches", () => {
         .bind(linkedRecipient?.transfer_id)
         .first<{ status: string; signature: string | null; provider_data: unknown }>();
       expect(transferRow?.status).toBe("processing");
+      expect(transferRow?.signature).toBeNull();
       const parkedProviderData =
         typeof transferRow?.provider_data === "string"
           ? JSON.parse(transferRow.provider_data)

@@ -321,7 +321,7 @@ export async function executeChunk(params: {
     // write through a longer path, so park the chunk instead, with the
     // signature in `provider_data` — the column refused it, JSON still takes
     // it, and the operator reconciles from there.
-    (sig) => parkChunk(sig)
+    parkChunk
   );
   let signature: Awaited<ReturnType<typeof params.feePayment.signAndSend>>;
   try {
