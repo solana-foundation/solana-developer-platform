@@ -32,6 +32,7 @@ export type DashboardLoadingRoute =
   | "token-holdings"
   | "wallets-overview"
   | "wallet-setup"
+  | "wallet-connections"
   | "wallet-detail"
   | "wallet-policy"
   | "wallet-policy-audit-list"
@@ -78,6 +79,7 @@ function resolveWalletLoadingRoute(pathname: string): DashboardLoadingRoute | nu
   if (!prefix) return null;
   if (pathname === prefix) return "wallets-overview";
   if (pathname === `${prefix}/setup` || pathname === `${prefix}/switch`) return "wallet-setup";
+  if (pathname === `${prefix}/connections`) return "wallet-connections";
 
   const suffix = pathname.slice(prefix.length).split("/").filter(Boolean);
   if (suffix.length < 1) return null;

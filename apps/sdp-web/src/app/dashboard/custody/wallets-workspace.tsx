@@ -42,6 +42,7 @@ interface WalletsWorkspaceProps {
   connectedProviders: KnownCustodyProvider[];
   enabledProviders: KnownCustodyProvider[];
   configsError: string | null;
+  showConnectionsLink: boolean;
   wallets: CustodyWalletSummary[];
   walletsError: string | null;
 }
@@ -52,6 +53,7 @@ export function WalletsWorkspace({
   connectedProviders,
   enabledProviders,
   configsError,
+  showConnectionsLink,
   wallets,
   walletsError,
 }: WalletsWorkspaceProps) {
@@ -123,6 +125,7 @@ export function WalletsWorkspace({
                 <WalletsOverview
                   enabledProviders={enabledProviders}
                   configsError={configsError}
+                  showConnectionsLink={showConnectionsLink}
                   wallets={wallets}
                   walletsError={walletsError}
                   canManageCustody={dashboardAccess.capabilities.canManageCustody}
