@@ -5,8 +5,7 @@ import type {
   SdpEnvironment,
 } from "@sdp/types";
 import { EARN_MOVEMENT_TRANSITIONS } from "@sdp/types";
-import { type AppDb, asTransactionalClient } from "@/db";
-import { conflict } from "@/lib/errors";
+import type { AppDb } from "@/db";
 
 /**
  * The unified Earn movement ledger (PRO-1705, migrations 0062-0064).
@@ -40,48 +39,9 @@ import { conflict } from "@/lib/errors";
  * database decides what it becomes.
  */
 
+/** Ids are minted only for custodial holdings — see `mintEarnPositionForProviderWallet`. */
 export function generateEarnPositionId(): string {
   return `earn_position_${crypto.randomUUID()}`;
-}
-
-/**
- * One id space for every movement, both execution models.
- *
- * History keeps the ids the projection preserved (`earn_vault_movement_…`,
- * `earn_program_withdrawal_…`), so the table holds a mix for as long as those rows
- * live. That is why nothing may parse a movement id for its kind — read
- * `execution_model`.
- */
-export function generateEarnMovementId(): string {
-  return `earn_movement_${crypto.randomUUID()}`;
-}
-
-/**
- * Assert a prior movement under this idempotency key is THIS request's own replay
- * — same project AND same fingerprint — before it is returned as one.
- *
- * THIS FUNCTION IS THE RULE, and it is exported so every site that resolves a
- * replay enforces the same one. It kept re-appearing as a bug precisely because it
- * was re-implemented per site: the vault anchor is org-scoped and the server
- * fingerprint omits the project, so any site that forgets this check hands a
- * sibling project's movement back as the caller's own replay — answering the wrong
- * deposit, with its amount and its signature.
- *
- * A different project answers with the SAME conflict as a divergent fingerprint,
- * deliberately: the key really has been used by a different request, and a distinct
- * message would disclose that a sibling project holds it. A null `project_id`
- * (owner deleted) conflicts too — the key is genuinely burnt either way.
- */
-export function assertMovementIsOwnReplay(
-  movement: EarnMovementRow,
-  request: { projectId: string; idempotencyFingerprint: string }
-): void {
-  if (
-    movement.project_id !== request.projectId ||
-    movement.idempotency_fingerprint !== request.idempotencyFingerprint
-  ) {
-    throw conflict("Idempotency key already used with different request payload");
-  }
 }
 
 export interface EarnPositionRow {
@@ -160,10 +120,6 @@ export interface EarnMovementRow {
  * the status — it would re-project `settled_at` as NULL and violate 0062's
  * settlement biconditional, failing the legacy write itself.
  */
-/** Mirrors 0062's amount format checks, so app-layer refusals match the DB's. */
-const DECIMAL_STRING = /^\d+(?:\.\d+)?$/;
-const NON_ZERO_DIGIT = /[1-9]/;
-
 const NOT_ALREADY_FINALIZED = `WHERE earn_movements.status <> 'finalized'`;
 
 /**
@@ -561,104 +517,20 @@ export interface EarnMovementsRepository {
   }): Promise<{ rows: EarnMovementRow[]; hasMore: boolean }>;
   /** Global bounded outbox scan for the reconciliation worker. */
   listUnsettledVaultMovements(limit: number): Promise<EarnMovementRow[]>;
-
-  // ── Writes ───────────────────────────────────────────────────────────────
-
   /**
-   * Atomically claim/refresh the vault holding, insert the signed movement, and
-   * activate the holding. A divergent idempotency loser throws so the entire
-   * claim rolls back; an identical loser returns the winning signed row.
+   * Guarded CAS to `finalized` — irreversible chain settlement.
+   *
+   * The one transition written HERE and nowhere else, because `finalized` is the
+   * one status no legacy table can express. Everything before it still flows
+   * through the legacy writer and is mirrored, so this is not a second authority
+   * over a movement: it is the only authority over a fact the old shape had no
+   * word for. Returns null when the row was not in a finalizable state.
    */
-  createSignedVaultDepositIntent(input: CreateSignedVaultDepositIntentInput): Promise<{
-    position: EarnPositionRow;
-    movement: EarnMovementRow;
-    replayed: boolean;
-  }>;
-  /**
-   * Guarded CAS on a vault movement. Legal source states come from the shared
-   * transition matrix, so terminal regression is unrepresentable rather than
-   * merely discouraged, and a lost race returns null rather than an error.
-   */
-  advanceVaultMovement(input: AdvanceVaultMovementInput): Promise<EarnMovementRow | null>;
-  /** Insert-at-intent for a custodial movement: the row exists before the provider accepts. */
-  createCustodialMovement(input: CreateCustodialMovementInput): Promise<EarnMovementRow | null>;
-  /** Guarded CAS on a custodial movement, by row id or by provider reference. */
-  updateCustodialMovementGuarded(
-    input: UpdateCustodialMovementGuardedInput
-  ): Promise<EarnMovementRow | null>;
-}
-
-export interface CreateSignedVaultDepositIntentInput {
-  organizationId: string;
-  projectId: string;
-  environment: SdpEnvironment;
-  provider: string;
-  /** The vault's on-chain address. */
-  vaultAddress: string;
-  custodyWalletId: string;
-  shareMint: string;
-  tokenMint: string;
-  label: string;
-  /** Decimal string in the vault token's units, as the caller sent it. */
-  requestedAmount: string;
-  /** The provider plan's canonical spelling of the same quantity. */
-  acceptedAmount: string;
-  acceptedMinSharesOut?: string | null;
-  /** The wallet that signs and holds the shares — the depositor, on chain. */
-  sourceAddress: string;
-  signature: string;
-  signedTransaction: string;
-  lastValidBlockHeight: string;
-  requestId: string;
-  idempotencyFingerprint: string;
-  createdBy?: string | null;
-  initiatedByKeyId?: string | null;
-}
-
-export interface AdvanceVaultMovementInput {
-  movementId: string;
-  organizationId: string;
-  toStatus: string;
-  sharesOut?: string | null;
-  failureReason?: string | null;
-  confirmedAt?: string | null;
-  settledAt?: string | null;
-}
-
-export interface CreateCustodialMovementInput {
-  organizationId: string;
-  projectId: string;
-  environment: SdpEnvironment;
-  provider: string;
-  /** The program wallet this movement is reached through; resolves the holding. */
-  providerWalletId: string;
-  /** USD decimal string (the portfolio vocabulary). */
-  amountRequestedUsd: string;
-  /** Payout stablecoin symbol; NOT the unit, which is always `usd` here. */
-  payoutToken: string;
-  destinationAddress: string;
-  requestId: string;
-  idempotencyFingerprint: string;
-  providerData: Record<string, unknown>;
-  createdBy: string | null;
-  initiatedByKeyId: string | null;
-}
-
-export type UpdateCustodialMovementSelector =
-  | { movementId: string }
-  | { provider: string; providerReference: string };
-
-export interface UpdateCustodialMovementGuardedInput {
-  selector: UpdateCustodialMovementSelector;
-  organizationId: string;
-  fromStatuses: readonly string[];
-  toStatus: string;
-  providerReference?: string;
-  amountSettled?: string | null;
-  feeAmount?: string | null;
-  failureReason?: string | null;
-  settledAt?: string | null;
-  providerData?: Record<string, unknown>;
+  finalizeVaultMovement(input: {
+    movementId: string;
+    organizationId: string;
+    settledAt: string;
+  }): Promise<EarnMovementRow | null>;
 }
 
 /**
@@ -994,447 +866,30 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       return (result.results ?? []).map(mapMovementRow);
     },
 
-    async createSignedVaultDepositIntent(input) {
-      // A real transaction for ordinary requests. When the caller supplied an
-      // approved-operation transaction, asTransactionalClient makes this nested
-      // call execute inline on that same connection.
-      return db.transaction(async (executor) => {
-        const transaction = asTransactionalClient(executor);
-
-        const prior = await findVaultMovementByRequest(
-          transaction,
-          input.organizationId,
-          input.requestId
-        );
-        if (prior) {
-          assertMovementIsOwnReplay(prior, input);
-          return {
-            position: await requireMovementPosition(transaction, prior),
-            movement: prior,
-            replayed: true,
-          };
-        }
-
-        const claimed = await claimVaultPosition(transaction, input);
-        const inserted = await insertVaultMovement(transaction, input, claimed.id);
-        if (!inserted) {
-          // A concurrent request committed after the preflight. A divergent
-          // fingerprint throws and rolls the claim back with this transaction.
-          const winner = await findVaultMovementByRequest(
-            transaction,
-            input.organizationId,
-            input.requestId
-          );
-          if (!winner) throw new Error("Failed to resolve concurrent earn vault movement");
-          assertMovementIsOwnReplay(winner, input);
-          return {
-            position: await requireMovementPosition(transaction, winner),
-            movement: winner,
-            replayed: true,
-          };
-        }
-
-        return { position: claimed, movement: inserted, replayed: false };
-      });
-    },
-
-    async advanceVaultMovement(input) {
-      assertVaultTransitionMetadata(input);
-      const sources = allowedSourceStatuses("vault_direct", input.toStatus);
+    async finalizeVaultMovement(input) {
+      const sources = allowedSourceStatuses("vault_direct", "finalized");
       const guards = sources.map(() => "?").join(", ");
-
-      const assignments = ["status = ?", "updated_at = sdp_iso_now()"];
-      const values: unknown[] = [input.toStatus];
-      for (const [column, value] of [
-        ["shares_out", input.sharesOut],
-        ["failure_reason", input.failureReason],
-        ["settled_at", input.settledAt],
-      ] as const) {
-        if (value !== undefined) {
-          assignments.push(`${column} = ?`);
-          values.push(value);
-        }
-      }
-      if (input.confirmedAt !== undefined) {
-        // COALESCEd rather than overwritten: a sweep whose first observation is
-        // already finalized never saw a separate commitment, and 0062 requires the
-        // column for any confirmed-or-finalized row — while a movement that DID
-        // report commitment earlier keeps the moment it was actually observed.
-        assignments.push("confirmed_at = COALESCE(confirmed_at, ?)");
-        values.push(input.confirmedAt);
-      }
-
-      const advance = (target: AppDb) =>
-        target
-          .prepare(
-            `UPDATE earn_movements
-                SET ${assignments.join(", ")}
-              WHERE id = ?
-                AND organization_id = ?
-                AND execution_model = 'vault_direct'
-                AND status IN (${guards})
-              RETURNING *`
-          )
-          .bind(...values, input.movementId, input.organizationId, ...sources)
-          .first<Record<string, unknown>>();
-
-      // Only an outcome that changes what the organization HOLDS needs the
-      // position lock and the second statement.
-      if (input.toStatus === "submitted") {
-        const row = await advance(db);
-        return row ? mapMovementRow(row) : null;
-      }
-
-      return db.transaction(async (executor) => {
-        const transaction = asTransactionalClient(executor);
-        const candidate = await transaction
-          .prepare(
-            `SELECT position_id, direction FROM earn_movements
-              WHERE id = ? AND organization_id = ?`
-          )
-          .bind(input.movementId, input.organizationId)
-          .first<{ position_id: string; direction: string }>();
-        if (!candidate) return null;
-        // Serialises concurrent activation decisions for this holding.
-        await transaction
-          .prepare("SELECT id FROM earn_positions WHERE id = ? FOR UPDATE")
-          .bind(candidate.position_id)
-          .first<{ id: string }>();
-        const row = await advance(transaction);
-        if (!row) return null;
-        const movement = mapMovementRow(row);
-
-        if (input.toStatus === "failed") {
-          // De-activate only when nothing live remains: a failed attempt beside a
-          // good one must not close a holding the organization still has.
-          await transaction
-            .prepare(
-              `UPDATE earn_positions position
-                  SET activated_at = NULL, updated_at = sdp_iso_now()
-                WHERE position.id = ?
-                  AND position.activated_at IS NOT NULL
-                  AND NOT EXISTS (
-                    SELECT 1 FROM earn_movements movement
-                     WHERE movement.position_id = position.id
-                       AND movement.status IN ('requested', 'submitted', 'confirmed', 'finalized')
-                  )`
-            )
-            .bind(movement.position_id)
-            .run();
-        } else if (candidate.direction === "deposit") {
-          await transaction
-            .prepare(
-              `UPDATE earn_positions
-                  SET activated_at = COALESCE(activated_at, sdp_iso_now()),
-                      closed_at = NULL,
-                      updated_at = sdp_iso_now()
-                WHERE id = ? AND organization_id = ?`
-            )
-            .bind(movement.position_id, input.organizationId)
-            .run();
-        }
-        return movement;
-      });
-    },
-
-    async createCustodialMovement(input) {
-      // Status, denomination and direction are fixed for this shape: an intent row
-      // exists before the provider call is accepted and never in another state, and
-      // a portfolio withdrawal is USD-denominated by definition. The holding is
-      // resolved by JOIN rather than passed in, so a movement can never name one
-      // that does not belong to its program.
       const row = await db
         .prepare(
-          `INSERT INTO earn_movements (
-             id, organization_id, project_id, environment, provider,
-             execution_model, direction, position_id, status,
-             denomination, amount_requested, payout_token, destination_address,
-             request_id, idempotency_fingerprint, provider_data,
-             created_by, initiated_by_key_id
-           )
-           SELECT ?, ?, ?, ?, ?, 'custodial', 'withdrawal', position.id, 'requested',
-                  'usd', ?, ?, ?, ?, ?, ?::jsonb, ?, ?
-             FROM earn_positions position
-            WHERE position.provider_wallet_id = ?
-              AND position.kind = 'custodial'
-           RETURNING *`
-        )
-        .bind(
-          generateEarnMovementId(),
-          input.organizationId,
-          input.projectId,
-          input.environment,
-          input.provider,
-          input.amountRequestedUsd,
-          input.payoutToken,
-          input.destinationAddress,
-          input.requestId,
-          input.idempotencyFingerprint,
-          JSON.stringify(input.providerData ?? {}),
-          input.createdBy,
-          input.initiatedByKeyId,
-          input.providerWalletId
-        )
-        .first<Record<string, unknown>>();
-      if (!row) {
-        // The program has no holding, so there is nowhere to record the movement.
-        // Loud, because the alternative is money moving unrecorded.
-        throw new Error(
-          `Earn program wallet ${input.providerWalletId} has no custodial holding to record a movement against`
-        );
-      }
-      return mapMovementRow(row);
-    },
-
-    async updateCustodialMovementGuarded(input) {
-      // Dynamic SET list, payments idiom: `undefined` means "don't touch", `null`
-      // is a real write; provider_data is a shallow JSONB merge. updated_at is
-      // DB-stamped (earn convention), never caller-supplied.
-      const assignments = ["status = ?", "updated_at = sdp_iso_now()"];
-      const assignmentValues: unknown[] = [input.toStatus];
-      for (const [column, value] of [
-        ["provider_reference", input.providerReference],
-        ["amount_settled", input.amountSettled],
-        ["fee_amount", input.feeAmount],
-        ["failure_reason", input.failureReason],
-        ["settled_at", input.settledAt],
-      ] as const) {
-        if (value !== undefined) {
-          assignments.push(`${column} = ?`);
-          assignmentValues.push(value);
-        }
-      }
-      if (input.providerData !== undefined) {
-        assignments.push("provider_data = provider_data || ?::jsonb");
-        assignmentValues.push(JSON.stringify(input.providerData));
-      }
-
-      // The CAS guard and the org scope live in the same WHERE as the selector, so
-      // the whole transition is one atomic statement: the loser of a concurrent
-      // race simply matches zero rows.
-      const conditions = ["organization_id = ?", "execution_model = 'custodial'", "status = ANY(?)"];
-      const conditionValues: unknown[] = [input.organizationId, [...input.fromStatuses]];
-      if ("movementId" in input.selector) {
-        conditions.push("id = ?");
-        conditionValues.push(input.selector.movementId);
-      } else {
-        conditions.push("provider = ?", "provider_reference = ?");
-        conditionValues.push(input.selector.provider, input.selector.providerReference);
-      }
-
-      const row = await db
-        .prepare(
+          // `confirmed_at` is COALESCEd rather than assumed: a sweep whose FIRST
+          // observation is already finalized never saw a separate commitment, and
+          // 0062's confirmation biconditional requires the column to be set for
+          // any finalized row. Stamping the moment we learned of it is the honest
+          // reading — and leaving it null would fail the write outright.
           `UPDATE earn_movements
-              SET ${assignments.join(", ")}
-            WHERE ${conditions.join(" AND ")}
+              SET status = 'finalized',
+                  settled_at = ?,
+                  confirmed_at = COALESCE(confirmed_at, ?),
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND execution_model = 'vault_direct'
+              AND status IN (${guards})
             RETURNING *`
         )
-        .bind(...assignmentValues, ...conditionValues)
+        .bind(input.settledAt, input.settledAt, input.movementId, input.organizationId, ...sources)
         .first<Record<string, unknown>>();
       return row ? mapMovementRow(row) : null;
     },
   };
-}
-
-/**
- * Field coupling for a vault transition, checked before the statement runs.
- *
- * These throw rather than miss the CAS, because a caller asking to confirm without
- * a timestamp or fail without a reason has a bug — and 0062 would refuse the write
- * anyway. Failing here names the actual mistake instead of returning the null that
- * means "someone else got there first".
- */
-function assertVaultTransitionMetadata(input: AdvanceVaultMovementInput): void {
-  if (input.failureReason !== undefined && input.toStatus !== "failed") {
-    throw new Error("failureReason is only valid when failing an earn vault movement");
-  }
-  if (input.toStatus === "failed" && !input.failureReason?.trim()) {
-    throw new Error("failureReason is required when failing an earn vault movement");
-  }
-  if (input.settledAt !== undefined && input.toStatus !== "finalized") {
-    throw new Error("settledAt is only valid when finalizing an earn vault movement");
-  }
-  if (input.toStatus === "finalized" && !input.settledAt?.trim()) {
-    throw new Error("settledAt is required when finalizing an earn vault movement");
-  }
-  if (
-    input.confirmedAt !== undefined &&
-    input.toStatus !== "confirmed" &&
-    input.toStatus !== "finalized"
-  ) {
-    throw new Error("confirmedAt is only valid when confirming an earn vault movement");
-  }
-  if (
-    (input.toStatus === "confirmed" || input.toStatus === "finalized") &&
-    !input.confirmedAt?.trim()
-  ) {
-    throw new Error("confirmedAt is required when confirming an earn vault movement");
-  }
-  if (input.sharesOut !== undefined && input.toStatus !== "confirmed") {
-    throw new Error("sharesOut is only valid when confirming an earn vault movement");
-  }
-  if (
-    input.sharesOut !== undefined &&
-    input.sharesOut !== null &&
-    (input.sharesOut.length < 1 ||
-      input.sharesOut.length > 128 ||
-      !DECIMAL_STRING.test(input.sharesOut) ||
-      !NON_ZERO_DIGIT.test(input.sharesOut))
-  ) {
-    throw new Error("sharesOut must be a positive unsigned decimal with at most 128 characters");
-  }
-}
-
-async function findVaultMovementByRequest(
-  db: AppDb,
-  organizationId: string,
-  requestId: string
-): Promise<EarnMovementRow | null> {
-  const row = await db
-    .prepare(
-      `SELECT * FROM earn_movements
-        WHERE organization_id = ? AND request_id = ? AND execution_model = 'vault_direct'`
-    )
-    .bind(organizationId, requestId)
-    .first<Record<string, unknown>>();
-  return row ? mapMovementRow(row) : null;
-}
-
-async function requireMovementPosition(
-  db: AppDb,
-  movement: EarnMovementRow
-): Promise<EarnPositionRow> {
-  const position = await db
-    .prepare(
-      `SELECT * FROM earn_positions WHERE id = ? AND organization_id = ? AND environment = ?`
-    )
-    .bind(movement.position_id, movement.organization_id, movement.environment)
-    .first<EarnPositionRow>();
-  if (!position) {
-    throw new Error(
-      `Earn movement ${movement.id} references missing holding ${movement.position_id}`
-    );
-  }
-  return position;
-}
-
-/**
- * Claim or refresh the vault holding, taking tenancy FROM the project row rather
- * than from the input, and validating the wallet's config-or-connection scope in
- * SQL. A mint-identity mismatch returns nothing and answers 409: the caller named a
- * holding whose asset identity is not the one being deposited.
- */
-async function claimVaultPosition(
-  db: AppDb,
-  input: CreateSignedVaultDepositIntentInput
-): Promise<EarnPositionRow> {
-  const row = await db
-    .prepare(
-      `INSERT INTO earn_positions (
-         id, organization_id, project_id, environment, provider, kind,
-         custody_wallet_id, vault_address, share_mint, token_mint, label,
-         created_by, activated_at
-       )
-       SELECT
-         ?, project.organization_id, project.id, project.environment,
-         ?, 'vault_direct', wallet.id, ?, ?, ?, ?, ?, sdp_iso_now()
-       FROM projects project
-       INNER JOIN custody_wallets wallet
-         ON wallet.id = ?
-       LEFT JOIN custody_configs config
-         ON config.id = wallet.custody_config_id
-       LEFT JOIN custody_connections connection
-         ON connection.id = wallet.custody_connection_id
-       WHERE project.id = ?
-         AND project.organization_id = ?
-         AND project.environment = ?
-         AND (
-           (
-             wallet.custody_config_id IS NOT NULL
-             AND config.organization_id = project.organization_id
-             AND (config.project_id IS NULL OR config.project_id = project.id)
-           )
-           OR
-           (
-             wallet.custody_connection_id IS NOT NULL
-             AND connection.organization_id = project.organization_id
-             AND (connection.project_id IS NULL OR connection.project_id = project.id)
-           )
-         )
-       ON CONFLICT (organization_id, environment, provider, vault_address, custody_wallet_id)
-         WHERE kind = 'vault_direct'
-       DO UPDATE SET
-         updated_at = sdp_iso_now(),
-         label = EXCLUDED.label,
-         activated_at = COALESCE(earn_positions.activated_at, sdp_iso_now())
-       WHERE earn_positions.token_mint = EXCLUDED.token_mint
-         AND earn_positions.share_mint = EXCLUDED.share_mint
-       RETURNING *`
-    )
-    .bind(
-      generateEarnPositionId(),
-      input.provider,
-      input.vaultAddress,
-      input.shareMint,
-      input.tokenMint,
-      input.label,
-      input.createdBy ?? null,
-      input.custodyWalletId,
-      input.projectId,
-      input.organizationId,
-      input.environment
-    )
-    .first<EarnPositionRow>();
-  if (!row) {
-    throw conflict("Vault position does not match project, wallet scope, or asset identity");
-  }
-  return row;
-}
-
-async function insertVaultMovement(
-  db: AppDb,
-  input: CreateSignedVaultDepositIntentInput,
-  positionId: string
-): Promise<EarnMovementRow | null> {
-  const row = await db
-    .prepare(
-      `INSERT INTO earn_movements (
-         id, organization_id, project_id, environment, provider,
-         execution_model, direction, position_id, status,
-         denomination, amount_requested, min_shares_out,
-         custody_wallet_id, vault_address, source_address, destination_address,
-         signature, signed_transaction, last_valid_block_height,
-         request_id, idempotency_fingerprint, created_by, initiated_by_key_id
-       ) VALUES (?, ?, ?, ?, ?, 'vault_direct', 'deposit', ?, 'requested',
-                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (organization_id, request_id) WHERE execution_model = 'vault_direct'
-       DO NOTHING
-       RETURNING *`
-    )
-    .bind(
-      generateEarnMovementId(),
-      input.organizationId,
-      input.projectId,
-      input.environment,
-      input.provider,
-      positionId,
-      // Mint units, never USD — the denomination IS the deposit token.
-      input.tokenMint,
-      input.requestedAmount,
-      input.acceptedMinSharesOut ?? null,
-      input.custodyWalletId,
-      input.vaultAddress,
-      input.sourceAddress,
-      // Funds go INTO the vault, so the instrument is also the destination.
-      input.vaultAddress,
-      input.signature,
-      input.signedTransaction,
-      input.lastValidBlockHeight,
-      input.requestId,
-      input.idempotencyFingerprint,
-      input.createdBy ?? null,
-      input.initiatedByKeyId ?? null
-    )
-    .first<Record<string, unknown>>();
-  return row ? mapMovementRow(row) : null;
 }

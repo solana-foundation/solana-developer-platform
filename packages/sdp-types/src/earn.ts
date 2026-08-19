@@ -722,27 +722,9 @@ export const EARN_MOVEMENT_TRANSITIONS = {
   },
   vault_direct: {
     submitted: ["requested"],
-    // From `requested` too, not only `submitted`: a broadcast whose response was
-    // lost leaves a movement unsubmitted WITH a signature, and the chain is then
-    // the only authority on it. Refusing the transition would strand exactly the
-    // rows reconciliation exists for.
     confirmed: ["requested", "submitted"],
-    // Reachable from ANY pre-terminal state, for the same reason: the sweep may
-    // learn of finalization as its first observation of a movement, and a
-    // transaction the chain calls finalized was demonstrably submitted and
-    // committed whether or not SDP recorded those moments separately. The writer
-    // stamps `confirmed_at` on the way through so the row is never a settled one
-    // with no record of its commitment.
-    finalized: ["requested", "submitted", "confirmed"],
-    // NOT from `confirmed`, deliberately. Migration 0062 ties `confirmed_at` to
-    // the commitment states, so failing a confirmed movement could only succeed by
-    // erasing an observation SDP genuinely made — and the realistic chain path
-    // never asks for it: an execution error is reported with the FIRST status for
-    // a signature, not after a clean one. The remaining tail, a confirmed
-    // transaction dropped by a fork rollback, is an open question rather than
-    // something handled here: such a row stops being observable and is left in the
-    // reconciliation queue rather than declared failed on a guess.
-    failed: ["requested", "submitted"],
+    finalized: ["submitted", "confirmed"],
+    failed: ["requested", "submitted", "confirmed"],
   },
 } as const satisfies {
   [Model in EarnExecutionModel]: Partial<
