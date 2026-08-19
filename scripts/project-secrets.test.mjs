@@ -21,7 +21,6 @@ function run(command, env = {}, extraArgs = []) {
 test("docker emits KEY=VALUE for committed and secret keys", () => {
   const result = run("docker", {
     SOLANA_NETWORK: "mainnet-beta",
-    PAYMENTS_RECURRING_COLLECTION_ENABLED: "true",
     PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE: "7",
     PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES: "45",
     CLERK_SECRET_KEY: "sk_test_clerk",
@@ -29,7 +28,6 @@ test("docker emits KEY=VALUE for committed and secret keys", () => {
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^SOLANA_NETWORK=mainnet-beta$/m);
-  assert.match(result.stdout, /^PAYMENTS_RECURRING_COLLECTION_ENABLED=true$/m);
   assert.match(result.stdout, /^PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE=7$/m);
   assert.match(result.stdout, /^PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES=45$/m);
   assert.match(result.stdout, /^CLERK_SECRET_KEY=sk_test_clerk$/m);
