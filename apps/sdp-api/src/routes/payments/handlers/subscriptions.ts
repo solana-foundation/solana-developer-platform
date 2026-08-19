@@ -50,6 +50,7 @@ import { resolveCreatorUserId } from "@/lib/creator";
 import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import {
   normalizePaymentToken,
@@ -62,18 +63,18 @@ import {
   getSponsoredFeePayer,
 } from "../context";
 import {
-  createSubscriptionPlanSchema,
-  createSubscriptionSchema,
+  type createSubscriptionPlanSchema,
+  type createSubscriptionSchema,
   listSubscriptionCollectionAttemptsQuerySchema,
   listSubscriptionPlansQuerySchema,
   listSubscriptionsQuerySchema,
-  prepareSubscriptionAuthorizationSchema,
-  prepareSubscriptionCollectionSchema,
-  prepareSubscriptionLifecycleSchema,
-  prepareSubscriptionPlanCreateSchema,
+  type prepareSubscriptionAuthorizationSchema,
+  type prepareSubscriptionCollectionSchema,
+  type prepareSubscriptionLifecycleSchema,
+  type prepareSubscriptionPlanCreateSchema,
   subscriptionIdParamsSchema,
   subscriptionPlanIdParamsSchema,
-  updateSubscriptionPlanSchema,
+  type updateSubscriptionPlanSchema,
 } from "../schemas";
 import { resolveMintDecimals, resolveMintTokenProgram, SOL_MINT } from "../token-accounts";
 import { resolveScope, resolveWallet } from "../wallets";
@@ -144,19 +145,6 @@ function mapCollectionAttempt(
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
-}
-
-async function readOptionalJsonBody(c: AppContext): Promise<unknown> {
-  const text = await c.req.text();
-  if (!text.trim()) {
-    return {};
-  }
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw badRequest("Invalid request body");
-  }
 }
 
 function generateProgramPlanId(): string {
@@ -376,20 +364,17 @@ async function resolvePullerWalletAddress(
   return { pullerWalletId: wallet.walletId, pullerAddress: wallet.publicKey };
 }
 
-export const createSubscriptionPlan = async (c: AppContext) => {
+export const createSubscriptionPlan = async (
+  c: ValidatedBodyContext<typeof createSubscriptionPlanSchema>
+) => {
   const projectId = requireProjectId(c);
-  const body = await c.req.json();
-  const parsed = createSubscriptionPlanSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
-  }
+  const body = c.req.valid("json");
 
   const scope = await resolveScope(c);
-  const ownerWallet = resolveWallet(scope.wallets, parsed.data.ownerWalletId);
+  const ownerWallet = resolveWallet(scope.wallets, body.ownerWalletId);
   assertApiKeyWalletAccess(scope.auth, ownerWallet.walletId, ["payments:write"]);
 
-  const puller = await resolvePullerWalletAddress(c, parsed.data.pullerWalletId);
+  const puller = await resolvePullerWalletAddress(c, body.pullerWalletId);
   const now = new Date().toISOString();
   const id = `psp_${crypto.randomUUID()}`;
   const createdBy = await resolveCreatorUserId(c);
@@ -401,16 +386,16 @@ export const createSubscriptionPlan = async (c: AppContext) => {
     projectId,
     ownerWalletId: ownerWallet.walletId,
     ownerAddress: ownerWallet.publicKey,
-    token: normalizePaymentToken(parsed.data.token, c.env),
-    amount: parsed.data.amount,
-    periodHours: parsed.data.periodHours,
-    programPlanId: parsed.data.programPlanId ?? generateProgramPlanId(),
-    planPda: parsed.data.planPda ?? null,
-    destinationAddress: parsed.data.destinationAddress ?? null,
+    token: normalizePaymentToken(body.token, c.env),
+    amount: body.amount,
+    periodHours: body.periodHours,
+    programPlanId: body.programPlanId ?? generateProgramPlanId(),
+    planPda: body.planPda ?? null,
+    destinationAddress: body.destinationAddress ?? null,
     pullerWalletId: puller.pullerWalletId ?? null,
     pullerAddress: puller.pullerAddress ?? null,
-    metadataUri: parsed.data.metadataUri ?? null,
-    status: parsed.data.status,
+    metadataUri: body.metadataUri ?? null,
+    status: body.status,
     createdBy,
     createdAt: now,
     updatedAt: now,
@@ -477,7 +462,9 @@ export const getSubscriptionPlan = async (c: AppContext) => {
   return success(c, response);
 };
 
-export const prepareCreateSubscriptionPlan = async (c: AppContext) => {
+export const prepareCreateSubscriptionPlan = async (
+  c: ValidatedBodyContext<typeof prepareSubscriptionPlanCreateSchema>
+) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const params = subscriptionPlanIdParamsSchema.safeParse(c.req.param());
@@ -486,12 +473,7 @@ export const prepareCreateSubscriptionPlan = async (c: AppContext) => {
     throw badRequestParams();
   }
 
-  const body = await readOptionalJsonBody(c);
-  const parsed = prepareSubscriptionPlanCreateSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
-  }
+  const body = c.req.valid("json");
 
   const repo = getPaymentSubscriptionsRepository(c);
   const plan = await repo.getPlanById({
@@ -520,7 +502,7 @@ export const prepareCreateSubscriptionPlan = async (c: AppContext) => {
   }
 
   const destinations = (
-    parsed.data.destinations ?? (plan.destination_address ? [plan.destination_address] : [])
+    body.destinations ?? (plan.destination_address ? [plan.destination_address] : [])
   ).map((value) => assertValidAddress(value, "destinations entry"));
   if (destinations.length === 0) {
     throw new AppError(
@@ -530,11 +512,11 @@ export const prepareCreateSubscriptionPlan = async (c: AppContext) => {
   }
 
   const pullers = (
-    parsed.data.pullers ?? (plan.puller_address ? [plan.puller_address] : [plan.owner_address])
+    body.pullers ?? (plan.puller_address ? [plan.puller_address] : [plan.owner_address])
   ).map((value) => assertValidAddress(value, "pullers entry"));
   const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(c, plan);
-  const endTs = parsed.data.endTs ? parseU64String(parsed.data.endTs, "endTs") : 0n;
-  const metadataUri = parsed.data.metadataUri ?? plan.metadata_uri ?? "";
+  const endTs = body.endTs ? parseU64String(body.endTs, "endTs") : 0n;
+  const metadataUri = body.metadataUri ?? plan.metadata_uri ?? "";
 
   const instruction = await getCreatePlanOverlayInstructionAsync({
     amount: amountBaseUnits,
@@ -559,7 +541,9 @@ export const prepareCreateSubscriptionPlan = async (c: AppContext) => {
   return success(c, response);
 };
 
-export const updateSubscriptionPlan = async (c: AppContext) => {
+export const updateSubscriptionPlan = async (
+  c: ValidatedBodyContext<typeof updateSubscriptionPlanSchema>
+) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const params = subscriptionPlanIdParamsSchema.safeParse(c.req.param());
@@ -568,12 +552,7 @@ export const updateSubscriptionPlan = async (c: AppContext) => {
     throw badRequestParams();
   }
 
-  const body = await c.req.json();
-  const parsed = updateSubscriptionPlanSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
-  }
+  const body = c.req.valid("json");
 
   const repo = getPaymentSubscriptionsRepository(c);
   const existingPlan = await repo.getPlanById({
@@ -588,17 +567,17 @@ export const updateSubscriptionPlan = async (c: AppContext) => {
 
   await resolvePlanWriteWallet(c, existingPlan);
 
-  const puller = await resolvePullerWalletAddress(c, parsed.data.pullerWalletId);
+  const puller = await resolvePullerWalletAddress(c, body.pullerWalletId);
   const updated = await repo.updatePlan({
     planId: params.data.planId,
     organizationId: auth.organizationId,
     projectId,
-    planPda: parsed.data.planPda,
-    destinationAddress: parsed.data.destinationAddress,
+    planPda: body.planPda,
+    destinationAddress: body.destinationAddress,
     pullerWalletId: puller.pullerWalletId,
     pullerAddress: puller.pullerAddress,
-    metadataUri: parsed.data.metadataUri,
-    status: parsed.data.status,
+    metadataUri: body.metadataUri,
+    status: body.status,
     updatedAt: new Date().toISOString(),
   });
 
@@ -610,19 +589,16 @@ export const updateSubscriptionPlan = async (c: AppContext) => {
   return success(c, response);
 };
 
-export const createSubscription = async (c: AppContext) => {
+export const createSubscription = async (
+  c: ValidatedBodyContext<typeof createSubscriptionSchema>
+) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
-  const body = await c.req.json();
-  const parsed = createSubscriptionSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
-  }
+  const body = c.req.valid("json");
 
   const repo = getPaymentSubscriptionsRepository(c);
   const plan = await repo.getPlanById({
-    planId: parsed.data.planId,
+    planId: body.planId,
     organizationId: auth.organizationId,
     projectId,
   });
@@ -634,13 +610,13 @@ export const createSubscription = async (c: AppContext) => {
     throw badRequest("Cannot create a subscription for an archived plan");
   }
 
-  await requireActiveCounterparty(c, parsed.data.counterpartyId);
+  await requireActiveCounterparty(c, body.counterpartyId);
 
   const existing = await repo.listSubscriptions({
     organizationId: auth.organizationId,
     projectId,
-    planId: parsed.data.planId,
-    counterpartyId: parsed.data.counterpartyId,
+    planId: body.planId,
+    counterpartyId: body.counterpartyId,
     limit: 1,
     offset: 0,
   });
@@ -655,9 +631,9 @@ export const createSubscription = async (c: AppContext) => {
     id: `psub_${crypto.randomUUID()}`,
     organizationId: auth.organizationId,
     projectId,
-    planId: parsed.data.planId,
-    counterpartyId: parsed.data.counterpartyId,
-    subscriberAddress: parsed.data.subscriberAddress,
+    planId: body.planId,
+    counterpartyId: body.counterpartyId,
+    subscriberAddress: body.subscriberAddress,
     subscriberTokenAccount: null,
     subscriptionPda: null,
     subscriptionAuthorityAddress: null,
@@ -678,19 +654,16 @@ export const createSubscription = async (c: AppContext) => {
   return created(c, response);
 };
 
-export const prepareSubscriptionAuthorization = async (c: AppContext) => {
+export const prepareSubscriptionAuthorization = async (
+  c: ValidatedBodyContext<typeof prepareSubscriptionAuthorizationSchema>
+) => {
   const params = subscriptionIdParamsSchema.safeParse(c.req.param());
 
   if (!params.success) {
     throw badRequestParams();
   }
 
-  const body = await c.req.json();
-  const parsed = prepareSubscriptionAuthorizationSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
-  }
+  const body = c.req.valid("json");
 
   const { plan, subscription } = await getSubscriptionWithPlan(c, params.data.subscriptionId);
   if (plan.status !== "active") {
@@ -706,16 +679,13 @@ export const prepareSubscriptionAuthorization = async (c: AppContext) => {
   const { owner, planId, planPda } = await derivePlanAddresses(plan);
   const subscriber = assertValidAddress(subscription.subscriber_address, "subscriberAddress");
   const subscriberTokenAccount = assertValidAddress(
-    parsed.data.subscriberTokenAccount,
+    body.subscriberTokenAccount,
     "subscriberTokenAccount"
   );
   const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(c, plan);
-  const expectedCreatedAt = parseU64String(
-    parsed.data.expectedPlanCreatedAt,
-    "expectedPlanCreatedAt"
-  );
+  const expectedCreatedAt = parseU64String(body.expectedPlanCreatedAt, "expectedPlanCreatedAt");
   const expectedSubscriptionAuthorityInitId = parseI64String(
-    parsed.data.expectedSubscriptionAuthorityInitId,
+    body.expectedSubscriptionAuthorityInitId,
     // biome-ignore lint/security/noSecrets: Field name used for validation errors, not a secret.
     "expectedSubscriptionAuthorityInitId"
   );
@@ -823,20 +793,13 @@ export const getSubscription = async (c: AppContext) => {
 };
 
 async function prepareSubscriptionLifecycle(
-  c: AppContext,
+  c: ValidatedBodyContext<typeof prepareSubscriptionLifecycleSchema>,
   operation: "cancel" | "resume"
 ): Promise<Response> {
   const params = subscriptionIdParamsSchema.safeParse(c.req.param());
 
   if (!params.success) {
     throw badRequestParams();
-  }
-
-  const body = await readOptionalJsonBody(c);
-  const parsed = prepareSubscriptionLifecycleSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
   }
 
   const { plan, subscription } = await getSubscriptionWithPlan(c, params.data.subscriptionId);
@@ -874,25 +837,24 @@ async function prepareSubscriptionLifecycle(
   return success(c, response);
 }
 
-export const prepareCancelSubscription = async (c: AppContext) =>
-  prepareSubscriptionLifecycle(c, "cancel");
+export const prepareCancelSubscription = async (
+  c: ValidatedBodyContext<typeof prepareSubscriptionLifecycleSchema>
+) => prepareSubscriptionLifecycle(c, "cancel");
 
-export const prepareResumeSubscription = async (c: AppContext) =>
-  prepareSubscriptionLifecycle(c, "resume");
+export const prepareResumeSubscription = async (
+  c: ValidatedBodyContext<typeof prepareSubscriptionLifecycleSchema>
+) => prepareSubscriptionLifecycle(c, "resume");
 
-export const prepareSubscriptionCollection = async (c: AppContext) => {
+export const prepareSubscriptionCollection = async (
+  c: ValidatedBodyContext<typeof prepareSubscriptionCollectionSchema>
+) => {
   const params = subscriptionIdParamsSchema.safeParse(c.req.param());
 
   if (!params.success) {
     throw badRequestParams();
   }
 
-  const body = await c.req.json();
-  const parsed = prepareSubscriptionCollectionSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
-  }
+  const body = c.req.valid("json");
 
   const { plan, subscription } = await getSubscriptionWithPlan(c, params.data.subscriptionId);
   if (subscription.status !== "active") {
@@ -915,7 +877,7 @@ export const prepareSubscriptionCollection = async (c: AppContext) => {
   const subscriptionPda = subscription.subscription_pda
     ? assertValidAddress(subscription.subscription_pda, "subscriptionPda")
     : derivedSubscriptionPda;
-  const receiverAta = assertValidAddress(parsed.data.receiverTokenAccount, "receiverTokenAccount");
+  const receiverAta = assertValidAddress(body.receiverTokenAccount, "receiverTokenAccount");
   const caller = assertValidAddress(callerWallet.publicKey, "caller");
   const instruction = await getTransferSubscriptionOverlayInstructionAsync({
     amount: amountBaseUnits,

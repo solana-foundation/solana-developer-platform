@@ -106,9 +106,17 @@ export async function applyEarnWithdrawalObservationByReference(params: {
   repo: EarnRepository;
   provider: string;
   organizationId: string;
+  /**
+   * The program wallet the caller observed this withdrawal THROUGH, when it has
+   * one (the poll path always does; a future account-wide sweep may not). Since
+   * PRO-1670 an organization holds several programs, so org-level scoping alone
+   * would let an observation made via program A advance program B's row — pass
+   * this whenever a program context exists.
+   */
+  walletId?: string;
   observed: EarnPortfolioWithdrawal;
 }): Promise<EarnProgramWithdrawalRow | null> {
-  const { repo, provider, organizationId, observed } = params;
+  const { repo, provider, organizationId, walletId, observed } = params;
 
   const row = await repo.getProgramWithdrawalByProviderReference({
     provider,
@@ -123,6 +131,16 @@ export async function applyEarnWithdrawalObservationByReference(params: {
     getLogger().warn(
       { provider, withdrawalRef: observed.withdrawalRef },
       "earn ledger observation resolved a row outside the caller's organization; skipping"
+    );
+    return null;
+  }
+  if (walletId !== undefined && row.wallet_id !== walletId) {
+    // Same organization, different program: the provider answered a lookup made
+    // through one program's wallet with another program's withdrawal. The
+    // handler's own guard should make this unreachable; never write on it.
+    getLogger().warn(
+      { provider, withdrawalRef: observed.withdrawalRef, walletId },
+      "earn ledger observation resolved a sibling program's row; skipping"
     );
     return null;
   }

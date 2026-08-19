@@ -15,8 +15,12 @@
  *
  * The sync iterates every registered vault-infra provider per environment,
  * pulls the live strategy catalogue, and upserts it into `earn_strategies`
- * keyed on (provider, provider_reference, environment) — the only writer of
- * that table besides the dev seed. It degrades provider-by-provider: one
+ * keyed on (provider, provider_reference, environment) — the only admitting
+ * writer for that table. Each provider pass then DELISTS: rows the
+ * provider no longer lists are deleted (`deleteUnlistedFromCatalogue`), so the
+ * table converges on the live catalogue instead of only ever growing — that is
+ * what makes a tightened catalogue gate reach rows already stored.
+ * It degrades provider-by-provider: one
  * provider failing (or still being a NOT_IMPLEMENTED stub) must never sink
  * the others' pass. Adding a provider is a registry change only
  * (`EARN_PROVIDER_CLIENTS`) — neither execution path names providers.
@@ -90,7 +94,7 @@ export async function syncEarnCatalogue(env: Env): Promise<void> {
   const repo = createEarnRepository(env);
   // Providers read their own credentials from the raw env keyed by
   // environment — same contract as the route-layer earnRuntime().
-  const providerEnv = env as unknown as Record<string, string | undefined>;
+  const providerEnv = env;
 
   for (const environment of SYNCED_ENVIRONMENTS) {
     for (const client of Object.values(EARN_PROVIDER_CLIENTS)) {
@@ -124,7 +128,39 @@ async function syncProviderCatalogue(
     return;
   }
 
+  // The keep set for the delist pass below: references this sync accepts as
+  // currently-listed. Built from the declared-support filter, not from upsert
+  // results, so a transient write failure never reads as a delisting — but any
+  // upsert failure still skips the pass entirely (`upsertFailed`), because a
+  // half-applied catalogue cannot say what the provider no longer lists.
+  const listedProviderReferences: string[] = [];
+  let upsertFailed = false;
+
   for (const snapshot of snapshots) {
+    // MAINNET INSTRUMENTS NEVER ENTER A NON-PRODUCTION CATALOGUE.
+    //
+    // Provider-neutral and deliberately enforced HERE, at the one writer of
+    // `earn_strategies`, rather than trusted to each client: a sandbox row
+    // naming a mainnet vault is an instrument no devnet wallet can reach, and
+    // the whole point of a sandbox catalogue is that an integrator can act on
+    // it. Kamino used to be catalogued this way on purpose (we believed it had
+    // no devnet deployment; it does — see providers/kamino/devnet.ts), and the
+    // rows were permanently `fundable: false`.
+    //
+    // This is a persistence gate, not a presentation one. `fundable` still
+    // describes a row a caller CAN see; this stops the row existing at all.
+    if (snapshot.hostCluster === "mainnet-beta" && ctx.environment !== "production") {
+      getLogger().error(
+        {
+          ...logContext,
+          provider_reference: snapshot.providerReference,
+          host_cluster: snapshot.hostCluster,
+        },
+        "syncEarnCatalogue: refused a mainnet instrument in a non-production environment"
+      );
+      continue;
+    }
+
     // A snapshot outside the provider's declared support envelope is provider
     // drift (an unvetted deposit mint or an undeclared strategy shape) — flag
     // it and keep it out of the catalogue rather than persist it.
@@ -141,6 +177,8 @@ async function syncProviderCatalogue(
       continue;
     }
 
+    listedProviderReferences.push(snapshot.providerReference);
+
     try {
       await repo.upsertStrategy({
         provider: client.provider,
@@ -155,6 +193,13 @@ async function syncProviderCatalogue(
         liquidityTerm: snapshot.liquidityTerm,
         redemptionDelayDays: snapshot.redemptionDelayDays ?? null,
         riskMetadata: snapshot.riskMetadata ?? {},
+        // Taken from the PROVIDER, never derived from `ctx.environment` —
+        // assuming the environment's cluster here is the silent lie this column
+        // exists to prevent (migration 0057). Still true even though the guard
+        // above now refuses mainnet instruments outside production: that guard
+        // REJECTS a mismatch, which is only possible because the provider
+        // stated the cluster in the first place.
+        hostCluster: snapshot.hostCluster,
         // Providers report no status; being listed is what makes a strategy
         // depositable, so the sync submits `active` for anything a provider
         // still lists. The repository upsert refuses to overwrite an operator
@@ -165,6 +210,7 @@ async function syncProviderCatalogue(
         environment: ctx.environment,
       });
     } catch (err) {
+      upsertFailed = true;
       getLogger().error(
         {
           ...logContext,
@@ -174,6 +220,73 @@ async function syncProviderCatalogue(
         "syncEarnCatalogue: failed to upsert strategy"
       );
     }
+  }
+
+  await deleteUnlistedFromCatalogue(repo, client, ctx, {
+    listedProviderReferences,
+    upsertFailed,
+    logContext,
+  });
+}
+
+/**
+ * Delete catalogue rows the provider no longer lists — the other half of
+ * keeping `earn_strategies` truthful. Upserting alone only ever adds: a vault
+ * the provider delists, or one a tightened gate now refuses, would otherwise
+ * keep its `active` row and stay depositable forever.
+ *
+ * Deliberately conservative — it skips rather than deletes whenever this
+ * pass cannot prove what the provider currently lists:
+ *
+ * - `upsertFailed`: a partial write pass cannot distinguish "not listed" from
+ *   "listed but not persisted".
+ * - empty keep set: never tear down a whole shelf off one empty response (the
+ *   repository refuses this too; the log here is what makes it visible).
+ *
+ * A skip costs one hour of staleness. Deleting wrongly costs a customer a
+ * vault they were mid-deposit into, so the asymmetry decides the default.
+ */
+async function deleteUnlistedFromCatalogue(
+  repo: EarnRepository,
+  client: EarnVaultProvider,
+  ctx: EarnRuntimeContext,
+  args: {
+    listedProviderReferences: readonly string[];
+    upsertFailed: boolean;
+    logContext: Record<string, unknown>;
+  }
+): Promise<void> {
+  const { listedProviderReferences, upsertFailed, logContext } = args;
+
+  if (upsertFailed || listedProviderReferences.length === 0) {
+    getLogger().warn(
+      {
+        ...logContext,
+        listed_count: listedProviderReferences.length,
+        upsert_failed: upsertFailed,
+      },
+      "syncEarnCatalogue: skipped delist pass on an unreliable catalogue pass"
+    );
+    return;
+  }
+
+  try {
+    const deleted = await repo.deleteUnlistedStrategies({
+      provider: client.provider,
+      environment: ctx.environment,
+      listedProviderReferences,
+    });
+    if (deleted.length > 0) {
+      getLogger().info(
+        { ...logContext, deleted_references: deleted },
+        "syncEarnCatalogue: deleted strategies the provider no longer lists"
+      );
+    }
+  } catch (err) {
+    getLogger().error(
+      { ...logContext, error: err instanceof Error ? err.message : String(err) },
+      "syncEarnCatalogue: failed to delete unlisted strategies"
+    );
   }
 }
 

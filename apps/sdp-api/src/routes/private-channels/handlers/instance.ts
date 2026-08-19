@@ -4,11 +4,11 @@ import {
   type PrivateChannelInstanceEnvelope,
   type PrivateChannelInstanceResponse,
 } from "@sdp/types";
-import { z } from "zod";
 import { mapPrivateChannelInstanceRow, type PrivateChannelInstanceRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { inviteMember, verifyInstanceConnection } from "@/services/private-channels";
 import type { AppContext } from "../context";
@@ -21,7 +21,7 @@ import {
   getProjectUserRepository,
 } from "../context";
 import { emitLifecycle, emitMember } from "../helpers";
-import { connectPrivateChannelInstanceSchema } from "../schemas";
+import type { connectPrivateChannelInstanceSchema } from "../schemas";
 
 export const getPrivateChannelInstance = async (c: AppContext) => {
   const auth = getAuth(c);
@@ -39,18 +39,14 @@ export const getPrivateChannelInstance = async (c: AppContext) => {
   return success(c, response);
 };
 
-export const connectPrivateChannelInstance = async (c: AppContext) => {
+export const connectPrivateChannelInstance = async (
+  c: ValidatedBodyContext<typeof connectPrivateChannelInstanceSchema>
+) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
-  const body = await c.req.json();
-  const parsed = connectPrivateChannelInstanceSchema.safeParse(body);
-  if (!parsed.success) {
-    throw badRequest("Invalid connection details", {
-      fieldErrors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-  const { confirmReactivate, ...input } = parsed.data;
+  const body = c.req.valid("json");
+  const { confirmReactivate, ...input } = body;
 
   const repo = getPrivateChannelInstanceRepository(c);
   const scope = { organizationId: auth.organizationId, projectId };

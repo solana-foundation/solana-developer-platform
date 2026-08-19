@@ -61,7 +61,9 @@ const yieldSource = (overrides: Record<string, unknown> = {}) => ({
   name: "Morpho Gauntlet USDC",
   description: null,
   mode: "active",
-  chain: "ethereum",
+  // Ground can bridge Solana deposits to an Ethereum-hosted yield source. The
+  // sync indexes the row; API visibility is a separate route-layer policy.
+  chain: "ethereum_sepolia",
   apyBps: 356,
   navUpdateMode: "continuous",
   tvlUsd: 512_400_000,
@@ -155,6 +157,12 @@ describe("GroundEarnClient.listStrategies", () => {
         sourceKind: "defi",
         underlyingSource: "morpho",
         depositMints: [wellKnownMint("USDC", "devnet")],
+        // The environment's own cluster, because Ground's DEPOSIT is Solana-side
+        // here — this row is catalogued with a devnet mint and Ground bridges to
+        // wherever it hosts the source (Morpho is Ethereum-hosted, and #1299
+        // deliberately indexes it). A non-custodial provider cannot say this —
+        // see Kamino, whose rows read `mainnet-beta` in sandbox too.
+        hostCluster: "devnet",
         apyType: "variable",
         currentApy: "0.0356",
         liquidityTerm: "instant",
@@ -194,6 +202,7 @@ describe("GroundEarnClient.listStrategies", () => {
         yieldSource({ id: "c", apyBps: 10_000 }),
         yieldSource({ id: "d", apyBps: 12_345 }),
         yieldSource({ id: "e", apyBps: null }),
+        yieldSource({ id: "f", apyBps: -5 }),
       ]),
     });
 
@@ -201,7 +210,7 @@ describe("GroundEarnClient.listStrategies", () => {
 
     assert.deepEqual(
       strategies.map((s) => s.currentApy),
-      ["0.0005", "0.062", "1", "1.2345", undefined]
+      ["0.0005", "0.062", "1", "1.2345", undefined, "-0.0005"]
     );
   });
 
@@ -225,7 +234,6 @@ describe("GroundEarnClient.listStrategies", () => {
             redeem: { processingTimeBasis: "banking_days", typicalMinUnits: 1, typicalMaxUnits: 3 },
           },
         }),
-        yieldSource({ id: "no-policy", processingPolicies: null }),
       ]),
     });
 
@@ -249,13 +257,35 @@ describe("GroundEarnClient.listStrategies", () => {
           liquidityTerm: "delayed",
           redemptionDelayDays: 3,
         },
-        {
-          providerReference: "no-policy",
-          liquidityTerm: "instant",
-          redemptionDelayDays: undefined,
-        },
       ]
     );
+  });
+
+  it("fails closed when an active source omits or malforms its redeem policy", async () => {
+    for (const processingPolicies of [
+      null,
+      {},
+      {
+        redeem: {
+          processingTimeBasis: "elapsed_seconds",
+          typicalMinUnits: 0,
+          typicalMaxUnits: "soon",
+        },
+      },
+    ]) {
+      mock.restoreAll();
+      stubGroundFetch({
+        body: page([yieldSource({ id: "bad-policy", processingPolicies })]),
+      });
+
+      await assert.rejects(
+        client.listStrategies(sandboxCtx),
+        earnError(
+          "PROVIDER_UNAVAILABLE",
+          /Ground provider contract violation: processingPolicies\.redeem/
+        )
+      );
+    }
   });
 
   it("skips every non-active mode so no exit-frozen source becomes depositable", async () => {
@@ -391,8 +421,8 @@ describe("GroundEarnClient.listStrategies", () => {
 describe("distillGroundYieldSource", () => {
   const distill = (
     overrides: Record<string, unknown>,
-    cluster: "devnet" | "mainnet-beta" = "devnet"
-  ) => distillGroundYieldSource(yieldSource(overrides) as GroundYieldSource, cluster);
+    environment: "sandbox" | "production" = "sandbox"
+  ) => distillGroundYieldSource(yieldSource(overrides) as GroundYieldSource, environment);
 
   it("names the gate that keeps each source out of the catalogue", () => {
     assert.deepEqual(distill({ mode: "buy_only" }), {
@@ -403,12 +433,19 @@ describe("distillGroundYieldSource", () => {
       outcome: "dropped",
       reason: "inactive_mode",
     });
-    // Rail-gated, not mint-gated: USDT drops even on mainnet-beta, where a
-    // well-known mint exists — Ground's Solana rails carry USDC only.
-    assert.deepEqual(distill({ depositToken: "usdt" }, "mainnet-beta"), {
+    // Rail-gated, not mint-gated: USDT drops even in production, where a
+    // well-known mint exists — Ground's Solana rails carry USDC only. Ordered
+    // USDT source wherever it is hosted.
+    assert.deepEqual(distill({ depositToken: "usdt" }, "production"), {
       outcome: "dropped",
       reason: "not_solana_routable",
     });
+  });
+
+  it("indexes routable sources regardless of where Ground hosts them", () => {
+    for (const chain of ["ethereum", "ethereum_sepolia", "base", "solana", null, undefined]) {
+      assert.equal(distill({ chain }).outcome, "catalogued", `chain=${String(chain)}`);
+    }
   });
 
   it("catalogues an active USDC source with the snapshot listStrategies publishes", () => {
@@ -420,6 +457,16 @@ describe("distillGroundYieldSource", () => {
     assert.equal(distilled.snapshot.sourceKind, "defi");
     assert.equal(distilled.snapshot.riskMetadata?.curator, "gauntlet");
     assert.deepEqual(distilled.snapshot.depositMints, [wellKnownMint("USDC", "devnet")]);
+  });
+
+  it("preserves missing or malformed optional catalogue APY as unavailable", () => {
+    for (const apyBps of [undefined, null, Number.NaN, Number.POSITIVE_INFINITY, 12.5, "356"]) {
+      const distilled = distill({ apyBps });
+      if (distilled.outcome !== "catalogued") {
+        assert.fail(`expected catalogued, got dropped: ${distilled.reason}`);
+      }
+      assert.equal(distilled.snapshot.currentApy, undefined, `apyBps=${String(apyBps)}`);
+    }
   });
 });
 
@@ -463,6 +510,7 @@ describe("Solana-only boundary — every request pins the environment's chain", 
         client.createPortfolioWallet(ctx, {
           label: "boundary",
           allocations: { usdc: [{ yieldSourceId: "morpho-gauntlet-usdc", pct: 100 }] },
+          requestId: "55555555-5555-4555-8555-555555555555",
         }),
       carriesChain: false,
     },
@@ -571,12 +619,29 @@ describe("GroundEarnClient.createPortfolioWallet", () => {
     assert.deepEqual(result, { providerWalletRef: "wal_1", status: "creating" });
   });
 
-  it("generates a UUIDv4 requestId when the caller omits one", async () => {
+  /**
+   * The create path deliberately has NO mint-when-absent fallback (PRO-1670):
+   * a server-minted id is fresh per attempt, so it would guarantee the
+   * double-provision it appears to guard against. `requestId` is required by
+   * `EarnPortfolioWalletCreateInput`, so the omission is a type error rather
+   * than a silent downgrade — this test pins that whatever the caller sends is
+   * exactly what reaches the wire, including a value the type system cannot
+   * catch at a JS boundary.
+   *
+   * The UPDATE path keeps its fallback (see updatePortfolioStrategy below):
+   * re-applying the same allocations is a provider no-op, so an absent key
+   * costs a duplicate mutation rather than a duplicate wallet.
+   */
+  it("never mints a requestId of its own on create", async () => {
     const fetchMock = stubGroundFetch({ body: groundWallet({ status: "creating" }) });
 
-    await client.createPortfolioWallet(sandboxCtx, { label: "SDP Earn", allocations: {} });
+    await client.createPortfolioWallet(sandboxCtx, {
+      label: "SDP Earn",
+      allocations: {},
+      requestId: undefined as unknown as string,
+    });
 
-    assert.match(String(requestBody(fetchMock).requestId), UUID_V4_PATTERN);
+    assert.equal(requestBody(fetchMock).requestId, undefined);
   });
 });
 
@@ -846,7 +911,76 @@ describe("GroundEarnClient.getPortfolioYield", () => {
 
     // Deployed weighting (0.9*2% + 0.1*10% = 2.8%) — not the 6% a naive
     // target-weight blend would report.
-    assert.equal(Number(result.currentApy).toFixed(4), "0.0280");
+    assert.equal(result.currentApy, "0.028000");
+  });
+
+  it("rounds an exact half-unit rate without binary-float drift", async () => {
+    stubGroundFetch({
+      body: groundYield([
+        { yieldSourceId: "a", name: "A", apyBps: 0, pct: 50, deployedValueUsd: "199" },
+        { yieldSourceId: "b", name: "B", apyBps: 1, pct: 50, deployedValueUsd: "1" },
+      ]),
+    });
+
+    const result = await client.getPortfolioYield(sandboxCtx, { providerWalletRef: "wal_1" });
+
+    // 1 / 200 bps = 0.0000005 as a decimal rate: exactly halfway, so the
+    // six-place contract rounds up. Number(...).toFixed(6) rounds this down.
+    assert.equal(result.currentApy, "0.000001");
+  });
+
+  it("preserves a negative rate through exact weighting and rounding", async () => {
+    stubGroundFetch({
+      body: groundYield([
+        { yieldSourceId: "a", name: "A", apyBps: 0, pct: 50, deployedValueUsd: "199" },
+        { yieldSourceId: "b", name: "B", apyBps: -1, pct: 50, deployedValueUsd: "1" },
+      ]),
+    });
+
+    const result = await client.getPortfolioYield(sandboxCtx, { providerWalletRef: "wal_1" });
+
+    assert.equal(result.currentApy, "-0.000001");
+    assert.equal(result.positions[1]?.apy, "-0.0001");
+  });
+
+  it("keeps a large skewed weight on the correct side of the rounding boundary", async () => {
+    stubGroundFetch({
+      body: groundYield([
+        {
+          yieldSourceId: "a",
+          name: "A",
+          apyBps: 0,
+          pct: 50,
+          deployedValueUsd: "1792432651693457606",
+        },
+        {
+          yieldSourceId: "b",
+          name: "B",
+          apyBps: 1,
+          pct: 50,
+          deployedValueUsd: "9007199254740993",
+        },
+      ]),
+    });
+
+    const result = await client.getPortfolioYield(sandboxCtx, { providerWalletRef: "wal_1" });
+
+    // The high-rate weight is just over 1/200. Both values exceed 2^53, and a
+    // Number blend sees the ratio as just under half a six-decimal unit.
+    assert.equal(result.currentApy, "0.000001");
+  });
+
+  it("uses exact fractional target percentages when no value is deployed", async () => {
+    stubGroundFetch({
+      body: groundYield([
+        { yieldSourceId: "a", name: "A", apyBps: -100, pct: 0.1, deployedValueUsd: "0" },
+        { yieldSourceId: "b", name: "B", apyBps: 100, pct: 99.9, deployedValueUsd: "0" },
+      ]),
+    });
+
+    const result = await client.getPortfolioYield(sandboxCtx, { providerWalletRef: "wal_1" });
+
+    assert.equal(result.currentApy, "0.009980");
   });
 
   it("omits the rate for an all-cash program rather than reporting 0%", async () => {
@@ -856,6 +990,64 @@ describe("GroundEarnClient.getPortfolioYield", () => {
 
     assert.equal(result.currentApy, undefined);
     assert.deepEqual(result.positions, []);
+  });
+
+  it("fails closed instead of fabricating zero for invalid required yield metrics", async () => {
+    const validPosition = {
+      yieldSourceId: "source-a",
+      name: "A",
+      apyBps: 250,
+      pct: 100,
+      deployedValueUsd: "10.000000",
+    };
+    const cases: Array<{ field: string; overrides: Record<string, unknown> }> = [
+      { field: "apyBps", overrides: { apyBps: undefined } },
+      { field: "apyBps", overrides: { apyBps: null } },
+      { field: "apyBps", overrides: { apyBps: 12.5 } },
+      { field: "apyBps", overrides: { apyBps: "250" } },
+      { field: "pct", overrides: { pct: undefined } },
+      { field: "pct", overrides: { pct: null } },
+      { field: "pct", overrides: { pct: Number.NaN } },
+      { field: "pct", overrides: { pct: 101 } },
+      { field: "deployedValueUsd", overrides: { deployedValueUsd: "not-a-decimal" } },
+      { field: "deployedValueUsd", overrides: { deployedValueUsd: "1e3" } },
+      { field: "deployedValueUsd", overrides: { deployedValueUsd: undefined } },
+      { field: "deployedValueUsd", overrides: { deployedValueUsd: "9".repeat(257) } },
+    ];
+
+    for (const testCase of cases) {
+      mock.restoreAll();
+      stubGroundFetch({
+        body: groundYield([{ ...validPosition, ...testCase.overrides }]),
+      });
+
+      await assert.rejects(
+        client.getPortfolioYield(sandboxCtx, { providerWalletRef: "wal_1" }),
+        (error: unknown) => {
+          assert.ok(error instanceof SdpEarnError);
+          assert.equal(error.code, "PROVIDER_UNAVAILABLE");
+          assert.match(error.message, /Ground provider contract violation/);
+          assert.equal(error.details?.field, `yield.positions[0].${testCase.field}`);
+          assert.equal(error.details?.provider, "ground");
+          return true;
+        }
+      );
+    }
+  });
+
+  it("keeps explicit zero yield metrics distinct from unavailable metrics", async () => {
+    stubGroundFetch({
+      body: groundYield([
+        { yieldSourceId: "a", name: "A", apyBps: 0, pct: 0, deployedValueUsd: "0.000000" },
+      ]),
+    });
+
+    const result = await client.getPortfolioYield(sandboxCtx, { providerWalletRef: "wal_1" });
+
+    assert.equal(result.currentApy, undefined);
+    assert.deepEqual(result.positions, [
+      { yieldSourceId: "a", name: "A", apy: "0", pct: 0, deployedValueUsd: "0.000000" },
+    ]);
   });
 
   it("classifies provider failures through the shared taxonomy", async () => {
@@ -979,7 +1171,7 @@ describe("GroundEarnClient.listPortfolioDeposits", () => {
             chain: "solana_devnet",
             fromAddress: null,
             txHash: null,
-            status: null,
+            status: "processing",
             createdAt: "2026-08-03T09:00:00Z",
             completedAt: null,
           },
@@ -1013,7 +1205,6 @@ describe("GroundEarnClient.listPortfolioDeposits", () => {
           id: "dep_2",
           amountUsd: "25.000000",
           token: "usdt",
-          // A null provider status is a deposit still being tracked.
           status: "processing",
           fromAddress: undefined,
           transactionSignature: undefined,
@@ -1031,6 +1222,36 @@ describe("GroundEarnClient.listPortfolioDeposits", () => {
     await client.listPortfolioDeposits(sandboxCtx, { providerWalletRef: "wal_1" });
 
     assert.equal(requestUrl(fetchMock), "https://sandbox.groundtech.co/v2/wallets/wal_1/deposits");
+  });
+
+  it("fails closed when required deposit token or status vocabulary drifts", async () => {
+    const validDeposit = {
+      id: "dep_bad",
+      amount: "25.000000",
+      token: "usdc",
+      chain: "solana_devnet",
+      status: "processing",
+      createdAt: "2026-08-03T09:00:00Z",
+    };
+    for (const testCase of [
+      { field: "deposit.token", overrides: { token: "future-token" } },
+      { field: "deposit.status", overrides: { status: "queued" } },
+      { field: "deposit.status", overrides: { status: null } },
+    ]) {
+      mock.restoreAll();
+      stubGroundFetch({ body: page([{ ...validDeposit, ...testCase.overrides }]) });
+
+      await assert.rejects(
+        client.listPortfolioDeposits(sandboxCtx, { providerWalletRef: "wal_1" }),
+        (error: unknown) => {
+          assert.ok(error instanceof SdpEarnError);
+          assert.equal(error.code, "PROVIDER_UNAVAILABLE");
+          assert.equal(error.details?.field, testCase.field);
+          assert.equal(error.details?.providerReference, "dep_bad");
+          return true;
+        }
+      );
+    }
   });
 });
 
@@ -1092,6 +1313,111 @@ describe("GroundEarnClient.previewPortfolioWithdrawal", () => {
       );
     }
     assert.equal(fetchMock.mock.callCount(), 0);
+  });
+
+  // PRO-1675: the liquidity form. Ground keys it off the field's ABSENCE, so
+  // this asserts the key is missing rather than merely falsy — `null` and `0`
+  // are different questions and `0` is off `parseUsdAmount`'s pattern anyway.
+  it("OMITS amountUsd entirely when asked for the lane maximum", async () => {
+    const fetchMock = stubGroundFetch({
+      body: {
+        amountRequestedUsd: null,
+        feeUsd: "0.100000",
+        withdrawableUsd: "412.500000",
+        totalUsdAfterWithdrawal: "412.500000",
+      },
+    });
+
+    const preview = await client.previewPortfolioWithdrawal(sandboxCtx, {
+      providerWalletRef: "wal_1",
+      token: "usdc",
+    });
+
+    const body = requestBody(fetchMock);
+    assert.deepEqual(body, { destinationChain: "solana_devnet", token: "usdc" });
+    assert.equal("amountUsd" in body, false);
+    assert.equal(preview.withdrawableUsd, "412.500000");
+    assert.equal(preview.amountRequestedUsd, undefined);
+  });
+
+  it("still refuses a token Ground cannot route to Solana, amount or not", async () => {
+    const fetchMock = stubGroundFetch({ body: {} });
+
+    await assert.rejects(
+      client.previewPortfolioWithdrawal(sandboxCtx, {
+        providerWalletRef: "wal_1",
+        token: "usdt",
+      }),
+      earnError("BAD_REQUEST")
+    );
+    assert.equal(fetchMock.mock.callCount(), 0);
+  });
+
+  // The 409 body is the only place the provider says HOW short a request is.
+  // Losing it is why an over-request used to read as "…failed with status 409".
+  it("carries the 409 lane balance onto SdpEarnError.details", async () => {
+    stubGroundFetch({
+      status: 409,
+      body: {
+        error: { code: "insufficient_funds", message: "insufficient funds" },
+        balance: { totalUsd: "900.00", withdrawableUsd: "412.50", reservedUsd: "487.50" },
+      },
+    });
+
+    await assert.rejects(
+      client.previewPortfolioWithdrawal(sandboxCtx, {
+        providerWalletRef: "wal_1",
+        amountUsd: "800",
+        token: "usdc",
+      }),
+      (error: unknown) => {
+        const earn = error as { code: string; details?: Record<string, unknown> };
+        assert.equal(earn.code, "CONFLICT");
+        assert.deepEqual(earn.details?.balance, {
+          totalUsd: "900.00",
+          withdrawableUsd: "412.50",
+          reservedUsd: "487.50",
+        });
+        // The transport's own facts are not overwritable by the normalizer.
+        assert.equal(earn.details?.provider, "ground");
+        assert.equal(earn.details?.providerStatus, 409);
+        return true;
+      }
+    );
+  });
+
+  it("normalizes a nested, numeric balance and declines a 409 that carries none", async () => {
+    stubGroundFetch(
+      {
+        status: 409,
+        // Ground nests the payload inconsistently across endpoints, and sends
+        // JSON numbers here where the success payload uses strings.
+        body: { error: { message: "nope", balance: { withdrawableUsd: 412.5 } } },
+      },
+      // A conflict with no balance (Ground's `request_id_conflict` shape) must
+      // pass through untouched rather than gaining an empty `balance`.
+      { status: 409, body: { error: { message: "request_id_conflict" } } }
+    );
+
+    const preview = () =>
+      client.previewPortfolioWithdrawal(sandboxCtx, {
+        providerWalletRef: "wal_1",
+        amountUsd: "800",
+        token: "usdc",
+      });
+
+    await assert.rejects(preview(), (error: unknown) => {
+      const earn = error as { details?: Record<string, unknown> };
+      assert.deepEqual(earn.details?.balance, { withdrawableUsd: "412.5" });
+      return true;
+    });
+
+    await assert.rejects(preview(), (error: unknown) => {
+      const earn = error as { message: string; details?: Record<string, unknown> };
+      assert.equal(earn.message, "request_id_conflict");
+      assert.equal("balance" in (earn.details ?? {}), false);
+      return true;
+    });
   });
 });
 
@@ -1176,6 +1502,35 @@ describe("GroundEarnClient.getPortfolioWithdrawal", () => {
     assert.equal(withdrawal.status, "completed");
     assert.equal(withdrawal.amountPaidUsd, "49.900000");
     assert.equal(withdrawal.completedAt, "2026-08-03T00:30:00Z");
+  });
+
+  it("preserves an unknown optional withdrawal token as unavailable", async () => {
+    stubGroundFetch({ body: groundWithdrawal({ destinationToken: "future-token" }) });
+
+    const withdrawal = await client.getPortfolioWithdrawal(sandboxCtx, {
+      providerWalletRef: "wal_1",
+      withdrawalRef: "wd_1",
+    });
+
+    assert.equal(withdrawal.token, undefined);
+  });
+
+  it("fails closed when the required withdrawal status is unknown", async () => {
+    stubGroundFetch({ body: groundWithdrawal({ status: "queued" }) });
+
+    await assert.rejects(
+      client.getPortfolioWithdrawal(sandboxCtx, {
+        providerWalletRef: "wal_1",
+        withdrawalRef: "wd_1",
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof SdpEarnError);
+        assert.equal(error.code, "PROVIDER_UNAVAILABLE");
+        assert.equal(error.details?.field, "withdrawal.status");
+        assert.equal(error.details?.providerReference, "wd_1");
+        return true;
+      }
+    );
   });
 });
 

@@ -8,13 +8,13 @@
 | --- | --- | --- |
 | Relevant push to `main` | Dev | Builds a SHA-tagged image, runs migrations, updates the dev service, and updates the dev cron job |
 | `chore(main): release X.Y.Z` commit on `main` | Release publication | Creates the `vX.Y.Z` tag, publishes the GitHub release, and triggers release-image/checksum workflows |
-| `vX.Y.Z` release published | Production API | Builds version- and SHA-tagged images from the tagged commit, runs migrations, updates the production service, and updates the production cron job |
-| `vX.Y.Z` release published | Production web | Builds sdp-web from the tagged commit and deploys it to Vercel production |
+| Release publication job on `main` | Production API | Verifies the published tag and SHA, builds version- and SHA-tagged images from that commit, runs migrations, updates the production service, and updates the production cron job |
+| Release publication job on `main` | Production web | Verifies the published tag and SHA, builds sdp-web from that commit, and deploys it to Vercel production |
 | Manual dev workflow dispatch | Dev | Rebuilds and deploys the selected workflow revision |
 | Manual production workflow dispatch from `main` | Production API | Resolves an existing 40-character Git SHA image tag and redeploys its immutable digest without running migrations |
 | Manual sdp-web workflow dispatch | Production web | Builds and deploys the provided ref to Vercel production |
 
-Vercel's git integration builds previews for pull-request branches only; `apps/sdp-web/vercel.json` skips git-triggered builds on `main`, so sdp-web reaches production exclusively through the release-triggered workflow.
+Vercel's git integration builds previews for pull-request branches only; `apps/sdp-web/vercel.json` skips git-triggered builds on `main`, so sdp-web reaches production exclusively through the release flow's production deployment job.
 
 The hosted API runs as a Node.js container on Cloud Run. Dev and production use separate GCP projects, Artifact Registry repositories, services, migration jobs, and cron jobs.
 
@@ -37,8 +37,7 @@ Release automation also reads these repository variables:
 
 - `TRANSLATION_AGENT_URL` — required when a release has missing UI translations
 - `TRANSLATION_AGENT_MODEL` — optional model name included in the release summary; the translation agent defaults to `deepseek/deepseek-v4-flash`
-- `TRANSLATION_AGENT_MAX_KEYS` — optional translation budget; defaults to `500`
-- `TRANSLATION_AGENT_BATCH_SIZE` — optional request batch size; defaults to `50`
+- `TRANSLATION_AGENT_BATCH_SIZE` — optional request batch size; defaults to `50`; all missing keys are processed in batches of this size
 - `TRANSLATION_AGENT_MAX_RETRIES` — optional retry count; defaults to `2`
 
 ### Repository secrets
@@ -47,6 +46,9 @@ Release automation also reads these repository variables:
 - `RELEASE_APP_ID` — GitHub App ID used by release automation
 - `RELEASE_APP_PRIVATE_KEY` — corresponding GitHub App private key
 - `TRANSLATION_AGENT_USERNAME` and `TRANSLATION_AGENT_PASSWORD` — HTTP Basic credentials required when a release has missing UI translations
+
+### Production environment secrets
+
 - `VERCEL_TOKEN`, `VERCEL_ORG_ID`, and `VERCEL_PROJECT_ID` — Vercel CLI credentials used by the sdp-web production deployment
 
 The release GitHub App needs `contents: write` and `pull_requests: write`, and it must be allowed to maintain the generated release branch and enable auto-merge.
@@ -99,7 +101,7 @@ Also exercise the affected authenticated, webhook, or provider flow; `/health` o
 
 ### 2. Review the generated release pull request
 
-The Release Flow workflow maintains `codex/release-main` and opens a pull request titled `chore(main): release X.Y.Z`. It updates:
+The Release Flow workflow maintains `sdp/release-main` and opens a pull request titled `chore(main): release X.Y.Z`. It updates:
 
 - `package.json`
 - `.github/.release-please-manifest.json`
@@ -110,15 +112,17 @@ Auto-merge is enabled, but branch protection still requires review approval and 
 
 ### 3. Deploy and publish production
 
-Merging the release pull request creates a `chore(main): release X.Y.Z` commit on `main`. That push runs [`release-please.yml`](../../.github/workflows/release-please.yml), which creates the `vX.Y.Z` tag and publishes the GitHub release. Publishing the release then starts two independent deployments from the tagged commit:
+Merging the release pull request creates a `chore(main): release X.Y.Z` commit on `main`. That push runs [`release-please.yml`](../../.github/workflows/release-please.yml), which creates the `vX.Y.Z` tag, publishes the GitHub release, resolves the tag to the exact `main` commit, and then starts two independent production deployments with that immutable tag and SHA:
 
 - [`deploy-sdp-api-gcp-prod.yml`](../../.github/workflows/deploy-sdp-api-gcp-prod.yml) deploys the production API.
-- [`deploy-sdp-web-vercel-prod.yml`](../../.github/workflows/deploy-sdp-web-vercel-prod.yml) deploys sdp-web to Vercel production.
+- The `deploy-web-production` job in [`release-please.yml`](../../.github/workflows/release-please.yml) deploys sdp-web to Vercel production. [`deploy-sdp-web-vercel-prod.yml`](../../.github/workflows/deploy-sdp-web-vercel-prod.yml) remains the manual recovery path.
+
+Both deployments retain the `main` event context required by the `production` environment. Before using production credentials, they verify that the checked-out SHA matches the published tag, belongs to `origin/main`, and has the matching version in `package.json`. The web deployment is a normal job in the release workflow so its Vercel credentials remain scoped to the protected `production` environment; they are not inherited across a reusable-workflow boundary.
 
 The production deploy workflow:
 
 1. Authenticates to the production GCP project.
-2. Builds the API image and pushes both `X.Y.Z` and `GITHUB_SHA` tags.
+2. Builds the API image and pushes both `X.Y.Z` and release-SHA tags.
 3. Resolves the SHA tag to an immutable image digest.
 4. Updates and executes `sdp-prod-api-public-migrate`.
 5. Captures the current service traffic and cron image for rollback.

@@ -23,27 +23,9 @@ export function CompactOperationsCardSkeleton({ route }: { route: "allowlist" })
 export function SettingsPageSkeleton() {
   return (
     <div className="flex w-full flex-col gap-6" data-loading-layout="settings" aria-busy="true">
-      <section className="flex flex-col gap-6 rounded-[var(--sdp-surface-radius)] bg-surface-raised py-6 shadow-sm ring-1 ring-border-default">
-        <header className="space-y-2 px-6">
-          <SkeletonBlock className="h-6 w-56 max-w-full" />
-          <SkeletonBlock className="h-4 w-full max-w-lg" />
-        </header>
-        <div className="px-6" data-loading-settings-form>
-          <div className="w-full space-y-5">
-            <SkeletonBlock className="h-10 w-full rounded-xl" />
-            <div className="space-y-2">
-              <SkeletonBlock className="h-4 w-32" />
-              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_112px] sm:items-center">
-                <SkeletonBlock className="h-10 w-full rounded-lg" />
-                <SkeletonBlock className="h-10 w-full rounded-[10px]" />
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Second card: the settings page also renders members, so a one-card
-          skeleton made the layout jump when the real content arrived. */}
+      {/* The organization/RPC card moved to Integrations (HOO-787); the page
+          opens on members now, so reserving a first card here would leave a
+          gap that never fills. */}
       <section
         className="flex flex-col gap-6 rounded-[var(--sdp-surface-radius)] bg-surface-raised py-6 shadow-sm ring-1 ring-border-default"
         data-loading-settings-members

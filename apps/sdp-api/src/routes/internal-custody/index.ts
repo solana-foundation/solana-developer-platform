@@ -8,45 +8,16 @@ import { credentialAdminAuthMiddleware } from "@/middleware/credential-admin-aut
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { getCustodySetupStatus } from "@/services/custody-setup-status.service";
-import {
-  cancelProviderCredentialInstallation,
-  completeProviderCredentialInstallation,
-  getProviderCredentialInstallation,
-} from "@/services/provider-credential-installation.service";
-import {
-  replaceProviderCredential,
-  submitProviderCredential,
-} from "@/services/provider-credential-submission.service";
+import { getProviderCredentialInstallation } from "@/services/provider-credential-installation.service";
+import { getProviderSetupDefinition } from "@/services/provider-setup-registry";
 import {
   getPendingWalletLabel,
   ProviderCredentialStore,
 } from "@/services/stores/provider-credential.store";
 import type { Env } from "@/types/env";
 
-const privyCredentialFieldsSchema = z
-  .object({
-    credentialLabel: z.string().trim().min(1),
-    scope: z.literal("project"),
-    appId: z.string().trim().min(1),
-    appSecret: z.string().min(1),
-  })
-  .strict();
-
-const privyCredentialSubmissionBaseSchema = z.object({
-  provider: z.literal("privy"),
-  requestDelayMs: z.number().int().min(0).max(3000).optional(),
-  walletLabel: z.string().trim().min(1).max(100).optional(),
-});
-
-const privyCredentialSubmissionSchema = privyCredentialSubmissionBaseSchema
-  .extend({ fields: privyCredentialFieldsSchema.optional() })
-  .strict();
-
-const privyCredentialReplacementSchema = privyCredentialSubmissionBaseSchema
-  .extend({ fields: privyCredentialFieldsSchema })
-  .strict();
-
 const connectionParamsSchema = z.object({ connectionId: z.string().trim().min(1) }).strict();
+const privySetup = getProviderSetupDefinition("custody", "privy");
 
 const internalCustody = new Hono<{ Bindings: Env }>();
 
@@ -116,7 +87,7 @@ internalCustody.get("/providers", async (c) => {
 
 internalCustody.post("/provider-credentials", async (c) => {
   const body = await c.req.json().catch(() => null);
-  const parsed = privyCredentialSubmissionSchema.safeParse(body);
+  const parsed = privySetup.validateSetupPayload(body, "submit");
   if (!parsed.success) {
     throw badRequest("Invalid request body", {
       errors: z.flattenError(parsed.error).fieldErrors,
@@ -128,7 +99,11 @@ internalCustody.post("/provider-credentials", async (c) => {
     throw badRequest("Idempotency-Key is required");
   }
 
-  const result = await submitProviderCredential(c, parsed.data, idempotencyKey);
+  const result = await privySetup.storeCredentials({
+    context: c,
+    payload: parsed.data,
+    idempotencyKey,
+  });
   return created(c, result);
 });
 
@@ -139,7 +114,7 @@ internalCustody.post("/connections/:connectionId/provider-credentials", async (c
   }
 
   const body = await c.req.json().catch(() => null);
-  const parsed = privyCredentialReplacementSchema.safeParse(body);
+  const parsed = privySetup.validateSetupPayload(body, "replace");
   if (!parsed.success) {
     throw badRequest("Invalid request body", {
       errors: z.flattenError(parsed.error).fieldErrors,
@@ -153,7 +128,12 @@ internalCustody.post("/connections/:connectionId/provider-credentials", async (c
 
   return created(
     c,
-    await replaceProviderCredential(c, params.data.connectionId, parsed.data, idempotencyKey)
+    await privySetup.storeCredentials({
+      context: c,
+      connectionId: params.data.connectionId,
+      payload: parsed.data,
+      idempotencyKey,
+    })
   );
 });
 
@@ -170,7 +150,10 @@ internalCustody.post("/connections/:connectionId/complete", async (c) => {
   if (!params.success) {
     throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
   }
-  return success(c, await completeProviderCredentialInstallation(c, params.data.connectionId));
+  return success(
+    c,
+    await privySetup.activate({ context: c, connectionId: params.data.connectionId })
+  );
 });
 
 internalCustody.post("/connections/:connectionId/cancel", async (c) => {
@@ -178,7 +161,10 @@ internalCustody.post("/connections/:connectionId/cancel", async (c) => {
   if (!params.success) {
     throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
   }
-  return success(c, await cancelProviderCredentialInstallation(c, params.data.connectionId));
+  return success(
+    c,
+    await privySetup.deactivate({ context: c, connectionId: params.data.connectionId })
+  );
 });
 
 export default internalCustody;

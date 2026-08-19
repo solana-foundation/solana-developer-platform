@@ -31,6 +31,7 @@ import {
   createOrgSignerMock,
   createRpcMock,
   DEVNET_USDC_MINT,
+  getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
   mockRecurringActivationRpc,
   mockTokenSupplyDecimalsOnce,
@@ -42,6 +43,7 @@ import {
   TEST_KORA_FEE_PAYER,
   TEST_ORG,
   TEST_PROJECT,
+  TEST_SPONSORSHIP_PROVIDER_CONFIG,
   TEST_USER,
   TEST_WALLET_ID,
   updateSeededWalletPublicKey,
@@ -220,9 +222,9 @@ describe("Payments routes — transfers", () => {
 
     const rules = [
       {
-        id: "deny-raw-signing",
+        id: "deny-issuance",
         kind: "operation_family",
-        family: "raw_sign",
+        family: "issuance",
         action: "deny",
       },
       {
@@ -320,9 +322,9 @@ describe("Payments routes — transfers", () => {
           defaultAction: "allow",
           rules: [
             {
-              id: "deny-programs",
+              id: "deny-issuance",
               kind: "operation_family",
-              family: "program",
+              family: "issuance",
               action: "deny",
             },
           ],
@@ -356,9 +358,9 @@ describe("Payments routes — transfers", () => {
     });
     expect(getBody.data.policy.rules).toEqual([
       {
-        id: "deny-programs",
+        id: "deny-issuance",
         kind: "operation_family",
-        family: "program",
+        family: "issuance",
         action: "deny",
       },
     ]);
@@ -387,7 +389,10 @@ describe("Payments routes — transfers", () => {
     };
     expect(body.error.code).toBe("BAD_REQUEST");
     expect(body.error.message).toContain("Invalid request body");
-    expect(body.error.details?.errors?.rules).toContain("operationType must not be empty");
+    expect(body.error.message).toContain(
+      "operation type must be one of the supported wallet operation types"
+    );
+    expect(body.error.message).toContain("→ at rules[0].operationType");
   });
 
   it("rejects wallet policy payloads with duplicate rule ids", async () => {
@@ -415,7 +420,7 @@ describe("Payments routes — transfers", () => {
       error: { code: string; message: string; details?: { errors?: Record<string, string[]> } };
     };
     expect(body.error.code).toBe("BAD_REQUEST");
-    expect(body.error.details?.errors?.rules).toContain("Duplicate rule id: duplicated");
+    expect(body.error.message).toContain("Duplicate rule id: duplicated");
   });
 
   it("dry-runs a gated transfer with zero writes and full rule criteria", async () => {
@@ -532,7 +537,7 @@ describe("Payments routes — transfers", () => {
     expect(response.status).toBe(400);
   });
 
-  it("executes an approved transfer exactly once after leaving it pending", async () => {
+  it("replays a selected-wallet API key approval exactly once", async () => {
     const sessionId = "ses_ungrouped_payment_approver";
     const approverUserId = "usr_ungrouped_payment_approver";
     await getDb(env).batch([
@@ -564,6 +569,25 @@ describe("Payments routes — transfers", () => {
           id: "approve-payment-execution",
           kind: "approval",
           operationTypes: ["payment_transfer_execute"],
+        },
+      ],
+    });
+    await getDb(env)
+      .prepare(
+        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+         VALUES ('akw_selected_approval_replay', ?, ?, '["*"]')`
+      )
+      .bind(TEST_API_KEY.id, TEST_WALLET_ID)
+      .run();
+    await seedCachedKey({
+      walletScope: "selected",
+      signingWalletId: TEST_WALLET_ID,
+      signingWalletIds: [TEST_WALLET_ID],
+      walletBindings: [
+        {
+          walletId: TEST_WALLET_ID,
+          custodyWalletId: TEST_CUSTODY_WALLET_ID,
+          permissions: ["*"],
         },
       ],
     });
@@ -664,6 +688,121 @@ describe("Payments routes — transfers", () => {
       .prepare("SELECT COUNT(*) AS count FROM payment_transfers")
       .first<{ count: number | string }>();
     expect(Number(transferCount?.count ?? 0)).toBe(1);
+  });
+
+  it("fails a selected-wallet approval replay when its wallet ID becomes ambiguous", async () => {
+    await getDb(env)
+      .prepare(
+        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+         VALUES ('akw_ambiguous_payment_replay', ?, ?, '["*"]')`
+      )
+      .bind(TEST_API_KEY.id, TEST_WALLET_ID)
+      .run();
+    await seedWalletControlProfile({
+      rules: [
+        {
+          id: "approve-ambiguous-payment-replay",
+          kind: "approval",
+          operationTypes: ["payment_transfer_execute"],
+        },
+      ],
+    });
+    await seedCachedKey({
+      walletScope: "selected",
+      signingWalletId: TEST_WALLET_ID,
+      signingWalletIds: [TEST_WALLET_ID],
+      walletBindings: [
+        {
+          walletId: TEST_WALLET_ID,
+          custodyWalletId: TEST_CUSTODY_WALLET_ID,
+          permissions: ["*"],
+        },
+      ],
+    });
+
+    const pendingResponse = await app.request(
+      "/v1/payments/transfers",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL",
+          amount: "0.1",
+        }),
+      },
+      env
+    );
+    expect(pendingResponse.status).toBe(202);
+    const pendingBody = (await pendingResponse.json()) as {
+      error: { details: { approvalRequestId: string; walletOperationId: string } };
+    };
+    const { approvalRequestId, walletOperationId } = pendingBody.error.details;
+    const operationBeforeReplay = await getDb(env)
+      .prepare("SELECT custody_wallet_id FROM wallet_operations WHERE id = ?")
+      .bind(walletOperationId)
+      .first<{ custody_wallet_id: string | null }>();
+    expect(operationBeforeReplay?.custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
+
+    const repository = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+    );
+    await repository.updateApprovalRequestStatus({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      approvalRequestId,
+      status: "approved",
+      operationStatus: "executing",
+      resolvedBy: TEST_API_KEY.id,
+    });
+
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted,
+              encryption_version, status)
+           VALUES ('cust_cfg_ambiguous_payment_replay', ?, ?, 'privy', 'test-config',
+                   'sdp-custody-encryption-v1', 'active')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id),
+      getDb(env).prepare(
+        `INSERT INTO custody_wallets
+           (id, custody_config_id, wallet_id, public_key, status)
+         VALUES ('cwlt_ambiguous_payment_replay', 'cust_cfg_ambiguous_payment_replay',
+                 '${TEST_WALLET_ID}', '${TEST_SOLANA_ADDRESSES.wallet3}', 'active')`
+      ),
+    ]);
+
+    expect(await recoverApprovedWalletOperations(env)).toBe(1);
+    const execution = await getDb(env)
+      .prepare(
+        `SELECT status, execution_error, execution_effect_started_at
+         FROM wallet_operations
+         WHERE id = ?`
+      )
+      .bind(walletOperationId)
+      .first<{
+        status: string;
+        execution_error: string | null;
+        execution_effect_started_at: string | null;
+      }>();
+    expect(execution).toMatchObject({
+      status: "failed",
+      execution_error: "API key is not authorized for the requested wallet",
+      execution_effect_started_at: null,
+    });
+    const transferCount = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM payment_transfers")
+      .first<{ count: number | string }>();
+    expect(Number(transferCount?.count ?? 0)).toBe(0);
+    expect(createOrgSignerMock).not.toHaveBeenCalled();
+    expect(sendAndConfirmTransactionMock).not.toHaveBeenCalled();
   });
 
   it("recovers an expired execution claim with a fenced retry", async () => {
@@ -1262,7 +1401,7 @@ describe("Payments routes — transfers", () => {
     };
     expect(body.error.code).toBe("BAD_REQUEST");
     expect(body.error.message).toContain("Invalid request body");
-    expect(body.error.details?.errors?.amount).toContain("Amount must be greater than zero");
+    expect(body.error.message).toContain("Amount must be greater than zero");
 
     const transfers = await getDb(env).prepare("SELECT id FROM payment_transfers").all<{
       id: string;
@@ -1320,6 +1459,7 @@ describe("Payments routes — transfers", () => {
         getTokenSupply: () => ({
           send: async () => ({ value: { decimals: 6 } }),
         }),
+        getFeeForMessage: () => ({ send: async () => ({ value: 5000n }) }),
       } as unknown as ReturnType<typeof solanaRpc.createRpc>);
       createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
       const signAndSendMock = vi
@@ -1330,6 +1470,7 @@ describe("Payments routes — transfers", () => {
       createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
         signAsFeePayer: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -1424,6 +1565,7 @@ describe("Payments routes — transfers", () => {
       await updateSeededWalletPublicKey(sourceSigner.address);
       createRpcMock.mockReturnValue({
         getTokenSupply: () => ({ send: async () => ({ value: { decimals: 6 } }) }),
+        getFeeForMessage: () => ({ send: async () => ({ value: 5000n }) }),
       } as unknown as ReturnType<typeof solanaRpc.createRpc>);
       createOrgSignerMock.mockResolvedValue(sourceSigner);
       const signAndSendMock = vi
@@ -1434,6 +1576,7 @@ describe("Payments routes — transfers", () => {
       createFeePaymentAdapterMock.mockReturnValueOnce({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
         signAsFeePayer: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -1507,6 +1650,7 @@ describe("Payments routes — transfers", () => {
       await updateSeededWalletPublicKey(sourceSigner.address);
       createRpcMock.mockReturnValue({
         getTokenSupply: () => ({ send: async () => ({ value: { decimals: 6 } }) }),
+        getFeeForMessage: () => ({ send: async () => ({ value: 5000n }) }),
       } as unknown as ReturnType<typeof solanaRpc.createRpc>);
       createOrgSignerMock.mockResolvedValue(sourceSigner);
       const signAndSendMock = vi
@@ -1517,6 +1661,7 @@ describe("Payments routes — transfers", () => {
       createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
         signAsFeePayer: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -1593,6 +1738,7 @@ describe("Payments routes — transfers", () => {
         getTokenSupply: () => ({
           send: async () => ({ value: { decimals: 6 } }),
         }),
+        getFeeForMessage: () => ({ send: async () => ({ value: 5000n }) }),
       } as unknown as ReturnType<typeof solanaRpc.createRpc>);
       createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
       const signAndSendMock = vi
@@ -1603,6 +1749,7 @@ describe("Payments routes — transfers", () => {
       createFeePaymentAdapterMock.mockReturnValueOnce({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
         signAsFeePayer: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -1746,6 +1893,7 @@ describe("Payments routes — transfers", () => {
       createFeePaymentAdapterMock.mockReturnValueOnce({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
         signAsFeePayer: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -1825,6 +1973,7 @@ describe("Payments routes — transfers", () => {
         getTokenSupply: () => ({
           send: async () => ({ value: { decimals: 6 } }),
         }),
+        getFeeForMessage: () => ({ send: async () => ({ value: 5000n }) }),
       } as unknown as ReturnType<typeof solanaRpc.createRpc>);
 
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
@@ -1999,6 +2148,10 @@ describe("Payments routes — transfers", () => {
       createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue({
+          ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
+          signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        }),
         signAsFeePayer: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -2039,6 +2192,10 @@ describe("Payments routes — transfers", () => {
       createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue({
+          ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
+          signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        }),
         signAsFeePayer: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -2082,6 +2239,10 @@ describe("Payments routes — transfers", () => {
       createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue({
+          ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
+          signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        }),
         signAsFeePayer: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -2184,6 +2345,10 @@ describe("Payments routes — transfers", () => {
       createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue({
+          ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
+          signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        }),
         signAsFeePayer: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -2198,6 +2363,19 @@ describe("Payments routes — transfers", () => {
         token: "SOL",
         amount: "1",
       });
+      getRecentBlockhashMock
+        .mockResolvedValueOnce({
+          blockhash: "29d2S7vB453rNYFdR5Ycwt7y9haRT5fwVwL9zTmBhfV2" as Awaited<
+            ReturnType<typeof solanaRpc.getRecentBlockhash>
+          >["blockhash"],
+          lastValidBlockHeight: 1000n,
+        })
+        .mockResolvedValueOnce({
+          blockhash: "3JF3sEqM796hk5WFqA6EtmEwJQ9quALszsfJyvXNQKy3" as Awaited<
+            ReturnType<typeof solanaRpc.getRecentBlockhash>
+          >["blockhash"],
+          lastValidBlockHeight: 1000n,
+        });
 
       const a = await app.request("/v1/payments/transfers", { method: "POST", headers, body }, env);
       const b = await app.request("/v1/payments/transfers", { method: "POST", headers, body }, env);
@@ -2211,6 +2389,10 @@ describe("Payments routes — transfers", () => {
       createFeePaymentAdapterMock.mockReturnValueOnce({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue({
+          ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
+          signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        }),
         signAsFeePayer: vi.fn(),
         signAndSend: vi.fn().mockRejectedValue(new Error("RPC connection refused")),
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -2253,6 +2435,10 @@ describe("Payments routes — transfers", () => {
       createFeePaymentAdapterMock.mockReturnValueOnce({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue({
+          ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
+          signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        }),
         signAsFeePayer: vi.fn(),
         signAndSend: vi
           .fn()

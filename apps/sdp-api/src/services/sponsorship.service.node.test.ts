@@ -125,6 +125,29 @@ describe("sponsorship identity boundary", () => {
     );
   });
 
+  it("derives a user-scoped identity for authenticated dashboard sessions", async () => {
+    const app = new Hono<{ Bindings: Env }>();
+    app.use("*", async (c, next) => {
+      c.set("session", {
+        id: "session_trusted",
+        userId: "user_trusted",
+        organizationId: "org_trusted",
+        permissions: ["wallets:write"],
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      });
+      c.set("projectId", "project_trusted");
+      c.set("projectEnvironment", "sandbox");
+      await next();
+    });
+    app.get("/probe", (c) => c.text(buildKoraUserId(resolveAuthenticatedSponsorshipScope(c))));
+
+    const response = await app.request("/probe");
+
+    expect(await response.text()).toBe(
+      "sdp:v1:sandbox:org_trusted:project:project_trusted:user:user_trusted"
+    );
+  });
+
   it("keeps project-required request sponsorship fail closed", async () => {
     const app = new Hono<{ Bindings: Env }>();
     let sponsorshipError: unknown;
@@ -194,6 +217,27 @@ describe("sponsorship identity boundary", () => {
 });
 
 describe("sponsorship construction guard", () => {
+  const FEE_PAYMENT_CONSTRUCTORS = new Set([
+    "createFeePaymentAdapter",
+    "createKoraAdapter",
+    "KoraAdapter",
+  ]);
+  const FEE_PAYMENT_SPECIFIER = `@sdp/payments/fee-payment(?:/[^"']*)?`;
+  const OPAQUE_IMPORT_PATTERNS = [
+    new RegExp(String.raw`import\s+\*\s+as\s+[\w$]+\s+from\s+["']${FEE_PAYMENT_SPECIFIER}["']`),
+    new RegExp(String.raw`import\s+(?!type\b)[\w$]+\s+from\s+["']${FEE_PAYMENT_SPECIFIER}["']`),
+    new RegExp(
+      String.raw`import\s+(?!type\b)[\w$]+\s*,[^;]*\sfrom\s+["']${FEE_PAYMENT_SPECIFIER}["']`
+    ),
+    new RegExp(
+      String.raw`export\s+\*(?:\s+as\s+[\w$]+)?\s+from\s+["']${FEE_PAYMENT_SPECIFIER}["']`
+    ),
+    new RegExp(String.raw`require\(\s*["']${FEE_PAYMENT_SPECIFIER}["']\s*\)`),
+    new RegExp(String.raw`import\(\s*["']${FEE_PAYMENT_SPECIFIER}["']\s*\)`),
+  ];
+  const NAMED_IMPORT_PATTERN =
+    /(?:import|export)\s*{([^}]+)}\s*from\s*["']@sdp\/payments\/fee-payment(?:\/[^"']*)?["']/g;
+
   function sourceFiles(directory: string): string[] {
     return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
       const entryPath = path.join(directory, entry.name);
@@ -204,15 +248,44 @@ describe("sponsorship construction guard", () => {
     });
   }
 
+  function constructsFeePaymentAdapter(relativePath: string, source: string): boolean {
+    if (
+      relativePath === "services/sponsorship.service.ts" ||
+      relativePath.startsWith("test/") ||
+      relativePath.includes("/test/") ||
+      relativePath.endsWith(".test.ts") ||
+      relativePath.endsWith(".spec.ts")
+    ) {
+      return false;
+    }
+    if (OPAQUE_IMPORT_PATTERNS.some((pattern) => pattern.test(source))) {
+      return true;
+    }
+    for (const match of source.matchAll(NAMED_IMPORT_PATTERN)) {
+      const importedNames = match[1].split(",").map(
+        (entry) =>
+          entry
+            .trim()
+            .replace(/^type\s+/, "")
+            .split(/\s+as\s+/)[0]
+      );
+      if (importedNames.some((name) => FEE_PAYMENT_CONSTRUCTORS.has(name))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   it("keeps production Kora adapter construction behind the owned boundary", () => {
-    const sourceRoot = path.resolve(import.meta.dirname, "..");
-    const violations = sourceFiles(sourceRoot)
-      .filter((file) => !file.endsWith(".test.ts") && !file.endsWith(".spec.ts"))
-      .filter((file) => !file.startsWith(path.join(sourceRoot, "test") + path.sep))
-      .filter((file) => !file.endsWith("/services/sponsorship.service.ts"))
-      .filter((file) => !file.endsWith("/services/adapters/index.ts"))
-      .filter((file) => readFileSync(file, "utf8").includes('from "@sdp/payments/fee-payment"'))
-      .map((file) => path.relative(sourceRoot, file));
+    const apiSourceRoot = path.resolve(import.meta.dirname, "..");
+    const violations = sourceFiles(apiSourceRoot)
+      .map((file) => path.relative(apiSourceRoot, file).split(path.sep).join("/"))
+      .filter((relativePath) =>
+        constructsFeePaymentAdapter(
+          relativePath,
+          readFileSync(path.join(apiSourceRoot, relativePath), "utf8")
+        )
+      );
 
     expect(violations).toEqual([]);
   });

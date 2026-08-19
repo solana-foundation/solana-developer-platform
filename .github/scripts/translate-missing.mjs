@@ -11,7 +11,7 @@ import {
   validateCatalogs,
 } from "./missing-translations.mjs";
 
-const releaseBranch = process.env.RELEASE_BRANCH ?? "codex/release-main";
+const releaseBranch = process.env.RELEASE_BRANCH ?? "sdp/release-main";
 const repo = process.env.GITHUB_REPOSITORY;
 const token = process.env.GITHUB_TOKEN;
 const messagesDir = path.resolve(
@@ -225,7 +225,6 @@ async function main() {
     agentUrl,
     agentUsername: process.env.TRANSLATION_AGENT_USERNAME,
     agentPassword: process.env.TRANSLATION_AGENT_PASSWORD,
-    maxKeys: Number(process.env.TRANSLATION_AGENT_MAX_KEYS || 500),
     batchSize: Number(process.env.TRANSLATION_AGENT_BATCH_SIZE || 50),
     maxRetries: Number(process.env.TRANSLATION_AGENT_MAX_RETRIES || 2),
   });

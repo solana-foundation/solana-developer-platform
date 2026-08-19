@@ -1,5 +1,10 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey, PolicyEvaluationContext, WalletOperationFamily } from "@sdp/types";
+import type {
+  CachedApiKey,
+  PolicyEvaluationContext,
+  WalletOperationFamily,
+  WalletOperationType,
+} from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPolicyRepository } from "@/db/repositories";
@@ -58,7 +63,7 @@ function evaluationContext(input: {
   organizationId?: string;
   projectId: string;
   family: WalletOperationFamily;
-  operationType: string;
+  operationType: WalletOperationType;
   walletRevisionId: string | null;
   apiKeyRevisionId: string | null;
 }): PolicyEvaluationContext {
@@ -282,7 +287,7 @@ async function seedPoliciesAndEvaluations() {
       key: "allow" as const,
       operationId: "wop_policy_audit_allow",
       family: "payment" as const,
-      operationType: "payment_transfer",
+      operationType: "payment_transfer_execute",
       status: "completed" as const,
       decision: "allow" as const,
       reasonCode: "wallet_policy_match",
@@ -295,7 +300,7 @@ async function seedPoliciesAndEvaluations() {
       key: "deny" as const,
       operationId: "wop_policy_audit_deny",
       family: "payment" as const,
-      operationType: "payment_transfer",
+      operationType: "payment_transfer_execute",
       status: "failed" as const,
       decision: "deny" as const,
       reasonCode: "wallet_policy_match",
@@ -308,7 +313,7 @@ async function seedPoliciesAndEvaluations() {
       key: "review" as const,
       operationId: "wop_policy_audit_review",
       family: "ramp" as const,
-      operationType: "onramp_quote",
+      operationType: "ramp_onramp_quote",
       status: "pending_approval" as const,
       decision: "review" as const,
       reasonCode: "manual_review",
@@ -317,7 +322,7 @@ async function seedPoliciesAndEvaluations() {
       revisionId: activeRevisionId,
       approvalRequestId: "appr_policy_audit_review",
     },
-  ];
+  ] as const;
 
   for (const entry of evaluations) {
     const operation = await repository.createWalletOperation({
@@ -392,7 +397,7 @@ async function seedPoliciesAndEvaluations() {
     key: "foreign" | "crossOrganization";
     organizationId: string;
     projectId: string;
-    operationType: string;
+    operationType: WalletOperationType;
   }) => {
     const operationId = `wop_${crypto.randomUUID()}`;
     const evaluationId = `pev_${crypto.randomUUID()}`;
@@ -442,13 +447,13 @@ async function seedPoliciesAndEvaluations() {
     key: "foreign",
     organizationId: TEST_ORG_ID,
     projectId: OTHER_PROJECT_ID,
-    operationType: "foreign_project_payment",
+    operationType: "payment_transfer_execute",
   });
   await seedForeignEvaluation({
     key: "crossOrganization",
     organizationId: OTHER_ORG_ID,
     projectId: TEST_PROJECT_ID,
-    operationType: "foreign_organization_payment",
+    operationType: "payment_transfer_execute",
   });
 }
 
@@ -512,7 +517,7 @@ describe("Wallet policy audit detail routes", () => {
       id: evaluationIds.review,
       walletOperation: {
         operationFamily: "ramp",
-        operationType: "onramp_quote",
+        operationType: "ramp_onramp_quote",
         status: "pending_approval",
       },
       policyRevisions: {

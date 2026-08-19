@@ -6,7 +6,7 @@
       "wallets": 19,
       "payments": 38,
       "counterparties": 12,
-      "issuance": 35
+      "issuance": 46
     }
   },
   "modules": {
@@ -84,23 +84,13 @@
               "custodyConfigId": "cfg_example",
               "provider": "privy",
               "isDefaultProvider": true,
+              "isRuntimeExecutionAllowed": true,
               "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",
               "label": "Root Signing Wallet",
               "purpose": "root",
               "status": "active",
-              "createdAt": "2025-01-01T00:00:00.000Z",
-              "balances": [
-                {
-                  "token": "USDC",
-                  "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-                  "amount": "1250000",
-                  "uiAmount": "1.25",
-                  "decimals": 6,
-                  "usdPrice": 1,
-                  "usdValue": 125.5
-                }
-              ]
+              "createdAt": "2025-01-01T00:00:00.000Z"
             }
           },
           "meta": {
@@ -247,23 +237,13 @@
                 "custodyConfigId": "cfg_example",
                 "provider": "privy",
                 "isDefaultProvider": true,
+                "isRuntimeExecutionAllowed": true,
                 "walletId": "privy_wallet_123",
                 "publicKey": "So11111111111111111111111111111111111111112",
                 "label": "Root Signing Wallet",
                 "purpose": "root",
                 "status": "active",
-                "createdAt": "2025-01-01T00:00:00.000Z",
-                "balances": [
-                  {
-                    "token": "USDC",
-                    "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-                    "amount": "1250000",
-                    "uiAmount": "1.25",
-                    "decimals": 6,
-                    "usdPrice": 1,
-                    "usdValue": 125.5
-                  }
-                ]
+                "createdAt": "2025-01-01T00:00:00.000Z"
               }
             ]
           },
@@ -508,8 +488,8 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{}",
-            "required": false
+            "defaultValue": "{\n  \"walletId\": \"privy_wallet_123\"\n}",
+            "required": true
           }
         ],
         "expectedResponse": {
@@ -517,7 +497,7 @@
             "walletId": "privy_wallet_123",
             "walletAddress": "So11111111111111111111111111111111111111112",
             "feePayer": "So11111111111111111111111111111111111111112",
-            "memo": "SDP signer check 2026-02-20T00:00:00.000Z",
+            "memo": "SDP signer check 123e4567-e89b-42d3-a456-426614174000",
             "signature": "sig_example",
             "slot": 123456789,
             "blockTime": "2026-02-20T00:00:00.000Z"
@@ -610,7 +590,7 @@
                   "apiKeyId": "apikey_example",
                   "source": "api",
                   "operationFamily": "payment",
-                  "operationType": "payment_transfer",
+                  "operationType": "payment_transfer_execute",
                   "asset": "example",
                   "amount": "example",
                   "destination": "example",
@@ -685,7 +665,7 @@
                 "apiKeyId": "apikey_example",
                 "source": "api",
                 "operationFamily": "payment",
-                "operationType": "payment_transfer",
+                "operationType": "payment_transfer_execute",
                 "asset": "example",
                 "amount": "example",
                 "destination": "example",
@@ -759,7 +739,7 @@
                 "apiKeyId": "apikey_example",
                 "source": "api",
                 "operationFamily": "payment",
-                "operationType": "payment_transfer",
+                "operationType": "payment_transfer_execute",
                 "asset": "example",
                 "amount": "example",
                 "destination": "example",
@@ -833,7 +813,7 @@
                 "apiKeyId": "apikey_example",
                 "source": "api",
                 "operationFamily": "payment",
-                "operationType": "payment_transfer",
+                "operationType": "payment_transfer_execute",
                 "asset": "example",
                 "amount": "example",
                 "destination": "example",
@@ -907,7 +887,7 @@
                 "apiKeyId": "apikey_example",
                 "source": "api",
                 "operationFamily": "payment",
-                "operationType": "payment_transfer",
+                "operationType": "payment_transfer_execute",
                 "asset": "example",
                 "amount": "example",
                 "destination": "example",
@@ -976,19 +956,13 @@
               "custodyConfigId": "cfg_example",
               "provider": "privy",
               "isDefaultProvider": true,
+              "isRuntimeExecutionAllowed": true,
               "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",
               "label": "Root Signing Wallet",
               "purpose": "root",
               "status": "active",
-              "createdAt": "2025-01-01T00:00:00.000Z",
-              "balance": {
-                "token": "SOL",
-                "mint": "So11111111111111111111111111111111111111112",
-                "amount": "123456789",
-                "uiAmount": "0.123456789",
-                "decimals": 9
-              }
+              "createdAt": "2025-01-01T00:00:00.000Z"
             }
           },
           "meta": {
@@ -1030,23 +1004,13 @@
               "custodyConfigId": "cfg_example",
               "provider": "privy",
               "isDefaultProvider": true,
+              "isRuntimeExecutionAllowed": true,
               "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",
               "label": "Root Signing Wallet",
               "purpose": "root",
               "status": "active",
-              "createdAt": "2025-01-01T00:00:00.000Z",
-              "balances": [
-                {
-                  "token": "USDC",
-                  "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-                  "amount": "1250000",
-                  "uiAmount": "1.25",
-                  "decimals": 6,
-                  "usdPrice": 1,
-                  "usdValue": 125.5
-                }
-              ]
+              "createdAt": "2025-01-01T00:00:00.000Z"
             }
           },
           "meta": {
@@ -1121,10 +1085,10 @@
               "defaultAction": "allow",
               "rules": [
                 {
-                  "id": "deny-raw-signing",
-                  "kind": "operation_family",
-                  "family": "raw_sign",
-                  "action": "deny"
+                  "id": "approve-vault-deposits",
+                  "kind": "operation_type",
+                  "operationTypes": ["earn_vault_deposit"],
+                  "action": "approval_required"
                 }
               ],
               "controlProfile": {
@@ -1137,10 +1101,10 @@
                 "defaultAction": "allow",
                 "rules": [
                   {
-                    "id": "deny-raw-signing",
-                    "kind": "operation_family",
-                    "family": "raw_sign",
-                    "action": "deny"
+                    "id": "approve-vault-deposits",
+                    "kind": "operation_type",
+                    "operationTypes": ["earn_vault_deposit"],
+                    "action": "approval_required"
                   }
                 ],
                 "providerMappingStatus": "not_applicable",
@@ -1153,7 +1117,7 @@
                   {
                     "walletOperationId": "wop_example",
                     "policyEvaluationId": "peval_example",
-                    "operationFamily": "transfer",
+                    "operationFamily": "payment",
                     "operationType": "payment_transfer_execute",
                     "asset": "USDC",
                     "amount": "100.00",
@@ -1200,7 +1164,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"commitMessage\": \"Require approval for transfers above 10,000 USDC.\",\n  \"defaultAction\": \"allow\",\n  \"rules\": [\n    {\n      \"id\": \"deny-raw-signing\",\n      \"kind\": \"operation_family\",\n      \"family\": \"raw_sign\",\n      \"action\": \"deny\"\n    }\n  ]\n}",
+            "defaultValue": "{\n  \"commitMessage\": \"Require approval for transfers above 10,000 USDC.\",\n  \"defaultAction\": \"allow\",\n  \"rules\": [\n    {\n      \"id\": \"approve-vault-deposits\",\n      \"kind\": \"operation_type\",\n      \"operationTypes\": [\n        \"earn_vault_deposit\"\n      ],\n      \"action\": \"approval_required\"\n    }\n  ]\n}",
             "required": true
           }
         ],
@@ -1211,10 +1175,10 @@
               "defaultAction": "allow",
               "rules": [
                 {
-                  "id": "deny-raw-signing",
-                  "kind": "operation_family",
-                  "family": "raw_sign",
-                  "action": "deny"
+                  "id": "approve-vault-deposits",
+                  "kind": "operation_type",
+                  "operationTypes": ["earn_vault_deposit"],
+                  "action": "approval_required"
                 }
               ],
               "controlProfile": {
@@ -1227,10 +1191,10 @@
                 "defaultAction": "allow",
                 "rules": [
                   {
-                    "id": "deny-raw-signing",
-                    "kind": "operation_family",
-                    "family": "raw_sign",
-                    "action": "deny"
+                    "id": "approve-vault-deposits",
+                    "kind": "operation_type",
+                    "operationTypes": ["earn_vault_deposit"],
+                    "action": "approval_required"
                   }
                 ],
                 "providerMappingStatus": "not_applicable",
@@ -1243,7 +1207,7 @@
                   {
                     "walletOperationId": "wop_example",
                     "policyEvaluationId": "peval_example",
-                    "operationFamily": "transfer",
+                    "operationFamily": "payment",
                     "operationType": "payment_transfer_execute",
                     "asset": "USDC",
                     "amount": "100.00",
@@ -1307,10 +1271,10 @@
                 "revisionNumber": 1,
                 "rules": [
                   {
-                    "id": "deny-raw-signing",
-                    "kind": "operation_family",
-                    "family": "raw_sign",
-                    "action": "deny"
+                    "id": "approve-vault-deposits",
+                    "kind": "operation_type",
+                    "operationTypes": ["earn_vault_deposit"],
+                    "action": "approval_required"
                   }
                 ],
                 "defaultAction": "allow",
@@ -1449,16 +1413,8 @@
                 "value": "issuance"
               },
               {
-                "label": "raw_sign",
-                "value": "raw_sign"
-              },
-              {
                 "label": "program",
                 "value": "program"
-              },
-              {
-                "label": "provider_admin",
-                "value": "provider_admin"
               }
             ]
           },
@@ -1475,7 +1431,7 @@
               "id": "_example",
               "walletOperation": {
                 "id": "_example",
-                "operationFamily": "transfer",
+                "operationFamily": "example",
                 "operationType": "example",
                 "asset": "example",
                 "amount": "example",
@@ -1508,7 +1464,7 @@
                   "apiKeyId": "apikey_example",
                   "actor": {},
                   "source": "example",
-                  "operationFamily": "transfer",
+                  "operationFamily": "example",
                   "operationType": "example",
                   "asset": "example",
                   "amount": "example",
@@ -1577,7 +1533,7 @@
               "id": "_example",
               "walletOperation": {
                 "id": "_example",
-                "operationFamily": "transfer",
+                "operationFamily": "example",
                 "operationType": "example",
                 "asset": "example",
                 "amount": "example",
@@ -1610,7 +1566,7 @@
                   "apiKeyId": "apikey_example",
                   "actor": {},
                   "source": "example",
-                  "operationFamily": "transfer",
+                  "operationFamily": "example",
                   "operationType": "example",
                   "asset": "example",
                   "amount": "example",
@@ -8927,6 +8883,433 @@
         ],
         "bodyFields": [],
         "expectedResponse": {}
+      },
+      {
+        "id": "list-workflow-catalog",
+        "operationId": "listWorkflowCatalog",
+        "title": "List the workflow catalog for an asset",
+        "method": "GET",
+        "path": "/v1/issuance/tokens/{tokenId}/workflows/catalog",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "triggers": [{}],
+            "actions": [{}]
+          },
+          "meta": {}
+        }
+      },
+      {
+        "id": "list-workflows",
+        "operationId": "listWorkflows",
+        "title": "List workflow rules",
+        "method": "GET",
+        "path": "/v1/issuance/tokens/{tokenId}/workflows",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "workflows": [
+              {
+                "id": "_example",
+                "token_id": "token__example",
+                "trigger_type": "example",
+                "action_type": "example",
+                "enabled": false,
+                "review_mode": "auto",
+                "created_at": "example"
+              }
+            ]
+          },
+          "meta": {}
+        }
+      },
+      {
+        "id": "create-workflow",
+        "operationId": "createWorkflow",
+        "title": "Create a workflow rule",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/workflows",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"triggerType\": \"kyc_approved\",\n  \"actionType\": \"allowlist_add\",\n  \"condition\": {\n    \"all\": [\n      {\n        \"field\": \"example\",\n        \"op\": \"eq\",\n        \"value\": \"example\"\n      }\n    ]\n  },\n  \"actionParams\": {},\n  \"reviewMode\": \"auto\",\n  \"retryPolicy\": {\n    \"maxAttempts\": 1,\n    \"retryAfterMinutes\": 1\n  }\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "workflow": {
+              "id": "_example",
+              "token_id": "token__example",
+              "trigger_type": "example",
+              "action_type": "example",
+              "enabled": false,
+              "review_mode": "auto",
+              "created_at": "example"
+            }
+          },
+          "meta": {}
+        }
+      },
+      {
+        "id": "update-workflow",
+        "operationId": "updateWorkflow",
+        "title": "Update a workflow rule",
+        "method": "PATCH",
+        "path": "/v1/issuance/tokens/{tokenId}/workflows/{workflowId}",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          },
+          {
+            "key": "workflowId",
+            "label": "{workflowId}",
+            "defaultValue": "asset_workflow_abc123",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"condition\": {\n    \"all\": [\n      {\n        \"field\": \"example\",\n        \"op\": \"eq\",\n        \"value\": \"example\"\n      }\n    ]\n  },\n  \"actionParams\": {},\n  \"reviewMode\": \"auto\",\n  \"retryPolicy\": {\n    \"maxAttempts\": 1,\n    \"retryAfterMinutes\": 1\n  }\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "workflow": {
+              "id": "_example",
+              "token_id": "token__example",
+              "trigger_type": "example",
+              "action_type": "example",
+              "enabled": false,
+              "review_mode": "auto",
+              "created_at": "example"
+            }
+          },
+          "meta": {}
+        }
+      },
+      {
+        "id": "delete-workflow",
+        "operationId": "deleteWorkflow",
+        "title": "Delete a workflow rule",
+        "method": "DELETE",
+        "path": "/v1/issuance/tokens/{tokenId}/workflows/{workflowId}",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          },
+          {
+            "key": "workflowId",
+            "label": "{workflowId}",
+            "defaultValue": "asset_workflow_abc123",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "deleted": false
+          },
+          "meta": {}
+        }
+      },
+      {
+        "id": "list-workflow-executions",
+        "operationId": "listWorkflowExecutions",
+        "title": "List workflow executions",
+        "method": "GET",
+        "path": "/v1/issuance/tokens/{tokenId}/workflows/executions?workflowId={workflowId}&page={page}&pageSize={pageSize}",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          },
+          {
+            "key": "workflowId",
+            "label": "workflowId",
+            "defaultValue": "asset_workflow_abc123",
+            "required": false
+          },
+          {
+            "key": "page",
+            "label": "page",
+            "description": "Page number (1-based).",
+            "defaultValue": "1",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "pageSize",
+            "label": "pageSize",
+            "description": "Number of items per page.",
+            "defaultValue": "50",
+            "required": false,
+            "valueType": "number"
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "executions": [
+              {
+                "id": "_example",
+                "workflow_id": "workflow__example",
+                "trigger_type": "example",
+                "action_type": "example",
+                "status": "awaiting_review",
+                "attempt_count": 1,
+                "max_attempts": 1,
+                "error": "example",
+                "trigger_payload": {},
+                "result": {},
+                "decided_by": "example",
+                "decided_at": "example",
+                "created_at": "example",
+                "updated_at": "example"
+              }
+            ],
+            "total": 1,
+            "page": 1,
+            "pageSize": 1
+          },
+          "meta": {}
+        }
+      },
+      {
+        "id": "approve-workflow-execution",
+        "operationId": "approveWorkflowExecution",
+        "title": "Approve a held execution",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/approve",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          },
+          {
+            "key": "executionId",
+            "label": "{executionId}",
+            "defaultValue": "workflow_execution_abc123",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "execution": {
+              "id": "_example",
+              "workflow_id": "workflow__example",
+              "trigger_type": "example",
+              "action_type": "example",
+              "status": "awaiting_review",
+              "attempt_count": 1,
+              "max_attempts": 1,
+              "error": "example",
+              "trigger_payload": {},
+              "result": {},
+              "decided_by": "example",
+              "decided_at": "example",
+              "created_at": "example",
+              "updated_at": "example"
+            }
+          },
+          "meta": {}
+        }
+      },
+      {
+        "id": "retry-workflow-execution",
+        "operationId": "retryWorkflowExecution",
+        "title": "Retry a failed execution",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/retry",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          },
+          {
+            "key": "executionId",
+            "label": "{executionId}",
+            "defaultValue": "workflow_execution_abc123",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "execution": {
+              "id": "_example",
+              "workflow_id": "workflow__example",
+              "trigger_type": "example",
+              "action_type": "example",
+              "status": "awaiting_review",
+              "attempt_count": 1,
+              "max_attempts": 1,
+              "error": "example",
+              "trigger_payload": {},
+              "result": {},
+              "decided_by": "example",
+              "decided_at": "example",
+              "created_at": "example",
+              "updated_at": "example"
+            }
+          },
+          "meta": {}
+        }
+      },
+      {
+        "id": "reject-workflow-execution",
+        "operationId": "rejectWorkflowExecution",
+        "title": "Reject a held execution",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/reject",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          },
+          {
+            "key": "executionId",
+            "label": "{executionId}",
+            "defaultValue": "workflow_execution_abc123",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "execution": {
+              "id": "_example",
+              "workflow_id": "workflow__example",
+              "trigger_type": "example",
+              "action_type": "example",
+              "status": "awaiting_review",
+              "attempt_count": 1,
+              "max_attempts": 1,
+              "error": "example",
+              "trigger_payload": {},
+              "result": {},
+              "decided_by": "example",
+              "decided_at": "example",
+              "created_at": "example",
+              "updated_at": "example"
+            }
+          },
+          "meta": {}
+        }
+      },
+      {
+        "id": "list-holders",
+        "operationId": "listHolders",
+        "title": "List verified holders",
+        "method": "GET",
+        "path": "/v1/issuance/tokens/{tokenId}/holders",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "holders": [{}]
+          },
+          "meta": {}
+        }
+      },
+      {
+        "id": "enroll-holder",
+        "operationId": "enrollHolder",
+        "title": "Enroll a verified holder",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/holders",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"walletAddress\": \"11111111111111111111111111111111\",\n  \"reviewMode\": \"auto\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "enrollment": {}
+          },
+          "meta": {}
+        }
       }
     ]
   }

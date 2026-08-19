@@ -43,6 +43,7 @@ export type {
 export { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 export type {
   CreateEarnProgramWithdrawalInput,
+  DeleteUnlistedEarnStrategiesInput,
   EarnProgramWithdrawalRow,
   EarnProviderWalletRow,
   EarnRepository,
@@ -53,6 +54,7 @@ export type {
   ListEarnStrategiesInput,
   ListEarnStrategiesResult,
   UpdateEarnProgramWithdrawalStatusGuardedInput,
+  UpdateEarnStrategyMetricsInput,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
 export { generateEarnProgramWithdrawalId, generateEarnStrategyId } from "./earn.repository";

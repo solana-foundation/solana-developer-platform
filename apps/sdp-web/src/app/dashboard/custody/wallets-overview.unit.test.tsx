@@ -42,7 +42,9 @@ import { WalletsOverview } from "./wallets-overview";
 const wallets: CustodyWalletSummary[] = [
   {
     id: "wallet-row-1",
+    custodyConfigId: "custody-config-1",
     provider: "privy",
+    isRuntimeExecutionAllowed: true,
     walletId: "wallet-treasury",
     publicKey: "TreasuryPublicKey1111111111111111111111111",
     label: "Operations Treasury",
@@ -52,7 +54,9 @@ const wallets: CustodyWalletSummary[] = [
   },
   {
     id: "wallet-row-2",
+    custodyConfigId: "custody-config-2",
     provider: "coinbase_cdp",
+    isRuntimeExecutionAllowed: true,
     walletId: "wallet-issuer",
     publicKey: "IssuerPublicKey222222222222222222222222222",
     label: "Primary Issuer",
@@ -70,6 +74,7 @@ function renderOverview(query: string): string {
         canManageCustody
         enabledProviders={["privy", "coinbase_cdp"]}
         configsError={null}
+        showConnectionsLink={false}
         wallets={wallets}
         walletsError={null}
         onCreateWallet={() => undefined}

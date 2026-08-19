@@ -7,21 +7,33 @@ import {
 } from "@sdp/types";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
 import { z } from "zod";
+import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 
 export const earnStrategyIdParamsSchema = z.object({
   strategyId: z.string().min(1),
 });
 
-export const listEarnStrategiesQuerySchema = z.object({
+/** The page window every earn list shares (see handlers/shared.ts pageWindow). */
+const earnPageQueryShape = {
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
+};
+
+export const listEarnStrategiesQuerySchema = z.object({
+  ...earnPageQueryShape,
   sourceKind: z.enum(EARN_STRATEGY_SOURCE_KINDS).optional(),
   apyType: z.enum(EARN_APY_TYPES).optional(),
   liquidityTerm: z.enum(EARN_LIQUIDITY_TERMS).optional(),
 });
 
 // ---------------------------------------------------------------------------
-// Shared portfolio program (ONE provider wallet per organization+environment).
+// Portfolio programs. An organization holds N per (environment, provider)
+// since PRO-1670 — each pinned to one vault, addressed by its own id.
+//
+// `provider` appears ONLY on the create body and as an optional list filter.
+// Every `/programs/:programId` route takes it from the stored row instead: the
+// id already identifies the program, and a caller-supplied provider that
+// disagreed with the row would have no sensible answer.
 // ---------------------------------------------------------------------------
 
 /** Writes stay closed to registered provider ids (ADR 0002 drift rule). */
@@ -77,27 +89,57 @@ const earnProgramAllocationsSchema = z
     message: "allocations must include at least one deposit token group",
   });
 
-export const earnProgramUpsertSchema = z.object({
+export const earnProgramCreateSchema = z.object({
   provider: earnProviderSchema,
   label: z.string().trim().min(1).max(120).optional(),
   allocations: earnProgramAllocationsSchema,
   /**
-   * Caller-owned idempotency key (UUIDv4), forwarded to the provider so a
-   * retried confirm cannot provision a second wallet or apply a strategy twice.
-   * Same contract as the withdrawal path: the provider replays the original
-   * response for a matching payload and conflicts on a mismatch, so callers must
-   * mint a NEW id whenever the allocation changes. The server mints one per call
-   * when absent, which is not idempotent — send your own to get that guarantee.
+   * Caller-owned idempotency key (UUIDv4). Optional HERE only because the
+   * `Idempotency-Key` header is the other accepted source — the handler requires
+   * EXACTLY one and refuses both neither and both, identically to the withdrawal
+   * path and for the same reason: no precedence rule can tell which of two
+   * sources a caller's retry keeps stable.
+   *
+   * Creation became key-REQUIRED with PRO-1670. While an organization could hold
+   * only one program per (environment, provider), a DB unique constraint caught a
+   * retried create; now that N programs are legal, nothing downstream can tell a
+   * retry from a genuine second program, and an unkeyed retry provisions a
+   * duplicate wallet the customer may then fund.
    */
   requestId: z.uuidv4().optional(),
 });
 
-export const earnProgramQuerySchema = z.object({
-  provider: earnProviderSchema,
+/**
+ * Re-target the program's single vault in place. No `provider` (the row owns
+ * it) and no `label` (write-once by design — the update path has never
+ * forwarded it and there is no repository update path, so accepting one here
+ * would silently no-op).
+ */
+export const earnProgramRetargetSchema = z.object({
+  allocations: earnProgramAllocationsSchema,
+  /**
+   * Optional, unlike create's: re-targeting moves no money and is naturally
+   * idempotent on the provider (the same allocations re-applied are a no-op),
+   * so an absent key costs a duplicate provider mutation rather than a duplicate
+   * wallet. Send one anyway — the provider replays a matching payload and 409s a
+   * reused key with changed allocations, which is what makes a double-submitted
+   * confirm safe. The `Idempotency-Key` header is the other accepted source,
+   * exactly as on create and withdrawals; sending both is a 400.
+   */
+  requestId: z.uuidv4().optional(),
+});
+
+export const earnProgramParamsSchema = z.object({
+  programId: z.string().min(1),
+});
+
+/** The collection list: `provider` narrows it, absent lists every provider. */
+export const earnProgramsListQuerySchema = z.object({
+  provider: earnProviderSchema.optional(),
+  ...earnPageQueryShape,
 });
 
 export const earnProgramDepositsQuerySchema = z.object({
-  provider: earnProviderSchema,
   cursor: z.string().min(1).optional(),
 });
 
@@ -115,13 +157,38 @@ const solanaDestinationSchema = z.preprocess(
   })
 );
 
-export const earnProgramWithdrawalPreviewSchema = z.object({
-  provider: earnProviderSchema,
-  amountUsd: usdAmountSchema,
+/**
+ * The preview and the create used to share a schema by `.extend()`, and they
+ * deliberately no longer do.
+ *
+ * PRO-1675 made the preview's `amountUsd` OPTIONAL — asked without one it
+ * answers what the lane can pay right now instead of validating a request. Had
+ * the create kept extending the preview, that single edit would have silently
+ * made the amount optional on the PAYOUT path too: `POST .../withdrawals` would
+ * have accepted a body with no amount. Each schema now DECLARES its own
+ * `amountUsd`, so optionality cannot travel between them at all — the
+ * relationship a reviewer has to verify is gone rather than merely corrected.
+ * Pinned by "keeps amountUsd required even though the preview made it optional"
+ * in `../earn-program.test.ts`.
+ */
+const earnProgramWithdrawalTokenShape = {
   token: z.enum(EARN_PORTFOLIO_TOKENS),
+} as const;
+
+export const earnProgramWithdrawalPreviewSchema = z.object({
+  /**
+   * Omit to ask the liquidity question — "how much can this lane pay right
+   * now?" — which is what the withdraw modal asks before the user types
+   * anything. Present, it also validates that specific amount is fillable.
+   */
+  amountUsd: usdAmountSchema.optional(),
+  ...earnProgramWithdrawalTokenShape,
 });
 
-export const earnProgramWithdrawalCreateSchema = earnProgramWithdrawalPreviewSchema.extend({
+export const earnProgramWithdrawalCreateSchema = z.object({
+  /** REQUIRED — a payout with no amount is not a request. See the note above. */
+  amountUsd: usdAmountSchema,
+  ...earnProgramWithdrawalTokenShape,
   /**
    * Caller-owned idempotency key (UUIDv4). Optional HERE only because the
    * `Idempotency-Key` header is the other accepted source — the handler
@@ -136,18 +203,58 @@ export const earnProgramWithdrawalCreateSchema = earnProgramWithdrawalPreviewSch
   destinationAddress: solanaDestinationSchema,
 });
 
-export const earnProgramWithdrawalParamsSchema = z.object({
+export const earnProgramWithdrawalParamsSchema = earnProgramParamsSchema.extend({
   withdrawalRef: z.string().min(1),
 });
 
 /**
- * Withdrawal-ledger list (DB read). The provider param stays registry-gated
- * like every program read — ADR 0002's open-string rule governs stored values
- * and dispatch, not query validation, and de-registration only ever happens
- * after a provider is drained.
+ * Withdrawal-ledger list (DB read). Scoped by the path program alone — the
+ * provider comes from that row, so there is no query param left to registry-gate
+ * and this route keeps taking no provider gate whatsoever (ADR 0002: the audit
+ * trail outlives credential removal).
  */
-export const earnProgramWithdrawalsListQuerySchema = z.object({
-  provider: earnProviderSchema,
-  page: z.coerce.number().int().positive().default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+export const earnProgramWithdrawalsListQuerySchema = z.object(earnPageQueryShape);
+
+/**
+ * Open a position in a NON-CUSTODIAL vault, or add to one, from an SDP custody
+ * wallet.
+ *
+ * Unlike the custodial create this carries an AMOUNT and a WALLET, because for
+ * a `vault_direct` provider opening the position and funding it are the same
+ * on-chain action — there is no wallet to provision first and no address to
+ * fund afterwards.
+ */
+export const earnVaultDepositSchema = z.object({
+  /** Catalogue strategy id, resolved to a vault address server-side. */
+  strategyId: z.string().min(1),
+  /** SDP custody-wallet row that signs and holds the shares (`id`, not provider `walletId`). */
+  custodyWalletId: z.string().min(1),
+  /** Deposit amount in the vault token's units, as a decimal string. */
+  amount: z
+    .string()
+    .max(128)
+    .regex(/^\d+(\.\d+)?$/, "amount must be a positive decimal string")
+    .refine((value) => /[1-9]/.test(value), "amount must be greater than zero"),
+  /** Optional slippage floor, in shares, as a decimal string. */
+  minSharesOut: z
+    .string()
+    .max(128)
+    .regex(/^\d+(\.\d+)?$/, "minSharesOut must be a decimal string")
+    .refine((value) => /[1-9]/.test(value), "minSharesOut must be greater than zero")
+    .optional(),
+  /**
+   * Retired on this route: the chain has no request dedupe to anchor a body
+   * key to, so the `Idempotency-Key` header is the only accepted source.
+   * Declared as `never` rather than omitted so the stray key is rejected with
+   * this message instead of being silently stripped.
+   */
+  requestId: z
+    .never(`Use the ${IDEMPOTENCY_KEY_HEADER} header; body requestId is not accepted`)
+    .optional(),
+});
+
+/** Bounded keyset page over active vault holdings, newest first. */
+export const earnVaultPositionsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  before: z.string().min(1).optional(),
 });

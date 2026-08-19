@@ -7,7 +7,6 @@ import { useTranslations } from "@/i18n/provider";
 import type {
   AuthoringDefaultAction,
   AuthoringRuleAction,
-  PolicyAuthoringState,
   PolicyFlowStep,
   RestrictionCategory,
 } from "./wallet-policy-authoring";
@@ -95,9 +94,7 @@ export const FAMILY_LABEL_KEYS = {
   payment: "DashboardCustody.policyPayments",
   ramp: "DashboardCustody.policyRamps",
   issuance: "DashboardCustody.policyIssuance",
-  raw_sign: "DashboardCustody.policyRawSigning",
   program: "DashboardCustody.policyProgramOperations",
-  provider_admin: "DashboardCustody.policyProviderAdministration",
 } as const satisfies Record<WalletOperationFamily, MessageKey>;
 
 export const FAMILY_DESCRIPTION_KEYS = {
@@ -105,9 +102,7 @@ export const FAMILY_DESCRIPTION_KEYS = {
   payment: "DashboardCustody.policyPaymentsDescription",
   ramp: "DashboardCustody.policyRampsDescription",
   issuance: "DashboardCustody.policyIssuanceDescription",
-  raw_sign: "DashboardCustody.policyRawSigningDescription",
   program: "DashboardCustody.policyProgramOperationsDescription",
-  provider_admin: "DashboardCustody.policyProviderAdministrationDescription",
 } as const satisfies Record<WalletOperationFamily, MessageKey>;
 
 export function toggleValue<TValue extends string>(values: TValue[], value: TValue): TValue[] {
@@ -117,12 +112,6 @@ export function toggleValue<TValue extends string>(values: TValue[], value: TVal
 export function walletDetailHref(pathname: string, walletId: string): string {
   const section = pathname.startsWith("/dashboard/custody/") ? "custody" : "wallets";
   return `/dashboard/${section}/${encodeURIComponent(walletId)}`;
-}
-
-export function operationControlCount(state: PolicyAuthoringState): number {
-  return (
-    Object.values(state.familyActions).filter(Boolean).length + state.operationTypeRules.length
-  );
 }
 
 export function hasActiveRestrictions(policy: PaymentWalletPolicy): boolean {

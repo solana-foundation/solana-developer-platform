@@ -1,6 +1,13 @@
 import type { SdpEnvironment } from "./api-keys";
 
-export type SolanaCluster = "devnet" | "mainnet-beta";
+/**
+ * The clusters SDP addresses, as a value so runtime validators (zod enums,
+ * parsers at a wire boundary) can be derived from the same declaration the type
+ * comes from instead of restating the members.
+ */
+export const SOLANA_CLUSTERS = ["devnet", "mainnet-beta"] as const;
+
+export type SolanaCluster = (typeof SOLANA_CLUSTERS)[number];
 
 export const SOLANA_CLUSTER_LABELS = {
   devnet: "Devnet",
@@ -308,6 +315,29 @@ export const CLUSTER_BY_SDP_ENVIRONMENT = {
   sandbox: "devnet",
   production: "mainnet-beta",
 } as const satisfies Record<SdpEnvironment, SolanaCluster>;
+
+/**
+ * Each cluster's genesis hash — the only honest way to ask an RPC endpoint
+ * WHICH CHAIN it actually serves.
+ *
+ * Needed because a cluster mismatch is invisible in exactly the wrong
+ * direction. Kamino's mainnet kvault program id also resolves on devnet with
+ * zero accounts under it, so aiming a devnet request at a mainnet endpoint (or
+ * the reverse) does not error — it reports "no such vault", or worse, succeeds
+ * against the wrong deployment. Inferring the cluster from the URL is no
+ * substitute: provider URLs are opaque, and a mainnet endpoint need not contain
+ * the word "mainnet".
+ *
+ * Lives here because both `@sdp/earn` (catalogue sync) and the API's execution
+ * registry need it and neither may depend on the other — the same argument the
+ * Kamino program tables make.
+ */
+export const GENESIS_HASH_BY_CLUSTER = {
+  // biome-ignore lint/security/noSecrets: Solana mainnet-beta's public genesis hash
+  "mainnet-beta": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  // biome-ignore lint/security/noSecrets: Solana devnet's public genesis hash
+  devnet: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+} as const satisfies Record<SolanaCluster, string>;
 
 export function isWellKnownTokenSymbol(value: string): value is WellKnownTokenSymbol {
   return Object.hasOwn(WELL_KNOWN_TOKENS, value);

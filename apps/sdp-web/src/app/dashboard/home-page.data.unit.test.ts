@@ -58,8 +58,51 @@ describe("home issuance activity", () => {
         token: "USDC",
         amount: "12.5",
         address: "wallet_1",
+        status: "confirmed",
       }),
     ]);
+  });
+
+  it("carries a failed deploy's status so the card can mark it", () => {
+    // A failed deploy has no destination and often no signature; before the
+    // status rode along, the row was indistinguishable from a successful one.
+    const failedDeploy = {
+      ...issuanceItem,
+      transaction: {
+        ...issuanceItem.transaction,
+        id: "ttx_2",
+        type: "deploy",
+        status: "failed",
+        signature: null,
+        params: {},
+        error: "insufficient funds",
+      },
+    } satisfies TokenTransactionListItem;
+
+    expect(buildHomeActivityRows([], [failedDeploy], t)).toEqual([
+      expect.objectContaining({
+        id: "issuance-ttx_2",
+        type: "Deploy",
+        status: "failed",
+        address: "—",
+      }),
+    ]);
+  });
+
+  it("carries the payment transfer status", () => {
+    const transfer = {
+      id: "xfr_status",
+      direction: "outbound",
+      status: "pending",
+      token: "mint",
+      amount: "1",
+      destination: "wallet_9",
+      createdAt: "2026-07-17T15:00:00.000Z",
+    } as unknown as PaymentTransferSummary;
+
+    const [row] = buildHomeActivityRows([transfer], [], t);
+
+    expect(row?.status).toBe("pending");
   });
 
   it("renders a well-known mint as its symbol rather than the raw address", () => {

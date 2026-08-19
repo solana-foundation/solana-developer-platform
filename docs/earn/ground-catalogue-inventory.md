@@ -8,7 +8,8 @@ What Ground actually offers versus what the Earn V1 product doc promises
 ([PRO-1638](https://linear.app/solana-fndn/issue/PRO-1638)). Raw catalogue pulled from
 `GET /v2/wallets/yield-sources`, distilled with the same `distillGroundYieldSource`
 the catalogue sync uses, so the catalogued/dropped split below is exactly what the
-platform does — not a parallel interpretation.
+sync persists — not a parallel interpretation. Strategy API reads separately hide
+Aave- and Morpho-related rows while retaining them in the database.
 
 ## Environment: sandbox
 
@@ -47,11 +48,10 @@ Ground carries that SDP does not surface, and the drop reason says which gate co
 
 ### Host-chain census — what is actually Solana-native
 
-SDP's Solana-only mandate governs the rails the CUSTOMER touches: deposits and
-payouts move USDC on Solana. Where a yield source itself lives is Ground's
-internal routing (the `bridge` position kind), so an off-Solana source funded by
-Solana USDC is catalogued on purpose. This table is how much of the shelf would
-remain if that decision were ever narrowed to Solana-hosted sources only.
+SDP's customer-facing deposit and payout rails remain Solana-only. Ground may
+bridge that USDC to a source it hosts elsewhere, so host chain is inventory
+metadata rather than a persistence gate. Aave- and Morpho-related rows are
+still represented here even though strategy API reads hide them.
 
 | host chain | catalogued sources | of which RWA |
 | --- | --- | --- |

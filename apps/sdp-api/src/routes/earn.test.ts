@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
   createPostgresEarnRepository,
+  type EarnProviderWalletRow,
   type EarnStrategyRow,
   type UpsertEarnStrategyInput,
 } from "@/db/repositories";
@@ -158,7 +159,11 @@ async function seedStrategy(
   overrides: Partial<UpsertEarnStrategyInput> = {}
 ): Promise<EarnStrategyRow> {
   const strategy = await createPostgresEarnRepository(getDb(env)).upsertStrategy({
-    provider: "veda",
+    // A SURFACED provider (EARN_PROVIDER_SURFACING in @sdp/types). Catalogue
+    // reads hide un-surfaced providers wholesale, so seeding one here would make
+    // every test in this file assert 404s for a reason it never meant to test.
+    // The provider-visibility rule gets its own test below.
+    provider: "kamino",
     providerReference: `vault-${crypto.randomUUID()}`,
     name: "Test USDC Vault",
     sourceKind: "defi",
@@ -171,6 +176,7 @@ async function seedStrategy(
     redemptionDelayDays: null,
     riskMetadata: {},
     status: "active",
+    hostCluster: "devnet",
     environment: "sandbox",
     ...overrides,
   });
@@ -178,6 +184,29 @@ async function seedStrategy(
     throw new Error("Failed to seed earn strategy");
   }
   return strategy;
+}
+
+/**
+ * A real `earn_provider_wallets` row, so the `:programId` probes below ride an
+ * id the handler actually resolves. Provider "ground" on purpose: it is NOT the
+ * entitled provider here (seedAuth entitles only "veda") and this file sets no
+ * GROUND credentials, which is exactly why the probe uses the one per-program
+ * route that takes no provider gate at all.
+ */
+async function seedProgram(): Promise<EarnProviderWalletRow> {
+  const row = await createPostgresEarnRepository(getDb(env)).insertProviderWallet({
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT.id,
+    environment: "sandbox",
+    provider: "ground",
+    providerWalletRef: crypto.randomUUID(),
+    label: null,
+    createdBy: TEST_USER.id,
+  });
+  if (!row) {
+    throw new Error("Failed to seed earn program");
+  }
+  return row;
 }
 
 function getEarn(path: string) {
@@ -292,6 +321,95 @@ describe("Earn routes — retired surfaces stay retired (PRO-1628)", () => {
   });
 });
 
+describe("Earn routes — retired program surfaces (PRO-1670)", () => {
+  // The singular `/program` family was an implicit create-or-update keyed on
+  // (organization, environment, provider), which stops being addressable the
+  // moment a second program exists. Every path below has an addressable
+  // `/programs[/:programId]` replacement; a stale registration would quietly
+  // hand callers the one-program model back.
+  //
+  // Both tests PAIR the 404s with a live probe of the replacement, because a 404
+  // for a URL that was never registered passes even if the replacement is
+  // broken — the same trap the /nav case above avoids by riding a real strategy
+  // id. This file's seedAuth entitles only "veda" and sets no GROUND
+  // credentials, so the probes are deliberately the two program routes that
+  // answer without any provider call: the UNFILTERED collection (no provider
+  // named ⇒ no credential gate) and the withdrawal LEDGER list (no provider gate
+  // whatsoever, by design — ADR 0002: the audit trail outlives credential
+  // removal).
+
+  it("serves 404 for the singular /program paths, while the collection answers", async () => {
+    await seedAuth();
+
+    for (const path of [
+      "/v1/earn/program",
+      "/v1/earn/program?provider=ground",
+      "/v1/earn/program/deposits",
+      "/v1/earn/program/withdrawals",
+      "/v1/earn/program/withdrawals/wd_x",
+    ]) {
+      const res = await getEarn(path);
+      expect(res.status, path).toBe(404);
+    }
+
+    for (const [method, path] of [
+      ["PUT", "/v1/earn/program"],
+      ["POST", "/v1/earn/program/withdrawals"],
+      ["POST", "/v1/earn/program/withdrawal-preview"],
+    ] as const) {
+      const res = await app.request(
+        path,
+        {
+          method,
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({}),
+        },
+        env
+      );
+      expect(res.status, `${method} ${path}`).toBe(404);
+    }
+
+    // The pairing: /programs is registered and serves the collection envelope
+    // end to end. An empty collection is a 200, never a 404 — the plural surface
+    // cannot 404 for emptiness, which is what makes the 404s above meaningful.
+    const collection = await getEarn("/v1/earn/programs");
+    expect(collection.status).toBe(200);
+    const body = (await collection.json()) as {
+      data: { programs: unknown[]; total: number; page: number; pageSize: number };
+    };
+    expect(body.data).toEqual({ programs: [], total: 0, page: 1, pageSize: 20 });
+  });
+
+  it("routes the per-program sub-paths under a real program id", async () => {
+    await seedAuth();
+    const program = await seedProgram();
+
+    // The retired sub-paths 404 …
+    for (const path of ["/v1/earn/program/deposits", "/v1/earn/program/withdrawals"]) {
+      const res = await getEarn(path);
+      expect(res.status, path).toBe(404);
+    }
+
+    // … and the same shape under `/programs/:programId` resolves the row and
+    // answers. Non-vacuous by construction: swap in an id that does not exist
+    // and this is a 404 too, so the 200 proves the route is registered AND that
+    // the id addressed a real program.
+    const ledger = await getEarn(`/v1/earn/programs/${program.id}/withdrawals`);
+    expect(ledger.status).toBe(200);
+    const ledgerBody = (await ledger.json()) as {
+      data: { withdrawals: unknown[]; total: number };
+    };
+    expect(ledgerBody.data.withdrawals).toEqual([]);
+    expect(ledgerBody.data.total).toBe(0);
+
+    const unknownProgram = await getEarn("/v1/earn/programs/earn_provider_wallet_nope/withdrawals");
+    expect(unknownProgram.status).toBe(404);
+  });
+});
+
 describe("Earn routes — environment scoping", () => {
   it("hides production strategies from a sandbox API key", async () => {
     await seedAuth();
@@ -367,5 +485,135 @@ describe("Earn routes — strategy catalogue", () => {
     expect(body.data.total).toBe(1);
     expect(body.data.page).toBe(1);
     expect(body.data.pageSize).toBe(20);
+  });
+
+  /**
+   * `fundable` is derived per request, so the SAME row answers differently to a
+   * sandbox and a production caller. This is the wire-level warning a partner
+   * reads before treating a listed strategy as depositable. Kamino used to be
+   * the live example (mainnet vaults listed in sandbox) and no longer is — each
+   * environment catalogues its own cluster, and the sync refuses to store a
+   * mainnet instrument outside production. The derivation still matters for
+   * Ground, for rows written before that guard, and for the next single-cluster
+   * provider, which is why this seeds the cluster directly.
+   */
+  it("derives fundable from hostCluster against the caller's environment", async () => {
+    await seedAuth();
+    const local = await seedStrategy({ hostCluster: "devnet" });
+    const elsewhere = await seedStrategy({ hostCluster: "mainnet-beta" });
+
+    const res = await getEarn("/v1/earn/strategies");
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        strategies: Array<{ id: string; hostCluster: string; fundable: boolean }>;
+      };
+    };
+    const byId = new Map(body.data.strategies.map((s) => [s.id, s]));
+    expect(byId.get(local.id)).toMatchObject({ hostCluster: "devnet", fundable: true });
+    // Listed, and explicitly not fundable — the row is honest about both.
+    expect(byId.get(elsewhere.id)).toMatchObject({
+      hostCluster: "mainnet-beta",
+      fundable: false,
+    });
+  });
+
+  it("carries hostCluster and fundable on the single-strategy read too", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy({ hostCluster: "mainnet-beta" });
+
+    const res = await getEarn(`/v1/earn/strategies/${strategy.id}`);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { strategy: { hostCluster: string; fundable: boolean } };
+    };
+    expect(body.data.strategy).toMatchObject({ hostCluster: "mainnet-beta", fundable: false });
+  });
+
+  /**
+   * Browse policy, which is a DIFFERENT question from `fundable` above and must
+   * not be collapsed into it: a hidden row is absent from the response entirely,
+   * while an un-fundable row is present and says so. Hiding is SDP's editorial
+   * choice about a source; `fundable` is a fact about where the instrument
+   * lives.
+   */
+  it("stores Morpho and Aave rows but never returns them from strategy reads", async () => {
+    await seedAuth();
+    const visible = await seedStrategy({
+      providerReference: "kamino-steakhouse-usdc",
+      name: "Kamino Steakhouse USDC",
+      underlyingSource: "kamino",
+    });
+    const morpho = await seedStrategy({
+      providerReference: "morpho-gauntlet-usdc",
+      name: "Gauntlet USDC Prime",
+      underlyingSource: "morpho",
+    });
+    const aave = await seedStrategy({
+      providerReference: "aave-v3-usdc",
+      name: "Aave V3 Core USDC",
+      // Pin the fallback matching path too: a related row remains hidden even
+      // if provider metadata arrives without an underlying-source value.
+      underlyingSource: null,
+    });
+
+    const repository = createPostgresEarnRepository(getDb(env));
+    expect(await repository.getStrategyById(morpho.id)).not.toBeNull();
+    expect(await repository.getStrategyById(aave.id)).not.toBeNull();
+
+    const list = await getEarn("/v1/earn/strategies?pageSize=1");
+    expect(list.status).toBe(200);
+    const listBody = (await list.json()) as {
+      data: { strategies: Array<{ id: string }>; total: number; pageSize: number };
+    };
+    expect(listBody.data.strategies.map((strategy) => strategy.id)).toEqual([visible.id]);
+    expect(listBody.data.total).toBe(1);
+    expect(listBody.data.pageSize).toBe(1);
+
+    for (const hidden of [morpho, aave]) {
+      const detail = await getEarn(`/v1/earn/strategies/${hidden.id}`);
+      expect(detail.status).toBe(404);
+    }
+  });
+
+  /**
+   * The OTHER visibility rule, and the one that scales: a provider SDP does not
+   * currently offer (`EARN_PROVIDER_SURFACING` in @sdp/types) contributes no
+   * rows at all, whatever they are named.
+   *
+   * Asserted against the stored row so the two halves stay honest: the sync
+   * keeps writing an un-surfaced provider's catalogue — which is what makes
+   * re-surfacing a deploy rather than an hour's wait — and only the read hides
+   * it. Ground is the un-surfaced provider today; if that flips, this test
+   * should move to whichever provider is off rather than be deleted.
+   */
+  it("stores an un-surfaced provider's rows but never returns them from strategy reads", async () => {
+    await seedAuth();
+    const surfaced = await seedStrategy({ providerReference: "kamino-visible-usdc" });
+    const unsurfaced = await seedStrategy({
+      provider: "ground",
+      providerReference: "ground-hidden-usdc",
+      name: "Ground Institutional USDC",
+      underlyingSource: "centrifuge",
+    });
+
+    // Still stored — hiding is a read-time policy, never a refusal to persist.
+    const repository = createPostgresEarnRepository(getDb(env));
+    expect(await repository.getStrategyById(unsurfaced.id)).not.toBeNull();
+
+    const list = await getEarn("/v1/earn/strategies");
+    expect(list.status).toBe(200);
+    const listBody = (await list.json()) as {
+      data: { strategies: Array<{ id: string }>; total: number };
+    };
+    expect(listBody.data.strategies.map((strategy) => strategy.id)).toEqual([surfaced.id]);
+    // The filter runs in SQL, so the total describes the rows the caller can
+    // see rather than counting a row the page then drops.
+    expect(listBody.data.total).toBe(1);
+
+    const detail = await getEarn(`/v1/earn/strategies/${unsurfaced.id}`);
+    expect(detail.status).toBe(404);
   });
 });

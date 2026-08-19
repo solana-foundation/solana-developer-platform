@@ -12,6 +12,12 @@ import { cn } from "@/lib/utils";
 export const dashboardWorkspaceOverviewPanelClassName =
   "h-full min-h-0 w-full overflow-y-auto [scrollbar-gutter:stable] px-3 pt-6 pb-5 md:px-6 md:pb-6";
 
+/**
+ * The standard playground/chrome panel: absolutely positioned to fill the
+ * shell, column flex, with no padding of its own.
+ */
+export const dashboardWorkspacePlaygroundPanelClassName = "absolute inset-0 flex min-h-0 flex-col";
+
 export function DashboardWorkspaceOverviewPanel({ className, ...props }: ComponentProps<"div">) {
   return <div className={cn(dashboardWorkspaceOverviewPanelClassName, className)} {...props} />;
 }

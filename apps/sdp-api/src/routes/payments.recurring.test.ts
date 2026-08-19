@@ -24,6 +24,7 @@ import {
   DEVNET_USDC_MINT,
   fetchMaybeSubscriptionDelegationMock,
   getAccountInfoMock,
+  getRecentBlockhashMock,
   getTransactionMock,
   installPaymentsRouteTestHooks,
   mockRecurringActivationRpc,
@@ -35,10 +36,29 @@ import {
   TEST_KORA_FEE_PAYER,
   TEST_ORG,
   TEST_PROJECT,
+  TEST_SPONSORSHIP_PROVIDER_CONFIG,
   TEST_USER,
   TEST_WALLET_ID,
   updateSeededWalletPublicKey,
 } from "@/test/helpers/payments-routes";
+
+function mockDistinctRecentBlockhashes(): void {
+  const blockhashes = [
+    "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+    "8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR",
+    "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+    "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq",
+    "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+    "QWmroo4YnnMqYW3cnxWkFdaTxGD3P7vMSzwMHGbUzwF",
+  ];
+  let call = 0;
+  getRecentBlockhashMock.mockImplementation(async () => ({
+    blockhash: blockhashes[call++ % blockhashes.length] as Awaited<
+      ReturnType<typeof solanaRpc.getRecentBlockhash>
+    >["blockhash"],
+    lastValidBlockHeight: 1000n,
+  }));
+}
 
 const TEST_COUNTERPARTY_IDENTITY = {
   firstName: "Ada",
@@ -184,6 +204,7 @@ async function activateRecurringPaymentForTest(headers: Record<string, string>) 
     {
       method: "POST",
       headers,
+      body: "{}",
     },
     env
   );
@@ -394,6 +415,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -435,6 +457,7 @@ describe("Payments routes — recurring", () => {
       {
         method: "POST",
         headers,
+        body: "{}",
       },
       env
     );
@@ -499,6 +522,7 @@ describe("Payments routes — recurring", () => {
       {
         method: "POST",
         headers,
+        body: "{}",
       },
       env
     );
@@ -530,6 +554,7 @@ describe("Payments routes — recurring", () => {
       {
         method: "POST",
         headers,
+        body: "{}",
       },
       env
     );
@@ -655,6 +680,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -760,6 +786,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -879,6 +906,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -978,6 +1006,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -1064,6 +1093,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -1185,6 +1215,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -1204,6 +1235,7 @@ describe("Payments routes — recurring", () => {
       {
         method: "POST",
         headers,
+        body: "{}",
       },
       env
     );
@@ -1240,6 +1272,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -1251,7 +1284,7 @@ describe("Payments routes — recurring", () => {
 
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1288,7 +1321,7 @@ describe("Payments routes — recurring", () => {
 
     const replayRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1312,7 +1345,7 @@ describe("Payments routes — recurring", () => {
 
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1354,6 +1387,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -1364,14 +1398,14 @@ describe("Payments routes — recurring", () => {
     const activated = await activateRecurringPaymentForTest(headers);
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(cancelRes.status).toBe(200);
 
     const resumeRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/resume`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1410,7 +1444,7 @@ describe("Payments routes — recurring", () => {
 
     const replayRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/resume`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1436,6 +1470,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -1485,7 +1520,7 @@ describe("Payments routes — recurring", () => {
 
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1534,6 +1569,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -1544,7 +1580,7 @@ describe("Payments routes — recurring", () => {
     const activated = await activateRecurringPaymentForTest(headers);
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(cancelRes.status).toBe(200);
@@ -1590,7 +1626,7 @@ describe("Payments routes — recurring", () => {
 
     const resumeRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/resume`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1634,6 +1670,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -1692,7 +1729,7 @@ describe("Payments routes — recurring", () => {
 
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1721,6 +1758,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -1736,7 +1774,7 @@ describe("Payments routes — recurring", () => {
 
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1787,6 +1825,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -1891,7 +1930,7 @@ describe("Payments routes — recurring", () => {
 
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -1935,6 +1974,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -1946,7 +1986,7 @@ describe("Payments routes — recurring", () => {
 
     const activateRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(activateRes.status).toBe(200);
@@ -1978,7 +2018,7 @@ describe("Payments routes — recurring", () => {
 
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -2057,6 +2097,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -2107,7 +2148,7 @@ describe("Payments routes — recurring", () => {
 
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/collect`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -2151,6 +2192,7 @@ describe("Payments routes — recurring", () => {
       createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
         signAsFeePayer: vi.fn(),
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -2162,7 +2204,7 @@ describe("Payments routes — recurring", () => {
 
       const activateRes = await app.request(
         `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-        { method: "POST", headers },
+        { method: "POST", headers, body: "{}" },
         env
       );
       expect(activateRes.status).toBe(200);
@@ -2266,7 +2308,7 @@ describe("Payments routes — recurring", () => {
 
       const collectRes = await app.request(
         `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-        { method: "POST", headers },
+        { method: "POST", headers, body: "{}" },
         env
       );
 
@@ -2432,6 +2474,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -2443,7 +2486,7 @@ describe("Payments routes — recurring", () => {
 
     const activateRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(activateRes.status).toBe(200);
@@ -2561,7 +2604,7 @@ describe("Payments routes — recurring", () => {
 
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -2609,6 +2652,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -2620,7 +2664,7 @@ describe("Payments routes — recurring", () => {
 
     const activateRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(activateRes.status).toBe(200);
@@ -2728,7 +2772,7 @@ describe("Payments routes — recurring", () => {
 
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -2788,6 +2832,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -2799,7 +2844,7 @@ describe("Payments routes — recurring", () => {
 
     const activateRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(activateRes.status).toBe(200);
@@ -2854,7 +2899,7 @@ describe("Payments routes — recurring", () => {
 
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -2891,6 +2936,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -2902,7 +2948,7 @@ describe("Payments routes — recurring", () => {
 
     const activateRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(activateRes.status).toBe(200);
@@ -3003,7 +3049,7 @@ describe("Payments routes — recurring", () => {
 
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -3054,6 +3100,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -3065,7 +3112,7 @@ describe("Payments routes — recurring", () => {
 
     const activateRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(activateRes.status).toBe(200);
@@ -3174,7 +3221,7 @@ describe("Payments routes — recurring", () => {
 
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -3235,6 +3282,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -3246,7 +3294,7 @@ describe("Payments routes — recurring", () => {
 
     const activateRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(activateRes.status).toBe(200);
@@ -3351,7 +3399,7 @@ describe("Payments routes — recurring", () => {
     );
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -3405,6 +3453,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -3416,14 +3465,14 @@ describe("Payments routes — recurring", () => {
 
     const activateRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(activateRes.status).toBe(200);
 
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -3453,6 +3502,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -3464,7 +3514,7 @@ describe("Payments routes — recurring", () => {
 
     const activateRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(activateRes.status).toBe(200);
@@ -3484,7 +3534,7 @@ describe("Payments routes — recurring", () => {
 
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -3536,6 +3586,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -3574,7 +3625,7 @@ describe("Payments routes — recurring", () => {
 
     const failedRes = await app.request(
       `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -3607,7 +3658,7 @@ describe("Payments routes — recurring", () => {
 
     const retryRes = await app.request(
       `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -3630,6 +3681,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -3755,7 +3807,7 @@ describe("Payments routes — recurring", () => {
 
     const freshRetryRes = await app.request(
       `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
     expect(freshRetryRes.status).toBe(409);
@@ -3770,7 +3822,7 @@ describe("Payments routes — recurring", () => {
 
     const staleRetryRes = await app.request(
       `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -3817,6 +3869,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -3950,7 +4003,7 @@ describe("Payments routes — recurring", () => {
 
     const staleRetryRes = await app.request(
       `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -3971,6 +4024,7 @@ describe("Payments routes — recurring", () => {
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
     mockRecurringActivationRpc();
+    mockDistinctRecentBlockhashes();
     const failedPlanSignature =
       "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature;
     const retryPlanSignature =
@@ -3985,6 +4039,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -4036,7 +4091,7 @@ describe("Payments routes — recurring", () => {
 
     const failedRes = await app.request(
       `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -4071,7 +4126,7 @@ describe("Payments routes — recurring", () => {
 
     const retryRes = await app.request(
       `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -4091,6 +4146,7 @@ describe("Payments routes — recurring", () => {
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerMock.mockResolvedValue(sourceSigner);
     mockRecurringActivationRpc();
+    mockDistinctRecentBlockhashes();
     fetchMaybeSubscriptionDelegationMock
       .mockResolvedValueOnce({
         exists: false,
@@ -4115,6 +4171,7 @@ describe("Payments routes — recurring", () => {
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn(),
       signAndSend: signAndSendMock,
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
@@ -4153,7 +4210,7 @@ describe("Payments routes — recurring", () => {
 
     const failedRes = await app.request(
       `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 
@@ -4195,7 +4252,7 @@ describe("Payments routes — recurring", () => {
 
     const retryRes = await app.request(
       `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}/activate`,
-      { method: "POST", headers },
+      { method: "POST", headers, body: "{}" },
       env
     );
 

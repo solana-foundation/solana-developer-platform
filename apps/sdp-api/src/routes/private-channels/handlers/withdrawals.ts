@@ -1,8 +1,8 @@
-import { z } from "zod";
 import { mapPrivateChannelInstanceRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound, unauthorized, walletNotFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { resolveScope, resolveWalletAddress } from "@/routes/payments/wallets";
 import {
   createChannelWithdrawal,
@@ -13,7 +13,7 @@ import {
 import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
 import type { AppContext } from "../context";
 import { getPrivateChannelInstanceRepository } from "../context";
-import { createWithdrawalBodySchema, withdrawalIdParamSchema } from "../schemas";
+import { type createWithdrawalBodySchema, withdrawalIdParamSchema } from "../schemas";
 
 async function loadActiveInstance(c: AppContext, organizationId: string, projectId: string) {
   const row = await getPrivateChannelInstanceRepository(c).getActiveByProject({
@@ -34,14 +34,10 @@ async function loadActiveInstance(c: AppContext, organizationId: string, project
  * status (submitted/confirmed, or failed with a reason). `settled` (operator's
  * devnet release observed) is detected asynchronously by the oracle.
  */
-export async function createPrivateChannelWithdrawal(c: AppContext) {
-  const body = await c.req.json().catch(() => null);
-  const parsed = createWithdrawalBodySchema.safeParse(body);
-  if (!parsed.success) {
-    throw badRequest("Invalid withdrawal request", {
-      fieldErrors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+export async function createPrivateChannelWithdrawal(
+  c: ValidatedBodyContext<typeof createWithdrawalBodySchema>
+) {
+  const body = c.req.valid("json");
 
   try {
     const { auth, wallets } = await resolveScope(c);
@@ -53,7 +49,7 @@ export async function createPrivateChannelWithdrawal(c: AppContext) {
     const instance = await loadActiveInstance(c, auth.organizationId, projectId);
 
     // Source wallet must be a custody wallet we can sign for (the burn owner).
-    const ownerPubkey = resolveWalletAddress(wallets, parsed.data.walletId, "walletId", auth, [
+    const ownerPubkey = resolveWalletAddress(wallets, body.walletId, "walletId", auth, [
       "wallets:read",
     ]);
     const wallet = wallets.find((w) => w.publicKey === ownerPubkey);
@@ -62,10 +58,8 @@ export async function createPrivateChannelWithdrawal(c: AppContext) {
     }
 
     // Devnet release destination may be another wallet/address; defaults to the owner.
-    const destination = parsed.data.destination
-      ? resolveWalletAddress(wallets, parsed.data.destination, "destination", auth, [
-          "wallets:read",
-        ])
+    const destination = body.destination
+      ? resolveWalletAddress(wallets, body.destination, "destination", auth, ["wallets:read"])
       : undefined;
 
     // Auth-enabled instances JWT-gate the burn broadcast (write) + confirm (read).
@@ -82,8 +76,8 @@ export async function createPrivateChannelWithdrawal(c: AppContext) {
       projectId,
       userId,
       wallet,
-      amount: parsed.data.amount,
-      mint: parsed.data.mint,
+      amount: body.amount,
+      mint: body.mint,
       destination,
       gatewayAuth,
     });

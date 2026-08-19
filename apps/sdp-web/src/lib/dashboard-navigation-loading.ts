@@ -3,13 +3,18 @@ export const DASHBOARD_SIDE_NAV_HREFS = {
   wallets: "/dashboard/wallets",
   issuance: "/dashboard/issuance",
   payments: "/dashboard/payments",
-  markets: "/dashboard/markets/earn",
+  markets: "/dashboard/markets",
   heliusRings: "/dashboard/helius-rings",
   apiKeys: "/dashboard/api-keys",
   policies: "/dashboard/policies",
   approvals: "/dashboard/approvals",
   settings: "/dashboard/settings",
   integrations: "/dashboard/integrations",
+} as const;
+
+export const DASHBOARD_MARKETS_SUBNAV_HREFS = {
+  treasurySolutions: "/dashboard/markets/treasury-solutions",
+  earnProgram: "/dashboard/markets/earn",
 } as const;
 
 export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
@@ -27,6 +32,7 @@ export type DashboardLoadingRoute =
   | "token-holdings"
   | "wallets-overview"
   | "wallet-setup"
+  | "wallet-connections"
   | "wallet-detail"
   | "wallet-policy"
   | "wallet-policy-audit-list"
@@ -35,9 +41,8 @@ export type DashboardLoadingRoute =
   | "issuance-create"
   | "issuance-detail"
   | "payments-overview"
-  | "earn-overview"
-  | "earn-deposit"
-  | "earn-strategy-detail"
+  | "treasury-solutions"
+  | "earn-program"
   | "payments-transactions"
   | "payments-pay"
   | "payments-deposit"
@@ -74,6 +79,7 @@ function resolveWalletLoadingRoute(pathname: string): DashboardLoadingRoute | nu
   if (!prefix) return null;
   if (pathname === prefix) return "wallets-overview";
   if (pathname === `${prefix}/setup` || pathname === `${prefix}/switch`) return "wallet-setup";
+  if (pathname === `${prefix}/connections`) return "wallet-connections";
 
   const suffix = pathname.slice(prefix.length).split("/").filter(Boolean);
   if (suffix.length < 1) return null;
@@ -81,6 +87,22 @@ function resolveWalletLoadingRoute(pathname: string): DashboardLoadingRoute | nu
   if (suffix.length === 2) return "wallet-policy";
   if (suffix[2] === "audit" && suffix.length === 3) return "wallet-policy-audit-list";
   if (suffix[2] === "audit" && suffix.length === 4) return "wallet-policy-audit-detail";
+  return null;
+}
+
+function resolveMarketsLoadingRoute(pathname: string): DashboardLoadingRoute | null {
+  if (
+    pathname === DASHBOARD_SIDE_NAV_HREFS.markets ||
+    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions
+  ) {
+    return "treasury-solutions";
+  }
+  if (
+    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram ||
+    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/button-builder`
+  ) {
+    return "earn-program";
+  }
   return null;
 }
 
@@ -97,11 +119,8 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
   if (pathname === "/dashboard/issuance/create") return "issuance-create";
   if (/^\/dashboard\/issuance\/[^/]+$/.test(pathname)) return "issuance-detail";
 
-  if (pathname === "/dashboard/markets/earn") return "earn-overview";
-  if (pathname === "/dashboard/markets/earn/deposit") return "earn-deposit";
-  if (/^\/dashboard\/markets\/earn\/strategies\/[^/]+$/.test(pathname)) {
-    return "earn-strategy-detail";
-  }
+  const marketsRoute = resolveMarketsLoadingRoute(pathname);
+  if (marketsRoute) return marketsRoute;
 
   if (pathname === "/dashboard/payments") return "payments-overview";
   if (pathname === "/dashboard/payments/transactions") return "payments-transactions";
