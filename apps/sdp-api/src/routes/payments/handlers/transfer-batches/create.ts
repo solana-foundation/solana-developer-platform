@@ -155,6 +155,7 @@ export async function extractTransferBatchPolicyCandidate(
       })),
       options: input.options === undefined ? null : input.options,
     },
+    idempotencyKey: null,
   };
 }
 

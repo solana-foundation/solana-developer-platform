@@ -575,13 +575,17 @@ export interface SignatureStatusInfo {
  */
 export async function getSignatureStatuses(
   rpc: SolanaRpc,
-  signatures: Signature[]
+  signatures: Signature[],
+  options: { searchTransactionHistory?: boolean } = {}
 ): Promise<Array<SignatureStatusInfo | null>> {
   if (signatures.length === 0) {
     return [];
   }
 
-  const response = await rpc.getSignatureStatuses(signatures).send();
+  const response = await (options.searchTransactionHistory
+    ? rpc.getSignatureStatuses(signatures, { searchTransactionHistory: true })
+    : rpc.getSignatureStatuses(signatures)
+  ).send();
 
   return response.value.map((item) =>
     item

@@ -89,6 +89,12 @@ export type CustodyRuntimeTargetQuery =
       walletId: string;
     }
   | {
+      kind: "wallet_record";
+      organizationId: string;
+      projectId?: string;
+      custodyWalletId: string;
+    }
+  | {
       kind: "provider";
       organizationId: string;
       projectId?: string;
@@ -253,6 +259,9 @@ export class CustodyRuntimeTargets {
   async resolve(query: CustodyRuntimeTargetQuery): Promise<CustodyRuntimeTarget | null> {
     if (query.kind === "wallet") {
       return this.resolveWallet(query.organizationId, query.projectId, query.walletId);
+    }
+    if (query.kind === "wallet_record") {
+      return this.resolveWalletRecord(query.organizationId, query.projectId, query.custodyWalletId);
     }
     if (query.kind === "provider") {
       return this.resolveProvider(query.organizationId, query.projectId, query.provider);
@@ -487,6 +496,41 @@ export class CustodyRuntimeTargets {
     return getTransactionSigner(adapter, target.wallet);
   }
 
+  /**
+   * Resolve a signer from the exact custody-wallet row authorized by the
+   * caller. Provider wallet ids are not globally unique across retained
+   * project and organization targets, so money-moving flows that already hold
+   * a row id must not collapse it back to `walletId` before signing.
+   */
+  async getTransactionSignerForWalletRecord(
+    organizationId: string,
+    projectId: string | undefined,
+    custodyWalletId: string,
+    getConfigAdapter: ConfigAdapterResolver
+  ): Promise<TransactionSigner> {
+    const target = await this.resolveWalletRecord(organizationId, projectId, custodyWalletId);
+    if (!target) {
+      throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
+    }
+
+    if (target.kind === "config") {
+      const adapter = await getConfigAdapter(organizationId, target.config);
+      return getTransactionSigner(adapter, target.wallet);
+    }
+
+    if (!isCustodyConnectionRuntimeEnabled(this.env, target.provider)) {
+      this.logUnavailable(target, "runtime_disabled");
+      throw forbidden("Custody Connection runtime is disabled");
+    }
+    if (!target.isRuntimeAvailable || !target.wallet) {
+      this.logUnavailable(target, "connection_unusable");
+      throw conflict("Custody Connection is unavailable");
+    }
+
+    const adapter = await this.getConnectionAdapter(target);
+    return getTransactionSigner(adapter, target.wallet);
+  }
+
   private async resolveEffective(
     organizationId: string,
     projectId: string | undefined
@@ -642,6 +686,42 @@ export class CustodyRuntimeTargets {
       [organizationId, walletId]
     );
     return organizationConfig ? this.mapConfigWalletTarget(organizationConfig) : null;
+  }
+
+  private async resolveWalletRecord(
+    organizationId: string,
+    projectId: string | undefined,
+    custodyWalletId: string
+  ): Promise<CustodyRuntimeTarget | null> {
+    const [connections, configs] = await Promise.all([
+      projectId
+        ? this.db.queryMany<ConnectionTargetRow>(
+            `${connectionTargetSelect()}
+             WHERE c.organization_id = ?
+               AND c.project_id = ?
+               AND c.status = 'active'
+               AND w.status = 'active'
+               AND w.id = ?`,
+            [organizationId, projectId, custodyWalletId]
+          )
+        : Promise.resolve([]),
+      this.db.queryMany<ConfigWalletRow>(
+        `${configWalletSelect()}
+         WHERE c.organization_id = ?
+           AND ${projectId ? "(c.project_id = ? OR c.project_id IS NULL)" : "c.project_id IS NULL"}
+           AND c.status = 'active'
+           AND w.status = 'active'
+           AND w.id = ?`,
+        projectId ? [organizationId, projectId, custodyWalletId] : [organizationId, custodyWalletId]
+      ),
+    ]);
+
+    if (connections.length + configs.length > 1) {
+      throw conflict("Custody wallet ownership is ambiguous");
+    }
+    if (connections[0]) return this.mapConnectionTarget(connections[0]);
+    if (configs[0]) return this.mapConfigWalletTarget(configs[0]);
+    return null;
   }
 
   private async findSelectedConnection(

@@ -2,28 +2,58 @@
 
 import {
   EARN_TERMINAL_WITHDRAWAL_STATUSES,
+  EARN_VAULT_MOVEMENT_STATUSES,
   type EarnPortfolioAllocationInput,
-  type EarnPortfolioDepositsPage,
   type EarnPortfolioToken,
   type EarnPortfolioWalletSnapshot,
   type EarnPortfolioWalletStatus,
   type EarnPortfolioWithdrawal,
-  type EarnPortfolioWithdrawalPreview,
-  type EarnPortfolioYield,
+  type EarnProgram,
+  type EarnProgramDepositsResponse,
+  type EarnProgramResponse,
+  type EarnProgramWithdrawalPreviewResponse,
+  type EarnProgramWithdrawalRecord,
+  type EarnProgramWithdrawalResponse,
   type EarnStrategy,
+  type EarnVaultDeposit,
+  type EarnVaultDepositRequest,
+  type EarnVaultPosition,
+  type EarnVaultPositionsPage,
+  type ListEarnProgramsResponse,
+  type ListEarnProgramWithdrawalsResponse,
   type ListEarnStrategiesResponse,
+  SOLANA_CLUSTERS,
 } from "@sdp/types";
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
+import { z } from "zod";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { type DashboardFetchResult, dashboardFetch } from "@/lib/dashboard-fetch";
+import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import {
   EARN_PROGRAM_CREATE_PROVIDER,
   EARN_PROGRAM_CREATION_ENABLED,
+  isEarnVaultDepositAvailable,
   SURFACED_CUSTODIAL_EARN_PROVIDERS,
+  SURFACED_VAULT_DIRECT_EARN_PROVIDERS,
 } from "./earn-surfacing";
+
+export type {
+  EarnProgram,
+  EarnProgramDepositsResponse,
+  EarnProgramResponse,
+  EarnProgramWithdrawalPreviewResponse,
+  EarnProgramWithdrawalRecord,
+  EarnProgramWithdrawalResponse,
+  EarnVaultDeposit,
+  EarnVaultDepositRequest,
+  EarnVaultPosition,
+  EarnVaultPositionsPage,
+  ListEarnProgramsResponse,
+  ListEarnProgramWithdrawalsResponse,
+} from "@sdp/types";
 
 /**
  * Live Earn data access for the dashboard, over the /api/dashboard/markets/earn
@@ -44,8 +74,8 @@ import {
  * boundary, after every page has loaded.
  */
 /**
- * Both constants live in `./earn-surfacing` (no `"use client"`) and are
- * re-exported here so client callers keep one import site. They must NOT be
+ * These surfacing values live in `./earn-surfacing` (no `"use client"`) and
+ * are re-exported here so client callers keep one import site. They must NOT be
  * declared in this file: a Server Component importing a value from a client
  * module gets a client-reference proxy rather than the value, which silently
  * broke the deposit route's server-side guard. See that file's header.
@@ -53,20 +83,10 @@ import {
 export {
   EARN_PROGRAM_CREATE_PROVIDER,
   EARN_PROGRAM_CREATION_ENABLED,
+  isEarnVaultDepositAvailable,
   SURFACED_CUSTODIAL_EARN_PROVIDERS,
+  SURFACED_VAULT_DIRECT_EARN_PROVIDERS,
 };
-
-/** Mirrors the sdp-api program envelope (route-owned there, thin enough to pin here). */
-export interface EarnProgram {
-  /** SDP program id — every per-program BFF path is built from it. */
-  id: string;
-  provider: string;
-  label: string | null;
-  createdAt: string;
-  wallet: EarnPortfolioWalletSnapshot;
-  /** Absent when the provider's yield lookup failed — render no rate, not 0%. */
-  yield?: EarnPortfolioYield;
-}
 
 /**
  * Program read outcome. `ready` carries the list and MAY be empty — an empty
@@ -145,9 +165,7 @@ export async function fetchEarnProgramsState(): Promise<EarnProgramsState> {
   const programs: EarnProgram[] = [];
 
   for (let page = 1; page <= PROGRAMS_PAGE_LIMIT; page += 1) {
-    const { status, body } = await requestJson<{
-      data: { programs: EarnProgram[]; total: number };
-    }>(
+    const { status, body } = await requestJson<{ data: ListEarnProgramsResponse }>(
       // UNFILTERED by provider, deliberately. Positions must show every program
       // the organization holds — a filter pinned to one provider hides money,
       // which is the worst failure this surface has. It also has to keep working
@@ -170,14 +188,16 @@ export async function fetchEarnProgramsState(): Promise<EarnProgramsState> {
     }
 
     programs.push(...body.data.programs);
-    // Stop on a short page as well as on the reported total: either one alone
-    // can be wrong, and agreeing on "done" beats trusting one of them.
-    if (body.data.programs.length < PROGRAMS_PAGE_SIZE || programs.length >= body.data.total) {
-      break;
+    if (programs.length >= body.data.total) {
+      return { kind: "ready", programs };
+    }
+    if (body.data.programs.length < PROGRAMS_PAGE_SIZE) {
+      throw new Error("Earn programs pagination ended before the reported total");
     }
   }
 
-  return { kind: "ready", programs };
+  // A partial portfolio is worse than an error because it can hide money.
+  throw new Error("Earn programs pagination exceeded its safety limit");
 }
 
 /**
@@ -186,8 +206,8 @@ export async function fetchEarnProgramsState(): Promise<EarnProgramsState> {
  * them wants a state that stops converging: `creating` blocks the funding step
  * on a deposit address that does not exist yet, and `busy` means the provider
  * is mid-withdrawal or mid-rebalance, so the figures on screen are already
- * out of date. `ready` and `failed` are absent (⇒ 0): a settled program and a
- * terminal failure issue no extra provider reads.
+ * out of date. A settled `ready` wallet still carries provider-live balances,
+ * so it refreshes at a quieter cadence instead of freezing at page load.
  *
  * Ground is hit live on every program read, so `busy` is deliberately slower
  * than `creating`: against a ~40s observed settle the reader loses nothing
@@ -196,6 +216,7 @@ export async function fetchEarnProgramsState(): Promise<EarnProgramsState> {
 const WALLET_POLL_MS: Partial<Record<EarnPortfolioWalletStatus, number>> = {
   creating: 4_000,
   busy: 10_000,
+  ready: 30_000,
 };
 
 /**
@@ -340,14 +361,10 @@ export interface EarnProgramWriteInput {
   requestId: string;
 }
 
-export interface EarnProgramWriteResult {
-  program: EarnProgram;
-}
-
 /** Provision a new program. 201 on create, 200 when the provider replayed. */
 export function createEarnProgram(
   input: EarnProgramWriteInput
-): Promise<DashboardFetchResult<{ data: EarnProgramWriteResult }>> {
+): Promise<DashboardFetchResult<{ data: EarnProgramResponse }>> {
   if (EARN_PROGRAM_CREATE_PROVIDER === undefined) {
     // Unreachable through the UI — every create affordance is gated on
     // EARN_PROGRAM_CREATION_ENABLED — so this is a programming error, not a
@@ -365,14 +382,14 @@ export function createEarnProgram(
 export function retargetEarnProgram(
   programId: string,
   input: EarnProgramWriteInput
-): Promise<DashboardFetchResult<{ data: EarnProgramWriteResult }>> {
+): Promise<DashboardFetchResult<{ data: EarnProgramResponse }>> {
   return dashboardFetch(programPath(programId), { method: "PUT", body: input });
 }
 
 export async function fetchEarnProgramDeposits(
   programId: string
-): Promise<EarnPortfolioDepositsPage> {
-  const { status, body } = await requestJson<{ data: EarnPortfolioDepositsPage }>(
+): Promise<EarnProgramDepositsResponse> {
+  const { status, body } = await requestJson<{ data: EarnProgramDepositsResponse }>(
     programPath(programId, "/deposits")
   );
   // No 404 branch, same reasoning as the programs read: the id always comes
@@ -424,21 +441,176 @@ export async function fetchEarnStrategies(): Promise<EarnStrategy[]> {
     }
 
     strategies.push(...body.data.strategies);
-    // Stop on a short page as well as on the reported total: either one alone
-    // can be wrong, and agreeing on "done" beats trusting one of them.
-    if (body.data.strategies.length < STRATEGY_PAGE_SIZE || strategies.length >= body.data.total) {
-      break;
+    if (strategies.length >= body.data.total) {
+      return strategies;
+    }
+    if (body.data.strategies.length < STRATEGY_PAGE_SIZE) {
+      throw new Error("Earn strategies pagination ended before the reported total");
     }
   }
 
-  return strategies;
+  throw new Error("Earn strategies pagination exceeded its safety limit");
 }
 
 export function useEarnStrategies() {
-  const { data, error, isLoading } = useSWR("dashboard-earn-strategies", () =>
+  const { data, error, isLoading, mutate } = useSWR("dashboard-earn-strategies", () =>
     fetchEarnStrategies()
   );
-  return { strategies: data, error, isLoading };
+  return { strategies: data, error, isLoading, refresh: () => void mutate() };
+}
+
+const VAULT_POSITIONS_PAGE_SIZE = 100;
+const VAULT_POSITIONS_PAGE_LIMIT = 20;
+
+/**
+ * Reads every vault position held by the selected project. The API uses an
+ * opaque keyset cursor and hydrates balances live from chain, so cursor
+ * progression — not row count — decides when the read is complete.
+ */
+export async function fetchEarnVaultPositions(): Promise<EarnVaultPosition[]> {
+  const positions: EarnVaultPosition[] = [];
+  const seenCursors = new Set<string>();
+  let before: string | undefined;
+
+  for (let page = 1; page <= VAULT_POSITIONS_PAGE_LIMIT; page += 1) {
+    const query = new URLSearchParams({ limit: String(VAULT_POSITIONS_PAGE_SIZE) });
+    if (before) query.set("before", before);
+
+    const { status, body } = await requestJson<{ data: EarnVaultPositionsPage }>(
+      `/api/dashboard/markets/earn/vault-positions?${query}`
+    );
+    if (status < 200 || status >= 300 || !body) {
+      throw new Error(errorMessage(body, status));
+    }
+
+    positions.push(...body.data.positions);
+    if (!body.data.hasMore) return positions;
+
+    const nextCursor = body.data.nextCursor;
+    if (!nextCursor || nextCursor === before || seenCursors.has(nextCursor)) {
+      throw new Error("Vault positions pagination did not advance");
+    }
+    seenCursors.add(nextCursor);
+    before = nextCursor;
+  }
+
+  throw new Error("Vault positions pagination exceeded its safety limit");
+}
+
+/** Live position values refresh while the surface is mounted. */
+export function useEarnVaultPositions() {
+  const { data, error, isLoading, mutate } = useSWR(
+    "dashboard-earn-vault-positions",
+    () => fetchEarnVaultPositions(),
+    { refreshInterval: 15_000 }
+  );
+  return { positions: data, error, isLoading, refresh: () => void mutate() };
+}
+
+/**
+ * The two envelopes a 2xx vault deposit can answer with, parsed at the
+ * boundary rather than narrowed by hand.
+ *
+ * `dashboardFetch` has already rejected every non-2xx status, so only these
+ * two shapes are reachable: the created movement, or the policy hold that the
+ * API reports as a `202` carrying an error-shaped body. Parsing both means the
+ * deposit RECORD is checked too — the previous `as unknown as EarnVaultDeposit`
+ * asserted a movement id and signature that were never looked at.
+ *
+ * `z.union` rather than `z.discriminatedUnion`: the two envelopes share no
+ * common key, so there is no discriminator to switch on — the tag is minted by
+ * the transforms below, which is what makes the OUTCOME a discriminated union
+ * for every caller.
+ *
+ * The record schema is annotated `z.ZodType<EarnVaultDeposit>` rather than left
+ * to inference, so a field added or renamed in `@sdp/types` fails typecheck
+ * here instead of being silently stripped from a parsed deposit.
+ */
+const earnVaultDepositSchema: z.ZodType<EarnVaultDeposit> = z.object({
+  positionId: z.string(),
+  movementId: z.string(),
+  status: z.enum(EARN_VAULT_MOVEMENT_STATUSES),
+  signature: z.string(),
+  failureReason: z.string().nullable(),
+  replayed: z.boolean(),
+  strategy: z.object({
+    id: z.string(),
+    name: z.string(),
+    provider: z.string(),
+    providerReference: z.string(),
+    hostCluster: z.enum(SOLANA_CLUSTERS),
+  }),
+});
+
+const earnVaultDepositOutcomeSchema = z.union([
+  z
+    .object({ data: earnVaultDepositSchema })
+    .transform(({ data }) => ({ kind: "submitted" as const, deposit: data })),
+  z
+    .object({
+      error: z.object({
+        code: z.literal("SIGNING_PENDING"),
+        message: z.string(),
+        details: z
+          .object({
+            approvalRequestId: z.string().optional(),
+            walletOperationId: z.string().optional(),
+          })
+          .optional(),
+      }),
+    })
+    .transform(({ error }) => ({
+      kind: "approval_pending" as const,
+      message: error.message,
+      approvalRequestId: error.details?.approvalRequestId,
+      walletOperationId: error.details?.walletOperationId,
+    })),
+]);
+
+export type EarnVaultDepositOutcome = z.infer<typeof earnVaultDepositOutcomeSchema>;
+
+/**
+ * Deposits from an SDP custody wallet into a non-custodial vault. The caller's
+ * idempotency key is transport metadata and is never copied into the JSON body.
+ */
+export async function createEarnVaultDeposit(
+  input: EarnVaultDepositRequest,
+  idempotencyKey: string,
+  signal?: AbortSignal
+): Promise<DashboardFetchResult<EarnVaultDepositOutcome>> {
+  // Rebuild the body field-by-field so even an untyped caller cannot smuggle
+  // requestId (the legacy custodial-program contract) or arbitrary fields into
+  // this value-moving request.
+  const body: EarnVaultDepositRequest = {
+    strategyId: input.strategyId,
+    custodyWalletId: input.custodyWalletId,
+    amount: input.amount,
+    ...(input.minSharesOut === undefined ? {} : { minSharesOut: input.minSharesOut }),
+  };
+  const result = await dashboardFetch<unknown>("/api/dashboard/markets/earn/vault-deposits", {
+    method: "POST",
+    headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
+    body,
+    signal,
+  });
+
+  if (!result.ok) return result;
+
+  const invalid = {
+    ok: false,
+    error: "Invalid vault deposit response",
+    status: result.status,
+    body: result.data,
+  } as const;
+
+  const parsed = earnVaultDepositOutcomeSchema.safeParse(result.data);
+  if (!parsed.success) return invalid;
+  // An approval hold is specifically the 202 contract. A 200 or 201 carrying it
+  // would mean the API reported a deposit as both created and held, and this
+  // must not resolve that contradiction in the customer's favour.
+  if (parsed.data.kind === "approval_pending" && result.status !== 202) return invalid;
+
+  return { ok: true, status: result.status, data: parsed.data };
 }
 
 export interface EarnWithdrawalPreviewInput {
@@ -456,7 +628,7 @@ export function previewEarnWithdrawal(
   programId: string,
   input: EarnWithdrawalPreviewInput,
   signal?: AbortSignal
-): Promise<DashboardFetchResult<{ data: { preview: EarnPortfolioWithdrawalPreview } }>> {
+): Promise<DashboardFetchResult<{ data: EarnProgramWithdrawalPreviewResponse }>> {
   return dashboardFetch(programPath(programId, "/withdrawal-preview"), {
     method: "POST",
     body: input,
@@ -473,17 +645,77 @@ export interface EarnWithdrawalCreateInput extends EarnWithdrawalPreviewInput {
 export function createEarnWithdrawal(
   programId: string,
   input: EarnWithdrawalCreateInput
-): Promise<DashboardFetchResult<{ data: { withdrawal: EarnPortfolioWithdrawal } }>> {
+): Promise<DashboardFetchResult<{ data: EarnProgramWithdrawalResponse }>> {
   return dashboardFetch(programPath(programId, "/withdrawals"), { method: "POST", body: input });
 }
 
 export function fetchEarnWithdrawal(
   programId: string,
   withdrawalRef: string
-): Promise<DashboardFetchResult<{ data: { withdrawal: EarnPortfolioWithdrawal } }>> {
+): Promise<DashboardFetchResult<{ data: EarnProgramWithdrawalResponse }>> {
   return dashboardFetch(
     programPath(programId, `/withdrawals/${encodeURIComponent(withdrawalRef)}`)
   );
+}
+
+const PROGRAM_WITHDRAWALS_PAGE_SIZE = 100;
+const PROGRAM_WITHDRAWALS_PAGE_LIMIT = 20;
+
+/**
+ * Read a program's complete durable withdrawal ledger. Returning a partial
+ * history would make an in-flight payout disappear after a reload, so every
+ * inconsistent or over-limit pagination outcome throws instead of returning
+ * the prefix collected so far.
+ */
+export async function fetchEarnProgramWithdrawals(
+  programId: string
+): Promise<EarnProgramWithdrawalRecord[]> {
+  const withdrawals: EarnProgramWithdrawalRecord[] = [];
+
+  for (let page = 1; page <= PROGRAM_WITHDRAWALS_PAGE_LIMIT; page += 1) {
+    const query = new URLSearchParams({
+      page: String(page),
+      pageSize: String(PROGRAM_WITHDRAWALS_PAGE_SIZE),
+    });
+    const { status, body } = await requestJson<{ data: ListEarnProgramWithdrawalsResponse }>(
+      `${programPath(programId, "/withdrawals")}?${query}`
+    );
+    if (status < 200 || status >= 300 || !body) {
+      throw new Error(errorMessage(body, status));
+    }
+
+    const ledgerPage = body.data;
+    if (ledgerPage.page !== page || ledgerPage.pageSize !== PROGRAM_WITHDRAWALS_PAGE_SIZE) {
+      throw new Error("Earn withdrawal ledger pagination did not match the requested page");
+    }
+    if (!Number.isSafeInteger(ledgerPage.total) || ledgerPage.total < 0) {
+      throw new Error("Earn withdrawal ledger reported an invalid total");
+    }
+
+    withdrawals.push(...ledgerPage.withdrawals);
+    if (withdrawals.length === ledgerPage.total) return withdrawals;
+    if (withdrawals.length > ledgerPage.total) {
+      throw new Error("Earn withdrawal ledger returned more rows than its reported total");
+    }
+    if (ledgerPage.withdrawals.length < PROGRAM_WITHDRAWALS_PAGE_SIZE) {
+      throw new Error("Earn withdrawal ledger pagination ended before the reported total");
+    }
+  }
+
+  throw new Error("Earn withdrawal ledger pagination exceeded its safety limit");
+}
+
+/** Passing no program id issues no ledger request. */
+export function useEarnProgramWithdrawals(programId: string | undefined) {
+  const { data, error, isLoading, mutate } = useSWR(
+    programId ? ["dashboard-earn-program-withdrawals", programId] : null,
+    () => fetchEarnProgramWithdrawals(programId as string),
+    // Detect withdrawals created from another session while this dashboard is
+    // open; the list is a cheap local-DB read and live outcome polling begins
+    // only for provider-accepted nonterminal rows.
+    { refreshInterval: 30_000 }
+  );
+  return { withdrawals: data, error, isLoading, refresh: () => void mutate() };
 }
 
 /**

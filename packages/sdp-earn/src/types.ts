@@ -25,8 +25,14 @@ import type { EarnProviderId } from "@sdp/types/provider-access";
  * provider stays AppContext-free. Same shape as `RampRuntimeContext` in
  * @sdp/payments, but named `environment` to match the rest of Earn.
  */
+export interface EarnRuntimeEnvironment {
+  GROUND_API_KEY?: string;
+  GROUND_SANDBOX_API_KEY?: string;
+  SOLANA_RPC_URL?: string;
+}
+
 export interface EarnRuntimeContext {
-  env: Record<string, string | undefined>;
+  env: EarnRuntimeEnvironment;
   environment: SdpEnvironment;
 }
 

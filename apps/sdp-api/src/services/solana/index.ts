@@ -22,6 +22,7 @@ export { createToken2022Service } from "./factory";
 // Signer service
 export {
   createOrgSigner,
+  createOrgSignerForCustodyWallet,
   createSigner,
   createSignerFromBase58,
   getSignerAddress,

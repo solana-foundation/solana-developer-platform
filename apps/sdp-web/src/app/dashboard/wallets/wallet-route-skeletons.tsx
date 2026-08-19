@@ -448,3 +448,26 @@ export function WalletPolicyAuditDetailSkeleton() {
     </DashboardWorkspaceOverviewPanel>
   );
 }
+
+export function WalletConnectionsListSkeleton() {
+  return (
+    <DashboardWorkspaceOverviewPanel className="flex flex-col">
+      <LoadingRegion layout="wallet-connections" className="flex w-full flex-1 flex-col">
+        <DashboardWorkspaceCard>
+          <div
+            className="flex flex-col gap-3 border-b border-border-default p-4 sm:flex-row sm:items-center sm:justify-between"
+            data-loading-connections-toolbar
+          >
+            <Pulse className="h-4 w-72 max-w-full" />
+            <Pulse className="h-9 w-full rounded-lg sm:w-40" />
+          </div>
+          <div className="flex-1 space-y-3 p-4" data-loading-connections-rows>
+            {FIVE_ITEMS.map((row) => (
+              <Pulse key={row} className="h-12 w-full rounded-lg" />
+            ))}
+          </div>
+        </DashboardWorkspaceCard>
+      </LoadingRegion>
+    </DashboardWorkspaceOverviewPanel>
+  );
+}

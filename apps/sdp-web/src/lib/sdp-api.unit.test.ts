@@ -13,7 +13,7 @@ vi.mock("@clerk/nextjs/server", () => ({
   auth: mocks.auth,
 }));
 
-import { createRequestScopedSdpApiClients, SdpApiResponseError } from "./sdp-api";
+import { createRequestScopedSdpApiClients, proxyToSdpApi, SdpApiResponseError } from "./sdp-api";
 
 describe("createRequestScopedSdpApiClients", () => {
   const originalApiBaseUrl = process.env.SDP_API_BASE_URL;
@@ -152,5 +152,46 @@ describe("createRequestScopedSdpApiClients", () => {
     const request = organizationClient.fetch("/v1/projects");
     await expect(request).rejects.toBeInstanceOf(SdpApiResponseError);
     await expect(request).rejects.toMatchObject({ status: 503 });
+  });
+
+  it("forwards only explicitly supplied endpoint headers to the upstream request", async () => {
+    mocks.cookies.mockResolvedValue({
+      get: (name: string) =>
+        name === "sdp_selected_project_id" ? { value: "project_test" } : undefined,
+    });
+    mocks.auth.mockResolvedValue({
+      userId: "user_test",
+      orgId: "org_test",
+      getToken: vi.fn().mockResolvedValue("token_test"),
+    });
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(null, { status: 204 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const request = new Request("https://dashboard.example.test/api/deposit", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Inbound-Only": "must-not-leak",
+      },
+      body: JSON.stringify({ amount: "1" }),
+    });
+
+    const response = await proxyToSdpApi({
+      request,
+      traceSource: "test.proxy.headers",
+      path: "/v1/earn/vault-deposits",
+      upstreamHeaders: { "Idempotency-Key": "deposit-key" },
+    });
+
+    expect(response.status).toBe(204);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, options] = fetchMock.mock.calls[0] ?? [];
+    const headers = new Headers(options?.headers);
+    expect(headers.get("Idempotency-Key")).toBe("deposit-key");
+    expect(headers.has("X-Inbound-Only")).toBe(false);
+    expect(headers.get("Authorization")).toBe("Bearer token_test");
+    expect(headers.get("x-project-id")).toBe("project_test");
+    expect(options?.body).toBe(JSON.stringify({ amount: "1" }));
   });
 });

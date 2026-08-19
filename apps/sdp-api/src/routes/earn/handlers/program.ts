@@ -3,12 +3,16 @@ import { notImplemented } from "@sdp/earn/errors";
 import type { EarnPortfolioWalletProvider } from "@sdp/earn/types";
 import type {
   EarnPortfolioAllocationInput,
-  EarnPortfolioDepositsPage,
   EarnPortfolioWalletSnapshot,
   EarnPortfolioWithdrawal,
-  EarnPortfolioWithdrawalPreview,
   EarnPortfolioYield,
+  EarnProgram,
+  EarnProgramDepositsResponse,
+  EarnProgramResponse,
+  EarnProgramWithdrawalPreviewResponse,
   EarnProgramWithdrawalRecord,
+  EarnProgramWithdrawalResponse,
+  ListEarnProgramsResponse,
   ListEarnProgramWithdrawalsResponse,
 } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
@@ -54,6 +58,15 @@ import {
 } from "../schemas";
 import { listResponse, pageWindow, parseBody, parseParams, parseQuery } from "./shared";
 
+export type {
+  EarnProgram,
+  EarnProgramDepositsResponse,
+  EarnProgramResponse,
+  EarnProgramWithdrawalPreviewResponse,
+  EarnProgramWithdrawalResponse,
+  ListEarnProgramsResponse,
+} from "@sdp/types";
+
 /**
  * Earn "programs": provider-managed portfolio wallets, N per (organization,
  * environment, provider) since PRO-1670, each pinned to a single vault with
@@ -86,43 +99,6 @@ import { listResponse, pageWindow, parseBody, parseParams, parseQuery } from "./
  * API); the ledger list takes no provider gate at all — the audit trail
  * outlives even credential removal.
  */
-
-// Response envelopes (route-owned until a second surface needs them in @sdp/types).
-export interface EarnProgram {
-  /** SDP's own program id — how every `/programs/:programId` route names it. */
-  id: string;
-  provider: string;
-  label: string | null;
-  createdAt: string;
-  wallet: EarnPortfolioWalletSnapshot;
-  /**
-   * Yield metrics, absent when the provider's yield endpoint fails. Balances
-   * are the load-bearing part of this response, so a yield outage degrades the
-   * headline rate rather than the whole program view.
-   */
-  yield?: EarnPortfolioYield;
-}
-
-export interface EarnProgramResponse {
-  program: EarnProgram;
-}
-
-export interface ListEarnProgramsResponse {
-  programs: EarnProgram[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
-
-export type EarnProgramDepositsResponse = EarnPortfolioDepositsPage;
-
-export interface EarnProgramWithdrawalPreviewResponse {
-  preview: EarnPortfolioWithdrawalPreview;
-}
-
-export interface EarnProgramWithdrawalResponse {
-  withdrawal: EarnPortfolioWithdrawal;
-}
 
 function mapProgram(
   row: EarnProviderWalletRow,
