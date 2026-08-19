@@ -966,9 +966,7 @@ describe("earn vault project attribution", () => {
       .bind(first.position.id)
       .first<{ project_id: string | null }>();
     const movements = await getDb(env)
-      .prepare(
-        "SELECT project_id FROM earn_movements WHERE position_id = ? ORDER BY request_id"
-      )
+      .prepare("SELECT project_id FROM earn_movements WHERE position_id = ? ORDER BY request_id")
       .bind(first.position.id)
       .all<{ project_id: string | null }>();
     expect(position?.project_id).toBeNull();
