@@ -3,6 +3,7 @@ import { AppError } from "@/lib/errors";
 import { isPrivateChannelsEnabled } from "@/lib/feature-flags";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
   addChannelMembership,
@@ -41,6 +42,16 @@ import {
   removeChannelMembership,
   verifyWallet,
 } from "./handlers";
+import {
+  addMembershipBodySchema,
+  connectPrivateChannelInstanceSchema,
+  createChannelBodySchema,
+  createDepositBodySchema,
+  createTransferBodySchema,
+  createWithdrawalBodySchema,
+  inviteMemberBodySchema,
+  probeConnectionSchema,
+} from "./schemas";
 
 const privateChannels = new Hono<{ Bindings: Env }>();
 
@@ -67,12 +78,22 @@ privateChannels.get("/health", requirePermissions("payments:read"), getPrivateCh
 // --- /probe ---------------------------------------------------------------
 // Full connect-time probe (gateway + chain RPC). What the connect flow's
 // re-probe runs; wired here so the web's Test-connection matches Connect.
-privateChannels.post("/probe", requirePermissions("payments:read"), probePrivateChannelConnection);
+privateChannels.post(
+  "/probe",
+  requirePermissions("payments:read"),
+  validateBody(probeConnectionSchema),
+  probePrivateChannelConnection
+);
 
 // --- /instance ------------------------------------------------------------
 const instance = new Hono<{ Bindings: Env }>();
 instance.get("/", requirePermissions("payments:read"), getPrivateChannelInstance);
-instance.post("/", requirePermissions("payments:write"), connectPrivateChannelInstance);
+instance.post(
+  "/",
+  requirePermissions("payments:write"),
+  validateBody(connectPrivateChannelInstanceSchema),
+  connectPrivateChannelInstance
+);
 instance.delete("/", requirePermissions("payments:write"), deletePrivateChannelInstance);
 instance.post(
   "/disconnect",
@@ -92,6 +113,7 @@ privateChannels.get("/balance", requirePermissions("payments:read"), getPrivateC
 privateChannels.post(
   "/deposits",
   requirePermissions("payments:write"),
+  validateBody(createDepositBodySchema),
   createPrivateChannelDeposit
 );
 privateChannels.get("/deposits", requirePermissions("payments:read"), listPrivateChannelDeposits);
@@ -108,6 +130,7 @@ privateChannels.get(
 privateChannels.post(
   "/withdrawals",
   requirePermissions("payments:write"),
+  validateBody(createWithdrawalBodySchema),
   createPrivateChannelWithdrawal
 );
 privateChannels.get(
@@ -132,7 +155,12 @@ privateChannels.get("/events", requirePermissions("payments:read"), listProjectE
 // --- /channels ------------------------------------------------------------
 // Logical channels: instance-scoped metadata, enforced entirely by SDP.
 privateChannels.get("/channels", requirePermissions("payments:read"), listChannels);
-privateChannels.post("/channels", requirePermissions("payments:write"), createChannel);
+privateChannels.post(
+  "/channels",
+  requirePermissions("payments:write"),
+  validateBody(createChannelBodySchema),
+  createChannel
+);
 privateChannels.get("/channels/:id", requirePermissions("payments:read"), getChannel);
 privateChannels.get("/channels/:id/events", requirePermissions("payments:read"), listChannelEvents);
 privateChannels.delete("/channels/:id", requirePermissions("payments:write"), deleteChannel);
@@ -144,6 +172,7 @@ privateChannels.get(
 privateChannels.post(
   "/channels/:channelId/transfers",
   requirePermissions("payments:write"),
+  validateBody(createTransferBodySchema),
   createPrivateChannelTransfer
 );
 
@@ -177,6 +206,7 @@ privateChannels.delete(
 privateChannels.post(
   "/channels/:channelId/memberships",
   requirePermissions("payments:write"),
+  validateBody(addMembershipBodySchema),
   addChannelMembership
 );
 privateChannels.delete(
@@ -188,7 +218,12 @@ privateChannels.delete(
 // --- /users ---------------------------------------------------------------
 // Workspace-level invites: one row per SDP user with SPC credentials.
 privateChannels.get("/users", requirePermissions("payments:read"), listPrivateChannelUsers);
-privateChannels.post("/users", requirePermissions("payments:write"), invitePrivateChannelUser);
+privateChannels.post(
+  "/users",
+  requirePermissions("payments:write"),
+  validateBody(inviteMemberBodySchema),
+  invitePrivateChannelUser
+);
 // /users/me must come before /users/:id so `me` isn't matched as a param.
 privateChannels.get(
   "/users/me",

@@ -3,13 +3,15 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
+import { validateBody } from "@/middleware/validate";
 import { env } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 import { addEntry } from "./handlers";
+import { addEntrySchema } from "./schemas";
 
 function buildApp() {
   const app = new Hono<{ Bindings: Env }>();
-  app.post("/allowlist", addEntry);
+  app.post("/allowlist", validateBody(addEntrySchema), addEntry);
   app.onError((err, c) => {
     if (err instanceof AppError) {
       return c.json(err.toResponse(), err.statusCode as ContentfulStatusCode);

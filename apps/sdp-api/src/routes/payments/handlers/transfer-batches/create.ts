@@ -1,6 +1,5 @@
 import * as solanaRpc from "@sdp/rpc/solana";
 import type { PolicyCandidate } from "@sdp/types";
-import { z } from "zod";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type {
   PaymentTransferBatchRow,
@@ -11,6 +10,7 @@ import { AppError, badRequest, internalError } from "@/lib/errors";
 import { buildTransferBatchFingerprint } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
   approvedWalletOperationId,
   beginApprovedWalletOperationEffect,
@@ -19,7 +19,7 @@ import {
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import * as solanaServices from "@/services/solana";
 import { type AppContext, getFeePayment, getPaymentTransferBatchesRepository } from "../../context";
-import { createTransferBatchSchema } from "../../schemas";
+import type { createTransferBatchSchema } from "../../schemas";
 import { applyRecipientRowUpdates, executeChunk, updateRecipientRows } from "./execute";
 import { resolveBatchRequest } from "./resolve";
 import { buildTransferBatchResponse, resolveTransferBatchIdempotencyReplay } from "./respond";
@@ -94,16 +94,9 @@ async function respondToTransferBatchReplay(
  * @returns The candidate, its legs, validated body, resolved request, and raw payload.
  */
 export async function extractTransferBatchPolicyCandidate(
-  c: AppContext
+  c: ValidatedBodyContext<typeof createTransferBatchSchema>
 ): Promise<PolicyGateExtraction> {
-  const parsed = createTransferBatchSchema.safeParse(await c.req.json());
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-
-  const input = parsed.data;
+  const input = c.req.valid("json");
   const resolved = await resolveBatchRequest(c, input, ["payments:write"]);
   const candidate: PolicyCandidate = {
     organizationId: resolved.scope.auth.organizationId,

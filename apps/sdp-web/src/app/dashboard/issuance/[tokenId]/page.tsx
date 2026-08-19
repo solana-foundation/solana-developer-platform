@@ -3,6 +3,7 @@ import type { AssetProfile, Token } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
 import { assetProfiles } from "@/flags";
 import { getTranslations } from "@/i18n/server";
+import { readApiErrorMessage } from "@/lib/api-error";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
@@ -30,11 +31,8 @@ interface PaginatedMeta {
 
 function parseErrorMessage(body: string, fallback: string): string {
   try {
-    const parsed = JSON.parse(body) as {
-      error?: { message?: string };
-      message?: string;
-    };
-    return parsed?.error?.message ?? parsed?.message ?? body;
+    const parsed: unknown = JSON.parse(body);
+    return readApiErrorMessage(parsed) ?? body;
   } catch {
     return body || fallback;
   }

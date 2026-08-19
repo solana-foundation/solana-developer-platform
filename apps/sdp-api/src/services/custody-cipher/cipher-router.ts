@@ -6,6 +6,10 @@ import { KmsEnvelopeCipher } from "./envelope-cipher";
 
 const V2_PREFIX = "v2.";
 
+export function isV2Ciphertext(ciphertext: string): boolean {
+  return ciphertext.startsWith(V2_PREFIX);
+}
+
 export interface CustodyCipher {
   encrypt(orgId: string, plaintext: string): Promise<string>;
   decrypt(orgId: string, ciphertext: string): Promise<string>;

@@ -5,9 +5,10 @@ import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repos
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
-import { badRequest, badRequestQuery } from "@/lib/errors";
+import { badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import {
   isPaymentRequestExpired,
@@ -78,7 +79,7 @@ export async function listPaymentRequests(c: AppContext) {
   return success(c, response);
 }
 
-const createPaymentRequestSchema = z.object({
+export const createPaymentRequestSchema = z.object({
   walletId: z.string().min(1),
   token: z.string().refine(isAddress, "token must be a valid Solana mint address"),
   amount: paymentAmountSchema,
@@ -90,15 +91,14 @@ const createPaymentRequestSchema = z.object({
   expiresAt: z.string().datetime().nullable().default(null),
 });
 
-export async function createPaymentRequest(c: AppContext) {
+export async function createPaymentRequest(
+  c: ValidatedBodyContext<typeof createPaymentRequestSchema>
+) {
   const projectId = requireProjectId(c);
-  const body = createPaymentRequestSchema.safeParse(await c.req.json());
-  if (!body.success) {
-    throw badRequest("Invalid payment request");
-  }
+  const body = c.req.valid("json");
 
   const scope = await resolveScope(c);
-  const wallet = resolveWallet(scope.wallets, body.data.walletId);
+  const wallet = resolveWallet(scope.wallets, body.walletId);
   assertApiKeyWalletAccess(scope.auth, wallet.walletId, ["payments:write"]);
 
   const row = await createPaymentRequestsRepository(
@@ -107,12 +107,12 @@ export async function createPaymentRequest(c: AppContext) {
   ).createPaymentRequest({
     organizationId: scope.auth.organizationId,
     projectId,
-    counterpartyId: body.data.counterpartyId,
+    counterpartyId: body.counterpartyId,
     walletId: wallet.walletId,
     destinationAddress: wallet.publicKey,
-    token: body.data.token,
-    amount: body.data.amount,
-    expiresAt: body.data.expiresAt,
+    token: body.token,
+    amount: body.amount,
+    expiresAt: body.expiresAt,
     createdBy: await resolveCreatorUserId(c),
   });
 

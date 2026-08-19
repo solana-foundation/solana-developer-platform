@@ -3,6 +3,7 @@ import type { ListProjectsResponse, Project } from "@sdp/types";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { cache } from "react";
+import { readApiErrorMessage } from "./api-error";
 import { PROJECT_COOKIE_NAME, PROJECT_HEADER_NAME } from "./project-cookie";
 import {
   createTimedTrace,
@@ -86,7 +87,9 @@ function createSdpApiRequest(
     if (!headers.has("Authorization")) {
       headers.set("Authorization", `Bearer ${token}`);
     }
-    headers.set("Content-Type", "application/json");
+    if (options.body !== undefined && options.body !== null) {
+      headers.set("Content-Type", "application/json");
+    }
     headers.set(TRACE_ID_HEADER, traceId);
     headers.set(TRACE_SOURCE_HEADER, source);
     headers.set("X-Request-ID", requestId);
@@ -162,8 +165,8 @@ export function extractSdpApiErrorMessage(error: unknown): string {
   if (!match) return error.message;
   const body = match[1] ?? "";
   try {
-    const payload = JSON.parse(body) as { error?: { message?: string } };
-    return payload.error?.message ?? body ?? error.message;
+    const payload: unknown = JSON.parse(body);
+    return readApiErrorMessage(payload) ?? (body || error.message);
   } catch {
     return body || error.message;
   }
@@ -361,8 +364,12 @@ export async function proxyToSdpApi({
   try {
     const apiClient = await createSdpApiClient(trace.childContext(`${traceSource}.api`));
     const method = request.method;
-    const body = method === "GET" || method === "HEAD" ? undefined : await request.text();
-    const response = await apiClient.request(path, { method, body, headers: upstreamHeaders });
+    const rawBody = method === "GET" || method === "HEAD" ? "" : await request.text();
+    const response = await apiClient.request(path, {
+      method,
+      body: rawBody === "" ? undefined : rawBody,
+      headers: upstreamHeaders,
+    });
 
     logRouteResult(trace, response.status);
 
