@@ -977,8 +977,11 @@ export async function recoverOrBlockLifecycleCollection(input: {
     }
     // The caller asked to change the subscription, not to collect it: the
     // transfer's reconciliation sentence reads as a payment error on a cancel
-    // request. The block itself stands — the cycle is unresolved, and moving
-    // the schedule under it would orphan the parked attempt.
+    // request. The block itself stands for `update` and `resume`, which move
+    // `next_collection_due_at` and would orphan the parked attempt. Cancel
+    // moves nothing: whether a customer may stop a subscription while one
+    // charge is unresolved is a product call, and until it is made the block
+    // covers cancel too.
     throw transferSubmissionOutcomeUnknown(
       error.cause,
       "Recurring payment cannot be changed while the current cycle's collection awaits manual reconciliation"
