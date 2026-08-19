@@ -1,10 +1,9 @@
+import type { EarnPortfolioWithdrawal } from "@sdp/types";
+import { isTerminalEarnMovementStatus } from "@sdp/types";
 import type {
-  EarnPortfolioWithdrawal,
-  EarnPortfolioWithdrawalStatus,
-  EarnProgramWithdrawalRecordStatus,
-} from "@sdp/types";
-import { EARN_TERMINAL_WITHDRAWAL_STATUSES } from "@sdp/types";
-import type { EarnProgramWithdrawalRow, EarnRepository } from "@/db/repositories";
+  EarnMovementRow,
+  EarnMovementsRepository,
+} from "@/db/repositories/earn-movements.repository";
 import { getLogger } from "@/runtime/logger";
 
 /**
@@ -31,20 +30,9 @@ import { getLogger } from "@/runtime/logger";
  * guard closes the read-then-write race (braces), mirroring the two-layer
  * shape of applyRampSettlementEvent.
  */
-const ALLOWED_EARN_WITHDRAWAL_SOURCE_STATUSES = {
-  processing: ["requested", "processing", "pending_approval"],
-  pending_approval: ["requested", "processing", "pending_approval"],
-  completed: ["requested", "processing", "pending_approval"],
-  partially_completed: ["requested", "processing", "pending_approval"],
-  failed: ["requested", "processing", "pending_approval"],
-  cancelled: ["requested", "processing", "pending_approval"],
-} as const satisfies Record<
-  EarnPortfolioWithdrawalStatus,
-  readonly EarnProgramWithdrawalRecordStatus[]
->;
 
-export function isTerminalEarnWithdrawalStatus(status: EarnProgramWithdrawalRecordStatus): boolean {
-  return (EARN_TERMINAL_WITHDRAWAL_STATUSES as readonly string[]).includes(status);
+export function isTerminalEarnWithdrawalStatus(status: string): boolean {
+  return isTerminalEarnMovementStatus("custodial", status);
 }
 
 /**
@@ -55,10 +43,12 @@ export function isTerminalEarnWithdrawalStatus(status: EarnProgramWithdrawalReco
  */
 function observationFields(observed: EarnPortfolioWithdrawal) {
   return {
-    amountPaidUsd: observed.amountPaidUsd,
-    feeUsd: observed.feeUsd,
+    // Denominated in the row's `denomination`, which is `usd` for every custodial
+    // movement — the provider stays authoritative for both figures.
+    amountSettled: observed.amountPaidUsd,
+    feeAmount: observed.feeUsd,
     failureReason: observed.failureReason,
-    completedAt: observed.completedAt,
+    settledAt: observed.completedAt,
     providerData: { lastObservation: observed },
   };
 }
@@ -74,20 +64,19 @@ function observationFields(observed: EarnPortfolioWithdrawal) {
  * the create handler retries them, observation paths swallow them.
  */
 export async function applyEarnWithdrawalObservationToRow(params: {
-  repo: EarnRepository;
-  row: EarnProgramWithdrawalRow;
+  repo: EarnMovementsRepository;
+  row: EarnMovementRow;
   observed: EarnPortfolioWithdrawal;
-}): Promise<EarnProgramWithdrawalRow | null> {
+}): Promise<EarnMovementRow | null> {
   const { repo, row, observed } = params;
 
   if (isTerminalEarnWithdrawalStatus(row.status)) {
     return row;
   }
 
-  return repo.updateProgramWithdrawalStatusGuarded({
-    selector: { withdrawalId: row.id },
+  return repo.updateCustodialMovementGuarded({
+    selector: { movementId: row.id },
     organizationId: row.organization_id,
-    fromStatuses: ALLOWED_EARN_WITHDRAWAL_SOURCE_STATUSES[observed.status],
     toStatus: observed.status,
     providerReference: observed.withdrawalRef,
     ...observationFields(observed),
@@ -103,7 +92,7 @@ export async function applyEarnWithdrawalObservationToRow(params: {
  * sweep, never by fuzzy matching here.
  */
 export async function applyEarnWithdrawalObservationByReference(params: {
-  repo: EarnRepository;
+  repo: EarnMovementsRepository;
   provider: string;
   organizationId: string;
   /**
@@ -115,10 +104,10 @@ export async function applyEarnWithdrawalObservationByReference(params: {
    */
   walletId?: string;
   observed: EarnPortfolioWithdrawal;
-}): Promise<EarnProgramWithdrawalRow | null> {
+}): Promise<EarnMovementRow | null> {
   const { repo, provider, organizationId, walletId, observed } = params;
 
-  const row = await repo.getProgramWithdrawalByProviderReference({
+  const row = await repo.findMovementByProviderReference({
     provider,
     providerReference: observed.withdrawalRef,
   });
@@ -134,7 +123,16 @@ export async function applyEarnWithdrawalObservationByReference(params: {
     );
     return null;
   }
-  if (walletId !== undefined && row.wallet_id !== walletId) {
+  if (
+    walletId !== undefined &&
+    (
+      await repo.getPositionById({
+        organizationId,
+        environment: row.environment,
+        positionId: row.position_id,
+      })
+    )?.provider_wallet_id !== walletId
+  ) {
     // Same organization, different program: the provider answered a lookup made
     // through one program's wallet with another program's withdrawal. The
     // handler's own guard should make this unreachable; never write on it.
@@ -148,10 +146,9 @@ export async function applyEarnWithdrawalObservationByReference(params: {
     return row;
   }
 
-  return repo.updateProgramWithdrawalStatusGuarded({
+  return repo.updateCustodialMovementGuarded({
     selector: { provider, providerReference: observed.withdrawalRef },
     organizationId,
-    fromStatuses: ALLOWED_EARN_WITHDRAWAL_SOURCE_STATUSES[observed.status],
     toStatus: observed.status,
     ...observationFields(observed),
   });

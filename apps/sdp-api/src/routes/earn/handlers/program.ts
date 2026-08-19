@@ -18,14 +18,11 @@ import type {
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
-import type {
-  EarnProgramWithdrawalRow,
-  EarnProviderWalletRow,
-  EarnRepository,
-} from "@/db/repositories";
+import type { EarnProviderWalletRow, EarnRepository } from "@/db/repositories";
 import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
+  type EarnMovementsRepository,
 } from "@/db/repositories/earn-movements.repository";
 import { getAuth } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
@@ -681,8 +678,8 @@ const LEDGER_WRITE_ATTEMPTS = 3;
  * ledger sweep, never by fuzzy matching.
  */
 async function persistWithdrawalObservation(
-  repo: EarnRepository,
-  intentRow: EarnProgramWithdrawalRow,
+  repo: EarnMovementsRepository,
+  intentRow: EarnMovementRow,
   observed: EarnPortfolioWithdrawal
 ): Promise<void> {
   for (let attempt = 1; attempt <= LEDGER_WRITE_ATTEMPTS; attempt++) {
@@ -729,11 +726,11 @@ export const createEarnProgramWithdrawal = async (
     destinationAddress: body.destinationAddress,
   });
 
-  const repo = getEarnRepository(c);
+  const ledger = createPostgresEarnMovementsRepository(getDb(c.env));
   const findIntentRow = () =>
-    repo.getProgramWithdrawalByRequestId({
+    ledger.findCustodialMovementByRequestId({
       organizationId: auth.organizationId,
-      walletId: row.id,
+      providerWalletId: row.id,
       requestId,
     });
 
@@ -744,12 +741,12 @@ export const createEarnProgramWithdrawal = async (
   // True replay of an accepted withdrawal: answer with the provider's live
   // state and let the observation refresh the ledger. 200, not 201 — nothing
   // was created by this request.
-  const serveReplay = async (intent: EarnProgramWithdrawalRow, providerReference: string) => {
+  const serveReplay = async (intent: EarnMovementRow, providerReference: string) => {
     const withdrawal = await client.getPortfolioWithdrawal(earnRuntime(c), {
       providerWalletRef: row.provider_wallet_ref,
       withdrawalRef: providerReference,
     });
-    await persistWithdrawalObservation(repo, intent, withdrawal);
+    await persistWithdrawalObservation(ledger, intent, withdrawal);
     const response: EarnProgramWithdrawalResponse = { withdrawal };
     return success(c, response, 200);
   };
@@ -768,13 +765,14 @@ export const createEarnProgramWithdrawal = async (
     // crash between here and acceptance leaves a re-drivable 'requested' row
     // (same-key retry or the ledger sweep) instead of an untracked payout.
     try {
-      intentRow = await repo.createProgramWithdrawal({
+      intentRow = await ledger.createCustodialMovement({
         organizationId: auth.organizationId,
         projectId: auth.projectId,
-        walletId: row.id,
+        environment: resolveSdpEnvironment(c),
+        providerWalletId: row.id,
         provider: client.provider,
         amountRequestedUsd: body.amountUsd,
-        token: body.token,
+        payoutToken: body.token,
         destinationAddress: body.destinationAddress,
         requestId,
         idempotencyFingerprint: fingerprint,
@@ -814,7 +812,7 @@ export const createEarnProgramWithdrawal = async (
     destinationAddress: body.destinationAddress,
   });
 
-  await persistWithdrawalObservation(repo, intentRow, withdrawal);
+  await persistWithdrawalObservation(ledger, intentRow, withdrawal);
 
   const response: EarnProgramWithdrawalResponse = { withdrawal };
   return success(c, response, 201);
@@ -840,14 +838,25 @@ export const getEarnProgramWithdrawal = async (c: AppContext) => {
   // complete while an org held one program; with several, asking program A for
   // program B's ref would pass it and then drive the provider with A's wallet
   // ref and B's withdrawal ref — a mismatch whose answer is entirely the
-  // provider's to decide. wallet_id is strictly stronger and still lets an
+  // provider's to decide. Program scope is strictly stronger and still lets an
   // unknown ref fall through.
-  const ledgerRow = await repo.getProgramWithdrawalByProviderReference({
+  //
+  // A ledger movement names its HOLDING rather than the program wallet, and the
+  // holding is 1:1 with that wallet, so the comparison resolves through it.
+  const ledger = createPostgresEarnMovementsRepository(getDb(c.env));
+  const ledgerRow = await ledger.findMovementByProviderReference({
     provider: client.provider,
     providerReference: withdrawalRef,
   });
-  if (ledgerRow && ledgerRow.wallet_id !== row.id) {
-    throw notFound("Earn withdrawal");
+  if (ledgerRow) {
+    const holding = await ledger.getPositionById({
+      organizationId: ledgerRow.organization_id,
+      environment: ledgerRow.environment,
+      positionId: ledgerRow.position_id,
+    });
+    if (holding?.provider_wallet_id !== row.id) {
+      throw notFound("Earn withdrawal");
+    }
   }
 
   const withdrawal = await client.getPortfolioWithdrawal(earnRuntime(c), {
@@ -860,7 +869,7 @@ export const getEarnProgramWithdrawal = async (c: AppContext) => {
   // without provider_reference are invisible to this path by design.
   try {
     await applyEarnWithdrawalObservationByReference({
-      repo,
+      repo: ledger,
       provider: client.provider,
       organizationId: getAuth(c).organizationId,
       walletId: row.id,

@@ -1,8 +1,6 @@
 import type {
   EarnApyType,
   EarnLiquidityTerm,
-  EarnPortfolioToken,
-  EarnProgramWithdrawalRecordStatus,
   EarnStrategyRiskMetadata,
   EarnStrategySourceKind,
   EarnStrategyStatus,
@@ -12,32 +10,20 @@ import type {
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
 import { type AppDb, asTransactionalClient } from "@/db";
 import type {
-  CreateEarnProgramWithdrawalInput,
   DeleteUnlistedEarnStrategiesInput,
-  EarnProgramWithdrawalRow,
   EarnProviderWalletRow,
   EarnRepository,
   EarnStrategyRow,
   InsertEarnProviderWalletInput,
-  ListEarnProgramWithdrawalsInput,
-  ListEarnProgramWithdrawalsResult,
   ListEarnProviderWalletsInput,
   ListEarnProviderWalletsResult,
   ListEarnStrategiesInput,
   ListEarnStrategiesResult,
-  UpdateEarnProgramWithdrawalStatusGuardedInput,
   UpdateEarnStrategyMetricsInput,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
-import {
-  generateEarnProgramWithdrawalId,
-  generateEarnProviderWalletId,
-  generateEarnStrategyId,
-} from "./earn.repository";
-import {
-  mintEarnPositionForProviderWallet,
-  projectEarnMovementFromWithdrawal,
-} from "./earn-movements.repository";
+import { generateEarnProviderWalletId, generateEarnStrategyId } from "./earn.repository";
+import { mintEarnPositionForProviderWallet } from "./earn-movements.repository";
 
 /**
  * `host_cluster` is NULLABLE in the schema on purpose (migration 0057 is the
@@ -92,32 +78,6 @@ function mapProviderWalletRow(row: Record<string, unknown>): EarnProviderWalletR
   };
 }
 
-function mapProgramWithdrawalRow(row: Record<string, unknown>): EarnProgramWithdrawalRow {
-  return {
-    id: row.id as string,
-    organization_id: row.organization_id as string,
-    project_id: row.project_id as string,
-    wallet_id: row.wallet_id as string,
-    provider: row.provider as string,
-    status: row.status as EarnProgramWithdrawalRecordStatus,
-    amount_requested_usd: row.amount_requested_usd as string,
-    amount_paid_usd: row.amount_paid_usd as string | null,
-    fee_usd: row.fee_usd as string | null,
-    token: row.token as EarnPortfolioToken,
-    destination_address: row.destination_address as string,
-    failure_reason: row.failure_reason as string | null,
-    request_id: row.request_id as string,
-    idempotency_fingerprint: row.idempotency_fingerprint as string,
-    provider_reference: row.provider_reference as string | null,
-    provider_data: row.provider_data as Record<string, unknown>,
-    created_by: row.created_by as string | null,
-    initiated_by_key_id: row.initiated_by_key_id as string | null,
-    created_at: row.created_at as string,
-    updated_at: row.updated_at as string,
-    completed_at: row.completed_at as string | null,
-  };
-}
-
 /**
  * Shared count+page read for the earn list methods (same shape as the
  * payments-family where-builder idiom). Ordering is fixed at newest-first with
@@ -133,7 +93,7 @@ function mapProgramWithdrawalRow(row: Record<string, unknown>): EarnProgramWithd
  */
 async function selectPage<Row>(
   db: AppDb,
-  table: "earn_strategies" | "earn_program_withdrawals" | "earn_provider_wallets",
+  table: "earn_strategies" | "earn_provider_wallets",
   conditions: string[],
   bindings: unknown[],
   window: { limit: number; offset: number },
@@ -443,154 +403,6 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         await mintEarnPositionForProviderWallet(transaction, id);
         return mapProviderWalletRow(row);
       });
-    },
-
-    async createProgramWithdrawal(input: CreateEarnProgramWithdrawalInput) {
-      const id = generateEarnProgramWithdrawalId();
-
-      // Status comes from the DB default ('requested'): an intent row exists
-      // before the provider call is accepted, never in any other state.
-      return db.transaction(async (executor) => {
-        const transaction = asTransactionalClient(executor);
-        const row = await transaction
-          .prepare(
-            `INSERT INTO earn_program_withdrawals (
-             id, organization_id, project_id, wallet_id, provider,
-             amount_requested_usd, token, destination_address,
-             request_id, idempotency_fingerprint, provider_data,
-             created_by, initiated_by_key_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)
-           RETURNING *`
-          )
-          .bind(
-            id,
-            input.organizationId,
-            input.projectId,
-            input.walletId,
-            input.provider,
-            input.amountRequestedUsd,
-            input.token,
-            input.destinationAddress,
-            input.requestId,
-            input.idempotencyFingerprint,
-            JSON.stringify(input.providerData ?? {}),
-            input.createdBy,
-            input.initiatedByKeyId
-          )
-          .first<Record<string, unknown>>();
-        if (!row) return null;
-
-        await projectEarnMovementFromWithdrawal(transaction, id);
-        return mapProgramWithdrawalRow(row);
-      });
-    },
-
-    async getProgramWithdrawalByRequestId(params) {
-      const row = await db
-        .prepare(
-          `SELECT * FROM earn_program_withdrawals
-             WHERE organization_id = ? AND wallet_id = ? AND request_id = ?`
-        )
-        .bind(params.organizationId, params.walletId, params.requestId)
-        .first<Record<string, unknown>>();
-      return row ? mapProgramWithdrawalRow(row) : null;
-    },
-
-    async getProgramWithdrawalByProviderReference(params) {
-      const row = await db
-        .prepare(
-          `SELECT * FROM earn_program_withdrawals
-             WHERE provider = ? AND provider_reference = ?`
-        )
-        .bind(params.provider, params.providerReference)
-        .first<Record<string, unknown>>();
-      return row ? mapProgramWithdrawalRow(row) : null;
-    },
-
-    async updateProgramWithdrawalStatusGuarded(
-      input: UpdateEarnProgramWithdrawalStatusGuardedInput
-    ) {
-      // Dynamic SET list, payments idiom: `undefined` means "don't touch",
-      // `null` is a real write; provider_data is a shallow JSONB merge.
-      // updated_at is DB-stamped (earn convention), never caller-supplied.
-      const assignments = ["status = ?", "updated_at = sdp_iso_now()"];
-      const assignmentValues: unknown[] = [input.toStatus];
-      if (input.providerReference !== undefined) {
-        assignments.push("provider_reference = ?");
-        assignmentValues.push(input.providerReference);
-      }
-      if (input.amountPaidUsd !== undefined) {
-        assignments.push("amount_paid_usd = ?");
-        assignmentValues.push(input.amountPaidUsd);
-      }
-      if (input.feeUsd !== undefined) {
-        assignments.push("fee_usd = ?");
-        assignmentValues.push(input.feeUsd);
-      }
-      if (input.failureReason !== undefined) {
-        assignments.push("failure_reason = ?");
-        assignmentValues.push(input.failureReason);
-      }
-      if (input.completedAt !== undefined) {
-        assignments.push("completed_at = ?");
-        assignmentValues.push(input.completedAt);
-      }
-      if (input.providerData !== undefined) {
-        assignments.push("provider_data = provider_data || ?::jsonb");
-        assignmentValues.push(JSON.stringify(input.providerData));
-      }
-
-      // The CAS guard and the org scope live in the same WHERE as the selector,
-      // so the whole transition is one atomic statement: the loser of a
-      // concurrent race simply matches zero rows.
-      const conditions = ["organization_id = ?", "status = ANY(?)"];
-      const conditionValues: unknown[] = [input.organizationId, [...input.fromStatuses]];
-      if ("withdrawalId" in input.selector) {
-        conditions.push("id = ?");
-        conditionValues.push(input.selector.withdrawalId);
-      } else {
-        conditions.push("provider = ?", "provider_reference = ?");
-        conditionValues.push(input.selector.provider, input.selector.providerReference);
-      }
-
-      return db.transaction(async (executor) => {
-        const transaction = asTransactionalClient(executor);
-        const row = await transaction
-          .prepare(
-            `UPDATE earn_program_withdrawals
-             SET ${assignments.join(", ")}
-           WHERE ${conditions.join(" AND ")}
-           RETURNING *`
-          )
-          .bind(...assignmentValues, ...conditionValues)
-          .first<Record<string, unknown>>();
-        // A lost CAS wrote nothing, so there is nothing to mirror: the winner
-        // already projected the state it moved the row to.
-        if (!row) return null;
-
-        await projectEarnMovementFromWithdrawal(transaction, row.id as string);
-        return mapProgramWithdrawalRow(row);
-      });
-    },
-
-    async listProgramWithdrawals(
-      input: ListEarnProgramWithdrawalsInput
-    ): Promise<ListEarnProgramWithdrawalsResult> {
-      // Wallet-scoped, not (org, project): every project in the environment
-      // reaches the same programs, and since PRO-1670 an organization may hold
-      // several — so the wallet id is what both joins sibling projects' history
-      // and keeps a sibling PROGRAM's payouts out. One program = one history.
-      const conditions = ["organization_id = ?", "wallet_id = ?"];
-      const bindings: unknown[] = [input.organizationId, input.walletId];
-
-      return selectPage(
-        db,
-        "earn_program_withdrawals",
-        conditions,
-        bindings,
-        input,
-        mapProgramWithdrawalRow
-      );
     },
   };
 }

@@ -137,7 +137,9 @@ function buildEarnVaultDepositResponse(
   strategy: EarnStrategyRow
 ) {
   if (!result.movement.signature) {
-    throw internalError(`Earn vault movement ${result.movement.id} was recorded without a signature`);
+    throw internalError(
+      `Earn vault movement ${result.movement.id} was recorded without a signature`
+    );
   }
   return {
     positionId: result.position.id,
@@ -832,9 +834,22 @@ export async function listEarnVaultDeposits(c: AppContext) {
 }
 
 const vaultMovementCursorSchema = z.object({
+  // `created_at` is ordered as canonical UTC text, so accepting offsets or a
+  // different precision would make a syntactically valid cursor sort wrongly.
   createdAt: z.string().datetime({ precision: 3 }),
+  // Shape and bound only, NOT a prefix. Movement ids are heterogeneous by design:
+  // the unification preserved every legacy row's id, so the table holds
+  // `earn_vault_movement_…` history beside `earn_movement_…` for anything minted
+  // since. Pinning a prefix here rejected page two outright.
+  //
+  // Safe because a cursor is a pagination BOUND, not an access grant — it lands in
+  // `(created_at, id) < (?, ?)` while organization, environment, project and wallet
+  // scope are separate conditions, so a forged one can only reposition a caller
+  // inside rows it could already read.
   id: z
-    .templateLiteral(["earn_vault_movement_", z.uuidv4()])
+    .string()
+    .min(1)
+    .max(128)
     .refine((id) => id === id.toLowerCase()),
 });
 
@@ -1057,10 +1072,14 @@ const vaultPositionCursorSchema = z.object({
   // `created_at` is ordered as canonical UTC text, so accepting offsets or a
   // different precision would make a syntactically valid cursor sort wrongly.
   createdAt: z.string().datetime({ precision: 3 }),
-  // Generated UUIDs are lowercase. Preserve that canonical spelling because
-  // PostgreSQL compares the prefixed position id as text in the keyset tuple.
+  // Shape and bound only, for the same reason as the movement cursor above:
+  // holdings carry `earn_vault_position_…` ids the unification preserved beside
+  // `earn_position_…` for newer ones. Lowercase is still asserted because
+  // PostgreSQL compares the prefixed id as text in the keyset tuple.
   id: z
-    .templateLiteral(["earn_vault_position_", z.uuidv4()])
+    .string()
+    .min(1)
+    .max(128)
     .refine((id) => id === id.toLowerCase()),
 });
 
