@@ -66,12 +66,18 @@ describe("integrations status", () => {
     expect(rpc.filter((p) => p.status === "active")).toHaveLength(1);
   });
 
-  it("only names SDP's own RPC while the organization actually runs on it", () => {
+  it("keeps SDP's own RPC listed after the organization moves to a vendor", () => {
     const onDefault = resolveRpcIntegrations({ selectedProvider: "default", entries: {} });
     expect(onDefault.find((p) => p.provider === "default")?.status).toBe("active");
 
-    const onVendor = resolveRpcIntegrations({ selectedProvider: "helius", entries: {} });
-    expect(onVendor.some((p) => p.provider === "default")).toBe(false);
+    // The route back. While `default` was hidden once a vendor was selected,
+    // /dashboard/integrations/default 404'd and no page anywhere offered SDP
+    // RPC — the Settings dropdown that used to was deleted by this change.
+    const onVendor = resolveRpcIntegrations({
+      selectedProvider: "helius",
+      entries: { helius: entry(true, true, true), default: entry(true, true, true) },
+    });
+    expect(onVendor.find((p) => p.provider === "default")?.status).toBe("available");
   });
 
   it("never calls a payment rail connected, because no organization ever connected one", () => {
