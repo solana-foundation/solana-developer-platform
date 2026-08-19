@@ -7,6 +7,7 @@ import {
 } from "@sdp/types";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
 import { z } from "zod";
+import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 
 export const earnStrategyIdParamsSchema = z.object({
   strategyId: z.string().min(1),
@@ -213,3 +214,47 @@ export const earnProgramWithdrawalParamsSchema = earnProgramParamsSchema.extend(
  * trail outlives credential removal).
  */
 export const earnProgramWithdrawalsListQuerySchema = z.object(earnPageQueryShape);
+
+/**
+ * Open a position in a NON-CUSTODIAL vault, or add to one, from an SDP custody
+ * wallet.
+ *
+ * Unlike the custodial create this carries an AMOUNT and a WALLET, because for
+ * a `vault_direct` provider opening the position and funding it are the same
+ * on-chain action — there is no wallet to provision first and no address to
+ * fund afterwards.
+ */
+export const earnVaultDepositSchema = z.object({
+  /** Catalogue strategy id, resolved to a vault address server-side. */
+  strategyId: z.string().min(1),
+  /** SDP custody-wallet row that signs and holds the shares (`id`, not provider `walletId`). */
+  custodyWalletId: z.string().min(1),
+  /** Deposit amount in the vault token's units, as a decimal string. */
+  amount: z
+    .string()
+    .max(128)
+    .regex(/^\d+(\.\d+)?$/, "amount must be a positive decimal string")
+    .refine((value) => /[1-9]/.test(value), "amount must be greater than zero"),
+  /** Optional slippage floor, in shares, as a decimal string. */
+  minSharesOut: z
+    .string()
+    .max(128)
+    .regex(/^\d+(\.\d+)?$/, "minSharesOut must be a decimal string")
+    .refine((value) => /[1-9]/.test(value), "minSharesOut must be greater than zero")
+    .optional(),
+  /**
+   * Retired on this route: the chain has no request dedupe to anchor a body
+   * key to, so the `Idempotency-Key` header is the only accepted source.
+   * Declared as `never` rather than omitted so the stray key is rejected with
+   * this message instead of being silently stripped.
+   */
+  requestId: z
+    .never(`Use the ${IDEMPOTENCY_KEY_HEADER} header; body requestId is not accepted`)
+    .optional(),
+});
+
+/** Bounded keyset page over active vault holdings, newest first. */
+export const earnVaultPositionsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  before: z.string().min(1).optional(),
+});

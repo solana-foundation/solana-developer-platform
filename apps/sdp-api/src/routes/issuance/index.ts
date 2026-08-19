@@ -4,6 +4,7 @@ import { isAssetProfilesEnabled } from "@/lib/feature-flags";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
   addAllowlistEntry,
@@ -26,7 +27,7 @@ import {
 } from "./handlers/deploy";
 import { executeForceBurn, prepareForceBurn } from "./handlers/force-burn";
 import { freezeAccount, listFrozenAccounts, unfreezeAccount } from "./handlers/freeze";
-import { enrollHolder, listHolders } from "./handlers/holders";
+import { enrollHolder, enrollHolderSchema, listHolders } from "./handlers/holders";
 import { serveTokenMetadata } from "./handlers/metadata";
 import { executeMint, extractMintPolicyCandidate, prepareMint } from "./handlers/mint";
 import { pauseToken, unpauseToken } from "./handlers/pause";
@@ -43,12 +44,29 @@ import {
 } from "./handlers/workflow-executions";
 import {
   createWorkflow,
+  createWorkflowSchema,
   deleteWorkflow,
   listWorkflowCatalog,
   listWorkflows,
   updateWorkflow,
+  updateWorkflowSchema,
 } from "./handlers/workflows";
 import type { AppContext } from "./helpers";
+import {
+  addAllowlistSchema,
+  burnSchema,
+  confirmDeploySchema,
+  createTokenSchema,
+  deployTokenSchema,
+  forceBurnSchema,
+  freezeSchema,
+  mintSchema,
+  pauseTokenSchema,
+  seizeSchema,
+  unfreezeSchema,
+  updateAuthoritySchema,
+  updateTokenSchema,
+} from "./schemas";
 
 const issuance = new Hono<{ Bindings: Env }>();
 
@@ -66,7 +84,12 @@ issuance.get("/templates", requirePermissions("tokens:read"), listTokenTemplates
 issuance.get("/templates/:templateId", requirePermissions("tokens:read"), getTokenTemplate);
 
 // Token CRUD
-issuance.post("/tokens", requirePermissions("tokens:write"), createToken);
+issuance.post(
+  "/tokens",
+  requirePermissions("tokens:write"),
+  validateBody(createTokenSchema),
+  createToken
+);
 issuance.get("/tokens", requirePermissions("tokens:read"), listTokens);
 issuance.get("/transactions", requirePermissions("tokens:read"), listTransactions);
 // Filter facets for the token list. Registered BEFORE `/tokens/:tokenId` so the
@@ -84,69 +107,144 @@ issuance.post(
   requirePermissions("tokens:read"),
   refreshTokenSupply
 );
-issuance.patch("/tokens/:tokenId", requirePermissions("tokens:write"), updateToken);
+issuance.patch(
+  "/tokens/:tokenId",
+  requirePermissions("tokens:write"),
+  validateBody(updateTokenSchema),
+  updateToken
+);
 
 // Deploy
-issuance.post("/tokens/:tokenId/deploy", requirePermissions("tokens:write"), deployToken);
-issuance.post("/tokens/:tokenId/deploy/prepare", requirePermissions("tokens:write"), prepareDeploy);
+issuance.post(
+  "/tokens/:tokenId/deploy",
+  requirePermissions("tokens:write"),
+  validateBody(deployTokenSchema),
+  deployToken
+);
+issuance.post(
+  "/tokens/:tokenId/deploy/prepare",
+  requirePermissions("tokens:write"),
+  validateBody(deployTokenSchema),
+  prepareDeploy
+);
 // Confirmation step for the non-custodial deploy flow: records the mint after
 // the client signs+submits the prepared create tx. Re-derives authorities from
 // the signing wallet prepareDeploy persisted on the token, so they can't diverge
 // from the prepared tx. Required before prepare-metadata can run.
-issuance.post("/tokens/:tokenId/deploy/confirm", requirePermissions("tokens:write"), confirmDeploy);
+issuance.post(
+  "/tokens/:tokenId/deploy/confirm",
+  requirePermissions("tokens:write"),
+  validateBody(confirmDeploySchema),
+  confirmDeploy
+);
 // Follow-up tx for the non-custodial deploy flow: set the metadata uri when the
 // create tx had to be prepared with an empty uri to stay under the packet limit.
 issuance.post(
   "/tokens/:tokenId/deploy/prepare-metadata",
   requirePermissions("tokens:write"),
+  validateBody(deployTokenSchema),
   prepareDeployMetadata
 );
 
 // Mint
-issuance.post("/tokens/:tokenId/mint/prepare", requirePermissions("tokens:write"), prepareMint);
+issuance.post(
+  "/tokens/:tokenId/mint/prepare",
+  requirePermissions("tokens:write"),
+  validateBody(mintSchema),
+  prepareMint
+);
 issuance.post(
   "/tokens/:tokenId/mint",
   requirePermissions("tokens:write"),
+  validateBody(mintSchema),
   policyGate({ extract: extractMintPolicyCandidate }),
   executeMint
 );
 
 // Burn
-issuance.post("/tokens/:tokenId/burn/prepare", requirePermissions("tokens:write"), prepareBurn);
-issuance.post("/tokens/:tokenId/burn", requirePermissions("tokens:write"), executeBurn);
+issuance.post(
+  "/tokens/:tokenId/burn/prepare",
+  requirePermissions("tokens:write"),
+  validateBody(burnSchema),
+  prepareBurn
+);
+issuance.post(
+  "/tokens/:tokenId/burn",
+  requirePermissions("tokens:write"),
+  validateBody(burnSchema),
+  executeBurn
+);
 
 // Seize (Force Transfer)
-issuance.post("/tokens/:tokenId/seize/prepare", requirePermissions("tokens:admin"), prepareSeize);
-issuance.post("/tokens/:tokenId/seize", requirePermissions("tokens:admin"), executeSeize);
+issuance.post(
+  "/tokens/:tokenId/seize/prepare",
+  requirePermissions("tokens:admin"),
+  validateBody(seizeSchema),
+  prepareSeize
+);
+issuance.post(
+  "/tokens/:tokenId/seize",
+  requirePermissions("tokens:admin"),
+  validateBody(seizeSchema),
+  executeSeize
+);
 
 // Force Burn
 issuance.post(
   "/tokens/:tokenId/force-burn/prepare",
   requirePermissions("tokens:admin"),
+  validateBody(forceBurnSchema),
   prepareForceBurn
 );
-issuance.post("/tokens/:tokenId/force-burn", requirePermissions("tokens:admin"), executeForceBurn);
+issuance.post(
+  "/tokens/:tokenId/force-burn",
+  requirePermissions("tokens:admin"),
+  validateBody(forceBurnSchema),
+  executeForceBurn
+);
 
 // Authority Updates
 issuance.post(
   "/tokens/:tokenId/authority/prepare",
   requirePermissions("tokens:admin"),
+  validateBody(updateAuthoritySchema),
   prepareUpdateAuthority
 );
 issuance.post(
   "/tokens/:tokenId/authority",
   requirePermissions("tokens:admin"),
+  validateBody(updateAuthoritySchema),
   policyGate({ extract: extractUpdateAuthorityPolicyCandidate }),
   executeUpdateAuthority
 );
 
 // Pause/Unpause
-issuance.post("/tokens/:tokenId/pause", requirePermissions("tokens:admin"), pauseToken);
-issuance.post("/tokens/:tokenId/unpause", requirePermissions("tokens:admin"), unpauseToken);
+issuance.post(
+  "/tokens/:tokenId/pause",
+  requirePermissions("tokens:admin"),
+  validateBody(pauseTokenSchema),
+  pauseToken
+);
+issuance.post(
+  "/tokens/:tokenId/unpause",
+  requirePermissions("tokens:admin"),
+  validateBody(pauseTokenSchema),
+  unpauseToken
+);
 
 // Freeze/Unfreeze
-issuance.post("/tokens/:tokenId/freeze", requirePermissions("tokens:admin"), freezeAccount);
-issuance.post("/tokens/:tokenId/unfreeze", requirePermissions("tokens:admin"), unfreezeAccount);
+issuance.post(
+  "/tokens/:tokenId/freeze",
+  requirePermissions("tokens:admin"),
+  validateBody(freezeSchema),
+  freezeAccount
+);
+issuance.post(
+  "/tokens/:tokenId/unfreeze",
+  requirePermissions("tokens:admin"),
+  validateBody(unfreezeSchema),
+  unfreezeAccount
+);
 issuance.get("/tokens/:tokenId/frozen", requirePermissions("tokens:read"), listFrozenAccounts);
 
 // Allowlist
@@ -158,7 +256,12 @@ issuance.get(
   listAllowlistLabels
 );
 issuance.get("/tokens/:tokenId/allowlist", requirePermissions("tokens:read"), listAllowlist);
-issuance.post("/tokens/:tokenId/allowlist", requirePermissions("tokens:write"), addAllowlistEntry);
+issuance.post(
+  "/tokens/:tokenId/allowlist",
+  requirePermissions("tokens:write"),
+  validateBody(addAllowlistSchema),
+  addAllowlistEntry
+);
 issuance.delete(
   "/tokens/:tokenId/allowlist/:entryId",
   requirePermissions("tokens:write"),
@@ -187,6 +290,7 @@ issuance.post(
   "/tokens/:tokenId/holders",
   requireAssetProfilesFeature,
   requirePermissions("tokens:write"),
+  validateBody(enrollHolderSchema),
   enrollHolder
 );
 
@@ -224,10 +328,16 @@ issuance.post(
   cancelWorkflowExecution
 );
 issuance.get("/tokens/:tokenId/workflows", requirePermissions("tokens:read"), listWorkflows);
-issuance.post("/tokens/:tokenId/workflows", requirePermissions("tokens:write"), createWorkflow);
+issuance.post(
+  "/tokens/:tokenId/workflows",
+  requirePermissions("tokens:write"),
+  validateBody(createWorkflowSchema),
+  createWorkflow
+);
 issuance.patch(
   "/tokens/:tokenId/workflows/:workflowId",
   requirePermissions("tokens:write"),
+  validateBody(updateWorkflowSchema),
   updateWorkflow
 );
 issuance.delete(

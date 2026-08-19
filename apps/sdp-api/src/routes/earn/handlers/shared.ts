@@ -1,11 +1,13 @@
 import { z } from "zod";
-import { badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
+import { badRequestParams, badRequestQuery } from "@/lib/errors";
 import type { AppContext } from "../context";
 
 /**
  * Request-parsing and list-envelope helpers shared by every earn handler, so
  * the zod-failure -> 400 mapping stays on one convention per input class
- * (query/params/body) instead of being repeated per endpoint.
+ * (query/params) instead of being repeated per endpoint. Body validation is
+ * route-level middleware (`validateBody`); handlers read it via
+ * `c.req.valid("json")`.
  */
 
 export function parseQuery<Schema extends z.ZodType>(
@@ -29,19 +31,6 @@ export function parseParams<Schema extends z.ZodType>(
 
   if (!parsed.success) {
     throw badRequestParams();
-  }
-
-  return parsed.data;
-}
-
-export async function parseBody<Schema extends z.ZodType>(
-  c: AppContext,
-  schema: Schema
-): Promise<z.output<Schema>> {
-  const parsed = schema.safeParse(await c.req.json());
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
   }
 
   return parsed.data;

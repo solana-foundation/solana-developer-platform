@@ -30,7 +30,6 @@ import type {
   UpsertEarnStrategyInput,
 } from "./earn.repository";
 import {
-  EARN_SEED_REFERENCE_PREFIX,
   generateEarnProgramWithdrawalId,
   generateEarnProviderWalletId,
   generateEarnStrategyId,
@@ -272,11 +271,6 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       // one thing this pass leaves behind; it is invisible to every read anyway
       // (the catalogue and program-creation paths both filter `status = 'active'`).
       //
-      // Dev-seed fixtures are outside every provider's key space (providers list
-      // bare ids, fixtures carry the prefix), so "the provider did not list it"
-      // says nothing about them — the seed relies on exactly that to keep its
-      // deliberately-paused fixture paused, and prunes its own stale rows.
-      //
       // An empty keep set would match EVERY active row (`= ANY('{}')` is false,
       // so `NOT` admits everything) and delete the provider's whole shelf.
       // "The provider listed nothing" is indistinguishable from a misconfigured
@@ -292,13 +286,10 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
             WHERE provider = ?
               AND environment = ?
               AND status = 'active'
-              AND provider_reference NOT LIKE ?
               AND NOT (provider_reference = ANY(?))
             RETURNING provider_reference`
         )
-        .bind(input.provider, input.environment, `${EARN_SEED_REFERENCE_PREFIX}%`, [
-          ...input.listedProviderReferences,
-        ])
+        .bind(input.provider, input.environment, [...input.listedProviderReferences])
         .all<{ provider_reference: string }>();
 
       return (rows.results ?? []).map((row) => row.provider_reference);
@@ -322,6 +313,37 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       if (input.liquidityTerm) {
         conditions.push("liquidity_term = ?");
         bindings.push(input.liquidityTerm);
+      }
+      if (input.providers !== undefined) {
+        if (input.providers.length === 0) {
+          // `provider IN ()` is a syntax error, and falling through to "no
+          // filter" would surface EVERY provider the moment the offered set went
+          // empty — the exact inversion this filter exists to prevent.
+          conditions.push("1 = 0");
+        } else {
+          conditions.push(`provider IN (${input.providers.map(() => "?").join(", ")})`);
+          bindings.push(...input.providers);
+        }
+      }
+      if (input.excludeProviderKeys?.length) {
+        const placeholders = input.excludeProviderKeys.map(() => "?").join(", ");
+        // Concatenated so one binding list covers both halves of the key; a bare
+        // provider_reference match could hide another provider's vault that
+        // happens to share a reference.
+        conditions.push(`(provider || ':' || provider_reference) NOT IN (${placeholders})`);
+        bindings.push(...input.excludeProviderKeys);
+      }
+      for (const [provider, references] of Object.entries(input.allowedProviderReferences ?? {})) {
+        if (references.length === 0) {
+          conditions.push("provider <> ?");
+          bindings.push(provider);
+          continue;
+        }
+        // Scoped to the one provider: every other provider's rows pass through,
+        // so adding an allowlist for one shelf never silently curates another.
+        const placeholders = references.map(() => "?").join(", ");
+        conditions.push(`(provider <> ? OR provider_reference IN (${placeholders}))`);
+        bindings.push(provider, ...references);
       }
       for (const rawTerm of input.excludeRelatedTerms ?? []) {
         const term = rawTerm.trim().toLowerCase();

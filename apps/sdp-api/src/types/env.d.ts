@@ -84,6 +84,18 @@ export interface Env {
 
   // Solana configuration
   SOLANA_RPC_URL?: string;
+  /**
+   * Optional PER-CLUSTER overrides for the Earn execution path.
+   *
+   * One API process serves both clusters — sandbox projects are devnet,
+   * production projects are mainnet-beta — so a single `SOLANA_RPC_URL` cannot
+   * be correct for both. Unset falls back to `SOLANA_RPC_URL`, which must then
+   * prove its chain by genesis hash before anything is built against it
+   * (`assertClusterEndpoint`), so a single-cluster deployment keeps working and
+   * a mismatch is a refusal rather than a confidently wrong transaction.
+   */
+  SOLANA_DEVNET_RPC_URL?: string;
+  SOLANA_MAINNET_RPC_URL?: string;
   SOLANA_RPC_DEFAULT_PROVIDER?: OrganizationRpcProvider;
   SOLANA_RPC_TRITON_URL?: string;
   SOLANA_RPC_TRITON_API_KEY?: string;
@@ -201,7 +213,6 @@ export interface Env {
   MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN?: string;
 
   // Recurring payment collection controls
-  PAYMENTS_RECURRING_COLLECTION_ENABLED?: string;
   PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE?: string;
   PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES?: string;
 
@@ -310,10 +321,12 @@ declare module "hono" {
       role: string;
       permissions: Permission[];
       environment: ApiKeyEnvironment;
+      walletScope?: "all" | "selected";
       signingWalletId: string | null;
       signingWalletIds?: string[];
       walletBindings?: Array<{
         walletId: string;
+        custodyWalletId?: string;
         permissions: Permission[];
       }>;
     };

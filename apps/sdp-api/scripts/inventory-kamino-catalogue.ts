@@ -227,10 +227,11 @@ created. SDP catalogues the subset that is a stablecoin vault, is named, and
 holds real money. This report is what that filter admits and refuses, so the
 threshold behind it can be reviewed rather than taken on faith.
 
-**Mainnet only.** \`/kvaults/*\` accepts no environment parameter and Kamino has
-no devnet deployment, so there is one shelf and it is the mainnet one. SDP
-catalogues it into BOTH the sandbox and production environments — sandbox rows
-carry \`host_cluster = 'mainnet-beta'\` and are never fundable there.
+**This report covers the MAINNET shelf only**, because that is what
+\`api.kamino.finance\` indexes — it accepts \`?env=devnet\` and returns the same
+mainnet payload. Kamino does have a devnet deployment (program \`devkRng…\`), and
+SDP catalogues it separately by reading the chain, so non-production
+environments are served devnet vaults and never appear here.
 
 **Every row is \`defi\`, and no row carries a curator.** Permissionless creation
 means the vault NAME is chosen by whoever created it, so SDP quotes it but

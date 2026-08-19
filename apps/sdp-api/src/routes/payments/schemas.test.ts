@@ -8,6 +8,7 @@ import {
   PAYMENT_TOKEN_VALIDATION_MESSAGE,
   updateRecurringPaymentSchema,
   updateWalletPolicySchema,
+  walletPolicyRuleSchema,
 } from "./schemas";
 
 const USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address;
@@ -272,6 +273,42 @@ describe("wallet policy destination rule allowlist schema", () => {
 });
 
 describe("wallet policy rule schema", () => {
+  it("rejects an operation type rule with an unknown operation type", () => {
+    const result = walletPolicyRuleSchema.safeParse({
+      kind: "operation_type",
+      operationType: "signer-check",
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts the program family now produced by Earn vault deposits", () => {
+    const result = walletPolicyRuleSchema.safeParse({
+      kind: "operation_family",
+      family: "program",
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts the Earn vault deposit operation type", () => {
+    const result = walletPolicyRuleSchema.safeParse({
+      kind: "operation_type",
+      operationType: "earn_vault_deposit",
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects an approval rule with an unknown operation type", () => {
+    const result = walletPolicyRuleSchema.safeParse({
+      kind: "approval",
+      operationTypes: ["issuance_mint_execute", "signer-check"],
+    });
+
+    expect(result.success).toBe(false);
+  });
+
   it("accepts operation_type and standalone asset rules", () => {
     const rules = [
       {
@@ -308,7 +345,7 @@ describe("wallet policy rule schema", () => {
         expect.arrayContaining([
           expect.objectContaining({
             path: ["rules", 0, "operationType"],
-            message: "operationType must not be empty",
+            message: "operation type must be one of the supported wallet operation types",
           }),
           expect.objectContaining({
             path: ["rules", 1, "assets", 0],

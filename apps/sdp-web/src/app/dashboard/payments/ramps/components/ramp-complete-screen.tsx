@@ -6,6 +6,7 @@ import { CheckCircle2Icon } from "lucide-react";
 import {
   formatMinorCurrencyAmount,
   formatTimestamp,
+  resolveTransferTokenLabel,
 } from "@/app/dashboard/payments/payments-overview.utils";
 import { useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel } from "@/lib/ramps";
@@ -30,8 +31,8 @@ export function RampCompleteScreen({
 }) {
   const t = useTranslations();
   const onramp = direction === "onramp";
-  const cryptoAmount =
-    transfer.amount && transfer.token ? `${transfer.amount} ${transfer.token.toUpperCase()}` : null;
+  const tokenLabel = resolveTransferTokenLabel(transfer.token);
+  const cryptoAmount = transfer.amount && tokenLabel ? `${transfer.amount} ${tokenLabel}` : null;
   const fiatAmount =
     transfer.fiatAmount && transfer.fiatCurrency
       ? `${transfer.fiatAmount} ${transfer.fiatCurrency.toUpperCase()}`

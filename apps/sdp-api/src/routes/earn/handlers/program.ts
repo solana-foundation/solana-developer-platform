@@ -1,18 +1,18 @@
-import {
-  isClusterFundableInEnvironment,
-  resolveEarnProviderClient,
-  supportsPortfolioWallets,
-} from "@sdp/earn";
+import { isClusterFundableInEnvironment, supportsPortfolioWallets } from "@sdp/earn";
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnPortfolioWalletProvider } from "@sdp/earn/types";
 import type {
   EarnPortfolioAllocationInput,
-  EarnPortfolioDepositsPage,
   EarnPortfolioWalletSnapshot,
   EarnPortfolioWithdrawal,
-  EarnPortfolioWithdrawalPreview,
   EarnPortfolioYield,
+  EarnProgram,
+  EarnProgramDepositsResponse,
+  EarnProgramResponse,
+  EarnProgramWithdrawalPreviewResponse,
   EarnProgramWithdrawalRecord,
+  EarnProgramWithdrawalResponse,
+  ListEarnProgramsResponse,
   ListEarnProgramWithdrawalsResponse,
 } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
@@ -33,28 +33,40 @@ import {
 } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
+import { resolveEarnProviderClient } from "@/services/earn-provider-registry";
 import {
   applyEarnWithdrawalObservationByReference,
   applyEarnWithdrawalObservationToRow,
 } from "@/services/earn-withdrawal-ledger.service";
 import {
   assertEarnProviderConfigured,
+  assertEarnProviderSurfaced,
   assertProviderAvailable,
 } from "@/services/provider-availability.service";
 import { type AppContext, earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
 import {
-  earnProgramCreateSchema,
+  type earnProgramCreateSchema,
   earnProgramDepositsQuerySchema,
   earnProgramParamsSchema,
-  earnProgramRetargetSchema,
+  type earnProgramRetargetSchema,
   earnProgramsListQuerySchema,
-  earnProgramWithdrawalCreateSchema,
+  type earnProgramWithdrawalCreateSchema,
   earnProgramWithdrawalParamsSchema,
-  earnProgramWithdrawalPreviewSchema,
+  type earnProgramWithdrawalPreviewSchema,
   earnProgramWithdrawalsListQuerySchema,
 } from "../schemas";
-import { listResponse, pageWindow, parseBody, parseParams, parseQuery } from "./shared";
+import { listResponse, pageWindow, parseParams, parseQuery } from "./shared";
+
+export type {
+  EarnProgram,
+  EarnProgramDepositsResponse,
+  EarnProgramResponse,
+  EarnProgramWithdrawalPreviewResponse,
+  EarnProgramWithdrawalResponse,
+  ListEarnProgramsResponse,
+} from "@sdp/types";
 
 /**
  * Earn "programs": provider-managed portfolio wallets, N per (organization,
@@ -88,43 +100,6 @@ import { listResponse, pageWindow, parseBody, parseParams, parseQuery } from "./
  * API); the ledger list takes no provider gate at all — the audit trail
  * outlives even credential removal.
  */
-
-// Response envelopes (route-owned until a second surface needs them in @sdp/types).
-export interface EarnProgram {
-  /** SDP's own program id — how every `/programs/:programId` route names it. */
-  id: string;
-  provider: string;
-  label: string | null;
-  createdAt: string;
-  wallet: EarnPortfolioWalletSnapshot;
-  /**
-   * Yield metrics, absent when the provider's yield endpoint fails. Balances
-   * are the load-bearing part of this response, so a yield outage degrades the
-   * headline rate rather than the whole program view.
-   */
-  yield?: EarnPortfolioYield;
-}
-
-export interface EarnProgramResponse {
-  program: EarnProgram;
-}
-
-export interface ListEarnProgramsResponse {
-  programs: EarnProgram[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
-
-export type EarnProgramDepositsResponse = EarnPortfolioDepositsPage;
-
-export interface EarnProgramWithdrawalPreviewResponse {
-  preview: EarnPortfolioWithdrawalPreview;
-}
-
-export interface EarnProgramWithdrawalResponse {
-  withdrawal: EarnPortfolioWithdrawal;
-}
 
 function mapProgram(
   row: EarnProviderWalletRow,
@@ -455,11 +430,21 @@ export const listEarnPrograms = async (c: AppContext) => {
   return success(c, response);
 };
 
-export const createEarnProgram = async (c: AppContext) => {
-  const body = await parseBody(c, earnProgramCreateSchema);
+export const createEarnProgram = async (
+  c: ValidatedBodyContext<typeof earnProgramCreateSchema>
+) => {
+  const body = c.req.valid("json");
   const client = requirePortfolioClient(body.provider);
   const auth = getAuth(c);
   const environment = resolveSdpEnvironment(c);
+
+  // Platform-level "we do not offer this provider", ahead of the org-level
+  // entitlement check below: no override lifts it, so answering "requires
+  // manual activation" would send the caller to a door that does not exist.
+  // Creation is the ONLY route that takes this gate — an organization holding a
+  // program with an un-surfaced provider keeps every read, re-target,
+  // withdrawal and ledger route (ADR 0002).
+  assertEarnProviderSurfaced(client.provider);
 
   // Money-in gate: full entitlement + mode-specific credential check.
   await assertProviderAvailable(
@@ -542,9 +527,11 @@ export const createEarnProgram = async (c: AppContext) => {
  * forcing withdraw → wait for settlement → re-deposit for what the provider
  * supports natively.
  */
-export const retargetEarnProgram = async (c: AppContext) => {
+export const retargetEarnProgram = async (
+  c: ValidatedBodyContext<typeof earnProgramRetargetSchema>
+) => {
   const { programId } = parseParams(c, earnProgramParamsSchema);
-  const body = await parseBody(c, earnProgramRetargetSchema);
+  const body = c.req.valid("json");
   const { row, client } = await requireProgramContext(c, programId);
   const auth = getAuth(c);
   const environment = resolveSdpEnvironment(c);
@@ -618,9 +605,11 @@ export const listEarnProgramDeposits = async (c: AppContext) => {
   return success(c, response);
 };
 
-export const previewEarnProgramWithdrawal = async (c: AppContext) => {
+export const previewEarnProgramWithdrawal = async (
+  c: ValidatedBodyContext<typeof earnProgramWithdrawalPreviewSchema>
+) => {
   const { programId } = parseParams(c, earnProgramParamsSchema);
-  const body = await parseBody(c, earnProgramWithdrawalPreviewSchema);
+  const body = c.req.valid("json");
   const { row, client, testMode } = await requireProgramContext(c, programId);
 
   // Money-out path: credentials only, never the entitlement gate.
@@ -714,9 +703,11 @@ async function persistWithdrawalObservation(
   }
 }
 
-export const createEarnProgramWithdrawal = async (c: AppContext) => {
+export const createEarnProgramWithdrawal = async (
+  c: ValidatedBodyContext<typeof earnProgramWithdrawalCreateSchema>
+) => {
   const { programId } = parseParams(c, earnProgramParamsSchema);
-  const body = await parseBody(c, earnProgramWithdrawalCreateSchema);
+  const body = c.req.valid("json");
   const { row, client, testMode } = await requireProgramContext(c, programId);
 
   // Money-out path: credentials only, never the entitlement gate.

@@ -74,6 +74,12 @@ Independent switches, all runtime-safe:
   holds until the status is deliberately written back. See the playbook's vault
   checklist.
 - **Feature flag:** the whole `/v1/earn` family sits behind `EARN_ENABLED`.
+- **Surfacing (2026-08-14 addendum):** `EARN_PROVIDER_SURFACING` declares which
+  registered providers SDP currently OFFERS. An un-surfaced provider keeps its
+  code, credentials, crons and catalogue rows, but its strategies vanish from
+  every public read and `POST /programs` refuses it. This is the *product*
+  switch — the four above are deployment and customer switches — and it is the
+  only one that no per-organization override can lift.
 
 ### Invariants that make disabling safe
 
@@ -92,6 +98,11 @@ Independent switches, all runtime-safe:
   remain readable regardless of provider entitlement, and the withdrawal
   ledger list carries no provider gate at all (2026-08-11 addendum), so
   dashboards and partner integrations keep working while a provider is off.
+  Surfacing is the one exception, and only for the *catalogue* read: an
+  un-surfaced provider's strategies are hidden, while every route that reads or
+  exits an existing program stays open (2026-08-14 addendum). Hiding a shelf
+  nobody may buy from is presentation; hiding a position someone holds would be
+  hiding their money.
 
 ## Consequences
 
@@ -420,8 +431,11 @@ second shape that the pluggability constraint has to absorb without a rewrite.
   whoever next provisions the service. The drift test gained an inverse guard so
   a credentialed provider cannot slip through by declaring nothing.
 - **The environment no longer implies the cluster; `hostCluster` states it.**
-  Kamino is deployed on mainnet only and is catalogued into BOTH environments,
-  so a sandbox row honestly names a live mainnet vault and a mainnet mint.
+  (The Kamino premise below was later found to be WRONG — it does have a devnet
+  deployment; see the 2026-08-14 addendum. The mechanism this bullet introduces
+  is unchanged and still load-bearing for any genuinely single-cluster provider.)
+  Kamino was believed to be mainnet-only and was catalogued into BOTH
+  environments, so a sandbox row honestly named a live mainnet vault and mint.
   `status` could not carry this — it is the operator's stop switch, and reusing
   it would both misstate the reason and collide with the sync's refusal to
   overwrite an operator pause. So every `ProviderStrategySnapshot` states the
@@ -447,3 +461,126 @@ second shape that the pluggability constraint has to absorb without a rewrite.
   type carries figures only, so it can neither admit a vault the catalogue
   refused nor change what a strategy is. Freshness is cadence, not blending.
   A provider whose rates cost one request per vault should not implement it.
+
+## Addendum (2026-08-14) — surfacing: which registered providers SDP actually offers
+
+The switches above (credentials, org entitlement, strategy status, feature flag)
+answer *deployment* and *customer* questions. None answers the **product**
+question — "is SDP selling this provider right now?" — and the first time it was
+asked, the honest options were all bad: delete a working integration, remove its
+credentials and let a `PROVIDER_NOT_CONFIGURED` stand in for a business
+decision, or pause every one of its strategies individually and hope the next
+catalogue sync respects it.
+
+So registration and surfacing are now separate declarations.
+`EARN_PROVIDER_SURFACING` in `packages/sdp-types/src/provider-access.ts` is an
+exhaustive `Record<EarnProviderId, boolean>` beside `EARN_PROVIDERS`: the latter
+is "what this deployment can talk to", the former is "what we offer today".
+
+- **One declaration, three consumers, no provider ids anywhere else.**
+  `GET /strategies` (list and detail) hides an un-surfaced provider's rows;
+  `POST /programs` refuses to open a new position with it
+  (`assertEarnProviderSurfaced`); the dashboard derives
+  `EARN_PROGRAM_CREATION_ENABLED` and drops every create affordance. Hiding at
+  the API rather than in the browser is deliberate — the API is the surface the
+  dashboard *and* every partner integration read, and a client-side copy of a
+  visibility rule is the second thing that drifts toward permissive.
+- **Exhaustive on purpose.** A provider added to `EARN_PROVIDERS` without an
+  entry is a compile error, so "we registered a provider and never decided
+  whether it was public" cannot happen quietly. The default for a new id is a
+  decision, not an omission.
+- **It gates the way IN, and only the way in.** Reads, withdrawal previews,
+  withdrawals, the ledger, and re-targeting an existing program all ignore
+  surfacing entirely. This is the money-out-beats-money-off invariant applied to
+  a new switch: an organization holding a position taken while a provider was
+  offered keeps every route that reads or exits it, and un-surfacing can never
+  trap funds. `POST /programs` is the only route that opens a *new* commitment,
+  so it is the only one that refuses.
+- **Its 403 is not the entitlement 403.** `assertProviderAvailable` answers an
+  organization-scoped question and tells the caller to request manual
+  activation. No override lifts surfacing, so it runs first and says "not
+  currently offered" — pointing a caller at an activation door that does not
+  exist is worse than a plain refusal.
+- **The catalogue sync and metrics refresh keep running.** `earn_strategies`
+  stays a truthful provider inventory, and re-surfacing takes effect on deploy
+  rather than after the next hourly pass. Same reasoning as the API's
+  `HIDDEN_STRATEGY_TERMS`: filter at the policy boundary, never by refusing to
+  store what a provider reports.
+
+**First application: Ground un-surfaced, Kamino the only offered provider.**
+Ground is the only portfolio-capable provider, so with it un-surfaced nothing
+can create a program and Earn is browse-only — a Kamino comparison catalogue
+plus whatever programs already exist. That is a product consequence of the
+switch, not a property of it; re-surfacing Ground is a one-line change.
+
+Two consequences worth naming, because both are load-bearing and neither is
+obvious:
+
+- **`assertKnownYieldSources` deliberately does NOT inherit the hide.** It
+  validates re-target allocations against the STORED catalogue, so a position
+  may keep pointing at a row the browse surface no longer shows. Collapsing the
+  two would freeze an existing customer's allocation because of an editorial
+  decision about new customers.
+- **The create test suite is config-independent.** `earn-program.test.ts`
+  partial-mocks `isEarnProviderSurfaced` to force it on, because idempotency,
+  replay, gate order and environment isolation have to keep working for whichever
+  provider is offered next — the gate itself gets its own tests that flip the
+  mock off and run against the real map.
+
+## Addendum (2026-08-14) — Kamino has a devnet deployment; each environment catalogues its own cluster
+
+The 2026-08-13 addendum recorded "Kamino is deployed on mainnet only" as a
+measured fact and built on it: sandbox was served the mainnet shelf, stamped
+`hostCluster: "mainnet-beta"`, permanently `fundable: false`. **The premise was
+wrong**, and the cost was a sandbox catalogue an integrator could look at and
+never act on.
+
+Measured 2026-08-14, on-chain:
+
+- Kamino runs a **separate devnet kvault program**,
+  `devkRngFnfp4gBc5a3LsadgbQKdPo8MSZ4prFiNSVmY` — not mainnet's `KvauGM…`, which
+  is *also* deployed to devnet but owns **zero** accounts there. Pointing at the
+  wrong one returns a confident empty shelf rather than an error.
+- **21 K-Vaults exist on devnet**, all with shares issued. Nine are denominated
+  in the official devnet USDC mint (`4zMMC…`, what the Circle faucet dispenses),
+  and several deliberately mirror mainnet names — Allez USDC, Steakhouse USDC,
+  RockawayX RWA USDC, Gauntlet Frontier USDC.
+
+### Why the original measurement missed it
+
+`api.kamino.finance` indexes mainnet only, and says so nowhere. `?env=devnet`
+and `?cluster=devnet` both return **200 with a byte-identical mainnet payload**
+(confirmed by hashing the responses), there is no devnet API host, and
+`/kvaults/vaults/{devnet pubkey}/metrics` answers 404. A parameter that is
+accepted and silently ignored is indistinguishable from a parameter that works.
+
+**The generalisable lesson, now in the playbook:** a hosted API is not evidence
+about cluster deployment. Check the chain for a per-cluster program id.
+
+### What changed
+
+- **Two clusters, two data SOURCES, not one source with a parameter.**
+  Production reads the mainnet REST shelf; every other environment reads devnet
+  vaults on-chain (`getProgramAccounts`, `VaultState` decoded positionally —
+  `@sdp/earn` still carries no dependency but `@sdp/types`). Non-production
+  issues no request to `api.kamino.finance` at all, which is stronger than
+  fetching and filtering.
+- **The catalogue sync refuses to STORE a mainnet instrument outside
+  production.** Provider-neutral, at the single writer of `earn_strategies`. It
+  does not trust a client to get this right, and it is independent of the
+  delist pass — which would otherwise leave stale mainnet rows behind whenever a
+  devnet read failed.
+- **No metrics outside production.** The bulk metrics endpoint is mainnet's, so
+  `listStrategyMetrics` returns `[]` elsewhere and sandbox rows render no rate.
+  A devnet APY would mean blending devnet Klend reserve rates — SDK-sized work
+  for a number that is ≈0 because those reserves have no real borrowers. `—` is
+  the honest answer.
+
+### What did NOT change, deliberately
+
+`hostCluster`, `fundable`, and `isClusterFundableInEnvironment` all stay. They
+stop *firing* for Kamino — its rows now match their environment's cluster in
+both — but they still guard Ground, production Kamino, rows already stored under
+the old behaviour, and the next genuinely single-cluster provider. The
+simplification here is to the mental model ("catalogued but not fundable" was a
+Kamino-shaped special case), not to the safety machinery.

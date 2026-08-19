@@ -1,9 +1,14 @@
 import { badRequest } from "@sdp/payments/errors";
 import { isAddress } from "@sdp/solana/address";
 import type { Permission } from "@sdp/types";
+import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { walletNotFound } from "@/lib/errors";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
+import {
+  assertApiKeyWalletAccess,
+  resolveApiKeyCustodyWalletId,
+} from "@/services/api-key-scope.service";
+import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { AppContext } from "./context";
@@ -26,6 +31,34 @@ export async function resolveScope(c: AppContext) {
 }
 
 export type ResolvedScope = Awaited<ReturnType<typeof resolveScope>>;
+
+export async function resolvePolicyWalletFromParams(
+  c: AppContext,
+  requiredWalletPermissions: Permission[]
+) {
+  const auth = getAuth(c);
+  const walletId = c.req.param("walletId");
+  if (!walletId) {
+    throw walletNotFound();
+  }
+  const targets = new CustodyRuntimeTargets(getDb(c.env), c.env, new Map());
+  const custodyWalletId = resolveApiKeyCustodyWalletId(auth, walletId, requiredWalletPermissions);
+  const wallet = custodyWalletId
+    ? await targets.findOperationalWalletById({
+        organizationId: auth.organizationId,
+        projectId: auth.projectId ?? undefined,
+        custodyWalletId,
+      })
+    : await targets.findOperationalWallet({
+        organizationId: auth.organizationId,
+        projectId: auth.projectId ?? undefined,
+        walletId,
+      });
+  if (!wallet) {
+    throw walletNotFound();
+  }
+  return { auth, wallet };
+}
 
 export function resolveWallet(wallets: CustodyWallet[], walletId: string): CustodyWallet {
   const wallet = wallets.find((entry) => entry.walletId === walletId);

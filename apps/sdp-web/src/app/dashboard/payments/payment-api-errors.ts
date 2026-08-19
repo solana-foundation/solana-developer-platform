@@ -24,16 +24,31 @@ export type PaymentApiErrorBody = {
  * by policy" and nothing else — which is where people actually hit a denial, so the
  * reason has to be joined on here and not only in the custody actions.
  */
-export function getPaymentApiError(body: PaymentApiErrorBody, fallback: string): string {
-  const error = body.error;
+export function getPaymentApiError(body: unknown, fallback: string): string {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return fallback;
+  }
+
+  const error = "error" in body ? body.error : undefined;
   if (typeof error === "string" && error) {
     return error;
   }
-  if (typeof error === "object" && typeof error.message === "string" && error.message) {
-    const reason = typeof error.details?.reason === "string" ? error.details.reason.trim() : "";
-    return withPolicyDenialReason(error.message, reason || null);
+  if (typeof error === "object" && error !== null && !Array.isArray(error)) {
+    const message = "message" in error ? error.message : undefined;
+    if (typeof message === "string" && message) {
+      const details = "details" in error ? error.details : undefined;
+      const reason =
+        typeof details === "object" &&
+        details !== null &&
+        !Array.isArray(details) &&
+        "reason" in details &&
+        typeof details.reason === "string"
+          ? details.reason.trim()
+          : "";
+      return withPolicyDenialReason(message, reason || null);
+    }
   }
-  if (typeof body.message === "string" && body.message) {
+  if ("message" in body && typeof body.message === "string" && body.message) {
     return body.message;
   }
   return fallback;
@@ -45,7 +60,7 @@ export function parsePaymentApiErrorText(body: string, fallback = body): string 
   }
 
   try {
-    return getPaymentApiError(JSON.parse(body) as PaymentApiErrorBody, fallback);
+    return getPaymentApiError(JSON.parse(body), fallback);
   } catch {
     return body;
   }

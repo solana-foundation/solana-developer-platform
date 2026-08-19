@@ -20,7 +20,6 @@ import type {
   ListEarnProviderWalletsResult,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
-import { EARN_SEED_REFERENCE_PREFIX } from "./earn.repository";
 import { createPostgresEarnRepository } from "./earn.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_earn_repo_test";
@@ -406,21 +405,6 @@ describe("EarnRepository (postgres)", () => {
       expect(second).toEqual([]);
     });
 
-    it("never touches dev-seed fixtures, which no provider lists", async () => {
-      const fixture = await seedStrategy({
-        providerReference: `${EARN_SEED_REFERENCE_PREFIX}kamino-allez-usdc`,
-      });
-
-      const deleted = await repo.deleteUnlistedStrategies({
-        provider: "ground",
-        environment: "sandbox",
-        listedProviderReferences: ["kamino-steakhouse-usdc"],
-      });
-
-      expect(deleted).toEqual([]);
-      expect((await repo.getStrategyById(fixture.id))?.status).toBe("active");
-    });
-
     it("refuses an empty keep set rather than deleting the whole shelf", async () => {
       // "The provider listed nothing" is indistinguishable from a misconfigured
       // account, so it can never tear down a catalogue.
@@ -478,6 +462,80 @@ describe("EarnRepository (postgres)", () => {
         offset: 0,
       });
       expect(all.total).toBe(2);
+    });
+  });
+
+  /**
+   * The per-vault curation knobs behind the API's HIDDEN_VAULTS / CURATED_VAULTS
+   * config. Both filter in SQL, so `total` has to move with the rows — a
+   * curated page that still counted the hidden vaults would paginate a reader
+   * into empty windows.
+   */
+  describe("listStrategies per-vault curation", () => {
+    it("drops a denied vault from rows AND total, keyed on provider:reference", async () => {
+      const kept = await seedStrategy({ providerReference: "vault-kept" });
+      await seedStrategy({ providerReference: "vault-denied" });
+
+      const { rows, total } = await repo.listStrategies({
+        environment: "sandbox",
+        // `veda` is this suite's default seed provider — deliberately not Ground,
+        // so the curation is proven against the canonical contract, not one
+        // provider's quirks.
+        excludeProviderKeys: ["veda:vault-denied"],
+        limit: 10,
+        offset: 0,
+      });
+
+      expect(total).toBe(1);
+      expect(rows.map((row) => row.id)).toEqual([kept.id]);
+    });
+
+    it("scopes the denylist to its provider, so a shared reference is not collateral", async () => {
+      // Same reference under two providers: only the keyed one may disappear.
+      const ground = await seedStrategy({ provider: "ground", providerReference: "shared-ref" });
+      const kamino = await seedStrategy({ provider: "kamino", providerReference: "shared-ref" });
+
+      const { rows } = await repo.listStrategies({
+        environment: "sandbox",
+        excludeProviderKeys: ["ground:shared-ref"],
+        limit: 10,
+        offset: 0,
+      });
+
+      expect(rows.map((row) => row.id)).toEqual([kamino.id]);
+      expect(rows.map((row) => row.id)).not.toContain(ground.id);
+    });
+
+    it("shows only the allowlisted references for a curated provider", async () => {
+      const picked = await seedStrategy({ provider: "kamino", providerReference: "kv-picked" });
+      await seedStrategy({ provider: "kamino", providerReference: "kv-other" });
+      // An uncurated provider passes through untouched.
+      const ground = await seedStrategy({ provider: "ground", providerReference: "ground-vault" });
+
+      const { rows, total } = await repo.listStrategies({
+        environment: "sandbox",
+        allowedProviderReferences: { kamino: ["kv-picked"] },
+        limit: 10,
+        offset: 0,
+      });
+
+      expect(total).toBe(2);
+      expect(rows.map((row) => row.id).sort()).toEqual([ground.id, picked.id].sort());
+    });
+
+    it("reads an EMPTY allowlist literally — that provider shows nothing", async () => {
+      await seedStrategy({ provider: "kamino", providerReference: "kv-any" });
+      const ground = await seedStrategy({ provider: "ground", providerReference: "ground-vault" });
+
+      const { rows, total } = await repo.listStrategies({
+        environment: "sandbox",
+        allowedProviderReferences: { kamino: [] },
+        limit: 10,
+        offset: 0,
+      });
+
+      expect(total).toBe(1);
+      expect(rows.map((row) => row.id)).toEqual([ground.id]);
     });
   });
 

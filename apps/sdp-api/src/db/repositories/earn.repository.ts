@@ -45,10 +45,11 @@ export interface EarnStrategyRow {
   risk_metadata: EarnStrategyRiskMetadata;
   status: EarnStrategyStatus;
   /**
-   * Cluster the instrument lives on — NOT implied by `environment`. A
-   * mainnet-only provider (Kamino) is catalogued into both environments, so a
-   * sandbox row may legitimately read `mainnet-beta`; that row is browsable and
-   * never fundable. See migration 0057 and `isClusterFundableInEnvironment`.
+   * Cluster the instrument lives on — NOT implied by `environment`, which is
+   * why it is a column. Note the catalogue sync now REFUSES to write a
+   * `mainnet-beta` row outside production, so a sandbox row reading
+   * `mainnet-beta` is not legitimate: it predates that guard and is waiting for
+   * a delist pass. See migration 0057 and `isClusterFundableInEnvironment`.
    */
   host_cluster: SolanaCluster;
   environment: SdpEnvironment;
@@ -152,15 +153,6 @@ export interface UpdateEarnStrategyMetricsInput {
 }
 
 /**
- * Provider-reference prefix the dev seed stamps on every fixture row it writes
- * (apps/sdp-api/scripts/seed-earn-demo.ts). Canonical HERE, not in the script,
- * because it partitions this table's key space and the delist pass has to honour
- * that partition: providers only ever list their own bare ids, so a prefixed row
- * is by construction not a row any provider can confirm or deny.
- */
-export const EARN_SEED_REFERENCE_PREFIX = "seed-demo-";
-
-/**
  * Delist pass input: everything the provider still lists for (provider,
  * environment). Anything else the table holds is stale — a vault the provider
  * delisted or one a tightened catalogue gate now refuses — and is deleted.
@@ -188,6 +180,36 @@ export interface ListEarnStrategiesInput {
    * the sync still persists the provider's complete routable catalogue.
    */
   excludeRelatedTerms?: readonly string[];
+  /**
+   * Server-owned provider allowlist — the offered set
+   * (`SURFACED_EARN_PROVIDERS`), never a caller's filter.
+   *
+   * An EMPTY array means "no provider is offered" and returns nothing. That is
+   * the whole point of accepting the array rather than an optional single id:
+   * the caller passes the offered set as-is, and the degenerate case cannot
+   * quietly invert into "no filter, show everything" at a call site that forgot
+   * to check. Filtering belongs in the query for the same reason
+   * `excludeRelatedTerms` does — so pagination and totals describe the rows the
+   * caller can actually see.
+   */
+  providers?: readonly string[];
+  /**
+   * Server-owned per-vault denylist, as `<provider>:<providerReference>` keys.
+   *
+   * Keyed on the provider REFERENCE — a vault address — never on the name.
+   * Kamino's vault registry is permissionless and the name is free text chosen
+   * by whoever created the vault, so a name-keyed rule is one an outsider can
+   * dodge (rename) or trip (impersonate a curated vault's name).
+   */
+  excludeProviderKeys?: readonly string[];
+  /**
+   * Per-provider allowlists: `{ kamino: [ref, ...] }` shows ONLY those
+   * references for that provider and hides the rest of its shelf. A provider
+   * absent from this map is unrestricted; a provider mapped to an EMPTY array
+   * shows nothing, which is the literal reading of an empty allowlist and is
+   * pinned by a repository test.
+   */
+  allowedProviderReferences?: Readonly<Record<string, readonly string[]>>;
   limit: number;
   offset: number;
 }
@@ -300,10 +322,10 @@ export interface EarnRepository {
    * keep set matches nothing.
    *
    * Deleted, not flagged: this table is a cache of the provider catalogue (the
-   * sync is its only writer besides the dev seed) and nothing references a
-   * strategy id — no foreign key, and a program's allocations carry the
-   * PROVIDER's reference, resolved against Ground's live response. A status flag
-   * would leave rows SDP must not carry sitting in the table indefinitely.
+   * sync is its only admitting writer) and nothing references a strategy id — no
+   * foreign key, and a program's allocations carry the PROVIDER's reference,
+   * resolved against live provider state. A status flag would leave rows SDP
+   * must not carry sitting in the table indefinitely.
    */
   deleteUnlistedStrategies(input: DeleteUnlistedEarnStrategiesInput): Promise<string[]>;
 
@@ -326,13 +348,12 @@ export interface EarnRepository {
    */
   listProviderWallets(input: ListEarnProviderWalletsInput): Promise<ListEarnProviderWalletsResult>;
   /**
-   * Lookup by the provider-side wallet ref, keyed on 0056's global unique. Two
-   * callers need it and neither has an organization to scope by: the create path
-   * resolves a provider replay (the provider answers a retried create with the
-   * ORIGINAL ref, so the insert lands on that unique and the row it collided with
-   * IS the caller's program), and the dev seed asks whether the shared sandbox
-   * wallet is already linked anywhere. Callers assert ownership after the fetch,
-   * exactly as getProgramWithdrawalByProviderReference does.
+   * Lookup by the provider-side wallet ref, keyed on 0056's global unique. The
+   * create path needs this without an organization scope to resolve a provider
+   * replay: the provider answers a retried create with the ORIGINAL ref, so the
+   * insert lands on that unique and the row it collided with IS the caller's
+   * program. The caller asserts ownership after the fetch, exactly as
+   * getProgramWithdrawalByProviderReference does.
    */
   getProviderWalletByRef(params: {
     provider: EarnProviderId;

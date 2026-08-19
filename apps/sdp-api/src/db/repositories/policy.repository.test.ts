@@ -3,6 +3,7 @@ import type {
   PolicyEvaluationContext,
   PolicyRule,
   WalletOperationFamily,
+  WalletOperationType,
 } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
@@ -53,6 +54,14 @@ const SECOND_CUSTODY_WALLET = {
   walletId: "wallet_policy_second",
   publicKey: "SecondPolicyWallet1111111111111111111111111",
   label: "Second policy wallet",
+  purpose: "payments",
+};
+
+const CONNECTION_CUSTODY_WALLET = {
+  id: "cw_policy_connection",
+  walletId: "wallet_policy_connection",
+  publicKey: "ConnectionPolicyWallet111111111111111111111",
+  label: "Connection policy wallet",
   purpose: "payments",
 };
 
@@ -254,7 +263,7 @@ describe("PolicyRepository (postgres)", () => {
       apiKeyId: TEST_API_KEY.id,
       actor: { type: "api_key", id: TEST_API_KEY.id, apiKeyId: TEST_API_KEY.id },
       operationFamily: "payment",
-      operationType: "payment_request",
+      operationType: "payment_transfer_execute",
       asset: "USDC",
       amount: "12.50",
       destination: "recipient_1",
@@ -268,7 +277,7 @@ describe("PolicyRepository (postgres)", () => {
       context: { requestId: "req_policy_1" },
       providerExtensions: { provider: "future-provider" },
     });
-    const evaluationContext = {
+    const evaluationContext: PolicyEvaluationContext = {
       operation: {
         id: operation?.id ?? "",
         organizationId: TEST_ORG.id,
@@ -279,7 +288,7 @@ describe("PolicyRepository (postgres)", () => {
         actor: { type: "api_key", id: TEST_API_KEY.id, apiKeyId: TEST_API_KEY.id },
         source: "api",
         operationFamily: "payment" as const,
-        operationType: "payment_request",
+        operationType: "payment_transfer_execute",
         asset: "USDC",
         amount: "12.50",
         destination: "recipient_1",
@@ -353,7 +362,7 @@ describe("PolicyRepository (postgres)", () => {
         custodyWalletId: TEST_CUSTODY_WALLET.id,
         walletId: OTHER_PROJECT_CUSTODY_WALLET.walletId,
         operationFamily: "payment",
-        operationType: "payment_transfer",
+        operationType: "payment_transfer_execute",
       })
     ).resolves.toBeNull();
 
@@ -460,7 +469,7 @@ describe("PolicyRepository (postgres)", () => {
       walletId: TEST_CUSTODY_WALLET.walletId,
       apiKeyId: TEST_API_KEY.id,
       operationFamily: "ramp",
-      operationType: "onramp_quote",
+      operationType: "ramp_onramp_quote",
       asset: "USDC",
       amount: "25.00",
       destination: "recipient_1",
@@ -488,7 +497,7 @@ describe("PolicyRepository (postgres)", () => {
         custodyWalletId: TEST_CUSTODY_WALLET.id,
         walletId: TEST_CUSTODY_WALLET.walletId,
         operationFamily: "ramp",
-        operationType: "onramp_quote",
+        operationType: "ramp_onramp_quote",
       }),
       requiresApproval: true,
       approvalRequestId: approvalRequest?.id,
@@ -502,7 +511,7 @@ describe("PolicyRepository (postgres)", () => {
       walletId: SECOND_CUSTODY_WALLET.walletId,
       apiKeyId: TEST_API_KEY.id,
       operationFamily: "payment",
-      operationType: "payment_transfer",
+      operationType: "payment_transfer_execute",
       status: "failed",
     });
     expect(otherWalletOperation).not.toBeNull();
@@ -516,7 +525,7 @@ describe("PolicyRepository (postgres)", () => {
         custodyWalletId: SECOND_CUSTODY_WALLET.id,
         walletId: SECOND_CUSTODY_WALLET.walletId,
         operationFamily: "payment",
-        operationType: "payment_transfer",
+        operationType: "payment_transfer_execute",
       }),
     });
 
@@ -533,7 +542,7 @@ describe("PolicyRepository (postgres)", () => {
       wallet_operation_id: operation?.id,
       policy_evaluation_id: evaluation?.id,
       operation_family: "ramp",
-      operation_type: "onramp_quote",
+      operation_type: "ramp_onramp_quote",
       asset: "USDC",
       amount: "25.00",
       destination: "recipient_1",
@@ -553,7 +562,7 @@ describe("PolicyRepository (postgres)", () => {
       custodyWalletId: TEST_CUSTODY_WALLET.id,
       walletId: TEST_CUSTODY_WALLET.walletId,
       operationFamily: "transfer",
-      operationType: "legacy_transfer",
+      operationType: "payment_transfer_execute",
     });
     expect(operation).not.toBeNull();
 
@@ -585,7 +594,7 @@ describe("PolicyRepository (postgres)", () => {
       walletId: TEST_CUSTODY_WALLET.walletId,
       apiKeyId: TEST_API_KEY.id,
       operationFamily: "payment",
-      operationType: "payment_transfer",
+      operationType: "payment_transfer_execute",
       status: "pending_approval",
     });
     expect(operation).not.toBeNull();
@@ -671,7 +680,7 @@ describe("PolicyRepository (postgres)", () => {
       walletId: TEST_CUSTODY_WALLET.walletId,
       apiKeyId: TEST_API_KEY.id,
       operationFamily: "payment",
-      operationType: "payment_transfer",
+      operationType: "payment_transfer_execute",
       asset: "USDC",
       amount: "25.00",
       destination: "recipient_1",
@@ -698,7 +707,7 @@ describe("PolicyRepository (postgres)", () => {
         custodyWalletId: TEST_CUSTODY_WALLET.id,
         walletId: TEST_CUSTODY_WALLET.walletId,
         operationFamily: "payment",
-        operationType: "payment_transfer",
+        operationType: "payment_transfer_execute",
       }),
       requiresApproval: true,
       approvalRequestId: request?.id,
@@ -724,7 +733,7 @@ describe("PolicyRepository (postgres)", () => {
       custodyWalletId: OTHER_PROJECT_CUSTODY_WALLET.id,
       walletId: OTHER_PROJECT_CUSTODY_WALLET.walletId,
       operationFamily: "payment",
-      operationType: "payment_transfer",
+      operationType: "payment_transfer_execute",
       status: "pending_approval",
     });
     expect(otherOperation).not.toBeNull();
@@ -751,7 +760,7 @@ describe("PolicyRepository (postgres)", () => {
       wallet_id: TEST_CUSTODY_WALLET.walletId,
       wallet_public_key: TEST_CUSTODY_WALLET.publicKey,
       operation_family: "payment",
-      operation_type: "payment_transfer",
+      operation_type: "payment_transfer_execute",
       decision: "approval_required",
       reason_code: "wallet_policy_match",
       matched_rules: [{ ruleId: "payment-approval" }],
@@ -815,8 +824,8 @@ describe("PolicyRepository (postgres)", () => {
       walletId: TEST_CUSTODY_WALLET.walletId,
       apiKeyId: TEST_API_KEY.id,
       actor: null,
-      operationFamily: "program",
-      operationType: "program_call",
+      operationFamily: "issuance",
+      operationType: "issuance_update_authority_execute",
       legs: [],
       rawPayload: { programId: "program_1" },
     });
@@ -866,6 +875,48 @@ describe("PolicyRepository (postgres)", () => {
     });
   });
 
+  it("owns and binds active Connection wallets by exact custody identity", async () => {
+    await seedConnectionCustodyWallet();
+    const service = policyStores(repo);
+    const walletProfile = await repo.createWalletControlProfile({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: CONNECTION_CUSTODY_WALLET.id,
+      name: "Connection wallet controls",
+      createdBy: TEST_USER.id,
+    });
+
+    expect(walletProfile?.custody_wallet_id).toBe(CONNECTION_CUSTODY_WALLET.id);
+
+    const { profile } = await createActiveApiKeyControlProfile(repo, {
+      name: "Connection binding controls",
+      defaultAction: "review",
+    });
+    await seedEndpointWalletPermission("akw_policy_connection", CONNECTION_CUSTODY_WALLET.walletId);
+
+    const binding = await service.upsertApiKeyWalletPolicyBinding({
+      apiKeyId: TEST_API_KEY.id,
+      bindingScope: "selected",
+      walletId: CONNECTION_CUSTODY_WALLET.walletId,
+      custodyWalletId: CONNECTION_CUSTODY_WALLET.id,
+      apiKeyControlProfileId: profile.id,
+    });
+
+    expect(binding).toMatchObject({
+      walletId: CONNECTION_CUSTODY_WALLET.walletId,
+      custodyWalletId: CONNECTION_CUSTODY_WALLET.id,
+    });
+    await expect(
+      service.resolveApiKeyWalletPolicyScope({
+        apiKeyId: TEST_API_KEY.id,
+        custodyWalletId: CONNECTION_CUSTODY_WALLET.id,
+      })
+    ).resolves.toMatchObject({
+      target: { custodyWalletId: CONNECTION_CUSTODY_WALLET.id },
+      binding: { custodyWalletId: CONNECTION_CUSTODY_WALLET.id },
+    });
+  });
+
   it("keeps selected policy bindings distinct when provider wallet IDs collide", async () => {
     await seedDuplicateProviderCustodyWallet();
 
@@ -901,6 +952,33 @@ describe("PolicyRepository (postgres)", () => {
     ).resolves.toMatchObject({
       binding: { custody_wallet_id: DUPLICATE_PROVIDER_CUSTODY_WALLET.id },
     });
+  });
+
+  it("fails endpoint authorization closed when a selected wallet ID is ambiguous", async () => {
+    const service = policyStores(repo);
+    await seedDuplicateProviderCustodyWallet();
+    await seedEndpointWalletPermission(
+      "akw_policy_ambiguous_endpoint",
+      TEST_CUSTODY_WALLET.walletId
+    );
+    const { profile } = await createActiveApiKeyControlProfile(repo, {
+      name: "Ambiguous endpoint controls",
+      defaultAction: "review",
+    });
+    await service.upsertApiKeyWalletPolicyBinding({
+      apiKeyId: TEST_API_KEY.id,
+      bindingScope: "all",
+      apiKeyControlProfileId: profile.id,
+    });
+
+    for (const custodyWalletId of [TEST_CUSTODY_WALLET.id, DUPLICATE_PROVIDER_CUSTODY_WALLET.id]) {
+      await expect(
+        service.resolveApiKeyWalletPolicyScope({ apiKeyId: TEST_API_KEY.id, custodyWalletId })
+      ).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        message: "API key is not authorized for the requested wallet",
+      });
+    }
   });
 
   it("resolves an all-wallet API key policy binding for every in-scope wallet", async () => {
@@ -1203,7 +1281,8 @@ describe("PolicyRepository (postgres)", () => {
   it("preserves policy-scoped wallet bindings when an API key is rotated", async () => {
     await getDb(env)
       .prepare(
-        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+        `INSERT INTO api_key_wallet_permissions
+           (id, api_key_id, wallet_id, permissions)
          VALUES ('akw_rotate_policy_test', ?, ?, '["payments:write"]')`
       )
       .bind(TEST_API_KEY.id, TEST_CUSTODY_WALLET.walletId)
@@ -1247,6 +1326,19 @@ describe("PolicyRepository (postgres)", () => {
       "pepper"
     );
     expect(rotation).not.toBeNull();
+
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT wallet_id
+           FROM api_key_wallet_permissions
+           WHERE api_key_id = ?`
+        )
+        .bind(rotation?.apiKey.id)
+        .first()
+    ).toEqual({
+      wallet_id: TEST_CUSTODY_WALLET.walletId,
+    });
 
     const clonedBindings = await repo.listApiKeyWalletPolicyBindings(rotation?.apiKey.id ?? "");
     expect(clonedBindings).toHaveLength(2);
@@ -1508,10 +1600,68 @@ async function seedOtherProjectCustodyWallet(): Promise<void> {
   ]);
 }
 
+async function seedConnectionCustodyWallet(): Promise<void> {
+  const db = getDb(env);
+  const credentialId = "pcred_policy_connection";
+  const connectionId = "cconn_policy_connection";
+
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO provider_credentials (
+           id, organization_id, project_id, provider, label, scope, source,
+           storage_backend, status, created_by
+         ) VALUES (?, ?, ?, 'privy', 'Policy runtime', 'project', 'runtime',
+                   'runtime_env', 'active', ?)`
+      )
+      .bind(credentialId, TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id),
+    db
+      .prepare(
+        `INSERT INTO custody_connections (
+           id, organization_id, project_id, provider, scope,
+           provider_credential_id, provider_credential_scope_key, status, created_by
+         ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?)`
+      )
+      .bind(
+        connectionId,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        credentialId,
+        TEST_PROJECT.id,
+        TEST_USER.id
+      ),
+    db
+      .prepare(
+        `INSERT INTO custody_wallets (
+           id, custody_connection_id, wallet_id, public_key, label, purpose, status
+         ) VALUES (?, ?, ?, ?, ?, ?, 'active')`
+      )
+      .bind(
+        CONNECTION_CUSTODY_WALLET.id,
+        connectionId,
+        CONNECTION_CUSTODY_WALLET.walletId,
+        CONNECTION_CUSTODY_WALLET.publicKey,
+        CONNECTION_CUSTODY_WALLET.label,
+        CONNECTION_CUSTODY_WALLET.purpose
+      ),
+    db
+      .prepare(
+        `UPDATE custody_connections
+         SET default_custody_wallet_id = ?, status = 'active',
+             last_check_status = 'success', last_check_at = sdp_iso_now(),
+             provider_account_fingerprint = 'policy-account',
+             activated_at = sdp_iso_now()
+         WHERE id = ?`
+      )
+      .bind(CONNECTION_CUSTODY_WALLET.id, connectionId),
+  ]);
+}
+
 async function seedEndpointWalletPermission(id: string, walletId: string): Promise<void> {
   await getDb(env)
     .prepare(
-      `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+      `INSERT INTO api_key_wallet_permissions
+         (id, api_key_id, wallet_id, permissions)
        VALUES (?, ?, ?, '["payments:write"]')`
     )
     .bind(id, TEST_API_KEY.id, walletId)
@@ -1523,7 +1673,7 @@ function buildPolicyEvaluationContext(input: {
   custodyWalletId: string;
   walletId: string;
   operationFamily: WalletOperationFamily;
-  operationType: string;
+  operationType: WalletOperationType;
 }): PolicyEvaluationContext {
   return {
     operation: {

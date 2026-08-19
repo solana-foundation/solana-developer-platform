@@ -1,6 +1,7 @@
-import type { ApiKeyWalletPolicyBindingSummary, WalletOperationFamily } from "@sdp/types";
+import type { ApiKeyWalletPolicyBindingSummary } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import {
+  type ApiKeyAuthoringDraft,
   buildApiKeyPolicyRules,
   buildEndpointWalletPayload,
   buildPolicyBindingTargets,
@@ -54,12 +55,12 @@ describe("API-key authoring", () => {
   });
 
   it("authors every additional restriction section as narrowing rules", () => {
-    const draft = {
+    const draft: ApiKeyAuthoringDraft = {
       ...createApiKeyAuthoringDraft(),
       restrictionsEnabled: true,
       restrictionsEdited: true,
-      operationFamilies: ["raw_sign", "provider_admin"] as WalletOperationFamily[],
-      operationTypes: "payment_transfer_execute, token_mint",
+      operationFamilies: ["ramp", "issuance"],
+      operationTypes: ["payment_transfer_execute", "issuance_mint_execute"],
       assets: "USDC\nSOL",
       maximumAmount: "2500",
       maximumAmountAssets: "USDC, SOL",

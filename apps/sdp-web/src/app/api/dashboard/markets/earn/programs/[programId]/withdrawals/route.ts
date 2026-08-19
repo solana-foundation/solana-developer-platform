@@ -2,9 +2,9 @@ import { proxyToSdpApi } from "@/lib/sdp-api";
 import { programProxyQuery } from "../../../provider-query";
 
 /**
- * The withdrawal LEDGER list (SDP's DB, never the provider). No dashboard code
- * calls it yet — it is proxied here because the API has registered it since
- * PRO-1628 and leaving the collection half-wired is how a route gets forgotten.
+ * The withdrawal LEDGER list (SDP's DB, never the provider). Treasury reads the
+ * complete collection after programs load so an accepted in-flight withdrawal
+ * resumes canonical provider polling after a reload.
  */
 export async function GET(
   request: Request,

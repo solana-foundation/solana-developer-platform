@@ -33,9 +33,9 @@ const policyDefaultActionOptions: ApiPlaygroundFieldOption[] = [
 ];
 const examplePolicyRules = [
   {
-    id: "deny-raw-signing",
+    id: "deny-issuance",
     kind: "operation_family",
-    family: "raw_sign",
+    family: "issuance",
     action: "deny",
   },
 ];

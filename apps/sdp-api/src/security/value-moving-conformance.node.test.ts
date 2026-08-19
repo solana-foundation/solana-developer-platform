@@ -1,35 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { type ContextVariableMap, Hono } from "hono";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AppError } from "@/lib/errors";
-import { policyGate } from "@/middleware/policy-gate";
-import type { Env } from "@/types/env";
-
-const boundaryMocks = vi.hoisted(() => ({
-  createOrgSigner: vi.fn(),
-  createSponsorship: vi.fn(),
-  enforcePolicy: vi.fn(),
-  resolvePolicyWallet: vi.fn(),
-}));
-
-vi.mock("@/services/solana", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/solana")>()),
-  createOrgSigner: boundaryMocks.createOrgSigner,
-}));
-
-vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/sponsorship.service")>()),
-  createAuthenticatedSponsorshipFeePayment: boundaryMocks.createSponsorship,
-}));
-
-vi.mock("@/services/policy/enforcement.service", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/policy/enforcement.service")>()),
-  enforceWalletOperationPolicy: boundaryMocks.enforcePolicy,
-  resolvePolicyCustodyWallet: boundaryMocks.resolvePolicyWallet,
-}));
-
-import { extractSignerCheckPolicyCandidate } from "@/routes/custody/handlers/signer-check";
+import { describe, expect, it } from "vitest";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../../../..");
 
@@ -40,7 +11,7 @@ type ValueMovingFamily =
   | "payments"
   | "ramps"
   | "custody"
-  | "raw_signing";
+  | "earn";
 
 interface OrderedBoundary {
   file: string;
@@ -77,7 +48,7 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/payments/index.ts",
       section: '"/transfer-batches",',
       before: "extract: extractTransferBatchPolicyCandidate",
-      after: "createTransferBatch",
+      after: "\n  createTransferBatch\n",
     },
     replay: [
       {
@@ -148,7 +119,7 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/payments/index.ts",
       section: '"/transfers",',
       before: "extract: extractTransferPolicyCandidate",
-      after: "createTransfer",
+      after: "\n  createTransfer\n",
     },
     replay: [
       {
@@ -173,7 +144,7 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/payments/index.ts",
       section: '"/ramps/onramp/quote",',
       before: "policyGate({ extract: extractOnrampQuotePolicyCandidate })",
-      after: "createOnrampQuote",
+      after: "\n  createOnrampQuote\n",
     },
     replay: [
       {
@@ -214,22 +185,33 @@ const contracts: ValueMovingContract[] = [
     ],
   },
   {
-    family: "raw_signing",
+    /**
+     * Non-custodial Earn vault deposits. Registered late — the route shipped
+     * ungoverned, and the inventory below could not see it because
+     * `apps/sdp-api/src/services/earn` was not a scanned root, so this test
+     * passed while a value-moving path had no policy gate at all.
+     */
+    family: "earn",
     trustedContext: {
-      file: "apps/sdp-api/src/routes/custody/handlers/signer-check.ts",
-      evidence: "const auth = getAuth(c)",
+      file: "apps/sdp-api/src/routes/earn/handlers/vault.ts",
+      evidence: "const wallets = await new CustodyRuntimeTargets",
     },
     authorization: {
-      file: "apps/sdp-api/src/routes/custody/index.ts",
-      section: '"/signer-check",',
-      before: "policyGate({ extract: extractSignerCheckPolicyCandidate })",
-      after: "signerCheck",
+      file: "apps/sdp-api/src/routes/earn/index.ts",
+      section: '"/vault-deposits",',
+      before: "extract: extractEarnVaultDepositPolicyCandidate",
+      after: "createEarnVaultDeposit",
     },
     replay: [
       {
-        mode: "fresh_blockhash_per_attempt",
-        file: "apps/sdp-api/src/routes/custody/handlers/signer-check.ts",
-        evidence: 'getRecentBlockhash(rpc, "confirmed")',
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/services/earn/vault-deposit.service.test.ts",
+        evidence: "replays the original vault deposit for the same requestId and payload",
+      },
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/services/earn/vault-deposit.service.test.ts",
+        evidence: "rejects the same requestId with a different payload",
       },
     ],
   },
@@ -237,6 +219,13 @@ const contracts: ValueMovingContract[] = [
 
 const signingSinkInventory: Record<string, string[]> = {
   "apps/sdp-api/src/routes/custody/handlers/signer-check.ts": ["signAndSend"],
+  "apps/sdp-api/src/services/earn/vault-execution.service.ts": [
+    // Sponsored signing adds the fee-payer signature without broadcasting, so
+    // the final signature can still be recorded before bytes reach the network.
+    "signAsFeePayer",
+    // Wallet-paid signing likewise returns fully signed bytes without sending.
+    "signTransactionMessageWithSigners",
+  ],
   "apps/sdp-api/src/routes/pay.ts": ["signAsFeePayer"],
   "apps/sdp-api/src/routes/payments/handlers/transfer-batches/execute.ts": ["signAndSend"],
   "apps/sdp-api/src/routes/payments/handlers/transfers.ts": [
@@ -259,6 +248,10 @@ const valueMovingSourceRoots = [
   "apps/sdp-api/src/routes",
   "apps/sdp-api/src/services/payments",
   "apps/sdp-api/src/services/private-channels",
+  // Earn's vault-direct path signs and broadcasts from a custody wallet. It was
+  // missing here, which is why the inventory below did not notice a whole
+  // money-moving surface — the omission the `earn` contract above now pins.
+  "apps/sdp-api/src/services/earn",
   "packages/sdp-issuance/src",
   "packages/sdp-solana/src",
 ];
@@ -313,19 +306,14 @@ function sectionSource(boundary: OrderedBoundary): string {
 }
 
 describe("value-moving authorization and replay conformance", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    boundaryMocks.resolvePolicyWallet.mockResolvedValue({ id: "cwlt_authorized" });
-  });
-
   it("covers every required value-moving family", () => {
     expect(contracts.map((contract) => contract.family).sort()).toEqual([
       "batch",
       "custody",
+      "earn",
       "issuance",
       "payments",
       "ramps",
-      "raw_signing",
       "recurring",
     ]);
   });
@@ -382,49 +370,5 @@ describe("value-moving authorization and replay conformance", () => {
     expect(productionSource).not.toMatch(
       /durable.?nonce|nonce.?account|advance.?nonce|setTransactionMessageLifetimeUsingDurableNonce/i
     );
-  });
-
-  it("stops a raw-sign policy denial in the gate before handler, KMS, or Kora access", async () => {
-    boundaryMocks.enforcePolicy.mockRejectedValueOnce(
-      new AppError("FORBIDDEN", "Denied by wallet policy")
-    );
-    const apiKey = {
-      id: "key_conformance",
-      organizationId: "org_conformance",
-      projectId: "prj_conformance",
-      role: "admin",
-      permissions: ["wallets:write"],
-      environment: "sandbox",
-      signingWalletId: "wal_conformance",
-      signingWalletIds: ["wal_conformance"],
-      walletBindings: [{ walletId: "wal_conformance", permissions: ["wallets:write"] }],
-    } satisfies NonNullable<ContextVariableMap["apiKey"]>;
-    const handler = vi.fn(() => new Response(null, { status: 204 }));
-    const testApp = new Hono<{ Bindings: Env }>();
-    testApp.use("*", async (c, next) => {
-      c.set("apiKey", apiKey);
-      c.set("projectId", "prj_conformance");
-      c.set("projectEnvironment", "sandbox");
-      await next();
-    });
-    testApp.post(
-      "/signer-check",
-      policyGate({ extract: extractSignerCheckPolicyCandidate }),
-      handler
-    );
-    testApp.onError((error) => {
-      throw error;
-    });
-
-    await expect(
-      testApp.request("/signer-check", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ walletId: "wal_conformance", memo: "conformance" }),
-      })
-    ).rejects.toMatchObject({ code: "FORBIDDEN" });
-    expect(handler).not.toHaveBeenCalled();
-    expect(boundaryMocks.createOrgSigner).not.toHaveBeenCalled();
-    expect(boundaryMocks.createSponsorship).not.toHaveBeenCalled();
   });
 });
