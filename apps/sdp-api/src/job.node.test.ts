@@ -11,11 +11,14 @@ import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { isSentryEnabled } from "@/runtime/observability";
 import { nodeObservability } from "@/runtime/observability-node";
+import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
 import { runDueWorkflowExecutions } from "@/services/jobs/run-workflow-executions";
+import { trackPendingDeposits } from "@/services/jobs/track-pending-deposits";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
+import { trackPendingWithdrawals } from "@/services/jobs/track-pending-withdrawals";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
 import { describeCronFailure, runCronJob } from "./job";
@@ -49,6 +52,21 @@ vi.mock("@/cron/earn-vault-movements", () => ({
 vi.mock("@/cron/pending-transfers", () => ({
   PENDING_TRANSFERS_CRON: "* * * * *",
   PENDING_TRANSFERS_MONITOR: "sdp-api-track-pending-transfers",
+}));
+
+vi.mock("@/cron/pending-deposits", () => ({
+  PENDING_DEPOSITS_CRON: "* * * * *",
+  PENDING_DEPOSITS_MONITOR: "sdp-api-track-pending-deposits",
+}));
+
+vi.mock("@/cron/pending-withdrawals", () => ({
+  PENDING_WITHDRAWALS_CRON: "* * * * *",
+  PENDING_WITHDRAWALS_MONITOR: "sdp-api-track-pending-withdrawals",
+}));
+
+vi.mock("@/cron/recurring-payments", () => ({
+  RECURRING_PAYMENTS_COLLECTION_CRON: "*/5 * * * *",
+  RECURRING_PAYMENTS_COLLECTION_MONITOR: "sdp-api-collect-recurring-payments",
 }));
 
 vi.mock("@/cron/workflow-executions", () => ({
@@ -98,8 +116,20 @@ vi.mock("@/services/jobs/run-workflow-executions", () => ({
   runDueWorkflowExecutions: vi.fn(async () => {}),
 }));
 
+vi.mock("@/services/jobs/collect-recurring-payments", () => ({
+  collectDueRecurringPayments: vi.fn(async () => {}),
+}));
+
+vi.mock("@/services/jobs/track-pending-deposits", () => ({
+  trackPendingDeposits: vi.fn(async () => {}),
+}));
+
 vi.mock("@/services/jobs/track-pending-transfers", () => ({
   trackPendingTransfers: vi.fn(async () => {}),
+}));
+
+vi.mock("@/services/jobs/track-pending-withdrawals", () => ({
+  trackPendingWithdrawals: vi.fn(async () => {}),
 }));
 
 vi.mock("@/services/jobs/reconcile-sponsorship-budgets", () => ({
@@ -135,6 +165,11 @@ describe("runCronJob", () => {
     vi.mocked(reconcileSponsorshipBudgets)
       .mockReset()
       .mockResolvedValue(undefined as never);
+    vi.mocked(collectDueRecurringPayments)
+      .mockReset()
+      .mockResolvedValue({ recovered: 0, collected: 0, failed: 0, skipped: 0 });
+    vi.mocked(trackPendingDeposits).mockReset().mockResolvedValue(undefined);
+    vi.mocked(trackPendingWithdrawals).mockReset().mockResolvedValue(undefined);
     vi.mocked(reconcileEarnVaultMovements).mockReset().mockResolvedValue(undefined);
     vi.mocked(runEarnCatalogueSyncIfDue).mockReset().mockResolvedValue("synced");
     vi.mocked(runEarnMetricsRefreshTick).mockReset().mockResolvedValue(undefined);
@@ -161,19 +196,81 @@ describe("runCronJob", () => {
     expect(reconcileSponsorshipBudgets).not.toHaveBeenCalled();
   });
 
-  it("runs the ungated pair and the workflow tick when the Earn flags are off", async () => {
+  it("runs the ungated ticks — recurring collection included — when every flag is off", async () => {
+    const env = makeEnv();
+    vi.mocked(getProcessEnv).mockReturnValue(env);
+
     await runCronJob();
 
     expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
     expect(recoverApprovedWalletOperations).toHaveBeenCalledTimes(1);
     expect(reconcileSponsorshipBudgets).toHaveBeenCalledTimes(1);
+    // Recurring payments are an always-on product surface: the collection tick
+    // is deliberately behind no flag.
+    expect(collectDueRecurringPayments).toHaveBeenCalledExactlyOnceWith(env);
     expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
     // Managed deployments always have asset profiles on, so the workflow tick runs.
     expect(runDueWorkflowExecutions).toHaveBeenCalledTimes(1);
     expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
+    expect(trackPendingDeposits).not.toHaveBeenCalled();
+    expect(trackPendingWithdrawals).not.toHaveBeenCalled();
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
     expect(closeAllRedisClients).toHaveBeenCalledTimes(1);
     expect(Sentry.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails the job on a recurring-collection error but still releases pools", async () => {
+    vi.mocked(collectDueRecurringPayments).mockRejectedValue(new Error("collection down"));
+
+    await expect(runCronJob()).rejects.toThrow("collection down");
+
+    expect(closeDatabasePools).toHaveBeenCalledTimes(1);
+    expect(closeAllRedisClients).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs both private-channel reconcilers behind the flag", async () => {
+    const env = makeEnv({ PRIVATE_CHANNELS_ENABLED: "true" });
+    vi.mocked(getProcessEnv).mockReturnValue(env);
+
+    await runCronJob();
+
+    expect(trackPendingDeposits).toHaveBeenCalledExactlyOnceWith(env);
+    expect(trackPendingWithdrawals).toHaveBeenCalledExactlyOnceWith(env);
+  });
+
+  // The reconcilers are siblings: a failing deposits leg must never skip the
+  // withdrawals leg (or vice versa), only fail the job after both settle.
+  it("still reconciles withdrawals when deposit tracking fails", async () => {
+    vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ PRIVATE_CHANNELS_ENABLED: "true" }));
+    vi.mocked(trackPendingDeposits).mockRejectedValue(new Error("deposits down"));
+
+    await expect(runCronJob()).rejects.toThrow("deposits down");
+
+    expect(trackPendingWithdrawals).toHaveBeenCalledTimes(1);
+    expect(closeDatabasePools).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports each new tick to its own monitor when Sentry is enabled", async () => {
+    vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ PRIVATE_CHANNELS_ENABLED: "true" }));
+    vi.mocked(isSentryEnabled).mockReturnValue(true);
+
+    await runCronJob();
+
+    expect(nodeObservability.withMonitor).toHaveBeenCalledWith(
+      "sdp-api-collect-recurring-payments",
+      expect.any(Function),
+      { schedule: { type: "crontab", value: "*/5 * * * *" } }
+    );
+    expect(nodeObservability.withMonitor).toHaveBeenCalledWith(
+      "sdp-api-track-pending-deposits",
+      expect.any(Function),
+      { schedule: { type: "crontab", value: "* * * * *" } }
+    );
+    expect(nodeObservability.withMonitor).toHaveBeenCalledWith(
+      "sdp-api-track-pending-withdrawals",
+      expect.any(Function),
+      { schedule: { type: "crontab", value: "* * * * *" } }
+    );
   });
 
   it("skips the workflow tick on a self-hosted deployment without the asset-profiles flag", async () => {
@@ -286,7 +383,7 @@ describe("runCronJob", () => {
 
     // The pair keeps the transfers monitor; the workflow tick and the retirement sweep
     // each report to their own, so neither masquerades as a reconciliation failure.
-    expect(nodeObservability.withMonitor).toHaveBeenCalledTimes(4);
+    expect(nodeObservability.withMonitor).toHaveBeenCalledTimes(5);
     expect(nodeObservability.withMonitor).toHaveBeenCalledWith(
       EARN_VAULT_MOVEMENTS_MONITOR,
       expect.any(Function),
@@ -332,7 +429,9 @@ describe("runCronJob", () => {
     expect(Sentry.close).toHaveBeenCalledTimes(1);
   });
 
-  it("skips the earn tick when reconciliation itself fails", async () => {
+  // One persistently broken reconciler must never starve the rest: a failing
+  // tick is collected, every later tick still runs, and the job fails at the end.
+  it("still runs every later tick when reconciliation itself fails", async () => {
     vi.mocked(getProcessEnv).mockReturnValue(
       makeEnv({ MARKETS_ENABLED: "true", EARN_ENABLED: "true" })
     );
@@ -340,9 +439,28 @@ describe("runCronJob", () => {
 
     await expect(runCronJob()).rejects.toThrow("sponsorship down");
 
-    expect(runDueWorkflowExecutions).not.toHaveBeenCalled();
-    expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
+    expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
+    expect(runDueWorkflowExecutions).toHaveBeenCalledTimes(1);
+    expect(retireOrphanedActionSecrets).toHaveBeenCalledTimes(1);
+    expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledTimes(1);
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
+  });
+
+  it("aggregates failures from more than one tick without dropping either", async () => {
+    vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ PRIVATE_CHANNELS_ENABLED: "true" }));
+    vi.mocked(reconcileSponsorshipBudgets).mockRejectedValue(new Error("sponsorship down"));
+    vi.mocked(trackPendingDeposits).mockRejectedValue(new Error("deposits down"));
+
+    await expect(runCronJob()).rejects.toMatchObject({
+      message: "reconciliation job had multiple tick failures",
+      errors: [
+        expect.objectContaining({ message: "sponsorship down" }),
+        expect.objectContaining({ message: "deposits down" }),
+      ],
+    });
+
+    expect(trackPendingWithdrawals).toHaveBeenCalledTimes(1);
+    expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
   });
 
   it("reconciles sponsorship budgets even when pending-transfer tracking fails", async () => {
