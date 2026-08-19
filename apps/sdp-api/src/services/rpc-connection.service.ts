@@ -284,7 +284,10 @@ export async function activateRpcConnection(
   let probeOk = false;
   let failureCode = "provider_unreachable";
   try {
-    const { upstream } = await probeRpcEndpoint(target);
+    // The endpoint came from the tenant, so the probe resolves it under the
+    // egress guard: the stored host passed the literal check at submit time,
+    // and this is what stops the name resolving somewhere internal now.
+    const { upstream } = await probeRpcEndpoint(target, { enforcePublicEgress: true });
     probeOk = upstream.ok;
     if (!upstream.ok) {
       failureCode = toRedactedFailureCode(upstream.status);
