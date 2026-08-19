@@ -68,6 +68,28 @@ describe("createSubmissionRecorder", () => {
     expect(persist).toHaveBeenCalledTimes(2);
   });
 
+  it("hands a lost signature to the caller instead of leaving the row unsigned", async () => {
+    const persist = vi.fn().mockRejectedValue(new Error("db unavailable"));
+    const onSignatureLost = vi.fn().mockResolvedValue(undefined);
+    const recorder = createSubmissionRecorder(transfer, persist, onSignatureLost);
+
+    await recorder.onSubmitted(SIGNATURE);
+
+    // An unsigned `processing` row is what the pending-transfers job times out
+    // into a false `failed`, so the broadcast must not end there silently.
+    expect(onSignatureLost).toHaveBeenCalledWith(SIGNATURE);
+  });
+
+  it("leaves a recorded signature to the caller alone", async () => {
+    const persist = vi.fn().mockResolvedValue({ ...transfer, signature: SIGNATURE });
+    const onSignatureLost = vi.fn().mockResolvedValue(undefined);
+    const recorder = createSubmissionRecorder(transfer, persist, onSignatureLost);
+
+    await recorder.onSubmitted(SIGNATURE);
+
+    expect(onSignatureLost).not.toHaveBeenCalled();
+  });
+
   it("reports nothing when the transaction was never submitted", async () => {
     const persist = vi.fn();
     const recorder = createSubmissionRecorder(transfer, persist);

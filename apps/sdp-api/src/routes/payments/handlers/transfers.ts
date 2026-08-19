@@ -507,13 +507,15 @@ async function signAndSendClosed(
  * `failed` — the pending-transfers job settles signed `processing` rows.
  * Write failures are logged, not thrown; the write is retried once where it
  * happens, so a caller that never reads `submittedRow` still gets both
- * attempts. Residual: if BOTH writes fail, the durable row stays unsigned and
- * the pending-transfers job will still time it out — a DB outage cannot be
- * closed by more DB writes. Exported for unit tests.
+ * attempts. If both fail the durable row is still unsigned, which the
+ * pending-transfers job would time out into a false `failed`, so
+ * `onSignatureLost` runs last for the caller to close that row another way.
+ * Exported for unit tests.
  */
 export function createSubmissionRecorder(
   transfer: TransferRow,
-  persistSignature: (signature: string) => Promise<TransferRow>
+  persistSignature: (signature: string) => Promise<TransferRow>,
+  onSignatureLost?: (signature: string) => Promise<void>
 ) {
   let signature: string | null = null;
   let row: TransferRow | null = null;
@@ -538,6 +540,9 @@ export function createSubmissionRecorder(
       if (!row) {
         await persist(sig);
       }
+      if (!row) {
+        await onSignatureLost?.(sig);
+      }
     },
     submittedRow: async (): Promise<TransferRow | null> => {
       const sig = signature;
@@ -548,8 +553,15 @@ export function createSubmissionRecorder(
 }
 
 function createTransferSubmissionRecorder(c: AppContext, transfer: TransferRow) {
-  return createSubmissionRecorder(transfer, (signature) =>
-    updateTransferRecord(c, transfer.id, { signature })
+  return createSubmissionRecorder(
+    transfer,
+    (signature) => updateTransferRecord(c, transfer.id, { signature }),
+    // Both writes lost after a broadcast. Left alone the row is an unsigned
+    // `processing` that the job times out into a false `failed`, and a client
+    // reading that failure sends the payment a second time. Park it instead,
+    // with the signature in `provider_data`: the column refused it, JSON still
+    // takes it, and the operator reconciles from there.
+    (signature) => markTransferOutcomeUnknown(c, transfer.id, { submitted_signature: signature })
   );
 }
 
@@ -559,7 +571,11 @@ function createTransferSubmissionRecorder(c: AppContext, transfer: TransferRow) 
  * in `error` is display only. See persistOutcomeUnknownMarker for why a
  * failed write never replaces the caller's 409.
  */
-function markTransferOutcomeUnknown(c: AppContext, transferId: string): Promise<void> {
+function markTransferOutcomeUnknown(
+  c: AppContext,
+  transferId: string,
+  providerData?: Record<string, unknown>
+): Promise<void> {
   return persistOutcomeUnknownMarker(
     () =>
       updateTransferRecord(c, transferId, {
@@ -567,7 +583,7 @@ function markTransferOutcomeUnknown(c: AppContext, transferId: string): Promise<
         error: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
         signature: null,
         blockTime: null,
-        providerData: { ...SUBMISSION_OUTCOME_UNKNOWN_MARKER },
+        providerData: { ...SUBMISSION_OUTCOME_UNKNOWN_MARKER, ...providerData },
       }),
     transferId
   );
