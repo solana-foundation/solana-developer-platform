@@ -16,7 +16,7 @@ const schema = z.object({
   count: z.number().int(),
 });
 
-function createApp(onMiddlewarePass?: () => void) {
+function createApp<S extends z.ZodType<object>>(bodySchema: S, onMiddlewarePass?: () => void) {
   const app = new Hono<{ Bindings: Env }>();
   app.onError((err, c) => {
     if (err instanceof AppError) {
@@ -26,12 +26,12 @@ function createApp(onMiddlewarePass?: () => void) {
   });
   app.post(
     "/",
-    validateBody(schema),
+    validateBody(bodySchema),
     async (_c, next) => {
       onMiddlewarePass?.();
       await next();
     },
-    (c: ValidatedBodyContext<typeof schema>) => c.json(c.req.valid("json"))
+    (c: ValidatedBodyContext<S>) => c.json(c.req.valid("json"))
   );
   return app;
 }
@@ -46,7 +46,10 @@ function post(app: Hono<{ Bindings: Env }>, body: string, contentType = "applica
 
 describe("validateBody", () => {
   it("passes the parsed, typed body through to the handler", async () => {
-    const res = await post(createApp(), JSON.stringify({ name: "abc", count: 2, extra: true }));
+    const res = await post(
+      createApp(schema),
+      JSON.stringify({ name: "abc", count: 2, extra: true })
+    );
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ name: "abc", count: 2 });
@@ -55,7 +58,7 @@ describe("validateBody", () => {
   it("rejects a body that fails the schema before downstream middleware runs", async () => {
     let downstreamRan = false;
     const res = await post(
-      createApp(() => {
+      createApp(schema, () => {
         downstreamRan = true;
       }),
       JSON.stringify({ name: "", count: "nope" })
@@ -72,36 +75,75 @@ describe("validateBody", () => {
   });
 
   it("parses a JSON body even without a JSON content type", async () => {
-    const res = await post(createApp(), JSON.stringify({ name: "abc", count: 2 }), "text/plain");
+    const res = await post(
+      createApp(schema),
+      JSON.stringify({ name: "abc", count: 2 }),
+      "text/plain"
+    );
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ name: "abc", count: 2 });
   });
 
   it("rejects a non-JSON body as malformed", async () => {
-    const res = await post(createApp(), "name=abc", "application/x-www-form-urlencoded");
+    const res = await post(createApp(schema), "name=abc", "application/x-www-form-urlencoded");
 
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error.message).toBe("Malformed JSON in request body");
   });
 
-  it("treats an empty body with a JSON content type as an empty object", async () => {
-    const emptyBodySchema = z.object({ note: z.string().optional() });
-    const app = new Hono<{ Bindings: Env }>();
-    app.onError((err, c) => {
-      if (err instanceof AppError) {
-        return c.json({ error: err.toResponse().error }, 400);
-      }
-      throw err;
+  it("keys nested issues by their full dot path", async () => {
+    const nestedSchema = z.object({
+      identity: z.object({
+        address: z.object({ line1: z.string().min(1) }),
+      }),
     });
-    app.post(
-      "/",
-      validateBody(emptyBodySchema),
-      (c: ValidatedBodyContext<typeof emptyBodySchema>) => c.json(c.req.valid("json"))
+    const res = await post(
+      createApp(nestedSchema),
+      JSON.stringify({ identity: { address: { line1: "" } } })
     );
 
-    const res = await post(app, "");
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.details.errors).toMatchObject({
+      "identity.address.line1": [expect.any(String)],
+    });
+    expect(body.error.details.formErrors).toBeUndefined();
+  });
+
+  it("keys a strict schema's unrecognized keys under the key, not formErrors", async () => {
+    const strictSchema = z.strictObject({
+      provider: z.string().min(1),
+      nested: z.strictObject({ known: z.string().min(1) }).optional(),
+    });
+    const res = await post(
+      createApp(strictSchema),
+      JSON.stringify({ provider: "para", apiBaseUrl: "https://x", nested: { known: "a", bad: 1 } })
+    );
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.details.errors).toMatchObject({
+      apiBaseUrl: ["Unrecognized key"],
+      "nested.bad": ["Unrecognized key"],
+    });
+    expect(body.error.details.formErrors).toBeUndefined();
+  });
+
+  it("reports a non-object body in formErrors", async () => {
+    const res = await post(createApp(schema), JSON.stringify("not an object"));
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.details.errors).toEqual({});
+    expect(body.error.details.formErrors).toEqual([expect.any(String)]);
+  });
+
+  it("treats an empty body with a JSON content type as an empty object", async () => {
+    const emptyBodySchema = z.object({ note: z.string().optional() });
+
+    const res = await post(createApp(emptyBodySchema), "");
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({});

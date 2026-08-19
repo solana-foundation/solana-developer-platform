@@ -29,6 +29,7 @@ import {
   earnProgramRetargetSchema,
   earnProgramWithdrawalCreateSchema,
   earnProgramWithdrawalPreviewSchema,
+  earnVaultDepositSchema,
 } from "./schemas";
 
 const earn = new Hono<{ Bindings: Env }>();
@@ -66,11 +67,13 @@ earn.get("/strategies/:strategyId", requirePermissions("earn:read"), getEarnStra
 // `createOrgSigner` and broadcasts a value-moving transaction, so without the
 // gate an org's wallet deny rules, approval requirements, amount/asset limits
 // and destination controls were all bypassed — the handler simply never asked.
-// The gate must sit AFTER `requirePermissions` and immediately before the
-// handler, so a denial is decided before any KMS or relay access.
+// The gate must sit AFTER `requirePermissions` and `validateBody`, and
+// immediately before the handler, so a denial is decided before any KMS or
+// relay access.
 earn.post(
   "/vault-deposits",
   requirePermissions("earn:write", "wallets:read"),
+  validateBody(earnVaultDepositSchema),
   policyGate({
     extract: extractEarnVaultDepositPolicyCandidate,
     findIdempotentKeyReplay: findEarnVaultDepositIdempotentKeyReplay,

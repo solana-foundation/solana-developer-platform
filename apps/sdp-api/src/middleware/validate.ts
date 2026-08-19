@@ -1,6 +1,6 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { validator } from "hono/validator";
-import { z } from "zod";
+import type { z } from "zod";
 import { type AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
 import type { Env } from "@/types/env";
 
@@ -27,7 +27,7 @@ export type ValidatedBodyContext<S extends z.ZodType> = ValidatedContext<{ json:
  * on failure, and hand the typed output to `c.req.valid(target)`.
  *
  * @param schema - The zod schema the target must satisfy.
- * @param toError - Error factory receiving the flattened field errors.
+ * @param toError - Error factory receiving the `{errors, formErrors?}` details.
  * @returns The validation function for hono's core `validator`.
  */
 function zodValidation<S extends z.ZodType>(
@@ -37,14 +37,46 @@ function zodValidation<S extends z.ZodType>(
   return async (value: unknown): Promise<z.output<S>> => {
     const parsed = await schema.safeParseAsync(value);
     if (!parsed.success) {
-      const flattened = z.flattenError(parsed.error);
-      throw toError({
-        errors: flattened.fieldErrors,
-        ...(flattened.formErrors.length > 0 && { formErrors: flattened.formErrors }),
-      });
+      throw toError(validationErrorDetails(parsed.error));
     }
     return parsed.data;
   };
+}
+
+/**
+ * Maps a zod error onto the wire detail shape. `errors` is keyed by each
+ * issue's FULL dot path (`identity.address.line1`, never collapsed to the
+ * top-level field), and a strict schema's `unrecognized_keys` issue is
+ * reported under the offending key itself rather than the empty root path.
+ * Only issues with no path at all — the body not being an object — land in
+ * `formErrors`.
+ *
+ * @param error - The zod error from a failed parse.
+ * @returns The `{errors, formErrors?}` details for the 400 response.
+ */
+function validationErrorDetails(error: z.ZodError): Record<string, unknown> {
+  const errors: Record<string, string[]> = {};
+  const formErrors: string[] = [];
+  const addError = (path: string, message: string) => {
+    const existing = errors[path];
+    if (existing) {
+      existing.push(message);
+    } else {
+      errors[path] = [message];
+    }
+  };
+  for (const issue of error.issues) {
+    if (issue.code === "unrecognized_keys") {
+      for (const key of issue.keys) {
+        addError([...issue.path, key].join("."), "Unrecognized key");
+      }
+    } else if (issue.path.length === 0) {
+      formErrors.push(issue.message);
+    } else {
+      addError(issue.path.join("."), issue.message);
+    }
+  }
+  return { errors, ...(formErrors.length > 0 && { formErrors }) };
 }
 
 /**
