@@ -384,17 +384,32 @@ organization's own custody wallets.
     capability: the route re-applies every scoping rule, so a guessed key can
     only surface a deposit the caller could already read. It is also why the key
     is a QUERY filter and not a path segment — legal keys contain `/` and `?`.
-  - **The POST replay lookup is project-scoped too**, not just these reads.
-    `findMovementByRequestId` is keyed on `(organization_id, request_id)` and the
-    server fingerprint (`buildEarnVaultDepositFingerprint`) omits the project, so
-    a key first used by a SIBLING project matched on both and its movement was
-    returned as a replay — the wrong deposit, plus its amount and signature.
-    Reachable because an organization-level custody config gives two projects the
-    same `custody_wallets` row. `findEarnVaultDepositIdempotentKeyReplay` now
-    applies `isMovementInProject` and answers 409, the conflict it actually is.
+  - **The replay decision is project-scoped IN THE REPOSITORY, not only at the
+    route.** `findMovementByRequestId` is keyed on `(organization_id, request_id)`
+    and the server fingerprint (`buildEarnVaultDepositFingerprint`) omits the
+    project, so a key first used by a SIBLING project matched on both and its
+    movement was returned as a replay — the wrong deposit, plus its amount and
+    signature. Reachable because an organization-level custody config gives two
+    projects the same `custody_wallets` row. The rule is ONE exported function —
+    `assertMovementIsOwnReplay` (`db/repositories/earn-vault.repository.ts`) —
+    enforced at EVERY site that resolves a replay: the route guard
+    (`findEarnVaultDepositIdempotentKeyReplay`), `depositIntoVault`'s fast
+    sequential preflight (`services/earn/vault-deposit.service.ts`), the
+    `createSignedDepositIntent` transaction preflight, and the concurrent-insert
+    loser. It kept re-appearing as a bug precisely because it was re-implemented
+    per site — the route guard was fixed and the repository missed; the
+    repository was fixed and the service fast path missed. A new replay site
+    calls the shared function or it is wrong. The multiplicity is required, not
+    redundancy: the route guard is deliberately skipped for an
+    approved-operation execution, and `wallet_operations` uniqueness is
+    per-PROJECT, so sibling projects can each hold an approval with the same
+    key.
     Deliberately NOT fixed by adding the project to the fingerprint: that value is
     persisted in `wallet_operations.raw_payload.executionRequest`, so changing it
-    would 409 every in-flight retry across a deploy.
+    would 409 every in-flight retry across a deploy. A sibling's approved
+    operation that hits this conflict records `failed` with the 409 as its
+    `execution_error` (`completeWalletOperationExecution` treats any non-2xx as
+    failure), so the outcome is visible on the approval surface, never silent.
   - `?settled=false` returns only movements that can still change, and recovery
     always asks for that. It is not a convenience: a client filtering an
     unbounded history locally has to page it all, and a workspace busy enough to

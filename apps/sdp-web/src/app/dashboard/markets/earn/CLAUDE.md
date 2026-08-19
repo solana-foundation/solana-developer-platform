@@ -147,6 +147,14 @@ the body `requestId` form.
     A ref-scoped key never survived a project switch, so this only became
     reachable once the key outlived the component. The API refuses that case too
     (see `routes/earn/CLAUDE.md`) — this keeps the client from asking.
+  - **The value-moving POST takes no abort signal.** The server processes the
+    request whether or not the component survives it, so aborting on unmount
+    only blinds the client to an answer the STORE needs: a 202 hold whose key
+    was never pinned stays on the 15-minute TTL while the approval lives for
+    hours, and the eventual resubmit mints a fresh key — a second approval
+    request for one intent. The controller gates state updates and the outcome
+    screen; key bookkeeping (`applyVaultDepositIdempotencyKeyOutcome`) runs
+    unconditionally, before the abort check.
   - `claimVaultDepositIdempotencyKey` mints once per fingerprint; `releaseVaultDepositIdempotencyKey` retires it. **Retire only on
     a 4xx or a recorded deposit.** A 5xx is the dangerous one — a gateway timing
     out downstream of an API that already recorded and broadcast looks exactly

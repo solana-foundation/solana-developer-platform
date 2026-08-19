@@ -582,6 +582,9 @@ export function EarnVaultDepositModal({
     contentDataKey: "panel",
   });
 
+  // Unmount "aborts" the SUBMISSION, not the request: the signal gates state
+  // updates and the outcome screen, while the POST itself runs to completion so
+  // its answer still reaches the key store (see the submit path).
   useEffect(
     () => () => {
       requestControllerRef.current?.abort();
@@ -646,17 +649,27 @@ export function EarnVaultDepositModal({
       }
       const idempotencyKey = resolvedKey.key;
 
+      // The value-moving POST deliberately takes NO abort signal. The server
+      // processes the request whether or not this component survives it, so
+      // aborting on unmount only blinds the client to an answer it needs: a
+      // 202 approval hold whose key was never PINNED stays on the 15-minute
+      // TTL while the approval itself lives for hours, and the eventual
+      // resubmit mints a fresh key — a second approval request for one intent.
+      // The controller still exists, but it gates the UI below, never the
+      // request or the key bookkeeping.
       const result = await createEarnVaultDeposit(
         {
           strategyId: strategy.id,
           custodyWalletId: selectedWallet.id,
           amount,
         },
-        idempotencyKey,
-        controller.signal
+        idempotencyKey
       );
-      if (controller.signal.aborted) return;
+      // Key bookkeeping FIRST and unconditionally: the store outlives the
+      // component, so an unmount mid-flight must not skip recording what the
+      // server just answered.
       applyVaultDepositIdempotencyKeyOutcome(fingerprint, result);
+      if (controller.signal.aborted) return;
       const resolution = resolveDepositSubmission(
         result,
         amount,

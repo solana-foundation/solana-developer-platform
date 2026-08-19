@@ -170,8 +170,46 @@ export interface EarnVaultRepository {
   }): Promise<EarnVaultMovementRow[]>;
 }
 
-function assertMovementFingerprint(movement: EarnVaultMovementRow, fingerprint: string): void {
-  if (movement.idempotency_fingerprint !== fingerprint) {
+/**
+ * Assert a prior movement under this (organization, request_id) is THIS
+ * request's own replay — same project AND same fingerprint — before it is
+ * returned as one.
+ *
+ * THIS FUNCTION IS THE RULE — exported so every site that resolves a replay
+ * enforces the same one: the route guard, `depositIntoVault`'s fast sequential
+ * preflight, the transaction preflight below, and the concurrent-insert loser.
+ * The rule kept re-appearing as a bug precisely because it was re-implemented
+ * per site: the route guard was fixed and the repository missed; the repository
+ * was fixed and the service fast path missed — each lookup is org-scoped
+ * (`(organization_id, request_id)` is the unique index) and the server
+ * fingerprint omits the project, so any site that forgets this check hands a
+ * sibling project's movement back as the caller's own replay. Do not inline it
+ * anywhere; call this.
+ *
+ * Reachability is not theoretical: the route guard is deliberately skipped for
+ * an approved-operation execution (`findEarnVaultDepositIdempotentKeyReplay`
+ * returns null so the approval can reach the handler's effect fence), and
+ * `wallet_operations` uniqueness is per-PROJECT — so sibling projects can each
+ * hold an approval with the same caller-chosen key, and the second to execute
+ * used to be handed the first project's movement: its own approved deposit
+ * silently never ran, and the sibling's amount and signature came back as the
+ * response.
+ *
+ * A different project answers with the SAME conflict as a divergent
+ * fingerprint, deliberately: the key really has been used by a different
+ * request, and a distinct message would disclose that a sibling project holds
+ * it. `project_id IS NULL` (owner deleted, `ON DELETE SET NULL`) also
+ * conflicts — the org-scoped unique index means the key is genuinely burnt
+ * either way.
+ */
+export function assertMovementIsOwnReplay(
+  movement: EarnVaultMovementRow,
+  request: { projectId: string; idempotencyFingerprint: string }
+): void {
+  if (
+    movement.project_id !== request.projectId ||
+    movement.idempotency_fingerprint !== request.idempotencyFingerprint
+  ) {
     throw conflict("Idempotency key already used with different request payload");
   }
 }
@@ -385,7 +423,7 @@ export function createPostgresEarnVaultRepository(db: AppDb): EarnVaultRepositor
           input.requestId
         );
         if (prior) {
-          assertMovementFingerprint(prior, input.idempotencyFingerprint);
+          assertMovementIsOwnReplay(prior, input);
           return {
             position: await requireMovementPosition(transaction, prior),
             movement: prior,
@@ -404,7 +442,7 @@ export function createPostgresEarnVaultRepository(db: AppDb): EarnVaultRepositor
             input.requestId
           );
           if (!winner) throw new Error("Failed to resolve concurrent earn vault movement");
-          assertMovementFingerprint(winner, input.idempotencyFingerprint);
+          assertMovementIsOwnReplay(winner, input);
           return {
             position: await requireMovementPosition(transaction, winner),
             movement: winner,

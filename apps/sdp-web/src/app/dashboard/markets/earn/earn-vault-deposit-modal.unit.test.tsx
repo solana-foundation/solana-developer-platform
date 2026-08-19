@@ -10,6 +10,10 @@ import {
   validateVaultDepositAmount,
   walletBalanceForMint,
 } from "./earn-vault-deposit-modal";
+import {
+  claimVaultDepositIdempotencyKey,
+  vaultDepositRequestFingerprint,
+} from "./earn-vault-deposit-tracking";
 
 const USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 const IDEMPOTENCY_KEY = "11111111-1111-4111-8111-111111111111";
@@ -278,6 +282,8 @@ describe("EarnVaultDepositModal", () => {
 
     const [firstInput, firstKey, firstSignal] = mocks.createEarnVaultDeposit.mock.calls[0];
     const [secondInput, secondKey, secondSignal] = mocks.createEarnVaultDeposit.mock.calls[1];
+    // No abort signal, DELIBERATELY: the POST moves value, so it must run to
+    // completion and reach the key bookkeeping even if the modal unmounts.
     const expectedInput = {
       strategyId: strategy.id,
       custodyWalletId: "wallet_1",
@@ -288,8 +294,8 @@ describe("EarnVaultDepositModal", () => {
     expect(firstInput).not.toHaveProperty("requestId");
     expect(firstKey).toBe(IDEMPOTENCY_KEY);
     expect(secondKey).toBe(firstKey);
-    expect(firstSignal).toBeInstanceOf(AbortSignal);
-    expect(secondSignal).toBeInstanceOf(AbortSignal);
+    expect(firstSignal).toBeUndefined();
+    expect(secondSignal).toBeUndefined();
   });
 
   it("carries the key across a remount, so a reload cannot cause a second deposit", async () => {
@@ -371,6 +377,53 @@ describe("EarnVaultDepositModal", () => {
     await screen.findByText("Approval required");
 
     expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).toBe(
+      mocks.createEarnVaultDeposit.mock.calls[0][1]
+    );
+  });
+
+  it("pins an approval hold even when the modal unmounts mid-flight", async () => {
+    // The server records the 202 hold whether or not this component survives
+    // the round trip. If unmount skipped the bookkeeping, the key would stay on
+    // the 15-minute TTL while the approval lives for hours — and the eventual
+    // resubmit would mint a fresh key, a SECOND approval request for one
+    // intent.
+    let respond: (value: unknown) => void = () => {};
+    mocks.createEarnVaultDeposit.mockReturnValue(
+      new Promise((resolve) => {
+        respond = resolve;
+      })
+    );
+
+    const view = render(
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />
+    );
+    await enterDepositAmount();
+    await vi.waitFor(() => expect(mocks.createEarnVaultDeposit).toHaveBeenCalledTimes(1));
+
+    // Browser Back / project switch: the component is gone before the answer.
+    view.unmount();
+    respond({
+      ok: true,
+      status: 202,
+      data: { kind: "approval_pending", message: "Approval required" },
+    });
+    // Let the in-flight submit continuation run.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // The hold reached the store: two hours later — far past the default TTL —
+    // the same fingerprint still claims the SAME key.
+    const fingerprint = vaultDepositRequestFingerprint({
+      projectId: PROJECT_ID,
+      strategyId: strategy.id,
+      custodyWalletId: "wallet_1",
+      amount: "1",
+    });
+    const entries = JSON.parse(
+      sessionStorage.getItem("sdp:earn:vault-deposit:idempotency:v1") ?? "[]"
+    ) as Array<{ id: string; createdAt: number; expiresAt?: number | null }>;
+    const held = entries.find((entry) => entry.id === fingerprint);
+    expect(held?.expiresAt).toBeNull();
+    expect(claimVaultDepositIdempotencyKey(fingerprint)).toBe(
       mocks.createEarnVaultDeposit.mock.calls[0][1]
     );
   });
