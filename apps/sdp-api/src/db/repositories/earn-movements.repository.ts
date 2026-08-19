@@ -853,12 +853,17 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       // commitment now that finalization is the terminal state. `requested` is in
       // it because a broadcast timeout or crash leaves a row unsubmitted WITH a
       // signature, which is precisely the ambiguous case reconciliation is for.
+      //
+      // Blockhash-bound work comes first. A confirmed signature can fall out of
+      // RPC history and correctly remain confirmed forever; letting those rows
+      // lead this bounded query would repeatedly consume the whole batch while a
+      // newer requested/submitted transaction expires without reconciliation.
       const result = await db
         .prepare(
           `SELECT * FROM earn_movements
              WHERE execution_model = 'vault_direct'
                AND status IN ('requested', 'submitted', 'confirmed')
-             ORDER BY created_at ASC, id ASC
+             ORDER BY (status = 'confirmed') ASC, created_at ASC, id ASC
              LIMIT ?`
         )
         .bind(limit)

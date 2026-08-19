@@ -10,7 +10,11 @@ import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
 import type { EarnRepository } from "./earn.repository";
 import { createPostgresEarnRepository } from "./earn.repository.postgres";
-import type { EarnMovementRow, EarnPositionRow } from "./earn-movements.repository";
+import {
+  createPostgresEarnMovementsRepository,
+  type EarnMovementRow,
+  type EarnPositionRow,
+} from "./earn-movements.repository";
 import {
   type CreateSignedEarnVaultDepositIntentInput,
   createPostgresEarnVaultRepository,
@@ -853,6 +857,37 @@ describe("Unified earn movement ledger (postgres)", () => {
           () => "rejected"
         );
       expect(duplicate).toBe("rejected");
+    });
+  });
+
+  describe("reconciliation queue", () => {
+    it("prioritizes blockhash-bound work over older confirmed rows", async () => {
+      const db = getDb(env);
+      const confirmed = await vaultRepo.createSignedDepositIntent(intent());
+      await vaultRepo.advanceMovement({
+        movementId: confirmed.movement.id,
+        organizationId: ORG,
+        fromStatuses: ["pending", "submitted"],
+        toStatus: "confirmed",
+        confirmedAt: "2026-08-19T12:00:00.000Z",
+      });
+      const requested = await vaultRepo.createSignedDepositIntent(intent());
+
+      // A confirmed signature that RPC no longer remembers remains in this queue
+      // indefinitely. Make it explicitly older so the former oldest-first query
+      // would consume a one-row batch and starve the expiring requested movement.
+      await db
+        .prepare("UPDATE earn_movements SET created_at = ? WHERE id = ?")
+        .bind("2026-08-19T00:00:00.000Z", confirmed.movement.id)
+        .run();
+      await db
+        .prepare("UPDATE earn_movements SET created_at = ? WHERE id = ?")
+        .bind("2026-08-19T01:00:00.000Z", requested.movement.id)
+        .run();
+
+      const queued = await createPostgresEarnMovementsRepository(db).listUnsettledVaultMovements(1);
+      expect(queued).toHaveLength(1);
+      expect(queued[0]).toMatchObject({ id: requested.movement.id, status: "requested" });
     });
   });
 
