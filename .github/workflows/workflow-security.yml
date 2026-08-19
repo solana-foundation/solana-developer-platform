@@ -37,7 +37,7 @@ jobs:
           UNPINNED=$(grep -rEn '^[[:space:]]*(-[[:space:]]+)?uses:' .github/workflows/ \
             | grep -Ev 'uses:[[:space:]]*\./' \
             | grep -Ev '^[^#]*uses:[^#@]*@[0-9a-f]{40}([[:space:]]+#.*)?$' \
-            | grep -Ev 'docker://[^@]+@sha256:[0-9a-f]{64}' || true)
+            | grep -Ev '^[^#]*uses:[[:space:]]*docker://[^#@]+@sha256:[0-9a-f]{64}([[:space:]]+#.*)?$' || true)
           if [ -n "$UNPINNED" ]; then
             echo "External actions must be pinned to a full commit SHA (or image digest):"
             echo "$UNPINNED"

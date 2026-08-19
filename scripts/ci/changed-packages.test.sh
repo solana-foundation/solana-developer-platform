@@ -19,6 +19,10 @@ mkdir -p 'apps/$(touch INJECTED)'
 echo x > 'apps/$(touch INJECTED)/index.ts'
 mkdir -p 'packages/evil;rm -rf .'
 echo x > 'packages/evil;rm -rf ./index.ts'
+mkdir -p 'apps/nl
+apps/forged'
+echo x > 'apps/nl
+apps/forged/index.ts'
 git add -A
 git -c user.name=fixture -c user.email=fixture@invalid commit -q -m change
 
