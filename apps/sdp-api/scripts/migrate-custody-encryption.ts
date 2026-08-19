@@ -86,6 +86,13 @@ async function scanOnce(env: Env, version: string, label: string): Promise<PassC
         }
         const reEncrypted = await cipher.encrypt(row.organization_id, nested.configJson);
 
+        const roundTrip = await cipher.decrypt(row.organization_id, reEncrypted);
+        if (roundTrip !== nested.configJson) {
+          counters.failed += 1;
+          console.error(`[${label}] row ${row.id} failed round-trip verification, not written`);
+          continue;
+        }
+
         const updated = await db
           .prepare(
             `UPDATE custody_configs
