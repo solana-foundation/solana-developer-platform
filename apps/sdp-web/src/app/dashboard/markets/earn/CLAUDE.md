@@ -170,12 +170,20 @@ the body `requestId` form.
     produces no movement, so its key survives until the next submit reuses it
     and the API answers 403 "denied by policy" — visible, and a 4xx retires the
     key, so the attempt after that mints a fresh one.
-  - Eviction under the entry cap drops EXPIRING entries before held ones. A plain
-    "keep the newest N" lost a held key once enough other fingerprints piled up in
-    one tab, and that mints a fresh key on the next submit — a second approval
-    request for one intent. Held entries are still bounded, because unbounded
-    growth would hit the `sessionStorage` quota and cost every entry rather than
-    the oldest.
+  - The entry cap governs EXPIRING entries only; a held entry is **never
+    evicted**. The two are not comparable in either direction that matters: an
+    expiring entry is minted by typing a new amount so it accumulates freely and
+    costs at most a replay if dropped, while a held entry exists only because a
+    real POST was parked by policy — single digits in practice — and dropping it
+    mints a fresh key that opens a SECOND approval request for one intent. A
+    shared cap traded the catastrophic failure for a storage one, and the storage
+    one is not real at these sizes (~260 bytes an entry, so even a thousand held
+    keys is a couple of hundred KB against a multi-megabyte quota); a refused
+    write already fails soft into the in-memory tier.
+  - The cap has a floor of ONE expiring entry, because callers write the entry
+    they just claimed as the last element — a budget of zero would evict the key
+    `claim` is about to return, and a key handed out but never stored is one the
+    next call silently replaces.
   - Entries are zod-parsed per row on read, and the row type is derived from that
     schema — same convention as `deposit/earn-funding-wallets.ts`, and for the same
     reason: this store is untrusted JSON written as often by an older build of the

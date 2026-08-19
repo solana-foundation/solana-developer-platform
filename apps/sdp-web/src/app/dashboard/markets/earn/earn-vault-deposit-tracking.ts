@@ -50,7 +50,10 @@ const IDEMPOTENCY_STORE_KEY = "sdp:earn:vault-deposit:idempotency:v1";
  */
 const IDEMPOTENCY_TTL_MS = 15 * 60_000;
 
-/** Bounded so a long session cannot grow the store without limit. */
+/**
+ * Cap on EXPIRING entries, so a long session of typing amounts cannot grow the
+ * store without limit. Held entries are exempt — see `withinStorageBound`.
+ */
 const MAX_STORED_ENTRIES = 20;
 
 /**
@@ -92,31 +95,46 @@ function isLiveEntry(entry: StoredEntry, now: number, ttlMs: number): boolean {
 }
 
 /**
- * Bound the store, evicting EXPIRING entries before held ones.
+ * Bound the store — by evicting EXPIRING entries only. A held entry is never
+ * dropped.
  *
- * A plain "keep the newest N" would drop a held entry once enough other
- * fingerprints accumulated in one tab, and a held entry is an approval still
- * pending server-side under that exact key: losing it mints a fresh key on the
- * next submit, which opens a SECOND approval request for the same intent and can
- * deposit twice. An expiring entry costs at most a replay if it is dropped
- * early, so it is always the safer thing to lose.
+ * The two kinds are not comparable, in either direction that matters:
  *
- * Held entries are still bounded — by the same cap, oldest first — because
- * "never evicted" would make the store unbounded, and `sessionStorage` has a
- * quota that failing to respect would lose EVERY entry rather than the oldest.
+ *   how many can exist — an EXPIRING entry is minted by typing a new amount, so
+ *     it accumulates freely. A HELD entry exists only because a real POST was
+ *     parked by the policy gate, so its count is bounded by actual approval
+ *     requests a person raised in one tab: single digits in practice, and it
+ *     falls as they resolve.
+ *   what losing one costs — dropping an expiring entry costs at most a replay,
+ *     which the API reports honestly as `replayed`. Dropping a HELD entry mints
+ *     a fresh key on the next submit, which opens a SECOND approval request for
+ *     the same intent and can deposit the customer's money twice.
+ *
+ * So a shared cap was the wrong shape: it traded the catastrophic failure for a
+ * storage one. And the storage failure is not real at these sizes — an entry is
+ * ~260 bytes, so even a thousand held entries is a couple of hundred KB against
+ * a multi-megabyte quota. If a quota ever did refuse the write, `writeEntries`
+ * already fails soft into `memoryEntries`, so the cost is durability across a
+ * reload rather than a key that silently changed.
+ *
+ * The cap therefore governs expiring entries, and held entries eat into its
+ * headroom: with the cap full of held keys only the newest expiring entry is
+ * kept, which is the correct trade in the same direction.
  */
 function withinStorageBound(entries: readonly StoredEntry[]): StoredEntry[] {
-  if (entries.length <= MAX_STORED_ENTRIES) return [...entries];
-
   const held = entries.filter(isHeldEntry);
-  const keptHeld = held.slice(Math.max(0, held.length - MAX_STORED_ENTRIES));
-  const room = MAX_STORED_ENTRIES - keptHeld.length;
+  // Floor of ONE, not zero. Callers write the entry they just claimed as the
+  // last element, so a budget of zero would evict the very key `claim` is about
+  // to return — and a key that was handed out but never stored is one the next
+  // call silently replaces, which is the failure this whole module exists to
+  // prevent. Held entries already exceed the cap freely, so one more expiring
+  // entry changes nothing about the bound's purpose.
+  const room = Math.max(1, MAX_STORED_ENTRIES - held.length);
   const expiring = entries.filter((entry) => !isHeldEntry(entry));
-  // `slice(-0)` returns the WHOLE array, so an exhausted budget is explicit.
-  const keptExpiring = room <= 0 ? [] : expiring.slice(Math.max(0, expiring.length - room));
+  const keptExpiring = expiring.slice(-room);
 
   // Filter the original array so insertion order — newest last — survives.
-  const kept = new Set<StoredEntry>([...keptHeld, ...keptExpiring]);
+  const kept = new Set<StoredEntry>([...held, ...keptExpiring]);
   return entries.filter((entry) => kept.has(entry));
 }
 

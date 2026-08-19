@@ -204,19 +204,49 @@ describe("storage bound", () => {
     expect(claimVaultDepositIdempotencyKey(heldFingerprint)).toBe(held);
   });
 
-  it("still bounds held keys, so a refusing quota cannot cost every entry", () => {
+  it("never evicts a held key, however many approvals are pending", () => {
+    // The cap governs EXPIRING entries. A held key is an approval still parked
+    // server-side under that exact value: dropping it mints a fresh key on the
+    // next submit, opening a second approval request for one intent. Losing an
+    // expiring entry costs a replay; losing this one can deposit twice.
     const fingerprints = Array.from({ length: 30 }, (_, index) =>
       vaultDepositRequestFingerprint({ ...request, amount: `20${index}` })
     );
-    for (const fingerprint of fingerprints) {
+    const keys = fingerprints.map((fingerprint) => {
+      const key = claimVaultDepositIdempotencyKey(fingerprint);
+      holdVaultDepositIdempotencyKey(fingerprint);
+      return key;
+    });
+
+    // Every one of them, including the OLDEST — the entry a shared cap dropped.
+    for (const [index, fingerprint] of fingerprints.entries()) {
+      expect(claimVaultDepositIdempotencyKey(fingerprint)).toBe(keys[index]);
+    }
+  });
+
+  it("gives up the OLDEST expiring entry when held keys fill the cap", () => {
+    const heldFingerprints = Array.from({ length: 20 }, (_, index) =>
+      vaultDepositRequestFingerprint({ ...request, amount: `30${index}` })
+    );
+    for (const fingerprint of heldFingerprints) {
       claimVaultDepositIdempotencyKey(fingerprint);
       holdVaultDepositIdempotencyKey(fingerprint);
     }
 
-    const stored = JSON.parse(sessionStorage.getItem(IDEMPOTENCY_STORE_KEY) ?? "[]") as unknown[];
-    expect(stored.length).toBeLessThanOrEqual(20);
-    // The newest survive; the oldest are the ones given up.
-    expect(claimVaultDepositIdempotencyKey(fingerprints[29] as string)).toBeTruthy();
+    const olderFingerprint = vaultDepositRequestFingerprint({ ...request, amount: "998" });
+    const older = claimVaultDepositIdempotencyKey(olderFingerprint);
+    const newerFingerprint = vaultDepositRequestFingerprint({ ...request, amount: "999" });
+    const newer = claimVaultDepositIdempotencyKey(newerFingerprint);
+
+    // The newest expiring entry always survives — it is the key `claim` just
+    // handed back, and returning a key that was never stored would let the next
+    // call silently replace it.
+    expect(claimVaultDepositIdempotencyKey(newerFingerprint)).toBe(newer);
+    // The older one is the honest thing to surrender: a stale expiring key risks
+    // only a replay, which the API reports as `replayed`.
+    expect(claimVaultDepositIdempotencyKey(olderFingerprint)).not.toBe(older);
+    // And every held key is untouched.
+    expect(claimVaultDepositIdempotencyKey(heldFingerprints[0] as string)).toBeTruthy();
   });
 
   it("drops an entry the store cannot recognize as a whole entry", () => {
