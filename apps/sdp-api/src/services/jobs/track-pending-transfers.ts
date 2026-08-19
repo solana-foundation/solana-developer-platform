@@ -26,6 +26,7 @@ import {
   WALLET_TRANSFER_TYPES,
 } from "@/db/repositories";
 import type {
+  ConfirmedTransferPollVerdict,
   PaymentTransferRow,
   UpdatePaymentTransferInput,
 } from "@/db/repositories/payments.repository";
@@ -38,8 +39,8 @@ const STUCK_PROCESSING_AFTER_MS = 5 * 60 * 1000;
 // getSignatureStatuses accepts at most 256 signatures per call.
 const MAX_SIGNATURES_PER_BATCH = 256;
 // A confirmed transaction finalizes within ~30s or never (fork, ledger reset);
-// past this window (anchored on created_at — updated_at rotates on every poll)
-// a still-confirmed row ages out of the finalization poll and rests at
+// past this window (anchored on confirmed_at, which never moves once set) a
+// still-confirmed row ages out of the finalization poll and rests at
 // confirmed instead of costing an RPC history search forever.
 const CONFIRMED_FINALIZATION_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -104,14 +105,18 @@ export async function trackPendingTransfers(env: Env): Promise<void> {
  * row would read null forever.
  *
  * Polls one page per tick as a least-recently-polled queue: rows are ordered
- * by updated_at, and advanceConfirmedTransfers touches every polled row's
- * updated_at, rotating it to the back. A fixed oldest-first prefix would let
- * stuck rows — null or errored reads whose updated_at never changed —
- * permanently starve every transfer behind them; rotation guarantees each
- * eligible row is polled within backlog/page-size ticks at a constant one
- * RPC call per tick. The poll only covers rows created within
- * CONFIRMED_FINALIZATION_WINDOW_MS: past that window the transaction will
- * never finalize, so the row rests at confirmed and stops costing RPC.
+ * by finalization_last_polled_at (never-polled first), and
+ * advanceConfirmedTransfers stamps it on every polled row, rotating the row
+ * to the back — updated_at stays a domain timestamp and moves only on real
+ * finalization. A fixed oldest-first prefix would let stuck rows permanently
+ * starve every transfer behind them; rotation polls each eligible row within
+ * backlog/page-size successful queue advances at a constant one RPC call per
+ * tick (overlapping runtimes degrade to duplicate polls, never lost or
+ * regressed state — every write is guarded on status). A failed RPC batch
+ * still rotates the page, so a poisoned signature cannot pin it. The poll
+ * only covers rows confirmed within CONFIRMED_FINALIZATION_WINDOW_MS: past
+ * that window the transaction will never finalize, so the row rests at
+ * confirmed and stops costing RPC.
  *
  * @param env - Runtime environment for RPC and repository construction.
  * @param repo - System payments repository.
@@ -126,11 +131,8 @@ async function finalizeConfirmedTransfers(
   nowIso: string
 ): Promise<void> {
   const windowFloor = new Date(now.getTime() - CONFIRMED_FINALIZATION_WINDOW_MS).toISOString();
-  const confirmedTransfers = await repo.listTransfersByStatus({
-    statuses: ["confirmed"],
-    types: WALLET_TRANSFER_TYPES,
-    hasSignature: true,
-    createdAfter: windowFloor,
+  const confirmedTransfers = await repo.listConfirmedTransfersToPoll({
+    confirmedAfter: windowFloor,
     limit: MAX_SIGNATURES_PER_BATCH,
   });
 
@@ -153,20 +155,39 @@ async function finalizeConfirmedTransfers(
       },
       "trackPendingTransfers: getSignatureStatuses RPC call failed for confirmed transfers"
     );
+    await repo.advanceConfirmedTransfers({
+      polled: confirmedTransfers.map(
+        (transfer): ConfirmedTransferPollVerdict => ({
+          transferId: transfer.id,
+          organizationId: transfer.organization_id,
+          finalized: false,
+          slot: null,
+        })
+      ),
+      updatedAt: nowIso,
+    });
     return;
   }
 
-  const polled = confirmedTransfers.map((transfer, i) => {
-    const status = statuses[i];
-    const finalized = Boolean(status && !status.err && status.confirmationStatus === "finalized");
-    return {
-      transferId: transfer.id,
-      organizationId: transfer.organization_id,
-      finalized,
-      slot: finalized && status ? Number(status.slot) : null,
-      signature: transfer.signature as string,
-    };
-  });
+  if (statuses.length !== signatures.length) {
+    throw internalError(
+      `getSignatureStatuses returned ${statuses.length} statuses for ${signatures.length} signatures`
+    );
+  }
+
+  const polled = confirmedTransfers.map(
+    (transfer, i): ConfirmedTransferPollVerdict & { signature: string } => {
+      const status = statuses[i];
+      const base = {
+        transferId: transfer.id,
+        organizationId: transfer.organization_id,
+        signature: transfer.signature as string,
+      };
+      return status && !status.err && status.confirmationStatus === "finalized"
+        ? { ...base, finalized: true, slot: Number(status.slot) }
+        : { ...base, finalized: false, slot: null };
+    }
+  );
 
   await repo.advanceConfirmedTransfers({ polled, updatedAt: nowIso });
 

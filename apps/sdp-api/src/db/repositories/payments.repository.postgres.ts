@@ -10,7 +10,7 @@ import type {
   PaymentTransferRow,
   UpdatePaymentTransferInput,
 } from "./payments.repository";
-import { generatePaymentTransferId } from "./payments.repository";
+import { generatePaymentTransferId, WALLET_TRANSFER_TYPES } from "./payments.repository";
 
 function buildInClause(length: number): string {
   return Array.from({ length }, () => "?").join(", ");
@@ -155,6 +155,9 @@ function mapTransferRow(row: Record<string, unknown>): PaymentTransferRow {
     initiated_by_key_id: (row.initiated_by_key_id as string | null | undefined) ?? null,
     idempotency_key: (row.idempotency_key as string | null | undefined) ?? null,
     idempotency_fingerprint: (row.idempotency_fingerprint as string | null | undefined) ?? null,
+    confirmed_at: (row.confirmed_at as string | null | undefined) ?? null,
+    finalization_last_polled_at:
+      (row.finalization_last_polled_at as string | null | undefined) ?? null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -233,9 +236,10 @@ export function createPostgresPaymentsRepository(
              initiated_by_key_id,
              idempotency_key,
              idempotency_fingerprint,
+             confirmed_at,
              created_at,
              updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, sdp_iso_now(), sdp_iso_now())
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, CASE WHEN ?::boolean THEN sdp_iso_now() END, sdp_iso_now(), sdp_iso_now())
            RETURNING *`
         )
         .bind(
@@ -264,7 +268,8 @@ export function createPostgresPaymentsRepository(
           input.slot,
           input.initiatedByKeyId,
           input.idempotencyKey ?? null,
-          input.idempotencyFingerprint ?? null
+          input.idempotencyFingerprint ?? null,
+          input.status === "confirmed"
         )
         .first<Record<string, unknown>>();
 
@@ -335,6 +340,7 @@ export function createPostgresPaymentsRepository(
                delivery_mode = CASE WHEN ?::boolean THEN ? ELSE delivery_mode END,
                provider_data = CASE WHEN ?::boolean THEN provider_data || ?::jsonb ELSE provider_data END,
                error = CASE WHEN ?::boolean THEN ? ELSE error END,
+               confirmed_at = CASE WHEN ?::boolean THEN COALESCE(confirmed_at, ?) ELSE confirmed_at END,
                updated_at = ?
            WHERE ${clauses.join(" AND ")}
            RETURNING *`
@@ -363,6 +369,8 @@ export function createPostgresPaymentsRepository(
           JSON.stringify(input.providerData ?? {}),
           input.error !== undefined,
           input.error ?? null,
+          input.status === "confirmed" || input.status === "finalized",
+          input.updatedAt,
           input.updatedAt,
           ...values
         )
@@ -580,7 +588,6 @@ export function createPostgresPaymentsRepository(
       types,
       hasSignature,
       createdBefore,
-      createdAfter,
       updatedBefore,
       limit,
       offset,
@@ -610,10 +617,6 @@ export function createPostgresPaymentsRepository(
         clauses.push("created_at < ?");
         values.push(createdBefore);
       }
-      if (createdAfter) {
-        clauses.push("created_at > ?");
-        values.push(createdAfter);
-      }
       if (updatedBefore) {
         clauses.push("updated_at < ?");
         values.push(updatedBefore);
@@ -629,6 +632,30 @@ export function createPostgresPaymentsRepository(
            OFFSET ?`
         )
         .bind(...values, limit, offset ?? 0)
+        .all<Record<string, unknown>>();
+
+      return rows.results.map(mapTransferRow);
+    },
+
+    async listConfirmedTransfersToPoll({ confirmedAfter, limit }) {
+      if (tenantScope) {
+        throw new TenantScopeViolationError(
+          "PaymentsRepository.listConfirmedTransfersToPoll is system-only"
+        );
+      }
+      const pollableStatus: PaymentTransferStatus = "confirmed";
+      const rows = await db
+        .prepare(
+          `SELECT *
+           FROM payment_transfers
+           WHERE status = ?
+             AND type IN (${buildInClause(WALLET_TRANSFER_TYPES.length)})
+             AND signature IS NOT NULL
+             AND confirmed_at > ?
+           ORDER BY finalization_last_polled_at ASC NULLS FIRST, id ASC
+           LIMIT ?`
+        )
+        .bind(pollableStatus, ...WALLET_TRANSFER_TYPES, confirmedAfter, limit)
         .all<Record<string, unknown>>();
 
       return rows.results.map(mapTransferRow);
@@ -651,7 +678,8 @@ export function createPostgresPaymentsRepository(
           `UPDATE payment_transfers AS t
               SET status = CASE WHEN v.finalized THEN ? ELSE t.status END,
                   slot = CASE WHEN v.finalized THEN v.slot ELSE t.slot END,
-                  updated_at = ?
+                  updated_at = CASE WHEN v.finalized THEN ? ELSE t.updated_at END,
+                  finalization_last_polled_at = ?
              FROM jsonb_to_recordset(?::jsonb) AS v(transfer_id text, organization_id text, finalized boolean, slot bigint)
             WHERE t.id = v.transfer_id
               AND t.organization_id = v.organization_id
@@ -659,6 +687,7 @@ export function createPostgresPaymentsRepository(
         )
         .bind(
           toStatus,
+          updatedAt,
           updatedAt,
           JSON.stringify(
             polled.map((t) => ({
