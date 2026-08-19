@@ -18,7 +18,6 @@
     "db:seed:local": "psql \"${DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp}\" -f src/db/seeds/local.sql",
     "db:spc:reset:local": "DATABASE_URL=${DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp} node scripts/spc-reset-postgres.mjs",
     "db:seed:issuance": "tsx scripts/seed-issuance-demo.ts",
-    "db:seed:earn": "tsx scripts/seed-earn-demo.ts",
     "db:postgres:bootstrap": "DATABASE_URL=${DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp} node scripts/migrate-postgres.mjs",
     "org:tier:local": "tsx scripts/set-organization-tier-local.ts",
     "sponsorship:budget": "tsx scripts/sponsorship-budget.ts",

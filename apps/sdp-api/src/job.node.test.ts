@@ -2,11 +2,16 @@ import * as Sentry from "@sentry/node";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
 import { runEarnMetricsRefreshTick } from "@/cron/earn-metrics-refresh";
+import {
+  EARN_VAULT_MOVEMENTS_CRON,
+  EARN_VAULT_MOVEMENTS_MONITOR,
+} from "@/cron/earn-vault-movements";
 import { closeDatabasePools } from "@/db/client";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { isSentryEnabled } from "@/runtime/observability";
 import { nodeObservability } from "@/runtime/observability-node";
+import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
 import { runDueWorkflowExecutions } from "@/services/jobs/run-workflow-executions";
@@ -32,6 +37,11 @@ vi.mock("@/cron/earn-catalogue-sync", () => ({
 // catch swallow the failures.
 vi.mock("@/cron/earn-metrics-refresh", () => ({
   runEarnMetricsRefreshTick: vi.fn(async () => {}),
+}));
+
+vi.mock("@/cron/earn-vault-movements", () => ({
+  EARN_VAULT_MOVEMENTS_CRON: "* * * * *",
+  EARN_VAULT_MOVEMENTS_MONITOR: "sdp-api-reconcile-earn-vault-movements",
 }));
 
 // Literal constants keep the heavy service graph behind pending-transfers out
@@ -96,6 +106,10 @@ vi.mock("@/services/jobs/reconcile-sponsorship-budgets", () => ({
   reconcileSponsorshipBudgets: vi.fn(async () => {}),
 }));
 
+vi.mock("@/services/jobs/reconcile-earn-vault-movements", () => ({
+  reconcileEarnVaultMovements: vi.fn(async () => {}),
+}));
+
 vi.mock("@/services/policy/approved-operation-replay", () => ({
   recoverApprovedWalletOperations: vi.fn(async () => {}),
 }));
@@ -121,6 +135,7 @@ describe("runCronJob", () => {
     vi.mocked(reconcileSponsorshipBudgets)
       .mockReset()
       .mockResolvedValue(undefined as never);
+    vi.mocked(reconcileEarnVaultMovements).mockReset().mockResolvedValue(undefined);
     vi.mocked(runEarnCatalogueSyncIfDue).mockReset().mockResolvedValue("synced");
     vi.mocked(runEarnMetricsRefreshTick).mockReset().mockResolvedValue(undefined);
     vi.mocked(runDueWorkflowExecutions)
@@ -152,6 +167,7 @@ describe("runCronJob", () => {
     expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
     expect(recoverApprovedWalletOperations).toHaveBeenCalledTimes(1);
     expect(reconcileSponsorshipBudgets).toHaveBeenCalledTimes(1);
+    expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
     // Managed deployments always have asset profiles on, so the workflow tick runs.
     expect(runDueWorkflowExecutions).toHaveBeenCalledTimes(1);
     expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
@@ -270,7 +286,12 @@ describe("runCronJob", () => {
 
     // The pair keeps the transfers monitor; the workflow tick and the retirement sweep
     // each report to their own, so neither masquerades as a reconciliation failure.
-    expect(nodeObservability.withMonitor).toHaveBeenCalledTimes(3);
+    expect(nodeObservability.withMonitor).toHaveBeenCalledTimes(4);
+    expect(nodeObservability.withMonitor).toHaveBeenCalledWith(
+      EARN_VAULT_MOVEMENTS_MONITOR,
+      expect.any(Function),
+      { schedule: { type: "crontab", value: EARN_VAULT_MOVEMENTS_CRON } }
+    );
     expect(nodeObservability.withMonitor).toHaveBeenCalledWith(
       "sdp-api-retire-workflow-secrets",
       expect.any(Function),

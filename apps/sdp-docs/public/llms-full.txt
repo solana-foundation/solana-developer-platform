@@ -2096,7 +2096,7 @@ Source: https://platform.solana.com/docs/wallet-operations
 
 > Configure custody-wallet controls, operation permissions, and balances.
 
-This section covers the controls and audit trail attached to a custody wallet: **wallet policies** that gate every wallet operation, and balance visibility. A wallet policy applies uniformly across payment, ramp, issuance, and signing activity, whichever product flow initiates the request.
+This section covers the controls and audit trail attached to a custody wallet: **wallet policies** that gate every wallet operation, and balance visibility. A wallet policy applies uniformly across payment, ramp, issuance, signing, and on-chain program activity such as Earn vault deposits, whichever product flow initiates the request.
 
 ## What's in this section
 
@@ -2105,7 +2105,7 @@ This section covers the controls and audit trail attached to a custody wallet: *
 
 ## API surface
 
-The current wallet-policy and balance endpoints remain under `/v1/payments/wallets` because they were introduced with the Payments API. Their behavior is wallet-wide: policy operation families include transfer, payment, ramp, and issuance.
+The current wallet-policy and balance endpoints remain under `/v1/payments/wallets` because they were introduced with the Payments API. Their behavior is wallet-wide: policy operation families include transfer, payment, ramp, issuance, and program.
 
 ## Related
 
@@ -2241,6 +2241,7 @@ These are wallet-policy selectors, not API-key permissions. API-key permissions 
 | `payment` | Outbound single and batch payments. | Single and batch transfer execution |
 | `ramp` | Fiat-to-crypto and crypto-to-fiat ramp activity. | On-ramp and off-ramp quote creation |
 | `issuance` | Token lifecycle actions signed by the wallet. | Mint, burn, seize, and authority-update execution |
+| `program` | On-chain program interactions signed by the wallet. | Earn vault deposits |
 | `transfer` | Generic direct-transfer family reserved for operations outside the payment workflow. | No current public operation type |
 
 Family values with no current public operation type are valid policy values, but they do not match a public SDP flow until an operation is emitted in that family.
@@ -2258,6 +2259,7 @@ Family values with no current public operation type are valid policy values, but
 | `issuance_force_burn_execute` | `issuance` | Force-burns tokens from a holder account. |
 | `issuance_seize_execute` | `issuance` | Seizes tokens into the issuer-controlled destination. |
 | `issuance_update_authority_execute` | `issuance` | Changes a token authority using the current authority wallet. |
+| `earn_vault_deposit` | `program` | Deposits custody-wallet assets into a supported non-custodial Earn vault. |
 | `recurring_payment_create` | `payment` | Creates a recurring payment schedule. |
 | `recurring_payment_update` | `payment` | Updates a recurring payment schedule. |
 | `recurring_payment_collection` | `payment` | Collects a due recurring payment. |

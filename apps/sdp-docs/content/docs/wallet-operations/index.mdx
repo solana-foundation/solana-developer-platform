@@ -3,7 +3,7 @@ title: Overview
 description: Configure custody-wallet controls, operation permissions, and balances.
 ---
 
-This section covers the controls and audit trail attached to a custody wallet: **wallet policies** that gate every wallet operation, and balance visibility. A wallet policy applies uniformly across payment, ramp, issuance, and signing activity, whichever product flow initiates the request.
+This section covers the controls and audit trail attached to a custody wallet: **wallet policies** that gate every wallet operation, and balance visibility. A wallet policy applies uniformly across payment, ramp, issuance, signing, and on-chain program activity such as Earn vault deposits, whichever product flow initiates the request.
 
 ## What's in this section
 
@@ -12,7 +12,7 @@ This section covers the controls and audit trail attached to a custody wallet: *
 
 ## API surface
 
-The current wallet-policy and balance endpoints remain under `/v1/payments/wallets` because they were introduced with the Payments API. Their behavior is wallet-wide: policy operation families include transfer, payment, ramp, and issuance.
+The current wallet-policy and balance endpoints remain under `/v1/payments/wallets` because they were introduced with the Payments API. Their behavior is wallet-wide: policy operation families include transfer, payment, ramp, issuance, and program.
 
 ## Related
 

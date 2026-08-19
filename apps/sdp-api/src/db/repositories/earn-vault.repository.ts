@@ -122,7 +122,7 @@ export interface EarnVaultRepository {
     /** Always the current project's wallet rows plus organization fallbacks. */
     custodyWalletIds: readonly string[];
     limit: number;
-    before?: EarnVaultPositionCursor;
+    before: EarnVaultPositionCursor | null;
   }): Promise<{ rows: EarnVaultPositionRow[]; hasMore: boolean }>;
   findMovementByRequestId(params: {
     organizationId: string;
@@ -132,6 +132,8 @@ export interface EarnVaultRepository {
     movementId: string;
     organizationId: string;
   }): Promise<EarnVaultMovementRow | null>;
+  /** Global bounded outbox scan for the reconciliation worker. */
+  listUnsettledMovements(limit: number): Promise<EarnVaultMovementRow[]>;
   /** Guarded CAS. Returns null when the row was not in `fromStatuses`. */
   advanceMovement(input: AdvanceEarnVaultMovementInput): Promise<EarnVaultMovementRow | null>;
   listMovements(params: {
@@ -449,6 +451,22 @@ export function createPostgresEarnVaultRepository(db: AppDb): EarnVaultRepositor
         .prepare(`SELECT * FROM earn_vault_movements WHERE id = ? AND organization_id = ?`)
         .bind(params.movementId, params.organizationId)
         .first<EarnVaultMovementRow>();
+    },
+
+    async listUnsettledMovements(limit) {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 256) {
+        throw new Error("listUnsettledMovements limit must be an integer from 1 to 256");
+      }
+      const result = await db
+        .prepare(
+          `SELECT * FROM earn_vault_movements
+           WHERE status IN ('pending', 'submitted')
+           ORDER BY created_at ASC, id ASC
+           LIMIT ?`
+        )
+        .bind(limit)
+        .all<EarnVaultMovementRow>();
+      return result.results ?? [];
     },
 
     async advanceMovement(input) {

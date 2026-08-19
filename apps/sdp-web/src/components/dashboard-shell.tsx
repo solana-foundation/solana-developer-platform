@@ -31,10 +31,9 @@ import {
 } from "@/app/dashboard/issuance/issuance-page-skeleton";
 import DashboardLoading from "@/app/dashboard/loading";
 import {
-  EarnDepositSkeleton,
-  EarnOverviewSkeleton,
-  EarnStrategyDetailSkeleton,
-} from "@/app/dashboard/markets/earn/earn-route-skeletons";
+  EarnProgramSkeleton,
+  TreasurySolutionsSkeleton,
+} from "@/app/dashboard/markets/markets-route-skeletons";
 import {
   CompactOperationsCardSkeleton,
   SettingsPageSkeleton,
@@ -155,12 +154,10 @@ function resolvePageLoadingComponent(
       return IssuanceDetailSkeleton;
     case "payments-overview":
       return PaymentsPageSkeleton;
-    case "earn-overview":
-      return EarnOverviewSkeleton;
-    case "earn-deposit":
-      return EarnDepositSkeleton;
-    case "earn-strategy-detail":
-      return EarnStrategyDetailSkeleton;
+    case "treasury-solutions":
+      return TreasurySolutionsSkeleton;
+    case "earn-program":
+      return EarnProgramSkeleton;
     case "payments-transactions":
       return PaymentsTransactionsPageSkeleton;
     case "payments-pay":
@@ -545,10 +542,10 @@ export function DashboardShell({
   ) : null;
   const headerTabs = pageConfig.headerTabs;
   const hasHeaderTabs = Boolean(headerTabs);
-  const centeredTitle = pageConfig.centeredTitle;
   const showBackInTopBar = Boolean(backAction) && !hasHeaderTabs;
   const topBarLeadingContent = showBackInTopBar ? backAction : pageConfig.topBarLeadingContent;
-  const shouldRenderTopBarBorder = (Boolean(centeredTitle) || showBackInTopBar) && !hasHeaderTabs;
+  const shouldRenderTopBarBorder =
+    (pageConfig.titlePosition === "center" || showBackInTopBar) && !hasHeaderTabs;
   const shouldClipHorizontalOverflow =
     pathname === "/dashboard/payments" ||
     pathname === "/dashboard/payments/transactions" ||
@@ -572,7 +569,7 @@ export function DashboardShell({
     pathname === "/dashboard/api-keys/new" ||
     (pathname.startsWith("/dashboard/api-keys/") && pathname.endsWith("/edit")) ||
     pathname.startsWith("/dashboard/payments") ||
-    pathname === "/dashboard/markets/earn/deposit" ||
+    pathname.startsWith("/dashboard/markets") ||
     pathname === "/dashboard/wallets" ||
     pathname === "/dashboard/custody" ||
     isWalletSetupRoute ||
@@ -736,7 +733,9 @@ export function DashboardShell({
         ].join(" ")}
       >
         <aside
-          style={{ width: isSidebarOpen ? sidebarExpandedWidth : sidebarCollapsedWidth }}
+          style={{
+            width: isSidebarOpen ? sidebarExpandedWidth : sidebarCollapsedWidth,
+          }}
           className="relative z-10 hidden bg-[var(--sdp-shell-bg)] xl:sticky xl:top-0 xl:flex xl:h-screen xl:flex-col xl:justify-between"
         >
           <DashboardSidebarContent
@@ -839,7 +838,7 @@ export function DashboardShell({
                   setMobileSidebarOpen={setMobileSidebarOpen}
                   hideTitle={pageConfig.hideTitle}
                   title={pageConfig.title}
-                  centeredTitle={centeredTitle}
+                  titlePosition={pageConfig.titlePosition}
                   topBarLeadingContent={topBarLeadingContent}
                   hasHeaderTabs={hasHeaderTabs}
                   showNotifications={assetProfilesEnabled}

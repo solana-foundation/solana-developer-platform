@@ -72,12 +72,12 @@ export const tokenAmountSchema = z.string().openapi({
 
 export const policyRuleSchema = withOpenApi(updateWalletPolicySchemaBase.shape.rules.element, {
   description:
-    "Wallet control profile rule. Supported kinds include operation_family, operation_type, asset, destination, amount, approval, and always.",
+    "Wallet control profile rule. Supported kinds include operation_family, operation_type, asset, destination, amount, approval, and always. Program-family operations include earn_vault_deposit.",
   example: {
-    id: "deny-issuance",
-    kind: "operation_family",
-    family: "issuance",
-    action: "deny",
+    id: "approve-vault-deposits",
+    kind: "operation_type",
+    operationTypes: ["earn_vault_deposit"],
+    action: "approval_required",
   },
 });
 
@@ -411,10 +411,10 @@ export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
         "Rules for the new immutable wallet control profile revision, activated after validation.",
       example: [
         {
-          id: "deny-issuance",
-          kind: "operation_family",
-          family: "issuance",
-          action: "deny",
+          id: "approve-vault-deposits",
+          kind: "operation_type",
+          operationTypes: ["earn_vault_deposit"],
+          action: "approval_required",
         },
       ],
     }),
