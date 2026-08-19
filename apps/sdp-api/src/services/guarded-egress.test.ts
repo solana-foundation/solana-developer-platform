@@ -6,6 +6,7 @@ import {
   guardedFetch,
   guardedLookup,
   isBlockedAddress,
+  nextRedirectStep,
 } from "@/services/guarded-egress";
 
 /**
@@ -63,6 +64,42 @@ describe("guardedLookup", () => {
 
   // The allow path is asserted against addresses rather than a live name on
   // purpose: a lookup of a public host would put the network in a unit test.
+});
+
+describe("nextRedirectStep", () => {
+  const init = { method: "POST", body: '{"jsonrpc":"2.0"}' };
+
+  it.each([307, 308])("repeats the request on %i", (status) => {
+    expect(
+      nextRedirectStep(status, "https://rpc.example/v2", "https://rpc.example/", init)
+    ).toEqual({ url: "https://rpc.example/v2", method: "POST", body: '{"jsonrpc":"2.0"}' });
+  });
+
+  it.each([301, 302, 303])("downgrades to GET and drops the body on %i", (status) => {
+    // What fetch did before the guard existed. Matching it keeps the change to
+    // where the request is allowed to go, not what it says.
+    expect(nextRedirectStep(status, "/v2", "https://rpc.example/rpc", init)).toEqual({
+      url: "https://rpc.example/v2",
+      method: "GET",
+      body: "",
+    });
+  });
+
+  it("resolves a relative location against the current URL", () => {
+    expect(nextRedirectStep(308, "../v3", "https://rpc.example/a/b", init)?.url).toBe(
+      "https://rpc.example/v3"
+    );
+  });
+
+  it.each([200, 404, 500])("is not a redirect on %i", (status) => {
+    expect(
+      nextRedirectStep(status, "https://elsewhere.example/", "https://rpc.example/", init)
+    ).toBeNull();
+  });
+
+  it("is not a redirect without a location", () => {
+    expect(nextRedirectStep(302, null, "https://rpc.example/", init)).toBeNull();
+  });
 });
 
 describe("guardedFetch", () => {

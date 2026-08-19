@@ -16,6 +16,7 @@ import {
   replaceProviderCredential,
   submitProviderCredential,
 } from "@/services/provider-credential-submission.service";
+import { isCustomerSuppliedTarget } from "@/services/rpc-egress";
 import { probeRpcEndpoint } from "@/services/rpc-probe";
 import type { Env } from "@/types/env";
 
@@ -142,18 +143,20 @@ export interface RpcConnectionCheckResult {
 /**
  * Run the same read-only JSON-RPC probe used by POST /rpc/test.
  *
- * `custom` is the project's own stored endpoint, `projects.settings.rpcEndpoint`,
- * which is validated as a URL when written and nothing more. That makes it as
- * customer-supplied as a tenant connection, so it resolves under the same guard
- * rather than through the ordinary fetch. Managed providers keep it: their
- * endpoints come from deployment config and are private on purpose in local
- * development and in the Surfpool suites.
+ * `/v1/rpc/test` resolves tenant connections and the project's own `custom`
+ * endpoint, and `projects.settings.rpcEndpoint` behind the latter is validated
+ * as a URL when written and nothing more, so the probe reaches a
+ * customer-supplied host in both cases and both go under the guard. Managed
+ * providers keep the ordinary fetch: their endpoints come from deployment
+ * config and are private on purpose in local development and in the Surfpool
+ * suites. The probe does not follow redirects, which it already refused before
+ * the guard existed.
  */
 export async function checkResolvedRpcTargetConnection(
   input: RpcConnectionCheckInput
 ): Promise<RpcConnectionCheckResult> {
   return probeRpcEndpoint(input.target, {
-    enforcePublicEgress: input.target.providerId === "custom",
+    enforcePublicEgress: isCustomerSuppliedTarget(input.target),
   });
 }
 
