@@ -190,6 +190,13 @@ async function finalizeConfirmedTransfers(
   }
 
   await repo.finalizeConfirmedTransfers({ transfers: finalized, updatedAt: nowIso });
+
+  if (finalized.length > 0) {
+    getLogger().info(
+      { finalized: finalized.length, swept: confirmedTransfers.length },
+      "trackPendingTransfers: finalized confirmed transfers"
+    );
+  }
 }
 
 /**
