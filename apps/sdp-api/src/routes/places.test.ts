@@ -50,7 +50,7 @@ async function requestAutocomplete(): Promise<Response> {
         "Content-Type": "application/json",
         Authorization: `Bearer ${TEST_API_KEY.raw}`,
       },
-      body: JSON.stringify({ input: "1 Main St" }),
+      body: JSON.stringify({ input: "1 Main St", sessionToken: "test-session-token" }),
     },
     env
   );

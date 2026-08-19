@@ -5,6 +5,7 @@
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
   acceptInvitation,
@@ -13,6 +14,7 @@ import {
   removeMember,
   revokeInvitation,
 } from "./handlers";
+import { acceptSchema, inviteSchema } from "./schemas";
 
 const members = new Hono<{ Bindings: Env }>();
 
@@ -21,12 +23,12 @@ members.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true })
 members.use("*", projectContextMiddleware());
 
 members.get("/", requirePermissions("org:read"), listMembers);
-members.post("/invite", requirePermissions("org:write"), inviteMember);
+members.post("/invite", requirePermissions("org:write"), validateBody(inviteSchema), inviteMember);
 
 // Accept invitation runs behind the shared auth + project-context middleware
 // above; it has no permission gate because the invitation token in the body is
 // the authorizing credential.
-members.post("/accept", acceptInvitation);
+members.post("/accept", validateBody(acceptSchema), acceptInvitation);
 
 // Declared before /:memberId so "invitations" is not read as a member id.
 members.delete("/invitations/:invitationId", requirePermissions("org:write"), revokeInvitation);

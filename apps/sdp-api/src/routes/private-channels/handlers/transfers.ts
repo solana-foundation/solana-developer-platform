@@ -1,14 +1,14 @@
-import { z } from "zod";
 import { mapPrivateChannelTransferRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { createChannelTransfer, mapPrivateChannelError } from "@/services/private-channels";
 import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
 import type { AppContext } from "../context";
 import { getPrivateChannelTransferRepository } from "../context";
 import {
-  createTransferBodySchema,
+  type createTransferBodySchema,
   transferChannelIdParamSchema,
   transferIdParamSchema,
   transferListQuerySchema,
@@ -32,21 +32,17 @@ export async function listPrivateChannelTransferRecipients(c: AppContext) {
 }
 
 /** POST /channels/:channelId/transfers. */
-export async function createPrivateChannelTransfer(c: AppContext) {
+export async function createPrivateChannelTransfer(
+  c: ValidatedBodyContext<typeof createTransferBodySchema>
+) {
   const channelId = parseChannelId(c);
-  const body = await c.req.json().catch(() => null);
-  const parsed = createTransferBodySchema.safeParse(body);
-  if (!parsed.success) {
-    throw badRequest("Invalid transfer request", {
-      fieldErrors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   try {
     const context = await resolveTransferCreateContext(c, {
       channelId,
-      walletId: parsed.data.walletId,
-      recipientVerifiedWalletId: parsed.data.recipientVerifiedWalletId,
+      walletId: body.walletId,
+      recipientVerifiedWalletId: body.recipientVerifiedWalletId,
     });
     const gatewayAuth = await resolveGatewayAuth(c.env, {
       instance: context.instance,
@@ -63,8 +59,8 @@ export async function createPrivateChannelTransfer(c: AppContext) {
       wallet: context.wallet,
       signer: context.signer,
       recipient: context.recipient,
-      amount: parsed.data.amount,
-      mint: parsed.data.mint,
+      amount: body.amount,
+      mint: body.mint,
       gatewayAuth,
     });
     return success(c, transfer);

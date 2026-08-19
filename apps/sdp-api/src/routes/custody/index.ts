@@ -8,6 +8,7 @@ import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
   approveApprovalRequest,
@@ -30,6 +31,15 @@ import {
   switchSigning,
   updateWallet,
 } from "./handlers";
+import {
+  createWalletSchema,
+  deleteWalletSchema,
+  initializeSigningSchema,
+  setDefaultWalletSchema,
+  signerCheckSchema,
+  switchSigningSchema,
+  updateWalletSchema,
+} from "./schemas";
 
 const wallets = new Hono<{ Bindings: Env }>();
 
@@ -38,15 +48,46 @@ wallets.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true })
 wallets.use("*", projectContextMiddleware());
 
 // Initialize signing (requires admin)
-wallets.post("/initialize", requirePermissions("custody:admin"), initializeSigning);
-wallets.post("/switch", requirePermissions("custody:admin"), switchSigning);
-wallets.post("/", requirePermissions("custody:admin"), createWallet);
-wallets.delete("/", requirePermissions("custody:admin"), deleteWallet);
-wallets.post("/default-wallet", requirePermissions("custody:admin"), setDefaultWallet);
-wallets.patch("/:walletId", requirePermissions("custody:admin"), updateWallet);
+wallets.post(
+  "/initialize",
+  requirePermissions("custody:admin"),
+  validateBody(initializeSigningSchema),
+  initializeSigning
+);
+wallets.post(
+  "/switch",
+  requirePermissions("custody:admin"),
+  validateBody(switchSigningSchema),
+  switchSigning
+);
+wallets.post(
+  "/",
+  requirePermissions("custody:admin"),
+  validateBody(createWalletSchema),
+  createWallet
+);
+wallets.delete(
+  "/",
+  requirePermissions("custody:admin"),
+  validateBody(deleteWalletSchema),
+  deleteWallet
+);
+wallets.post(
+  "/default-wallet",
+  requirePermissions("custody:admin"),
+  validateBody(setDefaultWalletSchema),
+  setDefaultWallet
+);
+wallets.patch(
+  "/:walletId",
+  requirePermissions("custody:admin"),
+  validateBody(updateWalletSchema),
+  updateWallet
+);
 wallets.post(
   "/signer-check",
   requirePermissions("wallets:write"),
+  validateBody(signerCheckSchema),
   meteredQuota({ name: "signer-check", actorMax: 2, orgMax: 10 }),
   signerCheck
 );

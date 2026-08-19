@@ -2,8 +2,10 @@ import { SigningError } from "@sdp/custody/signing";
 import { SdpPaymentsError } from "@sdp/payments/errors";
 import { SdpRpcError } from "@sdp/rpc/errors";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { createApp, type SdpPlugin } from "@/app";
 import { AppError } from "@/lib/errors";
+import { type ValidatedBodyContext, validateBody } from "@/middleware/validate";
 import { rootLogger } from "@/runtime/logger";
 import type { MonitorOptions, Observability, ObservabilityScope } from "@/runtime/observability";
 import { FeePaymentError } from "@/services/ports";
@@ -11,6 +13,8 @@ import { env as baseEnv } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 
 const THROW_PATH = "/__internal_error_test_throw";
+const VALIDATED_BODY_PATH = "/__internal_error_test_validated_body";
+const validatedBodySchema = z.object({ name: z.string() });
 const SECRET_APP_ERROR_PATH = "/__secret_app_error_test_throw";
 const SECRET_RPC_ERROR_PATH = "/__secret_rpc_error_test_throw";
 const SECRET_PAYMENTS_ERROR_PATH = "/__secret_payments_error_test_throw";
@@ -87,6 +91,34 @@ function buildApp(observability: Observability) {
   });
   return app;
 }
+
+describe("createApp onError HTTPException mapping", () => {
+  it("maps malformed JSON on a validated route to the standard 400 envelope", async () => {
+    const { obs, captureException } = makeObservability();
+    const app = buildApp(obs);
+    app.post(
+      VALIDATED_BODY_PATH,
+      validateBody(validatedBodySchema),
+      (c: ValidatedBodyContext<typeof validatedBodySchema>) => c.json(c.req.valid("json"))
+    );
+
+    const res = await app.request(
+      VALIDATED_BODY_PATH,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{not json",
+      },
+      baseEnv
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(body.error.message).toBe("Malformed JSON in request body");
+    expect(captureException).not.toHaveBeenCalled();
+  });
+});
 
 describe("createApp plugin registration", () => {
   it("registers plugin routes under /v1", async () => {

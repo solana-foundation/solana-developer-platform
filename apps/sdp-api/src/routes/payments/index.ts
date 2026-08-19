@@ -3,6 +3,7 @@ import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
   activateRecurringPayment,
@@ -50,13 +51,42 @@ import {
   prepareResumeSubscription,
   prepareSubscriptionAuthorization,
   prepareSubscriptionCollection,
-  recordRampProviderEvent,
+  recordCoinbaseRampEvent,
+  recordMoneygramRampEvent,
   resumeRecurringPayment,
   simulateSandboxTransfer,
   updateRecurringPayment,
   updateSubscriptionPlan,
   updateWalletPolicy,
 } from "./handlers";
+import { createPaymentRequestSchema } from "./handlers/payment-requests";
+import {
+  activateRecurringPaymentSchema,
+  cancelRampTransferSchema,
+  cancelRecurringPaymentSchema,
+  coinbaseRampEventSchema,
+  collectRecurringPaymentSchema,
+  createOfframpQuoteSchema,
+  createOnrampQuoteSchema,
+  createRecurringPaymentSchema,
+  createSubscriptionPlanSchema,
+  createSubscriptionSchema,
+  createTransferBatchSchema,
+  createTransferSchema,
+  estimateOfframpSchema,
+  estimateOnrampSchema,
+  estimateTransferBatchSchema,
+  moneygramRampEventSchema,
+  prepareSubscriptionAuthorizationSchema,
+  prepareSubscriptionCollectionSchema,
+  prepareSubscriptionLifecycleSchema,
+  prepareSubscriptionPlanCreateSchema,
+  resumeRecurringPaymentSchema,
+  simulateSandboxTransferSchema,
+  updateRecurringPaymentSchema,
+  updateSubscriptionPlanSchema,
+  updateWalletPolicySchema,
+} from "./schemas";
 
 const payments = new Hono<{ Bindings: Env }>();
 
@@ -91,42 +121,50 @@ payments.get(
 payments.put(
   "/wallets/:walletId/policies",
   requirePermissions("wallets:write", "payments:write"),
+  validateBody(updateWalletPolicySchema),
   updateWalletPolicy
 );
 payments.post(
   "/subscription-plans",
   requirePermissions("payments:write", "wallets:read"),
+  validateBody(createSubscriptionPlanSchema),
   createSubscriptionPlan
 );
 payments.post(
   "/recurring-payments",
   requirePermissions("payments:write", "wallets:read", "counterparties:read"),
+  validateBody(createRecurringPaymentSchema),
   createRecurringPayment
 );
 payments.get("/recurring-payments", requirePermissions("payments:read"), listRecurringPayments);
 payments.patch(
   "/recurring-payments/:id",
   requirePermissions("payments:write", "wallets:read", "counterparties:read"),
+  validateBody(updateRecurringPaymentSchema),
   updateRecurringPayment
 );
 payments.post(
   "/recurring-payments/:id/activate",
   requirePermissions("payments:write", "wallets:read"),
+  validateBody(activateRecurringPaymentSchema),
   activateRecurringPayment
 );
 payments.post(
   "/recurring-payments/:id/cancel",
   requirePermissions("payments:write", "wallets:read"),
+  validateBody(cancelRecurringPaymentSchema),
   cancelRecurringPayment
 );
 payments.post(
   "/recurring-payments/:id/collect",
   requirePermissions("payments:write", "wallets:read"),
+  validateBody(collectRecurringPaymentSchema),
   collectRecurringPayment
 );
 payments.post(
   "/recurring-payments/:id/resume",
   requirePermissions("payments:write", "wallets:read"),
+  validateBody(resumeRecurringPaymentSchema),
   resumeRecurringPayment
 );
 payments.get("/recurring-payments/:id", requirePermissions("payments:read"), getRecurringPayment);
@@ -134,6 +172,7 @@ payments.get("/subscription-plans", requirePermissions("payments:read"), listSub
 payments.post(
   "/subscription-plans/:planId/prepare-create",
   requirePermissions("payments:write", "wallets:read"),
+  validateBody(prepareSubscriptionPlanCreateSchema),
   prepareCreateSubscriptionPlan
 );
 payments.get(
@@ -144,32 +183,38 @@ payments.get(
 payments.patch(
   "/subscription-plans/:planId",
   requirePermissions("payments:write", "wallets:read"),
+  validateBody(updateSubscriptionPlanSchema),
   updateSubscriptionPlan
 );
 payments.post(
   "/subscriptions",
   requirePermissions("payments:write", "counterparties:read"),
+  validateBody(createSubscriptionSchema),
   createSubscription
 );
 payments.get("/subscriptions", requirePermissions("payments:read"), listSubscriptions);
 payments.post(
   "/subscriptions/:subscriptionId/prepare-authorization",
   requirePermissions("payments:write", "counterparties:read"),
+  validateBody(prepareSubscriptionAuthorizationSchema),
   prepareSubscriptionAuthorization
 );
 payments.post(
   "/subscriptions/:subscriptionId/prepare-cancel",
   requirePermissions("payments:write"),
+  validateBody(prepareSubscriptionLifecycleSchema),
   prepareCancelSubscription
 );
 payments.post(
   "/subscriptions/:subscriptionId/prepare-resume",
   requirePermissions("payments:write"),
+  validateBody(prepareSubscriptionLifecycleSchema),
   prepareResumeSubscription
 );
 payments.post(
   "/subscriptions/:subscriptionId/prepare-collection",
   requirePermissions("payments:write", "wallets:read"),
+  validateBody(prepareSubscriptionCollectionSchema),
   prepareSubscriptionCollection
 );
 payments.get(
@@ -185,6 +230,7 @@ payments.get(
 payments.post(
   "/transfers",
   requirePermissions("payments:write", "wallets:read"),
+  validateBody(createTransferSchema),
   policyGate({
     extract: extractTransferPolicyCandidate,
     findIdempotentKeyReplay: findTransferIdempotentKeyReplay,
@@ -195,11 +241,13 @@ payments.get("/transfers", requirePermissions("payments:read"), listTransfers);
 payments.post(
   "/transfer-batches/estimate",
   requirePermissions("payments:read", "wallets:read", "counterparties:read"),
+  validateBody(estimateTransferBatchSchema),
   estimateTransferBatch
 );
 payments.post(
   "/transfer-batches",
   requirePermissions("payments:write", "wallets:read", "counterparties:read"),
+  validateBody(createTransferBatchSchema),
   policyGate({
     extract: extractTransferBatchPolicyCandidate,
     findIdempotentKeyReplay: findTransferBatchIdempotentKeyReplay,
@@ -212,6 +260,7 @@ payments.get("/requests", requirePermissions("payments:read"), listPaymentReques
 payments.post(
   "/requests",
   requirePermissions("payments:write", "wallets:read"),
+  validateBody(createPaymentRequestSchema),
   createPaymentRequest
 );
 payments.get("/transfers/:transferId", requirePermissions("payments:read"), getTransfer);
@@ -222,18 +271,21 @@ payments.get("/ramps/offramp/currency", requirePermissions("payments:read"), lis
 payments.post(
   "/ramps/onramp/estimate",
   requirePermissions("payments:read"),
+  validateBody(estimateOnrampSchema),
   meteredQuota({ name: "ramp-estimate", actorMax: 30, orgMax: 120 }),
   estimateOnramp
 );
 payments.post(
   "/ramps/offramp/estimate",
   requirePermissions("payments:read"),
+  validateBody(estimateOfframpSchema),
   meteredQuota({ name: "ramp-estimate", actorMax: 30, orgMax: 120 }),
   estimateOfframp
 );
 payments.post(
   "/ramps/onramp/quote",
   requirePermissions("payments:write", "wallets:read"),
+  validateBody(createOnrampQuoteSchema),
   meteredQuota({ name: "ramp-quote", actorMax: 20, orgMax: 60 }),
   policyGate({ extract: extractOnrampQuotePolicyCandidate }),
   createOnrampQuote
@@ -241,19 +293,33 @@ payments.post(
 payments.post(
   "/ramps/offramp/quote",
   requirePermissions("payments:write", "wallets:read"),
+  validateBody(createOfframpQuoteSchema),
   meteredQuota({ name: "ramp-quote", actorMax: 20, orgMax: 60 }),
   policyGate({ extract: extractOfframpQuotePolicyCandidate }),
   createOfframpQuote
 );
 payments.post(
-  "/ramps/:provider/events",
+  "/ramps/moneygram/events",
   requirePermissions("payments:write"),
-  recordRampProviderEvent
+  validateBody(moneygramRampEventSchema),
+  recordMoneygramRampEvent
 );
-payments.post("/ramps/transfers/cancel", requirePermissions("payments:write"), cancelRampTransfer);
+payments.post(
+  "/ramps/coinbase/events",
+  requirePermissions("payments:write"),
+  validateBody(coinbaseRampEventSchema),
+  recordCoinbaseRampEvent
+);
+payments.post(
+  "/ramps/transfers/cancel",
+  requirePermissions("payments:write"),
+  validateBody(cancelRampTransferSchema),
+  cancelRampTransfer
+);
 payments.post(
   "/ramps/sandbox/simulate",
   requirePermissions("payments:write"),
+  validateBody(simulateSandboxTransferSchema),
   simulateSandboxTransfer
 );
 
