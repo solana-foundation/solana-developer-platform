@@ -1,7 +1,7 @@
 import { SigningError } from "@sdp/custody/signing";
 import type { ApiKeyRole, CreateApiKeyResponse } from "@sdp/types";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { asTransactionalClient, getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
@@ -11,13 +11,15 @@ import { buildApiKeyAccessSummaries } from "@/routes/api-keys/access-response";
 import type { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
 import { ApiKeyService } from "@/services/api-key.service";
 import {
-  assertWalletBindingsInScope,
   resolveCreateWalletScope,
+  resolveWalletBindingsInScope,
 } from "@/services/api-key-scope.service";
-import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
+import { provisionApiKeyWallet } from "@/services/api-key-wallet-provisioning.service";
+import {
+  type ExactApiKeyWalletBinding,
+  replaceApiKeyWalletBindings,
+} from "@/services/api-key-wallets.service";
 import { AuditService } from "@/services/audit.service";
-import { createSigningService } from "@/services/domain/signing.service";
-import type { WalletPurpose } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { assertApiKeyProjectAccess } from "../project-access";
 
@@ -128,30 +130,40 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
     walletPurpose,
   } = body;
 
+  const connectionId =
+    typeof provisionWallet === "object" ? provisionWallet.connectionId : undefined;
+  const provisionWalletRequested = Boolean(provisionWallet);
+
   const walletSelection = resolveCreateWalletScope({
     walletScope,
     signingWalletId,
     signingWalletIds,
     walletBindings,
-    provisionWallet,
+    provisionWallet: provisionWalletRequested,
+    connectionId,
   });
 
   let resolvedSigningWalletId: string | null = walletSelection.defaultSigningWalletId;
-  let resolvedWalletBindings = walletSelection.bindings;
+  let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];
 
-  if (provisionWallet) {
+  if (provisionWalletRequested) {
     if (!(auth.permissions.includes("*") || auth.permissions.includes("custody:admin"))) {
       throw new AppError("INSUFFICIENT_PERMISSIONS", "Required permissions: custody:admin");
     }
 
-    const signingService = createSigningService(c.env);
     try {
-      const wallet = await signingService.createWallet(auth.organizationId, projectId, {
+      const wallet = await provisionApiKeyWallet(getDb(c.env), c.env, {
+        organizationId: auth.organizationId,
+        projectId,
+        legacyConfigProjectId: projectId,
+        connectionId,
         label: walletLabel,
-        purpose: walletPurpose as WalletPurpose | undefined,
+        purpose: walletPurpose,
       });
       resolvedSigningWalletId = wallet.walletId;
-      resolvedWalletBindings = [{ walletId: wallet.walletId, permissions: ["*"] }];
+      resolvedWalletBindings = [
+        { walletId: wallet.walletId, custodyWalletId: wallet.id, permissions: ["*"] },
+      ];
     } catch (error) {
       if (error instanceof SigningError) {
         if (error.code === "NOT_FOUND") {
@@ -162,40 +174,40 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
       throw error;
     }
   } else {
-    await assertWalletBindingsInScope(
+    resolvedWalletBindings = await resolveWalletBindingsInScope(
       getDb(c.env),
       auth.organizationId,
       projectId,
-      resolvedWalletBindings
+      walletSelection.bindings
     );
   }
 
-  const apiKeyService = new ApiKeyService(
-    getDb(c.env),
-    createTenantScope({
-      organizationId: auth.organizationId,
-      projectId,
-    })
-  );
-  const createdKey = await apiKeyService.createApiKey({
+  const tenantScope = createTenantScope({
     organizationId: auth.organizationId,
     projectId,
-    createdByKeyId: auth.apiKeyId ?? undefined,
-    createdByUserId: auth.userId ?? undefined,
-    actorPermissions: auth.permissions,
-    name,
-    description,
-    role,
-    permissions,
-    allowedIps,
-    expiresAt,
-    signingWalletId: resolvedSigningWalletId,
-    pepper: c.env.API_KEY_PEPPER,
   });
-
-  if (resolvedWalletBindings.length > 0) {
-    await replaceApiKeyWalletBindings(getDb(c.env), createdKey.id, resolvedWalletBindings);
-  }
+  const createdKey = await getDb(c.env).transaction(async (tx) => {
+    const txDb = asTransactionalClient(tx);
+    const key = await new ApiKeyService(txDb, tenantScope).createApiKey({
+      organizationId: auth.organizationId,
+      projectId,
+      createdByKeyId: auth.apiKeyId ?? undefined,
+      createdByUserId: auth.userId ?? undefined,
+      actorPermissions: auth.permissions,
+      name,
+      description,
+      role,
+      permissions,
+      allowedIps,
+      expiresAt,
+      signingWalletId: resolvedSigningWalletId,
+      pepper: c.env.API_KEY_PEPPER,
+    });
+    if (resolvedWalletBindings.length > 0) {
+      await replaceApiKeyWalletBindings(txDb, key.id, resolvedWalletBindings);
+    }
+    return key;
+  });
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));
@@ -211,7 +223,7 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
       walletScope: resolvedWalletBindings.length > 0 ? "selected" : "all",
       signingWalletId: resolvedSigningWalletId,
       signingWalletIds: resolvedWalletBindings.map((binding) => binding.walletId),
-      provisionedWallet: Boolean(provisionWallet),
+      provisionedWallet: provisionWalletRequested,
     },
   });
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { apiKeyCreateSchema, apiKeyUpdateSchema } from "./schemas";
 
 const validCreateRequest = {
@@ -35,5 +36,33 @@ describe("API key IP allowlist schemas", () => {
       }).success
     ).toBe(false);
     expect(apiKeyUpdateSchema.safeParse({ allowedIps: [allowedIp] }).success).toBe(false);
+  });
+});
+
+describe("API key wallet provisioning schema", () => {
+  const exactConnectionRequest = {
+    name: "Connection key",
+    walletScope: "selected",
+    provisionWallet: { connectionId: "cconn_selected" },
+  } as const;
+
+  it("uses an exact-Connection shape that the previous revision rejects", () => {
+    const previousProvisioningSchema = z.object({
+      walletScope: z.enum(["all", "selected"]),
+      provisionWallet: z.boolean().optional(),
+    });
+
+    expect(apiKeyCreateSchema.safeParse(exactConnectionRequest).success).toBe(true);
+    expect(previousProvisioningSchema.safeParse(exactConnectionRequest).success).toBe(false);
+  });
+
+  it("rejects the obsolete top-level connectionId shape", () => {
+    expect(
+      apiKeyCreateSchema.safeParse({
+        ...exactConnectionRequest,
+        provisionWallet: true,
+        connectionId: "cconn_selected",
+      }).success
+    ).toBe(false);
   });
 });
