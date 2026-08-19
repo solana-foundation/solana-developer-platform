@@ -1,0 +1,22 @@
+{
+  "request": {
+    "envelope": {
+      "requestId": "req_01",
+      "organizationId": "org_01",
+      "walletId": "wallet_01",
+      "operationId": "op_01",
+      "stage": "plan",
+      "immutableHash": "sha256:a98c670ad6ff58f8f68afda109023bb036822ccbb61f609419d55b242b9e45a2",
+      "owner": "11111111111111111111111111111111"
+    },
+    "walletProjection": null,
+    "requireSlot": 42,
+    "action": {
+      "kind": "test",
+      "ratio": 1.0
+    },
+    "feePayer": "11111111111111111111111111111111"
+  },
+  "canonical": "{\"operationId\":\"op_01\",\"organizationId\":\"org_01\",\"owner\":\"11111111111111111111111111111111\",\"payload\":{\"action\":{\"kind\":\"test\",\"ratio\":1},\"feePayer\":\"11111111111111111111111111111111\",\"requireSlot\":42,\"walletProjection\":null},\"stage\":\"plan\",\"walletId\":\"wallet_01\"}",
+  "sha256": "sha256:a98c670ad6ff58f8f68afda109023bb036822ccbb61f609419d55b242b9e45a2"
+}

@@ -1,0 +1,52 @@
+[package]
+name = "sdp-rings-key-auth"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Internal custody boundary for Helius Rings viewing and nullifier keys."
+
+[dependencies]
+async-trait = "0.1.92"
+axum = "0.8.9"
+base64 = "0.23.1"
+bs58 = "0.5.1"
+hmac = "0.13.0"
+rand = "0.8.5"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+serde_json_canonicalizer = "0.3.2"
+sha2 = "0.11.0"
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = [
+  "rt-multi-thread",
+  "macros",
+  "net",
+  "io-util",
+  "signal",
+  "time",
+] }
+tower = { version = "0.5.3", features = ["util"] }
+tower-http = { version = "0.7.0", features = ["limit", "trace"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+zeroize = { version = "1.9.0", features = ["derive"] }
+zolana-keypair = { git = "https://github.com/helius-labs/zolana", rev = "c53d7998e284a43ec29930cc342038e51c30fd0a", version = "0.1.0" }
+
+[dev-dependencies]
+static_assertions = "1.1.0"
+tokio = { version = "1.53.1", features = [
+  "rt-multi-thread",
+  "macros",
+  "net",
+  "io-util",
+  "signal",
+  "test-util",
+] }
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"

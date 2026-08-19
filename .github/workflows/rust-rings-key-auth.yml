@@ -1,0 +1,69 @@
+name: Rust Rings Key Authority
+
+on:
+  pull_request:
+    paths:
+      - "apps/sdp-rings-key-auth/**"
+      - ".github/workflows/rust-rings-key-auth.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/sdp-rings-key-auth/**"
+      - ".github/workflows/rust-rings-key-auth.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-rings-key-auth-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/sdp-rings-key-auth
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned Rust toolchain
+        run: rustup show active-toolchain
+
+      - name: Cache cargo
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            apps/sdp-rings-key-auth/target
+          key: rings-ka-cargo-${{ runner.os }}-${{ hashFiles('apps/sdp-rings-key-auth/Cargo.lock') }}
+          restore-keys: |
+            rings-ka-cargo-${{ runner.os }}-
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Lint
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Cache cargo-audit
+        id: audit-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-0.22.0-${{ runner.os }}
+
+      - name: Install cargo-audit
+        if: steps.audit-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-audit --version 0.22.0 --locked
+
+      - name: Audit dependencies
+        run: cargo audit
