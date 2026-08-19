@@ -228,6 +228,11 @@ async function recoverStuckProcessingTransfers(
     statuses: ["processing"],
     types: WALLET_TRANSFER_TYPES,
     hasSignature: false,
+    // Rows marked submission-outcome-unknown are deliberately never
+    // auto-failed: the provider may have broadcast without returning a
+    // signature, and a terminal `failed` invites a client retry and a double
+    // send. Excluded in SQL so they can never crowd the recovery window.
+    excludeSubmissionOutcomeUnknown: true,
     updatedBefore: cutoff,
     limit: MAX_SIGNATURES_PER_BATCH,
   });

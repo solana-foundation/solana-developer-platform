@@ -145,6 +145,12 @@ export interface ListTransfersByStatusInput {
   statuses: PaymentTransferStatus[];
   types?: readonly PaymentTransferType[];
   hasSignature?: boolean;
+  /**
+   * Exclude rows whose provider_data carries the submission-outcome-unknown
+   * marker (see services/payments/submission-outcome.ts): they are deliberately
+   * never auto-settled and must not consume the recovery window.
+   */
+  excludeSubmissionOutcomeUnknown?: boolean;
   createdBefore?: string;
   updatedBefore?: string;
   limit: number;

@@ -222,7 +222,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Execute transfer (custody)",
     operationId: "createPaymentTransfer",
     description:
-      "Executes a transfer using server-side custody signing. The source walletId must reference a wallet from /v1/wallets. Private-transfer requests are provider-built, signed by SDP-controlled wallets when required, and submitted on the configured Solana cluster. Supply an Idempotency-Key to retry safely: an identical resolved request returns the original transfer, while reusing the key for a different request returns 409.",
+      "Executes a transfer using server-side custody signing. The source walletId must reference a wallet from /v1/wallets. Private-transfer requests are provider-built, signed by SDP-controlled wallets when required, and submitted on the configured Solana cluster. Supply an Idempotency-Key to retry safely: an identical resolved request returns the original transfer, while reusing the key for a different request returns 409. A 409 with error.details.reason = transfer_submission_outcome_unknown means the provider outcome is unknown and the transfer stays processing for manual reconciliation — do NOT retry it. A 200 may return a processing transfer with its signature when on-chain confirmation is still pending; it settles asynchronously.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeWithIdempotencyHeaders,

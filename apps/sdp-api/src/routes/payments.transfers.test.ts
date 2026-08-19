@@ -1,4 +1,5 @@
 import type * as feePaymentAdapters from "@sdp/payments/fee-payment";
+import { FeePaymentError } from "@sdp/payments/fee-payment";
 import type * as solanaRpc from "@sdp/rpc/solana";
 import { type PolicyDefaultAction, type PolicyRule, SOL_MINT } from "@sdp/types";
 import {
@@ -27,6 +28,7 @@ import { recoverApprovedWalletOperations } from "@/services/policy/approved-oper
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import {
+  confirmTransactionMock,
   createFeePaymentAdapterMock,
   createOrgSignerMock,
   createRpcMock,
@@ -2188,7 +2190,12 @@ describe("Payments routes — transfers", () => {
     });
 
     it("replays a failed transfer on retry without submitting again", async () => {
-      const signAndSendMock = vi.fn().mockRejectedValue(new Error("rpc down"));
+      // A deterministic provider rejection is the case that still journals a
+      // terminal `failed` (an ambiguous one now stays processing behind the
+      // reconciliation marker — see "submission outcome fence").
+      const signAndSendMock = vi
+        .fn()
+        .mockRejectedValue(new FeePaymentError("insufficient balance", "INSUFFICIENT_BALANCE"));
       createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
@@ -2386,15 +2393,18 @@ describe("Payments routes — transfers", () => {
     });
 
     it("marks the transfer as failed when execution throws and returns 502", async () => {
+      // Failure BEFORE the submit fence (fee payer resolution): nothing can
+      // have been broadcast, so the plain failed + 502 contract still holds.
+      // Post-submit ambiguity is covered in "submission outcome fence".
       createFeePaymentAdapterMock.mockReturnValueOnce({
         providerId: "mock",
-        getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        getFeePayer: vi.fn().mockRejectedValue(new Error("RPC connection refused")),
         getSponsorshipConfiguration: vi.fn().mockResolvedValue({
           ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
           signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
         }),
         signAsFeePayer: vi.fn(),
-        signAndSend: vi.fn().mockRejectedValue(new Error("RPC connection refused")),
+        signAndSend: vi.fn(),
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
 
       const res = await app.request(
@@ -2480,6 +2490,154 @@ describe("Payments routes — transfers", () => {
       expect(transfers.results).toHaveLength(1);
       expect(transfers.results[0]?.status).toBe("failed");
       expect(transfers.results[0]?.error).toBeTruthy();
+    });
+  });
+  describe("submission outcome fence", () => {
+    const KORA_FEE_PAYER_B58 = "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv";
+
+    function mockAdapterRejectingSend(error: Error) {
+      const signAndSendMock = vi.fn().mockRejectedValue(error);
+      createFeePaymentAdapterMock.mockReturnValue({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue(KORA_FEE_PAYER_B58),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue({
+          ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
+          signerAddress: address(KORA_FEE_PAYER_B58),
+        }),
+        signAsFeePayer: vi.fn(),
+        signAndSend: signAndSendMock,
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+      return signAndSendMock;
+    }
+
+    async function latestTransferRow() {
+      const row = await getDb(env)
+        .prepare(
+          "SELECT status, signature, error, provider_data FROM payment_transfers ORDER BY created_at DESC LIMIT 1"
+        )
+        .first<{
+          status: string;
+          signature: string | null;
+          error: string | null;
+          provider_data: unknown;
+        }>();
+      if (!row) throw new Error("no transfer row");
+      const providerData =
+        typeof row.provider_data === "string" ? JSON.parse(row.provider_data) : row.provider_data;
+      return { ...row, providerData };
+    }
+
+    function transferRequest(amount: string, extraHeaders: Record<string, string> = {}) {
+      return app.request(
+        "/v1/payments/transfers",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            ...extraHeaders,
+          },
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            token: "SOL",
+            amount,
+          }),
+        },
+        env
+      );
+    }
+
+    it("keeps the transfer processing behind the durable marker when the outcome is ambiguous", async () => {
+      // Kora may have broadcast before failing without returning a signature.
+      // A terminal `failed` invites a client retry and a double send; the row
+      // must stay processing, durably marked for manual reconciliation.
+      mockAdapterRejectingSend(new FeePaymentError("Kora timed out", "NETWORK_ERROR"));
+
+      const res = await transferRequest("1");
+
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { error: { details?: { reason?: string } } };
+      expect(body.error.details?.reason).toBe("transfer_submission_outcome_unknown");
+
+      const row = await latestTransferRow();
+      expect(row).toMatchObject({ status: "processing", signature: null });
+      // Literal on purpose: the marker is the durable contract jobs match on.
+      expect(row.providerData).toMatchObject({ submission_outcome: "unknown" });
+      expect(row.error).toBe(
+        "Transfer submission outcome is unknown; reconcile manually before retrying"
+      );
+    });
+
+    it("treats a deterministic-looking rejection as ambiguous when it may have broadcast", async () => {
+      // End-to-end for the retry-after-timeout window: the adapter says "an
+      // earlier attempt may have landed", so INSUFFICIENT_BALANCE must not be
+      // journaled as a plain failure inviting a resend.
+      mockAdapterRejectingSend(
+        new FeePaymentError("insufficient balance", "INSUFFICIENT_BALANCE", undefined, {
+          maybeBroadcast: true,
+        })
+      );
+
+      const res = await transferRequest("1");
+
+      expect(res.status).toBe(409);
+      const row = await latestTransferRow();
+      expect(row.status).toBe("processing");
+      expect(row.providerData).toMatchObject({ submission_outcome: "unknown" });
+    });
+
+    it("records a deterministic provider rejection as a plain failed transfer", async () => {
+      mockAdapterRejectingSend(new FeePaymentError("insufficient balance", "INSUFFICIENT_BALANCE"));
+
+      const res = await transferRequest("1");
+
+      expect(res.status).toBeGreaterThanOrEqual(400);
+      expect(res.status).not.toBe(409);
+      const row = await latestTransferRow();
+      expect(row).toMatchObject({ status: "failed", signature: null });
+      expect(row.providerData ?? {}).not.toMatchObject({ submission_outcome: "unknown" });
+    });
+
+    it("keeps a submitted transfer processing with its signature when confirmation fails", async () => {
+      const submittedSignature =
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
+      const signAndSendMock = vi.fn().mockResolvedValue(submittedSignature);
+      createFeePaymentAdapterMock.mockReturnValue({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue(KORA_FEE_PAYER_B58),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue({
+          ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
+          signerAddress: address(KORA_FEE_PAYER_B58),
+        }),
+        signAsFeePayer: vi.fn(),
+        signAndSend: signAndSendMock,
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+      confirmTransactionMock.mockRejectedValueOnce(new Error("confirmation timed out"));
+
+      const headers = { "Idempotency-Key": "submitted-unconfirmed-key" };
+      const res = await transferRequest("0.001", headers);
+
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as {
+        data: { transfer: { id: string; status: string; signature: string | null } };
+      };
+      expect(json.data.transfer.status).toBe("processing");
+      expect(json.data.transfer.signature).toBe(submittedSignature);
+
+      const row = await getDb(env)
+        .prepare("SELECT status, signature FROM payment_transfers WHERE id = ?")
+        .bind(json.data.transfer.id)
+        .first<{ status: string; signature: string | null }>();
+      expect(row?.status).toBe("processing");
+      expect(row?.signature).toBe(submittedSignature);
+
+      // An idempotent replay returns the settling row without re-submitting.
+      const replay = await transferRequest("0.001", headers);
+      expect(replay.status).toBe(200);
+      const replayJson = (await replay.json()) as { data: { transfer: { id: string } } };
+      expect(replayJson.data.transfer.id).toBe(json.data.transfer.id);
+      expect(signAndSendMock).toHaveBeenCalledTimes(1);
     });
   });
 });

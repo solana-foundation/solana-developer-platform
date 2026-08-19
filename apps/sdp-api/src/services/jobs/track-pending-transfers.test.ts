@@ -31,13 +31,14 @@ async function insertTransfer(params: {
   createdAt: string;
   updatedAt: string;
   confirmedAt?: string;
+  providerData?: Record<string, unknown>;
 }): Promise<void> {
   await getDb(env)
     .prepare(
       `INSERT INTO payment_transfers
        (id, organization_id, wallet_id, source_address, destination_address,
-        token, amount, type, direction, status, signature, confirmed_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        token, amount, type, direction, status, signature, provider_data, confirmed_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)`
     )
     .bind(
       params.id,
@@ -51,6 +52,7 @@ async function insertTransfer(params: {
       "outbound",
       params.status,
       params.signature ?? null,
+      JSON.stringify(params.providerData ?? {}),
       params.confirmedAt ?? null,
       params.createdAt,
       params.updatedAt
@@ -100,6 +102,36 @@ describe("trackPendingTransfers", () => {
       const updated = await getTransfer("xfr_stuck_processing");
       expect(updated?.status).toBe("failed");
       expect(updated?.error).toBe("Transfer processing timed out");
+    });
+
+    it("never times out a transfer marked submission-outcome-unknown", async () => {
+      // Literal marker on purpose: rows already written in production must
+      // keep matching even if the exported constants are ever renamed. A
+      // terminal `failed` here would invite a client retry and a double send.
+      await insertTransfer({
+        id: "xfr_outcome_unknown",
+        status: "processing",
+        signature: null,
+        createdAt: minutesAgo(90),
+        updatedAt: minutesAgo(90),
+        providerData: { submission_outcome: "unknown" },
+      });
+      await insertTransfer({
+        id: "xfr_genuinely_stuck",
+        status: "processing",
+        signature: null,
+        createdAt: minutesAgo(90),
+        updatedAt: minutesAgo(90),
+      });
+
+      await trackPendingTransfers(env);
+
+      const marked = await getTransfer("xfr_outcome_unknown");
+      expect(marked?.status).toBe("processing");
+      // The genuinely stuck sibling still recovers — the exclusion is
+      // surgical, not a disable switch.
+      const stuck = await getTransfer("xfr_genuinely_stuck");
+      expect(stuck?.status).toBe("failed");
     });
 
     it("does not fail processing transfers that are still within the threshold", async () => {
