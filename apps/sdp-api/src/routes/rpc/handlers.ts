@@ -16,6 +16,7 @@ import {
   checkResolvedRpcTargetConnection,
   getProviderSetupDefinition,
 } from "@/services/provider-setup-registry";
+import { createTenantRpcConnectionLookup } from "@/services/rpc-connection-lookup";
 import type { Env } from "@/types/env";
 import { rpcProjectQuerySchema, type rpcRelayPayloadSchema } from "./schemas";
 
@@ -80,6 +81,7 @@ async function relayToTarget(
 
   await recordRpcRelayTelemetry(c.var.kv.cache, {
     providerId: target.providerId,
+    connectionId: target.connectionId,
     methodNames,
     statusCode: upstream.status,
     latencyMs: elapsedMs,
@@ -132,6 +134,7 @@ export const getRpcProviders = async (c: AppContext) => {
     organizationId: auth.organizationId,
     authProjectId: auth.projectId,
     requestedProjectId: queryParse.data.projectId ?? null,
+    connections: createTenantRpcConnectionLookup(c.env, getDb(c.env)),
   });
 
   return success(c, response);
@@ -159,6 +162,7 @@ export const relayRpcRequest = async (c: ValidatedBodyContext<typeof rpcRelayPay
       organizationId: auth.organizationId,
       authProjectId: auth.projectId,
       requestedProjectId: queryParse.data.projectId ?? null,
+      connections: createTenantRpcConnectionLookup(c.env, getDb(c.env)),
     });
 
     let lastResponse: ReturnType<typeof buildRelayResponse> | null = null;
@@ -179,6 +183,7 @@ export const relayRpcRequest = async (c: ValidatedBodyContext<typeof rpcRelayPay
         lastError = error;
         await recordRpcRelayTelemetry(c.var.kv.cache, {
           providerId: target.providerId,
+          connectionId: target.connectionId,
           methodNames,
           statusCode: 0,
           latencyMs: Date.now() - startedAt,
@@ -205,6 +210,7 @@ export const relayRpcRequest = async (c: ValidatedBodyContext<typeof rpcRelayPay
     organizationId: auth.organizationId,
     authProjectId: auth.projectId,
     requestedProjectId: queryParse.data.projectId ?? null,
+    connections: createTenantRpcConnectionLookup(c.env, getDb(c.env)),
   });
 
   const startedAt = Date.now();
@@ -214,6 +220,7 @@ export const relayRpcRequest = async (c: ValidatedBodyContext<typeof rpcRelayPay
   } catch (error) {
     await recordRpcRelayTelemetry(c.var.kv.cache, {
       providerId: target.providerId,
+      connectionId: target.connectionId,
       methodNames,
       statusCode: 0,
       latencyMs: Date.now() - startedAt,
@@ -246,6 +253,7 @@ export const testRpcConnection = async (c: AppContext) => {
     organizationId: auth.organizationId,
     authProjectId: auth.projectId,
     requestedProjectId: queryParse.data.projectId ?? null,
+    connections: createTenantRpcConnectionLookup(c.env, getDb(c.env)),
   });
 
   const startedAt = Date.now();
@@ -257,6 +265,7 @@ export const testRpcConnection = async (c: AppContext) => {
 
     await recordRpcRelayTelemetry(c.var.kv.cache, {
       providerId: target.providerId,
+      connectionId: target.connectionId,
       methodNames,
       statusCode: upstream.status,
       latencyMs: elapsedMs,
@@ -282,6 +291,7 @@ export const testRpcConnection = async (c: AppContext) => {
   } catch (error) {
     await recordRpcRelayTelemetry(c.var.kv.cache, {
       providerId: target.providerId,
+      connectionId: target.connectionId,
       methodNames,
       statusCode: 0,
       latencyMs: Date.now() - startedAt,
