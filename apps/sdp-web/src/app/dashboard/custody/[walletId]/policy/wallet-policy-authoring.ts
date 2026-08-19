@@ -29,6 +29,7 @@ export const WALLET_OPERATION_FAMILIES = [
   "payment",
   "ramp",
   "issuance",
+  "program",
 ] as const satisfies readonly WalletOperationFamily[];
 
 export type AuthorableOperationFamily = (typeof WALLET_OPERATION_FAMILIES)[number];

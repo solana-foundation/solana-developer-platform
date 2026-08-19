@@ -376,6 +376,7 @@ export async function extractTransferPolicyCandidate(
       token: body.token,
       amount: body.amount,
     },
+    idempotencyKey: null,
   };
 }
 

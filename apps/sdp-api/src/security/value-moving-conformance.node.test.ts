@@ -4,7 +4,14 @@ import { describe, expect, it } from "vitest";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../../../..");
 
-type ValueMovingFamily = "batch" | "recurring" | "issuance" | "payments" | "ramps" | "custody";
+type ValueMovingFamily =
+  | "batch"
+  | "recurring"
+  | "issuance"
+  | "payments"
+  | "ramps"
+  | "custody"
+  | "earn";
 
 interface OrderedBoundary {
   file: string;
@@ -177,10 +184,48 @@ const contracts: ValueMovingContract[] = [
       },
     ],
   },
+  {
+    /**
+     * Non-custodial Earn vault deposits. Registered late — the route shipped
+     * ungoverned, and the inventory below could not see it because
+     * `apps/sdp-api/src/services/earn` was not a scanned root, so this test
+     * passed while a value-moving path had no policy gate at all.
+     */
+    family: "earn",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/earn/handlers/vault.ts",
+      evidence: "const wallets = await new CustodyRuntimeTargets",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/earn/index.ts",
+      section: '"/vault-deposits",',
+      before: "extract: extractEarnVaultDepositPolicyCandidate",
+      after: "createEarnVaultDeposit",
+    },
+    replay: [
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/services/earn/vault-deposit.service.test.ts",
+        evidence: "replays the original vault deposit for the same requestId and payload",
+      },
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/services/earn/vault-deposit.service.test.ts",
+        evidence: "rejects the same requestId with a different payload",
+      },
+    ],
+  },
 ];
 
 const signingSinkInventory: Record<string, string[]> = {
   "apps/sdp-api/src/routes/custody/handlers/signer-check.ts": ["signAndSend"],
+  "apps/sdp-api/src/services/earn/vault-execution.service.ts": [
+    // Sponsored signing adds the fee-payer signature without broadcasting, so
+    // the final signature can still be recorded before bytes reach the network.
+    "signAsFeePayer",
+    // Wallet-paid signing likewise returns fully signed bytes without sending.
+    "signTransactionMessageWithSigners",
+  ],
   "apps/sdp-api/src/routes/pay.ts": ["signAsFeePayer"],
   "apps/sdp-api/src/routes/payments/handlers/transfer-batches/execute.ts": ["signAndSend"],
   "apps/sdp-api/src/routes/payments/handlers/transfers.ts": [
@@ -203,6 +248,10 @@ const valueMovingSourceRoots = [
   "apps/sdp-api/src/routes",
   "apps/sdp-api/src/services/payments",
   "apps/sdp-api/src/services/private-channels",
+  // Earn's vault-direct path signs and broadcasts from a custody wallet. It was
+  // missing here, which is why the inventory below did not notice a whole
+  // money-moving surface — the omission the `earn` contract above now pins.
+  "apps/sdp-api/src/services/earn",
   "packages/sdp-issuance/src",
   "packages/sdp-solana/src",
 ];
@@ -261,6 +310,7 @@ describe("value-moving authorization and replay conformance", () => {
     expect(contracts.map((contract) => contract.family).sort()).toEqual([
       "batch",
       "custody",
+      "earn",
       "issuance",
       "payments",
       "ramps",

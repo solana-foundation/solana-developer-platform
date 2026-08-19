@@ -335,6 +335,7 @@ export async function extractOnrampQuotePolicyCandidate(
       fiatAmount: input.fiatAmount,
       cryptoToken: input.cryptoToken,
     },
+    idempotencyKey: null,
   };
 }
 
@@ -383,6 +384,7 @@ export async function extractOfframpQuotePolicyCandidate(
       cryptoAmount: input.cryptoAmount,
       cryptoToken: input.cryptoToken,
     },
+    idempotencyKey: null,
   };
 }
 

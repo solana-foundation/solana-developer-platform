@@ -5,6 +5,8 @@ const PROVIDERS = new Set<string>(EARN_PROVIDERS);
 /** Longest cursor we will forward — Ground cursors are short opaque tokens. */
 const MAX_CURSOR_LENGTH = 512;
 
+export type ProxyQueryValidation = { ok: true; query: string } | { ok: false; message: string };
+
 /**
  * Allowlisted query passthrough for the program proxy routes: every param is
  * opt-in — a known provider id, a bounded opaque cursor, a page window — and
@@ -43,4 +45,50 @@ export function programProxyQuery(
   }
 
   return query.size > 0 ? `?${query}` : "";
+}
+
+/**
+ * Strict allowlist for the keyset-paginated vault-position read. Unlike the
+ * older program proxies, this route is consumed only by our typed client, so a
+ * malformed or unknown parameter is a caller bug and returns 400 instead of
+ * silently changing the requested page.
+ */
+export function vaultPositionsProxyQuery(request: Request): ProxyQueryValidation {
+  const incoming = new URL(request.url).searchParams;
+  const allowed = new Set(["limit", "before"]);
+
+  for (const key of incoming.keys()) {
+    if (!allowed.has(key)) {
+      return { ok: false, message: `Unsupported vault positions query parameter: ${key}` };
+    }
+  }
+
+  for (const key of allowed) {
+    if (incoming.getAll(key).length > 1) {
+      return { ok: false, message: `Vault positions query parameter must be unique: ${key}` };
+    }
+  }
+
+  const query = new URLSearchParams();
+  const limit = incoming.get("limit");
+  if (limit !== null) {
+    if (!/^(?:[1-9]|[1-9]\d|100)$/.test(limit)) {
+      return { ok: false, message: "Vault positions limit must be an integer from 1 to 100" };
+    }
+    query.set("limit", limit);
+  }
+
+  const before = incoming.get("before");
+  if (before !== null) {
+    if (
+      before.length === 0 ||
+      before.length > MAX_CURSOR_LENGTH ||
+      !/^[A-Za-z0-9_-]+$/.test(before)
+    ) {
+      return { ok: false, message: "Vault positions cursor is invalid" };
+    }
+    query.set("before", before);
+  }
+
+  return { ok: true, query: query.size > 0 ? `?${query}` : "" };
 }

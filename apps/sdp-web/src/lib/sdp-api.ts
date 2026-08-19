@@ -335,10 +335,17 @@ export async function proxyToSdpApi({
   request,
   traceSource,
   path,
+  upstreamHeaders,
 }: {
   request: Request;
   traceSource: string;
   path: string;
+  /**
+   * Headers deliberately selected by the route handler for the upstream API.
+   * The proxy never copies the incoming header bag: auth, project and tracing
+   * remain server-owned, while endpoint-specific metadata is opt-in.
+   */
+  upstreamHeaders?: HeadersInit;
 }): Promise<NextResponse> {
   const trace = createTimedTrace(traceSource, request);
 
@@ -361,6 +368,7 @@ export async function proxyToSdpApi({
     const response = await apiClient.request(path, {
       method,
       body: rawBody === "" ? undefined : rawBody,
+      headers: upstreamHeaders,
     });
 
     logRouteResult(trace, response.status);
