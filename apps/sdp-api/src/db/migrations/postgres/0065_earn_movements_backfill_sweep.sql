@@ -191,11 +191,25 @@ ON CONFLICT (id) DO UPDATE SET
 WHERE earn_movements.status <> 'finalized'
   AND earn_movements.updated_at <= EXCLUDED.updated_at;
 
--- The reconciliation worker must spend its bounded RPC batch on signatures whose
--- blockhash can still expire before polling already-confirmed transactions. The
--- expression matches its queue order; the older created-at index remains useful
--- to revisions that still run the pre-finalization query during rollout.
+-- Reconciliation selection records a durable fairness cursor, not a work lease.
+-- Keep it separate from `updated_at`, which is part of the public movement
+-- representation, and order by the last attempt with creation as its fallback.
+-- This prevents an RPC-null signature from monopolizing its status class without
+-- starving retries behind a constant stream of newly confirmed rows.
+ALTER TABLE earn_movements
+    ADD COLUMN IF NOT EXISTS reconciliation_attempted_at TEXT;
+
+-- The worker reserves most of its bounded RPC batch for signatures whose blockhash
+-- can still expire, while guaranteeing confirmed finalization work a share. This
+-- index supports both reserved scans and their active-first overflow; the older
+-- created-at index remains useful to revisions that still run the pre-finalization
+-- query during rollout.
 CREATE INDEX IF NOT EXISTS idx_earn_movements_reconciliation_priority
-    ON earn_movements ((status = 'confirmed'), created_at ASC, id ASC)
+    ON earn_movements (
+        (status = 'confirmed'),
+        (COALESCE(reconciliation_attempted_at, created_at)) ASC,
+        created_at ASC,
+        id ASC
+    )
     WHERE execution_model = 'vault_direct'
       AND status IN ('requested', 'submitted', 'confirmed');

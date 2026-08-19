@@ -37,7 +37,7 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
   const db = getDb(env);
   const repo = createPostgresEarnVaultRepository(db);
   const ledger = createPostgresEarnMovementsRepository(db);
-  const movements = await ledger.listUnsettledVaultMovements(OUTBOX_BATCH_SIZE);
+  const movements = await ledger.claimUnsettledVaultMovements(OUTBOX_BATCH_SIZE);
   const byEnvironment = groupByEnvironment(movements);
 
   for (const [environment, rows] of byEnvironment) {

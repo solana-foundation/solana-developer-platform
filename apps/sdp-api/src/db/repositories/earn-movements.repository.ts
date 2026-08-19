@@ -8,7 +8,7 @@ import { EARN_MOVEMENT_TRANSITIONS } from "@sdp/types";
 import type { AppDb } from "@/db";
 
 /**
- * The unified Earn movement ledger (PRO-1705, migrations 0062-0064).
+ * The unified Earn movement ledger (PRO-1705, migrations 0062-0065).
  *
  * `earn_movements` is the single authoritative record of every Earn money
  * movement — both directions, both execution models — and `earn_positions` is
@@ -515,8 +515,8 @@ export interface EarnMovementsRepository {
     sourceAddress?: string;
     destinationAddress?: string;
   }): Promise<{ rows: EarnMovementRow[]; hasMore: boolean }>;
-  /** Global bounded outbox scan for the reconciliation worker. */
-  listUnsettledVaultMovements(limit: number): Promise<EarnMovementRow[]>;
+  /** Atomically select a fair, bounded batch and rotate its attempt cursor; not a work lease. */
+  claimUnsettledVaultMovements(limit: number): Promise<EarnMovementRow[]>;
   /**
    * Guarded CAS to `finalized` — irreversible chain settlement.
    *
@@ -845,28 +845,80 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       return { rows: rows.slice(0, params.limit), hasMore: rows.length > params.limit };
     },
 
-    async listUnsettledVaultMovements(limit) {
+    async claimUnsettledVaultMovements(limit) {
       if (!Number.isInteger(limit) || limit < 1 || limit > 256) {
-        throw new Error("listUnsettledVaultMovements limit must be an integer from 1 to 256");
+        throw new Error("claimUnsettledVaultMovements limit must be an integer from 1 to 256");
       }
       // `confirmed` is IN the queue: the sweep's job no longer ends at chain
       // commitment now that finalization is the terminal state. `requested` is in
       // it because a broadcast timeout or crash leaves a row unsubmitted WITH a
       // signature, which is precisely the ambiguous case reconciliation is for.
       //
-      // Blockhash-bound work comes first. A confirmed signature can fall out of
-      // RPC history and correctly remain confirmed forever; letting those rows
-      // lead this bounded query would repeatedly consume the whole batch while a
-      // newer requested/submitted transaction expires without reconciliation.
+      // Blockhash-bound work gets most of the batch, but never all of it once the
+      // caller can process at least two rows. A confirmed signature can fall out
+      // of RPC history and remain confirmed forever, while a sustained stream of
+      // requested/submitted rows can likewise keep finalization from being
+      // recorded. Reserve one quarter (at least one row) for confirmed work, then
+      // fill any unused reservation from either side so the batch stays full.
+      // Selection also advances an internal attempt cursor (not public
+      // `updated_at`) so an RPC-null row rotates behind its peers instead of
+      // monopolizing the same reserved slice forever. This is a fairness cursor,
+      // not a lease held for the later RPC work.
+      const confirmedQuota = limit > 1 ? Math.max(1, Math.floor(limit / 4)) : 0;
+      const blockhashBoundQuota = limit - confirmedQuota;
       const result = await db
         .prepare(
-          `SELECT * FROM earn_movements
-             WHERE execution_model = 'vault_direct'
-               AND status IN ('requested', 'submitted', 'confirmed')
-             ORDER BY (status = 'confirmed') ASC, created_at ASC, id ASC
-             LIMIT ?`
+          `WITH blockhash_bound AS MATERIALIZED (
+             SELECT id FROM earn_movements
+              WHERE execution_model = 'vault_direct'
+                AND status IN ('requested', 'submitted')
+              ORDER BY COALESCE(reconciliation_attempted_at, created_at) ASC,
+                       created_at ASC,
+                       id ASC
+              LIMIT ?
+              FOR UPDATE SKIP LOCKED
+           ), confirmed AS MATERIALIZED (
+             SELECT id FROM earn_movements
+              WHERE execution_model = 'vault_direct'
+                AND status = 'confirmed'
+              ORDER BY COALESCE(reconciliation_attempted_at, created_at) ASC,
+                       created_at ASC,
+                       id ASC
+              LIMIT ?
+              FOR UPDATE SKIP LOCKED
+           ), reserved AS MATERIALIZED (
+             SELECT * FROM blockhash_bound
+             UNION ALL
+             SELECT * FROM confirmed
+           ), overflow AS (
+             SELECT movement.id
+               FROM earn_movements movement
+              WHERE movement.execution_model = 'vault_direct'
+                AND movement.status IN ('requested', 'submitted', 'confirmed')
+                AND NOT EXISTS (
+                  SELECT 1 FROM reserved WHERE reserved.id = movement.id
+                )
+              ORDER BY (movement.status = 'confirmed') ASC,
+                       COALESCE(movement.reconciliation_attempted_at, movement.created_at) ASC,
+                       movement.created_at ASC,
+                       movement.id ASC
+              LIMIT GREATEST(0, ? - (SELECT COUNT(*) FROM reserved))
+              FOR UPDATE OF movement SKIP LOCKED
+           ), claimed AS (
+             SELECT id FROM reserved
+             UNION ALL
+             SELECT id FROM overflow
+           ), touched AS (
+             UPDATE earn_movements movement
+                SET reconciliation_attempted_at = sdp_iso_now()
+               FROM claimed
+              WHERE movement.id = claimed.id
+             RETURNING movement.*
+           )
+           SELECT * FROM touched
+           ORDER BY (status = 'confirmed') ASC, created_at ASC, id ASC`
         )
-        .bind(limit)
+        .bind(blockhashBoundQuota, confirmedQuota, limit)
         .all<Record<string, unknown>>();
       return (result.results ?? []).map(mapMovementRow);
     },

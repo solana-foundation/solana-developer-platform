@@ -878,16 +878,112 @@ describe("Unified earn movement ledger (postgres)", () => {
       // would consume a one-row batch and starve the expiring requested movement.
       await db
         .prepare("UPDATE earn_movements SET created_at = ? WHERE id = ?")
-        .bind("2026-08-19T00:00:00.000Z", confirmed.movement.id)
+        .bind("1900-01-01T00:00:00.000Z", confirmed.movement.id)
         .run();
       await db
         .prepare("UPDATE earn_movements SET created_at = ? WHERE id = ?")
-        .bind("2026-08-19T01:00:00.000Z", requested.movement.id)
+        .bind("1900-01-02T00:00:00.000Z", requested.movement.id)
         .run();
 
-      const queued = await createPostgresEarnMovementsRepository(db).listUnsettledVaultMovements(1);
+      const queued =
+        await createPostgresEarnMovementsRepository(db).claimUnsettledVaultMovements(1);
       expect(queued).toHaveLength(1);
       expect(queued[0]).toMatchObject({ id: requested.movement.id, status: "requested" });
+    });
+
+    it("reserves capacity for finalization under sustained blockhash-bound work", async () => {
+      const db = getDb(env);
+      const confirmed = await vaultRepo.createSignedDepositIntent(intent());
+      await vaultRepo.advanceMovement({
+        movementId: confirmed.movement.id,
+        organizationId: ORG,
+        fromStatuses: ["pending", "submitted"],
+        toStatus: "confirmed",
+        confirmedAt: "2026-08-19T12:00:00.000Z",
+      });
+      await db
+        .prepare("UPDATE earn_movements SET created_at = ? WHERE id = ?")
+        .bind("1900-02-01T00:00:00.000Z", confirmed.movement.id)
+        .run();
+
+      for (let index = 0; index < 4; index += 1) {
+        await vaultRepo.createSignedDepositIntent(intent());
+      }
+
+      // With four slots and both classes backlogged, three remain available to
+      // the blockhash-sensitive queue and one is guaranteed to finalization.
+      // The former absolute priority returned four requested rows forever.
+      const repository = createPostgresEarnMovementsRepository(db);
+      const queued = await repository.claimUnsettledVaultMovements(4);
+      expect(queued).toHaveLength(4);
+      expect(queued.filter((movement) => movement.status === "requested")).toHaveLength(3);
+      expect(queued).toContainEqual(expect.objectContaining({ id: confirmed.movement.id }));
+    });
+
+    it("rotates unchanged confirmed rows through the reserved capacity", async () => {
+      const db = getDb(env);
+      const older = await vaultRepo.createSignedDepositIntent(intent());
+      const newer = await vaultRepo.createSignedDepositIntent(intent());
+      for (const [movement, confirmedAt] of [
+        [older, "2026-08-19T12:00:00.000Z"],
+        [newer, "2026-08-19T12:01:00.000Z"],
+      ] as const) {
+        await vaultRepo.advanceMovement({
+          movementId: movement.movement.id,
+          organizationId: ORG,
+          fromStatuses: ["pending", "submitted"],
+          toStatus: "confirmed",
+          confirmedAt,
+        });
+      }
+      await db
+        .prepare("UPDATE earn_movements SET created_at = ? WHERE id = ?")
+        .bind("1900-03-01T00:00:00.000Z", older.movement.id)
+        .run();
+      await db
+        .prepare("UPDATE earn_movements SET created_at = ? WHERE id = ?")
+        .bind("1900-03-02T00:00:00.000Z", newer.movement.id)
+        .run();
+      for (let index = 0; index < 4; index += 1) {
+        await vaultRepo.createSignedDepositIntent(intent());
+      }
+
+      const repository = createPostgresEarnMovementsRepository(db);
+      const beforeClaims = await repository.getMovementById({
+        movementId: older.movement.id,
+        organizationId: ORG,
+      });
+      const first = await repository.claimUnsettledVaultMovements(4);
+      expect(first.filter((movement) => movement.status === "requested")).toHaveLength(3);
+      expect(first.filter((movement) => movement.status === "confirmed")).toEqual([
+        expect.objectContaining({ id: older.movement.id }),
+      ]);
+      const second = await repository.claimUnsettledVaultMovements(4);
+      expect(second.filter((movement) => movement.status === "requested")).toHaveLength(3);
+      expect(second.filter((movement) => movement.status === "confirmed")).toEqual([
+        expect.objectContaining({ id: newer.movement.id }),
+      ]);
+
+      // A constant stream of never-attempted rows must not starve retries either.
+      // Least-recently-seen ordering puts the earlier attempt back in front of a
+      // fresh confirmed row; NULLS FIRST would select the fresh row forever.
+      const fresh = await vaultRepo.createSignedDepositIntent(intent());
+      await vaultRepo.advanceMovement({
+        movementId: fresh.movement.id,
+        organizationId: ORG,
+        fromStatuses: ["pending", "submitted"],
+        toStatus: "confirmed",
+        confirmedAt: "2026-08-19T12:02:00.000Z",
+      });
+      const third = await repository.claimUnsettledVaultMovements(4);
+      expect(third.filter((movement) => movement.status === "confirmed")).toEqual([
+        expect.objectContaining({ id: older.movement.id }),
+      ]);
+      const afterClaims = await repository.getMovementById({
+        movementId: older.movement.id,
+        organizationId: ORG,
+      });
+      expect(afterClaims?.updated_at).toBe(beforeClaims?.updated_at);
     });
   });
 

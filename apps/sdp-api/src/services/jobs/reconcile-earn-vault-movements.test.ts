@@ -161,7 +161,7 @@ describe("reconcileEarnVaultMovements", () => {
     });
     const queued = await createPostgresEarnMovementsRepository(
       getDb(env)
-    ).listUnsettledVaultMovements(256);
+    ).claimUnsettledVaultMovements(256);
     expect(queued.map((row) => row.id)).toContain(seeded.movement.id);
 
     // A later tick sees finalization and settles it.
@@ -176,7 +176,7 @@ describe("reconcileEarnVaultMovements", () => {
     expect(finalized?.confirmed_at).not.toBeNull();
     expect(
       (
-        await createPostgresEarnMovementsRepository(getDb(env)).listUnsettledVaultMovements(256)
+        await createPostgresEarnMovementsRepository(getDb(env)).claimUnsettledVaultMovements(256)
       ).map((row) => row.id)
     ).not.toContain(seeded.movement.id);
   });
