@@ -42,7 +42,7 @@ import {
   persistOutcomeUnknownMarker,
   SUBMISSION_OUTCOME_UNKNOWN_MARKER,
   signAndSendClosed,
-  TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
+  submissionOutcomeUnknownPatch,
   TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
   transferSubmissionOutcomeUnknown,
 } from "@/services/payments/submission-outcome";
@@ -728,9 +728,7 @@ async function parkRecurringPaymentCollection(
         transferId: transfer.id,
         organizationId: input.organizationId,
         projectId: input.projectId,
-        status: "processing",
-        error: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
-        providerData: { ...SUBMISSION_OUTCOME_UNKNOWN_MARKER },
+        ...submissionOutcomeUnknownPatch(),
         updatedAt: new Date().toISOString(),
       }),
     transfer.id

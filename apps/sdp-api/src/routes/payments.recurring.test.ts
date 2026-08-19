@@ -15,6 +15,7 @@ import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories";
 import app from "@/index";
+import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import {
@@ -2055,6 +2056,33 @@ describe("Payments routes — recurring", () => {
       .bind(activated.subscriptionId, dueAt)
       .first<{ total: number }>();
     expect(Number(transferCount?.total)).toBe(1);
+
+    // Neither must stale recovery rebuild it: that fails the attempt, which
+    // reschedules the cycle and charges the payer for the same period twice.
+    const submitsBeforeCron = signAndSendMock.mock.calls.length;
+    await getDb(env)
+      .prepare(
+        `UPDATE payment_subscription_collection_attempts
+            SET updated_at = ?
+          WHERE subscription_id = ?`
+      )
+      .bind(new Date(Date.now() - 60 * 60 * 1000).toISOString(), activated.subscriptionId)
+      .run();
+    const cronResult = await collectDueRecurringPayments(env);
+    expect(signAndSendMock.mock.calls.length).toBe(submitsBeforeCron);
+    // `skipped` counts a row that entered collection and threw: the parked
+    // cycle must not even be selected, or it crowds the oldest-first window
+    // and starves the collections that are genuinely stuck.
+    expect(cronResult).toMatchObject({ skipped: 0 });
+    const afterCron = await getDb(env)
+      .prepare(
+        `SELECT count(*) AS total
+           FROM payment_subscription_collection_attempts
+          WHERE subscription_id = ?`
+      )
+      .bind(activated.subscriptionId)
+      .first<{ total: number }>();
+    expect(Number(afterCron?.total)).toBe(1);
   });
 
   it("collects due recurring payments through SDP API routes", async () => {

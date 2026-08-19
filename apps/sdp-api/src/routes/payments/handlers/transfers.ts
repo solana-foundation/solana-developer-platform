@@ -63,9 +63,8 @@ import {
 import {
   isTransferSubmissionOutcomeUnknown,
   persistOutcomeUnknownMarker,
-  SUBMISSION_OUTCOME_UNKNOWN_MARKER,
   signAndSendClosed,
-  TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
+  submissionOutcomeUnknownPatch,
 } from "@/services/payments/submission-outcome";
 import {
   approvedWalletOperationAttemptId,
@@ -474,7 +473,7 @@ async function updateTransferRecord(
  * attempts. If both fail the durable row is still unsigned, which the
  * pending-transfers job would time out into a false `failed`, so
  * `onSignatureLost` runs last for the caller to close that row another way.
- * Exported for unit tests.
+ * Used by the transfer and transfer-batch submit paths, and by unit tests.
  */
 export function createSubmissionRecorder(
   transfer: TransferRow,
@@ -541,14 +540,7 @@ function markTransferOutcomeUnknown(
   providerData?: Record<string, unknown>
 ): Promise<void> {
   return persistOutcomeUnknownMarker(
-    () =>
-      updateTransferRecord(c, transferId, {
-        status: "processing",
-        error: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
-        signature: null,
-        blockTime: null,
-        providerData: { ...SUBMISSION_OUTCOME_UNKNOWN_MARKER, ...providerData },
-      }),
+    () => updateTransferRecord(c, transferId, submissionOutcomeUnknownPatch(providerData)),
     transferId
   );
 }

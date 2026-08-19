@@ -19,9 +19,8 @@ import { getLogger } from "@/runtime/logger";
 import {
   isTransferSubmissionOutcomeUnknown,
   persistOutcomeUnknownMarker,
-  SUBMISSION_OUTCOME_UNKNOWN_MARKER,
   signAndSendClosed,
-  TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
+  submissionOutcomeUnknownPatch,
   TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
 } from "@/services/payments/submission-outcome";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
@@ -277,12 +276,7 @@ export async function executeChunk(params: {
   const parkChunk = (providerData?: Record<string, unknown>) =>
     persistOutcomeUnknownMarker(
       () =>
-        settle({
-          status: "processing",
-          recipientStatus: "processing",
-          error: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
-          providerData: { ...SUBMISSION_OUTCOME_UNKNOWN_MARKER, ...providerData },
-        }),
+        settle({ ...submissionOutcomeUnknownPatch(providerData), recipientStatus: "processing" }),
       transfer.id
     );
 
@@ -309,20 +303,46 @@ export async function executeChunk(params: {
   // Once broadcast, a failed bookkeeping write must never strand the chunk as
   // an unsigned `processing` row — the pending-transfers job would cascade a
   // false `failed` to every recipient. The recorder retries the write once.
-  let signaturePersisted = false;
-  const recorder = createSubmissionRecorder(transfer, async (sig) => {
-    const persisted = await updateTransferRecord(c, {
-      transferId: transfer.id,
-      organizationId: resolved.scope.auth.organizationId,
-      projectId: resolved.projectId,
-      status: "processing",
-      signature: sig,
-      serializedTx,
-      error: null,
-    });
-    signaturePersisted = true;
-    return persisted;
-  });
+  const recorder = createSubmissionRecorder(
+    transfer,
+    (sig) =>
+      updateTransferRecord(c, {
+        transferId: transfer.id,
+        organizationId: resolved.scope.auth.organizationId,
+        projectId: resolved.projectId,
+        status: "processing",
+        signature: sig,
+        serializedTx,
+        error: null,
+      }),
+    // Both writes lost after the broadcast. One more attempt through `settle`:
+    // a signed `processing` row settles itself from chain on the next
+    // pending-transfers run, while an unsigned one is timed out into a false
+    // `failed` for every recipient. If even that is refused — a duplicate
+    // signature, say — park the chunk with the signature in `provider_data`,
+    // the only place left that can still hold it.
+    async (sig) => {
+      try {
+        await settle({
+          status: "processing",
+          recipientStatus: "processing",
+          signature: sig,
+          error: null,
+        });
+      } catch (persistError) {
+        getLogger().warn(
+          {
+            transfer_id: transfer.id,
+            signature: sig,
+            reason: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
+            error: persistError instanceof Error ? persistError.message : String(persistError),
+          },
+          "Batch chunk signature could not be recorded; parking the chunk with the signature"
+        );
+        await parkChunk({ submitted_signature: sig });
+      }
+    }
+  );
   let signature: Awaited<ReturnType<typeof params.feePayment.signAndSend>>;
   try {
     signature = await signAndSendClosed(params.feePayment, txBytes);
@@ -351,26 +371,4 @@ export async function executeChunk(params: {
   }
 
   await recorder.onSubmitted(signature);
-  if (!signaturePersisted) {
-    // Both signature writes were lost after the broadcast. One more attempt
-    // through `settle`: a signed `processing` row settles itself from chain on
-    // the next pending-transfers run, while an unsigned one is timed out into a
-    // false `failed` for every recipient. If even that is refused — a duplicate
-    // signature, say — park the chunk with the signature in `provider_data`,
-    // the only place left that can still hold it.
-    try {
-      await settle({ status: "processing", recipientStatus: "processing", signature, error: null });
-    } catch (persistError) {
-      getLogger().warn(
-        {
-          transfer_id: transfer.id,
-          signature,
-          reason: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
-          error: persistError instanceof Error ? persistError.message : String(persistError),
-        },
-        "Batch chunk signature could not be recorded; parking the chunk with the signature"
-      );
-      await parkChunk({ submitted_signature: signature });
-    }
-  }
 }

@@ -76,6 +76,20 @@ export function isPreBroadcastRejection(error: unknown): boolean {
  * invites the exact double-send retry the marker exists to prevent. Retries
  * once; an unmarked row is loudly logged for operator reconciliation.
  */
+/**
+ * The write that parks a row: `processing`, the reconciliation notice and the
+ * durable marker, in one place so a new consumer cannot park a row half-way.
+ * `providerData` merges into the marker — anything the operator should find on
+ * the row, such as a signature its own column refused.
+ */
+export function submissionOutcomeUnknownPatch(providerData?: Record<string, unknown>) {
+  return {
+    status: "processing" as const,
+    error: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
+    providerData: { ...SUBMISSION_OUTCOME_UNKNOWN_MARKER, ...providerData },
+  };
+}
+
 export async function persistOutcomeUnknownMarker(
   persistMarker: () => Promise<unknown>,
   transferId: string
