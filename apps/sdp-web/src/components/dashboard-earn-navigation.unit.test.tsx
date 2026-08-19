@@ -36,15 +36,19 @@ function findMarketsItem(options: ReturnType<typeof navOptions>) {
     ?.items.find((item) => item.label === "Shared.dashboardShell.markets");
 }
 
-describe("Earn dashboard navigation", () => {
-  it("adds a Markets group with an Earn destination when both flags are enabled", () => {
+describe("Markets dashboard navigation", () => {
+  it("adds the ordered Treasury Solutions and Earn Program destinations when enabled", () => {
     const markets = findMarketsItem(navOptions({ marketsEnabled: true, earnEnabled: true }));
 
-    expect(markets?.href).toBe("/dashboard/markets/earn");
+    expect(markets?.href).toBe("/dashboard/markets");
     expect(markets?.subnavKey).toBe("markets");
     expect(markets?.children).toEqual([
       {
-        label: "Shared.dashboardShell.earn",
+        label: "Shared.dashboardShell.treasurySolutions",
+        href: "/dashboard/markets/treasury-solutions",
+      },
+      {
+        label: "Shared.dashboardShell.earnProgram",
         href: "/dashboard/markets/earn",
       },
     ]);
@@ -57,37 +61,32 @@ describe("Earn dashboard navigation", () => {
     expect(JSON.stringify(getNavSections(t, options))).not.toContain("dashboardShell.markets");
   });
 
-  it("hides the Markets group rather than rendering it empty when every sub-module is off", () => {
-    const options = navOptions({ marketsEnabled: true, earnEnabled: false });
-
-    expect(findMarketsItem(options)).toBeUndefined();
-    expect(JSON.stringify(getNavSections(t, options))).not.toContain("dashboardShell.markets");
+  it("hides provider-backed Markets when the Earn runtime is off", () => {
+    expect(
+      findMarketsItem(navOptions({ marketsEnabled: true, earnEnabled: false }))
+    ).toBeUndefined();
   });
 
-  it("keeps Earn out of the mobile More sheet when either flag is off", () => {
-    for (const flags of [
-      { marketsEnabled: false, earnEnabled: true },
-      { marketsEnabled: true, earnEnabled: false },
-    ]) {
-      expect(
-        renderToStaticMarkup(
-          <DashboardMoreSheet
-            pathname="/dashboard"
-            canReadApprovals={false}
-            canManageOrgSettings={false}
-            heliusRingsEnabled={false}
-            onClose={() => {}}
-            {...flags}
-          />
-        )
-      ).not.toContain("/dashboard/markets/earn");
-    }
-  });
-
-  it("exposes the active Earn destination from the mobile More sheet", () => {
+  it("keeps Markets out of the mobile More sheet when the module flag is off", () => {
     const markup = renderToStaticMarkup(
       <DashboardMoreSheet
-        pathname="/dashboard/markets/earn/deposit"
+        pathname="/dashboard"
+        canReadApprovals={false}
+        canManageOrgSettings={false}
+        earnEnabled
+        heliusRingsEnabled={false}
+        marketsEnabled={false}
+        onClose={() => {}}
+      />
+    );
+
+    expect(markup).not.toContain('href="/dashboard/markets"');
+  });
+
+  it("exposes the active Markets destination from the mobile More sheet", () => {
+    const markup = renderToStaticMarkup(
+      <DashboardMoreSheet
+        pathname="/dashboard/markets/treasury-solutions"
         canReadApprovals={false}
         canManageOrgSettings={false}
         earnEnabled
@@ -97,8 +96,8 @@ describe("Earn dashboard navigation", () => {
       />
     );
 
-    expect(markup).toContain('href="/dashboard/markets/earn"');
-    expect(markup).toContain("Shared.dashboardShell.earn");
+    expect(markup).toContain('href="/dashboard/markets"');
+    expect(markup).toContain("Shared.dashboardShell.markets");
     expect(markup).toContain('aria-current="page"');
   });
 });

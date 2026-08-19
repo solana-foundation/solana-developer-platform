@@ -15,8 +15,8 @@
  *
  * The sync iterates every registered vault-infra provider per environment,
  * pulls the live strategy catalogue, and upserts it into `earn_strategies`
- * keyed on (provider, provider_reference, environment) — the only writer of
- * that table besides the dev seed. Each provider pass then DELISTS: rows the
+ * keyed on (provider, provider_reference, environment) — the only admitting
+ * writer for that table. Each provider pass then DELISTS: rows the
  * provider no longer lists are deleted (`deleteUnlistedFromCatalogue`), so the
  * table converges on the live catalogue instead of only ever growing — that is
  * what makes a tightened catalogue gate reach rows already stored.
