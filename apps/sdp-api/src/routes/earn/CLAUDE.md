@@ -14,10 +14,9 @@ record, not state: a route may resolve which provider wallet a program is and
 then read all of its money live — what it may never do is mix a persisted
 balance with a live one.
 
-- `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Written only
-  by the hourly sync cron, the 5-minute metrics refresh
-  (`cron/earn-metrics-refresh.ts`, figures only — it can never insert a row),
-  and the local dev seed.
+- `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Rows are
+  admitted only by the hourly sync cron; the 5-minute metrics refresh
+  (`cron/earn-metrics-refresh.ts`) updates figures only and can never insert.
   - **FOUR visibility filters, all server-side, all in `handlers/strategies.ts`.**
     `EARN_PROVIDER_SURFACING` (@sdp/types) hides every row of a provider SDP does
     not currently OFFER — Ground today, so the shipped catalogue is Kamino only;
@@ -289,6 +288,214 @@ other's balance.
   `GET /strategies/:id/nav` (no writer, no reachable reader). A regression
   test in `../earn.test.ts` pins all of them at 404.
 
+## Vault-direct routes (non-custodial positions)
+
+A second money model, added for Kamino. A `vault_direct` provider custodies
+nothing: there is no wallet to provision and no address to fund — the vault's
+account is a PROGRAM account and stablecoins sent to it are destroyed. Money
+moves only when SDP builds an instruction and signs it with one of the
+organization's own custody wallets.
+
+- `POST /vault-deposits` — **build + simulate + sign + record + broadcast**, in
+  that order. Body `{strategyId, custodyWalletId, amount, minSharesOut?}` and a
+  required `Idempotency-Key` header; body `requestId` is rejected.
+  Registered as
+  `requirePermissions("earn:write", "wallets:read")` → `policyGate` → handler.
+  The caller names a CATALOGUE row, never a raw vault address, so the sync's
+  admission gates still bound this path.
+  - **POLICY-GATED.** `policyGate({ extract:
+    extractEarnVaultDepositPolicyCandidate })` resolves everything (strategy,
+    wallet, amount) and enforces wallet policy BEFORE `createOrgSigner` is
+    reached. The extractor owns all the gates below; the handler only ledgers.
+    Registered as the `earn` family in
+    `src/security/value-moving-conformance.node.test.ts`, whose
+    `valueMovingSourceRoots` now includes `src/services/earn` — it did not, which
+    is how a whole money-moving surface stayed invisible to the sink inventory.
+    The policy envelope is `program` / `earn_vault_deposit`; migration 0060
+    re-opens that live family after the earlier vocabulary trim.
+  - **Environment capability first.** `isVaultDirectDepositEnabled(environment)`
+    (`@sdp/types/provider-access`) fail-closes PRODUCTION while SDP has no
+    vault-withdraw route. The dashboard surfaces the durable position but
+    visibly disables its exit action. Entitlement cannot express this — it is
+    org-scoped, not environment-scoped. The dashboard disables the deposit
+    affordance from the same constant so the opportunity remains discoverable
+    without advertising an action the API will refuse.
+  - `minSharesOut` is **required in production** and optional in sandbox: the
+    pinned Kamino SDK picks the LEGACY deposit instruction when it is absent, so
+    there is no implicit floor at all.
+  - `Idempotency-Key` is **REQUIRED** and body `requestId` is rejected. There is
+    no provider-side dedupe to fall back on: the chain will happily accept the
+    same transfer twice. The header value is stored with a canonical
+    `buildEarnVaultDepositFingerprint`, and the replay is resolved BEFORE the
+    position is claimed — reusing a key with a different intent is a **409**, not
+    a silent replay, and writes nothing.
+  - Gate order: schema → environment capability → production floor → strategy
+    resolution → deposit-style check → surfacing → entitlement →
+    **catalogue admission** → wallet. `assertStrategyDepositable`
+    (`handlers/admission.ts`) is shared with the custodial path and asserts
+    `status = 'active'` plus `isClusterFundableInEnvironment`; without it a
+    `paused` row — an operator's deliberate stop — stayed fundable by id.
+  - Wallet binding takes **`earn:write`**, not `wallets:read`. A read-only
+    binding must not be able to spend. Note this is the first `earn:*` scope
+    asserted on a BINDING: a selected-scope key provisioned only with
+    payments-family binding permissions will now 403 here.
+    `custodyWalletId` is the exact `custody_wallets.id` (`cwlt_…`) returned by
+    the wallet surface, never the provider-local `walletId` or public key. The
+    latter can repeat across configurations; a selected binding whose provider
+    id maps to multiple scoped rows fails closed.
+  - Simulates before signing. The instructions come from a third-party SDK built
+    against live vault state, so a stale reserve set surfaces as a readable
+    program error instead of a landed, failed transaction the customer paid for.
+    Provider build, simulation, custody lookup, signing, and broadcast share one
+    absolute `VaultDeadline`; a slow early stage cannot reset the timeout before
+    a later side effect.
+  - **The signed outbox is recorded BEFORE broadcast.** `signVaultPlan` signs
+    without sending; one transaction stores the signature, base64 wire bytes,
+    last-valid block height, movement and activated claim while still `pending`.
+    Only the insert winner broadcasts. A send error leaves that row `pending`
+    and never `failed`, because a lost response does not prove the transaction
+    did not land.
+  - Fee payer is the CUSTODY WALLET. Kora only sponsors allow-listed programs and
+    the kvault/klend ids are not on that list. The shared execution runtime can
+    add a sponsor signature without broadcasting, preserving record-before-send,
+    but this route deliberately selects `wallet-pays` until those programs are
+    eligible for sponsorship.
+- `GET /vault-deposits` — this workspace's recorded deposits, **DB only**,
+  newest first, keyset-paged. The DISCOVERY tier: it is what lets a client
+  re-derive which of its deposits are still in flight after losing local state,
+  the way the custodial side re-derives withdrawals from its ledger. Scoped by
+  organization, environment, direction, PROJECT and wallet binding — the same
+  five rules as the detail read.
+  - `?requestId=` narrows to the caller's own idempotency key, and that is how
+    an **approval-gated** deposit becomes findable. A policy hold returns an
+    `approvalRequestId` and no `movementId` because no movement exists yet; the
+    approval executor replays the caller's original `Idempotency-Key`
+    (`services/policy/approved-operation-replay.ts` stores it in
+    `wallet_operations.raw_payload.executionRequest` and re-sends it as a real
+    header), so the movement it later creates carries it. **That preservation is
+    platform behaviour this route DEPENDS on** — if the executor ever derived
+    its own key instead, `?requestId=` would silently stop finding approved
+    deposits. It has no direct test today; the fixture needed to drive
+    `executeApprovedWalletOperation` has to reproduce the exact policy-gate
+    operation record, and that belongs in the approvals domain, not here.
+  - A key is caller-chosen `[\x20-\x7e]{1,255}` (`middleware/idempotency-key.ts`),
+    so it may be one character, and it is **published on chain** in the deposit
+    memo (`services/earn/vault-deposit.service.ts`). It is therefore never a
+    capability: the route re-applies every scoping rule, so a guessed key can
+    only surface a deposit the caller could already read. It is also why the key
+    is a QUERY filter and not a path segment — legal keys contain `/` and `?`.
+  - **The replay decision is project-scoped IN THE REPOSITORY, not only at the
+    route.** `findMovementByRequestId` is keyed on `(organization_id, request_id)`
+    and the server fingerprint (`buildEarnVaultDepositFingerprint`) omits the
+    project, so a key first used by a SIBLING project matched on both and its
+    movement was returned as a replay — the wrong deposit, plus its amount and
+    signature. Reachable because an organization-level custody config gives two
+    projects the same `custody_wallets` row. The rule is ONE exported function —
+    `assertMovementIsOwnReplay` (`db/repositories/earn-vault.repository.ts`) —
+    enforced at EVERY site that resolves a replay: the route guard
+    (`findEarnVaultDepositIdempotentKeyReplay`), `depositIntoVault`'s fast
+    sequential preflight (`services/earn/vault-deposit.service.ts`), the
+    `createSignedDepositIntent` transaction preflight, and the concurrent-insert
+    loser. It kept re-appearing as a bug precisely because it was re-implemented
+    per site — the route guard was fixed and the repository missed; the
+    repository was fixed and the service fast path missed. A new replay site
+    calls the shared function or it is wrong. The multiplicity is required, not
+    redundancy: the route guard is deliberately skipped for an
+    approved-operation execution, and `wallet_operations` uniqueness is
+    per-PROJECT, so sibling projects can each hold an approval with the same
+    key.
+    Deliberately NOT fixed by adding the project to the fingerprint: that value is
+    persisted in `wallet_operations.raw_payload.executionRequest`, so changing it
+    would 409 every in-flight retry across a deploy. A sibling's approved
+    operation that hits this conflict records `failed` with the 409 as its
+    `execution_error` (`completeWalletOperationExecution` treats any non-2xx as
+    failure), so the outcome is visible on the approval surface, never silent.
+  - `?settled=false` returns only movements that can still change, and recovery
+    always asks for that. It is not a convenience: a client filtering an
+    unbounded history locally has to page it all, and a workspace busy enough to
+    push an in-flight deposit past the first page would silently stop tracking
+    it. The reconciliation sweep drives every row terminal within ~90 seconds,
+    so the in-flight set is small by construction.
+  - Migration `0061` adds `idx_earn_vault_movements_workspace_created`
+    (`(organization_id, environment, created_at DESC, id DESC) WHERE direction =
+    'deposit'`). 0059's indexes serve the sweep, replay, the chain and per
+    position — none of them can order this page.
+- `GET /vault-deposits/:movementId` — one recorded movement, **DB only**, no
+  catalogue join and no chain read. This is what makes `POST`'s
+  record-before-broadcast answerable: a caller can hold a movement id for a
+  transaction whose fate it never learned, and the every-minute reconciliation
+  sweep is the only thing that settles it. `pending` here means "SDP could not
+  establish that this reached the network", never "failed".
+  - **No provider gate**, same ADR 0002 reason as `/vault-positions`: it reports
+    on money that has already left the customer's wallet, so un-offering the
+    provider must not take away the answer to "did my deposit land". Deliberately
+    no strategy lookup either — an un-catalogued strategy must not cost anyone
+    that answer, so the response carries `provider`/`providerReference` off the
+    movement row and leaves the display name to the caller.
+  - **Three scoping rules, all answering 404 rather than 403** — a caller who may
+    not see a movement must not learn it exists. ORGANIZATION (enforced inside
+    the repository query; the BOLA guard, same reasoning as
+    `getEarnProgramWithdrawal`), ENVIRONMENT (a sandbox key must not read a
+    production movement; the row carries its own, so this is a comparison and
+    not a second query), DIRECTION (`withdraw` is not a deposit — the column is
+    the only thing separating the two on a shared table, and it closes the
+    vault-withdraw path before there is anything to leak through it), and
+    PROJECT (an EXACT match — `project_id` is nullable only through
+    `ON DELETE SET NULL`, so a null means the project was DELETED, and accepting
+    it would hand that project's deposits to every sibling project sharing an
+    organization-level custody wallet).
+  - Wallet-binding scope comes from `listReadableEarnVaultWallets`, **shared with
+    `/vault-positions`**. Keep it shared: a binding that hides a position has to
+    hide that position's deposits too, and two copies of that rule is how they
+    drift. Both routes are pinned together in `../earn.vault-positions.test.ts`.
+- `GET /vault-positions` — DB claim rows **hydrated live from chain**. Shares and
+  value are never persisted: for a non-custodial vault the chain IS the provider.
+  Takes **no provider gate at all** — it is a read of money the org already
+  holds, and hiding it when a provider is un-offered would close the door out.
+  It DOES take wallet-binding scope: `getAllowedApiKeyWalletIdsForPermissions(auth,
+  ["earn:read"])`, applied in the repository query before any chain read. Mind
+  the id spaces — that helper returns provider `walletId`s (`privy_…`) while
+  `earn_vault_positions.custody_wallet_id` is the `cwlt_…` row id, so the handler
+  translates through `scope.wallets`. Passing the allow-list straight through
+  matches nothing and silently returns an empty page.
+  A failed chain read leaves a position UNHYDRATED rather than zero; reporting
+  zero is a claim about someone's money that a failed RPC call cannot support.
+
+Capability dispatch is `supportsVaultDirect` (`@sdp/earn/capabilities`), resolved
+through `services/earn/execution-registry.ts` — the one place a provider id maps
+to an executing client. `EARN_PROVIDER_CLIENTS` stays the CATALOGUE registry so
+the hourly sync keeps its small dependency surface.
+
+The every-minute vault reconciliation worker consumes
+`idx_earn_vault_movements_unsettled` in bounded pages. Both the embedded cron
+and the dedicated Cloud Run job call the same reconciler: it queries the exact
+recorded signature, confirms landed transactions, rebroadcasts the recorded
+signed bytes while the blockhash remains valid, and marks an expired, unlanded
+movement failed. Never rebuild a transaction during recovery.
+
+**Not built yet:** the withdraw counterpart. The dashboard now hydrates the
+durable vault-position record and shows it with a disabled exit action.
+
+One gap remains around approvals, and it is narrower than it was. An approved
+deposit is now fully followable — the executor writes the movement and
+`GET /vault-deposits` finds it — but a REJECTED approval never produces a
+movement, so nothing on this surface reports it. That outcome is observable via
+`GET /v1/wallets/approval-requests/:approvalRequestId`, whose `status` plus
+nested `operation.status` distinguish rejected/canceled from
+approved-and-executed. Wiring the dashboard to it is deliberately not done here. Until
+the withdrawal path lands, a vault position can be entered and not exited
+through SDP — which is why `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` fail-closes
+production rather than relying on anyone remembering ADR 0002.
+
+**Per-cluster RPC.** `resolveClusterRpcUrl` reads `SOLANA_DEVNET_RPC_URL` /
+`SOLANA_MAINNET_RPC_URL`, falling back to the canonical default only when its
+configured `SOLANA_NETWORK` matches the requested cluster, and
+`assertClusterEndpoint` proves the endpoint by GENESIS HASH before anything is
+built against it (cached per endpoint). One process serves both environments, so
+the old cluster-agnostic read silently built against whichever chain the single
+URL happened to serve — and a mismatch does not error, because Kamino's mainnet
+kvault program id also resolves on devnet with no accounts under it.
+
 ## Gate asymmetry — DO NOT BREAK (ADR 0002 exit-safety)
 
 - **Money-in** (`POST /programs`, `PUT /programs/:programId`):
@@ -334,10 +541,10 @@ other's balance.
 - Zod schemas in schemas.ts; parse/paginate/envelope helpers in
   handlers/shared.ts — don't hand-roll either.
 - Capability gating: `supportsPortfolioWallets(client)` → NOT_IMPLEMENTED for
-  providers lacking the surface. This is how a **catalogue-only** provider is
-  handled: Kamino lists real strategies but moves no money through SDP (its
-  vaults are non-custodial — the customer's own wallet deposits), so every
-  program route answers 501 for it by capability, never by a provider-id check.
+  providers lacking the surface. Kamino implements NONE of it, so every
+  **program** route still answers 501 for it by capability, never by a
+  provider-id check — its money moves through the vault-direct routes above
+  instead. The two capabilities are asserted mutually exclusive.
 - Withdrawal approval is a SECOND optional capability
   (`supportsWithdrawalApprovals`) with **no public route on purpose**: casting
   a vote needs the account-level Turnkey signer (platform ops — one shared
@@ -349,11 +556,10 @@ other's balance.
   `packages/sdp-earn/README.md` → "Withdrawals unwind in reverse").
 - Provider ids from DB rows are open strings — always dispatch via
   `resolveEarnProviderClient`.
-- Catalogue writes happen ONLY via the sync cron
-  (`src/cron/earn-catalogue-sync.ts` — the production path), the metrics refresh
-  (`src/cron/earn-metrics-refresh.ts` — every 5 minutes, figures only, UPDATE-only
-  so it can never admit a row), and the dev seed (`db:seed:earn` — local only,
-  refuses non-local databases). Cadence, failure behaviour, and which to use:
+- Catalogue rows are admitted ONLY via the sync cron
+  (`src/cron/earn-catalogue-sync.ts`). The metrics refresh
+  (`src/cron/earn-metrics-refresh.ts`) runs every 5 minutes and is UPDATE-only,
+  so it can never admit a row. Cadence and failure behaviour:
   `packages/sdp-earn/README.md` → "Catalogue data".
 - Whole-stack local setup (ports, flags, Ground key, entitlement, troubleshooting):
   `packages/sdp-earn/CLAUDE.md` → "Local development".

@@ -11,7 +11,7 @@ import { getAuth } from "@/lib/auth";
 import { AppError, badRequestQuery } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
-import { getAllowedApiKeyWalletIdsForPermissions } from "@/services/api-key-scope.service";
+import { getAllowedApiKeyCustodyWalletIdsForPermissions } from "@/services/api-key-scope.service";
 import type { Env } from "@/types/env";
 import { policyControlInventoryQuerySchema } from "./schemas";
 
@@ -98,14 +98,14 @@ export const listPolicyControlInventory = async (c: AppContext) => {
   }
 
   assertTargetPermissions(auth.permissions, parsed.data.target);
-  const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["wallets:read"]);
+  const allowedWalletIds = getAllowedApiKeyCustodyWalletIdsForPermissions(auth, ["wallets:read"]);
   const result = await createPolicyRepository(
     c.env,
     getRequestTenantScope(c)
   ).listPolicyControlInventory({
     organizationId: auth.organizationId,
     projectId: c.get("projectId") ?? null,
-    walletIds: allowedWalletIds ?? undefined,
+    custodyWalletIds: allowedWalletIds ?? undefined,
     ...parsed.data,
   });
 

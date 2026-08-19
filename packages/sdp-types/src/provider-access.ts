@@ -1,5 +1,6 @@
 import type { SdpEnvironment } from "./api-keys";
 import { CUSTODY_PROVIDERS, type CustodyProvider } from "./custody";
+import type { EarnPortfolioToken } from "./earn";
 import {
   normalizeOrganizationTier,
   ORGANIZATION_RPC_PROVIDERS,
@@ -40,6 +41,29 @@ export type RampProviderId = (typeof RAMP_PROVIDERS)[number];
  */
 export const EARN_PROVIDERS = ["veda", "upshift", "perena", "ground", "kamino"] as const;
 export type EarnProviderId = (typeof EARN_PROVIDERS)[number];
+
+/**
+ * Portfolio-withdrawal tokens each provider can pay to a Solana address.
+ *
+ * This is exhaustive and shared because the provider client must reject an
+ * impossible rail before calling upstream while the dashboard must never
+ * offer that same impossible choice. Empty means SDP exposes no program-style
+ * Solana payout capability for the provider.
+ */
+export const EARN_PROGRAM_SOLANA_PAYOUT_TOKENS = {
+  veda: [],
+  upshift: [],
+  perena: [],
+  ground: ["usdc"],
+  kamino: [],
+} as const satisfies Record<EarnProviderId, readonly EarnPortfolioToken[]>;
+
+/** Fail closed for provider ids from open database read models. */
+export function earnProgramSolanaPayoutTokens(provider: string): readonly EarnPortfolioToken[] {
+  return Object.hasOwn(EARN_PROGRAM_SOLANA_PAYOUT_TOKENS, provider)
+    ? EARN_PROGRAM_SOLANA_PAYOUT_TOKENS[provider as EarnProviderId]
+    : [];
+}
 
 /**
  * Whether SDP currently OFFERS a registered Earn provider — the one switch that
@@ -95,9 +119,10 @@ export const EARN_PROVIDER_SURFACING = {
  * - `custodial` — SDP provisions a provider-managed portfolio wallet and the
  *   customer funds THAT address. SDP never signs; it watches the address and the
  *   provider deploys on its own rebalance. Ground.
- * - `vault_direct` — the vault is non-custodial and takes deposits straight from
- *   the customer's own wallet, as an on-chain program instruction. There is no
- *   SDP-side address to fund and no SDP-side signature. Kamino.
+ * - `vault_direct` — the vault is non-custodial and takes an on-chain program
+ *   instruction signed by the organization's selected custody wallet. There is
+ *   no provider deposit address to fund; SDP builds and submits the custody-
+ *   signed transaction. Kamino.
  *
  * **The difference is load-bearing in the UI and is not cosmetic.** A custodial
  * program has a real deposit ADDRESS a customer can send USDC to. A K-Vault does
@@ -152,10 +177,10 @@ export const SURFACED_EARN_PROVIDERS: readonly EarnProviderId[] = EARN_PROVIDERS
  * ── Why production is closed ────────────────────────────────────────────────
  * SDP can currently move money INTO a K-Vault and not back out. There is no
  * vault-withdraw route (the Kamino client withholds the capability because its
- * plan is not yet batched), and the dashboard's Active tab reads custodial
- * `earn_provider_wallets` only, so a vault position does not even appear there.
- * Entitlement will not save us: it is org-scoped, not environment-scoped, so an
- * entitled org would otherwise reach mainnet with real funds.
+ * plan is not yet batched). The dashboard now shows durable vault positions,
+ * but it can only label their SDP withdrawal action unavailable. Entitlement
+ * will not save us: it is org-scoped, not environment-scoped, so an entitled
+ * org would otherwise reach mainnet with real funds and no SDP exit path.
  *
  * Nothing here traps money that is already deposited. The shares sit in the
  * org's OWN custody wallet and Kamino's UI can always redeem them — this closes
@@ -165,9 +190,9 @@ export const SURFACED_EARN_PROVIDERS: readonly EarnProviderId[] = EARN_PROVIDERS
  * refuses on and the dashboard hides the affordance on, and a UI that offered a
  * button the server refuses is the specific failure this replaces.
  *
- * TO OPEN PRODUCTION: land the withdraw path and the Active-tab surface, then
- * add "production" here. It is one line precisely so it cannot be forgotten,
- * and it is not a flag flip precisely because the work is real.
+ * TO OPEN PRODUCTION: land the withdraw path, then add "production" here. It is
+ * one line precisely so it cannot be forgotten, and it is not a flag flip
+ * precisely because the work is real.
  */
 export const VAULT_DIRECT_DEPOSIT_ENVIRONMENTS: readonly SdpEnvironment[] = ["sandbox"];
 

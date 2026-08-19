@@ -16,8 +16,13 @@ import { webhooksOriginHref, webhooksOriginTokenId } from "@/lib/webhooks-origin
 
 type DashboardPageConfig = {
   title: string;
+  /**
+   * Where the visible title renders: "center" puts it in the top bar row,
+   * "left" above the content in the header-tab layout. Defaults by condition —
+   * header-tab pages sit left, everything else centers.
+   */
+  titlePosition?: "left" | "center";
   headerTabs?: DashboardHeaderTabsConfig;
-  centeredTitle?: string;
   topBarLeadingContent?: ReactNode;
   contentWidthClass?: string;
   hideTitle?: boolean;
@@ -32,7 +37,7 @@ type DashboardTopBarProps = {
   setMobileSidebarOpen: (value: boolean) => void;
   hideTitle?: boolean;
   title: string;
-  centeredTitle?: string;
+  titlePosition?: "left" | "center";
   topBarLeadingContent?: ReactNode;
   hasHeaderTabs?: boolean;
 };
@@ -164,7 +169,7 @@ export function DashboardTopBar({
   setMobileSidebarOpen,
   hideTitle,
   title,
-  centeredTitle,
+  titlePosition,
   topBarLeadingContent,
   hasHeaderTabs = false,
 }: DashboardTopBarProps) {
@@ -177,7 +182,8 @@ export function DashboardTopBar({
       <Badge className="hidden sm:inline-flex">{t("Shared.dashboardShell.sandbox")}</Badge>
     </>
   ) : null;
-  const centersPageTitle = !hasHeaderTabs && !hideTitle;
+  const centersPageTitle =
+    !hideTitle && (titlePosition === undefined ? !hasHeaderTabs : titlePosition === "center");
   const trailingContent = (
     <>
       <LanguagePicker />
@@ -187,10 +193,10 @@ export function DashboardTopBar({
     </>
   );
 
-  if (centeredTitle || centersPageTitle) {
+  if (centersPageTitle) {
     return (
       <CenteredDashboardTopBar
-        title={centeredTitle ?? title}
+        title={title}
         leadingContent={
           <>
             <SidebarToggle
@@ -235,15 +241,14 @@ function playgroundHeaderTabs(t: ReturnType<typeof useTranslations>): DashboardH
 }
 
 function actionPageConfig(config: {
-  centeredTitle: string;
+  title: string;
   backHref: string;
   backLabel: string;
   contentWidthClass: string;
 }): DashboardPageConfig {
   return {
-    title: "",
-    hideTitle: true,
-    centeredTitle: config.centeredTitle,
+    title: config.title,
+    titlePosition: "center",
     topBarLeadingContent: (
       <HeaderBackAction href={config.backHref} label={config.backLabel} compactOnMobile />
     ),
@@ -322,7 +327,7 @@ function getCounterpartyRoutePageConfig(
 ): DashboardPageConfig | null {
   if (pathname === "/dashboard/payments/counterparty/create") {
     return actionPageConfig({
-      centeredTitle: t("Shared.dashboardShell.newCounterparty"),
+      title: t("Shared.dashboardShell.newCounterparty"),
       backHref: "/dashboard/payments/counterparty",
       backLabel: t("Shared.dashboardShell.backToCounterparty"),
       contentWidthClass: "max-w-none",
@@ -341,21 +346,28 @@ function getCounterpartyRoutePageConfig(
   return null;
 }
 
-function getEarnRoutePageConfig(
+function getMarketsRoutePageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
-  if (pathname === "/dashboard/markets/earn/deposit") {
-    return actionPageConfig({
-      centeredTitle: t("Shared.dashboardShell.earnNewDeposit"),
-      backHref: "/dashboard/markets/earn",
-      backLabel: t("Shared.dashboardShell.backToEarn"),
-      contentWidthClass: "max-w-none",
-    });
-  }
-  if (pathname === "/dashboard/markets/earn" || pathname.startsWith("/dashboard/markets/earn/")) {
+  if (pathname === "/dashboard/markets/treasury-solutions") {
     return {
-      title: t("Shared.dashboardShell.earn"),
+      title: t("Shared.dashboardShell.treasurySolutions"),
+      titlePosition: "center",
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname === "/dashboard/markets/earn") {
+    return {
+      title: t("Shared.dashboardShell.earnProgram"),
+      titlePosition: "center",
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname === "/dashboard/markets/earn/button-builder") {
+    return {
+      title: t("Shared.dashboardShell.configureEarnButton"),
+      titlePosition: "center",
       contentWidthClass: "max-w-none",
     };
   }
@@ -373,7 +385,7 @@ function getWalletRoutePageConfig(
     const [, section, walletId] = walletPolicyRouteMatch;
     const isPolicyEvaluationDetail = /\/policy\/audit\/[^/]+$/.test(pathname);
     return actionPageConfig({
-      centeredTitle: t("Shared.dashboardShell.walletControls"),
+      title: t("Shared.dashboardShell.walletControls"),
       backHref: isPolicyEvaluationDetail
         ? `/dashboard/${section}/${walletId}/policy/audit`
         : `/dashboard/${section}/${walletId}`,
@@ -412,7 +424,7 @@ function getAccessControlPageConfig(
   }
   if (pathname === "/dashboard/api-keys/new") {
     return actionPageConfig({
-      centeredTitle: t("Shared.dashboardShell.newApiKey"),
+      title: t("Shared.dashboardShell.newApiKey"),
       backHref: "/dashboard/api-keys",
       backLabel: t("Shared.dashboardShell.backToApiKeys"),
       contentWidthClass: "max-w-none",
@@ -420,7 +432,7 @@ function getAccessControlPageConfig(
   }
   if (pathname.startsWith("/dashboard/api-keys/") && pathname.endsWith("/edit")) {
     return actionPageConfig({
-      centeredTitle: t("Shared.dashboardShell.editApiKey"),
+      title: t("Shared.dashboardShell.editApiKey"),
       backHref: "/dashboard/api-keys",
       backLabel: t("Shared.dashboardShell.backToApiKeys"),
       contentWidthClass: "max-w-none",
@@ -492,7 +504,7 @@ function getIssuanceRoutePageConfig(
   }
   if (pathname === "/dashboard/issuance/create") {
     return actionPageConfig({
-      centeredTitle: t("Shared.dashboardShell.newAsset"),
+      title: t("Shared.dashboardShell.newAsset"),
       backHref: "/dashboard/issuance",
       backLabel: t("Shared.dashboardShell.backToOverview"),
       contentWidthClass: "max-w-none",
@@ -506,7 +518,7 @@ function getIssuanceRoutePageConfig(
   // left-aligned, full-width layout, untouched.
   if (assetProfilesEnabled) {
     return actionPageConfig({
-      centeredTitle: t("Shared.dashboardShell.assetManagement"),
+      title: t("Shared.dashboardShell.assetManagement"),
       backHref: "/dashboard/issuance",
       backLabel: t("Shared.dashboardShell.backToOverview"),
       contentWidthClass: "max-w-7xl",
@@ -560,7 +572,7 @@ function getIntegrationsPageConfig(
 }
 
 /**
- * Header config for the wallet section's three landing routes, under both the
+ * Header config for the wallet section's landing routes, under both the
  * `/wallets` and legacy `/custody` prefixes. Returns null elsewhere.
  */
 function getWalletSectionPageConfig(
@@ -577,6 +589,19 @@ function getWalletSectionPageConfig(
   if (pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup") {
     return {
       title: t("Shared.dashboardShell.createWallet"),
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard/wallets",
+        label: t("Shared.dashboardShell.backToWallets"),
+      },
+    };
+  }
+  if (
+    pathname === "/dashboard/wallets/connections" ||
+    pathname === "/dashboard/custody/connections"
+  ) {
+    return {
+      title: t("Shared.dashboardShell.connections"),
       contentWidthClass: "max-w-none",
       backAction: {
         href: "/dashboard/wallets",
@@ -661,9 +686,9 @@ export function getDashboardPageConfig(
   if (counterpartyRouteConfig) {
     return counterpartyRouteConfig;
   }
-  const earnRouteConfig = getEarnRoutePageConfig(pathname, t);
-  if (earnRouteConfig) {
-    return earnRouteConfig;
+  const marketsRouteConfig = getMarketsRoutePageConfig(pathname, t);
+  if (marketsRouteConfig) {
+    return marketsRouteConfig;
   }
   if (pathname === "/dashboard/payments") {
     return {
@@ -693,7 +718,7 @@ export function getDashboardPageConfig(
   }
   if (pathname === "/dashboard/payments/recurring/create") {
     return actionPageConfig({
-      centeredTitle: t("Shared.dashboardShell.recurringPayment"),
+      title: t("Shared.dashboardShell.recurringPayment"),
       backHref: "/dashboard/payments/recurring",
       backLabel: t("Shared.dashboardShell.backToRecurringPayments"),
       contentWidthClass: "max-w-none",
@@ -717,14 +742,14 @@ export function getDashboardPageConfig(
     const action = getPaymentsActions(t, privateChannelsEnabled).find((item) =>
       pathname.startsWith(item.href)
     );
-    const centeredTitle = action
+    const title = action
       ? action.label
       : pathname.endsWith("/receive")
         ? t("Shared.dashboardShell.receive")
         : t("Shared.dashboardShell.send");
 
     return actionPageConfig({
-      centeredTitle,
+      title,
       backHref: "/dashboard/payments",
       backLabel: t("Shared.dashboardShell.backToPayments"),
       contentWidthClass: "max-w-none",
@@ -739,7 +764,10 @@ export function getDashboardPageConfig(
     // wide empty gutter beside its cards. Widened rather than set to `max-w-none`:
     // the members table and the RPC form are label/value rows, and letting them span
     // an ultrawide display pushes each value far from its label.
-    return { title: t("Shared.dashboardShell.settings"), contentWidthClass: "max-w-7xl" };
+    return {
+      title: t("Shared.dashboardShell.settings"),
+      contentWidthClass: "max-w-7xl",
+    };
   }
   if (pathname.startsWith("/dashboard/allowlist")) {
     return { title: t("Shared.dashboardShell.allowlist") };

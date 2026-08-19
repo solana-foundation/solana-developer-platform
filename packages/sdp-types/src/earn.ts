@@ -6,10 +6,11 @@ import type { SolanaCluster, WellKnownTokenSymbol } from "./well-known-tokens";
  * Earn is a stablecoin deposit facility: organizations browse a catalogue of
  * yield strategies (DeFi protocols or tokenized RWAs, fronted by vault-infra
  * providers), fund a shared portfolio wallet, and withdraw to addresses they
- * control. Positions and balances are always read live from the provider
- * (never persisted); SDP-initiated withdrawals are recorded in a ledger —
- * "Record"-suffixed types are ledger rows, `EarnPortfolio*` types are live
- * provider reads (PRO-1628 / ADR 0002 addendum).
+ * control. Custodial portfolio balances are read live from the provider, while
+ * non-custodial vault ownership and movement records are durable and their
+ * balances are hydrated live. SDP-initiated portfolio withdrawals are recorded
+ * in a ledger — "Record"-suffixed types are ledger rows, `EarnPortfolio*`
+ * types are live provider reads (PRO-1628 / ADR 0002 addendum).
  *
  * Registries follow ADR 0001 (asset profiles): closed unions defined in code,
  * open TEXT columns in Postgres, Zod validation at the app layer — adding a
@@ -159,6 +160,121 @@ export interface EarnStrategy {
   fundable: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Non-custodial vault positions — the custody wallet owns the vault shares and
+ * SDP reads their current value live from the provider on every list request.
+ */
+export interface EarnVaultPosition {
+  id: string;
+  provider: string;
+  providerReference: string;
+  label: string;
+  custodyWalletId: string;
+  tokenMint: string;
+  shareMint: string;
+  createdAt: string;
+  closedAt: string | null;
+  /** Absent when the provider read failed; never coerce an unavailable value to zero. */
+  shares?: string;
+  /** Deposit-token value, absent when the provider cannot hydrate the position. */
+  tokenValue?: string;
+}
+
+export interface EarnVaultPositionsPage {
+  positions: EarnVaultPosition[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
+/** JSON body for POST /v1/earn/vault-deposits. Idempotency is header-only. */
+export interface EarnVaultDepositRequest {
+  strategyId: string;
+  custodyWalletId: string;
+  amount: string;
+  minSharesOut?: string;
+}
+
+export const EARN_VAULT_MOVEMENT_STATUSES = [
+  "pending",
+  "submitted",
+  "confirmed",
+  "failed",
+] as const;
+export type EarnVaultMovementStatus = (typeof EARN_VAULT_MOVEMENT_STATUSES)[number];
+
+/** Statuses a vault movement never moves on from. */
+export const EARN_TERMINAL_VAULT_MOVEMENT_STATUSES = ["confirmed", "failed"] as const;
+export type EarnTerminalVaultMovementStatus =
+  (typeof EARN_TERMINAL_VAULT_MOVEMENT_STATUSES)[number];
+
+/** Durable result of a submitted vault deposit (fresh or idempotently replayed). */
+export interface EarnVaultDeposit {
+  positionId: string;
+  movementId: string;
+  status: EarnVaultMovementStatus;
+  signature: string;
+  failureReason: string | null;
+  replayed: boolean;
+  strategy: {
+    id: string;
+    name: string;
+    provider: string;
+    providerReference: string;
+    hostCluster: SolanaCluster;
+  };
+}
+
+/**
+ * One recorded vault deposit, read back by movement id — what a caller polls
+ * to learn whether a signed deposit actually landed.
+ *
+ * Every field comes off the movement row ITSELF, with no catalogue join. That
+ * is deliberate: a strategy can be un-catalogued (paused, dropped by the sync,
+ * or belonging to a provider SDP stopped offering) while the deposit it funded
+ * is still in flight, and ADR 0002's exit-safety rule says reading money the
+ * organization already holds must never depend on the provider still being
+ * offered. `provider`/`providerReference` name the vault; the strategy's
+ * display name is the caller's to remember, and losing it must not cost the
+ * customer the outcome of a signed transaction.
+ *
+ * No `replayed`: that answers "did your idempotency key already spend itself",
+ * which is a property of a WRITE, not of the row.
+ */
+export interface EarnVaultDepositRecord {
+  movementId: string;
+  positionId: string;
+  provider: string;
+  providerReference: string;
+  status: EarnVaultMovementStatus;
+  signature: string;
+  /** Accepted deposit amount, in the vault token's units, as a decimal string. */
+  amount: string;
+  failureReason: string | null;
+  createdAt: string;
+  /** Set only once the sweep observed the transaction on chain. */
+  confirmedAt: string | null;
+}
+
+/** Response body of GET /v1/earn/vault-deposits/:movementId. */
+export interface EarnVaultDepositResponse {
+  deposit: EarnVaultDepositRecord;
+}
+
+/**
+ * Response body of GET /v1/earn/vault-deposits — one workspace's recorded
+ * deposits, newest first.
+ *
+ * A bounded window, not a complete history: it exists so a client can re-derive
+ * which of its deposits are still in flight after losing local state, and the
+ * reconciliation sweep settles a movement within about ninety seconds, so
+ * anything unsettled is by construction recent. Follow `nextCursor` for more.
+ */
+export interface EarnVaultDepositsPage {
+  deposits: EarnVaultDepositRecord[];
+  hasMore: boolean;
+  nextCursor: string | null;
 }
 
 /**
@@ -443,6 +559,48 @@ export interface EarnPortfolioLiquidityBalance {
 }
 
 // API response envelopes (mirrors the asset-profiles response naming).
+
+/**
+ * One provider-managed Earn program, hydrated from the provider on every read.
+ * The program id, label, and creation time are SDP-owned; wallet and yield state
+ * remain provider-authoritative and are never replaced with persisted balances.
+ */
+export interface EarnProgram {
+  /** SDP's own program id — how every `/programs/:programId` route names it. */
+  id: string;
+  /** Open provider id because a persisted program can outlive its registry entry. */
+  provider: string;
+  label: string | null;
+  createdAt: string;
+  wallet: EarnPortfolioWalletSnapshot;
+  /**
+   * Absent when the provider's yield lookup fails. Balances remain available,
+   * while consumers render an unavailable rate rather than fabricating 0%.
+   */
+  yield?: EarnPortfolioYield;
+}
+
+export interface EarnProgramResponse {
+  program: EarnProgram;
+}
+
+export interface ListEarnProgramsResponse {
+  programs: EarnProgram[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export type EarnProgramDepositsResponse = EarnPortfolioDepositsPage;
+
+export interface EarnProgramWithdrawalPreviewResponse {
+  preview: EarnPortfolioWithdrawalPreview;
+}
+
+export interface EarnProgramWithdrawalResponse {
+  withdrawal: EarnPortfolioWithdrawal;
+}
+
 export interface EarnStrategyResponse {
   strategy: EarnStrategy;
 }

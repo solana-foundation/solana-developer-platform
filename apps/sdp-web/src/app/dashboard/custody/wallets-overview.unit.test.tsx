@@ -74,6 +74,7 @@ function renderOverview(query: string): string {
         canManageCustody
         enabledProviders={["privy", "coinbase_cdp"]}
         configsError={null}
+        showConnectionsLink={false}
         wallets={wallets}
         walletsError={null}
         onCreateWallet={() => undefined}

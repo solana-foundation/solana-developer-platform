@@ -1,4 +1,24 @@
-import { type EarnProviderId, earnDepositStyle, SURFACED_EARN_PROVIDERS } from "@sdp/types";
+import {
+  type EarnProviderId,
+  type EarnStrategy,
+  earnDepositStyle,
+  isEarnProviderSurfaced,
+  isVaultDirectDepositEnabled,
+  type ProviderAvailabilityEntry,
+  type SdpEnvironment,
+  SURFACED_EARN_PROVIDERS,
+} from "@sdp/types";
+
+export type EarnProviderAccess = Readonly<
+  Partial<Record<EarnProviderId, ProviderAvailabilityEntry>>
+>;
+
+export type EarnVaultDepositAvailability =
+  | "available"
+  | "strategy_unavailable"
+  | "environment_unavailable"
+  | "access_unavailable"
+  | "provider_unavailable";
 
 /**
  * Which provider this module drives, and whether it is offered.
@@ -11,8 +31,8 @@ import { type EarnProviderId, earnDepositStyle, SURFACED_EARN_PROVIDERS } from "
  * server-side guard silently never fired. Typecheck passes (the types are right)
  * and unit tests pass (they mock the module), so only a browser catches it.
  *
- * Keep server-readable constants here. Anything that needs a hook, SWR, or
- * `window` belongs in `earn-program-data.ts`, which re-exports these two so
+ * Keep server-readable gates here. Anything that needs a hook, SWR, or
+ * `window` belongs in `earn-program-data.ts`, which re-exports these values so
  * existing client imports are unchanged.
  */
 /**
@@ -28,6 +48,50 @@ import { type EarnProviderId, earnDepositStyle, SURFACED_EARN_PROVIDERS } from "
  */
 export const SURFACED_CUSTODIAL_EARN_PROVIDERS: readonly EarnProviderId[] =
   SURFACED_EARN_PROVIDERS.filter((provider) => earnDepositStyle(provider) === "custodial");
+
+/** Offered providers whose deposits are signed from an SDP custody wallet. */
+export const SURFACED_VAULT_DIRECT_EARN_PROVIDERS: readonly EarnProviderId[] =
+  SURFACED_EARN_PROVIDERS.filter((provider) => earnDepositStyle(provider) === "vault_direct");
+
+/**
+ * Static client-visible gates for opening a vault position. Organization
+ * entitlement and provider configuration remain API-authoritative because
+ * they are request-scoped and must not be guessed in the browser.
+ */
+export function earnVaultDepositAvailability(
+  strategy: EarnStrategy,
+  environment: SdpEnvironment,
+  providerAccess: EarnProviderAccess | null
+): EarnVaultDepositAvailability {
+  if (
+    strategy.status !== "active" ||
+    !strategy.fundable ||
+    earnDepositStyle(strategy.provider) !== "vault_direct" ||
+    !isEarnProviderSurfaced(strategy.provider)
+  ) {
+    return "strategy_unavailable";
+  }
+  if (!isVaultDirectDepositEnabled(environment)) {
+    return "environment_unavailable";
+  }
+  if (providerAccess === null) {
+    return "access_unavailable";
+  }
+
+  // `strategy.provider` is an open read-model string. Surfacing above proves it
+  // is a registered provider before this cast; an unknown value already failed
+  // closed as `strategy_unavailable`.
+  const provider = strategy.provider as EarnProviderId;
+  return providerAccess[provider]?.enabled === true ? "available" : "provider_unavailable";
+}
+
+export function isEarnVaultDepositAvailable(
+  strategy: EarnStrategy,
+  environment: SdpEnvironment,
+  providerAccess: EarnProviderAccess | null
+): boolean {
+  return earnVaultDepositAvailability(strategy, environment, providerAccess) === "available";
+}
 
 /**
  * Whether the dashboard offers CREATING a program at all.

@@ -1,14 +1,13 @@
 import { compareDecimalAmounts } from "@sdp/payments/decimal";
-import { isRampEventProvider } from "@sdp/payments/ramps/shared";
 import type { MoneygramRampEvent } from "@sdp/types";
-import { z } from "zod";
 import type { PaymentTransferRow, PaymentTransferStatus } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentsRepository } from "../../context";
 import { mapTransferRow } from "../../mappers";
-import { coinbaseRampEventSchema, moneygramRampEventSchema } from "../../schemas";
+import type { coinbaseRampEventSchema, moneygramRampEventSchema } from "../../schemas";
 
 const TERMINAL_RAMP_STATUSES = [
   "completed",
@@ -112,33 +111,10 @@ async function recordAdvisoryClientEvent(
   return transferResponse(c, current);
 }
 
-export async function recordRampProviderEvent(c: AppContext) {
-  const provider = c.req.param("provider");
-  if (!isRampEventProvider(provider)) {
-    throw badRequest(`Unsupported ramp event provider: ${provider}.`);
-  }
-
-  const body = await c.req.json();
-  switch (provider) {
-    case "moneygram":
-      return recordMoneygramRampEvent(c, body);
-    case "coinbase":
-      return recordCoinbaseRampEvent(c, body);
-    default: {
-      const exhaustive: never = provider;
-      throw internalError(`Unhandled ramp event provider: ${String(exhaustive)}`);
-    }
-  }
-}
-
-async function recordCoinbaseRampEvent(c: AppContext, body: unknown) {
-  const parsed = coinbaseRampEventSchema.safeParse(body);
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-  const event = parsed.data;
+export async function recordCoinbaseRampEvent(
+  c: ValidatedBodyContext<typeof coinbaseRampEventSchema>
+) {
+  const event = c.req.valid("json");
 
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
@@ -183,14 +159,10 @@ const MONEYGRAM_EVENT_DIRECTION = {
   closed: null,
 } as const satisfies Record<MoneygramRampEvent["kind"], "onramp" | "offramp" | null>;
 
-async function recordMoneygramRampEvent(c: AppContext, body: unknown) {
-  const parsed = moneygramRampEventSchema.safeParse(body);
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-  const event = parsed.data;
+export async function recordMoneygramRampEvent(
+  c: ValidatedBodyContext<typeof moneygramRampEventSchema>
+) {
+  const event = c.req.valid("json");
 
   const auth = getAuth(c);
   const projectId = requireProjectId(c);

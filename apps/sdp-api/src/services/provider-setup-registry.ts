@@ -16,6 +16,8 @@ import {
   replaceProviderCredential,
   submitProviderCredential,
 } from "@/services/provider-credential-submission.service";
+import { isCustomerSuppliedTarget } from "@/services/rpc-egress";
+import { probeRpcEndpoint } from "@/services/rpc-probe";
 import type { Env } from "@/types/env";
 
 export const PROVIDER_SETUP_FAMILIES = ["custody", "rpc", "compliance", "ramps"] as const;
@@ -138,31 +140,24 @@ export interface RpcConnectionCheckResult {
   upstreamBody: unknown;
 }
 
-/** Run the same read-only JSON-RPC probe used by POST /rpc/test. */
+/**
+ * Run the same read-only JSON-RPC probe used by POST /rpc/test.
+ *
+ * `/v1/rpc/test` resolves tenant connections and the project's own `custom`
+ * endpoint, and `projects.settings.rpcEndpoint` behind the latter is validated
+ * as a URL when written and nothing more, so the probe reaches a
+ * customer-supplied host in both cases and both go under the guard. Managed
+ * providers keep the ordinary fetch: their endpoints come from deployment
+ * config and are private on purpose in local development and in the Surfpool
+ * suites. The probe does not follow redirects, which it already refused before
+ * the guard existed.
+ */
 export async function checkResolvedRpcTargetConnection(
   input: RpcConnectionCheckInput
 ): Promise<RpcConnectionCheckResult> {
-  const startedAt = Date.now();
-  const upstream = await fetch(input.target.endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...input.target.headers,
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: "rpc-connectivity-test",
-      method: "getVersion",
-      params: [],
-    }),
+  return probeRpcEndpoint(input.target, {
+    enforcePublicEgress: isCustomerSuppliedTarget(input.target),
   });
-
-  const rawBody = await upstream.text();
-  return {
-    elapsedMs: Date.now() - startedAt,
-    upstream,
-    upstreamBody: rawBody ? tryParseJson(rawBody) : null,
-  };
 }
 
 export interface ProviderConfigurationCheckInput {
@@ -287,12 +282,4 @@ export function getProviderSetupDefinition<
   const Provider extends keyof ProviderSetupRegistry[Family],
 >(family: Family, provider: Provider): ProviderSetupRegistry[Family][Provider] {
   return PROVIDER_SETUP_REGISTRY[family][provider];
-}
-
-function tryParseJson(value: string): unknown {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return value;
-  }
 }

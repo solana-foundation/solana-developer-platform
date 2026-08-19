@@ -57,11 +57,7 @@ export type {
   UpdateEarnStrategyMetricsInput,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
-export {
-  EARN_SEED_REFERENCE_PREFIX,
-  generateEarnProgramWithdrawalId,
-  generateEarnStrategyId,
-} from "./earn.repository";
+export { generateEarnProgramWithdrawalId, generateEarnStrategyId } from "./earn.repository";
 export { createPostgresEarnRepository } from "./earn.repository.postgres";
 export type {
   KycWalletRow,

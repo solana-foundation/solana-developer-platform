@@ -2,11 +2,11 @@ import * as solanaRpc from "@sdp/rpc/solana";
 import type { TransactionMessageBytesBase64 } from "@solana/kit";
 import { compileTransaction, createNoopSigner } from "@solana/kit";
 import { getTokenSize } from "@solana-program/token-2022";
-import { z } from "zod";
-import { badRequest, estimateNotAvailable } from "@/lib/errors";
+import { estimateNotAvailable } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { type AppContext, getFeePayment } from "../../context";
-import { estimateTransferBatchSchema } from "../../schemas";
+import type { ValidatedBodyContext } from "@/middleware/validate";
+import { getFeePayment } from "../../context";
+import type { estimateTransferBatchSchema } from "../../schemas";
 import { resolveBatchRequest } from "./resolve";
 import {
   buildInstructionGroups,
@@ -80,17 +80,11 @@ async function estimateMissingAtaRentLamports(
  * @param c - Request context.
  * @returns JSON estimate response.
  */
-export async function estimateTransferBatch(c: AppContext) {
-  const body = await c.req.json();
-  const parsed = estimateTransferBatchSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-
-  const resolved = await resolveBatchRequest(c, parsed.data, ["payments:read"]);
+export async function estimateTransferBatch(
+  c: ValidatedBodyContext<typeof estimateTransferBatchSchema>
+) {
+  const body = c.req.valid("json");
+  const resolved = await resolveBatchRequest(c, body, ["payments:read"]);
   const feePayment = getFeePayment(c);
   const sourceSigner = createNoopSigner(resolved.sourceAddress);
   const [feePayer, lifetime] = await Promise.all([
@@ -109,7 +103,7 @@ export async function estimateTransferBatch(c: AppContext) {
     feePayer,
     lifetime,
     maxRecipientsPerTransaction:
-      parsed.data.options?.maxRecipientsPerTransaction ?? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
+      body.options?.maxRecipientsPerTransaction ?? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
   });
   const [networkFeeLamports, tokenAccountRentLamports] = await Promise.all([
     estimateNetworkFeeLamports(resolved.rpc, chunks),

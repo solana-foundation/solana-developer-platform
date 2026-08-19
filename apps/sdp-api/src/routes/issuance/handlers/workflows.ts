@@ -24,6 +24,7 @@ import {
 } from "@/db/repositories";
 import { badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import type { StoredCredentialSecret } from "@/services/credential-secret-store";
 import {
   destroyActionSecret,
@@ -73,7 +74,7 @@ const retryPolicySchema = z.object({
 // Membership in the catalog is checked by the enum itself, not a lookup on an object
 // literal — `{"actionType":"constructor"}` passes a bare index check and reaches code
 // that assumes a real catalog entry.
-const createWorkflowSchema = z.object({
+export const createWorkflowSchema = z.object({
   triggerType: z.enum(WORKFLOW_TRIGGER_TYPES),
   actionType: z.enum(WORKFLOW_ACTION_TYPES),
   condition: conditionSchema.nullish(),
@@ -83,7 +84,7 @@ const createWorkflowSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
-const updateWorkflowSchema = z.object({
+export const updateWorkflowSchema = z.object({
   condition: conditionSchema.nullish(),
   actionParams: actionParamsShape.optional(),
   reviewMode: z.enum(["auto", "manual"]).optional(),
@@ -190,27 +191,21 @@ async function assertWebhookEndpointUsable(
   }
 }
 
-export const createWorkflow = async (c: AppContext) => {
+export const createWorkflow = async (c: ValidatedBodyContext<typeof createWorkflowSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
 
-  const parsed = createWorkflowSchema.safeParse(await c.req.json());
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.flattenError(parsed.error).fieldErrors });
-  }
+  const body = c.req.valid("json");
 
   // Tier gate: authoring a `seize` rule is authoring a seize (C1). Runs before any
   // lookup so an unauthorized caller learns nothing about the token.
-  assertWorkflowActionPermitted(c, parsed.data.actionType);
-  assertReviewModeCompatible(parsed.data.actionType, parsed.data.reviewMode);
+  assertWorkflowActionPermitted(c, body.actionType);
+  assertReviewModeCompatible(body.actionType, body.reviewMode);
 
-  const actionParams = parsed.data.actionParams ?? {};
-  assertActionParamsValid(parsed.data.actionType, actionParams);
+  const actionParams = body.actionParams ?? {};
+  assertActionParamsValid(body.actionType, actionParams);
   await assertWebhookEndpointUsable(c.env, actionParams, orgId, projectId);
-  assertGuardFieldsKnown(
-    parsed.data.triggerType,
-    (parsed.data.condition ?? null) as WorkflowCondition | null
-  );
+  assertGuardFieldsKnown(body.triggerType, (body.condition ?? null) as WorkflowCondition | null);
 
   const gate = await resolveAssetGateContext(c.env, {
     tokenId,
@@ -223,7 +218,7 @@ export const createWorkflow = async (c: AppContext) => {
 
   // Save-time capability gate (Ticket 5): reject a rule the asset can't perform.
   const support = validateActionSupported({
-    action: parsed.data.actionType as WorkflowActionType,
+    action: body.actionType as WorkflowActionType,
     category: gate.category,
     type: gate.type,
     selectedSettings: gate.selectedSettings,
@@ -253,9 +248,9 @@ export const createWorkflow = async (c: AppContext) => {
 
   const repo = createAssetWorkflowsRepository(c.env);
   const definition: AssetWorkflowDefinition = {
-    condition: (parsed.data.condition ?? null) as WorkflowCondition | null,
-    action: { type: parsed.data.actionType, params: storableParams },
-    retryPolicy: parsed.data.retryPolicy ?? { maxAttempts: 5, retryAfterMinutes: 5 },
+    condition: (body.condition ?? null) as WorkflowCondition | null,
+    action: { type: body.actionType, params: storableParams },
+    retryPolicy: body.retryPolicy ?? { maxAttempts: 5, retryAfterMinutes: 5 },
     actionSecret,
   };
 
@@ -269,15 +264,15 @@ export const createWorkflow = async (c: AppContext) => {
       organizationId: orgId,
       projectId,
       tokenId,
-      triggerType: parsed.data.triggerType,
-      actionType: parsed.data.actionType,
+      triggerType: body.triggerType,
+      actionType: body.actionType,
       definition,
       version: WORKFLOW_RULE_VERSION,
       // A tier that the engine will hold for review anyway, or that disrupts every holder
       // when it misfires, defaults to manual — the permissive default belongs only to the
       // tier whose actions are reversible side effects.
-      reviewMode: parsed.data.reviewMode ?? defaultReviewMode(parsed.data.actionType),
-      enabled: parsed.data.enabled,
+      reviewMode: body.reviewMode ?? defaultReviewMode(body.actionType),
+      enabled: body.enabled,
       createdBy: auth.id,
       // Committing the row makes the credential referenced, which discharges the
       // obligation queued just above — in this transaction, so a rollback keeps it.
@@ -342,14 +337,11 @@ export const listWorkflows = async (c: AppContext) => {
   return success(c, { workflows: workflows.map(toWorkflowResponse) });
 };
 
-export const updateWorkflow = async (c: AppContext) => {
+export const updateWorkflow = async (c: ValidatedBodyContext<typeof updateWorkflowSchema>) => {
   const { tokenId, workflowId } = c.req.param();
   const { projectId, orgId } = requireProjectScope(c);
 
-  const parsed = updateWorkflowSchema.safeParse(await c.req.json());
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.flattenError(parsed.error).fieldErrors });
-  }
+  const body = c.req.valid("json");
 
   const repo = createAssetWorkflowsRepository(c.env);
   const existing = await repo.getWorkflowById({ workflowId, organizationId: orgId, projectId });
@@ -360,25 +352,25 @@ export const updateWorkflow = async (c: AppContext) => {
   // Tier comes from the stored action, never the request: the body can't change
   // `action_type`, so trusting it here would let a member edit a seize rule.
   assertWorkflowActionPermitted(c, existing.action_type);
-  assertReviewModeCompatible(existing.action_type, parsed.data.reviewMode);
+  assertReviewModeCompatible(existing.action_type, body.reviewMode);
 
   // Only rebuild the definition when definition fields were supplied.
   const definitionSupplied =
-    parsed.data.condition !== undefined ||
-    parsed.data.actionParams !== undefined ||
-    parsed.data.retryPolicy !== undefined;
+    body.condition !== undefined ||
+    body.actionParams !== undefined ||
+    body.retryPolicy !== undefined;
 
   let params = existing.definition.action.params;
   let secret: string | null = null;
-  if (parsed.data.actionParams !== undefined) {
-    assertActionParamsValid(existing.action_type, parsed.data.actionParams);
-    await assertWebhookEndpointUsable(c.env, parsed.data.actionParams, orgId, projectId);
-    ({ params, secret } = splitOutSecret(parsed.data.actionParams));
+  if (body.actionParams !== undefined) {
+    assertActionParamsValid(existing.action_type, body.actionParams);
+    await assertWebhookEndpointUsable(c.env, body.actionParams, orgId, projectId);
+    ({ params, secret } = splitOutSecret(body.actionParams));
   }
-  if (parsed.data.condition !== undefined) {
+  if (body.condition !== undefined) {
     assertGuardFieldsKnown(
       existing.trigger_type,
-      (parsed.data.condition ?? null) as WorkflowCondition | null
+      (body.condition ?? null) as WorkflowCondition | null
     );
   }
 
@@ -401,11 +393,11 @@ export const updateWorkflow = async (c: AppContext) => {
   const definition: AssetWorkflowDefinition | undefined = definitionSupplied
     ? {
         condition:
-          parsed.data.condition !== undefined
-            ? ((parsed.data.condition ?? null) as WorkflowCondition | null)
+          body.condition !== undefined
+            ? ((body.condition ?? null) as WorkflowCondition | null)
             : existing.definition.condition,
         action: { type: existing.action_type, params },
-        retryPolicy: parsed.data.retryPolicy ?? existing.definition.retryPolicy,
+        retryPolicy: body.retryPolicy ?? existing.definition.retryPolicy,
         // A rule migrated onto a registry endpoint drops its inline-secret reference —
         // the endpoint's own key signs now, and keeping the stale handle would leave
         // `hasSecret` reporting a key that no longer signs anything.
@@ -422,8 +414,8 @@ export const updateWorkflow = async (c: AppContext) => {
       organizationId: orgId,
       projectId,
       definition,
-      reviewMode: parsed.data.reviewMode,
-      enabled: parsed.data.enabled,
+      reviewMode: body.reviewMode,
+      enabled: body.enabled,
       // Only the version this request wrote. What it supersedes is resolved from the row
       // under lock inside the transaction — `previousSecret` above came from a read that
       // predates it, so a concurrent rotation would make it name a version already gone.
@@ -463,7 +455,7 @@ export const updateWorkflow = async (c: AppContext) => {
   // Keyed on the request, not the enabled transition — a withdrawal that fails after
   // the row committed must be reachable by retrying the same PATCH, and on the retry
   // the rule is already disabled. A repeat on a long-disabled rule matches no rows.
-  if (parsed.data.enabled === false) {
+  if (body.enabled === false) {
     await createWorkflowExecutionsRepository(c.env).cancelOpenExecutionsForWorkflow({
       workflowId,
       organizationId: orgId,

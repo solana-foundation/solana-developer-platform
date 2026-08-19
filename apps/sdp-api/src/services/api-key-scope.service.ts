@@ -8,8 +8,11 @@ import {
   type Permission,
 } from "@sdp/types";
 import type { ApiKeyContext } from "@/lib/auth";
-import { AppError, badRequest } from "@/lib/errors";
-import { normalizeApiKeyWalletPermissions } from "@/services/api-key-wallets.service";
+import { AppError, badRequest, conflict } from "@/lib/errors";
+import {
+  type ExactApiKeyWalletBinding,
+  normalizeApiKeyWalletPermissions,
+} from "@/services/api-key-wallets.service";
 
 type WalletBindingInput = {
   walletId: string;
@@ -31,6 +34,7 @@ export type ParsedWalletBindingPatch = {
 type WalletScopeInput = WalletBindingPatchInput & {
   walletScope?: ApiKeyWalletScope;
   provisionWallet?: boolean;
+  connectionId?: string;
 };
 
 function trimWalletId(walletId: string): string {
@@ -41,22 +45,25 @@ function trimWalletId(walletId: string): string {
   return normalized;
 }
 
-function normalizeBindings(auth: ApiKeyContext): ApiKeyWalletBinding[] {
-  if (auth.walletBindings.length > 0) {
-    return auth.walletBindings.map((binding) => ({
-      walletId: binding.walletId,
-      permissions: binding.permissions.length > 0 ? binding.permissions : ["*"],
-    }));
-  }
-
-  if (auth.signingWalletId) {
-    return [{ walletId: auth.signingWalletId, permissions: ["*"] }];
-  }
-
-  return [];
+function normalizeBindings(auth: ApiKeyContext) {
+  return auth.walletBindings.map((binding) => ({
+    walletId: binding.walletId,
+    custodyWalletId: binding.custodyWalletId,
+    permissions: binding.permissions.length > 0 ? binding.permissions : (["*"] as Permission[]),
+  }));
 }
 
-function getBindingForWallet(auth: ApiKeyContext, walletId: string): ApiKeyWalletBinding | null {
+function hasSelectedWalletScope(auth: ApiKeyContext): boolean {
+  if (auth.authType !== "api_key") {
+    return false;
+  }
+  if (auth.walletScope) {
+    return auth.walletScope === "selected";
+  }
+  return auth.walletBindings.length > 0 || auth.signingWalletId !== null;
+}
+
+function getBindingForWallet(auth: ApiKeyContext, walletId: string) {
   const bindings = normalizeBindings(auth);
   if (bindings.length === 0) {
     return null;
@@ -78,14 +85,6 @@ function hasBindingPermission(
   }
 
   return requiredPermissions.every((permission) => binding.permissions.includes(permission));
-}
-
-function isProjectWalletAllowedForScope(
-  keyProjectId: string,
-  walletProjectId: string | null
-): boolean {
-  // Project keys can use org wallets (null) and same-project wallets.
-  return walletProjectId === null || walletProjectId === keyProjectId;
 }
 
 export function parseWalletBindingPatch(input: WalletBindingPatchInput): ParsedWalletBindingPatch {
@@ -180,6 +179,9 @@ export function resolveCreateWalletScope(input: WalletScopeInput): {
   const walletScope = input.walletScope;
   if (!walletScope) {
     throw badRequest("walletScope is required");
+  }
+  if (input.connectionId && !input.provisionWallet) {
+    throw badRequest("connectionId requires provisionWallet");
   }
 
   const walletBindingPatch = parseWalletBindingPatch(input);
@@ -285,14 +287,14 @@ export function resolveUpdateWalletScope(input: WalletScopeInput): {
   };
 }
 
-export async function assertWalletBindingsInScope(
+export async function resolveWalletBindingsInScope(
   db: DatabaseClient,
   organizationId: string,
   keyProjectId: string,
   bindings: ApiKeyWalletBinding[]
-): Promise<void> {
+): Promise<ExactApiKeyWalletBinding[]> {
   if (bindings.length === 0) {
-    return;
+    return [];
   }
 
   const walletIds = bindings.map((binding) => binding.walletId);
@@ -300,38 +302,53 @@ export async function assertWalletBindingsInScope(
 
   const rows = await db
     .prepare(
-      `SELECT w.wallet_id, c.project_id
+      `SELECT w.id AS custody_wallet_id, w.wallet_id
        FROM custody_wallets w
        JOIN custody_configs c ON c.id = w.custody_config_id
        WHERE c.organization_id = ?
          AND c.status = 'active'
          AND w.status = 'active'
+         AND (c.project_id IS NULL OR c.project_id = ?)
+         AND w.wallet_id IN (${placeholders})
+
+       UNION ALL
+
+       SELECT w.id AS custody_wallet_id, w.wallet_id
+       FROM custody_wallets w
+       JOIN custody_connections c ON c.id = w.custody_connection_id
+       WHERE c.organization_id = ?
+         AND c.project_id = ?
+         AND c.status = 'active'
+         AND w.status = 'active'
          AND w.wallet_id IN (${placeholders})`
     )
-    .bind(organizationId, ...walletIds)
-    .all<{ wallet_id: string; project_id: string | null }>();
+    .bind(organizationId, keyProjectId, ...walletIds, organizationId, keyProjectId, ...walletIds)
+    .all<{ custody_wallet_id: string; wallet_id: string }>();
 
-  const walletScope = new Map<string, string | null>();
+  const matchesByWalletId = new Map<string, string[]>();
   for (const row of rows.results ?? []) {
-    if (!walletScope.has(row.wallet_id)) {
-      walletScope.set(row.wallet_id, row.project_id);
-    }
+    const matches = matchesByWalletId.get(row.wallet_id) ?? [];
+    matches.push(row.custody_wallet_id);
+    matchesByWalletId.set(row.wallet_id, matches);
   }
 
-  const missingWalletIds = walletIds.filter((walletId) => !walletScope.has(walletId));
+  const missingWalletIds = walletIds.filter(
+    (walletId) => (matchesByWalletId.get(walletId)?.length ?? 0) === 0
+  );
   if (missingWalletIds.length > 0) {
     throw badRequest(`Unknown signing wallet IDs: ${missingWalletIds.join(", ")}`);
   }
 
-  for (const walletId of walletIds) {
-    const walletProjectId = walletScope.get(walletId) ?? null;
-    if (!isProjectWalletAllowedForScope(keyProjectId, walletProjectId)) {
-      throw new AppError(
-        "BAD_REQUEST",
-        "Project API keys cannot bind to wallets from other projects"
-      );
+  for (const [walletId, matches] of matchesByWalletId) {
+    if (matches.length > 1) {
+      throw conflict(`Custody wallet ownership is ambiguous for walletId: ${walletId}`);
     }
   }
+
+  return bindings.map((binding) => ({
+    ...binding,
+    custodyWalletId: matchesByWalletId.get(binding.walletId)?.[0] as string,
+  }));
 }
 
 export function assertGrantableApiKeyPermissions(
@@ -364,7 +381,7 @@ export function assertApiKeyNotWalletScoped(auth: ApiKeyContext, action: string)
     return;
   }
 
-  if (normalizeBindings(auth).length === 0) {
+  if (!hasSelectedWalletScope(auth)) {
     return;
   }
 
@@ -380,8 +397,7 @@ export function assertApiKeyWalletAccess(
     return;
   }
 
-  const bindings = normalizeBindings(auth);
-  if (bindings.length === 0) {
+  if (!hasSelectedWalletScope(auth)) {
     return;
   }
 
@@ -408,12 +424,19 @@ export function resolveApiKeySigningWalletId(
     return requestedWalletId;
   }
 
-  if (auth.signingWalletId) {
-    assertApiKeyWalletAccess(auth, auth.signingWalletId, requiredPermissions);
-    return auth.signingWalletId;
+  const bindings = normalizeBindings(auth);
+  const preferredBinding = auth.signingWalletId
+    ? bindings.find((binding) => binding.walletId === auth.signingWalletId)
+    : null;
+  if (preferredBinding) {
+    assertApiKeyWalletAccess(auth, preferredBinding.walletId, requiredPermissions);
+    return preferredBinding.walletId;
   }
 
-  const bindings = normalizeBindings(auth);
+  if (auth.signingWalletId) {
+    throw new AppError("FORBIDDEN", "API key has no usable wallet bindings");
+  }
+
   if (bindings.length === 1) {
     assertApiKeyWalletAccess(auth, bindings[0].walletId, requiredPermissions);
     return bindings[0].walletId;
@@ -426,6 +449,10 @@ export function resolveApiKeySigningWalletId(
     );
   }
 
+  if (hasSelectedWalletScope(auth)) {
+    throw new AppError("FORBIDDEN", "API key has no usable wallet bindings");
+  }
+
   return null;
 }
 
@@ -434,12 +461,11 @@ export function getAllowedApiKeyWalletIds(auth: ApiKeyContext): string[] | null 
     return null;
   }
 
-  const bindings = normalizeBindings(auth);
-  if (bindings.length === 0) {
+  if (!hasSelectedWalletScope(auth)) {
     return null;
   }
 
-  return bindings.map((binding) => binding.walletId);
+  return normalizeBindings(auth).map((binding) => binding.walletId);
 }
 
 export function getAllowedApiKeyWalletIdsForPermissions(
@@ -450,12 +476,11 @@ export function getAllowedApiKeyWalletIdsForPermissions(
     return null;
   }
 
-  const bindings = normalizeBindings(auth);
-  if (bindings.length === 0) {
+  if (!hasSelectedWalletScope(auth)) {
     return null;
   }
 
-  return bindings
+  return normalizeBindings(auth)
     .filter((binding) => hasBindingPermission(binding, requiredPermissions))
     .map((binding) => binding.walletId);
 }
@@ -469,8 +494,7 @@ export function filterApiKeyWallets<T extends { walletId: string }>(
     return wallets;
   }
 
-  const bindings = normalizeBindings(auth);
-  if (bindings.length === 0) {
+  if (!hasSelectedWalletScope(auth)) {
     return wallets;
   }
 
@@ -481,4 +505,62 @@ export function filterApiKeyWallets<T extends { walletId: string }>(
     }
     return hasBindingPermission(binding, requiredPermissions);
   });
+}
+
+export function getAllowedApiKeyCustodyWalletIdsForPermissions(
+  auth: ApiKeyContext,
+  requiredPermissions: Permission[] = []
+): string[] | null {
+  if (auth.authType !== "api_key" || !hasSelectedWalletScope(auth)) {
+    return null;
+  }
+
+  return normalizeBindings(auth)
+    .filter(
+      (binding) =>
+        typeof binding.custodyWalletId === "string" &&
+        binding.custodyWalletId.length > 0 &&
+        hasBindingPermission(binding, requiredPermissions)
+    )
+    .map((binding) => binding.custodyWalletId as string);
+}
+
+export function resolveApiKeyCustodyWalletId(
+  auth: ApiKeyContext,
+  requestedWalletId: string | null | undefined,
+  requiredPermissions: Permission[] = [],
+  allowRecordIdAlias = false
+): string | null {
+  if (auth.authType !== "api_key" || !hasSelectedWalletScope(auth)) {
+    return null;
+  }
+
+  const bindings = normalizeBindings(auth).filter(
+    (binding) => typeof binding.custodyWalletId === "string" && binding.custodyWalletId.length > 0
+  );
+  const binding = requestedWalletId
+    ? bindings.find(
+        (entry) =>
+          entry.walletId === requestedWalletId ||
+          (allowRecordIdAlias && entry.custodyWalletId === requestedWalletId)
+      )
+    : auth.signingWalletId
+      ? bindings.find((entry) => entry.walletId === auth.signingWalletId)
+      : bindings.length === 1
+        ? bindings[0]
+        : null;
+
+  if (!binding) {
+    if (!requestedWalletId && bindings.length > 1) {
+      throw badRequest("Multiple signing wallets are bound to this API key. Specify a walletId.");
+    }
+    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+  }
+  if (!hasBindingPermission(binding, requiredPermissions)) {
+    throw new AppError(
+      "FORBIDDEN",
+      `API key does not include required wallet permissions: ${requiredPermissions.join(", ")}`
+    );
+  }
+  return binding.custodyWalletId as string;
 }

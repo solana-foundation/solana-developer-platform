@@ -44,6 +44,27 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
 };
 
 const TEST_CONFIG_ID = "cust_cfg_api_key_wallet_scope";
+const BINDING_FAILURE_CONSTRAINT = "sdp_test_fail_api_key_wallet_permission_insert";
+
+async function removeBindingFailureConstraint(): Promise<void> {
+  await getDb(env)
+    .prepare(
+      `ALTER TABLE api_key_wallet_permissions
+       DROP CONSTRAINT IF EXISTS ${BINDING_FAILURE_CONSTRAINT}`
+    )
+    .run();
+}
+
+async function installBindingFailureConstraint(): Promise<void> {
+  await removeBindingFailureConstraint();
+  await getDb(env)
+    .prepare(
+      `ALTER TABLE api_key_wallet_permissions
+       ADD CONSTRAINT ${BINDING_FAILURE_CONSTRAINT}
+       CHECK (wallet_id <> 'wal_scope_b') NOT VALID`
+    )
+    .run();
+}
 
 async function seedAuthAndWallets(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -257,6 +278,7 @@ describe("API key wallet scope routes", () => {
   });
 
   afterEach(async () => {
+    await removeBindingFailureConstraint();
     await clearKVStores(env);
   });
 
@@ -341,17 +363,105 @@ describe("API key wallet scope routes", () => {
 
     const bindings = await getDb(env)
       .prepare(
-        "SELECT wallet_id FROM api_key_wallet_permissions WHERE api_key_id = ? ORDER BY wallet_id"
+        `SELECT wallet_id
+         FROM api_key_wallet_permissions
+         WHERE api_key_id = ?
+         ORDER BY wallet_id`
       )
       .bind(body.data.apiKey.id)
       .all<{ wallet_id: string }>();
-    expect(bindings.results?.map((row) => row.wallet_id)).toEqual(["wal_scope_a", "wal_scope_b"]);
+    expect(bindings.results).toEqual([{ wallet_id: "wal_scope_a" }, { wallet_id: "wal_scope_b" }]);
 
     const policyBindings = await getDb(env)
       .prepare("SELECT COUNT(*) AS count FROM api_key_wallet_policy_bindings WHERE api_key_id = ?")
       .bind(body.data.apiKey.id)
       .first<{ count: number }>();
     expect(Number(policyBindings?.count)).toBe(0);
+  });
+
+  it("rolls back API key creation when wallet binding persistence fails", async () => {
+    await installBindingFailureConstraint();
+
+    const response = await app.request(
+      "/v1/api-keys",
+      {
+        method: "POST",
+        headers: authenticatedJsonHeaders(),
+        body: JSON.stringify({
+          name: "Atomic create rollback",
+          walletScope: "selected",
+          signingWalletId: "wal_scope_b",
+          signingWalletIds: ["wal_scope_b"],
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(500);
+    const created = await getDb(env)
+      .prepare(
+        `SELECT id
+         FROM api_keys
+         WHERE organization_id = ? AND project_id = ? AND name = ?`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id, "Atomic create rollback")
+      .first<{ id: string }>();
+    expect(created).toBeNull();
+  });
+
+  it("rejects a newly authored wallet binding when its provider wallet ID is ambiguous", async () => {
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted, status)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          "cust_cfg_api_key_wallet_scope_duplicate",
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          "privy",
+          "test-config",
+          "active"
+        ),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, label, purpose, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          "cwlt_scope_a_duplicate",
+          "cust_cfg_api_key_wallet_scope_duplicate",
+          "wal_scope_a",
+          "pub_scope_a_duplicate",
+          "Duplicate Wallet Scope A",
+          "transfer",
+          "active"
+        ),
+    ]);
+
+    const response = await app.request(
+      "/v1/api-keys",
+      {
+        method: "POST",
+        headers: authenticatedJsonHeaders(),
+        body: JSON.stringify({
+          name: "Ambiguous wallet key",
+          walletScope: "selected",
+          signingWalletId: "wal_scope_a",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(409);
+    const keyCount = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM api_keys WHERE name = ?")
+      .bind("Ambiguous wallet key")
+      .first<{ count: number }>();
+    expect(Number(keyCount?.count)).toBe(0);
   });
 
   it("lists wallet access and policy binding metadata for selected-wallet keys", async () => {
@@ -572,6 +682,51 @@ describe("API key wallet scope routes", () => {
       .bind(TEST_API_KEY.id)
       .first<{ count: number }>();
     expect(bindings?.count).toBe(0);
+  });
+
+  it("preserves API key fields and wallet bindings when binding update fails", async () => {
+    const apiKeyId = await createManagedApiKey({
+      name: "Atomic update original",
+      walletScope: "selected",
+      walletIds: ["wal_scope_a"],
+    });
+    await installBindingFailureConstraint();
+
+    const response = await app.request(
+      `/v1/api-keys/${apiKeyId}`,
+      {
+        method: "PATCH",
+        headers: authenticatedJsonHeaders(),
+        body: JSON.stringify({
+          name: "Atomic update changed",
+          walletScope: "selected",
+          signingWalletId: "wal_scope_b",
+          signingWalletIds: ["wal_scope_b"],
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(500);
+    const key = await getDb(env)
+      .prepare("SELECT name, signing_wallet_id FROM api_keys WHERE id = ?")
+      .bind(apiKeyId)
+      .first<{ name: string; signing_wallet_id: string | null }>();
+    expect(key).toEqual({
+      name: "Atomic update original",
+      signing_wallet_id: "wal_scope_a",
+    });
+
+    const bindings = await getDb(env)
+      .prepare(
+        `SELECT wallet_id
+         FROM api_key_wallet_permissions
+         WHERE api_key_id = ?
+         ORDER BY wallet_id`
+      )
+      .bind(apiKeyId)
+      .all<{ wallet_id: string }>();
+    expect(bindings.results).toEqual([{ wallet_id: "wal_scope_a" }]);
   });
 
   it("hides API keys outside the authenticated project and organization", async () => {
@@ -955,6 +1110,6 @@ describe("API key wallet scope routes", () => {
       env
     );
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(409);
   });
 });
