@@ -72,9 +72,15 @@ async function seedScope(): Promise<void> {
 async function seedPendingConnection(
   connectionId: string,
   credentialId: string,
-  options: { credentialStatus?: string; projectId?: string } = {}
+  options: {
+    credentialStatus?: string;
+    connectionStatus?: string;
+    isDefault?: boolean;
+    projectId?: string;
+  } = {}
 ): Promise<void> {
   const db = getDb(env);
+  const connectionStatus = options.connectionStatus ?? "pending";
   await db
     .prepare(
       `INSERT INTO provider_credentials (
@@ -99,9 +105,9 @@ async function seedPendingConnection(
       `INSERT INTO rpc_connections (
          id, organization_id, project_id, provider, scope,
          provider_credential_id, provider_credential_scope_key,
-         network, status, created_by
+         network, status, is_default, activated_at, deactivated_at, created_by
        ) VALUES (?, ?, ?, 'helius', ?, ?, '__organization__',
-                 'devnet', 'pending', ?)`
+                 'devnet', ?, ?, ?, ?, ?)`
     )
     .bind(
       connectionId,
@@ -109,6 +115,12 @@ async function seedPendingConnection(
       options.projectId ?? null,
       options.projectId ? "project" : "organization",
       credentialId,
+      connectionStatus,
+      options.isDefault ?? false,
+      connectionStatus === "pending" || connectionStatus === "checking"
+        ? null
+        : "2026-08-16T12:00:00.000Z",
+      connectionStatus === "deactivated" ? "2026-08-16T12:30:00.000Z" : null,
       USER_ID
     )
     .run();
@@ -245,5 +257,91 @@ describe("RpcConnectionStore.activateConnectionCredential", () => {
 
     expect(promoted).toBe(0);
     expect(await credentialStatus("pcred_activation_project")).toBe("pending");
+  });
+});
+
+/**
+ * The fail-closed boundary.
+ *
+ * An organization that put its own key on a live connection must never have
+ * its traffic moved back onto SDP's credentials without saying so. But a row
+ * that has never carried traffic is not that promise, and treating it as one
+ * turned an abandoned create form into an org-wide outage — including the
+ * surfaces an administrator would use to fix it.
+ */
+describe("RpcConnectionStore.findScopeConnectionState", () => {
+  beforeEach(async () => {
+    await seedTestDatabase(env);
+    await seedScope();
+  });
+
+  const scope = {
+    organizationId: ORGANIZATION_ID,
+    scopeKey: "__organization__",
+    network: "devnet" as const,
+  };
+
+  it("reports an activated default as live", async () => {
+    await seedPendingConnection("rconn_state_live", "pcred_state_live", {
+      connectionStatus: "active",
+      credentialStatus: "active",
+      isDefault: true,
+    });
+
+    const state = await new RpcConnectionStore(getDb(env)).findScopeConnectionState(scope);
+    expect(state).toEqual({ kind: "active", connectionId: "rconn_state_live" });
+  });
+
+  it("treats a submitted-but-never-activated connection as nothing configured", async () => {
+    await seedPendingConnection("rconn_state_pending", "pcred_state_pending");
+
+    // The draft the reviewer called out: this used to answer "unusable", and
+    // the relay turned that into a 502 on every RPC call in the organization.
+    const state = await new RpcConnectionStore(getDb(env)).findScopeConnectionState(scope);
+    expect(state).toEqual({ kind: "none" });
+  });
+
+  it("treats an in-flight check as nothing configured", async () => {
+    await seedPendingConnection("rconn_state_checking", "pcred_state_checking", {
+      connectionStatus: "checking",
+    });
+
+    const state = await new RpcConnectionStore(getDb(env)).findScopeConnectionState(scope);
+    expect(state).toEqual({ kind: "none" });
+  });
+
+  it("fails closed on a connection that was live and then failed its check", async () => {
+    await seedPendingConnection("rconn_state_failed", "pcred_state_failed", {
+      connectionStatus: "failed",
+      credentialStatus: "active",
+    });
+
+    const state = await new RpcConnectionStore(getDb(env)).findScopeConnectionState(scope);
+    expect(state).toEqual({ kind: "unusable" });
+  });
+
+  it("falls back once the connection is deactivated", async () => {
+    await seedPendingConnection("rconn_state_off", "pcred_state_off", {
+      connectionStatus: "deactivated",
+      credentialStatus: "active",
+    });
+
+    const state = await new RpcConnectionStore(getDb(env)).findScopeConnectionState(scope);
+    expect(state).toEqual({ kind: "none" });
+  });
+
+  it("does not call a scope live that the effective lookup would not resolve", async () => {
+    await seedPendingConnection("rconn_state_split", "pcred_state_split", {
+      connectionStatus: "active",
+      credentialStatus: "pending",
+      isDefault: true,
+    });
+
+    // Without the credential predicate this answered "active" while
+    // findEffectiveConnection returned null, and the relay silently spent SDP's
+    // keys on an organization that had asked for its own.
+    const store = new RpcConnectionStore(getDb(env));
+    expect(await store.findScopeConnectionState(scope)).toEqual({ kind: "unusable" });
+    expect(await store.findEffectiveConnection(scope)).toBeNull();
   });
 });

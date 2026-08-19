@@ -74,3 +74,16 @@ export interface RpcConnectionListResponse {
     total: number;
   };
 }
+
+/**
+ * Providers whose RPC host is the same for every account, so a tenant never
+ * has to type an endpoint. Everything else issues an account-specific host
+ * (QuickNode, Triton) or is not confirmed for both clusters, and must supply
+ * one. `@sdp/rpc/byok` holds the actual URLs; the dashboard only needs to know
+ * whether to ask.
+ */
+export const RPC_PROVIDERS_WITH_DEFAULT_ENDPOINT = ["helius", "alchemy"] as const;
+
+export function rpcProviderNeedsEndpoint(provider: string): boolean {
+  return !(RPC_PROVIDERS_WITH_DEFAULT_ENDPOINT as readonly string[]).includes(provider);
+}

@@ -35,7 +35,7 @@ const createConnectionSchema = z
     network: z.enum(RPC_CONNECTION_NETWORKS as unknown as [string, ...string[]]),
     scope: z.enum(["organization", "project"]).default("organization"),
     credentialLabel: z.string().trim().min(1).max(100),
-    endpointUrl: z.string().trim().url().max(2048),
+    endpointUrl: z.string().trim().url().max(2048).optional(),
     apiKey: z.string().min(1).max(4096),
   })
   .strict();
