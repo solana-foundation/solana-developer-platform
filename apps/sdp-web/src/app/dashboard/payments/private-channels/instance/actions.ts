@@ -64,15 +64,6 @@ const connectionProbeDetailsSchema = z.object({
   auth: authProbeResultSchema,
 });
 
-const PRIVATE_CHANNEL_INSTANCE_FIELDS = [
-  "gatewayUrl",
-  "chainRpcUrl",
-  "escrowProgramId",
-  "withdrawProgramId",
-  "escrowInstanceAddr",
-  "authUrl",
-] as const satisfies readonly (keyof PrivateChannelInstanceInput)[];
-
 export type TestConnectionResult = ConnectionProbeResult;
 
 // Routes through the API so the probe runs in the same runtime as Connect's
@@ -239,21 +230,9 @@ function interpretApiError(error: unknown): ConnectPrivateChannelResult {
     return interpretProbeError(probe.data);
   }
 
-  const rawFieldErrors = details?.errors;
-  if (isRecord(rawFieldErrors)) {
-    const fieldErrors: FieldErrors = {};
-    for (const field of PRIVATE_CHANNEL_INSTANCE_FIELDS) {
-      const messages = rawFieldErrors[field];
-      const first = Array.isArray(messages) ? messages[0] : undefined;
-      if (typeof first === "string") {
-        fieldErrors[field] = first;
-      }
-    }
-    if (Object.keys(fieldErrors).length > 0) {
-      return { ok: false, kind: "validation", fieldErrors };
-    }
-  }
-
+  // API validation 400s carry one prettified message and no field map, so a
+  // schema mismatch that slips past the client-side parse surfaces as the
+  // server message rather than per-field errors.
   return { ok: false, kind: "server", message: displayMessage };
 }
 
