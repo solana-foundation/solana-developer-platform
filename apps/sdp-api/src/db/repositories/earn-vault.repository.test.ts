@@ -23,6 +23,17 @@ describe("EarnVaultRepository (postgres)", () => {
   beforeEach(async () => {
     const db = getDb(env);
 
+    // The unified ledger the repository mirrors into (PRO-1705) is cleared
+    // first: its rows reference both the legacy holdings and the custody wallets
+    // deleted below.
+    await db
+      .prepare("DELETE FROM earn_movements WHERE organization_id IN (?, ?)")
+      .bind(ORG_A, ORG_B)
+      .run();
+    await db
+      .prepare("DELETE FROM earn_positions WHERE organization_id IN (?, ?)")
+      .bind(ORG_A, ORG_B)
+      .run();
     await db
       .prepare("DELETE FROM earn_vault_movements WHERE organization_id IN (?, ?)")
       .bind(ORG_A, ORG_B)

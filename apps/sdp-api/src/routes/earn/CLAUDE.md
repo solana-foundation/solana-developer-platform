@@ -5,6 +5,41 @@ the fail-closed registry and check capabilities — no `if (provider === "ground
 anywhere. See `packages/sdp-earn/README.md` for architecture; ADR 0002 for
 invariants (the 2026-08-11 addendum owns the ledger-vs-live rules below).
 
+## In flight: the unified movement ledger (PRO-1705)
+
+Earn is mid-migration from two movement tables split by execution mechanism to
+ONE. Migrations `0062`-`0064` add `earn_movements` (every money movement, both
+directions, both execution models) and `earn_positions` (every holding, vault
+and custodial), and backfill all existing history into them.
+
+**Nothing reads the new tables yet.** `earn_program_withdrawals`,
+`earn_vault_movements` and `earn_vault_positions` remain authoritative for every
+route below; the unified tables are kept current by a dual-write so the read
+switch is a later, separate release.
+
+**The rule while both shapes exist — if you add or change a writer of any legacy
+earn table, it MUST mirror into the unified ledger in the SAME transaction.**
+Call the projection functions in
+`db/repositories/earn-movements.repository.ts`; do not hand-write an insert. The
+mapping itself lives in SQL views created by `0063` and is shared with the bulk
+backfill, precisely so history and new rows cannot disagree. Details worth
+knowing before touching it:
+
+- A projection is an upsert keyed on the LEGACY row's id — the unified row keeps
+  it — so every guarded transition simply re-projects the whole row, and a row an
+  older revision wrote without mirroring is repaired by the next write to it.
+- The projections assert their row is projectable BEFORE writing. `INSERT ...
+  SELECT` from a view that yields nothing inserts zero rows and SUCCEEDS, which
+  would silently drop a money movement.
+- Every movement needs a holding. A custodial one is minted when the program
+  wallet is linked (`insertProviderWallet`); without it a withdrawal cannot
+  project and the write fails loudly rather than going unrecorded.
+- `finalized` is the one status no legacy table can express, so a legacy write
+  never regresses a unified row that already reached it.
+- The vocabulary tables `earn_execution_models`, `earn_movement_directions` and
+  `earn_movement_statuses` are seeded reference data, pinned to `@sdp/types` by a
+  conformance test. Never truncate them in a test fixture.
+
 ## Route map — with each route's single source of truth
 
 Every route reads exactly ONE source for the STATE it reports (DB or live

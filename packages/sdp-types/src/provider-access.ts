@@ -1,6 +1,6 @@
 import type { SdpEnvironment } from "./api-keys";
 import { CUSTODY_PROVIDERS, type CustodyProvider } from "./custody";
-import type { EarnPortfolioToken } from "./earn";
+import { EARN_EXECUTION_MODELS, type EarnPortfolioToken } from "./earn";
 import {
   normalizeOrganizationTier,
   ORGANIZATION_RPC_PROVIDERS,
@@ -136,7 +136,14 @@ export const EARN_PROVIDER_SURFACING = {
  * capability, which the dashboard cannot see; a drift test in apps/sdp-api
  * asserts the two never disagree.
  */
-export const EARN_DEPOSIT_STYLES = ["custodial", "vault_direct"] as const;
+/**
+ * One vocabulary, not two that happen to match: a provider's deposit style IS
+ * the execution model every movement through it is executed by, so this is
+ * `EARN_EXECUTION_MODELS` under the name that reads correctly when the subject
+ * is a provider rather than a movement (PRO-1705). The ledger's
+ * `execution_model` column and this const can therefore never drift apart.
+ */
+export const EARN_DEPOSIT_STYLES = EARN_EXECUTION_MODELS;
 export type EarnDepositStyle = (typeof EARN_DEPOSIT_STYLES)[number];
 
 export const EARN_PROVIDER_DEPOSIT_STYLE = {

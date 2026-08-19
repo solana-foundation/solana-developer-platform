@@ -618,3 +618,119 @@ export interface ListEarnProgramWithdrawalsResponse {
   page: number;
   pageSize: number;
 }
+
+/**
+ * The unified movement ledger (PRO-1705, migration 0062).
+ *
+ * One vocabulary for every Earn money movement, whichever way it was executed.
+ * Earn previously split its movements across two tables by EXECUTION MECHANISM
+ * — provider-API withdrawals in one, signed on-chain deposits in the other — so
+ * every status, terminal set and transition rule existed twice, in two
+ * different shapes, in two different packages.
+ *
+ * This is the single source of truth for movement BEHAVIOUR: which statuses
+ * exist, which are terminal, and which transitions are legal. The database
+ * mirrors the first two as rows in `earn_movement_statuses` (so SQL can read
+ * the terminal set instead of re-spelling it), and a conformance test asserts
+ * the rows equal these constants — a migration and a change here can only move
+ * together. Transitions stay here alone: a table cannot enforce them without
+ * triggers, and the guards need them at compile time.
+ */
+export const EARN_EXECUTION_MODELS = ["custodial", "vault_direct"] as const;
+export type EarnExecutionModel = (typeof EARN_EXECUTION_MODELS)[number];
+
+/**
+ * Spelled `withdrawal`, matching every wire contract, route and dashboard label
+ * that already exists. (Migration 0059 wrote `withdraw` on a column no row has
+ * ever carried, because the vault withdraw path does not exist yet.)
+ */
+export const EARN_MOVEMENT_DIRECTIONS = ["deposit", "withdrawal"] as const;
+export type EarnMovementDirection = (typeof EARN_MOVEMENT_DIRECTIONS)[number];
+
+/**
+ * Statuses per execution model, because the two lifecycles are genuinely
+ * different rather than one lifecycle wearing two vocabularies:
+ *
+ * * `custodial` — a provider reports settlement, and can report a PARTIAL one
+ *   or park a payout awaiting a customer approval stamp. This is 0055's
+ *   vocabulary unchanged.
+ * * `vault_direct` — a chain reports commitment, which is not settlement.
+ *   `confirmed` is an optimistic commitment a fork can still drop; `finalized`
+ *   is irreversible. `requested` is 0059's `pending` renamed, so that one word
+ *   means one thing on both models: a signed transaction is durably recorded
+ *   but is not known to be on the wire.
+ *
+ * So `completed` and `finalized` are not synonyms — they are different facts,
+ * and keeping them keyed by model is what lets one column hold both honestly.
+ */
+export const EARN_MOVEMENT_STATUSES = {
+  custodial: EARN_PROGRAM_WITHDRAWAL_RECORD_STATUSES,
+  vault_direct: ["requested", "submitted", "confirmed", "finalized", "failed"],
+} as const satisfies Record<EarnExecutionModel, readonly string[]>;
+
+export type EarnCustodialMovementStatus = (typeof EARN_MOVEMENT_STATUSES)["custodial"][number];
+export type EarnVaultDirectMovementStatus = (typeof EARN_MOVEMENT_STATUSES)["vault_direct"][number];
+export type EarnMovementStatus = EarnCustodialMovementStatus | EarnVaultDirectMovementStatus;
+
+/** Statuses a movement never moves on from, per model. */
+export const EARN_TERMINAL_MOVEMENT_STATUSES = {
+  custodial: EARN_TERMINAL_WITHDRAWAL_STATUSES,
+  // `confirmed` is deliberately absent, unlike 0059's terminal set: the sweep's
+  // job does not end at chain commitment now that finalization is a state.
+  vault_direct: ["finalized", "failed"],
+} as const satisfies {
+  [Model in EarnExecutionModel]: readonly (typeof EARN_MOVEMENT_STATUSES)[Model][number][];
+};
+
+export function isTerminalEarnMovementStatus(
+  executionModel: EarnExecutionModel,
+  status: string
+): boolean {
+  return (EARN_TERMINAL_MOVEMENT_STATUSES[executionModel] as readonly string[]).includes(status);
+}
+
+/**
+ * Legal transitions, keyed by TARGET status to the statuses it may be reached
+ * from — the shape both legacy guards already used.
+ *
+ * Two properties make terminal-state regression unrepresentable rather than
+ * merely discouraged: terminal statuses appear in NO source list, and neither
+ * model's insert state (`requested`) is a target at all. Repositories apply
+ * these as a database-level compare-and-swap (`status IN (...)` in the same
+ * statement as the write), so a concurrent writer that already advanced a row
+ * makes the loser match zero rows instead of overwriting it.
+ *
+ * `custodial` self-transitions are intentional: a same-status observation still
+ * refreshes amounts, fees and provider_data, and `processing → processing` is
+ * the common poll case. `pending_approval ↔ processing` is a legitimate
+ * park/unpark cycle.
+ *
+ * `vault_direct` allows `submitted → finalized` directly, because a sweep whose
+ * first observation is already finalized must be able to record the truth
+ * rather than invent an intermediate commitment it never saw. It has no
+ * self-transitions: there is no in-place observation refresh on a signed
+ * movement, only advancement.
+ */
+export const EARN_MOVEMENT_TRANSITIONS = {
+  custodial: {
+    processing: ["requested", "processing", "pending_approval"],
+    pending_approval: ["requested", "processing", "pending_approval"],
+    completed: ["requested", "processing", "pending_approval"],
+    partially_completed: ["requested", "processing", "pending_approval"],
+    failed: ["requested", "processing", "pending_approval"],
+    cancelled: ["requested", "processing", "pending_approval"],
+  },
+  vault_direct: {
+    submitted: ["requested"],
+    confirmed: ["requested", "submitted"],
+    finalized: ["submitted", "confirmed"],
+    failed: ["requested", "submitted", "confirmed"],
+  },
+} as const satisfies {
+  [Model in EarnExecutionModel]: Partial<
+    Record<
+      (typeof EARN_MOVEMENT_STATUSES)[Model][number],
+      readonly (typeof EARN_MOVEMENT_STATUSES)[Model][number][]
+    >
+  >;
+};

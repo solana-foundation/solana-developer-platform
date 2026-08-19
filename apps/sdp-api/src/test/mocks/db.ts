@@ -13,7 +13,16 @@ import {
 } from "@/services/audit.service";
 import type { Env } from "@/types/env";
 
+// FK-dependency ordered: dependents before the rows they point at.
+//
+// The Earn vocabulary tables (earn_execution_models, earn_movement_directions,
+// earn_movement_statuses) are deliberately ABSENT. They are seeded reference data
+// from migration 0062, not tenant state — truncating them would make every
+// subsequent movement insert fail its status foreign key. Nothing here is
+// referenced BY them, so CASCADE cannot reach them either.
 const POSTGRES_TEST_TABLES = [
+  "earn_movements",
+  "earn_positions",
   "earn_vault_movements",
   "earn_vault_positions",
   "sponsorship_budget_policy_revisions",
