@@ -51,6 +51,7 @@
     "@sdp/payments": "workspace:*",
     "@sdp/policy": "workspace:*",
     "@sdp/private-channels": "workspace:*",
+    "@sdp/redaction": "workspace:*",
     "@sdp/rpc": "workspace:*",
     "@sdp/spc-escrow": "workspace:*",
     "@sdp/spc-withdraw": "workspace:*",

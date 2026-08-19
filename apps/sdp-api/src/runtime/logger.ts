@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { scrubTelemetry, scrubTelemetryString } from "@sdp/redaction";
 import pino, { type Logger, type LoggerOptions } from "pino";
 
 export interface LogContext {
@@ -19,7 +20,11 @@ export function getLogContext(): LogContext {
 
 function serializeError(value: unknown): unknown {
   return value instanceof Error
-    ? { type: value.name, message: value.message, stack: value.stack }
+    ? {
+        type: value.name,
+        message: scrubTelemetryString(value.message),
+        stack: value.stack ? scrubTelemetryString(value.stack) : value.stack,
+      }
     : value;
 }
 
@@ -43,6 +48,17 @@ export function baseLoggerOptions(): LoggerOptions {
       },
     },
     serializers: { error: serializeError, err: serializeError },
+    // The scrubbing boundary for every log line in the API. Applied here rather
+    // than asked of call sites: a denylist that depends on each caller
+    // remembering to wrap its payload is a denylist that holds until the next
+    // handler is written. Everything a caller passes — merged object, message,
+    // interpolation arguments — goes through it. The `mixin` context
+    // (request_id, trace_id) bypasses hooks but only ever holds generated ids.
+    hooks: {
+      logMethod(args, method) {
+        method.apply(this, args.map((argument) => scrubTelemetry(argument)) as typeof args);
+      },
+    },
     mixin: () => ({ ...getLogContext() }),
     ...(process.env.LOG_FORMAT === "pretty" ? { transport: { target: "pino-pretty" } } : {}),
   };

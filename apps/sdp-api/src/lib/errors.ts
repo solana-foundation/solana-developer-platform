@@ -2,7 +2,7 @@
  * API Error Types and Handlers
  */
 
-import { redactCredentialSecrets, redactCredentialString } from "@sdp/custody";
+import { redactCredentialSecrets, redactCredentialString } from "@sdp/redaction";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 
@@ -168,6 +168,13 @@ export class AppError extends Error {
     this.name = "AppError";
   }
 
+  /**
+   * Credential redaction only, deliberately. A 4xx body goes back to the tenant
+   * that submitted the data in it, so stripping its own counterparty fields out
+   * of a validation error would cost the caller the one thing that makes the
+   * error actionable. PII scrubbing belongs at the sinks we read —
+   * `scrubTelemetry` for logs and Sentry, `scrubAuditMetadata` for the ledger.
+   */
   toResponse(): ErrorResponse {
     const details = this.details ? redactCredentialSecrets(this.details) : undefined;
     return {

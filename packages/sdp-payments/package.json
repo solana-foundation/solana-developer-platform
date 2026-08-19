@@ -152,6 +152,7 @@
   },
   "dependencies": {
     "@coinbase/cdp-sdk": "1.54.0",
+    "@sdp/redaction": "workspace:*",
     "@sdp/rpc": "workspace:*",
     "@sdp/solana": "workspace:*",
     "@sdp/types": "workspace:*",

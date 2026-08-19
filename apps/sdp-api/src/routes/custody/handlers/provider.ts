@@ -1,6 +1,7 @@
-import { CUSTODY_PROVIDERS, type CustodyProvider, redactCredentialString } from "@sdp/custody";
+import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/custody";
 import { normalizePem } from "@sdp/custody/provisioning";
 import { SigningError } from "@sdp/custody/signing";
+import { redactCredentialString } from "@sdp/redaction";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, conflict, forbidden } from "@/lib/errors";

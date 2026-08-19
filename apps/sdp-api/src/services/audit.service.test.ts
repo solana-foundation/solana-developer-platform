@@ -132,6 +132,43 @@ describe("AuditService", () => {
     expect(metadata).not.toContain("raw-token");
   });
 
+  it("scrubs counterparty PII from metadata, masking the email so the row stays readable", async () => {
+    const { db, queryOne, checkpoint } = createAuditWriter();
+    const context = {
+      get: (key: string) =>
+        key === "apiKey" ? { id: "ak_123", organizationId: "org_123" } : "req_123",
+      req: { header: () => null },
+    };
+
+    await new AuditService(db as never, checkpoint).log(context as never, {
+      action: "create",
+      resourceType: "counterparty",
+      resourceId: "cp_123",
+      // An over-eager caller passing the whole submitted payload is exactly the
+      // mistake the ledger has to survive without a reviewer noticing.
+      metadata: {
+        entityType: "individual",
+        email: "jane.doe@example.com",
+        identity: { firstName: "Jane", dateOfBirth: "1988-04-02", phone: "+15551234567" },
+        details: { accountNumber: "000123456789", routingNumber: "021000021" },
+      },
+      status: "success",
+    });
+
+    const metadata = String(insertedCalls(queryOne)[0]?.[1]?.[7]);
+    // Masked, not dropped: an invitation or counterparty event whose subject is
+    // unnamed is not an audit trail. The full address lives in its own table.
+    expect(metadata).toContain('"email":"j***@example.com"');
+    expect(metadata).toContain('"identity":"[REDACTED]"');
+    expect(metadata).toContain('"accountNumber":"[REDACTED]"');
+    expect(metadata).toContain('"entityType":"individual"');
+    expect(metadata).not.toContain("jane.doe@example.com");
+    expect(metadata).not.toContain("Jane");
+    expect(metadata).not.toContain("1988-04-02");
+    expect(metadata).not.toContain("000123456789");
+    expect(metadata).not.toContain("021000021");
+  });
+
   it("fails closed when an audit insert fails", async () => {
     const { db, checkpoint } = createAuditWriter({ failAt: 1 });
 

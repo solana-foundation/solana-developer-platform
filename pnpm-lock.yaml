@@ -116,6 +116,9 @@ importers:
       '@sdp/private-channels':
         specifier: workspace:*
         version: link:../../packages/sdp-private-channels
+      '@sdp/redaction':
+        specifier: workspace:*
+        version: link:../../packages/sdp-redaction
       '@sdp/rpc':
         specifier: workspace:*
         version: link:../../packages/sdp-rpc
@@ -343,6 +346,9 @@ importers:
       '@sdp/private-channels':
         specifier: workspace:*
         version: link:../../packages/sdp-private-channels
+      '@sdp/redaction':
+        specifier: workspace:*
+        version: link:../../packages/sdp-redaction
       '@sdp/solana':
         specifier: workspace:*
         version: link:../../packages/sdp-solana
@@ -537,6 +543,9 @@ importers:
 
   packages/sdp-custody:
     dependencies:
+      '@sdp/redaction':
+        specifier: workspace:*
+        version: link:../sdp-redaction
       '@sdp/types':
         specifier: workspace:*
         version: link:../sdp-types
@@ -659,6 +668,9 @@ importers:
       '@coinbase/cdp-sdk':
         specifier: 1.54.0
         version: 1.54.0(typescript@6.0.3)
+      '@sdp/redaction':
+        specifier: workspace:*
+        version: link:../sdp-redaction
       '@sdp/rpc':
         specifier: workspace:*
         version: link:../sdp-rpc
@@ -734,6 +746,18 @@ importers:
       vitest:
         specifier: 4.1.10
         version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.1.2)(@vitest/coverage-istanbul@4.1.10)(jsdom@26.1.0)(vite@7.3.6(@types/node@26.1.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.23.5)(yaml@2.9.0))
+
+  packages/sdp-redaction:
+    devDependencies:
+      '@types/node':
+        specifier: 26.1.2
+        version: 26.1.2
+      tsx:
+        specifier: 4.23.5
+        version: 4.23.5
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
 
   packages/sdp-rpc:
     dependencies:
