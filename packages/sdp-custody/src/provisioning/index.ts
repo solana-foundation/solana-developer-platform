@@ -7,6 +7,7 @@
 import type { VaultAddressesResponse } from "@solana/keychain-fireblocks";
 import { ApiKeyStamper } from "@solana/keychain-turnkey";
 import { importPKCS8, SignJWT } from "jose";
+import { summarizeUpstreamErrorBody } from "../redaction";
 import { SigningError } from "../signing";
 import {
   coinbaseCdpRequest,
@@ -656,9 +657,9 @@ export async function provisionUtilaWallet(
   );
 
   if (!response.ok) {
-    const detail = await safeReadUtilaError(response);
+    const errorCode = await safeReadUtilaError(response);
     throw new SigningError(
-      `Utila CreateWallet failed (${response.status}): ${detail}`,
+      `Utila CreateWallet failed (${response.status}): code=${errorCode}`,
       "NETWORK_ERROR"
     );
   }
@@ -731,11 +732,15 @@ function extractUtilaWalletId(name?: string): string | undefined {
   return index === -1 ? name : name.slice(index + marker.length);
 }
 
+/**
+ * Utila error bodies can echo the request (including the service-account bearer
+ * token), so only a whitelisted upstream error code is surfaced.
+ */
 async function safeReadUtilaError(response: Response): Promise<string> {
   try {
-    return (await response.text()).slice(0, 300);
+    return summarizeUpstreamErrorBody(await response.text(), response.status);
   } catch {
-    return response.statusText;
+    return "unavailable";
   }
 }
 
