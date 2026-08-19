@@ -4,6 +4,8 @@
 
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { validateBody } from "@/middleware/validate";
+import { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
 import type { Env } from "@/types/env";
 import { createProjectApiKey, listProjectApiKeys } from "./handlers/api-keys";
 import {
@@ -14,6 +16,7 @@ import {
 } from "./handlers/members";
 import { archiveProject, getProject, listProjects, updateProject } from "./handlers/projects";
 import { apiKeyProjectAccessMiddleware } from "./project-access";
+import { addMemberSchema, updateMemberSchema, updateProjectSchema } from "./schemas";
 
 const projects = new Hono<{ Bindings: Env }>();
 
@@ -31,7 +34,12 @@ projects.use("/:projectId/*", apiKeyProjectAccessMiddleware());
 
 projects.get("/", requirePermissions("projects:read"), listProjects);
 projects.get("/:projectId", requirePermissions("projects:read"), getProject);
-projects.patch("/:projectId", requirePermissions("projects:write"), updateProject);
+projects.patch(
+  "/:projectId",
+  requirePermissions("projects:write"),
+  validateBody(updateProjectSchema),
+  updateProject
+);
 projects.delete("/:projectId", requirePermissions("projects:admin"), archiveProject);
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -39,10 +47,16 @@ projects.delete("/:projectId", requirePermissions("projects:admin"), archiveProj
 // ═══════════════════════════════════════════════════════════════════════════
 
 projects.get("/:projectId/members", requirePermissions("project-members:read"), listProjectMembers);
-projects.post("/:projectId/members", requirePermissions("project-members:write"), addProjectMember);
+projects.post(
+  "/:projectId/members",
+  requirePermissions("project-members:write"),
+  validateBody(addMemberSchema),
+  addProjectMember
+);
 projects.patch(
   "/:projectId/members/:memberId",
   requirePermissions("project-members:write"),
+  validateBody(updateMemberSchema),
   updateProjectMember
 );
 projects.delete(
@@ -56,6 +70,11 @@ projects.delete(
 // ═══════════════════════════════════════════════════════════════════════════
 
 projects.get("/:projectId/api-keys", requirePermissions("api-keys:read"), listProjectApiKeys);
-projects.post("/:projectId/api-keys", requirePermissions("api-keys:write"), createProjectApiKey);
+projects.post(
+  "/:projectId/api-keys",
+  requirePermissions("api-keys:write"),
+  validateBody(apiKeyCreateSchema),
+  createProjectApiKey
+);
 
 export default projects;

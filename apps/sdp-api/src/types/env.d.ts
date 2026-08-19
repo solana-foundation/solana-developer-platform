@@ -322,10 +322,12 @@ declare module "hono" {
       role: string;
       permissions: Permission[];
       environment: ApiKeyEnvironment;
+      walletScope?: "all" | "selected";
       signingWalletId: string | null;
       signingWalletIds?: string[];
       walletBindings?: Array<{
         walletId: string;
+        custodyWalletId?: string;
         permissions: Permission[];
       }>;
     };

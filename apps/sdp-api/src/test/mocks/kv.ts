@@ -6,6 +6,7 @@
  */
 
 import type { CachedApiKey } from "@sdp/types";
+import { getDb } from "@/db/client";
 import { RATE_LIMIT_WINDOW_MS } from "@/middleware/rate-limit";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import type { Env } from "@/types/env";
@@ -19,11 +20,52 @@ export async function seedCachedApiKey(
   data: CachedApiKey
 ): Promise<void> {
   const kv = createKVStoreSet(env);
+  const walletBindings = await Promise.all(
+    (data.walletBindings ?? []).map(async (binding) => {
+      if (binding.custodyWalletId) {
+        return binding;
+      }
+
+      const matches = await getDb(env).queryMany<{ id: string }>(
+        `SELECT w.id
+           FROM custody_wallets w
+           LEFT JOIN custody_configs cfg ON cfg.id = w.custody_config_id
+           LEFT JOIN custody_connections conn ON conn.id = w.custody_connection_id
+          WHERE w.wallet_id = ?
+            AND w.status = 'active'
+            AND (
+              (
+                cfg.status = 'active'
+                AND cfg.organization_id = ?
+                AND (cfg.project_id IS NULL OR cfg.project_id = ?)
+              )
+              OR (
+                conn.status = 'active'
+                AND conn.organization_id = ?
+                AND conn.project_id = ?
+              )
+            )
+          ORDER BY w.id
+          LIMIT 2`,
+        [binding.walletId, data.organizationId, data.projectId, data.organizationId, data.projectId]
+      );
+
+      // ponytail: legacy execution fixtures still use Provider IDs; HOO-1023 will make them exact.
+      return {
+        ...binding,
+        custodyWalletId: matches.length === 1 && matches[0] ? matches[0].id : binding.walletId,
+      };
+    })
+  );
   await kv.apiKeys.put(
     `key:${keyHash}`,
     JSON.stringify({
       ...data,
       rotationDeadline: data.rotationDeadline ?? null,
+      walletScope:
+        data.walletScope ??
+        ((data.walletBindings?.length ?? 0) > 0 || data.signingWalletId ? "selected" : "all"),
+      walletBindings,
     }),
     {
       expirationTtl: 3600,

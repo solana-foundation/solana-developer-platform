@@ -1,4 +1,5 @@
 import type { AssetCategory, IssuanceMetadata } from "@sdp/types";
+import { readApiErrorMessage } from "@/lib/api-error";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { type IssuanceListQuery, toIssuanceTokensApiParams } from "./issuance-list-query";
 import type { IssuanceTokenView } from "./issuance-token-fields";
@@ -68,11 +69,8 @@ interface RawToken {
 
 function parseErrorMessage(body: string, fallback: string): string {
   try {
-    const parsed = JSON.parse(body) as {
-      error?: { message?: string };
-      message?: string;
-    };
-    return (parsed?.error?.message ?? parsed?.message ?? body) || fallback;
+    const parsed: unknown = JSON.parse(body);
+    return readApiErrorMessage(parsed) || body || fallback;
   } catch {
     return body || fallback;
   }

@@ -48,7 +48,7 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/payments/index.ts",
       section: '"/transfer-batches",',
       before: "extract: extractTransferBatchPolicyCandidate",
-      after: "createTransferBatch",
+      after: "\n  createTransferBatch\n",
     },
     replay: [
       {
@@ -119,7 +119,7 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/payments/index.ts",
       section: '"/transfers",',
       before: "extract: extractTransferPolicyCandidate",
-      after: "createTransfer",
+      after: "\n  createTransfer\n",
     },
     replay: [
       {
@@ -144,7 +144,7 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/payments/index.ts",
       section: '"/ramps/onramp/quote",',
       before: "policyGate({ extract: extractOnrampQuotePolicyCandidate })",
-      after: "createOnrampQuote",
+      after: "\n  createOnrampQuote\n",
     },
     replay: [
       {

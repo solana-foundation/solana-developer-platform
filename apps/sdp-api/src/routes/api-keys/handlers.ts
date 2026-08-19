@@ -8,8 +8,7 @@ import type {
   RotateApiKeyResponse,
 } from "@sdp/types";
 import type { Context } from "hono";
-import { z } from "zod";
-import { getDb } from "@/db";
+import { asTransactionalClient, getDb } from "@/db";
 import {
   createPolicyRepository,
   type UpsertApiKeyWalletPolicyBindingInput,
@@ -18,24 +17,29 @@ import { requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, forbidden, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { ApiKeyService } from "@/services/api-key.service";
 import {
-  assertWalletBindingsInScope,
   resolveCreateWalletScope,
   resolveUpdateWalletScope,
+  resolveWalletBindingsInScope,
 } from "@/services/api-key-scope.service";
-import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
+import { provisionApiKeyWallet } from "@/services/api-key-wallet-provisioning.service";
+import {
+  type ExactApiKeyWalletBinding,
+  replaceApiKeyWalletBindings,
+} from "@/services/api-key-wallets.service";
 import { AuditService } from "@/services/audit.service";
-import { createSigningService } from "@/services/domain/signing.service";
+import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { ApiKeyPolicyStore } from "@/services/policy/api-key-policy.store";
-import { CustodyConfigStore, type WalletPurpose } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { buildApiKeyAccessSummaries } from "./access-response";
-import {
+import type {
   apiKeyControlProfileCreateSchema,
   apiKeyControlProfileRevisionCreateSchema,
   apiKeyCreateSchema,
   apiKeyPolicyBindingsWriteSchema,
+  apiKeyRevokeSchema,
   apiKeyRotateSchema,
   apiKeyUpdateSchema,
 } from "./schemas";
@@ -122,18 +126,9 @@ export const listApiKeys = async (c: AppContext) => {
   return success(c, response);
 };
 
-export const createApiKey = async (c: AppContext) => {
+export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSchema>) => {
   const actor = resolveActor(c);
   const orgId = actor.organizationId;
-
-  const body = await c.req.json();
-  const parsed = apiKeyCreateSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
 
   const {
     name,
@@ -149,7 +144,11 @@ export const createApiKey = async (c: AppContext) => {
     provisionWallet,
     walletLabel,
     walletPurpose,
-  } = parsed.data;
+  } = c.req.valid("json");
+
+  const connectionId =
+    typeof provisionWallet === "object" ? provisionWallet.connectionId : undefined;
+  const provisionWalletRequested = Boolean(provisionWallet);
 
   const projectId = requireProjectId(c);
 
@@ -158,25 +157,30 @@ export const createApiKey = async (c: AppContext) => {
     signingWalletId,
     signingWalletIds,
     walletBindings,
-    provisionWallet,
+    provisionWallet: provisionWalletRequested,
+    connectionId,
   });
 
   let resolvedSigningWalletId: string | null = walletSelection.defaultSigningWalletId;
-  let resolvedWalletBindings = walletSelection.bindings;
+  let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];
 
-  if (provisionWallet) {
+  if (provisionWalletRequested) {
     if (!(actor.permissions.includes("*") || actor.permissions.includes("custody:admin"))) {
       throw new AppError("INSUFFICIENT_PERMISSIONS", "Required permissions: custody:admin");
     }
 
-    const signingService = createSigningService(c.env);
     try {
-      const wallet = await signingService.createWallet(actor.organizationId, undefined, {
+      const wallet = await provisionApiKeyWallet(getDb(c.env), c.env, {
+        organizationId: actor.organizationId,
+        projectId,
+        connectionId,
         label: walletLabel,
-        purpose: walletPurpose as WalletPurpose | undefined,
+        purpose: walletPurpose,
       });
       resolvedSigningWalletId = wallet.walletId;
-      resolvedWalletBindings = [{ walletId: wallet.walletId, permissions: ["*"] }];
+      resolvedWalletBindings = [
+        { walletId: wallet.walletId, custodyWalletId: wallet.id, permissions: ["*"] },
+      ];
     } catch (error) {
       if (error instanceof SigningError) {
         if (error.code === "NOT_FOUND") {
@@ -187,7 +191,12 @@ export const createApiKey = async (c: AppContext) => {
       throw error;
     }
   } else {
-    await assertWalletBindingsInScope(getDb(c.env), orgId, projectId, resolvedWalletBindings);
+    resolvedWalletBindings = await resolveWalletBindingsInScope(
+      getDb(c.env),
+      orgId,
+      projectId,
+      walletSelection.bindings
+    );
   }
 
   const resolveCreatorFallback = async (): Promise<string | null> => {
@@ -232,26 +241,29 @@ export const createApiKey = async (c: AppContext) => {
     throw new AppError("UNAUTHORIZED", "Could not resolve authenticated user for API key creation");
   }
 
-  const apiKeyService = new ApiKeyService(getDb(c.env), getRequestTenantScope(c));
-  const createdKey = await apiKeyService.createApiKey({
-    organizationId: orgId,
-    projectId,
-    createdByUserId: createdBy,
-    createdByKeyId: actor.apiKeyId ?? undefined,
-    actorPermissions: actor.permissions,
-    name,
-    description,
-    role,
-    permissions,
-    allowedIps,
-    expiresAt,
-    signingWalletId: resolvedSigningWalletId,
-    pepper: c.env.API_KEY_PEPPER,
+  const db = getDb(c.env);
+  const createdKey = await db.transaction(async (tx) => {
+    const txDb = asTransactionalClient(tx);
+    const key = await new ApiKeyService(txDb, getRequestTenantScope(c)).createApiKey({
+      organizationId: orgId,
+      projectId,
+      createdByUserId: createdBy,
+      createdByKeyId: actor.apiKeyId ?? undefined,
+      actorPermissions: actor.permissions,
+      name,
+      description,
+      role,
+      permissions,
+      allowedIps,
+      expiresAt,
+      signingWalletId: resolvedSigningWalletId,
+      pepper: c.env.API_KEY_PEPPER,
+    });
+    if (resolvedWalletBindings.length > 0) {
+      await replaceApiKeyWalletBindings(txDb, key.id, resolvedWalletBindings);
+    }
+    return key;
   });
-
-  if (resolvedWalletBindings.length > 0) {
-    await replaceApiKeyWalletBindings(getDb(c.env), createdKey.id, resolvedWalletBindings);
-  }
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));
@@ -266,7 +278,7 @@ export const createApiKey = async (c: AppContext) => {
       walletScope: resolvedWalletBindings.length > 0 ? "selected" : "all",
       signingWalletId: resolvedSigningWalletId,
       signingWalletIds: resolvedWalletBindings.map((binding) => binding.walletId),
-      provisionedWallet: Boolean(provisionWallet),
+      provisionedWallet: provisionWalletRequested,
     },
   });
 
@@ -331,19 +343,12 @@ export const getApiKey = async (c: AppContext) => {
   });
 };
 
-export const updateApiKey = async (c: AppContext) => {
+export const updateApiKey = async (c: ValidatedBodyContext<typeof apiKeyUpdateSchema>) => {
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
 
-  const body = await c.req.json();
-  const parsed = apiKeyUpdateSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   // Verify key belongs to this organization and the current project scope
   const existing = await getDb(c.env)
@@ -358,14 +363,15 @@ export const updateApiKey = async (c: AppContext) => {
   }
 
   const walletSelection = resolveUpdateWalletScope({
-    walletScope: parsed.data.walletScope,
-    signingWalletId: parsed.data.signingWalletId,
-    signingWalletIds: parsed.data.signingWalletIds,
-    walletBindings: parsed.data.walletBindings,
+    walletScope: body.walletScope,
+    signingWalletId: body.signingWalletId,
+    signingWalletIds: body.signingWalletIds,
+    walletBindings: body.walletBindings,
   });
+  let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];
 
   if (walletSelection.touched) {
-    await assertWalletBindingsInScope(
+    resolvedWalletBindings = await resolveWalletBindingsInScope(
       getDb(c.env),
       actor.organizationId,
       existing.project_id,
@@ -373,33 +379,30 @@ export const updateApiKey = async (c: AppContext) => {
     );
   }
 
-  const apiKeyService = new ApiKeyService(getDb(c.env), getRequestTenantScope(c));
-  await apiKeyService.updateApiKey({
-    keyId,
-    organizationId: actor.organizationId,
-    projectId,
-    actorPermissions: actor.permissions,
-    currentRole: existing.role,
-    name: parsed.data.name,
-    description: parsed.data.description,
-    allowedIps: parsed.data.allowedIps,
-    expiresAt: parsed.data.expiresAt,
-    permissions: parsed.data.permissions,
-    signingWallet: walletSelection.touched
-      ? { walletId: walletSelection.defaultSigningWalletId }
-      : undefined,
+  await getDb(c.env).transaction(async (tx) => {
+    const txDb = asTransactionalClient(tx);
+    await new ApiKeyService(txDb, getRequestTenantScope(c)).updateApiKey({
+      keyId,
+      organizationId: actor.organizationId,
+      projectId,
+      actorPermissions: actor.permissions,
+      currentRole: existing.role,
+      name: body.name,
+      description: body.description,
+      allowedIps: body.allowedIps,
+      expiresAt: body.expiresAt,
+      permissions: body.permissions,
+      signingWallet: walletSelection.touched
+        ? { walletId: walletSelection.defaultSigningWalletId }
+        : undefined,
+    });
+    if (walletSelection.touched) {
+      await replaceApiKeyWalletBindings(txDb, keyId, resolvedWalletBindings);
+    }
   });
 
-  if (walletSelection.touched) {
-    await replaceApiKeyWalletBindings(getDb(c.env), keyId, walletSelection.bindings);
-  }
-
   // Invalidate cache if auth-relevant fields changed
-  if (
-    parsed.data.allowedIps !== undefined ||
-    parsed.data.permissions !== undefined ||
-    walletSelection.touched
-  ) {
+  if (body.allowedIps !== undefined || body.permissions !== undefined || walletSelection.touched) {
     await c.var.kv.apiKeys.delete(`key:${existing.key_hash}`);
   }
 
@@ -409,22 +412,19 @@ export const updateApiKey = async (c: AppContext) => {
     action: "update",
     resourceType: "api_key",
     resourceId: keyId,
-    metadata: parsed.data,
+    metadata: body,
   });
 
   return success(c, { success: true });
 };
 
-export const createApiKeyControlProfile = async (c: AppContext) => {
+export const createApiKeyControlProfile = async (
+  c: ValidatedBodyContext<typeof apiKeyControlProfileCreateSchema>
+) => {
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
-  const parsed = apiKeyControlProfileCreateSchema.safeParse(await c.req.json());
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const profile = await new ApiKeyPolicyStore(
     createPolicyRepository(c.env, getRequestTenantScope(c))
@@ -432,7 +432,7 @@ export const createApiKeyControlProfile = async (c: AppContext) => {
     organizationId: actor.organizationId,
     projectId,
     apiKeyId: keyId,
-    name: parsed.data.name,
+    name: body.name,
     createdBy: actor.userId ?? actor.apiKeyId,
   });
 
@@ -446,16 +446,13 @@ export const createApiKeyControlProfile = async (c: AppContext) => {
   return created(c, { profile });
 };
 
-export const createApiKeyControlProfileRevision = async (c: AppContext) => {
+export const createApiKeyControlProfileRevision = async (
+  c: ValidatedBodyContext<typeof apiKeyControlProfileRevisionCreateSchema>
+) => {
   const { keyId, profileId } = c.req.param();
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
-  const parsed = apiKeyControlProfileRevisionCreateSchema.safeParse(await c.req.json());
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const revision = await new ApiKeyPolicyStore(
     createPolicyRepository(c.env, getRequestTenantScope(c))
@@ -464,8 +461,8 @@ export const createApiKeyControlProfileRevision = async (c: AppContext) => {
     projectId,
     apiKeyId: keyId,
     profileId,
-    rules: parsed.data.rules as PolicyRule[],
-    defaultAction: parsed.data.defaultAction,
+    rules: body.rules as PolicyRule[],
+    defaultAction: body.defaultAction,
     createdBy: actor.userId ?? actor.apiKeyId,
   });
 
@@ -508,31 +505,28 @@ export const activateApiKeyControlProfileRevision = async (c: AppContext) => {
   return success(c, active);
 };
 
-export const writeApiKeyPolicyBindings = async (c: AppContext) => {
+export const writeApiKeyPolicyBindings = async (
+  c: ValidatedBodyContext<typeof apiKeyPolicyBindingsWriteSchema>
+) => {
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
-  const parsed = apiKeyPolicyBindingsWriteSchema.safeParse(await c.req.json());
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
-  const custodyStore = new CustodyConfigStore(getDb(c.env), c.env);
+  const custodyTargets = new CustodyRuntimeTargets(getDb(c.env), c.env, new Map());
   const bindings: UpsertApiKeyWalletPolicyBindingInput[] =
-    parsed.data.mode === "replace"
+    body.mode === "replace"
       ? await Promise.all(
-          parsed.data.bindings.map(async (binding) => {
+          body.bindings.map(async (binding) => {
             if (binding.bindingScope === "all") {
               return { apiKeyId: keyId, ...binding };
             }
 
-            const wallet = await custodyStore.findUniqueActiveWalletByIdentifier(
-              actor.organizationId,
+            const wallet = await custodyTargets.findOperationalWallet({
+              organizationId: actor.organizationId,
               projectId,
-              binding.walletId
-            );
+              walletId: binding.walletId,
+            });
             if (!wallet) {
               throw forbidden("API key is not authorized for the requested wallet");
             }
@@ -565,7 +559,7 @@ export const writeApiKeyPolicyBindings = async (c: AppContext) => {
     resourceType: "api_key",
     resourceId: keyId,
     metadata: {
-      action: `${parsed.data.mode}_policy_bindings`,
+      action: `${body.mode}_policy_bindings`,
       bindingCount: policyBindings.length,
     },
   });
@@ -573,7 +567,7 @@ export const writeApiKeyPolicyBindings = async (c: AppContext) => {
   return success(c, { policyBindings });
 };
 
-export const rotateApiKey = async (c: AppContext) => {
+export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSchema>) => {
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
@@ -583,16 +577,8 @@ export const rotateApiKey = async (c: AppContext) => {
     throw badRequest("Cannot rotate the API key being used for this request");
   }
 
-  const body = await c.req.json().catch(() => ({}));
-  const parsed = apiKeyRotateSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-
-  const gracePeriodHours = parsed.data.gracePeriodHours ?? 24;
+  const body = c.req.valid("json");
+  const gracePeriodHours = body.gracePeriodHours ?? 24;
 
   const apiKeyService = new ApiKeyService(getDb(c.env), getRequestTenantScope(c));
   const rotation = await apiKeyService.rotateApiKey(
@@ -627,7 +613,7 @@ export const rotateApiKey = async (c: AppContext) => {
   return created(c, response);
 };
 
-export const revokeApiKey = async (c: AppContext) => {
+export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSchema>) => {
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
@@ -637,13 +623,7 @@ export const revokeApiKey = async (c: AppContext) => {
     throw badRequest("Cannot revoke the API key being used for this request");
   }
 
-  const body = await c.req.json().catch(() => ({}));
-  const confirmation =
-    body &&
-    typeof body === "object" &&
-    typeof (body as { confirmation?: unknown }).confirmation === "string"
-      ? String((body as { confirmation: string }).confirmation).trim()
-      : "";
+  const { confirmation } = c.req.valid("json");
 
   const existing = await getDb(c.env)
     .prepare(
