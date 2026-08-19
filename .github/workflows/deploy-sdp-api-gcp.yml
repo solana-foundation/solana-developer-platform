@@ -49,11 +49,21 @@ jobs:
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
+      # NPM_TOKEN reaches the deps stage as a BuildKit secret, never a build-arg:
+      # `@sdp/veda` installs the private @vedatech/svm-sdk, and an arg would keep
+      # the credential in the pushed image's layer history.
       - name: Build and push image
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
+          if [ -z "${NPM_TOKEN}" ]; then
+            echo "NPM_TOKEN must be configured to build sdp-api: it installs the private @vedatech/svm-sdk package." >&2
+            exit 1
+          fi
           IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public:${GITHUB_SHA}"
-          docker build -f apps/sdp-api/Dockerfile --build-arg GIT_SHA="${GITHUB_SHA}" -t "${IMAGE}" .
+          docker build -f apps/sdp-api/Dockerfile --build-arg GIT_SHA="${GITHUB_SHA}" \
+            --secret id=npm_token,env=NPM_TOKEN -t "${IMAGE}" .
           docker push "${IMAGE}"
           echo "IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
 

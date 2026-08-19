@@ -84,6 +84,23 @@ doppler run --config "${DOPPLER_CONFIG}" -- <command>
 
 Keep `DOPPLER_TOKEN_CI` narrowly scoped, rotate it through Doppler and GitHub together, and verify a secret-aware CI run after rotation.
 
+## `NPM_TOKEN` — a BUILD credential, not a runtime one
+
+`packages/sdp-veda` depends on `@vedatech/svm-sdk`, published to a private npm scope. It is the only private dependency in this workspace, and it is needed **only while installing or building**. No deployed runtime reads it, so it belongs in neither Doppler nor Secret Manager, and it must never appear in `scripts/secret-keys.mjs` — that file is "every env key the SDP API reads", and a credential nothing reads is a standing question for whoever next provisions the service.
+
+| Boundary | How the token arrives |
+| --- | --- |
+| Local install | An env file outside the repo (`NPM_TOKEN=…`, mode `600`), injected into the install container with `--env-file`. Never exported into a shell whose history or logs are kept. |
+| Local image build | `docker build --secret id=npm_token,src=<that env file>`, or `set -a && . <file> && set +a && docker compose build`. Never `--build-arg`: an arg is recorded in the image and `docker history` prints it. |
+| CI | The `NPM_TOKEN` repository secret, referenced per step. `.github/scripts/pnpm-install.sh` is the single install entry point. |
+| Deploy / release images | The same repository secret, passed to `docker build` as `--secret id=npm_token,env=NPM_TOKEN`. |
+
+`.npmrc` commits the line `//registry.npmjs.org/:_authToken=${NPM_TOKEN}` — an environment REFERENCE expanded at install time. `.npmrc` is not gitignored, so a literal token written there is a published leak; the reference form is the reason it is safe to commit.
+
+Provision the token read-only and granular to the `@vedatech` scope. It grants read access to one vendor's package and nothing in this repository, so its blast radius is a vendor's source, not SDP's infrastructure — but rotate it through npm and GitHub together like any other.
+
+**Absence is a supported state.** Fork pull requests cannot read repository secrets, and SDP accepts provider contributions from forks. Every install runs through `.github/scripts/pnpm-install.sh`, which drops `@sdp/veda` from the install when the token is missing and sets `CI_HAS_NPM_TOKEN=false`; the jobs that genuinely need the SDK (the API typecheck, the API and `@sdp/veda` unit suites, the API bundle, the API image, the compose smoke) then skip with a GitHub notice naming the cause instead of failing on a credential the contributor cannot hold. Everything else runs unchanged.
+
 ## Cloud Run Boundary
 
 The Cloud Run deploy workflows authenticate to Google Cloud using `DEPLOY_WIF_PROVIDER` and `DEPLOY_SA`. Push-triggered deployments build an image, push it to Artifact Registry, execute the migration job, update the API service, and update the cron job image. A manual production deployment instead resolves an existing SHA-tagged image to its immutable digest and never runs migrations.

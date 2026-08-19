@@ -55,6 +55,11 @@ jobs:
           sbom: false
           build-args: |
             GIT_SHA=${{ github.sha }}
+          # Only apps/sdp-api/Dockerfile mounts this; it installs the private
+          # @vedatech/svm-sdk that `@sdp/veda` owns. A BuildKit secret rather
+          # than a build-arg so it never lands in a published layer.
+          secrets: |
+            npm_token=${{ secrets.NPM_TOKEN }}
           tags: |
             ${{ env.GHCR_IMAGE }}:scan-amd64
           cache-from: type=gha,scope=${{ matrix.service }}
@@ -78,6 +83,11 @@ jobs:
           sbom: false
           build-args: |
             GIT_SHA=${{ github.sha }}
+          # Only apps/sdp-api/Dockerfile mounts this; it installs the private
+          # @vedatech/svm-sdk that `@sdp/veda` owns. A BuildKit secret rather
+          # than a build-arg so it never lands in a published layer.
+          secrets: |
+            npm_token=${{ secrets.NPM_TOKEN }}
           tags: |
             ${{ env.GHCR_IMAGE }}:scan-arm64
           cache-from: type=gha,scope=${{ matrix.service }}
@@ -105,6 +115,11 @@ jobs:
           sbom: false
           build-args: |
             GIT_SHA=${{ github.sha }}
+          # Only apps/sdp-api/Dockerfile mounts this; it installs the private
+          # @vedatech/svm-sdk that `@sdp/veda` owns. A BuildKit secret rather
+          # than a build-arg so it never lands in a published layer.
+          secrets: |
+            npm_token=${{ secrets.NPM_TOKEN }}
           tags: |
             ${{ env.GHCR_IMAGE }}:${{ env.VERSION }}
             ${{ env.GHCR_IMAGE }}:latest

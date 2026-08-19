@@ -3,6 +3,18 @@
 # sdp-api — Node.js runtime image. Build context is the monorepo root:
 #
 #     docker build -f apps/sdp-api/Dockerfile -t sdp-api .
+#
+# `@sdp/veda` owns the PRIVATE `@vedatech/svm-sdk` package, so the deps stage
+# needs a read-only npm token for the `@vedatech` scope. Pass it as a BuildKit
+# SECRET — never `--build-arg`, and never `ENV`: both persist in the published
+# image's layer history and `docker history` prints them.
+#
+#     docker build -f apps/sdp-api/Dockerfile -t sdp-api . \
+#       --secret id=npm_token,src=$HOME/.secrets/veda-npm.env
+#
+# The secret's contents may be either a bare token or a `NPM_TOKEN=…` env file;
+# the deps stage accepts both so the same file works for `docker build`,
+# `docker compose build` and `docker run --env-file`.
 
 # Digest pinned so rebuilds don't float onto a new node:24-slim.
 FROM node:24-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS base
@@ -33,7 +45,19 @@ COPY packages/kit-augment/package.json ./packages/kit-augment/
 COPY packages/sdp-kamino/package.json ./packages/sdp-kamino/
 COPY patches ./patches
 
+# The secret is read INSIDE the RUN and never assigned with ENV/ARG, so it lives
+# only in this layer's process environment and leaves no trace in the image.
+# `set +x`-style discipline throughout: the value is never echoed, and the
+# fallback path prints the flag to pass, never what it should contain.
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
+    --mount=type=secret,id=npm_token \
+    if [ -f /run/secrets/npm_token ]; then \
+      NPM_TOKEN="$(sed -n 's/^[[:space:]]*NPM_TOKEN=//p' /run/secrets/npm_token | tail -n1)"; \
+      [ -n "$NPM_TOKEN" ] || NPM_TOKEN="$(tr -d ' \t\r\n' < /run/secrets/npm_token)"; \
+      export NPM_TOKEN; \
+    else \
+      echo "warning: no npm_token build secret; @vedatech/svm-sdk will 404. Pass --secret id=npm_token,src=<env file or token file>." >&2; \
+    fi; \
     pnpm install --frozen-lockfile --filter @sdp/api...
 
 FROM base AS builder

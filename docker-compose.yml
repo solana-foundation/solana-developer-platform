@@ -32,6 +32,8 @@ services:
       context: .
       dockerfile: apps/sdp-api/Dockerfile
       target: builder
+      secrets:
+        - npm_token
     working_dir: /repo/apps/sdp-api
     command: ["node", "scripts/migrate-postgres.mjs"]
     environment:
@@ -44,6 +46,8 @@ services:
     build:
       context: .
       dockerfile: apps/sdp-api/Dockerfile
+      secrets:
+        - npm_token
     restart: unless-stopped
     ports:
       - "${SDP_API_PORT:-8787}:8787"
@@ -164,6 +168,20 @@ services:
       PHOTON_URL: ${PHOTON_URL:-http://host.docker.internal:8784}
       PROVER_URL: ${PROVER_URL:-http://host.docker.internal:3001}
       RUST_LOG: ${RUST_LOG:-info}
+
+# Build-time only. `@sdp/veda` depends on the private `@vedatech/svm-sdk`, so the
+# two services built from apps/sdp-api/Dockerfile need a read-only token for the
+# `@vedatech` npm scope. It is a BUILD secret, not a runtime one: the deployed
+# API reads nothing from npm, so no environment ever has to carry this value.
+#
+#   set -a && . ~/.secrets/veda-npm.env && set +a && docker compose build
+#
+# Sourced from the environment rather than a fixed host path so CI can pass the
+# repository secret the same way. With NPM_TOKEN unset the build still runs and
+# fails inside pnpm with the Dockerfile's own warning above it.
+secrets:
+  npm_token:
+    environment: NPM_TOKEN
 
 volumes:
   sdp-postgres-data:

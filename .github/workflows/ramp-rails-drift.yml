@@ -51,7 +51,9 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: .github/scripts/pnpm-install.sh
 
       - name: Check for committed dumps
         id: dumps

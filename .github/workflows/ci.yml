@@ -32,7 +32,9 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: .github/scripts/pnpm-install.sh
 
       - name: Require exact direct dependency versions
         run: node scripts/check-pinned-dependency-versions.mjs
@@ -96,7 +98,9 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: .github/scripts/pnpm-install.sh
 
       - name: Lint
         run: |
@@ -152,12 +156,26 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: .github/scripts/pnpm-install.sh
 
       - name: Detect changed packages
         id: changed
         run: |
           CHANGED_PACKAGES=$(git diff --name-only origin/main...HEAD | awk -F/ '/^(apps|packages)\// {print $1 "/" $2}' | sort -u | tr '\n' ' ' | xargs)
+          if [ "${CI_HAS_NPM_TOKEN}" != "true" ]; then
+            # These two resolve `@vedatech/svm-sdk` types, which the install
+            # could not fetch (see .github/scripts/pnpm-install.sh). Dropping
+            # them keeps the rest of a forked pull request's typecheck honest
+            # rather than failing the job on an unrelated missing credential.
+            NEEDS_SDK='^(packages/sdp-veda|apps/sdp-api)$'
+            SKIPPED=$(echo "${CHANGED_PACKAGES}" | tr ' ' '\n' | grep -E "${NEEDS_SDK}" | tr '\n' ' ' | xargs || true)
+            CHANGED_PACKAGES=$(echo "${CHANGED_PACKAGES}" | tr ' ' '\n' | grep -vE "${NEEDS_SDK}" | tr '\n' ' ' | xargs || true)
+            if [ -n "${SKIPPED}" ]; then
+              echo "::notice title=Typecheck skipped::${SKIPPED} need the private @vedatech/svm-sdk package, which this run could not fetch."
+            fi
+          fi
           echo "packages=${CHANGED_PACKAGES}" >> "$GITHUB_OUTPUT"
 
       - name: Typecheck
@@ -218,7 +236,9 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: .github/scripts/pnpm-install.sh
 
       - name: Validate Doppler bootstrap secret
         if: env.CI_IS_FORK_PULL_REQUEST != 'true'
@@ -235,17 +255,26 @@ jobs:
         uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
       - name: Unit tests (Doppler)
-        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
+        if: env.CI_HAS_DOPPLER_TOKEN == 'true' && env.CI_HAS_NPM_TOKEN == 'true'
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
         run: pnpm test
 
       - name: Unit tests (fork-safe)
-        if: env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true'
+        if: env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true' && env.CI_HAS_NPM_TOKEN == 'true'
         run: |
           echo "::notice title=Fork-safe unit tests::DOPPLER_TOKEN_CI is unavailable to forked pull requests, so unit tests are running with local defaults instead of Doppler dev_ci secrets."
           node scripts/run-workspace-tests.mjs unit
+
+      # Same run, minus the two packages whose suites import @vedatech/svm-sdk.
+      # Turbo takes the exclusions as extra filters, so every other package's
+      # tests still run — the alternative was skipping the whole unit job.
+      - name: Unit tests (no private registry access)
+        if: env.CI_HAS_NPM_TOKEN != 'true'
+        run: |
+          echo "::notice title=Reduced unit tests::@sdp/veda and @sdp/api import the private @vedatech/svm-sdk package, which this run could not fetch, so their suites are skipped."
+          pnpm exec turbo run test --filter='!@sdp/api-integration' --filter='!@sdp/veda' --filter='!@sdp/api'
 
       - name: Scripts tests
         run: pnpm test:scripts
@@ -271,23 +300,37 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: .github/scripts/pnpm-install.sh
 
+      # No degraded variant: the bundle links @sdp/veda, which links the private
+      # @vedatech/svm-sdk. There is nothing partial to build, so say so rather
+      # than fail on a missing credential a forked pull request cannot supply.
       - name: Build API (Node bundle)
+        if: env.CI_HAS_NPM_TOKEN == 'true'
         run: pnpm --filter ./apps/sdp-api build
+
+      - name: Build API skipped
+        if: env.CI_HAS_NPM_TOKEN != 'true'
+        run: echo "::notice title=API build skipped::The API bundle links the private @vedatech/svm-sdk package, which this run could not fetch."
 
   docker_build_api:
     name: Docker Build API
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      CI_HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
 
       - name: Set up Docker Buildx
+        if: env.CI_HAS_NPM_TOKEN == 'true'
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Build sdp-api image (no push)
+        if: env.CI_HAS_NPM_TOKEN == 'true'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
@@ -299,8 +342,17 @@ jobs:
           tags: sdp-api:ci-${{ github.sha }}
           build-args: |
             GIT_SHA=${{ github.sha }}
+          # A BuildKit SECRET, deliberately not a build-arg: the deps stage
+          # installs the private @vedatech/svm-sdk, and an ARG/ENV would keep the
+          # token in the image's layer history.
+          secrets: |
+            npm_token=${{ secrets.NPM_TOKEN }}
           cache-from: type=gha,scope=sdp-api
           cache-to: type=gha,scope=sdp-api,mode=max
+
+      - name: Build sdp-api image skipped
+        if: env.CI_HAS_NPM_TOKEN != 'true'
+        run: echo "::notice title=API image build skipped::The image installs the private @vedatech/svm-sdk package, and NPM_TOKEN is unavailable to this run."
 
   docker_build_docs:
     name: Docker Build Docs
@@ -363,28 +415,42 @@ jobs:
     env:
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_c21va2UubG9jYWwuY2xlcmsuZGV2JA
       CLERK_SECRET_KEY: sk_test_dummy_smoke_for_ci_only
+      CI_HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
 
       - name: Set up Docker Buildx
+        if: env.CI_HAS_NPM_TOKEN == 'true'
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
+      # `secrets.npm_token.environment` in docker-compose.yml reads NPM_TOKEN
+      # from here and hands it to the API image's deps stage as a mounted build
+      # secret. Compose supplies it to the two services built from
+      # apps/sdp-api/Dockerfile only.
       - name: Build compose stack
+        if: env.CI_HAS_NPM_TOKEN == 'true'
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: docker compose build
 
       - name: Bring up stack and wait for healthy
+        if: env.CI_HAS_NPM_TOKEN == 'true'
         run: docker compose up -d --wait --wait-timeout 240
 
       - name: Dump compose state
-        if: always()
+        if: always() && env.CI_HAS_NPM_TOKEN == 'true'
         run: |
           docker compose ps
           docker compose logs --no-color --tail=200
 
       - name: Tear down
-        if: always()
+        if: always() && env.CI_HAS_NPM_TOKEN == 'true'
         run: docker compose down --volumes --remove-orphans
+
+      - name: Compose smoke skipped
+        if: env.CI_HAS_NPM_TOKEN != 'true'
+        run: echo "::notice title=Compose smoke skipped::The API image installs the private @vedatech/svm-sdk package, and NPM_TOKEN is unavailable to this run."
 
   build_docs:
     name: Build Docs
@@ -407,7 +473,9 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: .github/scripts/pnpm-install.sh
 
       - name: Env configurator drift check
         run: node scripts/check-env-configurator-drift.mjs
@@ -439,7 +507,9 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: .github/scripts/pnpm-install.sh
 
       - name: Generate public docs artifacts
         run: |
@@ -553,7 +623,9 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: .github/scripts/pnpm-install.sh
 
       - name: Validate Doppler bootstrap secret
         if: matrix.provider == 'kora' && env.CI_IS_FORK_PULL_REQUEST != 'true'
@@ -596,9 +668,11 @@ jobs:
           read -r -a test_files <<< "${INTEGRATION_TEST_FILES}"
           if [ "${CI_HAS_DOPPLER_TOKEN}" = "true" ]; then
             scripts/doppler/run-with-config.sh pnpm kora:surfpool:integration -- "${test_files[@]}"
-          elif [ "${CI_IS_FORK_PULL_REQUEST}" = "true" ] && [ "${INTEGRATION_SHARD_NAME}" = "Surfpool / Access" ]; then
+          elif [ "${CI_IS_FORK_PULL_REQUEST}" = "true" ] && [ "${INTEGRATION_SHARD_NAME}" = "Surfpool / Access" ] && [ "${CI_HAS_NPM_TOKEN}" = "true" ]; then
             echo "::notice title=Fork-safe Surfpool Access::Running the Surfpool Access shard without managed RPC or hosted custody secrets."
             SOLANA_RPC_CI_PREFERRED_PROVIDER=default pnpm kora:surfpool:integration -- "${test_files[@]}"
+          elif [ "${CI_IS_FORK_PULL_REQUEST}" = "true" ] && [ "${INTEGRATION_SHARD_NAME}" = "Surfpool / Access" ]; then
+            echo "::notice title=Fork-safe Surfpool Access skip::This shard boots @sdp/api, which links the private @vedatech/svm-sdk package that a forked pull request cannot fetch."
           elif [ "${CI_IS_FORK_PULL_REQUEST}" = "true" ]; then
             echo "::notice title=Fork-safe Surfpool integration skip::Forked pull requests cannot access managed Solana RPC secrets, so this Surfpool shard is skipped."
           else
@@ -720,7 +794,9 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: .github/scripts/pnpm-install.sh
 
       - name: Validate Doppler bootstrap secret
         if: env.CI_IS_FORK_PULL_REQUEST != 'true'
