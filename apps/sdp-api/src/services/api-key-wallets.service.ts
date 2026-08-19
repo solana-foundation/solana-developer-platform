@@ -1,14 +1,30 @@
-import type { Permission } from "@sdp/types";
+import type { ApiKeyWalletScope, Permission } from "@sdp/types";
 import type { PreparedStatement } from "@/db";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
+import { getLogger } from "@/runtime/logger";
 
 export interface ApiKeyWalletBinding {
   walletId: string;
   permissions: Permission[];
 }
 
+export interface ExactApiKeyWalletBinding extends ApiKeyWalletBinding {
+  custodyWalletId: string;
+}
+
 export interface ApiKeyWalletBindingForKey extends ApiKeyWalletBinding {
   apiKeyId: string;
+}
+
+export interface ApiKeyWalletPermissionRow {
+  wallet_id: string;
+  custody_wallet_id: string | null;
+  permissions: unknown;
+}
+
+interface CustodyWalletCandidateRow {
+  custody_wallet_id: string;
+  wallet_id: string;
 }
 
 export const DEFAULT_API_KEY_WALLET_PERMISSIONS: Permission[] = ["*"];
@@ -24,6 +40,121 @@ export function normalizeApiKeyWalletPermissions(permissions?: Permission[] | nu
   }
 
   return deduped;
+}
+
+export function hydrateApiKeyWalletAuthorization(
+  permissionRows: ApiKeyWalletPermissionRow[],
+  preferredSigningWalletId: string | null
+): {
+  walletScope: ApiKeyWalletScope;
+  signingWalletId: string | null;
+  signingWalletIds: string[];
+  walletBindings: ExactApiKeyWalletBinding[];
+} {
+  const walletBindings = permissionRows.flatMap((row) =>
+    row.custody_wallet_id
+      ? [
+          {
+            walletId: row.wallet_id,
+            custodyWalletId: row.custody_wallet_id,
+            permissions: normalizeApiKeyWalletPermissions(safeParsePermissions(row.permissions)),
+          },
+        ]
+      : []
+  );
+  const signingWalletIds = walletBindings.map((binding) => binding.walletId);
+
+  return {
+    walletScope:
+      permissionRows.length > 0 || preferredSigningWalletId !== null ? "selected" : "all",
+    signingWalletId: preferredSigningWalletId ?? signingWalletIds[0] ?? null,
+    signingWalletIds,
+    walletBindings,
+  };
+}
+
+export async function loadApiKeyWalletAuthorization(
+  db: DatabaseClient,
+  apiKeyId: string,
+  organizationId: string,
+  projectId: string,
+  preferredSigningWalletId: string | null
+) {
+  const permissionResult = await db
+    .prepare(
+      `SELECT wallet_id, permissions
+       FROM api_key_wallet_permissions
+       WHERE api_key_id = ?
+       ORDER BY created_at ASC`
+    )
+    .bind(apiKeyId)
+    .all<Omit<ApiKeyWalletPermissionRow, "custody_wallet_id">>();
+
+  const permissionRows = permissionResult.results ?? [];
+  if (permissionRows.length === 0 && preferredSigningWalletId) {
+    permissionRows.push({ wallet_id: preferredSigningWalletId, permissions: ["*"] });
+  }
+  if (permissionRows.length === 0) {
+    return hydrateApiKeyWalletAuthorization([], preferredSigningWalletId);
+  }
+
+  const walletIds = permissionRows.map((row) => row.wallet_id);
+  const placeholders = walletIds.map(() => "?").join(", ");
+  const candidates = await db
+    .prepare(
+      `SELECT w.id AS custody_wallet_id, w.wallet_id
+       FROM custody_wallets w
+       JOIN custody_configs c ON c.id = w.custody_config_id
+       WHERE c.organization_id = ?
+         AND (c.project_id IS NULL OR c.project_id = ?)
+         AND c.status = 'active'
+         AND w.status = 'active'
+         AND w.wallet_id IN (${placeholders})
+
+       UNION ALL
+
+       SELECT w.id AS custody_wallet_id, w.wallet_id
+       FROM custody_wallets w
+       JOIN custody_connections c ON c.id = w.custody_connection_id
+       WHERE c.organization_id = ?
+         AND c.project_id = ?
+         AND c.status = 'active'
+         AND w.status = 'active'
+         AND w.wallet_id IN (${placeholders})`
+    )
+    .bind(organizationId, projectId, ...walletIds, organizationId, projectId, ...walletIds)
+    .all<CustodyWalletCandidateRow>();
+
+  const candidatesByWalletId = new Map<string, string[]>();
+  for (const candidate of candidates.results ?? []) {
+    const matches = candidatesByWalletId.get(candidate.wallet_id) ?? [];
+    matches.push(candidate.custody_wallet_id);
+    candidatesByWalletId.set(candidate.wallet_id, matches);
+  }
+
+  const resolvedRows = permissionRows.map((row): ApiKeyWalletPermissionRow => {
+    const matches = candidatesByWalletId.get(row.wallet_id) ?? [];
+    if (matches.length !== 1) {
+      // The binding hydrates as deny-only (selected scope, no usable wallet),
+      // so the key silently loses access; surface it for operators.
+      getLogger().warn(
+        {
+          apiKeyId,
+          organizationId,
+          projectId,
+          walletId: row.wallet_id,
+          candidateCount: matches.length,
+        },
+        "api_key_wallet_binding_unresolved"
+      );
+    }
+    return {
+      ...row,
+      custody_wallet_id: matches.length === 1 ? matches[0] : null,
+    };
+  });
+
+  return hydrateApiKeyWalletAuthorization(resolvedRows, preferredSigningWalletId);
 }
 
 export async function listApiKeyWalletBindings(

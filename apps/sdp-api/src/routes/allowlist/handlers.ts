@@ -1,13 +1,13 @@
 import type { Context } from "hono";
-import { z } from "zod";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
-import { AppError, badRequest, notFound } from "@/lib/errors";
+import { AppError, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { createAllowlistService } from "@/services/allowlist.service";
 import { AuditService } from "@/services/audit.service";
 import type { Env } from "@/types/env";
-import { addEntrySchema } from "./schemas";
+import type { addEntrySchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -22,15 +22,8 @@ export const listEntries = async (c: AppContext) => {
   return success(c, { entries });
 };
 
-export const addEntry = async (c: AppContext) => {
-  const body = await c.req.json();
-  const parsed = addEntrySchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+export const addEntry = async (c: ValidatedBodyContext<typeof addEntrySchema>) => {
+  const body = c.req.valid("json");
 
   const allowlistService = createAllowlistService(c.env);
   const auditService = new AuditService(getDb(c.env));
@@ -38,17 +31,17 @@ export const addEntry = async (c: AppContext) => {
   try {
     const entry = await allowlistService.addEntry({
       id: `al_${crypto.randomUUID()}`,
-      type: parsed.data.type,
-      value: parsed.data.value,
-      tier: parsed.data.tier ?? "standard",
-      notes: parsed.data.notes,
+      type: body.type,
+      value: body.value,
+      tier: body.tier ?? "standard",
+      notes: body.notes,
     });
 
     await auditService.log(c, {
       action: "create",
       resourceType: "allowlist",
       resourceId: entry.id,
-      metadata: parsed.data,
+      metadata: body,
     });
 
     return created(c, { entry });

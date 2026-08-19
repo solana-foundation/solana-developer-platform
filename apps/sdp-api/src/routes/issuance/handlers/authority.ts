@@ -3,12 +3,13 @@ import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { AuthorityType } from "@solana-program/token-2022";
 import type { Context } from "hono";
-import { z } from "zod";
+import type { z } from "zod";
 import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
 import {
   approvedWalletOperationId,
@@ -24,7 +25,7 @@ import {
   getTenantTokenService,
   requireProjectScope,
 } from "../helpers";
-import { updateAuthoritySchema } from "../schemas";
+import type { updateAuthoritySchema } from "../schemas";
 import {
   type AuthorityRole,
   createResolvedAuthoritySigner,
@@ -67,18 +68,13 @@ const mapAuthorityRole = (role: AuthorityRole): MosaicAuthorityRole => {
   }
 };
 
-export const prepareUpdateAuthority = async (c: AppContext) => {
+export const prepareUpdateAuthority = async (
+  c: ValidatedBodyContext<typeof updateAuthoritySchema>
+) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
 
-  const body = await c.req.json();
-  const parsed = updateAuthoritySchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
@@ -95,13 +91,13 @@ export const prepareUpdateAuthority = async (c: AppContext) => {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
-  const role = parsed.data.authority.role;
+  const role = body.authority.role;
   const currentAuthorityRaw = await resolveCurrentAuthorityForRole(
     c.env,
     tokenService,
     token,
     role,
-    parsed.data.authority.currentAuthority
+    body.authority.currentAuthority
   );
 
   if (!currentAuthorityRaw) {
@@ -110,15 +106,15 @@ export const prepareUpdateAuthority = async (c: AppContext) => {
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const currentAuthority = assertValidAddress(currentAuthorityRaw, "currentAuthority");
-  const newAuthority = parsed.data.authority.newAuthority
-    ? assertValidAddress(parsed.data.authority.newAuthority, "newAuthority")
+  const newAuthority = body.authority.newAuthority
+    ? assertValidAddress(body.authority.newAuthority, "newAuthority")
     : null;
 
   const { signer } = await resolveAuthoritySigner({
     env: c.env,
     auth,
     token,
-    requestedWalletId: parsed.data.signingWalletId,
+    requestedWalletId: body.signingWalletId,
     currentAuthority: currentAuthorityRaw,
   });
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
@@ -132,7 +128,7 @@ export const prepareUpdateAuthority = async (c: AppContext) => {
   });
 
   let simulation: unknown;
-  if (parsed.data.options?.simulate) {
+  if (body.options?.simulate) {
     const rpc = createRpc(c.env);
     const txBytes = Buffer.from(prepared.serializedTx, "base64");
     simulation = await simulateTransaction(rpc, txBytes);
@@ -183,18 +179,11 @@ export const prepareUpdateAuthority = async (c: AppContext) => {
  * @returns The candidate, validated body, resolved resources, and raw payload.
  */
 export async function extractUpdateAuthorityPolicyCandidate(
-  c: AppContext
+  c: ValidatedBodyContext<typeof updateAuthoritySchema>
 ): Promise<PolicyGateExtraction> {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
-  const parsed = updateAuthoritySchema.safeParse(await c.req.json());
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-
-  const input = parsed.data;
+  const input = c.req.valid("json");
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,

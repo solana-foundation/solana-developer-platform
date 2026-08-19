@@ -3,12 +3,13 @@ import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { TokenTransaction } from "@sdp/types";
 import type { Context } from "hono";
-import { z } from "zod";
+import type { z } from "zod";
 import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
-import { AppError, badRequest, notFound } from "@/lib/errors";
+import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { type AuditIntent, AuditService } from "@/services/audit.service";
@@ -28,7 +29,7 @@ import {
   getTenantTokenService,
   requireProjectScope,
 } from "../helpers";
-import { mintSchema } from "../schemas";
+import type { mintSchema } from "../schemas";
 import {
   assertDestinationAllowedByControlList,
   getOnChainAllowlistMutationForMint,
@@ -284,18 +285,11 @@ async function syncDestinationToOnChainAllowlist(opts: {
   return true;
 }
 
-export const prepareMint = async (c: AppContext) => {
+export const prepareMint = async (c: ValidatedBodyContext<typeof mintSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
 
-  const body = await c.req.json();
-  const parsed = mintSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
@@ -312,24 +306,21 @@ export const prepareMint = async (c: AppContext) => {
     mintAddress: mintAddressRaw,
     mosaicAmount,
     amountBaseUnits,
-  } = resolveMintOperationAmount(token, parsed.data.mint.amount);
+  } = resolveMintOperationAmount(token, body.mint.amount);
 
   const ablListAddress = getOnChainAllowlistMutationForMint(token);
   if (!ablListAddress) {
-    const isOnControlList = await tokenService.isAddressAllowed(
-      tokenId,
-      parsed.data.mint.destination
-    );
+    const isOnControlList = await tokenService.isAddressAllowed(tokenId, body.mint.destination);
     assertDestinationAllowedByControlList({
       token,
-      destination: parsed.data.mint.destination,
+      destination: body.mint.destination,
       isOnControlList,
     });
   }
 
   const signingWalletId = resolveApiKeySigningWalletId(
     auth,
-    parsed.data.signingWalletId ?? token.signingWalletId,
+    body.signingWalletId ?? token.signingWalletId,
     ["tokens:write"]
   );
 
@@ -337,7 +328,7 @@ export const prepareMint = async (c: AppContext) => {
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const mintAuthority = assertValidAddress(token.mintAuthority ?? "", "mintAuthority");
   const mintAddress = assertValidAddress(mintAddressRaw, "mintAddress");
-  const destination = assertValidAddress(parsed.data.mint.destination, "destination");
+  const destination = assertValidAddress(body.mint.destination, "destination");
 
   // Build unsigned transaction using Mosaic
   // Note: amount is decimal (e.g., 100 for 100 tokens), SDK converts to raw
@@ -349,7 +340,7 @@ export const prepareMint = async (c: AppContext) => {
   if (ablListAddress) {
     const existingStatus = await tokenService.getAllowlistEntryStatusByAddress(
       tokenId,
-      parsed.data.mint.destination
+      body.mint.destination
     );
     if (existingStatus === "revoked") {
       throw new AppError("DESTINATION_REVOKED");
@@ -369,7 +360,7 @@ export const prepareMint = async (c: AppContext) => {
   });
 
   let simulation: unknown;
-  if (parsed.data.options?.simulate) {
+  if (body.options?.simulate) {
     const rpc = createRpc(c.env);
     const txBytes = Buffer.from(prepared.serializedTx, "base64");
     simulation = await simulateTransaction(rpc, txBytes);
@@ -386,9 +377,9 @@ export const prepareMint = async (c: AppContext) => {
     organizationId: auth.organizationId,
     type: "mint",
     params: {
-      destination: parsed.data.mint.destination,
-      amount: parsed.data.mint.amount,
-      memo: parsed.data.mint.memo,
+      destination: body.mint.destination,
+      amount: body.mint.amount,
+      memo: body.mint.memo,
     },
     initiatedByKeyId: auth.id,
   });
@@ -423,8 +414,8 @@ export const prepareMint = async (c: AppContext) => {
     resourceId: tx.id,
     metadata: {
       tokenId,
-      destination: parsed.data.mint.destination,
-      amount: parsed.data.mint.amount,
+      destination: body.mint.destination,
+      amount: body.mint.amount,
       mode: "prepare",
       addedToAllowlist: false,
     },
@@ -476,17 +467,12 @@ async function recordPreSubmissionMintFailure(options: {
  * @param c - Request context.
  * @returns The candidate or ungoverned marker, validated body, resources, and raw payload.
  */
-export async function extractMintPolicyCandidate(c: AppContext): Promise<PolicyGateExtraction> {
+export async function extractMintPolicyCandidate(
+  c: ValidatedBodyContext<typeof mintSchema>
+): Promise<PolicyGateExtraction> {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
-  const parsed = mintSchema.safeParse(await c.req.json());
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-
-  const input = parsed.data;
+  const input = c.req.valid("json");
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
     tokenId,

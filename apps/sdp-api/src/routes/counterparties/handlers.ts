@@ -26,12 +26,13 @@ import {
   notFound,
 } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
   advanceCounterpartyRequirements,
   assertRampProviderAvailable,
 } from "@/routes/payments/handlers/ramps";
 import { resolveMuralRequirements } from "@/routes/payments/handlers/ramps/mural";
-import { submitCounterpartyRequirementsSchema } from "@/routes/payments/schemas";
+import type { submitCounterpartyRequirementsSchema } from "@/routes/payments/schemas";
 import { resolveScope, resolveWalletAddress } from "@/routes/payments/wallets";
 import { AuditService } from "@/services/audit.service";
 import {
@@ -44,10 +45,10 @@ import {
   counterpartyIdentitySchema,
   counterpartyIdParamsSchema,
   counterpartyRequirementsQuerySchema,
-  createCounterpartySchema,
+  type createCounterpartySchema,
   listCounterpartiesQuerySchema,
   listCounterpartyAccountsQuerySchema,
-  updateCounterpartySchema,
+  type updateCounterpartySchema,
 } from "./schemas";
 
 function mapToCounterparty(row: CounterpartyRow): Counterparty {
@@ -244,7 +245,9 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
   return success(c, requirements);
 };
 
-export const submitCounterpartyRequirements = async (c: AppContext) => {
+export const submitCounterpartyRequirements = async (
+  c: ValidatedBodyContext<typeof submitCounterpartyRequirementsSchema>
+) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const params = counterpartyIdParamsSchema.safeParse(c.req.param());
@@ -253,14 +256,9 @@ export const submitCounterpartyRequirements = async (c: AppContext) => {
     throw badRequestParams();
   }
 
-  const body = await c.req.json();
-  const parsed = submitCounterpartyRequirementsSchema.safeParse(body);
+  const body = c.req.valid("json");
 
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
-  }
-
-  await assertRampProviderAvailable(c, parsed.data.provider, auth.organizationId);
+  await assertRampProviderAvailable(c, body.provider, auth.organizationId);
 
   const repo = getCounterpartiesRepository(c);
   const counterparty = await repo.getCounterpartyById({
@@ -273,7 +271,7 @@ export const submitCounterpartyRequirements = async (c: AppContext) => {
     throw notFound("Counterparty");
   }
 
-  const input = parsed.data;
+  const input = body;
   let destinationWalletAddress: string | undefined;
   if (input.provider === "bvnk" && input.direction === "onramp") {
     const scope = await resolveScope(c);
@@ -317,21 +315,18 @@ export const submitCounterpartyRequirements = async (c: AppContext) => {
   return success(c, advanced);
 };
 
-export const createCounterparty = async (c: AppContext) => {
+export const createCounterparty = async (
+  c: ValidatedBodyContext<typeof createCounterpartySchema>
+) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
-  const body = await c.req.json();
-  const parsed = createCounterpartySchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
-  }
+  const body = c.req.valid("json");
 
   const repo = getCounterpartiesRepository(c);
 
-  if (parsed.data.externalId) {
+  if (body.externalId) {
     const existing = await repo.getCounterpartyByExternalId({
-      externalId: parsed.data.externalId,
+      externalId: body.externalId,
       organizationId: auth.organizationId,
       projectId,
     });
@@ -345,11 +340,11 @@ export const createCounterparty = async (c: AppContext) => {
   const counterparty = await repo.createCounterparty({
     organizationId: auth.organizationId,
     projectId,
-    externalId: parsed.data.externalId ?? null,
-    entityType: parsed.data.entityType,
-    displayName: parsed.data.displayName,
-    email: parsed.data.email,
-    identity: parsed.data.identity,
+    externalId: body.externalId ?? null,
+    entityType: body.entityType,
+    displayName: body.displayName,
+    email: body.email,
+    identity: body.identity,
     createdBy,
   });
 
@@ -366,7 +361,7 @@ export const createCounterparty = async (c: AppContext) => {
     resourceType: "counterparty",
     resourceId: counterparty.id,
     metadata: {
-      entityType: parsed.data.entityType,
+      entityType: body.entityType,
     },
   });
 
@@ -422,7 +417,9 @@ async function validateUpdatedIdentity(
   return input.identity === undefined ? undefined : result.data;
 }
 
-export const updateCounterparty = async (c: AppContext) => {
+export const updateCounterparty = async (
+  c: ValidatedBodyContext<typeof updateCounterpartySchema>
+) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const params = counterpartyIdParamsSchema.safeParse(c.req.param());
@@ -431,19 +428,14 @@ export const updateCounterparty = async (c: AppContext) => {
     throw badRequestParams();
   }
 
-  const body = await c.req.json();
-  const parsed = updateCounterpartySchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
-  }
+  const body = c.req.valid("json");
 
   const { counterpartyId } = params.data;
   const repo = getCounterpartiesRepository(c);
 
-  if (parsed.data.externalId) {
+  if (body.externalId) {
     const existing = await repo.getCounterpartyByExternalId({
-      externalId: parsed.data.externalId,
+      externalId: body.externalId,
       organizationId: auth.organizationId,
       projectId,
     });
@@ -456,18 +448,16 @@ export const updateCounterparty = async (c: AppContext) => {
     counterpartyId,
     organizationId: auth.organizationId,
     projectId,
-    entityType: parsed.data.entityType,
-    identity: parsed.data.identity,
+    entityType: body.entityType,
+    identity: body.identity,
   });
-  if (validatedIdentity !== undefined) {
-    parsed.data.identity = validatedIdentity;
-  }
+  const update = validatedIdentity === undefined ? body : { ...body, identity: validatedIdentity };
 
   const updated = await repo.updateCounterparty({
     counterpartyId,
     organizationId: auth.organizationId,
     projectId,
-    ...parsed.data,
+    ...update,
   });
 
   if (!updated) {
@@ -482,7 +472,7 @@ export const updateCounterparty = async (c: AppContext) => {
     action: "update",
     resourceType: "counterparty",
     resourceId: counterpartyId,
-    metadata: { changedFields: Object.keys(parsed.data) },
+    metadata: { changedFields: Object.keys(body) },
   });
 
   const response: CounterpartyResponse = { counterparty: mapToCounterparty(updated) };

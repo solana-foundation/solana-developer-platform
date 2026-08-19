@@ -140,6 +140,28 @@ describe("OpenAPI spec", () => {
     });
   });
 
+  it("documents optional exact Connection provisioning for both API-key create routes", () => {
+    const doc = createOpenApiDocument();
+
+    for (const path of ["/v1/api-keys", "/v1/projects/{projectId}/api-keys"]) {
+      const operation = doc.paths?.[path]?.post;
+      const requestSchema = getJsonSchema(operation?.requestBody);
+
+      expect(requestSchema.properties?.connectionId).toBeUndefined();
+      expect(JSON.stringify(requestSchema.properties?.provisionWallet)).toContain("connectionId");
+      expect(JSON.stringify(requestSchema.properties?.provisionWallet)).toContain("boolean");
+      expect(requestSchema.example).toMatchObject({
+        provisionWallet: { connectionId: "cconn_123" },
+      });
+      expect(operation?.responses?.["201"]).toBeDefined();
+      expect(operation?.responses?.["400"]).toBeDefined();
+      expect(operation?.responses?.["403"]).toBeDefined();
+      expect(operation?.responses?.["404"]).toBeDefined();
+      expect(operation?.responses?.["409"]).toBeDefined();
+      expect(operation?.responses?.["503"]).toBeDefined();
+    }
+  });
+
   it("documents exact-one wallet ownership and request-time runtime admission", () => {
     const doc = createOpenApiDocument();
     const createWallet = getWalletResponseSchema(

@@ -326,6 +326,19 @@ export class CustodyRuntimeTargets {
     return matches[0] ?? null;
   }
 
+  async findOperationalWalletById(params: {
+    organizationId: string;
+    projectId?: string;
+    custodyWalletId: string;
+  }): Promise<CustodyRuntimeWalletProjection | null> {
+    const wallets = await this.listWallets({
+      organizationId: params.organizationId,
+      projectId: params.projectId,
+      includeAllProviders: true,
+    });
+    return wallets.find((wallet) => wallet.id === params.custodyWalletId) ?? null;
+  }
+
   async findOwnedWalletForMutation(params: {
     organizationId: string;
     projectId?: string;
