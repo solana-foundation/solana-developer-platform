@@ -1983,17 +1983,8 @@ describe("Payments routes — recurring", () => {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
       "Content-Type": "application/json",
     };
-    const recurringPaymentId = await createRecurringPaymentForActivation(headers);
-
-    const activateRes = await app.request(
-      `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-      { method: "POST", headers, body: "{}" },
-      env
-    );
-    expect(activateRes.status).toBe(200);
-    const activateBody = (await activateRes.json()) as {
-      data: { recurringPayment: { subscriptionId: string } };
-    };
+    const activated = await activateRecurringPaymentForTest(headers);
+    const recurringPaymentId = activated.id;
     const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
     await getDb(env)
       .prepare("UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?")
@@ -2001,7 +1992,7 @@ describe("Payments routes — recurring", () => {
       .run();
     await getDb(env)
       .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
-      .bind(dueAt, activateBody.data.recurringPayment.subscriptionId)
+      .bind(dueAt, activated.subscriptionId)
       .run();
 
     const collectRes = await app.request(
@@ -2027,7 +2018,7 @@ describe("Payments routes — recurring", () => {
           ORDER BY a.created_at DESC
           LIMIT 1`
       )
-      .bind(activateBody.data.recurringPayment.subscriptionId)
+      .bind(activated.subscriptionId)
       .first<{
         id: string;
         status: string;
@@ -2061,7 +2052,7 @@ describe("Payments routes — recurring", () => {
            FROM payment_subscription_collection_attempts
           WHERE subscription_id = ? AND due_at = ?`
       )
-      .bind(activateBody.data.recurringPayment.subscriptionId, dueAt)
+      .bind(activated.subscriptionId, dueAt)
       .first<{ total: number }>();
     expect(Number(transferCount?.total)).toBe(1);
   });

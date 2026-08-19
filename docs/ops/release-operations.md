@@ -219,6 +219,8 @@ again.
 The query above already spans every wallet transfer type, so it also lists parked **batch chunks** —
 resolve such a chunk exactly as a single transfer and its recipients and parent batch follow on the
 next `trackPendingTransfers` run — and parked **recurring collections**, which need a second step.
+A chunk that was broadcast but could not record its signature carries it in
+`provider_data ->> 'submitted_signature'`; start there instead of searching the chain by address.
 
 #### Parked recurring collections
 
@@ -240,6 +242,20 @@ Resolve the transfer first, as above. Then close the attempt to match it: if the
 confirm the attempt against the recorded signature; if it never landed, fail the attempt so the
 cycle is rescheduled and collected once. Do not fail the attempt while its transfer is still
 parked — that is the double-charge the parking exists to prevent.
+
+An attempt whose `transfer_id` write was lost is missing from that list, and both parking guards key
+off `transfer_id`, so stale recovery will reschedule it 15 minutes after its last write — the double
+charge. `Failed to link a parked collection attempt to its transfer; reconcile manually` is logged
+whenever that happens. Sweep for them before the window elapses:
+
+```sql
+SELECT id AS attempt_id, subscription_id, due_at, updated_at
+FROM payment_subscription_collection_attempts
+WHERE status = 'processing'
+  AND transfer_id IS NULL
+  AND updated_at < now() - interval '5 minutes'
+ORDER BY due_at;
+```
 
 ### Schema compatibility
 
