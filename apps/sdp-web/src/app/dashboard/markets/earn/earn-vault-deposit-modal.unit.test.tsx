@@ -13,6 +13,7 @@ import {
 
 const USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 const IDEMPOTENCY_KEY = "11111111-1111-4111-8111-111111111111";
+const PROJECT_ID = "prj_test";
 
 const mocks = vi.hoisted(() => ({
   createEarnVaultDeposit: vi.fn(),
@@ -258,7 +259,12 @@ describe("EarnVaultDepositModal", () => {
       });
 
     render(
-      <EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} onDeposited={onDeposited} />
+      <EarnVaultDepositModal
+        projectId={PROJECT_ID}
+        strategy={strategy}
+        onClose={vi.fn()}
+        onDeposited={onDeposited}
+      />
     );
     const user = await enterDepositAmount();
     expect((await screen.findByRole("alert")).textContent).toContain("Network unavailable");
@@ -294,13 +300,15 @@ describe("EarnVaultDepositModal", () => {
       body: null,
     });
 
-    const first = render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    const first = render(
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />
+    );
     await enterDepositAmount();
     await screen.findByRole("alert");
     // Everything this component remembered is gone — the reload case.
     first.unmount();
 
-    render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
     await enterDepositAmount();
     await screen.findByRole("alert");
 
@@ -328,7 +336,9 @@ describe("EarnVaultDepositModal", () => {
         body: null,
       });
 
-      render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+      render(
+        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />
+      );
       const user = await enterDepositAmount();
       await screen.findByRole("alert");
       await user.click(screen.getByRole("button", { name: "Confirm deposit" }));
@@ -349,12 +359,14 @@ describe("EarnVaultDepositModal", () => {
       data: { kind: "approval_pending", message: "Approval required" },
     });
 
-    const held = render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    const held = render(
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />
+    );
     await enterDepositAmount();
     await screen.findByText("Approval required");
     held.unmount();
 
-    render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
     await enterDepositAmount();
     await screen.findByText("Approval required");
 
@@ -373,7 +385,9 @@ describe("EarnVaultDepositModal", () => {
       data: { kind: "approval_pending", message: "Approval required" },
     });
 
-    const held = render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    const held = render(
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />
+    );
     await enterDepositAmount();
     await screen.findByText("Approval required");
     held.unmount();
@@ -384,7 +398,7 @@ describe("EarnVaultDepositModal", () => {
       deposit: vaultDeposit("confirmed"),
     });
 
-    render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
     await enterDepositAmount();
     await screen.findByText("Approval required");
 
@@ -406,7 +420,9 @@ describe("EarnVaultDepositModal", () => {
       data: { kind: "approval_pending", message: "Approval required" },
     });
 
-    const held = render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    const held = render(
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />
+    );
     await enterDepositAmount();
     await screen.findByText("Approval required");
     held.unmount();
@@ -414,7 +430,7 @@ describe("EarnVaultDepositModal", () => {
     mocks.fetchEarnVaultDepositByRequestId.mockResolvedValue({ kind: "unavailable" });
     mocks.createEarnVaultDeposit.mockClear();
 
-    render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
     await enterDepositAmount();
 
     expect((await screen.findByRole("alert")).textContent).toContain(
@@ -434,7 +450,7 @@ describe("EarnVaultDepositModal", () => {
       body: null,
     });
 
-    render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
     const user = await enterDepositAmount();
     await screen.findByRole("alert");
     await user.click(screen.getByRole("button", { name: "Confirm deposit" }));
@@ -454,12 +470,14 @@ describe("EarnVaultDepositModal", () => {
       data: { kind: "submitted", deposit: vaultDeposit("submitted") },
     });
 
-    const done = render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    const done = render(
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />
+    );
     await enterDepositAmount();
     await screen.findByText("Deposit submitted");
     done.unmount();
 
-    render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
     await enterDepositAmount();
     await screen.findByText("Deposit submitted");
 
@@ -482,7 +500,12 @@ describe("EarnVaultDepositModal", () => {
     });
 
     render(
-      <EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} onDeposited={onDeposited} />
+      <EarnVaultDepositModal
+        projectId={PROJECT_ID}
+        strategy={strategy}
+        onClose={vi.fn()}
+        onDeposited={onDeposited}
+      />
     );
     await enterDepositAmount();
 
@@ -503,7 +526,12 @@ describe("EarnVaultDepositModal", () => {
     });
 
     render(
-      <EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} onDeposited={onDeposited} />
+      <EarnVaultDepositModal
+        projectId={PROJECT_ID}
+        strategy={strategy}
+        onClose={vi.fn()}
+        onDeposited={onDeposited}
+      />
     );
     await enterDepositAmount();
 
@@ -521,7 +549,7 @@ describe("EarnVaultDepositModal", () => {
       isLoading: false,
     });
     const user = userEvent.setup();
-    render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
     await screen.findByRole("dialog");
 
     await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
@@ -545,7 +573,7 @@ describe("EarnVaultDepositModal", () => {
       isLoading: false,
     });
 
-    render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
 
     const walletOption = await screen.findByRole("radio", { name: /Treasury wallet/ });
     expect((walletOption as HTMLInputElement).disabled).toBe(true);

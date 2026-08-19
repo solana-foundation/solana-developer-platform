@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { proxyToSdpApi } from "@/lib/sdp-api";
-import { vaultDepositsProxyQuery } from "./list-query";
+import { vaultDepositsProxyQuery } from "../provider-query";
 
 export async function POST(request: Request) {
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER);

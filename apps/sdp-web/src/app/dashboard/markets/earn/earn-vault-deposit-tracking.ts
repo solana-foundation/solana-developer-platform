@@ -1,5 +1,7 @@
 "use client";
 
+import { z } from "zod";
+
 /**
  * Browser-side durability for the vault deposit IDEMPOTENCY KEY.
  *
@@ -51,24 +53,34 @@ const IDEMPOTENCY_TTL_MS = 15 * 60_000;
 /** Bounded so a long session cannot grow the store without limit. */
 const MAX_STORED_ENTRIES = 20;
 
-interface StoredEntry {
-  /** Request fingerprint for a key, movement id for a watch. */
-  id: string;
-  value: string;
-  createdAt: number;
-  /**
-   * Explicit expiry, overriding the store's default TTL.
-   *
-   * `null` means "does not expire while this tab lives", which is not the
-   * unbounded claim it looks like: the whole store is `sessionStorage`, so the
-   * tab session is already the outer bound.
-   *
-   * Optional so an entry written by an older build — which had no such field —
-   * keeps working under the default TTL instead of being dropped as
-   * unrecognized. Dropping it would mint a fresh key for a request already in
-   * flight, which is the one outcome this module must never produce.
-   */
-  expiresAt?: number | null;
+/**
+ * One stored entry, validated at the boundary rather than narrowed by hand.
+ *
+ * This store is written by an older build of this same page as often as by the
+ * current one, so its contents are untrusted JSON — the same reason
+ * `earn-funding-wallets.ts` parses its rows and derives its row type from the
+ * schema. `expiresAt` is OPTIONAL so an entry from a build that predates the
+ * field keeps working under the default TTL instead of being dropped as
+ * unrecognized; dropping it would mint a fresh key for a request already in
+ * flight, which is the one outcome this module must never produce.
+ *
+ * `null` on `expiresAt` means "does not expire while this tab lives", which is
+ * not the unbounded claim it looks like: the whole store is `sessionStorage`, so
+ * the tab session is already the outer bound.
+ */
+const storedEntrySchema = z.object({
+  /** The request fingerprint this key belongs to. */
+  id: z.string().min(1),
+  value: z.string().min(1),
+  createdAt: z.number().finite(),
+  expiresAt: z.union([z.number().finite(), z.null()]).optional(),
+});
+
+type StoredEntry = z.infer<typeof storedEntrySchema>;
+
+/** A held entry is one an approval is still waiting on; it has no expiry. */
+function isHeldEntry(entry: StoredEntry): boolean {
+  return entry.expiresAt === null;
 }
 
 /** Whether an entry is still claimable, honouring its own expiry over the default. */
@@ -77,6 +89,35 @@ function isLiveEntry(entry: StoredEntry, now: number, ttlMs: number): boolean {
     return entry.expiresAt === null || now < entry.expiresAt;
   }
   return now - entry.createdAt < ttlMs;
+}
+
+/**
+ * Bound the store, evicting EXPIRING entries before held ones.
+ *
+ * A plain "keep the newest N" would drop a held entry once enough other
+ * fingerprints accumulated in one tab, and a held entry is an approval still
+ * pending server-side under that exact key: losing it mints a fresh key on the
+ * next submit, which opens a SECOND approval request for the same intent and can
+ * deposit twice. An expiring entry costs at most a replay if it is dropped
+ * early, so it is always the safer thing to lose.
+ *
+ * Held entries are still bounded — by the same cap, oldest first — because
+ * "never evicted" would make the store unbounded, and `sessionStorage` has a
+ * quota that failing to respect would lose EVERY entry rather than the oldest.
+ */
+function withinStorageBound(entries: readonly StoredEntry[]): StoredEntry[] {
+  if (entries.length <= MAX_STORED_ENTRIES) return [...entries];
+
+  const held = entries.filter(isHeldEntry);
+  const keptHeld = held.slice(Math.max(0, held.length - MAX_STORED_ENTRIES));
+  const room = MAX_STORED_ENTRIES - keptHeld.length;
+  const expiring = entries.filter((entry) => !isHeldEntry(entry));
+  // `slice(-0)` returns the WHOLE array, so an exhausted budget is explicit.
+  const keptExpiring = room <= 0 ? [] : expiring.slice(Math.max(0, expiring.length - room));
+
+  // Filter the original array so insertion order — newest last — survives.
+  const kept = new Set<StoredEntry>([...keptHeld, ...keptExpiring]);
+  return entries.filter((entry) => kept.has(entry));
 }
 
 function storage(): Storage | null {
@@ -137,29 +178,18 @@ function readEntries(storeKey: string, ttlMs: number): StoredEntry[] {
   }
   if (!Array.isArray(parsed)) return [];
 
-  // Validate every field rather than trusting the shape. This store is written
-  // by an older build of this same page as often as by the current one, and a
-  // half-recognized entry must be dropped, never coerced.
+  // Parsed per entry at the boundary: a half-recognized entry is dropped, never
+  // coerced.
   const now = Date.now();
-  return parsed.filter((entry): entry is StoredEntry => {
-    if (!entry || typeof entry !== "object") return false;
-    const candidate = entry as Partial<StoredEntry>;
-    const shaped =
-      typeof candidate.id === "string" &&
-      candidate.id.length > 0 &&
-      typeof candidate.value === "string" &&
-      candidate.value.length > 0 &&
-      typeof candidate.createdAt === "number" &&
-      Number.isFinite(candidate.createdAt) &&
-      (candidate.expiresAt === undefined ||
-        candidate.expiresAt === null ||
-        (typeof candidate.expiresAt === "number" && Number.isFinite(candidate.expiresAt)));
-    return shaped && isLiveEntry(candidate as StoredEntry, now, ttlMs);
+  return parsed.flatMap((entry) => {
+    const candidate = storedEntrySchema.safeParse(entry);
+    if (!candidate.success) return [];
+    return isLiveEntry(candidate.data, now, ttlMs) ? [candidate.data] : [];
   });
 }
 
 function writeEntries(storeKey: string, entries: readonly StoredEntry[]): void {
-  const bounded = entries.slice(-MAX_STORED_ENTRIES);
+  const bounded = withinStorageBound(entries);
   // Memory first and unconditionally: it is the tier that cannot fail, and it
   // has to already hold the value if the store refuses the very next write.
   memoryEntries.set(storeKey, bounded);
@@ -175,16 +205,29 @@ function writeEntries(storeKey: string, entries: readonly StoredEntry[]): void {
 }
 
 /**
- * What makes two submissions the SAME request: the strategy, the wallet paying
- * for it, and the amount. Change any one and it is a different deposit, not a
- * retry — which is exactly the distinction an idempotency key has to encode.
+ * What makes two submissions the SAME request: the PROJECT, the strategy, the
+ * wallet paying for it, and the amount. Change any one and it is a different
+ * deposit, not a retry — which is exactly the distinction an idempotency key has
+ * to encode.
+ *
+ * The project is in here for a reason that only shows up once the key is
+ * durable. A custody config may be ORGANIZATION-level, so two projects can
+ * resolve the same `custody_wallets` row; without the project, switching project
+ * in one tab and re-submitting the same strategy and amount reuses the first
+ * project's key. The API's replay lookup is keyed on
+ * `(organization_id, request_id)`, so that reused key resolves the FIRST
+ * project's movement — returning it as a replay instead of making the deposit.
+ * A ref-scoped key never survived a project switch, so this only became
+ * reachable when the key started outliving the component.
  */
 export function vaultDepositRequestFingerprint(input: {
+  /** `null` only before a project resolves; it still discriminates. */
+  projectId: string | null;
   strategyId: string;
   custodyWalletId: string;
   amount: string;
 }): string {
-  return JSON.stringify([input.strategyId, input.custodyWalletId, input.amount]);
+  return JSON.stringify([input.projectId, input.strategyId, input.custodyWalletId, input.amount]);
 }
 
 /**

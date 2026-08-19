@@ -394,7 +394,21 @@ export async function findEarnVaultDepositIdempotentKeyReplay(
     requestId: idempotencyKey,
   });
   if (movement) {
-    if (movement.idempotency_fingerprint !== resolved.idempotencyFingerprint) {
+    // PROJECT boundary on the replay, not just on the reads. The lookup above is
+    // keyed on `(organization_id, request_id)` — migration 0059's unique index —
+    // so a key first used in a SIBLING project resolves that project's movement.
+    // Returning it would both answer the wrong deposit and hand over its amount
+    // and signature. Reachable because organization-level custody configs give
+    // two projects the same `custody_wallets` row, so the rest of the request can
+    // legitimately match.
+    //
+    // Answered as the fingerprint conflict it is: the key really has been used by
+    // a different request. The caller chose the key, so learning that its own key
+    // is taken within its own organization tells it nothing it did not supply.
+    if (
+      !isMovementInProject(movement, resolved.projectId) ||
+      movement.idempotency_fingerprint !== resolved.idempotencyFingerprint
+    ) {
       throw conflict("Idempotency key already used with different request payload");
     }
     if (movement.status === "failed") {
@@ -751,7 +765,7 @@ export async function listEarnVaultDeposits(c: AppContext) {
     custodyWalletIds,
     limit: query.limit,
     before,
-    ...(query.settled === undefined ? {} : { settled: query.settled }),
+    settled: query.settled,
   });
 
   const last = rows.at(-1);

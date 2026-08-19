@@ -810,10 +810,10 @@ export function isEarnVaultDepositInFlight(deposit: EarnVaultDepositRecord): boo
   return !SETTLED_VAULT_MOVEMENT_STATUSES.has(deposit.status);
 }
 
-const VAULT_DEPOSIT_OUTCOME_KEYS: Record<EarnTerminalVaultMovementStatus, MessageKey> = {
+const VAULT_DEPOSIT_OUTCOME_KEYS = {
   confirmed: "DashboardEarn.deposit.vaultOutcomeConfirmed",
   failed: "DashboardEarn.deposit.vaultOutcomeFailed",
-};
+} as const satisfies Record<EarnTerminalVaultMovementStatus, MessageKey>;
 
 /**
  * Announce how a submitted vault deposit actually ended, and only once it has
@@ -847,8 +847,10 @@ export function useEarnVaultDepositOutcomeToast(
   onSettledRef.current = onSettled;
 
   const { data } = useSWR(
-    movementId ? ["dashboard-earn-vault-deposit", movementId] : null,
-    () => fetchEarnVaultDeposit(movementId as string),
+    movementId ? (["dashboard-earn-vault-deposit", movementId] as const) : null,
+    // The id comes from the KEY, which only exists when it is defined — no cast,
+    // and no second place that has to stay in sync with the null guard.
+    ([, watchedId]) => fetchEarnVaultDeposit(watchedId),
     {
       refreshInterval: (deposit) =>
         deposit && SETTLED_VAULT_MOVEMENT_STATUSES.has(deposit.status) ? 0 : 5_000,
@@ -989,14 +991,14 @@ const SETTLED_WITHDRAWAL_STATUSES: ReadonlySet<EarnPortfolioWithdrawal["status"]
   EARN_TERMINAL_WITHDRAWAL_STATUSES
 );
 
-const WITHDRAWAL_OUTCOME_KEYS: Record<EarnPortfolioWithdrawal["status"], MessageKey> = {
+const WITHDRAWAL_OUTCOME_KEYS = {
   completed: "DashboardEarn.overview.withdrawalCompleted",
   partially_completed: "DashboardEarn.overview.withdrawalPartiallyCompleted",
   failed: "DashboardEarn.overview.withdrawalFailed",
   cancelled: "DashboardEarn.overview.withdrawalCancelled",
   pending_approval: "DashboardEarn.overview.withdrawalPendingApproval",
   processing: "DashboardEarn.overview.withdrawalProcessing",
-};
+} as const satisfies Record<EarnPortfolioWithdrawal["status"], MessageKey>;
 
 /**
  * Announce how a submitted withdrawal actually ended, by watching the

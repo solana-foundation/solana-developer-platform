@@ -612,7 +612,7 @@ export function TreasurySolutionsWorkspace({
   providerAccess: EarnProviderAccess | null;
 }) {
   const t = useTranslations();
-  const { sdpEnvironment } = useDashboardWorkspace();
+  const { sdpEnvironment, selectedProjectId } = useDashboardWorkspace();
   const {
     wallets,
     error: walletsError,
@@ -790,6 +790,7 @@ export function TreasurySolutionsWorkspace({
       {depositStrategy ? (
         <EarnVaultDepositModal
           onClose={() => setDepositStrategy(null)}
+          projectId={selectedProjectId}
           onDeposited={(deposit) => {
             // Two refreshes, for two different moments. This one shows the
             // claimed position row and the debited wallet right away; the

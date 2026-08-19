@@ -541,6 +541,13 @@ export function EarnVaultDepositOutcomeTracker({
 
 export interface EarnVaultDepositModalProps {
   strategy: EarnStrategy;
+  /**
+   * The project this deposit belongs to, which is part of what makes two
+   * submissions the same request — see `vaultDepositRequestFingerprint`. Passed
+   * in rather than read from the workspace context so this modal stays
+   * context-free and directly testable.
+   */
+  projectId: string | null;
   onClose: () => void;
   onDeposited?: (deposit: EarnVaultDeposit) => void;
 }
@@ -552,6 +559,7 @@ export interface EarnVaultDepositModalProps {
  */
 export function EarnVaultDepositModal({
   strategy,
+  projectId,
   onClose,
   onDeposited,
 }: EarnVaultDepositModalProps) {
@@ -615,6 +623,7 @@ export function EarnVaultDepositModal({
     // after a timeout — or after a reload that lost this component entirely —
     // replays the same key instead of signing a second transfer.
     const fingerprint = vaultDepositRequestFingerprint({
+      projectId,
       strategyId: strategy.id,
       custodyWalletId: selectedWallet.id,
       amount,

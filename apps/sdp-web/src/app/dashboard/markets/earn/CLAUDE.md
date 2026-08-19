@@ -33,13 +33,17 @@ api/dashboard/markets/earn/
   vault-positions/route.ts           GET list (keyset cursor)
 ```
 
-`provider-query.ts` holds TWO validators with deliberately different failure
+`provider-query.ts` holds THREE validators with deliberately different failure
 modes. `programProxyQuery` is permissive-by-omission — an unrecognized param is
 dropped — because those routes predate the typed client and are reachable with
 arbitrary query strings. `vaultPositionsProxyQuery` is **strict**: it is
 consumed only by our own typed client, so an unknown key, a repeated key, an
 out-of-range `limit` or a non-base64url cursor **400s** instead of silently
 reshaping the page. A typo must not return a different page of someone's money.
+`vaultDepositsProxyQuery` is the same posture over the deposits list, sharing
+`ProxyQueryValidation` and `MAX_CURSOR_LENGTH` rather than restating them; its
+`requestId` is validated to the API's OWN `[\x20-\x7e]{1,255}` idempotency-key
+shape, because a tidier rule would 400 a legitimate key containing a slash.
 
 `proxyToSdpApi` never copies the inbound header bag — auth, project scope and
 tracing stay server-owned — so a client-set `Idempotency-Key` never reaches the
@@ -135,8 +139,15 @@ the body `requestId` form.
   record-before-broadcast window must carry the SAME key or the chain accepts
   the transfer twice — there is no provider-side dedupe behind this route — and
   a React ref dies with the modal and with the page load.
-  - `claimVaultDepositIdempotencyKey` mints once per `(strategy, wallet, amount)`
-    fingerprint; `releaseVaultDepositIdempotencyKey` retires it. **Retire only on
+  - The fingerprint is `(project, strategy, wallet, amount)`. The PROJECT is in
+    there because an organization-level custody config gives two projects the same
+    `custody_wallets` row: without it, switching project in one tab and
+    re-submitting the same strategy and amount reuses the first project's key, and
+    the API's org-scoped replay lookup then resolves the FIRST project's movement.
+    A ref-scoped key never survived a project switch, so this only became
+    reachable once the key outlived the component. The API refuses that case too
+    (see `routes/earn/CLAUDE.md`) — this keeps the client from asking.
+  - `claimVaultDepositIdempotencyKey` mints once per fingerprint; `releaseVaultDepositIdempotencyKey` retires it. **Retire only on
     a 4xx or a recorded deposit.** A 5xx is the dangerous one — a gateway timing
     out downstream of an API that already recorded and broadcast looks exactly
     like a provider being unavailable before it did. A key released too early is
@@ -159,6 +170,16 @@ the body `requestId` form.
     produces no movement, so its key survives until the next submit reuses it
     and the API answers 403 "denied by policy" — visible, and a 4xx retires the
     key, so the attempt after that mints a fresh one.
+  - Eviction under the entry cap drops EXPIRING entries before held ones. A plain
+    "keep the newest N" lost a held key once enough other fingerprints piled up in
+    one tab, and that mints a fresh key on the next submit — a second approval
+    request for one intent. Held entries are still bounded, because unbounded
+    growth would hit the `sessionStorage` quota and cost every entry rather than
+    the oldest.
+  - Entries are zod-parsed per row on read, and the row type is derived from that
+    schema — same convention as `deposit/earn-funding-wallets.ts`, and for the same
+    reason: this store is untrusted JSON written as often by an older build of the
+    page as by the current one.
   - A store that refuses every operation falls back to a module-scope map, so a
     dead store costs DURABILITY across a reload and never the answer to "is this
     the same request". Failing soft must not mean failing open.

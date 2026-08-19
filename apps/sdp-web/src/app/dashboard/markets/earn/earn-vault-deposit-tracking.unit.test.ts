@@ -11,6 +11,7 @@ import {
 const IDEMPOTENCY_STORE_KEY = "sdp:earn:vault-deposit:idempotency:v1";
 
 const request = {
+  projectId: "prj_1",
   strategyId: "strategy_1",
   custodyWalletId: "wallet_1",
   amount: "1",
@@ -37,6 +38,10 @@ describe("vaultDepositRequestFingerprint", () => {
 
     expect(vaultDepositRequestFingerprint({ ...request })).toBe(base);
     for (const different of [
+      // A shared organization-level wallet makes the project the only thing
+      // separating these two, which is why it is in the fingerprint.
+      { ...request, projectId: "prj_2" },
+      { ...request, projectId: null },
       { ...request, strategyId: "strategy_2" },
       { ...request, custodyWalletId: "wallet_2" },
       { ...request, amount: "2" },
@@ -178,5 +183,56 @@ describe("an approval hold suspends expiry", () => {
     );
 
     expect(claimVaultDepositIdempotencyKey(fingerprint)).toBe("legacy-key");
+  });
+});
+
+describe("storage bound", () => {
+  it("evicts expiring keys before a key an approval is waiting on", () => {
+    // The hazard: a held key dropped by a plain "keep newest N" mints a fresh
+    // key on the next submit, which opens a SECOND approval for one intent.
+    const heldFingerprint = vaultDepositRequestFingerprint(request);
+    const held = claimVaultDepositIdempotencyKey(heldFingerprint);
+    holdVaultDepositIdempotencyKey(heldFingerprint);
+
+    // Push well past the 20-entry cap with ordinary, expiring entries.
+    for (let index = 0; index < 40; index += 1) {
+      claimVaultDepositIdempotencyKey(
+        vaultDepositRequestFingerprint({ ...request, amount: `10${index}` })
+      );
+    }
+
+    expect(claimVaultDepositIdempotencyKey(heldFingerprint)).toBe(held);
+  });
+
+  it("still bounds held keys, so a refusing quota cannot cost every entry", () => {
+    const fingerprints = Array.from({ length: 30 }, (_, index) =>
+      vaultDepositRequestFingerprint({ ...request, amount: `20${index}` })
+    );
+    for (const fingerprint of fingerprints) {
+      claimVaultDepositIdempotencyKey(fingerprint);
+      holdVaultDepositIdempotencyKey(fingerprint);
+    }
+
+    const stored = JSON.parse(sessionStorage.getItem(IDEMPOTENCY_STORE_KEY) ?? "[]") as unknown[];
+    expect(stored.length).toBeLessThanOrEqual(20);
+    // The newest survive; the oldest are the ones given up.
+    expect(claimVaultDepositIdempotencyKey(fingerprints[29] as string)).toBeTruthy();
+  });
+
+  it("drops an entry the store cannot recognize as a whole entry", () => {
+    const fingerprint = vaultDepositRequestFingerprint(request);
+    sessionStorage.setItem(
+      IDEMPOTENCY_STORE_KEY,
+      JSON.stringify([
+        { id: fingerprint, value: "", createdAt: Date.now() },
+        { id: fingerprint, value: "ok", createdAt: "not-a-number" },
+        { id: fingerprint, value: "ok", createdAt: Date.now(), expiresAt: "soon" },
+      ])
+    );
+
+    // None of the three parse, so nothing is reused and a fresh key is minted.
+    expect(claimVaultDepositIdempotencyKey(fingerprint)).toBe(
+      "00000000-0000-4000-8000-000000000001"
+    );
   });
 });

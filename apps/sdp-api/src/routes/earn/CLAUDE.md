@@ -384,6 +384,17 @@ organization's own custody wallets.
     capability: the route re-applies every scoping rule, so a guessed key can
     only surface a deposit the caller could already read. It is also why the key
     is a QUERY filter and not a path segment — legal keys contain `/` and `?`.
+  - **The POST replay lookup is project-scoped too**, not just these reads.
+    `findMovementByRequestId` is keyed on `(organization_id, request_id)` and the
+    server fingerprint (`buildEarnVaultDepositFingerprint`) omits the project, so
+    a key first used by a SIBLING project matched on both and its movement was
+    returned as a replay — the wrong deposit, plus its amount and signature.
+    Reachable because an organization-level custody config gives two projects the
+    same `custody_wallets` row. `findEarnVaultDepositIdempotentKeyReplay` now
+    applies `isMovementInProject` and answers 409, the conflict it actually is.
+    Deliberately NOT fixed by adding the project to the fingerprint: that value is
+    persisted in `wallet_operations.raw_payload.executionRequest`, so changing it
+    would 409 every in-flight retry across a deploy.
   - `?settled=false` returns only movements that can still change, and recovery
     always asks for that. It is not a convenience: a client filtering an
     unbounded history locally has to page it all, and a workspace busy enough to
