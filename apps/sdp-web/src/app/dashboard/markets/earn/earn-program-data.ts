@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  EARN_TERMINAL_VAULT_MOVEMENT_STATUSES,
   EARN_TERMINAL_WITHDRAWAL_STATUSES,
   EARN_VAULT_MOVEMENT_STATUSES,
   type EarnPortfolioAllocationInput,
@@ -15,8 +16,11 @@ import {
   type EarnProgramWithdrawalRecord,
   type EarnProgramWithdrawalResponse,
   type EarnStrategy,
+  type EarnTerminalVaultMovementStatus,
   type EarnVaultDeposit,
+  type EarnVaultDepositRecord,
   type EarnVaultDepositRequest,
+  type EarnVaultMovementStatus,
   type EarnVaultPosition,
   type EarnVaultPositionsPage,
   type ListEarnProgramsResponse,
@@ -48,6 +52,7 @@ export type {
   EarnProgramWithdrawalRecord,
   EarnProgramWithdrawalResponse,
   EarnVaultDeposit,
+  EarnVaultDepositRecord,
   EarnVaultDepositRequest,
   EarnVaultPosition,
   EarnVaultPositionsPage,
@@ -611,6 +616,126 @@ export async function createEarnVaultDeposit(
   if (parsed.data.kind === "approval_pending" && result.status !== 202) return invalid;
 
   return { ok: true, status: result.status, data: parsed.data };
+}
+
+/**
+ * The durable record of one recorded deposit, read back by movement id.
+ *
+ * Annotated `z.ZodType<EarnVaultDepositRecord>` for the same reason the create
+ * envelope is: a field added or renamed in `@sdp/types` must fail typecheck
+ * here rather than be silently stripped from a parsed deposit.
+ */
+const earnVaultDepositRecordSchema: z.ZodType<EarnVaultDepositRecord> = z.object({
+  movementId: z.string(),
+  positionId: z.string(),
+  provider: z.string(),
+  providerReference: z.string(),
+  status: z.enum(EARN_VAULT_MOVEMENT_STATUSES),
+  signature: z.string(),
+  amount: z.string(),
+  failureReason: z.string().nullable(),
+  createdAt: z.string(),
+  confirmedAt: z.string().nullable(),
+});
+
+const earnVaultDepositResponseSchema = z.object({
+  data: z.object({ deposit: earnVaultDepositRecordSchema }),
+});
+
+/**
+ * Read one recorded vault deposit. Returns `undefined` for every unusable
+ * answer — a transport failure, a 404, or an envelope that does not parse.
+ *
+ * `undefined` is deliberately NOT terminal: the caller keeps polling. A read
+ * that failed says nothing about whether the deposit landed, and treating it
+ * as an outcome would announce a settlement the API never reported.
+ */
+export async function fetchEarnVaultDeposit(
+  movementId: string
+): Promise<EarnVaultDepositRecord | undefined> {
+  const result = await dashboardFetch<unknown>(
+    `/api/dashboard/markets/earn/vault-deposits/${encodeURIComponent(movementId)}`
+  );
+  if (!result.ok) return undefined;
+  const parsed = earnVaultDepositResponseSchema.safeParse(result.data);
+  return parsed.success ? parsed.data.data.deposit : undefined;
+}
+
+/**
+ * Statuses a vault movement never moves on from — the shared canonical set,
+ * one declaration in @sdp/types.
+ *
+ * Note what is NOT here: `pending`. It reads like a failure and is not one —
+ * SDP signed and recorded the transaction but could not establish that it
+ * reached the network, so the reconciliation sweep is still working on it.
+ * Announcing an outcome there would be the exact lie this watch exists to
+ * avoid, in the one case where the customer's money is genuinely in the air.
+ */
+const SETTLED_VAULT_MOVEMENT_STATUSES: ReadonlySet<EarnVaultMovementStatus> = new Set(
+  EARN_TERMINAL_VAULT_MOVEMENT_STATUSES
+);
+
+const VAULT_DEPOSIT_OUTCOME_KEYS: Record<EarnTerminalVaultMovementStatus, MessageKey> = {
+  confirmed: "DashboardEarn.deposit.vaultOutcomeConfirmed",
+  failed: "DashboardEarn.deposit.vaultOutcomeFailed",
+};
+
+/**
+ * Announce how a submitted vault deposit actually ended, and only once it has
+ * ended.
+ *
+ * `POST /vault-deposits` records the signed transaction BEFORE broadcasting it,
+ * so its response is a receipt for a signature, not for a holding. Between that
+ * receipt and the chain there are three real outcomes — landed, rejected, or
+ * the blockhash expired without it ever landing — and the every-minute
+ * reconciliation sweep is the only thing that can tell them apart. This watches
+ * the movement until it says one of them.
+ *
+ * Polls until the status is terminal (`confirmed | failed`), then announces
+ * once. Passing `undefined` — nothing deposited this session — does nothing and
+ * issues no requests.
+ *
+ * `onSettled` fires once, right after the announcement, so the caller can
+ * refresh the balances the deposit changed and retire the watch: a settled
+ * watcher has nothing left to do, and keeping it mounted would accumulate dead
+ * SWR subscriptions over a long session.
+ */
+export function useEarnVaultDepositOutcomeToast(
+  movementId: string | undefined,
+  onSettled?: () => void
+): void {
+  const t = useTranslations();
+  const announced = useRef<string | undefined>(undefined);
+  // A ref so a re-created callback identity can never re-trigger the effect —
+  // the announcement (and therefore the retire signal) must fire exactly once.
+  const onSettledRef = useRef(onSettled);
+  onSettledRef.current = onSettled;
+
+  const { data } = useSWR(
+    movementId ? ["dashboard-earn-vault-deposit", movementId] : null,
+    () => fetchEarnVaultDeposit(movementId as string),
+    {
+      refreshInterval: (deposit) =>
+        deposit && SETTLED_VAULT_MOVEMENT_STATUSES.has(deposit.status) ? 0 : 5_000,
+      dedupingInterval: EARN_PROGRAM_DEDUPING_MS,
+    }
+  );
+
+  useEffect(() => {
+    if (!data || !SETTLED_VAULT_MOVEMENT_STATUSES.has(data.status)) return;
+    // Once per movement: polling keeps returning the terminal read.
+    if (announced.current === data.movementId) return;
+    announced.current = data.movementId;
+
+    if (data.status === "confirmed") {
+      toast.success(t(VAULT_DEPOSIT_OUTCOME_KEYS.confirmed));
+    } else {
+      // The provider's own reason when there is one — "insufficient funds" is
+      // actionable and "the deposit failed" is not.
+      toast.error(data.failureReason || t(VAULT_DEPOSIT_OUTCOME_KEYS.failed));
+    }
+    onSettledRef.current?.();
+  }, [data, t]);
 }
 
 export interface EarnWithdrawalPreviewInput {

@@ -360,6 +360,30 @@ organization's own custody wallets.
     add a sponsor signature without broadcasting, preserving record-before-send,
     but this route deliberately selects `wallet-pays` until those programs are
     eligible for sponsorship.
+- `GET /vault-deposits/:movementId` — one recorded movement, **DB only**, no
+  catalogue join and no chain read. This is what makes `POST`'s
+  record-before-broadcast answerable: a caller can hold a movement id for a
+  transaction whose fate it never learned, and the every-minute reconciliation
+  sweep is the only thing that settles it. `pending` here means "SDP could not
+  establish that this reached the network", never "failed".
+  - **No provider gate**, same ADR 0002 reason as `/vault-positions`: it reports
+    on money that has already left the customer's wallet, so un-offering the
+    provider must not take away the answer to "did my deposit land". Deliberately
+    no strategy lookup either — an un-catalogued strategy must not cost anyone
+    that answer, so the response carries `provider`/`providerReference` off the
+    movement row and leaves the display name to the caller.
+  - **Three scoping rules, all answering 404 rather than 403** — a caller who may
+    not see a movement must not learn it exists. ORGANIZATION (enforced inside
+    the repository query; the BOLA guard, same reasoning as
+    `getEarnProgramWithdrawal`), ENVIRONMENT (a sandbox key must not read a
+    production movement; the row carries its own, so this is a comparison and
+    not a second query), and DIRECTION (`withdraw` is not a deposit — the column
+    is the only thing separating the two on a shared table, and it closes the
+    vault-withdraw path before there is anything to leak through it).
+  - Wallet-binding scope comes from `listReadableEarnVaultWallets`, **shared with
+    `/vault-positions`**. Keep it shared: a binding that hides a position has to
+    hide that position's deposits too, and two copies of that rule is how they
+    drift. Both routes are pinned together in `../earn.vault-positions.test.ts`.
 - `GET /vault-positions` — DB claim rows **hydrated live from chain**. Shares and
   value are never persisted: for a non-custodial vault the chain IS the provider.
   Takes **no provider gate at all** — it is a read of money the org already
@@ -385,8 +409,14 @@ recorded signature, confirms landed transactions, rebroadcasts the recorded
 signed bytes while the blockhash remains valid, and marks an expired, unlanded
 movement failed. Never rebuild a transaction during recovery.
 
-**Not built yet:** the withdraw counterpart. The dashboard now hydrates the
-durable vault-position record and shows it with a disabled exit action. Until
+**Not built yet:** the withdraw counterpart, and a movement LIST. There is no
+`GET /vault-deposits` collection, so nothing can re-derive an organization's
+in-flight deposits — the dashboard persists its own watch list per tab instead
+(see the web module's `earn-vault-deposit-tracking.ts`), and an approval-gated
+deposit stays untrackable entirely because the approval hold carries an
+`approvalRequestId` but no `movementId`: no movement row exists until someone
+approves it (PRO-1692). The dashboard now hydrates the durable vault-position
+record and shows it with a disabled exit action. Until
 the withdrawal path lands, a vault position can be entered and not exited
 through SDP — which is why `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` fail-closes
 production rather than relying on anyone remembering ADR 0002.

@@ -243,6 +243,15 @@ export const earnVaultDepositSchema = z.object({
     .optional(),
 });
 
+/**
+ * The recorded movement a caller polls. Bounded because the value goes
+ * straight into a bind parameter; the row lookup is org-scoped, so anything
+ * this organization does not own answers 404 rather than a validation error.
+ */
+export const earnVaultDepositParamsSchema = z.object({
+  movementId: z.string().min(1).max(128),
+});
+
 /** Bounded keyset page over active vault holdings, newest first. */
 export const earnVaultPositionsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),

@@ -21,6 +21,7 @@ import {
   createEarnVaultDeposit,
   extractEarnVaultDepositPolicyCandidate,
   findEarnVaultDepositIdempotentKeyReplay,
+  getEarnVaultDeposit,
   listEarnVaultPositions,
 } from "./handlers/vault";
 
@@ -69,6 +70,16 @@ earn.post(
     findIdempotentKeyReplay: findEarnVaultDepositIdempotentKeyReplay,
   }),
   createEarnVaultDeposit
+);
+// The deposit READ takes no policy gate and no provider gate — it moves no
+// money and reports on money that already left the wallet. It is what makes a
+// signed-but-unconfirmed deposit answerable: `POST` records before broadcast,
+// so a caller can hold a movement id for a transaction whose outcome it never
+// saw, and the every-minute reconciliation sweep is what eventually settles it.
+earn.get(
+  "/vault-deposits/:movementId",
+  requirePermissions("earn:read", "wallets:read"),
+  getEarnVaultDeposit
 );
 earn.get(
   "/vault-positions",

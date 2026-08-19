@@ -62,7 +62,15 @@ import {
   useEarnVaultPositions,
 } from "../earn/earn-program-data";
 import { type EarnProviderAccess, earnVaultDepositAvailability } from "../earn/earn-surfacing";
-import { EarnVaultDepositModal } from "../earn/earn-vault-deposit-modal";
+import {
+  EarnVaultDepositModal,
+  EarnVaultDepositOutcomeTracker,
+} from "../earn/earn-vault-deposit-modal";
+import {
+  forgetVaultDepositWatch,
+  readVaultDepositWatches,
+  rememberVaultDepositWatch,
+} from "../earn/earn-vault-deposit-tracking";
 import { EarnWithdrawalOutcomeTracker, EarnWithdrawModal } from "../earn/earn-withdraw-modal";
 
 function WalletBalanceList({ wallet }: { wallet: EarnFundingWallet }) {
@@ -602,6 +610,31 @@ export function TreasurySolutionsWorkspace({
   const [withdrawProgram, setWithdrawProgram] = useState<EarnProgram | null>(null);
   const [withdrawalWatches, setWithdrawalWatches] = useState<readonly EarnWithdrawalWatch[]>([]);
   const settledWithdrawalKeys = useRef(new Set<string>());
+  const [vaultDepositWatches, setVaultDepositWatches] = useState<readonly string[]>([]);
+  const settledVaultDepositIds = useRef(new Set<string>());
+
+  const addVaultDepositWatches = useCallback((incoming: readonly string[]) => {
+    setVaultDepositWatches((current) => {
+      const known = new Set(current);
+      const additions = incoming.filter((movementId) => {
+        if (known.has(movementId) || settledVaultDepositIds.current.has(movementId)) return false;
+        known.add(movementId);
+        return true;
+      });
+      for (const movementId of additions) rememberVaultDepositWatch(movementId);
+      return additions.length === 0 ? current : [...current, ...additions];
+    });
+  }, []);
+
+  // Recover deposits this tab signed before a reload. The store is the only
+  // record of them: unlike the custodial withdrawal ledger there is no
+  // movement-LIST endpoint to re-derive an in-flight deposit from, so without
+  // this a refresh mid-flight loses the outcome entirely. Runs after mount, not
+  // during render, because sessionStorage does not exist on the server.
+  useEffect(() => {
+    const recovered = readVaultDepositWatches();
+    if (recovered.length > 0) addVaultDepositWatches(recovered);
+  }, [addVaultDepositWatches]);
 
   const addWithdrawalWatches = useCallback((incoming: readonly EarnWithdrawalWatch[]) => {
     setWithdrawalWatches((current) => {
@@ -731,7 +764,12 @@ export function TreasurySolutionsWorkspace({
       {depositStrategy ? (
         <EarnVaultDepositModal
           onClose={() => setDepositStrategy(null)}
-          onDeposited={() => {
+          onDeposited={(deposit) => {
+            // Two refreshes, for two different moments. This one shows the
+            // claimed position row and the debited wallet right away; the
+            // watch below is what re-reads them once the chain has actually
+            // decided, which is the only point at which the holding is real.
+            addVaultDepositWatches([deposit.movementId]);
             refreshPositions();
             refreshWallets();
           }}
@@ -756,6 +794,24 @@ export function TreasurySolutionsWorkspace({
           key={`withdrawal-ledger:${program.id}`}
           onRecover={addWithdrawalWatches}
           programId={program.id}
+        />
+      ))}
+
+      {vaultDepositWatches.map((movementId) => (
+        <EarnVaultDepositOutcomeTracker
+          key={`vault-deposit:${movementId}`}
+          movementId={movementId}
+          onSettled={() => {
+            settledVaultDepositIds.current.add(movementId);
+            forgetVaultDepositWatch(movementId);
+            // Only NOW is the position real: the shares exist on chain and the
+            // wallet balance reflects what left it.
+            refreshPositions();
+            refreshWallets();
+            setVaultDepositWatches((current) =>
+              current.filter((candidate) => candidate !== movementId)
+            );
+          }}
         />
       ))}
 

@@ -17,6 +17,7 @@ const IDEMPOTENCY_KEY = "11111111-1111-4111-8111-111111111111";
 const mocks = vi.hoisted(() => ({
   createEarnVaultDeposit: vi.fn(),
   useEarnFundingWallets: vi.fn(),
+  useEarnVaultDepositOutcomeToast: vi.fn(),
 }));
 
 const copy = vi.hoisted<Record<string, string>>(() => ({
@@ -87,6 +88,7 @@ vi.mock("./deposit/earn-funding-wallets", () => ({
 
 vi.mock("./earn-program-data", () => ({
   createEarnVaultDeposit: mocks.createEarnVaultDeposit,
+  useEarnVaultDepositOutcomeToast: mocks.useEarnVaultDepositOutcomeToast,
 }));
 
 const strategy: EarnStrategy = {
@@ -160,7 +162,17 @@ beforeEach(() => {
     error: undefined,
     isLoading: false,
   });
-  vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(IDEMPOTENCY_KEY);
+  // The store is what carries a key between submits now, so it has to start
+  // empty; and each mint returns a DISTINCT value, otherwise "the retry reused
+  // the key" would pass against a constant mock that proves nothing.
+  sessionStorage.clear();
+  let minted = 0;
+  vi.spyOn(globalThis.crypto, "randomUUID").mockImplementation(() => {
+    minted += 1;
+    return (
+      minted === 1 ? IDEMPOTENCY_KEY : `22222222-2222-4222-8222-22222222222${minted}`
+    ) as ReturnType<typeof crypto.randomUUID>;
+  });
 });
 
 afterEach(() => {
@@ -265,6 +277,104 @@ describe("EarnVaultDepositModal", () => {
     expect(secondKey).toBe(firstKey);
     expect(firstSignal).toBeInstanceOf(AbortSignal);
     expect(secondSignal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("carries the key across a remount, so a reload cannot cause a second deposit", async () => {
+    mocks.createEarnVaultDeposit.mockResolvedValue({
+      ok: false,
+      error: "Gateway timeout",
+      status: 504,
+      body: null,
+    });
+
+    const first = render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    await enterDepositAmount();
+    await screen.findByRole("alert");
+    // Everything this component remembered is gone — the reload case.
+    first.unmount();
+
+    render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    await enterDepositAmount();
+    await screen.findByRole("alert");
+
+    expect(mocks.createEarnVaultDeposit).toHaveBeenCalledTimes(2);
+    expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).toBe(
+      mocks.createEarnVaultDeposit.mock.calls[0][1]
+    );
+  });
+
+  it("retires the key on a 4xx and keeps it on anything that might have written", async () => {
+    // A 4xx refused the request on its own terms, so the next attempt is a new
+    // request and must not replay. A 5xx may be a gateway timing out
+    // downstream of an API that already recorded and broadcast the deposit.
+    for (const [status, expectReuse] of [
+      [422, false],
+      [500, true],
+    ] as const) {
+      cleanup();
+      sessionStorage.clear();
+      mocks.createEarnVaultDeposit.mockReset();
+      mocks.createEarnVaultDeposit.mockResolvedValue({
+        ok: false,
+        error: `Failed (${status})`,
+        status,
+        body: null,
+      });
+
+      render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+      const user = await enterDepositAmount();
+      await screen.findByRole("alert");
+      await user.click(screen.getByRole("button", { name: "Confirm deposit" }));
+      await vi.waitFor(() => expect(mocks.createEarnVaultDeposit).toHaveBeenCalledTimes(2));
+
+      const [, firstKey] = mocks.createEarnVaultDeposit.mock.calls[0];
+      const [, secondKey] = mocks.createEarnVaultDeposit.mock.calls[1];
+      expect(secondKey === firstKey).toBe(expectReuse);
+    }
+  });
+
+  it("keeps the key while an approval hold is still keyed by it", async () => {
+    // Re-submitting under a fresh key would open a SECOND approval request for
+    // the same intent, and no movement row exists yet to tell them apart.
+    mocks.createEarnVaultDeposit.mockResolvedValue({
+      ok: true,
+      status: 202,
+      data: { kind: "approval_pending", message: "Approval required" },
+    });
+
+    const held = render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    await enterDepositAmount();
+    await screen.findByText("Approval required");
+    held.unmount();
+
+    render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    await enterDepositAmount();
+    await screen.findByText("Approval required");
+
+    expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).toBe(
+      mocks.createEarnVaultDeposit.mock.calls[0][1]
+    );
+  });
+
+  it("retires the key once a deposit is recorded, so the next one is not a replay", async () => {
+    mocks.createEarnVaultDeposit.mockResolvedValue({
+      ok: true,
+      status: 201,
+      data: { kind: "submitted", deposit: vaultDeposit("submitted") },
+    });
+
+    const done = render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    await enterDepositAmount();
+    await screen.findByText("Deposit submitted");
+    done.unmount();
+
+    render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    await enterDepositAmount();
+    await screen.findByText("Deposit submitted");
+
+    expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).not.toBe(
+      mocks.createEarnVaultDeposit.mock.calls[0][1]
+    );
   });
 
   it.each([

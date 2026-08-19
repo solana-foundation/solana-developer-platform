@@ -133,6 +133,14 @@ function getPositions(query = "") {
   );
 }
 
+function getDeposit(movementId: string) {
+  return app.request(
+    `/v1/earn/vault-deposits/${encodeURIComponent(movementId)}`,
+    { headers: { Authorization: `Bearer ${API_KEY.raw}` } },
+    env
+  );
+}
+
 function encodeCursorPayload(createdAt: string, id: string): string {
   return btoa(`${createdAt}|${id}`).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
@@ -379,5 +387,141 @@ describe("GET /v1/earn/vault-positions", () => {
     expect(response.status).toBe(200);
     expect(readVaultPositions).toHaveBeenCalledTimes(10);
     expect(maximum).toBe(8);
+  });
+});
+
+/**
+ * The deposit READ shares this file because it shares this route's scope rule:
+ * both resolve which custody wallets the caller may see through
+ * `listReadableEarnVaultWallets`, and a binding that hides a position has to
+ * hide that position's deposits too. Testing them apart is how the two drift.
+ */
+describe("GET /v1/earn/vault-deposits/:movementId", () => {
+  it("reports the recorded deposit so an unconfirmed signature stays answerable", async () => {
+    const created = await createPosition({ providerReference: "vault_read_own" });
+
+    const response = await getDeposit(created.movement.id);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: {
+        deposit: {
+          movementId: string;
+          positionId: string;
+          provider: string;
+          providerReference: string;
+          status: string;
+          signature: string;
+          amount: string;
+          failureReason: string | null;
+          confirmedAt: string | null;
+        };
+      };
+    };
+
+    expect(body.data.deposit).toEqual({
+      movementId: created.movement.id,
+      positionId: created.position.id,
+      provider: "kamino",
+      providerReference: "vault_read_own",
+      // Recorded BEFORE broadcast, which is the whole reason this route exists.
+      status: "pending",
+      signature: created.movement.signature,
+      amount: "1",
+      failureReason: null,
+      createdAt: created.movement.created_at,
+      confirmedAt: null,
+    });
+  });
+
+  it("reads back the terminal state the reconciliation sweep wrote", async () => {
+    const created = await createPosition({ providerReference: "vault_read_settled" });
+    await createPostgresEarnVaultRepository(getDb(env)).advanceMovement({
+      movementId: created.movement.id,
+      organizationId: ORG,
+      fromStatuses: ["pending"],
+      toStatus: "failed",
+      failureReason: "Blockhash expired without the transaction landing",
+    });
+
+    const response = await getDeposit(created.movement.id);
+    const body = (await response.json()) as {
+      data: { deposit: { status: string; failureReason: string | null } };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.data.deposit.status).toBe("failed");
+    expect(body.data.deposit.failureReason).toBe(
+      "Blockhash expired without the transaction landing"
+    );
+  });
+
+  it("hides a sibling project's wallet deposit from an unbound project key", async () => {
+    const sibling = await createPosition({
+      projectId: PROJECT_B,
+      walletId: WALLET_B,
+      providerReference: "vault_read_sibling",
+    });
+
+    // 404, not 403: a caller who may not see the movement must not learn that
+    // it exists.
+    expect((await getDeposit(sibling.movement.id)).status).toBe(404);
+  });
+
+  it("refuses a withdrawal from the deposit path", async () => {
+    const created = await createPosition({ providerReference: "vault_read_direction" });
+    await getDb(env)
+      .prepare("UPDATE earn_vault_movements SET direction = 'withdraw' WHERE id = ?")
+      .bind(created.movement.id)
+      .run();
+
+    expect((await getDeposit(created.movement.id)).status).toBe(404);
+  });
+
+  it("refuses a movement recorded in another environment", async () => {
+    // Written straight to the tables so the environment is the ONLY thing that
+    // differs: same organization, same in-scope wallet, direction `deposit`.
+    // `createSignedDepositIntent` derives the environment from the project, so
+    // it cannot produce this row, and the composite position FK means the two
+    // rows have to be inserted mismatched rather than updated after the fact.
+    const positionId = `earn_vault_position_${crypto.randomUUID()}`;
+    const movementId = `earn_vault_movement_${crypto.randomUUID()}`;
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO earn_vault_positions (
+             id, organization_id, project_id, environment, provider, provider_reference,
+             custody_wallet_id, share_mint, token_mint, label, created_by, activated_at
+           ) VALUES (?, ?, ?, 'production', 'kamino', 'vault_read_environment',
+                     ?, ?, ?, 'Production vault', ?, sdp_iso_now())`
+        )
+        .bind(positionId, ORG, PROJECT_A, WALLET_A, SHARE_MINT, TOKEN_MINT, USER),
+      getDb(env)
+        .prepare(
+          `INSERT INTO earn_vault_movements (
+             id, organization_id, project_id, environment, position_id, provider,
+             provider_reference, custody_wallet_id, direction, request_id,
+             idempotency_fingerprint, requested_amount, amount, signature,
+             signed_transaction, last_valid_block_height, created_by
+           ) VALUES (?, ?, ?, 'production', ?, 'kamino', 'vault_read_environment',
+                     ?, 'deposit', ?, 'fingerprint_environment', '1', '1',
+                     ?, 'AQ==', '12345', ?)`
+        )
+        .bind(
+          movementId,
+          ORG,
+          PROJECT_A,
+          positionId,
+          WALLET_A,
+          crypto.randomUUID(),
+          `sig_${crypto.randomUUID()}`,
+          USER
+        ),
+    ]);
+
+    expect((await getDeposit(movementId)).status).toBe(404);
+  });
+
+  it("answers 404 for an id this organization has never held", async () => {
+    expect((await getDeposit(`earn_vault_movement_${crypto.randomUUID()}`)).status).toBe(404);
   });
 });

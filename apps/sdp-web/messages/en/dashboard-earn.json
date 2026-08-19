@@ -386,7 +386,9 @@
       "vaultTransaction": "Transaction",
       "vaultApprovalTitle": "Approval required",
       "vaultApprovalBody": "Your wallet policy accepted the request for review. No vault deposit has been submitted yet.",
-      "vaultApprovalRequest": "Approval request"
+      "vaultApprovalRequest": "Approval request",
+      "vaultOutcomeConfirmed": "Vault deposit confirmed on-chain — your position is live.",
+      "vaultOutcomeFailed": "Vault deposit failed — no funds left your wallet."
     }
   }
 }
