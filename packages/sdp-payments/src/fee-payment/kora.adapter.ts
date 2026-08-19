@@ -208,10 +208,10 @@ export class KoraAdapter implements FeePaymentPort {
 
         throw this.wrapError(error, "Failed to sign and send transaction", {
           maybeBroadcast,
-          // A refused final connection provably never reached Kora; when no
-          // earlier attempt was ambiguous either, the whole call is provably
-          // pre-broadcast — a terminal failure is safe, no 409 wedge.
-          preBroadcast: !maybeBroadcast && isRefusedConnection(error),
+          // A final error that proves nothing was submitted makes the whole
+          // call provably pre-broadcast — as long as no earlier attempt was
+          // ambiguous. Terminal failure is then safe, with no 409 wedge.
+          preBroadcast: !maybeBroadcast && isProvablyPreBroadcast(error),
         });
       }
     }
@@ -448,15 +448,32 @@ function isRefusedConnection(error: unknown): boolean {
 
 // The request may have REACHED Kora even though no usable response came
 // back. Derived from the retryable set so a future transport class cannot be
-// retried-but-unflagged by list drift; the two exclusions are the cases where
+// retried-but-unflagged by list drift; the exclusions are the cases where
 // the outcome of the failed attempt IS known: a refused connection was never
 // established, and "Blockhash not found" is a real server answer.
+/**
+ * Proof that nothing reached Kora's transaction handling: a connection it
+ * refused, a status answered before the payload was read (a wrong or missing
+ * Cloud Run audience answers 401 to every call), or an identity token this
+ * process never obtained, so no request left it. 408 and 499 are excluded —
+ * both mean the request was cut off, possibly after it began to be handled.
+ * A terminal failure is safe here; parking these would put every payment of a
+ * misconfigured deployment behind an operator.
+ */
+function isProvablyPreBroadcast(error: unknown): boolean {
+  if (isRefusedConnection(error)) return true;
+  if (!(error instanceof Error)) return false;
+  if (/cloud run identity token/i.test(error.message)) return true;
+  const status = Number(/\bKora HTTP (\d{3})\b/.exec(error.message)?.[1]);
+  return status >= 400 && status < 500 && status !== 408 && status !== 499;
+}
+
 function isAmbiguousTransportError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const message = error.message.toLowerCase();
   return (
     isRetryableSignAndSendError(error) &&
-    !isRefusedConnection(error) &&
+    !isProvablyPreBroadcast(error) &&
     !message.includes("blockhash not found")
   );
 }

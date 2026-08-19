@@ -299,6 +299,66 @@ describe("signAndSend ambiguity verdict (maybeBroadcast)", () => {
     assert.equal(error.preBroadcast, true);
   });
 
+  it("certifies pre-broadcast from the adapter's own HTTP failure", async () => {
+    // Drives the real request path of the identity-token client, which is what
+    // a managed deployment uses: the message asserted on below is built at that
+    // throw site, so rewording it there fails here instead of silently sending
+    // every 401 back to parking. The vendored client used without a Cloud Run
+    // audience raises its own error shape, which we have not pinned.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response("nope", { status: 401 })) as unknown as typeof fetch;
+    try {
+      const adapter = new KoraAdapter({
+        rpcUrl: "https://kora.example",
+        userId: "u1",
+        identityTokenAudience: "https://kora.example",
+        identityTokenProvider: async () => "token",
+      });
+      const error = await captureSendError(adapter);
+      assert.equal(error.maybeBroadcast, false);
+      assert.equal(error.preBroadcast, true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("certifies pre-broadcast when Kora refuses the request at its HTTP layer", async () => {
+    // A 4xx is Kora answering before it ever looked at the transaction — a bad
+    // or missing Cloud Run audience answers 401 for every call. Parking those
+    // would put every payment of a misconfigured deployment behind an operator.
+    const error = await captureSendError(makeAdapterWithSendSequence(["Kora HTTP 401"]));
+    assert.equal(error.maybeBroadcast, false);
+    assert.equal(error.preBroadcast, true);
+  });
+
+  it("leaves a Kora gateway failure ambiguous", async () => {
+    // 5xx can be a proxy giving up after Kora already submitted.
+    const error = await captureSendError(makeAdapterWithSendSequence(["Kora HTTP 503"]));
+    assert.equal(error.preBroadcast, false);
+  });
+
+  it("certifies pre-broadcast when the identity token could not be obtained", async () => {
+    // The request never left this process, so nothing can have been submitted —
+    // including when the metadata server answers with a retryable-looking code.
+    const error = await captureSendError(
+      makeAdapterWithSendSequence(["Cloud Run identity token request failed with HTTP 503"])
+    );
+    assert.equal(error.maybeBroadcast, false);
+    assert.equal(error.preBroadcast, true);
+  });
+
+  it("keeps an HTTP refusal ambiguous once an earlier attempt may have broadcast", async () => {
+    const error = await captureSendError(
+      makeAdapterWithSendSequence([
+        "Kora signAndSendTransaction timed out after 10000ms",
+        "Kora HTTP 401",
+      ])
+    );
+    assert.equal(error.maybeBroadcast, true);
+    assert.equal(error.preBroadcast, false);
+  });
+
   it("keeps a refused final connection ambiguous once an earlier attempt may have broadcast", async () => {
     const error = await captureSendError(
       makeAdapterWithSendSequence([
