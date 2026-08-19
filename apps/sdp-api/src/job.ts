@@ -3,22 +3,13 @@ import { pathToFileURL } from "node:url";
 import * as Sentry from "@sentry/node";
 import { runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
 import { runEarnMetricsRefreshTick } from "@/cron/earn-metrics-refresh";
-import {
-  EARN_VAULT_MOVEMENTS_CRON,
-  EARN_VAULT_MOVEMENTS_MONITOR,
-} from "@/cron/earn-vault-movements";
-import { PENDING_DEPOSITS_CRON, PENDING_DEPOSITS_MONITOR } from "@/cron/pending-deposits";
-import { PENDING_TRANSFERS_CRON, PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
-import { PENDING_WITHDRAWALS_CRON, PENDING_WITHDRAWALS_MONITOR } from "@/cron/pending-withdrawals";
-import {
-  RECURRING_PAYMENTS_COLLECTION_CRON,
-  RECURRING_PAYMENTS_COLLECTION_MONITOR,
-} from "@/cron/recurring-payments";
-import { WORKFLOW_EXECUTIONS_CRON, WORKFLOW_EXECUTIONS_MONITOR } from "@/cron/workflow-executions";
-import {
-  WORKFLOW_SECRET_RETIREMENTS_CRON,
-  WORKFLOW_SECRET_RETIREMENTS_MONITOR,
-} from "@/cron/workflow-secret-retirements";
+import { EARN_VAULT_MOVEMENTS_MONITOR } from "@/cron/earn-vault-movements";
+import { PENDING_DEPOSITS_MONITOR } from "@/cron/pending-deposits";
+import { PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
+import { PENDING_WITHDRAWALS_MONITOR } from "@/cron/pending-withdrawals";
+import { RECURRING_PAYMENTS_COLLECTION_MONITOR } from "@/cron/recurring-payments";
+import { WORKFLOW_EXECUTIONS_MONITOR } from "@/cron/workflow-executions";
+import { WORKFLOW_SECRET_RETIREMENTS_MONITOR } from "@/cron/workflow-secret-retirements";
 import { closeDatabasePools } from "@/db/client";
 import {
   isAssetProfilesEnabled,
@@ -39,6 +30,15 @@ import { trackPendingDeposits } from "@/services/jobs/track-pending-deposits";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { trackPendingWithdrawals } from "@/services/jobs/track-pending-withdrawals";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
+
+/**
+ * The Cloud Scheduler cadence this job runs on. Every monitored tick declares
+ * THIS schedule rather than the reconciler's in-process crontab: on managed
+ * deployments this job is the monitor's only reporter, and declaring a faster
+ * cadence than the job can deliver makes Sentry alert on missed check-ins
+ * between perfectly healthy executions.
+ */
+const MANAGED_JOB_CRON = "*/5 * * * *";
 
 /**
  * One-shot reconciliation entrypoint for the managed Cloud Run Job — the only
@@ -107,11 +107,11 @@ export async function runCronJob(): Promise<void> {
   initNodeSentry(getSentryOptions(env));
 
   const sentryEnabled = isSentryEnabled(env);
-  const monitored = async (monitor: string, cron: string, work: () => Promise<unknown>) => {
+  const monitored = async (monitor: string, work: () => Promise<unknown>) => {
     try {
       await (sentryEnabled
         ? nodeObservability.withMonitor(monitor, work, {
-            schedule: { type: "crontab", value: cron },
+            schedule: { type: "crontab", value: MANAGED_JOB_CRON },
           })
         : work());
     } catch (error) {
@@ -134,7 +134,7 @@ export async function runCronJob(): Promise<void> {
 
   try {
     await collect(
-      monitored(PENDING_TRANSFERS_MONITOR, PENDING_TRANSFERS_CRON, async () => {
+      monitored(PENDING_TRANSFERS_MONITOR, async () => {
         const outcomes = await Promise.allSettled([
           (async () => {
             await trackPendingTransfers(env);
@@ -146,32 +146,20 @@ export async function runCronJob(): Promise<void> {
       })
     );
     await collect(
-      monitored(RECURRING_PAYMENTS_COLLECTION_MONITOR, RECURRING_PAYMENTS_COLLECTION_CRON, () =>
-        collectDueRecurringPayments(env)
-      )
+      monitored(RECURRING_PAYMENTS_COLLECTION_MONITOR, () => collectDueRecurringPayments(env))
     );
     if (isPrivateChannelsEnabled(env)) {
       const outcomes = await Promise.allSettled([
-        monitored(PENDING_DEPOSITS_MONITOR, PENDING_DEPOSITS_CRON, () => trackPendingDeposits(env)),
-        monitored(PENDING_WITHDRAWALS_MONITOR, PENDING_WITHDRAWALS_CRON, () =>
-          trackPendingWithdrawals(env)
-        ),
+        monitored(PENDING_DEPOSITS_MONITOR, () => trackPendingDeposits(env)),
+        monitored(PENDING_WITHDRAWALS_MONITOR, () => trackPendingWithdrawals(env)),
       ]);
       failures.push(...rejectionReasons(outcomes));
     }
-    await collect(
-      monitored(EARN_VAULT_MOVEMENTS_MONITOR, EARN_VAULT_MOVEMENTS_CRON, () =>
-        reconcileEarnVaultMovements(env)
-      )
-    );
+    await collect(monitored(EARN_VAULT_MOVEMENTS_MONITOR, () => reconcileEarnVaultMovements(env)));
     if (isAssetProfilesEnabled(env)) {
-      await collect(
-        monitored(WORKFLOW_EXECUTIONS_MONITOR, WORKFLOW_EXECUTIONS_CRON, () =>
-          runDueWorkflowExecutions(env)
-        )
-      );
+      await collect(monitored(WORKFLOW_EXECUTIONS_MONITOR, () => runDueWorkflowExecutions(env)));
     }
-    await monitored(WORKFLOW_SECRET_RETIREMENTS_MONITOR, WORKFLOW_SECRET_RETIREMENTS_CRON, () =>
+    await monitored(WORKFLOW_SECRET_RETIREMENTS_MONITOR, () =>
       retireOrphanedActionSecrets(env)
     ).catch(() => undefined);
     if (isEarnEnabled(env)) {
@@ -216,15 +204,30 @@ function throwCollected(reasons: readonly unknown[], message: string): void {
   if (reasons.length > 1) throw new AggregateError(reasons, message);
 }
 
+/**
+ * Renders one failure cause for the structured exit log, expanding nested
+ * AggregateErrors recursively so a multi-leg tick's leaf causes are never
+ * hidden inside the job-wide aggregate.
+ *
+ * @param cause - A failure reason collected while the ticks ran.
+ * @returns The cause's message plus its stack or its recursively rendered
+ * child causes.
+ */
+function describeCause(cause: unknown): Record<string, unknown> {
+  if (cause instanceof AggregateError) {
+    return { message: cause.message, causes: cause.errors.map(describeCause) };
+  }
+  if (cause instanceof Error) {
+    return { message: cause.message, stack: cause.stack };
+  }
+  return { message: String(cause) };
+}
+
 export function describeCronFailure(error: unknown): Record<string, unknown> {
   if (!(error instanceof AggregateError)) return { error };
   return {
     error,
-    causes: error.errors.map((cause: unknown) =>
-      cause instanceof Error
-        ? { message: cause.message, stack: cause.stack }
-        : { message: String(cause) }
-    ),
+    causes: error.errors.map(describeCause),
   };
 }
 
