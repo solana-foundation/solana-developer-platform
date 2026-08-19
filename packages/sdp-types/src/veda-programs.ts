@@ -1,5 +1,5 @@
 import type { EarnDepositTokenSymbol } from "./earn";
-import { type SolanaCluster, wellKnownMint } from "./well-known-tokens";
+import { type SolanaCluster, WELL_KNOWN_TOKEN_BY_MINT, wellKnownMint } from "./well-known-tokens";
 
 /**
  * Veda's on-chain deployment, per cluster.
@@ -148,5 +148,27 @@ export function isVedaDeployed(cluster: SolanaCluster): boolean {
 export function vedaDepositMints(cluster: SolanaCluster): readonly string[] {
   return VEDA_DEPOSIT_TOKEN_SYMBOLS.map((symbol) => wellKnownMint(symbol, cluster)).filter(
     (mint): mint is string => mint !== undefined
+  );
+}
+
+/**
+ * Whether SDP fronts this mint for Veda — the admission rule, in ONE place.
+ *
+ * Two very different code paths ask it and they must never disagree: the
+ * catalogue read in `@sdp/earn` decides which of a vault's enabled assets
+ * become a row's `depositMints`, and the builder in `@sdp/veda` decides which
+ * asset a deposit instruction spends. A row admitted under one rule and spent
+ * under another is how a deposit ends up moving a token the ledger did not
+ * record, which is exactly what `EarnVaultAssetIdentity` exists to catch — and
+ * a check that fires is still a customer-visible failure, so the two sides
+ * share this predicate rather than each restating it.
+ *
+ * Fails closed on an unknown mint: a mint the well-known catalogue does not
+ * carry has no symbol to compare, so it is not something SDP fronts.
+ */
+export function isVedaDepositMint(mint: string): boolean {
+  const token = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
+  return (
+    token !== undefined && (VEDA_DEPOSIT_TOKEN_SYMBOLS as readonly string[]).includes(token.symbol)
   );
 }

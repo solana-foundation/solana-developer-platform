@@ -4,6 +4,7 @@ import {
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
 import {
+  isVedaDepositMint,
   VEDA_DEPOSIT_TOKEN_SYMBOLS,
   type VedaDeployment,
   vedaDeployment,
@@ -29,9 +30,6 @@ import { readVedaVaults, VEDA_UNSET_AUTHORITY, type VedaVault } from "./vault-st
 
 const SECONDS_PER_DAY = 86_400;
 
-/** Symbols SDP fronts, as a set, for the mint screen below. */
-const DECLARED_SYMBOLS = new Set<string>(VEDA_DEPOSIT_TOKEN_SYMBOLS);
-
 /**
  * Deposit mints this vault actually takes, intersected with what SDP declares.
  *
@@ -47,10 +45,7 @@ function depositMints(entry: VedaVault): string[] {
   return entry.assets
     .filter((asset) => asset.allowDeposits)
     .map((asset) => asset.assetMint)
-    .filter((mint) => {
-      const token = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
-      return token !== undefined && DECLARED_SYMBOLS.has(token.symbol);
-    })
+    .filter(isVedaDepositMint)
     .sort();
 }
 

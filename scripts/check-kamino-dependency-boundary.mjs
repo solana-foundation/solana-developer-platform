@@ -1,47 +1,11 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
+import { assertExactConsumers } from "./lib/dependency-boundary.mjs";
 
 const ROOT = process.cwd();
 const LOCKFILE = "pnpm-lock.yaml";
 const KAMINO_PACKAGE = "packages/sdp-kamino/package.json";
 const API_PACKAGE = "apps/sdp-api/package.json";
-
-function packageJsonFiles(parent) {
-  return readdirSync(path.join(ROOT, parent), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(parent, entry.name, "package.json"))
-    .filter((file) => {
-      try {
-        readFileSync(path.join(ROOT, file));
-        return true;
-      } catch {
-        return false;
-      }
-    });
-}
-
-const manifests = ["package.json", ...packageJsonFiles("apps"), ...packageJsonFiles("packages")];
-
-function directConsumers(dependency) {
-  return manifests.filter((file) => {
-    const manifest = JSON.parse(readFileSync(path.join(ROOT, file), "utf8"));
-    return [manifest.dependencies, manifest.devDependencies, manifest.optionalDependencies].some(
-      (dependencies) => dependencies && Object.hasOwn(dependencies, dependency)
-    );
-  });
-}
-
-function assertExactConsumers(dependency, expected) {
-  const actual = directConsumers(dependency).sort();
-  const wanted = [...expected].sort();
-  if (JSON.stringify(actual) !== JSON.stringify(wanted)) {
-    throw new Error(
-      `${dependency} dependency boundary changed. Expected ${wanted.join(", ")}; found ${
-        actual.join(", ") || "none"
-      }.`
-    );
-  }
-}
 
 // Only the private Kamino package may own klend-sdk, and only the API may ship
 // that package. A new web/docs/package consumer would create an artifact not
