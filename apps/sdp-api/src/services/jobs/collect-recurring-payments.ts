@@ -13,6 +13,10 @@ import {
   collectRecurringPayment,
   resumeRecurringPayment,
 } from "@/services/payments/recurring-payments";
+import {
+  isRecurringSubmissionOutcomeUnknown,
+  RECURRING_SUBMISSION_OUTCOME_UNKNOWN_REASON,
+} from "@/services/payments/recurring-payments/shared";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 
@@ -76,6 +80,26 @@ function shouldSkipCollectionError(error: unknown): boolean {
   return error instanceof AppError && error.code === "CONFLICT";
 }
 
+/**
+ * A collection parked for manual reconciliation is a skip for this tick, but a
+ * silent one would let the payer's subscription stall unnoticed until someone
+ * reads the transfers table.
+ */
+function warnIfParkedForReconciliation(row: PaymentRecurringPaymentRow, error: unknown): void {
+  if (!isRecurringSubmissionOutcomeUnknown(error)) {
+    return;
+  }
+  getLogger().warn(
+    {
+      organization_id: row.organization_id,
+      project_id: row.project_id,
+      recurring_payment_id: row.id,
+      reason: RECURRING_SUBMISSION_OUTCOME_UNKNOWN_REASON,
+    },
+    "collectDueRecurringPayments: collection parked, awaiting manual reconciliation"
+  );
+}
+
 function logCronFailure(message: string, row: PaymentRecurringPaymentRow, error: unknown): void {
   getLogger().error(
     {
@@ -109,6 +133,7 @@ async function collectRow(
     return "ok";
   } catch (error) {
     if (shouldSkipCollectionError(error)) {
+      warnIfParkedForReconciliation(row, error);
       return "skipped";
     }
     logCronFailure("collectDueRecurringPayments: failed to collect recurring payment", row, error);

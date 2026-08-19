@@ -67,6 +67,15 @@ export function isPreBroadcastRejection(error: unknown): boolean {
   return /custom program error:/i.test(message);
 }
 
+/** True when a transfer row's provider_data carries the outcome-unknown marker. */
+export function hasSubmissionOutcomeUnknownMarker(providerData: unknown): boolean {
+  return (
+    typeof providerData === "object" &&
+    providerData !== null &&
+    (providerData as Record<string, unknown>).submission_outcome === "unknown"
+  );
+}
+
 /**
  * Persist the manual-reconciliation marker without ever throwing: a DB blip
  * here is likely correlated with the provider trouble that made the outcome

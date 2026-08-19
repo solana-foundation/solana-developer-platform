@@ -20,6 +20,7 @@ import { createTokenRepository } from "@/db/repositories";
 import { AppError, badRequest } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { isNativePaymentToken, normalizePaymentToken } from "@/services/payment-operation.service";
+import { isPreBroadcastRejection } from "@/services/payments/submission-outcome";
 import * as solanaServices from "@/services/solana";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -117,7 +118,35 @@ export async function sendSubscriptionInstructions(input: {
   );
   const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
   const txBytes = new Uint8Array(getTransactionEncoder().encode(partiallySigned));
-  return feePayment.signAndSend(txBytes);
+  try {
+    return await feePayment.signAndSend(txBytes);
+  } catch (error) {
+    if (isPreBroadcastRejection(error)) {
+      throw error;
+    }
+    // The provider may have broadcast without returning a signature. Callers
+    // must park the collection instead of journaling a terminal failure: a
+    // failed attempt is rescheduled, and rescheduling re-charges the payer.
+    throw recurringSubmissionOutcomeUnknown();
+  }
+}
+
+/** Stable machine reason for a recurring submission whose outcome is unknown. */
+export const RECURRING_SUBMISSION_OUTCOME_UNKNOWN_REASON = "recurring_collection_outcome_unknown";
+
+export function recurringSubmissionOutcomeUnknown(): AppError {
+  return new AppError(
+    "CONFLICT",
+    "Recurring payment collection outcome is unknown; reconcile the existing transfer before retrying",
+    { reason: RECURRING_SUBMISSION_OUTCOME_UNKNOWN_REASON }
+  );
+}
+
+export function isRecurringSubmissionOutcomeUnknown(error: unknown): error is AppError {
+  return (
+    error instanceof AppError &&
+    error.details?.reason === RECURRING_SUBMISSION_OUTCOME_UNKNOWN_REASON
+  );
 }
 
 export async function confirmSubscriptionSignature(

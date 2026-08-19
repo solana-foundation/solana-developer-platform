@@ -216,6 +216,44 @@ If a pre-fence rollback cannot wait for every row, record the transfer ids left 
 incident timeline: the older job will fail them, and each one is a payment the client may send
 again.
 
+The same marker parks two more surfaces. Both are found by the query above — it already spans every
+wallet transfer type — but each needs a different second step.
+
+#### Parked batch chunks
+
+A chunk's transfer carries the marker and its recipients stay `processing`, so the batch never
+settles. Resolve the chunk exactly as a single transfer (find the transaction on chain, then either
+record the signature and drop the marker, or mark it failed). The recipients and the parent batch
+follow from the chunk on the next `trackPendingTransfers` run; check with:
+
+```sql
+SELECT r.status, count(*)
+FROM payment_transfer_recipients r
+WHERE r.batch_id = :batch_id
+GROUP BY r.status;
+```
+
+#### Parked recurring collections
+
+The collection attempt stays `processing` alongside its parked transfer, so the subscription stops
+collecting until an operator resolves it — deliberately, because failing the attempt would
+reschedule the cycle and charge the payer a second time. The cron logs each parked cycle
+(`collectDueRecurringPayments: collection parked`). List them with:
+
+```sql
+SELECT a.id AS attempt_id, a.subscription_id, a.due_at, a.transfer_id, t.source_address, t.amount
+FROM payment_subscription_collection_attempts a
+JOIN payment_transfers t ON t.id = a.transfer_id
+WHERE a.status = 'processing'
+  AND t.provider_data ->> 'submission_outcome' = 'unknown'
+ORDER BY a.due_at;
+```
+
+Resolve the transfer first, as above. Then close the attempt to match it: if the collection landed,
+confirm the attempt against the recorded signature; if it never landed, fail the attempt so the
+cycle is rescheduled and collected once. Do not fail the attempt while its transfer is still
+parked — that is the double-charge the parking exists to prevent.
+
 ### Schema compatibility
 
 Migrations must remain backward-compatible across the rollback window:

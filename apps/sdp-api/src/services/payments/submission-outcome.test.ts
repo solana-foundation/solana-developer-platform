@@ -1,6 +1,7 @@
 import { FeePaymentError } from "@sdp/payments/fee-payment";
 import { describe, expect, it, vi } from "vitest";
 import {
+  hasSubmissionOutcomeUnknownMarker,
   isPreBroadcastRejection,
   persistOutcomeUnknownMarker,
   SUBMISSION_OUTCOME_UNKNOWN_MARKER,
@@ -86,6 +87,22 @@ describe("isPreBroadcastRejection", () => {
     });
     expect(contradictory.preBroadcast).toBe(false);
     expect(isPreBroadcastRejection(contradictory)).toBe(false);
+  });
+});
+
+describe("hasSubmissionOutcomeUnknownMarker", () => {
+  it("detects the marker on a parked row", () => {
+    // Literal on purpose: rows already parked in production must keep matching
+    // even if the exported constant is ever renamed.
+    expect(hasSubmissionOutcomeUnknownMarker({ submission_outcome: "unknown" })).toBe(true);
+    expect(hasSubmissionOutcomeUnknownMarker({ ...SUBMISSION_OUTCOME_UNKNOWN_MARKER })).toBe(true);
+  });
+
+  it("ignores rows without it", () => {
+    expect(hasSubmissionOutcomeUnknownMarker({})).toBe(false);
+    expect(hasSubmissionOutcomeUnknownMarker(null)).toBe(false);
+    expect(hasSubmissionOutcomeUnknownMarker({ submission_outcome: "settled" })).toBe(false);
+    expect(hasSubmissionOutcomeUnknownMarker("unknown")).toBe(false);
   });
 });
 

@@ -37,6 +37,12 @@ import {
   resolveSourceTokenAccountOrAta,
 } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
+import {
+  hasSubmissionOutcomeUnknownMarker,
+  persistOutcomeUnknownMarker,
+  SUBMISSION_OUTCOME_UNKNOWN_MARKER,
+  TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
+} from "@/services/payments/submission-outcome";
 import * as solanaServices from "@/services/solana";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -50,6 +56,9 @@ import { enforceRecurringPaymentPolicy } from "./policy";
 import {
   activationErrorMessage,
   confirmSubscriptionSignature,
+  isRecurringSubmissionOutcomeUnknown,
+  RECURRING_SUBMISSION_OUTCOME_UNKNOWN_REASON,
+  recurringSubmissionOutcomeUnknown,
   sendSubscriptionInstructions,
 } from "./shared";
 
@@ -655,7 +664,59 @@ async function journalRecurringPaymentCollectionError(input: {
     return;
   }
 
+  if (!input.submittedSignature && isRecurringSubmissionOutcomeUnknown(input.error)) {
+    await parkRecurringPaymentCollection(input);
+    return;
+  }
+
   await markRecurringPaymentCollectionFailedAtomically(input);
+}
+
+/**
+ * Leave a collection whose submission outcome is unknown exactly where it is:
+ * the attempt stays `processing` and the transfer keeps its `processing` row
+ * behind the shared reconciliation marker. Journaling a failure here would
+ * reschedule the collection, and rescheduling re-charges the payer for a cycle
+ * that may already have settled on chain. The marker also stops the
+ * pending-transfers job from timing the transfer out into a false `failed`.
+ */
+async function parkRecurringPaymentCollection(input: {
+  env: Env;
+  paymentsRepo: ReturnType<typeof createPaymentsRepository>;
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+  attempt: PaymentSubscriptionCollectionAttemptRow;
+  transfer: PaymentTransferRow | null;
+  error: unknown;
+}): Promise<void> {
+  getLogger().warn(
+    {
+      attempt_id: input.attempt.id,
+      error: activationErrorMessage(input.error),
+      reason: RECURRING_SUBMISSION_OUTCOME_UNKNOWN_REASON,
+      recurring_payment_id: input.recurringPaymentId,
+      transfer_id: input.transfer?.id ?? null,
+    },
+    "Recurring payment collection parked; awaiting manual reconciliation"
+  );
+  const transfer = input.transfer;
+  if (!transfer) {
+    return;
+  }
+  await persistOutcomeUnknownMarker(
+    () =>
+      input.paymentsRepo.updateTransfer({
+        transferId: transfer.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        status: "processing",
+        error: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
+        providerData: { ...SUBMISSION_OUTCOME_UNKNOWN_MARKER },
+        updatedAt: new Date().toISOString(),
+      }),
+    transfer.id
+  );
 }
 
 async function safeJournalRecurringPaymentCollectionError(input: {
@@ -743,6 +804,13 @@ async function recoverRecurringPaymentCollection(input: {
   }
   const recoveredSignature = existing.signature ?? transfer.signature;
   if (!recoveredSignature) {
+    // A parked collection has no signature by definition: the provider may
+    // have broadcast without returning one. Failing it here would reschedule
+    // the cycle and re-charge the payer, so it stays parked until an operator
+    // reconciles it on chain.
+    if (hasSubmissionOutcomeUnknownMarker(transfer.provider_data)) {
+      throw recurringSubmissionOutcomeUnknown();
+    }
     // A fresh unsigned attempt means another request is between local persistence and Kora
     // submission; wait for it to either submit or become stale instead of creating a second transfer.
     if (!isStaleCollectionAttempt(existing)) {

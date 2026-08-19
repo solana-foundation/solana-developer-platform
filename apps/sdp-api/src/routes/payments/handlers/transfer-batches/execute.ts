@@ -15,6 +15,14 @@ import type {
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { internalError, transactionFailed } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { getLogger } from "@/runtime/logger";
+import {
+  isPreBroadcastRejection,
+  persistOutcomeUnknownMarker,
+  SUBMISSION_OUTCOME_UNKNOWN_MARKER,
+  TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
+  TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
+} from "@/services/payments/submission-outcome";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import {
   type AppContext,
@@ -22,6 +30,7 @@ import {
   getPaymentsRepository,
   getPaymentTransferBatchesRepository,
 } from "../../context";
+import { createSubmissionRecorder } from "../transfers";
 import type { TransactionChunk } from "./transaction";
 import type { ResolvedBatchRequest } from "./types";
 
@@ -45,6 +54,7 @@ async function updateTransferRecord(
     signature?: string;
     serializedTx: string;
     error: string | null;
+    providerData?: Record<string, unknown>;
   }
 ): Promise<PaymentTransferRow> {
   const updated = await getPaymentsRepository(c).updateTransfer({
@@ -56,6 +66,7 @@ async function updateTransferRecord(
     serializedTx: params.serializedTx,
     error: params.error,
     updatedAt: new Date().toISOString(),
+    providerData: params.providerData,
   });
 
   if (!updated) {
@@ -235,6 +246,7 @@ export async function executeChunk(params: {
     recipientStatus: PaymentTransferRecipientRow["status"];
     signature?: string;
     error: string | null;
+    providerData?: Record<string, unknown>;
   }): Promise<PaymentTransferRow> => {
     const updates = await updateRecipientRows({
       repository: getPaymentTransferBatchesRepository(c),
@@ -255,6 +267,7 @@ export async function executeChunk(params: {
       signature: params2.signature,
       serializedTx,
       error: params2.error,
+      providerData: params2.providerData,
     });
   };
 
@@ -278,25 +291,58 @@ export async function executeChunk(params: {
   }
 
   await beginApprovedWalletOperationEffect(c);
+  // Once broadcast, a failed bookkeeping write must never strand the chunk as
+  // an unsigned `processing` row — the pending-transfers job would cascade a
+  // false `failed` to every recipient. The recorder retries the write once.
+  const recorder = createSubmissionRecorder(transfer, (sig) =>
+    updateTransferRecord(c, {
+      transferId: transfer.id,
+      organizationId: resolved.scope.auth.organizationId,
+      projectId: resolved.projectId,
+      status: "processing",
+      signature: sig,
+      serializedTx,
+      error: null,
+    })
+  );
   let signature: Awaited<ReturnType<typeof params.feePayment.signAndSend>>;
   try {
     signature = await params.feePayment.signAndSend(txBytes);
   } catch (error) {
-    await settle({
-      status: "failed",
-      recipientStatus: "failed",
-      error: error instanceof Error ? error.message : String(error),
-    });
+    if (isPreBroadcastRejection(error)) {
+      await settle({
+        status: "failed",
+        recipientStatus: "failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+    // The provider may have broadcast the chunk without returning a signature.
+    // Settling it failed would invite a re-execution and a double send to every
+    // recipient, so the chunk parks behind the shared reconciliation marker.
+    getLogger().warn(
+      {
+        transfer_id: transfer.id,
+        reason: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      "batch chunk parked; awaiting manual reconciliation"
+    );
+    await persistOutcomeUnknownMarker(
+      () =>
+        settle({
+          status: "processing",
+          recipientStatus: "processing",
+          error: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
+          providerData: { ...SUBMISSION_OUTCOME_UNKNOWN_MARKER },
+        }),
+      transfer.id
+    );
     return;
   }
 
-  await updateTransferRecord(c, {
-    transferId: transfer.id,
-    organizationId: resolved.scope.auth.organizationId,
-    projectId: resolved.projectId,
-    status: "processing",
-    signature,
-    serializedTx,
-    error: null,
-  });
+  await recorder.onSubmitted(signature);
+  // Discarded result: called for its retry — it re-attempts the persist once
+  // when the first write failed.
+  await recorder.submittedRow();
 }

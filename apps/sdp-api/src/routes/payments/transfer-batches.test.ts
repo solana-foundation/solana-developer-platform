@@ -20,6 +20,7 @@ import * as paymentsRepositoryPostgres from "@/db/repositories/payments.reposito
 import app from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
+import { TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR } from "@/services/payments/submission-outcome";
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
@@ -1975,7 +1976,7 @@ describe("payment transfer batches", () => {
     }
   });
 
-  it("leaves linked recipients for reconciliation when the signature persist fails after submission", async () => {
+  it("retries the signature persist after submission instead of stranding the chunk", async () => {
     const createRepository = paymentsRepositoryPostgres.createPostgresPaymentsRepository;
     const batchesSpy = vi.spyOn(paymentsRepositoryPostgres, "createPostgresPaymentsRepository");
     let signaturePersistInjected = false;
@@ -2058,24 +2059,32 @@ describe("payment transfer batches", () => {
 
       await trackPendingTransfers(env);
 
+      // The write is retried once, so a single lost bookkeeping write no longer
+      // strands a broadcast chunk as an unsigned row that the pending-transfers
+      // job would time out into a false `failed` for every recipient. The row
+      // may already have settled from its signature, so assert what this test
+      // owns: the signature landed and the chunk is not terminally failed.
       const transferRow = await getDb(env)
-        .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+        .prepare("SELECT status, signature FROM payment_transfers WHERE id = ?")
         .bind(linkedRecipient?.transfer_id)
-        .first<{ status: string }>();
-      expect(transferRow?.status).toBe("failed");
+        .first<{ status: string; signature: string | null }>();
+      expect(transferRow?.signature).toBe(FIRST_SIGNATURE);
+      expect(transferRow?.status).not.toBe("failed");
 
       const settledRecipient = await getDb(env)
         .prepare("SELECT status, transfer_id FROM payment_transfer_recipients WHERE batch_id = ?")
         .bind(body.data.batch.id)
         .first<{ status: string; transfer_id: string | null }>();
-      expect(settledRecipient?.status).toBe("failed");
+      // The chunk is on chain with its signature, so neither the recipient nor
+      // the batch is cascaded to `failed` by a lost bookkeeping write.
+      expect(settledRecipient?.status).not.toBe("failed");
       expect(settledRecipient?.transfer_id).toBe(linkedRecipient?.transfer_id);
 
       const batchRow = await getDb(env)
         .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
         .bind(body.data.batch.id)
         .first<{ status: string }>();
-      expect(batchRow?.status).toBe("failed");
+      expect(batchRow?.status).not.toBe("failed");
     } finally {
       batchesSpy.mockRestore();
     }
@@ -2475,4 +2484,74 @@ describe("payment transfer batches", () => {
 
     expect(responses.map((response) => response.status)).toEqual([200, 200, 200, 200, 200]);
   }, 20_000);
+  it("parks a chunk whose provider outcome is unknown instead of failing its recipients", async () => {
+    // Kora may have broadcast the chunk before failing without returning a
+    // signature. Settling it failed would invite a re-execution and a double
+    // send to every recipient in the chunk.
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
+    const signAndSendMock = vi.fn().mockRejectedValue(new Error("kora timed out"));
+    createFeePaymentAdapterMock.mockReturnValueOnce({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+    const counterpartyId = await seedCounterparty("batch_parked_counterparty");
+    const accountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+
+    const res = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          token: "SOL",
+          recipients: [{ counterpartyId, counterpartyAccountId: accountId, amount: "0.1" }],
+          options: { preflight: false },
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { batch: { id: string }; transfers: Array<{ id: string }> };
+    };
+
+    const row = await getDb(env)
+      .prepare("SELECT status, signature, error, provider_data FROM payment_transfers WHERE id = ?")
+      .bind(body.data.transfers[0]?.id)
+      .first<{
+        status: string;
+        signature: string | null;
+        error: string | null;
+        provider_data: unknown;
+      }>();
+    expect(row).toMatchObject({
+      status: "processing",
+      signature: null,
+      error: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
+    });
+    const providerData =
+      typeof row?.provider_data === "string" ? JSON.parse(row.provider_data) : row?.provider_data;
+    // Literal on purpose: the durable contract the pending-transfers job matches.
+    expect(providerData).toMatchObject({ submission_outcome: "unknown" });
+
+    const recipients = await getDb(env)
+      .prepare("SELECT status FROM payment_transfer_recipients WHERE batch_id = ?")
+      .bind(body.data.batch.id)
+      .all<{ status: string }>();
+    expect(recipients.results.map((r) => r.status)).toEqual(["processing"]);
+  });
 });
