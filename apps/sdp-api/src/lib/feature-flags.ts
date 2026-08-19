@@ -7,12 +7,6 @@ function isTruthyFlag(value: string | undefined): boolean {
   return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }
 
-export function isRecurringPaymentCollectionEnabled(
-  env: Pick<Env, "PAYMENTS_RECURRING_COLLECTION_ENABLED">
-): boolean {
-  return isTruthyFlag(env.PAYMENTS_RECURRING_COLLECTION_ENABLED);
-}
-
 export function isAssetProfilesEnabled(
   env: Pick<Env, "SDP_FLAG_ASSET_PROFILES" | "ENVIRONMENT" | "SDP_DEPLOYMENT_MODE">
 ): boolean {

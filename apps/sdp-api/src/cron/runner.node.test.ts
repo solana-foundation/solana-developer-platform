@@ -144,12 +144,13 @@ describe("startCron", () => {
 
   it("schedules a task with PENDING_TRANSFERS_CRON when DISABLE_CRON is unset", () => {
     startCron({ env: {} as Env, bg: makeBg() });
-    expect(scheduleMock).toHaveBeenCalledTimes(5);
+    expect(scheduleMock).toHaveBeenCalledTimes(6);
     expect(scheduleMock.mock.calls[0][0]).toBe(APPROVED_WALLET_OPERATIONS_CRON);
     expect(scheduleMock.mock.calls[1][0]).toBe(PENDING_TRANSFERS_CRON);
-    expect(scheduleMock.mock.calls[2][0]).toBe(WORKFLOW_EXECUTIONS_CRON);
-    expect(scheduleMock.mock.calls[3][0]).toBe(WORKFLOW_SECRET_RETIREMENTS_CRON);
-    expect(scheduleMock.mock.calls[4][0]).toBe(EARN_VAULT_MOVEMENTS_CRON);
+    expect(scheduleMock.mock.calls[2][0]).toBe(RECURRING_PAYMENTS_COLLECTION_CRON);
+    expect(scheduleMock.mock.calls[3][0]).toBe(WORKFLOW_EXECUTIONS_CRON);
+    expect(scheduleMock.mock.calls[4][0]).toBe(WORKFLOW_SECRET_RETIREMENTS_CRON);
+    expect(scheduleMock.mock.calls[5][0]).toBe(EARN_VAULT_MOVEMENTS_CRON);
   });
 
   it("schedules workflow executions by default, and its tick runs the engine", () => {
@@ -158,7 +159,7 @@ describe("startCron", () => {
     const observability = makeObservability();
     startCron({ env, bg, observability });
 
-    (scheduleMock.mock.calls[2][1] as () => void)();
+    (scheduleMock.mock.calls[3][1] as () => void)();
     expect(runWorkflowExecutions).toHaveBeenCalledWith({ env, bg, observability });
   });
 
@@ -168,7 +169,7 @@ describe("startCron", () => {
   it("omits workflow executions when asset profiles is off", () => {
     startCron({ env: SELF_HOSTED_NO_PROFILES, bg: makeBg() });
 
-    expect(scheduleMock).toHaveBeenCalledTimes(4);
+    expect(scheduleMock).toHaveBeenCalledTimes(5);
     for (const call of scheduleMock.mock.calls) {
       (call[1] as () => void)();
     }
@@ -208,29 +209,17 @@ describe("startCron", () => {
       env: { K_SERVICE: "sdp-api", DISABLE_CRON: "false" } as Env,
       bg: makeBg(),
     });
-    expect(scheduleMock).toHaveBeenCalledTimes(5);
-    expect(scheduleMock.mock.calls[0][0]).toBe(APPROVED_WALLET_OPERATIONS_CRON);
-    expect(scheduleMock.mock.calls[1][0]).toBe(PENDING_TRANSFERS_CRON);
-  });
-
-  it("does not schedule recurring collection unless collection is enabled", () => {
-    startCron({ env: {} as Env, bg: makeBg() });
-
-    expect(scheduleMock).toHaveBeenCalledTimes(5);
-    expect(scheduleMock.mock.calls[0][0]).toBe(APPROVED_WALLET_OPERATIONS_CRON);
-    expect(scheduleMock.mock.calls[1][0]).toBe(PENDING_TRANSFERS_CRON);
-    expect(runRecurringPaymentsCollection).not.toHaveBeenCalled();
-  });
-
-  it("schedules recurring collection when collection is enabled", () => {
-    startCron({
-      env: { PAYMENTS_RECURRING_COLLECTION_ENABLED: "true" } as Env,
-      bg: makeBg(),
-    });
-
     expect(scheduleMock).toHaveBeenCalledTimes(6);
     expect(scheduleMock.mock.calls[0][0]).toBe(APPROVED_WALLET_OPERATIONS_CRON);
     expect(scheduleMock.mock.calls[1][0]).toBe(PENDING_TRANSFERS_CRON);
+  });
+
+  // Recurring payments are an always-on product surface: collection schedules
+  // behind no flag, like the transfers reconciliation it complements.
+  it("schedules recurring collection unconditionally", () => {
+    startCron({ env: {} as Env, bg: makeBg() });
+
+    expect(scheduleMock).toHaveBeenCalledTimes(6);
     expect(scheduleMock.mock.calls[2][0]).toBe(RECURRING_PAYMENTS_COLLECTION_CRON);
   });
 
@@ -239,9 +228,9 @@ describe("startCron", () => {
     const env = { PRIVATE_CHANNELS_ENABLED: "true" } as Env;
     startCron({ env, bg });
 
-    // approved-operation recovery + transfers + workflow executions + deposits +
-    // withdrawals (recurring stays off).
-    expect(scheduleMock).toHaveBeenCalledTimes(7);
+    // approved-operation recovery + transfers + recurring + workflow executions +
+    // deposits + withdrawals + retirements + vault movements.
+    expect(scheduleMock).toHaveBeenCalledTimes(8);
 
     // Fire every scheduled tick; the two private-channels reconcilers must run.
     for (const call of scheduleMock.mock.calls) {
@@ -262,7 +251,7 @@ describe("startCron", () => {
   it("schedules when DISABLE_CRON is set to a recognised falsy value ('false' / '0')", () => {
     startCron({ env: { DISABLE_CRON: "false" } as Env, bg: makeBg() });
     startCron({ env: { DISABLE_CRON: "0" } as Env, bg: makeBg() });
-    expect(scheduleMock).toHaveBeenCalledTimes(10);
+    expect(scheduleMock).toHaveBeenCalledTimes(12);
   });
 
   it("throws on an unrecognised DISABLE_CRON value to surface env typos", () => {
@@ -324,7 +313,7 @@ describe("startCron", () => {
 
   it("recurring tick invokes runRecurringPaymentsCollection with the supplied deps", () => {
     const bg = makeBg();
-    const env = { PAYMENTS_RECURRING_COLLECTION_ENABLED: "true" } as Env;
+    const env = {} as Env;
     const observability = makeObservability();
     startCron({ env, bg, observability });
     // recovery, transfers, recurring, workflow executions — recurring is third.
@@ -358,16 +347,16 @@ describe("startCron", () => {
     const handle = startCron({ env: {} as Env, bg: makeBg() });
     expect(handle).not.toBeNull();
     await handle?.stop();
-    expect(stopMock).toHaveBeenCalledTimes(5);
+    expect(stopMock).toHaveBeenCalledTimes(6);
   });
 
   it("returned handle.stop() stops every scheduled task", async () => {
     const handle = startCron({
-      env: { PAYMENTS_RECURRING_COLLECTION_ENABLED: "true" } as Env,
+      env: { PRIVATE_CHANNELS_ENABLED: "true" } as Env,
       bg: makeBg(),
     });
     expect(handle).not.toBeNull();
     await handle?.stop();
-    expect(stopMock).toHaveBeenCalledTimes(6);
+    expect(stopMock).toHaveBeenCalledTimes(8);
   });
 });

@@ -688,13 +688,6 @@ export const FIELDS: EnvField[] = [
     help: "Allows dashboard-stored custody Connection setup without provider credentials in this deployment.",
   },
   {
-    key: "PAYMENTS_RECURRING_COLLECTION_ENABLED",
-    section: "advanced",
-    kind: "text",
-    label: "Recurring payment collection enabled",
-    defaultValue: "false",
-  },
-  {
     key: "PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE",
     section: "advanced",
     kind: "text",
