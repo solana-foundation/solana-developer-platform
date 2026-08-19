@@ -8,8 +8,6 @@ const mocks = vi.hoisted(() => ({
   cancelRecurringPayment: vi.fn(),
   collectRecurringPayment: vi.fn(),
   resumeRecurringPayment: vi.fn(),
-  logError: vi.fn(),
-  logWarn: vi.fn(),
   getWalletById: vi.fn(),
   queryCalls: [] as Array<{ query: string; bindings: Array<string | number> }>,
   rows: {
@@ -36,10 +34,6 @@ vi.mock("@/db", () => ({
       }),
     }),
   }),
-}));
-
-vi.mock("@/runtime/logger", () => ({
-  getLogger: () => ({ error: mocks.logError, warn: mocks.logWarn, info: vi.fn(), debug: vi.fn() }),
 }));
 
 vi.mock("@/services/domain/signing.service", () => ({
@@ -199,24 +193,16 @@ describe("collectDueRecurringPayments", () => {
     expect(staleCollectionQuery?.query).toContain("PARTITION BY rp.id");
   });
 
-  it("surfaces a parked collection instead of hiding it in the silent skip counter", async () => {
-    // A collection whose submission outcome is unknown is deliberately left
-    // processing for manual reconciliation. It is still a "skip" for the tick,
-    // but a silent one would let a payer's subscription stall unnoticed.
-    mocks.rows.due = [recurringRow("active")];
-    mocks.collectRecurringPayment.mockRejectedValue(
-      new AppError("CONFLICT", "Transfer submission outcome is unknown", {
-        reason: "transfer_submission_outcome_unknown",
-      })
-    );
+  it("keeps parked collections out of the stale-recovery window", async () => {
+    // A parked cycle waits for an operator; its frozen updated_at would
+    // otherwise pin it to the head of this oldest-first window forever.
+    mocks.rows.due = [];
+    await collectDueRecurringPayments({} as Env);
 
-    const result = await collectDueRecurringPayments({} as Env);
-
-    expect(result).toEqual({ recovered: 0, collected: 0, failed: 0, skipped: 1 });
-    expect(mocks.logWarn).toHaveBeenCalledWith(
-      expect.objectContaining({ reason: "transfer_submission_outcome_unknown" }),
-      expect.stringContaining("manual reconciliation")
+    const staleQuery = mocks.queryCalls.find((call) =>
+      call.query.includes("JOIN payment_subscription_collection_attempts")
     );
+    expect(staleQuery?.query).toContain("submission_outcome");
   });
 
   it("treats collection conflicts as duplicate-prevention skips", async () => {

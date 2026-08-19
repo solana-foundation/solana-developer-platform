@@ -13,10 +13,6 @@ import {
   collectRecurringPayment,
   resumeRecurringPayment,
 } from "@/services/payments/recurring-payments";
-import {
-  isTransferSubmissionOutcomeUnknown,
-  TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
-} from "@/services/payments/submission-outcome";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 
@@ -113,19 +109,8 @@ async function collectRow(
     return "ok";
   } catch (error) {
     if (shouldSkipCollectionError(error)) {
-      if (isTransferSubmissionOutcomeUnknown(error)) {
-        // A parked cycle is a skip for this tick, but a silent one would let
-        // the payer's subscription stall unnoticed.
-        getLogger().warn(
-          {
-            organization_id: row.organization_id,
-            project_id: row.project_id,
-            recurring_payment_id: row.id,
-            reason: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
-          },
-          "collectDueRecurringPayments: collection parked, awaiting manual reconciliation"
-        );
-      }
+      // A parked cycle also lands here, but it is already logged where it was
+      // parked, with the attempt and transfer ids the operator needs.
       return "skipped";
     }
     logCronFailure("collectDueRecurringPayments: failed to collect recurring payment", row, error);

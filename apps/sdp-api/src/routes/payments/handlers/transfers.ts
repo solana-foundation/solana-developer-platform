@@ -493,7 +493,7 @@ export function createSubmissionRecorder(
           signature: sig,
           error: error instanceof Error ? error.message : String(error),
         },
-        "createTransfer: failed to persist submitted transfer signature"
+        "failed to persist submitted transfer signature"
       );
     }
   };

@@ -38,10 +38,10 @@ import {
 } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
 import {
-  isPreBroadcastRejection,
   isTransferSubmissionOutcomeUnknown,
   persistOutcomeUnknownMarker,
   SUBMISSION_OUTCOME_UNKNOWN_MARKER,
+  signAndSendClosed,
   TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
   TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
   transferSubmissionOutcomeUnknown,
@@ -673,24 +673,6 @@ async function journalRecurringPaymentCollectionError(input: {
 }
 
 /**
- * Submit a collection through the shared fence: a provably pre-broadcast
- * rejection stays a plain failure, anything else becomes the outcome-unknown
- * conflict that parks the cycle.
- */
-async function submitCollection(
-  input: Parameters<typeof sendSubscriptionInstructions>[0]
-): Promise<Signature> {
-  try {
-    return await sendSubscriptionInstructions(input);
-  } catch (error) {
-    if (isPreBroadcastRejection(error)) {
-      throw error;
-    }
-    throw transferSubmissionOutcomeUnknown(error);
-  }
-}
-
-/**
  * Leave a collection whose submission outcome is unknown exactly where it is:
  * the attempt stays `processing` and the transfer keeps its `processing` row
  * behind the shared reconciliation marker. Journaling a failure here would
@@ -705,6 +687,8 @@ async function parkRecurringPaymentCollection(
     {
       attempt_id: input.attempt.id,
       error: activationErrorMessage(input.error),
+      organization_id: input.organizationId,
+      project_id: input.projectId,
       reason: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
       recurring_payment_id: input.recurringPaymentId,
       transfer_id: input.transfer?.id ?? null,
@@ -714,6 +698,29 @@ async function parkRecurringPaymentCollection(
   const transfer = input.transfer;
   if (!transfer) {
     return;
+  }
+  // Link the attempt to its transfer if that write was the one that was lost:
+  // both parking guards key off `transfer_id`, and an unlinked attempt would be
+  // failed and rescheduled by stale recovery — the double charge itself.
+  if (!input.attempt.transfer_id) {
+    try {
+      await input.subscriptionsRepo.updateCollectionAttempt({
+        attemptId: input.attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        transferId: transfer.id,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (linkError) {
+      getLogger().error(
+        {
+          attempt_id: input.attempt.id,
+          error: activationErrorMessage(linkError),
+          transfer_id: transfer.id,
+        },
+        "Failed to link a parked collection attempt to its transfer; reconcile manually"
+      );
+    }
   }
   await persistOutcomeUnknownMarker(
     () =>
@@ -1240,7 +1247,7 @@ export async function collectRecurringPayment(input: {
     // Collection is the one recurring path that parks instead of failing: a
     // journaled failure reschedules the cycle, and rescheduling re-charges the
     // payer. The other recurring flows keep their own error handling.
-    const signature = await submitCollection({
+    const signature = await sendSubscriptionInstructions({
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -1248,6 +1255,7 @@ export async function collectRecurringPayment(input: {
       sourceSigner,
       instructions: [createDestinationAtaInstruction, collectInstruction],
       feePayer,
+      submit: signAndSendClosed,
     });
     submittedSignature = signature;
     const submittedAt = new Date().toISOString();

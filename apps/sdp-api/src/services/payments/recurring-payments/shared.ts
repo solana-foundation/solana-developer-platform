@@ -20,6 +20,7 @@ import { createTokenRepository } from "@/db/repositories";
 import { AppError, badRequest } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { isNativePaymentToken, normalizePaymentToken } from "@/services/payment-operation.service";
+import type { signAndSendClosed } from "@/services/payments/submission-outcome";
 import * as solanaServices from "@/services/solana";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -86,6 +87,12 @@ export async function sendSubscriptionInstructions(input: {
   sourceSigner?: TransactionSigner;
   instructions: Instruction[];
   feePayer?: Address;
+  /**
+   * How the signed transaction reaches the provider. Defaults to a plain
+   * submit; collection passes the fence so only the submit itself — never the
+   * signer, blockhash or fee-payer lookups above it — can park the cycle.
+   */
+  submit?: typeof signAndSendClosed;
 }): Promise<Signature> {
   const signer =
     input.sourceSigner ??
@@ -117,7 +124,7 @@ export async function sendSubscriptionInstructions(input: {
   );
   const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
   const txBytes = new Uint8Array(getTransactionEncoder().encode(partiallySigned));
-  return feePayment.signAndSend(txBytes);
+  return input.submit ? input.submit(feePayment, txBytes) : feePayment.signAndSend(txBytes);
 }
 
 export async function confirmSubscriptionSignature(

@@ -227,10 +227,10 @@ const signingSinkInventory: Record<string, string[]> = {
     "signTransactionMessageWithSigners",
   ],
   "apps/sdp-api/src/routes/pay.ts": ["signAsFeePayer"],
-  "apps/sdp-api/src/routes/payments/handlers/transfer-batches/execute.ts": ["signAndSend"],
   // Transfers, batch chunks and recurring collections all submit through the
   // signAndSendClosed chokepoint, which fails closed on ambiguous provider
-  // outcomes; it is the only sink left on those paths.
+  // outcomes. recurring-payments/shared.ts keeps its own sink for the
+  // activation, update and lifecycle flows, which submit unguarded.
   "apps/sdp-api/src/services/payments/submission-outcome.ts": ["signAndSend"],
   "apps/sdp-api/src/services/payments/recurring-payments/shared.ts": ["signAndSend"],
   "apps/sdp-api/src/services/private-channels/deposit.ts": ["signTransactionMessageWithSigners"],

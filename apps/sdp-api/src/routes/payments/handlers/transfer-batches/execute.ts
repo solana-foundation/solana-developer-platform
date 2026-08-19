@@ -17,9 +17,10 @@ import { internalError, transactionFailed } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import {
-  isPreBroadcastRejection,
+  isTransferSubmissionOutcomeUnknown,
   persistOutcomeUnknownMarker,
   SUBMISSION_OUTCOME_UNKNOWN_MARKER,
+  signAndSendClosed,
   TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
   TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
 } from "@/services/payments/submission-outcome";
@@ -294,8 +295,9 @@ export async function executeChunk(params: {
   // Once broadcast, a failed bookkeeping write must never strand the chunk as
   // an unsigned `processing` row — the pending-transfers job would cascade a
   // false `failed` to every recipient. The recorder retries the write once.
-  const recorder = createSubmissionRecorder(transfer, (sig) =>
-    updateTransferRecord(c, {
+  let signaturePersisted = false;
+  const recorder = createSubmissionRecorder(transfer, async (sig) => {
+    const persisted = await updateTransferRecord(c, {
       transferId: transfer.id,
       organizationId: resolved.scope.auth.organizationId,
       projectId: resolved.projectId,
@@ -303,13 +305,15 @@ export async function executeChunk(params: {
       signature: sig,
       serializedTx,
       error: null,
-    })
-  );
+    });
+    signaturePersisted = true;
+    return persisted;
+  });
   let signature: Awaited<ReturnType<typeof params.feePayment.signAndSend>>;
   try {
-    signature = await params.feePayment.signAndSend(txBytes);
+    signature = await signAndSendClosed(params.feePayment, txBytes);
   } catch (error) {
-    if (isPreBroadcastRejection(error)) {
+    if (!isTransferSubmissionOutcomeUnknown(error)) {
       await settle({
         status: "failed",
         recipientStatus: "failed",
@@ -326,7 +330,7 @@ export async function executeChunk(params: {
         reason: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
         error: error instanceof Error ? error.message : String(error),
       },
-      "batch chunk parked; awaiting manual reconciliation"
+      "Batch chunk parked; awaiting manual reconciliation"
     );
     await persistOutcomeUnknownMarker(
       () =>
@@ -342,5 +346,34 @@ export async function executeChunk(params: {
   }
 
   await recorder.onSubmitted(signature);
-  await recorder.submittedRow(); // retries the persist once if the first write failed
+  if (!signaturePersisted) {
+    // Both bookkeeping writes were lost after the broadcast. Try once more
+    // through `settle`, this time carrying the signature: a signed `processing`
+    // row settles itself from chain on the next pending-transfers run, while an
+    // unsigned one is timed out into a false `failed` for every recipient. If
+    // that write is refused too, park the chunk so the job leaves it alone.
+    try {
+      await settle({ status: "processing", recipientStatus: "processing", signature, error: null });
+    } catch (persistError) {
+      getLogger().error(
+        {
+          transfer_id: transfer.id,
+          signature,
+          reason: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
+          error: persistError instanceof Error ? persistError.message : String(persistError),
+        },
+        "Batch chunk signature could not be recorded; parking it for manual reconciliation"
+      );
+      await persistOutcomeUnknownMarker(
+        () =>
+          settle({
+            status: "processing",
+            recipientStatus: "processing",
+            error: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
+            providerData: { ...SUBMISSION_OUTCOME_UNKNOWN_MARKER },
+          }),
+        transfer.id
+      );
+    }
+  }
 }

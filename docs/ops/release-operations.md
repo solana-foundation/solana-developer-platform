@@ -216,21 +216,16 @@ If a pre-fence rollback cannot wait for every row, record the transfer ids left 
 incident timeline: the older job will fail them, and each one is a payment the client may send
 again.
 
-The same marker parks two more surfaces. Both are found by the query above — it already spans every
-wallet transfer type — but each needs a different second step.
-
-#### Parked batch chunks
-
-A chunk's transfer carries the marker and its recipients stay `processing`, so the batch never
-settles. Resolve the chunk exactly as a single transfer above; the recipients and the parent batch
-then follow from it on the next `trackPendingTransfers` run.
+The query above already spans every wallet transfer type, so it also lists parked **batch chunks** —
+resolve such a chunk exactly as a single transfer and its recipients and parent batch follow on the
+next `trackPendingTransfers` run — and parked **recurring collections**, which need a second step.
 
 #### Parked recurring collections
 
 The collection attempt stays `processing` alongside its parked transfer, so the subscription stops
 collecting until an operator resolves it — deliberately, because failing the attempt would
-reschedule the cycle and charge the payer a second time. The cron logs each parked cycle
-(`collectDueRecurringPayments: collection parked`). List them with:
+reschedule the cycle and charge the payer a second time. Each park is logged once where it happens, with the attempt and transfer ids
+(`Recurring payment collection parked; awaiting manual reconciliation`). List them with:
 
 ```sql
 SELECT a.id AS attempt_id, a.subscription_id, a.due_at, a.transfer_id, t.source_address, t.amount

@@ -1976,21 +1976,23 @@ describe("payment transfer batches", () => {
     }
   });
 
-  it("retries the signature persist after submission instead of stranding the chunk", async () => {
+  it("records a submitted chunk's signature even when both bookkeeping writes are lost", async () => {
     const createRepository = paymentsRepositoryPostgres.createPostgresPaymentsRepository;
     const batchesSpy = vi.spyOn(paymentsRepositoryPostgres, "createPostgresPaymentsRepository");
-    let signaturePersistInjected = false;
+    let signaturePersistFailures = 0;
     batchesSpy.mockImplementation((db) => {
       const repository = createRepository(db);
       return {
         ...repository,
         updateTransfer: async (input) => {
+          // Both of the recorder's attempts fail, so the chunk falls through to
+          // the settle that carries the signature.
           if (
-            !signaturePersistInjected &&
+            signaturePersistFailures < 2 &&
             input.status === "processing" &&
             input.signature !== undefined
           ) {
-            signaturePersistInjected = true;
+            signaturePersistFailures += 1;
             throw new Error("simulated signature persist failure");
           }
           return repository.updateTransfer(input);
@@ -2059,11 +2061,11 @@ describe("payment transfer batches", () => {
 
       await trackPendingTransfers(env);
 
-      // The write is retried once, so a single lost bookkeeping write no longer
-      // strands a broadcast chunk as an unsigned row that the pending-transfers
-      // job would time out into a false `failed` for every recipient. The row
-      // may already have settled from its signature, so assert what this test
-      // owns: the signature landed and the chunk is not terminally failed.
+      // A broadcast chunk is never stranded as an unsigned row that the
+      // pending-transfers job would time out into a false `failed` for every
+      // recipient: the recorder retries once and the settle carries the
+      // signature. The row may already have settled from that signature, so
+      // assert what this test owns: it landed and the chunk is not failed.
       const transferRow = await getDb(env)
         .prepare("SELECT status, signature FROM payment_transfers WHERE id = ?")
         .bind(linkedRecipient?.transfer_id)
