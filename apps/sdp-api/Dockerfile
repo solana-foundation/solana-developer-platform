@@ -27,7 +27,9 @@ WORKDIR /repo
 
 # Lockfile + workspace metadata first so the install layer only invalidates
 # when versions change. Root tsconfig.json is needed for esbuild's "extends".
-COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.json ./
+# `.npmrc` carries the `${NPM_TOKEN}` auth REFERENCE for the private @vedatech
+# scope — the value arrives separately, as a mounted secret below.
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.json .npmrc ./
 COPY apps/sdp-api/package.json ./apps/sdp-api/
 COPY packages/sdp-types/package.json ./packages/sdp-types/
 COPY packages/sdp-env-config/package.json ./packages/sdp-env-config/
@@ -43,6 +45,7 @@ COPY packages/sdp-spc-escrow/package.json ./packages/sdp-spc-escrow/
 COPY packages/sdp-spc-withdraw/package.json ./packages/sdp-spc-withdraw/
 COPY packages/kit-augment/package.json ./packages/kit-augment/
 COPY packages/sdp-kamino/package.json ./packages/sdp-kamino/
+COPY packages/sdp-veda/package.json ./packages/sdp-veda/
 COPY patches ./patches
 
 # The secret is read INSIDE the RUN and never assigned with ENV/ARG, so it lives
@@ -54,9 +57,14 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     if [ -f /run/secrets/npm_token ]; then \
       NPM_TOKEN="$(sed -n 's/^[[:space:]]*NPM_TOKEN=//p' /run/secrets/npm_token | tail -n1)"; \
       [ -n "$NPM_TOKEN" ] || NPM_TOKEN="$(tr -d ' \t\r\n' < /run/secrets/npm_token)"; \
+      if [ -z "$NPM_TOKEN" ]; then \
+        echo "error: the npm_token build secret is empty. It must contain the token, or a NPM_TOKEN=<token> line." >&2; \
+        exit 1; \
+      fi; \
       export NPM_TOKEN; \
     else \
-      echo "warning: no npm_token build secret; @vedatech/svm-sdk will 404. Pass --secret id=npm_token,src=<env file or token file>." >&2; \
+      echo "error: no npm_token build secret. @sdp/veda installs the private @vedatech/svm-sdk; pass --secret id=npm_token,src=<env file or token file>." >&2; \
+      exit 1; \
     fi; \
     pnpm install --frozen-lockfile --filter @sdp/api...
 
@@ -79,6 +87,7 @@ COPY packages/sdp-spc-escrow ./packages/sdp-spc-escrow
 COPY packages/sdp-spc-withdraw ./packages/sdp-spc-withdraw
 COPY packages/kit-augment ./packages/kit-augment
 COPY packages/sdp-kamino ./packages/sdp-kamino
+COPY packages/sdp-veda ./packages/sdp-veda
 
 WORKDIR /repo/apps/sdp-api
 RUN node scripts/build-node.mjs
