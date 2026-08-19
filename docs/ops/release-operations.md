@@ -171,7 +171,9 @@ Database schema rollback is not automated. If the selected image is incompatible
 
 When a fee-payment provider fails without telling us whether it broadcast the transaction, the API
 parks the transfer: it stays `processing`, carries the marker `provider_data.submission_outcome =
-'unknown'`, and returns `409 transfer_submission_outcome_unknown` telling the client not to retry.
+'unknown'`, and tells the caller not to retry — `409 transfer_submission_outcome_unknown` for a
+single transfer or a manual collection, and a `processing` chunk with that notice in its `error`
+inside the batch's `200`.
 The cron job never times out a signatureless parked transfer: the recovery query excludes it. If
 `signature` is present, the job still reconciles it from chain normally; otherwise an operator must
 establish what happened on chain. List them with:
@@ -243,6 +245,29 @@ WHERE a.status = 'processing'
 ORDER BY a.due_at;
 ```
 
+#### Failing a parked batch chunk
+
+Never fail a chunk by hand. The reconciliation job is the only writer that cascades to a chunk's
+recipients and recomputes its parent batch, and it only ever claims chunks that are still
+`processing` — one set to `failed` by hand leaves its recipients processing and its batch unsettled
+for good. Drop the marker instead and let the job do all three, leaving `updated_at` alone so the row
+is already past the stuck window:
+
+```sql
+UPDATE payment_transfers
+   SET provider_data = provider_data - 'submission_outcome'
+ WHERE id = :transfer_id
+   AND status = 'processing'
+   AND signature IS NULL;
+```
+
+The job confirms the signature against the transaction history before failing anything, so a chunk
+that did land after all settles instead. The recorded reason is then the job's own
+`Transaction not found on chain` rather than an operator's sentence.
+
+A chunk that DID land needs none of this: give it its signature as above and the job settles the
+chunk, its recipients and the batch on its next run.
+
 Resolve the transfer first, as above. Then close the attempt to match it: if the collection landed,
 confirm the attempt against the recorded signature; if it never landed, fail the attempt so the
 cycle is rescheduled and collected once. Do not fail the attempt while its transfer is still
@@ -258,7 +283,7 @@ SELECT id AS attempt_id, subscription_id, due_at, updated_at
 FROM payment_subscription_collection_attempts
 WHERE status = 'processing'
   AND transfer_id IS NULL
-  AND updated_at < now() - interval '5 minutes'
+  AND updated_at::timestamptz < now() - interval '5 minutes'
 ORDER BY due_at;
 ```
 

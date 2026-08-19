@@ -2083,6 +2083,21 @@ describe("Payments routes — recurring", () => {
       .bind(activated.subscriptionId)
       .first<{ total: number }>();
     expect(Number(afterCron?.total)).toBe(1);
+
+    // Lifecycle stays blocked while the cycle is unresolved — but the client
+    // asked to cancel a subscription, so the refusal must say that, not hand
+    // back a transfer's reconciliation notice.
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/cancel`,
+      { method: "POST", headers, body: "{}" },
+      env
+    );
+    expect(cancelRes.status).toBe(409);
+    const cancelBody = (await cancelRes.json()) as {
+      error: { message: string; details?: { reason?: string } };
+    };
+    expect(cancelBody.error.details?.reason).toBe("transfer_submission_outcome_unknown");
+    expect(cancelBody.error.message).toContain("awaits manual reconciliation");
   });
 
   it("collects due recurring payments through SDP API routes", async () => {

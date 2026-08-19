@@ -121,8 +121,11 @@ export async function persistOutcomeUnknownMarker(
  * serialized to the client — so the forced manual reconciliation starts from
  * the real error instead of this constant sentence.
  */
-export function transferSubmissionOutcomeUnknown(cause: unknown): AppError {
-  const error = new AppError("CONFLICT", TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR, {
+export function transferSubmissionOutcomeUnknown(
+  cause: unknown,
+  message: string = TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR
+): AppError {
+  const error = new AppError("CONFLICT", message, {
     reason: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
   });
   error.cause = cause;
