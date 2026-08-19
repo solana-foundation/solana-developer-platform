@@ -537,7 +537,7 @@ describe("Payments routes — transfers", () => {
     expect(response.status).toBe(400);
   });
 
-  it("executes an approved transfer exactly once after leaving it pending", async () => {
+  it("replays a selected-wallet API key approval exactly once", async () => {
     const sessionId = "ses_ungrouped_payment_approver";
     const approverUserId = "usr_ungrouped_payment_approver";
     await getDb(env).batch([
@@ -569,6 +569,25 @@ describe("Payments routes — transfers", () => {
           id: "approve-payment-execution",
           kind: "approval",
           operationTypes: ["payment_transfer_execute"],
+        },
+      ],
+    });
+    await getDb(env)
+      .prepare(
+        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+         VALUES ('akw_selected_approval_replay', ?, ?, '["*"]')`
+      )
+      .bind(TEST_API_KEY.id, TEST_WALLET_ID)
+      .run();
+    await seedCachedKey({
+      walletScope: "selected",
+      signingWalletId: TEST_WALLET_ID,
+      signingWalletIds: [TEST_WALLET_ID],
+      walletBindings: [
+        {
+          walletId: TEST_WALLET_ID,
+          custodyWalletId: TEST_CUSTODY_WALLET_ID,
+          permissions: ["*"],
         },
       ],
     });
@@ -669,6 +688,121 @@ describe("Payments routes — transfers", () => {
       .prepare("SELECT COUNT(*) AS count FROM payment_transfers")
       .first<{ count: number | string }>();
     expect(Number(transferCount?.count ?? 0)).toBe(1);
+  });
+
+  it("fails a selected-wallet approval replay when its wallet ID becomes ambiguous", async () => {
+    await getDb(env)
+      .prepare(
+        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+         VALUES ('akw_ambiguous_payment_replay', ?, ?, '["*"]')`
+      )
+      .bind(TEST_API_KEY.id, TEST_WALLET_ID)
+      .run();
+    await seedWalletControlProfile({
+      rules: [
+        {
+          id: "approve-ambiguous-payment-replay",
+          kind: "approval",
+          operationTypes: ["payment_transfer_execute"],
+        },
+      ],
+    });
+    await seedCachedKey({
+      walletScope: "selected",
+      signingWalletId: TEST_WALLET_ID,
+      signingWalletIds: [TEST_WALLET_ID],
+      walletBindings: [
+        {
+          walletId: TEST_WALLET_ID,
+          custodyWalletId: TEST_CUSTODY_WALLET_ID,
+          permissions: ["*"],
+        },
+      ],
+    });
+
+    const pendingResponse = await app.request(
+      "/v1/payments/transfers",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL",
+          amount: "0.1",
+        }),
+      },
+      env
+    );
+    expect(pendingResponse.status).toBe(202);
+    const pendingBody = (await pendingResponse.json()) as {
+      error: { details: { approvalRequestId: string; walletOperationId: string } };
+    };
+    const { approvalRequestId, walletOperationId } = pendingBody.error.details;
+    const operationBeforeReplay = await getDb(env)
+      .prepare("SELECT custody_wallet_id FROM wallet_operations WHERE id = ?")
+      .bind(walletOperationId)
+      .first<{ custody_wallet_id: string | null }>();
+    expect(operationBeforeReplay?.custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
+
+    const repository = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+    );
+    await repository.updateApprovalRequestStatus({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      approvalRequestId,
+      status: "approved",
+      operationStatus: "executing",
+      resolvedBy: TEST_API_KEY.id,
+    });
+
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted,
+              encryption_version, status)
+           VALUES ('cust_cfg_ambiguous_payment_replay', ?, ?, 'privy', 'test-config',
+                   'sdp-custody-encryption-v1', 'active')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id),
+      getDb(env).prepare(
+        `INSERT INTO custody_wallets
+           (id, custody_config_id, wallet_id, public_key, status)
+         VALUES ('cwlt_ambiguous_payment_replay', 'cust_cfg_ambiguous_payment_replay',
+                 '${TEST_WALLET_ID}', '${TEST_SOLANA_ADDRESSES.wallet3}', 'active')`
+      ),
+    ]);
+
+    expect(await recoverApprovedWalletOperations(env)).toBe(1);
+    const execution = await getDb(env)
+      .prepare(
+        `SELECT status, execution_error, execution_effect_started_at
+         FROM wallet_operations
+         WHERE id = ?`
+      )
+      .bind(walletOperationId)
+      .first<{
+        status: string;
+        execution_error: string | null;
+        execution_effect_started_at: string | null;
+      }>();
+    expect(execution).toMatchObject({
+      status: "failed",
+      execution_error: "API key is not authorized for the requested wallet",
+      execution_effect_started_at: null,
+    });
+    const transferCount = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM payment_transfers")
+      .first<{ count: number | string }>();
+    expect(Number(transferCount?.count ?? 0)).toBe(0);
+    expect(createOrgSignerMock).not.toHaveBeenCalled();
+    expect(sendAndConfirmTransactionMock).not.toHaveBeenCalled();
   });
 
   it("recovers an expired execution claim with a fenced retry", async () => {

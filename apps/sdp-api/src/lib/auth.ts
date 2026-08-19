@@ -5,7 +5,7 @@
  * avoiding non-null assertions while adding defensive runtime checks.
  */
 
-import type { ApiKeyWalletBinding, Permission } from "@sdp/types";
+import type { ApiKeyWalletAuthorizationBinding, ApiKeyWalletScope, Permission } from "@sdp/types";
 import type { Context } from "hono";
 import type { Env } from "@/types/env";
 import { AppError, badRequest } from "./errors";
@@ -19,9 +19,10 @@ interface AuthContextBase {
   role: string;
   permissions: Permission[];
   environment: string;
+  walletScope?: ApiKeyWalletScope | null;
   signingWalletId: string | null;
   signingWalletIds: string[];
-  walletBindings: ApiKeyWalletBinding[];
+  walletBindings: ApiKeyWalletAuthorizationBinding[];
 }
 
 /**
@@ -73,6 +74,9 @@ export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
       role: apiKey.role,
       permissions: apiKey.permissions,
       environment: apiKey.environment,
+      walletScope:
+        apiKey.walletScope ??
+        ((apiKey.walletBindings?.length ?? 0) > 0 || apiKey.signingWalletId ? "selected" : "all"),
       signingWalletId: apiKey.signingWalletId ?? null,
       signingWalletIds: apiKey.signingWalletIds ?? [],
       walletBindings: apiKey.walletBindings ?? [],
@@ -93,6 +97,7 @@ export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
       role: clerk.role,
       permissions: clerk.permissions,
       environment: c.get("projectEnvironment") ?? "dashboard",
+      walletScope: null,
       signingWalletId: null,
       signingWalletIds: [],
       walletBindings: [],
@@ -111,6 +116,7 @@ export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
       role: "session",
       permissions: session.permissions,
       environment: c.get("projectEnvironment") ?? "dashboard",
+      walletScope: null,
       signingWalletId: null,
       signingWalletIds: [],
       walletBindings: [],
