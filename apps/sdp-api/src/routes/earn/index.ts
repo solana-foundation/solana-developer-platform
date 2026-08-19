@@ -22,6 +22,7 @@ import {
   extractEarnVaultDepositPolicyCandidate,
   findEarnVaultDepositIdempotentKeyReplay,
   getEarnVaultDeposit,
+  listEarnVaultDeposits,
   listEarnVaultPositions,
 } from "./handlers/vault";
 
@@ -71,11 +72,18 @@ earn.post(
   }),
   createEarnVaultDeposit
 );
-// The deposit READ takes no policy gate and no provider gate — it moves no
-// money and reports on money that already left the wallet. It is what makes a
+// The deposit READS take no policy gate and no provider gate — they move no
+// money and report on money that already left the wallet. They are what makes a
 // signed-but-unconfirmed deposit answerable: `POST` records before broadcast,
 // so a caller can hold a movement id for a transaction whose outcome it never
 // saw, and the every-minute reconciliation sweep is what eventually settles it.
+//
+// The collection is declared BEFORE the `:movementId` route, the same ordering
+// rule `/programs` follows, so a literal segment can never be captured as an id.
+// `?requestId=` on the collection is how an APPROVAL-GATED deposit is found: the
+// hold returns no movement id, but the approval executor replays the caller's
+// original Idempotency-Key, so the movement it later creates carries it.
+earn.get("/vault-deposits", requirePermissions("earn:read", "wallets:read"), listEarnVaultDeposits);
 earn.get(
   "/vault-deposits/:movementId",
   requirePermissions("earn:read", "wallets:read"),

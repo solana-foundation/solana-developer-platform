@@ -1,28 +1,26 @@
 "use client";
 
 /**
- * Browser-side durability for a vault deposit that is in the air.
+ * Browser-side durability for the vault deposit IDEMPOTENCY KEY.
  *
  * `POST /v1/earn/vault-deposits` signs and RECORDS the transaction before it
  * broadcasts, so between the click and the chain there is a window where SDP
- * holds a signed transaction whose fate nobody knows yet. Two things have to
- * outlive the modal for that window to be survivable, and a React ref outlives
- * neither a close nor a reload:
+ * holds a signed transaction whose fate nobody knows yet. A retry inside that
+ * window must carry the SAME key, or the chain will happily accept the same
+ * transfer twice — there is no provider-side dedupe behind this route. A React
+ * ref cannot do that job: it dies with the modal and with the tab's page load.
  *
- *   the idempotency key   — without it a retry after an ambiguous send mints a
- *                           fresh key, and the chain will happily accept the
- *                           same transfer twice. There is no provider-side
- *                           dedupe behind this route to catch that.
- *   the movement id       — without it the deposit stops being pollable, and
- *                           the only thing left to tell a customer about their
- *                           money is "check the explorer".
+ * This store deliberately holds ONLY the key. Tracking which deposits are in
+ * flight used to live here too, and it was the wrong place: browser state
+ * could not see a deposit signed in another tab, and it restored the previous
+ * project's watches after a workspace switch. That moved to the server —
+ * `GET /v1/earn/vault-deposits` — which is workspace-scoped by construction.
+ * The key stays here because it is genuinely client-owned: the client mints it,
+ * and it has to survive to be re-sent.
  *
  * `sessionStorage`, not `localStorage`: this is per-tab working state about a
  * transaction in flight, and it should die with the tab rather than resurface
- * days later in a different context. The cost is that a deposit made in one tab
- * is not watched in another — acceptable while there is no movement-list
- * endpoint to recover from (the custodial withdrawal path recovers from its
- * ledger list instead; see `EarnWithdrawalLedgerRecovery`).
+ * days later in a different context.
  *
  * Every read fails soft. Storage throws outright in some privacy modes, and a
  * deposit must never be blocked because a browser refused to remember it — but
@@ -33,23 +31,22 @@
  */
 
 const IDEMPOTENCY_STORE_KEY = "sdp:earn:vault-deposit:idempotency:v1";
-const WATCH_STORE_KEY = "sdp:earn:vault-deposit:watch:v1";
 
 /**
- * How long a minted key stays claimable for the same request.
+ * How long a minted key stays claimable for the same request, by DEFAULT.
  *
  * It has to comfortably outlast a retry — a customer re-pressing submit after a
  * timeout, or reloading a tab that hung — and it has to expire well before the
- * key could be mistaken for a NEW intent. A recorded deposit is terminal within
+ * key could be mistaken for a NEW intent. A BROADCAST deposit is terminal within
  * ~90 seconds either way (a Solana blockhash expires, and the reconciliation
  * sweep fails the movement), so fifteen minutes is far past any live ambiguity
  * while still guaranteeing that depositing the same amount from the same wallet
  * again tomorrow is a second deposit rather than a replay of the first.
+ *
+ * That clock is WRONG for an approval hold, which is why `holdVaultDepositIdempotencyKey`
+ * exists — see it for the reasoning.
  */
 const IDEMPOTENCY_TTL_MS = 15 * 60_000;
-
-/** A watch outlives a reload, not a working day; the sweep settles in minutes. */
-const WATCH_TTL_MS = 12 * 60 * 60_000;
 
 /** Bounded so a long session cannot grow the store without limit. */
 const MAX_STORED_ENTRIES = 20;
@@ -59,6 +56,27 @@ interface StoredEntry {
   id: string;
   value: string;
   createdAt: number;
+  /**
+   * Explicit expiry, overriding the store's default TTL.
+   *
+   * `null` means "does not expire while this tab lives", which is not the
+   * unbounded claim it looks like: the whole store is `sessionStorage`, so the
+   * tab session is already the outer bound.
+   *
+   * Optional so an entry written by an older build — which had no such field —
+   * keeps working under the default TTL instead of being dropped as
+   * unrecognized. Dropping it would mint a fresh key for a request already in
+   * flight, which is the one outcome this module must never produce.
+   */
+  expiresAt?: number | null;
+}
+
+/** Whether an entry is still claimable, honouring its own expiry over the default. */
+function isLiveEntry(entry: StoredEntry, now: number, ttlMs: number): boolean {
+  if (entry.expiresAt !== undefined) {
+    return entry.expiresAt === null || now < entry.expiresAt;
+  }
+  return now - entry.createdAt < ttlMs;
 }
 
 function storage(): Storage | null {
@@ -126,15 +144,17 @@ function readEntries(storeKey: string, ttlMs: number): StoredEntry[] {
   return parsed.filter((entry): entry is StoredEntry => {
     if (!entry || typeof entry !== "object") return false;
     const candidate = entry as Partial<StoredEntry>;
-    return (
+    const shaped =
       typeof candidate.id === "string" &&
       candidate.id.length > 0 &&
       typeof candidate.value === "string" &&
       candidate.value.length > 0 &&
       typeof candidate.createdAt === "number" &&
       Number.isFinite(candidate.createdAt) &&
-      now - candidate.createdAt < ttlMs
-    );
+      (candidate.expiresAt === undefined ||
+        candidate.expiresAt === null ||
+        (typeof candidate.expiresAt === "number" && Number.isFinite(candidate.expiresAt)));
+    return shaped && isLiveEntry(candidate as StoredEntry, now, ttlMs);
   });
 }
 
@@ -186,6 +206,32 @@ export function claimVaultDepositIdempotencyKey(fingerprint: string): string {
 }
 
 /**
+ * Pin a key for as long as an approval hold on it is live.
+ *
+ * The default TTL is calibrated to a BROADCAST deposit: a blockhash expires in
+ * ~90 seconds and the sweep settles the movement, so fifteen minutes is far
+ * past any live ambiguity. An approval hold answers to no such clock — a human
+ * has to act, and that can take hours. Letting the key lapse there would be the
+ * worst possible timing: the operation is still pending server-side under that
+ * exact value, replay detection is keyed on it, and a resubmit with a fresh key
+ * opens a SECOND approval request for the same intent. Approve both and the
+ * customer deposits twice.
+ *
+ * So an approval hold suspends expiry rather than extending it by a guess. The
+ * tab session is still the outer bound, and `releaseVaultDepositIdempotencyKey`
+ * still retires the key the moment the API answers for it.
+ */
+export function holdVaultDepositIdempotencyKey(fingerprint: string): void {
+  const entries = readEntries(IDEMPOTENCY_STORE_KEY, IDEMPOTENCY_TTL_MS);
+  const held = entries.find((entry) => entry.id === fingerprint);
+  if (!held) return;
+  writeEntries(IDEMPOTENCY_STORE_KEY, [
+    ...entries.filter((entry) => entry.id !== fingerprint),
+    { ...held, expiresAt: null },
+  ]);
+}
+
+/**
  * Retire a key once the API has ANSWERED for it.
  *
  * Only call this on a definitive answer. A key that is released while its
@@ -200,28 +246,5 @@ export function releaseVaultDepositIdempotencyKey(fingerprint: string): void {
   writeEntries(
     IDEMPOTENCY_STORE_KEY,
     entries.filter((entry) => entry.id !== fingerprint)
-  );
-}
-
-/** Movement ids still worth polling, newest last, expired entries dropped. */
-export function readVaultDepositWatches(): string[] {
-  return [...new Set(readEntries(WATCH_STORE_KEY, WATCH_TTL_MS).map((entry) => entry.value))];
-}
-
-export function rememberVaultDepositWatch(movementId: string): void {
-  const entries = readEntries(WATCH_STORE_KEY, WATCH_TTL_MS);
-  if (entries.some((entry) => entry.id === movementId)) return;
-  writeEntries(WATCH_STORE_KEY, [
-    ...entries,
-    { id: movementId, value: movementId, createdAt: Date.now() },
-  ]);
-}
-
-export function forgetVaultDepositWatch(movementId: string): void {
-  const entries = readEntries(WATCH_STORE_KEY, WATCH_TTL_MS);
-  if (!entries.some((entry) => entry.id === movementId)) return;
-  writeEntries(
-    WATCH_STORE_KEY,
-    entries.filter((entry) => entry.id !== movementId)
   );
 }

@@ -360,6 +360,34 @@ organization's own custody wallets.
     add a sponsor signature without broadcasting, preserving record-before-send,
     but this route deliberately selects `wallet-pays` until those programs are
     eligible for sponsorship.
+- `GET /vault-deposits` — this workspace's recorded deposits, **DB only**,
+  newest first, keyset-paged. The DISCOVERY tier: it is what lets a client
+  re-derive which of its deposits are still in flight after losing local state,
+  the way the custodial side re-derives withdrawals from its ledger. Scoped by
+  organization, environment, direction, PROJECT and wallet binding — the same
+  five rules as the detail read.
+  - `?requestId=` narrows to the caller's own idempotency key, and that is how
+    an **approval-gated** deposit becomes findable. A policy hold returns an
+    `approvalRequestId` and no `movementId` because no movement exists yet; the
+    approval executor replays the caller's original `Idempotency-Key`
+    (`services/policy/approved-operation-replay.ts` stores it in
+    `wallet_operations.raw_payload.executionRequest` and re-sends it as a real
+    header), so the movement it later creates carries it. **That preservation is
+    platform behaviour this route DEPENDS on** — if the executor ever derived
+    its own key instead, `?requestId=` would silently stop finding approved
+    deposits. It has no direct test today; the fixture needed to drive
+    `executeApprovedWalletOperation` has to reproduce the exact policy-gate
+    operation record, and that belongs in the approvals domain, not here.
+  - A key is caller-chosen `[\x20-\x7e]{1,255}` (`middleware/idempotency-key.ts`),
+    so it may be one character, and it is **published on chain** in the deposit
+    memo (`services/earn/vault-deposit.service.ts`). It is therefore never a
+    capability: the route re-applies every scoping rule, so a guessed key can
+    only surface a deposit the caller could already read. It is also why the key
+    is a QUERY filter and not a path segment — legal keys contain `/` and `?`.
+  - Migration `0061` adds `idx_earn_vault_movements_workspace_created`
+    (`(organization_id, environment, created_at DESC, id DESC) WHERE direction =
+    'deposit'`). 0059's indexes serve the sweep, replay, the chain and per
+    position — none of them can order this page.
 - `GET /vault-deposits/:movementId` — one recorded movement, **DB only**, no
   catalogue join and no chain read. This is what makes `POST`'s
   record-before-broadcast answerable: a caller can hold a movement id for a
@@ -409,14 +437,16 @@ recorded signature, confirms landed transactions, rebroadcasts the recorded
 signed bytes while the blockhash remains valid, and marks an expired, unlanded
 movement failed. Never rebuild a transaction during recovery.
 
-**Not built yet:** the withdraw counterpart, and a movement LIST. There is no
-`GET /vault-deposits` collection, so nothing can re-derive an organization's
-in-flight deposits — the dashboard persists its own watch list per tab instead
-(see the web module's `earn-vault-deposit-tracking.ts`), and an approval-gated
-deposit stays untrackable entirely because the approval hold carries an
-`approvalRequestId` but no `movementId`: no movement row exists until someone
-approves it (PRO-1692). The dashboard now hydrates the durable vault-position
-record and shows it with a disabled exit action. Until
+**Not built yet:** the withdraw counterpart. The dashboard now hydrates the
+durable vault-position record and shows it with a disabled exit action.
+
+One gap remains around approvals, and it is narrower than it was. An approved
+deposit is now fully followable — the executor writes the movement and
+`GET /vault-deposits` finds it — but a REJECTED approval never produces a
+movement, so nothing on this surface reports it. That outcome is observable via
+`GET /v1/wallets/approval-requests/:approvalRequestId`, whose `status` plus
+nested `operation.status` distinguish rejected/canceled from
+approved-and-executed. Wiring the dashboard to it is deliberately not done here. Until
 the withdrawal path lands, a vault position can be entered and not exited
 through SDP — which is why `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` fail-closes
 production rather than relying on anyone remembering ADR 0002.

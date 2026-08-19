@@ -28,6 +28,7 @@ import {
 import { strategySourceLabel, strategyToken } from "./earn-program-presentation";
 import {
   claimVaultDepositIdempotencyKey,
+  holdVaultDepositIdempotencyKey,
   releaseVaultDepositIdempotencyKey,
   vaultDepositRequestFingerprint,
 } from "./earn-vault-deposit-tracking";
@@ -566,6 +567,11 @@ export function EarnVaultDepositModal({
       if (controller.signal.aborted) return;
       if (depositAnswerRetiresIdempotencyKey(result)) {
         releaseVaultDepositIdempotencyKey(fingerprint);
+      } else if (result.ok && result.data.kind === "approval_pending") {
+        // Pin it: the hold is keyed by this value server-side and a human may
+        // take hours, which is far longer than the default TTL was calibrated
+        // for. A lapsed key here resubmits into a SECOND approval request.
+        holdVaultDepositIdempotencyKey(fingerprint);
       }
       const resolution = resolveDepositSubmission(
         result,

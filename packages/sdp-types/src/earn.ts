@@ -263,6 +263,21 @@ export interface EarnVaultDepositResponse {
 }
 
 /**
+ * Response body of GET /v1/earn/vault-deposits — one workspace's recorded
+ * deposits, newest first.
+ *
+ * A bounded window, not a complete history: it exists so a client can re-derive
+ * which of its deposits are still in flight after losing local state, and the
+ * reconciliation sweep settles a movement within about ninety seconds, so
+ * anything unsettled is by construction recent. Follow `nextCursor` for more.
+ */
+export interface EarnVaultDepositsPage {
+  deposits: EarnVaultDepositRecord[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
+/**
  * Portfolio wallets — provider-neutral wire contracts.
  *
  * Some vault-infra providers front a managed multi-source portfolio (one

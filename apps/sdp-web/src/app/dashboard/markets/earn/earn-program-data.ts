@@ -661,6 +661,51 @@ export async function fetchEarnVaultDeposit(
   return parsed.success ? parsed.data.data.deposit : undefined;
 }
 
+const earnVaultDepositsPageSchema = z.object({
+  data: z.object({
+    deposits: z.array(earnVaultDepositRecordSchema),
+    hasMore: z.boolean(),
+    nextCursor: z.string().nullable(),
+  }),
+});
+
+/**
+ * This workspace's recorded deposits, newest first. The API derives the
+ * organization and project itself from the session, so this takes no scope
+ * argument — passing one would be a second, drifting copy of the boundary.
+ *
+ * Throws rather than returning a partial list. A silently short page here would
+ * quietly stop tracking a deposit that is genuinely in flight.
+ */
+export async function fetchEarnVaultDeposits(limit = 20): Promise<EarnVaultDepositRecord[]> {
+  const result = await dashboardFetch<unknown>(
+    `/api/dashboard/markets/earn/vault-deposits?limit=${limit}`
+  );
+  if (!result.ok) throw new Error(result.error);
+  const parsed = earnVaultDepositsPageSchema.safeParse(result.data);
+  if (!parsed.success) throw new Error("Invalid vault deposits response");
+  return parsed.data.data.deposits;
+}
+
+/**
+ * The DISCOVERY tier for in-flight deposits, mirroring `useEarnProgramWithdrawals`.
+ *
+ * Thirty seconds, and deliberately slower than the per-deposit tracker's five:
+ * this list only decides WHICH deposits are worth watching, and each watch then
+ * runs its own fast poll. It is also how a deposit signed before a reload — or
+ * in another tab, or unblocked by a policy approval minutes later — becomes
+ * visible again, which is the whole reason it is a server read rather than
+ * browser state.
+ */
+export function useEarnVaultDeposits() {
+  const { data, error, isLoading, mutate } = useSWR(
+    "dashboard-earn-vault-deposits",
+    () => fetchEarnVaultDeposits(),
+    { refreshInterval: 30_000 }
+  );
+  return { deposits: data, error, isLoading, refresh: () => void mutate() };
+}
+
 /**
  * Statuses a vault movement never moves on from — the shared canonical set,
  * one declaration in @sdp/types.
@@ -674,6 +719,17 @@ export async function fetchEarnVaultDeposit(
 const SETTLED_VAULT_MOVEMENT_STATUSES: ReadonlySet<EarnVaultMovementStatus> = new Set(
   EARN_TERMINAL_VAULT_MOVEMENT_STATUSES
 );
+
+/**
+ * Whether a recorded deposit can still change, and therefore is worth watching.
+ *
+ * Exported so the recovery filter and the poll's stop condition read the SAME
+ * rule. `pending` counts as in flight: it means SDP could not establish that
+ * the transaction reached the network, not that it failed.
+ */
+export function isEarnVaultDepositInFlight(deposit: EarnVaultDepositRecord): boolean {
+  return !SETTLED_VAULT_MOVEMENT_STATUSES.has(deposit.status);
+}
 
 const VAULT_DEPOSIT_OUTCOME_KEYS: Record<EarnTerminalVaultMovementStatus, MessageKey> = {
   confirmed: "DashboardEarn.deposit.vaultOutcomeConfirmed",

@@ -1,6 +1,11 @@
 import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
 import { isDecimalString } from "@sdp/solana/amount";
-import type { EarnVaultDepositRecord, EarnVaultDepositResponse, SdpEnvironment } from "@sdp/types";
+import type {
+  EarnVaultDepositRecord,
+  EarnVaultDepositResponse,
+  EarnVaultDepositsPage,
+  SdpEnvironment,
+} from "@sdp/types";
 import {
   type EarnProviderId,
   earnDepositStyle,
@@ -53,6 +58,7 @@ import { earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../contex
 import {
   earnVaultDepositParamsSchema,
   earnVaultDepositSchema,
+  earnVaultDepositsQuerySchema,
   earnVaultPositionsQuerySchema,
 } from "../schemas";
 import { assertStrategyDepositable } from "./admission";
@@ -547,6 +553,32 @@ async function listReadableEarnVaultWallets(
 }
 
 /**
+ * PROJECT boundary for a recorded movement.
+ *
+ * Wallet scope alone does not close this. Custody configs may be
+ * ORGANIZATION-level (`config.project_id IS NULL`), and `listWallets` hands
+ * those to every project in the org by design — so a sibling project's deposit
+ * signed by a shared org wallet passes the wallet check, and without this it
+ * would hand over that deposit's amount, signature and failure reason.
+ *
+ * This is deliberately STRICTER than `GET /vault-positions`, which scopes by
+ * wallet alone, and the asymmetry is the point: a POSITION is a holding the
+ * organization owns and every project may legitimately see, while a MOVEMENT is
+ * one project's individual transaction and exposes a specific amount and
+ * signature that the position does not. It is the same tightening
+ * `getEarnProgramWithdrawal` already made when it moved from an org-only check
+ * to a per-program one.
+ *
+ * A NULL `project_id` stays readable. The column is `ON DELETE SET NULL`, so
+ * null means the project was deleted, not that the row is unowned — refusing it
+ * would strand the audit trail of a real deposit behind wallet scope alone,
+ * which is the exit-safety failure ADR 0002 forbids.
+ */
+function isMovementInProject(movement: { project_id: string | null }, projectId: string): boolean {
+  return movement.project_id === null || movement.project_id === projectId;
+}
+
+/**
  * GET /v1/earn/vault-deposits/:movementId — one recorded deposit, so a caller
  * that signed something can find out whether it landed.
  *
@@ -574,6 +606,9 @@ async function listReadableEarnVaultWallets(
  *   environment  — a sandbox-scoped key must not read a production movement.
  *                  The row carries its own environment, so this is a
  *                  comparison, not a second query.
+ *   project      — see `isMovementInProject`. Wallet scope does NOT imply it,
+ *                  because an organization-level custody config is handed to
+ *                  every project in the org.
  *   direction    — a `withdraw` movement is not a deposit. The column is the
  *                  only thing separating the two on a shared table, and the
  *                  vault withdraw path is still unbuilt, so this closes the
@@ -590,7 +625,12 @@ export async function getEarnVaultDeposit(c: AppContext) {
     movementId,
     organizationId: auth.organizationId,
   });
-  if (!movement || movement.environment !== environment || movement.direction !== "deposit") {
+  if (
+    !movement ||
+    movement.environment !== environment ||
+    movement.direction !== "deposit" ||
+    !isMovementInProject(movement, projectId)
+  ) {
     throw notFound("Earn vault deposit");
   }
 
@@ -602,7 +642,24 @@ export async function getEarnVaultDeposit(c: AppContext) {
     throw notFound("Earn vault deposit");
   }
 
-  const deposit: EarnVaultDepositRecord = {
+  const response: EarnVaultDepositResponse = { deposit: toEarnVaultDepositRecord(movement) };
+  return success(c, response);
+}
+
+/** Shared row -> wire mapping, so the list and the detail cannot drift. */
+function toEarnVaultDepositRecord(movement: {
+  id: string;
+  position_id: string;
+  provider: string;
+  provider_reference: string;
+  status: EarnVaultDepositRecord["status"];
+  signature: string;
+  amount: string;
+  failure_reason: string | null;
+  created_at: string;
+  confirmed_at: string | null;
+}): EarnVaultDepositRecord {
+  return {
     movementId: movement.id,
     positionId: movement.position_id,
     provider: movement.provider,
@@ -614,8 +671,104 @@ export async function getEarnVaultDeposit(c: AppContext) {
     createdAt: movement.created_at,
     confirmedAt: movement.confirmed_at,
   };
-  const response: EarnVaultDepositResponse = { deposit };
+}
+
+/**
+ * GET /v1/earn/vault-deposits — this workspace's recorded deposits, newest
+ * first, so a client can re-derive what is still in flight.
+ *
+ * This is the DISCOVERY tier, and it exists because a signed deposit was
+ * previously only findable by an id the browser held in memory: close the tab
+ * and the outcome of a real on-chain transaction became unreachable. The
+ * custodial side already solves this by re-deriving withdrawals from its
+ * ledger; this is the same answer for vault deposits, and it is what lets the
+ * dashboard stop keeping its own per-tab watch list.
+ *
+ * It also closes the APPROVAL-GATED hole. A policy hold returns an
+ * `approvalRequestId` and NO `movementId`, because no movement exists until
+ * someone approves — but the approval executor replays the caller's original
+ * `Idempotency-Key`, so the movement it eventually creates carries it. Passing
+ * `?requestId=` therefore finds a deposit that did not exist when it was
+ * requested. The key is caller-chosen, short keys are legal, and it is even
+ * published on chain in the deposit memo — so it is emphatically NOT treated as
+ * a capability: this route re-applies every scoping rule the detail route
+ * applies, and a guessed key can only surface a deposit the caller could
+ * already read.
+ *
+ * Same gates as the detail read: no provider gate (ADR 0002), organization from
+ * the query, then environment, direction, project and wallet-binding scope.
+ */
+export async function listEarnVaultDeposits(c: AppContext) {
+  const query = parseQuery(c, earnVaultDepositsQuerySchema);
+  const before = query.before ? decodeVaultMovementCursor(query.before) : null;
+  if (query.before && !before) {
+    throw badRequest("Invalid vault deposit pagination cursor");
+  }
+  const environment = resolveSdpEnvironment(c);
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+
+  const scopedWallets = await listReadableEarnVaultWallets(c, auth, projectId);
+  const custodyWalletIds = [...new Set(scopedWallets.map((wallet) => wallet.id))];
+  if (custodyWalletIds.length === 0) {
+    return success(c, { deposits: [], hasMore: false, nextCursor: null });
+  }
+  const scopedWalletIds = new Set(custodyWalletIds);
+  const repo = createPostgresEarnVaultRepository(getDb(c.env));
+
+  // The single-key lookup deliberately does NOT page. It resolves at most one
+  // row (migration 0059's unique index on (organization_id, request_id)), and
+  // running it through the keyset query would mean indexing for a filter that
+  // can never return two rows.
+  if (query.requestId !== undefined) {
+    const movement = await repo.findMovementByRequestId({
+      organizationId: auth.organizationId,
+      requestId: query.requestId,
+    });
+    const visible =
+      movement !== null &&
+      movement.environment === environment &&
+      movement.direction === "deposit" &&
+      isMovementInProject(movement, projectId) &&
+      scopedWalletIds.has(movement.custody_wallet_id);
+    return success(c, {
+      deposits: visible && movement ? [toEarnVaultDepositRecord(movement)] : [],
+      hasMore: false,
+      nextCursor: null,
+    });
+  }
+
+  const { rows, hasMore } = await repo.listDeposits({
+    organizationId: auth.organizationId,
+    environment,
+    projectId,
+    custodyWalletIds,
+    limit: query.limit,
+    before,
+  });
+
+  const last = rows.at(-1);
+  const nextCursor = hasMore && last ? encodeKeysetCursor(last.created_at, last.id) : null;
+  const response: EarnVaultDepositsPage = {
+    deposits: rows.map(toEarnVaultDepositRecord),
+    hasMore,
+    nextCursor,
+  };
   return success(c, response);
+}
+
+const vaultMovementCursorSchema = z.object({
+  createdAt: z.string().datetime({ precision: 3 }),
+  id: z
+    .templateLiteral(["earn_vault_movement_", z.uuidv4()])
+    .refine((id) => id === id.toLowerCase()),
+});
+
+function decodeVaultMovementCursor(cursor: string): { createdAt: string; id: string } | null {
+  const decoded = decodeKeysetCursor(cursor);
+  if (!decoded) return null;
+  const parsed = vaultMovementCursorSchema.safeParse({ createdAt: decoded.value, id: decoded.id });
+  return parsed.success ? parsed.data : null;
 }
 
 /**

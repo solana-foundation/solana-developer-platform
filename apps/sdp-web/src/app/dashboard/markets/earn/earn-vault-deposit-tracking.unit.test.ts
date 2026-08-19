@@ -3,15 +3,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   claimVaultDepositIdempotencyKey,
-  forgetVaultDepositWatch,
-  readVaultDepositWatches,
+  holdVaultDepositIdempotencyKey,
   releaseVaultDepositIdempotencyKey,
-  rememberVaultDepositWatch,
   vaultDepositRequestFingerprint,
 } from "./earn-vault-deposit-tracking";
 
 const IDEMPOTENCY_STORE_KEY = "sdp:earn:vault-deposit:idempotency:v1";
-const WATCH_STORE_KEY = "sdp:earn:vault-deposit:watch:v1";
 
 const request = {
   strategyId: "strategy_1",
@@ -136,52 +133,50 @@ describe("vault deposit idempotency keys", () => {
   });
 });
 
-describe("vault deposit watches", () => {
-  it("recovers a watch across a reload and retires it exactly once", () => {
-    rememberVaultDepositWatch("movement_1");
-    rememberVaultDepositWatch("movement_2");
-    rememberVaultDepositWatch("movement_1");
+describe("an approval hold suspends expiry", () => {
+  it("keeps the key past the default TTL, because a human is the clock", () => {
+    const fingerprint = vaultDepositRequestFingerprint(request);
+    const held = claimVaultDepositIdempotencyKey(fingerprint);
+    holdVaultDepositIdempotencyKey(fingerprint);
 
-    expect(readVaultDepositWatches()).toEqual(["movement_1", "movement_2"]);
-
-    forgetVaultDepositWatch("movement_1");
-    expect(readVaultDepositWatches()).toEqual(["movement_2"]);
-    forgetVaultDepositWatch("movement_1");
-    expect(readVaultDepositWatches()).toEqual(["movement_2"]);
-  });
-
-  it("drops an entry no reconciliation sweep could still be working on", () => {
-    rememberVaultDepositWatch("movement_stale");
-    const entries = JSON.parse(sessionStorage.getItem(WATCH_STORE_KEY) ?? "[]") as Array<{
+    // Two hours later — far past the 15-minute default, which is calibrated to
+    // a blockhash and means nothing to an approval sitting in someone's queue.
+    const entries = JSON.parse(sessionStorage.getItem(IDEMPOTENCY_STORE_KEY) ?? "[]") as Array<{
       createdAt: number;
+      expiresAt?: number | null;
     }>;
-    entries[0].createdAt = Date.now() - 24 * 60 * 60_000;
-    sessionStorage.setItem(WATCH_STORE_KEY, JSON.stringify(entries));
+    entries[0].createdAt = Date.now() - 2 * 60 * 60_000;
+    sessionStorage.setItem(IDEMPOTENCY_STORE_KEY, JSON.stringify(entries));
 
-    expect(readVaultDepositWatches()).toEqual([]);
+    // A fresh key here would open a SECOND approval request for one intent.
+    expect(claimVaultDepositIdempotencyKey(fingerprint)).toBe(held);
   });
 
-  it("ignores anything in the store it does not fully recognize", () => {
-    // Written as often by an older build of this page as by the current one.
+  it("still retires a held key once the API answers", () => {
+    const fingerprint = vaultDepositRequestFingerprint(request);
+    const held = claimVaultDepositIdempotencyKey(fingerprint);
+    holdVaultDepositIdempotencyKey(fingerprint);
+
+    releaseVaultDepositIdempotencyKey(fingerprint);
+
+    expect(claimVaultDepositIdempotencyKey(fingerprint)).not.toBe(held);
+  });
+
+  it("does nothing for a request that was never claimed", () => {
+    holdVaultDepositIdempotencyKey(vaultDepositRequestFingerprint(request));
+    expect(sessionStorage.getItem(IDEMPOTENCY_STORE_KEY)).toBeNull();
+  });
+
+  it("keeps an entry written before this field existed working under the default TTL", () => {
+    // Forward compatibility runs both ways: an entry from an older build has no
+    // `expiresAt`, and dropping it as unrecognized would mint a fresh key for a
+    // request already in flight.
+    const fingerprint = vaultDepositRequestFingerprint(request);
     sessionStorage.setItem(
-      WATCH_STORE_KEY,
-      JSON.stringify([
-        { id: "movement_ok", value: "movement_ok", createdAt: Date.now() },
-        { id: "movement_no_timestamp", value: "movement_no_timestamp" },
-        { value: "movement_no_id", createdAt: Date.now() },
-        "movement_bare_string",
-        null,
-      ])
+      IDEMPOTENCY_STORE_KEY,
+      JSON.stringify([{ id: fingerprint, value: "legacy-key", createdAt: Date.now() }])
     );
 
-    expect(readVaultDepositWatches()).toEqual(["movement_ok"]);
-  });
-
-  it("returns nothing rather than throwing on an unparseable store", () => {
-    sessionStorage.setItem(WATCH_STORE_KEY, "{not json");
-    expect(readVaultDepositWatches()).toEqual([]);
-
-    sessionStorage.setItem(WATCH_STORE_KEY, JSON.stringify({ movement_1: true }));
-    expect(readVaultDepositWatches()).toEqual([]);
+    expect(claimVaultDepositIdempotencyKey(fingerprint)).toBe("legacy-key");
   });
 });

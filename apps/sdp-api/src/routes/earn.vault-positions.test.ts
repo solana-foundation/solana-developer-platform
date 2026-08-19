@@ -133,6 +133,14 @@ function getPositions(query = "") {
   );
 }
 
+function listDeposits(query = "") {
+  return app.request(
+    `/v1/earn/vault-deposits${query}`,
+    { headers: { Authorization: `Bearer ${API_KEY.raw}` } },
+    env
+  );
+}
+
 function getDeposit(movementId: string) {
   return app.request(
     `/v1/earn/vault-deposits/${encodeURIComponent(movementId)}`,
@@ -523,5 +531,142 @@ describe("GET /v1/earn/vault-deposits/:movementId", () => {
 
   it("answers 404 for an id this organization has never held", async () => {
     expect((await getDeposit(`earn_vault_movement_${crypto.randomUUID()}`)).status).toBe(404);
+  });
+});
+
+/**
+ * The LIST is the discovery tier: it is what lets a client re-derive its own
+ * in-flight deposits after losing local state, and — via `?requestId=` — find a
+ * deposit that did not exist when it was requested because policy held it for
+ * approval.
+ */
+describe("GET /v1/earn/vault-deposits", () => {
+  it("returns this workspace's deposits newest first", async () => {
+    const first = await createPosition({ providerReference: "vault_list_1" });
+    const second = await createPosition({ providerReference: "vault_list_2" });
+
+    const response = await listDeposits();
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: {
+        deposits: Array<{ movementId: string }>;
+        hasMore: boolean;
+        nextCursor: string | null;
+      };
+    };
+
+    expect(body.data.deposits.map((deposit) => deposit.movementId)).toEqual([
+      second.movement.id,
+      first.movement.id,
+    ]);
+    expect(body.data.hasMore).toBe(false);
+    expect(body.data.nextCursor).toBeNull();
+  });
+
+  it("never lists a sibling project's wallet deposit", async () => {
+    const own = await createPosition({ providerReference: "vault_list_own" });
+    await createPosition({
+      projectId: PROJECT_B,
+      walletId: WALLET_B,
+      providerReference: "vault_list_sibling",
+    });
+
+    const body = (await (await listDeposits()).json()) as {
+      data: { deposits: Array<{ movementId: string }> };
+    };
+
+    expect(body.data.deposits.map((deposit) => deposit.movementId)).toEqual([own.movement.id]);
+  });
+
+  it("omits a withdrawal, which is not a deposit", async () => {
+    const deposit = await createPosition({ providerReference: "vault_list_deposit" });
+    const withdrawal = await createPosition({ providerReference: "vault_list_withdrawal" });
+    await getDb(env)
+      .prepare("UPDATE earn_vault_movements SET direction = 'withdraw' WHERE id = ?")
+      .bind(withdrawal.movement.id)
+      .run();
+
+    const body = (await (await listDeposits()).json()) as {
+      data: { deposits: Array<{ movementId: string }> };
+    };
+
+    expect(body.data.deposits.map((deposit) => deposit.movementId)).toEqual([deposit.movement.id]);
+  });
+
+  it("pages by keyset without overlap", async () => {
+    await createPosition({ providerReference: "vault_list_page_1" });
+    await createPosition({ providerReference: "vault_list_page_2" });
+    await createPosition({ providerReference: "vault_list_page_3" });
+
+    const first = (await (await listDeposits("?limit=2")).json()) as {
+      data: {
+        deposits: Array<{ movementId: string }>;
+        hasMore: boolean;
+        nextCursor: string | null;
+      };
+    };
+    expect(first.data.deposits).toHaveLength(2);
+    expect(first.data.hasMore).toBe(true);
+
+    const second = (await (
+      await listDeposits(`?limit=2&before=${encodeURIComponent(first.data.nextCursor ?? "")}`)
+    ).json()) as {
+      data: {
+        deposits: Array<{ movementId: string }>;
+        hasMore: boolean;
+        nextCursor: string | null;
+      };
+    };
+    expect(second.data.deposits).toHaveLength(1);
+    expect(second.data.hasMore).toBe(false);
+    expect(
+      first.data.deposits.some((row) =>
+        second.data.deposits.some((next) => next.movementId === row.movementId)
+      )
+    ).toBe(false);
+  });
+
+  it("rejects a malformed cursor rather than silently returning the first page", async () => {
+    expect((await listDeposits("?before=not-a-cursor")).status).toBe(400);
+  });
+
+  it("finds a deposit by the caller's own idempotency key", async () => {
+    // This is the approval-gated mechanism: a policy hold returns no movement
+    // id, but the approval executor replays the ORIGINAL Idempotency-Key, so the
+    // movement it eventually creates is findable by the key the caller kept.
+    const requestId = `caller-chosen-${crypto.randomUUID()}`;
+    const created = await createPosition({ providerReference: "vault_by_key", requestId });
+
+    const body = (await (
+      await listDeposits(`?requestId=${encodeURIComponent(requestId)}`)
+    ).json()) as { data: { deposits: Array<{ movementId: string }> } };
+
+    expect(body.data.deposits.map((deposit) => deposit.movementId)).toEqual([created.movement.id]);
+  });
+
+  it("answers empty for a key that resolves outside the caller's scope", async () => {
+    // A key is caller-chosen and may be one character, so it must never work as
+    // a capability — the sibling-project scoping applies to it exactly as it
+    // does to the movement id.
+    const requestId = "1";
+    await createPosition({
+      projectId: PROJECT_B,
+      walletId: WALLET_B,
+      providerReference: "vault_by_key_sibling",
+      requestId,
+    });
+
+    const body = (await (
+      await listDeposits(`?requestId=${encodeURIComponent(requestId)}`)
+    ).json()) as { data: { deposits: unknown[] } };
+
+    expect(body.data.deposits).toEqual([]);
+  });
+
+  it("answers empty for a key nobody has used", async () => {
+    const body = (await (await listDeposits("?requestId=never-used")).json()) as {
+      data: { deposits: unknown[] };
+    };
+    expect(body.data.deposits).toEqual([]);
   });
 });

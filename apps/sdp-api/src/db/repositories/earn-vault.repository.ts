@@ -102,6 +102,11 @@ export interface EarnVaultPositionCursor {
   id: string;
 }
 
+export interface EarnVaultMovementCursor {
+  createdAt: string;
+  id: string;
+}
+
 export interface EarnVaultRepository {
   /**
    * Atomically claim/refresh the position, insert the signed movement, and
@@ -132,6 +137,22 @@ export interface EarnVaultRepository {
     movementId: string;
     organizationId: string;
   }): Promise<EarnVaultMovementRow | null>;
+  /**
+   * One workspace's recorded DEPOSITS, newest first, as a bounded keyset page.
+   *
+   * Scoped by wallet AND project, unlike `listPositions` which scopes by wallet
+   * alone. A position is a holding the organization owns; a movement is one
+   * project's individual transaction and carries an amount and a signature the
+   * position does not.
+   */
+  listDeposits(params: {
+    organizationId: string;
+    environment: SdpEnvironment;
+    projectId: string;
+    custodyWalletIds: readonly string[];
+    limit: number;
+    before: EarnVaultMovementCursor | null;
+  }): Promise<{ rows: EarnVaultMovementRow[]; hasMore: boolean }>;
   /** Global bounded outbox scan for the reconciliation worker. */
   listUnsettledMovements(limit: number): Promise<EarnVaultMovementRow[]>;
   /** Guarded CAS. Returns null when the row was not in `fromStatuses`. */
@@ -438,6 +459,40 @@ export function createPostgresEarnVaultRepository(db: AppDb): EarnVaultRepositor
           params.limit + 1
         )
         .all<EarnVaultPositionRow>();
+      const rows = result.results ?? [];
+      return { rows: rows.slice(0, params.limit), hasMore: rows.length > params.limit };
+    },
+
+    async listDeposits(params) {
+      if (params.custodyWalletIds.length === 0) {
+        throw new Error("listDeposits requires at least one project-scoped custody wallet id");
+      }
+      const beforeClause = params.before ? "AND (created_at, id) < (?, ?)" : "";
+      const beforeValues = params.before ? [params.before.createdAt, params.before.id] : [];
+      const result = await db
+        .prepare(
+          // `project_id IS NULL` stays visible: the column is ON DELETE SET
+          // NULL, so null means the project was deleted, not that the row is
+          // unowned, and hiding it would strand a real deposit's audit trail.
+          `SELECT * FROM earn_vault_movements
+           WHERE organization_id = ?
+             AND environment = ?
+             AND direction = 'deposit'
+             AND custody_wallet_id = ANY (?::text[])
+             AND (project_id IS NULL OR project_id = ?)
+             ${beforeClause}
+           ORDER BY created_at DESC, id DESC
+           LIMIT ?`
+        )
+        .bind(
+          params.organizationId,
+          params.environment,
+          params.custodyWalletIds,
+          params.projectId,
+          ...beforeValues,
+          params.limit + 1
+        )
+        .all<EarnVaultMovementRow>();
       const rows = result.results ?? [];
       return { rows: rows.slice(0, params.limit), hasMore: rows.length > params.limit };
     },
