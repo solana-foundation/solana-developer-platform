@@ -31,9 +31,11 @@ api/dashboard/markets/earn/
   vault-deposits/route.ts            …and GET the workspace list (recovery)
   vault-deposits/[movementId]/       GET one recorded deposit (poll to terminal)
   vault-positions/route.ts           GET list (keyset cursor)
+  movements/route.ts                 GET the cross-provider ledger feed
+                                     (keyset cursor + equality filters)
 ```
 
-`provider-query.ts` holds THREE validators with deliberately different failure
+`provider-query.ts` holds FOUR validators with deliberately different failure
 modes. `programProxyQuery` is permissive-by-omission — an unrecognized param is
 dropped — because those routes predate the typed client and are reachable with
 arbitrary query strings. `vaultPositionsProxyQuery` is **strict**: it is
@@ -44,6 +46,12 @@ reshaping the page. A typo must not return a different page of someone's money.
 `ProxyQueryValidation` and `MAX_CURSOR_LENGTH` rather than restating them; its
 `requestId` is validated to the API's OWN `[\x20-\x7e]{1,255}` idempotency-key
 shape, because a tidier rule would 400 a legitimate key containing a slash.
+`earnMovementsProxyQuery` (PRO-1705) is strict in the same way over the
+cross-provider feed, and its filter values are checked for SHAPE and length only,
+never against a vocabulary: `status` is per execution model and `provider` is an
+open registry string, so a copy of either list here would need revising every time
+one grows — and the API already answers an unknown value with an empty page, which
+is the honest result.
 
 `proxyToSdpApi` never copies the inbound header bag — auth, project scope and
 tracing stay server-owned — so a client-set `Idempotency-Key` never reaches the
