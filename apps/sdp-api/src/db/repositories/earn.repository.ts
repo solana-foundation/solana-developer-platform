@@ -1,7 +1,6 @@
 import type {
   EarnApyType,
   EarnLiquidityTerm,
-  EarnPortfolioToken,
   EarnStrategyRiskMetadata,
   EarnStrategySourceKind,
   EarnStrategyStatus,

@@ -18,7 +18,7 @@ import type {
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
-import type { EarnProviderWalletRow, EarnRepository } from "@/db/repositories";
+import type { EarnProviderWalletRow } from "@/db/repositories";
 import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
@@ -823,8 +823,6 @@ export const getEarnProgramWithdrawal = async (c: AppContext) => {
   const { row, client, testMode } = await requireProgramContext(c, programId);
 
   assertEarnProviderConfigured(c.env, client.provider, testMode);
-
-  const repo = getEarnRepository(c);
 
   // BOLA guard, defense in depth: every SDP organization shares one provider
   // account, so a withdrawal ref this program does not own must 404 HERE —

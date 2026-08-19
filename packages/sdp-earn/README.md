@@ -303,7 +303,7 @@ apps/sdp-api/src/
                                    the programs family (list/create/re-target,
                                    live provider reads + the withdrawal
                                    ledger); strategies is the catalogue family.
-  db/migrations/postgres/0048–0064 earn_strategies (0048);
+  db/migrations/postgres/0048–0065 earn_strategies (0048);
                                    earn_provider_wallets (0049, the program
                                    link); earn_program_withdrawals (0055, the
                                    withdrawal ledger — 0055 also dropped the
@@ -314,20 +314,20 @@ apps/sdp-api/src/
                                    PRO-1670; earn_vault_positions +
                                    earn_vault_movements (0059, the non-custodial
                                    claim index and its signed-movement ledger);
-                                   earn_movements + earn_positions (0062-0064,
+                                   earn_movements + earn_positions (0062-0065,
                                    PRO-1705 — the ONE provider-neutral movement
                                    ledger and ONE holdings table that supersede
                                    the two mechanism-split tables above).
-                                   0062-0064 are the expand/backfill half: the
-                                   legacy tables still own every read, and
-                                   writes are mirrored into the unified shape in
-                                   the same transaction until reads switch. See
-                                   routes/earn/CLAUDE.md for the rule that
-                                   binds any new writer.
+                                   The mechanism-split tables above take no
+                                   reads and no writes any more; a later
+                                   migration drops them.
+                                   earn_provider_wallets stays — it is an
+                                   ACCOUNT at a provider, not a holding.
   services/earn-withdrawal-ledger.service.ts
-                                   Withdrawal-ledger status machine + appliers
+                                   Custodial movement status machine + appliers
                                    (Hono-free; poll path today, sweep/webhooks
-                                   later).
+                                   later). Transitions come from the shared
+                                   matrix in @sdp/types, not a local list.
   db/repositories/earn.*           Row types + Postgres impl (open-string
                                    provider columns; dispatch must go through
                                    the fail-closed resolver).

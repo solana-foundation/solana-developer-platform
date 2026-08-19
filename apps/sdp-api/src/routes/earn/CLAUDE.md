@@ -5,56 +5,50 @@ the fail-closed registry and check capabilities — no `if (provider === "ground
 anywhere. See `packages/sdp-earn/README.md` for architecture; ADR 0002 for
 invariants (the 2026-08-11 addendum owns the ledger-vs-live rules below).
 
-## In flight: the unified movement ledger (PRO-1705)
+## The unified movement ledger (PRO-1705)
 
-Earn is mid-migration from two movement tables split by execution mechanism to
-ONE. Migrations `0062`-`0065` add `earn_movements` (every money movement, both
-directions, both execution models) and `earn_positions` (every holding, vault and
-custodial), and backfill all existing history into them. See ADR 0002's
-2026-08-19 addendum for the decisions.
+`earn_movements` is the single authoritative record of every Earn money movement —
+both directions, both execution models — and `earn_positions` is the single
+holdings table behind it. Migrations `0062`-`0065`; ADR 0002's 2026-08-19 addendum
+holds the decisions.
 
-**Every READ now serves from the unified tables**; the legacy ones remain the
-authoritative WRITERS and are mirrored into the unified shape in the same
-transaction, so a read is never behind a write. Writes flip in a later release,
-and the legacy tables are dropped last of all.
+The tables it replaced (`earn_program_withdrawals`, `earn_vault_movements`,
+`earn_vault_positions`) take no reads and no writes, and a later migration drops
+them along with the `earn_projected_*` views that carried their history across.
+**`earn_provider_wallets` is NOT one of them**: it models an ACCOUNT at a provider
+— the custodial twin of `custody_wallets` — and an account is not a holding. A
+custodial position is the link row between the two, minted when the program wallet
+is linked.
 
-Two consequences to know when touching a read:
+Things worth knowing before changing a movement path:
 
-- The published vault-deposit DTO is served through a vocabulary shim
-  (`LEGACY_VAULT_DEPOSIT_STATUS` in `handlers/vault.ts`): `requested` goes out as
-  `pending`, and `finalized` — which that DTO has no word for — goes out as
-  `confirmed`. `?settled=` matches the same client-visible notion. Delete both
-  when the DTO adopts the ledger vocabulary.
-- `GET /v1/earn/movements` is the one read that speaks the ledger vocabulary
-  directly, because it is a new contract with no client to keep compatible.
-
-**The rule while both shapes exist — if you add or change a writer of any legacy
-earn table, it MUST mirror into the unified ledger in the SAME transaction.**
-Call the projection functions in
-`db/repositories/earn-movements.repository.ts`; do not hand-write an insert. The
-mapping itself lives in SQL views created by `0063` and is shared with the bulk
-backfill, precisely so history and new rows cannot disagree. Details worth
-knowing before touching it:
-
-- A projection is an upsert keyed on the LEGACY row's id — the unified row keeps
-  it — so every guarded transition simply re-projects the whole row, and a row an
-  older revision wrote without mirroring is repaired by the next write to it.
-- The projections assert their row is projectable BEFORE writing. `INSERT ...
-  SELECT` from a view that yields nothing inserts zero rows and SUCCEEDS, which
-  would silently drop a money movement.
-- Every movement needs a holding. A custodial one is minted when the program
-  wallet is linked (`insertProviderWallet`); without it a withdrawal cannot
-  project and the write fails loudly rather than going unrecorded.
-- `finalized` is the one status no legacy table can express, so a legacy write
-  never regresses a unified row that already reached it — and it is written by
-  `finalizeVaultMovement` to the unified ledger ALONE. The reconciliation sweep
-  still records the commitment through the legacy writer first, so a rollback
-  shows a settled deposit rather than one still in flight.
-- `confirmed` is NOT terminal any more (PRO-1716). The sweep keeps polling a
-  confirmed movement until the chain says `finalized`, and a confirmed row whose
-  signature has aged out of RPC history is left alone rather than expired — the
-  transaction demonstrably landed, and the blockhash rule only ever applied to one
-  that never made it on chain.
+- **One writer, and the shared matrix owns the transitions.** Legal source states
+  come from `EARN_MOVEMENT_TRANSITIONS` (`@sdp/types`), never from the caller, so
+  terminal regression is unrepresentable rather than merely refused. A transition
+  whose row is not in a legal source state returns NULL — the same answer a lost
+  race gives, and the same contract every other guarded write here has. Only an
+  unknown TARGET throws.
+- **Every movement needs a holding.** `createCustodialMovement` resolves it by
+  JOIN and fails loudly if the program has none, because the alternative is money
+  moving unrecorded.
+- **Amounts carry a `denomination`** (`usd`, or the token mint) and share counts
+  live only in share-named columns. No read may sum across rows without grouping
+  by it.
+- **`confirmed` is not terminal** (PRO-1716). The reconciliation sweep keeps
+  polling a confirmed movement until the chain says `finalized`, and a confirmed
+  row whose signature has aged out of RPC history is left alone rather than
+  expired — the transaction demonstrably landed, and the blockhash rule only ever
+  applied to one that never made it on chain.
+- **The published vault-deposit DTO still speaks the older vocabulary**, through
+  `LEGACY_VAULT_DEPOSIT_STATUS` in `handlers/vault.ts`: `requested` goes out as
+  `pending`, and `finalized` as `confirmed`. `?settled=` matches that same
+  client-visible notion. Delete both when the DTO adopts the ledger vocabulary.
+  `GET /v1/earn/movements` is the one read that speaks the ledger's own words.
+- **Ids are heterogeneous by design.** New rows are `earn_movement_…`, while
+  history keeps the `earn_vault_movement_…` / `earn_program_withdrawal_…` ids the
+  projection preserved. Nothing may parse an id for its kind — read
+  `execution_model` — and the keyset cursors validate SHAPE rather than a prefix
+  for the same reason.
 - The vocabulary tables `earn_execution_models`, `earn_movement_directions` and
   `earn_movement_statuses` are seeded reference data, pinned to `@sdp/types` by a
   conformance test. Never truncate them in a test fixture.

@@ -878,8 +878,6 @@ describe("EarnRepository (postgres)", () => {
   // the ledger consumes only the canonical contract, so any registered
   // provider id must exercise it identically (ADR 0002 pluggability).
   describe("custodial movement ledger (earn_movements)", () => {
-    const NON_TERMINAL = ["requested", "processing", "pending_approval"] as const;
-
     let wallet: EarnProviderWalletRow;
     // The withdrawal ledger is `earn_movements`; `repo` still owns the ACCOUNT
     // table (`earn_provider_wallets`), which the unification deliberately left
