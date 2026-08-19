@@ -109,8 +109,9 @@ async function collectRow(
     return "ok";
   } catch (error) {
     if (shouldSkipCollectionError(error)) {
-      // A parked cycle also lands here, but it is already logged where it was
-      // parked, with the attempt and transfer ids the operator needs.
+      // The tick that parks a cycle lands here too; later ticks do not, because
+      // both queries above leave a parked attempt out. The park is logged where
+      // it happens, with the attempt and transfer ids the operator needs.
       return "skipped";
     }
     logCronFailure("collectDueRecurringPayments: failed to collect recurring payment", row, error);

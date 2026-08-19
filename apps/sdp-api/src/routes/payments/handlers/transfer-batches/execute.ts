@@ -272,6 +272,20 @@ export async function executeChunk(params: {
     });
   };
 
+  // A chunk that may already be on chain is parked, never failed: `providerData`
+  // carries anything the operator needs beyond the marker itself.
+  const parkChunk = (providerData?: Record<string, unknown>) =>
+    persistOutcomeUnknownMarker(
+      () =>
+        settle({
+          status: "processing",
+          recipientStatus: "processing",
+          error: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
+          providerData: { ...SUBMISSION_OUTCOME_UNKNOWN_MARKER, ...providerData },
+        }),
+      transfer.id
+    );
+
   if (params.preflight) {
     try {
       const simulated = await solanaRpc.simulateTransaction(resolved.rpc, txBytes);
@@ -332,48 +346,31 @@ export async function executeChunk(params: {
       },
       "Batch chunk parked; awaiting manual reconciliation"
     );
-    await persistOutcomeUnknownMarker(
-      () =>
-        settle({
-          status: "processing",
-          recipientStatus: "processing",
-          error: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
-          providerData: { ...SUBMISSION_OUTCOME_UNKNOWN_MARKER },
-        }),
-      transfer.id
-    );
+    await parkChunk();
     return;
   }
 
   await recorder.onSubmitted(signature);
   if (!signaturePersisted) {
-    // Both bookkeeping writes were lost after the broadcast. Try once more
-    // through `settle`, this time carrying the signature: a signed `processing`
-    // row settles itself from chain on the next pending-transfers run, while an
-    // unsigned one is timed out into a false `failed` for every recipient. If
-    // that write is refused too, park the chunk so the job leaves it alone.
+    // Both signature writes were lost after the broadcast. One more attempt
+    // through `settle`: a signed `processing` row settles itself from chain on
+    // the next pending-transfers run, while an unsigned one is timed out into a
+    // false `failed` for every recipient. If even that is refused — a duplicate
+    // signature, say — park the chunk with the signature in `provider_data`,
+    // the only place left that can still hold it.
     try {
       await settle({ status: "processing", recipientStatus: "processing", signature, error: null });
     } catch (persistError) {
-      getLogger().error(
+      getLogger().warn(
         {
           transfer_id: transfer.id,
           signature,
           reason: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
           error: persistError instanceof Error ? persistError.message : String(persistError),
         },
-        "Batch chunk signature could not be recorded; parking it for manual reconciliation"
+        "Batch chunk signature could not be recorded; parking the chunk with the signature"
       );
-      await persistOutcomeUnknownMarker(
-        () =>
-          settle({
-            status: "processing",
-            recipientStatus: "processing",
-            error: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
-            providerData: { ...SUBMISSION_OUTCOME_UNKNOWN_MARKER },
-          }),
-        transfer.id
-      );
+      await parkChunk({ submitted_signature: signature });
     }
   }
 }

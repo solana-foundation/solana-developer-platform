@@ -826,7 +826,18 @@ async function recoverRecurringPaymentCollection(input: {
     // have broadcast without returning one. Failing it here would reschedule
     // the cycle and re-charge the payer, so it stays parked until an operator
     // reconciles it on chain.
-    if (transfer.provider_data?.submission_outcome === "unknown") {
+    if (
+      transfer.provider_data?.submission_outcome ===
+      SUBMISSION_OUTCOME_UNKNOWN_MARKER.submission_outcome
+    ) {
+      getLogger().warn(
+        {
+          attempt_id: existing.id,
+          reason: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
+          transfer_id: transfer.id,
+        },
+        "Refused to recover a parked recurring payment collection; awaiting manual reconciliation"
+      );
       throw transferSubmissionOutcomeUnknown(
         new Error("Recurring payment collection is parked for manual reconciliation")
       );
