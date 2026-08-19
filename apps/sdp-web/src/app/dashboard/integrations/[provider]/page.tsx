@@ -1,9 +1,10 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyConfigSummary } from "@sdp/types";
+import type { CustodyConfigSummary, OrganizationRpcProvider } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
 import { isKnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
 import { getAuthEntryPath } from "@/lib/auth-entry";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createRequestScopedSdpApiClients, type SdpApiClient } from "@/lib/sdp-api";
 import { isKnownIntegrationProvider, resolveIntegrationDetail } from "../integration-detail";
@@ -38,13 +39,14 @@ export default async function IntegrationDetailPage({
     notFound();
   }
 
-  const { userId, orgId } = await auth();
+  const { userId, orgId, orgRole } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
   if (!orgId) {
     redirect("/dashboard");
   }
+  const dashboardAccess = resolveDashboardAccess(orgRole);
 
   const { organizationClient, projectClient } = await createRequestScopedSdpApiClients();
   const onboarding =
@@ -62,6 +64,10 @@ export default async function IntegrationDetailPage({
     getConnectedCustodyProviders(projectClient.request).catch(() => null),
   ]);
 
+  // The shell only routes here after onboarding, so a missing setting means
+  // the organization runs on SDP's default RPC, not "none".
+  const activeRpcProvider = onboarding.setup?.rpcProvider ?? "default";
+
   const detail = resolveIntegrationDetail({
     provider,
     custody:
@@ -72,7 +78,7 @@ export default async function IntegrationDetailPage({
             enabledProviders: availability.enabledCustodyProviders,
           }),
     rpc: resolveRpcIntegrations({
-      selectedProvider: onboarding.setup?.rpcProvider ?? "default",
+      selectedProvider: activeRpcProvider,
       entries: availability.providers.rpc,
     }),
     ramps: resolveRampIntegrations(availability.providers.ramps),
@@ -83,5 +89,20 @@ export default async function IntegrationDetailPage({
     notFound();
   }
 
-  return <IntegrationDetailView detail={detail} />;
+  return (
+    <IntegrationDetailView
+      detail={detail}
+      rpc={
+        detail.family === "rpc"
+          ? {
+              activeProvider: activeRpcProvider,
+              canManage: dashboardAccess.capabilities.canManageOrgSettings,
+              isEnabledInDeployment:
+                availability.providers.rpc[provider as OrganizationRpcProvider]?.enabled ?? false,
+              organizationId,
+            }
+          : undefined
+      }
+    />
+  );
 }
