@@ -155,7 +155,12 @@ async function finalizeConfirmedTransfers(
   }
 
   const rpc = solanaRpc.createRpc(env);
-  const finalized: { transferId: string; organizationId: string; slot: number }[] = [];
+  const finalized: {
+    transferId: string;
+    organizationId: string;
+    slot: number;
+    signature: string;
+  }[] = [];
 
   for (let start = 0; start < confirmedTransfers.length; start += MAX_SIGNATURES_PER_BATCH) {
     const chunk = confirmedTransfers.slice(start, start + MAX_SIGNATURES_PER_BATCH);
@@ -185,12 +190,24 @@ async function finalizeConfirmedTransfers(
         transferId: transfer.id,
         organizationId: transfer.organization_id,
         slot: Number(status.slot),
+        signature: transfer.signature as string,
       });
     }
   }
 
   await repo.finalizeConfirmedTransfers({ transfers: finalized, updatedAt: nowIso });
 
+  for (const transfer of finalized) {
+    getLogger().info(
+      {
+        transfer_id: transfer.transferId,
+        organization_id: transfer.organizationId,
+        signature: transfer.signature,
+        slot: transfer.slot,
+      },
+      "trackPendingTransfers: transfer finalized"
+    );
+  }
   if (finalized.length > 0) {
     getLogger().info(
       { finalized: finalized.length, swept: confirmedTransfers.length },
