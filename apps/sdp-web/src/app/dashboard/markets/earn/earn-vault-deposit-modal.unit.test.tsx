@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   createEarnVaultDeposit: vi.fn(),
   useEarnFundingWallets: vi.fn(),
   useEarnVaultDepositOutcomeToast: vi.fn(),
+  fetchEarnVaultDepositByRequestId: vi.fn(),
 }));
 
 const copy = vi.hoisted<Record<string, string>>(() => ({
@@ -89,6 +90,7 @@ vi.mock("./deposit/earn-funding-wallets", () => ({
 vi.mock("./earn-program-data", () => ({
   createEarnVaultDeposit: mocks.createEarnVaultDeposit,
   useEarnVaultDepositOutcomeToast: mocks.useEarnVaultDepositOutcomeToast,
+  fetchEarnVaultDepositByRequestId: mocks.fetchEarnVaultDepositByRequestId,
 }));
 
 const strategy: EarnStrategy = {
@@ -152,6 +154,9 @@ async function enterDepositAmount(amount = "1.000000") {
 
 beforeEach(() => {
   mocks.createEarnVaultDeposit.mockReset();
+  mocks.fetchEarnVaultDepositByRequestId.mockReset();
+  // Default: nothing recorded under the key yet, so a held key stays held.
+  mocks.fetchEarnVaultDepositByRequestId.mockResolvedValue(undefined);
   mocks.useEarnFundingWallets.mockReset();
   mocks.useEarnFundingWallets.mockReturnValue({
     wallets: [
@@ -351,6 +356,59 @@ describe("EarnVaultDepositModal", () => {
     await enterDepositAmount();
     await screen.findByText("Approval required");
 
+    expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).toBe(
+      mocks.createEarnVaultDeposit.mock.calls[0][1]
+    );
+  });
+
+  it("retires a held key once its approval has actually executed", async () => {
+    // The hold has no expiry, so it is the one key that can outlive what it
+    // protected. Once the approval executed, a movement exists under it and
+    // reusing it would replay that deposit and silently drop this one.
+    mocks.createEarnVaultDeposit.mockResolvedValue({
+      ok: true,
+      status: 202,
+      data: { kind: "approval_pending", message: "Approval required" },
+    });
+
+    const held = render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    await enterDepositAmount();
+    await screen.findByText("Approval required");
+    held.unmount();
+
+    // The approval was granted and executed while the modal was closed.
+    mocks.fetchEarnVaultDepositByRequestId.mockResolvedValue(vaultDeposit("confirmed"));
+
+    render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    await enterDepositAmount();
+    await screen.findByText("Approval required");
+
+    expect(mocks.fetchEarnVaultDepositByRequestId).toHaveBeenCalledWith(
+      mocks.createEarnVaultDeposit.mock.calls[0][1]
+    );
+    expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).not.toBe(
+      mocks.createEarnVaultDeposit.mock.calls[0][1]
+    );
+  });
+
+  it("does not consult the server for a key no approval is holding", async () => {
+    // The check costs a request, so it is scoped to the only key that cannot
+    // age out on its own.
+    mocks.createEarnVaultDeposit.mockResolvedValue({
+      ok: false,
+      error: "Gateway timeout",
+      status: 504,
+      body: null,
+    });
+
+    render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    const user = await enterDepositAmount();
+    await screen.findByRole("alert");
+    await user.click(screen.getByRole("button", { name: "Confirm deposit" }));
+    await vi.waitFor(() => expect(mocks.createEarnVaultDeposit).toHaveBeenCalledTimes(2));
+
+    expect(mocks.fetchEarnVaultDepositByRequestId).not.toHaveBeenCalled();
+    // Still the ambiguous-retry rule: a 5xx keeps the key.
     expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).toBe(
       mocks.createEarnVaultDeposit.mock.calls[0][1]
     );

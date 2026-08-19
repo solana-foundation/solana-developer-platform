@@ -557,9 +557,9 @@ async function listReadableEarnVaultWallets(
  *
  * Wallet scope alone does not close this. Custody configs may be
  * ORGANIZATION-level (`config.project_id IS NULL`), and `listWallets` hands
- * those to every project in the org by design — so a sibling project's deposit
- * signed by a shared org wallet passes the wallet check, and without this it
- * would hand over that deposit's amount, signature and failure reason.
+ * those to every project in the org — so a sibling project's deposit signed by a
+ * shared org wallet passes the wallet check, and without this it would hand over
+ * that deposit's amount, signature and failure reason.
  *
  * This is deliberately STRICTER than `GET /vault-positions`, which scopes by
  * wallet alone, and the asymmetry is the point: a POSITION is a holding the
@@ -569,13 +569,19 @@ async function listReadableEarnVaultWallets(
  * `getEarnProgramWithdrawal` already made when it moved from an org-only check
  * to a per-program one.
  *
- * A NULL `project_id` stays readable. The column is `ON DELETE SET NULL`, so
- * null means the project was deleted, not that the row is unowned — refusing it
- * would strand the audit trail of a real deposit behind wallet scope alone,
- * which is the exit-safety failure ADR 0002 forbids.
+ * An EXACT match, with no null exception. `project_id` is nullable only because
+ * of `ON DELETE SET NULL` (migration 0059) — the insert requires a real project
+ * id — so a null means the owning project was DELETED. Treating that as
+ * readable-by-anyone was a hole: it handed a deleted project's deposits to every
+ * sibling project that shares an org-level wallet, which is exactly the leak
+ * this guard exists to close. The row survives for forensics in the database;
+ * it is simply no longer addressable through a project-scoped API, and there is
+ * no caller who legitimately needs a deleted project's deposit. Nothing about
+ * exit safety argues otherwise — the POSITION still holds the money and is
+ * still readable by wallet scope.
  */
 function isMovementInProject(movement: { project_id: string | null }, projectId: string): boolean {
-  return movement.project_id === null || movement.project_id === projectId;
+  return movement.project_id === projectId;
 }
 
 /**
@@ -608,7 +614,9 @@ function isMovementInProject(movement: { project_id: string | null }, projectId:
  *                  comparison, not a second query.
  *   project      — see `isMovementInProject`. Wallet scope does NOT imply it,
  *                  because an organization-level custody config is handed to
- *                  every project in the org.
+ *                  every project in the org. An EXACT match: a null
+ *                  `project_id` means the project was deleted, not that the row
+ *                  is public.
  *   direction    — a `withdraw` movement is not a deposit. The column is the
  *                  only thing separating the two on a shared table, and the
  *                  vault withdraw path is still unbuilt, so this closes the
@@ -745,6 +753,7 @@ export async function listEarnVaultDeposits(c: AppContext) {
     custodyWalletIds,
     limit: query.limit,
     before,
+    ...(query.settled === undefined ? {} : { settled: query.settled }),
   });
 
   const last = rows.at(-1);

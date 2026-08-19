@@ -268,6 +268,16 @@ export const earnVaultDepositsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
   before: z.string().min(1).optional(),
   requestId: z.string().min(1).max(255).optional(),
+  /**
+   * `settled=false` returns only movements that can still change, which is what
+   * recovery wants. Without it a client has to page an unbounded history and
+   * filter locally — and a workspace busy enough to push an in-flight deposit
+   * past the first page would silently stop tracking it.
+   */
+  settled: z
+    .enum(["true", "false"])
+    .transform((value) => value === "true")
+    .optional(),
 });
 
 /** Bounded keyset page over active vault holdings, newest first. */

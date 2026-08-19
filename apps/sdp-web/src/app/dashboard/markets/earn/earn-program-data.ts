@@ -669,22 +669,82 @@ const earnVaultDepositsPageSchema = z.object({
   }),
 });
 
+const VAULT_DEPOSITS_PAGE_SIZE = 100;
+
+/**
+ * Hard stop on the paging loop, same reason as the other readers: a server that
+ * never stops advancing its cursor must not spin forever. 20 pages x 100 is far
+ * past any plausible number of SIMULTANEOUSLY in-flight deposits.
+ */
+const VAULT_DEPOSITS_PAGE_LIMIT = 20;
+
 /**
  * This workspace's recorded deposits, newest first. The API derives the
  * organization and project itself from the session, so this takes no scope
  * argument — passing one would be a second, drifting copy of the boundary.
  *
- * Throws rather than returning a partial list. A silently short page here would
- * quietly stop tracking a deposit that is genuinely in flight.
+ * PAGES TO THE END and fails loudly rather than truncating, like
+ * `fetchEarnVaultPositions` and `fetchEarnStrategies`. A silently short page
+ * here is a deposit that stops being tracked: its terminal outcome is never
+ * announced and the balances it changed are never refreshed.
+ *
+ * `settled: false` is what makes that affordable. Asking the server for only
+ * the movements that can still change keeps the result small by construction —
+ * the reconciliation sweep drives every row terminal within about ninety
+ * seconds — instead of paging an unbounded history to filter it locally. A
+ * workspace busy enough to push an in-flight deposit past the first page is
+ * exactly the case a single request got wrong.
  */
-export async function fetchEarnVaultDeposits(limit = 20): Promise<EarnVaultDepositRecord[]> {
+export async function fetchEarnVaultDeposits(
+  options: { settled?: boolean } = {}
+): Promise<EarnVaultDepositRecord[]> {
+  const deposits: EarnVaultDepositRecord[] = [];
+  const seenCursors = new Set<string>();
+  let before: string | null = null;
+
+  for (let page = 0; page < VAULT_DEPOSITS_PAGE_LIMIT; page += 1) {
+    const query = new URLSearchParams({ limit: String(VAULT_DEPOSITS_PAGE_SIZE) });
+    if (options.settled !== undefined) query.set("settled", String(options.settled));
+    if (before) query.set("before", before);
+
+    const result = await dashboardFetch<unknown>(
+      `/api/dashboard/markets/earn/vault-deposits?${query.toString()}`
+    );
+    if (!result.ok) throw new Error(result.error);
+    const parsed = earnVaultDepositsPageSchema.safeParse(result.data);
+    if (!parsed.success) throw new Error("Invalid vault deposits response");
+
+    const body = parsed.data.data;
+    deposits.push(...body.deposits);
+    if (!body.hasMore) return deposits;
+
+    const nextCursor = body.nextCursor;
+    if (!nextCursor || nextCursor === before || seenCursors.has(nextCursor)) {
+      throw new Error("Vault deposits pagination did not advance");
+    }
+    seenCursors.add(nextCursor);
+    before = nextCursor;
+  }
+
+  throw new Error("Vault deposits pagination exceeded its safety limit");
+}
+
+/**
+ * Resolve the deposit a given idempotency key produced, if one exists yet.
+ *
+ * The approval path needs this: a policy hold creates no movement, so the only
+ * handle the client keeps is the key it minted, and "has the write behind this
+ * key happened?" is a question only the server can answer.
+ */
+export async function fetchEarnVaultDepositByRequestId(
+  requestId: string
+): Promise<EarnVaultDepositRecord | undefined> {
   const result = await dashboardFetch<unknown>(
-    `/api/dashboard/markets/earn/vault-deposits?limit=${limit}`
+    `/api/dashboard/markets/earn/vault-deposits?requestId=${encodeURIComponent(requestId)}`
   );
-  if (!result.ok) throw new Error(result.error);
+  if (!result.ok) return undefined;
   const parsed = earnVaultDepositsPageSchema.safeParse(result.data);
-  if (!parsed.success) throw new Error("Invalid vault deposits response");
-  return parsed.data.data.deposits;
+  return parsed.success ? parsed.data.data.deposits[0] : undefined;
 }
 
 /**
@@ -699,8 +759,8 @@ export async function fetchEarnVaultDeposits(limit = 20): Promise<EarnVaultDepos
  */
 export function useEarnVaultDeposits() {
   const { data, error, isLoading, mutate } = useSWR(
-    "dashboard-earn-vault-deposits",
-    () => fetchEarnVaultDeposits(),
+    "dashboard-earn-vault-deposits-in-flight",
+    () => fetchEarnVaultDeposits({ settled: false }),
     { refreshInterval: 30_000 }
   );
   return { deposits: data, error, isLoading, refresh: () => void mutate() };

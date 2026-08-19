@@ -23,12 +23,14 @@ import { shortenMarketAddress } from "./earn-market-presentation";
 import {
   createEarnVaultDeposit,
   type EarnVaultDeposit,
+  fetchEarnVaultDepositByRequestId,
   useEarnVaultDepositOutcomeToast,
 } from "./earn-program-data";
 import { strategySourceLabel, strategyToken } from "./earn-program-presentation";
 import {
   claimVaultDepositIdempotencyKey,
   holdVaultDepositIdempotencyKey,
+  isVaultDepositIdempotencyKeyHeld,
   releaseVaultDepositIdempotencyKey,
   vaultDepositRequestFingerprint,
 } from "./earn-vault-deposit-tracking";
@@ -177,6 +179,60 @@ function depositAnswerRetiresIdempotencyKey(
   // timing out downstream of an API that already recorded and broadcast the
   // deposit looks exactly like a provider being unavailable before it did.
   return result.status !== null && result.status >= 400 && result.status < 500;
+}
+
+/**
+ * Apply the key lifecycle to an answer the API gave: retire it, pin it, or leave
+ * it alone. Kept beside `depositAnswerRetiresIdempotencyKey` so the whole rule
+ * reads in one place rather than half here and half in the submit handler.
+ */
+function applyVaultDepositIdempotencyKeyOutcome(
+  fingerprint: string,
+  result: Awaited<ReturnType<typeof createEarnVaultDeposit>>
+): void {
+  if (depositAnswerRetiresIdempotencyKey(result)) {
+    releaseVaultDepositIdempotencyKey(fingerprint);
+    return;
+  }
+  if (result.ok && result.data.kind === "approval_pending") {
+    // Pin it: the hold is keyed by this value server-side and a human may take
+    // hours, far longer than the default TTL was calibrated for. A lapsed key
+    // here resubmits into a SECOND approval request.
+    holdVaultDepositIdempotencyKey(fingerprint);
+  }
+}
+
+/**
+ * The key to send for this request, having established that a HELD key is not
+ * already spent.
+ *
+ * A key pinned by an approval hold has no expiry, which makes it the one key
+ * that can outlive the thing it protected. If that approval has since been
+ * approved and EXECUTED, a movement exists under the key: reusing it would
+ * replay that deposit and silently do nothing with this one, which carries the
+ * same amount from the same wallet and is therefore indistinguishable from a
+ * retry to everything except the customer. Only the server can answer whether
+ * the write behind the hold has happened, so it is asked.
+ *
+ * An unheld key needs no round trip — it ages out on its own. Returns
+ * `undefined` when the caller aborted mid-check, which is the caller's signal to
+ * send nothing at all.
+ */
+async function resolveVaultDepositIdempotencyKey(
+  fingerprint: string,
+  signal: AbortSignal
+): Promise<string | undefined> {
+  const key = claimVaultDepositIdempotencyKey(fingerprint);
+  if (!isVaultDepositIdempotencyKeyHeld(fingerprint)) return key;
+
+  const alreadyRecorded = await fetchEarnVaultDepositByRequestId(key);
+  if (signal.aborted) return undefined;
+  // Not recorded: the hold may still be pending, so the key STAYS — that is what
+  // stops a resubmit opening a second approval request.
+  if (!alreadyRecorded) return key;
+
+  releaseVaultDepositIdempotencyKey(fingerprint);
+  return claimVaultDepositIdempotencyKey(fingerprint);
 }
 
 type Translation = ReturnType<typeof useTranslations>;
@@ -546,15 +602,22 @@ export function EarnVaultDepositModal({
       custodyWalletId: selectedWallet.id,
       amount,
     });
-    const idempotencyKey = claimVaultDepositIdempotencyKey(fingerprint);
     const controller = new AbortController();
     requestControllerRef.current?.abort();
     requestControllerRef.current = controller;
+    // Locked BEFORE the first await below, so the spent-key check cannot be
+    // raced by a second press.
     submittingRef.current = true;
     setSubmitting(true);
     setSubmitError(null);
 
     try {
+      const idempotencyKey = await resolveVaultDepositIdempotencyKey(
+        fingerprint,
+        controller.signal
+      );
+      if (idempotencyKey === undefined) return;
+
       const result = await createEarnVaultDeposit(
         {
           strategyId: strategy.id,
@@ -565,14 +628,7 @@ export function EarnVaultDepositModal({
         controller.signal
       );
       if (controller.signal.aborted) return;
-      if (depositAnswerRetiresIdempotencyKey(result)) {
-        releaseVaultDepositIdempotencyKey(fingerprint);
-      } else if (result.ok && result.data.kind === "approval_pending") {
-        // Pin it: the hold is keyed by this value server-side and a human may
-        // take hours, which is far longer than the default TTL was calibrated
-        // for. A lapsed key here resubmits into a SECOND approval request.
-        holdVaultDepositIdempotencyKey(fingerprint);
-      }
+      applyVaultDepositIdempotencyKeyOutcome(fingerprint, result);
       const resolution = resolveDepositSubmission(
         result,
         amount,

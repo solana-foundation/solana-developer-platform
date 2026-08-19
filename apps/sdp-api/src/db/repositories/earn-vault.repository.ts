@@ -152,6 +152,12 @@ export interface EarnVaultRepository {
     custodyWalletIds: readonly string[];
     limit: number;
     before: EarnVaultMovementCursor | null;
+    /**
+     * `false` returns only movements that can still change. Recovery asks for
+     * exactly that, which keeps the page small by construction rather than
+     * relying on a client filter over an unbounded history.
+     */
+    settled?: boolean;
   }): Promise<{ rows: EarnVaultMovementRow[]; hasMore: boolean }>;
   /** Global bounded outbox scan for the reconciliation worker. */
   listUnsettledMovements(limit: number): Promise<EarnVaultMovementRow[]>;
@@ -469,17 +475,27 @@ export function createPostgresEarnVaultRepository(db: AppDb): EarnVaultRepositor
       }
       const beforeClause = params.before ? "AND (created_at, id) < (?, ?)" : "";
       const beforeValues = params.before ? [params.before.createdAt, params.before.id] : [];
+      // Terminal set spelled once, from the same statuses the transition guard
+      // above enforces.
+      const settledClause =
+        params.settled === undefined
+          ? ""
+          : params.settled
+            ? "AND status IN ('confirmed', 'failed')"
+            : "AND status NOT IN ('confirmed', 'failed')";
       const result = await db
         .prepare(
-          // `project_id IS NULL` stays visible: the column is ON DELETE SET
-          // NULL, so null means the project was deleted, not that the row is
-          // unowned, and hiding it would strand a real deposit's audit trail.
+          // An EXACT project match. `project_id` is nullable only through
+          // ON DELETE SET NULL, so a null means the project was deleted — and
+          // accepting it here would expose that project's deposits to every
+          // sibling project sharing an organization-level custody wallet.
           `SELECT * FROM earn_vault_movements
            WHERE organization_id = ?
              AND environment = ?
              AND direction = 'deposit'
              AND custody_wallet_id = ANY (?::text[])
-             AND (project_id IS NULL OR project_id = ?)
+             AND project_id = ?
+             ${settledClause}
              ${beforeClause}
            ORDER BY created_at DESC, id DESC
            LIMIT ?`

@@ -9,7 +9,7 @@ export function vaultDepositsProxyQuery(
   request: Request
 ): { ok: true; query: string } | { ok: false; message: string } {
   const url = new URL(request.url);
-  const allowed = new Set(["limit", "before", "requestId"]);
+  const allowed = new Set(["limit", "before", "requestId", "settled"]);
   const forwarded = new URLSearchParams();
 
   for (const key of new Set(url.searchParams.keys())) {
@@ -28,6 +28,9 @@ export function vaultDepositsProxyQuery(
     // narrower one, or a legitimate key with a slash or a space would 400.
     if (key === "requestId" && !/^[\x20-\x7e]{1,255}$/.test(value)) {
       return { ok: false, message: "requestId must be printable ASCII, 1-255 characters" };
+    }
+    if (key === "settled" && value !== "true" && value !== "false") {
+      return { ok: false, message: "settled must be true or false" };
     }
     forwarded.set(key, value);
   }

@@ -384,6 +384,12 @@ organization's own custody wallets.
     capability: the route re-applies every scoping rule, so a guessed key can
     only surface a deposit the caller could already read. It is also why the key
     is a QUERY filter and not a path segment — legal keys contain `/` and `?`.
+  - `?settled=false` returns only movements that can still change, and recovery
+    always asks for that. It is not a convenience: a client filtering an
+    unbounded history locally has to page it all, and a workspace busy enough to
+    push an in-flight deposit past the first page would silently stop tracking
+    it. The reconciliation sweep drives every row terminal within ~90 seconds,
+    so the in-flight set is small by construction.
   - Migration `0061` adds `idx_earn_vault_movements_workspace_created`
     (`(organization_id, environment, created_at DESC, id DESC) WHERE direction =
     'deposit'`). 0059's indexes serve the sweep, replay, the chain and per
@@ -405,9 +411,13 @@ organization's own custody wallets.
     the repository query; the BOLA guard, same reasoning as
     `getEarnProgramWithdrawal`), ENVIRONMENT (a sandbox key must not read a
     production movement; the row carries its own, so this is a comparison and
-    not a second query), and DIRECTION (`withdraw` is not a deposit — the column
-    is the only thing separating the two on a shared table, and it closes the
-    vault-withdraw path before there is anything to leak through it).
+    not a second query), DIRECTION (`withdraw` is not a deposit — the column is
+    the only thing separating the two on a shared table, and it closes the
+    vault-withdraw path before there is anything to leak through it), and
+    PROJECT (an EXACT match — `project_id` is nullable only through
+    `ON DELETE SET NULL`, so a null means the project was DELETED, and accepting
+    it would hand that project's deposits to every sibling project sharing an
+    organization-level custody wallet).
   - Wallet-binding scope comes from `listReadableEarnVaultWallets`, **shared with
     `/vault-positions`**. Keep it shared: a binding that hides a position has to
     hide that position's deposits too, and two copies of that rule is how they

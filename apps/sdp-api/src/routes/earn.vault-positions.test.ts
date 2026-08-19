@@ -663,6 +663,53 @@ describe("GET /v1/earn/vault-deposits", () => {
     expect(body.data.deposits).toEqual([]);
   });
 
+  it("returns only in-flight movements when asked, so recovery cannot be paged out", async () => {
+    const inFlight = await createPosition({ providerReference: "vault_settled_pending" });
+    const settled = await createPosition({ providerReference: "vault_settled_confirmed" });
+    await createPostgresEarnVaultRepository(getDb(env)).advanceMovement({
+      movementId: settled.movement.id,
+      organizationId: ORG,
+      fromStatuses: ["pending"],
+      toStatus: "confirmed",
+      confirmedAt: new Date(0).toISOString().replace(".000Z", ".000Z"),
+    });
+
+    const open = (await (await listDeposits("?settled=false")).json()) as {
+      data: { deposits: Array<{ movementId: string; status: string }> };
+    };
+    expect(open.data.deposits.map((deposit) => deposit.movementId)).toEqual([inFlight.movement.id]);
+
+    const closed = (await (await listDeposits("?settled=true")).json()) as {
+      data: { deposits: Array<{ movementId: string }> };
+    };
+    expect(closed.data.deposits.map((deposit) => deposit.movementId)).toEqual([
+      settled.movement.id,
+    ]);
+  });
+
+  it("rejects a settled filter that is not a boolean", async () => {
+    expect((await listDeposits("?settled=maybe")).status).toBe(400);
+  });
+
+  it("hides a movement whose project was deleted", async () => {
+    // `project_id` is nullable only through ON DELETE SET NULL, so a null means
+    // the owning project is gone — not that the row is readable by every
+    // sibling project that happens to share an organization-level wallet.
+    const orphaned = await createPosition({ providerReference: "vault_orphaned" });
+    await getDb(env)
+      .prepare("UPDATE earn_vault_movements SET project_id = NULL WHERE id = ?")
+      .bind(orphaned.movement.id)
+      .run();
+
+    expect((await getDeposit(orphaned.movement.id)).status).toBe(404);
+    const body = (await (await listDeposits()).json()) as {
+      data: { deposits: Array<{ movementId: string }> };
+    };
+    expect(body.data.deposits.map((deposit) => deposit.movementId)).not.toContain(
+      orphaned.movement.id
+    );
+  });
+
   it("answers empty for a key nobody has used", async () => {
     const body = (await (await listDeposits("?requestId=never-used")).json()) as {
       data: { deposits: unknown[] };

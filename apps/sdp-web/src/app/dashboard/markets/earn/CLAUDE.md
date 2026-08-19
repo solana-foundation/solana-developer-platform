@@ -101,7 +101,7 @@ the body `requestId` form.
   from `./earn-surfacing`, and reads are provider-agnostic on purpose so a
   position taken while a provider was offered stays visible after it is
   un-surfaced (ADR 0002 — un-surfacing closes the door in, never the door out).
-  Both paginated readers **page to the end** and fail loudly rather than
+  All three paginated readers **page to the end** and fail loudly rather than
   truncating: `fetchEarnStrategies` stops on the reported total or a short page
   and throws if pagination ends early, and `fetchEarnVaultPositions` follows the
   opaque keyset cursor, throwing if the cursor repeats or does not advance. A
@@ -144,8 +144,16 @@ the body `requestId` form.
   - `holdVaultDepositIdempotencyKey` SUSPENDS expiry while a policy approval is
     pending. The default TTL is calibrated to a blockhash (~90s to terminal);
     an approval answers to a human and can take hours, and a lapsed key there
-    resubmits into a SECOND approval request for one intent. The tab session is
-    still the outer bound.
+    resubmits into a SECOND approval request for one intent.
+  - Suspending expiry needs its own way OUT, or the key outlives the approval and
+    a later legitimate deposit of the same amount from the same wallet silently
+    replays the approved one. So before reusing a HELD key the modal asks the
+    server whether a movement exists for it
+    (`isVaultDepositIdempotencyKeyHeld` -> `fetchEarnVaultDepositByRequestId`): a
+    movement means the write happened and the key is spent. A REJECTED approval
+    produces no movement, so its key survives until the next submit reuses it
+    and the API answers 403 "denied by policy" — visible, and a 4xx retires the
+    key, so the attempt after that mints a fresh one.
   - A store that refuses every operation falls back to a module-scope map, so a
     dead store costs DURABILITY across a reload and never the answer to "is this
     the same request". Failing soft must not mean failing open.

@@ -217,9 +217,20 @@ export function claimVaultDepositIdempotencyKey(fingerprint: string): string {
  * opens a SECOND approval request for the same intent. Approve both and the
  * customer deposits twice.
  *
- * So an approval hold suspends expiry rather than extending it by a guess. The
- * tab session is still the outer bound, and `releaseVaultDepositIdempotencyKey`
- * still retires the key the moment the API answers for it.
+ * So an approval hold suspends expiry rather than extending it by a guess.
+ *
+ * Suspending expiry needs its own way OUT, or the key outlives the approval and
+ * a later legitimate deposit of the same amount from the same wallet silently
+ * replays the approved one instead of moving money. The tab session is not a
+ * tight enough bound for that. Two things end a hold:
+ *   - the API answering (`releaseVaultDepositIdempotencyKey`), as on any path;
+ *   - the write behind the hold becoming visible — the modal checks
+ *     `isVaultDepositIdempotencyKeyHeld` and asks the server whether a movement
+ *     exists for the key before reusing it, because a movement means the key is
+ *     spent.
+ * A REJECTED approval produces no movement, so its key stays until the next
+ * submit reuses it and the API answers 403 "denied by policy" — visible, and a
+ * 4xx retires the key, so the attempt after that mints a fresh one.
  */
 export function holdVaultDepositIdempotencyKey(fingerprint: string): void {
   const entries = readEntries(IDEMPOTENCY_STORE_KEY, IDEMPOTENCY_TTL_MS);
@@ -229,6 +240,22 @@ export function holdVaultDepositIdempotencyKey(fingerprint: string): void {
     ...entries.filter((entry) => entry.id !== fingerprint),
     { ...held, expiresAt: null },
   ]);
+}
+
+/**
+ * Whether this request's key is pinned by a live approval hold.
+ *
+ * A held key has no expiry, which makes it the one entry that cannot age out on
+ * its own — so the caller has to establish whether the hold is still live before
+ * reusing it. `fetchEarnVaultDepositByRequestId` is that check: once a movement
+ * exists for the key, the write behind the hold has HAPPENED and the key is
+ * spent. See the modal's submit path.
+ */
+export function isVaultDepositIdempotencyKeyHeld(fingerprint: string): boolean {
+  const entry = readEntries(IDEMPOTENCY_STORE_KEY, IDEMPOTENCY_TTL_MS).find(
+    (candidate) => candidate.id === fingerprint
+  );
+  return entry?.expiresAt === null;
 }
 
 /**
