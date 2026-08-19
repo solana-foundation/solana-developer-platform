@@ -204,6 +204,11 @@ export const EARN_VAULT_MOVEMENT_STATUSES = [
 ] as const;
 export type EarnVaultMovementStatus = (typeof EARN_VAULT_MOVEMENT_STATUSES)[number];
 
+/** Statuses a vault movement never moves on from. */
+export const EARN_TERMINAL_VAULT_MOVEMENT_STATUSES = ["confirmed", "failed"] as const;
+export type EarnTerminalVaultMovementStatus =
+  (typeof EARN_TERMINAL_VAULT_MOVEMENT_STATUSES)[number];
+
 /** Durable result of a submitted vault deposit (fresh or idempotently replayed). */
 export interface EarnVaultDeposit {
   positionId: string;
@@ -219,6 +224,57 @@ export interface EarnVaultDeposit {
     providerReference: string;
     hostCluster: SolanaCluster;
   };
+}
+
+/**
+ * One recorded vault deposit, read back by movement id — what a caller polls
+ * to learn whether a signed deposit actually landed.
+ *
+ * Every field comes off the movement row ITSELF, with no catalogue join. That
+ * is deliberate: a strategy can be un-catalogued (paused, dropped by the sync,
+ * or belonging to a provider SDP stopped offering) while the deposit it funded
+ * is still in flight, and ADR 0002's exit-safety rule says reading money the
+ * organization already holds must never depend on the provider still being
+ * offered. `provider`/`providerReference` name the vault; the strategy's
+ * display name is the caller's to remember, and losing it must not cost the
+ * customer the outcome of a signed transaction.
+ *
+ * No `replayed`: that answers "did your idempotency key already spend itself",
+ * which is a property of a WRITE, not of the row.
+ */
+export interface EarnVaultDepositRecord {
+  movementId: string;
+  positionId: string;
+  provider: string;
+  providerReference: string;
+  status: EarnVaultMovementStatus;
+  signature: string;
+  /** Accepted deposit amount, in the vault token's units, as a decimal string. */
+  amount: string;
+  failureReason: string | null;
+  createdAt: string;
+  /** Set only once the sweep observed the transaction on chain. */
+  confirmedAt: string | null;
+}
+
+/** Response body of GET /v1/earn/vault-deposits/:movementId. */
+export interface EarnVaultDepositResponse {
+  deposit: EarnVaultDepositRecord;
+}
+
+/**
+ * Response body of GET /v1/earn/vault-deposits — one workspace's recorded
+ * deposits, newest first.
+ *
+ * A bounded window, not a complete history: it exists so a client can re-derive
+ * which of its deposits are still in flight after losing local state, and the
+ * reconciliation sweep settles a movement within about ninety seconds, so
+ * anything unsettled is by construction recent. Follow `nextCursor` for more.
+ */
+export interface EarnVaultDepositsPage {
+  deposits: EarnVaultDepositRecord[];
+  hasMore: boolean;
+  nextCursor: string | null;
 }
 
 /**

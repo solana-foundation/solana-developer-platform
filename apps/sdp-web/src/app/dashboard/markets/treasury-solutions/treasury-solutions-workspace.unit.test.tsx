@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   refreshPrograms: vi.fn(),
   refreshWallets: vi.fn(),
   withdrawalsByProgram: {} as Record<string, Array<{ status: string; withdrawalRef?: string }>>,
+  vaultDeposits: [] as Array<{ movementId: string; status: string }>,
 }));
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -164,11 +165,24 @@ vi.mock("../earn/earn-program-data", () => ({
     refresh: vi.fn(),
     withdrawals: mocks.withdrawalsByProgram[programId] ?? [],
   }),
+  useEarnVaultDeposits: () => ({
+    deposits: mocks.vaultDeposits,
+    error: undefined,
+    isLoading: false,
+    refresh: vi.fn(),
+  }),
+  // The real predicate, not a stub: the recovery filter and the tracker's stop
+  // condition must agree, and a stub here would let them drift silently.
+  isEarnVaultDepositInFlight: (deposit: { status: string }) =>
+    deposit.status !== "confirmed" && deposit.status !== "failed",
 }));
 
 vi.mock("../earn/earn-vault-deposit-modal", () => ({
   EarnVaultDepositModal: ({ strategy }: { strategy: { name: string } }) => (
     <div role="dialog">Deposit into {strategy.name}</div>
+  ),
+  EarnVaultDepositOutcomeTracker: ({ movementId }: { movementId: string }) => (
+    <output data-testid="vault-deposit-outcome-tracker">{movementId}</output>
   ),
 }));
 
@@ -201,6 +215,7 @@ beforeEach(() => {
   mocks.environment = "sandbox";
   mocks.programProvider = "ground";
   mocks.withdrawalsByProgram = {};
+  mocks.vaultDeposits = [];
   vi.clearAllMocks();
 });
 
@@ -302,5 +317,45 @@ describe("TreasurySolutionsWorkspace", () => {
     ]);
     expect(document.body.textContent).not.toContain("must_not_poll_requested");
     expect(document.body.textContent).not.toContain("must_not_poll_terminal");
+  });
+
+  it("recovers every in-flight vault deposit from the server ledger", async () => {
+    mocks.vaultDeposits = [
+      // `pending` is IN FLIGHT, not failed: SDP could not establish that the
+      // transaction reached the network, and the sweep is still working on it.
+      { movementId: "earn_vault_movement_pending", status: "pending" },
+      { movementId: "earn_vault_movement_submitted", status: "submitted" },
+      // A repeated ledger result must still mount only one keyed tracker.
+      { movementId: "earn_vault_movement_submitted", status: "submitted" },
+      { movementId: "earn_vault_movement_confirmed", status: "confirmed" },
+      { movementId: "earn_vault_movement_failed", status: "failed" },
+    ];
+
+    renderWorkspace();
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId("vault-deposit-outcome-tracker")).toHaveLength(2);
+    });
+    expect(
+      screen
+        .getAllByTestId("vault-deposit-outcome-tracker")
+        .map((tracker) => tracker.textContent)
+        .sort()
+    ).toEqual(["earn_vault_movement_pending", "earn_vault_movement_submitted"]);
+    // Already settled: re-watching them would re-announce an outcome the
+    // customer was told about the first time round.
+    expect(document.body.textContent).not.toContain("earn_vault_movement_confirmed");
+    expect(document.body.textContent).not.toContain("earn_vault_movement_failed");
+  });
+
+  it("mounts no deposit tracker when the ledger reports nothing in flight", async () => {
+    mocks.vaultDeposits = [{ movementId: "earn_vault_movement_done", status: "confirmed" }];
+
+    renderWorkspace();
+
+    // Anchor on a real render so this cannot pass by asserting against a page
+    // that never mounted.
+    await waitFor(() => expect(screen.getByText("Legacy treasury program")).toBeTruthy());
+    expect(screen.queryAllByTestId("vault-deposit-outcome-tracker")).toHaveLength(0);
   });
 });

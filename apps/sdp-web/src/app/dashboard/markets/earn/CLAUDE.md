@@ -28,16 +28,22 @@ api/dashboard/markets/earn/
     withdrawals/                     POST create · GET ledger list
     withdrawals/[withdrawalRef]/     GET detail
   vault-deposits/route.ts            POST create (vault_direct)
+  vault-deposits/route.ts            …and GET the workspace list (recovery)
+  vault-deposits/[movementId]/       GET one recorded deposit (poll to terminal)
   vault-positions/route.ts           GET list (keyset cursor)
 ```
 
-`provider-query.ts` holds TWO validators with deliberately different failure
+`provider-query.ts` holds THREE validators with deliberately different failure
 modes. `programProxyQuery` is permissive-by-omission — an unrecognized param is
 dropped — because those routes predate the typed client and are reachable with
 arbitrary query strings. `vaultPositionsProxyQuery` is **strict**: it is
 consumed only by our own typed client, so an unknown key, a repeated key, an
 out-of-range `limit` or a non-base64url cursor **400s** instead of silently
 reshaping the page. A typo must not return a different page of someone's money.
+`vaultDepositsProxyQuery` is the same posture over the deposits list, sharing
+`ProxyQueryValidation` and `MAX_CURSOR_LENGTH` rather than restating them; its
+`requestId` is validated to the API's OWN `[\x20-\x7e]{1,255}` idempotency-key
+shape, because a tidier rule would 400 a legitimate key containing a slash.
 
 `proxyToSdpApi` never copies the inbound header bag — auth, project scope and
 tracing stay server-owned — so a client-set `Idempotency-Key` never reaches the
@@ -99,7 +105,7 @@ the body `requestId` form.
   from `./earn-surfacing`, and reads are provider-agnostic on purpose so a
   position taken while a provider was offered stays visible after it is
   un-surfaced (ADR 0002 — un-surfacing closes the door in, never the door out).
-  Both paginated readers **page to the end** and fail loudly rather than
+  All three paginated readers **page to the end** and fail loudly rather than
   truncating: `fetchEarnStrategies` stops on the reported total or a short page
   and throws if pagination ends early, and `fetchEarnVaultPositions` follows the
   opaque keyset cursor, throwing if the cursor repeats or does not advance. A
@@ -124,48 +130,116 @@ the body `requestId` form.
   value-moving request. `walletBalanceForMint` distinguishes an absent or
   malformed RPC observation (`undefined`) from a successful observation with no
   row for the mint (a real zero) — only the latter may read as "no funds".
-- `earn-decimal.ts` — the strict decimal parser: digits required on BOTH sides
-  of the point, optional no-trim and length caps, plus the canonical form. Scale
-  and ordering are NOT reimplemented — `decimalScale` and `compareDecimalAmounts`
-  come from `@sdp/solana/amount`. The one wrapper, `compareUnsignedDecimals`,
-  exists because the shared comparator THROWS on a non-decimal and these call
-  sites read provider strings during render (ADR 0002: a malformed ceiling must
-  disable an affordance, never crash an exit).
-- `earn-format.ts` — display formatters over decimal strings
-  (`formatProviderAmount`, `formatUsd`, `tokenSymbol`, `formatTokenQuantity`,
-  ISO-8601 duration helpers). `Intl.NumberFormat` takes the decimal string
-  DIRECTLY (ES2023), so there is no `Number()` cast and no hand-rolled digit
-  grouping; `roundingMode: "trunc"` because rounding a balance up would display
-  an amount the provider then refuses. Every formatter takes the caller's
-  `locale` — grouping and the decimal separator are locale facts, not en-US
-  constants. A non-decimal input renders `—`; nothing invents a zero.
-- `earn-market-presentation.tsx` — shared strategy identity + asset resolution
-  (`EarnStrategyIdentity`, `earnStrategyAsset`, `formatProviderApy`,
-  `sumDecimalStrings`). Shared with Treasury Solutions — keep it presentational.
-- `earn-program-presentation.ts` — pure per-strategy helpers (token lane,
-  source label). Every one reads a field the provider actually publishes.
-- `deposit/earn-funding-wallets.ts` — the org's own SDP wallets, one inventory
-  serving both deposit shapes. The response is zod-PARSED and the row type
-  (`EarnFundingWallet`) is derived from that schema, so the two cannot drift; a
-  row missing `publicKey` — the address a deposit is signed from — fails at this
-  boundary instead of somewhere downstream. An invalid envelope THROWS; treating
-  it as `[]` would disable deposits while claiming the org has no wallets. Only
-  `active` wallets are returned — an inactive wallet cannot originate a
-  transfer. `walletDisplayName` uses `||`, not `??`, so a whitespace label falls
-  back instead of rendering an empty name. `provider` is optional and a plain
-  string rather than an enum: it labels a badge, and a provider id this build has
-  not heard of must not fail the row and disable deposits over a caption.
+  It also exports `EarnVaultDepositOutcomeTracker`, the null-rendering watcher
+  Treasury mounts per in-flight deposit — the modal's success screen is a
+  receipt for a SIGNATURE, and the customer closes it long before the chain has
+  decided.
+- `earn-vault-deposit-tracking.ts` — the per-tab `sessionStorage` holding the
+  deposit IDEMPOTENCY KEY, and nothing else (PRO-1692). A retry inside the
+  record-before-broadcast window must carry the SAME key or the chain accepts
+  the transfer twice — there is no provider-side dedupe behind this route — and
+  a React ref dies with the modal and with the page load.
+  - The fingerprint is `(project, strategy, wallet, amount)`. The PROJECT is in
+    there because an organization-level custody config gives two projects the same
+    `custody_wallets` row: without it, switching project in one tab and
+    re-submitting the same strategy and amount reuses the first project's key, and
+    the API's org-scoped replay lookup then resolves the FIRST project's movement.
+    A ref-scoped key never survived a project switch, so this only became
+    reachable once the key outlived the component. The API refuses that case too
+    (see `routes/earn/CLAUDE.md`) — this keeps the client from asking.
+  - **The value-moving POST takes no abort signal.** The server processes the
+    request whether or not the component survives it, so aborting on unmount
+    only blinds the client to an answer the STORE needs: a 202 hold whose key
+    was never pinned stays on the 15-minute TTL while the approval lives for
+    hours, and the eventual resubmit mints a fresh key — a second approval
+    request for one intent. The controller gates state updates and the outcome
+    screen; key bookkeeping (`applyVaultDepositIdempotencyKeyOutcome`) runs
+    unconditionally, before the abort check.
+  - `claimVaultDepositIdempotencyKey` mints once per fingerprint; `releaseVaultDepositIdempotencyKey` retires it. **Retire only on
+    a 4xx or a recorded deposit.** A 5xx is the dangerous one — a gateway timing
+    out downstream of an API that already recorded and broadcast looks exactly
+    like a provider being unavailable before it did. A key released too early is
+    a double deposit; a key held too long is a replay the API reports honestly.
+  - `holdVaultDepositIdempotencyKey` SUSPENDS expiry while a policy approval is
+    pending. The default TTL is calibrated to a blockhash (~90s to terminal);
+    an approval answers to a human and can take hours, and a lapsed key there
+    resubmits into a SECOND approval request for one intent.
+  - Suspending expiry needs its own way OUT, or the key outlives the approval and
+    a later legitimate deposit of the same amount from the same wallet silently
+    replays the approved one. So before reusing a HELD key the modal asks the
+    server whether a movement exists for it
+    (`isVaultDepositIdempotencyKeyHeld` -> `fetchEarnVaultDepositByRequestId`): a
+    movement means the write happened and the key is spent. That lookup returns
+    THREE outcomes — `found` / `absent` / `unavailable` — and an unavailable read
+    REFUSES the submit rather than picking a key, because both guesses are wrong
+    in a different direction: reusing a possibly-spent key moves no money when
+    the customer asked it to, and minting a fresh one opens a second approval
+    request. Same rule as an unavailable balance, which must never read as zero.
+  - The pre-flight and the POST are two operations, so the approval can execute
+    BETWEEN them — a TOCTOU no further client read can close. Detection lives on
+    the RESPONSE instead: the key is client-minted and the approval executor
+    replaying it is the only other writer, so `replayed: true` on a key that was
+    HELD at check time is necessarily the approval's execution.
+    `resolveDepositSubmission` marks that outcome `absorbedByApproval` and the
+    modal announces "your approval completed this; this submission moved
+    nothing" — never the plain success screen, and never an auto-retry with a
+    fresh key, because auto-resubmitting money after a race IS the
+    double-deposit hazard. A second deposit stays a human decision. A REJECTED approval
+    produces no movement, so its key survives until the next submit reuses it
+    and the API answers 403 "denied by policy" — visible, and a 4xx retires the
+    key, so the attempt after that mints a fresh one.
+  - The entry cap governs EXPIRING entries only; a held entry is **never
+    evicted**. The two are not comparable in either direction that matters: an
+    expiring entry is minted by typing a new amount so it accumulates freely and
+    costs at most a replay if dropped, while a held entry exists only because a
+    real POST was parked by policy — single digits in practice — and dropping it
+    mints a fresh key that opens a SECOND approval request for one intent. A
+    shared cap traded the catastrophic failure for a storage one, and the storage
+    one is not real at these sizes (~260 bytes an entry, so even a thousand held
+    keys is a couple of hundred KB against a multi-megabyte quota); a refused
+    write already fails soft into the in-memory tier.
+  - The cap has a floor of ONE expiring entry, because callers write the entry
+    they just claimed as the last element — a budget of zero would evict the key
+    `claim` is about to return, and a key handed out but never stored is one the
+    next call silently replaces.
+  - Entries are zod-parsed per row on read, and the row type is derived from that
+    schema — same convention as `deposit/earn-funding-wallets.ts`, and for the same
+    reason: this store is untrusted JSON written as often by an older build of the
+    page as by the current one.
+  - A store that refuses every operation falls back to a module-scope map, so a
+    dead store costs DURABILITY across a reload and never the answer to "is this
+    the same request". Failing soft must not mean failing open.
+  - A PARTIALLY dead store — quota: `setItem` throws while `getItem` keeps
+    serving the stale previous state — is the trap in that design. Every write
+    lands in memory unconditionally, so memory is always the newest complete
+    snapshot and a readable storage can only be equal or OLDER; serving it after
+    a failed write un-writes the just-claimed key (fresh mint → second approval)
+    and loses hold markers (an executed approval presents as a fresh
+    submission). A failed write therefore flips that store key to
+    memory-preferred (`storageDivergedKeys`); the next successful write syncs
+    the full snapshot back and returns authority to storage, so an external
+    clear only ever means something when storage is actually keeping up.
+    Residual, stated honestly: a failed write followed by a RELOAD serves stale
+    storage — durability was refused, nothing client-side can close it — which
+    is why the server independently re-checks every reused key.
+  - It deliberately does NOT track which deposits are in flight any more. That
+    was browser state pretending to be a ledger: it could not see a deposit
+    signed in another tab, and it restored the previous project's watches after
+    a workspace switch. `GET /v1/earn/vault-deposits` owns it now and is
+    workspace-scoped by construction.
 
 ## Where these seams are consumed — do not delete them as dead code
 
-`useEarnPrograms`, `useEarnVaultPositions`, `createEarnVaultDeposit`,
-`EarnWithdrawModal` and `EarnVaultDepositModal` have **no caller inside this
-module**. That is a module boundary, not an oversight: this module is the Earn
+`useEarnPrograms`, `useEarnVaultPositions`, `useEarnVaultDeposits`,
+`createEarnVaultDeposit`, `useEarnVaultDepositOutcomeToast`,
+`isEarnVaultDepositInFlight`, `earn-vault-deposit-tracking.ts`,
+`EarnWithdrawModal`, `EarnVaultDepositModal` and
+`EarnVaultDepositOutcomeTracker` have **no caller inside this module**. That is a module boundary, not an oversight: this module is the Earn
 Program page (select a strategy → build a button → integrate the API), and the
 surface that reads positions, opens the vault-deposit modal and drives
 withdrawals is **Treasury Solutions**
 (`../treasury-solutions/treasury-solutions-workspace.tsx`), which consumes all
-five. The deposit modal itself lives HERE, beside the strategy, decimal and
+of them. The deposit modal itself lives HERE, beside the strategy, decimal and
 funding-wallet helpers it is built from, and is rendered from there.
 
 Grep before deleting: a seam whose only caller is one directory over still looks
@@ -181,6 +255,28 @@ asserted. An approval hold is decoded into an explicit `approval_pending`
 outcome (an approval is not a failure, and not a submitted deposit either) and
 is accepted ONLY on a 202: created-and-held is a contradiction, and this must
 not resolve it in the customer's favour.
+
+`useEarnVaultDepositOutcomeToast` is the deposit half of the same pattern
+`useEarnWithdrawalOutcomeToast` established: SWR whose `refreshInterval`
+returns `0` once the status is terminal so the poll SELF-STOPS, a ref guard so
+the announcement fires exactly once, `onSettled` right after so the caller can
+refresh balances and retire the watch, and `undefined` args issuing no requests.
+Terminal for a vault movement is `confirmed | failed`
+(`EARN_TERMINAL_VAULT_MOVEMENT_STATUSES`) — note `pending` is NOT terminal: it
+reads like a failure and is not one, it means SDP could not establish that the
+transaction reached the network, which is the one case where the customer's
+money is genuinely in the air. An unreadable poll returns `undefined` and keeps
+polling; a read that failed says nothing about whether the deposit landed.
+
+Two tiers, deliberately at different clocks, exactly as the withdrawal side
+does it. `useEarnVaultDeposits` is the **discovery** tier at 30s — a cheap
+server read that only decides WHICH deposits are worth watching, and the reason
+a deposit signed before a reload, in another tab, or unblocked by an approval
+minutes later becomes visible again. `useEarnVaultDepositOutcomeToast` is the
+**outcome** tier at 5s per watched deposit, self-stopping on terminal. Do not
+collapse them: one fast poll over the whole list would hammer a list read that
+exists only to seed watches, and one slow poll per deposit would make a
+settlement the customer is waiting on take up to half a minute to appear.
 
 ## Availability is the whole design
 
