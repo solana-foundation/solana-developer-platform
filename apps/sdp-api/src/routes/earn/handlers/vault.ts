@@ -19,7 +19,6 @@ import {
   type EarnMovementRow,
   type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
-import { createPostgresEarnVaultRepository } from "@/db/repositories/earn-vault.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import {
@@ -137,10 +136,14 @@ function buildEarnVaultDepositResponse(
   result: Awaited<ReturnType<typeof depositIntoVault>>,
   strategy: EarnStrategyRow
 ) {
+  if (!result.movement.signature) {
+    throw internalError(`Earn vault movement ${result.movement.id} was recorded without a signature`);
+  }
   return {
     positionId: result.position.id,
     movementId: result.movement.id,
-    status: result.movement.status,
+    // The ledger says `requested`; this contract's word for it is `pending`.
+    status: toLegacyVaultDepositStatus(result.movement.status),
     signature: result.movement.signature,
     failureReason: result.movement.failure_reason,
     // Tells a retrying caller that its key was already used and NOTHING was
@@ -393,8 +396,8 @@ export async function findEarnVaultDepositIdempotentKeyReplay(
   if (approvedWalletOperationId(c)) return null;
 
   const resolved = extraction.resolved as EarnVaultDepositResolved;
-  const repo = createPostgresEarnVaultRepository(getDb(c.env));
-  const movement = await repo.findMovementByRequestId({
+  const repo = createPostgresEarnMovementsRepository(getDb(c.env));
+  const movement = await repo.findVaultMovementByRequestId({
     organizationId: resolved.auth.organizationId,
     requestId: idempotencyKey,
   });
