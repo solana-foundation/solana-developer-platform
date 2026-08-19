@@ -730,21 +730,40 @@ export async function fetchEarnVaultDeposits(
 }
 
 /**
+ * What the store could establish about a key: the deposit it produced, that it
+ * produced none, or that the question could not be answered right now.
+ *
+ * Three outcomes, not two. Collapsing `unavailable` into `absent` is what makes
+ * a failed read look like "no deposit exists", and a caller deciding whether a
+ * key is spent would then reuse a spent one.
+ */
+export type EarnVaultDepositByRequestId =
+  | { kind: "found"; deposit: EarnVaultDepositRecord }
+  | { kind: "absent" }
+  | { kind: "unavailable" };
+
+/**
  * Resolve the deposit a given idempotency key produced, if one exists yet.
  *
  * The approval path needs this: a policy hold creates no movement, so the only
  * handle the client keeps is the key it minted, and "has the write behind this
  * key happened?" is a question only the server can answer.
+ *
+ * Note there is no 404 to interpret — the list answers 200 with an empty page
+ * for a key it has never seen — so a non-ok result really does mean the read
+ * failed rather than the deposit being absent.
  */
 export async function fetchEarnVaultDepositByRequestId(
   requestId: string
-): Promise<EarnVaultDepositRecord | undefined> {
+): Promise<EarnVaultDepositByRequestId> {
   const result = await dashboardFetch<unknown>(
     `/api/dashboard/markets/earn/vault-deposits?requestId=${encodeURIComponent(requestId)}`
   );
-  if (!result.ok) return undefined;
+  if (!result.ok) return { kind: "unavailable" };
   const parsed = earnVaultDepositsPageSchema.safeParse(result.data);
-  return parsed.success ? parsed.data.data.deposits[0] : undefined;
+  if (!parsed.success) return { kind: "unavailable" };
+  const deposit = parsed.data.data.deposits[0];
+  return deposit ? { kind: "found", deposit } : { kind: "absent" };
 }
 
 /**

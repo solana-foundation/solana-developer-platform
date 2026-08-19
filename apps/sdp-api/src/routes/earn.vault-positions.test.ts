@@ -671,7 +671,7 @@ describe("GET /v1/earn/vault-deposits", () => {
       organizationId: ORG,
       fromStatuses: ["pending"],
       toStatus: "confirmed",
-      confirmedAt: new Date(0).toISOString().replace(".000Z", ".000Z"),
+      confirmedAt: new Date(0).toISOString(),
     });
 
     const open = (await (await listDeposits("?settled=false")).json()) as {

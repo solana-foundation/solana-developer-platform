@@ -150,7 +150,12 @@ the body `requestId` form.
     replays the approved one. So before reusing a HELD key the modal asks the
     server whether a movement exists for it
     (`isVaultDepositIdempotencyKeyHeld` -> `fetchEarnVaultDepositByRequestId`): a
-    movement means the write happened and the key is spent. A REJECTED approval
+    movement means the write happened and the key is spent. That lookup returns
+    THREE outcomes — `found` / `absent` / `unavailable` — and an unavailable read
+    REFUSES the submit rather than picking a key, because both guesses are wrong
+    in a different direction: reusing a possibly-spent key moves no money when
+    the customer asked it to, and minting a fresh one opens a second approval
+    request. Same rule as an unavailable balance, which must never read as zero. A REJECTED approval
     produces no movement, so its key survives until the next submit reuses it
     and the API answers 403 "denied by policy" — visible, and a 4xx retires the
     key, so the attempt after that mints a fresh one.

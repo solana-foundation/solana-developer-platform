@@ -69,6 +69,8 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
   "DashboardEarn.deposit.vaultApprovalBody":
     "This deposit has not moved funds. It will execute only after wallet-policy approval.",
   "DashboardEarn.deposit.vaultApprovalRequest": "Approval request",
+  "DashboardEarn.deposit.vaultHeldKeyUnavailable":
+    "SDP could not check whether your earlier approved deposit already went through, so nothing was submitted. Try again in a moment.",
 }));
 
 vi.mock("@/i18n/provider", () => ({
@@ -156,7 +158,7 @@ beforeEach(() => {
   mocks.createEarnVaultDeposit.mockReset();
   mocks.fetchEarnVaultDepositByRequestId.mockReset();
   // Default: nothing recorded under the key yet, so a held key stays held.
-  mocks.fetchEarnVaultDepositByRequestId.mockResolvedValue(undefined);
+  mocks.fetchEarnVaultDepositByRequestId.mockResolvedValue({ kind: "absent" });
   mocks.useEarnFundingWallets.mockReset();
   mocks.useEarnFundingWallets.mockReturnValue({
     wallets: [
@@ -377,7 +379,10 @@ describe("EarnVaultDepositModal", () => {
     held.unmount();
 
     // The approval was granted and executed while the modal was closed.
-    mocks.fetchEarnVaultDepositByRequestId.mockResolvedValue(vaultDeposit("confirmed"));
+    mocks.fetchEarnVaultDepositByRequestId.mockResolvedValue({
+      kind: "found",
+      deposit: vaultDeposit("confirmed"),
+    });
 
     render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
     await enterDepositAmount();
@@ -389,6 +394,34 @@ describe("EarnVaultDepositModal", () => {
     expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).not.toBe(
       mocks.createEarnVaultDeposit.mock.calls[0][1]
     );
+  });
+
+  it("refuses to submit when it cannot tell whether a held key is spent", async () => {
+    // Both guesses are wrong in a different direction — reusing a possibly-spent
+    // key moves no money when the customer asked it to, minting a fresh one
+    // opens a second approval — so neither belongs in a coin flip over funds.
+    mocks.createEarnVaultDeposit.mockResolvedValue({
+      ok: true,
+      status: 202,
+      data: { kind: "approval_pending", message: "Approval required" },
+    });
+
+    const held = render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    await enterDepositAmount();
+    await screen.findByText("Approval required");
+    held.unmount();
+
+    mocks.fetchEarnVaultDepositByRequestId.mockResolvedValue({ kind: "unavailable" });
+    mocks.createEarnVaultDeposit.mockClear();
+
+    render(<EarnVaultDepositModal strategy={strategy} onClose={vi.fn()} />);
+    await enterDepositAmount();
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "SDP could not check whether your earlier approved deposit already went through"
+    );
+    // The point: nothing was sent under either key.
+    expect(mocks.createEarnVaultDeposit).not.toHaveBeenCalled();
   });
 
   it("does not consult the server for a key no approval is holding", async () => {

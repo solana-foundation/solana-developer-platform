@@ -203,6 +203,16 @@ function applyVaultDepositIdempotencyKeyOutcome(
 }
 
 /**
+ * What key to send for this request — or that we must not send one.
+ *
+ * `unavailable` is the honest third answer, not a defensive extra. See below.
+ */
+type VaultDepositKeyResolution =
+  | { kind: "key"; key: string }
+  | { kind: "aborted" }
+  | { kind: "unavailable" };
+
+/**
  * The key to send for this request, having established that a HELD key is not
  * already spent.
  *
@@ -214,25 +224,32 @@ function applyVaultDepositIdempotencyKeyOutcome(
  * retry to everything except the customer. Only the server can answer whether
  * the write behind the hold has happened, so it is asked.
  *
- * An unheld key needs no round trip — it ages out on its own. Returns
- * `undefined` when the caller aborted mid-check, which is the caller's signal to
- * send nothing at all.
+ * And when the server CANNOT answer, this refuses rather than guessing. Both
+ * guesses are wrong in a different direction: reusing a possibly-spent key
+ * silently moves no money when the customer asked it to, while minting a fresh
+ * one opens a second approval request for the same intent. Neither belongs in a
+ * coin flip over someone's funds, so the caller surfaces an error and the
+ * customer retries once the read works — the same rule this module already
+ * applies to an unavailable balance, which must never read as zero.
+ *
+ * An unheld key needs no round trip at all; it ages out on its own.
  */
 async function resolveVaultDepositIdempotencyKey(
   fingerprint: string,
   signal: AbortSignal
-): Promise<string | undefined> {
+): Promise<VaultDepositKeyResolution> {
   const key = claimVaultDepositIdempotencyKey(fingerprint);
-  if (!isVaultDepositIdempotencyKeyHeld(fingerprint)) return key;
+  if (!isVaultDepositIdempotencyKeyHeld(fingerprint)) return { kind: "key", key };
 
-  const alreadyRecorded = await fetchEarnVaultDepositByRequestId(key);
-  if (signal.aborted) return undefined;
-  // Not recorded: the hold may still be pending, so the key STAYS — that is what
-  // stops a resubmit opening a second approval request.
-  if (!alreadyRecorded) return key;
+  const recorded = await fetchEarnVaultDepositByRequestId(key);
+  if (signal.aborted) return { kind: "aborted" };
+  if (recorded.kind === "unavailable") return { kind: "unavailable" };
+  // Absent: the hold may still be pending, so the key STAYS — that is what stops
+  // a resubmit opening a second approval request.
+  if (recorded.kind === "absent") return { kind: "key", key };
 
   releaseVaultDepositIdempotencyKey(fingerprint);
-  return claimVaultDepositIdempotencyKey(fingerprint);
+  return { kind: "key", key: claimVaultDepositIdempotencyKey(fingerprint) };
 }
 
 type Translation = ReturnType<typeof useTranslations>;
@@ -612,11 +629,13 @@ export function EarnVaultDepositModal({
     setSubmitError(null);
 
     try {
-      const idempotencyKey = await resolveVaultDepositIdempotencyKey(
-        fingerprint,
-        controller.signal
-      );
-      if (idempotencyKey === undefined) return;
+      const resolvedKey = await resolveVaultDepositIdempotencyKey(fingerprint, controller.signal);
+      if (resolvedKey.kind === "aborted") return;
+      if (resolvedKey.kind === "unavailable") {
+        setSubmitError(t("DashboardEarn.deposit.vaultHeldKeyUnavailable"));
+        return;
+      }
+      const idempotencyKey = resolvedKey.key;
 
       const result = await createEarnVaultDeposit(
         {

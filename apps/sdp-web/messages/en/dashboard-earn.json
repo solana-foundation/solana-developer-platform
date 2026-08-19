@@ -387,6 +387,7 @@
       "vaultApprovalTitle": "Approval required",
       "vaultApprovalBody": "Your wallet policy accepted the request for review. No vault deposit has been submitted yet.",
       "vaultApprovalRequest": "Approval request",
+      "vaultHeldKeyUnavailable": "SDP could not check whether your earlier approved deposit already went through, so nothing was submitted. Try again in a moment.",
       "vaultOutcomeConfirmed": "Vault deposit confirmed on-chain — your position is live.",
       "vaultOutcomeFailed": "Vault deposit failed — no funds left your wallet."
     }
