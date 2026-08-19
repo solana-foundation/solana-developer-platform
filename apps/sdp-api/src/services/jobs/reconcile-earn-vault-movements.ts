@@ -6,7 +6,6 @@ import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
 } from "@/db/repositories/earn-movements.repository";
-import { createPostgresEarnVaultRepository } from "@/db/repositories/earn-vault.repository";
 import { getLogger } from "@/runtime/logger";
 import {
   assertClusterEndpoint,
@@ -28,20 +27,17 @@ const OUTBOX_BATCH_SIZE = 256;
  * says `finalized`. One meaning of settled across SDP, matching what payments
  * does for transfers.
  *
- * Which shape each write goes to is deliberate: every transition the legacy
- * vocabulary can express is still written THROUGH the legacy repository, which
- * mirrors it, so both shapes stay in step. Finalization is written to the unified
- * ledger alone, because there is no legacy column that could hold it.
+ * Every transition goes through the one ledger writer, and every legal source
+ * state comes from the shared transition matrix — so a status this sweep cannot
+ * legitimately reach is unrepresentable rather than merely unlikely.
  */
 export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
-  const db = getDb(env);
-  const repo = createPostgresEarnVaultRepository(db);
-  const ledger = createPostgresEarnMovementsRepository(db);
+  const ledger = createPostgresEarnMovementsRepository(getDb(env));
   const movements = await ledger.claimUnsettledVaultMovements(OUTBOX_BATCH_SIZE);
   const byEnvironment = groupByEnvironment(movements);
 
   for (const [environment, rows] of byEnvironment) {
-    await reconcileEnvironment(env, repo, ledger, environment, rows);
+    await reconcileEnvironment(env, ledger, environment, rows);
   }
 }
 
@@ -57,7 +53,6 @@ function groupByEnvironment(movements: EarnMovementRow[]) {
 
 async function reconcileEnvironment(
   env: Env,
-  repo: ReturnType<typeof createPostgresEarnVaultRepository>,
   ledger: ReturnType<typeof createPostgresEarnMovementsRepository>,
   environment: SdpEnvironment,
   rows: EarnMovementRow[]
@@ -97,7 +92,7 @@ async function reconcileEnvironment(
 
   for (const [index, movement] of rows.entries()) {
     try {
-      await reconcileMovement(env, repo, ledger, movement, statuses[index] ?? null, {
+      await reconcileMovement(env, ledger, movement, statuses[index] ?? null, {
         cluster,
         rpcUrl,
         currentBlockHeight,
@@ -115,37 +110,28 @@ async function reconcileEnvironment(
 
 async function reconcileMovement(
   env: Env,
-  repo: ReturnType<typeof createPostgresEarnVaultRepository>,
   ledger: ReturnType<typeof createPostgresEarnMovementsRepository>,
   movement: EarnMovementRow,
   status: SignatureStatusInfo | null,
   chain: { cluster: SolanaCluster; rpcUrl: string; currentBlockHeight: bigint | null }
 ): Promise<void> {
   if (status?.err) {
-    await failMovement(repo, movement, JSON.stringify(status.err));
+    await failMovement(ledger, movement, JSON.stringify(status.err));
     return;
   }
   if (status?.confirmationStatus === "finalized") {
     // The end of the story, and the only outcome that cannot be rolled back.
-    //
-    // Record the commitment through the LEGACY writer first, even though this
-    // observation is already stronger than that. `confirmed` is the most that
-    // vocabulary can say, and writing it means a rollback to the previous
-    // revision shows a settled deposit rather than one still in flight — the
-    // legacy row is kept as close to the truth as it is able to get.
-    if (movement.status !== "confirmed") {
-      await repo.advanceMovement({
-        movementId: movement.id,
-        organizationId: movement.organization_id,
-        fromStatuses: ["pending", "submitted"],
-        toStatus: "confirmed",
-        confirmedAt: new Date().toISOString(),
-      });
-    }
-    await ledger.finalizeVaultMovement({
+    // `confirmedAt` rides along because a movement whose FIRST observation is
+    // already finalized never reported a separate commitment, and the ledger
+    // requires the column for any settled row — the writer COALESCEs it, so a
+    // movement that did report one keeps the moment it was actually observed.
+    const observedAt = new Date().toISOString();
+    await ledger.advanceVaultMovement({
       movementId: movement.id,
       organizationId: movement.organization_id,
-      settledAt: new Date().toISOString(),
+      toStatus: "finalized",
+      confirmedAt: observedAt,
+      settledAt: observedAt,
     });
     return;
   }
@@ -153,17 +139,16 @@ async function reconcileMovement(
     // Optimistic commitment. Recorded, and kept in the queue: a later tick asks
     // the chain again until it finalizes.
     if (movement.status === "confirmed") return;
-    await repo.advanceMovement({
+    await ledger.advanceVaultMovement({
       movementId: movement.id,
       organizationId: movement.organization_id,
-      fromStatuses: ["pending", "submitted"],
       toStatus: "confirmed",
       confirmedAt: new Date().toISOString(),
     });
     return;
   }
   if (status !== null) {
-    await markSubmitted(repo, movement);
+    await markSubmitted(ledger, movement);
     return;
   }
   // A confirmed row whose signature has aged out of the RPC's history is NOT a
@@ -189,7 +174,7 @@ async function reconcileMovement(
     chain.currentBlockHeight !== null &&
     chain.currentBlockHeight > BigInt(lastValidBlockHeight)
   ) {
-    await failMovement(repo, movement, "Transaction blockhash expired before confirmation");
+    await failMovement(ledger, movement, "Transaction blockhash expired before confirmation");
     return;
   }
   if (chain.currentBlockHeight === null) return;
@@ -200,32 +185,31 @@ async function reconcileMovement(
     bytes: Uint8Array.from(Buffer.from(signedTransaction, "base64")),
     rpcUrl: chain.rpcUrl,
   });
-  await markSubmitted(repo, movement);
+  await markSubmitted(ledger, movement);
 }
 
 async function markSubmitted(
-  repo: ReturnType<typeof createPostgresEarnVaultRepository>,
+  ledger: ReturnType<typeof createPostgresEarnMovementsRepository>,
   movement: EarnMovementRow
 ): Promise<void> {
-  // `requested` is the ledger's word for the legacy `pending` this CAS guards on.
+  // Only an unbroadcast intent can become `submitted`; anything further along
+  // would lose its CAS anyway, and skipping the round trip keeps the sweep quiet.
   if (movement.status !== "requested") return;
-  await repo.advanceMovement({
+  await ledger.advanceVaultMovement({
     movementId: movement.id,
     organizationId: movement.organization_id,
-    fromStatuses: ["pending"],
     toStatus: "submitted",
   });
 }
 
 async function failMovement(
-  repo: ReturnType<typeof createPostgresEarnVaultRepository>,
+  ledger: ReturnType<typeof createPostgresEarnMovementsRepository>,
   movement: EarnMovementRow,
   reason: string
 ): Promise<void> {
-  await repo.advanceMovement({
+  await ledger.advanceVaultMovement({
     movementId: movement.id,
     organizationId: movement.organization_id,
-    fromStatuses: ["pending", "submitted"],
     toStatus: "failed",
     failureReason: reason,
   });
