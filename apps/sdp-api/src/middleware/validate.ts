@@ -1,7 +1,7 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { validator } from "hono/validator";
-import type { z } from "zod";
-import { type AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
+import { z } from "zod";
+import { type AppError, badRequest } from "@/lib/errors";
 import type { Env } from "@/types/env";
 
 type ValidatedTarget = "json" | "query" | "param";
@@ -26,57 +26,23 @@ export type ValidatedBodyContext<S extends z.ZodType> = ValidatedContext<{ json:
  * `@hono/zod-validator`'s `safeParseAsync`), throw the target-appropriate 400
  * on failure, and hand the typed output to `c.req.valid(target)`.
  *
+ * On failure the 400's message carries `z.prettifyError`'s rendering — one
+ * `✖ <message>` line per issue with its full `→ at identity.address.line1`
+ * path — deliberately the whole contract: one readable string, no parallel
+ * machine-readable detail payload.
+ *
  * @param schema - The zod schema the target must satisfy.
- * @param toError - Error factory receiving the `{errors, formErrors?}` details.
+ * @param toError - Error factory receiving the prettified zod error.
  * @returns The validation function for hono's core `validator`.
  */
-function zodValidation<S extends z.ZodType>(
-  schema: S,
-  toError: (details: Record<string, unknown>) => AppError
-) {
+function zodValidation<S extends z.ZodType>(schema: S, toError: (prettified: string) => AppError) {
   return async (value: unknown): Promise<z.output<S>> => {
     const parsed = await schema.safeParseAsync(value);
     if (!parsed.success) {
-      throw toError(validationErrorDetails(parsed.error));
+      throw toError(z.prettifyError(parsed.error));
     }
     return parsed.data;
   };
-}
-
-/**
- * Maps a zod error onto the wire detail shape. `errors` is keyed by each
- * issue's FULL dot path (`identity.address.line1`, never collapsed to the
- * top-level field), and a strict schema's `unrecognized_keys` issue is
- * reported under the offending key itself rather than the empty root path.
- * Only issues with no path at all — the body not being an object — land in
- * `formErrors`.
- *
- * @param error - The zod error from a failed parse.
- * @returns The `{errors, formErrors?}` details for the 400 response.
- */
-function validationErrorDetails(error: z.ZodError): Record<string, unknown> {
-  const errors: Record<string, string[]> = {};
-  const formErrors: string[] = [];
-  const addError = (path: string, message: string) => {
-    const existing = errors[path];
-    if (existing) {
-      existing.push(message);
-    } else {
-      errors[path] = [message];
-    }
-  };
-  for (const issue of error.issues) {
-    if (issue.code === "unrecognized_keys") {
-      for (const key of issue.keys) {
-        addError([...issue.path, key].join("."), "Unrecognized key");
-      }
-    } else if (issue.path.length === 0) {
-      formErrors.push(issue.message);
-    } else {
-      addError(issue.path.join("."), issue.message);
-    }
-  }
-  return { errors, ...(formErrors.length > 0 && { formErrors }) };
 }
 
 /**
@@ -100,7 +66,9 @@ export function validateBody<S extends z.ZodType<object>>(
   schema: S
   // biome-ignore lint/suspicious/noExplicitAny: mirrors hono's own validator() env default.
 ): MiddlewareHandler<any, string, { in: { json: z.input<S> }; out: { json: z.output<S> } }> {
-  const parse = zodValidation(schema, (details) => badRequest("Invalid request body", details));
+  const parse = zodValidation(schema, (prettified) =>
+    badRequest(`Invalid request body:\n${prettified}`)
+  );
   return async (c, next) => {
     const raw = await c.req.text();
     let value: unknown = {};
@@ -124,7 +92,10 @@ export function validateBody<S extends z.ZodType<object>>(
  * @returns Route-level middleware that rejects invalid queries with a 400.
  */
 export function validateQuery<S extends z.ZodType>(schema: S) {
-  return validator("query", zodValidation(schema, badRequestQuery));
+  return validator(
+    "query",
+    zodValidation(schema, (prettified) => badRequest(`Invalid query parameters:\n${prettified}`))
+  );
 }
 
 /**
@@ -135,5 +106,8 @@ export function validateQuery<S extends z.ZodType>(schema: S) {
  * @returns Route-level middleware that rejects invalid params with a 400.
  */
 export function validateParams<S extends z.ZodType>(schema: S) {
-  return validator("param", zodValidation(schema, badRequestParams));
+  return validator(
+    "param",
+    zodValidation(schema, (prettified) => badRequest(`Invalid path parameters:\n${prettified}`))
+  );
 }

@@ -650,12 +650,8 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(res.status).toBe(400);
-    const body = (await res.json()) as {
-      error: { details: { errors: { rampsMemo: string[] } } };
-    };
-    expect(body.error.details.errors.rampsMemo).toContain(
-      "rampsMemo must contain at most 20 key-value pairs"
-    );
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("rampsMemo must contain at most 20 key-value pairs");
   });
 
   it("rejects quotes for corridors the support matrix does not list the provider on", async () => {

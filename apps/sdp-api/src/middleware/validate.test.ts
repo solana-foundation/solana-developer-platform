@@ -68,10 +68,10 @@ describe("validateBody", () => {
     expect(downstreamRan).toBe(false);
     const body = await res.json();
     expect(body.error.code).toBe("BAD_REQUEST");
-    expect(body.error.details.errors).toMatchObject({
-      name: [expect.any(String)],
-      count: [expect.any(String)],
-    });
+    expect(body.error.message).toContain("Invalid request body:");
+    expect(body.error.message).toContain("→ at name");
+    expect(body.error.message).toContain("→ at count");
+    expect(body.error.details).toBeUndefined();
   });
 
   it("parses a JSON body even without a JSON content type", async () => {
@@ -93,7 +93,7 @@ describe("validateBody", () => {
     expect(body.error.message).toBe("Malformed JSON in request body");
   });
 
-  it("keys nested issues by their full dot path", async () => {
+  it("renders a nested issue with its full dot path in the message", async () => {
     const nestedSchema = z.object({
       identity: z.object({
         address: z.object({ line1: z.string().min(1) }),
@@ -106,13 +106,11 @@ describe("validateBody", () => {
 
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.error.details.errors).toMatchObject({
-      "identity.address.line1": [expect.any(String)],
-    });
-    expect(body.error.details.formErrors).toBeUndefined();
+    expect(body.error.message).toContain("→ at identity.address.line1");
+    expect(body.error.details).toBeUndefined();
   });
 
-  it("keys a strict schema's unrecognized keys under the key, not formErrors", async () => {
+  it("names a strict schema's unrecognized keys in the message", async () => {
     const strictSchema = z.strictObject({
       provider: z.string().min(1),
       nested: z.strictObject({ known: z.string().min(1) }).optional(),
@@ -124,20 +122,19 @@ describe("validateBody", () => {
 
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.error.details.errors).toMatchObject({
-      apiBaseUrl: ["Unrecognized key"],
-      "nested.bad": ["Unrecognized key"],
-    });
-    expect(body.error.details.formErrors).toBeUndefined();
+    expect(body.error.message).toContain('Unrecognized key: "apiBaseUrl"');
+    expect(body.error.message).toContain('Unrecognized key: "bad"');
+    expect(body.error.message).toContain("→ at nested");
+    expect(body.error.details).toBeUndefined();
   });
 
-  it("reports a non-object body in formErrors", async () => {
+  it("reports a non-object body as a root-level message line", async () => {
     const res = await post(createApp(schema), JSON.stringify("not an object"));
 
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.error.details.errors).toEqual({});
-    expect(body.error.details.formErrors).toEqual([expect.any(String)]);
+    expect(body.error.message).toContain("expected object, received string");
+    expect(body.error.details).toBeUndefined();
   });
 
   it("treats an empty body with a JSON content type as an empty object", async () => {
@@ -181,8 +178,9 @@ describe("validateQuery and validateParams", () => {
 
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.error.message).toBe("Invalid query parameters");
-    expect(body.error.details.errors).toMatchObject({ limit: [expect.any(String)] });
+    expect(body.error.message).toContain("Invalid query parameters:");
+    expect(body.error.message).toContain("→ at limit");
+    expect(body.error.details).toBeUndefined();
   });
 
   it("rejects an invalid path param with the params error shape", async () => {
@@ -190,6 +188,6 @@ describe("validateQuery and validateParams", () => {
 
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.error.message).toBe("Invalid path parameters");
+    expect(body.error.message).toContain("Invalid path parameters:");
   });
 });
