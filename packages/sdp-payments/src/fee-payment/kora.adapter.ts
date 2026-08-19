@@ -11,14 +11,14 @@ import {
   getTransactionDecoder,
   type Signature,
 } from "@solana/kit";
-import {
-  type Config,
-  type FeePayerPolicy,
-  KoraClient,
-  type KoraClientOptions,
-  type SignAndSendTransactionRequest,
-  type SignTransactionRequest,
+import type {
+  Config,
+  FeePayerPolicy,
+  KoraClientOptions,
+  SignAndSendTransactionRequest,
+  SignTransactionRequest,
 } from "@solana/kora";
+import { KoraErrorCode } from "@solana/kora";
 import type { FeePaymentPort, SponsorshipProviderConfiguration } from "./port";
 import { FeePaymentError } from "./port";
 
@@ -94,17 +94,13 @@ export class KoraAdapter implements FeePaymentPort {
       (identityTokenAudience
         ? createCloudRunIdentityTokenProvider(identityTokenAudience)
         : undefined);
+    // Always our own client, with or without an identity token: the vendored
+    // one does not check `response.ok`, so an HTTP refusal reaches us as a
+    // JSON parse failure with nothing to classify — and an unclassifiable
+    // refusal is parked for an operator rather than failed.
     this.client =
       config.client ??
-      (identityTokenProvider
-        ? new AuthorizedKoraClient({
-            rpcUrl,
-            apiKey,
-            getRecaptchaToken,
-            hmacSecret,
-            identityTokenProvider,
-          })
-        : new KoraClient({ rpcUrl, apiKey, getRecaptchaToken, hmacSecret }));
+      new KoraHttpClient({ rpcUrl, apiKey, getRecaptchaToken, hmacSecret, identityTokenProvider });
     this.client = withCallTimeouts(this.client, config.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     this.userId = userId?.trim() || "sdp:unscoped";
   }
@@ -516,17 +512,34 @@ function isRetryableGetFeePayerError(error: unknown): boolean {
   );
 }
 
+/**
+ * Straight off `KoraErrorCode` — the enum, not a transcription of it, because
+ * the bug this replaced was a transcription. Getting one wrong is not
+ * cosmetic: a code outside DETERMINISTIC_REJECTION_CODES is treated as an
+ * unknown outcome and parked for an operator, so a routine refusal would wait
+ * for a human instead of failing. Only codes whose meaning rules out a
+ * post-submit origin are named: the request was malformed, the signature was
+ * never produced, the caller was refused at the gate. Everything else stays
+ * parked on purpose — InvalidTransaction is the provider's catch-all and
+ * carries simulation failures, AccountNotFound can come from the node during
+ * a send, and the server-side codes cannot prove nothing was sent.
+ */
 function mapKoraErrorCode(code: number): import("./port").FeePaymentErrorCode {
   switch (code) {
-    case -32001:
-      return "RATE_LIMITED";
-    case -32002:
-      return "INSUFFICIENT_BALANCE";
-    case -32600:
-    case -32602:
+    case KoraErrorCode.ValidationError:
+    case KoraErrorCode.UnsupportedFeeToken:
+    case KoraErrorCode.InvalidRequest:
+    case KoraErrorCode.SigningError:
+    case KoraErrorCode.Unauthorized:
+    case KoraErrorCode.RecaptchaError:
+    case -32600: // JSON-RPC invalid request
+    case -32602: // JSON-RPC invalid params
       return "SIGNING_FAILED";
-    case -32003:
-      return "SUBMISSION_FAILED";
+    case KoraErrorCode.InsufficientFunds:
+      return "INSUFFICIENT_BALANCE";
+    case KoraErrorCode.RateLimitExceeded:
+    case KoraErrorCode.UsageLimitExceeded:
+      return "RATE_LIMITED";
     default:
       return "NETWORK_ERROR";
   }
@@ -575,10 +588,10 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-class AuthorizedKoraClient implements KoraClientTransport {
+class KoraHttpClient implements KoraClientTransport {
   constructor(
     private readonly config: KoraClientOptions & {
-      identityTokenProvider: () => Promise<string>;
+      identityTokenProvider?: () => Promise<string>;
     }
   ) {}
 
@@ -621,10 +634,10 @@ class AuthorizedKoraClient implements KoraClientTransport {
 
   private async rpcRequest<T>(method: string, params?: unknown): Promise<T> {
     const body = JSON.stringify({ id: 1, jsonrpc: "2.0", method, params });
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${await this.config.identityTokenProvider()}`,
-      "Content-Type": "application/json",
-    };
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (this.config.identityTokenProvider) {
+      headers.Authorization = `Bearer ${await this.config.identityTokenProvider()}`;
+    }
     if (this.config.apiKey) {
       headers["x-api-key"] = this.config.apiKey;
     }

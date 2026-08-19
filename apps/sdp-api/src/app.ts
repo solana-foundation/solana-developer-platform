@@ -180,6 +180,18 @@ function mapFeePaymentError(err: FeePaymentError): {
         code: err.code,
         message: "The signing provider is busy. Try again.",
       };
+    case "SIGNING_FAILED":
+      return {
+        status: 400,
+        code: "SIGNING_FAILED",
+        message: "The signing provider rejected this transaction. Check the request and try again.",
+      };
+    case "TRANSACTION_TOO_LARGE":
+      return {
+        status: 400,
+        code: "SIGNING_FAILED",
+        message: "The transaction is too large to sign. Split it into smaller transfers.",
+      };
     case "PROVIDER_NOT_AVAILABLE":
     case "NETWORK_ERROR":
       return {

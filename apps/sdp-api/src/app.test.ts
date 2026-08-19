@@ -21,6 +21,7 @@ const SECRET_PAYMENTS_ERROR_PATH = "/__secret_payments_error_test_throw";
 const SECRET_SIGNING_ERROR_PATH = "/__secret_signing_error_test_throw";
 const SECRET_UNEXPECTED_ERROR_PATH = "/__secret_unexpected_error_test_throw";
 const FEE_ERROR_PATH = "/__fee_error_test_throw";
+const FEE_REFUSED_PATH = "/__fee_error_test_refused";
 
 function makeObservability(): {
   obs: Observability;
@@ -86,6 +87,12 @@ function buildApp(observability: Observability) {
   app.all(FEE_ERROR_PATH, () => {
     throw new FeePaymentError(
       "Failed to sign and send transaction: RPC Error -32000: Invalid transaction: Transaction simulation failed: Error processing Instruction 0: custom program error: 0x1",
+      "SIGNING_FAILED"
+    );
+  });
+  app.all(FEE_REFUSED_PATH, () => {
+    throw new FeePaymentError(
+      "Failed to sign and send transaction: RPC Error -32001: validation failed",
       "SIGNING_FAILED"
     );
   });
@@ -223,6 +230,19 @@ describe("createApp onError Sentry guard", () => {
     expect(body.error.message).not.toContain("custom program error");
     expect(withScope).not.toHaveBeenCalled();
     expect(captureException).not.toHaveBeenCalled();
+  });
+
+  it("answers a provider refusal as a client error, not a gateway failure", async () => {
+    // A deterministic refusal used to fall through to 502 "Try again", which
+    // invites a retry of a request that can never succeed.
+    const { obs } = makeObservability();
+    const app = buildApp(obs);
+
+    const res = await app.request(FEE_REFUSED_PATH, {}, baseEnv);
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("SIGNING_FAILED");
   });
 
   it("redacts app error messages and details", async () => {

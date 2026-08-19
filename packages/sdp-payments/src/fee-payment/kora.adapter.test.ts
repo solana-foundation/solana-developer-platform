@@ -137,7 +137,7 @@ describe("KoraAdapter error classification", () => {
   });
 
   it("keeps rate limits deterministic and releasable", async () => {
-    const adapter = makeAdapterRejectingSend("RPC Error -32001: rate limited");
+    const adapter = makeAdapterRejectingSend("RPC Error -32030: rate limited");
     await assert.rejects(
       adapter.signAndSend(new Uint8Array(64)),
       (error: unknown) => error instanceof FeePaymentError && error.code === "RATE_LIMITED"
@@ -222,7 +222,7 @@ describe("signAndSend ambiguity verdict (maybeBroadcast)", () => {
 
   it("keeps a first-attempt deterministic rejection un-flagged", async () => {
     const error = await captureSendError(
-      makeAdapterWithSendSequence(["RPC Error -32002: insufficient balance for fee"])
+      makeAdapterWithSendSequence(["RPC Error -32003: insufficient balance for fee"])
     );
     assert.equal(error.code, "INSUFFICIENT_BALANCE");
     assert.equal(error.maybeBroadcast, false);
@@ -235,7 +235,7 @@ describe("signAndSend ambiguity verdict (maybeBroadcast)", () => {
     const error = await captureSendError(
       makeAdapterWithSendSequence([
         "Kora signAndSendTransaction timed out after 10000ms",
-        "RPC Error -32002: insufficient balance for fee",
+        "RPC Error -32003: insufficient balance for fee",
       ])
     );
     assert.equal(error.code, "INSUFFICIENT_BALANCE");
@@ -257,7 +257,7 @@ describe("signAndSend ambiguity verdict (maybeBroadcast)", () => {
     const error = await captureSendError(
       makeAdapterWithSendSequence([
         "connect ECONNREFUSED 127.0.0.1:8080",
-        "RPC Error -32002: insufficient balance for fee",
+        "RPC Error -32003: insufficient balance for fee",
       ])
     );
     assert.equal(error.code, "INSUFFICIENT_BALANCE");
@@ -299,25 +299,65 @@ describe("signAndSend ambiguity verdict (maybeBroadcast)", () => {
     assert.equal(error.preBroadcast, true);
   });
 
-  it("certifies pre-broadcast from the adapter's own HTTP failure", async () => {
-    // Drives the real request path of the identity-token client, which is what
-    // a managed deployment uses: the message asserted on below is built at that
-    // throw site, so rewording it there fails here instead of silently sending
-    // every 401 back to parking. The vendored client used without a Cloud Run
-    // audience raises its own error shape, which we have not pinned.
+  // Codes and names from the pinned @solana/kora error enum. A provider code
+  // that lands outside the deterministic set is parked for an operator, so a
+  // mis-mapping here wedges a routine refusal instead of failing it.
+  const KORA_CODE_EXPECTATIONS: Array<[string, string]> = [
+    ["RPC Error -32001: validation failed", "SIGNING_FAILED"],
+    ["RPC Error -32002: unsupported fee token", "SIGNING_FAILED"],
+    ["RPC Error -32003: insufficient funds", "INSUFFICIENT_BALANCE"],
+    ["RPC Error -32030: rate limit exceeded", "RATE_LIMITED"],
+  ];
+  for (const [message, expected] of KORA_CODE_EXPECTATIONS) {
+    it(`maps ${message.slice(0, 20)}… to ${expected}`, async () => {
+      const error = await captureSendError(makeAdapterWithSendSequence([message]));
+      assert.equal(error.code, expected);
+    });
+  }
+
+  // Both deployment shapes go through the adapter's own request path, so an
+  // HTTP refusal is classifiable in either. The messages asserted on are built
+  // at the throw site: rewording one there fails here instead of silently
+  // sending every 401 back to parking.
+  const AUDIENCE_CONFIGURATIONS: Array<[string, Partial<KoraAdapterConfig>]> = [
+    ["without a Cloud Run audience", {}],
+    [
+      "with a Cloud Run audience",
+      { identityTokenAudience: "https://kora.example", identityTokenProvider: async () => "token" },
+    ],
+  ];
+  for (const [name, extra] of AUDIENCE_CONFIGURATIONS) {
+    it(`certifies pre-broadcast from an HTTP failure ${name}`, async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () =>
+        new Response("<html>denied</html>", { status: 401 })) as unknown as typeof fetch;
+      try {
+        const adapter = new KoraAdapter({
+          rpcUrl: "https://kora.example",
+          userId: "u1",
+          ...extra,
+        });
+        const error = await captureSendError(adapter);
+        assert.equal(error.maybeBroadcast, false);
+        assert.equal(error.preBroadcast, true);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  }
+
+  it("classifies an in-band provider code on the path that could not before", async () => {
+    // The vendored client this replaced worded its errors differently, so no
+    // provider code was ever recognised without an identity token.
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () =>
-      new Response("nope", { status: 401 })) as unknown as typeof fetch;
+      new Response(JSON.stringify({ error: { code: -32003, message: "insufficient funds" } }), {
+        status: 200,
+      })) as unknown as typeof fetch;
     try {
-      const adapter = new KoraAdapter({
-        rpcUrl: "https://kora.example",
-        userId: "u1",
-        identityTokenAudience: "https://kora.example",
-        identityTokenProvider: async () => "token",
-      });
+      const adapter = new KoraAdapter({ rpcUrl: "https://kora.example", userId: "u1" });
       const error = await captureSendError(adapter);
-      assert.equal(error.maybeBroadcast, false);
-      assert.equal(error.preBroadcast, true);
+      assert.equal(error.code, "INSUFFICIENT_BALANCE");
     } finally {
       globalThis.fetch = originalFetch;
     }
