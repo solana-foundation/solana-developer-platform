@@ -281,8 +281,9 @@ async function syncProcessingTransfersOnChain(
 
   let statuses: Array<SignatureStatusInfo | null>;
 
+  let rpc: ReturnType<typeof solanaRpc.createRpc>;
   try {
-    const rpc = solanaRpc.createRpc(env);
+    rpc = solanaRpc.createRpc(env);
     statuses = await solanaRpc.getSignatureStatuses(rpc, signatures);
   } catch (err) {
     getLogger().error(
@@ -296,24 +297,53 @@ async function syncProcessingTransfersOnChain(
 
   const now = new Date();
 
+  // The batch lookup above covers the node's recent cache only, so a signature
+  // older than the stuck window reads as "never landed" even when it did — a
+  // row an operator has just resolved is hours old by definition. A terminal
+  // failure invites the client to send the payment again, so every candidate
+  // for one is confirmed against the transaction history first, in one call.
+  const agedOut = processingWithSig.filter(
+    (transfer, index) =>
+      !statuses[index] &&
+      now.getTime() - new Date(transfer.updated_at).getTime() > STUCK_PROCESSING_AFTER_MS
+  );
+  const archived = new Map<string, SignatureStatusInfo>();
+  if (agedOut.length > 0) {
+    const archivedStatuses = await solanaRpc.getSignatureStatuses(
+      rpc,
+      agedOut.map((transfer) => transfer.signature as Signature),
+      { searchTransactionHistory: true }
+    );
+    agedOut.forEach((transfer, index) => {
+      const status = archivedStatuses[index];
+      if (status) {
+        archived.set(transfer.id, status);
+      }
+    });
+  }
+
   for (let i = 0; i < processingWithSig.length; i++) {
     const transfer = processingWithSig[i];
-    const status = statuses[i] ?? null;
+    let status = statuses[i] ?? null;
 
     try {
       if (!status) {
         // Signature not found on chain. If the transfer has been processing long
         // enough, assume the transaction was dropped and mark it failed.
         const ageMs = now.getTime() - new Date(transfer.updated_at).getTime();
-        if (ageMs > STUCK_PROCESSING_AFTER_MS) {
+        if (ageMs <= STUCK_PROCESSING_AFTER_MS) {
+          continue;
+        }
+        status = archived.get(transfer.id) ?? null;
+        if (!status) {
           await updateTerminalTransfer(env, repo, transfer, {
             transferId: transfer.id,
             status: "failed",
             error: "Transaction not found on chain",
             updatedAt: nowIso,
           });
+          continue;
         }
-        continue;
       }
 
       if (status.err) {

@@ -227,7 +227,36 @@ describe("trackPendingTransfers", () => {
       expect(updated?.error).toContain("InsufficientFunds");
     });
 
+    it("settles a transfer whose signature only aged out of the recent cache", async () => {
+      // The batch lookup covers the node's recent cache only. A parked row that
+      // an operator has just resolved is hours old by definition, so "not
+      // found" there means nothing — and a terminal failure on it is what
+      // invites the client to send the payment a second time.
+      getSignatureStatusesMock.mockResolvedValueOnce([null]);
+      getSignatureStatusesMock.mockResolvedValueOnce([
+        { slot: 4242n, confirmationStatus: "finalized", err: null },
+      ] as unknown as Awaited<ReturnType<typeof solanaRpc.getSignatureStatuses>>);
+
+      await insertTransfer({
+        id: "xfr_processing_aged_out",
+        status: "processing",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(120),
+        updatedAt: minutesAgo(120),
+      });
+
+      await trackPendingTransfers(env);
+
+      const updated = await getTransfer("xfr_processing_aged_out");
+      expect(updated?.status).toBe("finalized");
+      expect(getSignatureStatusesMock).toHaveBeenLastCalledWith(expect.anything(), [TEST_SIG_1], {
+        searchTransactionHistory: true,
+      });
+    });
+
     it("marks old processing transfer as failed when signature is not found on chain", async () => {
+      // Absent from the recent cache and from the history search: it never landed.
+      getSignatureStatusesMock.mockResolvedValueOnce([null]);
       getSignatureStatusesMock.mockResolvedValueOnce([null]);
 
       await insertTransfer({
@@ -243,6 +272,10 @@ describe("trackPendingTransfers", () => {
       const updated = await getTransfer("xfr_processing_not_found");
       expect(updated?.status).toBe("failed");
       expect(updated?.error).toBe("Transaction not found on chain");
+      // Failed only after the history search missed it too.
+      expect(getSignatureStatusesMock).toHaveBeenLastCalledWith(expect.anything(), [TEST_SIG_1], {
+        searchTransactionHistory: true,
+      });
     });
 
     it("leaves processing transfer alone when signature not found but transfer is recent", async () => {
