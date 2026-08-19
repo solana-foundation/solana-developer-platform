@@ -82,7 +82,7 @@ function hasAllEnv(env: Env, keys: readonly (keyof Env)[]): boolean {
  * member on `Env`: the template literal below must resolve to a `keyof Env` for
  * every member of this union, so widening it silently demands a credential.
  */
-type KeyPairedEarnProviderId = Exclude<EarnProviderId, "kamino">;
+type KeyPairedEarnProviderId = Exclude<EarnProviderId, "kamino" | "veda">;
 
 /**
  * Credentialed earn providers share one shape: `<PREFIX>_API_KEY` for
@@ -325,7 +325,10 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
     },
   },
   earn: {
-    veda: keyPairCredentialDefinition("Veda", "VEDA"),
+    // Keyless like Kamino, and for the same reason: Veda's vaults are read and
+    // written entirely on-chain through `@sdp/veda`, so there is no provider API
+    // to authenticate against, and no credential to declare here.
+    veda: publicApiDefinition("Veda"),
     upshift: keyPairCredentialDefinition("Upshift", "UPSHIFT"),
     perena: keyPairCredentialDefinition("Perena", "PERENA"),
     ground: keyPairCredentialDefinition("Ground", "GROUND"),
