@@ -37,11 +37,10 @@ import type { Env } from "@/types/env";
 const STUCK_PROCESSING_AFTER_MS = 5 * 60 * 1000;
 // getSignatureStatuses accepts at most 256 signatures per call.
 const MAX_SIGNATURES_PER_BATCH = 256;
-// Upper bound on confirmed-backlog pages swept per tick (5120 rows).
-const MAX_CONFIRMED_SWEEP_PAGES = 20;
 // A confirmed transaction finalizes within ~30s or never (fork, ledger reset);
-// after this window a still-confirmed row ages out of the finalization sweep
-// and rests at confirmed instead of costing an RPC history search every tick.
+// past this window (anchored on created_at — updated_at rotates on every poll)
+// a still-confirmed row ages out of the finalization poll and rests at
+// confirmed instead of costing an RPC history search forever.
 const CONFIRMED_FINALIZATION_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /**
@@ -92,34 +91,33 @@ export async function trackPendingTransfers(env: Env): Promise<void> {
  * Upgrades confirmed transfers to finalized once the cluster reports finality.
  *
  * Upgrade-only by design: a confirmed transfer whose status reads null or err
- * is left untouched and re-checked next tick — the funds were already observed
- * on chain, so this pass never introduces a new failure path. Every finalized
- * row — batch parents included — upgrades through one set-based update guarded
- * on still being confirmed (never settleTransferBatch, which only claims from
- * processing and whose recipient settlement already ran): the upgrade changes
- * no recipient or batch state.
+ * keeps its status and rotates to the back of the poll queue — the funds were
+ * already observed on chain, so this pass never introduces a new failure
+ * path. Every finalized row — batch parents included — upgrades through one
+ * set-based update guarded on still being confirmed (never
+ * settleTransferBatch, which only claims from processing and whose recipient
+ * settlement already ran): the upgrade changes no recipient or batch state.
  *
  * Polls with searchTransactionHistory because a transaction typically
  * finalizes (~30s) and leaves the node's short recent-status cache before the
  * next tick on the managed five-minute cadence; without it every confirmed
  * row would read null forever.
  *
- * Sweeps the confirmed backlog every tick, listing all pages up front before
- * any row is updated (so upgraded rows leaving the set can never skew
- * pagination). A single oldest-page read would let stuck rows — whose
- * updated_at never changes — permanently block newer transfers from ever
- * being polled. The sweep only covers rows updated within
+ * Polls one page per tick as a least-recently-polled queue: rows are ordered
+ * by updated_at, and advanceConfirmedTransfers touches every polled row's
+ * updated_at, rotating it to the back. A fixed oldest-first prefix would let
+ * stuck rows — null or errored reads whose updated_at never changed —
+ * permanently starve every transfer behind them; rotation guarantees each
+ * eligible row is polled within backlog/page-size ticks at a constant one
+ * RPC call per tick. The poll only covers rows created within
  * CONFIRMED_FINALIZATION_WINDOW_MS: past that window the transaction will
  * never finalize, so the row rests at confirmed and stops costing RPC.
- * Steady state is one page and one RPC call; the sweep is capped at
- * MAX_CONFIRMED_SWEEP_PAGES pages per tick and logs when the cap truncates
- * it, so a pathological backlog degrades visibly, never silently.
  *
  * @param env - Runtime environment for RPC and repository construction.
  * @param repo - System payments repository.
  * @param now - Tick time anchoring the finalization window.
- * @param nowIso - Timestamp applied to upgraded rows.
- * @returns Resolves when every finalized upgrade has been attempted.
+ * @param nowIso - Timestamp applied to every polled row.
+ * @returns Resolves when the page's poll has been recorded.
  */
 async function finalizeConfirmedTransfers(
   env: Env,
@@ -127,76 +125,52 @@ async function finalizeConfirmedTransfers(
   now: Date,
   nowIso: string
 ): Promise<void> {
-  const sweepFloor = new Date(now.getTime() - CONFIRMED_FINALIZATION_WINDOW_MS).toISOString();
-  const confirmedTransfers: PaymentTransferRow[] = [];
-  for (let page = 0; page < MAX_CONFIRMED_SWEEP_PAGES; page++) {
-    const rows = await repo.listTransfersByStatus({
-      statuses: ["confirmed"],
-      types: WALLET_TRANSFER_TYPES,
-      hasSignature: true,
-      updatedAfter: sweepFloor,
-      limit: MAX_SIGNATURES_PER_BATCH,
-      offset: page * MAX_SIGNATURES_PER_BATCH,
-    });
-    confirmedTransfers.push(...rows);
-    if (rows.length < MAX_SIGNATURES_PER_BATCH) {
-      break;
-    }
-    if (page === MAX_CONFIRMED_SWEEP_PAGES - 1) {
-      getLogger().error(
-        { swept: confirmedTransfers.length },
-        "trackPendingTransfers: confirmed sweep truncated at the page cap; backlog exceeds one tick"
-      );
-    }
-  }
+  const windowFloor = new Date(now.getTime() - CONFIRMED_FINALIZATION_WINDOW_MS).toISOString();
+  const confirmedTransfers = await repo.listTransfersByStatus({
+    statuses: ["confirmed"],
+    types: WALLET_TRANSFER_TYPES,
+    hasSignature: true,
+    createdAfter: windowFloor,
+    limit: MAX_SIGNATURES_PER_BATCH,
+  });
 
   if (confirmedTransfers.length === 0) {
     return;
   }
 
-  const rpc = solanaRpc.createRpc(env);
-  const finalized: {
-    transferId: string;
-    organizationId: string;
-    slot: number;
-    signature: string;
-  }[] = [];
+  const signatures = confirmedTransfers.map((t) => t.signature as Signature);
 
-  for (let start = 0; start < confirmedTransfers.length; start += MAX_SIGNATURES_PER_BATCH) {
-    const chunk = confirmedTransfers.slice(start, start + MAX_SIGNATURES_PER_BATCH);
-    const signatures = chunk.map((t) => t.signature as Signature);
-
-    let statuses: Array<SignatureStatusInfo | null>;
-    try {
-      statuses = await solanaRpc.getSignatureStatuses(rpc, signatures, {
-        searchTransactionHistory: true,
-      });
-    } catch (err) {
-      getLogger().error(
-        {
-          error: err instanceof Error ? err.message : String(err),
-        },
-        "trackPendingTransfers: getSignatureStatuses RPC call failed for confirmed transfers"
-      );
-      break;
-    }
-
-    for (const [i, transfer] of chunk.entries()) {
-      const status = statuses[i];
-      if (!status || status.err || status.confirmationStatus !== "finalized") {
-        continue;
-      }
-      finalized.push({
-        transferId: transfer.id,
-        organizationId: transfer.organization_id,
-        slot: Number(status.slot),
-        signature: transfer.signature as string,
-      });
-    }
+  let statuses: Array<SignatureStatusInfo | null>;
+  try {
+    const rpc = solanaRpc.createRpc(env);
+    statuses = await solanaRpc.getSignatureStatuses(rpc, signatures, {
+      searchTransactionHistory: true,
+    });
+  } catch (err) {
+    getLogger().error(
+      {
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "trackPendingTransfers: getSignatureStatuses RPC call failed for confirmed transfers"
+    );
+    return;
   }
 
-  await repo.finalizeConfirmedTransfers({ transfers: finalized, updatedAt: nowIso });
+  const polled = confirmedTransfers.map((transfer, i) => {
+    const status = statuses[i];
+    const finalized = Boolean(status && !status.err && status.confirmationStatus === "finalized");
+    return {
+      transferId: transfer.id,
+      organizationId: transfer.organization_id,
+      finalized,
+      slot: finalized && status ? Number(status.slot) : null,
+      signature: transfer.signature as string,
+    };
+  });
 
+  await repo.advanceConfirmedTransfers({ polled, updatedAt: nowIso });
+
+  const finalized = polled.filter((transfer) => transfer.finalized);
   for (const transfer of finalized) {
     getLogger().info(
       {
@@ -210,7 +184,7 @@ async function finalizeConfirmedTransfers(
   }
   if (finalized.length > 0) {
     getLogger().info(
-      { finalized: finalized.length, swept: confirmedTransfers.length },
+      { finalized: finalized.length, polled: polled.length },
       "trackPendingTransfers: finalized confirmed transfers"
     );
   }

@@ -139,8 +139,8 @@ export interface ListTransfersByStatusInput {
   types?: readonly PaymentTransferType[];
   hasSignature?: boolean;
   createdBefore?: string;
+  createdAfter?: string;
   updatedBefore?: string;
-  updatedAfter?: string;
   limit: number;
   offset?: number;
 }
@@ -195,17 +195,26 @@ export interface PaymentsRepository {
   }): Promise<PaymentTransferRow | null>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
   /**
-   * Upgrades a set of confirmed transfers to finalized in one statement, each
-   * row guarded on still being confirmed (so a concurrent transition is never
-   * overwritten) and on its owning organization (defense in depth — a stray id
-   * can never touch another org's row). System-only.
+   * Records one finalization poll over a page of confirmed transfers in one
+   * statement: rows the chain reports finalized upgrade to finalized with
+   * their slot; every other polled row keeps its status but gets updated_at
+   * touched, rotating it to the back of the updated_at-ordered poll queue so
+   * no row can starve the ones behind it. Each row is guarded on still being
+   * confirmed (a concurrent transition is never overwritten) and on its
+   * owning organization (defense in depth). System-only.
    *
-   * @param params - Transfer ids with their owning orgs and finalized slots,
-   * and the timestamp to stamp on upgraded rows.
+   * @param params - Every polled transfer with its owning org, whether the
+   * chain reports it finalized, its slot when finalized, and the timestamp to
+   * stamp on all polled rows.
    * @returns Resolves once the batch update has been applied.
    */
-  finalizeConfirmedTransfers(params: {
-    transfers: readonly { transferId: string; organizationId: string; slot: number }[];
+  advanceConfirmedTransfers(params: {
+    polled: readonly {
+      transferId: string;
+      organizationId: string;
+      finalized: boolean;
+      slot: number | null;
+    }[];
     updatedAt: string;
   }): Promise<void>;
   getTransferById(params: {

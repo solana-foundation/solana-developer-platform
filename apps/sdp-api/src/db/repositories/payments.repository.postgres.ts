@@ -580,8 +580,8 @@ export function createPostgresPaymentsRepository(
       types,
       hasSignature,
       createdBefore,
+      createdAfter,
       updatedBefore,
-      updatedAfter,
       limit,
       offset,
     }: ListTransfersByStatusInput) {
@@ -610,13 +610,13 @@ export function createPostgresPaymentsRepository(
         clauses.push("created_at < ?");
         values.push(createdBefore);
       }
+      if (createdAfter) {
+        clauses.push("created_at > ?");
+        values.push(createdAfter);
+      }
       if (updatedBefore) {
         clauses.push("updated_at < ?");
         values.push(updatedBefore);
-      }
-      if (updatedAfter) {
-        clauses.push("updated_at > ?");
-        values.push(updatedAfter);
       }
 
       const rows = await db
@@ -634,13 +634,13 @@ export function createPostgresPaymentsRepository(
       return rows.results.map(mapTransferRow);
     },
 
-    async finalizeConfirmedTransfers({ transfers, updatedAt }) {
+    async advanceConfirmedTransfers({ polled, updatedAt }) {
       if (tenantScope) {
         throw new TenantScopeViolationError(
-          "PaymentsRepository.finalizeConfirmedTransfers is system-only"
+          "PaymentsRepository.advanceConfirmedTransfers is system-only"
         );
       }
-      if (transfers.length === 0) {
+      if (polled.length === 0) {
         return;
       }
 
@@ -649,10 +649,10 @@ export function createPostgresPaymentsRepository(
       await db
         .prepare(
           `UPDATE payment_transfers AS t
-              SET status = ?,
-                  slot = v.slot,
+              SET status = CASE WHEN v.finalized THEN ? ELSE t.status END,
+                  slot = CASE WHEN v.finalized THEN v.slot ELSE t.slot END,
                   updated_at = ?
-             FROM jsonb_to_recordset(?::jsonb) AS v(transfer_id text, organization_id text, slot bigint)
+             FROM jsonb_to_recordset(?::jsonb) AS v(transfer_id text, organization_id text, finalized boolean, slot bigint)
             WHERE t.id = v.transfer_id
               AND t.organization_id = v.organization_id
               AND t.status = ?`
@@ -661,9 +661,10 @@ export function createPostgresPaymentsRepository(
           toStatus,
           updatedAt,
           JSON.stringify(
-            transfers.map((t) => ({
+            polled.map((t) => ({
               transfer_id: t.transferId,
               organization_id: t.organizationId,
+              finalized: t.finalized,
               slot: t.slot,
             }))
           ),

@@ -362,7 +362,7 @@ describe("trackPendingTransfers", () => {
       expect(unchanged?.status).toBe("confirmed");
     });
 
-    it("reaches a newer confirmed transfer behind a full page of stuck rows", async () => {
+    it("rotates a full page of stuck rows so the next tick reaches a newer transfer", async () => {
       getSignatureStatusesMock.mockImplementation(async (_rpc, signatures) =>
         signatures.map((signature) =>
           String(signature) === String(TEST_SIG_2)
@@ -392,9 +392,16 @@ describe("trackPendingTransfers", () => {
 
       await trackPendingTransfers(env);
 
+      const behindFullPage = await getTransfer("xfr_confirmed_behind_stuck_page");
+      expect(behindFullPage?.status).toBe("confirmed");
+
+      await trackPendingTransfers(env);
+
       const upgraded = await getTransfer("xfr_confirmed_behind_stuck_page");
       expect(upgraded?.status).toBe("finalized");
       expect(upgraded?.slot).toBe(33333);
+      const stuck = await getTransfer("xfr_confirmed_stuck_0");
+      expect(stuck?.status).toBe("confirmed");
     });
 
     it("leaves confirmed transfer untouched when the finalized status carries an error", async () => {
