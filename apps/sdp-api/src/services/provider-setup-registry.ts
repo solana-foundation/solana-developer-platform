@@ -16,7 +16,7 @@ import {
   replaceProviderCredential,
   submitProviderCredential,
 } from "@/services/provider-credential-submission.service";
-import { isTenantOwnedTarget } from "@/services/rpc-egress";
+import { isCustomerSuppliedTarget } from "@/services/rpc-egress";
 import { probeRpcEndpoint } from "@/services/rpc-probe";
 import type { Env } from "@/types/env";
 
@@ -143,15 +143,15 @@ export interface RpcConnectionCheckResult {
 /**
  * Run the same read-only JSON-RPC probe used by POST /rpc/test.
  *
- * `/v1/rpc/test` resolves tenant connections too, so the probe reaches a
- * customer-supplied endpoint whenever one is active. That is exactly the case
- * the egress guard exists for, and `connectionId` is what distinguishes it.
+ * `/v1/rpc/test` resolves tenant connections and the project's own `custom`
+ * endpoint, so the probe reaches a customer-supplied host in both cases. The
+ * probe does not follow redirects, which it already refused before the guard.
  */
 export async function checkResolvedRpcTargetConnection(
   input: RpcConnectionCheckInput
 ): Promise<RpcConnectionCheckResult> {
   return probeRpcEndpoint(input.target, {
-    enforcePublicEgress: isTenantOwnedTarget(input.target),
+    enforcePublicEgress: isCustomerSuppliedTarget(input.target),
   });
 }
 

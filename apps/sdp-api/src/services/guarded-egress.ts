@@ -117,12 +117,50 @@ export interface GuardedFetchInit {
   method: string;
   headers: Record<string, string>;
   body: string;
+  /**
+   * How many redirects to follow. Zero is the probe's existing `redirect:
+   * "manual"`. The relay follows a few, because a provider answering on a
+   * canonical or regional host is ordinary, and every hop is resolved through
+   * the guard again rather than trusted for having come from an allowed one.
+   */
+  maxRedirects?: number;
+}
+
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+export interface RedirectStep {
+  url: string;
+  method: string;
+  body: string;
 }
 
 /**
- * Same shape as a `fetch` call the caller would otherwise make, minus redirect
- * following: `node:https` does not follow one, which is the behaviour the
- * probe already asked for.
+ * The next request a redirect asks for, or null when it is not a redirect we
+ * follow. Method handling matches what `fetch` did before the guard existed:
+ * 307 and 308 repeat the request, 301, 302 and 303 downgrade to GET and drop
+ * the body. Split out so the rules can be read and tested without a socket.
+ */
+export function nextRedirectStep(
+  status: number,
+  location: string | null,
+  from: string,
+  init: { method: string; body: string }
+): RedirectStep | null {
+  if (!REDIRECT_STATUSES.has(status) || !location) {
+    return null;
+  }
+
+  const url = new URL(location, from).toString();
+  if (status === 307 || status === 308) {
+    return { url, method: init.method, body: init.body };
+  }
+  return { url, method: "GET", body: "" };
+}
+
+/**
+ * Same shape as a `fetch` call the caller would otherwise make. Every hop,
+ * including a redirected one, resolves through `guardedLookup`, so a redirect
+ * cannot walk the request somewhere the first check refused.
  */
 export async function guardedFetch(url: string, init: GuardedFetchInit): Promise<Response> {
   const target = new URL(url);
@@ -130,6 +168,21 @@ export async function guardedFetch(url: string, init: GuardedFetchInit): Promise
     throw new EgressBlockedError(target.hostname);
   }
 
+  const response = await guardedRequest(target, init);
+  const step = nextRedirectStep(response.status, response.headers.get("location"), url, init);
+  if (!step || !init.maxRedirects) {
+    return response;
+  }
+
+  return guardedFetch(step.url, {
+    ...init,
+    method: step.method,
+    body: step.body,
+    maxRedirects: init.maxRedirects - 1,
+  });
+}
+
+async function guardedRequest(target: URL, init: GuardedFetchInit): Promise<Response> {
   return new Promise<Response>((resolve, reject) => {
     const req = httpsRequest(
       target,

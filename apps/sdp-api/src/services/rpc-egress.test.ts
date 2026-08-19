@@ -38,6 +38,21 @@ describe("fetchRpcRelayTarget", () => {
     expect(upstream.status).toBe(200);
   });
 
+  it("refuses a custom target whose host resolves inward", async () => {
+    // `custom` is the project's own stored endpoint, validated only as a URL
+    // when it is written and carrying no connectionId. It is as much a
+    // customer-supplied host as a BYOK connection.
+    await expect(
+      fetchRpcRelayTarget(
+        {
+          endpoint: `https://localhost:${(server.address() as AddressInfo).port}/`,
+          providerId: "custom",
+        },
+        { headers: { "Content-Type": "application/json" }, body: "{}" }
+      )
+    ).rejects.toBeInstanceOf(EgressBlockedError);
+  });
+
   it("refuses a tenant target whose host resolves inward", async () => {
     // Same destination, only the connectionId differs, which is the whole
     // rule: a target a customer supplied does not get to name an internal
@@ -56,7 +71,7 @@ describe("fetchRpcRelayTarget", () => {
 
 describe("checkResolvedRpcTargetConnection", () => {
   const base = {
-    providerId: "custom" as const,
+    providerId: "helius" as const,
     projectId: null,
     endpointLabel: "local",
     headers: {},
@@ -64,11 +79,26 @@ describe("checkResolvedRpcTargetConnection", () => {
   };
 
   it("probes a platform target at a private address", async () => {
+    // A managed provider's endpoint comes from deployment config, which is
+    // what local development and the Surfpool suites rely on.
     const { upstream } = await checkResolvedRpcTargetConnection({
       target: { ...base, endpoint: origin },
     });
 
     expect(upstream.status).toBe(200);
+  });
+
+  it("refuses to probe the project's own custom endpoint when it resolves inward", async () => {
+    await expect(
+      checkResolvedRpcTargetConnection({
+        target: {
+          ...base,
+          providerId: "custom",
+          endpoint: `https://localhost:${(server.address() as AddressInfo).port}/`,
+          selectionMode: "project_custom_provider",
+        },
+      })
+    ).rejects.toBeInstanceOf(EgressBlockedError);
   });
 
   it("refuses to probe a tenant target that resolves inward", async () => {
