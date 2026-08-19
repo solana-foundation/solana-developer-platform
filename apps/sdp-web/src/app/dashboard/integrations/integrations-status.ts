@@ -11,6 +11,7 @@ import {
   resolveCustodyProviderAvailability,
 } from "@/app/dashboard/custody/provider-display-status";
 import type { MessageKey } from "@/i18n/messages";
+import { RPC_PROVIDER_LABELS } from "@/lib/rpc-providers";
 
 /**
  * One vocabulary across every provider family, aligned with the
@@ -75,16 +76,11 @@ const COMPLIANCE_DESCRIPTION_KEYS: Record<ComplianceProviderId, MessageKey> = {
   chainalysis: "Shared.integrations.complianceChainalysisDescription",
 };
 
-/** Display labels for families whose ids never had UI names on main. */
-export const RPC_PROVIDER_LABELS: Record<OrganizationRpcProvider, string> = {
-  alchemy: "Alchemy",
-  default: "SDP RPC",
-  helius: "Helius",
-  nodit: "Nodit",
-  quicknode: "QuickNode",
-  triton: "Triton",
-  validationcloud: "Validation Cloud",
-};
+/**
+ * Re-exported so the catalog's consumers keep one import path now that the
+ * labels are shared with Settings and the integration detail controls.
+ */
+export { RPC_PROVIDER_LABELS };
 
 export const RAMP_PROVIDER_LABELS: Record<RampProviderId, string> = {
   moonpay: "MoonPay",
@@ -111,18 +107,20 @@ export function resolveCustodyIntegrations(input: {
 }
 
 /**
- * The organization runs exactly one RPC provider, chosen in onboarding or
- * Settings — that one is active. The rest of the enabled set is available to
- * switch to; `default` is SDP's own key and is only worth naming while it is
- * what the organization actually uses.
+ * The organization runs exactly one RPC provider, chosen in onboarding or on an
+ * integration's own page — that one is active. The rest of the enabled set is
+ * available to switch to.
+ *
+ * `default` is listed like any other provider, including while the organization
+ * is on a vendor. Hiding it left an organization that had moved to Helius with
+ * no page offering SDP RPC and a 404 at its route, so the only way back was the
+ * Settings dropdown this family replaced (HOO-787).
  */
 export function resolveRpcIntegrations(input: {
   selectedProvider: OrganizationRpcProvider | null;
   entries: Partial<Record<OrganizationRpcProvider, ProviderAvailabilityEntry>>;
 }): IntegrationEntry<OrganizationRpcProvider>[] {
-  return ORGANIZATION_RPC_PROVIDERS.filter(
-    (provider) => provider !== "default" || input.selectedProvider === "default"
-  ).map((provider) => {
+  return ORGANIZATION_RPC_PROVIDERS.map((provider) => {
     const entry = input.entries[provider];
     // Every RPC provider is generally available; an unconfigured one lacks a
     // URL in this deployment, which is never organization access.

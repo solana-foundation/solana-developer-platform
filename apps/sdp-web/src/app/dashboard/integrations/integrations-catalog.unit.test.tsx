@@ -192,8 +192,9 @@ describe("IntegrationsCatalog filtering", () => {
   it("keeps cards action-free: browsing here, acting on the detail page", () => {
     renderCatalog();
 
-    // Shared destinations link once at the section level, never per card.
-    expect(screen.getAllByRole("link", { name: "Change in Settings" })).toHaveLength(1);
+    // RPC is managed on each provider's own page now (HOO-787), so the section
+    // no longer signposts Settings.
+    expect(screen.queryAllByRole("link", { name: "Change in Settings" })).toHaveLength(0);
     expect(screen.queryAllByRole("link", { name: "Manage" })).toHaveLength(0);
     expect(screen.queryAllByRole("link", { name: "Configure" })).toHaveLength(0);
     expect(screen.queryAllByRole("link", { name: "Request access" })).toHaveLength(0);
