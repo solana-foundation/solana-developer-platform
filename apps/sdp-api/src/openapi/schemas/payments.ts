@@ -685,7 +685,8 @@ export const transferSchema = z
       .nullable()
       .openapi({ description: "Transaction fee in lamports.", example: 5000 }),
     error: z.string().nullable().openapi({
-      description: "Error message if the transaction failed.",
+      description:
+        "Error message when the transfer failed, or the reconciliation notice when its submission outcome is unknown and it stays processing. Non-null does not imply a failed status.",
       example: "Signature failed",
     }),
     initiatedBy: transferInitiatorSchema

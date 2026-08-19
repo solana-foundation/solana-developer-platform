@@ -2494,9 +2494,10 @@ describe("Payments routes — transfers", () => {
   });
   describe("submission outcome fence", () => {
     const KORA_FEE_PAYER_B58 = "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv";
+    const SUBMITTED_SIGNATURE =
+      "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
 
-    function mockAdapterRejectingSend(error: Error) {
-      const signAndSendMock = vi.fn().mockRejectedValue(error);
+    function mockAdapter(signAndSendMock: ReturnType<typeof vi.fn>) {
       createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
         getFeePayer: vi.fn().mockResolvedValue(KORA_FEE_PAYER_B58),
@@ -2508,6 +2509,14 @@ describe("Payments routes — transfers", () => {
         signAndSend: signAndSendMock,
       } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
       return signAndSendMock;
+    }
+
+    function mockAdapterRejectingSend(error: Error) {
+      return mockAdapter(vi.fn().mockRejectedValue(error));
+    }
+
+    function mockAdapterSubmitting(signature: string) {
+      return mockAdapter(vi.fn().mockResolvedValue(signature));
     }
 
     async function latestTransferRow() {
@@ -2623,20 +2632,29 @@ describe("Payments routes — transfers", () => {
       expect(row.providerData ?? {}).not.toMatchObject({ submission_outcome: "unknown" });
     });
 
+    it("journals a definite on-chain failure as failed with the submitted signature", async () => {
+      // Beyond-spec item 3: the network itself reported the transaction as
+      // failed, so the terminal `failed` is safe — and the row must keep the
+      // submitted signature so reconciliation is a lookup, not archaeology.
+      mockAdapterSubmitting(SUBMITTED_SIGNATURE);
+      confirmTransactionMock.mockResolvedValueOnce({
+        signature: SUBMITTED_SIGNATURE,
+        slot: 100n,
+        confirmationStatus: "confirmed",
+        err: { InstructionError: [0, { Custom: 1 }] },
+      } as unknown as Awaited<ReturnType<typeof solanaRpc.confirmTransaction>>);
+
+      const res = await transferRequest("1");
+
+      // Not a 200 (the failure is definite) and not a 409 (nothing is unknown).
+      expect(res.status).toBe(400);
+      const row = await latestTransferRow();
+      expect(row).toMatchObject({ status: "failed", signature: SUBMITTED_SIGNATURE });
+      expect(row.providerData ?? {}).not.toMatchObject({ submission_outcome: "unknown" });
+    });
+
     it("keeps a submitted transfer processing with its signature when confirmation fails", async () => {
-      const submittedSignature =
-        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
-      const signAndSendMock = vi.fn().mockResolvedValue(submittedSignature);
-      createFeePaymentAdapterMock.mockReturnValue({
-        providerId: "mock",
-        getFeePayer: vi.fn().mockResolvedValue(KORA_FEE_PAYER_B58),
-        getSponsorshipConfiguration: vi.fn().mockResolvedValue({
-          ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-          signerAddress: address(KORA_FEE_PAYER_B58),
-        }),
-        signAsFeePayer: vi.fn(),
-        signAndSend: signAndSendMock,
-      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+      const signAndSendMock = mockAdapterSubmitting(SUBMITTED_SIGNATURE);
       confirmTransactionMock.mockRejectedValueOnce(new Error("confirmation timed out"));
 
       const headers = { "Idempotency-Key": "submitted-unconfirmed-key" };
@@ -2647,14 +2665,14 @@ describe("Payments routes — transfers", () => {
         data: { transfer: { id: string; status: string; signature: string | null } };
       };
       expect(json.data.transfer.status).toBe("processing");
-      expect(json.data.transfer.signature).toBe(submittedSignature);
+      expect(json.data.transfer.signature).toBe(SUBMITTED_SIGNATURE);
 
       const row = await getDb(env)
         .prepare("SELECT status, signature FROM payment_transfers WHERE id = ?")
         .bind(json.data.transfer.id)
         .first<{ status: string; signature: string | null }>();
       expect(row?.status).toBe("processing");
-      expect(row?.signature).toBe(submittedSignature);
+      expect(row?.signature).toBe(SUBMITTED_SIGNATURE);
 
       // An idempotent replay returns the settling row without re-submitting.
       const replay = await transferRequest("0.001", headers);

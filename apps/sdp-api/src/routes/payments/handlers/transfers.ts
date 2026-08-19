@@ -465,10 +465,14 @@ async function updateTransferRecord(
   return updated;
 }
 
-function transferSubmissionOutcomeUnknown(): AppError {
-  return new AppError("CONFLICT", TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR, {
+function transferSubmissionOutcomeUnknown(cause: unknown): AppError {
+  const error = new AppError("CONFLICT", TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR, {
     reason: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
   });
+  // Server-side only (`toResponse` never serializes it): the marker branch
+  // logs the cause so the manual reconciliation starts from the real failure.
+  error.cause = cause;
+  return error;
 }
 
 function isTransferSubmissionOutcomeUnknown(error: unknown): error is AppError {
@@ -493,7 +497,7 @@ async function signAndSendClosed(
     if (isPreBroadcastRejection(error)) {
       throw error;
     }
-    throw transferSubmissionOutcomeUnknown();
+    throw transferSubmissionOutcomeUnknown(error);
   }
 }
 
@@ -605,8 +609,13 @@ async function settleTransferExecutionFailure(
     // The provider may have broadcast without returning a signature: keep the
     // processing row behind the durable marker (the pending-transfers job
     // never times it out into a false failure); a terminal failure invites a
-    // client retry and a double send.
-    logSubmittedUnconfirmed(transfer.id, null, error);
+    // client retry and a double send. The log carries the original provider
+    // failure — the row and the 409 only say "unknown", and the operator
+    // reconciling it needs to know what actually happened.
+    getLogger().warn(
+      { transfer_id: transfer.id, error: error.cause },
+      "createTransfer: submission outcome unknown; parking the transfer behind the reconciliation marker"
+    );
     await markTransferOutcomeUnknown(c, transfer.id);
     throw error;
   }
