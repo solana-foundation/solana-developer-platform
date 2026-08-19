@@ -160,14 +160,14 @@ export function floorUsdToCents(decimal: string): string {
  * move money.
  */
 export function laneCeilingFromErrorBody(body: unknown): string | undefined {
-  if (!body || typeof body !== "object") return undefined;
-  const error = (body as { error?: unknown }).error;
-  if (!error || typeof error !== "object") return undefined;
-  const details = (error as { details?: unknown }).details;
-  if (!details || typeof details !== "object") return undefined;
-  const balance = (details as { balance?: unknown }).balance;
-  if (!balance || typeof balance !== "object") return undefined;
-  const withdrawableUsd = (balance as { withdrawableUsd?: unknown }).withdrawableUsd;
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return undefined;
+  const error = "error" in body ? body.error : undefined;
+  if (typeof error !== "object" || error === null || Array.isArray(error)) return undefined;
+  const details = "details" in error ? error.details : undefined;
+  if (typeof details !== "object" || details === null || Array.isArray(details)) return undefined;
+  const balance = "balance" in details ? details.balance : undefined;
+  if (typeof balance !== "object" || balance === null || Array.isArray(balance)) return undefined;
+  const withdrawableUsd = "withdrawableUsd" in balance ? balance.withdrawableUsd : undefined;
   return typeof withdrawableUsd === "string" && parseUnsignedDecimal(withdrawableUsd)
     ? withdrawableUsd.trim()
     : undefined;

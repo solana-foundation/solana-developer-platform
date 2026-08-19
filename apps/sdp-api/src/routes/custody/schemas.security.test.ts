@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { assertNoExistingProviderObjectSelector } from "./handlers/provider";
 import { initializeSigningSchema, switchSigningSchema } from "./schemas";
 
 const hostedProviderRequests = [
@@ -27,57 +26,35 @@ describe.each([
   ["initialize", initializeSigningSchema],
   ["switch", switchSigningSchema],
 ] as const)("custody %s endpoint selection", (_operation, schema) => {
-  it.each(hostedProviderRequests)("does not accept a client endpoint for $provider", (request) => {
+  it.each(hostedProviderRequests)("rejects a client endpoint for $provider", (request) => {
     const parsed = schema.safeParse({
       ...request,
       apiBaseUrl: "https://untrusted.example",
     });
 
-    if (parsed.success) {
-      expect(parsed.data).not.toHaveProperty("apiBaseUrl");
-    }
+    expect(parsed.success).toBe(false);
   });
 
   it.each(existingProviderObjectRequests)(
-    "does not include an existing $provider object selector",
-    (request) => {
-      const parsed = schema.parse(request);
-      expect(parsed).not.toHaveProperty("walletAddress");
-      expect(parsed).not.toHaveProperty("walletId");
-      expect(parsed).not.toHaveProperty("privateKeyId");
-      expect(parsed).not.toHaveProperty("signingKeyId");
-    }
-  );
-});
-
-describe("hosted custody provider object selection", () => {
-  it.each(existingProviderObjectRequests)(
     "rejects client selection of an existing $provider object",
     (request) => {
-      expect(() => assertNoExistingProviderObjectSelector(request)).toThrow(
-        /cannot select an existing wallet/
-      );
+      expect(schema.safeParse(request).success).toBe(false);
     }
   );
 
   it("preserves ordinary platform-managed provisioning requests", () => {
-    expect(() =>
-      assertNoExistingProviderObjectSelector({
-        provider: "coinbase_cdp",
-        network: "solana-devnet",
-        walletLabel: "Treasury",
-      })
-    ).not.toThrow();
+    const parsed = schema.safeParse({
+      provider: "coinbase_cdp",
+      network: "solana-devnet",
+      walletLabel: "Treasury",
+    });
+
+    expect(parsed.success).toBe(true);
   });
 
-  it.each(["__proto__", "constructor"])(
-    "defers the unknown provider %s to schema validation",
-    (provider) => {
-      const request = { provider, walletId: "wallet_from_another_tenant" };
+  it.each(["__proto__", "constructor"])("rejects the unknown provider %s", (provider) => {
+    const request = { provider, walletId: "wallet_from_another_tenant" };
 
-      expect(() => assertNoExistingProviderObjectSelector(request)).not.toThrow();
-      expect(initializeSigningSchema.safeParse(request).success).toBe(false);
-      expect(switchSigningSchema.safeParse(request).success).toBe(false);
-    }
-  );
+    expect(schema.safeParse(request).success).toBe(false);
+  });
 });

@@ -7,6 +7,7 @@ import {
 } from "@sdp/types";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
 import { z } from "zod";
+import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 
 export const earnStrategyIdParamsSchema = z.object({
   strategyId: z.string().min(1),
@@ -240,6 +241,15 @@ export const earnVaultDepositSchema = z.object({
     .max(128)
     .regex(/^\d+(\.\d+)?$/, "minSharesOut must be a decimal string")
     .refine((value) => /[1-9]/.test(value), "minSharesOut must be greater than zero")
+    .optional(),
+  /**
+   * Retired on this route: the chain has no request dedupe to anchor a body
+   * key to, so the `Idempotency-Key` header is the only accepted source.
+   * Declared as `never` rather than omitted so the stray key is rejected with
+   * this message instead of being silently stripped.
+   */
+  requestId: z
+    .never(`Use the ${IDEMPOTENCY_KEY_HEADER} header; body requestId is not accepted`)
     .optional(),
 });
 

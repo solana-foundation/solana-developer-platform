@@ -15,6 +15,7 @@ import {
   notFound,
 } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
 import {
   type AppContext,
@@ -24,10 +25,10 @@ import {
 import {
   counterpartyAccountListParamsSchema,
   counterpartyAccountParamsSchema,
-  createCounterpartyAccountSchema,
+  type createCounterpartyAccountSchema,
   cryptoWalletDetailsSchema,
   listCounterpartyAccountsQuerySchema,
-  updateCounterpartyAccountSchema,
+  type updateCounterpartyAccountSchema,
 } from "./schemas";
 
 function mapToCounterpartyAccount(row: CounterpartyAccountRow): CounterpartyAccount {
@@ -125,7 +126,9 @@ export const getCounterpartyAccount = async (c: AppContext) => {
   return success(c, response);
 };
 
-export const createCounterpartyAccount = async (c: AppContext) => {
+export const createCounterpartyAccount = async (
+  c: ValidatedBodyContext<typeof createCounterpartyAccountSchema>
+) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const params = counterpartyAccountListParamsSchema.safeParse(c.req.param());
@@ -134,12 +137,7 @@ export const createCounterpartyAccount = async (c: AppContext) => {
     throw badRequestParams();
   }
 
-  const body = await c.req.json();
-  const parsed = createCounterpartyAccountSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
-  }
+  const body = c.req.valid("json");
 
   await assertCounterpartyExists(c, params.data.counterpartyId, auth.organizationId, projectId);
 
@@ -147,10 +145,10 @@ export const createCounterpartyAccount = async (c: AppContext) => {
     organizationId: auth.organizationId,
     projectId,
     counterpartyId: params.data.counterpartyId,
-    accountKind: parsed.data.accountKind,
-    label: parsed.data.label ?? null,
-    details: parsed.data.details ?? {},
-    providerAccountData: parsed.data.providerAccountData ?? {},
+    accountKind: body.accountKind,
+    label: body.label ?? null,
+    details: body.details ?? {},
+    providerAccountData: body.providerAccountData ?? {},
   });
 
   if (!account) {
@@ -167,7 +165,7 @@ export const createCounterpartyAccount = async (c: AppContext) => {
     resourceId: account.id,
     metadata: {
       counterpartyId: params.data.counterpartyId,
-      accountKind: parsed.data.accountKind,
+      accountKind: body.accountKind,
     },
   });
 
@@ -175,7 +173,9 @@ export const createCounterpartyAccount = async (c: AppContext) => {
   return created(c, response);
 };
 
-export const updateCounterpartyAccount = async (c: AppContext) => {
+export const updateCounterpartyAccount = async (
+  c: ValidatedBodyContext<typeof updateCounterpartyAccountSchema>
+) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const params = counterpartyAccountParamsSchema.safeParse(c.req.param());
@@ -184,16 +184,11 @@ export const updateCounterpartyAccount = async (c: AppContext) => {
     throw badRequestParams();
   }
 
-  const body = await c.req.json();
-  const parsed = updateCounterpartyAccountSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
-  }
+  const body = c.req.valid("json");
 
   const repo = getCounterpartyAccountsRepository(c);
 
-  if (parsed.data.details !== undefined) {
+  if (body.details !== undefined) {
     const existing = await repo.getCounterpartyAccountById({
       counterpartyAccountId: params.data.counterpartyAccountId,
       counterpartyId: params.data.counterpartyId,
@@ -204,7 +199,7 @@ export const updateCounterpartyAccount = async (c: AppContext) => {
       throw notFound("Counterparty account");
     }
     if (existing.account_kind === "crypto_wallet") {
-      const result = cryptoWalletDetailsSchema.safeParse(parsed.data.details);
+      const result = cryptoWalletDetailsSchema.safeParse(body.details);
       if (!result.success) {
         throw badRequest("Invalid crypto_wallet details", {
           errors: z.treeifyError(result.error),
@@ -218,7 +213,7 @@ export const updateCounterpartyAccount = async (c: AppContext) => {
     counterpartyId: params.data.counterpartyId,
     organizationId: auth.organizationId,
     projectId,
-    ...parsed.data,
+    ...body,
   });
 
   if (!updated) {
@@ -234,7 +229,7 @@ export const updateCounterpartyAccount = async (c: AppContext) => {
     action: "update",
     resourceType: "counterparty_account",
     resourceId: updated.id,
-    metadata: { changedFields: Object.keys(parsed.data) },
+    metadata: { changedFields: Object.keys(body) },
   });
 
   const response: CounterpartyAccountResponse = { account: mapToCounterpartyAccount(updated) };
