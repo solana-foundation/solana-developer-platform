@@ -1,8 +1,9 @@
+import { EARN_APY_TYPES, EARN_LIQUIDITY_TERMS, EARN_STRATEGY_SOURCE_KINDS } from "@sdp/types";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
-const SOURCE_KINDS = new Set(["defi", "rwa"]);
-const APY_TYPES = new Set(["variable", "fixed"]);
-const LIQUIDITY_TERMS = new Set(["instant", "delayed"]);
+const SOURCE_KINDS = new Set<string>(EARN_STRATEGY_SOURCE_KINDS);
+const APY_TYPES = new Set<string>(EARN_APY_TYPES);
+const LIQUIDITY_TERMS = new Set<string>(EARN_LIQUIDITY_TERMS);
 
 export async function GET(request: Request) {
   const incoming = new URL(request.url);

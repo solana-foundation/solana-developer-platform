@@ -41,7 +41,7 @@ earn.use("*", requireEarnFeature);
 earn.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 earn.use("*", projectContextMiddleware());
 
-// Strategy catalogue (source: DB, written only by the sync cron + dev seed).
+// Strategy catalogue (source: DB, admitted only by the sync cron).
 earn.get("/strategies", requirePermissions("earn:read"), listEarnStrategies);
 earn.get("/strategies/:strategyId", requirePermissions("earn:read"), getEarnStrategy);
 

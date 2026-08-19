@@ -12,6 +12,10 @@ api/dashboard/markets/earn/
   provider-query.ts                  allowlisted query passthrough — lives at
                                      the earn/ ROOT because its importers now
                                      sit at several depths under programs/
+                                     (the vault-positions helper is the strict
+                                     one: it 400s instead of dropping a bad
+                                     param, so a typo can't silently reshape
+                                     the page)
   strategies/route.ts
   programs/route.ts                  GET list (page window) · POST create
   programs/[programId]/route.ts      GET one · PUT re-target
@@ -20,11 +24,17 @@ api/dashboard/markets/earn/
     withdrawal-preview/              POST
     withdrawals/                     POST create · GET ledger list
     withdrawals/[withdrawalRef]/     GET detail
+  vault-deposits/route.ts            POST create (vault_direct)
+  vault-positions/route.ts           GET list (keyset cursor)
 ```
 
-`proxyToSdpApi` forwards `{method, body}` and builds its own headers, so an
-inbound `Idempotency-Key` never reaches the API — the dashboard's create sends
-the body `requestId` form, which is the only one that can get through.
+`proxyToSdpApi` never copies the inbound header bag — auth, project scope and
+tracing stay server-owned — so a client-set `Idempotency-Key` never reaches the
+API on its own. A route forwards one deliberately, per header, through the
+optional `upstreamHeaders` argument, spelling it `IDEMPOTENCY_KEY_HEADER`
+(`src/lib/idempotency.ts`). `vault-deposits/` is the one route that opts in,
+forwarding that single header and nothing else; the program create still sends
+the body `requestId` form.
 
 ## Module map
 
@@ -156,9 +166,10 @@ the body `requestId` form, which is the only one that can get through.
   A token Ground never routes to Solana (USDT: Ethereum
   only, per their supported-chains doc — sandbox USDT is Ground's mock Sepolia
   asset) is NOT OFFERED at all: the token select renders only
-  `SOLANA_PAYOUT_TOKENS`, mirroring `GROUND_SOLANA_ROUTED_TOKENS` in the
-  provider client, which also keeps un-routable strategies out of the
-  catalogue at sync time. Preview failures render TRANSLATED copy naming the per-lane
+  `SOLANA_PAYOUT_TOKENS`, read from the shared
+  `EARN_PROGRAM_SOLANA_PAYOUT_TOKENS` registry in `@sdp/types` that the
+  provider client gates on too, which also keeps un-routable strategies out of
+  the catalogue at sync time. Preview failures render TRANSLATED copy naming the per-lane
   reality — never the provider's wire text ("ground request failed with status
   409" explains nothing).
 - `deposit/` — the deposit flow: funding wallet → full strategy catalogue →
