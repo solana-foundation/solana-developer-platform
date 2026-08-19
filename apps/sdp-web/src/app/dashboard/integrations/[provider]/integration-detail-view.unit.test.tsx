@@ -13,6 +13,13 @@ vi.mock("next/headers", () => ({
   cookies: async () => ({ get: () => ({ value: "en" }) }),
   headers: async () => new Headers(),
 }));
+// The panel is a client component with its own test; here we only care that
+// the view mounts it for the RPC family and drops the Settings signpost.
+vi.mock("../rpc-connection-panel", () => ({
+  RpcConnectionPanel: ({ provider }: { provider: string }) => (
+    <div data-rpc-panel={provider}>rpc-connection-panel</div>
+  ),
+}));
 
 const on = { entitled: true, configured: true, enabled: true };
 const off = { entitled: false, configured: false, enabled: false };
@@ -77,6 +84,33 @@ describe("IntegrationDetailView", () => {
     expect(compliance).toContain("Request access");
     expect(compliance).toContain("Available by arrangement");
     expect(compliance).not.toContain("typeform.com");
+  });
+
+  it("manages an RPC provider on its own page instead of sending it to Settings", async () => {
+    const detail = resolveIntegrationDetail({ ...INPUTS, provider: "helius" });
+    if (!detail) throw new Error("expected detail");
+    const markup = renderToStaticMarkup(
+      await IntegrationDetailView({
+        detail,
+        rpc: {
+          activeProvider: "helius",
+          canManage: true,
+          isEnabledInDeployment: true,
+          organizationId: "org_1",
+        },
+      })
+    );
+    expect(markup).toContain("Connection");
+    expect(markup).toContain('data-rpc-panel="helius"');
+    expect(markup).not.toContain("Change in Settings");
+  });
+
+  it("offers no RPC action when the organization could not be resolved", async () => {
+    const markup = await render("helius");
+    // No rpc context means no panel. Settings no longer holds RPC, so linking
+    // there would be a dead end rather than a fallback.
+    expect(markup).not.toContain("/dashboard/settings");
+    expect(markup).not.toContain("rpc-connection-panel");
   });
 
   it("offers no state-dependent action when the connection state is unknown", async () => {

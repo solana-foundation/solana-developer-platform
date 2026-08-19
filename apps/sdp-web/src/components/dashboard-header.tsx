@@ -548,7 +548,7 @@ function getIntegrationsPageConfig(
 }
 
 /**
- * Header config for the wallet section's three landing routes, under both the
+ * Header config for the wallet section's landing routes, under both the
  * `/wallets` and legacy `/custody` prefixes. Returns null elsewhere.
  */
 function getWalletSectionPageConfig(
@@ -565,6 +565,19 @@ function getWalletSectionPageConfig(
   if (pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup") {
     return {
       title: t("Shared.dashboardShell.createWallet"),
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard/wallets",
+        label: t("Shared.dashboardShell.backToWallets"),
+      },
+    };
+  }
+  if (
+    pathname === "/dashboard/wallets/connections" ||
+    pathname === "/dashboard/custody/connections"
+  ) {
+    return {
+      title: t("Shared.dashboardShell.connections"),
       contentWidthClass: "max-w-none",
       backAction: {
         href: "/dashboard/wallets",

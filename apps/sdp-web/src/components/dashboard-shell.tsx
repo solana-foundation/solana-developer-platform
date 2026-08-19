@@ -53,6 +53,7 @@ import {
 import { PoliciesOverviewSkeleton } from "@/app/dashboard/policies/policies-overview";
 import TokenHoldingsLoading from "@/app/dashboard/tokens/loading";
 import {
+  WalletConnectionsListSkeleton,
   WalletDetailSkeleton,
   WalletPolicyAuditDetailSkeleton,
   WalletPolicyAuditListSkeleton,
@@ -138,6 +139,8 @@ function resolvePageLoadingComponent(
       return WalletsOverviewSkeleton;
     case "wallet-setup":
       return WalletSetupSkeleton;
+    case "wallet-connections":
+      return WalletConnectionsListSkeleton;
     case "wallet-detail":
       return WalletDetailSkeleton;
     case "wallet-policy":
