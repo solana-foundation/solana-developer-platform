@@ -1955,6 +1955,117 @@ describe("Payments routes — recurring", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(3);
   });
 
+  it("parks a collection whose submission outcome is unknown instead of re-charging the payer", async () => {
+    // The provider may have broadcast the collection without returning a
+    // signature. Journaling a failure would reschedule the cycle, and the next
+    // tick would charge the payer a second time for the same period.
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+      )
+      .mockResolvedValueOnce(
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      )
+      .mockRejectedValue(new Error("kora timed out"));
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const recurringPaymentId = await createRecurringPaymentForActivation(headers);
+
+    const activateRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
+      { method: "POST", headers, body: "{}" },
+      env
+    );
+    expect(activateRes.status).toBe(200);
+    const activateBody = (await activateRes.json()) as {
+      data: { recurringPayment: { subscriptionId: string } };
+    };
+    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, recurringPaymentId)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, activateBody.data.recurringPayment.subscriptionId)
+      .run();
+
+    const collectRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
+      { method: "POST", headers, body: "{}" },
+      env
+    );
+
+    expect(collectRes.status).toBe(409);
+    const collectError = (await collectRes.json()) as {
+      error: { details?: { reason?: string } };
+    };
+    expect(collectError.error.details?.reason).toBe("transfer_submission_outcome_unknown");
+
+    const attempt = await getDb(env)
+      .prepare(
+        `SELECT a.id, a.status, a.transfer_id, t.status AS transfer_status,
+                t.signature AS transfer_signature, t.error AS transfer_error,
+                t.provider_data AS transfer_provider_data
+           FROM payment_subscription_collection_attempts a
+           JOIN payment_transfers t ON t.id = a.transfer_id
+          WHERE a.subscription_id = ?
+          ORDER BY a.created_at DESC
+          LIMIT 1`
+      )
+      .bind(activateBody.data.recurringPayment.subscriptionId)
+      .first<{
+        id: string;
+        status: string;
+        transfer_id: string;
+        transfer_status: string;
+        transfer_signature: string | null;
+        transfer_error: string | null;
+        transfer_provider_data: unknown;
+      }>();
+    // The attempt is NOT failed: failing it reschedules the cycle.
+    expect(attempt?.status).toBe("processing");
+    expect(attempt?.transfer_status).toBe("processing");
+    expect(attempt?.transfer_signature).toBeNull();
+    const providerData =
+      typeof attempt?.transfer_provider_data === "string"
+        ? JSON.parse(attempt.transfer_provider_data)
+        : attempt?.transfer_provider_data;
+    // Literal on purpose: the durable contract the jobs and the operator match.
+    expect(providerData).toMatchObject({ submission_outcome: "unknown" });
+
+    // A second collect must not create a second transfer for the same cycle.
+    const retryRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
+      { method: "POST", headers, body: "{}" },
+      env
+    );
+    expect(retryRes.status).toBe(409);
+    const transferCount = await getDb(env)
+      .prepare(
+        `SELECT count(*) AS total
+           FROM payment_subscription_collection_attempts
+          WHERE subscription_id = ? AND due_at = ?`
+      )
+      .bind(activateBody.data.recurringPayment.subscriptionId, dueAt)
+      .first<{ total: number }>();
+    expect(Number(transferCount?.total)).toBe(1);
+  });
+
   it("collects due recurring payments through SDP API routes", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);

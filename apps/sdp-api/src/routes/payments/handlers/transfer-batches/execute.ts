@@ -342,7 +342,5 @@ export async function executeChunk(params: {
   }
 
   await recorder.onSubmitted(signature);
-  // Discarded result: called for its retry — it re-attempts the persist once
-  // when the first write failed.
-  await recorder.submittedRow();
+  await recorder.submittedRow(); // retries the persist once if the first write failed
 }

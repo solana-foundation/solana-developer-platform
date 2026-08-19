@@ -61,11 +61,11 @@ import {
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
 import {
-  isPreBroadcastRejection,
+  isTransferSubmissionOutcomeUnknown,
   persistOutcomeUnknownMarker,
   SUBMISSION_OUTCOME_UNKNOWN_MARKER,
+  signAndSendClosed,
   TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
-  TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
 } from "@/services/payments/submission-outcome";
 import {
   approvedWalletOperationAttemptId,
@@ -463,42 +463,6 @@ async function updateTransferRecord(
   }
 
   return updated;
-}
-
-function transferSubmissionOutcomeUnknown(cause: unknown): AppError {
-  const error = new AppError("CONFLICT", TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR, {
-    reason: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
-  });
-  // Server-side only (`toResponse` never serializes it): the marker branch
-  // logs the cause so the manual reconciliation starts from the real failure.
-  error.cause = cause;
-  return error;
-}
-
-function isTransferSubmissionOutcomeUnknown(error: unknown): error is AppError {
-  return (
-    error instanceof AppError &&
-    error.details?.reason === TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON
-  );
-}
-
-/**
- * Submit through one closed chokepoint: a provably pre-broadcast provider
- * rejection passes through for a plain terminal failure, anything else
- * becomes the outcome-unknown 409 the caller must mark and rethrow.
- */
-async function signAndSendClosed(
-  feePayment: ReturnType<typeof getFeePayment>,
-  txBytes: Uint8Array
-) {
-  try {
-    return await feePayment.signAndSend(txBytes);
-  } catch (error) {
-    if (isPreBroadcastRejection(error)) {
-      throw error;
-    }
-    throw transferSubmissionOutcomeUnknown(error);
-  }
 }
 
 /**

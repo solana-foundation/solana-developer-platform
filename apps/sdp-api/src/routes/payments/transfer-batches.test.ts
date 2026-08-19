@@ -2069,7 +2069,7 @@ describe("payment transfer batches", () => {
         .bind(linkedRecipient?.transfer_id)
         .first<{ status: string; signature: string | null }>();
       expect(transferRow?.signature).toBe(FIRST_SIGNATURE);
-      expect(transferRow?.status).not.toBe("failed");
+      expect(["processing", "confirmed", "finalized"]).toContain(transferRow?.status);
 
       const settledRecipient = await getDb(env)
         .prepare("SELECT status, transfer_id FROM payment_transfer_recipients WHERE batch_id = ?")
@@ -2077,14 +2077,14 @@ describe("payment transfer batches", () => {
         .first<{ status: string; transfer_id: string | null }>();
       // The chunk is on chain with its signature, so neither the recipient nor
       // the batch is cascaded to `failed` by a lost bookkeeping write.
-      expect(settledRecipient?.status).not.toBe("failed");
+      expect(["processing", "confirmed", "finalized"]).toContain(settledRecipient?.status);
       expect(settledRecipient?.transfer_id).toBe(linkedRecipient?.transfer_id);
 
       const batchRow = await getDb(env)
         .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
         .bind(body.data.batch.id)
         .first<{ status: string }>();
-      expect(batchRow?.status).not.toBe("failed");
+      expect(["processing", "confirmed", "completed"]).toContain(batchRow?.status);
     } finally {
       batchesSpy.mockRestore();
     }

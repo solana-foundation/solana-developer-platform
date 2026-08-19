@@ -38,10 +38,13 @@ import {
 } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
 import {
-  hasSubmissionOutcomeUnknownMarker,
+  isPreBroadcastRejection,
+  isTransferSubmissionOutcomeUnknown,
   persistOutcomeUnknownMarker,
   SUBMISSION_OUTCOME_UNKNOWN_MARKER,
   TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
+  TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
+  transferSubmissionOutcomeUnknown,
 } from "@/services/payments/submission-outcome";
 import * as solanaServices from "@/services/solana";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
@@ -56,9 +59,6 @@ import { enforceRecurringPaymentPolicy } from "./policy";
 import {
   activationErrorMessage,
   confirmSubscriptionSignature,
-  isRecurringSubmissionOutcomeUnknown,
-  RECURRING_SUBMISSION_OUTCOME_UNKNOWN_REASON,
-  recurringSubmissionOutcomeUnknown,
   sendSubscriptionInstructions,
 } from "./shared";
 
@@ -664,12 +664,30 @@ async function journalRecurringPaymentCollectionError(input: {
     return;
   }
 
-  if (!input.submittedSignature && isRecurringSubmissionOutcomeUnknown(input.error)) {
+  if (!input.submittedSignature && isTransferSubmissionOutcomeUnknown(input.error)) {
     await parkRecurringPaymentCollection(input);
     return;
   }
 
   await markRecurringPaymentCollectionFailedAtomically(input);
+}
+
+/**
+ * Submit a collection through the shared fence: a provably pre-broadcast
+ * rejection stays a plain failure, anything else becomes the outcome-unknown
+ * conflict that parks the cycle.
+ */
+async function submitCollection(
+  input: Parameters<typeof sendSubscriptionInstructions>[0]
+): Promise<Signature> {
+  try {
+    return await sendSubscriptionInstructions(input);
+  } catch (error) {
+    if (isPreBroadcastRejection(error)) {
+      throw error;
+    }
+    throw transferSubmissionOutcomeUnknown(error);
+  }
 }
 
 /**
@@ -680,21 +698,14 @@ async function journalRecurringPaymentCollectionError(input: {
  * that may already have settled on chain. The marker also stops the
  * pending-transfers job from timing the transfer out into a false `failed`.
  */
-async function parkRecurringPaymentCollection(input: {
-  env: Env;
-  paymentsRepo: ReturnType<typeof createPaymentsRepository>;
-  organizationId: string;
-  projectId: string;
-  recurringPaymentId: string;
-  attempt: PaymentSubscriptionCollectionAttemptRow;
-  transfer: PaymentTransferRow | null;
-  error: unknown;
-}): Promise<void> {
+async function parkRecurringPaymentCollection(
+  input: Parameters<typeof journalRecurringPaymentCollectionError>[0]
+): Promise<void> {
   getLogger().warn(
     {
       attempt_id: input.attempt.id,
       error: activationErrorMessage(input.error),
-      reason: RECURRING_SUBMISSION_OUTCOME_UNKNOWN_REASON,
+      reason: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
       recurring_payment_id: input.recurringPaymentId,
       transfer_id: input.transfer?.id ?? null,
     },
@@ -808,8 +819,10 @@ async function recoverRecurringPaymentCollection(input: {
     // have broadcast without returning one. Failing it here would reschedule
     // the cycle and re-charge the payer, so it stays parked until an operator
     // reconciles it on chain.
-    if (hasSubmissionOutcomeUnknownMarker(transfer.provider_data)) {
-      throw recurringSubmissionOutcomeUnknown();
+    if (transfer.provider_data?.submission_outcome === "unknown") {
+      throw transferSubmissionOutcomeUnknown(
+        new Error("Recurring payment collection is parked for manual reconciliation")
+      );
     }
     // A fresh unsigned attempt means another request is between local persistence and Kora
     // submission; wait for it to either submit or become stale instead of creating a second transfer.
@@ -1224,7 +1237,10 @@ export async function collectRecurringPayment(input: {
       throw new AppError("CONFLICT", "Recurring payment is no longer active");
     }
 
-    const signature = await sendSubscriptionInstructions({
+    // Collection is the one recurring path that parks instead of failing: a
+    // journaled failure reschedules the cycle, and rescheduling re-charges the
+    // payer. The other recurring flows keep their own error handling.
+    const signature = await submitCollection({
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,

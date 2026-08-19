@@ -14,9 +14,9 @@ import {
   resumeRecurringPayment,
 } from "@/services/payments/recurring-payments";
 import {
-  isRecurringSubmissionOutcomeUnknown,
-  RECURRING_SUBMISSION_OUTCOME_UNKNOWN_REASON,
-} from "@/services/payments/recurring-payments/shared";
+  isTransferSubmissionOutcomeUnknown,
+  TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
+} from "@/services/payments/submission-outcome";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 
@@ -80,26 +80,6 @@ function shouldSkipCollectionError(error: unknown): boolean {
   return error instanceof AppError && error.code === "CONFLICT";
 }
 
-/**
- * A collection parked for manual reconciliation is a skip for this tick, but a
- * silent one would let the payer's subscription stall unnoticed until someone
- * reads the transfers table.
- */
-function warnIfParkedForReconciliation(row: PaymentRecurringPaymentRow, error: unknown): void {
-  if (!isRecurringSubmissionOutcomeUnknown(error)) {
-    return;
-  }
-  getLogger().warn(
-    {
-      organization_id: row.organization_id,
-      project_id: row.project_id,
-      recurring_payment_id: row.id,
-      reason: RECURRING_SUBMISSION_OUTCOME_UNKNOWN_REASON,
-    },
-    "collectDueRecurringPayments: collection parked, awaiting manual reconciliation"
-  );
-}
-
 function logCronFailure(message: string, row: PaymentRecurringPaymentRow, error: unknown): void {
   getLogger().error(
     {
@@ -133,7 +113,19 @@ async function collectRow(
     return "ok";
   } catch (error) {
     if (shouldSkipCollectionError(error)) {
-      warnIfParkedForReconciliation(row, error);
+      if (isTransferSubmissionOutcomeUnknown(error)) {
+        // A parked cycle is a skip for this tick, but a silent one would let
+        // the payer's subscription stall unnoticed.
+        getLogger().warn(
+          {
+            organization_id: row.organization_id,
+            project_id: row.project_id,
+            recurring_payment_id: row.id,
+            reason: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
+          },
+          "collectDueRecurringPayments: collection parked, awaiting manual reconciliation"
+        );
+      }
       return "skipped";
     }
     logCronFailure("collectDueRecurringPayments: failed to collect recurring payment", row, error);
@@ -259,6 +251,15 @@ export async function collectDueRecurringPayments(
           AND rp.next_collection_due_at IS NOT NULL
           AND a.status IN ('processing', 'confirmed')
           AND (a.status = 'confirmed' OR a.updated_at <= ?)
+          -- A parked cycle waits for an operator and is never re-collected, so
+          -- its frozen updated_at would otherwise keep it permanently at the
+          -- head of this oldest-first window and starve genuinely stale ones.
+          AND NOT EXISTS (
+            SELECT 1
+              FROM payment_transfers parked
+             WHERE parked.id = a.transfer_id
+               AND parked.provider_data ->> 'submission_outcome' = 'unknown'
+          )
        ) recoverable_attempts
       WHERE attempt_rank = 1
       ORDER BY attempt_updated_at ASC

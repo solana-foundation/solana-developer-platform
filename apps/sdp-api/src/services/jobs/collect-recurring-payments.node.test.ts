@@ -205,8 +205,8 @@ describe("collectDueRecurringPayments", () => {
     // but a silent one would let a payer's subscription stall unnoticed.
     mocks.rows.due = [recurringRow("active")];
     mocks.collectRecurringPayment.mockRejectedValue(
-      new AppError("CONFLICT", "Recurring payment collection outcome is unknown", {
-        reason: "recurring_collection_outcome_unknown",
+      new AppError("CONFLICT", "Transfer submission outcome is unknown", {
+        reason: "transfer_submission_outcome_unknown",
       })
     );
 
@@ -214,7 +214,7 @@ describe("collectDueRecurringPayments", () => {
 
     expect(result).toEqual({ recovered: 0, collected: 0, failed: 0, skipped: 1 });
     expect(mocks.logWarn).toHaveBeenCalledWith(
-      expect.objectContaining({ reason: "recurring_collection_outcome_unknown" }),
+      expect.objectContaining({ reason: "transfer_submission_outcome_unknown" }),
       expect.stringContaining("manual reconciliation")
     );
   });

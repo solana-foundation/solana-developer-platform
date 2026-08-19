@@ -1,4 +1,6 @@
+import type { FeePaymentPort } from "@sdp/payments/fee-payment";
 import { FeePaymentError, type FeePaymentErrorCode } from "@sdp/payments/fee-payment";
+import { AppError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 
 /**
@@ -67,15 +69,6 @@ export function isPreBroadcastRejection(error: unknown): boolean {
   return /custom program error:/i.test(message);
 }
 
-/** True when a transfer row's provider_data carries the outcome-unknown marker. */
-export function hasSubmissionOutcomeUnknownMarker(providerData: unknown): boolean {
-  return (
-    typeof providerData === "object" &&
-    providerData !== null &&
-    (providerData as Record<string, unknown>).submission_outcome === "unknown"
-  );
-}
-
 /**
  * Persist the manual-reconciliation marker without ever throwing: a DB blip
  * here is likely correlated with the provider trouble that made the outcome
@@ -103,5 +96,45 @@ export async function persistOutcomeUnknownMarker(
         "failed to persist the submission-outcome-unknown marker; the row may auto-fail — reconcile manually"
       );
     }
+  }
+}
+
+/**
+ * The outcome-unknown conflict every money path throws and every consumer
+ * detects. The provider failure travels as `cause` — server-side only, never
+ * serialized to the client — so the forced manual reconciliation starts from
+ * the real error instead of this constant sentence.
+ */
+export function transferSubmissionOutcomeUnknown(cause: unknown): AppError {
+  const error = new AppError("CONFLICT", TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR, {
+    reason: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
+  });
+  error.cause = cause;
+  return error;
+}
+
+export function isTransferSubmissionOutcomeUnknown(error: unknown): error is AppError {
+  return (
+    error instanceof AppError &&
+    error.details?.reason === TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON
+  );
+}
+
+/**
+ * Submit through one closed chokepoint: a provably pre-broadcast provider
+ * rejection passes through for a plain terminal failure, anything else becomes
+ * the outcome-unknown conflict the caller must park and rethrow.
+ */
+export async function signAndSendClosed(
+  feePayment: Pick<FeePaymentPort, "signAndSend">,
+  txBytes: Uint8Array
+) {
+  try {
+    return await feePayment.signAndSend(txBytes);
+  } catch (error) {
+    if (isPreBroadcastRejection(error)) {
+      throw error;
+    }
+    throw transferSubmissionOutcomeUnknown(error);
   }
 }

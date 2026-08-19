@@ -222,16 +222,8 @@ wallet transfer type — but each needs a different second step.
 #### Parked batch chunks
 
 A chunk's transfer carries the marker and its recipients stay `processing`, so the batch never
-settles. Resolve the chunk exactly as a single transfer (find the transaction on chain, then either
-record the signature and drop the marker, or mark it failed). The recipients and the parent batch
-follow from the chunk on the next `trackPendingTransfers` run; check with:
-
-```sql
-SELECT r.status, count(*)
-FROM payment_transfer_recipients r
-WHERE r.batch_id = :batch_id
-GROUP BY r.status;
-```
+settles. Resolve the chunk exactly as a single transfer above; the recipients and the parent batch
+then follow from it on the next `trackPendingTransfers` run.
 
 #### Parked recurring collections
 
