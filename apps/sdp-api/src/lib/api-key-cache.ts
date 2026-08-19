@@ -20,14 +20,11 @@
  * expiry (after which fills re-read the authoritative row anyway).
  */
 
-import type { ApiKeyStatus, ApiKeyWalletBinding, CachedApiKey } from "@sdp/types";
+import type { ApiKeyStatus, CachedApiKey } from "@sdp/types";
 import { getPermissionsForApiKeyRole, type Permission } from "@sdp/types";
-import {
-  parseOptionalPostgresJson,
-  parsePostgresJson,
-  parsePostgresJsonOr,
-} from "@/db/postgres-utils";
+import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
 import type { KVStore } from "@/runtime/kv";
+import { loadApiKeyWalletAuthorization } from "@/services/api-key-wallets.service";
 
 export const API_KEY_CACHE_TTL_SECONDS = 3600; // 1 hour
 
@@ -39,19 +36,6 @@ export function apiKeyCacheKey(keyHash: string): string {
 
 function isTerminalStatus(status: ApiKeyStatus): boolean {
   return TERMINAL_STATUSES.has(status);
-}
-
-function safeParsePermissionsArray(value: string | null | undefined): Permission[] {
-  if (!value) {
-    return [];
-  }
-
-  const parsed = parsePostgresJsonOr<unknown>(value, []);
-  if (!Array.isArray(parsed)) {
-    return [];
-  }
-
-  return parsed.filter((entry): entry is Permission => typeof entry === "string");
 }
 
 /** Read the authoritative key row (and wallet bindings) from Postgres. */
@@ -91,27 +75,14 @@ export async function loadCachedApiKeyFromDb(
     return null;
   }
 
-  const walletBindingsResult = await db
-    .prepare(
-      `SELECT wallet_id, permissions
-       FROM api_key_wallet_permissions
-       WHERE api_key_id = ?
-       ORDER BY created_at ASC`
-    )
-    .bind(result.id)
-    .all<{ wallet_id: string; permissions: string }>();
-
-  const walletBindings: ApiKeyWalletBinding[] = (walletBindingsResult.results ?? []).map((row) => {
-    // Stored permissions are authoritative: an explicitly empty array grants
-    // nothing, and unparseable values fail closed — never widen to "*".
-    return {
-      walletId: row.wallet_id,
-      permissions: safeParsePermissionsArray(row.permissions),
-    };
-  });
-
-  const signingWalletIds = walletBindings.map((binding) => binding.walletId);
-  const signingWalletId = result.signing_wallet_id ?? signingWalletIds[0] ?? null;
+  const { walletScope, signingWalletId, signingWalletIds, walletBindings } =
+    await loadApiKeyWalletAuthorization(
+      db,
+      result.id,
+      result.organization_id,
+      result.project_id,
+      result.signing_wallet_id
+    );
 
   return {
     id: result.id,
@@ -124,6 +95,7 @@ export async function loadCachedApiKeyFromDb(
     environment: result.environment as "sandbox" | "production",
     rateLimitTier: result.rate_limit_tier as "standard" | "elevated" | "unlimited",
     allowedIps: parseOptionalPostgresJson<string[]>(result.allowed_ips),
+    walletScope,
     signingWalletId,
     signingWalletIds,
     walletBindings,
@@ -135,21 +107,35 @@ export async function loadCachedApiKeyFromDb(
 }
 
 /**
- * Payloads written before rotation-deadline enforcement (or corrupted ones)
- * are treated as cache misses by every reader; they must never be adopted as
- * authoritative state.
+ * The single trust predicate for cached entries, shared by the auth
+ * middleware's reader and this module's fill adoption so they can never
+ * drift. Rejects payloads written before rotation-deadline,
+ * organization-status, or wallet-scope enforcement (a deploy must not extend
+ * an old key's validity), bindings missing their custody-wallet resolution,
+ * and pending installs — a fill's snapshot is not trustworthy until its
+ * post-install Postgres verification clears it.
+ */
+export function isTrustedCachedApiKey(entry: CachedApiKey): boolean {
+  return (
+    !entry.pendingVerification &&
+    Object.hasOwn(entry, "rotationDeadline") &&
+    Object.hasOwn(entry, "organizationStatus") &&
+    (entry.walletScope === "all" || entry.walletScope === "selected") &&
+    (entry.walletBindings ?? []).every(
+      (binding) => typeof binding.custodyWalletId === "string" && binding.custodyWalletId.length > 0
+    )
+  );
+}
+
+/**
+ * Payloads that fail the trust predicate (legacy, pending, or corrupted)
+ * are treated as cache misses by every reader; they must never be adopted
+ * as authoritative state.
  */
 function tryParseAuthoritativeEntry(raw: string): CachedApiKey | null {
   try {
     const parsed = JSON.parse(raw) as CachedApiKey;
-    // Pending installs are another fill's not-yet-verified snapshot — no
-    // more trustworthy than this fill's own.
-    if (parsed.pendingVerification) {
-      return null;
-    }
-    return Object.hasOwn(parsed, "rotationDeadline") && Object.hasOwn(parsed, "organizationStatus")
-      ? parsed
-      : null;
+    return isTrustedCachedApiKey(parsed) ? parsed : null;
   } catch {
     return null;
   }
@@ -175,6 +161,13 @@ export async function fillApiKeyCache(
   entry: CachedApiKey
 ): Promise<CachedApiKey> {
   const cacheKey = apiKeyCacheKey(keyHash);
+  // Deploy-compat: readers from the previous deploy interpret an empty
+  // binding list as unrestricted, so a selected-scope key without bindings
+  // must never be cached. Fills of that key class authenticate from their
+  // own DB read and leave the slot empty (a miss for every reader).
+  if (entry.walletScope === "selected" && (entry.walletBindings ?? []).length === 0) {
+    return entry;
+  }
   // Installs go in marked pending: readers treat them as misses until the
   // post-install Postgres read clears them. Publishing a trusted entry
   // straight from the CAS would let concurrent cache-hit readers authorize
@@ -361,6 +354,19 @@ export async function refreshApiKeyCache(
     return;
   }
 
+  // Deploy-compat, mirroring the fill: a non-terminal selected-scope entry
+  // without bindings reads as unrestricted to previous-deploy readers, so
+  // empty the slot instead of writing one. New-code fills skip this key
+  // class too, so the slot stays a miss rather than inviting a stale fill.
+  if (
+    !isTerminalStatus(fresh.status) &&
+    fresh.walletScope === "selected" &&
+    (fresh.walletBindings ?? []).length === 0
+  ) {
+    await kv.delete(cacheKey);
+    return;
+  }
+
   await overwriteWithAuthoritativeState(kv, cacheKey, fresh);
 }
 
@@ -383,6 +389,7 @@ async function writeRevokedTombstone(kv: KVStore, cacheKey: string): Promise<voi
     environment: "sandbox",
     rateLimitTier: "standard",
     allowedIps: null,
+    walletScope: "all",
     signingWalletId: null,
     signingWalletIds: [],
     walletBindings: [],

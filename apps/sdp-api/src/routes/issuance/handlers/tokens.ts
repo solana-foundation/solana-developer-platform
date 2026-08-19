@@ -6,6 +6,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { badRequest, badRequestQuery, conflict, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { createOrgSigner } from "@/services/solana";
@@ -15,7 +16,7 @@ import {
   getTenantTokenService,
   requireProjectScope,
 } from "../helpers";
-import { createTokenSchema, listTokensQuerySchema, updateTokenSchema } from "../schemas";
+import { type createTokenSchema, listTokensQuerySchema, type updateTokenSchema } from "../schemas";
 import { resolveAuthoritySigner, resolveCurrentAuthorityForRole } from "./authority-resolution";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -49,24 +50,17 @@ function getOnChainMetadataPatch(input: {
   return patch;
 }
 
-export const createToken = async (c: AppContext) => {
+export const createToken = async (c: ValidatedBodyContext<typeof createTokenSchema>) => {
   const { auth, projectId, orgId } = requireProjectScope(c);
 
-  const body = await c.req.json();
-  const parsed = createTokenSchema.safeParse(body);
+  const body = c.req.valid("json");
 
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-
-  const normalizedTemplate = normalizeTemplateId(parsed.data.template);
+  const normalizedTemplate = normalizeTemplateId(body.template);
   const resolved = resolveTemplateConfig(
     normalizedTemplate,
-    parsed.data.overrides,
-    parsed.data.requiresAllowlist,
-    parsed.data.decimals
+    body.overrides,
+    body.requiresAllowlist,
+    body.decimals
   );
 
   if (resolved.errors.length > 0) {
@@ -76,7 +70,7 @@ export const createToken = async (c: AppContext) => {
   }
 
   const tokenService = getTenantTokenService(c);
-  const signingWalletId = resolveApiKeySigningWalletId(auth, parsed.data.signingWalletId, [
+  const signingWalletId = resolveApiKeySigningWalletId(auth, body.signingWalletId, [
     "tokens:write",
   ]);
 
@@ -89,17 +83,17 @@ export const createToken = async (c: AppContext) => {
     organizationId: orgId,
     createdBy: auth.id,
     signingWalletId,
-    name: parsed.data.name,
-    symbol: parsed.data.symbol,
+    name: body.name,
+    symbol: body.symbol,
     decimals: resolved.decimals,
-    description: parsed.data.description,
-    uri: parsed.data.uri,
-    imageUrl: parsed.data.imageUrl,
+    description: body.description,
+    uri: body.uri,
+    imageUrl: body.imageUrl,
     template: resolved.template,
     extensions: resolved.extensions ?? undefined,
-    maxSupply: parsed.data.maxSupply,
-    isMintable: parsed.data.isMintable,
-    isFreezable: parsed.data.isFreezable,
+    maxSupply: body.maxSupply,
+    isMintable: body.isMintable,
+    isFreezable: body.isFreezable,
     requiresAllowlist: resolved.requiresAllowlist,
   });
 
@@ -192,18 +186,11 @@ export const getToken = async (c: AppContext) => {
   return success(c, response);
 };
 
-export const updateToken = async (c: AppContext) => {
+export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
 
-  const body = await c.req.json();
-  const parsed = updateTokenSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const tokenService = getTenantTokenService(c);
 
@@ -226,7 +213,7 @@ export const updateToken = async (c: AppContext) => {
   // Access-control enforcement is baked into the mint at deploy; the flag only
   // makes sense to change while the token is still an undeployed draft.
   if (
-    parsed.data.requiresAllowlist !== undefined &&
+    body.requiresAllowlist !== undefined &&
     (existing.mintAddress || existing.status !== "pending")
   ) {
     throw badRequest("requiresAllowlist cannot be changed after deployment");
@@ -235,7 +222,7 @@ export const updateToken = async (c: AppContext) => {
   // Symbol and decimals define the mint itself, so they're immutable once the
   // token is deployed on-chain — only editable while it's an undeployed draft.
   if (
-    (parsed.data.symbol !== undefined || parsed.data.decimals !== undefined) &&
+    (body.symbol !== undefined || body.decimals !== undefined) &&
     (existing.mintAddress || existing.status !== "pending")
   ) {
     throw badRequest("symbol and decimals cannot be changed after deployment");
@@ -245,7 +232,7 @@ export const updateToken = async (c: AppContext) => {
   // only do while it holds the mint authority. Once that authority is revoked
   // (lock-supply), the total can never change again and neither can the cap.
   if (
-    parsed.data.maxSupply !== undefined &&
+    body.maxSupply !== undefined &&
     existing.mintAddress &&
     (!existing.isMintable || !existing.mintAuthority)
   ) {
@@ -257,7 +244,7 @@ export const updateToken = async (c: AppContext) => {
   let authoritativeEffectCompleted = false;
 
   try {
-    const metadataPatch = getOnChainMetadataPatch(parsed.data);
+    const metadataPatch = getOnChainMetadataPatch(body);
     const shouldUpdateMetadataOnChain =
       Boolean(existing.mintAddress) &&
       existing.status !== "pending" &&
@@ -268,7 +255,7 @@ export const updateToken = async (c: AppContext) => {
       resourceType: "token",
       resourceId: tokenId,
       metadata: {
-        ...parsed.data,
+        ...body,
         onChainMetadataUpdatePlanned: shouldUpdateMetadataOnChain,
       },
     });
@@ -308,7 +295,7 @@ export const updateToken = async (c: AppContext) => {
       metadataUpdateSlot = result ? result.slot.toString() : null;
     }
 
-    const token = await tokenService.updateToken(tokenId, parsed.data, {
+    const token = await tokenService.updateToken(tokenId, body, {
       status: existing.status,
       mintAddress: existing.mintAddress,
     });

@@ -1,14 +1,14 @@
 import type { ListProjectsResponse, ProjectResponse, UpdateProjectRequest } from "@sdp/types";
 import type { Context } from "hono";
-import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { badRequest, notFound } from "@/lib/errors";
+import { notFound } from "@/lib/errors";
 import { noContent, success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
 import { ProjectService } from "@/services/project.service";
 import type { Env } from "@/types/env";
-import { updateProjectSchema } from "../schemas";
+import type { updateProjectSchema } from "../schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -53,18 +53,11 @@ export const getProject = async (c: AppContext) => {
   return success(c, response);
 };
 
-export const updateProject = async (c: AppContext) => {
+export const updateProject = async (c: ValidatedBodyContext<typeof updateProjectSchema>) => {
   const { projectId } = c.req.param();
   const auth = getAuth(c);
 
-  const body = await c.req.json();
-  const parsed = updateProjectSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const projectService = new ProjectService(getDb(c.env));
 
@@ -74,10 +67,7 @@ export const updateProject = async (c: AppContext) => {
     throw notFound("Project");
   }
 
-  const project = await projectService.updateProject(
-    projectId,
-    parsed.data as UpdateProjectRequest
-  );
+  const project = await projectService.updateProject(projectId, body as UpdateProjectRequest);
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));
@@ -85,7 +75,7 @@ export const updateProject = async (c: AppContext) => {
     action: "update",
     resourceType: "project",
     resourceId: projectId,
-    metadata: parsed.data,
+    metadata: body,
   });
 
   const response: ProjectResponse = { project };

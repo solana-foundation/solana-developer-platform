@@ -14,13 +14,19 @@ import { hashString } from "@sdp/payments/hash";
 import type {
   ApiKeyEnvironment,
   ApiKeyRole,
-  ApiKeyWalletBinding,
+  ApiKeyWalletAuthorizationBinding,
+  ApiKeyWalletScope,
   CachedApiKey,
   Permission,
 } from "@sdp/types";
 import type { Context, Next } from "hono";
 import { getDb } from "@/db";
-import { apiKeyCacheKey, fillApiKeyCache, loadCachedApiKeyFromDb } from "@/lib/api-key-cache";
+import {
+  apiKeyCacheKey,
+  fillApiKeyCache,
+  isTrustedCachedApiKey,
+  loadCachedApiKeyFromDb,
+} from "@/lib/api-key-cache";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
 import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
 import { getClientIp } from "@/lib/client-ip";
@@ -55,9 +61,10 @@ interface ApiKeyContext {
   role: ApiKeyRole;
   permissions: Permission[];
   environment: ApiKeyEnvironment;
+  walletScope: ApiKeyWalletScope;
   signingWalletId: string | null;
   signingWalletIds: string[];
-  walletBindings: ApiKeyWalletBinding[];
+  walletBindings: Array<ApiKeyWalletAuthorizationBinding & { custodyWalletId: string }>;
 }
 
 function extractBearerToken(c: Context<{ Bindings: Env }>): string | null {
@@ -80,19 +87,11 @@ function looksLikeJwt(token: string): boolean {
 /** Look up API key in KV cache */
 async function getFromKV(kv: KVStore, keyHash: string): Promise<CachedApiKey | null> {
   const cached = await kv.get<CachedApiKey>(apiKeyCacheKey(keyHash), "json");
-  // Payloads written before rotation-deadline or organization-status
-  // enforcement do not contain these properties. Treat them as misses so a
-  // deploy cannot extend an old key's validity until the legacy one-hour
-  // cache entry expires. Pending installs are misses too: a fill's snapshot
-  // is not trustworthy until its post-install Postgres verification clears
-  // it — cache eviction can have erased a newer revocation's terminal entry
-  // before the fill's CAS won the slot.
-  return cached &&
-    !cached.pendingVerification &&
-    Object.hasOwn(cached, "rotationDeadline") &&
-    Object.hasOwn(cached, "organizationStatus")
-    ? cached
-    : null;
+  // The shared predicate treats legacy payloads (pre rotation-deadline,
+  // organization-status, or wallet-scope enforcement) and pending installs
+  // as misses, so a deploy cannot extend an old key's validity and a fill's
+  // not-yet-verified snapshot never authenticates a cache-hit reader.
+  return cached && isTrustedCachedApiKey(cached) ? cached : null;
 }
 
 async function isKnownInvalidKey(kv: KVStore, keyHash: string): Promise<boolean> {
@@ -224,30 +223,32 @@ export function scheduleApiKeyLastUsedUpdate(
 }
 
 function normalizeWalletBindings(cachedKey: CachedApiKey): {
+  walletScope: ApiKeyWalletScope;
   signingWalletId: string | null;
   signingWalletIds: string[];
-  walletBindings: ApiKeyWalletBinding[];
+  walletBindings: Array<ApiKeyWalletAuthorizationBinding & { custodyWalletId: string }>;
 } {
   const rawBindings = cachedKey.walletBindings ?? [];
   const walletBindings = rawBindings
-    .filter((binding) => typeof binding.walletId === "string" && binding.walletId.length > 0)
+    .filter(
+      (binding): binding is ApiKeyWalletAuthorizationBinding & { custodyWalletId: string } =>
+        typeof binding.walletId === "string" &&
+        binding.walletId.length > 0 &&
+        typeof binding.custodyWalletId === "string" &&
+        binding.custodyWalletId.length > 0
+    )
     .map((binding) => ({
       walletId: binding.walletId,
-      // An explicitly empty list grants nothing; a missing one fails closed.
+      custodyWalletId: binding.custodyWalletId,
+      // An explicitly empty list grants nothing; it must never widen to "*".
       permissions: binding.permissions ?? ([] as Permission[]),
     }));
-
-  if (walletBindings.length === 0 && cachedKey.signingWalletId) {
-    walletBindings.push({
-      walletId: cachedKey.signingWalletId,
-      permissions: ["*"],
-    });
-  }
 
   const signingWalletIds = walletBindings.map((binding) => binding.walletId);
   const signingWalletId = cachedKey.signingWalletId ?? signingWalletIds[0] ?? null;
 
   return {
+    walletScope: cachedKey.walletScope as ApiKeyWalletScope,
     signingWalletId,
     signingWalletIds,
     walletBindings,
@@ -292,10 +293,10 @@ export function authMiddleware() {
       throw new AppError("INVALID_API_KEY", "Invalid API key");
     }
 
-    // A key whose organization is gone must not authenticate even if its own
-    // row still says active: a key created or rotated after an organization
-    // deletion enumerated that org's keys is covered by neither the deletion's
-    // revocation nor its cache refresh.
+    // Reject on organization status before key status: even when the key
+    // row still says active, a key created or rotated after an organization
+    // deletion enumerated that org's keys is covered by neither the
+    // deletion's revocation nor its cache refresh.
     if (cachedKey.organizationStatus !== "active") {
       throw new AppError("REVOKED_API_KEY");
     }
@@ -340,6 +341,7 @@ export function authMiddleware() {
       role: cachedKey.role,
       permissions: cachedKey.permissions,
       environment: cachedKey.environment,
+      walletScope: normalizedWalletBindings.walletScope,
       signingWalletId: normalizedWalletBindings.signingWalletId,
       signingWalletIds: normalizedWalletBindings.signingWalletIds,
       walletBindings: normalizedWalletBindings.walletBindings,

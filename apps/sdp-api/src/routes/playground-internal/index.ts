@@ -2,12 +2,13 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { requireProjectId } from "@/lib/auth";
-import { badRequest, forbidden, unauthorized } from "@/lib/errors";
+import { forbidden, unauthorized } from "@/lib/errors";
 import { noContent } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { type ValidatedBodyContext, validateBody } from "@/middleware/validate";
 import { ApiKeyService } from "@/services/api-key.service";
 import type { Env } from "@/types/env";
 
@@ -37,12 +38,10 @@ playgroundInternal.use("*", projectContextMiddleware());
 playgroundInternal.post(
   "/api-key/verify",
   requirePermissions("api-keys:read"),
+  validateBody(verifyApiKeySchema),
   meteredQuota({ name: "playground-verify", actorMax: 60, orgMax: 240 }),
-  async (c) => {
-    const parsed = verifyApiKeySchema.safeParse(await c.req.json());
-    if (!parsed.success) {
-      throw badRequest("Invalid API key");
-    }
+  async (c: ValidatedBodyContext<typeof verifyApiKeySchema>) => {
+    const { apiKey } = c.req.valid("json");
 
     const actor = c.get("clerk") ?? c.get("session");
     if (!actor) {
@@ -50,7 +49,7 @@ playgroundInternal.post(
     }
 
     const owned = await new ApiKeyService(getDb(c.env), getRequestTenantScope(c)).ownsUsableApiKey({
-      apiKey: parsed.data.apiKey,
+      apiKey,
       organizationId: actor.organizationId,
       projectId: requireProjectId(c),
       pepper: c.env.API_KEY_PEPPER,

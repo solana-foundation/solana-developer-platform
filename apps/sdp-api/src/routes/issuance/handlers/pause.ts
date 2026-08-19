@@ -1,29 +1,26 @@
 import { assertValidAddress } from "@sdp/solana/address";
 import { MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic-sdk";
-import type { Context } from "hono";
-import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { createOrgSigner } from "@/services/solana";
 import type { TokenService } from "@/services/token.service";
 import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
-import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
   getTenantTokenService,
   requireProjectScope,
 } from "../helpers";
-import { pauseTokenSchema } from "../schemas";
+import type { pauseTokenSchema } from "../schemas";
 import { buildIdempotencyMetadata } from "./idempotency";
 import {
   persistSettledTransactionThenOutcome,
   recoverSettledTransactionReplay,
 } from "./settled-transaction";
 
-type AppContext = Context<{ Bindings: Env }>;
 type TokenRecord = Awaited<ReturnType<TokenService["getToken"]>>;
 
 const resolvePauseAuthority = (token: TokenRecord): string | null => {
@@ -33,18 +30,11 @@ const resolvePauseAuthority = (token: TokenRecord): string | null => {
   return token.extensions?.pausable?.authority ?? token.mintAuthority ?? null;
 };
 
-export const pauseToken = async (c: AppContext) => {
+export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
 
-  const body = await c.req.json();
-  const parsed = pauseTokenSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
@@ -75,7 +65,7 @@ export const pauseToken = async (c: AppContext) => {
     tokenId,
     operation: "pause",
     mode: "execute",
-    params: parsed.data,
+    params: body,
   });
 
   const { transaction: tx, replayed } = await tokenService.createTransaction({
@@ -190,18 +180,11 @@ export const pauseToken = async (c: AppContext) => {
   }
 };
 
-export const unpauseToken = async (c: AppContext) => {
+export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
 
-  const body = await c.req.json();
-  const parsed = pauseTokenSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
@@ -232,7 +215,7 @@ export const unpauseToken = async (c: AppContext) => {
     tokenId,
     operation: "unpause",
     mode: "execute",
-    params: parsed.data,
+    params: body,
   });
 
   const { transaction: tx, replayed } = await tokenService.createTransaction({

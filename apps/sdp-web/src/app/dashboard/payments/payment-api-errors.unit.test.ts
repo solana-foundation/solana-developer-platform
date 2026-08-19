@@ -42,6 +42,14 @@ describe("getPaymentApiError", () => {
     expect(getPaymentApiError({ message: "Gateway timeout" }, FALLBACK)).toBe("Gateway timeout");
     expect(getPaymentApiError({}, FALLBACK)).toBe(FALLBACK);
   });
+
+  it("falls back for malformed error envelopes and ignores malformed details", () => {
+    expect(getPaymentApiError(null, FALLBACK)).toBe(FALLBACK);
+    expect(getPaymentApiError({ error: null }, FALLBACK)).toBe(FALLBACK);
+    expect(
+      getPaymentApiError({ error: { message: "Denied", details: "wrong shape" } }, FALLBACK)
+    ).toBe("Denied");
+  });
 });
 
 describe("parsePaymentApiErrorText", () => {

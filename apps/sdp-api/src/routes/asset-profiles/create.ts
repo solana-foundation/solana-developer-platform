@@ -1,7 +1,6 @@
 import { resolveSettingsToExtensions } from "@sdp/issuance/capabilities";
 import { normalizeTemplateId, resolveTemplateConfig } from "@sdp/issuance/templates";
 import { getAssetTypeRegistryEntry, type TokenWithAssetProfileResponse } from "@sdp/types";
-import { z } from "zod";
 import { asTransactionalClient, getDb } from "@/db";
 import { createPostgresAssetProfilesRepository } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
@@ -16,30 +15,25 @@ import {
 import { projectPublicMetadata } from "@/lib/issuance/public-metadata";
 import { created } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { createOrgSigner } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
-import { createTokenWithAssetProfileSchema } from "../issuance/schemas";
-import type { AppContext } from "./context";
+import type { createTokenWithAssetProfileSchema } from "../issuance/schemas";
 import { mapToAssetProfile } from "./handlers";
 
 // POST /v1/issuance/asset-profiles: create token and profile in one transaction.
-export const createTokenWithAssetProfile = async (c: AppContext) => {
+export const createTokenWithAssetProfile = async (
+  c: ValidatedBodyContext<typeof createTokenWithAssetProfileSchema>
+) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const orgId = auth.organizationId;
 
-  const body = await c.req.json();
-  const parsed = createTokenWithAssetProfileSchema.safeParse(body);
+  const body = c.req.valid("json");
 
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-
-  const { assetCategory, assetType, issuanceMetadata, ...tokenInput } = parsed.data;
+  const { assetCategory, assetType, issuanceMetadata, ...tokenInput } = body;
 
   // Validate type early (before transaction) to avoid token insert on bad type.
   const registryEntry = getAssetTypeRegistryEntry(assetCategory, assetType);

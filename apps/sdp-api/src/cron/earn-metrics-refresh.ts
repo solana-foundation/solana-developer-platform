@@ -113,7 +113,7 @@ async function withDeadline<T>(work: Promise<T>, deadlineMs: number): Promise<T 
 
 export async function refreshEarnStrategyMetrics(env: Env): Promise<void> {
   const repo = createEarnRepository(env);
-  const providerEnv = env as unknown as Record<string, string | undefined>;
+  const providerEnv = env;
 
   for (const environment of REFRESHED_ENVIRONMENTS) {
     for (const client of Object.values(EARN_PROVIDER_CLIENTS)) {

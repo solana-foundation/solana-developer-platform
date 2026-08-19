@@ -26,6 +26,7 @@ function entryWithStatus(status: CachedApiKey["status"]): CachedApiKey {
     environment: "sandbox",
     rateLimitTier: "standard",
     allowedIps: null,
+    walletScope: "all",
     signingWalletId: null,
     signingWalletIds: [],
     walletBindings: [],

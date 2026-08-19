@@ -14,7 +14,6 @@ import {
   isAssetProfilesEnabled,
   isEarnEnabled,
   isPrivateChannelsEnabled,
-  isRecurringPaymentCollectionEnabled,
 } from "@/lib/feature-flags";
 import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
@@ -25,6 +24,10 @@ import {
 } from "./approved-wallet-operations";
 import { EARN_CATALOGUE_SYNC_CRON, runEarnCatalogueSync } from "./earn-catalogue-sync";
 import { EARN_METRICS_REFRESH_CRON, runEarnMetricsRefresh } from "./earn-metrics-refresh";
+import {
+  EARN_VAULT_MOVEMENTS_CRON,
+  runEarnVaultMovementsReconciliation,
+} from "./earn-vault-movements";
 import { PENDING_DEPOSITS_CRON, runPendingDepositsReconciliation } from "./pending-deposits";
 import { PENDING_TRANSFERS_CRON, runPendingTransfersReconciliation } from "./pending-transfers";
 import {
@@ -132,20 +135,18 @@ export function startCron(deps: CronDeps): CronHandle | null {
     })
   );
 
-  if (isRecurringPaymentCollectionEnabled(deps.env)) {
-    tasks.push(
-      schedule(RECURRING_PAYMENTS_COLLECTION_CRON, () => {
-        if (stopping) {
-          return;
-        }
-        runRecurringPaymentsCollection({
-          env: deps.env,
-          bg: deps.bg,
-          observability: deps.observability,
-        });
-      })
-    );
-  }
+  tasks.push(
+    schedule(RECURRING_PAYMENTS_COLLECTION_CRON, () => {
+      if (stopping) {
+        return;
+      }
+      runRecurringPaymentsCollection({
+        env: deps.env,
+        bg: deps.bg,
+        observability: deps.observability,
+      });
+    })
+  );
 
   if (isAssetProfilesEnabled(deps.env)) {
     tasks.push(
@@ -235,6 +236,19 @@ export function startCron(deps: CronDeps): CronHandle | null {
         return;
       }
       runWorkflowSecretRetirements({
+        env: deps.env,
+        bg: deps.bg,
+        observability: deps.observability,
+      });
+    })
+  );
+
+  // Durable signed intents outlive the feature flag that admitted them. Keep
+  // draining their outbox even when Earn is disabled during an incident.
+  tasks.push(
+    schedule(EARN_VAULT_MOVEMENTS_CRON, () => {
+      if (stopping) return;
+      runEarnVaultMovementsReconciliation({
         env: deps.env,
         bg: deps.bg,
         observability: deps.observability,

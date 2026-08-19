@@ -213,7 +213,6 @@ export interface Env {
   MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN?: string;
 
   // Recurring payment collection controls
-  PAYMENTS_RECURRING_COLLECTION_ENABLED?: string;
   PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE?: string;
   PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES?: string;
 
@@ -322,10 +321,12 @@ declare module "hono" {
       role: string;
       permissions: Permission[];
       environment: ApiKeyEnvironment;
+      walletScope?: "all" | "selected";
       signingWalletId: string | null;
       signingWalletIds?: string[];
       walletBindings?: Array<{
         walletId: string;
+        custodyWalletId?: string;
         permissions: Permission[];
       }>;
     };

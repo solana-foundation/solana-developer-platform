@@ -4,6 +4,7 @@
 
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
   deleteOrganization,
@@ -11,6 +12,7 @@ import {
   getOrganizationProviderAccess,
   updateOrganization,
 } from "./handlers";
+import { updateOrgSchema } from "./schemas";
 
 const organizations = new Hono<{ Bindings: Env }>();
 
@@ -23,7 +25,12 @@ organizations.get(
   requirePermissions("org:read"),
   getOrganizationProviderAccess
 );
-organizations.patch("/:orgId", requirePermissions("org:write"), updateOrganization);
+organizations.patch(
+  "/:orgId",
+  requirePermissions("org:write"),
+  validateBody(updateOrgSchema),
+  updateOrganization
+);
 organizations.delete("/:orgId", requirePermissions("org:admin"), deleteOrganization);
 
 export default organizations;

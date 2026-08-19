@@ -1,10 +1,5 @@
-import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { EarnOverviewSkeleton } from "./earn-route-skeletons";
+import { EarnProgramSkeleton } from "../markets-route-skeletons";
 
 export default function EarnLoading() {
-  return (
-    <DashboardWorkspaceOverviewPanel>
-      <EarnOverviewSkeleton />
-    </DashboardWorkspaceOverviewPanel>
-  );
+  return <EarnProgramSkeleton />;
 }
