@@ -1,14 +1,14 @@
 import { SigningError } from "@sdp/custody/signing";
 import type { ApiKeyRole, CreateApiKeyResponse } from "@sdp/types";
 import type { Context } from "hono";
-import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { createTenantScope } from "@/lib/tenant-scope";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { buildApiKeyAccessSummaries } from "@/routes/api-keys/access-response";
-import { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
+import type { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
 import { ApiKeyService } from "@/services/api-key.service";
 import {
   assertWalletBindingsInScope,
@@ -104,18 +104,11 @@ export const listProjectApiKeys = async (c: AppContext) => {
   });
 };
 
-export const createProjectApiKey = async (c: AppContext) => {
+export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSchema>) => {
   const { projectId } = c.req.param();
   const auth = getAuth(c);
 
-  const body = await c.req.json();
-  const parsed = apiKeyCreateSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   await assertProjectAccess(c, auth, projectId);
 
@@ -133,7 +126,7 @@ export const createProjectApiKey = async (c: AppContext) => {
     provisionWallet,
     walletLabel,
     walletPurpose,
-  } = parsed.data;
+  } = body;
 
   const walletSelection = resolveCreateWalletScope({
     walletScope,

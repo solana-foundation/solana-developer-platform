@@ -1,13 +1,13 @@
 import { CUSTODY_PROVIDERS, type CustodyProvider, redactCredentialString } from "@sdp/custody";
 import { normalizePem } from "@sdp/custody/provisioning";
 import { SigningError } from "@sdp/custody/signing";
-import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, conflict, forbidden } from "@/lib/errors";
 import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import { assertApiKeyNotWalletScoped } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
@@ -28,12 +28,12 @@ import {
   getProviderAvailability,
 } from "@/services/provider-availability.service";
 import { type AppContext, getPreferredWalletForConfig, resolveActor } from "../context";
-import {
-  type InitializeSigningRequest,
-  type InitializeSigningResponse,
+import type {
+  InitializeSigningRequest,
+  InitializeSigningResponse,
   initializeSigningSchema,
-  type SwitchProviderOptionsResponse,
-  type SwitchSigningResponse,
+  SwitchProviderOptionsResponse,
+  SwitchSigningResponse,
   switchSigningSchema,
 } from "../schemas";
 
@@ -41,15 +41,6 @@ type SigningInitializationResult = {
   configId: string;
   publicKey: string;
   walletId: string;
-};
-
-const EXISTING_PROVIDER_OBJECT_SELECTORS: Partial<Record<CustodyProvider, readonly string[]>> = {
-  coinbase_cdp: ["walletAddress"],
-  para: ["walletId"],
-  turnkey: ["privateKeyId"],
-  dfns: ["walletId", "signingKeyId"],
-  ibm_haven: ["walletId", "signingKeyId"],
-  anchorage: ["walletId"],
 };
 
 function hasReusableConfigWallet(
@@ -72,30 +63,9 @@ function hasReusableConfigWallet(
   }
 }
 
-export function assertNoExistingProviderObjectSelector(body: unknown): void {
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return;
-  }
-
-  const request = body as Record<string, unknown>;
-  if (typeof request.provider !== "string") {
-    return;
-  }
-
-  if (!Object.hasOwn(EXISTING_PROVIDER_OBJECT_SELECTORS, request.provider)) {
-    return;
-  }
-
-  const selectors = EXISTING_PROVIDER_OBJECT_SELECTORS[request.provider as CustodyProvider] ?? [];
-  const suppliedSelector = selectors.find((selector) => Object.hasOwn(request, selector));
-  if (suppliedSelector) {
-    throw badRequest(
-      `${suppliedSelector} cannot select an existing wallet when using platform-managed provider credentials`
-    );
-  }
-}
-
-export const initializeSigning = async (c: AppContext) => {
+export const initializeSigning = async (
+  c: ValidatedBodyContext<typeof initializeSigningSchema>
+) => {
   const actor = resolveActor(c);
   const projectId = c.get("projectId");
 
@@ -103,15 +73,7 @@ export const initializeSigning = async (c: AppContext) => {
   // outside any wallet-scoped key's bindings by definition.
   assertApiKeyNotWalletScoped(getAuth(c), "initialize custody providers");
 
-  const body = await c.req.json();
-  assertNoExistingProviderObjectSelector(body);
-  const parsed = initializeSigningSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const signingService = createSigningService(c.env, getRequestTenantScope(c));
 
@@ -123,7 +85,7 @@ export const initializeSigning = async (c: AppContext) => {
       actor.organizationId,
       await resolveOrganizationSlug(c, actor.organizationId),
       projectId,
-      parsed.data
+      body
     );
 
     const auditService = new AuditService(getDb(c.env));
@@ -133,7 +95,7 @@ export const initializeSigning = async (c: AppContext) => {
       resourceId: result.configId,
       metadata: {
         event: "provider_connected",
-        provider: parsed.data.provider,
+        provider: body.provider,
         projectId: projectId ?? null,
       },
     });
@@ -146,31 +108,23 @@ export const initializeSigning = async (c: AppContext) => {
   }
 };
 
-export const switchSigning = async (c: AppContext) => {
+export const switchSigning = async (c: ValidatedBodyContext<typeof switchSigningSchema>) => {
   const actor = resolveActor(c);
 
   // Switching the default provider re-points the scope's default signer —
   // outside any wallet-scoped key's bindings by definition.
   assertApiKeyNotWalletScoped(getAuth(c), "switch custody providers");
 
-  const body = await c.req.json();
-  assertNoExistingProviderObjectSelector(body);
-  const parsed = switchSigningSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const signingService = createSigningService(c.env, getRequestTenantScope(c));
   const auditService = new AuditService(getDb(c.env));
   const projectId = c.get("projectId");
-  const requestedProvider = parsed.data.provider;
-  const providerRequest = "connectionId" in parsed.data ? null : parsed.data;
+  const requestedProvider = body.provider;
+  const providerRequest = "connectionId" in body ? null : body;
 
   try {
-    let connectionId = "connectionId" in parsed.data ? parsed.data.connectionId : undefined;
+    let connectionId = "connectionId" in body ? body.connectionId : undefined;
     if (
       !connectionId &&
       projectId &&

@@ -7,7 +7,6 @@ import {
   type OrganizationTier,
 } from "@sdp/types";
 import type { Context } from "hono";
-import { z } from "zod";
 import { getDb } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { getAuth } from "@/lib/auth";
@@ -15,6 +14,7 @@ import { getClientIp } from "@/lib/client-ip";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { isClientIpAllowed } from "@/lib/ip-allowlist";
 import { noContent, success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import {
@@ -23,7 +23,7 @@ import {
 } from "@/services/provider-availability.service";
 import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
-import { updateOrgSchema } from "./schemas";
+import type { updateOrgSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -131,7 +131,7 @@ function assertAllowlistAdmitsCaller(c: AppContext, allowedIps: string[] | undef
   }
 }
 
-export const updateOrganization = async (c: AppContext) => {
+export const updateOrganization = async (c: ValidatedBodyContext<typeof updateOrgSchema>) => {
   const { orgId } = c.req.param();
   const auth = getAuth(c);
 
@@ -139,18 +139,11 @@ export const updateOrganization = async (c: AppContext) => {
     throw new AppError("FORBIDDEN", "Access denied to this organization");
   }
 
-  const body = await c.req.json();
-  const parsed = updateOrgSchema.safeParse(body);
+  const body = c.req.valid("json");
 
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const settingsPatch = body.settings;
 
-  const settingsPatch = parsed.data.settings;
-
-  if (parsed.data.name === undefined && settingsPatch === undefined) {
+  if (body.name === undefined && settingsPatch === undefined) {
     throw badRequest("No valid updates provided");
   }
 
@@ -180,9 +173,9 @@ export const updateOrganization = async (c: AppContext) => {
     const updates: string[] = [];
     const params: (string | null)[] = [];
 
-    if (parsed.data.name !== undefined) {
+    if (body.name !== undefined) {
       updates.push("name = ?");
-      params.push(parsed.data.name);
+      params.push(body.name);
     }
 
     if (settingsPatch !== undefined) {
@@ -224,7 +217,7 @@ export const updateOrganization = async (c: AppContext) => {
     resourceType: "organization",
     resourceId: orgId,
     // Canonical form, not the submitted spelling: the trail records what was granted.
-    metadata: { ...parsed.data, ...(settingsPatch ? { settings: settingsPatch } : {}) },
+    metadata: { ...body, ...(settingsPatch ? { settings: settingsPatch } : {}) },
   });
 
   return success(c, toOrganizationResponse(org));
