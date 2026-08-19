@@ -346,6 +346,57 @@ describe("trackPendingTransfers", () => {
       expect(unchanged?.status).toBe("confirmed");
     });
 
+    it("does not poll confirmed transfers older than the finalization window", async () => {
+      await insertTransfer({
+        id: "xfr_confirmed_aged_out",
+        status: "confirmed",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(25 * 60),
+        updatedAt: minutesAgo(25 * 60),
+      });
+
+      await trackPendingTransfers(env);
+
+      expect(getSignatureStatusesMock).not.toHaveBeenCalled();
+      const unchanged = await getTransfer("xfr_confirmed_aged_out");
+      expect(unchanged?.status).toBe("confirmed");
+    });
+
+    it("reaches a newer confirmed transfer behind a full page of stuck rows", async () => {
+      getSignatureStatusesMock.mockImplementation(async (_rpc, signatures) =>
+        signatures.map((signature) =>
+          String(signature) === String(TEST_SIG_2)
+            ? { slot: 33333n, confirmations: null, confirmationStatus: "finalized", err: null }
+            : null
+        )
+      );
+
+      await Promise.all(
+        Array.from({ length: 256 }, (_, i) =>
+          insertTransfer({
+            id: `xfr_confirmed_stuck_${i}`,
+            status: "confirmed",
+            signature: `${TEST_SIG_1}stuck${i}`,
+            createdAt: minutesAgo(30),
+            updatedAt: minutesAgo(30),
+          })
+        )
+      );
+      await insertTransfer({
+        id: "xfr_confirmed_behind_stuck_page",
+        status: "confirmed",
+        signature: String(TEST_SIG_2),
+        createdAt: minutesAgo(2),
+        updatedAt: minutesAgo(2),
+      });
+
+      await trackPendingTransfers(env);
+
+      const upgraded = await getTransfer("xfr_confirmed_behind_stuck_page");
+      expect(upgraded?.status).toBe("finalized");
+      expect(upgraded?.slot).toBe(33333);
+    });
+
     it("leaves confirmed transfer untouched when the finalized status carries an error", async () => {
       getSignatureStatusesMock.mockResolvedValueOnce([
         {

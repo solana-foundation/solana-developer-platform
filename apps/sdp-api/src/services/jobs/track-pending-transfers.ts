@@ -37,6 +37,12 @@ import type { Env } from "@/types/env";
 const STUCK_PROCESSING_AFTER_MS = 5 * 60 * 1000;
 // getSignatureStatuses accepts at most 256 signatures per call.
 const MAX_SIGNATURES_PER_BATCH = 256;
+// Upper bound on confirmed-backlog pages swept per tick (5120 rows).
+const MAX_CONFIRMED_SWEEP_PAGES = 20;
+// A confirmed transaction finalizes within ~30s or never (fork, ledger reset);
+// after this window a still-confirmed row ages out of the finalization sweep
+// and rests at confirmed instead of costing an RPC history search every tick.
+const CONFIRMED_FINALIZATION_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Applies a terminal status to a transfer. Batch chunks settle through
@@ -79,7 +85,7 @@ export async function trackPendingTransfers(env: Env): Promise<void> {
 
   await recoverStuckProcessingTransfers(env, repo, now, nowIso);
   await syncProcessingTransfersOnChain(env, repo, nowIso);
-  await finalizeConfirmedTransfers(env, repo, nowIso);
+  await finalizeConfirmedTransfers(env, repo, now, nowIso);
 }
 
 /**
@@ -98,57 +104,89 @@ export async function trackPendingTransfers(env: Env): Promise<void> {
  * next tick on the managed five-minute cadence; without it every confirmed
  * row would read null forever.
  *
+ * Sweeps the confirmed backlog every tick, listing all pages up front before
+ * any row is updated (so upgraded rows leaving the set can never skew
+ * pagination). A single oldest-page read would let stuck rows — whose
+ * updated_at never changes — permanently block newer transfers from ever
+ * being polled. The sweep only covers rows updated within
+ * CONFIRMED_FINALIZATION_WINDOW_MS: past that window the transaction will
+ * never finalize, so the row rests at confirmed and stops costing RPC.
+ * Steady state is one page and one RPC call; the sweep is capped at
+ * MAX_CONFIRMED_SWEEP_PAGES pages per tick and logs when the cap truncates
+ * it, so a pathological backlog degrades visibly, never silently.
+ *
  * @param env - Runtime environment for RPC and repository construction.
  * @param repo - System payments repository.
+ * @param now - Tick time anchoring the finalization window.
  * @param nowIso - Timestamp applied to upgraded rows.
  * @returns Resolves when every finalized upgrade has been attempted.
  */
 async function finalizeConfirmedTransfers(
   env: Env,
   repo: PaymentsRepository,
+  now: Date,
   nowIso: string
 ): Promise<void> {
-  const confirmedTransfers = await repo.listTransfersByStatus({
-    statuses: ["confirmed"],
-    types: WALLET_TRANSFER_TYPES,
-    hasSignature: true,
-    limit: MAX_SIGNATURES_PER_BATCH,
-  });
+  const sweepFloor = new Date(now.getTime() - CONFIRMED_FINALIZATION_WINDOW_MS).toISOString();
+  const confirmedTransfers: PaymentTransferRow[] = [];
+  for (let page = 0; page < MAX_CONFIRMED_SWEEP_PAGES; page++) {
+    const rows = await repo.listTransfersByStatus({
+      statuses: ["confirmed"],
+      types: WALLET_TRANSFER_TYPES,
+      hasSignature: true,
+      updatedAfter: sweepFloor,
+      limit: MAX_SIGNATURES_PER_BATCH,
+      offset: page * MAX_SIGNATURES_PER_BATCH,
+    });
+    confirmedTransfers.push(...rows);
+    if (rows.length < MAX_SIGNATURES_PER_BATCH) {
+      break;
+    }
+    if (page === MAX_CONFIRMED_SWEEP_PAGES - 1) {
+      getLogger().error(
+        { swept: confirmedTransfers.length },
+        "trackPendingTransfers: confirmed sweep truncated at the page cap; backlog exceeds one tick"
+      );
+    }
+  }
 
   if (confirmedTransfers.length === 0) {
     return;
   }
 
-  const signatures = confirmedTransfers.map((t) => t.signature as Signature);
-
-  let statuses: Array<SignatureStatusInfo | null>;
-
-  try {
-    const rpc = solanaRpc.createRpc(env);
-    statuses = await solanaRpc.getSignatureStatuses(rpc, signatures, {
-      searchTransactionHistory: true,
-    });
-  } catch (err) {
-    getLogger().error(
-      {
-        error: err instanceof Error ? err.message : String(err),
-      },
-      "trackPendingTransfers: getSignatureStatuses RPC call failed for confirmed transfers"
-    );
-    return;
-  }
-
+  const rpc = solanaRpc.createRpc(env);
   const finalized: { transferId: string; organizationId: string; slot: number }[] = [];
-  for (const [i, transfer] of confirmedTransfers.entries()) {
-    const status = statuses[i];
-    if (!status || status.err || status.confirmationStatus !== "finalized") {
-      continue;
+
+  for (let start = 0; start < confirmedTransfers.length; start += MAX_SIGNATURES_PER_BATCH) {
+    const chunk = confirmedTransfers.slice(start, start + MAX_SIGNATURES_PER_BATCH);
+    const signatures = chunk.map((t) => t.signature as Signature);
+
+    let statuses: Array<SignatureStatusInfo | null>;
+    try {
+      statuses = await solanaRpc.getSignatureStatuses(rpc, signatures, {
+        searchTransactionHistory: true,
+      });
+    } catch (err) {
+      getLogger().error(
+        {
+          error: err instanceof Error ? err.message : String(err),
+        },
+        "trackPendingTransfers: getSignatureStatuses RPC call failed for confirmed transfers"
+      );
+      break;
     }
-    finalized.push({
-      transferId: transfer.id,
-      organizationId: transfer.organization_id,
-      slot: Number(status.slot),
-    });
+
+    for (const [i, transfer] of chunk.entries()) {
+      const status = statuses[i];
+      if (!status || status.err || status.confirmationStatus !== "finalized") {
+        continue;
+      }
+      finalized.push({
+        transferId: transfer.id,
+        organizationId: transfer.organization_id,
+        slot: Number(status.slot),
+      });
+    }
   }
 
   await repo.finalizeConfirmedTransfers({ transfers: finalized, updatedAt: nowIso });

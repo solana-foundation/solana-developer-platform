@@ -581,6 +581,7 @@ export function createPostgresPaymentsRepository(
       hasSignature,
       createdBefore,
       updatedBefore,
+      updatedAfter,
       limit,
       offset,
     }: ListTransfersByStatusInput) {
@@ -613,13 +614,17 @@ export function createPostgresPaymentsRepository(
         clauses.push("updated_at < ?");
         values.push(updatedBefore);
       }
+      if (updatedAfter) {
+        clauses.push("updated_at > ?");
+        values.push(updatedAfter);
+      }
 
       const rows = await db
         .prepare(
           `SELECT *
            FROM payment_transfers
            WHERE ${clauses.join(" AND ")}
-           ORDER BY updated_at ASC
+           ORDER BY updated_at ASC, id ASC
            LIMIT ?
            OFFSET ?`
         )

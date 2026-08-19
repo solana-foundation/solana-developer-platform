@@ -140,6 +140,7 @@ export interface ListTransfersByStatusInput {
   hasSignature?: boolean;
   createdBefore?: string;
   updatedBefore?: string;
+  updatedAfter?: string;
   limit: number;
   offset?: number;
 }
