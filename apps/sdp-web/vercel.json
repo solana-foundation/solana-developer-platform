@@ -1,4 +1,4 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "ignoreCommand": "[ \"$VERCEL_GIT_COMMIT_REF\" = \"main\" ]"
+  "ignoreCommand": "sh -c '[ \"$VERCEL_GIT_COMMIT_REF\" = main ] || exit 1; [ \"$VERCEL_GIT_COMMIT_AUTHOR_LOGIN\" = \"sdp-release-bot[bot]\" ] && exit 1; exit 0'"
 }
