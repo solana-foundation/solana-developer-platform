@@ -1598,6 +1598,19 @@ export class SigningService {
     );
   }
 
+  async getTransactionSignerForWalletRecord(
+    orgId: string,
+    projectId: string | undefined,
+    custodyWalletId: string
+  ): Promise<TransactionSigner> {
+    return this.runtimeTargets.getTransactionSignerForWalletRecord(
+      orgId,
+      projectId,
+      custodyWalletId,
+      (organizationId, config) => this.getAdapterForConfig(organizationId, config)
+    );
+  }
+
   private mapWalletLookup(
     wallet: CustodyWalletLookup,
     defaultConfigId: string | null

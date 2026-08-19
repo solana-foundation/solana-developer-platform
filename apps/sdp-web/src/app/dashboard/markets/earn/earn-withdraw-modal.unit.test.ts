@@ -1,9 +1,43 @@
 import { describe, expect, it } from "vitest";
 import {
   floorUsdToCents,
+  isPositiveUsdAmount,
   laneCeilingFromErrorBody,
   liquidityWriteWins,
+  withdrawalRequestSignature,
 } from "./earn-withdraw-modal";
+
+describe("exact USD amount checks", () => {
+  it("accepts only positive API-shaped amounts", () => {
+    expect(isPositiveUsdAmount("0.000001")).toBe(true);
+    expect(isPositiveUsdAmount("0.000000")).toBe(false);
+    expect(isPositiveUsdAmount("1.000000")).toBe(true);
+    expect(isPositiveUsdAmount("1.0000000")).toBe(false);
+    expect(isPositiveUsdAmount("1.0000001")).toBe(false);
+    expect(isPositiveUsdAmount("1e3")).toBe(false);
+    expect(isPositiveUsdAmount(" 1 ")).toBe(false);
+  });
+});
+
+describe("withdrawalRequestSignature", () => {
+  const base = ["earn_program_1", "12.50", "usdc", "11111111111111111111111111111111"] as const;
+
+  it("is stable for an unchanged retry", () => {
+    expect(withdrawalRequestSignature(...base)).toBe(withdrawalRequestSignature(...base));
+  });
+
+  it("changes whenever the intended withdrawal changes", () => {
+    const signature = withdrawalRequestSignature(...base);
+    expect(withdrawalRequestSignature("earn_program_2", base[1], base[2], base[3])).not.toBe(
+      signature
+    );
+    expect(withdrawalRequestSignature(base[0], "12.51", base[2], base[3])).not.toBe(signature);
+    expect(withdrawalRequestSignature(base[0], base[1], "usdt", base[3])).not.toBe(signature);
+    expect(
+      withdrawalRequestSignature(base[0], base[1], base[2], "22222222222222222222222222222222")
+    ).not.toBe(signature);
+  });
+});
 
 /**
  * The two helpers that carry PRO-1675's provider-quirk handling. Both exist
@@ -167,6 +201,8 @@ describe("laneCeilingFromErrorBody", () => {
       // API has already normalized. Anything else is a shape we do not know.
       { error: { details: { balance: { withdrawableUsd: 412.5 } } } },
       { error: { details: { balance: { withdrawableUsd: "   " } } } },
+      { error: { details: { balance: { withdrawableUsd: "NaN" } } } },
+      { error: { details: { balance: { withdrawableUsd: "-1.00" } } } },
     ]) {
       expect(laneCeilingFromErrorBody(body)).toBeUndefined();
     }

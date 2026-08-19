@@ -91,6 +91,14 @@ function resolveScope(
  * is selected, never another project's. The selected project is already
  * membership-checked by middleware, so anchoring to it is what stops one
  * project's administrator naming another project's connection by id.
+ *
+ * The organization key stays in the set on purpose. These routes gate on
+ * `org:admin`, which is organization-wide rather than per-project, so a
+ * project context is an additional grant and not a restriction — and
+ * `projectContextMiddleware` requires `x-project-id` on every request, so
+ * narrowing to the project alone would make organization-scoped connections,
+ * which is what POST /connections creates by default, impossible to activate,
+ * deactivate or make default.
  */
 function actingScopeKeys(c: AppContext): string[] {
   const projectId = c.get("projectId");
@@ -280,7 +288,10 @@ export async function activateRpcConnection(
   let probeOk = false;
   let failureCode = "provider_unreachable";
   try {
-    const { upstream } = await probeRpcEndpoint(target);
+    // The endpoint came from the tenant, so the probe resolves it under the
+    // egress guard: the stored host passed the literal check at submit time,
+    // and this is what stops the name resolving somewhere internal now.
+    const { upstream } = await probeRpcEndpoint(target, { enforcePublicEgress: true });
     probeOk = upstream.ok;
     if (!upstream.ok) {
       failureCode = toRedactedFailureCode(upstream.status);

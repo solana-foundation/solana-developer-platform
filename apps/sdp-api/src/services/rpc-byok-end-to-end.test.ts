@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { resolveRpcTarget } from "@sdp/rpc/relay";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import type { KVStoreSet } from "@/runtime/kv";
 import { createCredentialSecretStore } from "@/services/credential-secret-store";
@@ -31,6 +31,23 @@ import type { Env } from "@/types/env";
  * Unit tests cover each link with stubs; this is the one that answers "will my
  * own credentials work".
  */
+/**
+ * The stand-in provider below is an ordinary loopback server, and activation
+ * probes tenant endpoints through the egress guard, which refuses loopback and
+ * plaintext by design. That refusal is the correct production behaviour and is
+ * asserted in `guarded-egress.test.ts` and `rpc-egress.test.ts`. This file is
+ * about the credential lifecycle, so the guard is delegated to plain fetch here
+ * rather than weakened anywhere real.
+ */
+vi.mock("@/services/guarded-egress", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/guarded-egress")>();
+  return {
+    ...actual,
+    guardedFetch: (url: string, init: { method: string; headers: HeadersInit; body: string }) =>
+      fetch(url, { method: init.method, headers: init.headers, body: init.body }),
+  };
+});
+
 const ORG_ID = "org_rpc_byok_e2e";
 const USER_ID = "usr_rpc_byok_e2e";
 const CREDENTIAL_ID = "pcred_rpc_byok_e2e";

@@ -7,6 +7,8 @@
  * connection service, so the connection service must not import the registry
  * back.
  */
+import { guardedFetch } from "@/services/guarded-egress";
+
 export interface RpcProbeTarget {
   endpoint: string;
   headers: Record<string, string>;
@@ -18,6 +20,17 @@ export interface RpcProbeResult {
   upstreamBody: unknown;
 }
 
+export interface RpcProbeOptions {
+  /**
+   * Set for an endpoint the tenant supplied. It routes the request through
+   * `guardedFetch`, which refuses an address the host check cannot see because
+   * DNS produced it. Platform endpoints leave it off: they come from
+   * deployment config and are private on purpose in local development and in
+   * the Surfpool suites.
+   */
+  enforcePublicEgress?: boolean;
+}
+
 function tryParseJson(value: string): unknown {
   try {
     return JSON.parse(value);
@@ -26,24 +39,32 @@ function tryParseJson(value: string): unknown {
   }
 }
 
-export async function probeRpcEndpoint(target: RpcProbeTarget): Promise<RpcProbeResult> {
+export async function probeRpcEndpoint(
+  target: RpcProbeTarget,
+  options: RpcProbeOptions = {}
+): Promise<RpcProbeResult> {
   const startedAt = Date.now();
-  const upstream = await fetch(target.endpoint, {
-    method: "POST",
-    // A validated host can still redirect; following it would land the request
-    // somewhere the host check already refused.
-    redirect: "manual",
-    headers: {
-      "Content-Type": "application/json",
-      ...target.headers,
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: "rpc-connectivity-test",
-      method: "getVersion",
-      params: [],
-    }),
+  const headers = {
+    "Content-Type": "application/json",
+    ...target.headers,
+  };
+  const body = JSON.stringify({
+    jsonrpc: "2.0",
+    id: "rpc-connectivity-test",
+    method: "getVersion",
+    params: [],
   });
+
+  const upstream = options.enforcePublicEgress
+    ? await guardedFetch(target.endpoint, { method: "POST", headers, body })
+    : await fetch(target.endpoint, {
+        method: "POST",
+        // A validated host can still redirect; following it would land the
+        // request somewhere the host check already refused.
+        redirect: "manual",
+        headers,
+        body,
+      });
 
   const rawBody = await upstream.text();
   return {

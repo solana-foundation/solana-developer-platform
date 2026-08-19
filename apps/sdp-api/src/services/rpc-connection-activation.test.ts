@@ -17,7 +17,19 @@ import { seedTestDatabase } from "@/test/mocks/db";
 const ORGANIZATION_ID = "org_rpc_activation";
 const OTHER_ORGANIZATION_ID = "org_rpc_activation_other";
 const PROJECT_ID = "prj_rpc_activation";
+const OTHER_PROJECT_ID = "prj_rpc_activation_other";
 const USER_ID = "usr_rpc_activation";
+const ORGANIZATION_SCOPE_KEY = "__organization__";
+
+/**
+ * What `actingScopeKeys` hands the store when a project is selected. The routes
+ * gate on `org:admin`, which is an organization-wide role, and
+ * `projectContextMiddleware` requires `x-project-id` on every request, so this
+ * is the only key set the lifecycle operations are ever called with in the
+ * dashboard. Dropping the organization key from it would leave every
+ * organization-scoped connection permanently unactivatable.
+ */
+const PROJECT_CONTEXT_SCOPE_KEYS = [ORGANIZATION_SCOPE_KEY, PROJECT_ID];
 
 async function seedScope(): Promise<void> {
   const db = getDb(env);
@@ -47,6 +59,13 @@ async function seedScope(): Promise<void> {
          VALUES (?, ?, 'RPC activation', ?, 'sandbox', 'active', ?)`
       )
       .bind(PROJECT_ID, ORGANIZATION_ID, "rpc-activation", USER_ID),
+    db
+      .prepare(
+        `INSERT INTO projects
+           (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, 'RPC activation other', ?, 'sandbox', 'active', ?)`
+      )
+      .bind(OTHER_PROJECT_ID, ORGANIZATION_ID, "rpc-activation-other", USER_ID),
   ]);
 }
 
@@ -57,6 +76,7 @@ async function seedPendingConnection(
     credentialStatus?: string;
     connectionStatus?: string;
     isDefault?: boolean;
+    projectId?: string;
   } = {}
 ): Promise<void> {
   const db = getDb(env);
@@ -78,18 +98,22 @@ async function seedPendingConnection(
     )
     .run();
 
+  // A project connection is allowed to borrow the organization credential, so
+  // only the connection row changes scope here.
   await db
     .prepare(
       `INSERT INTO rpc_connections (
          id, organization_id, project_id, provider, scope,
          provider_credential_id, provider_credential_scope_key,
          network, status, is_default, activated_at, deactivated_at, created_by
-       ) VALUES (?, ?, NULL, 'helius', 'organization', ?, '__organization__',
+       ) VALUES (?, ?, ?, 'helius', ?, ?, '__organization__',
                  'devnet', ?, ?, ?, ?, ?)`
     )
     .bind(
       connectionId,
       ORGANIZATION_ID,
+      options.projectId ?? null,
+      options.projectId ? "project" : "organization",
       credentialId,
       connectionStatus,
       options.isDefault ?? false,
@@ -182,12 +206,49 @@ describe("RpcConnectionStore.activateConnectionCredential", () => {
     expect(await credentialStatus("pcred_activation_scoped")).toBe("pending");
   });
 
-  it("does not promote from outside the acting scope", async () => {
+  it("promotes an organization connection for an administrator acting in a project", async () => {
+    await seedPendingConnection("rconn_activation_ctx", "pcred_activation_ctx");
+    const store = new RpcConnectionStore(getDb(env));
+
+    // Deliberate, and the reason `actingScopeKeys` keeps the organization key
+    // alongside the selected project: the caller holds the organization-wide
+    // `org:admin`, and a project header is mandatory on these routes, so an
+    // organization connection would otherwise be impossible to activate at all.
+    const promoted = await store.activateConnectionCredential({
+      organizationId: ORGANIZATION_ID,
+      connectionId: "rconn_activation_ctx",
+      scopeKeys: PROJECT_CONTEXT_SCOPE_KEYS,
+    });
+
+    expect(promoted).toBe(1);
+    expect(await credentialStatus("pcred_activation_ctx")).toBe("active");
+  });
+
+  it("does not promote another project's connection", async () => {
+    await seedPendingConnection("rconn_activation_other_project", "pcred_activation_other", {
+      projectId: OTHER_PROJECT_ID,
+    });
+    const store = new RpcConnectionStore(getDb(env));
+
+    // The boundary that is actually crossable: same organization, same
+    // administrator, a connection belonging to a project they have not
+    // selected. Only the selected project's key reaches the store.
+    const promoted = await store.activateConnectionCredential({
+      organizationId: ORGANIZATION_ID,
+      connectionId: "rconn_activation_other_project",
+      scopeKeys: PROJECT_CONTEXT_SCOPE_KEYS,
+    });
+
+    expect(promoted).toBe(0);
+    expect(await credentialStatus("pcred_activation_other")).toBe("pending");
+  });
+
+  it("matches only the scope keys it is handed", async () => {
     await seedPendingConnection("rconn_activation_project", "pcred_activation_project");
     const store = new RpcConnectionStore(getDb(env));
 
-    // An administrator acting inside one project must not reach an
-    // organization-scoped connection by naming its id.
+    // The store's half of the contract: it filters on exactly the key set the
+    // caller supplies and infers nothing from the organization id.
     const promoted = await store.activateConnectionCredential({
       organizationId: ORGANIZATION_ID,
       connectionId: "rconn_activation_project",
