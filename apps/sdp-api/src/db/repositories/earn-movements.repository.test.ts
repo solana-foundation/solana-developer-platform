@@ -608,6 +608,60 @@ describe("Unified earn movement ledger (postgres)", () => {
       });
     });
 
+    it("preserves a shared program and cross-project history when its provisioning project is deleted", async () => {
+      const db = getDb(env);
+      const wallet = await linkProgram();
+      const primary = await createWithdrawal({
+        walletId: wallet.id,
+        requestId: "wd-project-delete-primary",
+        idempotencyFingerprint: "wd-project-delete-primary-fingerprint",
+      });
+      const sibling = await createWithdrawal({
+        walletId: wallet.id,
+        projectId: PROJECT_SIBLING,
+        requestId: "wd-project-delete-sibling",
+        idempotencyFingerprint: "wd-project-delete-sibling-fingerprint",
+      });
+      if (!primary || !sibling) throw new Error("withdrawal not created");
+      const [positionBefore] = await positions();
+
+      await db.prepare("DELETE FROM projects WHERE id = ?").bind(PROJECT).run();
+
+      // The program is organization-scoped. Deleting the project that first
+      // provisioned it clears only forensic attribution, so sibling projects do
+      // not lose the funded provider account or its global ownership anchor.
+      await expect(
+        earnRepo.getProviderWalletById({
+          organizationId: ORG,
+          environment: "sandbox",
+          walletId: wallet.id,
+        })
+      ).resolves.toMatchObject({ id: wallet.id, project_id: null });
+
+      const [positionAfter] = await positions();
+      expect(positionAfter).toMatchObject({
+        id: positionBefore.id,
+        project_id: null,
+        provider_wallet_id: wallet.id,
+      });
+
+      const unified = await movements();
+      expect(unified).toHaveLength(2);
+      expect(unified.find((row) => row.id === primary.id)?.project_id).toBeNull();
+      expect(unified.find((row) => row.id === sibling.id)?.project_id).toBe(PROJECT_SIBLING);
+
+      // The split legacy table still follows its old project-owned cascade;
+      // the unified ledger is the durable history that deliberately survives.
+      const legacy = await db
+        .prepare(
+          `SELECT id, project_id FROM earn_program_withdrawals
+           WHERE wallet_id = ? ORDER BY id`
+        )
+        .bind(wallet.id)
+        .all<{ id: string; project_id: string }>();
+      expect(legacy.results).toEqual([{ id: sibling.id, project_id: PROJECT_SIBLING }]);
+    });
+
     it("mirrors a provider observation, including a zero fee and a scientific-notation amount", async () => {
       const wallet = await linkProgram();
       const withdrawal = await createWithdrawal({ walletId: wallet.id });

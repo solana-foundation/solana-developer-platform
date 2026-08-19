@@ -81,7 +81,7 @@ function mapProviderWalletRow(row: Record<string, unknown>): EarnProviderWalletR
   return {
     id: row.id as string,
     organization_id: row.organization_id as string,
-    project_id: row.project_id as string,
+    project_id: row.project_id as string | null,
     environment: row.environment as SdpEnvironment,
     provider: row.provider as string,
     provider_wallet_ref: row.provider_wallet_ref as string,

@@ -28,13 +28,15 @@
 --
 -- ── Why new tables rather than ALTER/RENAME ────────────────────────────────
 -- Expand/contract, exactly as 0055 did: the legacy tables keep their writers
--- and their data for now, this migration only ADDS. The application dual-writes
--- both shapes in one transaction (0063 backfills history), reads switch in a
--- later release, and the legacy tables are dropped last of all. The point is
--- that every intermediate deploy is rollback-safe — the previously deployed
--- revision keeps working throughout, because nothing it writes was renamed or
--- removed. A rename would have made the rollback of the FIRST deploy break
--- vault deposits outright; the repo also has no RENAME precedent to follow.
+-- and their data for now. The application dual-writes both shapes in one
+-- transaction (0063 backfills history), reads switch in a later release, and
+-- the legacy tables are dropped last of all. The point is that every
+-- intermediate deploy is rollback-safe — the previously deployed revision
+-- keeps working throughout, because nothing it writes was renamed or removed.
+-- The one legacy-schema relaxation below makes a provider wallet's provisioning
+-- project nullable; every old and new writer still supplies one on insert. A
+-- rename would have made the rollback of the FIRST deploy break vault deposits
+-- outright; the repo also has no RENAME precedent to follow.
 --
 -- Conventions inherited from 0055 / 0059:
 -- * provider is open TEXT (ADR 0001/0002 drift rule) — a row can outlive its
@@ -149,6 +151,24 @@ INSERT INTO earn_movement_statuses (execution_model, status, is_terminal) VALUES
     ('vault_direct', 'finalized', TRUE),
     ('vault_direct', 'failed', TRUE)
 ON CONFLICT (execution_model, status) DO NOTHING;
+
+-- A provider wallet is scoped to its organization and environment; project_id
+-- only records which project provisioned it (0049/0056). The original CASCADE
+-- disagreed with that scope: deleting the provisioning project tried to delete
+-- a shared, potentially funded provider account. It also conflicts with the
+-- unified holding below, whose project attribution is deliberately cleared so
+-- its movement history survives. Retain the account and clear only its forensic
+-- project attribution. This is a rollback-safe relaxation: prior revisions
+-- still write a real project, and NULL appears only after a hard deletion.
+ALTER TABLE earn_provider_wallets
+    DROP CONSTRAINT IF EXISTS earn_provider_wallets_project_id_fkey;
+
+ALTER TABLE earn_provider_wallets
+    ALTER COLUMN project_id DROP NOT NULL;
+
+ALTER TABLE earn_provider_wallets
+    ADD CONSTRAINT earn_provider_wallets_project_id_fkey
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL;
 
 -- ───────────────────────────────────────────────────────────────────────────
 -- 2. Holdings: one row per position, whatever its custody model.
