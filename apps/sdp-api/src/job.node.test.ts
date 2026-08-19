@@ -2,10 +2,7 @@ import * as Sentry from "@sentry/node";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
 import { runEarnMetricsRefreshTick } from "@/cron/earn-metrics-refresh";
-import {
-  EARN_VAULT_MOVEMENTS_CRON,
-  EARN_VAULT_MOVEMENTS_MONITOR,
-} from "@/cron/earn-vault-movements";
+import { EARN_VAULT_MOVEMENTS_MONITOR } from "@/cron/earn-vault-movements";
 import { closeDatabasePools } from "@/db/client";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
@@ -43,39 +40,32 @@ vi.mock("@/cron/earn-metrics-refresh", () => ({
 }));
 
 vi.mock("@/cron/earn-vault-movements", () => ({
-  EARN_VAULT_MOVEMENTS_CRON: "* * * * *",
   EARN_VAULT_MOVEMENTS_MONITOR: "sdp-api-reconcile-earn-vault-movements",
 }));
 
 // Literal constants keep the heavy service graph behind pending-transfers out
 // of this test's module graph (same reason runner.node.test.ts mocks it).
 vi.mock("@/cron/pending-transfers", () => ({
-  PENDING_TRANSFERS_CRON: "* * * * *",
   PENDING_TRANSFERS_MONITOR: "sdp-api-track-pending-transfers",
 }));
 
 vi.mock("@/cron/pending-deposits", () => ({
-  PENDING_DEPOSITS_CRON: "* * * * *",
   PENDING_DEPOSITS_MONITOR: "sdp-api-track-pending-deposits",
 }));
 
 vi.mock("@/cron/pending-withdrawals", () => ({
-  PENDING_WITHDRAWALS_CRON: "* * * * *",
   PENDING_WITHDRAWALS_MONITOR: "sdp-api-track-pending-withdrawals",
 }));
 
 vi.mock("@/cron/recurring-payments", () => ({
-  RECURRING_PAYMENTS_COLLECTION_CRON: "*/5 * * * *",
   RECURRING_PAYMENTS_COLLECTION_MONITOR: "sdp-api-collect-recurring-payments",
 }));
 
 vi.mock("@/cron/workflow-executions", () => ({
-  WORKFLOW_EXECUTIONS_CRON: "* * * * *",
   WORKFLOW_EXECUTIONS_MONITOR: "sdp-api-run-workflow-executions",
 }));
 
 vi.mock("@/cron/workflow-secret-retirements", () => ({
-  WORKFLOW_SECRET_RETIREMENTS_CRON: "*/5 * * * *",
   WORKFLOW_SECRET_RETIREMENTS_MONITOR: "sdp-api-retire-workflow-secrets",
 }));
 
@@ -264,12 +254,12 @@ describe("runCronJob", () => {
     expect(nodeObservability.withMonitor).toHaveBeenCalledWith(
       "sdp-api-track-pending-deposits",
       expect.any(Function),
-      { schedule: { type: "crontab", value: "* * * * *" } }
+      { schedule: { type: "crontab", value: "*/5 * * * *" } }
     );
     expect(nodeObservability.withMonitor).toHaveBeenCalledWith(
       "sdp-api-track-pending-withdrawals",
       expect.any(Function),
-      { schedule: { type: "crontab", value: "* * * * *" } }
+      { schedule: { type: "crontab", value: "*/5 * * * *" } }
     );
   });
 
@@ -387,7 +377,7 @@ describe("runCronJob", () => {
     expect(nodeObservability.withMonitor).toHaveBeenCalledWith(
       EARN_VAULT_MOVEMENTS_MONITOR,
       expect.any(Function),
-      { schedule: { type: "crontab", value: EARN_VAULT_MOVEMENTS_CRON } }
+      { schedule: { type: "crontab", value: "*/5 * * * *" } }
     );
     expect(nodeObservability.withMonitor).toHaveBeenCalledWith(
       "sdp-api-retire-workflow-secrets",
@@ -397,12 +387,12 @@ describe("runCronJob", () => {
     expect(nodeObservability.withMonitor).toHaveBeenCalledWith(
       "sdp-api-track-pending-transfers",
       expect.any(Function),
-      { schedule: { type: "crontab", value: "* * * * *" } }
+      { schedule: { type: "crontab", value: "*/5 * * * *" } }
     );
     expect(nodeObservability.withMonitor).toHaveBeenCalledWith(
       "sdp-api-run-workflow-executions",
       expect.any(Function),
-      { schedule: { type: "crontab", value: "* * * * *" } }
+      { schedule: { type: "crontab", value: "*/5 * * * *" } }
     );
     // Both earn ticks monitor themselves inside their own entrypoints
     // (EARN_CATALOGUE_SYNC_MONITOR / EARN_METRICS_REFRESH_MONITOR) — the job
@@ -495,6 +485,31 @@ describe("runCronJob", () => {
     expect(describeCronFailure(new AggregateError(["boom"], "tick"))).toEqual({
       error: expect.any(AggregateError),
       causes: [{ message: "boom" }],
+    });
+  });
+
+  it("expands nested aggregate failures down to their leaf causes", () => {
+    const pendingTransfersTick = new AggregateError(
+      [new Error("transfers down"), new Error("sponsorship down")],
+      "pending-transfers tick had multiple failures"
+    );
+    const jobWide = new AggregateError(
+      [pendingTransfersTick, new Error("earn vault movements down")],
+      "reconciliation job had multiple tick failures"
+    );
+
+    expect(describeCronFailure(jobWide)).toEqual({
+      error: jobWide,
+      causes: [
+        {
+          message: "pending-transfers tick had multiple failures",
+          causes: [
+            { message: "transfers down", stack: expect.any(String) },
+            { message: "sponsorship down", stack: expect.any(String) },
+          ],
+        },
+        { message: "earn vault movements down", stack: expect.any(String) },
+      ],
     });
   });
 });
