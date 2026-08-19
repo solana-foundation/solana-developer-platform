@@ -63,6 +63,12 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
         organizationId: auth.organizationId,
         authProjectId: auth.projectId,
         requestedProjectId: null,
+        // Deliberately no tenant connection lookup: signer check stays on the
+        // platform rail. It is API-key reachable and organization-wide, so
+        // routing it through the fail-closed resolver would let one mistyped
+        // key on an unrelated surface take this endpoint down for every
+        // caller. The blast radius of a bad tenant credential belongs to the
+        // RPC relay.
       }),
     ]);
 

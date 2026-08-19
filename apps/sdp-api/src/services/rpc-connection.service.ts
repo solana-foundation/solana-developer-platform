@@ -3,6 +3,7 @@ import {
   type ByokRpcProvider,
   buildTenantDisplayMetadata,
   buildTenantRpcTarget,
+  resolveTenantEndpoint,
   type TenantRpcCredential,
 } from "@sdp/rpc/byok";
 import type { RpcConnectionNetwork, SafeRpcConnection } from "@sdp/types";
@@ -32,7 +33,8 @@ export interface SubmitRpcConnectionInput {
   network: RpcConnectionNetwork;
   scope: "organization" | "project";
   credentialLabel: string;
-  endpointUrl: string;
+  /** Omitted for providers whose endpoint is the same for every account. */
+  endpointUrl?: string;
   apiKey: string;
 }
 
@@ -149,7 +151,9 @@ export async function submitRpcConnection(
   const { projectId, scopeKey } = resolveScope(c, input.scope);
 
   const credential: TenantRpcCredential = {
-    endpointUrl: input.endpointUrl,
+    // A tenant only types an endpoint when their account has its own; for the
+    // rest the provider's published host is used.
+    endpointUrl: resolveTenantEndpoint(input.provider, input.network, input.endpointUrl),
     apiKey: input.apiKey,
   };
 
@@ -167,7 +171,7 @@ export async function submitRpcConnection(
     orgId: auth.organizationId,
     provider: input.provider,
     providerCredentialId,
-    payload: { endpointUrl: input.endpointUrl, apiKey: input.apiKey },
+    payload: { endpointUrl: credential.endpointUrl, apiKey: input.apiKey },
   });
 
   const db = getDb(c.env);
