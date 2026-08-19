@@ -1,6 +1,6 @@
 import { apiTestSupport } from "@sdp/api/test-support";
 import { createRpc, getSignatureStatuses } from "@sdp/rpc/solana";
-import { generateKeyPairSigner, type Signature } from "@solana/kit";
+import { type Commitment, generateKeyPairSigner, type Signature } from "@solana/kit";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupIntegrationSuite,
@@ -36,34 +36,40 @@ const RECIPIENT_AMOUNT_SOL = "0.002";
 const RECIPIENT_AMOUNT_LAMPORTS = 2_000_000;
 
 /**
- * Polls surfpool for the given signatures until every one reports at least
- * confirmed commitment, so reconciliation observes real on-chain statuses.
+ * Polls surfpool for the given signatures until every one reports at least the
+ * target commitment, so reconciliation observes real on-chain statuses.
+ * Searches transaction history because finalization can outlive the node's
+ * recent-status cache.
  *
  * @param signatures - Transaction signatures returned by the batch create.
+ * @param target - Commitment level every signature must reach.
  * @param timeoutMs - How long to keep polling before failing the test.
  */
-async function waitForSignaturesConfirmed(
+async function waitForSignatureCommitment(
   signatures: Signature[],
+  target: Exclude<Commitment, "processed">,
   timeoutMs: number
 ): Promise<void> {
   const rpc = createRpc(env);
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    const statuses = await getSignatureStatuses(rpc, signatures);
-    const allConfirmed = statuses.every(
+    const statuses = await getSignatureStatuses(rpc, signatures, {
+      searchTransactionHistory: true,
+    });
+    const allReached = statuses.every(
       (status) =>
         status !== null &&
         status.err === null &&
-        (status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized")
+        (status.confirmationStatus === target || status.confirmationStatus === "finalized")
     );
-    if (allConfirmed) {
+    if (allReached) {
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
 
   throw new Error(
-    `Timed out waiting for batch signatures to confirm on-chain after ${timeoutMs}ms`
+    `Timed out waiting for batch signatures to reach ${target} on-chain after ${timeoutMs}ms`
   );
 }
 
@@ -105,8 +111,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Transfer Batches 
     await resetIntegrationState(apiKeyHash);
   });
 
-  it("executes a SOL transfer batch on-chain and reconciles it to confirmed", {
-    timeout: 240_000,
+  it("executes a SOL transfer batch on-chain and reconciles it to confirmed, then finalized", {
+    timeout: 300_000,
   }, async () => {
     const sourceWallet = await createFundedIntegrationWallet({
       label: "Batch Source Wallet",
@@ -190,7 +196,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Transfer Batches 
     });
     expect(new Set(signatures).size).toBe(2);
 
-    await waitForSignaturesConfirmed(signatures, 60_000);
+    await waitForSignatureCommitment(signatures, "confirmed", 60_000);
     await trackPendingTransfers(env);
 
     const detailRes = await request(`/v1/payments/transfer-batches/${created.data.batch.id}`);
@@ -208,5 +214,17 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Transfer Batches 
     for (const destinationSigner of destinationSigners) {
       expect(await getLamports(destinationSigner.address)).toBe(RECIPIENT_AMOUNT_LAMPORTS);
     }
+
+    await waitForSignatureCommitment(signatures, "finalized", 120_000);
+    await trackPendingTransfers(env);
+
+    const finalizedRes = await request(`/v1/payments/transfer-batches/${created.data.batch.id}`);
+    expect(finalizedRes.status).toBe(200);
+    const finalized = (await finalizedRes.json()) as TransferBatchApiResponse;
+    expect(finalized.data.transfers.every((transfer) => transfer.status === "finalized")).toBe(
+      true
+    );
+    expect(finalized.data.batch.status).toBe("confirmed");
+    expect(finalized.data.recipients.every((r) => r.status === "confirmed")).toBe(true);
   });
 });

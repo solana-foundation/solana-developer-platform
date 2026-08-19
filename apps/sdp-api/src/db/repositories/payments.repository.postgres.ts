@@ -1,4 +1,4 @@
-import { tokenFilterAliases } from "@sdp/types";
+import { type PaymentTransferStatus, tokenFilterAliases } from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import type {
@@ -627,6 +627,44 @@ export function createPostgresPaymentsRepository(
         .all<Record<string, unknown>>();
 
       return rows.results.map(mapTransferRow);
+    },
+
+    async finalizeConfirmedTransfers({ transfers, updatedAt }) {
+      if (tenantScope) {
+        throw new TenantScopeViolationError(
+          "PaymentsRepository.finalizeConfirmedTransfers is system-only"
+        );
+      }
+      if (transfers.length === 0) {
+        return;
+      }
+
+      const fromStatus: PaymentTransferStatus = "confirmed";
+      const toStatus: PaymentTransferStatus = "finalized";
+      await db
+        .prepare(
+          `UPDATE payment_transfers AS t
+              SET status = ?,
+                  slot = v.slot,
+                  updated_at = ?
+             FROM jsonb_to_recordset(?::jsonb) AS v(transfer_id text, organization_id text, slot bigint)
+            WHERE t.id = v.transfer_id
+              AND t.organization_id = v.organization_id
+              AND t.status = ?`
+        )
+        .bind(
+          toStatus,
+          updatedAt,
+          JSON.stringify(
+            transfers.map((t) => ({
+              transfer_id: t.transferId,
+              organization_id: t.organizationId,
+              slot: t.slot,
+            }))
+          ),
+          fromStatus
+        )
+        .run();
     },
   };
 }

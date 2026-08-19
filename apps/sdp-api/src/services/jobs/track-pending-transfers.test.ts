@@ -299,4 +299,75 @@ describe("trackPendingTransfers", () => {
       expect(getSignatureStatusesMock).not.toHaveBeenCalled();
     });
   });
+
+  describe("finalizeConfirmedTransfers", () => {
+    it("upgrades confirmed transfer to finalized, polling with searchTransactionHistory", async () => {
+      getSignatureStatusesMock.mockResolvedValueOnce([
+        {
+          slot: 77777n,
+          confirmations: null,
+          confirmationStatus: "finalized",
+          err: null,
+        },
+      ]);
+
+      await insertTransfer({
+        id: "xfr_confirmed_finalizing",
+        status: "confirmed",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(3),
+        updatedAt: minutesAgo(2),
+      });
+
+      await trackPendingTransfers(env);
+
+      const updated = await getTransfer("xfr_confirmed_finalizing");
+      expect(updated?.status).toBe("finalized");
+      expect(updated?.slot).toBe(77777);
+      expect(getSignatureStatusesMock).toHaveBeenCalledWith(expect.anything(), [TEST_SIG_1], {
+        searchTransactionHistory: true,
+      });
+    });
+
+    it("leaves confirmed transfer untouched when its signature status reads null", async () => {
+      getSignatureStatusesMock.mockResolvedValueOnce([null]);
+
+      await insertTransfer({
+        id: "xfr_confirmed_no_status",
+        status: "confirmed",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(10),
+        updatedAt: minutesAgo(10),
+      });
+
+      await trackPendingTransfers(env);
+
+      const unchanged = await getTransfer("xfr_confirmed_no_status");
+      expect(unchanged?.status).toBe("confirmed");
+    });
+
+    it("leaves confirmed transfer untouched when the finalized status carries an error", async () => {
+      getSignatureStatusesMock.mockResolvedValueOnce([
+        {
+          slot: 88888n,
+          confirmations: null,
+          confirmationStatus: "finalized",
+          err: { InstructionError: [0, { Custom: 1 }] },
+        },
+      ]);
+
+      await insertTransfer({
+        id: "xfr_confirmed_errored",
+        status: "confirmed",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(3),
+        updatedAt: minutesAgo(2),
+      });
+
+      await trackPendingTransfers(env);
+
+      const unchanged = await getTransfer("xfr_confirmed_errored");
+      expect(unchanged?.status).toBe("confirmed");
+    });
+  });
 });

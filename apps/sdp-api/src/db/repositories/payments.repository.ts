@@ -193,6 +193,20 @@ export interface PaymentsRepository {
     error?: string | null;
   }): Promise<PaymentTransferRow | null>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
+  /**
+   * Upgrades a set of confirmed transfers to finalized in one statement, each
+   * row guarded on still being confirmed (so a concurrent transition is never
+   * overwritten) and on its owning organization (defense in depth — a stray id
+   * can never touch another org's row). System-only.
+   *
+   * @param params - Transfer ids with their owning orgs and finalized slots,
+   * and the timestamp to stamp on upgraded rows.
+   * @returns Resolves once the batch update has been applied.
+   */
+  finalizeConfirmedTransfers(params: {
+    transfers: readonly { transferId: string; organizationId: string; slot: number }[];
+    updatedAt: string;
+  }): Promise<void>;
   getTransferById(params: {
     transferId: string;
     organizationId: string;

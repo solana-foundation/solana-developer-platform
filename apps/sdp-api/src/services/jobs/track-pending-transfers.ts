@@ -11,6 +11,9 @@
  *    these are submitted transactions whose final confirmation may not have been
  *    recorded due to a timeout or process crash. We batch-check their statuses via
  *    getSignatureStatuses and update DB accordingly.
+ *
+ * 3. Upgrade "confirmed" transfers to "finalized" once the cluster reports
+ *    finality — confirmed is transitional, not terminal.
  */
 
 import type { SignatureStatusInfo } from "@sdp/rpc/solana";
@@ -76,6 +79,79 @@ export async function trackPendingTransfers(env: Env): Promise<void> {
 
   await recoverStuckProcessingTransfers(env, repo, now, nowIso);
   await syncProcessingTransfersOnChain(env, repo, nowIso);
+  await finalizeConfirmedTransfers(env, repo, nowIso);
+}
+
+/**
+ * Upgrades confirmed transfers to finalized once the cluster reports finality.
+ *
+ * Upgrade-only by design: a confirmed transfer whose status reads null or err
+ * is left untouched and re-checked next tick — the funds were already observed
+ * on chain, so this pass never introduces a new failure path. Every finalized
+ * row — batch parents included — upgrades through one set-based update guarded
+ * on still being confirmed (never settleTransferBatch, which only claims from
+ * processing and whose recipient settlement already ran): the upgrade changes
+ * no recipient or batch state.
+ *
+ * Polls with searchTransactionHistory because a transaction typically
+ * finalizes (~30s) and leaves the node's short recent-status cache before the
+ * next tick on the managed five-minute cadence; without it every confirmed
+ * row would read null forever.
+ *
+ * @param env - Runtime environment for RPC and repository construction.
+ * @param repo - System payments repository.
+ * @param nowIso - Timestamp applied to upgraded rows.
+ * @returns Resolves when every finalized upgrade has been attempted.
+ */
+async function finalizeConfirmedTransfers(
+  env: Env,
+  repo: PaymentsRepository,
+  nowIso: string
+): Promise<void> {
+  const confirmedTransfers = await repo.listTransfersByStatus({
+    statuses: ["confirmed"],
+    types: WALLET_TRANSFER_TYPES,
+    hasSignature: true,
+    limit: MAX_SIGNATURES_PER_BATCH,
+  });
+
+  if (confirmedTransfers.length === 0) {
+    return;
+  }
+
+  const signatures = confirmedTransfers.map((t) => t.signature as Signature);
+
+  let statuses: Array<SignatureStatusInfo | null>;
+
+  try {
+    const rpc = solanaRpc.createRpc(env);
+    statuses = await solanaRpc.getSignatureStatuses(rpc, signatures, {
+      searchTransactionHistory: true,
+    });
+  } catch (err) {
+    getLogger().error(
+      {
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "trackPendingTransfers: getSignatureStatuses RPC call failed for confirmed transfers"
+    );
+    return;
+  }
+
+  const finalized: { transferId: string; organizationId: string; slot: number }[] = [];
+  for (const [i, transfer] of confirmedTransfers.entries()) {
+    const status = statuses[i];
+    if (!status || status.err || status.confirmationStatus !== "finalized") {
+      continue;
+    }
+    finalized.push({
+      transferId: transfer.id,
+      organizationId: transfer.organization_id,
+      slot: Number(status.slot),
+    });
+  }
+
+  await repo.finalizeConfirmedTransfers({ transfers: finalized, updatedAt: nowIso });
 }
 
 /**
@@ -139,9 +215,7 @@ async function syncProcessingTransfersOnChain(
     return;
   }
 
-  const signatures = processingWithSig
-    .map((t) => t.signature)
-    .filter((s): s is string => s !== null) as Signature[];
+  const signatures = processingWithSig.map((t) => t.signature as Signature);
 
   let statuses: Array<SignatureStatusInfo | null>;
 
