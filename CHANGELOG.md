@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.65.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.64.0...v0.65.0) (2026-08-19)
+
+### Features
+
+* **earn:** add Treasury Solutions with live custody balances and vault positions ([#1397](https://github.com/solana-foundation/solana-developer-platform/pull/1397)) ([9792cf9](https://github.com/solana-foundation/solana-developer-platform/commit/9792cf923e20c1d6a681a6539498a4e5b2f3e66e))
+
+### Bug Fixes
+
+* **web:** resolve token mints to symbols on ramp success and asset breakdown ([#1377](https://github.com/solana-foundation/solana-developer-platform/pull/1377)) ([c9cc500](https://github.com/solana-foundation/solana-developer-platform/commit/c9cc500d77cf459c375a52d701395f17caa448d8))
+
 ## [0.64.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.63.0...v0.64.0) (2026-08-19)
 
 ### Features
