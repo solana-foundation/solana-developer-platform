@@ -139,11 +139,22 @@ export interface RpcConnectionCheckResult {
   upstreamBody: unknown;
 }
 
-/** Run the same read-only JSON-RPC probe used by POST /rpc/test. */
+/**
+ * Run the same read-only JSON-RPC probe used by POST /rpc/test.
+ *
+ * `custom` is the project's own stored endpoint, `projects.settings.rpcEndpoint`,
+ * which is validated as a URL when written and nothing more. That makes it as
+ * customer-supplied as a tenant connection, so it resolves under the same guard
+ * rather than through the ordinary fetch. Managed providers keep it: their
+ * endpoints come from deployment config and are private on purpose in local
+ * development and in the Surfpool suites.
+ */
 export async function checkResolvedRpcTargetConnection(
   input: RpcConnectionCheckInput
 ): Promise<RpcConnectionCheckResult> {
-  return probeRpcEndpoint(input.target);
+  return probeRpcEndpoint(input.target, {
+    enforcePublicEgress: input.target.providerId === "custom",
+  });
 }
 
 export interface ProviderConfigurationCheckInput {
