@@ -110,13 +110,24 @@ export interface ExtendedFeePaymentPort extends FeePaymentPort {
  * Base error for fee payment operations
  */
 export class FeePaymentError extends Error {
+  /**
+   * True when an earlier attempt of the same call may have reached the
+   * provider (lost response, dropped connection, timeout) — so this error,
+   * whatever its code or text, cannot vouch that nothing was broadcast.
+   * Consumers must treat the outcome as unknown instead of journaling a
+   * terminal failure that invites a resend.
+   */
+  public readonly maybeBroadcast: boolean;
+
   constructor(
     message: string,
     public readonly code: FeePaymentErrorCode,
-    public readonly cause?: Error
+    public readonly cause?: Error,
+    options?: { maybeBroadcast?: boolean }
   ) {
     super(message);
     this.name = "FeePaymentError";
+    this.maybeBroadcast = options?.maybeBroadcast ?? false;
   }
 }
 

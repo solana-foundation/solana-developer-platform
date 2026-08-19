@@ -177,6 +177,11 @@ export class KoraAdapter implements FeePaymentPort {
     //  - 502/503/Bad Gateway: The underlying RPC (e.g. Helius devnet) can return transient
     //    HTTP gateway errors that resolve on the next attempt.
     const maxRetries = 2;
+    // Once any attempt dies ambiguously (timeout, dropped connection, gateway
+    // error), the request may have REACHED Kora — from then on no rejection in
+    // this call can vouch that nothing was broadcast. The verdict travels on
+    // the thrown FeePaymentError as `maybeBroadcast` (data, not message text).
+    let maybeBroadcast = false;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         const { signature: submittedSignature, signed_transaction } =
@@ -195,17 +200,20 @@ export class KoraAdapter implements FeePaymentPort {
 
         return signature;
       } catch (error) {
+        maybeBroadcast ||= isAmbiguousTransportError(error);
         if (attempt < maxRetries && isRetryableSignAndSendError(error)) {
           await sleep((attempt + 1) * 500);
           continue;
         }
 
-        throw this.wrapError(error, "Failed to sign and send transaction");
+        throw this.wrapError(error, "Failed to sign and send transaction", { maybeBroadcast });
       }
     }
 
     // Unreachable: loop always returns or throws.
-    throw new FeePaymentError("Failed to sign and send transaction", "NETWORK_ERROR");
+    throw new FeePaymentError("Failed to sign and send transaction", "NETWORK_ERROR", undefined, {
+      maybeBroadcast,
+    });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -303,19 +311,26 @@ export class KoraAdapter implements FeePaymentPort {
     return feeToken;
   }
 
-  private wrapError(error: unknown, message: string): FeePaymentError {
+  private wrapError(
+    error: unknown,
+    message: string,
+    options?: { maybeBroadcast?: boolean }
+  ): FeePaymentError {
     const rpcCode = extractRpcErrorCode(error);
     if (rpcCode !== undefined) {
       return new FeePaymentError(
         `${message}: ${formatErrorMessage(error)}`,
-        mapKoraErrorCode(rpcCode)
+        mapKoraErrorCode(rpcCode),
+        undefined,
+        options
       );
     }
 
     return new FeePaymentError(
       `${message}: ${formatErrorMessage(error)}`,
       "NETWORK_ERROR",
-      error instanceof Error ? error : undefined
+      error instanceof Error ? error : undefined,
+      options
     );
   }
 }
@@ -407,6 +422,21 @@ function extractRpcErrorCode(error: unknown): number | undefined {
   const match = /RPC Error (-?\d+):/.exec(error.message);
   if (!match) return undefined;
   return Number.parseInt(match[1], 10);
+}
+
+// The request may have REACHED Kora even though no usable response came
+// back. Derived from the retryable set so a future transport class cannot be
+// retried-but-unflagged by list drift; the two exclusions are the cases where
+// the outcome of the failed attempt IS known: a refused connection was never
+// established, and "Blockhash not found" is a real server answer.
+function isAmbiguousTransportError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return (
+    isRetryableSignAndSendError(error) &&
+    !message.includes("econnrefused") &&
+    !message.includes("blockhash not found")
+  );
 }
 
 function isRetryableSignAndSendError(error: unknown): boolean {

@@ -191,3 +191,84 @@ describe("KoraAdapter.getSponsorshipConfiguration", () => {
     assert.equal(config.feePayerMayTransferLamports, false);
   });
 });
+
+describe("signAndSend ambiguity verdict (maybeBroadcast)", () => {
+  function makeAdapterWithSendSequence(errors: string[]): KoraAdapter {
+    let call = 0;
+    const transport = {
+      getPayerSigner: async () => ({ signer_address: SIGNER }),
+      signTransaction: async () => ({ signed_transaction: "" }),
+      signAndSendTransaction: async () => {
+        const message = errors[Math.min(call, errors.length - 1)];
+        call += 1;
+        throw new Error(message);
+      },
+      estimateTransactionFee: async () => ({ fee_in_lamports: 0 }),
+      getSupportedTokens: async () => ({ tokens: [] }),
+      getConfig: async () => ({ validation_config: {} }),
+    } as unknown as KoraTransport;
+    return new KoraAdapter({ rpcUrl: "https://kora.example", userId: "u1", client: transport });
+  }
+
+  async function captureSendError(adapter: KoraAdapter): Promise<FeePaymentError> {
+    try {
+      await adapter.signAndSend(new Uint8Array([1, 2, 3]));
+    } catch (error) {
+      assert.ok(error instanceof FeePaymentError);
+      return error;
+    }
+    assert.fail("signAndSend unexpectedly succeeded");
+  }
+
+  it("keeps a first-attempt deterministic rejection un-flagged", async () => {
+    const error = await captureSendError(
+      makeAdapterWithSendSequence(["RPC Error -32002: insufficient balance for fee"])
+    );
+    assert.equal(error.code, "INSUFFICIENT_BALANCE");
+    assert.equal(error.maybeBroadcast, false);
+  });
+
+  it("flags the final rejection after a timed-out attempt, preserving its code", async () => {
+    // The first attempt may have landed; the retry's "insufficient balance"
+    // can be CAUSED by that hidden broadcast. The verdict travels as data —
+    // the code stays, the flag says it cannot be trusted as pre-broadcast.
+    const error = await captureSendError(
+      makeAdapterWithSendSequence([
+        "Kora signAndSendTransaction timed out after 10000ms",
+        "RPC Error -32002: insufficient balance for fee",
+      ])
+    );
+    assert.equal(error.code, "INSUFFICIENT_BALANCE");
+    assert.equal(error.maybeBroadcast, true);
+  });
+
+  it("flags the final simulation rejection after a dropped connection", async () => {
+    const error = await captureSendError(
+      makeAdapterWithSendSequence([
+        "socket hang up ECONNRESET",
+        "RPC Error -32000: Transaction simulation failed: custom program error: 0x1",
+      ])
+    );
+    assert.equal(error.code, "NETWORK_ERROR");
+    assert.equal(error.maybeBroadcast, true);
+  });
+
+  it("does not flag after a refused connection (nothing was ever sent)", async () => {
+    const error = await captureSendError(
+      makeAdapterWithSendSequence([
+        "connect ECONNREFUSED 127.0.0.1:8080",
+        "RPC Error -32002: insufficient balance for fee",
+      ])
+    );
+    assert.equal(error.code, "INSUFFICIENT_BALANCE");
+    assert.equal(error.maybeBroadcast, false);
+  });
+
+  it("flags exhausted retries on ambiguous transport errors", async () => {
+    const error = await captureSendError(
+      makeAdapterWithSendSequence(["Kora signAndSendTransaction timed out after 10000ms"])
+    );
+    assert.equal(error.code, "NETWORK_ERROR");
+    assert.equal(error.maybeBroadcast, true);
+  });
+});
