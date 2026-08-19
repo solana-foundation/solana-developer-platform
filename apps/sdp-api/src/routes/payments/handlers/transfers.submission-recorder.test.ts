@@ -37,6 +37,21 @@ describe("createSubmissionRecorder", () => {
     expect(persist).toHaveBeenCalledTimes(2);
   });
 
+  it("retries at submission even when the caller never reads the row", async () => {
+    const persisted = { ...transfer, signature: SIGNATURE };
+    const persist = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("db unavailable"))
+      .mockResolvedValueOnce(persisted);
+    const recorder = createSubmissionRecorder(transfer, persist);
+
+    await recorder.onSubmitted(SIGNATURE);
+
+    // A caller that decides something from the write's outcome — the batch
+    // path parks the chunk on it — must see both attempts before it decides.
+    expect(persist).toHaveBeenCalledTimes(2);
+  });
+
   it("falls back to the in-memory signed row when persistence keeps failing", async () => {
     const persist = vi.fn().mockRejectedValue(new Error("db unavailable"));
     const recorder = createSubmissionRecorder(transfer, persist);

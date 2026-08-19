@@ -505,11 +505,11 @@ async function signAndSendClosed(
  * Persists a submitted transfer's signature while confirmation is pending so
  * a timeout or crash never strands a broadcast transaction as unsigned
  * `failed` — the pending-transfers job settles signed `processing` rows.
- * Write failures are logged, not thrown; `submittedRow` retries once, then
- * falls back to the in-memory row + signature. Residual: if BOTH writes fail,
- * the durable row stays unsigned and the pending-transfers job will still
- * time it out — a DB outage cannot be closed by more DB writes. Exported for
- * unit tests.
+ * Write failures are logged, not thrown; the write is retried once where it
+ * happens, so a caller that never reads `submittedRow` still gets both
+ * attempts. Residual: if BOTH writes fail, the durable row stays unsigned and
+ * the pending-transfers job will still time it out — a DB outage cannot be
+ * closed by more DB writes. Exported for unit tests.
  */
 export function createSubmissionRecorder(
   transfer: TransferRow,
@@ -535,11 +535,13 @@ export function createSubmissionRecorder(
     onSubmitted: async (sig: string) => {
       signature = sig;
       await persist(sig);
+      if (!row) {
+        await persist(sig);
+      }
     },
     submittedRow: async (): Promise<TransferRow | null> => {
       const sig = signature;
       if (!sig) return null;
-      if (!row) await persist(sig);
       return row ?? { ...transfer, signature: sig };
     },
   };
