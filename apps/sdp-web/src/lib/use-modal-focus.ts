@@ -5,24 +5,22 @@ import { useEffect, useRef } from "react";
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-type EarnModalFocusFallbackAttribute =
-  | "data-earn-vault-deposit-focus-fallback"
-  | "data-earn-withdraw-focus-fallback";
-
-interface EarnModalFocusOptions {
+interface ModalFocusOptions {
   /** Re-run initial focus when the modal changes panels or identity. */
   focusKey: string;
   initialFocusSelector: string;
-  fallbackAttribute: EarnModalFocusFallbackAttribute;
+  /**
+   * Data attribute identifying the element to focus when the trigger is gone by
+   * the time the modal closes — a row action that re-rendered, say. A plain
+   * parameter: nothing here is domain-specific, so the caller names its own.
+   */
+  fallbackAttribute: string;
   fallbackValue: string;
   restoreTiming?: "immediate" | "animation-frame";
   contentDataKey?: string;
 }
 
-function findFocusFallback(
-  attribute: EarnModalFocusFallbackAttribute,
-  value: string
-): HTMLElement | null {
+function findFocusFallback(attribute: string, value: string): HTMLElement | null {
   for (const element of document.querySelectorAll<HTMLElement>(`[${attribute}]`)) {
     if (element.getAttribute(attribute) === value) return element;
   }
@@ -30,18 +28,21 @@ function findFocusFallback(
 }
 
 /**
- * Shared focus containment and trigger restoration for portaled Earn modals.
- * Escape remains owned by the common `Modal`, so its close semantics stay
- * aligned with every other dashboard modal.
+ * Focus containment and trigger restoration for a portaled modal.
+ *
+ * Generic a11y machinery, deliberately NOT parked in a feature directory: it
+ * started in the Earn module and every modal-heavy surface would otherwise
+ * reinvent the tab cycle and the restore-on-close rules. Escape stays owned by
+ * the common `Modal`, so close semantics remain aligned across the dashboard.
  */
-export function useEarnModalFocus({
+export function useModalFocus({
   focusKey,
   initialFocusSelector,
   fallbackAttribute,
   fallbackValue,
   restoreTiming = "immediate",
   contentDataKey,
-}: EarnModalFocusOptions) {
+}: ModalFocusOptions) {
   const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

@@ -1,7 +1,7 @@
 "use client";
 
-import type { CustodyWalletSummary } from "@sdp/types";
 import useSWR from "swr";
+import { z } from "zod";
 
 /**
  * Funding wallets for the deposit flow: the org's own SDP wallets, plus the
@@ -15,6 +15,51 @@ import useSWR from "swr";
  * both flows; their write contracts remain deliberately separate.
  */
 
+const walletTokenBalanceSchema = z.object({
+  token: z.string(),
+  mint: z.string(),
+  amount: z.string(),
+  uiAmount: z.string(),
+  decimals: z.number(),
+  usdPrice: z.number().optional(),
+  usdValue: z.number().optional(),
+});
+
+/**
+ * The wallet fields this seam actually promises its callers, PARSED rather than
+ * asserted.
+ *
+ * The envelope walk this replaced proved only that `data.wallets` was an array
+ * and then cast the rows to the full custody type — so a response missing
+ * `publicKey` (the address a deposit is signed from) type-checked as a complete
+ * wallet and failed later, somewhere else. Parsing here means a malformed row
+ * fails loudly at the boundary that read it. The row type is derived from this
+ * schema, so the two cannot drift.
+ */
+const earnFundingWalletSchema = z.object({
+  id: z.string(),
+  walletId: z.string(),
+  publicKey: z.string(),
+  label: z.string().nullable(),
+  purpose: z.string().nullable(),
+  status: z.enum(["active", "inactive"]),
+  isRuntimeExecutionAllowed: z.boolean(),
+  balances: z.array(walletTokenBalanceSchema).optional(),
+});
+
+/**
+ * An invalid success envelope is an upstream failure, not an empty wallet list.
+ * Treating it as `[]` would disable deposits while claiming the org simply has
+ * no wallets.
+ */
+const fundingWalletsResponseSchema = z.object({
+  data: z.object({
+    wallets: z.array(earnFundingWalletSchema),
+  }),
+});
+
+export type EarnFundingWallet = z.infer<typeof earnFundingWalletSchema>;
+
 /**
  * Balances come from live RPC reads, so they are opt-in per request and served
  * from short-TTL caches on both sides. They are shown as context only — never
@@ -23,30 +68,17 @@ import useSWR from "swr";
 const WALLETS_PATH =
   "/api/dashboard/wallets?view=summary&includeBalances=true&includeAllProviders=true";
 
-export async function fetchFundingWallets(): Promise<CustodyWalletSummary[]> {
+export async function fetchFundingWallets(): Promise<EarnFundingWallet[]> {
   const response = await fetch(WALLETS_PATH);
   if (!response.ok) {
     throw new Error(`Request failed (${response.status})`);
   }
-  const body = (await response.json()) as unknown;
-  if (
-    !body ||
-    typeof body !== "object" ||
-    !("data" in body) ||
-    !body.data ||
-    typeof body.data !== "object" ||
-    !("wallets" in body.data) ||
-    !Array.isArray(body.data.wallets)
-  ) {
-    // An invalid success envelope is an upstream failure, not an empty wallet
-    // list. Treating it as [] would disable deposits while claiming the org
-    // simply has no wallets.
+  const parsed = fundingWalletsResponseSchema.safeParse(await response.json());
+  if (!parsed.success) {
     throw new Error("Invalid custody wallet response");
   }
   // Only usable funding sources: an inactive wallet cannot originate a transfer.
-  return (body.data.wallets as CustodyWalletSummary[]).filter(
-    (wallet) => wallet.status === "active"
-  );
+  return parsed.data.data.wallets.filter((wallet) => wallet.status === "active");
 }
 
 export function useEarnFundingWallets() {
@@ -63,9 +95,6 @@ export function useEarnFundingWallets() {
  * user-set and nullable, and `||` (not `??`) is required so a label of spaces
  * falls back instead of rendering an empty name.
  */
-export function walletDisplayName(
-  wallet: CustodyWalletSummary | undefined,
-  fallback: string
-): string {
+export function walletDisplayName(wallet: EarnFundingWallet | undefined, fallback: string): string {
   return wallet?.label?.trim() || fallback;
 }

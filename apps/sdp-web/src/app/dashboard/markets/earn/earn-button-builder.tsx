@@ -29,11 +29,7 @@ import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { EarnProgramSkeleton } from "../markets-route-skeletons";
-import {
-  EARN_BUTTON_STYLES,
-  type EarnButtonStyle,
-  EarnDepositButtonPreview,
-} from "./earn-button-preview";
+import { type EarnButtonStyle, EarnDepositButtonPreview } from "./earn-button-preview";
 import { EarnStrategyIdentity, formatProviderApy } from "./earn-market-presentation";
 import { useEarnStrategies } from "./earn-program-data";
 import { type EarnProviderAccess, earnVaultDepositAvailability } from "./earn-surfacing";
@@ -59,10 +55,6 @@ const STYLE_OPTIONS = [
   labelKey: MessageKey;
   descriptionKey: MessageKey;
 }>;
-
-if (STYLE_OPTIONS.some((option) => !EARN_BUTTON_STYLES.includes(option.value))) {
-  throw new Error("Earn button style options are out of sync");
-}
 
 function buildServerIntegration(strategy: EarnStrategy): string {
   return `const SDP_API_URL = ${JSON.stringify(DEFAULT_SDP_API_URL)};

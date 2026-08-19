@@ -107,25 +107,37 @@ the body `requestId` form.
 - `earn-withdraw-modal.tsx` — portfolio-level withdrawal: stablecoin, amount,
   Solana destination; preview → confirm → submitted. Every figure it quotes
   comes from the PROVIDER, never a local estimate (PRO-1675) — see
-  "Withdrawal rules" below.
-- `earn-modal-focus.ts` — shared focus containment and trigger restoration for
-  the portaled Earn modals. Escape stays owned by the common `Modal` so close
-  semantics match every other dashboard modal. The fallback attribute is a
-  closed union, so a modal cannot invent an unmatched restore target.
-- `earn-decimal.ts` — exact unsigned-decimal parse/scale/compare over STRINGS.
-  No JavaScript `number` touches money here.
+  "Withdrawal rules" below. The selected token is `EarnPortfolioToken |
+  undefined` and the form subtree renders only once it is a REAL lane: seeding
+  state with a default stablecoin would make every read below depend on
+  remembering to fail closed, and the provider-unavailable case would silently
+  hold a lane that cannot pay out.
+- `earn-decimal.ts` — the strict decimal parser: digits required on BOTH sides
+  of the point, optional no-trim and length caps, plus the canonical form. Scale
+  and ordering are NOT reimplemented — `decimalScale` and `compareDecimalAmounts`
+  come from `@sdp/solana/amount`. The one wrapper, `compareUnsignedDecimals`,
+  exists because the shared comparator THROWS on a non-decimal and these call
+  sites read provider strings during render (ADR 0002: a malformed ceiling must
+  disable an affordance, never crash an exit).
 - `earn-format.ts` — display formatters over decimal strings
   (`formatProviderAmount`, `formatUsd`, `tokenSymbol`, `formatTokenQuantity`,
-  ISO-8601 duration helpers). A non-decimal input renders `—`; nothing invents
-  a zero.
+  ISO-8601 duration helpers). `Intl.NumberFormat` takes the decimal string
+  DIRECTLY (ES2023), so there is no `Number()` cast and no hand-rolled digit
+  grouping; `roundingMode: "trunc"` because rounding a balance up would display
+  an amount the provider then refuses. Every formatter takes the caller's
+  `locale` — grouping and the decimal separator are locale facts, not en-US
+  constants. A non-decimal input renders `—`; nothing invents a zero.
 - `earn-market-presentation.tsx` — shared strategy identity + asset resolution
   (`EarnStrategyIdentity`, `earnStrategyAsset`, `formatProviderApy`,
   `sumDecimalStrings`). Shared with Treasury Solutions — keep it presentational.
 - `earn-program-presentation.ts` — pure per-strategy helpers (token lane,
   source label). Every one reads a field the provider actually publishes.
 - `deposit/earn-funding-wallets.ts` — the org's own SDP wallets, one inventory
-  serving both deposit shapes. An invalid success envelope THROWS; treating it
-  as `[]` would disable deposits while claiming the org has no wallets. Only
+  serving both deposit shapes. The response is zod-PARSED and the row type
+  (`EarnFundingWallet`) is derived from that schema, so the two cannot drift; a
+  row missing `publicKey` — the address a deposit is signed from — fails at this
+  boundary instead of somewhere downstream. An invalid envelope THROWS; treating
+  it as `[]` would disable deposits while claiming the org has no wallets. Only
   `active` wallets are returned — an inactive wallet cannot originate a
   transfer. `walletDisplayName` uses `||`, not `??`, so a whitespace label falls
   back instead of rendering an empty name.
@@ -148,9 +160,13 @@ Solutions exists, these seams have callers and this section can go.
 `createEarnVaultDeposit` rebuilds its request body field-by-field rather than
 spreading the caller's input, so even an untyped caller cannot smuggle
 `requestId` (the legacy custodial-program contract) or arbitrary fields into a
-value-moving request. It also decodes the `202 SIGNING_PENDING` answer into an
-explicit `approval_pending` outcome — an approval is not a failure, and it is
-not a submitted deposit either.
+value-moving request. The RESPONSE is parsed at the boundary — a zod union over
+the success envelope and the `SIGNING_PENDING` one, with the outcome type
+derived via `z.infer` — so the deposit record itself is checked rather than
+asserted. An approval hold is decoded into an explicit `approval_pending`
+outcome (an approval is not a failure, and not a submitted deposit either) and
+is accepted ONLY on a 202: created-and-held is a contradiction, and this must
+not resolve it in the customer's favour.
 
 ## Availability is the whole design
 
@@ -214,15 +230,21 @@ Conventions). All still hold:
 The API deliberately carries amounts as strings, and JavaScript numbers cannot
 distinguish every six-decimal value once balances exceed 2^53. So:
 
-- `earn-decimal.ts` parses, scales and compares without a `Number` cast.
-- `earn-format.ts` groups digits textually — it never round-trips through
-  `Number` or `toLocaleString` on the amount.
+- `earn-decimal.ts` parses and canonicalizes without a `Number` cast, and
+  delegates scale and ordering to `@sdp/solana/amount` (`decimalScale`,
+  `compareDecimalAmounts`) rather than restating that arithmetic.
+- `earn-format.ts` hands the decimal string straight to `Intl.NumberFormat`,
+  which formats it exactly — no `Number` round trip, no manual grouping.
 - `sumDecimalStrings` (`earn-market-presentation.tsx`) adds at the widest scale
   in `BigInt` and formats back.
 - The one deliberate `Number` is `formatProviderApy`, on a RATE (`0.062`) rather
   than an amount, for `Intl.NumberFormat` percent output. Keep it that way.
 
 Anything unparseable renders `—`. Never `0`, never a fabricated rate.
+
+Shared machinery belongs OUTSIDE this directory: the modal focus trap lives at
+`@/lib/use-modal-focus` (generic a11y, not Earn domain — its fallback attribute
+is a plain parameter), beside `use-escape-key`. `Modal` still owns Escape.
 
 ## The client/server boundary bug — why `earn-surfacing.ts` exists
 

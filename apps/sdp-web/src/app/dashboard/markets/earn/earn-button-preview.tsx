@@ -6,11 +6,11 @@ import { cn } from "@/lib/utils";
 export const EARN_BUTTON_STYLES = ["ink", "light", "accent"] as const;
 export type EarnButtonStyle = (typeof EARN_BUTTON_STYLES)[number];
 
-export const EARN_BUTTON_STYLE_CLASS_NAMES: Record<EarnButtonStyle, string> = {
+export const EARN_BUTTON_STYLE_CLASS_NAMES = {
   ink: "bg-primary text-on-primary shadow-sm",
   light: "border border-border-default bg-surface-raised text-primary shadow-sm",
   accent: "bg-[#14F195] text-[#0f0f10] shadow-sm",
-};
+} as const satisfies Record<EarnButtonStyle, string>;
 
 export function EarnDepositButtonPreview({
   className,

@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { useEarnModalFocus } from "./earn-modal-focus";
+import { useModalFocus } from "./use-modal-focus";
 
 interface FocusHarnessProps {
   scope: "program" | "strategy";
@@ -12,7 +12,7 @@ interface FocusHarnessProps {
 }
 
 function FocusHarness({ scope, scopeId, panelKey = "form", restoreTiming }: FocusHarnessProps) {
-  const contentRef = useEarnModalFocus({
+  const contentRef = useModalFocus({
     focusKey: panelKey,
     initialFocusSelector: "[data-modal-focus-target]",
     fallbackAttribute:
@@ -48,7 +48,7 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-describe("useEarnModalFocus", () => {
+describe("useModalFocus", () => {
   it("focuses each panel target and contains forward and reverse Tab navigation", async () => {
     const view = render(<FocusHarness scope="strategy" scopeId="strategy_1" />);
     const first = view.getByRole("button", { name: "First" });

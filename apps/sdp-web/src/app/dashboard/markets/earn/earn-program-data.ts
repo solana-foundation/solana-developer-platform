@@ -2,6 +2,7 @@
 
 import {
   EARN_TERMINAL_WITHDRAWAL_STATUSES,
+  EARN_VAULT_MOVEMENT_STATUSES,
   type EarnPortfolioAllocationInput,
   type EarnPortfolioToken,
   type EarnPortfolioWalletSnapshot,
@@ -21,10 +22,12 @@ import {
   type ListEarnProgramsResponse,
   type ListEarnProgramWithdrawalsResponse,
   type ListEarnStrategiesResponse,
+  SOLANA_CLUSTERS,
 } from "@sdp/types";
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
+import { z } from "zod";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { type DashboardFetchResult, dashboardFetch } from "@/lib/dashboard-fetch";
@@ -504,18 +507,67 @@ export function useEarnVaultPositions() {
   return { positions: data, error, isLoading, refresh: () => void mutate() };
 }
 
-export type EarnVaultDepositOutcome =
-  | { kind: "submitted"; deposit: EarnVaultDeposit }
-  | {
-      kind: "approval_pending";
-      message: string;
-      approvalRequestId?: string;
-      walletOperationId?: string;
-    };
+/**
+ * The two envelopes a 2xx vault deposit can answer with, parsed at the
+ * boundary rather than narrowed by hand.
+ *
+ * `dashboardFetch` has already rejected every non-2xx status, so only these
+ * two shapes are reachable: the created movement, or the policy hold that the
+ * API reports as a `202` carrying an error-shaped body. Parsing both means the
+ * deposit RECORD is checked too — the previous `as unknown as EarnVaultDeposit`
+ * asserted a movement id and signature that were never looked at.
+ *
+ * `z.union` rather than `z.discriminatedUnion`: the two envelopes share no
+ * common key, so there is no discriminator to switch on — the tag is minted by
+ * the transforms below, which is what makes the OUTCOME a discriminated union
+ * for every caller.
+ *
+ * The record schema is annotated `z.ZodType<EarnVaultDeposit>` rather than left
+ * to inference, so a field added or renamed in `@sdp/types` fails typecheck
+ * here instead of being silently stripped from a parsed deposit.
+ */
+const earnVaultDepositSchema: z.ZodType<EarnVaultDeposit> = z.object({
+  positionId: z.string(),
+  movementId: z.string(),
+  status: z.enum(EARN_VAULT_MOVEMENT_STATUSES),
+  signature: z.string(),
+  failureReason: z.string().nullable(),
+  replayed: z.boolean(),
+  strategy: z.object({
+    id: z.string(),
+    name: z.string(),
+    provider: z.string(),
+    providerReference: z.string(),
+    hostCluster: z.enum(SOLANA_CLUSTERS),
+  }),
+});
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
+const earnVaultDepositOutcomeSchema = z.union([
+  z
+    .object({ data: earnVaultDepositSchema })
+    .transform(({ data }) => ({ kind: "submitted" as const, deposit: data })),
+  z
+    .object({
+      error: z.object({
+        code: z.literal("SIGNING_PENDING"),
+        message: z.string(),
+        details: z
+          .object({
+            approvalRequestId: z.string().optional(),
+            walletOperationId: z.string().optional(),
+          })
+          .optional(),
+      }),
+    })
+    .transform(({ error }) => ({
+      kind: "approval_pending" as const,
+      message: error.message,
+      approvalRequestId: error.details?.approvalRequestId,
+      walletOperationId: error.details?.walletOperationId,
+    })),
+]);
+
+export type EarnVaultDepositOutcome = z.infer<typeof earnVaultDepositOutcomeSchema>;
 
 /**
  * Deposits from an SDP custody wallet into a non-custodial vault. The caller's
@@ -543,42 +595,22 @@ export async function createEarnVaultDeposit(
   });
 
   if (!result.ok) return result;
-  const responseBody = result.data;
 
-  if (isObject(responseBody) && isObject(responseBody.data)) {
-    return {
-      ok: true,
-      status: result.status,
-      data: { kind: "submitted", deposit: responseBody.data as unknown as EarnVaultDeposit },
-    };
-  }
-
-  const error = isObject(responseBody) && isObject(responseBody.error) ? responseBody.error : null;
-  if (result.status === 202 && error?.code === "SIGNING_PENDING") {
-    const details = isObject(error.details) ? error.details : undefined;
-    return {
-      ok: true,
-      status: result.status,
-      data: {
-        kind: "approval_pending",
-        message:
-          typeof error.message === "string" ? error.message : "Vault deposit requires approval",
-        ...(typeof details?.approvalRequestId === "string"
-          ? { approvalRequestId: details.approvalRequestId }
-          : {}),
-        ...(typeof details?.walletOperationId === "string"
-          ? { walletOperationId: details.walletOperationId }
-          : {}),
-      },
-    };
-  }
-
-  return {
+  const invalid = {
     ok: false,
     error: "Invalid vault deposit response",
     status: result.status,
-    body: responseBody,
-  };
+    body: result.data,
+  } as const;
+
+  const parsed = earnVaultDepositOutcomeSchema.safeParse(result.data);
+  if (!parsed.success) return invalid;
+  // An approval hold is specifically the 202 contract. A 200 or 201 carrying it
+  // would mean the API reported a deposit as both created and held, and this
+  // must not resolve that contradiction in the customer's favour.
+  if (parsed.data.kind === "approval_pending" && result.status !== 202) return invalid;
+
+  return { ok: true, status: result.status, data: parsed.data };
 }
 
 export interface EarnWithdrawalPreviewInput {
