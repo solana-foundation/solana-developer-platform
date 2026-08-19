@@ -1,4 +1,5 @@
 import type { OrganizationRpcProvider } from "@sdp/types";
+import { rpcProviderNeedsEndpoint } from "@sdp/types";
 import {
   applyApiKeyTemplate,
   withAlchemyApiKey,
@@ -42,6 +43,52 @@ export const BYOK_RPC_PROVIDERS: readonly ByokRpcProvider[] = [
 
 export function isByokRpcProvider(value: string): value is ByokRpcProvider {
   return (BYOK_RPC_PROVIDERS as readonly string[]).includes(value);
+}
+
+/**
+ * Endpoints a tenant does not have to type.
+ *
+ * Only providers whose host is the same for every account belong here, and
+ * only where this repository already carries both network URLs. QuickNode and
+ * Triton issue an account-specific subdomain, and Nodit and Validation Cloud
+ * are not confirmed for both clusters, so those still require an explicit
+ * endpoint rather than a guessed one.
+ */
+export const DEFAULT_TENANT_ENDPOINTS: Partial<
+  Record<ByokRpcProvider, Record<"devnet" | "mainnet-beta", string>>
+> = {
+  helius: {
+    devnet: "https://devnet.helius-rpc.com",
+    "mainnet-beta": "https://mainnet.helius-rpc.com",
+  },
+  alchemy: {
+    devnet: "https://solana-devnet.g.alchemy.com/v2",
+    "mainnet-beta": "https://solana-mainnet.g.alchemy.com/v2",
+  },
+};
+
+/** Whether the tenant must supply an endpoint because we cannot know theirs. */
+export function requiresExplicitEndpoint(provider: ByokRpcProvider): boolean {
+  return rpcProviderNeedsEndpoint(provider);
+}
+
+export function resolveTenantEndpoint(
+  provider: ByokRpcProvider,
+  network: "devnet" | "mainnet-beta",
+  supplied?: string
+): string {
+  const trimmed = supplied?.trim();
+  if (trimmed) {
+    return trimmed;
+  }
+  const fallback = DEFAULT_TENANT_ENDPOINTS[provider]?.[network];
+  if (!fallback) {
+    throw new SdpRpcError(
+      "BAD_REQUEST",
+      `${provider} issues an account-specific endpoint, so one must be supplied`
+    );
+  }
+  return fallback;
 }
 
 /**

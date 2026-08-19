@@ -1,4 +1,4 @@
-import type { OrganizationRpcProvider } from "@sdp/types";
+import type { OrganizationRpcProvider, SafeRpcConnection } from "@sdp/types";
 import Image from "next/image";
 import Link from "next/link";
 import { CUSTODY_CAPABILITY_LABEL_KEYS } from "@/app/dashboard/custody/provider-catalog";
@@ -10,6 +10,7 @@ import { getTranslations } from "@/i18n/server";
 import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
 import { RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import type { IntegrationDetail } from "../integration-detail";
+import { RpcByokSection } from "../rpc-byok-section";
 import { RpcConnectionPanel } from "../rpc-connection-panel";
 
 /**
@@ -23,6 +24,11 @@ export interface RpcConnectionContext {
   /** Whether this deployment holds an endpoint for the provider on the page. */
   isEnabledInDeployment: boolean;
   organizationId: string;
+  /**
+   * Tenant-owned connections for this provider; absent for SDP's own rail,
+   * `null` when the read failed and we must not claim there are none.
+   */
+  byokConnections?: SafeRpcConnection[] | null | "restricted";
 }
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
@@ -177,6 +183,16 @@ export async function IntegrationDetailView({
             organizationId={rpc.organizationId}
             provider={detail.provider as OrganizationRpcProvider}
             status={detail.status}
+          />
+        </Section>
+      ) : null}
+
+      {detail.family === "rpc" && rpc?.byokConnections !== undefined ? (
+        <Section title={t("Shared.integrations.rpcByokTitle")}>
+          <RpcByokSection
+            canManage={rpc.canManage}
+            connections={rpc.byokConnections}
+            provider={detail.provider}
           />
         </Section>
       ) : null}
