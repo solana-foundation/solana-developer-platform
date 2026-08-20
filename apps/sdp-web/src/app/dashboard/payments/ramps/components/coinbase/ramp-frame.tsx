@@ -2,6 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "@/i18n/provider";
+import {
+  COINBASE_HOSTED_APPROVED_HOSTS,
+  isTrustedRampDestination,
+} from "@/lib/trusted-ramp-destinations";
 import { handleCoinbaseFrameEvent } from "./frame-events";
 
 /**
@@ -28,7 +32,13 @@ type CoinbaseFramePhase = "button" | "sheet" | "processing";
 export function CoinbaseRampFrame({ orderId, src }: { orderId: string; src: string }) {
   const t = useTranslations();
   const [phase, setPhase] = useState<CoinbaseFramePhase>("button");
+  // The frame's origin is also what the postMessage listener trusts, so only
+  // HTTPS Coinbase payment-link hosts may ever be embedded — fail closed.
+  const trustedSrc = isTrustedRampDestination(src, COINBASE_HOSTED_APPROVED_HOSTS);
   useEffect(() => {
+    if (!trustedSrc) {
+      return;
+    }
     const expectedOrigin = new URL(src).origin;
     const handleMessage = (event: MessageEvent) => {
       if (event.origin !== expectedOrigin) {
@@ -47,7 +57,15 @@ export function CoinbaseRampFrame({ orderId, src }: { orderId: string; src: stri
     };
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [src, orderId, t]);
+  }, [src, orderId, t, trustedSrc]);
+
+  if (!trustedSrc) {
+    return (
+      <div className="rounded-2xl border border-error-border bg-error-bg px-5 py-5 text-sm text-error">
+        {t("DashboardPayments.ramps.untrustedProviderUrl")}
+      </div>
+    );
+  }
 
   if (phase === "processing") {
     return null;

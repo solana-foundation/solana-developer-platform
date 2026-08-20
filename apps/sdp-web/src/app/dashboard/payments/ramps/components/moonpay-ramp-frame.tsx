@@ -5,6 +5,10 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
+import {
+  isTrustedRampDestination,
+  MOONPAY_HOSTED_APPROVED_HOSTS,
+} from "@/lib/trusted-ramp-destinations";
 
 const FRAME_ALLOW =
   "accelerometer; autoplay; camera; encrypted-media; fullscreen; geolocation; gyroscope; payment";
@@ -17,6 +21,16 @@ const FRAME_ALLOW =
 export function MoonpayRampFrame({ title, src }: { title: string; src: string }) {
   const t = useTranslations();
   const [expanded, setExpanded] = useState(false);
+
+  // The frame gets camera/payment permissions, so only HTTPS MoonPay checkout
+  // hosts may ever be embedded — anything else fails closed.
+  if (!isTrustedRampDestination(src, MOONPAY_HOSTED_APPROVED_HOSTS)) {
+    return (
+      <div className="rounded-2xl border border-error-border bg-error-bg px-5 py-5 text-sm text-error">
+        {t("DashboardPayments.ramps.untrustedProviderUrl")}
+      </div>
+    );
+  }
 
   return (
     <div>
