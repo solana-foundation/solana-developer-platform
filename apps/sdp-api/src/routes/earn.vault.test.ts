@@ -652,7 +652,6 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
       shareMint: SHARE_MINT,
       label: strategy.name,
       requestedAmount: "10",
-      acceptedAmount: "10",
       signature: `sig_${crypto.randomUUID()}`,
       signedTransaction: "AQ==",
       lastValidBlockHeight: "12345",

@@ -925,11 +925,7 @@ describe("EarnRepository (postgres)", () => {
     async function seedWithdrawal(
       overrides: Partial<CreateCustodialMovementInput> = {}
     ): Promise<EarnMovementRow> {
-      const row = await ledger.createCustodialMovement(withdrawalInput(overrides));
-      if (!row) {
-        throw new Error("failed to seed withdrawal");
-      }
-      return row;
+      return ledger.createCustodialMovement(withdrawalInput(overrides));
     }
 
     function observed(overrides: Partial<EarnPortfolioWithdrawal> = {}): EarnPortfolioWithdrawal {

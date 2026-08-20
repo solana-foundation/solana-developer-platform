@@ -163,7 +163,6 @@ describe("Unified earn movement ledger (postgres)", () => {
       tokenMint: TOKEN_MINT,
       label: "USDC vault",
       requestedAmount: "100",
-      acceptedAmount: "100.000000",
       acceptedMinSharesOut: "99.000000",
       signature: `earn-mv-signature-${sequence}`,
       signedTransaction: `earn-mv-transaction-${sequence}`,
@@ -387,6 +386,10 @@ describe("Unified earn movement ledger (postgres)", () => {
         status: "confirmed",
         confirmed_at: confirmedAt,
         shares_out: "99.5",
+        // The chain has spoken, so what moved is known: the requested amount,
+        // which the service pinned numerically equal to the plan's canonical
+        // amount before signing.
+        amount_settled: "100",
         // Commitment is not settlement, so nothing is settled yet.
         settled_at: null,
       });
@@ -402,6 +405,7 @@ describe("Unified earn movement ledger (postgres)", () => {
       expect(await onlyMovement()).toMatchObject({
         status: "finalized",
         settled_at: settledAt,
+        amount_settled: "100",
         // The moment commitment was ACTUALLY observed survives finalization; the
         // writer coalesces rather than overwriting it.
         confirmed_at: confirmedAt,
@@ -424,6 +428,8 @@ describe("Unified earn movement ledger (postgres)", () => {
         failure_reason: "Transaction blockhash expired before confirmation",
         confirmed_at: null,
         settled_at: null,
+        // Nothing moved, so nothing is ever reported as settled.
+        amount_settled: null,
       });
       // The only movement failed, so the holding loses its activation — and the
       // mirror has to reflect that, not just the movement's own state.
@@ -456,8 +462,7 @@ describe("Unified earn movement ledger (postgres)", () => {
       const db = getDb(env);
       const first = await ledger.createSignedVaultDepositIntent(intent());
       const second = await ledger.createSignedVaultDepositIntent(
-        // Requested and accepted must stay numerically equal (0059 enforces it).
-        intent({ requestedAmount: "250", acceptedAmount: "250.000000" })
+        intent({ requestedAmount: "250" })
       );
 
       // Topping up the same vault from the same wallet is one HOLDING with many
@@ -805,9 +810,7 @@ describe("Unified earn movement ledger (postgres)", () => {
       // Trailing zeroes and a bare integer are different SPELLINGS of the same
       // value. An audit ledger stores what was said, so no coercion may happen.
       await createWithdrawal({ walletId: wallet.id, amountRequestedUsd: "1000.500000" });
-      await ledger.createSignedVaultDepositIntent(
-        intent({ requestedAmount: "100", acceptedAmount: "100.000000" })
-      );
+      await ledger.createSignedVaultDepositIntent(intent({ requestedAmount: "100" }));
 
       const rows = await movements();
       const custodial = rows.find((row) => row.execution_model === "custodial");

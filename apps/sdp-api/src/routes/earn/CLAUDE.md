@@ -311,9 +311,10 @@ other's balance.
   the program wallet (two tenants sharing the provider account cannot collide;
   Ground validates the shape strictly — v4 only, verified 2026-08-05).
   Since PRO-1628 the defence is TWO-layer: the derived id anchors an SDP
-  intent row in `earn_program_withdrawals` — unique per (wallet, request_id),
-  wallet-scoped because sibling projects reach the same program and, since
-  PRO-1670, because one caller key used against two of the org's own programs
+  intent row in `earn_movements` — unique per (position, request_id), the
+  custodial holding being 1:1 with the program wallet, so this is 0055's wallet
+  scope in the unified shape: sibling projects reach the same program and, since
+  PRO-1670, one caller key used against two of the org's own programs
   must not collapse into one payout — with a payload
   fingerprint that answers a replay from our own ledger (200, live state) and
   409s key-reuse-with-different-payload BEFORE any provider call. The
@@ -333,19 +334,21 @@ other's balance.
   unique) is advanced best-effort as a side effect. Unknown refs serve live state
   and touch nothing (pre-ledger withdrawals must keep polling fine). A **BOLA
   guard** runs before the provider call, and since PRO-1670 it compares the
-  **program, not the organization**: `ledgerRow.wallet_id !== row.id` 404s. An
+  **program, not the organization**: the movement names its HOLDING, so the
+  guard re-resolves it through `earn_positions` and 404s when
+  `holding.provider_wallet_id !== row.id`. An
   org-only check was complete while an org held one program; with several,
   asking program A for program B's ref would pass it and then drive the provider
   with A's wallet ref and B's withdrawal ref — a mismatch whose answer is
-  entirely the provider's to decide. wallet_id is strictly stronger and still
+  entirely the provider's to decide. Program scope is strictly stronger and still
   lets an unknown ref fall through. Cross-tenant scoping stays SDP's job, never
   delegated to the provider's own path scoping.
-- `GET /programs/:programId/withdrawals` — **DB ledger list**
-  (`earn_program_withdrawals`), the house `{withdrawals, total, page, pageSize}`
-  envelope, newest first. Scoped to the path program's `wallet_id`: every project
-  in the environment reaches the same programs, so one program = one history, and
-  with several programs the wallet id is also what keeps a sibling program's
-  payouts out of this list. Note it resolves the program WITHOUT
+- `GET /programs/:programId/withdrawals` — **DB ledger list** (custodial
+  `earn_movements` rows), the house `{withdrawals, total, page, pageSize}`
+  envelope, newest first. Scoped to the path program through its holding: every
+  project in the environment reaches the same programs, so one program = one
+  history, and with several programs that scope is also what keeps a sibling
+  program's payouts out of this list. Note it resolves the program WITHOUT
   `requirePortfolioClient` and takes NO provider gate — not even the credential
   check — because the audit trail must outlive credential removal, entitlement
   disablement, and a provider losing its registry entry entirely. There is no
@@ -459,7 +462,7 @@ organization's own custody wallets.
     only surface a deposit the caller could already read. It is also why the key
     is a QUERY filter and not a path segment — legal keys contain `/` and `?`.
   - **The replay decision is project-scoped IN THE REPOSITORY, not only at the
-    route.** `findMovementByRequestId` is keyed on `(organization_id, request_id)`
+    route.** `findVaultMovementByRequestId` is keyed on `(organization_id, request_id)`
     and the server fingerprint (`buildEarnVaultDepositFingerprint`) omits the
     project, so a key first used by a SIBLING project matched on both and its
     movement was returned as a replay — the wrong deposit, plus its amount and
@@ -490,10 +493,10 @@ organization's own custody wallets.
     push an in-flight deposit past the first page would silently stop tracking
     it. The reconciliation sweep drives every row terminal within ~90 seconds,
     so the in-flight set is small by construction.
-  - Migration `0061` adds `idx_earn_vault_movements_workspace_created`
-    (`(organization_id, environment, created_at DESC, id DESC) WHERE direction =
-    'deposit'`). 0059's indexes serve the sweep, replay, the chain and per
-    position — none of them can order this page.
+  - 0062's `idx_earn_movements_direction_created` (`(organization_id,
+    environment, direction, created_at DESC, id DESC)`) is what orders this
+    page; the sweep, replay, chain and per-position lookups each have their own
+    index — none of them can.
 - `GET /vault-deposits/:movementId` — one recorded movement, **DB only**, no
   catalogue join and no chain read. This is what makes `POST`'s
   record-before-broadcast answerable: a caller can hold a movement id for a
@@ -529,7 +532,7 @@ organization's own custody wallets.
   It DOES take wallet-binding scope: `getAllowedApiKeyWalletIdsForPermissions(auth,
   ["earn:read"])`, applied in the repository query before any chain read. Mind
   the id spaces — that helper returns provider `walletId`s (`privy_…`) while
-  `earn_vault_positions.custody_wallet_id` is the `cwlt_…` row id, so the handler
+  `earn_positions.custody_wallet_id` is the `cwlt_…` row id, so the handler
   translates through `scope.wallets`. Passing the allow-list straight through
   matches nothing and silently returns an empty page.
   A failed chain read leaves a position UNHYDRATED rather than zero; reporting
@@ -541,7 +544,7 @@ to an executing client. `EARN_PROVIDER_CLIENTS` stays the CATALOGUE registry so
 the hourly sync keeps its small dependency surface.
 
 The every-minute vault reconciliation worker consumes
-`idx_earn_vault_movements_unsettled` in bounded pages. Both the embedded cron
+`idx_earn_movements_unsettled` in bounded pages. Both the embedded cron
 and the dedicated Cloud Run job call the same reconciler: it queries the exact
 recorded signature, confirms landed transactions, rebroadcasts the recorded
 signed bytes while the blockhash remains valid, and marks an expired, unlanded
