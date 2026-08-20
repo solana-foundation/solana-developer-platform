@@ -465,7 +465,7 @@ organization's own custody wallets.
     movement was returned as a replay — the wrong deposit, plus its amount and
     signature. Reachable because an organization-level custody config gives two
     projects the same `custody_wallets` row. The rule is ONE exported function —
-    `assertMovementIsOwnReplay` (`db/repositories/earn-vault.repository.ts`) —
+    `assertMovementIsOwnReplay` (`db/repositories/earn-movements.repository.ts`) —
     enforced at EVERY site that resolves a replay: the route guard
     (`findEarnVaultDepositIdempotentKeyReplay`), `depositIntoVault`'s fast
     sequential preflight (`services/earn/vault-deposit.service.ts`), the
