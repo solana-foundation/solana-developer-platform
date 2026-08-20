@@ -20,9 +20,20 @@ const TRANSIENT_ERROR_TEXT =
  * insufficient funds) are intentionally excluded so callers don't retry
  * unrecoverable submissions.
  */
+// Transient Solana JSON-RPC server codes: -32005 node unhealthy/behind,
+// -32014 block status not yet available, -32019 long-term storage failed.
+const TRANSIENT_SOLANA_RPC_CODE = /#?-320(05|14|19)\b/;
+const TRANSIENT_SOLANA_RPC_TEXT =
+  /failed to query long-term storage|block status is not (?:yet )?available|node is (?:unhealthy|behind)/i;
+
 export function isTransientRpcError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return TRANSIENT_HTTP_STATUS.test(message) || TRANSIENT_ERROR_TEXT.test(message);
+  return (
+    TRANSIENT_HTTP_STATUS.test(message) ||
+    TRANSIENT_ERROR_TEXT.test(message) ||
+    TRANSIENT_SOLANA_RPC_CODE.test(message) ||
+    TRANSIENT_SOLANA_RPC_TEXT.test(message)
+  );
 }
 
 /**
