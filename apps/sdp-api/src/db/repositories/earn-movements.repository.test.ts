@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import {
   EARN_EXECUTION_MODELS,
   EARN_MOVEMENT_DIRECTIONS,
@@ -12,8 +14,11 @@ import type { EarnRepository } from "./earn.repository";
 import { createPostgresEarnRepository } from "./earn.repository.postgres";
 import {
   createPostgresEarnMovementsRepository,
+  EARN_POSITION_ID_PREFIX,
+  EARN_PROJECTION_SPECS,
   type EarnMovementRow,
   type EarnPositionRow,
+  generateEarnPositionId,
 } from "./earn-movements.repository";
 import {
   type CreateSignedEarnVaultDepositIntentInput,
@@ -180,9 +185,10 @@ describe("Unified earn movement ledger (postgres)", () => {
       organizationId: ORG,
       projectId: PROJECT,
       environment: "sandbox",
-      // Open provider string: nothing in the ledger is Ground-specific, so the
-      // pluggability proof uses a provider that is not the live one.
-      provider: "veda" as never,
+      // Nothing in the ledger is Ground-specific, so the pluggability proof uses
+      // a registered provider that is not the live one. A real `EarnProviderId`,
+      // so the union check the typed id exists for still applies.
+      provider: "veda",
       providerWalletRef: walletRef,
       label,
       createdBy: USER,
@@ -202,7 +208,7 @@ describe("Unified earn movement ledger (postgres)", () => {
       organizationId: ORG,
       projectId: overrides.projectId ?? PROJECT,
       walletId: overrides.walletId,
-      provider: "veda" as never,
+      provider: "veda",
       amountRequestedUsd: overrides.amountRequestedUsd ?? "250.50",
       token: "usdc",
       destinationAddress: "DestinationAddress111111111111111111111111",
@@ -282,6 +288,50 @@ describe("Unified earn movement ledger (postgres)", () => {
           for (const source of sources) expect(terminal).not.toContain(source);
         }
       }
+    });
+
+    it("declares no vault transition migration 0062's CHECK constraints forbid", () => {
+      // The matrix and the schema have to agree, not merely be internally
+      // consistent. `confirmed_at` and `shares_out` are tied to the commitment
+      // states, so a transition OUT of 'confirmed' into a state that may not hold
+      // them could only be written by erasing an observation SDP actually made.
+      for (const [target, sources] of Object.entries(EARN_MOVEMENT_TRANSITIONS.vault_direct)) {
+        if (target === "finalized") continue;
+        expect(sources).not.toContain("confirmed");
+      }
+    });
+  });
+
+  describe("projection column drift", () => {
+    // The failure this prevents is silent: a column added to a 0063 view but
+    // missed in one clause that carries it is written on the first mirror and
+    // never refreshed afterwards, with every other test still green. Generating
+    // the clauses from one array closes the three-clause direction; this closes
+    // the array-vs-view direction.
+    it.each(Object.entries(EARN_PROJECTION_SPECS))(
+      "projects every column %s's view produces",
+      async (_name, spec) => {
+        const result = await getDb(env)
+          .prepare(
+            `SELECT column_name FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = ?`
+          )
+          .bind(spec.view)
+          .all<{ column_name: string }>();
+        const viewColumns = (result.results ?? []).map((row) => row.column_name).sort();
+        expect(viewColumns).toEqual([...spec.columns].sort());
+      }
+    );
+
+    it("mints holding ids under the same prefix the backfill migration writes", () => {
+      const backfill = readFileSync(
+        path.join(__dirname, "../migrations/postgres/0064_earn_movements_backfill.sql"),
+        "utf8"
+      );
+      expect(generateEarnPositionId()).toMatch(new RegExp(`^${EARN_POSITION_ID_PREFIX}`));
+      // 0064 mints in SQL and cannot import the constant, so the literal is
+      // pinned here instead.
+      expect(backfill).toContain(`'${EARN_POSITION_ID_PREFIX}' || gen_random_uuid()`);
     });
   });
 
@@ -654,16 +704,27 @@ describe("Unified earn movement ledger (postgres)", () => {
       expect(unified.find((row) => row.id === primary.id)?.project_id).toBeNull();
       expect(unified.find((row) => row.id === sibling.id)?.project_id).toBe(PROJECT_SIBLING);
 
-      // The split legacy table still follows its old project-owned cascade;
-      // the unified ledger is the durable history that deliberately survives.
+      // 0062 relaxes 0055's CASCADE to SET NULL, so the legacy table keeps the
+      // history too and the two shapes stay ISOMORPHIC through the expand
+      // window. That is not cosmetic: a divergence here would let a reused
+      // idempotency key insert a fresh legacy row, collide with the surviving
+      // unified row on the custodial anchor, and fail that key permanently —
+      // because the route re-resolves the replay from the LEGACY table.
       const legacy = await db
         .prepare(
           `SELECT id, project_id FROM earn_program_withdrawals
            WHERE wallet_id = ? ORDER BY id`
         )
         .bind(wallet.id)
-        .all<{ id: string; project_id: string }>();
-      expect(legacy.results).toEqual([{ id: sibling.id, project_id: PROJECT_SIBLING }]);
+        .all<{ id: string; project_id: string | null }>();
+      expect(
+        [...(legacy.results ?? [])].sort((left, right) => left.id.localeCompare(right.id))
+      ).toEqual(
+        [
+          { id: primary.id, project_id: null },
+          { id: sibling.id, project_id: PROJECT_SIBLING },
+        ].sort((left, right) => left.id.localeCompare(right.id))
+      );
     });
 
     it("mirrors a provider observation, including a zero fee and a scientific-notation amount", async () => {
@@ -721,25 +782,76 @@ describe("Unified earn movement ledger (postgres)", () => {
       expect((await onlyMovement()).status).toBe("completed");
     });
 
-    it("refuses to project a withdrawal whose program has no holding", async () => {
+    it("opens a missing holding rather than failing a withdrawal against it", async () => {
       const db = getDb(env);
       const wallet = await linkProgram();
-      // Simulate the one state the ledger cannot represent: a program wallet with
-      // no holding. The projection joins INNER precisely so this fails loudly
-      // instead of dropping a money movement on the floor.
+      // The state a program reaches when it was linked by a revision that
+      // predates the ledger, or during a rollout or rollback window: the wallet
+      // exists and has no holding. Failing here would take the program's whole
+      // withdrawal endpoint down permanently, so the projection opens one.
+      await db
+        .prepare("DELETE FROM earn_positions WHERE provider_wallet_id = ?")
+        .bind(wallet.id)
+        .run();
+      expect(await positions()).toHaveLength(0);
+
+      const withdrawal = await createWithdrawal({ walletId: wallet.id });
+      if (!withdrawal) throw new Error("withdrawal not created");
+
+      const [healed] = await positions();
+      expect(healed).toMatchObject({
+        kind: "custodial",
+        provider_wallet_id: wallet.id,
+        organization_id: ORG,
+      });
+      expect(await onlyMovement()).toMatchObject({
+        id: withdrawal.id,
+        execution_model: "custodial",
+        position_id: healed.id,
+        status: "requested",
+      });
+    });
+
+    it("keeps the provider_reference stamp when the holding was missing at observation", async () => {
+      const db = getDb(env);
+      const wallet = await linkProgram();
+      const withdrawal = await createWithdrawal({ walletId: wallet.id });
+      if (!withdrawal) throw new Error("withdrawal not created");
+
+      // Lose the holding AFTER the intent, so the observation write is the first
+      // thing to notice. This is the dangerous case: the mirror shares its
+      // transaction with the legacy write, so a throw here would roll back the
+      // provider_reference stamp for a withdrawal the provider has already PAID —
+      // and a movement with no reference is the one row no later observation can
+      // find again.
+      await db.prepare("DELETE FROM earn_movements WHERE id = ?").bind(withdrawal.id).run();
       await db
         .prepare("DELETE FROM earn_positions WHERE provider_wallet_id = ?")
         .bind(wallet.id)
         .run();
 
-      await expect(createWithdrawal({ walletId: wallet.id })).rejects.toThrow();
-      expect(await movements()).toHaveLength(0);
-      // The legacy write rolled back with the mirror, so neither shape holds it.
+      const observed = await earnRepo.updateProgramWithdrawalStatusGuarded({
+        selector: { withdrawalId: withdrawal.id },
+        organizationId: ORG,
+        fromStatuses: ["requested"],
+        toStatus: "completed",
+        providerReference: "wd-paid-ref",
+        amountPaidUsd: "250.50",
+        completedAt: "2026-08-19T14:00:00.000Z",
+      });
+
+      expect(observed?.provider_reference).toBe("wd-paid-ref");
       const legacy = await db
-        .prepare("SELECT COUNT(*)::int AS total FROM earn_program_withdrawals WHERE wallet_id = ?")
-        .bind(wallet.id)
-        .first<{ total: number }>();
-      expect(legacy?.total).toBe(0);
+        .prepare("SELECT provider_reference FROM earn_program_withdrawals WHERE id = ?")
+        .bind(withdrawal.id)
+        .first<{ provider_reference: string | null }>();
+      expect(legacy?.provider_reference).toBe("wd-paid-ref");
+      expect(await onlyMovement()).toMatchObject({
+        id: withdrawal.id,
+        status: "completed",
+        provider_reference: "wd-paid-ref",
+        amount_settled: "250.50",
+      });
     });
   });
 
@@ -1015,6 +1127,56 @@ describe("Unified earn movement ledger (postgres)", () => {
       });
       // Recovered rows keep their original timestamps, not the repair time.
       expect(healed.created_at).toBe(created.movement.created_at);
+    });
+
+    it("repairs an unmirrored holding on a non-terminal transition, not only a terminal one", async () => {
+      const db = getDb(env);
+      const created = await vaultRepo.createSignedDepositIntent(intent());
+
+      // A movement whose HOLDING never reached the ledger. The movement
+      // projection INNER JOINs earn_positions, so before this was fixed the
+      // non-terminal branch threw and rolled the legacy status write back with
+      // it — leaving reconciliation to re-broadcast the same signed bytes every
+      // tick until blockhash expiry forced it down the terminal path.
+      await db.prepare("DELETE FROM earn_movements WHERE id = ?").bind(created.movement.id).run();
+      await db.prepare("DELETE FROM earn_positions WHERE id = ?").bind(created.position.id).run();
+      expect(await positions()).toHaveLength(0);
+
+      const advanced = await vaultRepo.advanceMovement({
+        movementId: created.movement.id,
+        organizationId: ORG,
+        fromStatuses: ["pending"],
+        toStatus: "submitted",
+      });
+
+      expect(advanced?.status).toBe("submitted");
+      const [holding] = await positions();
+      expect(holding).toMatchObject({ id: created.position.id, kind: "vault_direct" });
+      expect(await onlyMovement()).toMatchObject({
+        id: created.movement.id,
+        status: "submitted",
+        position_id: created.position.id,
+      });
+    });
+
+    it("repairs an unmirrored row on an idempotent replay", async () => {
+      const db = getDb(env);
+      const input = intent();
+      const created = await vaultRepo.createSignedDepositIntent(input);
+
+      // A replay writes no legacy row, so it used to project nothing — meaning a
+      // caller retrying the one request that touches an unmirrored movement got
+      // a 200 while the ledger still had no record of it.
+      await db.prepare("DELETE FROM earn_movements WHERE id = ?").bind(created.movement.id).run();
+      await db.prepare("DELETE FROM earn_positions WHERE id = ?").bind(created.position.id).run();
+
+      const replay = await vaultRepo.createSignedDepositIntent(input);
+      expect(replay.replayed).toBe(true);
+      expect(await positions()).toHaveLength(1);
+      expect(await onlyMovement()).toMatchObject({
+        id: created.movement.id,
+        position_id: created.position.id,
+      });
     });
 
     it("never regresses a finalized ledger row from a legacy write", async () => {

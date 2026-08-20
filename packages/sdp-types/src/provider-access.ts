@@ -135,13 +135,20 @@ export const EARN_PROVIDER_SURFACING = {
  * mirrors — and must agree with — the server-side `supportsPortfolioWallets`
  * capability, which the dashboard cannot see; a drift test in apps/sdp-api
  * asserts the two never disagree.
- */
-/**
- * One vocabulary, not two that happen to match: a provider's deposit style IS
- * the execution model every movement through it is executed by, so this is
- * `EARN_EXECUTION_MODELS` under the name that reads correctly when the subject
- * is a provider rather than a movement (PRO-1705). The ledger's
- * `execution_model` column and this const can therefore never drift apart.
+ *
+ * ── One vocabulary, not two that happen to match (PRO-1705) ───────────────
+ * A provider's deposit style IS the execution model every movement through it
+ * is executed by, so this is `EARN_EXECUTION_MODELS` under the name that reads
+ * correctly when the subject is a provider rather than a movement. The ledger's
+ * `execution_model` column and this const therefore cannot drift apart.
+ *
+ * The aliasing is deliberate but not free: `EarnDepositStyle` and
+ * `EarnExecutionModel` are now the SAME type, so the compiler no longer
+ * distinguishes "how money reaches this provider" from "how this movement was
+ * executed". That is sound precisely because they are one fact — but if a
+ * provider ever gains a deposit style that is not an execution model (a second
+ * way in to the same on-chain vault, say), this must become its own tuple again
+ * rather than gaining a member here.
  */
 export const EARN_DEPOSIT_STYLES = EARN_EXECUTION_MODELS;
 export type EarnDepositStyle = (typeof EARN_DEPOSIT_STYLES)[number];
