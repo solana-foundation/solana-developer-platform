@@ -104,18 +104,29 @@ wallet. Clear both once, against your local database:
 ```sql
 DELETE FROM earn_strategies WHERE provider_reference LIKE 'seed-demo-%';
 
+DELETE FROM earn_positions position
+ WHERE position.kind = 'custodial'
+   AND position.provider_wallet_id IN (
+     SELECT id FROM earn_provider_wallets
+      WHERE label = 'Seeded sandbox wallet (local dev)'
+   )
+   AND NOT EXISTS (
+     SELECT 1 FROM earn_movements movement
+      WHERE movement.position_id = position.id
+   );
+
 DELETE FROM earn_provider_wallets
  WHERE label = 'Seeded sandbox wallet (local dev)'
    AND NOT EXISTS (
-     SELECT 1 FROM earn_program_withdrawals x
-      WHERE x.wallet_id = earn_provider_wallets.id
+     SELECT 1 FROM earn_positions position
+      WHERE position.provider_wallet_id = earn_provider_wallets.id
    );
 ```
 
-`earn_program_withdrawals` FKs the link row with no cascade — history is
-undeletable by design (migration `0055`) — so a link you have withdrawn against
-stays put, which is where its history belongs anyway. Recreating the local
-database from scratch is the other valid answer.
+`earn_movements` FKs the unified position with no cascade, and `earn_positions`
+FKs the link row with no cascade, so any wallet with movement history survives
+both guarded deletes (migration `0062`). Recreating the local database from
+scratch is the other valid answer.
 
 **Update.** Sync-owned fields (name, APY, mints, risk metadata, ...) converge
 on the next run; manual edits to those columns get overwritten. `status` is the

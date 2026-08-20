@@ -77,11 +77,7 @@ describe("Unified earn movement ledger (postgres)", () => {
   beforeEach(async () => {
     const db = getDb(env);
 
-    for (const table of [
-      "earn_movements",
-      "earn_positions",
-      "earn_provider_wallets",
-    ]) {
+    for (const table of ["earn_movements", "earn_positions", "earn_provider_wallets"]) {
       await db
         .prepare(`DELETE FROM ${table} WHERE organization_id IN (?, ?)`)
         .bind(ORG, ORG_OTHER)
