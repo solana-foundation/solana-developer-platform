@@ -110,6 +110,14 @@ The Release Flow workflow maintains `sdp/release-main` and opens a pull request 
 
 Auto-merge is enabled, but branch protection still requires review approval and required checks. The release pull request is the human release gate.
 
+#### Translation sync
+
+`translate-release-strings` runs after the release pull request exists, as a separate `continue-on-error` job. A translation problem therefore never fails the push to `main`; it reports on the release pull request, which is where it can still block the release. Read the `Eve translation sync` comment on that pull request for the outcome.
+
+The job queues a key when it is missing from a locale **or** when the value already committed is one the validator would reject — a placeholder set that no longer matches English, forbidden terminology, unparseable ICU. Both sides share one predicate, so the validator can never reject something the collector will not retranslate. That symmetry is the fix for the 2026-08 stall, where an English string gained a placeholder, the collector skipped the key because it was present, and the validator rejected it on every run for sixteen days.
+
+A `partial` status means some batches failed and were deferred to the next run; the batches that succeeded are still committed. Only drift that this run *introduced* blocks the commit.
+
 ### 3. Deploy and publish production
 
 Merging the release pull request creates a `chore(main): release X.Y.Z` commit on `main`. That push runs [`release-please.yml`](../../.github/workflows/release-please.yml), which creates the `vX.Y.Z` tag, publishes the GitHub release, resolves the tag to the exact `main` commit, and then starts two independent production deployments with that immutable tag and SHA:
