@@ -210,31 +210,63 @@ WHERE id = :transfer_id AND status = 'processing';
 
 -- The transaction provably did NOT land: fail it terminally and drop the
 -- marker. Only after confirming no matching transaction exists on chain —
--- a wrong call here invites the client to send the payment twice.
+-- a wrong call here invites the client to send the payment twice. Batch
+-- chunks use the separate procedure below so their recipients also settle.
 UPDATE payment_transfers
 SET status = 'failed',
     error = 'Reconciled manually: transaction was never broadcast',
     provider_data = provider_data - 'submission_outcome',
     updated_at = sdp_iso_now()
-WHERE id = :transfer_id AND status = 'processing';
+WHERE id = :transfer_id
+  AND status = 'processing'
+  AND type <> 'transfer_batch';
 ```
 
 If a pre-fence rollback cannot wait for every row, record the transfer ids left parked in the
 incident timeline: the older job will fail them, and each one is a payment the client may send
 again.
 
-The query above already spans every wallet transfer type, so it also lists parked **batch chunks** —
-resolve such a chunk exactly as a single transfer and its recipients and parent batch follow on the
-next `trackPendingTransfers` run — and parked **recurring collections**, which need a second step.
+The query above spans every wallet transfer type. A parked batch chunk has
+`type = 'transfer_batch'` and requires the procedure below. A recurring collection uses the normal
+`transfer` type; identify it through its collection-attempt link.
+
+#### Parked batch chunks
+
+Never fail a chunk by hand. The reconciliation job is the only writer that cascades to a chunk's
+recipients and recomputes its parent batch, and it only ever claims chunks that are still
+`processing` — one set to `failed` by hand leaves its recipients processing and its batch unsettled
+for good.
+
+If the chunk landed, record its signature with the earlier `UPDATE`; the job then settles the chunk,
+its recipients, and the parent batch. If it provably did not land, drop only the marker and leave
+`updated_at` unchanged:
+
+```sql
+UPDATE payment_transfers
+   SET provider_data = provider_data - 'submission_outcome'
+ WHERE id = :transfer_id
+   AND status = 'processing'
+   AND type = 'transfer_batch'
+   AND signature IS NULL;
+```
+
+Use this only after proving on chain that the transaction did not land. Once the row is five minutes
+old, `trackPendingTransfers` takes the signatureless timeout path. `settleTransferBatch` then fails
+the chunk and its recipients atomically and recomputes the parent batch. The recorded reason is
+`Transfer processing timed out`.
+
+A signatureless row is not checked against transaction history because there is no signature to
+query. If the chunk did land, record its signature instead of removing the marker.
 
 #### Parked recurring collections
 
 The collection attempt stays `processing` alongside its parked transfer, so the subscription stops
 collecting until an operator resolves it — deliberately, because failing the attempt would
-reschedule the cycle and charge the payer a second time. Each park is logged once where it happens, with the attempt and transfer ids
-(`Recurring payment collection parked; awaiting manual reconciliation`). A transfer that could not
-even be parked logs `failed to close a lost submitted transfer signature` and needs the same
-treatment, from the signature in that line. List the parked collections with:
+reschedule the cycle and charge the payer a second time. Each park is logged once with the attempt
+and transfer ids (`Recurring payment collection parked; awaiting manual reconciliation`). A
+transfer that could not even be parked logs `failed to close a lost submitted transfer signature`
+and needs the same treatment, starting from the signature in that line. List parked collections
+with:
 
 ```sql
 SELECT a.id AS attempt_id, a.subscription_id, a.due_at, a.transfer_id, t.source_address, t.amount
@@ -245,33 +277,10 @@ WHERE a.status = 'processing'
 ORDER BY a.due_at;
 ```
 
-#### Failing a parked batch chunk
-
-Never fail a chunk by hand. The reconciliation job is the only writer that cascades to a chunk's
-recipients and recomputes its parent batch, and it only ever claims chunks that are still
-`processing` — one set to `failed` by hand leaves its recipients processing and its batch unsettled
-for good. Drop the marker instead and let the job do all three, leaving `updated_at` alone so the row
-is already past the stuck window:
-
-```sql
-UPDATE payment_transfers
-   SET provider_data = provider_data - 'submission_outcome'
- WHERE id = :transfer_id
-   AND status = 'processing'
-   AND signature IS NULL;
-```
-
-The job confirms the signature against the transaction history before failing anything, so a chunk
-that did land after all settles instead. The recorded reason is then the job's own
-`Transaction not found on chain` rather than an operator's sentence.
-
-A chunk that DID land needs none of this: give it its signature as above and the job settles the
-chunk, its recipients and the batch on its next run.
-
-Resolve the transfer first, as above. Then close the attempt to match it: if the collection landed,
-confirm the attempt against the recorded signature; if it never landed, fail the attempt so the
-cycle is rescheduled and collected once. Do not fail the attempt while its transfer is still
-parked — that is the double-charge the parking exists to prevent.
+Resolve the transfer first: record its signature if it landed, or use the non-batch failure statement
+if it provably did not. Do not close the attempt by hand. After the marker is gone, recurring-payment
+recovery claims the stale attempt after 15 minutes. With a signature it verifies and completes the
+cycle; without one it fails the attempt and reschedules the cycle once.
 
 An attempt whose `transfer_id` write was lost is missing from that list, and both parking guards key
 off `transfer_id`, so stale recovery will reschedule it 15 minutes after its last write — the double
@@ -286,6 +295,22 @@ WHERE status = 'processing'
   AND updated_at::timestamptz < now() - interval '5 minutes'
 ORDER BY due_at;
 ```
+
+Use the `transfer_id` from the corresponding error log to restore the link before that window:
+
+```sql
+UPDATE payment_subscription_collection_attempts
+SET transfer_id = :transfer_id,
+    updated_at = sdp_iso_now()
+WHERE id = :attempt_id
+  AND organization_id = :organization_id
+  AND project_id = :project_id
+  AND status = 'processing'
+  AND transfer_id IS NULL;
+```
+
+Then resolve the linked transfer as above. The refreshed `updated_at` gives the operator a new
+15-minute recovery window.
 
 ### Schema compatibility
 
