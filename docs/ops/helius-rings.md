@@ -95,8 +95,11 @@ through them in one pass.
 
 ## Background jobs
 
-`poll-rings-indexing` runs every minute (registered unconditionally, inert
-unless `HELIUS_RINGS_ENABLED=true` and `HELIUS_RINGS_ADAPTER=http`):
+`poll-rings-indexing` runs every minute in-process (`cron/runner.ts`) and once
+per managed-job execution every five minutes (`src/job.ts`, the only tick a
+Cloud Run deployment gets — web replicas skip the in-process scheduler under
+`K_SERVICE`). Registered unconditionally in both, inert unless
+`HELIUS_RINGS_ENABLED=true` and `HELIUS_RINGS_ADAPTER=http`:
 
 1. Operations in `indexing` poll `verifyIndexed` through the port; a hit
    completes them.
