@@ -172,21 +172,24 @@ Database schema rollback is not automated. If the selected image is incompatible
 When a fee-payment provider fails without telling us whether it broadcast the transaction, the API
 parks the transfer: it stays `processing`, carries the marker `provider_data.submission_outcome =
 'unknown'`, and returns `409 transfer_submission_outcome_unknown` telling the client not to retry.
-The cron job never settles a parked transfer — only an operator does, after establishing on chain
-what actually happened. List them with:
+The cron job never times out a signatureless parked transfer: the recovery query excludes it. If
+`signature` is present, the job still reconciles it from chain normally; otherwise an operator must
+establish what happened on chain. List them with:
 
 ```sql
-SELECT id, organization_id, project_id, source_address, destination_address,
-       token, amount, created_at, updated_at
+SELECT id, type, organization_id, project_id, source_address, destination_address,
+       token, amount, signature, created_at, updated_at,
+       provider_data ->> 'submitted_signature' AS submitted_signature
 FROM payment_transfers
 WHERE status = 'processing'
   AND provider_data ->> 'submission_outcome' = 'unknown'
 ORDER BY created_at;
 ```
 
-A parked row waits indefinitely, so resolve it whenever one appears — and always before a rollback
-to a pre-fence image. Look up the source address on chain around `created_at` for a matching
-transaction, then:
+A signatureless parked row waits indefinitely, so resolve parked rows promptly. Reconcile every one
+before a planned rollback to a pre-fence image. If the row carries
+`provider_data ->> 'submitted_signature'`, start from that signature; otherwise look up the source
+address on chain around `created_at` for a matching transaction. Then:
 
 ```sql
 -- The transaction DID land: record its signature and drop the marker. The

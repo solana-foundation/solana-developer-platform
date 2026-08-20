@@ -28,7 +28,7 @@ import {
 } from "@/db/repositories/sponsorship-budget.repository";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
-import { DETERMINISTIC_REJECTION_CODES } from "@/services/payments/submission-outcome";
+import { isPreBroadcastRejection } from "@/services/payments/submission-outcome";
 import type { Env } from "@/types/env";
 import type { SponsorshipScope } from "./sponsorship.service";
 
@@ -264,7 +264,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
     try {
       signature = await this.provider.signAndSend(transaction);
     } catch (error) {
-      if (isDeterministicProviderRejection(error)) {
+      if (isPreBroadcastRejection(error)) {
         await this.releaseDeterministic(reservation, error);
       } else {
         await this.markAmbiguous(reservation, error);
@@ -823,16 +823,6 @@ export class BudgetedFeePayment implements FeePaymentPort {
       );
     }
   }
-}
-
-function isDeterministicProviderRejection(error: unknown): boolean {
-  if (error instanceof FeePaymentError && error.maybeBroadcast) {
-    // An earlier attempt may have broadcast; the rejection can be CAUSED by
-    // that hidden broadcast (spent funds -> INSUFFICIENT_BALANCE), so it must
-    // not release the budget as "definitely not sent".
-    return false;
-  }
-  return error instanceof FeePaymentError && DETERMINISTIC_REJECTION_CODES.has(error.code);
 }
 
 function reservationHasResponse(

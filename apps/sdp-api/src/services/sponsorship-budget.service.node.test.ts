@@ -316,6 +316,33 @@ describe("BudgetedFeePayment", () => {
     expect(repository.markChargedUnknown).not.toHaveBeenCalled();
   });
 
+  it("releases provider failures proven to be pre-broadcast", async () => {
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    vi.mocked(provider.signAndSend).mockRejectedValueOnce(
+      new FeePaymentError("connect ECONNREFUSED", "NETWORK_ERROR", undefined, {
+        preBroadcast: true,
+      })
+    );
+
+    await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
+      code: "NETWORK_ERROR",
+      preBroadcast: true,
+    });
+    expect(repository.markReleased).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      "connect ECONNREFUSED"
+    );
+    expect(budgetRedis.settle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actualLamports: 0,
+        attempt: 1,
+        detectMissingReservation: true,
+      })
+    );
+    expect(repository.markChargedUnknown).not.toHaveBeenCalled();
+  });
+
   it("leaves a durable terminal-unsynced row when the Redis sync marker write fails", async () => {
     const { feePayment, provider, repository, budgetRedis } = harness();
     vi.mocked(provider.signAndSend).mockRejectedValueOnce(
