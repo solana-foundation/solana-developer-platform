@@ -108,6 +108,11 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
   }
 
   private async createInitializedSigner(vaultAccountId: string): Promise<FireblocksSigner> {
+    // RAW is the only signing mode Keychain supports for Fireblocks. PROGRAM_CALL
+    // broadcasts through Fireblocks and returns only a txHash — never a signer-bound
+    // signature — which SDP's flow requires (Kora broadcasts separately). Since
+    // @solana/keychain-fireblocks@1.4.0, `useProgramCall: true` is rejected at
+    // construction with CONFIG_ERROR; the flag is deprecated and must stay unset.
     const signer = new FireblocksSigner({
       apiKey: this.config.apiKey,
       privateKeyPem: this.config.apiSecretPem,
@@ -117,8 +122,6 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
       pollIntervalMs: this.config.pollIntervalMs,
       maxPollAttempts: this.config.maxPollAttempts,
       requestDelayMs: this.config.requestDelayMs,
-      // Always use RAW signing - we handle broadcast separately via Kora
-      useProgramCall: false,
     });
     this.attachDebugLogging(signer);
     await signer.init();

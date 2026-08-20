@@ -49,4 +49,22 @@ describe("fireblocks adapter", () => {
       expect.objectContaining({ vaultAccountId: "vault-1" }),
     ]);
   });
+
+  it("never passes useProgramCall to the Keychain signer", async () => {
+    // @solana/keychain-fireblocks >= 1.4.0 rejects `useProgramCall: true` at
+    // construction (PROGRAM_CALL broadcasts without a signer-bound signature),
+    // and the flag itself is deprecated. The adapter must omit it entirely.
+    const { KeychainFireblocksAdapter } = await import("@sdp/custody/keychain");
+    const adapter = new KeychainFireblocksAdapter({
+      apiKey: "api-key",
+      apiSecretPem: "api-secret",
+      vaultAccountId: "default-vault",
+    });
+
+    fireblocksSignerMock.init.mockResolvedValueOnce();
+    await adapter.getPublicKey();
+
+    expect(fireblocksSignerMock.constructorConfigs).toHaveLength(1);
+    expect(fireblocksSignerMock.constructorConfigs[0]).not.toHaveProperty("useProgramCall");
+  });
 });
