@@ -1,5 +1,6 @@
 import { getDb } from "@/db";
 import { LocalPiiCipher } from "@/services/pii-cipher/pii-cipher";
+import { TEST_RUNTIME_PASSWORD, TEST_RUNTIME_ROLE } from "@/test/runtime-role";
 import type { Env } from "@/types/env";
 
 const workerId = process.env.VITEST_POOL_ID;
@@ -44,12 +45,34 @@ function workerRedisUrl(baseUrl: string, id: string): string {
   return url.toString();
 }
 
+/**
+ * This worker's database as the container's superuser/table owner. Reserved
+ * for work that genuinely needs owner powers — running migration DDL in
+ * migration tests — because a superuser bypasses the tenant-isolation RLS
+ * policies entirely.
+ */
+export const adminDatabaseUrl = workerDatabaseUrl(baseDatabaseUrl, workerId);
+
+/**
+ * The same worker database through the plain NOSUPERUSER/NOBYPASSRLS runtime
+ * role (created by node-global-setup.ts), mirroring the production posture
+ * from docs/ops/audit-ledger.md. Everything the app-under-test and the
+ * repositories touch goes through this role so the tenant-isolation policies
+ * from migration 0063 are actually enforced in tests.
+ */
+function runtimeDatabaseUrl(adminUrl: string): string {
+  const url = new URL(adminUrl);
+  url.username = TEST_RUNTIME_ROLE;
+  url.password = TEST_RUNTIME_PASSWORD;
+  return url.toString();
+}
+
 // CI runs under Doppler. Only pass through the test data-service endpoints so
 // ambient provider credentials cannot silently change unit-test behavior.
 const providedEnv: Env = {
   ENVIRONMENT: "development",
   API_VERSION: "v1",
-  DATABASE_URL: workerDatabaseUrl(baseDatabaseUrl, workerId),
+  DATABASE_URL: runtimeDatabaseUrl(adminDatabaseUrl),
   REDIS_URL: workerRedisUrl(baseRedisUrl, workerId),
   API_KEY_PEPPER: "test-pepper-for-unit-tests",
   CREDENTIAL_FINGERPRINT_PEPPER: "test-credential-fingerprint-pepper-for-unit-tests",

@@ -11,3 +11,11 @@ export {
   type PreparedStatement,
   type QueryManyResult,
 } from "./client";
+export {
+  type DatabaseIdentity,
+  DatabaseIdentityError,
+  runWithDatabaseIdentity,
+  runWithoutDatabaseIdentity,
+  runWithSystemDatabaseIdentity,
+  runWithTenantDatabaseIdentity,
+} from "./identity";

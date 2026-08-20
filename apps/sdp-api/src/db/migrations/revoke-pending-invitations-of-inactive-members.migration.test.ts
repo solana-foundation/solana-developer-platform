@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 import { expect, it } from "vitest";
-import { env } from "@/test/helpers/env";
+import { adminDatabaseUrl } from "@/test/helpers/env";
 
 /**
  * Revokes exactly the self-reinstatement tokens (pending invitations of
@@ -15,7 +15,7 @@ it("revokes pending invitations only where the invited member is inactive", asyn
     "postgres/0056_revoke_pending_invitations_of_inactive_members.sql"
   );
   const sql = readFileSync(migrationPath, "utf8");
-  const client = new Client({ connectionString: env.DATABASE_URL });
+  const client = new Client({ connectionString: adminDatabaseUrl });
   await client.connect();
 
   try {

@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 import { expect, it } from "vitest";
-import { env } from "@/test/helpers/env";
+import { adminDatabaseUrl } from "@/test/helpers/env";
 
 it("backfills only unambiguous in-scope custody wallet identities", async () => {
   const migrationPath = path.join(
@@ -11,7 +11,7 @@ it("backfills only unambiguous in-scope custody wallet identities", async () => 
     "postgres/0053_api_key_policy_binding_custody_identity.sql"
   );
   const sql = readFileSync(migrationPath, "utf8");
-  const client = new Client({ connectionString: env.DATABASE_URL });
+  const client = new Client({ connectionString: adminDatabaseUrl });
   await client.connect();
 
   try {

@@ -10,6 +10,7 @@
  */
 
 import { type ScheduledTask, schedule } from "node-cron";
+import { runWithSystemDatabaseIdentity } from "@/db";
 import {
   isAssetProfilesEnabled,
   isEarnEnabled,
@@ -89,115 +90,92 @@ export function startCron(deps: CronDeps): CronHandle | null {
 
   const tasks: ScheduledTask[] = [];
 
-  tasks.push(
-    schedule(APPROVED_WALLET_OPERATIONS_CRON, () => {
+  // Every tick runs under a named system database identity: reconciliation is
+  // inherently cross-tenant, and row-level security (migration 0063) denies
+  // database access to any workload that never declared one.
+  const scheduleSystemTask = (
+    cronExpression: string,
+    component: string,
+    run: (deps: CronDeps) => void
+  ): ScheduledTask =>
+    schedule(cronExpression, () => {
       if (stopping) {
         return;
       }
-      runApprovedWalletOperationRecovery({
-        env: deps.env,
-        bg: deps.bg,
-        observability: deps.observability,
-      });
-    })
+      runWithSystemDatabaseIdentity(component, () =>
+        run({
+          env: deps.env,
+          bg: deps.bg,
+          observability: deps.observability,
+        })
+      );
+    });
+
+  tasks.push(
+    scheduleSystemTask(
+      APPROVED_WALLET_OPERATIONS_CRON,
+      "cron:approved-wallet-operations",
+      runApprovedWalletOperationRecovery
+    )
   );
 
   tasks.push(
-    schedule(PENDING_TRANSFERS_CRON, () => {
-      if (stopping) {
-        return;
-      }
-      runPendingTransfersReconciliation({
-        env: deps.env,
-        bg: deps.bg,
-        observability: deps.observability,
-      });
-    })
+    scheduleSystemTask(
+      PENDING_TRANSFERS_CRON,
+      "cron:pending-transfers",
+      runPendingTransfersReconciliation
+    )
   );
 
   tasks.push(
-    schedule(RECURRING_PAYMENTS_COLLECTION_CRON, () => {
-      if (stopping) {
-        return;
-      }
-      runRecurringPaymentsCollection({
-        env: deps.env,
-        bg: deps.bg,
-        observability: deps.observability,
-      });
-    })
+    scheduleSystemTask(
+      RECURRING_PAYMENTS_COLLECTION_CRON,
+      "cron:recurring-payments",
+      runRecurringPaymentsCollection
+    )
   );
 
   if (isAssetProfilesEnabled(deps.env)) {
     tasks.push(
-      schedule(WORKFLOW_EXECUTIONS_CRON, () => {
-        if (stopping) {
-          return;
-        }
-        runWorkflowExecutions({
-          env: deps.env,
-          bg: deps.bg,
-          observability: deps.observability,
-        });
-      })
+      scheduleSystemTask(
+        WORKFLOW_EXECUTIONS_CRON,
+        "cron:workflow-executions",
+        runWorkflowExecutions
+      )
     );
   }
 
   if (isPrivateChannelsEnabled(deps.env)) {
     tasks.push(
-      schedule(PENDING_DEPOSITS_CRON, () => {
-        if (stopping) {
-          return;
-        }
-        runPendingDepositsReconciliation({
-          env: deps.env,
-          bg: deps.bg,
-          observability: deps.observability,
-        });
-      })
+      scheduleSystemTask(
+        PENDING_DEPOSITS_CRON,
+        "cron:pending-deposits",
+        runPendingDepositsReconciliation
+      )
     );
     tasks.push(
-      schedule(PENDING_WITHDRAWALS_CRON, () => {
-        if (stopping) {
-          return;
-        }
-        runPendingWithdrawalsReconciliation({
-          env: deps.env,
-          bg: deps.bg,
-          observability: deps.observability,
-        });
-      })
+      scheduleSystemTask(
+        PENDING_WITHDRAWALS_CRON,
+        "cron:pending-withdrawals",
+        runPendingWithdrawalsReconciliation
+      )
     );
   }
 
   if (isEarnEnabled(deps.env)) {
     tasks.push(
-      schedule(EARN_CATALOGUE_SYNC_CRON, () => {
-        if (stopping) {
-          return;
-        }
-        runEarnCatalogueSync({
-          env: deps.env,
-          bg: deps.bg,
-          observability: deps.observability,
-        });
-      })
+      scheduleSystemTask(EARN_CATALOGUE_SYNC_CRON, "cron:earn-catalogue-sync", runEarnCatalogueSync)
     );
     // Separate task, not folded into the sync above: the two have different
     // cadences on purpose (catalogue drift is hourly, rates are not) and
     // different blast radii — this one can only rewrite figures on rows that
     // already exist. See cron/earn-metrics-refresh.ts.
     tasks.push(
-      schedule(EARN_METRICS_REFRESH_CRON, () => {
-        if (stopping) {
-          return;
-        }
-        runEarnMetricsRefresh({
-          env: deps.env,
-          bg: deps.bg,
-          observability: deps.observability,
-        });
-      })
+      scheduleSystemTask(
+        EARN_METRICS_REFRESH_CRON,
+        "cron:earn-metrics-refresh",
+        runEarnMetricsRefresh
+      )
     );
   }
 
@@ -211,29 +189,21 @@ export function startCron(deps: CronDeps): CronHandle | null {
   // exactly when the cleanup matters most). The sweep is a no-op on the empty queue every
   // other deployment has.
   tasks.push(
-    schedule(WORKFLOW_SECRET_RETIREMENTS_CRON, () => {
-      if (stopping) {
-        return;
-      }
-      runWorkflowSecretRetirements({
-        env: deps.env,
-        bg: deps.bg,
-        observability: deps.observability,
-      });
-    })
+    scheduleSystemTask(
+      WORKFLOW_SECRET_RETIREMENTS_CRON,
+      "cron:workflow-secret-retirements",
+      runWorkflowSecretRetirements
+    )
   );
 
   // Durable signed intents outlive the feature flag that admitted them. Keep
   // draining their outbox even when Earn is disabled during an incident.
   tasks.push(
-    schedule(EARN_VAULT_MOVEMENTS_CRON, () => {
-      if (stopping) return;
-      runEarnVaultMovementsReconciliation({
-        env: deps.env,
-        bg: deps.bg,
-        observability: deps.observability,
-      });
-    })
+    scheduleSystemTask(
+      EARN_VAULT_MOVEMENTS_CRON,
+      "cron:earn-vault-movements",
+      runEarnVaultMovementsReconciliation
+    )
   );
 
   return {

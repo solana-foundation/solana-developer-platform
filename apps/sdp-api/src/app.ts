@@ -20,6 +20,7 @@ import { secureHeaders } from "hono/secure-headers";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { AppError, badRequest } from "@/lib/errors";
 import { corsMiddleware } from "@/middleware/cors";
+import { databaseIdentityBoundary } from "@/middleware/database-identity";
 import { dryRunMiddleware } from "@/middleware/dry-run";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
@@ -289,6 +290,11 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
   // Request ID for tracing
   app.use("*", requestIdMiddleware());
+
+  // Database identity boundary: public surfaces run as named system
+  // components, everything else is identity-less until an auth middleware
+  // narrows it to a tenant — row-level security denies unwired access.
+  app.use("*", databaseIdentityBoundary());
 
   // Idempotency-Key validation + response echo (public API only)
   app.use("/v1/*", idempotencyKeyMiddleware());

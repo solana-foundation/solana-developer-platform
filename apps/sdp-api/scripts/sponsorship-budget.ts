@@ -1,4 +1,4 @@
-import { closeDatabasePools, getDb } from "../src/db";
+import { closeDatabasePools, getDb, runWithSystemDatabaseIdentity } from "../src/db";
 import {
   SponsorshipBudgetRepository,
   type SponsorshipNetwork,
@@ -120,7 +120,7 @@ async function main() {
   console.log(JSON.stringify(policy, null, 2));
 }
 
-main()
+runWithSystemDatabaseIdentity("script:sponsorship-budget", main)
   .catch((error) => {
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;

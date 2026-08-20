@@ -4,6 +4,7 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testconta
 import { RedisContainer, type StartedRedisContainer } from "@testcontainers/redis";
 import pg from "pg";
 import { runPostgresMigrations } from "../../scripts/lib/run-postgres-migrations.mjs";
+import { TEST_RUNTIME_PASSWORD, TEST_RUNTIME_ROLE } from "./runtime-role";
 import { TEST_WORKER_COUNT } from "./worker-count";
 
 const POSTGRES_IMAGE = "postgres:16-alpine";
@@ -40,6 +41,7 @@ export async function setup(): Promise<void> {
     process.env.REDIS_URL = redisUrl;
 
     await runPostgresMigrations({ databaseUrl, migrationsDir });
+    await createRuntimeRole(databaseUrl);
     await createWorkerDatabases(databaseUrl);
 
     process.once("SIGINT", handleSignal);
@@ -60,6 +62,44 @@ export async function teardown(): Promise<void> {
 
 function handleSignal(): void {
   void teardown().finally(() => process.exit(1));
+}
+
+/**
+ * The testcontainers bootstrap user (`test`) is a superuser and the table
+ * owner, so PostgreSQL would never evaluate the tenant-isolation RLS policies
+ * (migration 0063) for it. Tests exercise the app through this plain
+ * NOSUPERUSER/NOBYPASSRLS role instead — the same posture
+ * docs/ops/audit-ledger.md requires of production runtimes. Grants are issued
+ * on the base database before the template clone so every worker database
+ * inherits them; the role itself is cluster-level.
+ */
+async function createRuntimeRole(databaseUrl: string): Promise<void> {
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    await client.query(
+      `CREATE ROLE ${TEST_RUNTIME_ROLE} LOGIN PASSWORD '${TEST_RUNTIME_PASSWORD}'
+         NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE`
+    );
+    await client.query(`GRANT USAGE ON SCHEMA public TO ${TEST_RUNTIME_ROLE}`);
+    // TRUNCATE is required by seedTestDatabase's reset between tests.
+    await client.query(
+      `GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA public TO ${TEST_RUNTIME_ROLE}`
+    );
+    await client.query(
+      `GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO ${TEST_RUNTIME_ROLE}`
+    );
+    // TRUNCATE ... RESTART IDENTITY passes owner checks only. Role membership
+    // confers ownership rights, but NOT the owner's SUPERUSER/BYPASSRLS
+    // attributes (PostgreSQL never inherits role attributes) — and every
+    // tenant-isolation policy is FORCEd, which binds owners too. The
+    // enforcement suite in src/db/tenant-isolation.test.ts proves RLS still
+    // applies to this role.
+    const owner = new URL(databaseUrl).username || "test";
+    await client.query(`GRANT "${owner}" TO ${TEST_RUNTIME_ROLE}`);
+  } finally {
+    await client.end();
+  }
 }
 
 /**

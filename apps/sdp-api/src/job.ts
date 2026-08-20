@@ -11,6 +11,7 @@ import { RECURRING_PAYMENTS_COLLECTION_MONITOR } from "@/cron/recurring-payments
 import { WORKFLOW_EXECUTIONS_MONITOR } from "@/cron/workflow-executions";
 import { WORKFLOW_SECRET_RETIREMENTS_MONITOR } from "@/cron/workflow-secret-retirements";
 import { closeDatabasePools } from "@/db/client";
+import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import {
   isAssetProfilesEnabled,
   isEarnEnabled,
@@ -107,7 +108,11 @@ export async function runCronJob(): Promise<void> {
   initNodeSentry(getSentryOptions(env));
 
   const sentryEnabled = isSentryEnabled(env);
-  const monitored = async (monitor: string, work: () => Promise<unknown>) => {
+  const monitored = async (monitor: string, tickWork: () => Promise<unknown>) => {
+    // Reconciliation is cross-tenant by nature: each tick runs under a named
+    // system database identity so row-level security (migration 0063) admits
+    // it explicitly rather than by accident.
+    const work = () => runWithSystemDatabaseIdentity(`job:${monitor}`, tickWork);
     try {
       await (sentryEnabled
         ? nodeObservability.withMonitor(monitor, work, {

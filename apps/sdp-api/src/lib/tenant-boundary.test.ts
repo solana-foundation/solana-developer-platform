@@ -42,6 +42,52 @@ describe("tenant data-access boundary", () => {
     expect(violations).toEqual([]);
   });
 
+  it("keeps system database-identity grants in registered entry points", () => {
+    // Each of these files is an explicit cross-tenant surface: HTTP auth
+    // resolution, public endpoints, webhook/cron/job entry points, and ops
+    // scripts. Granting the system identity anywhere else would silently
+    // widen the database tenant boundary — extend this registry deliberately.
+    const allowedPrefixes = [
+      "db/index.ts",
+      "db/identity.ts",
+      "db/operator-access.ts",
+      "cron/runner.ts",
+      "job.ts",
+      "middleware/auth.ts",
+      "middleware/clerk-auth.ts",
+      "middleware/session-auth.ts",
+      "middleware/database-identity.ts",
+      "routes/issuance/index.ts",
+      "routes/members/index.ts",
+    ];
+    const violations = sourceFiles(sourceRoot)
+      .filter((path) => readFileSync(path, "utf8").includes("runWithSystemDatabaseIdentity"))
+      .map((path) => relative(sourceRoot, path))
+      .filter((path) => !allowedPrefixes.some((prefix) => path.startsWith(prefix)));
+
+    expect(violations).toEqual([]);
+  });
+
+  it("keeps the audited operator bypass out of application code", () => {
+    // runWithOperatorDatabaseAccess is break-glass tooling for operational
+    // scripts; nothing in the request/worker paths may import it.
+    const violations = sourceFiles(sourceRoot)
+      .filter((path) => readFileSync(path, "utf8").includes("runWithOperatorDatabaseAccess"))
+      .map((path) => relative(sourceRoot, path))
+      .filter((path) => path !== join("db", "operator-access.ts"));
+
+    expect(violations).toEqual([]);
+  });
+
+  it("keeps the test-only default database identity out of production code", () => {
+    const violations = sourceFiles(sourceRoot)
+      .filter((path) => readFileSync(path, "utf8").includes("setDefaultDatabaseIdentityForTesting"))
+      .map((path) => relative(sourceRoot, path))
+      .filter((path) => !path.startsWith("test/") && path !== join("db", "identity.ts"));
+
+    expect(violations).toEqual([]);
+  });
+
   it("requires transactional payment repositories to receive a tenant scope", () => {
     const allowedSystemFactory = join(sourceRoot, "db", "repositories", "repository-factory.ts");
     const violations = sourceFiles(sourceRoot)
