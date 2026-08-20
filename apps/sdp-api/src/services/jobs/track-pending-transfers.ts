@@ -313,20 +313,7 @@ async function syncProcessingTransfersOnChain(
       !statuses[index] &&
       now.getTime() - new Date(transfer.updated_at).getTime() > STUCK_PROCESSING_AFTER_MS
   );
-  const archived = new Map<string, SignatureStatusInfo>();
-  if (agedOut.length > 0) {
-    const archivedStatuses = await solanaRpc.getSignatureStatuses(
-      rpc,
-      agedOut.map((transfer) => transfer.signature as Signature),
-      { searchTransactionHistory: true }
-    );
-    agedOut.forEach((transfer, index) => {
-      const status = archivedStatuses[index];
-      if (status) {
-        archived.set(transfer.id, status);
-      }
-    });
-  }
+  const archived = await getArchivedStatuses(rpc, agedOut);
 
   for (let i = 0; i < processingWithSig.length; i++) {
     const transfer = processingWithSig[i];
@@ -338,6 +325,9 @@ async function syncProcessingTransfersOnChain(
         // enough, assume the transaction was dropped and mark it failed.
         const ageMs = now.getTime() - new Date(transfer.updated_at).getTime();
         if (ageMs <= STUCK_PROCESSING_AFTER_MS) {
+          continue;
+        }
+        if (archived === null) {
           continue;
         }
         status = archived.get(transfer.id) ?? null;
@@ -388,5 +378,40 @@ async function syncProcessingTransfersOnChain(
         "trackPendingTransfers: failed to update transfer"
       );
     }
+  }
+}
+
+async function getArchivedStatuses(
+  rpc: ReturnType<typeof solanaRpc.createRpc>,
+  transfers: PaymentTransferRow[]
+): Promise<Map<string, SignatureStatusInfo | null> | null> {
+  if (transfers.length === 0) {
+    return new Map();
+  }
+
+  try {
+    const statuses = await solanaRpc.withTransientRpcRetry(() =>
+      solanaRpc.getSignatureStatuses(
+        rpc,
+        transfers.map((transfer) => transfer.signature as Signature),
+        { searchTransactionHistory: true }
+      )
+    );
+    if (statuses.length !== transfers.length) {
+      throw internalError(
+        `getSignatureStatuses returned ${statuses.length} statuses for ${transfers.length} signatures`
+      );
+    }
+    return new Map(
+      transfers.map((transfer, index) => [transfer.id, statuses[index] ?? null] as const)
+    );
+  } catch (err) {
+    getLogger().error(
+      {
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "trackPendingTransfers: archival getSignatureStatuses RPC call failed"
+    );
+    return null;
   }
 }

@@ -254,6 +254,83 @@ describe("trackPendingTransfers", () => {
       });
     });
 
+    it("retries a transient archival status lookup before settling", async () => {
+      getSignatureStatusesMock
+        .mockResolvedValueOnce([null])
+        .mockRejectedValueOnce(new Error("fetch failed"))
+        .mockResolvedValueOnce([
+          {
+            slot: 4243n,
+            confirmations: null,
+            confirmationStatus: "finalized",
+            err: null,
+          },
+        ]);
+
+      await insertTransfer({
+        id: "xfr_processing_archive_retry",
+        status: "processing",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(10),
+        updatedAt: minutesAgo(10),
+      });
+
+      await trackPendingTransfers(env);
+
+      const updated = await getTransfer("xfr_processing_archive_retry");
+      expect(updated?.status).toBe("finalized");
+      expect(updated?.slot).toBe(4243);
+      expect(getSignatureStatusesMock).toHaveBeenCalledTimes(3);
+    });
+
+    it("continues reconciliation when the archival status lookup fails", async () => {
+      getSignatureStatusesMock
+        .mockResolvedValueOnce([
+          null,
+          {
+            slot: 12345n,
+            confirmations: 10n,
+            confirmationStatus: "confirmed",
+            err: null,
+          },
+        ])
+        .mockRejectedValueOnce(new Error("archival rpc unavailable"))
+        .mockResolvedValueOnce([
+          {
+            slot: 12346n,
+            confirmations: null,
+            confirmationStatus: "finalized",
+            err: null,
+          },
+        ]);
+
+      await insertTransfer({
+        id: "xfr_aged_archive_unavailable",
+        status: "processing",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(10),
+        updatedAt: minutesAgo(10),
+      });
+      await insertTransfer({
+        id: "xfr_recent_cache_hit",
+        status: "processing",
+        signature: String(TEST_SIG_2),
+        createdAt: minutesAgo(1),
+        updatedAt: minutesAgo(1),
+      });
+
+      await expect(trackPendingTransfers(env)).resolves.toBeUndefined();
+
+      const [aged, recent] = await Promise.all([
+        getTransfer("xfr_aged_archive_unavailable"),
+        getTransfer("xfr_recent_cache_hit"),
+      ]);
+      expect(aged).toMatchObject({ status: "processing", error: null, slot: null });
+      expect(recent).toMatchObject({ status: "finalized", slot: 12346 });
+      expect(recent?.confirmed_at).not.toBeNull();
+      expect(recent?.finalization_last_polled_at).not.toBeNull();
+    });
+
     it("settles a parked transfer once it has a signature to check", async () => {
       // Parking blocks the timeout window, not this one. A parked row that has
       // been given its signature is resolvable from the chain, so leaving it
