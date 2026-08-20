@@ -12,6 +12,7 @@ import { getAuth } from "@/lib/auth";
 import { AppError, badRequestQuery } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { assertFaucetDestinationsOwned } from "@/services/faucet-destination-guard";
 import {
   checkResolvedRpcTargetConnection,
   getProviderSetupDefinition,
@@ -153,6 +154,11 @@ export const relayRpcRequest = async (c: ValidatedBodyContext<typeof rpcRelayPay
   const payload = c.req.valid("json");
 
   const methodNames = extractRpcMethodNames(payload);
+
+  // Before EITHER dispatch branch: a `requestAirdrop` inside a JSON-RPC batch
+  // array skips the faucet branch below, so a check living only there would be
+  // bypassed by wrapping the call in an array.
+  await assertFaucetDestinationsOwned(getDb(c.env), auth.organizationId, payload);
 
   if (shouldRoundRobinFaucetRequest(payload, methodNames)) {
     const targets = await resolveRoundRobinRpcTargets({
