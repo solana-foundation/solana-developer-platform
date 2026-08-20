@@ -19,7 +19,6 @@ import {
   type EarnMovementRow,
   type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
-import { createPostgresEarnVaultRepository } from "@/db/repositories/earn-vault.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import {
@@ -137,10 +136,16 @@ function buildEarnVaultDepositResponse(
   result: Awaited<ReturnType<typeof depositIntoVault>>,
   strategy: EarnStrategyRow
 ) {
+  if (!result.movement.signature) {
+    throw internalError(
+      `Earn vault movement ${result.movement.id} was recorded without a signature`
+    );
+  }
   return {
     positionId: result.position.id,
     movementId: result.movement.id,
-    status: result.movement.status,
+    // The ledger says `requested`; this contract's word for it is `pending`.
+    status: toLegacyVaultDepositStatus(result.movement.status),
     signature: result.movement.signature,
     failureReason: result.movement.failure_reason,
     // Tells a retrying caller that its key was already used and NOTHING was
@@ -393,8 +398,8 @@ export async function findEarnVaultDepositIdempotentKeyReplay(
   if (approvedWalletOperationId(c)) return null;
 
   const resolved = extraction.resolved as EarnVaultDepositResolved;
-  const repo = createPostgresEarnVaultRepository(getDb(c.env));
-  const movement = await repo.findMovementByRequestId({
+  const repo = createPostgresEarnMovementsRepository(getDb(c.env));
+  const movement = await repo.findVaultMovementByRequestId({
     organizationId: resolved.auth.organizationId,
     requestId: idempotencyKey,
   });
@@ -531,8 +536,8 @@ function assertBoundWalletIdentifierIsUnique(
  * read wallet B's deposits either.
  *
  * The id spaces differ and that is the trap. `getAllowedApiKeyWalletIdsForPermissions`
- * returns PROVIDER wallet ids (`privy_…`), while `earn_vault_positions.custody_wallet_id`
- * and `earn_vault_movements.custody_wallet_id` are `custody_wallets` row ids
+ * returns PROVIDER wallet ids (`privy_…`), while `earn_positions.custody_wallet_id`
+ * and `earn_movements.custody_wallet_id` are `custody_wallets` row ids
  * (`cwlt_…`). The projection carries both, so it is the translation table;
  * comparing the allow-list directly against a stored id matches nothing and
  * silently answers "you hold none of this", which is a filter that looks like
@@ -829,9 +834,22 @@ export async function listEarnVaultDeposits(c: AppContext) {
 }
 
 const vaultMovementCursorSchema = z.object({
+  // `created_at` is ordered as canonical UTC text, so accepting offsets or a
+  // different precision would make a syntactically valid cursor sort wrongly.
   createdAt: z.string().datetime({ precision: 3 }),
+  // Shape and bound only, NOT a prefix. Movement ids are heterogeneous by design:
+  // the unification preserved every legacy row's id, so the table holds
+  // `earn_vault_movement_…` history beside `earn_movement_…` for anything minted
+  // since. Pinning a prefix here rejected page two outright.
+  //
+  // Safe because a cursor is a pagination BOUND, not an access grant — it lands in
+  // `(created_at, id) < (?, ?)` while organization, environment, project and wallet
+  // scope are separate conditions, so a forged one can only reposition a caller
+  // inside rows it could already read.
   id: z
-    .templateLiteral(["earn_vault_movement_", z.uuidv4()])
+    .string()
+    .min(1)
+    .max(128)
     .refine((id) => id === id.toLowerCase()),
 });
 
@@ -1054,10 +1072,14 @@ const vaultPositionCursorSchema = z.object({
   // `created_at` is ordered as canonical UTC text, so accepting offsets or a
   // different precision would make a syntactically valid cursor sort wrongly.
   createdAt: z.string().datetime({ precision: 3 }),
-  // Generated UUIDs are lowercase. Preserve that canonical spelling because
-  // PostgreSQL compares the prefixed position id as text in the keyset tuple.
+  // Shape and bound only, for the same reason as the movement cursor above:
+  // holdings carry `earn_vault_position_…` ids the unification preserved beside
+  // `earn_position_…` for newer ones. Lowercase is still asserted because
+  // PostgreSQL compares the prefixed id as text in the keyset tuple.
   id: z
-    .templateLiteral(["earn_vault_position_", z.uuidv4()])
+    .string()
+    .min(1)
+    .max(128)
     .refine((id) => id === id.toLowerCase()),
 });
 

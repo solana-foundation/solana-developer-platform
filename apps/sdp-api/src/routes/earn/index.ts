@@ -120,8 +120,8 @@ earn.get("/movements", requirePermissions("earn:read", "wallets:read"), listEarn
 // require provider credentials (ADR 0002 exit safety — disabling a provider must
 // never trap funds). Source of truth per route: list/get/deposits/
 // withdrawal-detail read the provider LIVE; the withdrawals LIST reads the SDP
-// ledger (earn_program_withdrawals) and takes no provider gate at all — the
-// audit trail outlives credential removal.
+// ledger (custodial earn_movements rows) and takes no provider gate at all —
+// the audit trail outlives credential removal.
 //
 // The collection is declared BEFORE the `:programId` routes so a literal
 // segment can never be captured as an id.

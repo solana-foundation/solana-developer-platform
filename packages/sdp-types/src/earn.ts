@@ -732,16 +732,13 @@ export function isTerminalEarnMovementStatus(
  * movement, only advancement.
  *
  * ── Who enforces this, and when ───────────────────────────────────────────
- * The custodial half is enforced NOW: `earn-withdrawal-ledger.service.ts`
- * derives its compare-and-swap source statuses from it, so there is no second
- * copy to drift from. The vault half has no enforcer in this release — the
- * live guard (`assertValidMovementTransition` in `earn-vault.repository.ts`)
- * still speaks migration 0059's legacy vocabulary (`pending`, and `confirmed`
- * as terminal) because it guards the LEGACY table, which is still the
- * authoritative writer here. It is replaced by a guard reading this matrix in
- * the release that switches reads to the unified ledger; until then the
- * vault half describes the ledger's intended lifecycle, and the conformance
- * test in `earn-movements.repository.test.ts` pins it against
+ * Both halves are enforced NOW, by a single guard. `allowedSourceStatuses` in
+ * `earn-movements.repository.ts` derives every compare-and-swap's legal source
+ * states from this matrix, for both execution models, so there is no second
+ * copy to drift from. Naming a target the matrix does not carry throws; a
+ * source it does not allow is refused by the CAS matching zero rows, which is
+ * the answer a lost race already gave. The conformance test in
+ * `earn-movements.repository.test.ts` pins the matrix against
  * `earn_movement_statuses`.
  *
  * The matrix is written to be consistent with migration 0062's CHECK

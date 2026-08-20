@@ -5,77 +5,71 @@ the fail-closed registry and check capabilities — no `if (provider === "ground
 anywhere. See `packages/sdp-earn/README.md` for architecture; ADR 0002 for
 invariants (the 2026-08-11 addendum owns the ledger-vs-live rules below).
 
-## In flight: the unified movement ledger (PRO-1705)
+## The unified movement ledger (PRO-1705)
 
-Earn is mid-migration from two movement tables split by execution mechanism to
-ONE. Migrations `0062`-`0065` add `earn_movements` (every money movement, both
-directions, both execution models) and `earn_positions` (every holding, vault and
-custodial), and backfill all existing history into them. See ADR 0002's
-2026-08-19 addendum for the decisions.
+`earn_movements` is the single authoritative record of every Earn money movement —
+both directions, both execution models — and `earn_positions` is the single
+holdings table behind it. Migrations `0062`-`0065`; ADR 0002's 2026-08-19 addendum
+holds the decisions.
 
-**Every READ now serves from the unified tables**; the legacy ones remain the
-authoritative WRITERS and are mirrored into the unified shape in the same
-transaction, so a read is never behind a write. Writes flip in a later release,
-and the legacy tables are dropped last of all.
+The tables it replaced (`earn_program_withdrawals`, `earn_vault_movements`,
+`earn_vault_positions`) take no reads and no writes, and a later migration drops
+them along with the `earn_projected_*` views that carried their history across.
+**`earn_provider_wallets` is NOT one of them**: it models an ACCOUNT at a provider
+— the custodial twin of `custody_wallets` — and an account is not a holding. A
+custodial position is the link row between the two, minted when the program wallet
+is linked.
 
-Two consequences to know when touching a read:
+Things worth knowing before changing a movement path:
 
-- The published vault-deposit DTO is served through a vocabulary shim
-  (`LEGACY_VAULT_DEPOSIT_STATUS` in `handlers/vault.ts`): `requested` goes out as
-  `pending`, and `finalized` — which that DTO has no word for — goes out as
-  `confirmed`. `?settled=` matches the same client-visible notion. Delete both
-  when the DTO adopts the ledger vocabulary.
-- `GET /v1/earn/movements` is the one read that speaks the ledger vocabulary
-  directly, because it is a new contract with no client to keep compatible.
-
-**The rule while both shapes exist — if you add or change a writer of any legacy
-earn table, it MUST mirror into the unified ledger in the SAME transaction.**
-Call the projection functions in
-`db/repositories/earn-movements.repository.ts`; do not hand-write an insert. The
-mapping itself lives in SQL views created by `0063` and is shared with the bulk
-backfill, precisely so history and new rows cannot disagree. Details worth
-knowing before touching it:
-
-- A projection is an upsert keyed on the LEGACY row's id — the unified row keeps
-  it — so every guarded transition simply re-projects the whole row, and a row an
-  older revision wrote without mirroring is repaired by the next write to it.
-- The projections assert their row is projectable BEFORE writing. `INSERT ...
-  SELECT` from a view that yields nothing inserts zero rows and SUCCEEDS, which
-  would silently drop a money movement.
-- Every movement needs a holding, so every write path projects the holding
-  BEFORE the movement. A custodial holding is minted when the program wallet is
-  linked (`insertProviderWallet`) and by `0064` for programs that already exist;
-  if a program somehow has none, the withdrawal projection OPENS one rather than
-  failing. That is not politeness: on the observation path the mirror shares its
-  transaction with the legacy write, so throwing would roll back the
-  `provider_reference` stamp for a payout the provider had already made, and a
-  movement with no reference is the one row nothing can heal.
-- `finalized` is the one status no legacy table can express, so a legacy write
-  never regresses a unified row that already reached it — and it is written by
-  `finalizeVaultMovement` to the unified ledger ALONE. The reconciliation sweep
-  still records the commitment through the legacy writer first, so a rollback
-  shows a settled deposit rather than one still in flight.
-- `confirmed` is NOT terminal any more (PRO-1716). The sweep keeps polling a
-  confirmed movement until the chain says `finalized`, and a confirmed row whose
-  signature has aged out of RPC history is left alone rather than expired — the
-  transaction demonstrably landed, and the blockhash rule only ever applied to one
-  that never made it on chain.
+- **One writer, and the shared matrix owns the transitions.** Legal source states
+  come from `EARN_MOVEMENT_TRANSITIONS` (`@sdp/types`), never from the caller, so
+  terminal regression is unrepresentable rather than merely refused. A transition
+  whose row is not in a legal source state returns NULL — the same answer a lost
+  race gives, and the same contract every other guarded write here has. Only an
+  unknown TARGET throws.
+- **Every movement needs a holding, and a missing one must never fail a money
+  write.** `createCustodialMovement` resolves the holding by JOIN — so a movement
+  can never name one outside its program — and OPENS one if the program has none,
+  retrying once before giving up. A program linked by a revision that predates
+  the ledger has no holding through no fault of the caller, and refusing would
+  take that program's whole withdrawal endpoint down until an operator
+  intervened. It still fails loudly when the program wallet itself does not
+  exist, because the alternative there is money moving unrecorded.
+- **Amounts carry a `denomination`** (`usd`, or the token mint) and share counts
+  live only in share-named columns. No read may sum across rows without grouping
+  by it.
+- **`confirmed` is not terminal** (PRO-1716). The reconciliation sweep keeps
+  polling a confirmed movement until the chain says `finalized`, and a confirmed
+  row whose signature has aged out of RPC history is left alone rather than
+  expired — the transaction demonstrably landed, and the blockhash rule only ever
+  applied to one that never made it on chain.
+- **The published vault-deposit DTO still speaks the older vocabulary**, through
+  `LEGACY_VAULT_DEPOSIT_STATUS` in `handlers/vault.ts`: `requested` goes out as
+  `pending`, and `finalized` as `confirmed`. `?settled=` matches that same
+  client-visible notion. Delete both when the DTO adopts the ledger vocabulary.
+  `GET /v1/earn/movements` is the one read that speaks the ledger's own words.
+- **Ids are heterogeneous by design.** New rows are `earn_movement_…`, while
+  history keeps the `earn_vault_movement_…` / `earn_program_withdrawal_…` ids the
+  projection preserved. Nothing may parse an id for its kind — read
+  `execution_model` — and the keyset cursors validate SHAPE rather than a prefix
+  for the same reason.
 - The vocabulary tables `earn_execution_models`, `earn_movement_directions` and
   `earn_movement_statuses` are seeded reference data, pinned to `@sdp/types` by a
   conformance test. Never truncate them in a test fixture.
-- `EARN_MOVEMENT_TRANSITIONS` in `@sdp/types` is the one declaration of which
-  transitions are legal. The custodial half is enforced today
-  (`earn-withdrawal-ledger.service.ts` derives its CAS source statuses from it);
-  the vault half has no enforcer until reads switch, because the live guard still
-  guards the LEGACY table in migration 0059's vocabulary. It is written to agree
-  with `0062`'s CHECK constraints — in particular there is no
-  `confirmed → failed`, because recording one could only succeed by erasing a
-  `confirmed_at` SDP actually observed.
-- `0064` establishes history; it does NOT converge rows that a legacy-only writer
-  ADVANCED during a rollout or rollback window (`ON CONFLICT DO NOTHING` leaves
-  the stale projection). The read-switch release re-states the projection as an
-  upsert to sweep those. Read `0064`'s header before assuming the backfill is
-  self-correcting.
+- `EARN_MOVEMENT_TRANSITIONS` is written to agree with `0062`'s CHECK
+  constraints, not merely with itself. In particular there is no
+  `confirmed → failed`: the schema ties `confirmed_at` and `shares_out` to the
+  commitment states, so recording that transition could only succeed by erasing
+  observations SDP genuinely made. A confirmed transaction dropped by a fork
+  stays in the reconciliation queue as an open question. Do not add the
+  transition without changing the constraint it contradicts.
+- `0064` established history but does NOT converge rows a legacy-only writer
+  ADVANCED during a rollout or rollback window — `ON CONFLICT DO NOTHING` leaves
+  the stale projection, and neither applier revisits a terminal row. `0065` is
+  the same projection re-stated as a guarded upsert, and it is where the
+  convergence guarantee actually lives. Read both headers before assuming a
+  backfill is self-correcting.
 
 ## Route map — with each route's single source of truth
 
@@ -317,9 +311,10 @@ other's balance.
   the program wallet (two tenants sharing the provider account cannot collide;
   Ground validates the shape strictly — v4 only, verified 2026-08-05).
   Since PRO-1628 the defence is TWO-layer: the derived id anchors an SDP
-  intent row in `earn_program_withdrawals` — unique per (wallet, request_id),
-  wallet-scoped because sibling projects reach the same program and, since
-  PRO-1670, because one caller key used against two of the org's own programs
+  intent row in `earn_movements` — unique per (position, request_id), the
+  custodial holding being 1:1 with the program wallet, so this is 0055's wallet
+  scope in the unified shape: sibling projects reach the same program and, since
+  PRO-1670, one caller key used against two of the org's own programs
   must not collapse into one payout — with a payload
   fingerprint that answers a replay from our own ledger (200, live state) and
   409s key-reuse-with-different-payload BEFORE any provider call. The
@@ -339,19 +334,21 @@ other's balance.
   unique) is advanced best-effort as a side effect. Unknown refs serve live state
   and touch nothing (pre-ledger withdrawals must keep polling fine). A **BOLA
   guard** runs before the provider call, and since PRO-1670 it compares the
-  **program, not the organization**: `ledgerRow.wallet_id !== row.id` 404s. An
+  **program, not the organization**: the movement names its HOLDING, so the
+  guard re-resolves it through `earn_positions` and 404s when
+  `holding.provider_wallet_id !== row.id`. An
   org-only check was complete while an org held one program; with several,
   asking program A for program B's ref would pass it and then drive the provider
   with A's wallet ref and B's withdrawal ref — a mismatch whose answer is
-  entirely the provider's to decide. wallet_id is strictly stronger and still
+  entirely the provider's to decide. Program scope is strictly stronger and still
   lets an unknown ref fall through. Cross-tenant scoping stays SDP's job, never
   delegated to the provider's own path scoping.
-- `GET /programs/:programId/withdrawals` — **DB ledger list**
-  (`earn_program_withdrawals`), the house `{withdrawals, total, page, pageSize}`
-  envelope, newest first. Scoped to the path program's `wallet_id`: every project
-  in the environment reaches the same programs, so one program = one history, and
-  with several programs the wallet id is also what keeps a sibling program's
-  payouts out of this list. Note it resolves the program WITHOUT
+- `GET /programs/:programId/withdrawals` — **DB ledger list** (custodial
+  `earn_movements` rows), the house `{withdrawals, total, page, pageSize}`
+  envelope, newest first. Scoped to the path program through its holding: every
+  project in the environment reaches the same programs, so one program = one
+  history, and with several programs that scope is also what keeps a sibling
+  program's payouts out of this list. Note it resolves the program WITHOUT
   `requirePortfolioClient` and takes NO provider gate — not even the credential
   check — because the audit trail must outlive credential removal, entitlement
   disablement, and a provider losing its registry entry entirely. There is no
@@ -465,13 +462,13 @@ organization's own custody wallets.
     only surface a deposit the caller could already read. It is also why the key
     is a QUERY filter and not a path segment — legal keys contain `/` and `?`.
   - **The replay decision is project-scoped IN THE REPOSITORY, not only at the
-    route.** `findMovementByRequestId` is keyed on `(organization_id, request_id)`
+    route.** `findVaultMovementByRequestId` is keyed on `(organization_id, request_id)`
     and the server fingerprint (`buildEarnVaultDepositFingerprint`) omits the
     project, so a key first used by a SIBLING project matched on both and its
     movement was returned as a replay — the wrong deposit, plus its amount and
     signature. Reachable because an organization-level custody config gives two
     projects the same `custody_wallets` row. The rule is ONE exported function —
-    `assertMovementIsOwnReplay` (`db/repositories/earn-vault.repository.ts`) —
+    `assertMovementIsOwnReplay` (`db/repositories/earn-movements.repository.ts`) —
     enforced at EVERY site that resolves a replay: the route guard
     (`findEarnVaultDepositIdempotentKeyReplay`), `depositIntoVault`'s fast
     sequential preflight (`services/earn/vault-deposit.service.ts`), the
@@ -496,10 +493,10 @@ organization's own custody wallets.
     push an in-flight deposit past the first page would silently stop tracking
     it. The reconciliation sweep drives every row terminal within ~90 seconds,
     so the in-flight set is small by construction.
-  - Migration `0061` adds `idx_earn_vault_movements_workspace_created`
-    (`(organization_id, environment, created_at DESC, id DESC) WHERE direction =
-    'deposit'`). 0059's indexes serve the sweep, replay, the chain and per
-    position — none of them can order this page.
+  - 0062's `idx_earn_movements_direction_created` (`(organization_id,
+    environment, direction, created_at DESC, id DESC)`) is what orders this
+    page; the sweep, replay, chain and per-position lookups each have their own
+    index — none of them can.
 - `GET /vault-deposits/:movementId` — one recorded movement, **DB only**, no
   catalogue join and no chain read. This is what makes `POST`'s
   record-before-broadcast answerable: a caller can hold a movement id for a
@@ -535,7 +532,7 @@ organization's own custody wallets.
   It DOES take wallet-binding scope: `getAllowedApiKeyWalletIdsForPermissions(auth,
   ["earn:read"])`, applied in the repository query before any chain read. Mind
   the id spaces — that helper returns provider `walletId`s (`privy_…`) while
-  `earn_vault_positions.custody_wallet_id` is the `cwlt_…` row id, so the handler
+  `earn_positions.custody_wallet_id` is the `cwlt_…` row id, so the handler
   translates through `scope.wallets`. Passing the allow-list straight through
   matches nothing and silently returns an empty page.
   A failed chain read leaves a position UNHYDRATED rather than zero; reporting
@@ -547,7 +544,7 @@ to an executing client. `EARN_PROVIDER_CLIENTS` stays the CATALOGUE registry so
 the hourly sync keeps its small dependency surface.
 
 The every-minute vault reconciliation worker consumes
-`idx_earn_vault_movements_unsettled` in bounded pages. Both the embedded cron
+`idx_earn_movements_unsettled` in bounded pages. Both the embedded cron
 and the dedicated Cloud Run job call the same reconciler: it queries the exact
 recorded signature, confirms landed transactions, rebroadcasts the recorded
 signed bytes while the blockhash remains valid, and marks an expired, unlanded

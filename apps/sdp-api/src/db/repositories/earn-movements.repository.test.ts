@@ -13,18 +13,14 @@ import { env } from "@/test/helpers/env";
 import type { EarnRepository } from "./earn.repository";
 import { createPostgresEarnRepository } from "./earn.repository.postgres";
 import {
+  type CreateSignedVaultDepositIntentInput,
   createPostgresEarnMovementsRepository,
   EARN_POSITION_ID_PREFIX,
-  EARN_PROJECTION_SPECS,
   type EarnMovementRow,
+  type EarnMovementsRepository,
   type EarnPositionRow,
   generateEarnPositionId,
 } from "./earn-movements.repository";
-import {
-  type CreateSignedEarnVaultDepositIntentInput,
-  createPostgresEarnVaultRepository,
-  type EarnVaultRepository,
-} from "./earn-vault.repository";
 
 /**
  * The unified movement ledger (PRO-1705).
@@ -50,7 +46,7 @@ const VAULT = "VaultAddress11111111111111111111111111111111";
 const WALLET_PUBKEY = "DepositorPublicKey11111111111111111111111111";
 
 describe("Unified earn movement ledger (postgres)", () => {
-  let vaultRepo: EarnVaultRepository;
+  let ledger: EarnMovementsRepository;
   let earnRepo: EarnRepository;
   let sequence = 0;
 
@@ -146,28 +142,27 @@ describe("Unified earn movement ledger (postgres)", () => {
       .bind(WALLET, CONFIG, WALLET_PUBKEY)
       .run();
 
-    vaultRepo = createPostgresEarnVaultRepository(db);
+    ledger = createPostgresEarnMovementsRepository(db);
     earnRepo = createPostgresEarnRepository(db);
     sequence = 0;
   });
 
   function intent(
-    overrides: Partial<CreateSignedEarnVaultDepositIntentInput> = {}
-  ): CreateSignedEarnVaultDepositIntentInput {
+    overrides: Partial<CreateSignedVaultDepositIntentInput> = {}
+  ): CreateSignedVaultDepositIntentInput {
     sequence += 1;
     return {
       organizationId: ORG,
       projectId: PROJECT,
       environment: "sandbox",
       provider: "kamino",
-      providerReference: VAULT,
+      vaultAddress: VAULT,
+      sourceAddress: WALLET_PUBKEY,
       custodyWalletId: WALLET,
       shareMint: SHARE_MINT,
       tokenMint: TOKEN_MINT,
       label: "USDC vault",
       requestedAmount: "100",
-      acceptedAmount: "100.000000",
-      requestedMinSharesOut: "99",
       acceptedMinSharesOut: "99.000000",
       signature: `earn-mv-signature-${sequence}`,
       signedTransaction: `earn-mv-transaction-${sequence}`,
@@ -204,13 +199,14 @@ describe("Unified earn movement ledger (postgres)", () => {
       idempotencyFingerprint: string;
     }>
   ) {
-    return earnRepo.createProgramWithdrawal({
+    return ledger.createCustodialMovement({
       organizationId: ORG,
       projectId: overrides.projectId ?? PROJECT,
-      walletId: overrides.walletId,
+      providerWalletId: overrides.walletId,
+      environment: "sandbox",
       provider: "veda",
       amountRequestedUsd: overrides.amountRequestedUsd ?? "250.50",
-      token: "usdc",
+      payoutToken: "usdc",
       destinationAddress: "DestinationAddress111111111111111111111111",
       requestId: overrides.requestId ?? "wd-request-1",
       idempotencyFingerprint: overrides.idempotencyFingerprint ?? "wd-fingerprint-1",
@@ -302,27 +298,7 @@ describe("Unified earn movement ledger (postgres)", () => {
     });
   });
 
-  describe("projection column drift", () => {
-    // The failure this prevents is silent: a column added to a 0063 view but
-    // missed in one clause that carries it is written on the first mirror and
-    // never refreshed afterwards, with every other test still green. Generating
-    // the clauses from one array closes the three-clause direction; this closes
-    // the array-vs-view direction.
-    it.each(Object.entries(EARN_PROJECTION_SPECS))(
-      "projects every column %s's view produces",
-      async (_name, spec) => {
-        const result = await getDb(env)
-          .prepare(
-            `SELECT column_name FROM information_schema.columns
-             WHERE table_schema = 'public' AND table_name = ?`
-          )
-          .bind(spec.view)
-          .all<{ column_name: string }>();
-        const viewColumns = (result.results ?? []).map((row) => row.column_name).sort();
-        expect(viewColumns).toEqual([...spec.columns].sort());
-      }
-    );
-
+  describe("minted id shape", () => {
     it("mints holding ids under the same prefix the backfill migration writes", () => {
       const backfill = readFileSync(
         path.join(__dirname, "../migrations/postgres/0064_earn_movements_backfill.sql"),
@@ -335,9 +311,9 @@ describe("Unified earn movement ledger (postgres)", () => {
     });
   });
 
-  describe("vault deposits mirror into the ledger", () => {
+  describe("vault deposits", () => {
     it("projects the holding and the movement, with mint-denominated amounts", async () => {
-      const created = await vaultRepo.createSignedDepositIntent(intent());
+      const created = await ledger.createSignedVaultDepositIntent(intent());
 
       const [position] = await positions();
       expect(position).toMatchObject({
@@ -388,46 +364,60 @@ describe("Unified earn movement ledger (postgres)", () => {
       expect(movement.last_valid_block_height).toBe("123456");
     });
 
-    it("advances the mirror through submitted, confirmed and finalization-ready state", async () => {
-      const created = await vaultRepo.createSignedDepositIntent(intent());
+    it("advances through submitted, confirmed and finalized", async () => {
+      const created = await ledger.createSignedVaultDepositIntent(intent());
 
-      await vaultRepo.advanceMovement({
+      await ledger.advanceVaultMovement({
         movementId: created.movement.id,
         organizationId: ORG,
-        fromStatuses: ["pending"],
         toStatus: "submitted",
       });
       expect((await onlyMovement()).status).toBe("submitted");
 
       const confirmedAt = "2026-08-19T12:00:00.000Z";
-      await vaultRepo.advanceMovement({
+      await ledger.advanceVaultMovement({
         movementId: created.movement.id,
         organizationId: ORG,
-        fromStatuses: ["pending", "submitted"],
         toStatus: "confirmed",
         confirmedAt,
-        shares: "99.5",
+        sharesOut: "99.5",
       });
-
-      const confirmed = await onlyMovement();
-      expect(confirmed).toMatchObject({
+      expect(await onlyMovement()).toMatchObject({
         status: "confirmed",
         confirmed_at: confirmedAt,
         shares_out: "99.5",
-        // Only once the chain has spoken does a settled amount exist.
-        amount_settled: "100.000000",
-        // Confirmation is not settlement: the finalization sweep sets this.
+        // The chain has spoken, so what moved is known: the requested amount,
+        // which the service pinned numerically equal to the plan's canonical
+        // amount before signing.
+        amount_settled: "100",
+        // Commitment is not settlement, so nothing is settled yet.
         settled_at: null,
+      });
+
+      const settledAt = "2026-08-19T12:30:00.000Z";
+      await ledger.advanceVaultMovement({
+        movementId: created.movement.id,
+        organizationId: ORG,
+        toStatus: "finalized",
+        confirmedAt: settledAt,
+        settledAt,
+      });
+      expect(await onlyMovement()).toMatchObject({
+        status: "finalized",
+        settled_at: settledAt,
+        amount_settled: "100",
+        // The moment commitment was ACTUALLY observed survives finalization; the
+        // writer coalesces rather than overwriting it.
+        confirmed_at: confirmedAt,
       });
     });
 
     it("mirrors a failure and the holding de-activation it triggers", async () => {
-      const created = await vaultRepo.createSignedDepositIntent(intent());
+      const created = await ledger.createSignedVaultDepositIntent(intent());
 
-      await vaultRepo.advanceMovement({
+      await ledger.advanceVaultMovement({
         movementId: created.movement.id,
         organizationId: ORG,
-        fromStatuses: ["pending", "submitted"],
         toStatus: "failed",
         failureReason: "Transaction blockhash expired before confirmation",
       });
@@ -438,6 +428,8 @@ describe("Unified earn movement ledger (postgres)", () => {
         failure_reason: "Transaction blockhash expired before confirmation",
         confirmed_at: null,
         settled_at: null,
+        // Nothing moved, so nothing is ever reported as settled.
+        amount_settled: null,
       });
       // The only movement failed, so the holding loses its activation — and the
       // mirror has to reflect that, not just the movement's own state.
@@ -446,19 +438,17 @@ describe("Unified earn movement ledger (postgres)", () => {
     });
 
     it("leaves the mirror untouched when a guarded transition loses its race", async () => {
-      const created = await vaultRepo.createSignedDepositIntent(intent());
-      await vaultRepo.advanceMovement({
+      const created = await ledger.createSignedVaultDepositIntent(intent());
+      await ledger.advanceVaultMovement({
         movementId: created.movement.id,
         organizationId: ORG,
-        fromStatuses: ["pending", "submitted"],
         toStatus: "confirmed",
         confirmedAt: "2026-08-19T12:00:00.000Z",
       });
 
-      const lost = await vaultRepo.advanceMovement({
+      const lost = await ledger.advanceVaultMovement({
         movementId: created.movement.id,
         organizationId: ORG,
-        fromStatuses: ["pending"],
         toStatus: "submitted",
       });
 
@@ -470,10 +460,9 @@ describe("Unified earn movement ledger (postgres)", () => {
 
     it("records many deposits against one holding, and re-entry after a close", async () => {
       const db = getDb(env);
-      const first = await vaultRepo.createSignedDepositIntent(intent());
-      const second = await vaultRepo.createSignedDepositIntent(
-        // Requested and accepted must stay numerically equal (0059 enforces it).
-        intent({ requestedAmount: "250", acceptedAmount: "250.000000" })
+      const first = await ledger.createSignedVaultDepositIntent(intent());
+      const second = await ledger.createSignedVaultDepositIntent(
+        intent({ requestedAmount: "250" })
       );
 
       // Topping up the same vault from the same wallet is one HOLDING with many
@@ -491,10 +480,9 @@ describe("Unified earn movement ledger (postgres)", () => {
         .prepare("UPDATE earn_vault_positions SET closed_at = sdp_iso_now() WHERE id = ?")
         .bind(first.position.id)
         .run();
-      await vaultRepo.advanceMovement({
+      await ledger.advanceVaultMovement({
         movementId: second.movement.id,
         organizationId: ORG,
-        fromStatuses: ["pending", "submitted"],
         toStatus: "confirmed",
         confirmedAt: "2026-08-19T12:00:00.000Z",
       });
@@ -530,8 +518,8 @@ describe("Unified earn movement ledger (postgres)", () => {
         )
         .run();
 
-      const mine = await vaultRepo.createSignedDepositIntent(intent());
-      const theirs = await vaultRepo.createSignedDepositIntent(
+      const mine = await ledger.createSignedVaultDepositIntent(intent());
+      const theirs = await ledger.createSignedVaultDepositIntent(
         intent({
           organizationId: ORG_OTHER,
           projectId: "prj_earn_mv_other",
@@ -574,8 +562,8 @@ describe("Unified earn movement ledger (postgres)", () => {
     });
 
     it("keeps exactly one ledger row for an idempotent replay", async () => {
-      const first = await vaultRepo.createSignedDepositIntent(intent({ requestId: "same-key" }));
-      const replay = await vaultRepo.createSignedDepositIntent(
+      const first = await ledger.createSignedVaultDepositIntent(intent({ requestId: "same-key" }));
+      const replay = await ledger.createSignedVaultDepositIntent(
         intent({
           requestId: "same-key",
           idempotencyFingerprint: first.movement.idempotency_fingerprint,
@@ -591,10 +579,12 @@ describe("Unified earn movement ledger (postgres)", () => {
     });
 
     it("writes no ledger row when a divergent replay rolls the whole claim back", async () => {
-      const first = await vaultRepo.createSignedDepositIntent(intent({ requestId: "shared-key" }));
+      const first = await ledger.createSignedVaultDepositIntent(
+        intent({ requestId: "shared-key" })
+      );
 
       await expect(
-        vaultRepo.createSignedDepositIntent(
+        ledger.createSignedVaultDepositIntent(
           intent({ requestId: "shared-key", idempotencyFingerprint: "a-different-fingerprint" })
         )
       ).rejects.toThrow(/Idempotency key already used/);
@@ -607,7 +597,7 @@ describe("Unified earn movement ledger (postgres)", () => {
     });
   });
 
-  describe("custodial withdrawals mirror into the ledger", () => {
+  describe("custodial withdrawals", () => {
     it("mints exactly one custodial holding per program wallet, and labels an unlabelled one", async () => {
       const labelled = await linkProgram("gw-ref-1", "Treasury program");
       const unlabelled = await linkProgram("gw-ref-2", null);
@@ -703,28 +693,6 @@ describe("Unified earn movement ledger (postgres)", () => {
       expect(unified).toHaveLength(2);
       expect(unified.find((row) => row.id === primary.id)?.project_id).toBeNull();
       expect(unified.find((row) => row.id === sibling.id)?.project_id).toBe(PROJECT_SIBLING);
-
-      // 0062 relaxes 0055's CASCADE to SET NULL, so the legacy table keeps the
-      // history too and the two shapes stay ISOMORPHIC through the expand
-      // window. That is not cosmetic: a divergence here would let a reused
-      // idempotency key insert a fresh legacy row, collide with the surviving
-      // unified row on the custodial anchor, and fail that key permanently —
-      // because the route re-resolves the replay from the LEGACY table.
-      const legacy = await db
-        .prepare(
-          `SELECT id, project_id FROM earn_program_withdrawals
-           WHERE wallet_id = ? ORDER BY id`
-        )
-        .bind(wallet.id)
-        .all<{ id: string; project_id: string | null }>();
-      expect(
-        [...(legacy.results ?? [])].sort((left, right) => left.id.localeCompare(right.id))
-      ).toEqual(
-        [
-          { id: primary.id, project_id: null },
-          { id: sibling.id, project_id: PROJECT_SIBLING },
-        ].sort((left, right) => left.id.localeCompare(right.id))
-      );
     });
 
     it("mirrors a provider observation, including a zero fee and a scientific-notation amount", async () => {
@@ -732,17 +700,16 @@ describe("Unified earn movement ledger (postgres)", () => {
       const withdrawal = await createWithdrawal({ walletId: wallet.id });
       if (!withdrawal) throw new Error("withdrawal not created");
 
-      await earnRepo.updateProgramWithdrawalStatusGuarded({
-        selector: { withdrawalId: withdrawal.id },
+      await ledger.updateCustodialMovementGuarded({
+        selector: { movementId: withdrawal.id },
         organizationId: ORG,
-        fromStatuses: ["requested"],
         toStatus: "completed",
         providerReference: "wd-provider-ref-1",
         // Values a provider legitimately reports and 0055 never constrained. The
         // ledger must accept them verbatim rather than fail the money write.
-        amountPaidUsd: "1e-7",
-        feeUsd: "0",
-        completedAt: "2026-08-19T13:00:00.000Z",
+        amountSettled: "1e-7",
+        feeAmount: "0",
+        settledAt: "2026-08-19T13:00:00.000Z",
         providerData: { lastObservation: { status: "completed" } },
       });
 
@@ -764,17 +731,15 @@ describe("Unified earn movement ledger (postgres)", () => {
       const withdrawal = await createWithdrawal({ walletId: wallet.id });
       if (!withdrawal) throw new Error("withdrawal not created");
 
-      await earnRepo.updateProgramWithdrawalStatusGuarded({
-        selector: { withdrawalId: withdrawal.id },
+      await ledger.updateCustodialMovementGuarded({
+        selector: { movementId: withdrawal.id },
         organizationId: ORG,
-        fromStatuses: ["requested"],
         toStatus: "completed",
-        completedAt: "2026-08-19T13:00:00.000Z",
+        settledAt: "2026-08-19T13:00:00.000Z",
       });
-      const regressed = await earnRepo.updateProgramWithdrawalStatusGuarded({
-        selector: { withdrawalId: withdrawal.id },
+      const regressed = await ledger.updateCustodialMovementGuarded({
+        selector: { movementId: withdrawal.id },
         organizationId: ORG,
-        fromStatuses: ["requested", "processing"],
         toStatus: "processing",
       });
 
@@ -812,54 +777,10 @@ describe("Unified earn movement ledger (postgres)", () => {
       });
     });
 
-    it("keeps the provider_reference stamp when the holding was missing at observation", async () => {
-      const db = getDb(env);
-      const wallet = await linkProgram();
-      const withdrawal = await createWithdrawal({ walletId: wallet.id });
-      if (!withdrawal) throw new Error("withdrawal not created");
-
-      // Lose the holding AFTER the intent, so the observation write is the first
-      // thing to notice. This is the dangerous case: the mirror shares its
-      // transaction with the legacy write, so a throw here would roll back the
-      // provider_reference stamp for a withdrawal the provider has already PAID —
-      // and a movement with no reference is the one row no later observation can
-      // find again.
-      await db.prepare("DELETE FROM earn_movements WHERE id = ?").bind(withdrawal.id).run();
-      await db
-        .prepare("DELETE FROM earn_positions WHERE provider_wallet_id = ?")
-        .bind(wallet.id)
-        .run();
-
-      const observed = await earnRepo.updateProgramWithdrawalStatusGuarded({
-        selector: { withdrawalId: withdrawal.id },
-        organizationId: ORG,
-        fromStatuses: ["requested"],
-        toStatus: "completed",
-        providerReference: "wd-paid-ref",
-        amountPaidUsd: "250.50",
-        completedAt: "2026-08-19T14:00:00.000Z",
-      });
-
-      expect(observed?.provider_reference).toBe("wd-paid-ref");
-      const legacy = await db
-        .prepare("SELECT provider_reference FROM earn_program_withdrawals WHERE id = ?")
-        .bind(withdrawal.id)
-        .first<{ provider_reference: string | null }>();
-      expect(legacy?.provider_reference).toBe("wd-paid-ref");
-      expect(await onlyMovement()).toMatchObject({
-        id: withdrawal.id,
-        status: "completed",
-        provider_reference: "wd-paid-ref",
-        amount_settled: "250.50",
-      });
-    });
-  });
-
-  describe("accounting invariants across execution models", () => {
     it("keeps USD, mint units and share counts in separate, self-describing columns", async () => {
       const wallet = await linkProgram();
       await createWithdrawal({ walletId: wallet.id, amountRequestedUsd: "250.50" });
-      await vaultRepo.createSignedDepositIntent(intent({ requestedAmount: "100" }));
+      await ledger.createSignedVaultDepositIntent(intent({ requestedAmount: "100" }));
 
       const rows = await movements();
       expect(rows).toHaveLength(2);
@@ -889,9 +810,7 @@ describe("Unified earn movement ledger (postgres)", () => {
       // Trailing zeroes and a bare integer are different SPELLINGS of the same
       // value. An audit ledger stores what was said, so no coercion may happen.
       await createWithdrawal({ walletId: wallet.id, amountRequestedUsd: "1000.500000" });
-      await vaultRepo.createSignedDepositIntent(
-        intent({ requestedAmount: "100", acceptedAmount: "100.000000" })
-      );
+      await ledger.createSignedVaultDepositIntent(intent({ requestedAmount: "100" }));
 
       const rows = await movements();
       const custodial = rows.find((row) => row.execution_model === "custodial");
@@ -903,7 +822,7 @@ describe("Unified earn movement ledger (postgres)", () => {
     it("serves one chronological history across both execution models", async () => {
       const wallet = await linkProgram();
       await createWithdrawal({ walletId: wallet.id });
-      await vaultRepo.createSignedDepositIntent(intent());
+      await ledger.createSignedVaultDepositIntent(intent());
 
       const rows = await getDb(env)
         .prepare(
@@ -931,7 +850,7 @@ describe("Unified earn movement ledger (postgres)", () => {
       // The SAME caller key on both models is two different requests, and each
       // anchor is a partial index over its own model's rows — so they coexist.
       await createWithdrawal({ walletId: wallet.id, requestId: "shared-request-id" });
-      await vaultRepo.createSignedDepositIntent(intent({ requestId: "shared-request-id" }));
+      await ledger.createSignedVaultDepositIntent(intent({ requestId: "shared-request-id" }));
       expect(await movements()).toHaveLength(2);
 
       // Custodial: position-scoped, which is 0055's wallet scope in the new
@@ -975,15 +894,14 @@ describe("Unified earn movement ledger (postgres)", () => {
   describe("reconciliation queue", () => {
     it("prioritizes blockhash-bound work over older confirmed rows", async () => {
       const db = getDb(env);
-      const confirmed = await vaultRepo.createSignedDepositIntent(intent());
-      await vaultRepo.advanceMovement({
+      const confirmed = await ledger.createSignedVaultDepositIntent(intent());
+      await ledger.advanceVaultMovement({
         movementId: confirmed.movement.id,
         organizationId: ORG,
-        fromStatuses: ["pending", "submitted"],
         toStatus: "confirmed",
         confirmedAt: "2026-08-19T12:00:00.000Z",
       });
-      const requested = await vaultRepo.createSignedDepositIntent(intent());
+      const requested = await ledger.createSignedVaultDepositIntent(intent());
 
       // A confirmed signature that RPC no longer remembers remains in this queue
       // indefinitely. Make it explicitly older so the former oldest-first query
@@ -1005,11 +923,10 @@ describe("Unified earn movement ledger (postgres)", () => {
 
     it("reserves capacity for finalization under sustained blockhash-bound work", async () => {
       const db = getDb(env);
-      const confirmed = await vaultRepo.createSignedDepositIntent(intent());
-      await vaultRepo.advanceMovement({
+      const confirmed = await ledger.createSignedVaultDepositIntent(intent());
+      await ledger.advanceVaultMovement({
         movementId: confirmed.movement.id,
         organizationId: ORG,
-        fromStatuses: ["pending", "submitted"],
         toStatus: "confirmed",
         confirmedAt: "2026-08-19T12:00:00.000Z",
       });
@@ -1019,7 +936,7 @@ describe("Unified earn movement ledger (postgres)", () => {
         .run();
 
       for (let index = 0; index < 4; index += 1) {
-        await vaultRepo.createSignedDepositIntent(intent());
+        await ledger.createSignedVaultDepositIntent(intent());
       }
 
       // With four slots and both classes backlogged, three remain available to
@@ -1034,16 +951,15 @@ describe("Unified earn movement ledger (postgres)", () => {
 
     it("rotates unchanged confirmed rows through the reserved capacity", async () => {
       const db = getDb(env);
-      const older = await vaultRepo.createSignedDepositIntent(intent());
-      const newer = await vaultRepo.createSignedDepositIntent(intent());
+      const older = await ledger.createSignedVaultDepositIntent(intent());
+      const newer = await ledger.createSignedVaultDepositIntent(intent());
       for (const [movement, confirmedAt] of [
         [older, "2026-08-19T12:00:00.000Z"],
         [newer, "2026-08-19T12:01:00.000Z"],
       ] as const) {
-        await vaultRepo.advanceMovement({
+        await ledger.advanceVaultMovement({
           movementId: movement.movement.id,
           organizationId: ORG,
-          fromStatuses: ["pending", "submitted"],
           toStatus: "confirmed",
           confirmedAt,
         });
@@ -1057,7 +973,7 @@ describe("Unified earn movement ledger (postgres)", () => {
         .bind("1900-03-02T00:00:00.000Z", newer.movement.id)
         .run();
       for (let index = 0; index < 4; index += 1) {
-        await vaultRepo.createSignedDepositIntent(intent());
+        await ledger.createSignedVaultDepositIntent(intent());
       }
 
       const repository = createPostgresEarnMovementsRepository(db);
@@ -1079,11 +995,10 @@ describe("Unified earn movement ledger (postgres)", () => {
       // A constant stream of never-attempted rows must not starve retries either.
       // Least-recently-seen ordering puts the earlier attempt back in front of a
       // fresh confirmed row; NULLS FIRST would select the fresh row forever.
-      const fresh = await vaultRepo.createSignedDepositIntent(intent());
-      await vaultRepo.advanceMovement({
+      const fresh = await ledger.createSignedVaultDepositIntent(intent());
+      await ledger.advanceVaultMovement({
         movementId: fresh.movement.id,
         organizationId: ORG,
-        fromStatuses: ["pending", "submitted"],
         toStatus: "confirmed",
         confirmedAt: "2026-08-19T12:02:00.000Z",
       });
@@ -1096,131 +1011,6 @@ describe("Unified earn movement ledger (postgres)", () => {
         organizationId: ORG,
       });
       expect(afterClaims?.updated_at).toBe(beforeClaims?.updated_at);
-    });
-  });
-
-  describe("self-healing", () => {
-    it("repairs a legacy row an earlier revision wrote without mirroring", async () => {
-      const db = getDb(env);
-      const created = await vaultRepo.createSignedDepositIntent(intent());
-
-      // Simulate a row written by a revision that predates the mirror (or one
-      // written during a rollback window): legacy has it, the ledger does not.
-      await db.prepare("DELETE FROM earn_movements WHERE id = ?").bind(created.movement.id).run();
-      expect(await movements()).toHaveLength(0);
-
-      // The next legacy write re-projects the whole row, so the gap closes
-      // without a backfill pass.
-      await vaultRepo.advanceMovement({
-        movementId: created.movement.id,
-        organizationId: ORG,
-        fromStatuses: ["pending"],
-        toStatus: "submitted",
-      });
-
-      const healed = await onlyMovement();
-      expect(healed).toMatchObject({
-        id: created.movement.id,
-        status: "submitted",
-        denomination: TOKEN_MINT,
-        source_address: WALLET_PUBKEY,
-      });
-      // Recovered rows keep their original timestamps, not the repair time.
-      expect(healed.created_at).toBe(created.movement.created_at);
-    });
-
-    it("repairs an unmirrored holding on a non-terminal transition, not only a terminal one", async () => {
-      const db = getDb(env);
-      const created = await vaultRepo.createSignedDepositIntent(intent());
-
-      // A movement whose HOLDING never reached the ledger. The movement
-      // projection INNER JOINs earn_positions, so before this was fixed the
-      // non-terminal branch threw and rolled the legacy status write back with
-      // it — leaving reconciliation to re-broadcast the same signed bytes every
-      // tick until blockhash expiry forced it down the terminal path.
-      await db.prepare("DELETE FROM earn_movements WHERE id = ?").bind(created.movement.id).run();
-      await db.prepare("DELETE FROM earn_positions WHERE id = ?").bind(created.position.id).run();
-      expect(await positions()).toHaveLength(0);
-
-      const advanced = await vaultRepo.advanceMovement({
-        movementId: created.movement.id,
-        organizationId: ORG,
-        fromStatuses: ["pending"],
-        toStatus: "submitted",
-      });
-
-      expect(advanced?.status).toBe("submitted");
-      const [holding] = await positions();
-      expect(holding).toMatchObject({ id: created.position.id, kind: "vault_direct" });
-      expect(await onlyMovement()).toMatchObject({
-        id: created.movement.id,
-        status: "submitted",
-        position_id: created.position.id,
-      });
-    });
-
-    it("repairs an unmirrored row on an idempotent replay", async () => {
-      const db = getDb(env);
-      const input = intent();
-      const created = await vaultRepo.createSignedDepositIntent(input);
-
-      // A replay writes no legacy row, so it used to project nothing — meaning a
-      // caller retrying the one request that touches an unmirrored movement got
-      // a 200 while the ledger still had no record of it.
-      await db.prepare("DELETE FROM earn_movements WHERE id = ?").bind(created.movement.id).run();
-      await db.prepare("DELETE FROM earn_positions WHERE id = ?").bind(created.position.id).run();
-
-      const replay = await vaultRepo.createSignedDepositIntent(input);
-      expect(replay.replayed).toBe(true);
-      expect(await positions()).toHaveLength(1);
-      expect(await onlyMovement()).toMatchObject({
-        id: created.movement.id,
-        position_id: created.position.id,
-      });
-    });
-
-    it("never regresses a finalized ledger row from a legacy write", async () => {
-      const db = getDb(env);
-      const created = await vaultRepo.createSignedDepositIntent(intent());
-      await vaultRepo.advanceMovement({
-        movementId: created.movement.id,
-        organizationId: ORG,
-        fromStatuses: ["pending", "submitted"],
-        toStatus: "confirmed",
-        confirmedAt: "2026-08-19T12:00:00.000Z",
-      });
-
-      // `finalized` is the one state no legacy table can express, so a legacy row
-      // can never be the authority on a movement that already reached it.
-      await db
-        .prepare(
-          `UPDATE earn_movements
-             SET status = 'finalized', settled_at = '2026-08-19T12:30:00.000Z'
-           WHERE id = ?`
-        )
-        .bind(created.movement.id)
-        .run();
-
-      // A legacy transition that would otherwise re-project 'confirmed' — which
-      // would both regress the status and null out settled_at, violating 0062's
-      // settlement biconditional and failing the legacy write itself.
-      await db
-        .prepare(
-          "UPDATE earn_vault_movements SET status = 'submitted', confirmed_at = NULL WHERE id = ?"
-        )
-        .bind(created.movement.id)
-        .run();
-      await vaultRepo.advanceMovement({
-        movementId: created.movement.id,
-        organizationId: ORG,
-        fromStatuses: ["pending", "submitted"],
-        toStatus: "confirmed",
-        confirmedAt: "2026-08-19T14:00:00.000Z",
-      });
-
-      const movement = await onlyMovement();
-      expect(movement.status).toBe("finalized");
-      expect(movement.settled_at).toBe("2026-08-19T12:30:00.000Z");
     });
   });
 });

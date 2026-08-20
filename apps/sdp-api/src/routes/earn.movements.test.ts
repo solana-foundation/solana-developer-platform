@@ -3,7 +3,7 @@ import type { CachedApiKey } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
-import { createPostgresEarnVaultRepository } from "@/db/repositories/earn-vault.repository";
+import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -185,18 +185,18 @@ async function seedScope(): Promise<void> {
 async function seedVaultDeposit(
   overrides: { projectId?: string; walletId?: string; vault?: string; amount?: string } = {}
 ) {
-  return createPostgresEarnVaultRepository(getDb(env)).createSignedDepositIntent({
+  return createPostgresEarnMovementsRepository(getDb(env)).createSignedVaultDepositIntent({
     organizationId: ORG,
     projectId: overrides.projectId ?? PROJECT_A,
     environment: "sandbox",
     provider: "kamino",
-    providerReference: overrides.vault ?? VAULT,
+    vaultAddress: overrides.vault ?? VAULT,
     custodyWalletId: overrides.walletId ?? WALLET_A,
+    sourceAddress: PUBLIC_KEY_A,
     tokenMint: TOKEN_MINT,
     shareMint: SHARE_MINT,
     label: "USDC vault",
     requestedAmount: overrides.amount ?? "10",
-    acceptedAmount: overrides.amount ?? "10",
     signature: `sig_${crypto.randomUUID()}`,
     signedTransaction: "AQ==",
     lastValidBlockHeight: "12345",
@@ -218,13 +218,16 @@ async function seedProgramWithdrawal(overrides: { amountUsd?: string } = {}) {
     createdBy: USER,
   });
   if (!wallet) throw new Error("program wallet not linked");
-  const withdrawal = await repo.createProgramWithdrawal({
+  const withdrawal = await createPostgresEarnMovementsRepository(
+    getDb(env)
+  ).createCustodialMovement({
     organizationId: ORG,
     projectId: PROJECT_A,
-    walletId: wallet.id,
+    providerWalletId: wallet.id,
+    environment: "sandbox",
     provider: "veda" as never,
     amountRequestedUsd: overrides.amountUsd ?? "500.25",
-    token: "usdc",
+    payoutToken: "usdc",
     destinationAddress: PAYOUT,
     requestId: crypto.randomUUID(),
     idempotencyFingerprint: `fp_${crypto.randomUUID()}`,

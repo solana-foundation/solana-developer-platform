@@ -2,11 +2,7 @@ import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import {
-  projectEarnMovementFromVaultMovement,
-  projectEarnPositionFromVaultPosition,
-} from "@/db/repositories/earn-movements.repository";
-import { createPostgresEarnVaultRepository } from "@/db/repositories/earn-vault.repository";
+import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -108,18 +104,18 @@ async function createPosition(params: {
 }) {
   const providerReference = params.providerReference ?? `vault_${crypto.randomUUID()}`;
   const walletId = params.walletId ?? WALLET_A;
-  return createPostgresEarnVaultRepository(getDb(env)).createSignedDepositIntent({
+  return createPostgresEarnMovementsRepository(getDb(env)).createSignedVaultDepositIntent({
     organizationId: ORG,
     projectId: params.projectId ?? PROJECT_A,
     environment: "sandbox",
     provider: "kamino",
-    providerReference,
+    vaultAddress: providerReference,
     custodyWalletId: walletId,
+    sourceAddress: PUBLIC_KEY_A,
     tokenMint: TOKEN_MINT,
     shareMint: SHARE_MINT,
     label: `Vault ${providerReference}`,
     requestedAmount: "1",
-    acceptedAmount: "1",
     signature: params.signature ?? `sig_${crypto.randomUUID()}`,
     signedTransaction: "AQ==",
     lastValidBlockHeight: "12345",
@@ -167,7 +163,7 @@ beforeEach(async () => {
   readVaultPositions.mockImplementation(
     async (_ctx: unknown, input: { owner: string; providerReferences: string[] }) =>
       input.providerReferences.map((providerReference) => ({
-        providerReference,
+        vaultAddress: providerReference,
         owner: input.owner,
         cluster: "devnet",
         shares: "1",
@@ -307,7 +303,7 @@ describe("GET /v1/earn/vault-positions", () => {
     await createPosition({ providerReference });
     readVaultPositions.mockResolvedValue([
       {
-        providerReference,
+        vaultAddress: providerReference,
         owner: PUBLIC_KEY_A,
         cluster: "devnet",
         shares: "99",
@@ -350,7 +346,10 @@ describe("GET /v1/earn/vault-positions", () => {
       "2026-08-17T16:29:31.000Z",
       "earn_vault_position_00000000-0000-4000-8000-000000000ABC",
     ],
-    ["malformed position id", "2026-08-17T16:29:31.000Z", "not-a-position-id"],
+    // An id shape the keyset tuple cannot compare correctly: PostgreSQL orders it
+    // as text, so uppercase would sort wrongly against generated lowercase ids.
+    ["empty position id", "2026-08-17T16:29:31.000Z", ""],
+    ["over-long position id", "2026-08-17T16:29:31.000Z", `earn_position_${"a".repeat(200)}`],
   ])("rejects a decodable cursor with a %s", async (_case, createdAt, id) => {
     const cursor = encodeCursorPayload(createdAt, id);
     const response = await getPositions(`?before=${encodeURIComponent(cursor)}`);
@@ -363,6 +362,22 @@ describe("GET /v1/earn/vault-positions", () => {
       },
     });
     expect(readVaultPositions).not.toHaveBeenCalled();
+  });
+
+  it("accepts an id it does not recognise, because a cursor is a bound and not a grant", async () => {
+    // Holdings carry ids from two eras — `earn_vault_position_…` preserved by the
+    // unification and `earn_position_…` for newer ones — so the cursor validates
+    // SHAPE rather than a prefix. That is safe rather than lax: the id lands in
+    // `(created_at, id) < (?, ?)` while organization, environment and wallet scope
+    // are separate conditions, so an unrecognised one can only bound the page.
+    await createPosition({ providerReference: "vault_unknown_cursor_id" });
+
+    const cursor = encodeCursorPayload("2999-01-01T00:00:00.000Z", "earn_position_unrecognised");
+    const response = await getPositions(`?before=${encodeURIComponent(cursor)}`);
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: { positions: Array<{ id: string }> } };
+    expect(body.data.positions).toHaveLength(1);
   });
 
   it("caps live wallet hydration at eight concurrent calls", async () => {
@@ -408,21 +423,6 @@ describe("GET /v1/earn/vault-positions", () => {
  * `listReadableEarnVaultWallets`, and a binding that hides a position has to
  * hide that position's deposits too. Testing them apart is how the two drift.
  */
-/**
- * Mirror a legacy row into the unified ledger, which is what the reads serve.
- *
- * These fixtures write `earn_vault_movements` directly to build states no writer
- * can produce (a withdraw direction, a foreign environment, an orphaned project).
- * Production mirrors every such write in the same transaction, so a fixture that
- * skipped this would leave the row invisible to the read and the assertion would
- * pass for the wrong reason — proving only that the row was missing, not that the
- * gate it targets works.
- */
-async function reprojectLegacyMovement(positionId: string, movementId: string): Promise<void> {
-  const db = getDb(env);
-  await projectEarnPositionFromVaultPosition(db, positionId);
-  await projectEarnMovementFromVaultMovement(db, movementId);
-}
 
 describe("GET /v1/earn/vault-deposits/:movementId", () => {
   it("reports the recorded deposit so an unconfirmed signature stays answerable", async () => {
@@ -463,10 +463,9 @@ describe("GET /v1/earn/vault-deposits/:movementId", () => {
 
   it("reads back the terminal state the reconciliation sweep wrote", async () => {
     const created = await createPosition({ providerReference: "vault_read_settled" });
-    await createPostgresEarnVaultRepository(getDb(env)).advanceMovement({
+    await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultMovement({
       movementId: created.movement.id,
       organizationId: ORG,
-      fromStatuses: ["pending"],
       toStatus: "failed",
       failureReason: "Blockhash expired without the transaction landing",
     });
@@ -498,10 +497,9 @@ describe("GET /v1/earn/vault-deposits/:movementId", () => {
   it("refuses a withdrawal from the deposit path", async () => {
     const created = await createPosition({ providerReference: "vault_read_direction" });
     await getDb(env)
-      .prepare("UPDATE earn_vault_movements SET direction = 'withdraw' WHERE id = ?")
+      .prepare("UPDATE earn_movements SET direction = 'withdrawal' WHERE id = ?")
       .bind(created.movement.id)
       .run();
-    await reprojectLegacyMovement(created.position.id, created.movement.id);
 
     expect((await getDeposit(created.movement.id)).status).toBe(404);
   });
@@ -517,23 +515,23 @@ describe("GET /v1/earn/vault-deposits/:movementId", () => {
     await getDb(env).batch([
       getDb(env)
         .prepare(
-          `INSERT INTO earn_vault_positions (
-             id, organization_id, project_id, environment, provider, provider_reference,
+          `INSERT INTO earn_positions (
+             id, organization_id, project_id, environment, provider, kind, vault_address,
              custody_wallet_id, share_mint, token_mint, label, created_by, activated_at
-           ) VALUES (?, ?, ?, 'production', 'kamino', 'vault_read_environment',
+           ) VALUES (?, ?, ?, 'production', 'kamino', 'vault_direct', 'vault_read_environment',
                      ?, ?, ?, 'Production vault', ?, sdp_iso_now())`
         )
         .bind(positionId, ORG, PROJECT_A, WALLET_A, SHARE_MINT, TOKEN_MINT, USER),
       getDb(env)
         .prepare(
-          `INSERT INTO earn_vault_movements (
+          `INSERT INTO earn_movements (
              id, organization_id, project_id, environment, position_id, provider,
-             provider_reference, custody_wallet_id, direction, request_id,
-             idempotency_fingerprint, requested_amount, amount, signature,
-             signed_transaction, last_valid_block_height, created_by
-           ) VALUES (?, ?, ?, 'production', ?, 'kamino', 'vault_read_environment',
-                     ?, 'deposit', ?, 'fingerprint_environment', '1', '1',
-                     ?, 'AQ==', '12345', ?)`
+             execution_model, vault_address, custody_wallet_id, direction, status,
+             request_id, idempotency_fingerprint, denomination, amount_requested,
+             signature, signed_transaction, last_valid_block_height, created_by
+           ) VALUES (?, ?, ?, 'production', ?, 'kamino', 'vault_direct',
+                     'vault_read_environment', ?, 'deposit', 'requested', ?,
+                     'fingerprint_environment', ?, '1', ?, 'AQ==', '12345', ?)`
         )
         .bind(
           movementId,
@@ -542,11 +540,11 @@ describe("GET /v1/earn/vault-deposits/:movementId", () => {
           positionId,
           WALLET_A,
           crypto.randomUUID(),
+          TOKEN_MINT,
           `sig_${crypto.randomUUID()}`,
           USER
         ),
     ]);
-    await reprojectLegacyMovement(positionId, movementId);
 
     expect((await getDeposit(movementId)).status).toBe(404);
   });
@@ -604,10 +602,9 @@ describe("GET /v1/earn/vault-deposits", () => {
     const deposit = await createPosition({ providerReference: "vault_list_deposit" });
     const withdrawal = await createPosition({ providerReference: "vault_list_withdrawal" });
     await getDb(env)
-      .prepare("UPDATE earn_vault_movements SET direction = 'withdraw' WHERE id = ?")
+      .prepare("UPDATE earn_movements SET direction = 'withdrawal' WHERE id = ?")
       .bind(withdrawal.movement.id)
       .run();
-    await reprojectLegacyMovement(withdrawal.position.id, withdrawal.movement.id);
 
     const body = (await (await listDeposits()).json()) as {
       data: { deposits: Array<{ movementId: string }> };
@@ -689,10 +686,9 @@ describe("GET /v1/earn/vault-deposits", () => {
   it("returns only in-flight movements when asked, so recovery cannot be paged out", async () => {
     const inFlight = await createPosition({ providerReference: "vault_settled_pending" });
     const settled = await createPosition({ providerReference: "vault_settled_confirmed" });
-    await createPostgresEarnVaultRepository(getDb(env)).advanceMovement({
+    await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultMovement({
       movementId: settled.movement.id,
       organizationId: ORG,
-      fromStatuses: ["pending"],
       toStatus: "confirmed",
       confirmedAt: new Date(0).toISOString(),
     });
@@ -720,10 +716,9 @@ describe("GET /v1/earn/vault-deposits", () => {
     // sibling project that happens to share an organization-level wallet.
     const orphaned = await createPosition({ providerReference: "vault_orphaned" });
     await getDb(env)
-      .prepare("UPDATE earn_vault_movements SET project_id = NULL WHERE id = ?")
+      .prepare("UPDATE earn_movements SET project_id = NULL WHERE id = ?")
       .bind(orphaned.movement.id)
       .run();
-    await reprojectLegacyMovement(orphaned.position.id, orphaned.movement.id);
 
     expect((await getDeposit(orphaned.movement.id)).status).toBe(404);
     const body = (await (await listDeposits()).json()) as {
