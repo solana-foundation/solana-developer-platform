@@ -200,11 +200,13 @@ export async function retryRingsOperation(c: AppContext) {
   });
   if (!failed) throw notFound("rings operation");
 
-  const ringsWallet = await getHeliusRingsWalletRepository(c).getWalletById({
-    ...tenant,
-    id: failed.wallet_id,
-  });
-  const scope = await resolveScope(c);
+  const [ringsWallet, scope] = await Promise.all([
+    getHeliusRingsWalletRepository(c).getWalletById({
+      ...tenant,
+      id: failed.wallet_id,
+    }),
+    resolveScope(c),
+  ]);
   const custodyWallet = ringsWallet
     ? scope.wallets.find((entry) => entry.walletId === ringsWallet.sdp_wallet_id)
     : undefined;

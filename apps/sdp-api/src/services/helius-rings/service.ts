@@ -430,13 +430,15 @@ export class HeliusRingsService {
   async probeHealth(): Promise<RuntimeHealth> {
     try {
       const health = await this.gateway.probeHealth();
-      for (const component of ["rpc", "prover", "photon", "gateway"] as const) {
-        await this.health.recordHealth({
-          projectId: this.tenant.projectId,
-          component,
-          status: health[component],
-        });
-      }
+      await Promise.all(
+        (["rpc", "prover", "photon", "gateway"] as const).map((component) =>
+          this.health.recordHealth({
+            projectId: this.tenant.projectId,
+            component,
+            status: health[component],
+          })
+        )
+      );
     } catch (error) {
       await this.health.recordHealth({
         projectId: this.tenant.projectId,
