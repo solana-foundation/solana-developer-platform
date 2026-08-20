@@ -165,25 +165,29 @@ export function OperationComposer({
     setSubmitting(true);
     setError(null);
     const asset = RINGS_ALLOWLISTED_ASSETS.find((entry) => entry.mint === draft.assetMint);
-    const prepared = await prepareRingsOperation({
-      walletId: draft.walletId,
-      opType: draft.opType,
-      asset:
-        NEEDS_ASSET.has(draft.opType) && asset
-          ? { mint: asset.mint, amountRaw: draft.amountRaw }
-          : undefined,
-      to: NEEDS_RECIPIENT.has(draft.opType) ? draft.recipient.trim() : undefined,
-      zoneId: draft.opType === "merge" && draft.zoneId ? draft.zoneId : undefined,
-      transferMode: transferModeFor(draft.opType),
-      timelock:
-        draft.opType === "timelock_create"
-          ? {
-              unlockAt: new Date(draft.unlockAt).toISOString(),
-              beneficiary: draft.beneficiary.trim(),
-            }
-          : undefined,
-    });
-    setSubmitting(false);
+    let prepared: Awaited<ReturnType<typeof prepareRingsOperation>>;
+    try {
+      prepared = await prepareRingsOperation({
+        walletId: draft.walletId,
+        opType: draft.opType,
+        asset:
+          NEEDS_ASSET.has(draft.opType) && asset
+            ? { mint: asset.mint, amountRaw: draft.amountRaw }
+            : undefined,
+        to: NEEDS_RECIPIENT.has(draft.opType) ? draft.recipient.trim() : undefined,
+        zoneId: draft.opType === "merge" && draft.zoneId ? draft.zoneId : undefined,
+        transferMode: transferModeFor(draft.opType),
+        timelock:
+          draft.opType === "timelock_create"
+            ? {
+                unlockAt: new Date(draft.unlockAt).toISOString(),
+                beneficiary: draft.beneficiary.trim(),
+              }
+            : undefined,
+      });
+    } finally {
+      setSubmitting(false);
+    }
     if (prepared.error || !prepared.operation) {
       setError(prepared.error ?? t("DashboardHeliusRings.composer.prepareFailed"));
       return;
