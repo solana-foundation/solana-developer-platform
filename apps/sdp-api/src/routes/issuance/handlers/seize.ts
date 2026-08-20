@@ -1,10 +1,9 @@
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { Context } from "hono";
-import { z } from "zod";
 import { getDb } from "@/db";
 import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
 import {
   assertTokenAllowsOperation,
@@ -12,13 +11,12 @@ import {
   parsePositiveTokenAmount,
 } from "@/services/token-operation.service";
 import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
-import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
   getTenantTokenService,
   requireProjectScope,
 } from "../helpers";
-import { seizeSchema } from "../schemas";
+import type { seizeSchema } from "../schemas";
 import { assertDestinationAllowedByControlList } from "./access-control";
 import { resolveAuthoritySigner, resolvePermanentDelegateAuthority } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
@@ -27,20 +25,11 @@ import {
   recoverSettledTransactionReplay,
 } from "./settled-transaction";
 
-type AppContext = Context<{ Bindings: Env }>;
-
-export const prepareSeize = async (c: AppContext) => {
+export const prepareSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
 
-  const body = await c.req.json();
-  const parsed = seizeSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
@@ -56,20 +45,17 @@ export const prepareSeize = async (c: AppContext) => {
   assertTokenAllowsOperation(token, "seize");
   assertTokenIsDeployed(token);
 
-  const { mosaicAmount } = parsePositiveTokenAmount(parsed.data.seize.amount, token.decimals);
+  const { mosaicAmount } = parsePositiveTokenAmount(body.seize.amount, token.decimals);
 
-  const isOnControlList = await tokenService.isAddressAllowed(
-    tokenId,
-    parsed.data.seize.destination
-  );
+  const isOnControlList = await tokenService.isAddressAllowed(tokenId, body.seize.destination);
   assertDestinationAllowedByControlList({
     token,
-    destination: parsed.data.seize.destination,
+    destination: body.seize.destination,
     isOnControlList,
   });
 
   const permanentDelegateRaw =
-    parsed.data.seize.delegateAuthority ??
+    body.seize.delegateAuthority ??
     (await resolvePermanentDelegateAuthority(c.env, tokenService, token));
   if (!permanentDelegateRaw) {
     throw badRequest("Permanent delegate is not configured for this token");
@@ -79,12 +65,12 @@ export const prepareSeize = async (c: AppContext) => {
     env: c.env,
     auth,
     token,
-    requestedWalletId: parsed.data.signingWalletId,
+    requestedWalletId: body.signingWalletId,
     currentAuthority: permanentDelegateRaw,
   });
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
-  const source = assertValidAddress(parsed.data.seize.source, "source");
-  const destination = assertValidAddress(parsed.data.seize.destination, "destination");
+  const source = assertValidAddress(body.seize.source, "source");
+  const destination = assertValidAddress(body.seize.destination, "destination");
   const permanentDelegate = assertValidAddress(permanentDelegateRaw, "delegateAuthority");
 
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
@@ -98,7 +84,7 @@ export const prepareSeize = async (c: AppContext) => {
   });
 
   let simulation: unknown;
-  if (parsed.data.options?.simulate) {
+  if (body.options?.simulate) {
     const rpc = createRpc(c.env);
     const txBytes = Buffer.from(prepared.serializedTx, "base64");
     simulation = await simulateTransaction(rpc, txBytes);
@@ -109,11 +95,11 @@ export const prepareSeize = async (c: AppContext) => {
     organizationId: auth.organizationId,
     type: "seize",
     params: {
-      source: parsed.data.seize.source,
-      destination: parsed.data.seize.destination,
-      amount: parsed.data.seize.amount,
+      source: body.seize.source,
+      destination: body.seize.destination,
+      amount: body.seize.amount,
       delegateAuthority: permanentDelegateRaw,
-      memo: parsed.data.seize.memo,
+      memo: body.seize.memo,
     },
     serializedTx: prepared.serializedTx,
     initiatedByKeyId: auth.id,
@@ -126,9 +112,9 @@ export const prepareSeize = async (c: AppContext) => {
     resourceId: tx.id,
     metadata: {
       tokenId,
-      source: parsed.data.seize.source,
-      destination: parsed.data.seize.destination,
-      amount: parsed.data.seize.amount,
+      source: body.seize.source,
+      destination: body.seize.destination,
+      amount: body.seize.amount,
       delegateAuthority: permanentDelegateRaw,
       mode: "prepare",
     },
@@ -145,18 +131,11 @@ export const prepareSeize = async (c: AppContext) => {
   });
 };
 
-export const executeSeize = async (c: AppContext) => {
+export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
 
-  const body = await c.req.json();
-  const parsed = seizeSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
@@ -172,20 +151,17 @@ export const executeSeize = async (c: AppContext) => {
   assertTokenAllowsOperation(token, "seize");
   assertTokenIsDeployed(token);
 
-  const { mosaicAmount } = parsePositiveTokenAmount(parsed.data.seize.amount, token.decimals);
+  const { mosaicAmount } = parsePositiveTokenAmount(body.seize.amount, token.decimals);
 
-  const isOnControlList = await tokenService.isAddressAllowed(
-    tokenId,
-    parsed.data.seize.destination
-  );
+  const isOnControlList = await tokenService.isAddressAllowed(tokenId, body.seize.destination);
   assertDestinationAllowedByControlList({
     token,
-    destination: parsed.data.seize.destination,
+    destination: body.seize.destination,
     isOnControlList,
   });
 
   const permanentDelegateRaw =
-    parsed.data.seize.delegateAuthority ??
+    body.seize.delegateAuthority ??
     (await resolvePermanentDelegateAuthority(c.env, tokenService, token));
   if (!permanentDelegateRaw) {
     throw badRequest("Permanent delegate is not configured for this token");
@@ -195,19 +171,19 @@ export const executeSeize = async (c: AppContext) => {
     env: c.env,
     auth,
     token,
-    requestedWalletId: parsed.data.signingWalletId,
+    requestedWalletId: body.signingWalletId,
     currentAuthority: permanentDelegateRaw,
   });
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
-  const source = assertValidAddress(parsed.data.seize.source, "source");
-  const destination = assertValidAddress(parsed.data.seize.destination, "destination");
+  const source = assertValidAddress(body.seize.source, "source");
+  const destination = assertValidAddress(body.seize.destination, "destination");
 
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
     tokenId,
     operation: "seize",
     mode: "execute",
-    params: parsed.data,
+    params: body,
   });
 
   const { transaction: tx, replayed } = await tokenService.createTransaction({
@@ -215,11 +191,11 @@ export const executeSeize = async (c: AppContext) => {
     organizationId: auth.organizationId,
     type: "seize",
     params: {
-      source: parsed.data.seize.source,
-      destination: parsed.data.seize.destination,
-      amount: parsed.data.seize.amount,
+      source: body.seize.source,
+      destination: body.seize.destination,
+      amount: body.seize.amount,
       delegateAuthority: permanentDelegateRaw,
-      memo: parsed.data.seize.memo,
+      memo: body.seize.memo,
     },
     idempotencyKey: idempotencyMetadata.idempotencyKey,
     idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
@@ -244,9 +220,9 @@ export const executeSeize = async (c: AppContext) => {
     resourceId: tx.id,
     metadata: {
       tokenId,
-      source: parsed.data.seize.source,
-      destination: parsed.data.seize.destination,
-      amount: parsed.data.seize.amount,
+      source: body.seize.source,
+      destination: body.seize.destination,
+      amount: body.seize.amount,
       delegateAuthority: permanentDelegateRaw,
       mode: "execute",
     },

@@ -67,11 +67,13 @@ export interface EarnStrategyRow {
  *
  * project_id records the provisioning project only — it is not part of the
  * program's scope, and every project in an environment reaches every program.
+ * It becomes null if that provisioning project is hard-deleted; the funded,
+ * organization-scoped provider account survives.
  */
 export interface EarnProviderWalletRow {
   id: string;
   organization_id: string;
-  project_id: string;
+  project_id: string | null;
   environment: SdpEnvironment;
   /** Open TEXT, same drift rule as EarnStrategyRow.provider. */
   provider: string;

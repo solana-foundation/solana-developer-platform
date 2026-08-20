@@ -1,12 +1,14 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { resolveIntegrationDetail } from "../integration-detail";
+import { IntegrationDetailSkeleton } from "../integrations-skeleton";
 import {
   resolveComplianceIntegrations,
   resolveCustodyIntegrations,
   resolveRampIntegrations,
   resolveRpcIntegrations,
 } from "../integrations-status";
+import type { RpcConnectionContext } from "./integration-detail-view";
 import { IntegrationDetailView } from "./integration-detail-view";
 
 vi.mock("next/headers", () => ({
@@ -19,6 +21,9 @@ vi.mock("../rpc-connection-panel", () => ({
   RpcConnectionPanel: ({ provider }: { provider: string }) => (
     <div data-rpc-panel={provider}>rpc-connection-panel</div>
   ),
+}));
+vi.mock("../rpc-byok-section", () => ({
+  RpcByokSection: ({ provider }: { provider: string }) => <div data-rpc-byok={provider} />,
 }));
 
 const on = { entitled: true, configured: true, enabled: true };
@@ -120,5 +125,38 @@ describe("IntegrationDetailView", () => {
     expect(markup).toContain("Status unavailable");
     expect(markup).not.toContain("/dashboard/wallets/setup");
     expect(markup).not.toContain(">Manage<");
+  });
+
+  it("keeps the shared skeleton within one block of every family", async () => {
+    // The skeleton cannot match all four families, so the rule is that it sits
+    // within one block of each. A new section pushes some family to two.
+    const skeleton = (
+      renderToStaticMarkup(<IntegrationDetailSkeleton />).match(/rounded-2xl/g) ?? []
+    ).length;
+
+    const cases: Array<[string, RpcConnectionContext | undefined]> = [
+      [
+        "helius",
+        {
+          activeProvider: "helius",
+          canManage: true,
+          isEnabledInDeployment: true,
+          organizationId: "o",
+          byokConnections: [],
+        },
+      ],
+      ["privy", undefined],
+      ["moonpay", undefined],
+      ["range", undefined],
+    ];
+
+    for (const [provider, rpc] of cases) {
+      const detail = resolveIntegrationDetail({ provider, ...INPUTS });
+      if (!detail) throw new Error(provider);
+      const markup = renderToStaticMarkup(await IntegrationDetailView({ detail, rpc }));
+      const blocks =
+        (markup.match(/<section/g) ?? []).length + (markup.match(/<header/g) ?? []).length;
+      expect(Math.abs(blocks - skeleton)).toBeLessThanOrEqual(1);
+    }
   });
 });

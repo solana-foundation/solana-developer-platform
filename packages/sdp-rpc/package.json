@@ -9,6 +9,11 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./byok": {
+      "types": "./src/byok.ts",
+      "import": "./src/byok.ts",
+      "default": "./src/byok.ts"
+    },
     "./errors": {
       "types": "./src/errors.ts",
       "import": "./src/errors.ts",

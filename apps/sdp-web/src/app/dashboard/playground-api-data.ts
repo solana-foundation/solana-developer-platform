@@ -1,3 +1,4 @@
+import { readApiErrorMessage } from "@/lib/api-error";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
 export interface PlaygroundApiKeyView {
@@ -17,11 +18,8 @@ interface FetchResult<T> {
 
 function parseErrorMessage(body: string): string {
   try {
-    const parsed = JSON.parse(body) as {
-      error?: { message?: string };
-      message?: string;
-    };
-    return parsed?.error?.message ?? parsed?.message ?? body;
+    const parsed: unknown = JSON.parse(body);
+    return readApiErrorMessage(parsed) ?? body;
   } catch {
     return body;
   }

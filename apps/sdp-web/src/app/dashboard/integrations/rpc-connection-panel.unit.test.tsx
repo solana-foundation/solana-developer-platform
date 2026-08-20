@@ -133,7 +133,7 @@ describe("RpcConnectionPanel", () => {
     // different provider.
     renderPanel({ isEnabledInDeployment: false });
     expect(screen.queryByRole("button", { name: "Test connection" })).toBeNull();
-    expect(screen.getByText(/falling back to another provider/)).toBeTruthy();
+    expect(screen.getByText(/falling back to another one/)).toBeTruthy();
     // ...and must not simultaneously claim traffic runs through it.
     expect(screen.queryByText(/runs through this provider/)).toBeNull();
     expect(screen.getByText("This organization is set to use this provider.")).toBeTruthy();
@@ -142,7 +142,7 @@ describe("RpcConnectionPanel", () => {
   it("explains an unconfigured provider instead of offering a dead switch", () => {
     renderPanel({ provider: "triton", status: "not_configured" });
     expect(screen.queryByRole("button")).toBeNull();
-    expect(screen.getByText(/does not hold an endpoint/)).toBeTruthy();
+    expect(screen.getByText(/holds no endpoint/)).toBeTruthy();
   });
 
   it("does not switch when the save fails", async () => {

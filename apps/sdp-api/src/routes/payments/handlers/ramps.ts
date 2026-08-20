@@ -57,6 +57,7 @@ import {
 } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
@@ -70,14 +71,14 @@ import {
 } from "../context";
 import { mapTransferRow } from "../mappers";
 import {
-  cancelRampTransferSchema,
-  createOfframpQuoteSchema,
-  createOnrampQuoteSchema,
-  estimateOfframpSchema,
-  estimateOnrampSchema,
+  type cancelRampTransferSchema,
+  type createOfframpQuoteSchema,
+  type createOnrampQuoteSchema,
+  type estimateOfframpSchema,
+  type estimateOnrampSchema,
   listOfframpCurrenciesQuerySchema,
   listOnrampCurrenciesQuerySchema,
-  simulateSandboxTransferSchema,
+  type simulateSandboxTransferSchema,
   type submitCounterpartyRequirementsSchema,
 } from "../schemas";
 import { type ResolvedScope, resolveScope, resolveWalletAddress } from "../wallets";
@@ -296,16 +297,9 @@ async function resolveRampQuoteRequest(
  * @returns The candidate, validated body, resolved resources, and raw payload.
  */
 export async function extractOnrampQuotePolicyCandidate(
-  c: AppContext
+  c: ValidatedBodyContext<typeof createOnrampQuoteSchema>
 ): Promise<PolicyGateExtraction> {
-  const parsed = createOnrampQuoteSchema.safeParse(await c.req.json());
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-
-  const input = parsed.data;
+  const input = c.req.valid("json");
   const { scope, projectId, counterparty, wallet, walletAddress } = await resolveRampQuoteRequest(
     c,
     "onramp",
@@ -352,16 +346,9 @@ export async function extractOnrampQuotePolicyCandidate(
  * @returns The candidate, validated body, resolved resources, and raw payload.
  */
 export async function extractOfframpQuotePolicyCandidate(
-  c: AppContext
+  c: ValidatedBodyContext<typeof createOfframpQuoteSchema>
 ): Promise<PolicyGateExtraction> {
-  const parsed = createOfframpQuoteSchema.safeParse(await c.req.json());
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-
-  const input = parsed.data;
+  const input = c.req.valid("json");
   const { scope, projectId, counterparty, wallet, walletAddress } = await resolveRampQuoteRequest(
     c,
     "offramp",
@@ -583,17 +570,8 @@ async function estimateAcrossProviders(
   return settled.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
 }
 
-export async function estimateOnramp(c: AppContext) {
-  const body = await c.req.json();
-  const parsed = estimateOnrampSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-
-  const input = parsed.data;
+export async function estimateOnramp(c: ValidatedBodyContext<typeof estimateOnrampSchema>) {
+  const input = c.req.valid("json");
   const row = ONRAMP_SUPPORT.find(
     (pair) => pair.source === input.fiatCurrency && pair.dest === input.assetRail
   );
@@ -610,17 +588,8 @@ export async function estimateOnramp(c: AppContext) {
   return success(c, { estimates });
 }
 
-export async function estimateOfframp(c: AppContext) {
-  const body = await c.req.json();
-  const parsed = estimateOfframpSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-
-  const input = parsed.data;
+export async function estimateOfframp(c: ValidatedBodyContext<typeof estimateOfframpSchema>) {
+  const input = c.req.valid("json");
   const row = OFFRAMP_SUPPORT.find(
     (pair) => pair.source === input.assetRail && pair.dest === input.fiatCurrency
   );
@@ -925,17 +894,8 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
   return success(c, { quote });
 }
 
-export async function cancelRampTransfer(c: AppContext) {
-  const body = await c.req.json();
-  const parsed = cancelRampTransferSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-
-  const input = parsed.data;
+export async function cancelRampTransfer(c: ValidatedBodyContext<typeof cancelRampTransferSchema>) {
+  const input = c.req.valid("json");
   const scope = await resolveScope(c);
   const projectId = requireProjectId(c);
   const repository = getPaymentsRepository(c);
@@ -1027,7 +987,9 @@ export async function listOfframpCurrencies(c: AppContext) {
   });
 }
 
-export async function simulateSandboxTransfer(c: AppContext) {
+export async function simulateSandboxTransfer(
+  c: ValidatedBodyContext<typeof simulateSandboxTransferSchema>
+) {
   if (resolveSdpEnvironment(c) !== "sandbox") {
     throw new AppError(
       "FORBIDDEN",
@@ -1035,25 +997,18 @@ export async function simulateSandboxTransfer(c: AppContext) {
     );
   }
 
-  const body = await c.req.json();
-  const parsed = simulateSandboxTransferSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   let transaction: unknown;
-  switch (parsed.data.provider) {
+  switch (body.provider) {
     case "lightspark":
       transaction = await RAMP_PROVIDER_CLIENTS.lightspark.sandboxSend(
         rampRuntime(c),
-        parsed.data.payload
+        body.payload
       );
       break;
     case "bvnk": {
-      const payload = parsed.data.payload;
+      const payload = body.payload;
       const scope = await resolveScope(c);
       const projectId = requireProjectId(c);
       const counterparty = await getCounterpartiesRepository(c).getCounterpartyById({
@@ -1101,7 +1056,7 @@ export async function simulateSandboxTransfer(c: AppContext) {
       break;
     }
     case "mural": {
-      const payload = parsed.data.payload;
+      const payload = body.payload;
       const scope = await resolveScope(c);
       const projectId = requireProjectId(c);
       const counterparty = await getCounterpartiesRepository(c).getCounterpartyById({

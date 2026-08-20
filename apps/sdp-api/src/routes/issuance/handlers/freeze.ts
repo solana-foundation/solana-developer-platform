@@ -3,10 +3,10 @@ import { type Address, assertValidAddress } from "@sdp/solana/address";
 import type { FrozenAccount, FrozenAccountResponse, TokenTransaction } from "@sdp/types";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
-import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
 import type { TokenService } from "@/services/token.service";
 import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
@@ -16,7 +16,7 @@ import {
   getTenantTokenService,
   requireProjectScope,
 } from "../helpers";
-import { freezeSchema, unfreezeSchema } from "../schemas";
+import type { freezeSchema, unfreezeSchema } from "../schemas";
 import { getTokenAccessControlMode, type TokenAccessControlMode } from "./access-control";
 import { resolveAuthoritySigner, resolveCurrentAuthorityForRole } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
@@ -209,18 +209,11 @@ async function resolveFreezeTarget(
   };
 }
 
-export const freezeAccount = async (c: AppContext) => {
+export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
 
-  const body = await c.req.json();
-  const parsed = freezeSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
@@ -258,10 +251,10 @@ export const freezeAccount = async (c: AppContext) => {
     env: c.env,
     auth,
     token,
-    requestedWalletId: parsed.data.signingWalletId,
+    requestedWalletId: body.signingWalletId,
     currentAuthority: currentAuthorityRaw,
   });
-  const requestedAddress = assertValidAddress(parsed.data.accountAddress, "accountAddress");
+  const requestedAddress = assertValidAddress(body.accountAddress, "accountAddress");
   const { tokenAccount } = await resolveFreezeTarget(
     c.env,
     requestedAddress,
@@ -274,7 +267,7 @@ export const freezeAccount = async (c: AppContext) => {
     operation: "freeze",
     mode: "execute",
     params: {
-      ...parsed.data,
+      ...body,
       accountAddress: tokenAccount,
     },
   });
@@ -285,7 +278,7 @@ export const freezeAccount = async (c: AppContext) => {
     type: "freeze",
     params: {
       accountAddress: tokenAccount,
-      reason: parsed.data.reason,
+      reason: body.reason,
     },
     idempotencyKey: idempotencyMetadata.idempotencyKey,
     idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
@@ -301,7 +294,7 @@ export const freezeAccount = async (c: AppContext) => {
       tokenId,
       tokenAccount,
       actorId: auth.id,
-      reason: parsed.data.reason,
+      reason: body.reason,
     });
     return created(c, {
       frozenAccount: {
@@ -321,7 +314,7 @@ export const freezeAccount = async (c: AppContext) => {
       tokenId,
       accountAddress: tokenAccount,
       tokenAccountAddress: tokenAccount,
-      reason: parsed.data.reason,
+      reason: body.reason,
     },
   });
   let onChainEffectCompleted = false;
@@ -339,7 +332,7 @@ export const freezeAccount = async (c: AppContext) => {
       evidence: { signature: result.signature, slot: Number(result.slot) },
       params: {
         accountAddress: tokenAccount,
-        reason: parsed.data.reason,
+        reason: body.reason,
         tokenAccountAddress: tokenAccount,
         signature: result.signature,
         slot: result.slot.toString(),
@@ -360,7 +353,7 @@ export const freezeAccount = async (c: AppContext) => {
       accountAddress: tokenAccount,
       state: "frozen",
       actorId: auth.id,
-      reason: parsed.data.reason,
+      reason: body.reason,
     });
 
     emitTokenOperationCompleted(c, {
@@ -433,18 +426,11 @@ export const listFrozenAccounts = async (c: AppContext) => {
   return paginated(c, frozenAccounts, { total, page, pageSize });
 };
 
-export const unfreezeAccount = async (c: AppContext) => {
+export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
 
-  const body = await c.req.json();
-  const parsed = unfreezeSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
@@ -474,7 +460,7 @@ export const unfreezeAccount = async (c: AppContext) => {
     throw badRequest("Current freeze authority is not available for this token");
   }
 
-  const requestedAddress = assertValidAddress(parsed.data.accountAddress, "accountAddress");
+  const requestedAddress = assertValidAddress(body.accountAddress, "accountAddress");
   const { tokenAccount } = await resolveFreezeTarget(
     c.env,
     requestedAddress,
@@ -486,7 +472,7 @@ export const unfreezeAccount = async (c: AppContext) => {
     env: c.env,
     auth,
     token,
-    requestedWalletId: parsed.data.signingWalletId,
+    requestedWalletId: body.signingWalletId,
     currentAuthority: currentAuthorityRaw,
   });
 
@@ -495,7 +481,7 @@ export const unfreezeAccount = async (c: AppContext) => {
     operation: "unfreeze",
     mode: "execute",
     params: {
-      ...parsed.data,
+      ...body,
       accountAddress: tokenAccount,
     },
   });

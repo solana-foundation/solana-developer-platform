@@ -1,14 +1,14 @@
 import type { ListProjectMembersResponse, ProjectMemberResponse, ProjectRole } from "@sdp/types";
 import type { Context } from "hono";
-import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
 import { ProjectService } from "@/services/project.service";
 import type { Env } from "@/types/env";
-import { addMemberSchema, updateMemberSchema } from "../schemas";
+import type { addMemberSchema, updateMemberSchema } from "../schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -30,18 +30,11 @@ export const listProjectMembers = async (c: AppContext) => {
   return success(c, response);
 };
 
-export const addProjectMember = async (c: AppContext) => {
+export const addProjectMember = async (c: ValidatedBodyContext<typeof addMemberSchema>) => {
   const { projectId } = c.req.param();
   const auth = getAuth(c);
 
-  const body = await c.req.json();
-  const parsed = addMemberSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const projectService = new ProjectService(getDb(c.env));
 
@@ -56,7 +49,7 @@ export const addProjectMember = async (c: AppContext) => {
     .prepare(
       "SELECT id FROM organization_members WHERE user_id = ? AND organization_id = ? AND status = 'active'"
     )
-    .bind(parsed.data.userId, auth.organizationId)
+    .bind(body.userId, auth.organizationId)
     .first();
 
   if (!orgMember) {
@@ -65,14 +58,14 @@ export const addProjectMember = async (c: AppContext) => {
 
   const member = await projectService.addMember(
     projectId,
-    parsed.data.userId,
-    (parsed.data.role ?? "developer") as ProjectRole
+    body.userId,
+    (body.role ?? "developer") as ProjectRole
   );
 
   // Get user details
   const user = await getDb(c.env)
     .prepare("SELECT id, email, name FROM users WHERE id = ?")
-    .bind(parsed.data.userId)
+    .bind(body.userId)
     .first<{ id: string; email: string; name: string | null }>();
 
   // Audit log
@@ -81,30 +74,23 @@ export const addProjectMember = async (c: AppContext) => {
     action: "create",
     resourceType: "project_member",
     resourceId: member.id,
-    metadata: { projectId, userId: parsed.data.userId, role: member.role },
+    metadata: { projectId, userId: body.userId, role: member.role },
   });
 
   const response: ProjectMemberResponse = {
     member: {
       ...member,
-      user: user ?? { id: parsed.data.userId, email: "", name: null },
+      user: user ?? { id: body.userId, email: "", name: null },
     },
   };
   return created(c, response);
 };
 
-export const updateProjectMember = async (c: AppContext) => {
+export const updateProjectMember = async (c: ValidatedBodyContext<typeof updateMemberSchema>) => {
   const { projectId, memberId } = c.req.param();
   const auth = getAuth(c);
 
-  const body = await c.req.json();
-  const parsed = updateMemberSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const projectService = new ProjectService(getDb(c.env));
 
@@ -124,11 +110,7 @@ export const updateProjectMember = async (c: AppContext) => {
     throw notFound("Project member");
   }
 
-  await projectService.updateMemberRole(
-    projectId,
-    memberRow.user_id,
-    parsed.data.role as ProjectRole
-  );
+  await projectService.updateMemberRole(projectId, memberRow.user_id, body.role as ProjectRole);
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));
@@ -136,7 +118,7 @@ export const updateProjectMember = async (c: AppContext) => {
     action: "update",
     resourceType: "project_member",
     resourceId: memberId,
-    metadata: { role: parsed.data.role },
+    metadata: { role: body.role },
   });
 
   return noContent(c);

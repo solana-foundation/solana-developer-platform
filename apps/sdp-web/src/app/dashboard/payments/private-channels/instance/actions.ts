@@ -6,7 +6,63 @@ import {
 } from "@sdp/private-channels";
 import type { PrivateChannelInstance, PrivateChannelInstanceInput } from "@sdp/types";
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { createSdpApiClient } from "@/lib/sdp-api";
+
+const privateChannelInstanceSchema = privateChannelInstanceInputSchema.extend({
+  id: z.string(),
+  organizationId: z.string(),
+  projectId: z.string(),
+  isActive: z.boolean(),
+  createdBy: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+}) satisfies z.ZodType<PrivateChannelInstance>;
+
+const gatewayProbeResponseSchema = z.object({
+  status: z.number(),
+  ok: z.boolean(),
+  body: z.unknown().optional(),
+});
+
+const gatewayHealthResultSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("ready"),
+    latencyMs: z.number(),
+    health: gatewayProbeResponseSchema,
+    ready: gatewayProbeResponseSchema,
+  }),
+  z.object({
+    status: z.literal("degraded"),
+    latencyMs: z.number(),
+    health: gatewayProbeResponseSchema,
+    ready: gatewayProbeResponseSchema,
+    reason: z.string(),
+  }),
+  z.object({
+    status: z.literal("unreachable"),
+    latencyMs: z.number(),
+    error: z.string(),
+    health: gatewayProbeResponseSchema.optional(),
+    ready: gatewayProbeResponseSchema.optional(),
+  }),
+]);
+
+const rpcProbeResultSchema = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), latencyMs: z.number(), version: z.string() }),
+  z.object({ ok: z.literal(false), latencyMs: z.number(), error: z.string() }),
+]);
+
+const authProbeResultSchema = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), latencyMs: z.number() }),
+  z.object({ ok: z.literal(false), latencyMs: z.number(), error: z.string() }),
+]);
+
+const connectionProbeDetailsSchema = z.object({
+  gateway: gatewayHealthResultSchema,
+  rpc: rpcProbeResultSchema,
+  auth: authProbeResultSchema,
+});
 
 export type TestConnectionResult = ConnectionProbeResult;
 
@@ -149,47 +205,38 @@ function interpretApiError(error: unknown): ConnectPrivateChannelResult {
   const { details, message } = extractError(payload);
   const displayMessage = message ?? error.message;
 
-  if (details?.requiresReactivateConfirmation && details.existingInstance) {
+  const existingInstance = privateChannelInstanceSchema.safeParse(details?.existingInstance);
+  if (details?.requiresReactivateConfirmation === true && existingInstance.success) {
     return {
       ok: false,
       kind: "requires-reactivate-confirmation",
       message: displayMessage,
-      existingInstance: details.existingInstance,
+      existingInstance: existingInstance.data,
     };
   }
 
-  if (details?.activeInstance) {
+  const activeInstance = privateChannelInstanceSchema.safeParse(details?.activeInstance);
+  if (activeInstance.success) {
     return {
       ok: false,
       kind: "conflict-active",
       message: displayMessage,
-      activeInstance: details.activeInstance,
+      activeInstance: activeInstance.data,
     };
   }
 
-  if (details?.gateway && details.rpc && details.auth) {
-    return interpretProbeError(details);
+  const probe = connectionProbeDetailsSchema.safeParse(details);
+  if (probe.success) {
+    return interpretProbeError(probe.data);
   }
 
-  if (details?.fieldErrors) {
-    const fieldErrors: FieldErrors = {};
-    for (const [field, messages] of Object.entries(details.fieldErrors)) {
-      const first = Array.isArray(messages) ? messages[0] : undefined;
-      if (typeof first === "string") {
-        fieldErrors[field as keyof PrivateChannelInstanceInput] = first;
-      }
-    }
-    return { ok: false, kind: "validation", fieldErrors };
-  }
-
+  // API validation 400s carry one prettified message and no field map, so a
+  // schema mismatch that slips past the client-side parse surfaces as the
+  // server message rather than per-field errors.
   return { ok: false, kind: "server", message: displayMessage };
 }
 
-type ConnectionProbeDetails = {
-  gateway: ConnectionProbeResult["gateway"];
-  rpc: ConnectionProbeResult["rpc"];
-  auth: ConnectionProbeResult["auth"];
-};
+type ConnectionProbeDetails = z.infer<typeof connectionProbeDetailsSchema>;
 
 function summarizeProbeFailure(probe: ConnectionProbeDetails): string {
   if (probe.auth.ok === false) {
@@ -207,35 +254,26 @@ function summarizeProbeFailure(probe: ConnectionProbeDetails): string {
   return "Connection check failed.";
 }
 
-function interpretProbeError(details: ErrorDetails): ConnectPrivateChannelResult {
-  const probe = details as ConnectionProbeDetails;
+function interpretProbeError(details: ConnectionProbeDetails): ConnectPrivateChannelResult {
   return {
     ok: false,
     kind: "probe",
-    probe: { gateway: probe.gateway, rpc: probe.rpc, auth: probe.auth, ok: false },
-    message: summarizeProbeFailure(probe),
+    probe: { gateway: details.gateway, rpc: details.rpc, auth: details.auth, ok: false },
+    message: summarizeProbeFailure(details),
   };
 }
 
-interface ErrorDetails {
-  gateway?: ConnectionProbeResult["gateway"];
-  rpc?: ConnectionProbeResult["rpc"];
-  auth?: ConnectionProbeResult["auth"];
-  fieldErrors?: Record<string, unknown>;
-  requiresReactivateConfirmation?: boolean;
-  existingInstance?: PrivateChannelInstance;
-  activeInstance?: PrivateChannelInstance;
-}
-
-function extractError(payload: unknown): { details: ErrorDetails | null; message: string | null } {
+function extractError(payload: unknown): {
+  details: Record<string, unknown> | null;
+  message: string | null;
+} {
   const record = isRecord(payload) ? payload : null;
   const errorField = record && isRecord(record.error) ? record.error : null;
-  const details =
-    errorField && isRecord(errorField.details) ? (errorField.details as ErrorDetails) : null;
+  const details = errorField && isRecord(errorField.details) ? errorField.details : null;
   const message = errorField && typeof errorField.message === "string" ? errorField.message : null;
   return { details, message };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
