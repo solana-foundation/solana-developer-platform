@@ -31,14 +31,32 @@ knowing before touching it:
 - The projections assert their row is projectable BEFORE writing. `INSERT ...
   SELECT` from a view that yields nothing inserts zero rows and SUCCEEDS, which
   would silently drop a money movement.
-- Every movement needs a holding. A custodial one is minted when the program
-  wallet is linked (`insertProviderWallet`); without it a withdrawal cannot
-  project and the write fails loudly rather than going unrecorded.
+- Every movement needs a holding, so every write path projects the holding
+  BEFORE the movement. A custodial holding is minted when the program wallet is
+  linked (`insertProviderWallet`) and by `0064` for programs that already exist;
+  if a program somehow has none, the withdrawal projection OPENS one rather than
+  failing. That is not politeness: on the observation path the mirror shares its
+  transaction with the legacy write, so throwing would roll back the
+  `provider_reference` stamp for a payout the provider had already made, and a
+  movement with no reference is the one row nothing can heal.
 - `finalized` is the one status no legacy table can express, so a legacy write
   never regresses a unified row that already reached it.
 - The vocabulary tables `earn_execution_models`, `earn_movement_directions` and
   `earn_movement_statuses` are seeded reference data, pinned to `@sdp/types` by a
   conformance test. Never truncate them in a test fixture.
+- `EARN_MOVEMENT_TRANSITIONS` in `@sdp/types` is the one declaration of which
+  transitions are legal. The custodial half is enforced today
+  (`earn-withdrawal-ledger.service.ts` derives its CAS source statuses from it);
+  the vault half has no enforcer until reads switch, because the live guard still
+  guards the LEGACY table in migration 0059's vocabulary. It is written to agree
+  with `0062`'s CHECK constraints — in particular there is no
+  `confirmed → failed`, because recording one could only succeed by erasing a
+  `confirmed_at` SDP actually observed.
+- `0064` establishes history; it does NOT converge rows that a legacy-only writer
+  ADVANCED during a rollout or rollback window (`ON CONFLICT DO NOTHING` leaves
+  the stale projection). The read-switch release re-states the projection as an
+  upsert to sweep those. Read `0064`'s header before assuming the backfill is
+  self-correcting.
 
 ## Route map — with each route's single source of truth
 

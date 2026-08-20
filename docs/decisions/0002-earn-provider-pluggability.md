@@ -584,3 +584,124 @@ both — but they still guard Ground, production Kamino, rows already stored und
 the old behaviour, and the next genuinely single-cluster provider. The
 simplification here is to the mental model ("catalogued but not fundable" was a
 Kamino-shaped special case), not to the safety machinery.
+
+## Addendum (2026-08-19) — One ledger for every movement (PRO-1705)
+
+The 2026-08-11 "ledger vs live" addendum above stands in full; this settles
+*how many* ledgers implement it. Earn had grown **two authoritative movement
+tables split by execution mechanism rather than by business meaning**:
+
+- `earn_program_withdrawals` (`0055`) — provider-API portfolio withdrawals.
+- `earn_vault_movements` (`0059`) — signed, on-chain vault deposits.
+
+Both record the same fact — money moved through Earn — so idempotency,
+lifecycle, reconciliation, history and reporting existed twice in two shapes,
+and no single query could answer "what moved on this organization". Every new
+provider or direction deepened it: `0061`'s own index comment anticipated a
+third variation landing as more columns on `0059`.
+
+### Decision
+
+**One row per real-world money movement, discriminated by `execution_model`
+rather than by which table it lives in** (`earn_movements`, migration `0062`),
+and **one holdings table behind it** (`earn_positions`) so every movement
+belongs to exactly one holding — a vault claim or a custodial program alike.
+`earn_provider_wallets` keeps owning the *account*; a custodial position is the
+link row.
+
+This supersedes the earlier plan of record in two places, deliberately:
+
+- `0059`'s "extend `earn_vault_movements` for vault withdraw" — that is the
+  third mechanism-shaped variation, and it is not built.
+- The 2026-08-11 addendum's "PRO-1634 redesigns a movements ledger *if* the
+  execution era arrives". It arrived: the Kamino `vault_direct` pivot made SDP
+  a signer, so a movements ledger is no longer speculative and the name
+  `earn_movements` is reclaimed — with a movement-identity-first shape, not
+  `0048`'s position-scoped one.
+
+### Invariants this establishes
+
+- **Accounting units never share a column.** Every amount is denominated in an
+  explicit `denomination` (`usd` for custodial, the token MINT for vault), and
+  share quantities live only in share-named columns. Unifying USD, mint units
+  and vault share counts into one `amount` was the concrete accounting hazard
+  here, and it is closed by construction rather than by convention.
+- **Closed vocabularies are lookup tables with FK integrity**, not
+  `CHECK (status IN (...))` lists. The composite `(execution_model, status)`
+  foreign key makes a custodial status unrepresentable on a vault movement and
+  makes `execution_model` transitively valid without a second constraint.
+  `@sdp/types` remains the source of truth for BEHAVIOUR (which statuses are
+  terminal, which transitions are legal); a conformance test pins the seeded
+  rows to it, so a migration and a constant can only move together.
+- **The transition matrix must agree with the schema, not merely with itself.**
+  `EARN_MOVEMENT_TRANSITIONS` declares no `confirmed → failed` for a vault
+  movement, because `0062` ties `confirmed_at`/`shares_out` to the commitment
+  states and recording that transition could only succeed by erasing an
+  observation SDP genuinely made. A confirmed transaction dropped by a fork
+  stays in the reconciliation queue as an open question rather than being
+  declared failed on a guess.
+- **`confirmed` is not settlement.** A vault movement's chain commitment can
+  still be dropped by a fork; `finalized` is the irreversible state and the only
+  one that stamps `settled_at`. Treating `confirmed` as terminal (`0059`'s
+  vocabulary) is what made "settled" mean two things across SDP.
+- **Both legacy idempotency anchors survive**, scoped as they were — custodial
+  position-scoped (≡ `0055`'s wallet scope, since a custodial position is 1:1
+  with its program wallet), vault org-scoped (`0059`). Flattening them to one
+  anchor would have broken whichever side lost. No fingerprint builder or
+  request-id derivation changes: those values are persisted in
+  `wallet_operations.raw_payload.executionRequest`, so altering one would 409
+  every in-flight approved retry across a deploy.
+- **Project attribution is not a lifetime.** `project_id` is nullable with
+  `ON DELETE SET NULL` on the unified tables *and*, as of this change, on
+  `earn_provider_wallets` and `earn_program_withdrawals`. `0055`'s CASCADE meant
+  deleting a project destroyed the withdrawal history of money that had actually
+  left the organization. Keeping the two shapes isomorphic here also removes a
+  trap: a divergence would let a reused idempotency key insert a legacy row that
+  collides with a surviving unified row and fail that key permanently.
+
+### Migration shape, and the rule while both shapes exist
+
+Expand → backfill → switch → contract, exactly as `0055` did, because every
+intermediate deploy must be rollback-safe: the previously deployed revision
+keeps working throughout, since nothing it writes was renamed or removed. A
+rename would have made the *first* rollback break vault deposits outright.
+
+- `0062` adds the tables and vocabularies; `0063` defines each projection as a
+  **VIEW**; `0064` backfills all existing holdings and history.
+- Each projection is a view precisely because it has two consumers — the bulk
+  backfill and the application's dual-write. Spelled twice they would drift, and
+  the parts that drift are the dangerous ones (which status maps to which, which
+  join supplies the denomination). "History" disagreeing with "new rows" in a
+  money ledger is the worst outcome available, so it is made structurally
+  impossible rather than test-guarded. All four views are dropped with the
+  legacy tables.
+- **The rule, for as long as two shapes exist: any writer of a legacy earn
+  movement table MUST mirror into the unified ledger in the SAME transaction.**
+  One Postgres, one transaction — divergence is unrepresentable and there is no
+  reconciliation problem to monitor. It is documented where the writers live
+  (`db/repositories/CLAUDE.md`) and where the routes are
+  (`routes/earn/CLAUDE.md`).
+- **A missing holding must never fail a money write.** Every write path projects
+  the holding before the movement, and the custodial projection opens one if the
+  ledger has none. On the observation path the mirror shares its transaction
+  with the legacy write, so throwing there would roll back the
+  `provider_reference` stamp for a payout the provider had already made — and a
+  movement with no reference is the one row no observation can heal.
+- **The backfill establishes history; it does not converge advances.**
+  `ON CONFLICT DO NOTHING` cannot refresh a row a legacy-only writer advanced
+  during a rollout or rollback window, so the read-switch release re-states the
+  projection as a guarded upsert to sweep that window. Before the contract
+  phase stops dual-writing, a read-only parity check (row counts plus a per-row
+  projection diff) runs in the deployed environments, expecting zero
+  differences.
+
+### What did NOT change
+
+Reads. `earn_program_withdrawals`, `earn_vault_movements` and
+`earn_vault_positions` stay authoritative for every route until a later,
+separate release switches them — so this addendum changes where movements are
+*recorded*, not yet where any surface *reads* them. ADR 0002's rule that SDP
+ledgers what SDP initiates, and reads live what the provider observes, is
+untouched: customer-initiated custodial deposits remain unledgered because SDP
+has no intent moment for them, and when an observed-deposit feed is built it
+writes rows here.

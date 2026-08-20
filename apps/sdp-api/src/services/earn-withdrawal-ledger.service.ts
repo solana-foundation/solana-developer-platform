@@ -3,7 +3,7 @@ import type {
   EarnPortfolioWithdrawalStatus,
   EarnProgramWithdrawalRecordStatus,
 } from "@sdp/types";
-import { EARN_TERMINAL_WITHDRAWAL_STATUSES } from "@sdp/types";
+import { EARN_MOVEMENT_TRANSITIONS, isTerminalEarnMovementStatus } from "@sdp/types";
 import type { EarnProgramWithdrawalRow, EarnRepository } from "@/db/repositories";
 import { getLogger } from "@/runtime/logger";
 
@@ -31,20 +31,22 @@ import { getLogger } from "@/runtime/logger";
  * guard closes the read-then-write race (braces), mirroring the two-layer
  * shape of applyRampSettlementEvent.
  */
-const ALLOWED_EARN_WITHDRAWAL_SOURCE_STATUSES = {
-  processing: ["requested", "processing", "pending_approval"],
-  pending_approval: ["requested", "processing", "pending_approval"],
-  completed: ["requested", "processing", "pending_approval"],
-  partially_completed: ["requested", "processing", "pending_approval"],
-  failed: ["requested", "processing", "pending_approval"],
-  cancelled: ["requested", "processing", "pending_approval"],
-} as const satisfies Record<
-  EarnPortfolioWithdrawalStatus,
-  readonly EarnProgramWithdrawalRecordStatus[]
->;
+/**
+ * The custodial half of `EARN_MOVEMENT_TRANSITIONS`, which is the single
+ * declaration of this matrix (PRO-1705). It was spelled here as well until the
+ * unified vocabulary existed; two copies of a money-movement transition table
+ * is exactly the drift the unification exists to remove, so this now narrows
+ * the shared constant to the statuses a PROVIDER can report rather than
+ * restating it.
+ */
+const ALLOWED_EARN_WITHDRAWAL_SOURCE_STATUSES =
+  EARN_MOVEMENT_TRANSITIONS.custodial satisfies Record<
+    EarnPortfolioWithdrawalStatus,
+    readonly EarnProgramWithdrawalRecordStatus[]
+  >;
 
 export function isTerminalEarnWithdrawalStatus(status: EarnProgramWithdrawalRecordStatus): boolean {
-  return (EARN_TERMINAL_WITHDRAWAL_STATUSES as readonly string[]).includes(status);
+  return isTerminalEarnMovementStatus("custodial", status);
 }
 
 /**

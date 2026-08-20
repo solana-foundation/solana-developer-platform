@@ -265,7 +265,13 @@ Terminal for a vault movement is `confirmed | failed`
 (`EARN_TERMINAL_VAULT_MOVEMENT_STATUSES`) — note `pending` is NOT terminal: it
 reads like a failure and is not one, it means SDP could not establish that the
 transaction reached the network, which is the one case where the customer's
-money is genuinely in the air. An unreadable poll returns `undefined` and keeps
+money is genuinely in the air. **Keep using
+`EARN_TERMINAL_VAULT_MOVEMENT_STATUSES` here, not the similarly named
+`EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct`** (PRO-1705): that one is the
+unified ledger's vocabulary, where `confirmed` is NOT terminal because
+`finalized` exists after it. This poll reads the legacy wire field, so switching
+to the unified set would make it wait for a `finalized` nothing writes yet and
+never stop. An unreadable poll returns `undefined` and keeps
 polling; a read that failed says nothing about whether the deposit landed.
 
 Two tiers, deliberately at different clocks, exactly as the withdrawal side

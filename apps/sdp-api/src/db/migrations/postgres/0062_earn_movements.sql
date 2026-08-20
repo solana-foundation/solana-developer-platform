@@ -1,5 +1,6 @@
 -- Solana Earn: one provider-neutral movement ledger, and one holdings table
--- behind it (PRO-1705, ADR 0002 addendum "One ledger for every movement").
+-- behind it (PRO-1705, ADR 0002 addendum 2026-08-19 "One ledger for every
+-- movement").
 --
 -- ── The problem this closes ────────────────────────────────────────────────
 -- Earn ended up with TWO authoritative movement tables split by EXECUTION
@@ -29,7 +30,7 @@
 -- ── Why new tables rather than ALTER/RENAME ────────────────────────────────
 -- Expand/contract, exactly as 0055 did: the legacy tables keep their writers
 -- and their data for now. The application dual-writes both shapes in one
--- transaction (0063 backfills history), reads switch in a later release, and
+-- transaction (0064 backfills history), reads switch in a later release, and
 -- the legacy tables are dropped last of all. The point is that every
 -- intermediate deploy is rollback-safe — the previously deployed revision
 -- keeps working throughout, because nothing it writes was renamed or removed.
@@ -168,6 +169,36 @@ ALTER TABLE earn_provider_wallets
 
 ALTER TABLE earn_provider_wallets
     ADD CONSTRAINT earn_provider_wallets_project_id_fkey
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL;
+
+-- The same relaxation for 0055's withdrawal history, and for the same reason
+-- twice over.
+--
+-- 1. It is the forensics rule applied consistently: project_id is write-only
+--    provisioning attribution (ADR 0002), and attribution is not a lifetime.
+--    CASCADE made deleting a project DESTROY the withdrawal history of money
+--    that actually left the organization — the one record a purge must not take
+--    with it.
+-- 2. It keeps the two shapes ISOMORPHIC through the expand window, which is
+--    this migration's entire safety argument. `earn_movements.project_id` is
+--    SET NULL; leaving the legacy table on CASCADE would make a hard project
+--    deletion drop the legacy row while the unified row survived. A reused
+--    idempotency key would then insert a fresh legacy row, collide with the
+--    surviving unified row on `idx_earn_movements_custodial_request`, and the
+--    route's unique-violation path — which re-resolves the replay from the
+--    LEGACY table — would find nothing and fail that key permanently.
+--
+-- Rollback-safe, like the wallet relaxation above: every old and new writer
+-- still supplies a real project on insert, and NULL appears only after a hard
+-- deletion.
+ALTER TABLE earn_program_withdrawals
+    DROP CONSTRAINT IF EXISTS earn_program_withdrawals_project_id_fkey;
+
+ALTER TABLE earn_program_withdrawals
+    ALTER COLUMN project_id DROP NOT NULL;
+
+ALTER TABLE earn_program_withdrawals
+    ADD CONSTRAINT earn_program_withdrawals_project_id_fkey
         FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL;
 
 -- ───────────────────────────────────────────────────────────────────────────
@@ -316,6 +347,10 @@ CREATE INDEX IF NOT EXISTS idx_earn_positions_wallet_created
 
 -- Complement the narrow-wallet index above for pages spanning many custody
 -- rows: ORDER BY can stream globally before applying the wallet-array filter.
+-- This also serves the kind-neutral workspace-wide question ("what does this
+-- organization hold"): `custody_wallet_id` is the LAST column, so the leading
+-- (organization_id, environment, created_at DESC, id DESC) prefix answers it
+-- without a second index over exactly that prefix.
 CREATE INDEX IF NOT EXISTS idx_earn_positions_created_wallet
     ON earn_positions(
         organization_id,
@@ -326,12 +361,6 @@ CREATE INDEX IF NOT EXISTS idx_earn_positions_created_wallet
     )
     WHERE activated_at IS NOT NULL AND closed_at IS NULL;
 
--- Workspace-wide holdings list, kind-neutral: the treasury overview asks "what
--- does this organization hold", which no index above answers without also
--- naming wallets.
-CREATE INDEX IF NOT EXISTS idx_earn_positions_workspace_created
-    ON earn_positions(organization_id, environment, created_at DESC, id DESC)
-    WHERE activated_at IS NOT NULL AND closed_at IS NULL;
 
 -- ───────────────────────────────────────────────────────────────────────────
 -- 3. The ledger: every money movement Earn records.
@@ -522,6 +551,24 @@ CREATE TABLE IF NOT EXISTS earn_movements (
     -- Chain commitment time exists exactly for the states that have one. Both
     -- confirmed and finalized carry it: finalization does not erase the earlier
     -- commitment, it supersedes it.
+    --
+    -- This is a BICONDITIONAL, and `EARN_MOVEMENT_TRANSITIONS` is written to
+    -- respect it rather than fight it. Two consequences, both deliberate:
+    --
+    -- * There is no `confirmed -> failed` transition. Recording one would mean
+    --   NULLing `confirmed_at` (and `shares_out` below) — erasing two chain
+    --   facts SDP genuinely observed, and making "failed before landing"
+    --   indistinguishable from "landed, then dropped in a fork". The realistic
+    --   chain path never asks for it: an execution error is reported with the
+    --   FIRST status for a signature, not after a clean one. The remaining
+    --   tail — a confirmed transaction dropped by a fork rollback — stays in
+    --   the reconciliation queue as an open question rather than being declared
+    --   failed on a guess, which is the only answer that keeps the observation.
+    -- * `submitted -> finalized` is legal, and its writer stamps `confirmed_at`
+    --   on the way through. That is not an invented observation: finalized
+    --   strictly implies committed, so the column states a fact the chain
+    --   asserts, and the alternative is a settled row with no record of its own
+    --   commitment.
     CONSTRAINT earn_movements_confirmation_metadata_check
         CHECK (
             execution_model <> 'vault_direct'
@@ -592,7 +639,9 @@ CREATE TABLE IF NOT EXISTS earn_movements (
             )
         ),
     -- Shares are what the chain minted or burned, so they exist only once the
-    -- chain has spoken.
+    -- chain has spoken. Kept to the commitment states for the same reason as
+    -- `confirmed_at` above: no legal transition leaves a movement that observed
+    -- a share count in a status that may not hold one.
     CONSTRAINT earn_movements_shares_out_format_check
         CHECK (
             shares_out IS NULL
