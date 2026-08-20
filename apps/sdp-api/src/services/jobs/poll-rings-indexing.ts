@@ -63,6 +63,11 @@ export async function pollRingsIndexing(
   const logger = getLogger();
   const timeoutCutoff = now().getTime() - RINGS_INDEXING_TIMEOUT_MS;
 
+  // Deliberately sequential. Each iteration builds a per-tenant service and runs
+  // a transactional state transition, so fanning the batch out concurrently
+  // would put up to MAX_PER_RUN pipelines on the shared pool in one tick — and
+  // the per-operation catch below would no longer isolate a single failure.
+  // The 30-minute indexing budget leaves ample room for a serial sweep.
   for (const operation of inFlight) {
     if (operation.state !== "indexing") continue;
     try {
