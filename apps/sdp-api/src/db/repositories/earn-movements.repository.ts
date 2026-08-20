@@ -337,8 +337,12 @@ export interface EarnMovementsRepository {
    * merely discouraged, and a lost race returns null rather than an error.
    */
   advanceVaultMovement(input: AdvanceVaultMovementInput): Promise<EarnMovementRow | null>;
-  /** Insert-at-intent for a custodial movement: the row exists before the provider accepts. */
-  createCustodialMovement(input: CreateCustodialMovementInput): Promise<EarnMovementRow | null>;
+  /**
+   * Insert-at-intent for a custodial movement: the row exists before the provider
+   * accepts. Always returns the row — a missing holding heals then retries, and a
+   * missing program wallet throws rather than letting money move unrecorded.
+   */
+  createCustodialMovement(input: CreateCustodialMovementInput): Promise<EarnMovementRow>;
   /** Guarded CAS on a custodial movement, by row id or by provider reference. */
   updateCustodialMovementGuarded(
     input: UpdateCustodialMovementGuardedInput
@@ -356,10 +360,13 @@ export interface CreateSignedVaultDepositIntentInput {
   shareMint: string;
   tokenMint: string;
   label: string;
-  /** Decimal string in the vault token's units, as the caller sent it. */
+  /**
+   * Decimal string in the vault token's units, as the caller sent it. Also what
+   * settlement reports: `requireAcceptedPlan` asserts it numerically equal to
+   * the plan's canonical amount before anything is signed, so the writer stamps
+   * `amount_settled` from it once the chain speaks.
+   */
   requestedAmount: string;
-  /** The provider plan's canonical spelling of the same quantity. */
-  acceptedAmount: string;
   acceptedMinSharesOut?: string | null;
   /** The wallet that signs and holds the shares — the depositor, on chain. */
   sourceAddress: string;
@@ -879,6 +886,14 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         // report commitment earlier keeps the moment it was actually observed.
         assignments.push("confirmed_at = COALESCE(confirmed_at, ?)");
         values.push(input.confirmedAt);
+      }
+      if (input.toStatus === "confirmed" || input.toStatus === "finalized") {
+        // What moved is what the intent encoded: the service asserts the caller's
+        // amount numerically equal to the plan's canonical amount before signing,
+        // so once the chain speaks the requested amount IS the settled amount —
+        // the same fact 0063's projection derived for the backfilled history.
+        // COALESCEd so a backfilled row keeps the projection's spelling.
+        assignments.push("amount_settled = COALESCE(amount_settled, amount_requested)");
       }
 
       const advance = (target: AppDb) =>

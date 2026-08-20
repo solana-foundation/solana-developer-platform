@@ -36,6 +36,9 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
   const movements = await ledger.claimUnsettledVaultMovements(OUTBOX_BATCH_SIZE);
   const byEnvironment = groupByEnvironment(movements);
 
+  // Sequential on purpose. Each environment opens its own RPC client and polls a
+  // batch of signature statuses, so running the handful of them together only
+  // multiplies concurrent load on the endpoints for no measurable wall-clock win.
   for (const [environment, rows] of byEnvironment) {
     await reconcileEnvironment(env, ledger, environment, rows);
   }
@@ -90,6 +93,11 @@ async function reconcileEnvironment(
     }
   }
 
+  // Sequential on purpose, and load-bearing: an iteration can REBROADCAST a
+  // transaction and writes CAS transitions, so fanning a 256-row batch out with
+  // `Promise.all` would put 256 concurrent broadcasts on the RPC endpoint and 256
+  // writes on the connection pool from one tick. Pacing is the point; the batch is
+  // already bounded, and every other job in this directory reconciles the same way.
   for (const [index, movement] of rows.entries()) {
     try {
       await reconcileMovement(env, ledger, movement, statuses[index] ?? null, {

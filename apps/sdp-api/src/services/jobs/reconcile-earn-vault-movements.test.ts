@@ -73,7 +73,6 @@ async function seedMovement(lastValidBlockHeight = "100") {
     tokenMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     label: "USDC Vault",
     requestedAmount: "1",
-    acceptedAmount: "1",
     sourceAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
     signature: `sig_${crypto.randomUUID()}`,
     signedTransaction: Buffer.from([1, 2, 3]).toString("base64"),
@@ -160,7 +159,9 @@ describe("reconcileEarnVaultMovements", () => {
     await reconcileEarnVaultMovements(env);
 
     const finalized = await ledgerRow(seeded.movement.id);
-    expect(finalized).toMatchObject({ status: "finalized" });
+    // amount_settled rides along with commitment: the intent's amount is what
+    // the chain executed, so a settled row always reports what moved.
+    expect(finalized).toMatchObject({ status: "finalized", amount_settled: "1" });
     expect(finalized?.settled_at).not.toBeNull();
     expect(finalized?.confirmed_at).not.toBeNull();
     expect(
@@ -182,7 +183,7 @@ describe("reconcileEarnVaultMovements", () => {
     // the moment finalization was observed rather than left null — which 0062's
     // confirmation biconditional would reject outright.
     const row = await ledgerRow(seeded.movement.id);
-    expect(row).toMatchObject({ status: "finalized" });
+    expect(row).toMatchObject({ status: "finalized", amount_settled: "1" });
     expect(row?.confirmed_at).not.toBeNull();
     expect(row?.settled_at).not.toBeNull();
   });

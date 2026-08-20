@@ -116,7 +116,6 @@ async function createPosition(params: {
     shareMint: SHARE_MINT,
     label: `Vault ${providerReference}`,
     requestedAmount: "1",
-    acceptedAmount: "1",
     signature: params.signature ?? `sig_${crypto.randomUUID()}`,
     signedTransaction: "AQ==",
     lastValidBlockHeight: "12345",
