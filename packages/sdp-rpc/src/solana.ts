@@ -24,7 +24,7 @@ import {
 } from "@solana/kit";
 import { getSolanaConfig } from "./config";
 import { solanaRpcError } from "./errors";
-import { isTransientRpcError } from "./transient";
+import { isTransientRpcError, withTransientRpcRetry } from "./transient";
 import type { RpcEnv } from "./types";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -93,28 +93,6 @@ const DISALLOWED_RPC_HEADERS = new Set([
   "upgrade",
   "via",
 ]);
-
-const TRANSIENT_RPC_RETRY_DELAYS_MS = [250, 750, 1500];
-
-async function withTransientRpcRetry<T>(operation: () => Promise<T>): Promise<T> {
-  let lastError: unknown;
-
-  for (let attempt = 0; attempt <= TRANSIENT_RPC_RETRY_DELAYS_MS.length; attempt += 1) {
-    try {
-      return await operation();
-    } catch (error) {
-      lastError = error;
-
-      if (attempt === TRANSIENT_RPC_RETRY_DELAYS_MS.length || !isTransientRpcError(error)) {
-        throw error;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, TRANSIENT_RPC_RETRY_DELAYS_MS[attempt]));
-    }
-  }
-
-  throw lastError;
-}
 
 function assertAllowedRpcHeaders(
   headers: Readonly<Record<string, string>>

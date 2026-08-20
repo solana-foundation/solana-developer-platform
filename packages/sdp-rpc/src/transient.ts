@@ -40,3 +40,33 @@ export function isUnauthorizedRpcError(error: unknown): boolean {
   }
   return (context as { statusCode?: unknown }).statusCode === 401;
 }
+
+const TRANSIENT_RPC_RETRY_DELAYS_MS = [250, 750, 1500];
+
+/**
+ * Run an RPC operation, retrying transient failures (as classified by
+ * `isTransientRpcError`) on a short backoff schedule. Persistent errors and
+ * errors that survive the whole schedule are rethrown.
+ */
+export async function withTransientRpcRetry<T>(
+  operation: () => Promise<T>,
+  delaysMs: readonly number[] = TRANSIENT_RPC_RETRY_DELAYS_MS
+): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= delaysMs.length; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+
+      if (attempt === delaysMs.length || !isTransientRpcError(error)) {
+        throw error;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, delaysMs[attempt]));
+    }
+  }
+
+  throw lastError;
+}
