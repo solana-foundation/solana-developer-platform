@@ -266,6 +266,12 @@ async function syncProcessingTransfersOnChain(
   repo: PaymentsRepository,
   nowIso: string
 ): Promise<void> {
+  // No marker exclusion here, unlike the window above, and deliberately: that
+  // one concludes from a timeout, and a guess about a row that may be on chain
+  // is what parking forbids. This one asks the chain. Five minutes is well past
+  // a blockhash's lifetime, so "absent from the recent cache and from the
+  // history" proves the transaction can never confirm — and a parked row that
+  // has its signature is exactly the one an operator no longer has to touch.
   const processingWithSig = await repo.listTransfersByStatus({
     statuses: ["processing"],
     types: WALLET_TRANSFER_TYPES,

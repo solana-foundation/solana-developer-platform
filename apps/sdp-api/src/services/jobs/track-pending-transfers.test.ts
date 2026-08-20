@@ -254,6 +254,30 @@ describe("trackPendingTransfers", () => {
       });
     });
 
+    it("settles a parked transfer once it has a signature to check", async () => {
+      // Parking blocks the timeout window, not this one. A parked row that has
+      // been given its signature is resolvable from the chain, so leaving it
+      // alone would only hold a resolved payment for an operator — and would
+      // strand it silently if the marker outlived the signature write.
+      getSignatureStatusesMock.mockResolvedValueOnce([
+        { slot: 77n, confirmationStatus: "finalized", err: null },
+      ] as unknown as Awaited<ReturnType<typeof solanaRpc.getSignatureStatuses>>);
+
+      await insertTransfer({
+        id: "xfr_parked_with_signature",
+        status: "processing",
+        signature: String(TEST_SIG_1),
+        providerData: { submission_outcome: "unknown" },
+        createdAt: minutesAgo(30),
+        updatedAt: minutesAgo(30),
+      });
+
+      await trackPendingTransfers(env);
+
+      const updated = await getTransfer("xfr_parked_with_signature");
+      expect(updated?.status).toBe("finalized");
+    });
+
     it("marks old processing transfer as failed when signature is not found on chain", async () => {
       // Absent from the recent cache and from the history search: it never landed.
       getSignatureStatusesMock.mockResolvedValueOnce([null]);
