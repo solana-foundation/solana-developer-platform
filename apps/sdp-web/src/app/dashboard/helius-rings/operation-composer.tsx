@@ -41,7 +41,15 @@ const NEEDS_RECIPIENT: ReadonlySet<RingsOpType> = new Set([
   "withdraw",
 ]);
 
-type Step = "compose" | "review" | "result";
+/**
+ * Where the wizard is, and the only data valid at that point. A union rather
+ * than parallel `step`/`result`/`error` values so "showing a result with no
+ * operation" is not representable.
+ */
+type Phase =
+  | { name: "compose" }
+  | { name: "review"; error: string | null }
+  | { name: "result"; operation: RingsOperationDetail };
 
 /** Everything the compose form has collected. */
 interface ComposerDraft {
@@ -140,12 +148,10 @@ export function OperationComposer({
 }) {
   const t = useTranslations();
 
-  const [step, setStep] = useState<Step>("compose");
+  const [phase, setPhase] = useState<Phase>({ name: "compose" });
   const [draft, setDraft] = useState<ComposerDraft>(EMPTY_DRAFT);
   const [anonymousAcknowledged, setAnonymousAcknowledged] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<RingsOperationDetail | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   const { zones } = useRingsZones(draft.walletId, t("DashboardHeliusRings.errors.loadFailed"));
 
@@ -154,17 +160,15 @@ export function OperationComposer({
   }, []);
 
   const reset = useCallback(() => {
-    setStep("compose");
+    setPhase({ name: "compose" });
     setDraft((current) => ({ ...EMPTY_DRAFT, walletId: current.walletId }));
     setAnonymousAcknowledged(false);
-    setResult(null);
-    setError(null);
   }, []);
 
   const handleConfirm = useCallback(async () => {
     if (!draft.walletId) return;
     setSubmitting(true);
-    setError(null);
+    setPhase({ name: "review", error: null });
     const asset = RINGS_ALLOWLISTED_ASSETS.find((entry) => entry.mint === draft.assetMint);
     let prepared: Awaited<ReturnType<typeof prepareRingsOperation>>;
     try {
@@ -190,11 +194,13 @@ export function OperationComposer({
       setSubmitting(false);
     }
     if (prepared.error || !prepared.operation) {
-      setError(prepared.error ?? t("DashboardHeliusRings.composer.prepareFailed"));
+      setPhase({
+        name: "review",
+        error: prepared.error ?? t("DashboardHeliusRings.composer.prepareFailed"),
+      });
       return;
     }
-    setResult(prepared.operation);
-    setStep("result");
+    setPhase({ name: "result", operation: prepared.operation });
     await onPrepared();
   }, [draft, onPrepared, t]);
 
@@ -210,29 +216,29 @@ export function OperationComposer({
         <CardDescription>{t("DashboardHeliusRings.composer.description")}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {step === "compose" ? (
+        {phase.name === "compose" ? (
           <ComposeStep
             draft={draft}
             wallets={wallets}
             zones={zones}
             onPatch={patchDraft}
-            onReview={() => setStep("review")}
+            onReview={() => setPhase({ name: "review", error: null })}
           />
         ) : null}
-        {step === "review" ? (
+        {phase.name === "review" ? (
           <ReviewStep
             rows={summaryRows}
             isAnonymous={draft.opType === "transfer_anonymous"}
             acknowledged={anonymousAcknowledged}
             onAcknowledge={setAnonymousAcknowledged}
             gatewayRed={gatewayRed}
-            error={error}
+            error={phase.error}
             submitting={submitting}
-            onBack={() => setStep("compose")}
+            onBack={() => setPhase({ name: "compose" })}
             onConfirm={() => void handleConfirm()}
           />
         ) : null}
-        {step === "result" && result ? <ResultStep result={result} onReset={reset} /> : null}
+        {phase.name === "result" ? <ResultStep result={phase.operation} onReset={reset} /> : null}
       </CardContent>
     </Card>
   );
