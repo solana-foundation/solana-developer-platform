@@ -5,13 +5,34 @@
 -- mapping itself lives THERE, shared with the application's dual-write, so this
 -- file only decides WHICH rows to project and how to avoid duplicating them.
 --
--- ── Idempotent by construction, and re-run on purpose ──────────────────────
+-- ── Idempotent by construction — and precisely what that does NOT cover ────
 -- Everything is `INSERT ... SELECT ... ON CONFLICT DO NOTHING` keyed on the
--- LEGACY row's own id, so this converges rather than duplicating. That matters
--- because it is deliberately run again in a later release: migrations apply
--- BEFORE the new revision serves traffic, so rows the outgoing revision writes
--- during the rollout window land in neither this pass nor the dual-write. The
--- same property makes it safe after a rollback that briefly wrote only legacy.
+-- LEGACY row's own id, so re-running this can never duplicate a movement.
+--
+-- `DO NOTHING` converges INSERTS, not ADVANCES, and the difference is
+-- load bearing. Migrations apply BEFORE the new revision serves traffic, so
+-- there is a window in which the OUTGOING revision still writes the legacy
+-- tables alone; the same window reopens for a rollback that briefly restores a
+-- legacy-only writer. Two different things happen in it:
+--
+--   * a row INSERTED in the window is missing here entirely, and a later pass
+--     of this projection inserts it — `DO NOTHING` is enough; and
+--   * a row ADVANCED in the window (mirrored at `requested`, then moved to
+--     `completed` or `confirmed` by the legacy-only writer) already exists under
+--     its own id, so `DO NOTHING` leaves the STALE projection in place. The
+--     runtime mirror does not rescue it either: the custodial appliers early
+--     return on a terminal status, and the vault reconciliation queue selects
+--     only ('pending', 'submitted'), so nothing ever touches that row again.
+--
+-- Closing the second case needs an UPSERT, not this statement, and the release
+-- that switches reads ships exactly that — the same projection with
+-- `ON CONFLICT ... DO UPDATE`, guarded so a unified-only `finalized` row is
+-- never regressed by a legacy row that cannot express it. That pass is where
+-- the convergence guarantee lives; this one establishes the history.
+--
+-- This file is NOT edited to become that pass: the runner ledgers a migration
+-- by filename, so editing an applied migration to run again would rewrite
+-- applied history. It re-states the projection under a new number instead.
 --
 -- ── Ids are preserved, never regenerated ──────────────────────────────────
 -- A projected movement keeps the legacy row's id, and a projected vault holding

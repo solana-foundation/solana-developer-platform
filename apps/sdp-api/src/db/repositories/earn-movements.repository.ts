@@ -25,8 +25,17 @@ import { conflict } from "@/lib/errors";
  * holding. A custodial position is the link row between the two.
  */
 
+/**
+ * Prefix of a minted holding id.
+ *
+ * Exported because the backfill migrations mint the same ids in SQL and cannot
+ * import this: a conformance test asserts the literal in 0064 matches this
+ * constant, so the two mints cannot come to disagree on the id shape.
+ */
+export const EARN_POSITION_ID_PREFIX = "earn_position_";
+
 export function generateEarnPositionId(): string {
-  return `earn_position_${crypto.randomUUID()}`;
+  return `${EARN_POSITION_ID_PREFIX}${crypto.randomUUID()}`;
 }
 
 /**
@@ -951,9 +960,10 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       // a portfolio withdrawal is USD-denominated by definition. The holding is
       // resolved by JOIN rather than passed in, so a movement can never name one
       // that does not belong to its program.
-      const row = await db
-        .prepare(
-          `INSERT INTO earn_movements (
+      const insert = () =>
+        db
+          .prepare(
+            `INSERT INTO earn_movements (
              id, organization_id, project_id, environment, provider,
              execution_model, direction, position_id, status,
              denomination, amount_requested, payout_token, destination_address,
@@ -966,32 +976,46 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
             WHERE position.provider_wallet_id = ?
               AND position.kind = 'custodial'
            RETURNING *`
-        )
-        .bind(
-          generateEarnMovementId(),
-          input.organizationId,
-          input.projectId,
-          input.environment,
-          input.provider,
-          input.amountRequestedUsd,
-          input.payoutToken,
-          input.destinationAddress,
-          input.requestId,
-          input.idempotencyFingerprint,
-          JSON.stringify(input.providerData ?? {}),
-          input.createdBy,
-          input.initiatedByKeyId,
-          input.providerWalletId
-        )
-        .first<Record<string, unknown>>();
-      if (!row) {
-        // The program has no holding, so there is nowhere to record the movement.
-        // Loud, because the alternative is money moving unrecorded.
+          )
+          .bind(
+            generateEarnMovementId(),
+            input.organizationId,
+            input.projectId,
+            input.environment,
+            input.provider,
+            input.amountRequestedUsd,
+            input.payoutToken,
+            input.destinationAddress,
+            input.requestId,
+            input.idempotencyFingerprint,
+            JSON.stringify(input.providerData ?? {}),
+            input.createdBy,
+            input.initiatedByKeyId,
+            input.providerWalletId
+          )
+          .first<Record<string, unknown>>();
+
+      const row = await insert();
+      if (row) return mapMovementRow(row);
+
+      // Zero rows means the JOIN found no holding for this program. Open one and
+      // retry rather than failing: a program linked by a revision that predates
+      // the ledger, or during a rollout or rollback window, has no holding
+      // through no fault of the caller, and refusing here takes that program's
+      // whole withdrawal endpoint down permanently until an operator intervenes.
+      // The mint is insert-only and guarded on the wallet, so this is safe to
+      // race.
+      await mintEarnPositionForProviderWallet(db, input.providerWalletId);
+      const healed = await insert();
+      if (!healed) {
+        // Still nothing: the program wallet itself does not exist, which is a
+        // caller bug rather than a gap in the ledger. Loud, because the
+        // alternative is money moving unrecorded.
         throw new Error(
           `Earn program wallet ${input.providerWalletId} has no custodial holding to record a movement against`
         );
       }
-      return mapMovementRow(row);
+      return mapMovementRow(healed);
     },
 
     async updateCustodialMovementGuarded(input) {

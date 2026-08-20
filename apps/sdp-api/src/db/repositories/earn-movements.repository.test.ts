@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import {
   EARN_EXECUTION_MODELS,
   EARN_MOVEMENT_DIRECTIONS,
@@ -13,9 +15,11 @@ import { createPostgresEarnRepository } from "./earn.repository.postgres";
 import {
   type CreateSignedVaultDepositIntentInput,
   createPostgresEarnMovementsRepository,
+  EARN_POSITION_ID_PREFIX,
   type EarnMovementRow,
   type EarnMovementsRepository,
   type EarnPositionRow,
+  generateEarnPositionId,
 } from "./earn-movements.repository";
 
 /**
@@ -170,9 +174,10 @@ describe("Unified earn movement ledger (postgres)", () => {
       organizationId: ORG,
       projectId: PROJECT,
       environment: "sandbox",
-      // Open provider string: nothing in the ledger is Ground-specific, so the
-      // pluggability proof uses a provider that is not the live one.
-      provider: "veda" as never,
+      // Nothing in the ledger is Ground-specific, so the pluggability proof uses
+      // a registered provider that is not the live one. A real `EarnProviderId`,
+      // so the union check the typed id exists for still applies.
+      provider: "veda",
       providerWalletRef: walletRef,
       label,
       createdBy: USER,
@@ -193,7 +198,7 @@ describe("Unified earn movement ledger (postgres)", () => {
       projectId: overrides.projectId ?? PROJECT,
       providerWalletId: overrides.walletId,
       environment: "sandbox",
-      provider: "veda" as never,
+      provider: "veda",
       amountRequestedUsd: overrides.amountRequestedUsd ?? "250.50",
       payoutToken: "usdc",
       destinationAddress: "DestinationAddress111111111111111111111111",
@@ -273,6 +278,30 @@ describe("Unified earn movement ledger (postgres)", () => {
           for (const source of sources) expect(terminal).not.toContain(source);
         }
       }
+    });
+
+    it("declares no vault transition migration 0062's CHECK constraints forbid", () => {
+      // The matrix and the schema have to agree, not merely be internally
+      // consistent. `confirmed_at` and `shares_out` are tied to the commitment
+      // states, so a transition OUT of 'confirmed' into a state that may not hold
+      // them could only be written by erasing an observation SDP actually made.
+      for (const [target, sources] of Object.entries(EARN_MOVEMENT_TRANSITIONS.vault_direct)) {
+        if (target === "finalized") continue;
+        expect(sources).not.toContain("confirmed");
+      }
+    });
+  });
+
+  describe("minted id shape", () => {
+    it("mints holding ids under the same prefix the backfill migration writes", () => {
+      const backfill = readFileSync(
+        path.join(__dirname, "../migrations/postgres/0064_earn_movements_backfill.sql"),
+        "utf8"
+      );
+      expect(generateEarnPositionId()).toMatch(new RegExp(`^${EARN_POSITION_ID_PREFIX}`));
+      // 0064 mints in SQL and cannot import the constant, so the literal is
+      // pinned here instead.
+      expect(backfill).toContain(`'${EARN_POSITION_ID_PREFIX}' || gen_random_uuid()`);
     });
   });
 
@@ -706,25 +735,37 @@ describe("Unified earn movement ledger (postgres)", () => {
       expect((await onlyMovement()).status).toBe("completed");
     });
 
-    it("refuses to project a withdrawal whose program has no holding", async () => {
+    it("opens a missing holding rather than failing a withdrawal against it", async () => {
       const db = getDb(env);
       const wallet = await linkProgram();
-      // Simulate the one state the ledger cannot represent: a program wallet with
-      // no holding. The projection joins INNER precisely so this fails loudly
-      // instead of dropping a money movement on the floor.
+      // The state a program reaches when it was linked by a revision that
+      // predates the ledger, or during a rollout or rollback window: the wallet
+      // exists and has no holding. Failing here would take the program's whole
+      // withdrawal endpoint down permanently, so the writer opens one and
+      // retries. It still fails loudly when the program wallet itself is absent.
       await db
         .prepare("DELETE FROM earn_positions WHERE provider_wallet_id = ?")
         .bind(wallet.id)
         .run();
+      expect(await positions()).toHaveLength(0);
 
-      // Loud, and nothing written: a movement with nowhere to belong must fail
-      // rather than go unrecorded.
-      await expect(createWithdrawal({ walletId: wallet.id })).rejects.toThrow();
-      expect(await movements()).toHaveLength(0);
+      const withdrawal = await createWithdrawal({ walletId: wallet.id });
+      if (!withdrawal) throw new Error("withdrawal not created");
+
+      const [healed] = await positions();
+      expect(healed).toMatchObject({
+        kind: "custodial",
+        provider_wallet_id: wallet.id,
+        organization_id: ORG,
+      });
+      expect(await onlyMovement()).toMatchObject({
+        id: withdrawal.id,
+        execution_model: "custodial",
+        position_id: healed.id,
+        status: "requested",
+      });
     });
-  });
 
-  describe("accounting invariants across execution models", () => {
     it("keeps USD, mint units and share counts in separate, self-describing columns", async () => {
       const wallet = await linkProgram();
       await createWithdrawal({ walletId: wallet.id, amountRequestedUsd: "250.50" });
