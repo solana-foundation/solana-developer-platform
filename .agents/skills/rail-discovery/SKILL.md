@@ -1,6 +1,7 @@
 ---
 name: rail-discovery
 description: Declare which fiat↔crypto rails a ramp provider supports. Implement _discoverRails + distillRailSupport, declare a <PROVIDER>_DECLARED_RAIL_SUPPORT const, and add a RAMP_RAIL_DUMPS entry, then regenerate the committed support snapshot + matrix. Use when opening a PR against apps/sdp-api to add or update a ramp provider's supported currencies/corridors.
+disable-model-invocation: true
 ---
 
 # Rail discovery
