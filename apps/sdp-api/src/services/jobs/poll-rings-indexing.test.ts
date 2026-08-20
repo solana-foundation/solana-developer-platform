@@ -8,6 +8,7 @@ import {
 } from "@/db/repositories";
 import { createHeliusRingsService } from "@/services/helius-rings";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { signedRingsTransaction } from "@/test/fixtures/rings-transactions";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { pollRingsIndexing, RINGS_INDEXING_TIMEOUT_MS } from "./poll-rings-indexing";
@@ -27,6 +28,8 @@ const allowPolicy = async () =>
     },
   }) as unknown as WalletOperationPolicyEnforcement;
 
+const OUTER_TX = signedRingsTransaction(9);
+
 let walletId: string;
 let jobEnv: typeof env;
 
@@ -34,8 +37,8 @@ function serviceWith(gateway: InMemoryRingsGateway) {
   return createHeliusRingsService(env, tenant, {
     gateway,
     enforcePolicy: allowPolicy,
-    signOuterTransaction: async () => "c2lnbmVk",
-    submitOuterTransaction: async () => "sig_job_1",
+    signOuterTransaction: async () => OUTER_TX.signedTxBase64,
+    submitOuterTransaction: async () => OUTER_TX.signature,
   });
 }
 
@@ -82,7 +85,7 @@ describe("pollRingsIndexing", () => {
       { apiKeyId: null, actor: null, custodyWalletId: null }
     );
     expect(operation.state).toBe("indexing");
-    gateway.recordSubmission("sig_job_1");
+    gateway.recordSubmission(OUTER_TX.signature);
 
     await pollRingsIndexing(
       { ...env, HELIUS_RINGS_ENABLED: "true" },
@@ -103,7 +106,7 @@ describe("pollRingsIndexing", () => {
       { apiKeyId: null, actor: null, custodyWalletId: null }
     );
     expect(operation.state).toBe("indexing");
-    gateway.recordSubmission("sig_job_1");
+    gateway.recordSubmission(OUTER_TX.signature);
 
     await pollRingsIndexing(jobEnv, { createService: () => serviceWith(gateway) });
 

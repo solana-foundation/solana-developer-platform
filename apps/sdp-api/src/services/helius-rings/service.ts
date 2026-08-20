@@ -16,6 +16,7 @@ import {
 } from "@sdp/helius-rings";
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { ApprovalRequestStatus, WalletOperationActor } from "@sdp/types";
+import { getBase64Codec, getSignatureFromTransaction, getTransactionDecoder } from "@solana/kit";
 import {
   createHeliusRingsEventRepository,
   createHeliusRingsHealthRepository,
@@ -486,40 +487,43 @@ export class HeliusRingsService {
         payload: { source: proof.source },
       });
 
-      // ready_to_sign → submitted: sign with custody, then broadcast.
-      //
-      // This ordering must be inverted before the live gateway ships. It is
-      // unreachable today — the port above is always NotImplementedRingsGateway,
-      // which fails at `proving` — which is the only reason it is still here:
-      //   1. The broadcast runs while the operation is still `ready_to_sign`.
-      //      Lose the process after `sendTransaction` succeeds and the
-      //      transaction is live on chain with its signature recorded nowhere,
-      //      and nothing sweeps `ready_to_sign`, so the operation strands.
-      //   2. `failEdgeFor("ready_to_sign")` is `signer_failed`, so an RPC
-      //      failure is filed as a signing failure and the state machine's own
-      //      `submitted → indexing` edge (`submit_failed`) is dead code.
-      // Both close the same way: derive the signature from the signed bytes
-      // (`getSignatureFromTransaction`, as sponsorship-budget.service.ts does),
-      // persist it through the `signed` guard, then broadcast — putting the
-      // broadcast inside `submitted`, where `submit_failed` applies. That needs
-      // real transaction fixtures first: every sign/submit test double here
-      // returns a placeholder base64 string, not a decodable transaction.
+      // ready_to_sign → submitted: sign with custody, then persist the signature
+      // *before* broadcasting. The signature is a property of the signed
+      // transaction, so it is knowable without the network — which is what makes
+      // `submitted` durable ahead of the RPC call. Broadcasting first would leave
+      // a live on-chain transaction whose signature was never recorded if the
+      // process died in between, and nothing sweeps `ready_to_sign` to find it.
       const signed = await this.signOuterTransaction({
         env: this.env,
         organizationId: this.tenant.organizationId,
         projectId: this.tenant.projectId,
         unsignedTxBase64: built.outerUnsignedTxBase64,
       });
-      const signature = await this.submitOuterTransaction({
-        env: this.env,
-        signedTxBase64: signed,
-      });
+      let signature: string;
+      try {
+        signature = getSignatureFromTransaction(
+          getTransactionDecoder().decode(getBase64Codec().encode(signed))
+        );
+      } catch (cause) {
+        // The signer returned something that is not a transaction. Retrying the
+        // same inputs cannot change that, so this is the signer's failure.
+        throw new RingsAdapterError("signer_failed", "signer returned undecodable bytes", {
+          retryable: false,
+          cause,
+        });
+      }
 
       const submitted = await this.transition(current.id, "ready_to_sign", "signed", {
         outerTxSignature: signature,
       });
       if (!submitted) return this.requireOperation(current.id);
       current = submitted;
+
+      // Broadcast from inside `submitted`, so an RPC failure records
+      // `submit_failed` against the state the state machine declares it for. The
+      // intent key makes a resubmission safe.
+      await this.submitOuterTransaction({ env: this.env, signedTxBase64: signed });
+
       await this.events.append({
         operationId: current.id,
         kind: "transaction.submitted",

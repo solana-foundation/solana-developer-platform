@@ -7,6 +7,7 @@ import { getDb } from "@/db";
 import { createHeliusRingsWalletRepository } from "@/db/repositories";
 import { AppError } from "@/lib/errors";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { signedRingsTransaction } from "@/test/fixtures/rings-transactions";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { RingsAdapterError } from "./adapter-error";
@@ -57,12 +58,18 @@ function service(deps: HeliusRingsServiceDependencies = {}) {
   });
 }
 
-/** A service whose gateway succeeds and whose sign/submit adapters are stubbed. */
+const OUTER_TX = signedRingsTransaction(7);
+
+/**
+ * A service whose gateway succeeds and whose sign/submit adapters are stubbed.
+ * The signer returns real wire bytes because the service derives the outer
+ * signature from them before it broadcasts.
+ */
 function liveishService(deps: HeliusRingsServiceDependencies = {}) {
   return service({
     gateway: new InMemoryRingsGateway(),
-    signOuterTransaction: async () => "c2lnbmVk",
-    submitOuterTransaction: async () => "sig_outer_1",
+    signOuterTransaction: async () => OUTER_TX.signedTxBase64,
+    submitOuterTransaction: async () => OUTER_TX.signature,
     ...deps,
   });
 }
@@ -190,7 +197,30 @@ describe("HeliusRingsService", () => {
       );
 
       expect(operation.state).toBe("indexing");
-      expect(operation.outerTxSignature).toBe("sig_outer_1");
+      expect(operation.outerTxSignature).toBe(OUTER_TX.signature);
+    });
+
+    it("persists the outer signature before broadcasting", async () => {
+      const operation = await liveishService({
+        submitOuterTransaction: async () => {
+          throw new RingsAdapterError("submit_failed", "rpc down", { retryable: true });
+        },
+      }).prepareOperation(operationInput({ clientNonce: "nonce-submit" }), actorContext);
+
+      expect(operation.state).toBe("failed");
+      expect(operation.failure).toMatchObject({ code: "submit_failed", retryable: true });
+      // The signature was durable before the RPC call, so a transaction that
+      // landed anyway is still recoverable from the row.
+      expect(operation.outerTxSignature).toBe(OUTER_TX.signature);
+    });
+
+    it("fails as signer_failed when the signer returns undecodable bytes", async () => {
+      const operation = await liveishService({
+        signOuterTransaction: async () => "c2lnbmVk",
+      }).prepareOperation(operationInput({ clientNonce: "nonce-garbage" }), actorContext);
+
+      expect(operation.state).toBe("failed");
+      expect(operation.failure).toMatchObject({ code: "signer_failed", retryable: false });
     });
 
     it("takes the signer's fail edge when custody signing fails", async () => {
@@ -259,7 +289,7 @@ describe("HeliusRingsService", () => {
       );
       expect(operation.state).toBe("indexing");
 
-      gateway.recordSubmission("sig_outer_1");
+      gateway.recordSubmission(OUTER_TX.signature);
       // Photon has not indexed yet: repeated polls change nothing.
       expect((await svc.executeOperation(operation.id)).state).toBe("indexing");
       expect((await svc.executeOperation(operation.id)).state).toBe("indexing");

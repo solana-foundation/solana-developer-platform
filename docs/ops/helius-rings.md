@@ -130,16 +130,8 @@ Track B replaces `NotImplementedRingsGateway` with the live HTTP adapter one
 method at a time (health first), flipping `HELIUS_RINGS_ADAPTER=http` when the
 sidecar is reachable.
 
-Two defects in `runPipeline` become reachable the moment that flip happens, and
-must be closed first (both are marked at the call site in `service.ts`):
-
-- The outer transaction is **broadcast while the operation is still
-  `ready_to_sign`**. Losing the process after the RPC accepts it leaves a live
-  transaction on chain whose signature was never persisted, and no job sweeps
-  `ready_to_sign`, so the operation strands with funds moved.
-- Because of that ordering, an RPC failure takes `ready_to_sign`'s fail edge
-  (`signer_failed`) rather than `submit_failed`, so the failure code lies about
-  what broke and `submit_failed` is currently unreachable.
-
-Both close together: derive the signature from the signed bytes, persist it via
-the `signed` guard, then broadcast from inside `submitted`.
+One gap remains in `runPipeline` for the moment that flip happens: **nothing
+sweeps `ready_to_sign` or `submitted`.** `poll-rings-indexing` only picks up
+`indexing`, so an operation that dies mid-transition needs a human. The
+signature is persisted before the broadcast, so the recovery is a lookup rather
+than a search — but the sweep itself is still to write.
