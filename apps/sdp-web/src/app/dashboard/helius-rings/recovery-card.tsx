@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { type RingsOperationSummary, retryRingsOperation } from "./helius-rings.data";
 
 /**
@@ -29,6 +29,7 @@ export function RecoveryCard({
   onRetried: () => Promise<void>;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,7 +79,12 @@ export function RecoveryCard({
                       </Badge>
                     </span>
                   </TableCell>
-                  <TableCell>{new Date(operation.createdAt).toLocaleString()}</TableCell>
+                  <TableCell>
+                    {new Date(operation.createdAt).toLocaleString(locale, {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    })}
+                  </TableCell>
                   <TableCell>
                     <Button
                       variant="secondary"

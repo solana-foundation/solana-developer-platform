@@ -16,7 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import {
   createRingsWallet,
   fetchRingsHealth,
@@ -72,6 +72,7 @@ export function HeliusRingsWorkspace({
   custodyWallets: CustodyWalletOption[];
 }) {
   const t = useTranslations();
+  const locale = useLocale();
 
   const [health, setHealth] = useState<RingsHealth | null>(null);
   const [wallets, setWallets] = useState<RingsWallet[]>([]);
@@ -309,7 +310,12 @@ export function HeliusRingsWorkspace({
                       </Badge>
                     </TableCell>
                     <TableCell>{operation.amountRaw ?? "—"}</TableCell>
-                    <TableCell>{new Date(operation.createdAt).toLocaleString()}</TableCell>
+                    <TableCell>
+                      {new Date(operation.createdAt).toLocaleString(locale, {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      })}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
