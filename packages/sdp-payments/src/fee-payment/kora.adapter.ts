@@ -547,10 +547,12 @@ function mapKoraErrorCode(code: number): import("./port").FeePaymentErrorCode {
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
-// The Kora SDK performs a bare fetch with no abort hook, so a hung connection
-// would otherwise hold the caller until the platform request timeout. Race
-// every call against a deadline; the timeout message is classified as
-// retryable by the transient-error checks above.
+// Bounds every call, including the transports tests inject, which is why it
+// wraps the client rather than the request. The deadline is a race, not an
+// abort: a hung connection is abandoned, not cancelled, so the request may
+// still reach Kora — which is exactly why the message it throws classifies as
+// ambiguous rather than as a refusal. Own the fetch and this could be an
+// AbortSignal, but the pinned message has to survive the move.
 function withCallTimeouts(client: KoraClientTransport, timeoutMs: number): KoraClientTransport {
   return {
     getPayerSigner: () => withTimeout(client.getPayerSigner(), timeoutMs, "getPayerSigner"),
