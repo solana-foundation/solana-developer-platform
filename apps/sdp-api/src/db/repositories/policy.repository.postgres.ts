@@ -58,7 +58,7 @@ const WALLET_CONTROL_PROFILE_REVISION_HISTORY_LIMIT = 100;
 
 const POLICY_CONTROL_INVENTORY_CTE = `
 WITH scope AS (
-  SELECT ?::text AS organization_id, ?::text AS project_id, ?::text[] AS wallet_ids
+  SELECT ?::text AS organization_id, ?::text AS project_id, ?::text[] AS custody_wallet_ids
 ),
 wallet_targets AS (
   SELECT
@@ -66,16 +66,17 @@ wallet_targets AS (
     w.wallet_id,
     COALESCE(NULLIF(w.label, ''), w.wallet_id) AS display_name,
     w.public_key AS wallet_address,
-    c.provider,
+    COALESCE(c.provider, connection.provider) AS provider,
     COALESCE(w.updated_at, w.created_at) AS target_updated_at
   FROM custody_wallets w
-  INNER JOIN custody_configs c ON c.id = w.custody_config_id
+  LEFT JOIN custody_configs c ON c.id = w.custody_config_id
+  LEFT JOIN custody_connections connection ON connection.id = w.custody_connection_id
   INNER JOIN scope s
-    ON c.organization_id = s.organization_id
-   AND c.project_id IS NOT DISTINCT FROM s.project_id
-  WHERE c.status = 'active'
+    ON COALESCE(c.organization_id, connection.organization_id) = s.organization_id
+   AND COALESCE(c.project_id, connection.project_id) IS NOT DISTINCT FROM s.project_id
+  WHERE COALESCE(c.status, connection.status) = 'active'
     AND w.status = 'active'
-    AND (s.wallet_ids IS NULL OR w.wallet_id = ANY(s.wallet_ids))
+    AND (s.custody_wallet_ids IS NULL OR w.id = ANY(s.custody_wallet_ids))
 ),
 api_key_targets AS (
   SELECT
@@ -1116,7 +1117,7 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
         .bind(
           scope.organizationId,
           scope.projectId,
-          input.walletIds ?? null,
+          input.custodyWalletIds ?? null,
           ...(input.status ? [input.status] : []),
           ...summaryFilters.params
         )
@@ -1137,7 +1138,7 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
         .bind(
           scope.organizationId,
           scope.projectId,
-          input.walletIds ?? null,
+          input.custodyWalletIds ?? null,
           ...rowFilters.params,
           pageSize,
           offset
@@ -1868,16 +1869,48 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
       const row = await db
         .prepare(
           `WITH target_api_key AS (
-             SELECT id, organization_id, project_id
+             SELECT id, organization_id, project_id, signing_wallet_id
              FROM api_keys
              WHERE id = ?
                AND status = 'active'
            ),
            endpoint_scope AS (
-             SELECT api_key_id, COUNT(*) AS binding_count
-             FROM api_key_wallet_permissions
-             WHERE api_key_id = ?
-             GROUP BY api_key_id
+             SELECT
+               ak.id AS api_key_id,
+               COUNT(perm.id) AS permission_count,
+               CASE
+                 WHEN COUNT(perm.id) = 0 AND ak.signing_wallet_id IS NOT NULL THEN 1
+                 ELSE COUNT(perm.id)
+               END AS binding_count
+             FROM target_api_key ak
+             LEFT JOIN api_key_wallet_permissions perm ON perm.api_key_id = ak.id
+             GROUP BY ak.id, ak.signing_wallet_id
+           ),
+           wallet_candidates AS (
+             SELECT w.id, w.wallet_id, c.project_id AS wallet_project_id
+             FROM target_api_key ak
+             JOIN custody_configs c
+               ON c.organization_id = ak.organization_id
+              AND (c.project_id IS NOT DISTINCT FROM ak.project_id OR c.project_id IS NULL)
+              AND c.status = 'active'
+             JOIN custody_wallets w ON w.custody_config_id = c.id AND w.status = 'active'
+
+             UNION ALL
+
+             SELECT w.id, w.wallet_id, connection.project_id AS wallet_project_id
+             FROM target_api_key ak
+             JOIN custody_connections connection
+               ON connection.organization_id = ak.organization_id
+              AND connection.project_id IS NOT DISTINCT FROM ak.project_id
+              AND connection.status = 'active'
+             JOIN custody_wallets w
+               ON w.custody_connection_id = connection.id
+              AND w.status = 'active'
+           ),
+           wallet_id_counts AS (
+             SELECT wallet_id, COUNT(*) AS match_count
+             FROM wallet_candidates
+             GROUP BY wallet_id
            )
            SELECT
              ak.id AS api_key_id,
@@ -1885,31 +1918,27 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
              ak.project_id,
              w.wallet_id,
              w.id AS custody_wallet_id,
-             c.project_id AS wallet_project_id,
+             w.wallet_project_id,
              COALESCE(es.binding_count, 0) AS endpoint_binding_count,
-             perm.id AS endpoint_wallet_binding_id
+             CASE
+               WHEN counts.match_count = 1 THEN COALESCE(
+                 perm.id,
+                 CASE
+                   WHEN es.permission_count = 0 AND ak.signing_wallet_id = w.wallet_id
+                     THEN 'legacy_signing_wallet'
+                 END
+               )
+             END AS endpoint_wallet_binding_id
            FROM target_api_key ak
-           JOIN custody_configs c
-             ON c.organization_id = ak.organization_id
-            AND c.status = 'active'
-           JOIN custody_wallets w
-             ON w.custody_config_id = c.id
-            AND w.status = 'active'
-            AND w.id = ?
+           JOIN wallet_candidates w ON w.id = ?
+           JOIN wallet_id_counts counts ON counts.wallet_id = w.wallet_id
            LEFT JOIN endpoint_scope es ON es.api_key_id = ak.id
            LEFT JOIN api_key_wallet_permissions perm
              ON perm.api_key_id = ak.id
             AND perm.wallet_id = w.wallet_id
-           ORDER BY
-             CASE
-               WHEN c.project_id = ak.project_id THEN 0
-               WHEN c.project_id IS NULL THEN 1
-               ELSE 2
-             END,
-             w.created_at DESC
            LIMIT 1`
         )
-        .bind(apiKeyId, apiKeyId, custodyWalletId)
+        .bind(apiKeyId, custodyWalletId)
         .first<Record<string, unknown>>();
 
       return row ? mapApiKeyWalletPolicyTargetRow(row) : null;

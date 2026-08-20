@@ -7,6 +7,7 @@ import type { EarnProviderId } from "@sdp/types/provider-access";
 import { address } from "@solana/kit";
 import { type AppDb, getDb } from "@/db";
 import {
+  assertMovementIsOwnReplay,
   createPostgresEarnVaultRepository,
   type EarnVaultMovementRow,
   type EarnVaultPositionRow,
@@ -175,7 +176,20 @@ export async function depositIntoVault(
       }),
     fingerprint
   );
-  if (prior) return replayResult(primaryRepo, input, prior);
+  if (prior) {
+    // Ownership, not just fingerprint. The lookup is org-scoped and the
+    // fingerprint omits the project, so a key first used by a SIBLING project
+    // matches both — and this path is reachable with the route-level guard
+    // skipped (an approved-operation execution). Without this line, project B's
+    // approved deposit was answered with project A's movement as replayed:true:
+    // B's deposit silently never ran, and A's amount and signature leaked. Same
+    // shared rule as the repository preflight; do not re-implement it here.
+    assertMovementIsOwnReplay(prior, {
+      projectId: input.projectId,
+      idempotencyFingerprint: fingerprint,
+    });
+    return replayResult(primaryRepo, input, prior);
+  }
 
   // Replays above are pure durable reads: they must keep working during an RPC
   // outage and must never touch a chain client. Only a fresh attempt proves and

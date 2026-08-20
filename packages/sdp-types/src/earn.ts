@@ -204,6 +204,24 @@ export const EARN_VAULT_MOVEMENT_STATUSES = [
 ] as const;
 export type EarnVaultMovementStatus = (typeof EARN_VAULT_MOVEMENT_STATUSES)[number];
 
+/**
+ * Statuses a vault movement never moves on from — in migration 0059's LEGACY
+ * vocabulary, which is what `earn_vault_movements` and every existing wire
+ * contract still speak.
+ *
+ * **Do not reach for this in new code.** The unified ledger's answer is
+ * `EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct`, and the two deliberately
+ * disagree: `confirmed` is terminal HERE because 0059 had no state after chain
+ * commitment, and is NOT terminal there because `finalized` now exists and a
+ * confirmed transaction can still be dropped by a fork. Treating `confirmed` as
+ * settled is exactly the conflation the unification exists to end, so this set
+ * is correct only for a consumer reading the legacy table or a legacy wire
+ * field. Both names are retired together when the legacy tables are dropped.
+ */
+export const EARN_TERMINAL_VAULT_MOVEMENT_STATUSES = ["confirmed", "failed"] as const;
+export type EarnTerminalVaultMovementStatus =
+  (typeof EARN_TERMINAL_VAULT_MOVEMENT_STATUSES)[number];
+
 /** Durable result of a submitted vault deposit (fresh or idempotently replayed). */
 export interface EarnVaultDeposit {
   positionId: string;
@@ -219,6 +237,57 @@ export interface EarnVaultDeposit {
     providerReference: string;
     hostCluster: SolanaCluster;
   };
+}
+
+/**
+ * One recorded vault deposit, read back by movement id — what a caller polls
+ * to learn whether a signed deposit actually landed.
+ *
+ * Every field comes off the movement row ITSELF, with no catalogue join. That
+ * is deliberate: a strategy can be un-catalogued (paused, dropped by the sync,
+ * or belonging to a provider SDP stopped offering) while the deposit it funded
+ * is still in flight, and ADR 0002's exit-safety rule says reading money the
+ * organization already holds must never depend on the provider still being
+ * offered. `provider`/`providerReference` name the vault; the strategy's
+ * display name is the caller's to remember, and losing it must not cost the
+ * customer the outcome of a signed transaction.
+ *
+ * No `replayed`: that answers "did your idempotency key already spend itself",
+ * which is a property of a WRITE, not of the row.
+ */
+export interface EarnVaultDepositRecord {
+  movementId: string;
+  positionId: string;
+  provider: string;
+  providerReference: string;
+  status: EarnVaultMovementStatus;
+  signature: string;
+  /** Accepted deposit amount, in the vault token's units, as a decimal string. */
+  amount: string;
+  failureReason: string | null;
+  createdAt: string;
+  /** Set only once the sweep observed the transaction on chain. */
+  confirmedAt: string | null;
+}
+
+/** Response body of GET /v1/earn/vault-deposits/:movementId. */
+export interface EarnVaultDepositResponse {
+  deposit: EarnVaultDepositRecord;
+}
+
+/**
+ * Response body of GET /v1/earn/vault-deposits — one workspace's recorded
+ * deposits, newest first.
+ *
+ * A bounded window, not a complete history: it exists so a client can re-derive
+ * which of its deposits are still in flight after losing local state, and the
+ * reconciliation sweep settles a movement within about ninety seconds, so
+ * anything unsettled is by construction recent. Follow `nextCursor` for more.
+ */
+export interface EarnVaultDepositsPage {
+  deposits: EarnVaultDepositRecord[];
+  hasMore: boolean;
+  nextCursor: string | null;
 }
 
 /**
@@ -562,3 +631,162 @@ export interface ListEarnProgramWithdrawalsResponse {
   page: number;
   pageSize: number;
 }
+
+/**
+ * The unified movement ledger (PRO-1705, migration 0062).
+ *
+ * One vocabulary for every Earn money movement, whichever way it was executed.
+ * Earn previously split its movements across two tables by EXECUTION MECHANISM
+ * — provider-API withdrawals in one, signed on-chain deposits in the other — so
+ * every status, terminal set and transition rule existed twice, in two
+ * different shapes, in two different packages.
+ *
+ * This is the single source of truth for movement BEHAVIOUR: which statuses
+ * exist, which are terminal, and which transitions are legal. The database
+ * mirrors the first two as rows in `earn_movement_statuses` (so SQL can read
+ * the terminal set instead of re-spelling it), and a conformance test asserts
+ * the rows equal these constants — a migration and a change here can only move
+ * together. Transitions stay here alone: a table cannot enforce them without
+ * triggers, and the guards need them at compile time.
+ */
+export const EARN_EXECUTION_MODELS = ["custodial", "vault_direct"] as const;
+export type EarnExecutionModel = (typeof EARN_EXECUTION_MODELS)[number];
+
+/**
+ * Spelled `withdrawal`, matching every wire contract, route and dashboard label
+ * that already exists. (Migration 0059 wrote `withdraw` on a column no row has
+ * ever carried, because the vault withdraw path does not exist yet.)
+ */
+export const EARN_MOVEMENT_DIRECTIONS = ["deposit", "withdrawal"] as const;
+export type EarnMovementDirection = (typeof EARN_MOVEMENT_DIRECTIONS)[number];
+
+/**
+ * Statuses per execution model, because the two lifecycles are genuinely
+ * different rather than one lifecycle wearing two vocabularies:
+ *
+ * * `custodial` — a provider reports settlement, and can report a PARTIAL one
+ *   or park a payout awaiting a customer approval stamp. This is 0055's
+ *   vocabulary unchanged.
+ * * `vault_direct` — a chain reports commitment, which is not settlement.
+ *   `confirmed` is an optimistic commitment a fork can still drop; `finalized`
+ *   is irreversible. `requested` is 0059's `pending` renamed, so that one word
+ *   means one thing on both models: a signed transaction is durably recorded
+ *   but is not known to be on the wire.
+ *
+ * So `completed` and `finalized` are not synonyms — they are different facts,
+ * and keeping them keyed by model is what lets one column hold both honestly.
+ */
+export const EARN_MOVEMENT_STATUSES = {
+  custodial: EARN_PROGRAM_WITHDRAWAL_RECORD_STATUSES,
+  vault_direct: ["requested", "submitted", "confirmed", "finalized", "failed"],
+} as const satisfies Record<EarnExecutionModel, readonly string[]>;
+
+export type EarnCustodialMovementStatus = (typeof EARN_MOVEMENT_STATUSES)["custodial"][number];
+export type EarnVaultDirectMovementStatus = (typeof EARN_MOVEMENT_STATUSES)["vault_direct"][number];
+export type EarnMovementStatus = EarnCustodialMovementStatus | EarnVaultDirectMovementStatus;
+
+/**
+ * Statuses a movement never moves on from, per model — the UNIFIED ledger's
+ * answer, and the one new code should use.
+ *
+ * Not to be confused with `EARN_TERMINAL_VAULT_MOVEMENT_STATUSES` above, which
+ * is the legacy `earn_vault_movements` vocabulary and calls `confirmed`
+ * terminal. See that constant's note for why the disagreement is intentional.
+ */
+export const EARN_TERMINAL_MOVEMENT_STATUSES = {
+  custodial: EARN_TERMINAL_WITHDRAWAL_STATUSES,
+  // `confirmed` is deliberately absent, unlike 0059's terminal set: the sweep's
+  // job does not end at chain commitment now that finalization is a state.
+  vault_direct: ["finalized", "failed"],
+} as const satisfies {
+  [Model in EarnExecutionModel]: readonly (typeof EARN_MOVEMENT_STATUSES)[Model][number][];
+};
+
+export function isTerminalEarnMovementStatus(
+  executionModel: EarnExecutionModel,
+  status: string
+): boolean {
+  return (EARN_TERMINAL_MOVEMENT_STATUSES[executionModel] as readonly string[]).includes(status);
+}
+
+/**
+ * Legal transitions, keyed by TARGET status to the statuses it may be reached
+ * from — the shape both legacy guards already used.
+ *
+ * Two properties make terminal-state regression unrepresentable rather than
+ * merely discouraged: terminal statuses appear in NO source list, and neither
+ * model's insert state (`requested`) is a target at all. Repositories apply
+ * these as a database-level compare-and-swap (`status IN (...)` in the same
+ * statement as the write), so a concurrent writer that already advanced a row
+ * makes the loser match zero rows instead of overwriting it.
+ *
+ * `custodial` self-transitions are intentional: a same-status observation still
+ * refreshes amounts, fees and provider_data, and `processing → processing` is
+ * the common poll case. `pending_approval ↔ processing` is a legitimate
+ * park/unpark cycle.
+ *
+ * `vault_direct` allows `submitted → finalized` directly, because a sweep whose
+ * first observation is already finalized must be able to record the truth
+ * rather than invent an intermediate commitment it never saw. It has no
+ * self-transitions: there is no in-place observation refresh on a signed
+ * movement, only advancement.
+ *
+ * ── Who enforces this, and when ───────────────────────────────────────────
+ * The custodial half is enforced NOW: `earn-withdrawal-ledger.service.ts`
+ * derives its compare-and-swap source statuses from it, so there is no second
+ * copy to drift from. The vault half has no enforcer in this release — the
+ * live guard (`assertValidMovementTransition` in `earn-vault.repository.ts`)
+ * still speaks migration 0059's legacy vocabulary (`pending`, and `confirmed`
+ * as terminal) because it guards the LEGACY table, which is still the
+ * authoritative writer here. It is replaced by a guard reading this matrix in
+ * the release that switches reads to the unified ledger; until then the
+ * vault half describes the ledger's intended lifecycle, and the conformance
+ * test in `earn-movements.repository.test.ts` pins it against
+ * `earn_movement_statuses`.
+ *
+ * The matrix is written to be consistent with migration 0062's CHECK
+ * constraints, not merely with itself — see the `vault_direct` notes below.
+ */
+export const EARN_MOVEMENT_TRANSITIONS = {
+  custodial: {
+    processing: ["requested", "processing", "pending_approval"],
+    pending_approval: ["requested", "processing", "pending_approval"],
+    completed: ["requested", "processing", "pending_approval"],
+    partially_completed: ["requested", "processing", "pending_approval"],
+    failed: ["requested", "processing", "pending_approval"],
+    cancelled: ["requested", "processing", "pending_approval"],
+  },
+  vault_direct: {
+    submitted: ["requested"],
+    // From `requested` too, not only `submitted`: a broadcast whose response was
+    // lost leaves a movement unsubmitted WITH a signature, and the chain is then
+    // the only authority on it. Refusing the transition would strand exactly the
+    // rows reconciliation exists for.
+    confirmed: ["requested", "submitted"],
+    // Reachable from ANY pre-terminal state, for the same reason: the sweep may
+    // learn of finalization as its first observation of a movement, and a
+    // transaction the chain calls finalized was demonstrably submitted and
+    // committed whether or not SDP recorded those moments separately. The writer
+    // stamps `confirmed_at` on the way through, so the row is never a settled one
+    // with no record of its own commitment.
+    finalized: ["requested", "submitted", "confirmed"],
+    // NOT from `confirmed`, deliberately. Migration 0062 ties `confirmed_at` and
+    // `shares_out` to the commitment states, so failing a confirmed movement
+    // could only succeed by erasing observations SDP genuinely made — and it
+    // would make "failed before landing" indistinguishable from "landed, then
+    // dropped in a fork". The realistic chain path never asks for it: an
+    // execution error is reported with the FIRST status for a signature, not
+    // after a clean one. The remaining tail, a confirmed transaction dropped by
+    // a fork rollback, is an open question rather than something handled here:
+    // such a row stops being observable and is left in the reconciliation queue
+    // rather than declared failed on a guess.
+    failed: ["requested", "submitted"],
+  },
+} as const satisfies {
+  [Model in EarnExecutionModel]: Partial<
+    Record<
+      (typeof EARN_MOVEMENT_STATUSES)[Model][number],
+      readonly (typeof EARN_MOVEMENT_STATUSES)[Model][number][]
+    >
+  >;
+};

@@ -1,11 +1,11 @@
 import { hashString } from "@sdp/payments/hash";
 import { normalizeOrganizationRole, type OrganizationRole, type Permission } from "@sdp/types";
 import type { Context } from "hono";
-import { z } from "zod";
 import { getDb } from "@/db";
 import { isPlausibleEmail } from "@/lib/clerk-token";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import {
@@ -14,7 +14,7 @@ import {
 } from "@/services/clerk-organizations.service";
 import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
-import { acceptSchema, inviteSchema } from "./schemas";
+import type { acceptSchema, inviteSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -438,21 +438,14 @@ async function resolveClerkInvitations(
   }
 }
 
-export const inviteMember = async (c: AppContext) => {
+export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>) => {
   const { organizationId, userId, apiKeyId } = resolveActor(c);
   const clerk = c.get("clerk");
 
-  const body = await c.req.json();
-  const parsed = inviteSchema.safeParse(body);
+  const body = c.req.valid("json");
 
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-
-  const { email } = parsed.data;
-  const role = normalizeOrganizationRole(parsed.data.role);
+  const { email } = body;
+  const role = normalizeOrganizationRole(body.role);
   const normalizedEmail = email.toLowerCase().trim();
   const clerkRole = mapRoleToClerkRole(role);
 
@@ -603,19 +596,9 @@ async function resolveActorEmail(c: AppContext, userId: string): Promise<string 
   return email ? email.trim().toLowerCase() : null;
 }
 
-export const acceptInvitation = async (c: AppContext) => {
+export const acceptInvitation = async (c: ValidatedBodyContext<typeof acceptSchema>) => {
   const { userId: actorUserId } = resolveActor(c);
-
-  const body = await c.req.json();
-  const parsed = acceptSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-
-  const { token, name } = parsed.data;
+  const { token, name } = c.req.valid("json");
 
   // An API key has no identity to be the invitee — letting it redeem a token
   // would let any key holder enrol somebody else or burn their invitation.

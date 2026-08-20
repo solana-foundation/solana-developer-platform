@@ -1,8 +1,22 @@
 import type { SdpEnvironment } from "@sdp/types";
 import { type AppDb, asTransactionalClient } from "@/db";
 import { conflict } from "@/lib/errors";
+import {
+  ensureEarnMovementFromVaultMovement,
+  ensureEarnPositionFromVaultPosition,
+  projectEarnMovementFromVaultMovement,
+  projectEarnPositionFromVaultPosition,
+} from "./earn-movements.repository";
 
-/** Persistence for signed, non-custodial Earn vault movements and holdings. */
+/**
+ * Persistence for signed, non-custodial Earn vault movements and holdings.
+ *
+ * Still the authoritative writer, and additionally MIRRORS every write into the
+ * unified `earn_movements`/`earn_positions` ledger in the same transaction
+ * (PRO-1705, migrations 0062-0064). Reads switch to the unified tables in a
+ * later release; until then the mirror is what keeps them current, and one
+ * Postgres transaction is what makes the two shapes unable to diverge.
+ */
 
 export function generateEarnVaultPositionId(): string {
   return `earn_vault_position_${crypto.randomUUID()}`;
@@ -102,6 +116,11 @@ export interface EarnVaultPositionCursor {
   id: string;
 }
 
+export interface EarnVaultMovementCursor {
+  createdAt: string;
+  id: string;
+}
+
 export interface EarnVaultRepository {
   /**
    * Atomically claim/refresh the position, insert the signed movement, and
@@ -132,6 +151,28 @@ export interface EarnVaultRepository {
     movementId: string;
     organizationId: string;
   }): Promise<EarnVaultMovementRow | null>;
+  /**
+   * One workspace's recorded DEPOSITS, newest first, as a bounded keyset page.
+   *
+   * Scoped by wallet AND project, unlike `listPositions` which scopes by wallet
+   * alone. A position is a holding the organization owns; a movement is one
+   * project's individual transaction and carries an amount and a signature the
+   * position does not.
+   */
+  listDeposits(params: {
+    organizationId: string;
+    environment: SdpEnvironment;
+    projectId: string;
+    custodyWalletIds: readonly string[];
+    limit: number;
+    before: EarnVaultMovementCursor | null;
+    /**
+     * `false` returns only movements that can still change. Recovery asks for
+     * exactly that, which keeps the page small by construction rather than
+     * relying on a client filter over an unbounded history.
+     */
+    settled?: boolean;
+  }): Promise<{ rows: EarnVaultMovementRow[]; hasMore: boolean }>;
   /** Global bounded outbox scan for the reconciliation worker. */
   listUnsettledMovements(limit: number): Promise<EarnVaultMovementRow[]>;
   /** Guarded CAS. Returns null when the row was not in `fromStatuses`. */
@@ -143,8 +184,46 @@ export interface EarnVaultRepository {
   }): Promise<EarnVaultMovementRow[]>;
 }
 
-function assertMovementFingerprint(movement: EarnVaultMovementRow, fingerprint: string): void {
-  if (movement.idempotency_fingerprint !== fingerprint) {
+/**
+ * Assert a prior movement under this (organization, request_id) is THIS
+ * request's own replay — same project AND same fingerprint — before it is
+ * returned as one.
+ *
+ * THIS FUNCTION IS THE RULE — exported so every site that resolves a replay
+ * enforces the same one: the route guard, `depositIntoVault`'s fast sequential
+ * preflight, the transaction preflight below, and the concurrent-insert loser.
+ * The rule kept re-appearing as a bug precisely because it was re-implemented
+ * per site: the route guard was fixed and the repository missed; the repository
+ * was fixed and the service fast path missed — each lookup is org-scoped
+ * (`(organization_id, request_id)` is the unique index) and the server
+ * fingerprint omits the project, so any site that forgets this check hands a
+ * sibling project's movement back as the caller's own replay. Do not inline it
+ * anywhere; call this.
+ *
+ * Reachability is not theoretical: the route guard is deliberately skipped for
+ * an approved-operation execution (`findEarnVaultDepositIdempotentKeyReplay`
+ * returns null so the approval can reach the handler's effect fence), and
+ * `wallet_operations` uniqueness is per-PROJECT — so sibling projects can each
+ * hold an approval with the same caller-chosen key, and the second to execute
+ * used to be handed the first project's movement: its own approved deposit
+ * silently never ran, and the sibling's amount and signature came back as the
+ * response.
+ *
+ * A different project answers with the SAME conflict as a divergent
+ * fingerprint, deliberately: the key really has been used by a different
+ * request, and a distinct message would disclose that a sibling project holds
+ * it. `project_id IS NULL` (owner deleted, `ON DELETE SET NULL`) also
+ * conflicts — the org-scoped unique index means the key is genuinely burnt
+ * either way.
+ */
+export function assertMovementIsOwnReplay(
+  movement: EarnVaultMovementRow,
+  request: { projectId: string; idempotencyFingerprint: string }
+): void {
+  if (
+    movement.project_id !== request.projectId ||
+    movement.idempotency_fingerprint !== request.idempotencyFingerprint
+  ) {
     throw conflict("Idempotency key already used with different request payload");
   }
 }
@@ -358,15 +437,22 @@ export function createPostgresEarnVaultRepository(db: AppDb): EarnVaultRepositor
           input.requestId
         );
         if (prior) {
-          assertMovementFingerprint(prior, input.idempotencyFingerprint);
-          return {
-            position: await requireMovementPosition(transaction, prior),
-            movement: prior,
-            replayed: true,
-          };
+          assertMovementIsOwnReplay(prior, input);
+          const position = await requireMovementPosition(transaction, prior);
+          // A replay writes no legacy row, but it is still the path a caller
+          // retrying an unmirrored row takes — so repair rather than answer 200
+          // while the ledger is still missing the movement. `ensure`, because a
+          // replay changes nothing about the holding and this runs concurrently
+          // with the winning request's own writes.
+          await ensureEarnPositionFromVaultPosition(transaction, position.id);
+          await ensureEarnMovementFromVaultMovement(transaction, prior.id);
+          return { position, movement: prior, replayed: true };
         }
 
         const claimed = await claimPosition(transaction, input);
+        // Mirror the holding before the movement: the ledger's tenancy and
+        // exact-claim foreign keys both point at it.
+        await projectEarnPositionFromVaultPosition(transaction, claimed.id);
         const inserted = await insertMovement(transaction, input, claimed.id);
         if (!inserted) {
           // A concurrent request committed after the preflight. A divergent
@@ -377,13 +463,17 @@ export function createPostgresEarnVaultRepository(db: AppDb): EarnVaultRepositor
             input.requestId
           );
           if (!winner) throw new Error("Failed to resolve concurrent earn vault movement");
-          assertMovementFingerprint(winner, input.idempotencyFingerprint);
-          return {
-            position: await requireMovementPosition(transaction, winner),
-            movement: winner,
-            replayed: true,
-          };
+          assertMovementIsOwnReplay(winner, input);
+          const winnerPosition = await requireMovementPosition(transaction, winner);
+          // Same repair as the sequential replay above: the winner projected its
+          // own row, but this loser may be the first write to touch a holding
+          // that predates the ledger.
+          await ensureEarnPositionFromVaultPosition(transaction, winnerPosition.id);
+          await ensureEarnMovementFromVaultMovement(transaction, winner.id);
+          return { position: winnerPosition, movement: winner, replayed: true };
         }
+
+        await projectEarnMovementFromVaultMovement(transaction, inserted.id);
 
         return {
           position: claimed,
@@ -438,6 +528,50 @@ export function createPostgresEarnVaultRepository(db: AppDb): EarnVaultRepositor
           params.limit + 1
         )
         .all<EarnVaultPositionRow>();
+      const rows = result.results ?? [];
+      return { rows: rows.slice(0, params.limit), hasMore: rows.length > params.limit };
+    },
+
+    async listDeposits(params) {
+      if (params.custodyWalletIds.length === 0) {
+        throw new Error("listDeposits requires at least one project-scoped custody wallet id");
+      }
+      const beforeClause = params.before ? "AND (created_at, id) < (?, ?)" : "";
+      const beforeValues = params.before ? [params.before.createdAt, params.before.id] : [];
+      // Terminal set spelled once, from the same statuses the transition guard
+      // above enforces.
+      const settledClause =
+        params.settled === undefined
+          ? ""
+          : params.settled
+            ? "AND status IN ('confirmed', 'failed')"
+            : "AND status NOT IN ('confirmed', 'failed')";
+      const result = await db
+        .prepare(
+          // An EXACT project match. `project_id` is nullable only through
+          // ON DELETE SET NULL, so a null means the project was deleted — and
+          // accepting it here would expose that project's deposits to every
+          // sibling project sharing an organization-level custody wallet.
+          `SELECT * FROM earn_vault_movements
+           WHERE organization_id = ?
+             AND environment = ?
+             AND direction = 'deposit'
+             AND custody_wallet_id = ANY (?::text[])
+             AND project_id = ?
+             ${settledClause}
+             ${beforeClause}
+           ORDER BY created_at DESC, id DESC
+           LIMIT ?`
+        )
+        .bind(
+          params.organizationId,
+          params.environment,
+          params.custodyWalletIds,
+          params.projectId,
+          ...beforeValues,
+          params.limit + 1
+        )
+        .all<EarnVaultMovementRow>();
       const rows = result.results ?? [];
       return { rows: rows.slice(0, params.limit), hasMore: rows.length > params.limit };
     },
@@ -498,7 +632,28 @@ export function createPostgresEarnVaultRepository(db: AppDb): EarnVaultRepositor
           .bind(...values, input.movementId, input.organizationId, ...input.fromStatuses)
           .first<EarnVaultMovementRow>();
 
-      if (input.toStatus !== "failed" && input.toStatus !== "confirmed") return advance(db);
+      // Every transition now runs in a transaction, including the non-terminal
+      // ones that used to be a bare UPDATE: the ledger mirror has to commit with
+      // the transition it describes, or a crash between them would leave the two
+      // shapes disagreeing about a money movement's state.
+      if (input.toStatus !== "failed" && input.toStatus !== "confirmed") {
+        return db.transaction(async (executor) => {
+          const transaction = asTransactionalClient(executor);
+          const movement = await advance(transaction);
+          if (!movement) return null;
+          // The holding first, as in the terminal branch below. The movement
+          // projection INNER JOINs earn_positions, so a movement whose holding
+          // was never mirrored — one written by a revision that predates the
+          // ledger, or during a rollout window — would otherwise fail here and
+          // roll the legacy status write back with it. `ensure` rather than
+          // re-project: a non-terminal transition changes no holding state, so
+          // there is nothing to refresh, and taking a row lock on the holding
+          // here would deadlock against a concurrent flow on the same one.
+          await ensureEarnPositionFromVaultPosition(transaction, movement.position_id);
+          await projectEarnMovementFromVaultMovement(transaction, movement.id);
+          return movement;
+        });
+      }
 
       return db.transaction(async (executor) => {
         const transaction = asTransactionalClient(executor);
@@ -545,6 +700,10 @@ export function createPostgresEarnVaultRepository(db: AppDb): EarnVaultRepositor
             .bind(movement.position_id)
             .run();
         }
+        // A terminal transition can activate or de-activate the holding, so the
+        // holding is re-projected too — not just the movement.
+        await projectEarnPositionFromVaultPosition(transaction, movement.position_id);
+        await projectEarnMovementFromVaultMovement(transaction, movement.id);
         return movement;
       });
     },

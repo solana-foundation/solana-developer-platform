@@ -44,6 +44,10 @@ describe("EarnRepository (postgres)", () => {
 
   beforeEach(async () => {
     const db = getDb(env);
+    // The unified ledger the repository mirrors into (PRO-1705) references both
+    // the withdrawal's holding and the program wallet, so it is cleared first.
+    await db.prepare("DELETE FROM earn_movements").run();
+    await db.prepare("DELETE FROM earn_positions").run();
     await db.prepare("DELETE FROM earn_program_withdrawals").run();
     await db.prepare("DELETE FROM earn_strategies").run();
     await db.prepare("DELETE FROM earn_provider_wallets").run();

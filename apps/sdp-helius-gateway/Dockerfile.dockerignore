@@ -1,0 +1,7 @@
+# Build context is this directory (not the monorepo root), so these are relative
+# to apps/sdp-helius-gateway.
+target/
+tests/
+clippy.toml
+package.json
+*.md

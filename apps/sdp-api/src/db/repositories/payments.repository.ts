@@ -56,6 +56,8 @@ export interface PaymentTransferRow {
   initiated_by_key_id: string | null;
   idempotency_key: string | null;
   idempotency_fingerprint: string | null;
+  confirmed_at: string | null;
+  finalization_last_polled_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -63,6 +65,11 @@ export interface PaymentTransferRow {
 export function generatePaymentTransferId(): string {
   return `xfr_${crypto.randomUUID()}`;
 }
+
+export type ConfirmedTransferPollVerdict = {
+  transferId: string;
+  organizationId: string;
+} & ({ finalized: true; slot: number } | { finalized: false; slot: null });
 
 export interface CreatePaymentTransferInput {
   organizationId: string;
@@ -193,6 +200,36 @@ export interface PaymentsRepository {
     error?: string | null;
   }): Promise<PaymentTransferRow | null>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
+  /**
+   * Lists the page of confirmed transfers whose finalization should be polled
+   * next: least-recently-polled first (never-polled rows first), bounded to
+   * rows confirmed after the given floor. System-only.
+   *
+   * @param params - The confirmed_at eligibility floor and the page size.
+   * @returns The next page of the finalization poll queue.
+   */
+  listConfirmedTransfersToPoll(params: {
+    confirmedAfter: string;
+    limit: number;
+  }): Promise<PaymentTransferRow[]>;
+  /**
+   * Records one finalization poll over a page of confirmed transfers in one
+   * statement: rows the chain reports finalized upgrade to finalized with
+   * their slot and a fresh updated_at; every polled row — finalized or not —
+   * gets finalization_last_polled_at stamped, rotating it to the back of the
+   * poll queue so no row can starve the ones behind it. updated_at moves only
+   * on real finalization, never on a poll. Each row is guarded on still being
+   * confirmed (a concurrent transition is never overwritten) and on its
+   * owning organization (defense in depth). System-only.
+   *
+   * @param params - Every polled transfer with its owning org and the chain's
+   * verdict (finalized rows carry their slot), plus the poll timestamp.
+   * @returns Resolves once the batch update has been applied.
+   */
+  advanceConfirmedTransfers(params: {
+    polled: readonly ConfirmedTransferPollVerdict[];
+    updatedAt: string;
+  }): Promise<void>;
   getTransferById(params: {
     transferId: string;
     organizationId: string;

@@ -20,7 +20,7 @@ import {
   walletPolicyEvaluationListQuerySchema,
   walletPolicyEvaluationParamsSchema,
 } from "../schemas";
-import { resolveWalletFromParams } from "./transfers";
+import { resolvePolicyWalletFromParams } from "../wallets";
 
 function mapRevisionHistory(
   history: WalletControlProfileRevisionHistoryRow | null
@@ -129,7 +129,7 @@ function mapPolicyEvaluation(row: WalletPolicyEvaluationAuditRow): WalletPolicyE
 }
 
 export async function listWalletControlProfileRevisions(c: AppContext) {
-  const { auth, wallet } = await resolveWalletFromParams(c, ["wallets:read"]);
+  const { auth, wallet } = await resolvePolicyWalletFromParams(c, ["wallets:read"]);
   const history = await createPolicyRepository(
     c.env,
     getRequestTenantScope(c)
@@ -155,7 +155,7 @@ export async function listWalletPolicyEvaluations(c: AppContext) {
     throw badRequestQuery({ errors: z.flattenError(parsed.error).fieldErrors });
   }
 
-  const { auth, wallet } = await resolveWalletFromParams(c, ["wallets:read"]);
+  const { auth, wallet } = await resolvePolicyWalletFromParams(c, ["wallets:read"]);
   const result = await createPolicyRepository(
     c.env,
     getRequestTenantScope(c)
@@ -179,7 +179,7 @@ export async function getWalletPolicyEvaluation(c: AppContext) {
     throw badRequestParams({ errors: z.flattenError(parsed.error).fieldErrors });
   }
 
-  const { auth, wallet } = await resolveWalletFromParams(c, ["wallets:read"]);
+  const { auth, wallet } = await resolvePolicyWalletFromParams(c, ["wallets:read"]);
   const evaluation = await createPolicyRepository(
     c.env,
     getRequestTenantScope(c)

@@ -14,7 +14,6 @@ import {
   isAssetProfilesEnabled,
   isEarnEnabled,
   isPrivateChannelsEnabled,
-  isRecurringPaymentCollectionEnabled,
 } from "@/lib/feature-flags";
 import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
@@ -116,20 +115,18 @@ export function startCron(deps: CronDeps): CronHandle | null {
     })
   );
 
-  if (isRecurringPaymentCollectionEnabled(deps.env)) {
-    tasks.push(
-      schedule(RECURRING_PAYMENTS_COLLECTION_CRON, () => {
-        if (stopping) {
-          return;
-        }
-        runRecurringPaymentsCollection({
-          env: deps.env,
-          bg: deps.bg,
-          observability: deps.observability,
-        });
-      })
-    );
-  }
+  tasks.push(
+    schedule(RECURRING_PAYMENTS_COLLECTION_CRON, () => {
+      if (stopping) {
+        return;
+      }
+      runRecurringPaymentsCollection({
+        env: deps.env,
+        bg: deps.bg,
+        observability: deps.observability,
+      });
+    })
+  );
 
   if (isAssetProfilesEnabled(deps.env)) {
     tasks.push(

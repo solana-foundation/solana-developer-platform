@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "@/i18n/server";
+import { readApiErrorMessage } from "@/lib/api-error";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { isValidTokenDecimals } from "./create-token-modal.utils";
 import { issuanceTemplateCatalog } from "./template-catalog";
@@ -30,19 +31,12 @@ function parseBoolean(value: FormDataEntryValue | null, fallback: boolean): bool
 
 function parseErrorMessage(body: string, fallback: string): string {
   try {
-    const parsed = JSON.parse(body) as {
-      error?: { message?: string };
-      message?: string;
-    };
-    if (parsed?.error?.message) {
-      return parsed.error.message;
+    const parsed: unknown = JSON.parse(body);
+    const message = readApiErrorMessage(parsed);
+    if (message) {
+      return message;
     }
-    if (parsed?.message) {
-      return parsed.message;
-    }
-  } catch {
-    // Fall through to raw body below.
-  }
+  } catch {}
 
   return body || fallback;
 }

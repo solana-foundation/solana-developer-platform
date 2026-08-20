@@ -386,7 +386,13 @@
       "vaultTransaction": "Transaction",
       "vaultApprovalTitle": "Approval required",
       "vaultApprovalBody": "Your wallet policy accepted the request for review. No vault deposit has been submitted yet.",
-      "vaultApprovalRequest": "Approval request"
+      "vaultApprovalRequest": "Approval request",
+      "vaultAbsorbedTitle": "Deposit already completed by your approval",
+      "vaultAbsorbedBody": "Your earlier approval for this exact deposit executed just before this submission, so the request was absorbed as a retry of it. Funds moved once, through the approval \u2014 this submission moved nothing additional.",
+      "vaultAbsorbedNote": "The details below are the approved deposit. If you intended a second deposit of the same amount, submit again.",
+      "vaultHeldKeyUnavailable": "SDP could not check whether your earlier approved deposit already went through, so nothing was submitted. Try again in a moment.",
+      "vaultOutcomeConfirmed": "Vault deposit confirmed on-chain — your position is live.",
+      "vaultOutcomeFailed": "Vault deposit failed — no funds left your wallet."
     }
   }
 }

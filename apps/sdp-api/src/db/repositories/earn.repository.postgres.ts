@@ -10,7 +10,7 @@ import type {
   SolanaCluster,
 } from "@sdp/types";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
-import type { AppDb } from "@/db";
+import { type AppDb, asTransactionalClient } from "@/db";
 import type {
   CreateEarnProgramWithdrawalInput,
   DeleteUnlistedEarnStrategiesInput,
@@ -34,6 +34,10 @@ import {
   generateEarnProviderWalletId,
   generateEarnStrategyId,
 } from "./earn.repository";
+import {
+  mintEarnPositionForProviderWallet,
+  projectEarnMovementFromWithdrawal,
+} from "./earn-movements.repository";
 
 /**
  * `host_cluster` is NULLABLE in the schema on purpose (migration 0057 is the
@@ -77,7 +81,7 @@ function mapProviderWalletRow(row: Record<string, unknown>): EarnProviderWalletR
   return {
     id: row.id as string,
     organization_id: row.organization_id as string,
-    project_id: row.project_id as string,
+    project_id: row.project_id as string | null,
     environment: row.environment as SdpEnvironment,
     provider: row.provider as string,
     provider_wallet_ref: row.provider_wallet_ref as string,
@@ -409,27 +413,36 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
     async insertProviderWallet(input: InsertEarnProviderWalletInput) {
       const id = generateEarnProviderWalletId();
 
-      const row = await db
-        .prepare(
-          `INSERT INTO earn_provider_wallets (
+      // Linking a program also opens its custodial HOLDING in the unified
+      // ledger, atomically. Without it the program's first withdrawal would have
+      // no position to belong to, and the ledger requires every movement to have
+      // one (PRO-1705). 0064 does the same for programs that already exist.
+      return db.transaction(async (executor) => {
+        const transaction = asTransactionalClient(executor);
+        const row = await transaction
+          .prepare(
+            `INSERT INTO earn_provider_wallets (
              id, organization_id, project_id, environment,
              provider, provider_wallet_ref, label, created_by
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
            RETURNING *`
-        )
-        .bind(
-          id,
-          input.organizationId,
-          input.projectId,
-          input.environment,
-          input.provider,
-          input.providerWalletRef,
-          input.label,
-          input.createdBy
-        )
-        .first<Record<string, unknown>>();
+          )
+          .bind(
+            id,
+            input.organizationId,
+            input.projectId,
+            input.environment,
+            input.provider,
+            input.providerWalletRef,
+            input.label,
+            input.createdBy
+          )
+          .first<Record<string, unknown>>();
+        if (!row) return null;
 
-      return row ? mapProviderWalletRow(row) : null;
+        await mintEarnPositionForProviderWallet(transaction, id);
+        return mapProviderWalletRow(row);
+      });
     },
 
     async createProgramWithdrawal(input: CreateEarnProgramWithdrawalInput) {
@@ -437,34 +450,39 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
 
       // Status comes from the DB default ('requested'): an intent row exists
       // before the provider call is accepted, never in any other state.
-      const row = await db
-        .prepare(
-          `INSERT INTO earn_program_withdrawals (
+      return db.transaction(async (executor) => {
+        const transaction = asTransactionalClient(executor);
+        const row = await transaction
+          .prepare(
+            `INSERT INTO earn_program_withdrawals (
              id, organization_id, project_id, wallet_id, provider,
              amount_requested_usd, token, destination_address,
              request_id, idempotency_fingerprint, provider_data,
              created_by, initiated_by_key_id
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)
            RETURNING *`
-        )
-        .bind(
-          id,
-          input.organizationId,
-          input.projectId,
-          input.walletId,
-          input.provider,
-          input.amountRequestedUsd,
-          input.token,
-          input.destinationAddress,
-          input.requestId,
-          input.idempotencyFingerprint,
-          JSON.stringify(input.providerData ?? {}),
-          input.createdBy,
-          input.initiatedByKeyId
-        )
-        .first<Record<string, unknown>>();
+          )
+          .bind(
+            id,
+            input.organizationId,
+            input.projectId,
+            input.walletId,
+            input.provider,
+            input.amountRequestedUsd,
+            input.token,
+            input.destinationAddress,
+            input.requestId,
+            input.idempotencyFingerprint,
+            JSON.stringify(input.providerData ?? {}),
+            input.createdBy,
+            input.initiatedByKeyId
+          )
+          .first<Record<string, unknown>>();
+        if (!row) return null;
 
-      return row ? mapProgramWithdrawalRow(row) : null;
+        await projectEarnMovementFromWithdrawal(transaction, id);
+        return mapProgramWithdrawalRow(row);
+      });
     },
 
     async getProgramWithdrawalByRequestId(params) {
@@ -535,17 +553,24 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         conditionValues.push(input.selector.provider, input.selector.providerReference);
       }
 
-      const row = await db
-        .prepare(
-          `UPDATE earn_program_withdrawals
+      return db.transaction(async (executor) => {
+        const transaction = asTransactionalClient(executor);
+        const row = await transaction
+          .prepare(
+            `UPDATE earn_program_withdrawals
              SET ${assignments.join(", ")}
            WHERE ${conditions.join(" AND ")}
            RETURNING *`
-        )
-        .bind(...assignmentValues, ...conditionValues)
-        .first<Record<string, unknown>>();
+          )
+          .bind(...assignmentValues, ...conditionValues)
+          .first<Record<string, unknown>>();
+        // A lost CAS wrote nothing, so there is nothing to mirror: the winner
+        // already projected the state it moved the row to.
+        if (!row) return null;
 
-      return row ? mapProgramWithdrawalRow(row) : null;
+        await projectEarnMovementFromWithdrawal(transaction, row.id as string);
+        return mapProgramWithdrawalRow(row);
+      });
     },
 
     async listProgramWithdrawals(

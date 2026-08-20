@@ -3,8 +3,9 @@ import type { TokenAllowlistEntry, TokenAllowlistResponse } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { AppError, badRequest, badRequestQuery, notFound } from "@/lib/errors";
+import { AppError, badRequestQuery, notFound } from "@/lib/errors";
 import { created, noContent, paginated, success } from "@/lib/response";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import { createOrgSigner } from "@/services/solana";
@@ -15,7 +16,7 @@ import {
   getTenantTokenService,
   requireProjectScope,
 } from "../helpers";
-import { addAllowlistSchema, listAllowlistQuerySchema } from "../schemas";
+import { type addAllowlistSchema, listAllowlistQuerySchema } from "../schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -217,18 +218,11 @@ export const listAllowlistLabels = async (c: AppContext) => {
   return success(c, { labels, total });
 };
 
-export const addAllowlistEntry = async (c: AppContext) => {
+export const addAllowlistEntry = async (c: ValidatedBodyContext<typeof addAllowlistSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
 
-  const body = await c.req.json();
-  const parsed = addAllowlistSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
+  const body = c.req.valid("json");
 
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
@@ -244,9 +238,9 @@ export const addAllowlistEntry = async (c: AppContext) => {
   try {
     let { entry } = await tokenService.addAllowlistEntry({
       tokenId,
-      address: parsed.data.address,
+      address: body.address,
       addedBy: auth.id,
-      label: parsed.data.label,
+      label: body.label,
       initialStatus: token.ablListAddress ? "pending" : "active",
     });
 
@@ -257,8 +251,8 @@ export const addAllowlistEntry = async (c: AppContext) => {
       resourceId: entry.id,
       metadata: {
         tokenId,
-        address: parsed.data.address,
-        label: parsed.data.label,
+        address: body.address,
+        label: body.label,
         mode: token.ablListAddress ? "on-chain" : "database",
         syncStatus: token.ablListAddress ? "pending" : "not_required",
       },
@@ -273,7 +267,7 @@ export const addAllowlistEntry = async (c: AppContext) => {
         tokenService,
         entryId: entry.id,
         list: assertValidAddress(token.ablListAddress, "ablListAddress"),
-        wallet: assertValidAddress(parsed.data.address, "address"),
+        wallet: assertValidAddress(body.address, "address"),
       });
     }
 

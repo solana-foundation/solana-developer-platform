@@ -1,0 +1,6 @@
+{
+  "name": "@sdp/helius-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Rust crate. Present only so this deployable appears in docs/architecture/module-map.md; it exposes no JavaScript entrypoint and has no dependencies. Build with cargo, not pnpm."
+}
