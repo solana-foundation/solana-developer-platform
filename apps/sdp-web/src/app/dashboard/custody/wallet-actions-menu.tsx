@@ -32,11 +32,11 @@ interface WalletActionsMenuProps {
 }
 
 /**
- * Both actions in this menu are devnet-only regardless of the project being viewed:
- * the signer check always runs against the sandbox project, and the faucet only
- * funds devnet. So these links are pinned to devnet rather than following
- * `useSolanaCluster()` — using the active cluster would point a devnet signature at
- * mainnet explorer for anyone viewing a production project.
+ * The faucet only funds devnet regardless of the project being viewed, so its
+ * explorer link is pinned to devnet rather than following `useSolanaCluster()`
+ * — using the active cluster would point a devnet signature at mainnet
+ * explorer for anyone viewing a production project. (The signer check no
+ * longer links anywhere: it is verified in simulation and never broadcast.)
  */
 const ACTION_EXPLORER_CLUSTER = "devnet" satisfies SolanaCluster;
 
@@ -83,23 +83,12 @@ export function WalletActionsMenu({
         }));
 
         if (result.status === "success") {
-          const explorerUrl = explorerTxUrl(result.signature, ACTION_EXPLORER_CLUSTER);
-
+          // The check is verified in simulation and never broadcast, so there
+          // is no on-chain transaction to link — an explorer URL for this
+          // signature would always 404.
           toast.success(t("DashboardCustody.signerCheckSent"), {
             id: toastId,
-            description: (
-              <span>
-                {t("DashboardCustody.memoTransactionSubmitted")}{" "}
-                <a
-                  href={explorerUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="underline underline-offset-2"
-                >
-                  {t("DashboardCustody.viewOnSolanaExplorer")}
-                </a>
-              </span>
-            ),
+            description: t("DashboardCustody.memoTransactionSubmitted"),
             position: "bottom-right",
           });
           return;
