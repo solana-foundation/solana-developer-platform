@@ -33,7 +33,7 @@ Example: `feat(payments): add retryable settlement polling`
 
 Do not require or search for an issue ticket. Mention one only when the user explicitly asks for it.
 
-The body follows the style established by SDP PRs [#1403](https://github.com/solana-foundation/solana-developer-platform/pull/1403) and [#1402](https://github.com/solana-foundation/solana-developer-platform/pull/1402): concise summary first, technical behavior second, detail only at the changed seam.
+Write the body with a concise summary first and the technical behavior second. Explain only the changed seam: name the user-visible or operational result, the mechanism that produces it, the important failure semantics, and the evidence that verifies it. Omit unchanged architecture and background that does not help review the diff.
 
 ```markdown
 - <3–7 short bullets: behavior, mechanism, important failure semantics, tests>
