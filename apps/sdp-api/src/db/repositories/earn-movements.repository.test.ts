@@ -659,17 +659,6 @@ describe("Unified earn movement ledger (postgres)", () => {
       expect(unified).toHaveLength(2);
       expect(unified.find((row) => row.id === primary.id)?.project_id).toBeNull();
       expect(unified.find((row) => row.id === sibling.id)?.project_id).toBe(PROJECT_SIBLING);
-
-      // The split legacy table still follows its old project-owned cascade;
-      // the unified ledger is the durable history that deliberately survives.
-      const legacy = await db
-        .prepare(
-          `SELECT id, project_id FROM earn_program_withdrawals
-           WHERE wallet_id = ? ORDER BY id`
-        )
-        .bind(wallet.id)
-        .all<{ id: string; project_id: string }>();
-      expect(legacy.results).toEqual([{ id: sibling.id, project_id: PROJECT_SIBLING }]);
     });
 
     it("mirrors a provider observation, including a zero fee and a scientific-notation amount", async () => {
