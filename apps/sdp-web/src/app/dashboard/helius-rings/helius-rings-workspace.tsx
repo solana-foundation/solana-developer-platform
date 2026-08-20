@@ -29,6 +29,7 @@ import {
   type RingsWallet,
   type RingsZone,
 } from "./helius-rings.data";
+import { formatWhen } from "./helius-rings.utils";
 import { OperationComposer } from "./operation-composer";
 import { OperationDetailDrawer } from "./operation-detail-drawer";
 import { RecoveryCard } from "./recovery-card";
@@ -310,12 +311,7 @@ export function HeliusRingsWorkspace({
                       </Badge>
                     </TableCell>
                     <TableCell>{operation.amountRaw ?? "—"}</TableCell>
-                    <TableCell>
-                      {new Date(operation.createdAt).toLocaleString(locale, {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                      })}
-                    </TableCell>
+                    <TableCell>{formatWhen(operation.createdAt, locale)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

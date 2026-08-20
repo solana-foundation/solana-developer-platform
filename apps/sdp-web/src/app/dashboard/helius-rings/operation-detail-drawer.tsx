@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Callout } from "@/components/ui/callout";
 import { Drawer, DrawerContent, DrawerTitle } from "@/components/ui/drawer";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { fetchRingsOperationDetail, type RingsOperationDetail } from "./helius-rings.data";
+import { formatTimeOfDay, formatWhen } from "./helius-rings.utils";
 
 /**
  * Operation detail: identity, failure (code + message, verbatim), and the
@@ -20,6 +21,7 @@ export function OperationDetailDrawer({
   onClose: () => void;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const [detail, setDetail] = useState<RingsOperationDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -80,7 +82,7 @@ export function OperationDetailDrawer({
               ) : null}
               <DetailRow
                 label={t("DashboardHeliusRings.activity.created")}
-                value={new Date(detail.createdAt).toLocaleString()}
+                value={formatWhen(detail.createdAt, locale)}
               />
             </dl>
 
@@ -108,7 +110,7 @@ export function OperationDetailDrawer({
                     <li key={event.key} className="flex items-baseline justify-between gap-4">
                       <span className="text-sm text-primary">{event.kind}</span>
                       <span className="text-sm text-secondary">
-                        {new Date(event.createdAt).toLocaleTimeString()}
+                        {formatTimeOfDay(event.createdAt, locale)}
                       </span>
                     </li>
                   ))}

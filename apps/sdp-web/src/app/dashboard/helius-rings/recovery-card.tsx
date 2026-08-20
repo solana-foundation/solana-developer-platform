@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { type RingsOperationSummary, retryRingsOperation } from "./helius-rings.data";
+import { formatWhen } from "./helius-rings.utils";
 
 /**
  * Failed operations with a retry action. Retryability is enforced server-side
@@ -79,12 +80,7 @@ export function RecoveryCard({
                       </Badge>
                     </span>
                   </TableCell>
-                  <TableCell>
-                    {new Date(operation.createdAt).toLocaleString(locale, {
-                      dateStyle: "medium",
-                      timeStyle: "short",
-                    })}
-                  </TableCell>
+                  <TableCell>{formatWhen(operation.createdAt, locale)}</TableCell>
                   <TableCell>
                     <Button
                       variant="secondary"
