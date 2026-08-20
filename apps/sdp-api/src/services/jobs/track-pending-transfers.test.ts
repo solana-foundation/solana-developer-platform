@@ -254,36 +254,17 @@ describe("trackPendingTransfers", () => {
       });
     });
 
-    it("retries a transient archival status lookup before settling", async () => {
-      getSignatureStatusesMock
-        .mockResolvedValueOnce([null])
-        .mockRejectedValueOnce(new Error("fetch failed"))
-        .mockResolvedValueOnce([
-          {
-            slot: 4243n,
-            confirmations: null,
-            confirmationStatus: "finalized",
-            err: null,
-          },
-        ]);
-
-      await insertTransfer({
-        id: "xfr_processing_archive_retry",
-        status: "processing",
-        signature: String(TEST_SIG_1),
-        createdAt: minutesAgo(10),
-        updatedAt: minutesAgo(10),
+    it("persists recent cache hits before the archival lookup completes", async () => {
+      let signalArchivalStarted: () => void = () => undefined;
+      const archivalStarted = new Promise<void>((resolve) => {
+        signalArchivalStarted = resolve;
       });
-
-      await trackPendingTransfers(env);
-
-      const updated = await getTransfer("xfr_processing_archive_retry");
-      expect(updated?.status).toBe("finalized");
-      expect(updated?.slot).toBe(4243);
-      expect(getSignatureStatusesMock).toHaveBeenCalledTimes(3);
-    });
-
-    it("continues reconciliation when the archival status lookup fails", async () => {
+      let rejectArchival: (reason: Error) => void = () => undefined;
+      const archivalResult = new Promise<
+        Awaited<ReturnType<typeof solanaRpc.getSignatureStatuses>>
+      >((_resolve, reject) => {
+        rejectArchival = reject;
+      });
       getSignatureStatusesMock
         .mockResolvedValueOnce([
           null,
@@ -294,7 +275,10 @@ describe("trackPendingTransfers", () => {
             err: null,
           },
         ])
-        .mockRejectedValueOnce(new Error("archival rpc unavailable"))
+        .mockImplementationOnce(() => {
+          signalArchivalStarted();
+          return archivalResult;
+        })
         .mockResolvedValueOnce([
           {
             slot: 12346n,
@@ -319,7 +303,17 @@ describe("trackPendingTransfers", () => {
         updatedAt: minutesAgo(1),
       });
 
-      await expect(trackPendingTransfers(env)).resolves.toBeUndefined();
+      const reconciliation = trackPendingTransfers(env);
+      await archivalStarted;
+
+      try {
+        const recent = await getTransfer("xfr_recent_cache_hit");
+        expect(recent).toMatchObject({ status: "confirmed", slot: 12345 });
+        expect(recent?.confirmed_at).not.toBeNull();
+      } finally {
+        rejectArchival(new Error("archival rpc unavailable"));
+        await reconciliation;
+      }
 
       const [aged, recent] = await Promise.all([
         getTransfer("xfr_aged_archive_unavailable"),
