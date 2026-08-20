@@ -22,7 +22,7 @@ export const prepareRingsOperationSchema = z.object({
   transferMode: z.enum(TRANSFER_MODES).optional(),
   timelock: z
     .object({
-      unlockAt: z.string().datetime(),
+      unlockAt: z.iso.datetime(),
       beneficiary: z.string().min(1),
     })
     .optional(),
