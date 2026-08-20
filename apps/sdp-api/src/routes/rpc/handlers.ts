@@ -17,6 +17,7 @@ import {
   getProviderSetupDefinition,
 } from "@/services/provider-setup-registry";
 import { createTenantRpcConnectionLookup } from "@/services/rpc-connection-lookup";
+import { fetchRpcRelayTarget } from "@/services/rpc-egress";
 import type { Env } from "@/types/env";
 import { rpcProjectQuerySchema, type rpcRelayPayloadSchema } from "./schemas";
 
@@ -69,8 +70,7 @@ async function relayToTarget(
     ...target.headers,
   };
 
-  const upstream = await fetch(target.endpoint, {
-    method: "POST",
+  const upstream = await fetchRpcRelayTarget(target, {
     headers,
     body: JSON.stringify(payload),
   });

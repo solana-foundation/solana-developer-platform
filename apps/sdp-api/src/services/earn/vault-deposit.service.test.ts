@@ -192,6 +192,42 @@ describe("depositIntoVault — idempotency", () => {
     expect(first.position.provider_reference).toBe(VAULT_A);
   });
 
+  it("conflicts a sibling project's identical key on the fast replay path, before signing", async () => {
+    // The third site of the shared ownership rule, and the one a repository
+    // test cannot reach: the fast sequential preflight returns BEFORE
+    // createSignedDepositIntent, and it is reachable with the route-level
+    // guard skipped (approved-operation execution). The fingerprint omits the
+    // project by design, so an identical deposit from a sibling project
+    // matches it — without assertMovementIsOwnReplay here, project B's
+    // approved deposit was answered with project A's movement as
+    // replayed:true.
+    const siblingProject = "prj_vault_deposit_sibling";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO projects
+           (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, 'Sibling Vault Project', 'sibling-vault-project', 'sandbox', 'active', ?)`
+      )
+      .bind(siblingProject, ORG, USER)
+      .run();
+
+    const first = await depositIntoVault(env, depositInput());
+    expect(first.replayed).toBe(false);
+    const signingsAfterFirst = signVaultPlan.mock.calls.length;
+
+    await expect(
+      depositIntoVault(env, depositInput({ projectId: siblingProject }))
+    ).rejects.toThrow("Idempotency key already used with different request payload");
+    // Refused at the durable preflight: nothing was rebuilt, re-signed, or
+    // broadcast for the sibling.
+    expect(signVaultPlan.mock.calls.length).toBe(signingsAfterFirst);
+
+    // And the owning project still replays its own movement.
+    const replay = await depositIntoVault(env, depositInput());
+    expect(replay.replayed).toBe(true);
+    expect(replay.movement.id).toBe(first.movement.id);
+  });
+
   it("rolls back a concurrent divergent requestId loser before it can claim a position", async () => {
     let releaseBuilds: (() => void) | undefined;
     const bothBuilding = new Promise<void>((resolve) => {

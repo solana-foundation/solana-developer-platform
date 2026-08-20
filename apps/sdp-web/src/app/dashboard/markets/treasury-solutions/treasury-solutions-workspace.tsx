@@ -56,13 +56,18 @@ import {
 } from "../earn/earn-market-presentation";
 import {
   type EarnProgram,
+  isEarnVaultDepositInFlight,
   useEarnPrograms,
   useEarnProgramWithdrawals,
   useEarnStrategies,
+  useEarnVaultDeposits,
   useEarnVaultPositions,
 } from "../earn/earn-program-data";
 import { type EarnProviderAccess, earnVaultDepositAvailability } from "../earn/earn-surfacing";
-import { EarnVaultDepositModal } from "../earn/earn-vault-deposit-modal";
+import {
+  EarnVaultDepositModal,
+  EarnVaultDepositOutcomeTracker,
+} from "../earn/earn-vault-deposit-modal";
 import { EarnWithdrawalOutcomeTracker, EarnWithdrawModal } from "../earn/earn-withdraw-modal";
 
 function WalletBalanceList({ wallet }: { wallet: EarnFundingWallet }) {
@@ -567,13 +572,47 @@ function EarnWithdrawalLedgerRecovery({
   return null;
 }
 
+/**
+ * Re-derive in-flight deposits from the SERVER, the way
+ * `EarnWithdrawalLedgerRecovery` does for withdrawals.
+ *
+ * This replaced a per-tab `sessionStorage` watch list, and the difference is
+ * not just tidiness. Browser state could not see a deposit signed in another
+ * tab, could not survive the tab closing, and — because it stored bare movement
+ * ids — restored the previous project's watches after a workspace switch, which
+ * then polled forever against a movement the new workspace cannot read. A
+ * server list is workspace-scoped by construction, so none of those are
+ * expressible.
+ *
+ * It also closes the approval-gated case for free: a policy hold creates no
+ * movement, so there was nothing to watch, but once someone approves it the
+ * executor writes the movement and this list finds it on the next pass.
+ */
+function EarnVaultDepositLedgerRecovery({
+  onRecover,
+}: {
+  onRecover: (movementIds: readonly string[]) => void;
+}) {
+  const { deposits } = useEarnVaultDeposits();
+
+  useEffect(() => {
+    if (!deposits) return;
+    const inFlight = deposits
+      .filter(isEarnVaultDepositInFlight)
+      .map((deposit) => deposit.movementId);
+    if (inFlight.length > 0) onRecover(inFlight);
+  }, [deposits, onRecover]);
+
+  return null;
+}
+
 export function TreasurySolutionsWorkspace({
   providerAccess,
 }: {
   providerAccess: EarnProviderAccess | null;
 }) {
   const t = useTranslations();
-  const { sdpEnvironment } = useDashboardWorkspace();
+  const { sdpEnvironment, selectedProjectId } = useDashboardWorkspace();
   const {
     wallets,
     error: walletsError,
@@ -602,6 +641,26 @@ export function TreasurySolutionsWorkspace({
   const [withdrawProgram, setWithdrawProgram] = useState<EarnProgram | null>(null);
   const [withdrawalWatches, setWithdrawalWatches] = useState<readonly EarnWithdrawalWatch[]>([]);
   const settledWithdrawalKeys = useRef(new Set<string>());
+  const [vaultDepositWatches, setVaultDepositWatches] = useState<readonly string[]>([]);
+  const settledVaultDepositIds = useRef(new Set<string>());
+
+  // Pure updater: the recovery list re-asserts every 30s, so this runs often
+  // and must not have side effects (StrictMode double-invokes it in dev).
+  const addVaultDepositWatches = useCallback((incoming: readonly string[]) => {
+    setVaultDepositWatches((current) => {
+      const known = new Set(current);
+      const additions = incoming.filter((movementId) => {
+        // `settledVaultDepositIds` is load-bearing, not defensive: the ledger
+        // list keeps re-asserting a row until the server marks it terminal, so
+        // without a tombstone a just-settled deposit would be resurrected on
+        // the next pass and announced again.
+        if (known.has(movementId) || settledVaultDepositIds.current.has(movementId)) return false;
+        known.add(movementId);
+        return true;
+      });
+      return additions.length === 0 ? current : [...current, ...additions];
+    });
+  }, []);
 
   const addWithdrawalWatches = useCallback((incoming: readonly EarnWithdrawalWatch[]) => {
     setWithdrawalWatches((current) => {
@@ -731,7 +790,13 @@ export function TreasurySolutionsWorkspace({
       {depositStrategy ? (
         <EarnVaultDepositModal
           onClose={() => setDepositStrategy(null)}
-          onDeposited={() => {
+          projectId={selectedProjectId}
+          onDeposited={(deposit) => {
+            // Two refreshes, for two different moments. This one shows the
+            // claimed position row and the debited wallet right away; the
+            // watch below is what re-reads them once the chain has actually
+            // decided, which is the only point at which the holding is real.
+            addVaultDepositWatches([deposit.movementId]);
             refreshPositions();
             refreshWallets();
           }}
@@ -756,6 +821,25 @@ export function TreasurySolutionsWorkspace({
           key={`withdrawal-ledger:${program.id}`}
           onRecover={addWithdrawalWatches}
           programId={program.id}
+        />
+      ))}
+
+      <EarnVaultDepositLedgerRecovery onRecover={addVaultDepositWatches} />
+
+      {vaultDepositWatches.map((movementId) => (
+        <EarnVaultDepositOutcomeTracker
+          key={`vault-deposit:${movementId}`}
+          movementId={movementId}
+          onSettled={() => {
+            settledVaultDepositIds.current.add(movementId);
+            // Only NOW is the position real: the shares exist on chain and the
+            // wallet balance reflects what left it.
+            refreshPositions();
+            refreshWallets();
+            setVaultDepositWatches((current) =>
+              current.filter((candidate) => candidate !== movementId)
+            );
+          }}
         />
       ))}
 

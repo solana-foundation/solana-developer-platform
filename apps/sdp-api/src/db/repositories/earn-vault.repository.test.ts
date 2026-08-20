@@ -163,6 +163,67 @@ describe("EarnVaultRepository (postgres)", () => {
     });
   });
 
+  it("replays a key only to its OWN project, and conflicts for a sibling", async () => {
+    // The transaction-level guard, and the one every path funnels through —
+    // including an approved-operation execution, which deliberately skips the
+    // route-level replay guard. wallet_operations uniqueness is per-project, so
+    // sibling projects can each hold an approval with the same caller-chosen
+    // key; the second to execute must NOT be handed the first project's
+    // movement as a replay.
+    const key = "earn-vault-shared-key";
+    const fingerprint = "earn-vault-shared-fingerprint";
+    const first = await repo.createSignedDepositIntent(
+      intent({
+        custodyWalletId: WALLET_A_ORG,
+        requestId: key,
+        idempotencyFingerprint: fingerprint,
+      })
+    );
+    expect(first.replayed).toBe(false);
+
+    // Same project, same key, same fingerprint: a genuine replay.
+    const replay = await repo.createSignedDepositIntent(
+      intent({
+        custodyWalletId: WALLET_A_ORG,
+        requestId: key,
+        idempotencyFingerprint: fingerprint,
+      })
+    );
+    expect(replay.replayed).toBe(true);
+    expect(replay.movement.id).toBe(first.movement.id);
+
+    // Sibling project, same org-level wallet, same key AND same fingerprint
+    // (the server fingerprint omits the project, so it matches): conflict, and
+    // with the same message as a fingerprint mismatch so nothing about the
+    // sibling is disclosed.
+    await expect(
+      repo.createSignedDepositIntent(
+        intent({
+          projectId: PROJECT_A_OTHER,
+          custodyWalletId: WALLET_A_ORG,
+          requestId: key,
+          idempotencyFingerprint: fingerprint,
+        })
+      )
+    ).rejects.toThrow("Idempotency key already used with different request payload");
+
+    // A movement whose owning project was deleted conflicts too: the org-scoped
+    // unique index means the key is burnt either way.
+    await getDb(env)
+      .prepare("UPDATE earn_vault_movements SET project_id = NULL WHERE id = ?")
+      .bind(first.movement.id)
+      .run();
+    await expect(
+      repo.createSignedDepositIntent(
+        intent({
+          custodyWalletId: WALLET_A_ORG,
+          requestId: key,
+          idempotencyFingerprint: fingerprint,
+        })
+      )
+    ).rejects.toThrow("Idempotency key already used with different request payload");
+  });
+
   it("keeps a closed position closed when re-entry fails and reopens it on confirmation", async () => {
     const initial = await repo.createSignedDepositIntent(intent());
     await confirm(initial.movement.id);
