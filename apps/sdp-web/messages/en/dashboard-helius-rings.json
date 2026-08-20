@@ -118,11 +118,13 @@
       "notRetryable": "Not retryable."
     },
     "recovery": {
-      "title": "Recovery",
-      "description": "Failed operations. A retry files a fresh operation linked to the original and re-runs policy; retry chains are capped server-side.",
-      "empty": "Nothing to recover.",
+      "title": "Needs attention",
+      "description": "Operations resting on a human decision. Approved operations execute against the verdict already stored server-side; a retry files a fresh operation linked to the original and re-runs policy, and retry chains are capped server-side.",
+      "empty": "Nothing waiting.",
       "retry": "Retry",
-      "retrying": "Retrying…"
+      "retrying": "Retrying…",
+      "execute": "Execute",
+      "executing": "Executing…"
     }
   }
 }

@@ -268,7 +268,7 @@ export function HeliusRingsWorkspace({
 
       <ZonesCard wallets={wallets} />
 
-      <RecoveryCard operations={operations} onRetried={refresh} />
+      <RecoveryCard operations={operations} onChanged={refresh} />
 
       <Card>
         <CardHeader>

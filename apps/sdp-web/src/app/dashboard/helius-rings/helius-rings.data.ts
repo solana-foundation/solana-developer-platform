@@ -175,6 +175,24 @@ export async function prepareRingsOperation(
   return { operation: result.data.operation };
 }
 
+/**
+ * Advances an operation the server has already cleared. The verdict is read
+ * from the stored approval request server-side, so this carries no body.
+ */
+export async function executeRingsOperation(
+  operationId: string
+): Promise<{ operation?: RingsOperationDetail; error?: string }> {
+  const response = await fetch(
+    `/api/dashboard/helius-rings/operations/${encodeURIComponent(operationId)}/execute`,
+    { method: "POST", cache: "no-store" }
+  );
+  const result = await readEnvelope<{ operation: RingsOperationDetail }>(response);
+  if (!result.ok) {
+    return { error: result.error };
+  }
+  return { operation: result.data.operation };
+}
+
 export async function retryRingsOperation(
   operationId: string
 ): Promise<{ operation?: RingsOperationDetail; error?: string }> {
