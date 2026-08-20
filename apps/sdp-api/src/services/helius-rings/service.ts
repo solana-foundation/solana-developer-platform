@@ -487,6 +487,23 @@ export class HeliusRingsService {
       });
 
       // ready_to_sign → submitted: sign with custody, then broadcast.
+      //
+      // This ordering must be inverted before the live gateway ships. It is
+      // unreachable today — the port above is always NotImplementedRingsGateway,
+      // which fails at `proving` — which is the only reason it is still here:
+      //   1. The broadcast runs while the operation is still `ready_to_sign`.
+      //      Lose the process after `sendTransaction` succeeds and the
+      //      transaction is live on chain with its signature recorded nowhere,
+      //      and nothing sweeps `ready_to_sign`, so the operation strands.
+      //   2. `failEdgeFor("ready_to_sign")` is `signer_failed`, so an RPC
+      //      failure is filed as a signing failure and the state machine's own
+      //      `submitted → indexing` edge (`submit_failed`) is dead code.
+      // Both close the same way: derive the signature from the signed bytes
+      // (`getSignatureFromTransaction`, as sponsorship-budget.service.ts does),
+      // persist it through the `signed` guard, then broadcast — putting the
+      // broadcast inside `submitted`, where `submit_failed` applies. That needs
+      // real transaction fixtures first: every sign/submit test double here
+      // returns a placeholder base64 string, not a decodable transaction.
       const signed = await this.signOuterTransaction({
         env: this.env,
         organizationId: this.tenant.organizationId,
