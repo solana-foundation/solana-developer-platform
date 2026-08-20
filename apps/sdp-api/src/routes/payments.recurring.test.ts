@@ -2098,6 +2098,39 @@ describe("Payments routes — recurring", () => {
     };
     expect(cancelBody.error.details?.reason).toBe("transfer_submission_outcome_unknown");
     expect(cancelBody.error.message).toContain("awaits manual reconciliation");
+
+    // A rollback can leave the marker behind while the old cron settles the
+    // transfer. After rolling forward, that settled marker is inert: recovery
+    // must advance past the old attempt instead of blocking it forever.
+    const parkedTransferId = attempt?.transfer_id;
+    if (!parkedTransferId) {
+      throw new Error("Expected the parked attempt to reference its transfer");
+    }
+    await getDb(env)
+      .prepare(
+        `UPDATE payment_transfers
+            SET status = 'failed',
+                error = 'Transfer processing timed out'
+          WHERE id = ?`
+      )
+      .bind(parkedTransferId)
+      .run();
+    const recoveryResult = await collectDueRecurringPayments(env);
+
+    expect(recoveryResult).toEqual({ recovered: 0, collected: 0, failed: 0, skipped: 1 });
+    const recoveredAttempts = await getDb(env)
+      .prepare(
+        `SELECT status
+           FROM payment_subscription_collection_attempts
+          WHERE subscription_id = ?
+          ORDER BY created_at`
+      )
+      .bind(activated.subscriptionId)
+      .all<{ status: string }>();
+    expect(recoveredAttempts.rows.map((row) => row.status).sort()).toEqual([
+      "failed",
+      "processing",
+    ]);
   });
 
   it("collects due recurring payments through SDP API routes", async () => {

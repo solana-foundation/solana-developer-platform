@@ -757,6 +757,7 @@ async function safeJournalRecurringPaymentCollectionError(input: {
         has_submitted_signature: input.submittedSignature !== null,
         original_error: activationErrorMessage(input.error),
         recurring_payment_id: input.recurringPaymentId,
+        submitted_signature: input.submittedSignature,
         transfer_id: input.transfer?.id ?? null,
       },
       "Failed to journal recurring payment collection after failure"
@@ -825,8 +826,9 @@ async function recoverRecurringPaymentCollection(input: {
     // the cycle and re-charge the payer, so it stays parked until an operator
     // reconciles it on chain.
     if (
+      transfer.status === "processing" &&
       transfer.provider_data?.submission_outcome ===
-      SUBMISSION_OUTCOME_UNKNOWN_MARKER.submission_outcome
+        SUBMISSION_OUTCOME_UNKNOWN_MARKER.submission_outcome
     ) {
       getLogger().warn(
         {

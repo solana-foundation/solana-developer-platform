@@ -244,6 +244,7 @@ export async function collectDueRecurringPayments(
             SELECT 1
               FROM payment_transfers parked
              WHERE parked.id = a.transfer_id
+               AND parked.status = 'processing'
                AND parked.provider_data ->> 'submission_outcome' = 'unknown'
           )
        ) recoverable_attempts

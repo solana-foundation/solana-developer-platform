@@ -264,23 +264,25 @@ The collection attempt stays `processing` alongside its parked transfer, so the 
 collecting until an operator resolves it — deliberately, because failing the attempt would
 reschedule the cycle and charge the payer a second time. Each park is logged once with the attempt
 and transfer ids (`Recurring payment collection parked; awaiting manual reconciliation`). A
-transfer that could not even be parked logs `failed to close a lost submitted transfer signature`
-and needs the same treatment, starting from the signature in that line. List parked collections
-with:
+transfer whose post-submit bookkeeping could not be journaled logs
+`Failed to journal recurring payment collection after failure` and needs the same treatment,
+starting from its `submitted_signature` field. List parked collections with:
 
 ```sql
 SELECT a.id AS attempt_id, a.subscription_id, a.due_at, a.transfer_id, t.source_address, t.amount
 FROM payment_subscription_collection_attempts a
 JOIN payment_transfers t ON t.id = a.transfer_id
 WHERE a.status = 'processing'
+  AND t.status = 'processing'
   AND t.provider_data ->> 'submission_outcome' = 'unknown'
 ORDER BY a.due_at;
 ```
 
 Resolve the transfer first: record its signature if it landed, or use the non-batch failure statement
-if it provably did not. Do not close the attempt by hand. After the marker is gone, recurring-payment
-recovery claims the stale attempt after 15 minutes. With a signature it verifies and completes the
-cycle; without one it fails the attempt and reschedules the cycle once.
+if it provably did not. Do not close the attempt by hand. Once the transfer leaves `processing`, its
+marker is inert even if an application write retained it. Recurring-payment recovery then claims the
+stale attempt after 15 minutes: with a signature it verifies and completes the cycle; without one it
+fails the attempt and reschedules the cycle once.
 
 An attempt whose `transfer_id` write was lost is missing from that list, and both parking guards key
 off `transfer_id`, so stale recovery will reschedule it 15 minutes after its last write — the double
