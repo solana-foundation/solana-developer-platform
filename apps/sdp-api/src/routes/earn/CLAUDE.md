@@ -28,9 +28,14 @@ Things worth knowing before changing a movement path:
   whose row is not in a legal source state returns NULL — the same answer a lost
   race gives, and the same contract every other guarded write here has. Only an
   unknown TARGET throws.
-- **Every movement needs a holding.** `createCustodialMovement` resolves it by
-  JOIN and fails loudly if the program has none, because the alternative is money
-  moving unrecorded.
+- **Every movement needs a holding, and a missing one must never fail a money
+  write.** `createCustodialMovement` resolves the holding by JOIN — so a movement
+  can never name one outside its program — and OPENS one if the program has none,
+  retrying once before giving up. A program linked by a revision that predates
+  the ledger has no holding through no fault of the caller, and refusing would
+  take that program's whole withdrawal endpoint down until an operator
+  intervened. It still fails loudly when the program wallet itself does not
+  exist, because the alternative there is money moving unrecorded.
 - **Amounts carry a `denomination`** (`usd`, or the token mint) and share counts
   live only in share-named columns. No read may sum across rows without grouping
   by it.
@@ -52,6 +57,19 @@ Things worth knowing before changing a movement path:
 - The vocabulary tables `earn_execution_models`, `earn_movement_directions` and
   `earn_movement_statuses` are seeded reference data, pinned to `@sdp/types` by a
   conformance test. Never truncate them in a test fixture.
+- `EARN_MOVEMENT_TRANSITIONS` is written to agree with `0062`'s CHECK
+  constraints, not merely with itself. In particular there is no
+  `confirmed → failed`: the schema ties `confirmed_at` and `shares_out` to the
+  commitment states, so recording that transition could only succeed by erasing
+  observations SDP genuinely made. A confirmed transaction dropped by a fork
+  stays in the reconciliation queue as an open question. Do not add the
+  transition without changing the constraint it contradicts.
+- `0064` established history but does NOT converge rows a legacy-only writer
+  ADVANCED during a rollout or rollback window — `ON CONFLICT DO NOTHING` leaves
+  the stale projection, and neither applier revisits a terminal row. `0065` is
+  the same projection re-stated as a guarded upsert, and it is where the
+  convergence guarantee actually lives. Read both headers before assuming a
+  backfill is self-correcting.
 
 ## Route map — with each route's single source of truth
 

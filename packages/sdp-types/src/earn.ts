@@ -204,7 +204,20 @@ export const EARN_VAULT_MOVEMENT_STATUSES = [
 ] as const;
 export type EarnVaultMovementStatus = (typeof EARN_VAULT_MOVEMENT_STATUSES)[number];
 
-/** Statuses a vault movement never moves on from. */
+/**
+ * Statuses a vault movement never moves on from — in migration 0059's LEGACY
+ * vocabulary, which is what `earn_vault_movements` and every existing wire
+ * contract still speak.
+ *
+ * **Do not reach for this in new code.** The unified ledger's answer is
+ * `EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct`, and the two deliberately
+ * disagree: `confirmed` is terminal HERE because 0059 had no state after chain
+ * commitment, and is NOT terminal there because `finalized` now exists and a
+ * confirmed transaction can still be dropped by a fork. Treating `confirmed` as
+ * settled is exactly the conflation the unification exists to end, so this set
+ * is correct only for a consumer reading the legacy table or a legacy wire
+ * field. Both names are retired together when the legacy tables are dropped.
+ */
 export const EARN_TERMINAL_VAULT_MOVEMENT_STATUSES = ["confirmed", "failed"] as const;
 export type EarnTerminalVaultMovementStatus =
   (typeof EARN_TERMINAL_VAULT_MOVEMENT_STATUSES)[number];
@@ -672,7 +685,14 @@ export type EarnCustodialMovementStatus = (typeof EARN_MOVEMENT_STATUSES)["custo
 export type EarnVaultDirectMovementStatus = (typeof EARN_MOVEMENT_STATUSES)["vault_direct"][number];
 export type EarnMovementStatus = EarnCustodialMovementStatus | EarnVaultDirectMovementStatus;
 
-/** Statuses a movement never moves on from, per model. */
+/**
+ * Statuses a movement never moves on from, per model — the UNIFIED ledger's
+ * answer, and the one new code should use.
+ *
+ * Not to be confused with `EARN_TERMINAL_VAULT_MOVEMENT_STATUSES` above, which
+ * is the legacy `earn_vault_movements` vocabulary and calls `confirmed`
+ * terminal. See that constant's note for why the disagreement is intentional.
+ */
 export const EARN_TERMINAL_MOVEMENT_STATUSES = {
   custodial: EARN_TERMINAL_WITHDRAWAL_STATUSES,
   // `confirmed` is deliberately absent, unlike 0059's terminal set: the sweep's
@@ -710,6 +730,22 @@ export function isTerminalEarnMovementStatus(
  * rather than invent an intermediate commitment it never saw. It has no
  * self-transitions: there is no in-place observation refresh on a signed
  * movement, only advancement.
+ *
+ * ── Who enforces this, and when ───────────────────────────────────────────
+ * The custodial half is enforced NOW: `earn-withdrawal-ledger.service.ts`
+ * derives its compare-and-swap source statuses from it, so there is no second
+ * copy to drift from. The vault half has no enforcer in this release — the
+ * live guard (`assertValidMovementTransition` in `earn-vault.repository.ts`)
+ * still speaks migration 0059's legacy vocabulary (`pending`, and `confirmed`
+ * as terminal) because it guards the LEGACY table, which is still the
+ * authoritative writer here. It is replaced by a guard reading this matrix in
+ * the release that switches reads to the unified ledger; until then the
+ * vault half describes the ledger's intended lifecycle, and the conformance
+ * test in `earn-movements.repository.test.ts` pins it against
+ * `earn_movement_statuses`.
+ *
+ * The matrix is written to be consistent with migration 0062's CHECK
+ * constraints, not merely with itself — see the `vault_direct` notes below.
  */
 export const EARN_MOVEMENT_TRANSITIONS = {
   custodial: {
@@ -731,17 +767,19 @@ export const EARN_MOVEMENT_TRANSITIONS = {
     // learn of finalization as its first observation of a movement, and a
     // transaction the chain calls finalized was demonstrably submitted and
     // committed whether or not SDP recorded those moments separately. The writer
-    // stamps `confirmed_at` on the way through so the row is never a settled one
-    // with no record of its commitment.
+    // stamps `confirmed_at` on the way through, so the row is never a settled one
+    // with no record of its own commitment.
     finalized: ["requested", "submitted", "confirmed"],
-    // NOT from `confirmed`, deliberately. Migration 0062 ties `confirmed_at` to
-    // the commitment states, so failing a confirmed movement could only succeed by
-    // erasing an observation SDP genuinely made — and the realistic chain path
-    // never asks for it: an execution error is reported with the FIRST status for
-    // a signature, not after a clean one. The remaining tail, a confirmed
-    // transaction dropped by a fork rollback, is an open question rather than
-    // something handled here: such a row stops being observable and is left in the
-    // reconciliation queue rather than declared failed on a guess.
+    // NOT from `confirmed`, deliberately. Migration 0062 ties `confirmed_at` and
+    // `shares_out` to the commitment states, so failing a confirmed movement
+    // could only succeed by erasing observations SDP genuinely made — and it
+    // would make "failed before landing" indistinguishable from "landed, then
+    // dropped in a fork". The realistic chain path never asks for it: an
+    // execution error is reported with the FIRST status for a signature, not
+    // after a clean one. The remaining tail, a confirmed transaction dropped by
+    // a fork rollback, is an open question rather than something handled here:
+    // such a row stops being observable and is left in the reconciliation queue
+    // rather than declared failed on a guess.
     failed: ["requested", "submitted"],
   },
 } as const satisfies {

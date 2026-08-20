@@ -3,6 +3,7 @@ import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { type AppDb, getDb } from "@/db";
 import { env } from "@/test/helpers/env";
+import { splitSqlStatements } from "../../../scripts/lib/run-postgres-migrations.mjs";
 import type { EarnMovementRow, EarnPositionRow } from "./earn-movements.repository";
 
 /**
@@ -41,17 +42,12 @@ const VAULT = "BackfillVaultAddress1111111111111111111111";
 /**
  * Split the migration into statements so it can run through the pooled client,
  * which binds parameters and therefore speaks the extended protocol (one
- * statement per round trip). Safe for these files specifically: they are plain
- * SQL with `--` comments, no dollar-quoting and no semicolons inside literals.
+ * statement per round trip). Uses the migration runner's own splitter rather
+ * than a local one, so this test cannot disagree with the shipped tool about
+ * where a statement ends.
  */
 function backfillStatements(file: string = BACKFILL_SQL): string[] {
-  return readFileSync(file, "utf8")
-    .split("\n")
-    .filter((line) => !line.trimStart().startsWith("--"))
-    .join("\n")
-    .split(";")
-    .map((statement) => statement.trim())
-    .filter((statement) => statement.length > 0);
+  return splitSqlStatements(readFileSync(file, "utf8"));
 }
 
 async function runBackfill(db: AppDb, file: string = BACKFILL_SQL): Promise<void> {

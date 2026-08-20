@@ -659,6 +659,33 @@ of what already went through it.
   chain commitment can be dropped in a fork rollback, so settlement means
   finalization for a vault movement and provider completion for a custodial one —
   one meaning of settled across SDP, matching payments (PRO-1716).
+- **The transition matrix must agree with the SCHEMA, not merely with itself.**
+  `EARN_MOVEMENT_TRANSITIONS` declares no `confirmed → failed` for a vault
+  movement, because 0062 ties `confirmed_at`/`shares_out` to the commitment
+  states and recording that transition could only succeed by erasing an
+  observation SDP genuinely made — and would make "failed before landing"
+  indistinguishable from "landed, then dropped in a fork". A confirmed
+  transaction dropped by a fork stays in the reconciliation queue as an open
+  question rather than being declared failed on a guess.
+- **Project attribution is not a lifetime.** `project_id` is nullable with
+  `ON DELETE SET NULL` on the unified tables and, from 0062, on
+  `earn_provider_wallets` and `earn_program_withdrawals` too. 0055's CASCADE
+  meant deleting a project DESTROYED the withdrawal history of money that had
+  actually left the organization. Keeping the two shapes isomorphic through the
+  expand window also closes a trap: a divergence let a reused idempotency key
+  insert a fresh legacy row, collide with the surviving unified row on the
+  custodial anchor, and fail that key permanently — because the route
+  re-resolves the replay from the legacy table.
+- **A missing holding must never fail a money write.** Every movement belongs to
+  exactly one holding, so every write path projects the holding BEFORE the
+  movement, and the custodial projection opens one if the ledger has none.
+  Failing instead would take a program's whole withdrawal endpoint down, and on
+  the observation path — where the mirror shares its transaction with the legacy
+  write — it would roll back the `provider_reference` stamp for a payout the
+  provider had already made. A movement with no reference is the one row no later
+  observation can find again. The repair is ENSURE-shaped, not re-project: a
+  transition that changes no holding state must not take a row lock on the
+  holding, or two concurrent flows against the same one deadlock.
 
 ### Migration posture
 
@@ -669,3 +696,15 @@ release; the legacy tables are dropped last, alone. Each projection is defined
 ONCE as a SQL view shared by the bulk backfill and the runtime mirror, because a
 projection spelled twice would drift, and history disagreeing with new rows is
 the worst outcome this migration could produce.
+
+One asymmetry in that posture is worth stating, because its absence reads as a
+guarantee it is not: **0064 establishes history, it does not converge advances.**
+`ON CONFLICT DO NOTHING` cannot refresh a row a legacy-only writer ADVANCED
+during a rollout or rollback window, and nothing else reaches such a row — the
+custodial appliers early-return on a terminal status and the vault reconciliation
+queue selects only the unsettled states. 0065 is therefore the same projection
+re-stated as a guarded upsert, and it is where the convergence guarantee actually
+lives. Before the contract phase stops dual-writing, a read-only parity check
+(row counts plus a per-row projection diff) runs in the deployed environments,
+expecting zero differences.
+
