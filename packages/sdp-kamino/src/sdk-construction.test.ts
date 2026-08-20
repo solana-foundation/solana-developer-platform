@@ -102,10 +102,10 @@ describe("vault construction", () => {
     const sdk = read("sdk.ts");
     expect(sdk).toContain("vaultAssetIdentityFromState(state)");
     // Deposit and withdrawal must both return the identity produced by the
-    // shared bind path; omitting either would reopen catalogue-only trust.
-    expect(
-      sdk.match(/lookupTables:\s*\[\],\s*assetIdentity,/g)?.length ?? 0
-    ).toBeGreaterThanOrEqual(2);
+    // shared bind path (the `assetIdentity` shorthand only exists as a
+    // destructure of bindVault's result); omitting either would reopen
+    // catalogue-only trust.
+    expect(sdk.match(/^\s*assetIdentity,$/gm)?.length ?? 0).toBeGreaterThanOrEqual(2);
   });
 
   it("fails closed on invalid observed shares but only withholds an invalid valuation", () => {

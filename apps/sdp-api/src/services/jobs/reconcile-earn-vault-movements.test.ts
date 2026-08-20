@@ -206,6 +206,111 @@ describe("reconcileEarnVaultMovements", () => {
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
   });
 
+  describe("withdrawal leg ordering (0066)", () => {
+    const POSITION = "earn_position_reconcile_withdraw";
+
+    async function seedWithdrawalGroup(legs: Array<{ lastValidBlockHeight: string }>) {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO earn_positions (
+             id, organization_id, project_id, environment, provider, kind,
+             custody_wallet_id, vault_address, share_mint, token_mint, label, activated_at
+           ) VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', ?,
+                     'vault_reconcile_withdraw', 'So11111111111111111111111111111111111111112',
+                     'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'Exit Vault', sdp_iso_now())
+           ON CONFLICT DO NOTHING`
+        )
+        .bind(POSITION, ORG, PROJECT, WALLET)
+        .run();
+      return createPostgresEarnMovementsRepository(getDb(env)).createSignedVaultWithdrawalIntent({
+        organizationId: ORG,
+        projectId: PROJECT,
+        environment: "sandbox",
+        provider: "kamino",
+        positionId: POSITION,
+        vaultAddress: "vault_reconcile_withdraw",
+        custodyWalletId: WALLET,
+        shareMint: "So11111111111111111111111111111111111111112",
+        walletAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+        legs: legs.map((leg, index) => ({
+          shares: String(index + 1),
+          signature: `sig_leg_${index}_${crypto.randomUUID()}`,
+          signedTransaction: Buffer.from([index + 10]).toString("base64"),
+          lastValidBlockHeight: leg.lastValidBlockHeight,
+        })),
+        requestId: crypto.randomUUID(),
+        idempotencyFingerprint: crypto.randomUUID(),
+      });
+    }
+
+    function answerStatusesBySignature(statusBySignature: Record<string, unknown>) {
+      getSignatureStatuses.mockImplementation(async (_rpc: unknown, signatures: string[]) =>
+        signatures.map((signature) => statusBySignature[signature] ?? null)
+      );
+    }
+
+    it("holds a later leg until its predecessor commits, then broadcasts it in order", async () => {
+      const group = await seedWithdrawalGroup([
+        { lastValidBlockHeight: "100" },
+        { lastValidBlockHeight: "100" },
+      ]);
+      const [first, second] = group.movements;
+      answerStatusesBySignature({});
+      getBlockHeight.mockResolvedValue(50n);
+
+      await reconcileEarnVaultMovements(env);
+
+      // Only leg 0's bytes may reach the wire while it is uncommitted.
+      expect(broadcastVaultTransaction.mock.calls.map(([, input]) => input.bytes)).toEqual([
+        new Uint8Array([10]),
+      ]);
+      await expect(ledgerRow(second.id)).resolves.toMatchObject({ status: "requested" });
+
+      // Once the chain reports leg 0 committed, the next ticks release leg 1.
+      answerStatusesBySignature({
+        [String(first.signature)]: {
+          slot: 1n,
+          confirmations: 1n,
+          err: null,
+          confirmationStatus: "confirmed",
+        },
+      });
+      broadcastVaultTransaction.mockClear();
+      await reconcileEarnVaultMovements(env);
+      await reconcileEarnVaultMovements(env);
+
+      expect(broadcastVaultTransaction.mock.calls.map(([, input]) => input.bytes)).toContainEqual(
+        new Uint8Array([11])
+      );
+      await expect(ledgerRow(first.id)).resolves.toMatchObject({ status: "confirmed" });
+      await expect(ledgerRow(second.id)).resolves.toMatchObject({ status: "submitted" });
+    });
+
+    it("fails a leg whose predecessor failed, without broadcasting it", async () => {
+      const group = await seedWithdrawalGroup([
+        // Leg 0 expires; leg 1's own blockhash window is still open, so the
+        // ONLY thing that may fail it is the predecessor gate.
+        { lastValidBlockHeight: "100" },
+        { lastValidBlockHeight: "10000" },
+      ]);
+      const [first, second] = group.movements;
+      answerStatusesBySignature({});
+      getBlockHeight.mockResolvedValue(101n);
+
+      await reconcileEarnVaultMovements(env);
+      await reconcileEarnVaultMovements(env);
+
+      await expect(ledgerRow(first.id)).resolves.toMatchObject({
+        status: "failed",
+        failure_reason: "Transaction blockhash expired before confirmation",
+      });
+      const cascaded = await ledgerRow(second.id);
+      expect(cascaded?.status).toBe("failed");
+      expect(cascaded?.failure_reason).toContain("Predecessor withdrawal leg");
+      expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+    });
+  });
+
   it("fails a finalized-then-errored signature without regressing a settled row", async () => {
     const seeded = await seedMovement();
     getSignatureStatuses.mockResolvedValue([

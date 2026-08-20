@@ -3,17 +3,23 @@ import { KaminoEarnClient } from "@sdp/earn/providers/kamino/client";
 import type {
   EarnRuntimeContext,
   EarnVaultDepositInput,
-  EarnVaultDirectProvider,
   EarnVaultInstruction,
   EarnVaultPositionInput,
   EarnVaultPositionSnapshot,
   EarnVaultTransactionPlan,
+  EarnVaultWithdrawInput,
+  EarnVaultWithdrawProvider,
 } from "@sdp/earn/types";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
 import { type Address, address, createNoopSigner } from "@solana/kit";
 import { SdpKaminoError } from "./errors";
 import { createKaminoRpc } from "./rpc";
-import { buildKaminoDepositPlan, discoverKaminoPositionVaults, readKaminoPosition } from "./sdk";
+import {
+  buildKaminoDepositPlan,
+  buildKaminoWithdrawPlan,
+  discoverKaminoPositionVaults,
+  readKaminoPosition,
+} from "./sdk";
 import type { KaminoInstructionPlan, KaminoRuntime } from "./types";
 
 /** One portfolio request may fan out over many vaults; never fan out the RPCs without a bound. */
@@ -78,6 +84,11 @@ export function toEarnVaultTransactionPlan(plan: KaminoInstructionPlan): EarnVau
       )
     ),
     lookupTables: plan.lookupTables.map(String),
+    // Present on withdrawal plans only: the exact shares each transaction leg
+    // redeems, which the API ledgers as one movement row per leg.
+    ...(plan.transactionShares === undefined
+      ? {}
+      : { transactionShares: [...plan.transactionShares] }),
     assetIdentity: {
       depositTokenMint: String(plan.assetIdentity.depositTokenMint),
       shareMint: String(plan.assetIdentity.shareMint),
@@ -90,7 +101,7 @@ export function toEarnVaultTransactionPlan(plan: KaminoInstructionPlan): EarnVau
 
 /**
  * Kamino as an EXECUTING provider: the catalogue client plus the vault-direct
- * capability.
+ * capability, money-in AND money-out (`EarnVaultWithdrawProvider`).
  *
  * Lives here rather than in `@sdp/earn` so that package keeps its single
  * `@sdp/types` dependency — its hourly catalogue cron runs in both environments
@@ -99,10 +110,10 @@ export function toEarnVaultTransactionPlan(plan: KaminoInstructionPlan): EarnVau
  *
  * Registered by the API's execution registry, which prefers this class over the
  * catalogue-only `KaminoEarnClient` when a route needs to move money. Callers
- * still discover the capability with `supportsVaultDirect`, never a provider-id
- * check.
+ * still discover each capability with `supportsVaultDirect` /
+ * `supportsVaultWithdraw`, never a provider-id check.
  */
-export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVaultDirectProvider {
+export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVaultWithdrawProvider {
   /**
    * Where a PROVEN RPC endpoint comes from and how its operation is bounded.
    *
@@ -184,27 +195,42 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
     return toEarnVaultTransactionPlan(plan);
   }
 
-  /*
-   * NO `buildVaultWithdrawal` — the withdraw capability is WITHHELD, and its
-   * absence is the mechanism, not an oversight.
+  /**
+   * The money-OUT half (`EarnVaultWithdrawProvider`), implemented LAST on
+   * purpose — after the builder honoured the transaction-sized-batch contract
+   * (vault lookup table, compile-measured splits at protocol boundaries) and
+   * the API grew resumable multi-leg submission with per-leg ledger rows.
+   * Implementing it is what flips `supportsVaultWithdraw` to true, so the
+   * order of that work was the mechanism keeping the exit route closed while
+   * an unsized plan could still strand a customer mid-exit (PRO-1702).
    *
-   * `buildKaminoWithdrawPlan` exists and is proven against a mainnet-forked
-   * surfnet, but it does not yet honour the plan contract: it flattens every
-   * unstake/withdraw/cleanup instruction into ONE batch and returns no lookup
-   * table, while the pinned SDK documents that a multi-reserve exit "might have
-   * to be split in multiple transactions". Implementing the method here would
-   * make `supportsVaultWithdraw` answer true, which is what a future exit route
-   * will narrow on — and it would then hand that route a plan that either
-   * exceeds the packet limit or is refused by the submitter, after the customer
-   * was told their withdrawal was prepared.
-   *
-   * Adding the method is therefore the LAST step of that work, not the first:
-   * load the vault LUT, compile-measure and split at protocol boundaries (an
-   * unstake must never land without its withdraw), and give the API a resumable
-   * multi-leg submission. Until then the honest answer is that SDP has no exit
-   * route — the shares are in the org's own wallet and Kamino's UI can redeem
-   * them, which is why withholding this is safe rather than fund-trapping.
+   * The slot is read here, once, so every leg of one exit is priced against
+   * the same slot — the same rule `readVaultPositions` applies to a page.
    */
+  async buildVaultWithdrawal(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultWithdrawInput
+  ): Promise<EarnVaultTransactionPlan> {
+    const plan = await this.withRuntime(
+      ctx,
+      "Building the vault withdrawal",
+      async (runtime, assertActive) => {
+        const slot = await createKaminoRpc(runtime.rpcUrl).getSlot().send();
+        assertActive();
+        return buildKaminoWithdrawPlan(
+          runtime,
+          {
+            vault: address(input.providerReference),
+            owner: this.owner(input.owner),
+            shares: input.shares,
+            slot,
+          },
+          assertActive
+        );
+      }
+    );
+    return toEarnVaultTransactionPlan(plan);
+  }
 
   /**
    * Reads every requested vault against ONE slot, so a multi-position page is

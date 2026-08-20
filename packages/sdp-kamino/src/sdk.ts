@@ -1,4 +1,10 @@
-import { KaminoVault, KaminoVaultClient } from "@kamino-finance/klend-sdk";
+import {
+  getKvaultGlobalConfigPda,
+  KaminoVault,
+  KaminoVaultClient,
+  KVaultGlobalConfig,
+} from "@kamino-finance/klend-sdk";
+import { EARN_VAULT_TRANSACTION_HEADROOM_BYTES } from "@sdp/earn/types";
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
 import type { Address, Instruction } from "@solana/kit";
 import Decimal from "decimal.js";
@@ -6,6 +12,7 @@ import { acceptAtMintScale, isZeroAmount, mintDecimals } from "./amounts";
 import { vaultAssetIdentityFromState } from "./asset-identity";
 import { invalidAmount, SdpKaminoError, vaultUnreadable } from "./errors";
 import { assertPlanTargetsCluster } from "./guards";
+import { loadVaultLookupTableAddresses } from "./lookup-table";
 import { kaminoClusterConfig } from "./programs";
 import { createKaminoRpc } from "./rpc";
 import { sumRawTokenAccountBaseUnits } from "./share-balances";
@@ -16,6 +23,13 @@ import type {
   KaminoRuntime,
   KaminoWithdrawInput,
 } from "./types";
+import {
+  decodeKvaultWithdrawShares,
+  planWithdrawBatches,
+  type RoleTaggedInstruction,
+  resolveBurnAllSentinel,
+  SOLANA_TRANSACTION_SIZE_LIMIT_BYTES,
+} from "./withdraw-batching";
 
 /**
  * ════════════════════════════════════════════════════════════════════════════
@@ -238,48 +252,98 @@ export async function buildKaminoDepositPlan(
 }
 
 /**
- * Build a withdrawal. **NOT CONTRACT-COMPLETE — see the warning below.**
+ * Build a withdrawal as TRANSACTION-SIZED batches — the exit half of the
+ * vault-direct model.
  *
- * ── Why this is not exported as a capability ────────────────────────────────
- * `KaminoInstructionPlan.instructions` promises TRANSACTION-SIZED batches: one
- * entry, one transaction. This function cannot honour that promise yet. It
- * flattens `unstake → withdraw → post` into a single batch and returns no
- * lookup table, while the pinned SDK documents the opposite — `withdrawIxs`
- * returns "one or multiple withdraw instructions, based on how many reserves
- * it's needed to withdraw from. This might have to be split in multiple
- * transactions". A multi-reserve exit therefore builds a plan that can exceed
- * Solana's 1232-byte packet, and the API's submitter refuses any plan with more
- * than one transaction — so the failure lands at submit, after the caller has
- * been told a withdrawal was prepared.
+ * The pinned SDK documents that `withdrawIxs` returns "one or multiple withdraw
+ * instructions, based on how many reserves it's needed to withdraw from. This
+ * might have to be split in multiple transactions", and each withdraw carries
+ * the vault's full reserve remaining-accounts list. Honouring the plan contract
+ * therefore takes three steps, all here:
  *
- * Honouring the contract needs three things this does not do: load the vault's
- * published lookup table, compile-measure and split at valid protocol
- * boundaries (an unstake must never land without its withdraw), and give the
- * API a resumable multi-leg submission with per-leg ledger rows.
+ * 1. **The vault's published lookup table is loaded** (`VaultState.
+ *    vaultLookupTable`) and applied to sizing, best-effort — a vault whose
+ *    table is unset or unreadable still gets a plan, just one that splits
+ *    earlier. The table travels on `lookupTables` so the API compiles with the
+ *    same compression this sizing assumed.
+ * 2. **Batches are compile-measured** against the packet limit minus the API's
+ *    reserved metadata headroom, and split only at boundaries where every
+ *    resulting transaction still redeems shares — an unstake or an ATA
+ *    creation must never land in a transaction without its withdraw. An exit
+ *    that cannot satisfy that is REFUSED at build time, not discovered at
+ *    submit time.
+ * 3. **Each batch's exact share quantity is decoded from its own
+ *    instructions** (`sharesAmount: u64`) and returned as `transactionShares`,
+ *    so the API can ledger one movement row per transaction leg with the
+ *    quantity that leg actually encodes. The decoded total must equal the
+ *    accepted request exactly, or the plan is refused — a bundle that encodes
+ *    a different quantity than it was asked for must never be signed.
  *
- * Until then the WITHDRAW CAPABILITY IS WITHHELD: `KaminoVaultDirectClient` does
- * not implement `buildVaultWithdrawal`, so `supportsVaultWithdraw` answers false
- * and no route can move money out through an unsized plan. This builder stays in
- * the package because it is proven against a mainnet-forked surfnet and is the
- * starting point for that work — it is deliberately NOT re-exported from
- * `index.ts`, so the only callers are this package's own smoke tests.
- *
- * Tracked as the exit half of the vault-direct path; see `CLAUDE.md`.
+ * NOT covered, deliberately (see CLAUDE.md → known gaps): withdrawal penalties
+ * are not quoted, and shares staked in a vault farm are not unstaked — the
+ * deposit path never stakes (it passes no farm state), so an SDP-managed
+ * position has none; externally staked shares must be unstaked outside SDP
+ * before they can exit through it.
  */
 export async function buildKaminoWithdrawPlan(
   runtime: KaminoRuntime,
-  input: KaminoWithdrawInput
+  input: KaminoWithdrawInput,
+  assertActive: AssertActive = alwaysActive
 ): Promise<KaminoInstructionPlan> {
-  const { client, vault, state, config, assetIdentity } = await bindVault(runtime, input.vault);
-  const acceptedShares = acceptAtMintScale(
-    "shares",
-    input.shares,
-    mintDecimals(state.sharesMintDecimals, "sharesMintDecimals")
+  const { client, vault, state, config, rpc, assetIdentity } = await bindVault(
+    runtime,
+    input.vault,
+    assertActive
   );
+  const shareDecimals = mintDecimals(state.sharesMintDecimals, "sharesMintDecimals");
+  const acceptedShares = acceptAtMintScale("shares", input.shares, shareDecimals);
   if (isZeroAmount(acceptedShares)) throw invalidAmount("shares", input.shares);
   const shares = toDecimal(acceptedShares, "shares");
 
+  assertActive();
   const reserves = await client.loadVaultReserves(state);
+  assertActive();
+
+  // ── The SDK's global-config loader repeats the constructor trap ───────────
+  // `withdrawIxs` without explicit penalties calls `loadKVaultGlobalConfig`,
+  // which derives the config PDA with the client's program id but then fetches
+  // it with the DEFAULT (mainnet) id as the expected owner — so a devnet exit
+  // throws "belongs to wrong program" before building anything. Measured
+  // 2026-08-20 against a devnet fork; deposits never load the config, which is
+  // why only the exit path bites. Passing `withdrawalPenalties` short-circuits
+  // that loader entirely; the values are computed exactly as the SDK's private
+  // `getEffectiveWithdrawalPenaltyParams` does — max(vault, global config),
+  // per field — from a config fetched with the RIGHT program id.
+  const globalConfigAddress = await getKvaultGlobalConfigPda(config.kvaultProgramId as Kit2);
+  const globalConfig = await KVaultGlobalConfig.fetch(
+    rpc,
+    globalConfigAddress,
+    config.kvaultProgramId as Kit2
+  );
+  if (!globalConfig) {
+    throw vaultUnreadable(input.vault, runtime.cluster, "kvault global config not found");
+  }
+  assertActive();
+  const withdrawalPenalties = {
+    withdrawalPenaltyLamports: Decimal.max(
+      requireNonNegativeFiniteDecimal(
+        "vault withdrawal penalty lamports",
+        state.withdrawalPenaltyLamports
+      ),
+      requireNonNegativeFiniteDecimal(
+        "global withdrawal penalty lamports",
+        globalConfig.withdrawalPenaltyLamports
+      )
+    ),
+    withdrawalPenaltyBps: Decimal.max(
+      requireNonNegativeFiniteDecimal("vault withdrawal penalty bps", state.withdrawalPenaltyBps),
+      requireNonNegativeFiniteDecimal(
+        "global withdrawal penalty bps",
+        globalConfig.withdrawalPenaltyBps
+      )
+    ),
+  };
+
   const bundle = await vault.withdrawIxs(
     input.owner as Kit2,
     shares,
@@ -287,19 +351,100 @@ export async function buildKaminoWithdrawPlan(
     reserves,
     null,
     null,
-    (input.rentPayer ?? input.owner) as Kit2
+    (input.rentPayer ?? input.owner) as Kit2,
+    withdrawalPenalties as Kit2
   );
+  assertActive();
 
-  const instructions = asInstructions([
-    ...(bundle.unstakeFromFarmIfNeededIxs ?? []),
-    ...(bundle.withdrawIxs ?? []),
-    ...(bundle.postWithdrawIxs ?? []),
-  ]);
+  // Best-effort: an exit must never fail for want of a compression aid. The
+  // rpc client is the same deadline-bounded transport every other read uses.
+  const lookupTables = await loadVaultLookupTableAddresses(
+    rpc as ReturnType<typeof createKaminoRpc>,
+    state.vaultLookupTable === undefined ? undefined : String(state.vaultLookupTable)
+  );
+  assertActive();
+
+  const kvaultProgramAddress = String(config.kvaultProgramId);
+  const decoded: RoleTaggedInstruction[] = [
+    ...asInstructions(bundle.unstakeFromFarmIfNeededIxs ?? []).map((instruction) => ({
+      instruction,
+      role: "unstake" as const,
+      sharesBaseUnits: null,
+    })),
+    // The SDK interleaves prerequisites (ATA creation) into `withdrawIxs`, so
+    // membership alone does not mean "redeems shares" — the instruction bytes
+    // decide, and only decodable instructions count toward the ledgered total.
+    ...asInstructions(bundle.withdrawIxs ?? []).map((instruction): RoleTaggedInstruction => {
+      const sharesBaseUnits = decodeKvaultWithdrawShares(instruction, kvaultProgramAddress);
+      return {
+        instruction,
+        role: sharesBaseUnits === null ? "prepare" : "withdraw",
+        sharesBaseUnits,
+      };
+    }),
+    ...asInstructions(bundle.postWithdrawIxs ?? []).map((instruction) => ({
+      instruction,
+      role: "post" as const,
+      sharesBaseUnits: null,
+    })),
+  ];
+
+  const requestedBaseUnits = parseDecimalAmount(acceptedShares, shareDecimals);
+  // A FULL exit never encodes the literal amount: the SDK writes the burn-all
+  // sentinel whenever the request reaches the wallet's whole balance (measured
+  // 2026-08-20 on a devnet fork). The sentinel is accepted only when it
+  // provably names the requested quantity — the balance read here is the same
+  // exact base-unit read the position report uses.
+  const walletShareBaseUnits = await readUnstakedShareBaseUnits(
+    rpc,
+    input.owner.address,
+    assetIdentity.shareMint
+  );
+  assertActive();
+  const tagged = resolveBurnAllSentinel({
+    instructions: decoded,
+    requestedBaseUnits,
+    walletShareBaseUnits,
+  });
+  const encodedBaseUnits = tagged.reduce((sum, entry) => sum + (entry.sharesBaseUnits ?? 0n), 0n);
+  if (encodedBaseUnits !== requestedBaseUnits) {
+    // Includes the zero-withdraw-instruction case. Whatever the SDK did — a
+    // capped amount, a sentinel encoding, a new instruction variant this decode
+    // does not know — signing it would ledger a quantity the chain will not
+    // move, so the only safe answer is a loud refusal.
+    throw new SdpKaminoError(
+      "VAULT_UNREADABLE",
+      `Kamino withdraw instructions encode ${encodedBaseUnits} share base units where the ` +
+        `accepted request is ${requestedBaseUnits}; refusing to build a plan whose ledger ` +
+        "record would not match what moves on chain."
+    );
+  }
+
+  const batches = planWithdrawBatches({
+    instructions: tagged,
+    feePayer: input.owner.address,
+    lookupTables,
+    maxTransactionBytes:
+      SOLANA_TRANSACTION_SIZE_LIMIT_BYTES - EARN_VAULT_TRANSACTION_HEADROOM_BYTES,
+  });
+  for (const batch of batches) {
+    // The batcher guarantees a withdraw-role instruction per batch; this
+    // asserts the stronger fact the ledger needs — every leg moves something.
+    if (batch.sharesBaseUnits <= 0n) {
+      throw new SdpKaminoError(
+        "VAULT_UNREADABLE",
+        "Kamino withdraw plan produced a transaction that redeems zero shares"
+      );
+    }
+  }
 
   return assertPlanTargetsCluster({
     cluster: config.cluster,
-    instructions: [instructions],
-    lookupTables: [],
+    instructions: batches.map((batch) => batch.instructions),
+    lookupTables: Object.keys(lookupTables) as Address[],
+    transactionShares: batches.map((batch) =>
+      formatDecimalAmount(batch.sharesBaseUnits, shareDecimals)
+    ),
     assetIdentity,
     accepted: { shares: acceptedShares },
   });

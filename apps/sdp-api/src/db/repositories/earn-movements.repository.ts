@@ -50,6 +50,11 @@ export function generateEarnMovementId(): string {
   return `earn_movement_${crypto.randomUUID()}`;
 }
 
+/** One id per withdrawal GROUP — the exit request all of its legs share. */
+export function generateEarnMovementGroupId(): string {
+  return `earn_movement_group_${crypto.randomUUID()}`;
+}
+
 /**
  * Assert a prior movement under this idempotency key is THIS request's own replay
  * — same project AND same fingerprint — before it is returned as one.
@@ -139,6 +144,15 @@ export interface EarnMovementRow {
   request_id: string;
   idempotency_fingerprint: string;
   provider_data: Record<string, unknown>;
+  /**
+   * Vault WITHDRAWAL rows only (0066): one exit request = one leg group, with
+   * `leg_index` the 0-based submission order and `leg_count` stamped on every
+   * row. Ordering is load-bearing — a leg is broadcast only after its
+   * predecessor reaches commitment. All three null on every other row.
+   */
+  leg_group_id: string | null;
+  leg_index: number | null;
+  leg_count: number | null;
   created_by: string | null;
   initiated_by_key_id: string | null;
   created_at: string;
@@ -261,16 +275,37 @@ export interface EarnMovementsRepository {
     provider: string;
     providerReference: string;
   }): Promise<EarnMovementRow | null>;
-  /** One workspace's recorded vault DEPOSITS, newest first, as a keyset page. */
-  listVaultDeposits(params: {
+  /**
+   * One workspace's recorded vault movements of ONE direction, newest first, as
+   * a keyset page. The direction is a required parameter rather than two copies
+   * of this query: deposits and withdrawal legs share every scoping rule
+   * (organization, environment, exact project, wallet binding), and a shared
+   * builder is what keeps them from drifting apart.
+   */
+  listVaultMovements(params: {
     organizationId: string;
     environment: SdpEnvironment;
     projectId: string;
     custodyWalletIds: readonly string[];
+    direction: EarnMovementDirection;
     limit: number;
     before: EarnMovementCursor | null;
     settled?: boolean;
   }): Promise<{ rows: EarnMovementRow[]; hasMore: boolean }>;
+  /** Every leg of one withdrawal group, submission order, org-scoped (BOLA). */
+  listVaultWithdrawalLegs(params: {
+    organizationId: string;
+    legGroupId: string;
+  }): Promise<EarnMovementRow[]>;
+  /**
+   * One leg by (group, index) — global like the provider-reference lookup, for
+   * the reconciliation sweep's predecessor gate; callers already hold a row of
+   * the same group, which is what scopes the question.
+   */
+  getVaultWithdrawalLegByIndex(params: {
+    legGroupId: string;
+    legIndex: number;
+  }): Promise<EarnMovementRow | null>;
   /** One program's withdrawal history, offset-paged with a total. */
   listCustodialMovements(params: {
     organizationId: string;
@@ -332,6 +367,21 @@ export interface EarnMovementsRepository {
     replayed: boolean;
   }>;
   /**
+   * Atomically record every signed leg of one vault withdrawal against an
+   * EXISTING holding — record-before-broadcast for the whole group, so a crash
+   * at any point leaves nothing on the wire that the ledger cannot reconcile
+   * by signature. Never creates or activates a holding: an exit is only ever
+   * asked of a position the organization already holds, and the movement
+   * rows' composite FK onto that position is what refuses a claim whose vault
+   * or wallet does not match. A divergent idempotency loser throws so the
+   * whole group rolls back; an identical loser returns the winning group.
+   */
+  createSignedVaultWithdrawalIntent(input: CreateSignedVaultWithdrawalIntentInput): Promise<{
+    position: EarnPositionRow;
+    movements: EarnMovementRow[];
+    replayed: boolean;
+  }>;
+  /**
    * Guarded CAS on a vault movement. Legal source states come from the shared
    * transition matrix, so terminal regression is unrepresentable rather than
    * merely discouraged, and a lost race returns null rather than an error.
@@ -387,6 +437,54 @@ export interface AdvanceVaultMovementInput {
   failureReason?: string | null;
   confirmedAt?: string | null;
   settledAt?: string | null;
+}
+
+/** One signed transaction leg of a vault withdrawal, ready to record. */
+export interface SignedVaultWithdrawalLegInput {
+  /**
+   * Exact shares this leg's transaction encodes, as a decimal string in share
+   * units — decoded from the instructions by the plan builder, never estimated.
+   */
+  shares: string;
+  signature: string;
+  signedTransaction: string;
+  lastValidBlockHeight: string;
+}
+
+export interface CreateSignedVaultWithdrawalIntentInput {
+  organizationId: string;
+  projectId: string;
+  environment: SdpEnvironment;
+  provider: string;
+  /** The EXISTING vault holding being exited; never created here. */
+  positionId: string;
+  /** Claim facts, FK-verified against the position row on insert. */
+  vaultAddress: string;
+  custodyWalletId: string;
+  /**
+   * The share mint — every withdrawal leg's `denomination` (0066): the exact
+   * quantity a leg encodes is shares, and tokens received are chain-decided.
+   */
+  shareMint: string;
+  /** The custody wallet's public key: shares burn from it, tokens return to it. */
+  walletAddress: string;
+  /** Ordered legs; index 0 broadcasts first and anchors the caller's key. */
+  legs: readonly SignedVaultWithdrawalLegInput[];
+  requestId: string;
+  idempotencyFingerprint: string;
+  createdBy?: string | null;
+  initiatedByKeyId?: string | null;
+}
+
+/**
+ * request_id for leg `index` of a withdrawal group. Leg 0 carries the caller's
+ * raw Idempotency-Key — the replay anchor under 0059's (org, request_id)
+ * unique. Later legs derive theirs with a NEWLINE separator, which a legal key
+ * ([\x20-\x7e], middleware/idempotency-key.ts) can never contain, so a derived
+ * id can never collide with any caller's real key.
+ */
+export function vaultWithdrawalLegRequestId(requestId: string, legIndex: number): string {
+  return legIndex === 0 ? requestId : `${requestId}\nleg:${legIndex}`;
 }
 
 export interface CreateCustodialMovementInput {
@@ -486,6 +584,9 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
     request_id: row.request_id as string,
     idempotency_fingerprint: row.idempotency_fingerprint as string,
     provider_data: (row.provider_data ?? {}) as Record<string, unknown>,
+    leg_group_id: (row.leg_group_id ?? null) as string | null,
+    leg_index: (row.leg_index ?? null) as number | null,
+    leg_count: (row.leg_count ?? null) as number | null,
     created_by: row.created_by as string | null,
     initiated_by_key_id: row.initiated_by_key_id as string | null,
     created_at: row.created_at as string,
@@ -543,9 +644,11 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       return row ? mapMovementRow(row) : null;
     },
 
-    async listVaultDeposits(params) {
+    async listVaultMovements(params) {
       if (params.custodyWalletIds.length === 0) {
-        throw new Error("listVaultDeposits requires at least one project-scoped custody wallet id");
+        throw new Error(
+          "listVaultMovements requires at least one project-scoped custody wallet id"
+        );
       }
       const beforeClause = params.before ? "AND (created_at, id) < (?, ?)" : "";
       const beforeValues = params.before ? [params.before.createdAt, params.before.id] : [];
@@ -560,13 +663,13 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .prepare(
           // An EXACT project match. `project_id` is nullable only through
           // ON DELETE SET NULL, so a null means the project was deleted — and
-          // accepting it here would expose that project's deposits to every
+          // accepting it here would expose that project's movements to every
           // sibling project sharing an organization-level custody wallet.
           `SELECT * FROM earn_movements
              WHERE organization_id = ?
                AND environment = ?
                AND execution_model = 'vault_direct'
-               AND direction = 'deposit'
+               AND direction = ?
                AND custody_wallet_id = ANY (?::text[])
                AND project_id = ?
                ${settledClause}
@@ -577,6 +680,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .bind(
           params.organizationId,
           params.environment,
+          params.direction,
           params.custodyWalletIds,
           params.projectId,
           ...settledValues,
@@ -586,6 +690,18 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .all<Record<string, unknown>>();
       const rows = (result.results ?? []).map(mapMovementRow);
       return { rows: rows.slice(0, params.limit), hasMore: rows.length > params.limit };
+    },
+
+    async listVaultWithdrawalLegs(params) {
+      return listLegsByGroup(db, params.organizationId, params.legGroupId);
+    },
+
+    async getVaultWithdrawalLegByIndex(params) {
+      const row = await db
+        .prepare(`SELECT * FROM earn_movements WHERE leg_group_id = ? AND leg_index = ?`)
+        .bind(params.legGroupId, params.legIndex)
+        .first<Record<string, unknown>>();
+      return row ? mapMovementRow(row) : null;
     },
 
     async listCustodialMovements(params) {
@@ -859,6 +975,64 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         }
 
         return { position: claimed, movement: inserted, replayed: false };
+      });
+    },
+
+    async createSignedVaultWithdrawalIntent(input) {
+      if (input.legs.length === 0) {
+        throw new Error("A vault withdrawal intent needs at least one signed leg");
+      }
+      return db.transaction(async (executor) => {
+        const transaction = asTransactionalClient(executor);
+
+        const resolveReplay = async () => {
+          const prior = await findVaultMovementByRequest(
+            transaction,
+            input.organizationId,
+            input.requestId
+          );
+          if (!prior) return null;
+          assertMovementIsOwnReplay(prior, input);
+          if (!prior.leg_group_id) {
+            // A matching fingerprint on a legless row should be unreachable
+            // (the fingerprint scopes deposit and withdrawal apart), so a hit
+            // here is a corrupt anchor, not a replay to serve.
+            throw conflict("Idempotency key already used with different request payload");
+          }
+          return {
+            position: await requireMovementPosition(transaction, prior),
+            movements: await listLegsByGroup(transaction, input.organizationId, prior.leg_group_id),
+            replayed: true,
+          };
+        };
+
+        const prior = await resolveReplay();
+        if (prior) return prior;
+
+        const legGroupId = generateEarnMovementGroupId();
+        const first = await insertVaultWithdrawalLeg(transaction, input, legGroupId, 0);
+        if (!first) {
+          // A concurrent identical request committed after the preflight; its
+          // signed legs — not ours — are the ones that may be broadcast.
+          const winner = await resolveReplay();
+          if (!winner) throw new Error("Failed to resolve concurrent earn vault withdrawal");
+          return winner;
+        }
+        const movements = [first];
+        for (let legIndex = 1; legIndex < input.legs.length; legIndex += 1) {
+          const inserted = await insertVaultWithdrawalLeg(transaction, input, legGroupId, legIndex);
+          if (!inserted) {
+            // Unreachable while derived leg ids cannot collide (newline rule);
+            // loud because a missing leg row is a leg the sweep cannot resume.
+            throw new Error(`Failed to record earn vault withdrawal leg ${legIndex}`);
+          }
+          movements.push(inserted);
+        }
+        return {
+          position: await requireMovementPosition(transaction, first),
+          movements,
+          replayed: false,
+        };
       });
     },
 
@@ -1139,6 +1313,87 @@ function assertVaultTransitionMetadata(input: AdvanceVaultMovementInput): void {
   ) {
     throw new Error("sharesOut must be a positive unsigned decimal with at most 128 characters");
   }
+}
+
+async function listLegsByGroup(
+  db: AppDb,
+  organizationId: string,
+  legGroupId: string
+): Promise<EarnMovementRow[]> {
+  const result = await db
+    .prepare(
+      `SELECT * FROM earn_movements
+        WHERE organization_id = ? AND leg_group_id = ?
+        ORDER BY leg_index ASC`
+    )
+    .bind(organizationId, legGroupId)
+    .all<Record<string, unknown>>();
+  return (result.results ?? []).map(mapMovementRow);
+}
+
+/**
+ * One withdrawal leg, inserted `requested` with its signed outbox payload.
+ *
+ * The two composite FKs onto `earn_positions` are the claim check: a leg whose
+ * (position, organization, environment, provider, vault, wallet) tuple does not
+ * exactly match the holding fails the INSERT rather than recording money
+ * against someone else's claim. Denomination is the SHARE MINT and
+ * `amount_requested` the exact shares this leg's transaction encodes — see
+ * 0066's header for why a withdrawal is not token-denominated.
+ */
+async function insertVaultWithdrawalLeg(
+  db: AppDb,
+  input: CreateSignedVaultWithdrawalIntentInput,
+  legGroupId: string,
+  legIndex: number
+): Promise<EarnMovementRow | null> {
+  const leg = input.legs[legIndex];
+  if (!leg) throw new Error(`Earn vault withdrawal leg ${legIndex} is missing from the input`);
+  const row = await db
+    .prepare(
+      `INSERT INTO earn_movements (
+         id, organization_id, project_id, environment, provider,
+         execution_model, direction, position_id, status,
+         denomination, amount_requested,
+         custody_wallet_id, vault_address, source_address, destination_address,
+         signature, signed_transaction, last_valid_block_height,
+         request_id, idempotency_fingerprint,
+         leg_group_id, leg_index, leg_count,
+         created_by, initiated_by_key_id
+       ) VALUES (?, ?, ?, ?, ?, 'vault_direct', 'withdrawal', ?, 'requested',
+                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (organization_id, request_id) WHERE execution_model = 'vault_direct'
+       DO NOTHING
+       RETURNING *`
+    )
+    .bind(
+      generateEarnMovementId(),
+      input.organizationId,
+      input.projectId,
+      input.environment,
+      input.provider,
+      input.positionId,
+      input.shareMint,
+      leg.shares,
+      input.custodyWalletId,
+      input.vaultAddress,
+      // Money leaves the INSTRUMENT and returns to the org's own wallet — the
+      // mirror image of a deposit's source/destination.
+      input.vaultAddress,
+      input.walletAddress,
+      leg.signature,
+      leg.signedTransaction,
+      leg.lastValidBlockHeight,
+      vaultWithdrawalLegRequestId(input.requestId, legIndex),
+      input.idempotencyFingerprint,
+      legGroupId,
+      legIndex,
+      input.legs.length,
+      input.createdBy ?? null,
+      input.initiatedByKeyId ?? null
+    )
+    .first<Record<string, unknown>>();
+  return row ? mapMovementRow(row) : null;
 }
 
 async function findVaultMovementByRequest(

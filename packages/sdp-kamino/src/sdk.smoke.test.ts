@@ -127,5 +127,11 @@ describe.skipIf(!RPC_URL || !SIGNER_HEX)("Kamino plans against a live chain", ()
       kaminoClusterConfig("mainnet-beta").kvaultProgramId
     );
     expect(plan.instructions[0]?.length ?? 0).toBeGreaterThan(0);
+    // The batching contract (PRO-1702): one exact share quantity per
+    // transaction batch, decoded from the instructions themselves.
+    expect(plan.transactionShares).toHaveLength(plan.instructions.length);
+    for (const legShares of plan.transactionShares ?? []) {
+      expect(legShares).toMatch(/[1-9]/);
+    }
   });
 });

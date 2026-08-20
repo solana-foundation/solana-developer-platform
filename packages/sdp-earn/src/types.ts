@@ -374,19 +374,44 @@ export interface EarnVaultInstruction {
 }
 
 /**
+ * Bytes every plan batch must leave FREE below Solana's 1232-byte packet limit.
+ *
+ * The execution layer appends per-transaction metadata the builder cannot know —
+ * today one memo instruction binding the caller's idempotency key into the
+ * message, whose worst legal case (a 255-character key, the memo program as an
+ * extra static account, and encoding overhead) measures ≈319 bytes. A builder
+ * that sized batches to the raw packet limit would hand back transactions the
+ * API can no longer stamp, and the failure would land at compile time, far from
+ * the sizing decision. Rounded up so the reservation survives small metadata
+ * changes without every provider re-measuring.
+ */
+export const EARN_VAULT_TRANSACTION_HEADROOM_BYTES = 384;
+
+/**
  * Unsigned work for a non-custodial vault, ready for the API to compile.
  *
  * `transactions` is a list of TRANSACTION-SIZED batches, not one flat list: a
  * multi-reserve vault exit emits several instructions each carrying the vault's
  * full reserve account list and can exceed Solana's 1232-byte packet. Returning
  * batches makes that the builder's problem, where the vault's shape is known,
- * rather than the caller's at compile time.
+ * rather than the caller's at compile time. "Transaction-sized" means each
+ * batch, compiled with the plan's lookup tables and the owner as fee payer,
+ * fits `1232 - EARN_VAULT_TRANSACTION_HEADROOM_BYTES` — the reservation is the
+ * API's, for the metadata it appends per transaction.
  */
 export interface EarnVaultTransactionPlan {
   cluster: SolanaCluster;
   transactions: EarnVaultInstruction[][];
   /** Address lookup tables the caller should apply when compiling. */
   lookupTables: string[];
+  /**
+   * Exact share quantity each batch redeems, parallel to `transactions`, in
+   * SHARE-mint units. Withdrawal plans populate this — the execution layer
+   * ledgers one movement row per transaction leg, and the quantity that leg
+   * encodes is the only exact intent-time fact a withdrawal has (tokens
+   * received are decided by the chain at execution). Deposit plans omit it.
+   */
+  transactionShares?: string[];
   /**
    * Asset addresses observed from the live vault state used to build this plan.
    *

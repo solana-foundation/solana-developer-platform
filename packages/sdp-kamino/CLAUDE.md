@@ -1,8 +1,8 @@
 # @sdp/kamino — agent notes
 
-Kit-native deposit/withdraw **instruction building** for Kamino K-Vaults, plus
-the live position read. It builds unsigned plans and reads chain state; it never
-signs, never submits, never touches a database, and holds no credential —
+Kit-native deposit AND withdraw **instruction building** for Kamino K-Vaults,
+plus the live position read. It builds unsigned plans and reads chain state; it
+never signs, never submits, never touches a database, and holds no credential —
 Kamino's data surface is public. Signing and submission belong to the API, which
 owns custody and the Kora fee-payment path.
 
@@ -94,24 +94,36 @@ authorize one asset while the transaction moves another.
 transaction — not a flat list. A multi-reserve exit emits several withdraw
 instructions each carrying the vault's full reserve remaining-accounts list, and
 can exceed Solana's 1232-byte packet; Kamino publishes a per-vault lookup table
-(`SyncVaultLUTIxs`) precisely for this. Handing back a flat list would make the
-caller discover that at `compileTransaction`, far from the code that could fix it.
+(`VaultState.vaultLookupTable`) precisely for this. Handing back a flat list
+would make the caller discover that at `compileTransaction`, far from the code
+that could fix it.
 
-The unstake → withdraw → post sequence stays in ONE batch deliberately: it must
-land atomically, since unstaking without the withdraw leaves the position in a
-state nobody asked for. If that stops fitting, the fix is the lookup table, not
-splitting the batch.
+**`buildKaminoWithdrawPlan` honours this contract now** (PRO-1702), and
+`KaminoVaultDirectClient` implements `buildVaultWithdrawal`, so
+`supportsVaultWithdraw` answers true. How the exit is batched
+(`withdraw-batching.ts`, deliberately OUTSIDE the SDK firewall so it is
+unit-testable with synthetic instructions):
 
-**`buildKaminoWithdrawPlan` does NOT yet honour this contract**, and that is why
-the WITHDRAW CAPABILITY IS WITHHELD. It flattens every instruction into one
-batch and returns no lookup table, while the pinned SDK documents that a
-multi-reserve exit "might have to be split in multiple transactions".
-`KaminoVaultDirectClient` therefore does not implement `buildVaultWithdrawal`,
-`supportsVaultWithdraw` answers false, and the builder is not re-exported from
-`index.ts` — its only callers are this package's smoke tests. Nothing is
-fund-trapped by that: the shares sit in the org's own custody wallet and
-Kamino's UI can redeem them. Implementing the method is the LAST step of the
-batching work, not the first (`client.test.ts` pins this).
+- The vault's published lookup table is loaded best-effort (`lookup-table.ts`,
+  via kit's `fetchAddressesForLookupTables`) — an exit must never fail for want
+  of a compression aid, so an unset/unreadable table just means the plan splits
+  earlier. When used, its ADDRESS travels on `lookupTables` so the API compiles
+  with the same compression the sizing assumed.
+- Batches are compile-measured against `1232 −
+  EARN_VAULT_TRANSACTION_HEADROOM_BYTES` (`@sdp/earn` — the API's reservation
+  for the request memo it appends per transaction), with kit's own compiler so
+  a batch measured here cannot compile to a different size there.
+- **Every batch must redeem shares.** This is "an unstake must never land
+  without its withdraw" in its strong form: a boundary that would strand
+  unstake/ATA/cleanup work in a transaction that redeems nothing REFUSES the
+  whole plan (`TRANSACTION TOO LARGE` class errors), because a leg that moves
+  nothing is also a leg the ledger cannot honestly record.
+- **Per-batch share quantities are decoded from the instruction bytes**
+  (`sharesAmount: u64` behind the `withdraw`/`withdraw_from_available` anchor
+  discriminators — pinned to their sha256 derivation by test) and returned as
+  `transactionShares`; the decoded total must equal the accepted request
+  exactly or the plan is refused. The API ledgers one movement row per leg
+  with exactly these quantities.
 
 ## Known gaps (deliberate, and owed to the caller)
 
@@ -125,9 +137,12 @@ batching work, not the first (`client.test.ts` pins this).
   the live exchange rate. Passing `"0"` would be the appearance of slippage
   protection without the substance, so the caller computes a floor or passes
   nothing. The API requires one in PRODUCTION for exactly that reason.
-- **`lookupTables` is always empty today.** The field exists so callers compile
-  against the right shape; populating it from Kamino's per-vault LUT is the fix
-  when a plan stops fitting.
+- **Withdrawals do not unstake farm-staked shares.** The withdraw builder
+  passes no farm state, matching the deposit builder (which never stakes), so
+  an SDP-managed position has nothing staked and nothing to unstake. Shares
+  staked OUTSIDE SDP must be unstaked outside SDP before they can exit through
+  it — the batching still handles unstake instructions generically for the day
+  farm support arrives.
 
 ## Amounts are checked against the MINT, not just parsed
 

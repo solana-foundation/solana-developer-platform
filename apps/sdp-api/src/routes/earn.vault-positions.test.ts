@@ -497,7 +497,16 @@ describe("GET /v1/earn/vault-deposits/:movementId", () => {
   it("refuses a withdrawal from the deposit path", async () => {
     const created = await createPosition({ providerReference: "vault_read_direction" });
     await getDb(env)
-      .prepare("UPDATE earn_movements SET direction = 'withdrawal' WHERE id = ?")
+      .prepare(
+        // 0066's leg-shape check makes a vault withdrawal carry its leg
+        // identity, so flipping the direction for this fixture stamps one.
+        `UPDATE earn_movements
+            SET direction = 'withdrawal',
+                leg_group_id = 'earn_movement_group_' || id,
+                leg_index = 0,
+                leg_count = 1
+          WHERE id = ?`
+      )
       .bind(created.movement.id)
       .run();
 
@@ -602,7 +611,16 @@ describe("GET /v1/earn/vault-deposits", () => {
     const deposit = await createPosition({ providerReference: "vault_list_deposit" });
     const withdrawal = await createPosition({ providerReference: "vault_list_withdrawal" });
     await getDb(env)
-      .prepare("UPDATE earn_movements SET direction = 'withdrawal' WHERE id = ?")
+      .prepare(
+        // 0066's leg-shape check makes a vault withdrawal carry its leg
+        // identity, so flipping the direction for this fixture stamps one.
+        `UPDATE earn_movements
+            SET direction = 'withdrawal',
+                leg_group_id = 'earn_movement_group_' || id,
+                leg_index = 0,
+                leg_count = 1
+          WHERE id = ?`
+      )
       .bind(withdrawal.movement.id)
       .run();
 

@@ -1,6 +1,10 @@
-import { supportsVaultDirect } from "@sdp/earn/capabilities";
+import { supportsVaultDirect, supportsVaultWithdraw } from "@sdp/earn/capabilities";
 import { providerNotConfigured } from "@sdp/earn/errors";
-import type { EarnVaultDirectProvider, EarnVaultProvider } from "@sdp/earn/types";
+import type {
+  EarnVaultDirectProvider,
+  EarnVaultProvider,
+  EarnVaultWithdrawProvider,
+} from "@sdp/earn/types";
 import { assertNotPortfolioProvider, KaminoVaultDirectClient } from "@sdp/kamino";
 import { resolveDefaultSolanaRpcUrl } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
@@ -191,4 +195,21 @@ export function resolveVaultDirectClient(
   const client = resolveEarnExecutionClient(env, provider, deadline);
   if (!client) return null;
   return supportsVaultDirect(client) ? client : null;
+}
+
+/**
+ * The executing client narrowed to the vault-WITHDRAW capability, or null.
+ *
+ * Null means "SDP cannot build this provider's exit" (501 at the route) — a
+ * statement about our plumbing, never a permission gate: ADR 0002 forbids
+ * money-out inheriting any money-in gate, and this narrows on capability alone.
+ */
+export function resolveVaultWithdrawClient(
+  env: Env,
+  provider: string,
+  deadline: VaultDeadline
+): EarnVaultWithdrawProvider | null {
+  const client = resolveEarnExecutionClient(env, provider, deadline);
+  if (!client) return null;
+  return supportsVaultWithdraw(client) ? client : null;
 }

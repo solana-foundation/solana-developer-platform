@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   refreshWallets: vi.fn(),
   withdrawalsByProgram: {} as Record<string, Array<{ status: string; withdrawalRef?: string }>>,
   vaultDeposits: [] as Array<{ movementId: string; status: string }>,
+  vaultWithdrawals: [] as Array<{ movementId: string; status: string }>,
 }));
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -171,10 +172,30 @@ vi.mock("../earn/earn-program-data", () => ({
     isLoading: false,
     refresh: vi.fn(),
   }),
-  // The real predicate, not a stub: the recovery filter and the tracker's stop
-  // condition must agree, and a stub here would let them drift silently.
+  useEarnVaultWithdrawals: () => ({
+    withdrawals: mocks.vaultWithdrawals,
+    error: undefined,
+    isLoading: false,
+    refresh: vi.fn(),
+  }),
+  // The real predicates, not stubs: each recovery filter and its tracker's
+  // stop condition must agree, and a stub here would let them drift silently.
+  // Note the two vocabularies differ on purpose: the deposit DTO is legacy
+  // (confirmed is terminal), the withdrawal DTO is the unified ledger's
+  // (confirmed is still in flight; finalized is terminal).
   isEarnVaultDepositInFlight: (deposit: { status: string }) =>
     deposit.status !== "confirmed" && deposit.status !== "failed",
+  isEarnVaultWithdrawalLegInFlight: (leg: { status: string }) =>
+    leg.status !== "finalized" && leg.status !== "failed",
+}));
+
+vi.mock("../earn/earn-vault-withdraw-modal", () => ({
+  EarnVaultWithdrawModal: ({ position }: { position: { label: string } }) => (
+    <div role="dialog">Withdraw from {position.label}</div>
+  ),
+  EarnVaultWithdrawalOutcomeTracker: ({ movementId }: { movementId: string }) => (
+    <output data-testid="vault-withdrawal-outcome-tracker">{movementId}</output>
+  ),
 }));
 
 vi.mock("../earn/earn-vault-deposit-modal", () => ({
@@ -216,6 +237,7 @@ beforeEach(() => {
   mocks.programProvider = "ground";
   mocks.withdrawalsByProgram = {};
   mocks.vaultDeposits = [];
+  mocks.vaultWithdrawals = [];
   vi.clearAllMocks();
 });
 
@@ -242,10 +264,10 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(vaultStrategyRow.textContent).toContain("6.2%");
     expect(screen.getByText("Retired provider vault")).toBeTruthy();
 
+    // The exit verb is LIVE (PRO-1702) and takes no availability gate: money
+    // out beats money off, so it stays enabled even where deposits are not.
     const vaultWithdraw = within(vaultPositionRow).getByRole("button", { name: "Withdraw" });
-    expect((vaultWithdraw as HTMLButtonElement).disabled).toBe(true);
-    expect(vaultWithdraw.getAttribute("title")).toContain("not available through SDP yet");
-    expect(screen.getByText("Vault withdrawals are not available through SDP yet.")).toBeTruthy();
+    expect((vaultWithdraw as HTMLButtonElement).disabled).toBe(false);
 
     await user.click(within(vaultStrategyRow).getByRole("button", { name: "Deposit" }));
     expect(screen.getByRole("dialog").textContent).toBe("Deposit into Kamino USDC Vault");
@@ -253,6 +275,37 @@ describe("TreasurySolutionsWorkspace", () => {
     const legacyRow = screen.getByText("Legacy treasury program").closest("tr");
     if (!legacyRow) throw new Error("Expected existing Ground program row");
     expect(legacyRow.textContent).toContain("900.50 USD");
+  });
+
+  it("opens the vault exit modal from a position row", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    const vaultPositionRow = screen
+      .getAllByText("Kamino USDC Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row?.textContent?.includes("119.5"));
+    if (!vaultPositionRow) throw new Error("Expected vault position row");
+
+    await user.click(within(vaultPositionRow).getByRole("button", { name: "Withdraw" }));
+    expect(screen.getByRole("dialog").textContent).toBe("Withdraw from Kamino USDC Vault");
+  });
+
+  it("keeps the vault exit verb live in production, where deposits are closed", () => {
+    // ADR 0002: the environment fail-close guards the way IN only. A position
+    // that exists in production must keep its way out.
+    mocks.environment = "production";
+    renderWorkspace();
+
+    const vaultPositionRow = screen
+      .getAllByText("Kamino USDC Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row?.textContent?.includes("119.5"));
+    if (!vaultPositionRow) throw new Error("Expected vault position row");
+    expect(
+      (within(vaultPositionRow).getByRole("button", { name: "Withdraw" }) as HTMLButtonElement)
+        .disabled
+    ).toBe(false);
   });
 
   it("keeps vault deposits disabled in production", () => {
@@ -267,7 +320,7 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(
       (within(row).getByRole("button", { name: "Deposit" }) as HTMLButtonElement).disabled
     ).toBe(true);
-    expect(document.body.textContent).toContain("new vault deposits stay disabled");
+    expect(document.body.textContent).toContain("intentionally closed in production");
   });
 
   it("fails closed when a persisted program provider has no Solana withdrawal lane", () => {
@@ -346,6 +399,38 @@ describe("TreasurySolutionsWorkspace", () => {
     // customer was told about the first time round.
     expect(document.body.textContent).not.toContain("earn_vault_movement_confirmed");
     expect(document.body.textContent).not.toContain("earn_vault_movement_failed");
+  });
+
+  it("recovers every in-flight vault withdrawal leg from the server ledger", async () => {
+    mocks.vaultWithdrawals = [
+      { movementId: "earn_movement_leg_requested", status: "requested" },
+      { movementId: "earn_movement_leg_submitted", status: "submitted" },
+      // The unified ledger's vocabulary: `confirmed` is optimistic commitment,
+      // NOT terminal — a fork can still drop it, so it stays watched.
+      { movementId: "earn_movement_leg_confirmed", status: "confirmed" },
+      // A repeated ledger result must still mount only one keyed tracker.
+      { movementId: "earn_movement_leg_confirmed", status: "confirmed" },
+      { movementId: "earn_movement_leg_finalized", status: "finalized" },
+      { movementId: "earn_movement_leg_failed", status: "failed" },
+    ];
+
+    renderWorkspace();
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId("vault-withdrawal-outcome-tracker")).toHaveLength(3);
+    });
+    expect(
+      screen
+        .getAllByTestId("vault-withdrawal-outcome-tracker")
+        .map((tracker) => tracker.textContent)
+        .sort()
+    ).toEqual([
+      "earn_movement_leg_confirmed",
+      "earn_movement_leg_requested",
+      "earn_movement_leg_submitted",
+    ]);
+    expect(document.body.textContent).not.toContain("earn_movement_leg_finalized");
+    expect(document.body.textContent).not.toContain("earn_movement_leg_failed");
   });
 
   it("mounts no deposit tracker when the ledger reports nothing in flight", async () => {

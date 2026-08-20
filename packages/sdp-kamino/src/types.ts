@@ -50,6 +50,13 @@ export interface KaminoInstructionPlan {
    * publishes a per-vault LUT precisely because these account lists are large.
    */
   lookupTables: readonly Address[];
+  /**
+   * Exact shares each batch redeems, parallel to `instructions`, in share-mint
+   * units — decoded from the instructions themselves, never estimated. Present
+   * on withdrawal plans only: the API ledgers one movement row per transaction
+   * leg, and this is the quantity that leg actually encodes.
+   */
+  transactionShares?: readonly string[];
   /** Asset mints observed from the same live vault state used to build. */
   assetIdentity: KaminoVaultAssetIdentity;
   /** What the instructions above actually encode. See `KaminoAcceptedAmounts`. */

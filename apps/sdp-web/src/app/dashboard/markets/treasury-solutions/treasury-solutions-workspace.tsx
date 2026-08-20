@@ -57,17 +57,23 @@ import {
 import {
   type EarnProgram,
   isEarnVaultDepositInFlight,
+  isEarnVaultWithdrawalLegInFlight,
   useEarnPrograms,
   useEarnProgramWithdrawals,
   useEarnStrategies,
   useEarnVaultDeposits,
   useEarnVaultPositions,
+  useEarnVaultWithdrawals,
 } from "../earn/earn-program-data";
 import { type EarnProviderAccess, earnVaultDepositAvailability } from "../earn/earn-surfacing";
 import {
   EarnVaultDepositModal,
   EarnVaultDepositOutcomeTracker,
 } from "../earn/earn-vault-deposit-modal";
+import {
+  EarnVaultWithdrawalOutcomeTracker,
+  EarnVaultWithdrawModal,
+} from "../earn/earn-vault-withdraw-modal";
 import { EarnWithdrawalOutcomeTracker, EarnWithdrawModal } from "../earn/earn-withdraw-modal";
 
 function WalletBalanceList({ wallet }: { wallet: EarnFundingWallet }) {
@@ -290,11 +296,13 @@ function StrategyTable({
 function ActiveVaultPositionsCard({
   error,
   isLoading,
+  onWithdraw,
   positions,
   wallets,
 }: {
   error: unknown;
   isLoading: boolean;
+  onWithdraw: (position: EarnVaultPosition) => void;
   positions: readonly EarnVaultPosition[] | undefined;
   wallets: readonly EarnFundingWallet[];
 }) {
@@ -382,16 +390,18 @@ function ActiveVaultPositionsCard({
                         </TableCell>
                         <TableCell align="right">
                           {/*
-                           * There is no vault-withdraw HTTP route or provider capability yet.
-                           * Keep the verb visible so the missing exit is explicit, but never
-                           * attach a client-only balance mutation or expose a raw vault address.
+                           * The exit route (PRO-1702). Deliberately NOT gated on
+                           * availability, surfacing, or environment — money out
+                           * beats money off (ADR 0002), so the verb stays live
+                           * wherever a position exists. A provider whose exit
+                           * SDP cannot build yet answers 501 with a clear error
+                           * inside the modal rather than a silently dead button.
                            */}
                           <Button
-                            aria-describedby="earn-vault-withdraw-unavailable-note"
-                            disabled
+                            data-earn-vault-withdraw-focus-fallback={position.id}
                             iconLeft={<ArrowUpFromLineIcon />}
+                            onClick={() => onWithdraw(position)}
                             size="sm"
-                            title={t("DashboardMarkets.treasury.vaultWithdrawUnavailable")}
                             type="button"
                             variant="secondary"
                           >
@@ -403,13 +413,6 @@ function ActiveVaultPositionsCard({
                   })}
                 </TableBody>
               </Table>
-            </div>
-            <div
-              className="flex items-start gap-2 bg-fill-subtle px-6 py-3 text-xs leading-5 text-secondary"
-              id="earn-vault-withdraw-unavailable-note"
-            >
-              <InfoIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-              <p>{t("DashboardMarkets.treasury.vaultWithdrawUnavailable")}</p>
             </div>
           </>
         )}
@@ -606,6 +609,31 @@ function EarnVaultDepositLedgerRecovery({
   return null;
 }
 
+/**
+ * The withdrawal-leg mirror of the deposit recovery above, over the unified
+ * ledger's vocabulary (terminal = finalized | failed). Legs are watched
+ * individually — a multi-transaction exit settles leg by leg, and the sweep
+ * finishes legs the submitting request could not, so this is also how an exit
+ * interrupted by a reload keeps announcing its outcome.
+ */
+function EarnVaultWithdrawalLedgerRecovery({
+  onRecover,
+}: {
+  onRecover: (movementIds: readonly string[]) => void;
+}) {
+  const { withdrawals } = useEarnVaultWithdrawals();
+
+  useEffect(() => {
+    if (!withdrawals) return;
+    const inFlight = withdrawals
+      .filter(isEarnVaultWithdrawalLegInFlight)
+      .map((leg) => leg.movementId);
+    if (inFlight.length > 0) onRecover(inFlight);
+  }, [withdrawals, onRecover]);
+
+  return null;
+}
+
 export function TreasurySolutionsWorkspace({
   providerAccess,
 }: {
@@ -639,10 +667,13 @@ export function TreasurySolutionsWorkspace({
   } = useEarnPrograms();
   const [depositStrategy, setDepositStrategy] = useState<EarnStrategy | null>(null);
   const [withdrawProgram, setWithdrawProgram] = useState<EarnProgram | null>(null);
+  const [withdrawPosition, setWithdrawPosition] = useState<EarnVaultPosition | null>(null);
   const [withdrawalWatches, setWithdrawalWatches] = useState<readonly EarnWithdrawalWatch[]>([]);
   const settledWithdrawalKeys = useRef(new Set<string>());
   const [vaultDepositWatches, setVaultDepositWatches] = useState<readonly string[]>([]);
   const settledVaultDepositIds = useRef(new Set<string>());
+  const [vaultWithdrawalWatches, setVaultWithdrawalWatches] = useState<readonly string[]>([]);
+  const settledVaultWithdrawalIds = useRef(new Set<string>());
 
   // Pure updater: the recovery list re-asserts every 30s, so this runs often
   // and must not have side effects (StrictMode double-invokes it in dev).
@@ -655,6 +686,21 @@ export function TreasurySolutionsWorkspace({
         // without a tombstone a just-settled deposit would be resurrected on
         // the next pass and announced again.
         if (known.has(movementId) || settledVaultDepositIds.current.has(movementId)) return false;
+        known.add(movementId);
+        return true;
+      });
+      return additions.length === 0 ? current : [...current, ...additions];
+    });
+  }, []);
+
+  // Same pure-updater and tombstone rules as the deposit watches above.
+  const addVaultWithdrawalWatches = useCallback((incoming: readonly string[]) => {
+    setVaultWithdrawalWatches((current) => {
+      const known = new Set(current);
+      const additions = incoming.filter((movementId) => {
+        if (known.has(movementId) || settledVaultWithdrawalIds.current.has(movementId)) {
+          return false;
+        }
         known.add(movementId);
         return true;
       });
@@ -705,6 +751,7 @@ export function TreasurySolutionsWorkspace({
         <ActiveVaultPositionsCard
           error={positionsError}
           isLoading={positionsLoading}
+          onWithdraw={setWithdrawPosition}
           positions={positions}
           wallets={activeWallets}
         />
@@ -816,6 +863,23 @@ export function TreasurySolutionsWorkspace({
         />
       ) : null}
 
+      {withdrawPosition ? (
+        <EarnVaultWithdrawModal
+          environment={sdpEnvironment}
+          onClose={() => setWithdrawPosition(null)}
+          onWithdrawn={(withdrawal) => {
+            // Watch every LEG: a multi-transaction exit settles leg by leg, and
+            // the sweep drives legs the submitting request could not. Balances
+            // refresh now for the optimistic view and again per leg settlement.
+            addVaultWithdrawalWatches(withdrawal.movements.map((leg) => leg.movementId));
+            refreshPositions();
+            refreshWallets();
+          }}
+          position={withdrawPosition}
+          projectId={selectedProjectId}
+        />
+      ) : null}
+
       {programs.map((program) => (
         <EarnWithdrawalLedgerRecovery
           key={`withdrawal-ledger:${program.id}`}
@@ -825,6 +889,24 @@ export function TreasurySolutionsWorkspace({
       ))}
 
       <EarnVaultDepositLedgerRecovery onRecover={addVaultDepositWatches} />
+      <EarnVaultWithdrawalLedgerRecovery onRecover={addVaultWithdrawalWatches} />
+
+      {vaultWithdrawalWatches.map((movementId) => (
+        <EarnVaultWithdrawalOutcomeTracker
+          key={`vault-withdrawal:${movementId}`}
+          movementId={movementId}
+          onSettled={() => {
+            settledVaultWithdrawalIds.current.add(movementId);
+            // Only now did the exit change what the org holds: the shares are
+            // burned and the proceeds sit in the custody wallet.
+            refreshPositions();
+            refreshWallets();
+            setVaultWithdrawalWatches((current) =>
+              current.filter((candidate) => candidate !== movementId)
+            );
+          }}
+        />
+      ))}
 
       {vaultDepositWatches.map((movementId) => (
         <EarnVaultDepositOutcomeTracker

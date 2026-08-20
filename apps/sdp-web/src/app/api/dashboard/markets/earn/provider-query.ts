@@ -165,6 +165,70 @@ export function vaultDepositsProxyQuery(request: Request): ProxyQueryValidation 
 }
 
 /**
+ * Strict allowlist for the keyset-paginated withdrawal-leg read — the deposits
+ * reader's mirror, sharing its exact posture, parameter set, and the
+ * idempotency-key shape rule (the API's `[\x20-\x7e]{1,255}`).
+ */
+export function vaultWithdrawalsProxyQuery(request: Request): ProxyQueryValidation {
+  const incoming = new URL(request.url).searchParams;
+  const allowed = new Set(["limit", "before", "requestId", "settled"]);
+
+  for (const key of incoming.keys()) {
+    if (!allowed.has(key)) {
+      return { ok: false, message: `Unsupported vault withdrawals query parameter: ${key}` };
+    }
+  }
+
+  for (const key of allowed) {
+    if (incoming.getAll(key).length > 1) {
+      return { ok: false, message: `Vault withdrawals query parameter must be unique: ${key}` };
+    }
+  }
+
+  const query = new URLSearchParams();
+  const limit = incoming.get("limit");
+  if (limit !== null) {
+    if (!/^(?:[1-9]|[1-9]\d|100)$/.test(limit)) {
+      return { ok: false, message: "Vault withdrawals limit must be an integer from 1 to 100" };
+    }
+    query.set("limit", limit);
+  }
+
+  const before = incoming.get("before");
+  if (before !== null) {
+    if (
+      before.length === 0 ||
+      before.length > MAX_CURSOR_LENGTH ||
+      !/^[A-Za-z0-9_-]+$/.test(before)
+    ) {
+      return { ok: false, message: "Vault withdrawals cursor is invalid" };
+    }
+    query.set("before", before);
+  }
+
+  const requestId = incoming.get("requestId");
+  if (requestId !== null) {
+    if (!/^[\x20-\x7e]{1,255}$/.test(requestId)) {
+      return {
+        ok: false,
+        message: "Vault withdrawals requestId must be printable ASCII, 1-255 characters",
+      };
+    }
+    query.set("requestId", requestId);
+  }
+
+  const settled = incoming.get("settled");
+  if (settled !== null) {
+    if (settled !== "true" && settled !== "false") {
+      return { ok: false, message: "Vault withdrawals settled filter must be true or false" };
+    }
+    query.set("settled", settled);
+  }
+
+  return { ok: true, query: query.size > 0 ? `?${query}` : "" };
+}
+
+/**
  * Strict allowlist for the cross-provider movement feed, same posture as the two
  * readers above: consumed only by our typed client, so an unknown or duplicated
  * parameter is a caller bug and returns 400 rather than silently changing the

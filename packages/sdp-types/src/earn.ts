@@ -290,6 +290,80 @@ export interface EarnVaultDepositsPage {
   nextCursor: string | null;
 }
 
+/** JSON body for POST /v1/earn/vault-withdrawals. Idempotency is header-only. */
+export interface EarnVaultWithdrawalRequest {
+  /** The vault position being exited — from GET /v1/earn/vault-positions. */
+  positionId: string;
+  /** Shares to redeem, decimal string in share units; the position's `shares` is the ceiling. */
+  shares: string;
+}
+
+/**
+ * One recorded withdrawal transaction LEG.
+ *
+ * A vault exit may need several transactions (one withdraw instruction per
+ * reserve the vault draws from), and each is recorded, broadcast and settled
+ * individually — strictly in `legIndex` order, later legs only after earlier
+ * ones commit. A single-transaction withdrawal is simply a group of one.
+ *
+ * This surface speaks the LEDGER's own vocabulary (`requested` … `finalized`),
+ * unlike the older deposit DTO's legacy mapping: `confirmed` here is optimistic
+ * commitment and NOT terminal — `finalized` is settlement.
+ *
+ * `shares` is the exact quantity this leg's transaction encodes, in SHARE
+ * units. The tokens received are decided by the chain at execution and are
+ * deliberately not stated here — a number SDP did not observe is worse than
+ * none. Every field comes off the movement row itself, no catalogue and no
+ * position join (the same exit-safety rule as the deposit record); the
+ * position named by `positionId` carries the deposit-token mint for display.
+ */
+export interface EarnVaultWithdrawalLeg {
+  movementId: string;
+  positionId: string;
+  provider: string;
+  /** The vault's on-chain address — the instrument, not the payout. */
+  providerReference: string;
+  groupId: string;
+  legIndex: number;
+  legCount: number;
+  status: EarnVaultDirectMovementStatus;
+  signature: string;
+  /** Exact shares this leg redeems, decimal string, share units. */
+  shares: string;
+  shareMint: string;
+  failureReason: string | null;
+  createdAt: string;
+  /** Optimistic chain commitment; set once observed. */
+  confirmedAt: string | null;
+  /** Irreversible settlement (finalization); set once observed. */
+  settledAt: string | null;
+}
+
+/**
+ * Durable result of POST /v1/earn/vault-withdrawals (fresh or idempotently
+ * replayed): every leg of the group, submission order. The withdrawal as a
+ * whole has no single status by design — legs settle independently, and the
+ * honest aggregate is the legs themselves.
+ */
+export interface EarnVaultWithdrawal {
+  positionId: string;
+  groupId: string;
+  movements: EarnVaultWithdrawalLeg[];
+  replayed: boolean;
+}
+
+/** Response body of GET /v1/earn/vault-withdrawals/:movementId. */
+export interface EarnVaultWithdrawalResponse {
+  withdrawal: EarnVaultWithdrawalLeg;
+}
+
+/** Response body of GET /v1/earn/vault-withdrawals — recorded legs, newest first. */
+export interface EarnVaultWithdrawalsPage {
+  withdrawals: EarnVaultWithdrawalLeg[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
 /**
  * Portfolio wallets — provider-neutral wire contracts.
  *

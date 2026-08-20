@@ -24,14 +24,12 @@ import {
 } from "./execution-registry";
 import { createVaultDeadline } from "./vault-deadline";
 import {
+  appendVaultRequestMemo,
   broadcastVaultTransaction,
   type SignedVaultTransaction,
   signVaultPlan,
   simulateVaultPlan,
 } from "./vault-execution.service";
-
-// biome-ignore lint/security/noSecrets: public Solana Memo program address.
-const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 
 /**
  * Deposit ordering is deliberately `build → simulate → sign → record → send`.
@@ -134,21 +132,6 @@ function requireAcceptedPlan(
   return { minSharesOut };
 }
 
-function appendRequestMemo(
-  plan: EarnVaultTransactionPlan,
-  requestId: string
-): EarnVaultTransactionPlan {
-  const memo = {
-    programAddress: MEMO_PROGRAM_ADDRESS,
-    accounts: [],
-    data: Buffer.from(`sdp:earn:vault-deposit:${requestId}`, "utf8").toString("base64"),
-  };
-  return {
-    ...plan,
-    transactions: plan.transactions.map((batch) => [...batch, memo]),
-  };
-}
-
 export async function depositIntoVault(
   env: Env,
   input: VaultDepositInput,
@@ -217,11 +200,7 @@ export async function depositIntoVault(
       amount: input.amount,
       minSharesOut: input.minSharesOut,
     });
-    // Deterministic Solana signing plus a shared recent blockhash would make
-    // otherwise independent requests produce the same signature. Bind the
-    // caller key into the message so each ledger intent has a unique on-chain
-    // identity while retries of the same key remain byte-for-byte equivalent.
-    plan = appendRequestMemo(built, input.requestId);
+    plan = appendVaultRequestMemo(built, "vault-deposit", input.requestId);
   } catch (error) {
     getLogger().error({ error }, "vault deposit: build failed before signing");
     if (error instanceof SdpKaminoError && error.code === "INVALID_AMOUNT") {

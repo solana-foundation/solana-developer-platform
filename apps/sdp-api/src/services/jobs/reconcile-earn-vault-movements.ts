@@ -187,6 +187,43 @@ async function reconcileMovement(
   }
   if (chain.currentBlockHeight === null) return;
 
+  // WITHDRAWAL LEG ORDERING (0066). A later leg's instructions may consume
+  // state its predecessor creates, so a leg is (re)broadcast only after the
+  // leg before it reached commitment — the same rule the request-path
+  // submitter follows, applied here so a resumed group cannot land out of
+  // order. A failed predecessor fails this leg too, because its instructions
+  // were built against state that will now never exist; the shares it would
+  // have redeemed remain in the wallet, immediately re-withdrawable. This gate
+  // deliberately runs AFTER the expiry check — an expired leg can never land,
+  // whatever its predecessor does.
+  if (movement.leg_group_id !== null && movement.leg_index !== null && movement.leg_index > 0) {
+    const predecessor = await ledger.getVaultWithdrawalLegByIndex({
+      legGroupId: movement.leg_group_id,
+      legIndex: movement.leg_index - 1,
+    });
+    if (!predecessor) {
+      // 0066's leg-shape check and the group insert's atomicity make this
+      // unreachable; loud, because broadcasting without the gate could land a
+      // leg before its dependency.
+      throw new Error(
+        `Earn vault withdrawal leg ${movement.id} has no predecessor row to order against`
+      );
+    }
+    if (predecessor.status === "failed") {
+      await failMovement(
+        ledger,
+        movement,
+        `Predecessor withdrawal leg ${predecessor.signature} failed`
+      );
+      return;
+    }
+    if (predecessor.status !== "confirmed" && predecessor.status !== "finalized") {
+      // Not this leg's turn yet. Leave it recorded; a later tick reconsiders
+      // once the predecessor commits, fails, or expires.
+      return;
+    }
+  }
+
   await broadcastVaultTransaction(env, {
     cluster: chain.cluster,
     deadline: createVaultDeadline(),

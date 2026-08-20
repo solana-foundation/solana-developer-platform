@@ -550,19 +550,64 @@ recorded signature, confirms landed transactions, rebroadcasts the recorded
 signed bytes while the blockhash remains valid, and marks an expired, unlanded
 movement failed. Never rebuild a transaction during recovery.
 
-**Not built yet:** the withdraw counterpart. The dashboard now hydrates the
-durable vault-position record and shows it with a disabled exit action.
+### Vault withdrawals — the exit half (PRO-1702)
+
+- `POST /vault-withdrawals` — **build + simulate + sign ALL legs + record ALL
+  legs + broadcast in order**. Body `{positionId, shares}` and a required
+  `Idempotency-Key` header (body `requestId` rejected, same as deposits).
+  Registered `requirePermissions("earn:write", "wallets:read")` → `policyGate`
+  (extractor `extractEarnVaultWithdrawalPolicyCandidate`; family `program`,
+  type `earn_vault_withdrawal`; asset = the SHARE mint, the token actually
+  leaving the wallet) → handler. Registered as the second `earn` entry in
+  `value-moving-conformance.node.test.ts`.
+  - **The caller names its own POSITION, never a strategy and never a raw
+    vault address.** The position row carries the vault, the signing wallet
+    and both mints, so the exit has NO catalogue dependency — a delisted vault
+    stays exitable. `expectedAssetIdentity` is the position's stored mints.
+  - **Gates: 404 position scoping (org+environment+kind), wallet binding with
+    `earn:write`, wallet policy — and nothing else.** No surfacing, no
+    entitlement, no availability, no admission, no environment capability
+    (`isVaultDirectDepositEnabled` deliberately not consulted: an exit works in
+    production today, where deposits are closed). The only provider-shaped
+    answer is capability: `resolveVaultWithdrawClient` narrows on
+    `supportsVaultWithdraw` and a provider without it is a 501 — a statement
+    about SDP's plumbing, never permission. Pinned by the exit-safety describe
+    in `../earn.vault-withdrawals.test.ts`.
+  - **LEG MODEL (migration 0066).** A multi-reserve exit may need several
+    transactions; each is one `earn_movements` row — `direction='withdrawal'`,
+    denominated in the SHARE MINT with `amount_requested` the exact shares that
+    leg's instructions encode (see 0066's header for why a withdrawal is not
+    token-denominated) — tied together by `(leg_group_id, leg_index,
+    leg_count)`. Every leg is signed and durably recorded BEFORE the first
+    byte is broadcast; legs then broadcast strictly in order, each only after
+    its predecessor reaches commitment, in-request while the `VaultDeadline`
+    budget lasts and by the reconciliation sweep after it (the sweep's
+    predecessor gate enforces the same ordering, and fails a leg whose
+    predecessor failed). leg 0's `request_id` is the caller's raw key — the
+    replay anchor; later legs derive theirs with a newline separator no legal
+    key can contain.
+  - The wire (`EarnVaultWithdrawalLeg`) speaks the LEDGER's own vocabulary —
+    `requested/submitted/confirmed/finalized/failed`, `confirmed` NOT terminal
+    — unlike the deposit DTO's legacy mapping. There is no aggregate status on
+    purpose: legs settle independently and the honest answer is the legs.
+- `GET /vault-withdrawals` / `GET /vault-withdrawals/:movementId` — the deposit
+  reads mirrored: DB only, NO provider gate (ADR 0002), same four 404 scoping
+  rules with `direction = 'withdrawal'`, same wallet-binding scope through
+  `listReadableEarnVaultWallets`. `?requestId=` serves the WHOLE leg group —
+  the caller's question is "what happened to my withdrawal" and a multi-leg
+  exit's answer is every leg — and `?settled=` uses the LEDGER terminal set
+  (`finalized|failed`), not the deposits' legacy one.
 
 One gap remains around approvals, and it is narrower than it was. An approved
-deposit is now fully followable — the executor writes the movement and
-`GET /vault-deposits` finds it — but a REJECTED approval never produces a
-movement, so nothing on this surface reports it. That outcome is observable via
-`GET /v1/wallets/approval-requests/:approvalRequestId`, whose `status` plus
-nested `operation.status` distinguish rejected/canceled from
-approved-and-executed. Wiring the dashboard to it is deliberately not done here. Until
-the withdrawal path lands, a vault position can be entered and not exited
-through SDP — which is why `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` fail-closes
-production rather than relying on anyone remembering ADR 0002.
+deposit or withdrawal is now fully followable — the executor writes the
+movement(s) and the list reads find them — but a REJECTED approval never
+produces a movement, so nothing on this surface reports it. That outcome is
+observable via `GET /v1/wallets/approval-requests/:approvalRequestId`, whose
+`status` plus nested `operation.status` distinguish rejected/canceled from
+approved-and-executed. Wiring the dashboard to it is deliberately not done
+here. `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` still fail-closes production
+DEPOSITS — the remaining blocker is PRO-1703 (vault positions on the Active
+tab), not the exit path.
 
 **Per-cluster RPC.** `resolveClusterRpcUrl` reads `SOLANA_DEVNET_RPC_URL` /
 `SOLANA_MAINNET_RPC_URL`, falling back to the canonical default only when its
@@ -592,6 +637,13 @@ kvault program id also resolves on devnet with no accounts under it.
   live read, so a de-registered or vault-only provider fails the list with a
   clean 503/501 instead of mid-fan-out — and once more up front for a
   `provider` filter so an empty list still 503s (see route map).
+- **The vault exit** (`POST /vault-withdrawals`): the strongest form of the
+  asymmetry — no provider gate of ANY kind, not even the credential check
+  (Kamino is keyless; a credentialed vault provider's own client throws
+  `PROVIDER_NOT_CONFIGURED` from inside its build). Capability (501) is the
+  only provider-shaped refusal, and wallet policy is the org's own custody
+  control, not a provider gate. It also ignores `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS`:
+  the environment fail-close guards the way IN only.
 - **The ledger list**: no provider gate at all (see route map).
 - Route tests in `../earn-program.test.ts` encode the asymmetry: the money-in
   half (create and re-target both refused when the organization is not entitled
