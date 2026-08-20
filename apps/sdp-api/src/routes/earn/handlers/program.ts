@@ -88,8 +88,8 @@ export type {
  *
  * Source of truth per surface (PRO-1628): balances/positions/yield/deposits
  * are NEVER persisted — every read is a live provider fetch. Withdrawals are
- * the one money movement SDP initiates, so they get a ledger row
- * (earn_program_withdrawals): written at intent, advanced on every
+ * the one money movement SDP initiates, so they get a ledger row (a custodial
+ * `earn_movements` row): written at intent, advanced on every
  * observation, listed from the DB. No endpoint ever blends the two sources —
  * create/get answer with the provider's live object and update the ledger as
  * a side effect; the list answers from the ledger alone.
@@ -784,13 +784,14 @@ export const createEarnProgramWithdrawal = async (
       if (!isPostgresUniqueViolation(error)) {
         throw error;
       }
-      // Concurrent same-key race: the other request claimed the (wallet,
+      // Concurrent same-key race: the other request claimed the (position,
       // request_id) slot — re-resolve as a replay. Fingerprint is NOT NULL by
       // schema, so this is always decisive: match, or 409.
-      intentRow = await resolveIdempotencyReplay(findIntentRow, fingerprint);
-    }
-    if (!intentRow) {
-      throw internalError("Failed to persist earn withdrawal intent");
+      const replayed = await resolveIdempotencyReplay(findIntentRow, fingerprint);
+      if (!replayed) {
+        throw internalError("Failed to persist earn withdrawal intent");
+      }
+      intentRow = replayed;
     }
     // Lost-race edge: the concurrent same-key winner may have already driven
     // the provider and stamped the ref while we waited on the re-resolve —
@@ -918,7 +919,7 @@ function mapToEarnProgramWithdrawalRecord(row: EarnMovementRow): EarnProgramWith
 }
 
 /**
- * The withdrawal LEDGER list (source: earn_program_withdrawals, never the
+ * The withdrawal LEDGER list (source: earn_movements, never the
  * provider). Deliberately takes NO provider gate — not even the credential
  * check, and note it resolves the program WITHOUT requirePortfolioClient —
  * because the audit trail must survive credential removal, entitlement

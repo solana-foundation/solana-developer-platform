@@ -133,7 +133,7 @@ function toEarnMovementRecord(row: EarnMovementRow): EarnMovementRecord {
  * could already read.
  */
 const movementCursorSchema = z.object({
-  createdAt: z.string().datetime({ precision: 3 }),
+  createdAt: z.iso.datetime({ precision: 3 }),
   id: z.string().min(1).max(128),
 });
 

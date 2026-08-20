@@ -197,7 +197,6 @@ async function seedVaultDeposit(
     shareMint: SHARE_MINT,
     label: "USDC vault",
     requestedAmount: overrides.amount ?? "10",
-    acceptedAmount: overrides.amount ?? "10",
     signature: `sig_${crypto.randomUUID()}`,
     signedTransaction: "AQ==",
     lastValidBlockHeight: "12345",

@@ -938,7 +938,6 @@ describe("earn vault project attribution", () => {
       shareMint: SHARE_MINT,
       label: "Shared Vault",
       requestedAmount: "1",
-      acceptedAmount: "1",
       signedTransaction: "AQ==",
       lastValidBlockHeight: "12345",
       createdBy: USER,

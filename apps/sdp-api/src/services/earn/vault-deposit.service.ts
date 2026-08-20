@@ -100,7 +100,6 @@ function requireAcceptedPlan(
   plan: EarnVaultTransactionPlan,
   input: Pick<VaultDepositInput, "tokenMint" | "shareMint" | "amount" | "minSharesOut">
 ): {
-  amount: string;
   minSharesOut: string | null;
 } {
   if (plan.assetIdentity.depositTokenMint !== input.tokenMint) {
@@ -132,7 +131,7 @@ function requireAcceptedPlan(
       "Vault builder minSharesOut does not match the policy-approved slippage floor"
     );
   }
-  return { amount, minSharesOut };
+  return { minSharesOut };
 }
 
 function appendRequestMemo(
@@ -303,7 +302,6 @@ export async function depositIntoVault(
       shareMint: plan.assetIdentity.shareMint,
       label: input.label,
       requestedAmount: input.amount,
-      acceptedAmount: accepted.amount,
       acceptedMinSharesOut: accepted.minSharesOut,
       // The signing wallet IS the depositor on chain, so the ledger records where
       // the money came from without a second lookup.

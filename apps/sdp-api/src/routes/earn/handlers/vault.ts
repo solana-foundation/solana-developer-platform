@@ -536,8 +536,8 @@ function assertBoundWalletIdentifierIsUnique(
  * read wallet B's deposits either.
  *
  * The id spaces differ and that is the trap. `getAllowedApiKeyWalletIdsForPermissions`
- * returns PROVIDER wallet ids (`privy_…`), while `earn_vault_positions.custody_wallet_id`
- * and `earn_vault_movements.custody_wallet_id` are `custody_wallets` row ids
+ * returns PROVIDER wallet ids (`privy_…`), while `earn_positions.custody_wallet_id`
+ * and `earn_movements.custody_wallet_id` are `custody_wallets` row ids
  * (`cwlt_…`). The projection carries both, so it is the translation table;
  * comparing the allow-list directly against a stored id matches nothing and
  * silently answers "you hold none of this", which is a filter that looks like
