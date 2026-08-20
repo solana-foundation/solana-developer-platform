@@ -736,6 +736,7 @@ export function createPostgresPaymentTransferBatchesRepository(
                 SET status = ?,
                     slot = CASE WHEN ?::boolean THEN ? ELSE slot END,
                     error = ?,
+                    confirmed_at = CASE WHEN ?::boolean THEN COALESCE(confirmed_at, ?) ELSE confirmed_at END,
                     updated_at = ?
               WHERE id = ?
                 AND organization_id = ?
@@ -748,6 +749,8 @@ export function createPostgresPaymentTransferBatchesRepository(
             input.slot !== null,
             input.slot,
             input.error,
+            input.transferStatus !== "failed",
+            input.updatedAt,
             input.updatedAt,
             input.transferId,
             input.organizationId,

@@ -1,0 +1,6 @@
+interface:
+  display_name: "SDP Make PR"
+  short_description: "Open an SDP PR with technical before and after"
+  default_prompt: "Use $sdp-make-pr to prepare and open a pull request for the current branch."
+policy:
+  allow_implicit_invocation: false
