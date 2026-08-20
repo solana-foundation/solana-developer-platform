@@ -53,6 +53,11 @@ Public docs and AI artifacts should mirror the supported public surface only.
 
 - `skills/sdp-tokenization/SKILL.md`: consumer-facing skill for explaining how to tokenize assets with SDP using the supported public docs and API surface.
 - `.agents/skills/sdp-ui-designer/SKILL.md`: SDP UI design skill for designing, prototyping, reviewing, or implementing payments, wallets, counterparty, and issuance UI. Its bundle ships the canonical token reference (`sdp-design-system.css`) and the UI handoff rules (`AGENTS.md`) alongside the skill; treat those as the design source of truth for UI work.
+- `.agents/skills/integrate-ramp-provider/SKILL.md`: explicit-only Payments/Ramps integration router; its sibling skills cover provider registration, rail discovery, estimates, counterparty requirements, on-ramp, off-ramp, and webhooks.
+- `.agents/skills/sdp-concise/SKILL.md`: explicit-only, action-first output contract shared by SDP workflows.
+- `.agents/skills/sdp-make-pr/SKILL.md`: explicit-only PR creation workflow with technical before/after behavior, flows or pseudocode, verification, and risk notes.
+- `.agents/skills/sdp-review/SKILL.md`: explicit-only SDP change-set digest and focused review workflow.
+- `.agents/skills/sdp-bug-report/SKILL.md`: explicit-only SDP bug-bash reporting workflow for Linear issue `PRO-1482`.
 
 When updating repo-local skills:
 
