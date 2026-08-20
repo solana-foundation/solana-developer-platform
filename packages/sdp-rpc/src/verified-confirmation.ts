@@ -12,6 +12,12 @@ import { withTransientRpcRetry } from "./transient";
 export interface VerifyTransactionLandedOptions {
   /** Account that must exist on-chain after the transaction (e.g. the created mint). */
   expectAccount?: Address;
+  /**
+   * Look past the node's recent-status cache into transaction history. Needed
+   * when the signature may be older than that cache (~2.5 minutes), at the
+   * cost of a heavier RPC read.
+   */
+  searchTransactionHistory?: boolean;
 }
 
 export type VerifyTransactionLandedResult =
@@ -43,7 +49,11 @@ export async function verifyTransactionLanded(
   signature: Signature,
   options: VerifyTransactionLandedOptions = {}
 ): Promise<VerifyTransactionLandedResult> {
-  const [status] = await withTransientRpcRetry(() => getSignatureStatuses(rpc, [signature]));
+  const [status] = await withTransientRpcRetry(() =>
+    getSignatureStatuses(rpc, [signature], {
+      searchTransactionHistory: options.searchTransactionHistory,
+    })
+  );
 
   if (!status || status.err !== null || status.confirmationStatus === "processed") {
     return { ok: false, reason: "not_confirmed" };

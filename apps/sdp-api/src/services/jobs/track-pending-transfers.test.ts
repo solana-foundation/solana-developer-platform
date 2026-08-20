@@ -1,4 +1,5 @@
 import * as solanaRpc from "@sdp/rpc/solana";
+import * as verifiedConfirmation from "@sdp/rpc/verified-confirmation";
 import type { Signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -9,6 +10,7 @@ import { trackPendingTransfers } from "./track-pending-transfers";
 
 const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 const getSignatureStatusesMock = vi.spyOn(solanaRpc, "getSignatureStatuses");
+const verifyTransactionLandedMock = vi.spyOn(verifiedConfirmation, "verifyTransactionLanded");
 
 const TEST_SIG_1 =
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as unknown as Signature;
@@ -83,6 +85,7 @@ describe("trackPendingTransfers", () => {
     getSignatureStatusesMock.mockImplementation(async (_rpc, signatures) =>
       signatures.map(() => null)
     );
+    verifyTransactionLandedMock.mockResolvedValue({ ok: false, reason: "not_confirmed" });
   });
 
   describe("recoverStuckProcessingTransfers", () => {
@@ -211,6 +214,56 @@ describe("trackPendingTransfers", () => {
       const updated = await getTransfer("xfr_processing_not_found");
       expect(updated?.status).toBe("failed");
       expect(updated?.error).toBe("Transaction not found on chain");
+    });
+
+    it("settles as confirmed instead of failed when history proves the transfer landed", async () => {
+      getSignatureStatusesMock.mockResolvedValueOnce([null]);
+      verifyTransactionLandedMock.mockResolvedValueOnce({
+        ok: true,
+        status: {
+          slot: 4242n,
+          confirmations: 10n,
+          confirmationStatus: "confirmed",
+          err: null,
+        } as Awaited<ReturnType<typeof solanaRpc.getSignatureStatuses>>[number] & object,
+        transaction: { slot: 4242n, err: null, instructions: [] },
+      } as Awaited<ReturnType<typeof verifiedConfirmation.verifyTransactionLanded>>);
+
+      await insertTransfer({
+        id: "xfr_processing_history_landed",
+        status: "processing",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(10),
+        updatedAt: minutesAgo(10),
+      });
+
+      await trackPendingTransfers(env);
+
+      const updated = await getTransfer("xfr_processing_history_landed");
+      expect(updated?.status).toBe("confirmed");
+      expect(updated?.slot).toBe(4242);
+      expect(verifyTransactionLandedMock).toHaveBeenCalledWith(expect.anything(), TEST_SIG_1, {
+        searchTransactionHistory: true,
+      });
+    });
+
+    it("leaves the transfer processing when the history lookup itself fails", async () => {
+      getSignatureStatusesMock.mockResolvedValueOnce([null]);
+      verifyTransactionLandedMock.mockRejectedValueOnce(new Error("rpc unavailable"));
+
+      await insertTransfer({
+        id: "xfr_processing_history_unavailable",
+        status: "processing",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(10),
+        updatedAt: minutesAgo(10),
+      });
+
+      await trackPendingTransfers(env);
+
+      const unchanged = await getTransfer("xfr_processing_history_unavailable");
+      expect(unchanged?.status).toBe("processing");
+      expect(unchanged?.error).toBeNull();
     });
 
     it("leaves processing transfer alone when signature not found but transfer is recent", async () => {

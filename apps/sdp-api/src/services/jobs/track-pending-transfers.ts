@@ -16,8 +16,13 @@
  *    finality — confirmed is transitional, not terminal.
  */
 
+import { withTransientRpcRetry } from "@sdp/rpc";
 import type { SignatureStatusInfo } from "@sdp/rpc/solana";
 import * as solanaRpc from "@sdp/rpc/solana";
+import {
+  type VerifyTransactionLandedResult,
+  verifyTransactionLanded,
+} from "@sdp/rpc/verified-confirmation";
 import type { Signature } from "@solana/kit";
 import {
   createSystemPaymentsRepository,
@@ -253,6 +258,34 @@ async function recoverStuckProcessingTransfers(
 }
 
 /**
+ * Second opinion on a single signature the batch poll reported as unknown,
+ * read from transaction history rather than the node's recent-status cache.
+ *
+ * Returns the verdict, or null when the lookup itself failed — an RPC outage
+ * is not evidence that a transfer was dropped, so callers must leave the row
+ * processing rather than settle it on a missing answer.
+ */
+async function verifyLandedFromHistory(
+  env: Env,
+  signature: Signature
+): Promise<VerifyTransactionLandedResult | null> {
+  try {
+    return await verifyTransactionLanded(solanaRpc.createRpc(env), signature, {
+      searchTransactionHistory: true,
+    });
+  } catch (err) {
+    getLogger().error(
+      {
+        signature,
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "trackPendingTransfers: history verification failed for a transfer with no batch status"
+    );
+    return null;
+  }
+}
+
+/**
  * Query on-chain status for processing transfers that have a signature and
  * update the DB with confirmed / finalized / failed as appropriate.
  */
@@ -278,7 +311,7 @@ async function syncProcessingTransfersOnChain(
 
   try {
     const rpc = solanaRpc.createRpc(env);
-    statuses = await solanaRpc.getSignatureStatuses(rpc, signatures);
+    statuses = await withTransientRpcRetry(() => solanaRpc.getSignatureStatuses(rpc, signatures));
   } catch (err) {
     getLogger().error(
       {
@@ -301,6 +334,37 @@ async function syncProcessingTransfersOnChain(
         // enough, assume the transaction was dropped and mark it failed.
         const ageMs = now.getTime() - new Date(transfer.updated_at).getTime();
         if (ageMs > STUCK_PROCESSING_AFTER_MS) {
+          // The batch poll reads the node's recent-status cache (~2.5 minutes),
+          // so a transfer that landed while the job was paused reads as null
+          // here. Re-check the candidate against transaction history before
+          // failing it: `failed` is terminal and a landed transfer must never
+          // be recorded as dropped on one provider's cache miss.
+          const verified = await verifyLandedFromHistory(env, transfer.signature as Signature);
+          if (verified?.ok) {
+            getLogger().warn(
+              {
+                transfer_id: transfer.id,
+                organization_id: transfer.organization_id,
+                signature: transfer.signature,
+                slot: Number(verified.status.slot),
+                confirmation_status: verified.status.confirmationStatus,
+              },
+              "trackPendingTransfers: batch poll reported no status but history confirms the transfer landed"
+            );
+            await updateTerminalTransfer(env, repo, transfer, {
+              transferId: transfer.id,
+              status:
+                verified.status.confirmationStatus === "finalized" ? "finalized" : "confirmed",
+              slot: Number(verified.status.slot),
+              updatedAt: nowIso,
+            });
+            continue;
+          }
+          if (verified === null) {
+            // History lookup itself failed; leave the row processing so a later
+            // tick decides with real evidence.
+            continue;
+          }
           await updateTerminalTransfer(env, repo, transfer, {
             transferId: transfer.id,
             status: "failed",
