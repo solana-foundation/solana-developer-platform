@@ -65,13 +65,29 @@ interface Envelope<T> {
   error?: { message?: string };
 }
 
-async function getJson<T>(path: string, fallbackError: string): Promise<T> {
-  const response = await fetch(path, { cache: "no-store" });
+type EnvelopeResult<T> = { ok: true; data: T } | { ok: false; status: number; error?: string };
+
+/**
+ * Single reader for every `{ data } | { error }` response on this surface. The
+ * body is parsed even on failure so the server's own `error.message` reaches
+ * the caller rather than a generic string, and `.catch` absorbs a non-JSON
+ * error page.
+ */
+async function readEnvelope<T>(response: Response): Promise<EnvelopeResult<T>> {
   const body = (await response.json().catch(() => ({}))) as Envelope<T>;
   if (!response.ok || !body.data) {
-    throw new Error(body.error?.message ?? fallbackError);
+    return { ok: false, status: response.status, error: body.error?.message };
   }
-  return body.data;
+  return { ok: true, data: body.data };
+}
+
+async function getJson<T>(path: string, fallbackError: string): Promise<T> {
+  const response = await fetch(path, { cache: "no-store" });
+  const result = await readEnvelope<T>(response);
+  if (!result.ok) {
+    throw new Error(result.error ?? fallbackError);
+  }
+  return result.data;
 }
 
 export function fetchRingsHealth(fallbackError: string): Promise<{ health: RingsHealth }> {
@@ -115,14 +131,14 @@ export async function createRingsWallet(input: {
     body: JSON.stringify(input),
     cache: "no-store",
   });
-  const body = (await response.json().catch(() => ({}))) as Envelope<{ wallet: RingsWallet }>;
-  if (response.status === 503) {
-    return { pendingIntegration: true };
+  const result = await readEnvelope<{ wallet: RingsWallet }>(response);
+  if (!result.ok) {
+    if (result.status === 503) {
+      return { pendingIntegration: true };
+    }
+    return { pendingIntegration: false, error: result.error };
   }
-  if (!response.ok || !body.data) {
-    return { pendingIntegration: false, error: body.error?.message };
-  }
-  return { wallet: body.data.wallet, pendingIntegration: false };
+  return { wallet: result.data.wallet, pendingIntegration: false };
 }
 
 export type RingsOpType =
@@ -152,13 +168,11 @@ export async function prepareRingsOperation(
     body: JSON.stringify({ ...input, clientNonce: crypto.randomUUID() }),
     cache: "no-store",
   });
-  const body = (await response.json().catch(() => ({}))) as Envelope<{
-    operation: RingsOperationDetail;
-  }>;
-  if (!response.ok || !body.data) {
-    return { error: body.error?.message };
+  const result = await readEnvelope<{ operation: RingsOperationDetail }>(response);
+  if (!result.ok) {
+    return { error: result.error };
   }
-  return { operation: body.data.operation };
+  return { operation: result.data.operation };
 }
 
 export async function retryRingsOperation(
@@ -173,13 +187,11 @@ export async function retryRingsOperation(
       cache: "no-store",
     }
   );
-  const body = (await response.json().catch(() => ({}))) as Envelope<{
-    operation: RingsOperationDetail;
-  }>;
-  if (!response.ok || !body.data) {
-    return { error: body.error?.message };
+  const result = await readEnvelope<{ operation: RingsOperationDetail }>(response);
+  if (!result.ok) {
+    return { error: result.error };
   }
-  return { operation: body.data.operation };
+  return { operation: result.data.operation };
 }
 
 export interface RingsZone {
@@ -212,11 +224,11 @@ export async function createRingsZone(input: {
       cache: "no-store",
     }
   );
-  const body = (await response.json().catch(() => ({}))) as Envelope<{ zone: RingsZone }>;
-  if (!response.ok || !body.data) {
-    return { error: body.error?.message };
+  const result = await readEnvelope<{ zone: RingsZone }>(response);
+  if (!result.ok) {
+    return { error: result.error };
   }
-  return { zone: body.data.zone };
+  return { zone: result.data.zone };
 }
 
 /** Devnet assets seeded in the rings allowlist. */
