@@ -16,6 +16,7 @@ import {
   type RingsWallet,
   type RingsZone,
 } from "./helius-rings.data";
+import { useRingsZones } from "./use-rings-zones";
 
 type Translate = ReturnType<typeof useTranslations>;
 
@@ -130,12 +131,10 @@ function buildSummaryRows(
  */
 export function OperationComposer({
   wallets,
-  zones,
   gatewayRed,
   onPrepared,
 }: {
   wallets: RingsWallet[];
-  zones: RingsZone[];
   gatewayRed: boolean;
   onPrepared: () => Promise<void>;
 }) {
@@ -147,6 +146,8 @@ export function OperationComposer({
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<RingsOperationDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const { zones } = useRingsZones(draft.walletId, t("DashboardHeliusRings.errors.loadFailed"));
 
   const patchDraft = useCallback((patch: Partial<ComposerDraft>) => {
     setDraft((current) => ({ ...current, ...patch }));

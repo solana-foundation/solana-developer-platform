@@ -1,59 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
-import {
-  createRingsZone,
-  fetchRingsZones,
-  type RingsWallet,
-  type RingsZone,
-} from "./helius-rings.data";
+import { createRingsZone, type RingsWallet, type RingsZone } from "./helius-rings.data";
+import { useRingsZones } from "./use-rings-zones";
 
 /**
  * Zone management for one wallet. Zones are SDP-owned metadata, so this card
  * is fully functional today — no gateway involved.
  */
-export function ZonesCard({
-  wallets,
-  onZonesChanged,
-}: {
-  wallets: RingsWallet[];
-  onZonesChanged: (zones: RingsZone[]) => void;
-}) {
+export function ZonesCard({ wallets }: { wallets: RingsWallet[] }) {
   const t = useTranslations();
 
   const [walletId, setWalletId] = useState<string | null>(wallets[0]?.id ?? null);
-  const [zones, setZones] = useState<RingsZone[]>([]);
   const [name, setName] = useState("");
   const [kind, setKind] = useState<RingsZone["kind"]>("treasury");
   const [creating, setCreating] = useState(false);
 
-  const loadFailedCopy = t("DashboardHeliusRings.errors.loadFailed");
-
-  const refresh = useCallback(async () => {
-    if (!walletId) {
-      setZones([]);
-      onZonesChanged([]);
-      return;
-    }
-    try {
-      const result = await fetchRingsZones(walletId, loadFailedCopy);
-      setZones(result.zones);
-      onZonesChanged(result.zones);
-    } catch {
-      setZones([]);
-      onZonesChanged([]);
-    }
-  }, [walletId, loadFailedCopy, onZonesChanged]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  const { zones, reload } = useRingsZones(walletId, t("DashboardHeliusRings.errors.loadFailed"));
 
   const handleCreate = useCallback(async () => {
     if (!walletId || !name.trim()) return;
@@ -61,8 +30,8 @@ export function ZonesCard({
     await createRingsZone({ walletId, name: name.trim(), kind });
     setCreating(false);
     setName("");
-    await refresh();
-  }, [walletId, name, kind, refresh]);
+    await reload();
+  }, [walletId, name, kind, reload]);
 
   if (wallets.length === 0) return null;
 

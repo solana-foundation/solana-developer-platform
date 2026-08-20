@@ -27,7 +27,6 @@ import {
   type RingsOperationState,
   type RingsOperationSummary,
   type RingsWallet,
-  type RingsZone,
 } from "./helius-rings.data";
 import { formatWhen } from "./helius-rings.utils";
 import { OperationComposer } from "./operation-composer";
@@ -78,7 +77,6 @@ export function HeliusRingsWorkspace({
   const [health, setHealth] = useState<RingsHealth | null>(null);
   const [wallets, setWallets] = useState<RingsWallet[]>([]);
   const [operations, setOperations] = useState<RingsOperationSummary[]>([]);
-  const [zones, setZones] = useState<RingsZone[]>([]);
   const [detailOperationId, setDetailOperationId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -266,14 +264,9 @@ export function HeliusRingsWorkspace({
         </CardContent>
       </Card>
 
-      <OperationComposer
-        wallets={wallets}
-        zones={zones}
-        gatewayRed={gatewayPending}
-        onPrepared={refresh}
-      />
+      <OperationComposer wallets={wallets} gatewayRed={gatewayPending} onPrepared={refresh} />
 
-      <ZonesCard wallets={wallets} onZonesChanged={setZones} />
+      <ZonesCard wallets={wallets} />
 
       <RecoveryCard operations={operations} onRetried={refresh} />
 
