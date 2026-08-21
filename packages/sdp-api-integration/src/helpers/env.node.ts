@@ -5,6 +5,9 @@ const { getDb } = apiTestSupport;
 function readEnvFromProcess(): ApiTestEnv {
   const proc: Record<string, string | undefined> = { ...process.env };
   proc.DATABASE_URL = proc.TEST_DATABASE_URL;
+  if (proc.SDP_INTEGRATION_CUSTODY_PROVIDER === "local" && !proc.SDP_DEPLOYMENT_MODE) {
+    proc.SDP_DEPLOYMENT_MODE = "self_hosted";
+  }
   return proc as unknown as ApiTestEnv;
 }
 
