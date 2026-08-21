@@ -15,6 +15,9 @@ import type {
   VedaPosition,
   VedaPositionInput,
   VedaRuntime,
+  VedaWithdrawInput,
+  VedaWithdrawQuote,
+  VedaWithdrawQuoteInput,
 } from "./types";
 
 /**
@@ -359,6 +362,142 @@ export async function previewVedaDeposit(
 }
 
 /**
+ * Build an INSTANT withdrawal: burn shares, receive the vault asset, in one
+ * transaction (ADR 0003 — the queued exit is a separate capability and a
+ * separate piece of work).
+ *
+ * Deliberately NOT gated by `assertVedaVaultUsable`: that check demands the
+ * withdrawal QUEUE and exists to stop money going IN to a vault whose exit
+ * infrastructure is missing. Demanding it on the way OUT would be exactly the
+ * inversion ADR 0002 forbids — a customer must be able to leave through the
+ * instant path even when the queue is broken. The vault's own refusals
+ * (`RESTRICTED_REDEMPTION` when a withdraw authority is set, `SHARE_LOCKED`
+ * inside the post-deposit lock window) surface as `WITHDRAW_REFUSED` with the
+ * SDK's own sentence.
+ *
+ * `minAmountOut` is required for the same reason `minSharesOut` is on the
+ * deposit: the SDK refuses an implicit slippage tolerance and SDP will not
+ * choose one. The asset resolves exactly as the deposit's does — the vault's
+ * own configured assets, cluster-exact, ambiguity refused — and deliberately
+ * ignores `allow_deposits`, which gates the other money direction.
+ */
+export async function buildVedaWithdrawPlan(
+  runtime: VedaRuntime,
+  config: VedaClusterConfig,
+  input: VedaWithdrawInput
+): Promise<VedaInstructionPlan> {
+  const vaultClient = client(runtime, config).vault(input.vault as Kit7);
+  let state: { shareMint: Kit7; shareDecimals: unknown };
+  try {
+    state = await vaultClient.getState();
+  } catch (cause) {
+    throw vaultUnreadable(String(input.vault), config.cluster, cause);
+  }
+
+  const asset = await resolveVaultAsset(runtime, config, vaultClient, input.vault);
+  const shares = acceptPositiveAtMintScale(
+    "shares",
+    input.shares,
+    shareMintDecimals(state.shareDecimals, input.vault)
+  );
+  const minAmountOut = acceptPositiveAtMintScale(
+    "minAmountOut",
+    input.minAmountOut,
+    asset.decimals
+  );
+
+  let plan: { instructions: readonly Kit7[] };
+  try {
+    plan = await vaultClient.buildWithdraw({
+      owner: input.owner as Kit7,
+      asset: asset.mint as Kit7,
+      shares: shares.baseUnits,
+      // `minAmountOut`, never `slippageBps` — same rule as the deposit: the
+      // floor the caller was quoted is the one that must be encoded.
+      protection: { minAmountOut: minAmountOut.baseUnits },
+    });
+  } catch (cause) {
+    throw mapVedaSdkError(
+      cause,
+      `Veda could not build a withdrawal for vault ${input.vault}`,
+      "WITHDRAW_REFUSED"
+    );
+  }
+
+  return assertPlanTargetsCluster(
+    {
+      cluster: config.cluster,
+      instructions: [...plan.instructions],
+      lookupTables: [],
+      assetIdentity: {
+        depositTokenMint: asset.mint,
+        shareMint: address(String(state.shareMint)),
+      },
+      accepted: { shares: shares.canonical, minAmountOut: minAmountOut.canonical },
+    },
+    config
+  );
+}
+
+/**
+ * Quote an instant withdrawal — the READ an exit floor is derived from.
+ * `previewWithdraw` reports the vault's own accounting for these exact shares,
+ * including its oracle and any withdraw premium; blocking conditions come back
+ * as data (`issues`) rather than as errors, same as the deposit quote.
+ */
+export async function previewVedaWithdraw(
+  runtime: VedaRuntime,
+  config: VedaClusterConfig,
+  input: VedaWithdrawQuoteInput
+): Promise<VedaWithdrawQuote> {
+  const vaultClient = client(runtime, config).vault(input.vault as Kit7);
+  let state: { shareMint: Kit7; shareDecimals: unknown };
+  try {
+    state = await vaultClient.getState();
+  } catch (cause) {
+    throw vaultUnreadable(String(input.vault), config.cluster, cause);
+  }
+
+  const asset = await resolveVaultAsset(runtime, config, vaultClient, input.vault);
+  const shares = acceptPositiveAtMintScale(
+    "shares",
+    input.shares,
+    shareMintDecimals(state.shareDecimals, input.vault)
+  );
+
+  let quote: {
+    assetsOut: bigint;
+    assetDecimals: unknown;
+    issues: readonly { code: unknown; message: unknown }[];
+  };
+  try {
+    quote = await vaultClient.previewWithdraw({
+      asset: asset.mint as Kit7,
+      shares: shares.baseUnits,
+    });
+  } catch (cause) {
+    throw mapVedaSdkError(
+      cause,
+      `Veda could not quote a withdrawal for vault ${input.vault}`,
+      "WITHDRAW_REFUSED"
+    );
+  }
+
+  // The mint account's own decimals decide the scale: the floor derived from
+  // `assetsOut` is quantized against `asset.decimals` in the build, so trusting
+  // a different number here would silently rescale it.
+  const assetDecimals = asset.decimals;
+  return {
+    assetsOut: formatAtomic(quote.assetsOut, assetDecimals),
+    assetDecimals,
+    issues: quote.issues.map((issue) => ({
+      code: String(issue.code),
+      message: String(issue.message),
+    })),
+  };
+}
+
+/**
  * One wallet's holding in one vault, read live.
  *
  * Shares come from `getUserPosition`, which reads the owner's Token-2022 share
@@ -477,7 +616,14 @@ function formatAtomic(value: bigint, decimals: number): string {
  * "your request was wrong". The SDK's own message and the original error are
  * preserved either way.
  */
-export function mapVedaSdkError(cause: unknown, context: string): SdpVedaError {
+export function mapVedaSdkError(
+  cause: unknown,
+  context: string,
+  // Which money direction's refusal code a vault refusal maps to. The SDK's
+  // SHARE_LOCKED / RESTRICTED_REDEMPTION / NOT_ALLOWED family reads the same
+  // either way; the caller-facing code should name the direction that failed.
+  refusalCode: "DEPOSIT_REFUSED" | "WITHDRAW_REFUSED" = "DEPOSIT_REFUSED"
+): SdpVedaError {
   if (cause instanceof SdpVedaError) return cause;
   if (!(cause instanceof VedaSdkError)) {
     return new SdpVedaError("VAULT_UNREADABLE", `${context}: ${describe(cause)}`, { cause });
@@ -499,17 +645,15 @@ export function mapVedaSdkError(cause: unknown, context: string): SdpVedaError {
       // `issue` present means the vault refused the request (paused, capped,
       // asset disabled, insufficient balance); absent means the number itself
       // was unusable.
-      return new SdpVedaError(
-        "issue" in cause.context ? "DEPOSIT_REFUSED" : "INVALID_AMOUNT",
-        message,
-        { cause }
-      );
+      return new SdpVedaError("issue" in cause.context ? refusalCode : "INVALID_AMOUNT", message, {
+        cause,
+      });
     case "ZERO_SHARES":
       return new SdpVedaError("INVALID_AMOUNT", message, { cause });
     case "NOT_ALLOWED":
     case "SHARE_LOCKED":
     case "RESTRICTED_REDEMPTION":
-      return new SdpVedaError("DEPOSIT_REFUSED", message, { cause });
+      return new SdpVedaError(refusalCode, message, { cause });
     case "INCOMPATIBLE_DEPLOYMENT":
       return new SdpVedaError("INCOMPATIBLE_DEPLOYMENT", message, { cause });
     case "QUEUE_NOT_CONFIGURED":

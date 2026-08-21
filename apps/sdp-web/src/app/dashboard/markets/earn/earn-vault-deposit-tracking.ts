@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  createFloorMemo,
   createIdempotencyKeyStore,
   resetIdempotencyKeyStoresForTests,
 } from "./earn-idempotency-key-store";
@@ -28,12 +29,7 @@ export const vaultDepositIdempotencyKeyStore = createIdempotencyKeyStore(
  */
 export function resetVaultDepositTrackingStateForTests(): void {
   resetIdempotencyKeyStoresForTests();
-  memoryFloorMemo = {};
-  try {
-    window.sessionStorage.removeItem(FLOOR_MEMO_STORAGE_KEY);
-  } catch {
-    // No storage in this environment; the memory tier above is already clear.
-  }
+  vaultDepositFloorMemo.resetForTests();
 }
 
 /**
@@ -86,72 +82,25 @@ export function vaultDepositRequestFingerprint(input: {
 }
 
 /**
- * The share floor each in-flight fingerprint's key was minted with (see
- * `toleranceBps` above for why it cannot live in the fingerprint). Same
- * per-tab tier as the key store: `sessionStorage` so it survives the reload
- * the held key survives, an in-memory fallback when storage is refused, and a
- * hard bound so an abandoned tab cannot grow it without limit.
+ * The floor each in-flight fingerprint's key was minted with — see
+ * `createFloorMemo` for why it lives beside the key instead of inside the
+ * fingerprint, and `toleranceBps` above for the other half of that story.
  */
-const FLOOR_MEMO_STORAGE_KEY = "sdp:earn:vault-deposit:floor:v1";
-const FLOOR_MEMO_BOUND = 32;
+const vaultDepositFloorMemo = createFloorMemo("sdp:earn:vault-deposit:floor:v1");
 
-type FloorMemo = Record<string, string | null>;
-
-let memoryFloorMemo: FloorMemo = {};
-
-function readFloorMemo(): FloorMemo {
-  try {
-    const raw = window.sessionStorage.getItem(FLOOR_MEMO_STORAGE_KEY);
-    if (raw === null) return {};
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
-    const memo: FloorMemo = {};
-    for (const [key, value] of Object.entries(parsed)) {
-      if (typeof value === "string" || value === null) memo[key] = value;
-    }
-    return memo;
-  } catch {
-    return { ...memoryFloorMemo };
-  }
-}
-
-function writeFloorMemo(memo: FloorMemo): void {
-  memoryFloorMemo = { ...memo };
-  try {
-    window.sessionStorage.setItem(FLOOR_MEMO_STORAGE_KEY, JSON.stringify(memo));
-  } catch {
-    // The in-memory copy above still serves this component's lifetime.
-  }
-}
-
-/** Record the floor `fingerprint`'s key is being submitted with (insertion-bounded). */
+/** Record the floor `fingerprint`'s key is being submitted with. */
 export function rememberVaultDepositFloor(fingerprint: string, minSharesOut: string | null): void {
-  const memo = readFloorMemo();
-  delete memo[fingerprint];
-  memo[fingerprint] = minSharesOut;
-  const keys = Object.keys(memo);
-  for (const stale of keys.slice(0, Math.max(0, keys.length - FLOOR_MEMO_BOUND))) {
-    delete memo[stale];
-  }
-  writeFloorMemo(memo);
+  vaultDepositFloorMemo.remember(fingerprint, minSharesOut);
 }
 
-/**
- * The floor `fingerprint`'s key was minted with: a string floor, `null` for
- * "deliberately none", or `undefined` when nothing is remembered (evicted, a
- * different tab, or storage refused) — the caller then falls back to a fresh
- * derivation and the server's own fingerprint remains the last line.
- */
+/** The remembered floor, `null` for "deliberately none", `undefined` for nothing. */
 export function recallVaultDepositFloor(fingerprint: string): string | null | undefined {
-  const memo = readFloorMemo();
-  return fingerprint in memo ? memo[fingerprint] : undefined;
+  return vaultDepositFloorMemo.recall(fingerprint);
 }
 
 /** Drop a retired key's floor so the next fresh derivation cannot inherit it. */
 export function forgetVaultDepositFloor(fingerprint: string): void {
-  const memo = readFloorMemo();
-  delete memo[fingerprint];
-  writeFloorMemo(memo);
+  vaultDepositFloorMemo.forget(fingerprint);
 }
 
 export function claimVaultDepositIdempotencyKey(fingerprint: string): string {

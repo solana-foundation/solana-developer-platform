@@ -11,6 +11,11 @@ import type {
   EarnVaultPositionInput,
   EarnVaultPositionSnapshot,
   EarnVaultTransactionPlan,
+  EarnVaultWithdrawInput,
+  EarnVaultWithdrawProvider,
+  EarnVaultWithdrawQuote,
+  EarnVaultWithdrawQuoteInput,
+  EarnVaultWithdrawQuoteProvider,
 } from "@sdp/earn/types";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
 import { vedaDeployment } from "@sdp/types/veda-programs";
@@ -22,7 +27,13 @@ import {
   vedaClusterConfig,
   vedaProgramAllowlist,
 } from "./programs";
-import { buildVedaDepositPlan, previewVedaDeposit, readVedaPosition } from "./sdk";
+import {
+  buildVedaDepositPlan,
+  buildVedaWithdrawPlan,
+  previewVedaDeposit,
+  previewVedaWithdraw,
+  readVedaPosition,
+} from "./sdk";
 import type { VedaInstructionPlan, VedaRuntime } from "./types";
 
 /** One position page may fan out over several vaults; never fan out unbounded. */
@@ -109,20 +120,25 @@ export function toEarnVaultTransactionPlan(plan: VedaInstructionPlan): EarnVault
  * still discover the capability with `supportsVaultDirect`, never a provider-id
  * check.
  *
- * **`buildVaultWithdrawal` is deliberately absent.** Money OUT is a separate
- * capability (`supportsVaultWithdraw`) and a separate piece of work: Veda offers
- * two independent exits — an instant redemption and a request/fulfil queue —
- * and the queue's lifecycle does not fit the `pending|submitted|confirmed|failed`
- * movement model the `POST /vault-withdrawals` route carries, while exposing
- * only the instant half would auto-select a mechanism Veda deliberately leaves
- * to the caller. Withholding the capability says SDP cannot carry Veda's exits
- * yet; it is never a permission gate, and it traps nothing: the shares sit in
- * the organization's own custody wallet and Veda's own surfaces can redeem them.
- * See `docs/decisions/` for the withdrawal design that lands it.
+ * **Money OUT is the INSTANT exit only** (`buildVaultWithdrawal`,
+ * `supportsVaultWithdraw`): burn shares, receive the vault asset, one
+ * transaction — the shape the movement model already carries (ADR 0003,
+ * "instant lands first, and alone"). Veda's OTHER exit, the request/fulfil
+ * queue, is deliberately still absent: its lifecycle is settled by a solver
+ * Veda operates and does not fit `pending|submitted|confirmed|failed`, so it
+ * waits on its own capability and schema (ADR 0003 §4). Implementing only the
+ * instant half here is not auto-selecting a route — the caller asked for an
+ * immediate redemption and gets exactly that, or a typed refusal
+ * (`WITHDRAW_REFUSED`) when the vault restricts it; SDP never silently
+ * substitutes the queue.
  */
 export class VedaVaultDirectClient
   extends VedaEarnClient
-  implements EarnVaultDirectProvider, EarnVaultDepositQuoteProvider
+  implements
+    EarnVaultDirectProvider,
+    EarnVaultDepositQuoteProvider,
+    EarnVaultWithdrawProvider,
+    EarnVaultWithdrawQuoteProvider
 {
   /**
    * Where a PROVEN RPC endpoint comes from and how its operation is bounded.
@@ -255,6 +271,61 @@ export class VedaVaultDirectClient
       })
     );
     return toEarnVaultTransactionPlan(plan);
+  }
+
+  /**
+   * The INSTANT exit: burn shares, receive the vault asset, one transaction.
+   *
+   * `minAmountOut` is refused-if-absent for the same reason `minSharesOut` is
+   * on the deposit: Veda's SDK will not apply an implicit slippage tolerance
+   * and SDP will not choose a floor on a caller's behalf — on the way OUT the
+   * floor is the caller's money, not their shares. The API derives it from a
+   * live quote (`quoteVaultWithdrawal`) exactly as the deposit does.
+   */
+  async buildVaultWithdrawal(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultWithdrawInput
+  ): Promise<EarnVaultTransactionPlan> {
+    if (input.minAmountOut === undefined) {
+      throw new SdpVedaError(
+        "INVALID_AMOUNT",
+        "Veda withdrawals require minAmountOut: the vault refuses an implicit slippage " +
+          "tolerance, and SDP will not choose a floor on the caller's behalf."
+      );
+    }
+
+    const plan = await this.withRuntime(ctx, "Building the vault withdrawal", (runtime, config) =>
+      buildVedaWithdrawPlan(runtime, config, {
+        vault: address(input.providerReference),
+        owner: address(input.owner),
+        shares: input.shares,
+        minAmountOut: input.minAmountOut as string,
+      })
+    );
+    return toEarnVaultTransactionPlan(plan);
+  }
+
+  /**
+   * The live exit quote a withdrawal floor is derived from
+   * (`supportsVaultWithdrawQuote`) — the exit twin of `quoteVaultDeposit`,
+   * with the same posture: a read, blocking conditions returned as data in the
+   * vault's own words.
+   */
+  async quoteVaultWithdrawal(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultWithdrawQuoteInput
+  ): Promise<EarnVaultWithdrawQuote> {
+    const quote = await this.withRuntime(ctx, "Quoting the vault withdrawal", (runtime, config) =>
+      previewVedaWithdraw(runtime, config, {
+        vault: address(input.providerReference),
+        shares: input.shares,
+      })
+    );
+    return {
+      assetsOut: quote.assetsOut,
+      assetDecimals: quote.assetDecimals,
+      blockingIssues: quote.issues,
+    };
   }
 
   /**

@@ -281,8 +281,17 @@ program create still sends the body `requestId` form.
   outcome. The result screen links the withdrawal transaction in Explorer.
   Exports `EarnVaultWithdrawalOutcomeTracker`, mounted once per withdrawal.
 - `earn-vault-withdraw-tracking.ts` — the withdrawal idempotency-key store
-  (fingerprint: project, position, shares) under its own versioned
-  `sessionStorage` key.
+  (fingerprint: project, position, shares, minAmountOut — the derived exit
+  floor is in there for the same reason the deposit's is) under its own
+  versioned `sessionStorage` key.
+- `earn-vault-slippage.tsx` — the slippage-floor machinery BOTH vault modals
+  share: `parseSlippageToleranceBps`, `floorForTolerance` (BigInt at the quoted
+  mint's scale, floored, one-atom minimum), `isSlippageExceededRefusal` (the
+  API's `details.reason` seam), the debounced quote hook and the disclosure
+  section. One copy on purpose — two copies of a funds-protection rule is how
+  one drifts, the same reasoning as `earn-idempotency-key-store`. The floor is
+  derived from a LIVE provider quote, never from the caller's own input; an
+  unavailable quote DISABLES the action rather than guessing.
 - `earn-idempotency-key-store.ts` — the shared machinery behind BOTH tracking
   modules (storage tiers, quota divergence, approval holds, entry bounds), plus
   `answerRetiresIdempotencyKey`, the shared retire-decision rule. Extracted

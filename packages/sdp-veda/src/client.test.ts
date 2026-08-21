@@ -3,6 +3,7 @@ import {
   supportsVaultDepositQuote,
   supportsVaultDirect,
   supportsVaultWithdraw,
+  supportsVaultWithdrawQuote,
 } from "@sdp/earn/capabilities";
 import type { VedaDeployment } from "@sdp/types/veda-programs";
 import { address } from "@solana/kit";
@@ -36,13 +37,17 @@ const DEPLOYMENT: VedaDeployment = {
 
 const mocks = vi.hoisted(() => ({
   buildVedaDepositPlan: vi.fn(),
+  buildVedaWithdrawPlan: vi.fn(),
   previewVedaDeposit: vi.fn(),
+  previewVedaWithdraw: vi.fn(),
   readVedaPosition: vi.fn(),
 }));
 
 vi.mock("./sdk", () => ({
   buildVedaDepositPlan: mocks.buildVedaDepositPlan,
+  buildVedaWithdrawPlan: mocks.buildVedaWithdrawPlan,
   previewVedaDeposit: mocks.previewVedaDeposit,
+  previewVedaWithdraw: mocks.previewVedaWithdraw,
   readVedaPosition: mocks.readVedaPosition,
 }));
 
@@ -100,21 +105,13 @@ describe("VedaVaultDirectClient capabilities", () => {
   });
 
   /**
-   * The withdraw capability is WITHHELD, and this pins it so implementing
-   * `buildVaultWithdrawal` cannot happen by accident.
-   *
-   * Veda offers two independent exits — instant redemption and a
-   * request/fulfil queue — and neither has an SDP route: there is no
-   * `POST /vault-withdrawals`, and the queue's lifecycle does not fit the
-   * `pending|submitted|confirmed|failed` movement model the deposit path uses.
-   * Answering yes here would let a future exit route narrow onto this client
-   * and receive a plan nothing can carry, after the customer was told their
-   * withdrawal was prepared. Deleting this test is the wrong way to make it
-   * pass; landing the withdrawal design is the right way.
+   * The exit route exists (PRO-1702) and the instant redemption rides it
+   * (ADR 0003 — "instant lands first, and alone"), so the capability answer
+   * flipped WITH the implementation, never before it. The queued exit stays
+   * unimplemented and gets no capability answer here.
    */
-  it("does NOT report the withdraw capability until the exit route exists", () => {
-    expect(supportsVaultWithdraw(client)).toBe(false);
-    expect((client as unknown as Record<string, unknown>).buildVaultWithdrawal).toBeUndefined();
+  it("reports the withdraw capability now that the instant exit is implemented", () => {
+    expect(supportsVaultWithdraw(client)).toBe(true);
   });
 
   /**
@@ -409,5 +406,72 @@ describe("quoteVaultDeposit", () => {
     ];
     expect(String(input.vault)).toBe(VAULT_A);
     expect(input.amount).toBe("1");
+  });
+});
+
+describe("buildVaultWithdrawal", () => {
+  /**
+   * Refused HERE, exactly like the deposit's `minSharesOut`: the SDK will not
+   * apply an implicit tolerance, and on the way OUT the floor is the caller's
+   * MONEY. A typed INVALID_AMOUNT before any chain work is the caller-fixable
+   * answer.
+   */
+  it("refuses to build without a minAmountOut floor", async () => {
+    await expect(
+      client.buildVaultWithdrawal(sandbox, {
+        providerReference: VAULT_A,
+        owner: OWNER,
+        shares: "5",
+      })
+    ).rejects.toMatchObject({ code: "INVALID_AMOUNT" });
+    expect(mocks.buildVedaWithdrawPlan).not.toHaveBeenCalled();
+  });
+
+  it("serializes the exit plan into the dependency-free Earn contract", async () => {
+    mocks.buildVedaWithdrawPlan.mockResolvedValue({
+      ...plan(),
+      accepted: { shares: "5", minAmountOut: "4.99" },
+    });
+
+    const result = await client.buildVaultWithdrawal(sandbox, {
+      providerReference: VAULT_A,
+      owner: OWNER,
+      shares: "5",
+      minAmountOut: "4.99",
+    });
+
+    expect(result.accepted).toEqual({ shares: "5", minAmountOut: "4.99" });
+    expect(result.instructions).toHaveLength(1);
+    const [, , input] = mocks.buildVedaWithdrawPlan.mock.calls[0] as [
+      unknown,
+      unknown,
+      { vault: unknown; owner: unknown; shares: string; minAmountOut: string },
+    ];
+    expect(String(input.vault)).toBe(VAULT_A);
+    expect(String(input.owner)).toBe(OWNER);
+    expect(input.shares).toBe("5");
+    expect(input.minAmountOut).toBe("4.99");
+  });
+});
+
+describe("quoteVaultWithdrawal", () => {
+  it("reports the capability and serializes the quote unchanged", async () => {
+    expect(supportsVaultWithdrawQuote(client)).toBe(true);
+    mocks.previewVedaWithdraw.mockResolvedValue({
+      assetsOut: "4.997",
+      assetDecimals: 6,
+      issues: [{ code: "SHARE_LOCKED", message: "Shares are locked" }],
+    });
+
+    const quote = await client.quoteVaultWithdrawal(sandbox, {
+      providerReference: VAULT_A,
+      shares: "5",
+    });
+
+    expect(quote).toEqual({
+      assetsOut: "4.997",
+      assetDecimals: 6,
+      blockingIssues: [{ code: "SHARE_LOCKED", message: "Shares are locked" }],
+    });
   });
 });
