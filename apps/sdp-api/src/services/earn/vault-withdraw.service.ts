@@ -230,6 +230,10 @@ export async function withdrawFromVault(
         idempotencyFingerprint: fingerprint,
         createdBy: input.userId ?? null,
         initiatedByKeyId: input.apiKeyId ?? null,
+        // An exit can create the share account as a prerequisite and pay its
+        // rent, so it owns the attribution from that point on.
+        createsShareAccount: plan.createsShareAccount === true,
+        shareAtaRentFunder: rentPayer ?? null,
       }),
   });
 }

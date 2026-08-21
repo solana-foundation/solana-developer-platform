@@ -22,13 +22,26 @@
 --
 -- NULL means the owner funded it, which is both the historical default and the
 -- unsponsored one, and it makes the close destination fall back to the custody
--- wallet with no special case. Only a deposit that OBSERVED the account missing
+-- wallet with no special case. Only a movement that OBSERVED the account missing
 -- and created it writes an address here.
 --
 -- Set on the position rather than the movement because the account is per
--- (wallet, share mint): one position, many deposits, and only the first one
--- pays. It is cleared when the account is closed, so a re-entry that pays rent
--- again records its own funder rather than inheriting a stale one.
+-- (wallet, share mint): one position, many movements, and only the one that
+-- creates the account pays. It is rewritten, including back to NULL, by every
+-- movement that actually creates the account, so a re-entry under a different
+-- fee mode records its own funder rather than inheriting a stale one. Both
+-- directions write it: an exit creates the account too when it has to
+-- consolidate auxiliary share accounts, and it funds that creation.
+--
+-- Authoritative only while the account EXISTS, which is the only window anything
+-- reads it. A value left from an already-refunded entry is unreachable, because
+-- a position with no share account has no shares to exit.
+--
+-- KNOWN RESIDUAL: the funder is observed before broadcast, so a create from
+-- outside SDP in that window records a funder that paid nothing. Concurrent SDP
+-- movements are safe (one fee mode per deployment and cluster means they name
+-- the same funder). Confirming the funder from the landed transaction at
+-- settlement is the real fix and is not attempted here.
 
 ALTER TABLE earn_positions
     ADD COLUMN IF NOT EXISTS share_ata_rent_funder TEXT;

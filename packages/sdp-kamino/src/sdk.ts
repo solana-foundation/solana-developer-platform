@@ -511,12 +511,23 @@ export async function buildKaminoWithdrawPlan(
   // Appended AFTER the share-encoding assertion on purpose. A close redeems no
   // shares, and folding it in earlier would invite a future edit to count it.
   // It is last in the instruction order because it must follow every redemption.
+  // Did THIS exit create the share account? If so it also paid the rent, and
+  // that beats whatever the caller recorded from an earlier movement: a single
+  // transaction can create the account, consolidate into it, redeem everything
+  // and close it, and in that case the party owed the refund is the one who
+  // funded it moments earlier in the same transaction. Only when the account
+  // pre-dates this exit does the recorded funder describe who paid for it.
+  const createsShareAccount = !shareAccounts.some(
+    (account) => account.address === consolidation.shareAta
+  );
+  const rentRefundTo = createsShareAccount ? input.rentPayer?.address : input.rentRefundTo;
   const closeShareAccountInstruction = buildShareAccountCloseInstruction({
     shareAta: consolidation.shareAta,
     owner: input.owner,
-    ...(input.rentRefundTo === undefined ? {} : { refundTo: input.rentRefundTo }),
+    ...(rentRefundTo === undefined ? {} : { refundTo: rentRefundTo }),
     ataBaseUnitsBeforeExit: consolidation.postConsolidationAtaBaseUnits,
     redeemedBaseUnits: requestedBaseUnits,
+    ownerTotalBaseUnits: consolidation.totalBaseUnits,
   });
 
   return assertPlanTargetsCluster({
@@ -528,6 +539,13 @@ export async function buildKaminoWithdrawPlan(
     lookupTables: Object.keys(lookupTables) as Address[],
     assetIdentity,
     accepted: { shares: acceptedShares },
+    // An EXIT can create the share ATA too, and charge its rent to `rentPayer`:
+    // consolidation emits an idempotent create, and klend interleaves its own
+    // ATA prerequisites into the withdraw bundle. So the same observation the
+    // deposit path makes has to be reported here, or an exit that paid the rent
+    // would leave the position naming whoever funded a PREVIOUS instance of the
+    // account, and the next close would refund the wrong party.
+    createsShareAccount,
   });
 }
 

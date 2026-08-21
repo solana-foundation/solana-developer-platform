@@ -330,8 +330,16 @@ export function buildShareAccountCloseInstruction(input: {
   ataBaseUnitsBeforeExit: bigint;
   /** Shares the redemption instructions are asserted to encode. */
   redeemedBaseUnits: bigint;
+  /** Everything the owner holds of this share mint, across every account. */
+  ownerTotalBaseUnits: bigint;
 }): Instruction | null {
   if (input.ataBaseUnitsBeforeExit !== input.redeemedBaseUnits) return null;
+  // A TRUE full exit, not merely an emptied ATA. If auxiliary accounts still
+  // hold shares, closing here would be closing an account the very next
+  // withdrawal has to recreate and pay rent for again, and the funder recorded
+  // against the position would by then describe a previous instance of the
+  // account. Leaving it open costs nothing and keeps the recorded funder true.
+  if (input.ownerTotalBaseUnits !== input.redeemedBaseUnits) return null;
   return getCloseAccountInstruction(
     {
       account: input.shareAta,

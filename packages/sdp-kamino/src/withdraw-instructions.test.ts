@@ -209,14 +209,19 @@ describe("buildShareAccountCloseInstruction", () => {
   const SHARE_ATA = address("7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx");
   const SPONSOR = address("4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q");
 
-  it("refunds the recorded funder when the exit empties the account", () => {
-    const instruction = buildShareAccountCloseInstruction({
+  function close(overrides: Record<string, unknown> = {}) {
+    return buildShareAccountCloseInstruction({
       shareAta: SHARE_ATA,
       owner: OWNER,
-      refundTo: SPONSOR,
       ataBaseUnitsBeforeExit: 500n,
       redeemedBaseUnits: 500n,
-    });
+      ownerTotalBaseUnits: 500n,
+      ...overrides,
+    } as Parameters<typeof buildShareAccountCloseInstruction>[0]);
+  }
+
+  it("refunds the recorded funder when the exit empties the account", () => {
+    const instruction = close({ refundTo: SPONSOR });
 
     expect(instruction).not.toBeNull();
     const accounts = (instruction?.accounts ?? []).map((account) => String(account.address));
@@ -226,48 +231,51 @@ describe("buildShareAccountCloseInstruction", () => {
   });
 
   it("refunds the owner when no funder was recorded", () => {
-    const instruction = buildShareAccountCloseInstruction({
-      shareAta: SHARE_ATA,
-      owner: OWNER,
-      ataBaseUnitsBeforeExit: 500n,
-      redeemedBaseUnits: 500n,
-    });
-
-    expect((instruction?.accounts ?? []).map((account) => String(account.address))[1]).toBe(
+    expect((close()?.accounts ?? []).map((account) => String(account.address))[1]).toBe(
       OWNER.address
     );
   });
 
   /**
-   * The load-bearing case. `CloseAccount` fails on a non-zero balance and rides
-   * the same transaction as the redemptions, so closing on a partial exit would
-   * not strand rent, it would fail the customer's withdrawal.
+   * `CloseAccount` fails on a non-zero balance and rides the same transaction as
+   * the redemptions, so closing on a partial exit would not strand rent, it would
+   * fail the customer's withdrawal.
    */
   it.each([
-    ["a partial exit leaves shares behind", 500n, 200n],
-    ["redeeming more than the ATA holds cannot be a clean close", 200n, 500n],
-  ])("returns null when %s", (_case, held, redeemed) => {
+    [
+      "a partial exit leaves shares in the ATA",
+      { ataBaseUnitsBeforeExit: 500n, redeemedBaseUnits: 200n, ownerTotalBaseUnits: 500n },
+    ],
+    [
+      "redeeming more than the ATA holds",
+      { ataBaseUnitsBeforeExit: 200n, redeemedBaseUnits: 500n, ownerTotalBaseUnits: 500n },
+    ],
+  ])("returns null when %s", (_case, overrides) => {
+    expect(close({ ...overrides, refundTo: SPONSOR })).toBeNull();
+  });
+
+  /**
+   * The case Greptile flagged, and the reason the condition is not just
+   * "is the ATA empty". Consolidation can leave the ATA holding exactly the
+   * request while auxiliary accounts still hold shares. Closing there would be
+   * closing an account the NEXT withdrawal has to recreate and pay rent for, at
+   * which point the funder recorded against the position describes a previous
+   * instance of the account and its refund goes to the wrong party.
+   */
+  it("returns null when auxiliary accounts still hold shares", () => {
     expect(
-      buildShareAccountCloseInstruction({
-        shareAta: SHARE_ATA,
-        owner: OWNER,
+      close({
+        ataBaseUnitsBeforeExit: 500n,
+        redeemedBaseUnits: 500n,
+        ownerTotalBaseUnits: 900n,
         refundTo: SPONSOR,
-        ataBaseUnitsBeforeExit: held,
-        redeemedBaseUnits: redeemed,
       })
     ).toBeNull();
   });
 
   it("closes a zero-balance account that redeems nothing", () => {
-    // Degenerate but well defined: both sides zero still means the account ends
-    // empty, so its rent is recoverable.
     expect(
-      buildShareAccountCloseInstruction({
-        shareAta: SHARE_ATA,
-        owner: OWNER,
-        ataBaseUnitsBeforeExit: 0n,
-        redeemedBaseUnits: 0n,
-      })
+      close({ ataBaseUnitsBeforeExit: 0n, redeemedBaseUnits: 0n, ownerTotalBaseUnits: 0n })
     ).not.toBeNull();
   });
 });

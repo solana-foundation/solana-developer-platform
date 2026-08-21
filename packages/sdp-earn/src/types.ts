@@ -416,6 +416,17 @@ export interface EarnVaultTransactionPlan {
    * the builder, which read the chain, can say which happened, and the caller
    * needs to know because it must remember who to give the rent back to when
    * the account is closed. Absent or false means no rent was charged here.
+   *
+   * KNOWN RESIDUAL: this is a pre-execution read, so a party that creates the
+   * account between the read and the broadcast makes this true when no rent was
+   * actually charged. Two concurrent SDP movements cannot cause harm, because
+   * the fee mode is resolved per deployment and per cluster, so both would name
+   * the SAME funder. The reachable case is a create from OUTSIDE SDP (the
+   * customer transacting with the provider directly) in that window, which would
+   * later refund one ATA's rent to a sponsor that did not pay it. Bounded at
+   * 2,039,280 lamports per position and only on a full exit. Closing it properly
+   * needs the funder confirmed from the LANDED transaction at settlement rather
+   * than predicted at build; that is deliberately not in this change.
    */
   createsShareAccount?: boolean;
 }

@@ -380,7 +380,7 @@ export interface EarnMovementsRepository {
   ): Promise<EarnMovementRow | null>;
 }
 
-export interface CreateSignedVaultDepositIntentInput {
+export interface CreateSignedVaultDepositIntentInput extends ShareAccountRentAttribution {
   organizationId: string;
   projectId: string;
   environment: SdpEnvironment;
@@ -408,22 +408,35 @@ export interface CreateSignedVaultDepositIntentInput {
   idempotencyFingerprint: string;
   createdBy?: string | null;
   initiatedByKeyId?: string | null;
+}
+
+/**
+ * Share-ATA rent attribution, carried by BOTH money directions.
+ *
+ * Not deposit-only, and that asymmetry was a bug: an EXIT can create the share
+ * account too (consolidation emits an idempotent create, and klend interleaves
+ * its own ATA prerequisites into the withdraw bundle), so an exit that paid the
+ * rent has to say so or the position keeps naming whoever funded a previous
+ * instance of the account.
+ */
+export interface ShareAccountRentAttribution {
   /**
-   * Whether this deposit's instructions CREATE the share token account, as
-   * OBSERVED by the builder rather than inferred from the instruction list.
-   * True is what makes `shareAtaRentFunder` below meaningful.
+   * Whether these instructions CREATE the share token account, as OBSERVED by
+   * the builder against chain state rather than inferred from the instruction
+   * list. Creation is idempotent, so the instruction proves nothing on its own.
+   * True is what makes `shareAtaRentFunder` meaningful.
    *
    * Optional, and the default is the safe direction: omitted means "no rent was
    * charged here", so the funder is left untouched and no refund can be
-   * misdirected. A caller that cannot observe account creation gets the
-   * historical behaviour rather than a guess.
+   * misdirected. A caller that cannot observe creation gets the historical
+   * behaviour rather than a guess.
    */
   createsShareAccount?: boolean;
   /**
    * Who funds that creation: a sponsor address, or null when the custody wallet
    * pays. Only consulted when `createsShareAccount` is true, and then it is
-   * written even if null, so a re-entry under a different fee mode cannot
-   * inherit the previous entry's funder.
+   * written even if null, so a later entry under a different fee mode cannot
+   * inherit the previous one's funder.
    */
   shareAtaRentFunder?: string | null;
 }
@@ -438,7 +451,7 @@ export interface AdvanceVaultMovementInput {
   settledAt?: string | null;
 }
 
-export interface CreateSignedVaultWithdrawalIntentInput {
+export interface CreateSignedVaultWithdrawalIntentInput extends ShareAccountRentAttribution {
   organizationId: string;
   projectId: string;
   environment: SdpEnvironment;
@@ -973,6 +986,12 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         if (prior) return prior;
 
         const movement = await insertVaultWithdrawalMovement(transaction, input);
+        if (movement) {
+          // An exit that creates the share account funds its rent, so it owns
+          // the attribution from here. Only on the winning insert: a loser
+          // broadcasts nothing and so pays nothing.
+          await recordShareAccountRentFunder(transaction, input, movement.position_id);
+        }
         if (!movement) {
           // A concurrent identical request committed after the preflight. Its
           // signed transaction, not ours, is the one that may be broadcast.
@@ -1379,7 +1398,7 @@ async function requireMovementPosition(
  */
 async function recordShareAccountRentFunder(
   db: AppDb,
-  input: CreateSignedVaultDepositIntentInput,
+  input: ShareAccountRentAttribution & { organizationId: string },
   positionId: string
 ): Promise<void> {
   if (!input.createsShareAccount) return;
