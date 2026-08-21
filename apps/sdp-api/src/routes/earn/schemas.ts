@@ -332,6 +332,17 @@ export const earnVaultWithdrawalSchema = z.object({
     .regex(/^\d+(\.\d+)?$/, "shares must be a positive decimal string")
     .refine((value) => /[1-9]/.test(value), "shares must be greater than zero"),
   /**
+   * Optional exit slippage floor: the minimum deposit-token amount to accept,
+   * as a decimal string in the token's own units. Providers whose builder
+   * refuses an implicit tolerance (Veda) refuse its absence with a typed 400.
+   */
+  minAmountOut: z
+    .string()
+    .max(128)
+    .regex(/^\d+(\.\d+)?$/, "minAmountOut must be a decimal string")
+    .refine((value) => /[1-9]/.test(value), "minAmountOut must be greater than zero")
+    .optional(),
+  /**
    * Retired on this route for the same reason as the deposit's: the chain has
    * no request dedupe to anchor a body key to, so the `Idempotency-Key` header
    * is the only accepted source.
@@ -343,6 +354,21 @@ export const earnVaultWithdrawalSchema = z.object({
 
 /** One recorded withdrawal; org-scoped lookup answers 404 for foreign rows. */
 export const earnVaultWithdrawalParamsSchema = earnVaultMovementParamsSchema;
+
+/**
+ * Quote what redeeming these shares would pay right now — a read, no side
+ * effects, so no idempotency key. The exit twin of the deposit preview.
+ */
+export const earnVaultWithdrawalPreviewSchema = z.object({
+  /** The `earn_positions` row being exited. */
+  positionId: z.string().min(1).max(128),
+  /** Shares to redeem, decimal string in share units. */
+  shares: z
+    .string()
+    .max(128)
+    .regex(/^\d+(\.\d+)?$/, "shares must be a positive decimal string")
+    .refine((value) => /[1-9]/.test(value), "shares must be greater than zero"),
+});
 
 /**
  * Bounded keyset page over recorded withdrawals, newest first. The same

@@ -538,6 +538,18 @@ organization's own custody wallets.
   A failed chain read leaves a position UNHYDRATED rather than zero; reporting
   zero is a claim about someone's money that a failed RPC call cannot support.
 
+- `POST /vault-deposit-previews` / `POST /vault-withdrawal-previews` — the
+  QUOTES the dashboard derives its slippage floors from
+  (`supportsVaultDepositQuote` / `supportsVaultWithdrawQuote`; 501 for a
+  provider without the capability). Reads with no side effects and no
+  idempotency key, but with deliberately DIFFERENT gates per direction: the
+  deposit preview carries the deposit's own money-in gates (it exists only to
+  open a new position), while the withdrawal preview carries EXIT gates only —
+  position scoping and the read-side wallet binding, both 404 (ADR 0002).
+  `minAmountOut` / `minSharesOut` join the idempotency fingerprints because the
+  floor is baked into the built instruction; a retry with a different floor is
+  a changed request that must mint a fresh key.
+
 Capability dispatch is `supportsVaultDirect` (`@sdp/earn/capabilities`), resolved
 through `services/earn/execution-registry.ts` — the one place a provider id maps
 to an executing client. `EARN_PROVIDER_CLIENTS` stays the CATALOGUE registry so
@@ -553,7 +565,7 @@ movement failed. Never rebuild a transaction during recovery.
 ### Vault withdrawals — the exit half (PRO-1702)
 
 - `POST /vault-withdrawals` — **build + simulate + sign ALL legs + record ALL
-  legs + broadcast in order**. Body `{positionId, shares}` and a required
+  legs + broadcast in order**. Body `{positionId, shares, minAmountOut?}` and a required
   `Idempotency-Key` header (body `requestId` rejected, same as deposits).
   Registered `requirePermissions("earn:write", "wallets:read")` → `policyGate`
   (extractor `extractEarnVaultWithdrawalPolicyCandidate`; family `program`,

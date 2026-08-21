@@ -421,6 +421,8 @@ export interface EarnVaultAcceptedAmounts {
   amount?: string;
   minSharesOut?: string;
   shares?: string;
+  /** Withdrawal slippage floor, in the deposit token's own units. */
+  minAmountOut?: string;
 }
 
 export interface EarnVaultDepositInput {
@@ -439,6 +441,35 @@ export interface EarnVaultWithdrawInput {
   owner: string;
   /** Shares to redeem, as a decimal string. */
   shares: string;
+  /**
+   * Minimum deposit-token amount to accept for those shares — the exit's
+   * slippage floor, in the deposit token's own units. Optional on the
+   * contract; a provider whose builder refuses an implicit tolerance (Veda)
+   * refuses its absence with a typed error rather than inventing one.
+   */
+  minAmountOut?: string;
+}
+
+export interface EarnVaultWithdrawQuoteInput {
+  /** Vault address — the position's `providerReference`. */
+  providerReference: string;
+  /** Shares to redeem, as a decimal string. */
+  shares: string;
+}
+
+/**
+ * One provider's answer to "what would redeeming these shares pay right now".
+ * The exit twin of `EarnVaultDepositQuote`, and used the same way: a caller
+ * derives a truthful `minAmountOut` floor from `assetsOut` minus a chosen
+ * tolerance, so the floor tracks the LIVE rate instead of assuming one.
+ */
+export interface EarnVaultWithdrawQuote {
+  /** Deposit-token amount at the live rate, decimal string at token scale. */
+  assetsOut: string;
+  /** The deposit token's decimals — the scale a floor must be quantized to. */
+  assetDecimals: number;
+  /** Conditions the provider reports would block this exit, empty when none. */
+  blockingIssues: readonly EarnVaultDepositQuoteIssue[];
 }
 
 export interface EarnVaultDepositQuoteInput {
@@ -567,6 +598,19 @@ export interface EarnVaultDepositQuoteProvider extends EarnVaultDirectProvider {
     ctx: EarnRuntimeContext,
     input: EarnVaultDepositQuoteInput
   ): Promise<EarnVaultDepositQuote>;
+}
+
+/**
+ * Optional capability: a live withdrawal quote (see `EarnVaultWithdrawQuote`).
+ * Extends the WITHDRAW capability, not the deposit-quote one: an exit quote
+ * exists to derive an exit floor, and it means nothing on a provider whose
+ * exit SDP cannot carry.
+ */
+export interface EarnVaultWithdrawQuoteProvider extends EarnVaultWithdrawProvider {
+  quoteVaultWithdrawal(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultWithdrawQuoteInput
+  ): Promise<EarnVaultWithdrawQuote>;
 }
 
 /**

@@ -26,6 +26,12 @@ export function vaultWithdrawalRequestFingerprint(input: {
   projectId: string | null;
   positionId: string;
   shares: string;
+  /**
+   * The derived exit floor, or `null` when the provider takes none. In the
+   * fingerprint because the API's own fingerprint includes it: "raise the
+   * tolerance and retry" must mint a fresh key, not replay the refused one.
+   */
+  minAmountOut: string | null;
 }): string {
-  return JSON.stringify([input.projectId, input.positionId, input.shares]);
+  return JSON.stringify([input.projectId, input.positionId, input.shares, input.minAmountOut]);
 }
