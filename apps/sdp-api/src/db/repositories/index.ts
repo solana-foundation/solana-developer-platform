@@ -55,6 +55,87 @@ export type {
 export { generateEarnStrategyId } from "./earn.repository";
 export { createPostgresEarnRepository } from "./earn.repository.postgres";
 export type {
+  AppendHeliusRingsEventInput,
+  HeliusRingsEventRepository,
+  HeliusRingsEventRepositoryContext,
+  HeliusRingsEventRow,
+  ListHeliusRingsEventsInput,
+} from "./helius-rings-event.repository";
+export {
+  DEFAULT_RINGS_EVENT_LIST_LIMIT,
+  generateHeliusRingsEventId,
+  mapHeliusRingsEventRow,
+  redactHeliusRingsEventPayload,
+} from "./helius-rings-event.repository";
+export { createPostgresHeliusRingsEventRepository } from "./helius-rings-event.repository.postgres";
+export type {
+  HeliusRingsHealthRepository,
+  HeliusRingsHealthRepositoryContext,
+  HeliusRingsRuntimeHealthRow,
+  RecordHeliusRingsHealthInput,
+} from "./helius-rings-health.repository";
+export { mapHeliusRingsHealthRows } from "./helius-rings-health.repository";
+export { createPostgresHeliusRingsHealthRepository } from "./helius-rings-health.repository.postgres";
+export type {
+  CreateHeliusRingsKeyRefInput,
+  HeliusRingsKeyRefRepository,
+  HeliusRingsKeyRefRepositoryContext,
+  HeliusRingsKeyRefRow,
+} from "./helius-rings-key-ref.repository";
+export { generateHeliusRingsKeyRefId } from "./helius-rings-key-ref.repository";
+export { createPostgresHeliusRingsKeyRefRepository } from "./helius-rings-key-ref.repository.postgres";
+export type {
+  FailHeliusRingsOperationInput,
+  HeliusRingsOperationRepository,
+  HeliusRingsOperationRepositoryContext,
+  HeliusRingsOperationRow,
+  HeliusRingsOperationTransitionPatch,
+  HeliusRingsTimelockInput,
+  HeliusRingsTimelockRow,
+  ListHeliusRingsInFlightOperationsInput,
+  ListHeliusRingsOperationsByProjectInput,
+  ListHeliusRingsOperationsByWalletInput,
+  ReleaseHeliusRingsTimelockInput,
+  ReserveHeliusRingsIntentInput,
+  ReserveHeliusRingsIntentResult,
+  TransitionHeliusRingsOperationInput,
+} from "./helius-rings-operation.repository";
+export {
+  DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT,
+  DEFAULT_RINGS_OPERATION_LIST_LIMIT,
+  generateHeliusRingsOperationId,
+  mapHeliusRingsOperationSummaryRow,
+} from "./helius-rings-operation.repository";
+export { createPostgresHeliusRingsOperationRepository } from "./helius-rings-operation.repository.postgres";
+export type {
+  CreateHeliusRingsWalletInput,
+  HeliusRingsProjectScope,
+  HeliusRingsWalletRepository,
+  HeliusRingsWalletRepositoryContext,
+  HeliusRingsWalletRow,
+  ListHeliusRingsWalletsInput,
+  MarkHeliusRingsWalletProvisionedInput,
+  UpdateHeliusRingsWalletStatusInput,
+  UpdateHeliusRingsWalletSyncCursorInput,
+} from "./helius-rings-wallet.repository";
+export {
+  DEFAULT_RINGS_WALLET_LIST_LIMIT,
+  generateHeliusRingsWalletId,
+  mapHeliusRingsWalletRow,
+} from "./helius-rings-wallet.repository";
+export { createPostgresHeliusRingsWalletRepository } from "./helius-rings-wallet.repository.postgres";
+export type {
+  CreateHeliusRingsZoneInput,
+  HeliusRingsZoneRepository,
+  HeliusRingsZoneRepositoryContext,
+  HeliusRingsZoneRow,
+} from "./helius-rings-zone.repository";
+export {
+  generateHeliusRingsZoneId,
+  mapHeliusRingsZoneRow,
+} from "./helius-rings-zone.repository";
+export { createPostgresHeliusRingsZoneRepository } from "./helius-rings-zone.repository.postgres";
+export type {
   KycWalletRow,
   KycWalletsRepository,
   SetKycStatusByCounterpartyInput,
@@ -331,6 +412,12 @@ export {
   createCounterpartiesRepository,
   createCounterpartyAccountsRepository,
   createEarnRepository,
+  createHeliusRingsEventRepository,
+  createHeliusRingsHealthRepository,
+  createHeliusRingsKeyRefRepository,
+  createHeliusRingsOperationRepository,
+  createHeliusRingsWalletRepository,
+  createHeliusRingsZoneRepository,
   createKycWalletsRepository,
   createNotificationsRepository,
   createPaymentRecurringPaymentsRepository,

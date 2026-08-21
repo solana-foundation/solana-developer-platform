@@ -252,6 +252,12 @@ jobs:
       - name: Scripts tests
         run: pnpm test:scripts
 
+      # Runs here rather than in the Module Boundaries job because it parses
+      # TypeScript with the compiler's own parser, and that job installs no
+      # dependencies.
+      - name: Check SecretRef serialization
+        run: pnpm check:secretref-serialization
+
   build_api:
     name: Build API
     runs-on: ubuntu-latest
