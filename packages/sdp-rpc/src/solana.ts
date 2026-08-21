@@ -7,15 +7,18 @@
 
 import {
   type Address,
+  airdropFactory,
   type Base64EncodedWireTransaction,
   type Blockhash,
   type Commitment,
+  commitmentComparator,
   createDefaultRpcTransport,
   type createSolanaRpc,
   createSolanaRpcFromTransport,
   createSolanaRpcSubscriptions,
   getBase64Decoder,
   getTransactionDecoder,
+  lamports as kitLamports,
   type RpcTransport,
   type Signature,
   type Slot,
@@ -330,9 +333,8 @@ export async function confirmTransaction(
 
     if (result) {
       const isConfirmed =
-        result.confirmationStatus === commitment ||
-        (commitment === "confirmed" && result.confirmationStatus === "finalized") ||
-        result.confirmationStatus === "finalized";
+        result.confirmationStatus !== null &&
+        commitmentComparator(result.confirmationStatus, commitment) >= 0;
 
       if (isConfirmed || result.err) {
         return {
@@ -362,43 +364,20 @@ export async function requestAndConfirmAirdrop(
     timeoutMs?: number;
   }
 ): Promise<TransactionConfirmation> {
-  const rpcUrl = getSolanaConfig(env).rpcUrl;
-  const response = await fetch(rpcUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "requestAirdrop",
-      params: [address, Number(lamports)],
-    }),
+  const rpc = createRpc(env);
+  const commitment = options?.commitment ?? "confirmed";
+  const airdrop = airdropFactory({
+    rpc,
+    rpcSubscriptions: createRpcSubscriptions(env),
+  } as unknown as Parameters<typeof airdropFactory>[0]);
+
+  const signature = await airdrop({
+    commitment,
+    lamports: kitLamports(BigInt(lamports)),
+    recipientAddress: address,
   });
 
-  if (!response.ok) {
-    throw new Error(`Airdrop request failed with HTTP ${response.status}`);
-  }
-
-  const payload = (await response.json()) as {
-    result?: string;
-    error?: {
-      code?: number;
-      message?: string;
-      data?: unknown;
-    };
-  };
-
-  if (payload.error) {
-    throw new Error(payload.error.message ?? "Airdrop request failed");
-  }
-
-  if (!payload.result) {
-    throw new Error("Airdrop request returned no signature");
-  }
-
-  const rpc = createRpc(env);
-  const confirmation = await confirmTransaction(rpc, payload.result as Signature, {
+  const confirmation = await confirmTransaction(rpc, signature, {
     commitment: options?.commitment,
     timeoutMs: options?.timeoutMs,
   });
