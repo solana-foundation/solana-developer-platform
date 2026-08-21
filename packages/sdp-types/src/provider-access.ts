@@ -188,25 +188,29 @@ export const SURFACED_EARN_PROVIDERS: readonly EarnProviderId[] = EARN_PROVIDERS
 /**
  * Environments where a `vault_direct` deposit may be OPENED.
  *
- * ── Why production is closed ────────────────────────────────────────────────
- * SDP can currently move money INTO a K-Vault and not back out. There is no
- * vault-withdraw route (the Kamino client withholds the capability because its
- * plan is not yet batched). The dashboard now shows durable vault positions,
- * but it can only label their SDP withdrawal action unavailable. Entitlement
- * will not save us: it is org-scoped, not environment-scoped, so an entitled
- * org would otherwise reach mainnet with real funds and no SDP exit path.
+ * ── Why production is (still) closed ────────────────────────────────────────
+ * The vault-withdraw path exists now (PRO-1702: `POST /v1/earn/vault-withdrawals`
+ * plus the treasury exit action), and it deliberately does NOT consult this
+ * constant — an exit works in every environment a position exists in. What
+ * remains open is PRO-1703: the Active tab does not surface vault positions,
+ * so a mainnet position would be held somewhere the customer's primary
+ * portfolio view cannot show. Entitlement will not save us: it is org-scoped,
+ * not environment-scoped, so an entitled org would otherwise reach mainnet
+ * before the epic's launch checklist (PRO-1635) says it may.
  *
- * Nothing here traps money that is already deposited. The shares sit in the
- * org's OWN custody wallet and Kamino's UI can always redeem them — this closes
- * the door IN, which is the only direction ADR 0002 ever permits closing.
+ * Nothing here traps money that is already deposited — the SDP exit route
+ * works in production, and the shares sit in the org's OWN custody wallet —
+ * this closes the door IN, which is the only direction ADR 0002 ever permits
+ * closing.
  *
  * Shared rather than duplicated on purpose: this is the single fact the API
  * refuses on and the dashboard hides the affordance on, and a UI that offered a
  * button the server refuses is the specific failure this replaces.
  *
- * TO OPEN PRODUCTION: land the withdraw path, then add "production" here. It is
- * one line precisely so it cannot be forgotten, and it is not a flag flip
- * precisely because the work is real.
+ * TO OPEN PRODUCTION: land the Active-tab surfacing (PRO-1703), then add
+ * "production" here as part of PRO-1635's launch checklist. It is one line
+ * precisely so it cannot be forgotten, and it is not a flag flip precisely
+ * because the work is real.
  */
 export const VAULT_DIRECT_DEPOSIT_ENVIRONMENTS: readonly SdpEnvironment[] = ["sandbox"];
 
