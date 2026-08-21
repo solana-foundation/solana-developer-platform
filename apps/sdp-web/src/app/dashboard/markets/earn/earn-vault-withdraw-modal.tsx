@@ -176,10 +176,7 @@ function TransactionList({
   return (
     <dl className="mt-5 rounded-lg border border-border-default bg-fill-subtle p-4 text-sm">
       {transactions.map((transaction) => (
-        <div
-          className="flex items-baseline justify-between gap-5 py-1"
-          key={transaction.signature}
-        >
+        <div className="flex items-baseline justify-between gap-5 py-1" key={transaction.signature}>
           <dt className="text-tertiary">
             {transactions.length > 1
               ? t("DashboardEarn.vaultWithdraw.legLabel", {

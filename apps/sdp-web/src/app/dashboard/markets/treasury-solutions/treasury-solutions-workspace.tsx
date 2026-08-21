@@ -44,6 +44,7 @@ import {
   type EarnFundingWallet,
   useEarnFundingWallets,
 } from "../earn/deposit/earn-funding-wallets";
+import { compareUnsignedDecimals } from "../earn/earn-decimal";
 import {
   EarnStrategyIdentity,
   earnMintAsset,
@@ -65,7 +66,6 @@ import {
   useEarnVaultPositions,
   useEarnVaultWithdrawals,
 } from "../earn/earn-program-data";
-import { compareUnsignedDecimals } from "../earn/earn-decimal";
 import { type EarnProviderAccess, earnVaultDepositAvailability } from "../earn/earn-surfacing";
 import {
   EarnVaultDepositModal,
@@ -346,83 +346,75 @@ function ActiveVaultPositionsCard({
             message={t("DashboardMarkets.treasury.vaultPositionsEmptyTitle")}
           />
         ) : (
-          <>
-            <div className="overflow-x-auto border-y border-border-subtle">
-              <Table className="table-fixed" style={{ minWidth: "58rem" }}>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[28%]">
-                      {t("DashboardMarkets.treasury.position")}
-                    </TableHead>
-                    <TableHead className="w-[12%]">
-                      {t("DashboardMarkets.treasury.asset")}
-                    </TableHead>
-                    <TableHead className="w-[16%]">
-                      {t("DashboardMarkets.treasury.balance")}
-                    </TableHead>
-                    <TableHead className="w-[14%]">
-                      {t("DashboardMarkets.treasury.shares")}
-                    </TableHead>
-                    <TableHead className="w-[18%]">
-                      {t("DashboardMarkets.treasury.custodyWallet")}
-                    </TableHead>
-                    <TableHead align="right" className="w-[12%]">
-                      {t("DashboardMarkets.treasury.actions")}
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {activePositions.map((position) => {
-                    const asset = earnMintAsset(position.tokenMint);
-                    const wallet = walletById.get(position.custodyWalletId);
-                    return (
-                      <TableRow key={position.id}>
-                        <TableCell>
-                          <p className="truncate text-sm text-primary" title={position.label}>
-                            {position.label || shortenMarketAddress(position.providerReference)}
-                          </p>
-                          <p className="mt-0.5 truncate text-xs text-tertiary">
-                            {position.provider}
-                          </p>
-                        </TableCell>
-                        <TableCell className="text-sm text-secondary">{asset.symbol}</TableCell>
-                        <TableCell className="text-sm text-primary tabular-nums">
-                          {formatProviderAmount(position.tokenValue, locale, asset.symbol)}
-                        </TableCell>
-                        <TableCell className="text-sm text-secondary tabular-nums">
-                          {formatProviderAmount(position.shares, locale)}
-                        </TableCell>
-                        <TableCell className="text-sm text-secondary">
-                          {wallet?.label?.trim() ||
-                            shortenMarketAddress(wallet?.publicKey ?? position.custodyWalletId)}
-                        </TableCell>
-                        <TableCell align="right">
-                          {/*
-                           * The exit route (PRO-1702). Deliberately NOT gated on
-                           * availability, surfacing, or environment — money out
-                           * beats money off (ADR 0002), so the verb stays live
-                           * wherever a position exists. A provider whose exit
-                           * SDP cannot build yet answers 501 with a clear error
-                           * inside the modal rather than a silently dead button.
-                           */}
-                          <Button
-                            data-earn-vault-withdraw-focus-fallback={position.id}
-                            iconLeft={<ArrowUpFromLineIcon />}
-                            onClick={() => onWithdraw(position)}
-                            size="sm"
-                            type="button"
-                            variant="secondary"
-                          >
-                            {t("DashboardMarkets.treasury.withdraw")}
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          </>
+          <div className="overflow-x-auto border-y border-border-subtle">
+            <Table className="table-fixed" style={{ minWidth: "58rem" }}>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[28%]">
+                    {t("DashboardMarkets.treasury.position")}
+                  </TableHead>
+                  <TableHead className="w-[12%]">{t("DashboardMarkets.treasury.asset")}</TableHead>
+                  <TableHead className="w-[16%]">
+                    {t("DashboardMarkets.treasury.balance")}
+                  </TableHead>
+                  <TableHead className="w-[14%]">{t("DashboardMarkets.treasury.shares")}</TableHead>
+                  <TableHead className="w-[18%]">
+                    {t("DashboardMarkets.treasury.custodyWallet")}
+                  </TableHead>
+                  <TableHead align="right" className="w-[12%]">
+                    {t("DashboardMarkets.treasury.actions")}
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {activePositions.map((position) => {
+                  const asset = earnMintAsset(position.tokenMint);
+                  const wallet = walletById.get(position.custodyWalletId);
+                  return (
+                    <TableRow key={position.id}>
+                      <TableCell>
+                        <p className="truncate text-sm text-primary" title={position.label}>
+                          {position.label || shortenMarketAddress(position.providerReference)}
+                        </p>
+                        <p className="mt-0.5 truncate text-xs text-tertiary">{position.provider}</p>
+                      </TableCell>
+                      <TableCell className="text-sm text-secondary">{asset.symbol}</TableCell>
+                      <TableCell className="text-sm text-primary tabular-nums">
+                        {formatProviderAmount(position.tokenValue, locale, asset.symbol)}
+                      </TableCell>
+                      <TableCell className="text-sm text-secondary tabular-nums">
+                        {formatProviderAmount(position.shares, locale)}
+                      </TableCell>
+                      <TableCell className="text-sm text-secondary">
+                        {wallet?.label?.trim() ||
+                          shortenMarketAddress(wallet?.publicKey ?? position.custodyWalletId)}
+                      </TableCell>
+                      <TableCell align="right">
+                        {/*
+                         * The exit route (PRO-1702). Deliberately NOT gated on
+                         * availability, surfacing, or environment — money out
+                         * beats money off (ADR 0002), so the verb stays live
+                         * wherever a position exists. A provider whose exit
+                         * SDP cannot build yet answers 501 with a clear error
+                         * inside the modal rather than a silently dead button.
+                         */}
+                        <Button
+                          data-earn-vault-withdraw-focus-fallback={position.id}
+                          iconLeft={<ArrowUpFromLineIcon />}
+                          onClick={() => onWithdraw(position)}
+                          size="sm"
+                          type="button"
+                          variant="secondary"
+                        >
+                          {t("DashboardMarkets.treasury.withdraw")}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
         )}
       </CardContent>
     </Card>
