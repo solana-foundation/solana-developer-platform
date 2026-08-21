@@ -31,6 +31,7 @@ packages/*
 !packages/sdp-spc-withdraw
 !packages/kit-augment
 !packages/sdp-kamino
+!packages/sdp-veda
 docs
 infra
 scripts
