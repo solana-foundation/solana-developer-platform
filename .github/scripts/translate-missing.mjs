@@ -27,6 +27,10 @@ const guidanceFile = path.resolve(
 );
 const guidance = loadTranslationGuidance(guidanceFile);
 
+// Set once a summary reaches the release PR. The failure reporter reads it so a
+// late throw cannot replace an accurate summary with a bare error.
+let summaryReported = false;
+
 function git(args) {
   return execFileSync("git", args, { encoding: "utf8" }).trim();
 }
@@ -80,7 +84,7 @@ function formatLocales(locales) {
   return locales.length === 0 ? "None" : locales.map((locale) => `\`${locale}\``).join(", ");
 }
 
-function summaryMarkdown({
+export function summaryMarkdown({
   missing,
   translations = [],
   batches = 0,
@@ -143,6 +147,37 @@ function summaryMarkdown({
 
   lines.push("", "Generated values are LLM-assisted and require normal review.");
   return lines.join("\n");
+}
+
+function workflowRunUrl() {
+  const server = process.env.GITHUB_SERVER_URL;
+  const runId = process.env.GITHUB_RUN_ID;
+  return server && repo && runId ? `${server}/${repo}/actions/runs/${runId}` : null;
+}
+
+/**
+ * The translation job is continue-on-error, so a throw leaves the workflow run
+ * green and the failing job buried inside it. Without a comment the release PR
+ * carries no trace at all, which is the same invisibility that let the 2026-08
+ * stall run for sixteen days. Same marker as summaryMarkdown, so the next run
+ * replaces this in place.
+ */
+export function failureMarkdown(message) {
+  const runUrl = workflowRunUrl();
+  return [
+    "<!-- sdp-translation-summary -->",
+    "## Eve translation sync",
+    "",
+    "- Status: **failed**",
+    "- The run stopped before it could report. Whatever it did not commit is queued for the next run.",
+    ...(runUrl ? [`- Failing run: ${runUrl}`] : []),
+    "",
+    "```",
+    message,
+    "```",
+    "",
+    "The workflow run is green by design; this job does not gate the push to `main`. Treat this comment as the release gate.",
+  ].join("\n");
 }
 
 async function githubRequest(method, resourcePath, body) {
@@ -252,6 +287,7 @@ async function main() {
     console.log(summary);
     writeStepSummary(summary);
     await updateReleasePrComment(summary);
+    summaryReported = true;
     return;
   }
 
@@ -314,6 +350,7 @@ async function main() {
   console.log(summary);
   writeStepSummary(summary);
   await updateReleasePrComment(summary);
+  summaryReported = true;
 
   if (result.failures.length > 0) {
     const dropped = result.failures.reduce((total, failure) => total + failure.keys, 0);
@@ -323,7 +360,42 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
+/**
+ * What a failed run should say on the release PR, or null when it should stay
+ * quiet. The deferred-batch throw runs after its own summary is posted and that
+ * summary says more than this would; every other throw happens before any
+ * report exists at all.
+ */
+export function failureReport(message, { summaryReported: reported }) {
+  return reported ? null : failureMarkdown(message);
+}
+
+async function reportFailure(error) {
+  const message = String(error instanceof Error ? error.message : error);
+  console.error(message);
   process.exitCode = 1;
-});
+
+  const failure = failureReport(message, { summaryReported });
+  if (!failure) {
+    return;
+  }
+
+  writeStepSummary(failure);
+  try {
+    await updateReleasePrComment(failure);
+  } catch (reportError) {
+    console.error(
+      `Could not report the failure on the release PR: ${
+        reportError instanceof Error ? reportError.message : reportError
+      }`
+    );
+  }
+}
+
+// Importing this module for tests must not run a release. The opt-out is
+// deliberately inverted: anything short of an explicit "1" still runs, because
+// a translation sync that silently skips itself is the exact failure class this
+// script exists to remove.
+if (process.env.TRANSLATION_SCRIPT_IMPORT_ONLY !== "1") {
+  main().catch(reportFailure);
+}

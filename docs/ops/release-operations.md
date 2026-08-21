@@ -112,11 +112,20 @@ Auto-merge is enabled, but branch protection still requires review approval and 
 
 #### Translation sync
 
-`translate-release-strings` runs after the release pull request exists, as a separate `continue-on-error` job. A translation problem therefore never fails the push to `main`; it reports on the release pull request, which is where it can still block the release. Read the `Eve translation sync` comment on that pull request for the outcome.
+`translate-release-strings` runs after the release pull request exists, as a separate `continue-on-error` job.
 
-The job queues a key when it is missing from a locale **or** when the value already committed is one the validator would reject — a placeholder set that no longer matches English, forbidden terminology, unparseable ICU. Both sides share one predicate, so the validator can never reject something the collector will not retranslate. That symmetry is the fix for the 2026-08 stall, where an English string gained a placeholder, the collector skipped the key because it was present, and the validator rejected it on every run for sixteen days.
+**This moves the catalog gate off `main`.** `validateCatalogs` has no caller outside this job, so a catalog defect used to fail Release Flow on the push to `main` and now cannot. The signal is the `Eve translation sync` comment on the release pull request, plus the job's own red status inside an otherwise green run. Read that comment before merging a release: the release pull request is the only place a translation problem can still stop anything.
 
-A `partial` status means some batches failed and were deferred to the next run; the batches that succeeded are still committed. Only drift that this run *introduced* blocks the commit.
+The job queues a key when it is missing from a locale **or** when the value already committed is one the validator would reject: a placeholder set that no longer matches English, forbidden terminology, unparseable ICU. Both sides share one predicate, so the validator can never reject something the collector will not retranslate. That symmetry is the fix for the 2026-08 stall, where an English string gained a placeholder, the collector skipped the key because it was present, and the validator rejected it on every run for sixteen days.
+
+Every run posts or updates one comment, so a missing comment means the job never ran, not that it passed.
+
+| Status | Meaning |
+| --- | --- |
+| `no-op` | Nothing to translate; catalogs validated clean. |
+| `generated` | Every batch succeeded and was committed to the release branch. |
+| `partial` | Some batches failed and are deferred to the next run; the batches that succeeded are still committed. Only drift this run *introduced* blocks the commit. |
+| `failed` | The run threw before it could finish, most often because a source key changed shape in a way `applyTranslations` cannot write. The comment carries the error and a link to the run. Nothing is lost; the next push to `main` retries. |
 
 ### 3. Deploy and publish production
 

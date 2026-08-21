@@ -13,6 +13,15 @@ import {
   validateTerminology,
 } from "../.github/scripts/missing-translations.mjs";
 
+// The orchestration script runs a release on import unless told not to, and it
+// reads its GitHub context at import time.
+process.env.TRANSLATION_SCRIPT_IMPORT_ONLY = "1";
+process.env.GITHUB_REPOSITORY = "solana-foundation/solana-developer-platform";
+process.env.GITHUB_SERVER_URL = "https://github.com";
+const { failureMarkdown, failureReport, summaryMarkdown } = await import(
+  "../.github/scripts/translate-missing.mjs"
+);
+
 const guidance = {
   default: {
     context: {
@@ -781,4 +790,54 @@ test("keeps translations from batches that succeeded when another batch fails", 
   assert.equal(result.failures.length, 1);
   assert.equal(result.failures[0].locale, "es");
   assert.match(result.failures[0].reason, /HTTP 503/);
+});
+
+test("reports a run that threw before it could summarize", () => {
+  process.env.GITHUB_RUN_ID = "424242";
+
+  const markdown = failureMarkdown("Cannot add wallet.balance.label: balance is not an object");
+
+  assert.match(markdown, /<!-- sdp-translation-summary -->/, "must update the summary in place");
+  assert.match(markdown, /Status: \*\*failed\*\*/);
+  assert.match(markdown, /Cannot add wallet\.balance\.label: balance is not an object/);
+  assert.match(
+    markdown,
+    /https:\/\/github\.com\/solana-foundation\/solana-developer-platform\/actions\/runs\/424242/
+  );
+  assert.match(markdown, /does not gate the push to `main`/);
+});
+
+test("omits the run link outside a workflow run", () => {
+  delete process.env.GITHUB_RUN_ID;
+
+  const markdown = failureMarkdown("boom");
+
+  assert.doesNotMatch(markdown, /Failing run/);
+  assert.match(markdown, /Status: \*\*failed\*\*/);
+});
+
+test("a summary that already posted is not replaced by a bare failure", () => {
+  process.env.GITHUB_RUN_ID = "424242";
+
+  assert.equal(
+    failureReport("2 batch(es) failed", { summaryReported: true }),
+    null,
+    "the partial summary already says more than a failure comment would"
+  );
+  assert.match(
+    failureReport("2 batch(es) failed", { summaryReported: false }),
+    /Status: \*\*failed\*\*/
+  );
+});
+
+test("summary status names the outcome the runbook documents", () => {
+  assert.match(summaryMarkdown({ missing: [], noOp: true }), /Status: \*\*no-op\*\*/);
+  assert.match(summaryMarkdown({ missing: [{ locale: "fr" }] }), /Status: \*\*generated\*\*/);
+  assert.match(
+    summaryMarkdown({
+      missing: [{ locale: "fr" }],
+      failures: [{ locale: "fr", keys: 3, reason: "HTTP 503" }],
+    }),
+    /Status: \*\*partial\*\*/
+  );
 });
