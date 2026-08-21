@@ -811,11 +811,14 @@ So the exit now closes the account and returns the rent to whoever paid it:
   `earn_positions.share_ata_rent_funder` (migration 0066). It cannot be
   re-derived at exit: nothing on chain records who funded rent, and the fee mode
   may have flipped in between, so refunding "whoever sponsors today" would
-  eventually pay a sponsor with the customer's lamports. The column is rewritten,
-  including back to NULL, by every movement that actually creates the account in
-  EITHER direction (an exit consolidates auxiliary share accounts and can create
-  the ATA itself), and only by one that WON its idempotency insert, since a loser
-  broadcasts nothing and pays nothing. The one exception to reading it: when the
+  eventually pay a sponsor with the customer's lamports. The stored value is a
+  PROJECTION (migration 0067): each movement that actually creates the account,
+  in EITHER direction (an exit consolidating auxiliary share accounts can create
+  the ATA itself), records the claim on its own ledger row, and the position
+  carries the newest claim that has not failed. A loser of the idempotency race
+  has no row to contribute, and a movement whose transaction never lands loses
+  its claim when reconciliation fails it, so a refund cannot be directed by a
+  transaction that did not land. The one exception to reading it: when the
   exit itself creates the account, the party owed the refund is that exit's own
   rent payer, who funded it moments earlier in the same transaction. The recorded
   funder is authoritative only for an account that pre-dates the exit.

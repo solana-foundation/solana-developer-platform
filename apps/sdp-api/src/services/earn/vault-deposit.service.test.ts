@@ -1066,6 +1066,69 @@ describe("earn vault project attribution", () => {
       expect(await recordedFunder(result.position.id)).toBeNull();
     });
 
+    async function failMovement(movementId: string): Promise<void> {
+      await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultMovement({
+        movementId,
+        organizationId: ORG,
+        toStatus: "failed",
+        failureReason: "Transaction blockhash expired before confirmation",
+      });
+    }
+
+    /**
+     * The attribution is a PROJECTION, so it repairs itself. A movement that
+     * observed the account missing and then never landed charged no rent, and
+     * leaving its claim standing would send the close's 2,039,280 lamports to a
+     * party that paid nothing, for as long as the position lives.
+     */
+    it("drops the claim when the creating movement fails", async () => {
+      sponsored();
+      buildVaultDeposit.mockResolvedValue(plan({ createsShareAccount: true }));
+      const result = await depositIntoVault(env, depositInput());
+      expect(await recordedFunder(result.position.id)).toBe(SPONSOR);
+
+      await failMovement(result.movement.id);
+
+      expect(await recordedFunder(result.position.id)).toBeNull();
+    });
+
+    /**
+     * And it falls back rather than to a guess: an earlier surviving claim is
+     * the truth once a later one fails, because the account it created is the
+     * one still on chain.
+     */
+    it("falls back to the earlier surviving claim", async () => {
+      const SPONSOR_LATER = "8pPyFjmDGXnstD9Yg8H1jd1CyJcCPHwRvUBhZ4NRLPMe";
+      buildVaultDeposit.mockResolvedValue(plan({ createsShareAccount: true }));
+      resolveVaultSponsorship.mockResolvedValue({
+        kind: "sponsored",
+        sponsor: SPONSOR,
+        feePayment: { getFeePayer: vi.fn(), signAsFeePayer: vi.fn(), signAndSend: vi.fn() },
+      });
+      const first = await depositIntoVault(env, depositInput());
+
+      resolveVaultSponsorship.mockResolvedValue({
+        kind: "sponsored",
+        sponsor: SPONSOR_LATER,
+        feePayment: { getFeePayer: vi.fn(), signAsFeePayer: vi.fn(), signAndSend: vi.fn() },
+      });
+      signVaultPlan.mockResolvedValue({
+        bytes: new Uint8Array([2]),
+        signature: "sig_second_claim",
+        lastValidBlockHeight: "12345",
+      });
+      const second = await depositIntoVault(
+        env,
+        depositInput({ requestId: "22222222-2222-4222-8222-222222222222" })
+      );
+      expect(second.position.id).toBe(first.position.id);
+      expect(await recordedFunder(first.position.id)).toBe(SPONSOR_LATER);
+
+      await failMovement(second.movement.id);
+
+      expect(await recordedFunder(first.position.id)).toBe(SPONSOR);
+    });
+
     /**
      * The loser of the insert race must not attribute rent. Its bytes never
      * broadcast, so it pays nothing, and it is not merely sometimes-last: the

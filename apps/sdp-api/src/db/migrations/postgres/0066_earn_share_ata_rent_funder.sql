@@ -25,34 +25,26 @@
 -- wallet with no special case. Only a movement that OBSERVED the account missing
 -- and created it writes an address here.
 --
--- Set on the position rather than the movement because the account is per
--- (wallet, share mint): one position, many movements, and only the one that
--- creates the account pays. It is rewritten, including back to NULL, by every
--- movement that actually creates the account, so a re-entry under a different
--- fee mode records its own funder rather than inheriting a stale one. Both
--- directions write it: an exit creates the account too when it has to
--- consolidate auxiliary share accounts, and it funds that creation.
---
--- ONLY THE MOVEMENT THAT WON ITS IDEMPOTENCY INSERT writes it. A loser's bytes
--- are never broadcast, so it pays no rent, and its write is not a race it merely
--- might lose: the deposit path holds this row's lock from its claim upsert, so a
--- loser is serialised second and would be the last writer every time. The
--- fingerprint omits the fee mode, so two same-key requests that resolved
--- different sponsors replay-match rather than conflict.
+-- Read from the position because the account is per (wallet, share mint): one
+-- position, many movements, and the exit needs one answer. HOW the column is
+-- populated is 0067's contract: each movement that observes itself creating the
+-- account records the claim on its OWN row, and this column is a projection of
+-- the newest such claim that has not failed. See 0067's header for why the claim
+-- lives on the movement (a claim must not outlive a transaction that never
+-- landed) and for the write discipline.
 --
 -- Authoritative only while the account EXISTS, which is the only window anything
 -- reads it. A value left from an already-refunded entry is unreachable, because
 -- a position with no share account has no shares to exit.
 --
--- KNOWN RESIDUAL: the funder is observed before broadcast, so the observation can
+-- KNOWN RESIDUAL: creation is observed before broadcast, so the observation can
 -- be wrong in BOTH directions. Someone else creating the account first records a
 -- funder that paid nothing; the account being CLOSED first makes an idempotent
--- create fire for real and records nobody. Concurrency does not rule this out
--- (the fee mode is per process, so a rolling deploy has both answers live), and
--- a movement whose write committed but whose transaction never landed leaves the
--- attribution behind indefinitely rather than for seconds. Confirming the funder
--- from the landed transaction at settlement is the real fix and is not attempted
--- here.
+-- create fire for real and records nobody. Concurrency does not rule this out:
+-- the fee mode is per process, so a rolling deploy has both answers live.
+-- Confirming the funder from the landed transaction at settlement is the real
+-- fix and is not attempted here. What 0067's projection does close is the
+-- adjacent, larger hole of a claim outliving a transaction that never landed.
 
 ALTER TABLE earn_positions
     ADD COLUMN IF NOT EXISTS share_ata_rent_funder TEXT;

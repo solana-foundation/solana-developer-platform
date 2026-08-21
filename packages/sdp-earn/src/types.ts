@@ -427,11 +427,13 @@ export interface EarnVaultTransactionPlan {
    *
    * Concurrency does not make this safe: the fee mode is per PROCESS, so a
    * rolling deploy has both answers live at once, and a create from outside SDP
-   * needs no concurrency at all. Note too that a movement whose funder write
-   * committed and whose transaction never landed leaves the attribution behind
-   * indefinitely, not just for the build-to-broadcast window.
+   * needs no concurrency at all. A claim whose transaction never lands does NOT
+   * persist, though: the attribution is a ledger projection that drops a failed
+   * movement's claim (SDP migration 0067), so this residual is bounded by the
+   * build-to-broadcast window plus reconciliation lag, not by the position's
+   * lifetime.
    *
-   * Closing it properly needs the funder confirmed from the LANDED transaction
+   * Closing it entirely needs the funder confirmed from the LANDED transaction
    * at settlement rather than predicted at build; that is deliberately not in
    * this change.
    */
