@@ -1,5 +1,5 @@
 import type { SolanaCluster } from "@sdp/types";
-import type { Address, Instruction } from "@solana/kit";
+import type { Address } from "@solana/kit";
 import { kaminoProgramAllowlist } from "./programs";
 import type { KaminoInstructionPlan } from "./types";
 
@@ -56,28 +56,24 @@ export function assertPlanTargetsCluster(plan: KaminoInstructionPlan): KaminoIns
   const allowed = kaminoProgramAllowlist(plan.cluster);
   const invariant = new Set<string>(CLUSTER_INVARIANT_PROGRAMS);
 
-  for (const batch of plan.instructions) {
-    for (const instruction of batch) {
-      const program = instruction.programAddress;
-      if (allowed.has(program) || invariant.has(program)) continue;
-      throw new KaminoProgramMismatchError(plan.cluster, program);
-    }
+  for (const instruction of plan.instructions) {
+    const program = instruction.programAddress;
+    if (allowed.has(program) || invariant.has(program)) continue;
+    throw new KaminoProgramMismatchError(plan.cluster, program);
   }
   return plan;
 }
 
-/** Flatten a plan for callers that genuinely want one transaction's worth. */
+/** Count the instructions in the transaction plan. */
 export function planInstructionCount(plan: KaminoInstructionPlan): number {
-  return plan.instructions.reduce((total, batch) => total + batch.length, 0);
+  return plan.instructions.length;
 }
 
 /** Every distinct program a plan touches — useful for Kora allowlist assertions. */
 export function planProgramAddresses(plan: KaminoInstructionPlan): readonly Address[] {
   const seen = new Set<Address>();
-  for (const batch of plan.instructions) {
-    for (const instruction of batch as readonly Instruction[]) {
-      seen.add(instruction.programAddress);
-    }
+  for (const instruction of plan.instructions) {
+    seen.add(instruction.programAddress);
   }
   return [...seen];
 }

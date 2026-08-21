@@ -4,6 +4,7 @@ export type EffectivePolicySource = "implicit_default_allow" | "customer_profile
 
 export const WALLET_OPERATION_TYPES = [
   "earn_vault_deposit",
+  "earn_vault_withdrawal",
   "issuance_burn_execute",
   "issuance_force_burn_execute",
   "issuance_mint_execute",

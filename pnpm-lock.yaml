@@ -678,6 +678,9 @@ importers:
       '@sdp/types':
         specifier: workspace:*
         version: link:../sdp-types
+      '@solana-program/token':
+        specifier: 'catalog:'
+        version: 0.15.0(@solana/kit@6.8.0(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))
       '@solana/kit':
         specifier: 'catalog:'
         version: 6.8.0(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
