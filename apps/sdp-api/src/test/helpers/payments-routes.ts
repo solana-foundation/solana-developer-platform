@@ -1,10 +1,17 @@
+import { createHash } from "node:crypto";
 import * as feePaymentAdapters from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { type CachedApiKey, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { getBase58Codec } from "@solana/codecs";
-import type { Signature } from "@solana/kit";
-import { address, createNoopSigner } from "@solana/kit";
+import type { Signature, SignatureBytes } from "@solana/kit";
+import {
+  address,
+  createNoopSigner,
+  getSignatureFromTransaction,
+  getTransactionDecoder,
+  getTransactionEncoder,
+} from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { afterEach, beforeEach, vi } from "vitest";
@@ -27,6 +34,8 @@ export const confirmTransactionMock = vi.spyOn(solanaRpc, "confirmTransaction");
 export const getTransactionMock = vi.spyOn(solanaRpc, "getTransaction");
 
 export const sendAndConfirmTransactionMock = vi.spyOn(solanaRpc, "sendAndConfirmTransaction");
+
+export const sendTransactionMock = vi.spyOn(solanaRpc, "sendTransaction");
 
 export const getSignaturesForAddressMock = vi.spyOn(solanaRpc, "getSignaturesForAddress");
 
@@ -89,6 +98,20 @@ export const TEST_SPONSORSHIP_PROVIDER_CONFIG = {
   feePayerMayTransferLamports: false,
   feePayerPolicy: { test: "zero-outflow" },
 } satisfies feePaymentAdapters.SponsorshipProviderConfiguration;
+
+export function fullySignTestTransaction(transactionBytes: Uint8Array): Uint8Array {
+  const transaction = getTransactionDecoder().decode(transactionBytes);
+  const signatureSeed = createHash("sha512")
+    .update(new Uint8Array(transaction.messageBytes))
+    .digest();
+  const signatures = Object.fromEntries(
+    Object.entries(transaction.signatures).map(([signer, signature], index) => [
+      signer,
+      signature ?? (new Uint8Array(signatureSeed.map((byte) => byte ^ index)) as SignatureBytes),
+    ])
+  ) as typeof transaction.signatures;
+  return new Uint8Array(getTransactionEncoder().encode({ ...transaction, signatures }));
+}
 
 const TEST_CACHED_API_KEY: CachedApiKey = {
   id: TEST_API_KEY.id,
@@ -505,6 +528,9 @@ export function installPaymentsRouteTestHooks(): void {
       confirmationStatus: "confirmed",
       err: null,
     });
+    sendTransactionMock.mockImplementation(async (_rpc, transactionBytes) =>
+      getSignatureFromTransaction(getTransactionDecoder().decode(transactionBytes))
+    );
     getSignaturesForAddressMock.mockResolvedValue([]);
     getSplTokenBalancesMock.mockResolvedValue([]);
     getSplTokenAccountAddressesMock.mockResolvedValue([]);
@@ -537,7 +563,7 @@ export function installPaymentsRouteTestHooks(): void {
         ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
         signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
       }),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: vi
         .fn()
         .mockResolvedValue(

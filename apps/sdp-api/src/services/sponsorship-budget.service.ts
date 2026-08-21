@@ -7,6 +7,7 @@ import {
 import { createRpc, getTransactionNetworkFee } from "@sdp/rpc/solana";
 import {
   type Address,
+  assertIsFullySignedTransaction,
   assertIsSignature,
   getBase64Decoder,
   getBase64Encoder,
@@ -28,7 +29,12 @@ import {
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
 import type { Env } from "@/types/env";
-import type { SponsorshipScope } from "./sponsorship.service";
+import type {
+  OwnedSignedSubmission,
+  OwnedSubmissionLifecycle,
+  SponsorshipFeePayment,
+  SponsorshipScope,
+} from "./sponsorship.service";
 
 const MAX_SAFE_LAMPORTS = BigInt(Number.MAX_SAFE_INTEGER);
 
@@ -46,6 +52,19 @@ type BudgetRepository = Pick<
   | "markRedisSettled"
   | "tripGlobalBreaker"
 >;
+
+export function getFullySignedSubmission(signedTransaction: Uint8Array): OwnedSignedSubmission {
+  const decoded = getTransactionDecoder().decode(signedTransaction);
+  try {
+    assertIsFullySignedTransaction(decoded);
+  } catch {
+    throw new Error("Sponsored transaction is not fully signed");
+  }
+  return {
+    signedTransaction,
+    signature: getSignatureFromTransaction(decoded),
+  };
+}
 
 type BudgetRedis = Pick<SponsorshipBudgetRedis, "reserve" | "cancel" | "settle" | "syncPolicy">;
 
@@ -147,7 +166,7 @@ export function sponsorshipProviderConfigFingerprint(
     .digest("hex");
 }
 
-export class BudgetedFeePayment implements FeePaymentPort {
+export class BudgetedFeePayment implements SponsorshipFeePayment {
   readonly providerId: string;
   private readonly repository: BudgetRepository;
   private readonly budgetRedis: BudgetRedis;
@@ -235,6 +254,92 @@ export class BudgetedFeePayment implements FeePaymentPort {
       );
     }
     return signed;
+  }
+
+  async prepareOwnedSubmission(
+    transaction: Uint8Array,
+    lifecycle: OwnedSubmissionLifecycle
+  ): Promise<OwnedSignedSubmission> {
+    const reservation = await this.admit(transaction, "sign");
+    if (reservation.replay) {
+      throw new FeePaymentError(
+        "An identical owned submission is already in progress",
+        "PROVIDER_NOT_AVAILABLE"
+      );
+    }
+    let submission: OwnedSignedSubmission;
+    try {
+      const signedTransaction = await this.provider.signAsFeePayer(transaction);
+      submission = getFullySignedSubmission(signedTransaction);
+      const signedResult = await this.repository.markSigned(
+        reservation.id,
+        reservation.attempt,
+        encodeBase64(signedTransaction),
+        submission.signature
+      );
+      if (signedResult !== "persisted") {
+        throw new FeePaymentError(
+          "Owned sponsorship signature could not be persisted",
+          "PROVIDER_NOT_AVAILABLE"
+        );
+      }
+      await lifecycle.persistSigned(submission);
+      const policies = await this.resolveEnabledPolicies(resolveNetwork(this.env));
+      if (policies.some((policy) => !policy.enabled)) {
+        throw new FeePaymentError(
+          "Sponsorship is disabled for this scope",
+          "PROVIDER_NOT_AVAILABLE"
+        );
+      }
+    } catch (error) {
+      await this.releaseDeterministic(reservation, error);
+      throw error;
+    }
+    try {
+      await lifecycle.markStarted();
+    } catch (error) {
+      let started: boolean;
+      try {
+        started = await lifecycle.hasStarted();
+      } catch {
+        // An unreadable marker is an ambiguous ownership boundary. Releasing
+        // here could refund a submission that has already become sendable.
+        throw error;
+      }
+      if (!started) {
+        await this.releaseDeterministic(reservation, error);
+      }
+      throw error;
+    }
+    let submittedResult: SignaturePersistResult;
+    try {
+      submittedResult = await this.repository.markSubmitted(
+        reservation.id,
+        reservation.attempt,
+        submission.signature
+      );
+    } catch (error) {
+      return this.accountingUnavailable(
+        resolveNetwork(this.env),
+        "Owned submission accounting could not be persisted",
+        "Owned submission accounting persistence failed",
+        error,
+        { signature: submission.signature, reservationId: reservation.id }
+      );
+    }
+    if (
+      submittedResult !== "persisted" &&
+      !(await this.durablyAdvanced(reservation, ["submitted", "committed", "charged_unknown"]))
+    ) {
+      return this.accountingUnavailable(
+        resolveNetwork(this.env),
+        "Owned submission accounting could not be persisted",
+        "Owned submission accounting lost its durable state transition",
+        undefined,
+        { signature: submission.signature, reservationId: reservation.id }
+      );
+    }
+    return submission;
   }
 
   async signAndSend(transaction: Uint8Array): Promise<Signature> {
@@ -396,18 +501,18 @@ export class BudgetedFeePayment implements FeePaymentPort {
   }
 
   private async resolveEnabledPolicies(
-    context: AdmissionContext
+    network: SponsorshipNetwork
   ): Promise<SponsorshipBudgetPolicy[]> {
     let policies: SponsorshipBudgetPolicy[];
     try {
       policies = await this.repository.resolvePolicies({
-        network: context.network,
+        network,
         organizationId: this.scope.organizationId,
         projectId: this.scope.projectId,
       });
     } catch (error) {
       return this.accountingUnavailable(
-        context.network,
+        network,
         "Sponsorship policy resolution is unavailable",
         "Policy resolution failed",
         error
@@ -440,7 +545,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
   ): Promise<AdmissionResult> {
     let durable: DurableAdmission | null = null;
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const policies = await this.resolveEnabledPolicies(context);
+      const policies = await this.resolveEnabledPolicies(context.network);
       await this.assertSponsorshipEnabled(context, policies, durable, reservationAttempt);
       if (!durable) {
         durable = await this.persistReservationDurable(
@@ -697,7 +802,11 @@ export class BudgetedFeePayment implements FeePaymentPort {
     network: SponsorshipNetwork,
     message: string,
     breakerReason: string,
-    error?: unknown
+    error?: unknown,
+    // On post-broadcast paths, carry the one fact that makes the forced manual
+    // reconciliation trivial: the broadcast signature (a public on-chain
+    // identifier — redaction-safe) and the reservation it belongs to.
+    submission?: { signature: string; reservationId: string }
   ): Promise<never> {
     logEvent("error", {
       event: "sdp_api_sponsorship_accounting_unavailable",
@@ -705,6 +814,9 @@ export class BudgetedFeePayment implements FeePaymentPort {
       reason: breakerReason,
       organization_id: this.scope.organizationId,
       project_id: this.scope.projectId,
+      ...(submission === undefined
+        ? {}
+        : { signature: submission.signature, reservation_id: submission.reservationId }),
       ...(error === undefined ? {} : describeError(error)),
     });
     try {
