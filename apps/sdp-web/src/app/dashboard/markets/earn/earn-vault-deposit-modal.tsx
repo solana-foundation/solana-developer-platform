@@ -20,8 +20,20 @@ import {
 import { compareUnsignedDecimals, parseUnsignedDecimal } from "./earn-decimal";
 import { formatTokenQuantity, tokenSymbol } from "./earn-format";
 import { shortenMarketAddress } from "./earn-market-presentation";
-import { createEarnVaultDeposit, type EarnVaultDeposit } from "./earn-program-data";
+import {
+  createEarnVaultDeposit,
+  type EarnVaultDeposit,
+  fetchEarnVaultDepositByRequestId,
+  useEarnVaultDepositOutcomeToast,
+} from "./earn-program-data";
 import { strategySourceLabel, strategyToken } from "./earn-program-presentation";
+import {
+  claimVaultDepositIdempotencyKey,
+  holdVaultDepositIdempotencyKey,
+  isVaultDepositIdempotencyKeyHeld,
+  releaseVaultDepositIdempotencyKey,
+  vaultDepositRequestFingerprint,
+} from "./earn-vault-deposit-tracking";
 
 const MAX_AMOUNT_LENGTH = 128;
 
@@ -95,6 +107,15 @@ type DepositOutcome =
       amount: string;
       deposit: EarnVaultDeposit;
       walletName: string;
+      /**
+       * The approval executor won the race: it executed this exact intent
+       * between the held-key pre-flight and this POST, so the server absorbed
+       * the submission as a replay of the approval's movement. Real money DID
+       * move — once, via the approval — but THIS submission moved nothing, and
+       * saying "deposit submitted" would leave the customer believing two
+       * deposits happened, or none.
+       */
+      absorbedByApproval?: true;
     };
 
 type DepositSubmissionResolution =
@@ -105,7 +126,8 @@ function resolveDepositSubmission(
   result: Awaited<ReturnType<typeof createEarnVaultDeposit>>,
   amount: string,
   walletName: string,
-  fallbackError: string
+  fallbackError: string,
+  keyWasHeld: boolean
 ): DepositSubmissionResolution {
   if (!result.ok) {
     return { kind: "error", message: result.error || fallbackError };
@@ -129,11 +151,144 @@ function resolveDepositSubmission(
   if (deposit.status === "failed") {
     return { kind: "error", message: deposit.failureReason || fallbackError };
   }
+  // A replay of a HELD key can only be the approval's own execution: the key is
+  // client-minted, so the executor replaying the original Idempotency-Key is
+  // the sole other writer under it. The pre-flight said "absent", the answer
+  // says "already recorded" — the approval landed in between, and no client
+  // read could have closed that window. Announce what actually happened rather
+  // than crediting this submission; the caller still refreshes and watches the
+  // movement, because it is real and may still be settling. Deliberately NOT
+  // retried with a fresh key: auto-resubmitting money after a race is the
+  // double-deposit hazard, so making a second deposit stays a human decision.
+  if (deposit.replayed && keyWasHeld) {
+    return {
+      kind: "outcome",
+      outcome: { kind: "deposit", amount, deposit, walletName, absorbedByApproval: true },
+      deposited: deposit,
+    };
+  }
   return {
     kind: "outcome",
     outcome: { kind: "deposit", amount, deposit, walletName },
     deposited: deposit,
   };
+}
+
+/**
+ * Whether the API has ANSWERED for this idempotency key, which is the only
+ * condition under which retiring it is safe.
+ *
+ * The asymmetry drives every branch: a key released too early turns the next
+ * retry into a SECOND on-chain deposit, while a key held too long costs at
+ * worst a replay the API reports honestly as `replayed`. So anything short of a
+ * definite answer keeps it.
+ */
+function depositAnswerRetiresIdempotencyKey(
+  result: Awaited<ReturnType<typeof createEarnVaultDeposit>>
+): boolean {
+  if (result.ok) {
+    // An approval hold IS an answer, but the write it gates has not been
+    // decided yet and is still keyed by this value. Re-submitting under a fresh
+    // key would open a second approval request for the same intent — and since
+    // no movement row exists at approval time, nothing downstream could tell
+    // the two apart afterwards.
+    return result.data.kind !== "approval_pending";
+  }
+  // Only a 4xx proves nothing was written. The request was refused on its own
+  // terms — schema, auth, policy, a 404, or an idempotency conflict — and in
+  // the conflict case releasing is also the escape hatch: without it a key that
+  // collided with a different payload would keep colliding forever.
+  //
+  // Everything else keeps the key, because everything else might have written:
+  // `status === null` is a transport failure; a 2xx whose body did not parse is
+  // an answer nobody could read; and a 5xx is the dangerous one — a gateway
+  // timing out downstream of an API that already recorded and broadcast the
+  // deposit looks exactly like a provider being unavailable before it did.
+  return result.status !== null && result.status >= 400 && result.status < 500;
+}
+
+/**
+ * Apply the key lifecycle to an answer the API gave: retire it, pin it, or leave
+ * it alone. Kept beside `depositAnswerRetiresIdempotencyKey` so the whole rule
+ * reads in one place rather than half here and half in the submit handler.
+ */
+function applyVaultDepositIdempotencyKeyOutcome(
+  fingerprint: string,
+  result: Awaited<ReturnType<typeof createEarnVaultDeposit>>
+): void {
+  if (depositAnswerRetiresIdempotencyKey(result)) {
+    releaseVaultDepositIdempotencyKey(fingerprint);
+    return;
+  }
+  if (result.ok && result.data.kind === "approval_pending") {
+    // Pin it: the hold is keyed by this value server-side and a human may take
+    // hours, far longer than the default TTL was calibrated for. A lapsed key
+    // here resubmits into a SECOND approval request.
+    holdVaultDepositIdempotencyKey(fingerprint);
+  }
+}
+
+/**
+ * What key to send for this request — or that we must not send one.
+ *
+ * `unavailable` is the honest third answer, not a defensive extra. See below.
+ */
+type VaultDepositKeyResolution =
+  | {
+      kind: "key";
+      key: string;
+      /**
+       * True only when this is a HELD key being knowingly reused. The caller
+       * needs it to interpret the response: the pre-flight and the POST are two
+       * operations, so the approval can execute BETWEEN them, and no further
+       * read can close that race — only the answer can. See
+       * `resolveDepositSubmission`.
+       */
+      wasHeld: boolean;
+    }
+  | { kind: "aborted" }
+  | { kind: "unavailable" };
+
+/**
+ * The key to send for this request, having established that a HELD key is not
+ * already spent.
+ *
+ * A key pinned by an approval hold has no expiry, which makes it the one key
+ * that can outlive the thing it protected. If that approval has since been
+ * approved and EXECUTED, a movement exists under the key: reusing it would
+ * replay that deposit and silently do nothing with this one, which carries the
+ * same amount from the same wallet and is therefore indistinguishable from a
+ * retry to everything except the customer. Only the server can answer whether
+ * the write behind the hold has happened, so it is asked.
+ *
+ * And when the server CANNOT answer, this refuses rather than guessing. Both
+ * guesses are wrong in a different direction: reusing a possibly-spent key
+ * silently moves no money when the customer asked it to, while minting a fresh
+ * one opens a second approval request for the same intent. Neither belongs in a
+ * coin flip over someone's funds, so the caller surfaces an error and the
+ * customer retries once the read works — the same rule this module already
+ * applies to an unavailable balance, which must never read as zero.
+ *
+ * An unheld key needs no round trip at all; it ages out on its own.
+ */
+async function resolveVaultDepositIdempotencyKey(
+  fingerprint: string,
+  signal: AbortSignal
+): Promise<VaultDepositKeyResolution> {
+  const key = claimVaultDepositIdempotencyKey(fingerprint);
+  if (!isVaultDepositIdempotencyKeyHeld(fingerprint)) return { kind: "key", key, wasHeld: false };
+
+  const recorded = await fetchEarnVaultDepositByRequestId(key);
+  if (signal.aborted) return { kind: "aborted" };
+  if (recorded.kind === "unavailable") return { kind: "unavailable" };
+  // Absent: the hold may still be pending, so the key STAYS — that is what stops
+  // a resubmit opening a second approval request. `wasHeld` travels with it,
+  // because "absent" was true at CHECK time only; the approval can execute
+  // before the POST lands, and the response is the only place that shows.
+  if (recorded.kind === "absent") return { kind: "key", key, wasHeld: true };
+
+  releaseVaultDepositIdempotencyKey(fingerprint);
+  return { kind: "key", key: claimVaultDepositIdempotencyKey(fingerprint), wasHeld: false };
 }
 
 type Translation = ReturnType<typeof useTranslations>;
@@ -326,8 +481,15 @@ function DepositResult({
   }
 
   const { deposit } = outcome;
-  const copy =
-    deposit.status === "confirmed"
+  // The absorbed case overrides the status copy: whatever state the movement is
+  // in, the headline is that THIS submission moved nothing.
+  const copy = outcome.absorbedByApproval
+    ? {
+        title: t("DashboardEarn.deposit.vaultAbsorbedTitle"),
+        body: t("DashboardEarn.deposit.vaultAbsorbedBody"),
+        note: t("DashboardEarn.deposit.vaultAbsorbedNote"),
+      }
+    : deposit.status === "confirmed"
       ? {
           title: t("DashboardEarn.deposit.vaultConfirmedTitle"),
           body: t("DashboardEarn.deposit.vaultConfirmedBody"),
@@ -394,8 +556,44 @@ function DepositResult({
   );
 }
 
+interface EarnVaultDepositOutcomeTrackerProps {
+  movementId: string;
+  /** Refresh the balances the deposit changed, then retire the tracker. */
+  onSettled?: () => void;
+}
+
+/**
+ * Keeps a recorded deposit under observation independently of the dismissible
+ * modal, which is the whole point: the modal's success screen is a receipt for
+ * a SIGNATURE, and the customer will close it long before the chain has
+ * decided. Treasury mounts one of these per in-flight deposit; the canonical
+ * hook polls until the movement is `confirmed` or `failed`, announces exactly
+ * once, and then asks the caller to retire it.
+ *
+ * Deliberately NOT mounted for an approval-gated deposit: that path throws
+ * `SIGNING_PENDING` with an approval id and NO movement id, because no movement
+ * row exists until someone approves it. There is nothing to poll by id, and a
+ * tracker that pretended otherwise would poll a movement that does not exist
+ * and quietly report nothing (PRO-1692 — the approval path needs its own
+ * answer, either a wallet-operation poll or a server-side attempt record).
+ */
+export function EarnVaultDepositOutcomeTracker({
+  movementId,
+  onSettled,
+}: EarnVaultDepositOutcomeTrackerProps) {
+  useEarnVaultDepositOutcomeToast(movementId, onSettled);
+  return null;
+}
+
 export interface EarnVaultDepositModalProps {
   strategy: EarnStrategy;
+  /**
+   * The project this deposit belongs to, which is part of what makes two
+   * submissions the same request — see `vaultDepositRequestFingerprint`. Passed
+   * in rather than read from the workspace context so this modal stays
+   * context-free and directly testable.
+   */
+  projectId: string | null;
   onClose: () => void;
   onDeposited?: (deposit: EarnVaultDeposit) => void;
 }
@@ -407,6 +605,7 @@ export interface EarnVaultDepositModalProps {
  */
 export function EarnVaultDepositModal({
   strategy,
+  projectId,
   onClose,
   onDeposited,
 }: EarnVaultDepositModalProps) {
@@ -419,7 +618,6 @@ export function EarnVaultDepositModal({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<DepositOutcome | null>(null);
   const submittingRef = useRef(false);
-  const requestRef = useRef<{ signature: string; key: string } | null>(null);
   const requestControllerRef = useRef<AbortController | null>(null);
   const panelKey = outcome ? `outcome:${outcome.kind}` : "form";
   const contentRef = useModalFocus({
@@ -430,6 +628,9 @@ export function EarnVaultDepositModal({
     contentDataKey: "panel",
   });
 
+  // Unmount "aborts" the SUBMISSION, not the request: the signal gates state
+  // updates and the outcome screen, while the POST itself runs to completion so
+  // its answer still reaches the key store (see the submit path).
   useEffect(
     () => () => {
       requestControllerRef.current?.abort();
@@ -461,44 +662,66 @@ export function EarnVaultDepositModal({
   const backing = strategySourceLabel(strategy);
   const amountError = amountValidationMessage(amountInput, amountValidation, t);
 
-  function idempotencyKeyFor(signature: string): string {
-    if (requestRef.current?.signature !== signature) {
-      requestRef.current = { signature, key: crypto.randomUUID() };
-    }
-    return requestRef.current.key;
-  }
-
   async function submit() {
     if (submittingRef.current || !selectedWallet || amountValidation.kind !== "valid") {
       return;
     }
 
     const amount = amountValidation.canonicalAmount;
-    const requestSignature = JSON.stringify([strategy.id, selectedWallet.id, amount]);
-    const idempotencyKey = idempotencyKeyFor(requestSignature);
+    // Keyed by the request itself and persisted per tab, so re-pressing submit
+    // after a timeout — or after a reload that lost this component entirely —
+    // replays the same key instead of signing a second transfer.
+    const fingerprint = vaultDepositRequestFingerprint({
+      projectId,
+      strategyId: strategy.id,
+      custodyWalletId: selectedWallet.id,
+      amount,
+    });
     const controller = new AbortController();
     requestControllerRef.current?.abort();
     requestControllerRef.current = controller;
+    // Locked BEFORE the first await below, so the spent-key check cannot be
+    // raced by a second press.
     submittingRef.current = true;
     setSubmitting(true);
     setSubmitError(null);
 
     try {
+      const resolvedKey = await resolveVaultDepositIdempotencyKey(fingerprint, controller.signal);
+      if (resolvedKey.kind === "aborted") return;
+      if (resolvedKey.kind === "unavailable") {
+        setSubmitError(t("DashboardEarn.deposit.vaultHeldKeyUnavailable"));
+        return;
+      }
+      const idempotencyKey = resolvedKey.key;
+
+      // The value-moving POST deliberately takes NO abort signal. The server
+      // processes the request whether or not this component survives it, so
+      // aborting on unmount only blinds the client to an answer it needs: a
+      // 202 approval hold whose key was never PINNED stays on the 15-minute
+      // TTL while the approval itself lives for hours, and the eventual
+      // resubmit mints a fresh key — a second approval request for one intent.
+      // The controller still exists, but it gates the UI below, never the
+      // request or the key bookkeeping.
       const result = await createEarnVaultDeposit(
         {
           strategyId: strategy.id,
           custodyWalletId: selectedWallet.id,
           amount,
         },
-        idempotencyKey,
-        controller.signal
+        idempotencyKey
       );
+      // Key bookkeeping FIRST and unconditionally: the store outlives the
+      // component, so an unmount mid-flight must not skip recording what the
+      // server just answered.
+      applyVaultDepositIdempotencyKeyOutcome(fingerprint, result);
       if (controller.signal.aborted) return;
       const resolution = resolveDepositSubmission(
         result,
         amount,
         walletDisplayName(selectedWallet, t("DashboardEarn.deposit.walletUnnamed")),
-        t("DashboardEarn.deposit.vaultSubmitError")
+        t("DashboardEarn.deposit.vaultSubmitError"),
+        resolvedKey.wasHeld
       );
       if (resolution.kind === "error") {
         setSubmitError(resolution.message);

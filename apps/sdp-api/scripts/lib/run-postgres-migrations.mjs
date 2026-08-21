@@ -9,15 +9,29 @@ export function getPostgresMigrationMode(sql) {
   return NON_TRANSACTIONAL_DIRECTIVE.test(sql) ? "non-transactional" : "transactional";
 }
 
-function concurrentIndexName(sql, migrationFile) {
-  const withoutComments = sql
+/**
+ * Split a migration file into its individual statements.
+ *
+ * Comments are stripped first so a `;` inside one cannot split a statement.
+ * Deliberately NOT a general SQL parser: it is correct for the migrations this
+ * repo writes (no dollar-quoted bodies, no semicolons inside string literals),
+ * which is why it lives here — one implementation to audit, used by the runner
+ * and by the tests that execute a migration through the pooled client.
+ *
+ * @param sql - Full text of a migration file.
+ * @returns The statements, comment-free and trimmed, in file order.
+ */
+export function splitSqlStatements(sql) {
+  return sql
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/--.*$/gm, "")
-    .trim();
-  const statements = withoutComments
     .split(";")
     .map((statement) => statement.trim())
     .filter(Boolean);
+}
+
+function concurrentIndexName(sql, migrationFile) {
+  const statements = splitSqlStatements(sql);
   const match = statements[0]?.match(
     /^CREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\s+IF\s+NOT\s+EXISTS\s+([a-z_][a-z0-9_]*)\b/i
   );

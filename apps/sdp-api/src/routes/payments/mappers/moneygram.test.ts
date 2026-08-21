@@ -28,6 +28,8 @@ function transferRow(overrides: Partial<PaymentTransferRow> = {}): PaymentTransf
     serialized_tx: null,
     slot: null,
     block_time: null,
+    confirmed_at: null,
+    finalization_last_polled_at: null,
     fee: null,
     error: null,
     initiated_by_key_id: null,

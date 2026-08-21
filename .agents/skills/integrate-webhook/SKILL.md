@@ -1,6 +1,7 @@
 ---
 name: integrate-webhook
 description: Implement a ramp provider's webhook as a WebhookProcessor — verify (signature verification), parse (→ RampSettlementEvent), and process (DB orchestration via applyRampSettlementEvent) — registered in the webhook dispatch map. Use when opening a PR against apps/sdp-api to add webhook/settlement handling for a ramp provider.
+disable-model-invocation: true
 ---
 
 # Integrate webhook

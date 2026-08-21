@@ -6,6 +6,7 @@ import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
+import { listEarnMovements } from "./handlers/movements";
 import {
   createEarnProgram,
   createEarnProgramWithdrawal,
@@ -22,6 +23,8 @@ import {
   createEarnVaultDeposit,
   extractEarnVaultDepositPolicyCandidate,
   findEarnVaultDepositIdempotentKeyReplay,
+  getEarnVaultDeposit,
+  listEarnVaultDeposits,
   listEarnVaultPositions,
 } from "./handlers/vault";
 import {
@@ -80,11 +83,36 @@ earn.post(
   }),
   createEarnVaultDeposit
 );
+// The deposit READS take no policy gate and no provider gate — they move no
+// money and report on money that already left the wallet. They are what makes a
+// signed-but-unconfirmed deposit answerable: `POST` records before broadcast,
+// so a caller can hold a movement id for a transaction whose outcome it never
+// saw, and the every-minute reconciliation sweep is what eventually settles it.
+//
+// The collection is declared BEFORE the `:movementId` route, the same ordering
+// rule `/programs` follows, so a literal segment can never be captured as an id.
+// `?requestId=` on the collection is how an APPROVAL-GATED deposit is found: the
+// hold returns no movement id, but the approval executor replays the caller's
+// original Idempotency-Key, so the movement it later creates carries it.
+earn.get("/vault-deposits", requirePermissions("earn:read", "wallets:read"), listEarnVaultDeposits);
+earn.get(
+  "/vault-deposits/:movementId",
+  requirePermissions("earn:read", "wallets:read"),
+  getEarnVaultDeposit
+);
 earn.get(
   "/vault-positions",
   requirePermissions("earn:read", "wallets:read"),
   listEarnVaultPositions
 );
+
+// The cross-provider movement feed (source: earn_movements). One chronological
+// history spanning both execution models, which no per-family list can serve —
+// and like them it takes NO provider gate, because it reports on money that has
+// already moved. `wallets:read` is required for the same reason the vault reads
+// require it: the wallet-binding scope it enforces is what keeps a key bound to
+// particular wallets from seeing movements signed by others.
+earn.get("/movements", requirePermissions("earn:read", "wallets:read"), listEarnMovements);
 
 // Portfolio programs: N provider wallets per org+environment+provider
 // (PRO-1670), each addressed by its own id. Money-in (create, re-target) takes
@@ -92,8 +120,8 @@ earn.get(
 // require provider credentials (ADR 0002 exit safety — disabling a provider must
 // never trap funds). Source of truth per route: list/get/deposits/
 // withdrawal-detail read the provider LIVE; the withdrawals LIST reads the SDP
-// ledger (earn_program_withdrawals) and takes no provider gate at all — the
-// audit trail outlives credential removal.
+// ledger (custodial earn_movements rows) and takes no provider gate at all —
+// the audit trail outlives credential removal.
 //
 // The collection is declared BEFORE the `:programId` routes so a literal
 // segment can never be captured as an id.

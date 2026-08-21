@@ -2,7 +2,7 @@ import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { createPostgresEarnVaultRepository } from "@/db/repositories/earn-vault.repository";
+import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -104,18 +104,18 @@ async function createPosition(params: {
 }) {
   const providerReference = params.providerReference ?? `vault_${crypto.randomUUID()}`;
   const walletId = params.walletId ?? WALLET_A;
-  return createPostgresEarnVaultRepository(getDb(env)).createSignedDepositIntent({
+  return createPostgresEarnMovementsRepository(getDb(env)).createSignedVaultDepositIntent({
     organizationId: ORG,
     projectId: params.projectId ?? PROJECT_A,
     environment: "sandbox",
     provider: "kamino",
-    providerReference,
+    vaultAddress: providerReference,
     custodyWalletId: walletId,
+    sourceAddress: PUBLIC_KEY_A,
     tokenMint: TOKEN_MINT,
     shareMint: SHARE_MINT,
     label: `Vault ${providerReference}`,
     requestedAmount: "1",
-    acceptedAmount: "1",
     signature: params.signature ?? `sig_${crypto.randomUUID()}`,
     signedTransaction: "AQ==",
     lastValidBlockHeight: "12345",
@@ -128,6 +128,22 @@ async function createPosition(params: {
 function getPositions(query = "") {
   return app.request(
     `/v1/earn/vault-positions${query}`,
+    { headers: { Authorization: `Bearer ${API_KEY.raw}` } },
+    env
+  );
+}
+
+function listDeposits(query = "") {
+  return app.request(
+    `/v1/earn/vault-deposits${query}`,
+    { headers: { Authorization: `Bearer ${API_KEY.raw}` } },
+    env
+  );
+}
+
+function getDeposit(movementId: string) {
+  return app.request(
+    `/v1/earn/vault-deposits/${encodeURIComponent(movementId)}`,
     { headers: { Authorization: `Bearer ${API_KEY.raw}` } },
     env
   );
@@ -147,7 +163,7 @@ beforeEach(async () => {
   readVaultPositions.mockImplementation(
     async (_ctx: unknown, input: { owner: string; providerReferences: string[] }) =>
       input.providerReferences.map((providerReference) => ({
-        providerReference,
+        vaultAddress: providerReference,
         owner: input.owner,
         cluster: "devnet",
         shares: "1",
@@ -287,7 +303,7 @@ describe("GET /v1/earn/vault-positions", () => {
     await createPosition({ providerReference });
     readVaultPositions.mockResolvedValue([
       {
-        providerReference,
+        vaultAddress: providerReference,
         owner: PUBLIC_KEY_A,
         cluster: "devnet",
         shares: "99",
@@ -330,7 +346,10 @@ describe("GET /v1/earn/vault-positions", () => {
       "2026-08-17T16:29:31.000Z",
       "earn_vault_position_00000000-0000-4000-8000-000000000ABC",
     ],
-    ["malformed position id", "2026-08-17T16:29:31.000Z", "not-a-position-id"],
+    // An id shape the keyset tuple cannot compare correctly: PostgreSQL orders it
+    // as text, so uppercase would sort wrongly against generated lowercase ids.
+    ["empty position id", "2026-08-17T16:29:31.000Z", ""],
+    ["over-long position id", "2026-08-17T16:29:31.000Z", `earn_position_${"a".repeat(200)}`],
   ])("rejects a decodable cursor with a %s", async (_case, createdAt, id) => {
     const cursor = encodeCursorPayload(createdAt, id);
     const response = await getPositions(`?before=${encodeURIComponent(cursor)}`);
@@ -343,6 +362,22 @@ describe("GET /v1/earn/vault-positions", () => {
       },
     });
     expect(readVaultPositions).not.toHaveBeenCalled();
+  });
+
+  it("accepts an id it does not recognise, because a cursor is a bound and not a grant", async () => {
+    // Holdings carry ids from two eras — `earn_vault_position_…` preserved by the
+    // unification and `earn_position_…` for newer ones — so the cursor validates
+    // SHAPE rather than a prefix. That is safe rather than lax: the id lands in
+    // `(created_at, id) < (?, ?)` while organization, environment and wallet scope
+    // are separate conditions, so an unrecognised one can only bound the page.
+    await createPosition({ providerReference: "vault_unknown_cursor_id" });
+
+    const cursor = encodeCursorPayload("2999-01-01T00:00:00.000Z", "earn_position_unrecognised");
+    const response = await getPositions(`?before=${encodeURIComponent(cursor)}`);
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: { positions: Array<{ id: string }> } };
+    expect(body.data.positions).toHaveLength(1);
   });
 
   it("caps live wallet hydration at eight concurrent calls", async () => {
@@ -379,5 +414,325 @@ describe("GET /v1/earn/vault-positions", () => {
     expect(response.status).toBe(200);
     expect(readVaultPositions).toHaveBeenCalledTimes(10);
     expect(maximum).toBe(8);
+  });
+});
+
+/**
+ * The deposit READ shares this file because it shares this route's scope rule:
+ * both resolve which custody wallets the caller may see through
+ * `listReadableEarnVaultWallets`, and a binding that hides a position has to
+ * hide that position's deposits too. Testing them apart is how the two drift.
+ */
+
+describe("GET /v1/earn/vault-deposits/:movementId", () => {
+  it("reports the recorded deposit so an unconfirmed signature stays answerable", async () => {
+    const created = await createPosition({ providerReference: "vault_read_own" });
+
+    const response = await getDeposit(created.movement.id);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: {
+        deposit: {
+          movementId: string;
+          positionId: string;
+          provider: string;
+          providerReference: string;
+          status: string;
+          signature: string;
+          amount: string;
+          failureReason: string | null;
+          confirmedAt: string | null;
+        };
+      };
+    };
+
+    expect(body.data.deposit).toEqual({
+      movementId: created.movement.id,
+      positionId: created.position.id,
+      provider: "kamino",
+      providerReference: "vault_read_own",
+      // Recorded BEFORE broadcast, which is the whole reason this route exists.
+      status: "pending",
+      signature: created.movement.signature,
+      amount: "1",
+      failureReason: null,
+      createdAt: created.movement.created_at,
+      confirmedAt: null,
+    });
+  });
+
+  it("reads back the terminal state the reconciliation sweep wrote", async () => {
+    const created = await createPosition({ providerReference: "vault_read_settled" });
+    await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultMovement({
+      movementId: created.movement.id,
+      organizationId: ORG,
+      toStatus: "failed",
+      failureReason: "Blockhash expired without the transaction landing",
+    });
+
+    const response = await getDeposit(created.movement.id);
+    const body = (await response.json()) as {
+      data: { deposit: { status: string; failureReason: string | null } };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.data.deposit.status).toBe("failed");
+    expect(body.data.deposit.failureReason).toBe(
+      "Blockhash expired without the transaction landing"
+    );
+  });
+
+  it("hides a sibling project's wallet deposit from an unbound project key", async () => {
+    const sibling = await createPosition({
+      projectId: PROJECT_B,
+      walletId: WALLET_B,
+      providerReference: "vault_read_sibling",
+    });
+
+    // 404, not 403: a caller who may not see the movement must not learn that
+    // it exists.
+    expect((await getDeposit(sibling.movement.id)).status).toBe(404);
+  });
+
+  it("refuses a withdrawal from the deposit path", async () => {
+    const created = await createPosition({ providerReference: "vault_read_direction" });
+    await getDb(env)
+      .prepare("UPDATE earn_movements SET direction = 'withdrawal' WHERE id = ?")
+      .bind(created.movement.id)
+      .run();
+
+    expect((await getDeposit(created.movement.id)).status).toBe(404);
+  });
+
+  it("refuses a movement recorded in another environment", async () => {
+    // Written straight to the tables so the environment is the ONLY thing that
+    // differs: same organization, same in-scope wallet, direction `deposit`.
+    // `createSignedDepositIntent` derives the environment from the project, so
+    // it cannot produce this row, and the composite position FK means the two
+    // rows have to be inserted mismatched rather than updated after the fact.
+    const positionId = `earn_vault_position_${crypto.randomUUID()}`;
+    const movementId = `earn_vault_movement_${crypto.randomUUID()}`;
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO earn_positions (
+             id, organization_id, project_id, environment, provider, kind, vault_address,
+             custody_wallet_id, share_mint, token_mint, label, created_by, activated_at
+           ) VALUES (?, ?, ?, 'production', 'kamino', 'vault_direct', 'vault_read_environment',
+                     ?, ?, ?, 'Production vault', ?, sdp_iso_now())`
+        )
+        .bind(positionId, ORG, PROJECT_A, WALLET_A, SHARE_MINT, TOKEN_MINT, USER),
+      getDb(env)
+        .prepare(
+          `INSERT INTO earn_movements (
+             id, organization_id, project_id, environment, position_id, provider,
+             execution_model, vault_address, custody_wallet_id, direction, status,
+             request_id, idempotency_fingerprint, denomination, amount_requested,
+             signature, signed_transaction, last_valid_block_height, created_by
+           ) VALUES (?, ?, ?, 'production', ?, 'kamino', 'vault_direct',
+                     'vault_read_environment', ?, 'deposit', 'requested', ?,
+                     'fingerprint_environment', ?, '1', ?, 'AQ==', '12345', ?)`
+        )
+        .bind(
+          movementId,
+          ORG,
+          PROJECT_A,
+          positionId,
+          WALLET_A,
+          crypto.randomUUID(),
+          TOKEN_MINT,
+          `sig_${crypto.randomUUID()}`,
+          USER
+        ),
+    ]);
+
+    expect((await getDeposit(movementId)).status).toBe(404);
+  });
+
+  it("answers 404 for an id this organization has never held", async () => {
+    expect((await getDeposit(`earn_vault_movement_${crypto.randomUUID()}`)).status).toBe(404);
+  });
+});
+
+/**
+ * The LIST is the discovery tier: it is what lets a client re-derive its own
+ * in-flight deposits after losing local state, and — via `?requestId=` — find a
+ * deposit that did not exist when it was requested because policy held it for
+ * approval.
+ */
+describe("GET /v1/earn/vault-deposits", () => {
+  it("returns this workspace's deposits newest first", async () => {
+    const first = await createPosition({ providerReference: "vault_list_1" });
+    const second = await createPosition({ providerReference: "vault_list_2" });
+
+    const response = await listDeposits();
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: {
+        deposits: Array<{ movementId: string }>;
+        hasMore: boolean;
+        nextCursor: string | null;
+      };
+    };
+
+    expect(body.data.deposits.map((deposit) => deposit.movementId)).toEqual([
+      second.movement.id,
+      first.movement.id,
+    ]);
+    expect(body.data.hasMore).toBe(false);
+    expect(body.data.nextCursor).toBeNull();
+  });
+
+  it("never lists a sibling project's wallet deposit", async () => {
+    const own = await createPosition({ providerReference: "vault_list_own" });
+    await createPosition({
+      projectId: PROJECT_B,
+      walletId: WALLET_B,
+      providerReference: "vault_list_sibling",
+    });
+
+    const body = (await (await listDeposits()).json()) as {
+      data: { deposits: Array<{ movementId: string }> };
+    };
+
+    expect(body.data.deposits.map((deposit) => deposit.movementId)).toEqual([own.movement.id]);
+  });
+
+  it("omits a withdrawal, which is not a deposit", async () => {
+    const deposit = await createPosition({ providerReference: "vault_list_deposit" });
+    const withdrawal = await createPosition({ providerReference: "vault_list_withdrawal" });
+    await getDb(env)
+      .prepare("UPDATE earn_movements SET direction = 'withdrawal' WHERE id = ?")
+      .bind(withdrawal.movement.id)
+      .run();
+
+    const body = (await (await listDeposits()).json()) as {
+      data: { deposits: Array<{ movementId: string }> };
+    };
+
+    expect(body.data.deposits.map((deposit) => deposit.movementId)).toEqual([deposit.movement.id]);
+  });
+
+  it("pages by keyset without overlap", async () => {
+    await createPosition({ providerReference: "vault_list_page_1" });
+    await createPosition({ providerReference: "vault_list_page_2" });
+    await createPosition({ providerReference: "vault_list_page_3" });
+
+    const first = (await (await listDeposits("?limit=2")).json()) as {
+      data: {
+        deposits: Array<{ movementId: string }>;
+        hasMore: boolean;
+        nextCursor: string | null;
+      };
+    };
+    expect(first.data.deposits).toHaveLength(2);
+    expect(first.data.hasMore).toBe(true);
+
+    const second = (await (
+      await listDeposits(`?limit=2&before=${encodeURIComponent(first.data.nextCursor ?? "")}`)
+    ).json()) as {
+      data: {
+        deposits: Array<{ movementId: string }>;
+        hasMore: boolean;
+        nextCursor: string | null;
+      };
+    };
+    expect(second.data.deposits).toHaveLength(1);
+    expect(second.data.hasMore).toBe(false);
+    expect(
+      first.data.deposits.some((row) =>
+        second.data.deposits.some((next) => next.movementId === row.movementId)
+      )
+    ).toBe(false);
+  });
+
+  it("rejects a malformed cursor rather than silently returning the first page", async () => {
+    expect((await listDeposits("?before=not-a-cursor")).status).toBe(400);
+  });
+
+  it("finds a deposit by the caller's own idempotency key", async () => {
+    // This is the approval-gated mechanism: a policy hold returns no movement
+    // id, but the approval executor replays the ORIGINAL Idempotency-Key, so the
+    // movement it eventually creates is findable by the key the caller kept.
+    const requestId = `caller-chosen-${crypto.randomUUID()}`;
+    const created = await createPosition({ providerReference: "vault_by_key", requestId });
+
+    const body = (await (
+      await listDeposits(`?requestId=${encodeURIComponent(requestId)}`)
+    ).json()) as { data: { deposits: Array<{ movementId: string }> } };
+
+    expect(body.data.deposits.map((deposit) => deposit.movementId)).toEqual([created.movement.id]);
+  });
+
+  it("answers empty for a key that resolves outside the caller's scope", async () => {
+    // A key is caller-chosen and may be one character, so it must never work as
+    // a capability — the sibling-project scoping applies to it exactly as it
+    // does to the movement id.
+    const requestId = "1";
+    await createPosition({
+      projectId: PROJECT_B,
+      walletId: WALLET_B,
+      providerReference: "vault_by_key_sibling",
+      requestId,
+    });
+
+    const body = (await (
+      await listDeposits(`?requestId=${encodeURIComponent(requestId)}`)
+    ).json()) as { data: { deposits: unknown[] } };
+
+    expect(body.data.deposits).toEqual([]);
+  });
+
+  it("returns only in-flight movements when asked, so recovery cannot be paged out", async () => {
+    const inFlight = await createPosition({ providerReference: "vault_settled_pending" });
+    const settled = await createPosition({ providerReference: "vault_settled_confirmed" });
+    await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultMovement({
+      movementId: settled.movement.id,
+      organizationId: ORG,
+      toStatus: "confirmed",
+      confirmedAt: new Date(0).toISOString(),
+    });
+
+    const open = (await (await listDeposits("?settled=false")).json()) as {
+      data: { deposits: Array<{ movementId: string; status: string }> };
+    };
+    expect(open.data.deposits.map((deposit) => deposit.movementId)).toEqual([inFlight.movement.id]);
+
+    const closed = (await (await listDeposits("?settled=true")).json()) as {
+      data: { deposits: Array<{ movementId: string }> };
+    };
+    expect(closed.data.deposits.map((deposit) => deposit.movementId)).toEqual([
+      settled.movement.id,
+    ]);
+  });
+
+  it("rejects a settled filter that is not a boolean", async () => {
+    expect((await listDeposits("?settled=maybe")).status).toBe(400);
+  });
+
+  it("hides a movement whose project was deleted", async () => {
+    // `project_id` is nullable only through ON DELETE SET NULL, so a null means
+    // the owning project is gone — not that the row is readable by every
+    // sibling project that happens to share an organization-level wallet.
+    const orphaned = await createPosition({ providerReference: "vault_orphaned" });
+    await getDb(env)
+      .prepare("UPDATE earn_movements SET project_id = NULL WHERE id = ?")
+      .bind(orphaned.movement.id)
+      .run();
+
+    expect((await getDeposit(orphaned.movement.id)).status).toBe(404);
+    const body = (await (await listDeposits()).json()) as {
+      data: { deposits: Array<{ movementId: string }> };
+    };
+    expect(body.data.deposits.map((deposit) => deposit.movementId)).not.toContain(
+      orphaned.movement.id
+    );
+  });
+
+  it("answers empty for a key nobody has used", async () => {
+    const body = (await (await listDeposits("?requestId=never-used")).json()) as {
+      data: { deposits: unknown[] };
+    };
+    expect(body.data.deposits).toEqual([]);
   });
 });

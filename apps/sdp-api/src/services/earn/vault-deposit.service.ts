@@ -7,10 +7,11 @@ import type { EarnProviderId } from "@sdp/types/provider-access";
 import { address } from "@solana/kit";
 import { type AppDb, getDb } from "@/db";
 import {
-  createPostgresEarnVaultRepository,
-  type EarnVaultMovementRow,
-  type EarnVaultPositionRow,
-} from "@/db/repositories/earn-vault.repository";
+  assertMovementIsOwnReplay,
+  createPostgresEarnMovementsRepository,
+  type EarnMovementRow,
+  type EarnPositionRow,
+} from "@/db/repositories/earn-movements.repository";
 import { badRequest, internalError } from "@/lib/errors";
 import { buildEarnVaultDepositFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
@@ -62,8 +63,8 @@ export interface VaultDepositInput {
 }
 
 export interface VaultDepositResult {
-  position: EarnVaultPositionRow;
-  movement: EarnVaultMovementRow;
+  position: EarnPositionRow;
+  movement: EarnMovementRow;
   /** True when an existing signed movement won; its bytes were not re-sent. */
   replayed: boolean;
 }
@@ -78,11 +79,11 @@ export interface VaultDepositExecutionOptions {
 }
 
 async function replayResult(
-  repo: ReturnType<typeof createPostgresEarnVaultRepository>,
+  ledger: ReturnType<typeof createPostgresEarnMovementsRepository>,
   input: VaultDepositInput,
-  movement: EarnVaultMovementRow
+  movement: EarnMovementRow
 ): Promise<VaultDepositResult> {
-  const position = await repo.getPositionById({
+  const position = await ledger.getPositionById({
     organizationId: input.organizationId,
     environment: input.environment,
     positionId: movement.position_id,
@@ -99,7 +100,6 @@ function requireAcceptedPlan(
   plan: EarnVaultTransactionPlan,
   input: Pick<VaultDepositInput, "tokenMint" | "shareMint" | "amount" | "minSharesOut">
 ): {
-  amount: string;
   minSharesOut: string | null;
 } {
   if (plan.assetIdentity.depositTokenMint !== input.tokenMint) {
@@ -131,7 +131,7 @@ function requireAcceptedPlan(
       "Vault builder minSharesOut does not match the policy-approved slippage floor"
     );
   }
-  return { amount, minSharesOut };
+  return { minSharesOut };
 }
 
 function appendRequestMemo(
@@ -154,7 +154,7 @@ export async function depositIntoVault(
   input: VaultDepositInput,
   options: VaultDepositExecutionOptions = {}
 ): Promise<VaultDepositResult> {
-  const primaryRepo = createPostgresEarnVaultRepository(getDb(env));
+  const ledger = createPostgresEarnMovementsRepository(getDb(env));
   const fingerprint = buildEarnVaultDepositFingerprint({
     environment: input.environment,
     provider: input.provider,
@@ -169,13 +169,26 @@ export async function depositIntoVault(
   // a transaction whose signed row already exists.
   const prior = await resolveIdempotencyReplay(
     () =>
-      primaryRepo.findMovementByRequestId({
+      ledger.findVaultMovementByRequestId({
         organizationId: input.organizationId,
         requestId: input.requestId,
       }),
     fingerprint
   );
-  if (prior) return replayResult(primaryRepo, input, prior);
+  if (prior) {
+    // Ownership, not just fingerprint. The lookup is org-scoped and the
+    // fingerprint omits the project, so a key first used by a SIBLING project
+    // matches both — and this path is reachable with the route-level guard
+    // skipped (an approved-operation execution). Without this line, project B's
+    // approved deposit was answered with project A's movement as replayed:true:
+    // B's deposit silently never ran, and A's amount and signature leaked. Same
+    // shared rule as the repository preflight; do not re-implement it here.
+    assertMovementIsOwnReplay(prior, {
+      projectId: input.projectId,
+      idempotencyFingerprint: fingerprint,
+    });
+    return replayResult(ledger, input, prior);
+  }
 
   // Replays above are pure durable reads: they must keep working during an RPC
   // outage and must never touch a chain client. Only a fresh attempt proves and
@@ -278,20 +291,21 @@ export async function depositIntoVault(
     options.runIntentTransaction ??
     (<T>(mutation: (db: AppDb) => Promise<T>) => mutation(getDb(env)));
   const result = await runIntentTransaction((db) =>
-    createPostgresEarnVaultRepository(db).createSignedDepositIntent({
+    createPostgresEarnMovementsRepository(db).createSignedVaultDepositIntent({
       organizationId: input.organizationId,
       projectId: input.projectId,
       environment: input.environment,
       provider: input.provider,
-      providerReference: input.providerReference,
+      vaultAddress: input.providerReference,
       custodyWalletId: input.wallet.id,
       tokenMint: plan.assetIdentity.depositTokenMint,
       shareMint: plan.assetIdentity.shareMint,
       label: input.label,
       requestedAmount: input.amount,
-      acceptedAmount: accepted.amount,
-      requestedMinSharesOut: input.minSharesOut ?? null,
       acceptedMinSharesOut: accepted.minSharesOut,
+      // The signing wallet IS the depositor on chain, so the ledger records where
+      // the money came from without a second lookup.
+      sourceAddress: input.wallet.publicKey,
       signature: signed.signature,
       signedTransaction: Buffer.from(signed.bytes).toString("base64"),
       lastValidBlockHeight: signed.lastValidBlockHeight,
@@ -323,17 +337,16 @@ export async function depositIntoVault(
     return result;
   }
 
-  const advanced = await primaryRepo.advanceMovement({
+  const advanced = await ledger.advanceVaultMovement({
     movementId: result.movement.id,
     organizationId: input.organizationId,
-    fromStatuses: ["pending"],
     toStatus: "submitted",
   });
   if (advanced) return { ...result, movement: advanced };
 
   // A confirmer may have won the CAS after broadcast. Return its newer state;
   // never fabricate the stale pending row or overwrite a terminal observation.
-  const observed = await primaryRepo.getMovementById({
+  const observed = await ledger.getMovementById({
     movementId: result.movement.id,
     organizationId: input.organizationId,
   });

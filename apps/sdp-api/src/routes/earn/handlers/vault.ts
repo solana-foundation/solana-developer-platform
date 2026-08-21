@@ -1,6 +1,11 @@
 import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
 import { isDecimalString } from "@sdp/solana/amount";
-import type { SdpEnvironment } from "@sdp/types";
+import type {
+  EarnVaultDepositRecord,
+  EarnVaultDepositResponse,
+  EarnVaultDepositsPage,
+  SdpEnvironment,
+} from "@sdp/types";
 import {
   type EarnProviderId,
   earnDepositStyle,
@@ -9,7 +14,11 @@ import {
 import { z } from "zod";
 import { getDb } from "@/db";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
-import { createPostgresEarnVaultRepository } from "@/db/repositories/earn-vault.repository";
+import {
+  createPostgresEarnMovementsRepository,
+  type EarnMovementRow,
+  type EarnPositionRow,
+} from "@/db/repositories/earn-movements.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import {
@@ -51,9 +60,14 @@ import {
 } from "@/services/provider-availability.service";
 import type { AppContext } from "../context";
 import { earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
-import { type earnVaultDepositSchema, earnVaultPositionsQuerySchema } from "../schemas";
+import {
+  earnVaultDepositParamsSchema,
+  type earnVaultDepositSchema,
+  earnVaultDepositsQuerySchema,
+  earnVaultPositionsQuerySchema,
+} from "../schemas";
 import { assertStrategyDepositable } from "./admission";
-import { parseQuery } from "./shared";
+import { parseParams, parseQuery } from "./shared";
 
 /**
  * POST /v1/earn/vault-deposits — open or add to a non-custodial vault position,
@@ -122,10 +136,16 @@ function buildEarnVaultDepositResponse(
   result: Awaited<ReturnType<typeof depositIntoVault>>,
   strategy: EarnStrategyRow
 ) {
+  if (!result.movement.signature) {
+    throw internalError(
+      `Earn vault movement ${result.movement.id} was recorded without a signature`
+    );
+  }
   return {
     positionId: result.position.id,
     movementId: result.movement.id,
-    status: result.movement.status,
+    // The ledger says `requested`; this contract's word for it is `pending`.
+    status: toLegacyVaultDepositStatus(result.movement.status),
     signature: result.movement.signature,
     failureReason: result.movement.failure_reason,
     // Tells a retrying caller that its key was already used and NOTHING was
@@ -378,13 +398,27 @@ export async function findEarnVaultDepositIdempotentKeyReplay(
   if (approvedWalletOperationId(c)) return null;
 
   const resolved = extraction.resolved as EarnVaultDepositResolved;
-  const repo = createPostgresEarnVaultRepository(getDb(c.env));
-  const movement = await repo.findMovementByRequestId({
+  const repo = createPostgresEarnMovementsRepository(getDb(c.env));
+  const movement = await repo.findVaultMovementByRequestId({
     organizationId: resolved.auth.organizationId,
     requestId: idempotencyKey,
   });
   if (movement) {
-    if (movement.idempotency_fingerprint !== resolved.idempotencyFingerprint) {
+    // PROJECT boundary on the replay, not just on the reads. The lookup above is
+    // keyed on `(organization_id, request_id)` — migration 0059's unique index —
+    // so a key first used in a SIBLING project resolves that project's movement.
+    // Returning it would both answer the wrong deposit and hand over its amount
+    // and signature. Reachable because organization-level custody configs give
+    // two projects the same `custody_wallets` row, so the rest of the request can
+    // legitimately match.
+    //
+    // Answered as the fingerprint conflict it is: the key really has been used by
+    // a different request. The caller chose the key, so learning that its own key
+    // is taken within its own organization tells it nothing it did not supply.
+    if (
+      !isMovementInProject(movement, resolved.projectId) ||
+      movement.idempotency_fingerprint !== resolved.idempotencyFingerprint
+    ) {
       throw conflict("Idempotency key already used with different request payload");
     }
     if (movement.status === "failed") {
@@ -494,6 +528,377 @@ function assertBoundWalletIdentifierIsUnique(
 }
 
 /**
+ * The custody wallets an earn READ may see, already narrowed to the caller's
+ * API-key wallet bindings.
+ *
+ * Shared by every vault read so the binding rule cannot drift between them: a
+ * selected-wallet key that may not read wallet B's position must not be able to
+ * read wallet B's deposits either.
+ *
+ * The id spaces differ and that is the trap. `getAllowedApiKeyWalletIdsForPermissions`
+ * returns PROVIDER wallet ids (`privy_…`), while `earn_positions.custody_wallet_id`
+ * and `earn_movements.custody_wallet_id` are `custody_wallets` row ids
+ * (`cwlt_…`). The projection carries both, so it is the translation table;
+ * comparing the allow-list directly against a stored id matches nothing and
+ * silently answers "you hold none of this", which is a filter that looks like
+ * it works and hides money.
+ *
+ * A provider wallet id that maps to more than one scoped custody row is
+ * dropped: the binding cannot say which row it meant, so it authorizes neither.
+ */
+export async function listReadableEarnVaultWallets(
+  c: AppContext,
+  auth: ApiKeyContext,
+  projectId: string
+): Promise<CustodyRuntimeWalletProjection[]> {
+  const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
+    organizationId: auth.organizationId,
+    projectId,
+    includeAllProviders: true,
+  });
+
+  const allowedProviderWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["earn:read"]);
+  if (allowedProviderWalletIds === null) return wallets;
+
+  const allowed = new Set(allowedProviderWalletIds);
+  const scopedProviderWalletCounts = new Map<string, number>();
+  for (const wallet of wallets) {
+    scopedProviderWalletCounts.set(
+      wallet.walletId,
+      (scopedProviderWalletCounts.get(wallet.walletId) ?? 0) + 1
+    );
+  }
+  return wallets.filter(
+    (wallet) =>
+      allowed.has(wallet.walletId) && scopedProviderWalletCounts.get(wallet.walletId) === 1
+  );
+}
+
+/**
+ * PROJECT boundary for a recorded movement.
+ *
+ * Wallet scope alone does not close this. Custody configs may be
+ * ORGANIZATION-level (`config.project_id IS NULL`), and `listWallets` hands
+ * those to every project in the org — so a sibling project's deposit signed by a
+ * shared org wallet passes the wallet check, and without this it would hand over
+ * that deposit's amount, signature and failure reason.
+ *
+ * This is deliberately STRICTER than `GET /vault-positions`, which scopes by
+ * wallet alone, and the asymmetry is the point: a POSITION is a holding the
+ * organization owns and every project may legitimately see, while a MOVEMENT is
+ * one project's individual transaction and exposes a specific amount and
+ * signature that the position does not. It is the same tightening
+ * `getEarnProgramWithdrawal` already made when it moved from an org-only check
+ * to a per-program one.
+ *
+ * An EXACT match, with no null exception. `project_id` is nullable only because
+ * of `ON DELETE SET NULL` (migration 0059) — the insert requires a real project
+ * id — so a null means the owning project was DELETED. Treating that as
+ * readable-by-anyone was a hole: it handed a deleted project's deposits to every
+ * sibling project that shares an org-level wallet, which is exactly the leak
+ * this guard exists to close. The row survives for forensics in the database;
+ * it is simply no longer addressable through a project-scoped API, and there is
+ * no caller who legitimately needs a deleted project's deposit. Nothing about
+ * exit safety argues otherwise — the POSITION still holds the money and is
+ * still readable by wallet scope.
+ */
+function isMovementInProject(movement: { project_id: string | null }, projectId: string): boolean {
+  return movement.project_id === projectId;
+}
+
+/**
+ * GET /v1/earn/vault-deposits/:movementId — one recorded deposit, so a caller
+ * that signed something can find out whether it landed.
+ *
+ * SDP signs vault deposits and records them BEFORE broadcast, which means a
+ * caller can hold a movement id for a transaction whose fate it never learned:
+ * a `pending` row is "we could not establish that this reached the network",
+ * not "this failed". The every-minute reconciliation sweep
+ * (`services/jobs/reconcile-earn-vault-movements.ts`) drives every row to
+ * `confirmed` or `failed`; this route is how anyone else finds out. Without it
+ * the only honest thing a client could tell a customer about a signed deposit
+ * was "check the explorer".
+ *
+ * NO provider gate, exactly like `GET /vault-positions` and for the same ADR
+ * 0002 reason: this reports on money that has already left the customer's
+ * wallet. Un-offering or un-entitling a provider closes the door in, and must
+ * never take away the answer to "did my deposit land".
+ *
+ * THREE scoping rules, all of which answer 404 rather than 403 — a caller who
+ * may not see a movement must not learn that it exists:
+ *
+ *   organization — enforced in the repository query itself. Movement ids are
+ *                  UUID-suffixed rather than sequential, but this is the guard
+ *                  that makes guessing one useless (BOLA), the same reasoning
+ *                  as `getEarnProgramWithdrawal`.
+ *   environment  — a sandbox-scoped key must not read a production movement.
+ *                  The row carries its own environment, so this is a
+ *                  comparison, not a second query.
+ *   project      — see `isMovementInProject`. Wallet scope does NOT imply it,
+ *                  because an organization-level custody config is handed to
+ *                  every project in the org. An EXACT match: a null
+ *                  `project_id` means the project was deleted, not that the row
+ *                  is public.
+ *   direction    — a `withdraw` movement is not a deposit. The column is the
+ *                  only thing separating the two on a shared table, and the
+ *                  vault withdraw path is still unbuilt, so this closes the
+ *                  path before there is anything to leak through it.
+ */
+export async function getEarnVaultDeposit(c: AppContext) {
+  const { movementId } = parseParams(c, earnVaultDepositParamsSchema);
+  const environment = resolveSdpEnvironment(c);
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+
+  const repo = createPostgresEarnMovementsRepository(getDb(c.env));
+  const movement = await repo.getMovementById({
+    movementId,
+    organizationId: auth.organizationId,
+  });
+  if (
+    !movement ||
+    movement.environment !== environment ||
+    // The ledger holds both execution models, so "is this a vault deposit" is now
+    // two columns rather than a table name. A custodial withdrawal reached by a
+    // guessed id must 404 exactly like a wrong-organization row.
+    movement.execution_model !== "vault_direct" ||
+    movement.direction !== "deposit" ||
+    !isMovementInProject(movement, projectId)
+  ) {
+    throw notFound("Earn vault deposit");
+  }
+
+  // Wallet-binding scope, applied to the movement's OWN custody wallet. The
+  // deposit names the wallet that signed it, so a key bound elsewhere is asking
+  // about someone else's transaction.
+  const scopedWallets = await listReadableEarnVaultWallets(c, auth, projectId);
+  if (!scopedWallets.some((wallet) => wallet.id === movement.custody_wallet_id)) {
+    throw notFound("Earn vault deposit");
+  }
+
+  const response: EarnVaultDepositResponse = { deposit: toEarnVaultDepositRecord(movement) };
+  return success(c, response);
+}
+
+/**
+ * The published vault-deposit vocabulary, which predates the unified ledger.
+ *
+ * Two values need translating and both are deliberate: `requested` is the ledger's
+ * one word for "a signed transaction is durably recorded but is not known to be
+ * on the wire", which this DTO calls `pending`; and `finalized` — irreversible
+ * chain settlement — has no name here at all, because this vocabulary was written
+ * when optimistic commitment was the end of the story.
+ *
+ * Mapping `finalized` down to `confirmed` therefore tells the existing client
+ * exactly what it already understood, rather than sending it a status its own Zod
+ * enum would reject. Delete this table, and the `?settled=` note in the
+ * repository, when the DTO adopts the ledger vocabulary.
+ */
+const LEGACY_VAULT_DEPOSIT_STATUS = {
+  requested: "pending",
+  submitted: "submitted",
+  confirmed: "confirmed",
+  finalized: "confirmed",
+  failed: "failed",
+} as const satisfies Record<string, EarnVaultDepositRecord["status"]>;
+
+function toLegacyVaultDepositStatus(status: string): EarnVaultDepositRecord["status"] {
+  const mapped = LEGACY_VAULT_DEPOSIT_STATUS[status as keyof typeof LEGACY_VAULT_DEPOSIT_STATUS];
+  if (!mapped) {
+    throw internalError(`Earn vault movement carries the unmappable status ${status}`);
+  }
+  return mapped;
+}
+
+/**
+ * Shared row -> wire mapping, so the list and the detail cannot drift.
+ *
+ * `vault_address` is what this DTO calls `providerReference`. The unified ledger
+ * reserves `provider_reference` for the provider's id FOR THE MOVEMENT, which a
+ * vault movement does not have — the vault is the INSTRUMENT, and 0059 having
+ * used one column name for both meanings is exactly what made the two tables
+ * unmergeable until it was unpicked.
+ *
+ * `amount` serves `amount_requested`. 0059 stored the caller's text and the
+ * provider plan's canonical spelling in two columns and enforced them NUMERICALLY
+ * EQUAL, so this is the same quantity; only the spelling can differ (`100` where
+ * the padded form said `100.000000`).
+ */
+function toEarnVaultDepositRecord(movement: EarnMovementRow): EarnVaultDepositRecord {
+  // Guaranteed by 0062's model-shape constraint for a vault_direct row; asserted
+  // rather than coerced, because a blank instrument or signature on the wire
+  // would be a silent lie about a real on-chain transaction.
+  if (!movement.vault_address || !movement.signature) {
+    throw internalError(
+      `Earn vault movement ${movement.id} is missing its instrument or signature`
+    );
+  }
+  return {
+    movementId: movement.id,
+    positionId: movement.position_id,
+    provider: movement.provider,
+    providerReference: movement.vault_address,
+    status: toLegacyVaultDepositStatus(movement.status),
+    signature: movement.signature,
+    amount: movement.amount_requested,
+    failureReason: movement.failure_reason,
+    createdAt: movement.created_at,
+    confirmedAt: movement.confirmed_at,
+  };
+}
+
+/**
+ * GET /v1/earn/vault-deposits — this workspace's recorded deposits, newest
+ * first, so a client can re-derive what is still in flight.
+ *
+ * This is the DISCOVERY tier, and it exists because a signed deposit was
+ * previously only findable by an id the browser held in memory: close the tab
+ * and the outcome of a real on-chain transaction became unreachable. The
+ * custodial side already solves this by re-deriving withdrawals from its
+ * ledger; this is the same answer for vault deposits, and it is what lets the
+ * dashboard stop keeping its own per-tab watch list.
+ *
+ * It also closes the APPROVAL-GATED hole. A policy hold returns an
+ * `approvalRequestId` and NO `movementId`, because no movement exists until
+ * someone approves — but the approval executor replays the caller's original
+ * `Idempotency-Key`, so the movement it eventually creates carries it. Passing
+ * `?requestId=` therefore finds a deposit that did not exist when it was
+ * requested. The key is caller-chosen, short keys are legal, and it is even
+ * published on chain in the deposit memo — so it is emphatically NOT treated as
+ * a capability: this route re-applies every scoping rule the detail route
+ * applies, and a guessed key can only surface a deposit the caller could
+ * already read.
+ *
+ * Same gates as the detail read: no provider gate (ADR 0002), organization from
+ * the query, then environment, direction, project and wallet-binding scope.
+ */
+export async function listEarnVaultDeposits(c: AppContext) {
+  const query = parseQuery(c, earnVaultDepositsQuerySchema);
+  const before = query.before ? decodeVaultMovementCursor(query.before) : null;
+  if (query.before && !before) {
+    throw badRequest("Invalid vault deposit pagination cursor");
+  }
+  const environment = resolveSdpEnvironment(c);
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+
+  const scopedWallets = await listReadableEarnVaultWallets(c, auth, projectId);
+  const custodyWalletIds = [...new Set(scopedWallets.map((wallet) => wallet.id))];
+  if (custodyWalletIds.length === 0) {
+    return success(c, { deposits: [], hasMore: false, nextCursor: null });
+  }
+  const scopedWalletIds = new Set(custodyWalletIds);
+  const repo = createPostgresEarnMovementsRepository(getDb(c.env));
+
+  // The single-key lookup deliberately does NOT page. It resolves at most one
+  // row (0062's partial unique index on (organization_id, request_id) for vault
+  // rows, carried over from 0059), and running it through the keyset query would
+  // mean indexing for a filter that can never return two rows.
+  if (query.requestId !== undefined) {
+    const movement = await repo.findVaultMovementByRequestId({
+      organizationId: auth.organizationId,
+      requestId: query.requestId,
+    });
+    const visible =
+      movement !== null &&
+      movement.environment === environment &&
+      movement.direction === "deposit" &&
+      isMovementInProject(movement, projectId) &&
+      movement.custody_wallet_id !== null &&
+      scopedWalletIds.has(movement.custody_wallet_id);
+    return success(c, {
+      deposits: visible && movement ? [toEarnVaultDepositRecord(movement)] : [],
+      hasMore: false,
+      nextCursor: null,
+    });
+  }
+
+  const { rows, hasMore } = await repo.listVaultDeposits({
+    organizationId: auth.organizationId,
+    environment,
+    projectId,
+    custodyWalletIds,
+    limit: query.limit,
+    before,
+    settled: query.settled,
+  });
+
+  const last = rows.at(-1);
+  const nextCursor = hasMore && last ? encodeKeysetCursor(last.created_at, last.id) : null;
+  const response: EarnVaultDepositsPage = {
+    deposits: rows.map(toEarnVaultDepositRecord),
+    hasMore,
+    nextCursor,
+  };
+  return success(c, response);
+}
+
+const vaultMovementCursorSchema = z.object({
+  // `created_at` is ordered as canonical UTC text, so accepting offsets or a
+  // different precision would make a syntactically valid cursor sort wrongly.
+  createdAt: z.string().datetime({ precision: 3 }),
+  // Shape and bound only, NOT a prefix. Movement ids are heterogeneous by design:
+  // the unification preserved every legacy row's id, so the table holds
+  // `earn_vault_movement_…` history beside `earn_movement_…` for anything minted
+  // since. Pinning a prefix here rejected page two outright.
+  //
+  // Safe because a cursor is a pagination BOUND, not an access grant — it lands in
+  // `(created_at, id) < (?, ?)` while organization, environment, project and wallet
+  // scope are separate conditions, so a forged one can only reposition a caller
+  // inside rows it could already read.
+  id: z
+    .string()
+    .min(1)
+    .max(128)
+    .refine((id) => id === id.toLowerCase()),
+});
+
+function decodeVaultMovementCursor(cursor: string): { createdAt: string; id: string } | null {
+  const decoded = decodeKeysetCursor(cursor);
+  if (!decoded) return null;
+  const parsed = vaultMovementCursorSchema.safeParse({ createdAt: decoded.value, id: decoded.id });
+  return parsed.success ? parsed.data : null;
+}
+
+/**
+ * One vault holding with its instrument columns proven present.
+ *
+ * `earn_positions` holds both custody models, so the vault-only columns are
+ * nullable at the type level even though 0062's shape constraint makes them
+ * NOT NULL for a `vault_direct` row. Narrowing once here keeps the hydration
+ * below from either coercing a blank vault address into a chain read or
+ * repeating the same assertion six times.
+ */
+interface VaultHolding {
+  id: string;
+  provider: string;
+  vaultAddress: string;
+  label: string;
+  custodyWalletId: string;
+  tokenMint: string;
+  shareMint: string;
+  createdAt: string;
+  closedAt: string | null;
+}
+
+function toVaultHolding(row: EarnPositionRow): VaultHolding {
+  if (!row.vault_address || !row.custody_wallet_id || !row.token_mint || !row.share_mint) {
+    throw internalError(`Earn vault position ${row.id} is missing its instrument identity`);
+  }
+  return {
+    id: row.id,
+    provider: row.provider,
+    vaultAddress: row.vault_address,
+    label: row.label,
+    custodyWalletId: row.custody_wallet_id,
+    tokenMint: row.token_mint,
+    shareMint: row.share_mint,
+    createdAt: row.created_at,
+    closedAt: row.closed_at,
+  };
+}
+
+/**
  * GET /v1/earn/vault-positions — the org's vault positions, HYDRATED LIVE.
  *
  * The DB rows are only the claim set (which wallet holds which vault). Shares
@@ -515,49 +920,30 @@ export async function listEarnVaultPositions(c: AppContext) {
   const environment = resolveSdpEnvironment(c);
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
-  const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
-    organizationId: auth.organizationId,
-    projectId,
-    includeAllProviders: true,
-  });
 
   // WALLET-BINDING SCOPE, applied before the query and therefore before any
   // chain read. A selected-wallet key must not hydrate — or even learn of —
-  // positions held by wallets it is not bound to.
-  //
-  // The id spaces differ and that is the trap here: this helper returns PROVIDER
-  // wallet ids (`privy_…`), while `earn_vault_positions.custody_wallet_id` is
-  // the `custody_wallets` row id (`cwlt_…`). `scope.wallets` carries both, so it
-  // is the translation table. Passing the allow-list straight through would
-  // match nothing and silently return an empty page — a filter that looks like
-  // it works and hides everything.
-  const allowedProviderWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["earn:read"]);
-  const allowed = allowedProviderWalletIds === null ? null : new Set(allowedProviderWalletIds);
-  const scopedProviderWalletCounts = new Map<string, number>();
-  for (const wallet of wallets) {
-    scopedProviderWalletCounts.set(
-      wallet.walletId,
-      (scopedProviderWalletCounts.get(wallet.walletId) ?? 0) + 1
-    );
-  }
-  const scopedWallets = wallets.filter(
-    (wallet) =>
-      allowed === null ||
-      (allowed.has(wallet.walletId) && scopedProviderWalletCounts.get(wallet.walletId) === 1)
-  );
+  // positions held by wallets it is not bound to. See the helper for the id
+  // spaces this translates between.
+  const scopedWallets = await listReadableEarnVaultWallets(c, auth, projectId);
   const custodyWalletIds = [...new Set(scopedWallets.map((wallet) => wallet.id))];
   if (custodyWalletIds.length === 0) {
     return success(c, { positions: [], hasMore: false, nextCursor: null });
   }
 
-  const repo = createPostgresEarnVaultRepository(getDb(c.env));
-  const { rows, hasMore } = await repo.listPositions({
+  const repo = createPostgresEarnMovementsRepository(getDb(c.env));
+  const page = await repo.listVaultPositions({
     organizationId: auth.organizationId,
     environment,
     custodyWalletIds,
     limit: query.limit,
     before,
   });
+  const hasMore = page.hasMore;
+  // Normalised once, so the instrument columns are proven non-null here rather
+  // than at each of the six places below that would otherwise have to coerce
+  // them — and a hydration request is never built against a blank vault address.
+  const rows = page.rows.map(toVaultHolding);
 
   // Group by provider so each client reads its whole shelf in one pass, sharing
   // one slot across the vaults — a per-position read would price a multi-vault
@@ -587,20 +973,20 @@ export async function listEarnVaultPositions(c: AppContext) {
     if (!client) continue;
     const byWallet = new Map<string, typeof rows>();
     for (const row of providerRows) {
-      const walletRows = byWallet.get(row.custody_wallet_id);
+      const walletRows = byWallet.get(row.custodyWalletId);
       if (walletRows) walletRows.push(row);
-      else byWallet.set(row.custody_wallet_id, [row]);
+      else byWallet.set(row.custodyWalletId, [row]);
     }
     for (const [walletId, walletRows] of byWallet) {
       const owner = walletAddresses.get(walletId);
       if (!owner) continue;
       const trustedIdentity = new Map(
         walletRows.map((row) => [
-          row.provider_reference,
-          { tokenMint: row.token_mint, shareMint: row.share_mint },
+          row.vaultAddress,
+          { tokenMint: row.tokenMint, shareMint: row.shareMint },
         ])
       );
-      const references = walletRows.map((row) => row.provider_reference);
+      const references = walletRows.map((row) => row.vaultAddress);
       hydrationJobs.push(async () => {
         const snapshots = await client.readVaultPositions(earnRuntime(c), {
           owner,
@@ -647,23 +1033,23 @@ export async function listEarnVaultPositions(c: AppContext) {
   }
 
   const last = rows.at(-1);
-  const nextCursor = hasMore && last ? encodeVaultPositionCursor(last.created_at, last.id) : null;
+  const nextCursor = hasMore && last ? encodeVaultPositionCursor(last.createdAt, last.id) : null;
 
   return success(c, {
     positions: rows.map((row) => {
       const hydrated = live.get(
-        vaultPositionLiveKey(row.provider, row.custody_wallet_id, row.provider_reference)
+        vaultPositionLiveKey(row.provider, row.custodyWalletId, row.vaultAddress)
       );
       return {
         id: row.id,
         provider: row.provider,
-        providerReference: row.provider_reference,
+        providerReference: row.vaultAddress,
         label: row.label,
-        custodyWalletId: row.custody_wallet_id,
-        tokenMint: row.token_mint,
-        shareMint: row.share_mint,
-        createdAt: row.created_at,
-        closedAt: row.closed_at,
+        custodyWalletId: row.custodyWalletId,
+        tokenMint: row.tokenMint,
+        shareMint: row.shareMint,
+        createdAt: row.createdAt,
+        closedAt: row.closedAt,
         // Absent (not zero) when the chain read failed or returned nothing.
         shares: hydrated?.shares,
         tokenValue: hydrated?.tokenValue,
@@ -686,10 +1072,14 @@ const vaultPositionCursorSchema = z.object({
   // `created_at` is ordered as canonical UTC text, so accepting offsets or a
   // different precision would make a syntactically valid cursor sort wrongly.
   createdAt: z.string().datetime({ precision: 3 }),
-  // Generated UUIDs are lowercase. Preserve that canonical spelling because
-  // PostgreSQL compares the prefixed position id as text in the keyset tuple.
+  // Shape and bound only, for the same reason as the movement cursor above:
+  // holdings carry `earn_vault_position_…` ids the unification preserved beside
+  // `earn_position_…` for newer ones. Lowercase is still asserted because
+  // PostgreSQL compares the prefixed id as text in the keyset tuple.
   id: z
-    .templateLiteral(["earn_vault_position_", z.uuidv4()])
+    .string()
+    .min(1)
+    .max(128)
     .refine((id) => id === id.toLowerCase()),
 });
 

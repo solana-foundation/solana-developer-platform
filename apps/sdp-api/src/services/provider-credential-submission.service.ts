@@ -61,7 +61,8 @@ type SubmissionSource = "stored" | "runtime";
 
 export interface SafeProviderCredential {
   id: string;
-  provider: "privy";
+  /** Widened alongside ProviderCredentialRow: RPC connections store credentials here too. */
+  provider: string;
   label: string;
   scope: "organization" | "project";
   projectId: string | null;
@@ -583,6 +584,7 @@ async function runSubmissionTransaction(
       id: submission.providerCredentialId,
       organizationId: submission.organizationId,
       projectId: submission.projectId,
+      provider: "privy",
       label: fields?.credentialLabel ?? RUNTIME_CREDENTIAL_LABEL,
       scope: "project",
       source: submission.credentialSource,
