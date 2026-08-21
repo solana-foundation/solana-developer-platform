@@ -85,6 +85,15 @@ describe("resolveBurnAllSentinel", () => {
     expect(decodeKvaultWithdrawShares(resolved[1].instruction, String(KVAULT_PROGRAM))).toBe(60n);
   });
 
+  it("refuses an exact maximum-u64 remainder because the protocol reserves it for burn-all", () => {
+    expect(() =>
+      resolveBurnAllSentinel({
+        instructions: [withdraw(sentinel)],
+        requestedBaseUnits: sentinel,
+      })
+    ).toThrow(/reserved burn-all value/);
+  });
+
   it("refuses ambiguous sentinel placement", () => {
     expect(() =>
       resolveBurnAllSentinel({

@@ -95,11 +95,11 @@ export function resolveBurnAllSentinel(input: {
     0n
   );
   const remainder = input.requestedBaseUnits - literalBaseUnits;
-  if (remainder <= 0n || remainder > KVAULT_BURN_ALL_SHARES_SENTINEL) {
+  if (remainder <= 0n || remainder >= KVAULT_BURN_ALL_SHARES_SENTINEL) {
     throw new SdpKaminoError(
       "INVALID_AMOUNT",
       `Kamino withdraw instructions leave ${remainder} share base units for their final redemption; ` +
-        "the requested amount must exceed every preceding literal redemption."
+        "the remainder must be positive and below the protocol's reserved burn-all value."
     );
   }
   return input.instructions.map((tagged) =>
