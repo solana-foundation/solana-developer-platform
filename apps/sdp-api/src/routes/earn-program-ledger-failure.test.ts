@@ -176,7 +176,12 @@ describe("Earn withdrawal ledger — post-acceptance bookkeeping failure", () =>
     // must be pinned to the program in the PATH, not merely to some program of
     // this organization's.
     const row = await getDb(env)
-      .prepare("SELECT status, provider_reference, wallet_id FROM earn_program_withdrawals")
+      .prepare(
+        `SELECT movement.status, movement.provider_reference,
+                position.provider_wallet_id AS wallet_id
+           FROM earn_movements movement
+           INNER JOIN earn_positions position ON position.id = movement.position_id`
+      )
       .first<{ status: string; provider_reference: string | null; wallet_id: string }>();
     expect(row).toEqual({
       status: "requested",

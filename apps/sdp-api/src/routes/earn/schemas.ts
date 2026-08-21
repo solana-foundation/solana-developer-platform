@@ -2,6 +2,7 @@ import { isAddress } from "@sdp/solana/address";
 import {
   EARN_APY_TYPES,
   EARN_LIQUIDITY_TERMS,
+  EARN_MOVEMENT_DIRECTIONS,
   EARN_PORTFOLIO_TOKENS,
   EARN_STRATEGY_SOURCE_KINDS,
 } from "@sdp/types";
@@ -288,6 +289,27 @@ export const earnVaultDepositsQuerySchema = z.object({
     .enum(["true", "false"])
     .transform((value) => value === "true")
     .optional(),
+});
+
+/**
+ * The cross-provider movement feed.
+ *
+ * Filters are narrow on purpose — each one answers a question a dashboard
+ * actually asks (what moved, in which direction, through which provider, on which
+ * holding, from or to which counterparty address) and every one of them is an
+ * equality match the ledger has an index for. `status` is left an open string
+ * because the vocabulary is per execution model: a value that belongs to the
+ * other model simply matches nothing, which is the honest answer.
+ */
+export const earnMovementsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  before: z.string().min(1).optional(),
+  direction: z.enum(EARN_MOVEMENT_DIRECTIONS).optional(),
+  status: z.string().min(1).max(64).optional(),
+  provider: z.string().min(1).max(64).optional(),
+  positionId: z.string().min(1).max(128).optional(),
+  sourceAddress: z.string().min(1).max(128).optional(),
+  destinationAddress: z.string().min(1).max(128).optional(),
 });
 
 /** Bounded keyset page over active vault holdings, newest first. */

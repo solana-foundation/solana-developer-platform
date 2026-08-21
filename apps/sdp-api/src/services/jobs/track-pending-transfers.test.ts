@@ -2,6 +2,7 @@ import * as solanaRpc from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { createSystemPaymentsRepository } from "@/db/repositories";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { trackPendingTransfers } from "./track-pending-transfers";
@@ -29,13 +30,14 @@ async function insertTransfer(params: {
   signature?: string | null;
   createdAt: string;
   updatedAt: string;
+  confirmedAt?: string;
 }): Promise<void> {
   await getDb(env)
     .prepare(
       `INSERT INTO payment_transfers
        (id, organization_id, wallet_id, source_address, destination_address,
-        token, amount, type, direction, status, signature, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        token, amount, type, direction, status, signature, confirmed_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       params.id,
@@ -49,6 +51,7 @@ async function insertTransfer(params: {
       "outbound",
       params.status,
       params.signature ?? null,
+      params.confirmedAt ?? null,
       params.createdAt,
       params.updatedAt
     )
@@ -61,6 +64,8 @@ async function getTransfer(id: string) {
     status: string;
     error: string | null;
     slot: number | null;
+    confirmed_at: string | null;
+    finalization_last_polled_at: string | null;
   }>();
 }
 
@@ -75,7 +80,9 @@ describe("trackPendingTransfers", () => {
     await seedOrg();
     vi.clearAllMocks();
     createRpcMock.mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);
-    getSignatureStatusesMock.mockResolvedValue([]);
+    getSignatureStatusesMock.mockImplementation(async (_rpc, signatures) =>
+      signatures.map(() => null)
+    );
   });
 
   describe("recoverStuckProcessingTransfers", () => {
@@ -297,6 +304,310 @@ describe("trackPendingTransfers", () => {
       await trackPendingTransfers(env);
 
       expect(getSignatureStatusesMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("finalizeConfirmedTransfers", () => {
+    it("upgrades confirmed transfer to finalized, polling with searchTransactionHistory", async () => {
+      getSignatureStatusesMock.mockResolvedValueOnce([
+        {
+          slot: 77777n,
+          confirmations: null,
+          confirmationStatus: "finalized",
+          err: null,
+        },
+      ]);
+
+      await insertTransfer({
+        id: "xfr_confirmed_finalizing",
+        status: "confirmed",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(3),
+        updatedAt: minutesAgo(2),
+        confirmedAt: minutesAgo(2),
+      });
+
+      await trackPendingTransfers(env);
+
+      const updated = await getTransfer("xfr_confirmed_finalizing");
+      expect(updated?.status).toBe("finalized");
+      expect(updated?.slot).toBe(77777);
+      expect(updated?.finalization_last_polled_at).not.toBeNull();
+      expect(getSignatureStatusesMock).toHaveBeenCalledWith(expect.anything(), [TEST_SIG_1], {
+        searchTransactionHistory: true,
+      });
+    });
+
+    it("rotates a confirmed transfer whose signature status reads null without touching its status", async () => {
+      getSignatureStatusesMock.mockResolvedValueOnce([null]);
+
+      await insertTransfer({
+        id: "xfr_confirmed_no_status",
+        status: "confirmed",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(10),
+        updatedAt: minutesAgo(10),
+        confirmedAt: minutesAgo(10),
+      });
+
+      await trackPendingTransfers(env);
+
+      const rotated = await getTransfer("xfr_confirmed_no_status");
+      expect(rotated?.status).toBe("confirmed");
+      expect(rotated?.finalization_last_polled_at).not.toBeNull();
+    });
+
+    it("does not poll confirmed transfers older than the finalization window", async () => {
+      await insertTransfer({
+        id: "xfr_confirmed_aged_out",
+        status: "confirmed",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(25 * 60),
+        updatedAt: minutesAgo(25 * 60),
+        confirmedAt: minutesAgo(25 * 60),
+      });
+
+      await trackPendingTransfers(env);
+
+      expect(getSignatureStatusesMock).not.toHaveBeenCalled();
+      const unchanged = await getTransfer("xfr_confirmed_aged_out");
+      expect(unchanged?.status).toBe("confirmed");
+    });
+
+    it("rotates a full page of stuck rows so the next tick reaches a newer transfer", async () => {
+      getSignatureStatusesMock.mockImplementation(async (_rpc, signatures) =>
+        signatures.map((signature) =>
+          String(signature) === String(TEST_SIG_2)
+            ? { slot: 33333n, confirmations: null, confirmationStatus: "finalized", err: null }
+            : null
+        )
+      );
+
+      await Promise.all(
+        Array.from({ length: 256 }, (_, i) =>
+          insertTransfer({
+            id: `xfr_confirmed_stuck_${i}`,
+            status: "confirmed",
+            signature: `${TEST_SIG_1}stuck${i}`,
+            createdAt: minutesAgo(30),
+            updatedAt: minutesAgo(30),
+            confirmedAt: minutesAgo(30),
+          })
+        )
+      );
+      await insertTransfer({
+        id: "xfr_confirmed_zz_behind_stuck_page",
+        status: "confirmed",
+        signature: String(TEST_SIG_2),
+        createdAt: minutesAgo(2),
+        updatedAt: minutesAgo(2),
+        confirmedAt: minutesAgo(2),
+      });
+
+      await trackPendingTransfers(env);
+
+      const behindFullPage = await getTransfer("xfr_confirmed_zz_behind_stuck_page");
+      expect(behindFullPage?.status).toBe("confirmed");
+      expect(behindFullPage?.finalization_last_polled_at).toBeNull();
+
+      await trackPendingTransfers(env);
+
+      const upgraded = await getTransfer("xfr_confirmed_zz_behind_stuck_page");
+      expect(upgraded?.status).toBe("finalized");
+      expect(upgraded?.slot).toBe(33333);
+      const stuck = await getTransfer("xfr_confirmed_stuck_0");
+      expect(stuck?.status).toBe("confirmed");
+    });
+
+    it("rotates the polled page even when the RPC batch call fails", async () => {
+      getSignatureStatusesMock.mockRejectedValueOnce(new Error("rpc unreachable"));
+
+      await insertTransfer({
+        id: "xfr_confirmed_rpc_failed",
+        status: "confirmed",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(3),
+        updatedAt: minutesAgo(2),
+        confirmedAt: minutesAgo(2),
+      });
+
+      await trackPendingTransfers(env);
+
+      const rotated = await getTransfer("xfr_confirmed_rpc_failed");
+      expect(rotated?.status).toBe("confirmed");
+      expect(rotated?.finalization_last_polled_at).not.toBeNull();
+
+      getSignatureStatusesMock.mockResolvedValueOnce([
+        {
+          slot: 44444n,
+          confirmations: null,
+          confirmationStatus: "finalized",
+          err: null,
+        },
+      ]);
+
+      await trackPendingTransfers(env);
+
+      const upgraded = await getTransfer("xfr_confirmed_rpc_failed");
+      expect(upgraded?.status).toBe("finalized");
+      expect(upgraded?.slot).toBe(44444);
+    });
+
+    it("leaves confirmed transfer untouched when the finalized status carries an error", async () => {
+      getSignatureStatusesMock.mockResolvedValueOnce([
+        {
+          slot: 88888n,
+          confirmations: null,
+          confirmationStatus: "finalized",
+          err: { InstructionError: [0, { Custom: 1 }] },
+        },
+      ]);
+
+      await insertTransfer({
+        id: "xfr_confirmed_errored",
+        status: "confirmed",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(3),
+        updatedAt: minutesAgo(2),
+        confirmedAt: minutesAgo(2),
+      });
+
+      await trackPendingTransfers(env);
+
+      const unchanged = await getTransfer("xfr_confirmed_errored");
+      expect(unchanged?.status).toBe("confirmed");
+    });
+  });
+
+  describe("cron state regressions", () => {
+    it("stamps confirmed_at when the sync pass confirms, and never re-stamps it", async () => {
+      getSignatureStatusesMock.mockResolvedValueOnce([
+        { slot: 100n, confirmations: 3n, confirmationStatus: "confirmed", err: null },
+      ]);
+
+      await insertTransfer({
+        id: "xfr_regression_confirmed_at",
+        status: "processing",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(1),
+        updatedAt: minutesAgo(1),
+      });
+
+      await trackPendingTransfers(env);
+
+      const confirmed = await getTransfer("xfr_regression_confirmed_at");
+      expect(confirmed?.status).toBe("confirmed");
+      expect(confirmed?.confirmed_at).not.toBeNull();
+      const stampedAt = confirmed?.confirmed_at;
+
+      getSignatureStatusesMock.mockResolvedValue([
+        { slot: 101n, confirmations: null, confirmationStatus: "finalized", err: null },
+      ]);
+
+      await trackPendingTransfers(env);
+
+      const finalized = await getTransfer("xfr_regression_confirmed_at");
+      expect(finalized?.status).toBe("finalized");
+      expect(finalized?.confirmed_at).toBe(stampedAt);
+    });
+
+    it("running the reconciler twice against the same chain state is idempotent", async () => {
+      getSignatureStatusesMock.mockResolvedValue([
+        { slot: 200n, confirmations: null, confirmationStatus: "finalized", err: null },
+      ]);
+
+      await insertTransfer({
+        id: "xfr_regression_double_fire",
+        status: "confirmed",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(3),
+        updatedAt: minutesAgo(2),
+        confirmedAt: minutesAgo(2),
+      });
+
+      await trackPendingTransfers(env);
+      const first = await getTransfer("xfr_regression_double_fire");
+
+      await trackPendingTransfers(env);
+      const second = await getTransfer("xfr_regression_double_fire");
+
+      expect(first?.status).toBe("finalized");
+      expect(second?.status).toBe("finalized");
+      expect(second?.slot).toBe(first?.slot);
+    });
+
+    it("a late poll verdict never regresses a finalized or failed transfer", async () => {
+      await insertTransfer({
+        id: "xfr_regression_already_final",
+        status: "finalized",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(3),
+        updatedAt: minutesAgo(2),
+        confirmedAt: minutesAgo(2),
+      });
+      await insertTransfer({
+        id: "xfr_regression_already_failed",
+        status: "failed",
+        signature: String(TEST_SIG_2),
+        createdAt: minutesAgo(3),
+        updatedAt: minutesAgo(2),
+        confirmedAt: minutesAgo(2),
+      });
+
+      const repo = createSystemPaymentsRepository(env);
+      await repo.advanceConfirmedTransfers({
+        polled: [
+          {
+            transferId: "xfr_regression_already_final",
+            organizationId: TEST_ORG_ID,
+            finalized: false,
+            slot: null,
+          },
+          {
+            transferId: "xfr_regression_already_failed",
+            organizationId: TEST_ORG_ID,
+            finalized: true,
+            slot: 999,
+          },
+        ],
+        updatedAt: new Date().toISOString(),
+      });
+
+      const stillFinal = await getTransfer("xfr_regression_already_final");
+      const stillFailed = await getTransfer("xfr_regression_already_failed");
+      expect(stillFinal?.status).toBe("finalized");
+      expect(stillFinal?.finalization_last_polled_at).toBeNull();
+      expect(stillFailed?.status).toBe("failed");
+      expect(stillFailed?.slot).toBeNull();
+    });
+
+    it("a poll verdict scoped to the wrong organization touches nothing", async () => {
+      await insertTransfer({
+        id: "xfr_regression_wrong_org",
+        status: "confirmed",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(3),
+        updatedAt: minutesAgo(2),
+        confirmedAt: minutesAgo(2),
+      });
+
+      const repo = createSystemPaymentsRepository(env);
+      await repo.advanceConfirmedTransfers({
+        polled: [
+          {
+            transferId: "xfr_regression_wrong_org",
+            organizationId: "org_other",
+            finalized: true,
+            slot: 555,
+          },
+        ],
+        updatedAt: new Date().toISOString(),
+      });
+
+      const untouched = await getTransfer("xfr_regression_wrong_org");
+      expect(untouched?.status).toBe("confirmed");
+      expect(untouched?.slot).toBeNull();
+      expect(untouched?.finalization_last_polled_at).toBeNull();
     });
   });
 });

@@ -440,6 +440,8 @@ function buildObservedTransferRows(
         initiated_by_key_id: null,
         idempotency_key: null,
         idempotency_fingerprint: null,
+        confirmed_at: null,
+        finalization_last_polled_at: null,
         created_at: timestamp,
         updated_at: timestamp,
       });
@@ -520,6 +522,8 @@ function buildObservedTransferRows(
         initiated_by_key_id: null,
         idempotency_key: null,
         idempotency_fingerprint: null,
+        confirmed_at: null,
+        finalization_last_polled_at: null,
         created_at: timestamp,
         updated_at: timestamp,
       });
@@ -609,6 +613,8 @@ function buildObservedTransferRows(
       initiated_by_key_id: null,
       idempotency_key: null,
       idempotency_fingerprint: null,
+      confirmed_at: null,
+      finalization_last_polled_at: null,
       created_at: timestamp,
       updated_at: timestamp,
     });
