@@ -221,6 +221,8 @@ try {
     env: {
       ENVIRONMENT: localEnv.ENVIRONMENT ?? process.env.ENVIRONMENT ?? "development",
       API_VERSION: localEnv.API_VERSION ?? process.env.API_VERSION ?? "local",
+      SDP_DEPLOYMENT_MODE:
+        localEnv.SDP_DEPLOYMENT_MODE ?? process.env.SDP_DEPLOYMENT_MODE ?? "self_hosted",
       DATABASE_URL: databaseUrl,
       REDIS_URL: redisUrl,
       PORT: port,
