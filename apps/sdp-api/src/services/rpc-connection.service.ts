@@ -12,6 +12,7 @@ import { getDb } from "@/db";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
 import { getAuth } from "@/lib/auth";
 import { badRequest, conflict, forbidden, notFound } from "@/lib/errors";
+import { getLogger } from "@/runtime/logger";
 import {
   type CredentialSecretStorageBackend,
   createCredentialSecretStore,
@@ -377,6 +378,12 @@ export async function deactivateRpcConnection(
 ): Promise<SafeRpcConnection> {
   const { auth, store, scopeKeys } = await loadConnectionWithSecret(c, connectionId);
 
+  const credential = await store.findConnectionSecret({
+    organizationId: auth.organizationId,
+    connectionId,
+    scopeKeys,
+  });
+
   const deactivated = await store.deactivateConnection({
     organizationId: auth.organizationId,
     connectionId,
@@ -386,13 +393,37 @@ export async function deactivateRpcConnection(
     throw conflict("The RPC connection is already deactivated");
   }
 
-  const credential = await store.findConnectionSecret({
-    organizationId: auth.organizationId,
-    connectionId,
-    scopeKeys,
-  });
+  await destroyConnectionSecretBestEffort(c, credential);
 
   return toSafeWithCredential(deactivated, credential);
+}
+
+async function destroyConnectionSecretBestEffort(
+  c: AppContext,
+  credential: Awaited<ReturnType<RpcConnectionStore["findConnectionSecret"]>>
+): Promise<void> {
+  if (credential?.storage_backend !== "gcp_secret_manager" || !credential.secret_version_ref) {
+    return;
+  }
+
+  try {
+    const store = createCredentialSecretStore(
+      c.env,
+      credential.storage_backend as CredentialSecretStorageBackend
+    );
+    await store.destroyVersion({ secretVersionRef: credential.secret_version_ref });
+  } catch (err) {
+    getLogger().error(
+      {
+        provider_credential_id: credential.id,
+        storage_backend: credential.storage_backend,
+        request_id: c.get("requestId"),
+        reason: "secret_cleanup_failed",
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "rpc_connection_secret_orphan_risk"
+    );
+  }
 }
 
 function isDefaultConflict(error: unknown): boolean {
