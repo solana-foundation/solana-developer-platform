@@ -123,7 +123,7 @@ describe("POST /api/playground/execute", () => {
     ["empty string", ""],
     ["whitespace", "   "],
   ])(
-    "rejects requests with a %s apiKey instead of falling back to the session (Hacktron audit regression)",
+    "rejects requests with a %s apiKey instead of falling back to the session",
     async (_label, apiKey) => {
       const request = vi.fn();
       mocks.createSdpApiClient.mockResolvedValue({ request });

@@ -1,6 +1,7 @@
 ---
 name: register-provider
 description: Scaffold and wire a new ramp provider into SDP so the platform knows it exists, dispatches to it, and gates it by availability. Add the id to RAMP_PROVIDERS, register the client, fill the dispatch switches, declare secrets, and stub the provider class. Step 1 — do this before the capability skills. Use when opening a PR against apps/sdp-api to add a ramp provider.
+disable-model-invocation: true
 ---
 
 # Register a ramp provider

@@ -189,6 +189,40 @@ export const buildEarnVaultDepositFingerprint = (input: EarnVaultDepositFingerpr
     })
   );
 
+export interface EarnVaultWithdrawalFingerprintInput {
+  environment: string;
+  provider: string;
+  /** The `earn_positions` row being exited. */
+  positionId: string;
+  /** Shares to redeem, decimal string in share units. */
+  shares: string;
+}
+
+/**
+ * Fingerprint for a non-custodial vault withdrawal.
+ *
+ * Same inclusion test as the deposit's: every field changes WHAT MOVES. The
+ * position id carries the vault and the signing wallet transitively (a holding
+ * is one (org, environment, provider, vault, wallet) claim), so naming it is
+ * naming both; `environment` is included because the same key arriving in
+ * sandbox and production is two requests against two chains. Decimal spelling
+ * is normalized without rounding, exactly like the deposit — `1` and `1.000000`
+ * are one intent to the share mint.
+ */
+export const buildEarnVaultWithdrawalFingerprint = (
+  input: EarnVaultWithdrawalFingerprintInput
+): string =>
+  JSON.stringify(
+    normalizeForFingerprint({
+      scope: "earn_vault_withdrawal",
+      environment: input.environment,
+      provider: input.provider,
+      positionId: input.positionId,
+      direction: "withdrawal",
+      shares: normalizeDecimalString(input.shares),
+    })
+  );
+
 export interface EarnWithdrawalFingerprintInput {
   providerWalletRef: string;
   amountUsd: string;
