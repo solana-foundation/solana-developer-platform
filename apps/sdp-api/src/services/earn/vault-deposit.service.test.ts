@@ -1,7 +1,7 @@
 import { SdpKaminoError } from "@sdp/kamino";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { createPostgresEarnVaultRepository } from "@/db/repositories/earn-vault.repository";
+import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { createPostgresPolicyRepository } from "@/db/repositories/policy.repository.postgres";
 import { createTenantScope } from "@/lib/tenant-scope";
 import {
@@ -121,7 +121,7 @@ async function seedWallet(): Promise<void> {
   ]);
 }
 
-async function tableCount(table: "earn_vault_positions" | "earn_vault_movements") {
+async function tableCount(table: "earn_positions" | "earn_movements") {
   const row = await getDb(env)
     .prepare(`SELECT COUNT(*) AS count FROM ${table}`)
     .first<{ count: number | string }>();
@@ -187,9 +187,9 @@ describe("depositIntoVault — idempotency", () => {
       depositIntoVault(env, depositInput({ providerReference: VAULT_B }))
     ).rejects.toMatchObject({ code: "CONFLICT" });
 
-    expect(await tableCount("earn_vault_positions")).toBe(1);
-    expect(await tableCount("earn_vault_movements")).toBe(1);
-    expect(first.position.provider_reference).toBe(VAULT_A);
+    expect(await tableCount("earn_positions")).toBe(1);
+    expect(await tableCount("earn_movements")).toBe(1);
+    expect(first.position.vault_address).toBe(VAULT_A);
   });
 
   it("conflicts a sibling project's identical key on the fast replay path, before signing", async () => {
@@ -258,8 +258,8 @@ describe("depositIntoVault — idempotency", () => {
     expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
     const rejected = outcomes.find((outcome) => outcome.status === "rejected");
     expect(rejected).toMatchObject({ reason: { code: "CONFLICT" } });
-    expect(await tableCount("earn_vault_positions")).toBe(1);
-    expect(await tableCount("earn_vault_movements")).toBe(1);
+    expect(await tableCount("earn_positions")).toBe(1);
+    expect(await tableCount("earn_movements")).toBe(1);
     expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
   });
 
@@ -293,8 +293,8 @@ describe("depositIntoVault — idempotency", () => {
     expect(results.map((result) => result.replayed).sort()).toEqual([false, true]);
     expect(new Set(results.map((result) => result.movement.id))).toHaveProperty("size", 1);
     expect(new Set(results.map((result) => result.position.id))).toHaveProperty("size", 1);
-    expect(await tableCount("earn_vault_positions")).toBe(1);
-    expect(await tableCount("earn_vault_movements")).toBe(1);
+    expect(await tableCount("earn_positions")).toBe(1);
+    expect(await tableCount("earn_movements")).toBe(1);
     expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
   });
 
@@ -323,8 +323,8 @@ describe("depositIntoVault — idempotency", () => {
         .map((requestId) => `sdp:earn:vault-deposit:${requestId}`)
         .sort()
     );
-    expect(await tableCount("earn_vault_positions")).toBe(1);
-    expect(await tableCount("earn_vault_movements")).toBe(2);
+    expect(await tableCount("earn_positions")).toBe(1);
+    expect(await tableCount("earn_movements")).toBe(2);
     expect(broadcastVaultTransaction).toHaveBeenCalledTimes(2);
   });
 
@@ -367,7 +367,7 @@ describe("depositIntoVault — signed persistence boundary", () => {
 
     expect(simulateVaultPlan).not.toHaveBeenCalled();
     expect(signVaultPlan).not.toHaveBeenCalled();
-    expect(await tableCount("earn_vault_movements")).toBe(0);
+    expect(await tableCount("earn_movements")).toBe(0);
   });
 
   it.each([
@@ -384,8 +384,8 @@ describe("depositIntoVault — signed persistence boundary", () => {
 
       expect(simulateVaultPlan).not.toHaveBeenCalled();
       expect(signVaultPlan).not.toHaveBeenCalled();
-      expect(await tableCount("earn_vault_positions")).toBe(0);
-      expect(await tableCount("earn_vault_movements")).toBe(0);
+      expect(await tableCount("earn_positions")).toBe(0);
+      expect(await tableCount("earn_movements")).toBe(0);
     }
   );
 
@@ -404,7 +404,7 @@ describe("depositIntoVault — signed persistence boundary", () => {
 
       expect(simulateVaultPlan).not.toHaveBeenCalled();
       expect(signVaultPlan).not.toHaveBeenCalled();
-      expect(await tableCount("earn_vault_movements")).toBe(0);
+      expect(await tableCount("earn_movements")).toBe(0);
     }
   );
 
@@ -414,10 +414,10 @@ describe("depositIntoVault — signed persistence boundary", () => {
     let positionAtBroadcast: Record<string, unknown> | null = null;
     broadcastVaultTransaction.mockImplementation(async () => {
       movementAtBroadcast = await getDb(env)
-        .prepare("SELECT * FROM earn_vault_movements")
+        .prepare("SELECT * FROM earn_movements")
         .first<Record<string, unknown>>();
       positionAtBroadcast = await getDb(env)
-        .prepare("SELECT * FROM earn_vault_positions")
+        .prepare("SELECT * FROM earn_positions")
         .first<Record<string, unknown>>();
     });
 
@@ -442,14 +442,15 @@ describe("depositIntoVault — signed persistence boundary", () => {
       deadline,
     });
     expect(movementAtBroadcast).toMatchObject({
-      requested_amount: "10.000000",
-      amount: "10",
-      requested_min_shares_out: "1.000",
+      // The caller's spelling is what the ledger keeps; the provider plan's
+      // canonical form is asserted equal before signing, not stored twice.
+      amount_requested: "10.000000",
+      // The ENCODED floor — the value that actually constrained the chain.
       min_shares_out: "1",
       signature: "sig_original",
       signed_transaction: "AQ==",
       last_valid_block_height: "12345",
-      status: "pending",
+      status: "requested",
     });
     expect(positionAtBroadcast).toMatchObject({
       token_mint: TOKEN_MINT,
@@ -464,44 +465,68 @@ describe("depositIntoVault — signed persistence boundary", () => {
   it("rejects direct SQL writes that break fund or parent-position identity", async () => {
     const result = await depositIntoVault(env, depositInput());
 
+    // The requested/accepted PAIR is gone: 0059 stored both and DB-enforced them
+    // numerically equal, and the ledger keeps one column per fact with the equality
+    // asserted in `requireAcceptedPlan` before anything is signed. What the database
+    // still refuses is a value that is not an amount at all.
     await expect(
       getDb(env)
-        .prepare("UPDATE earn_vault_movements SET amount = '11' WHERE id = ?")
+        .prepare("UPDATE earn_movements SET amount_requested = ? WHERE id = ?")
+        .bind("9".repeat(129), result.movement.id)
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      getDb(env)
+        .prepare("UPDATE earn_movements SET amount_requested = '0.00' WHERE id = ?")
+        .bind(result.movement.id)
+        .run()
+    ).rejects.toThrow();
+    // The unit a movement is denominated in can never be blank — that is what keeps
+    // USD, mint units and share counts from ever being read as the same figure.
+    await expect(
+      getDb(env)
+        .prepare("UPDATE earn_movements SET denomination = '   ' WHERE id = ?")
         .bind(result.movement.id)
         .run()
     ).rejects.toThrow();
     await expect(
       getDb(env)
-        .prepare("UPDATE earn_vault_movements SET requested_amount = ?, amount = ? WHERE id = ?")
-        .bind("9".repeat(129), "9".repeat(129), result.movement.id)
-        .run()
-    ).rejects.toThrow();
-    await expect(
-      getDb(env)
-        .prepare(
-          "UPDATE earn_vault_movements SET requested_min_shares_out = '0', min_shares_out = '0' WHERE id = ?"
-        )
+        .prepare("UPDATE earn_movements SET min_shares_out = '0' WHERE id = ?")
         .bind(result.movement.id)
         .run()
     ).rejects.toThrow();
     await expect(
       getDb(env)
-        .prepare("UPDATE earn_vault_movements SET last_valid_block_height = 1.5 WHERE id = ?")
+        .prepare("UPDATE earn_movements SET last_valid_block_height = 1.5 WHERE id = ?")
+        .bind(result.movement.id)
+        .run()
+    ).rejects.toThrow();
+    // A vault movement cannot borrow a custodial column, or shed the signed-outbox
+    // payload that makes record-before-broadcast enforceable.
+    await expect(
+      getDb(env)
+        .prepare("UPDATE earn_movements SET payout_token = 'usdc' WHERE id = ?")
         .bind(result.movement.id)
         .run()
     ).rejects.toThrow();
     await expect(
       getDb(env)
-        .prepare("UPDATE earn_vault_movements SET provider_reference = ? WHERE id = ?")
+        .prepare("UPDATE earn_movements SET signed_transaction = NULL WHERE id = ?")
+        .bind(result.movement.id)
+        .run()
+    ).rejects.toThrow();
+    await expect(
+      getDb(env)
+        .prepare("UPDATE earn_movements SET vault_address = ? WHERE id = ?")
         .bind(VAULT_B, result.movement.id)
         .run()
     ).rejects.toThrow();
     expect(
-      await createPostgresEarnVaultRepository(getDb(env)).getMovementById({
+      await createPostgresEarnMovementsRepository(getDb(env)).getMovementById({
         movementId: result.movement.id,
         organizationId: ORG,
       })
-    ).toMatchObject({ amount: "10", provider_reference: VAULT_A });
+    ).toMatchObject({ amount_requested: "10", vault_address: VAULT_A });
   });
 
   it.each([
@@ -528,32 +553,31 @@ describe("depositIntoVault — signed persistence boundary", () => {
         )
       ).rejects.toMatchObject({ code: "CONFLICT" });
 
-      expect(await tableCount("earn_vault_movements")).toBe(1);
+      expect(await tableCount("earn_movements")).toBe(1);
       const position = await getDb(env)
-        .prepare("SELECT token_mint, share_mint FROM earn_vault_positions")
+        .prepare("SELECT token_mint, share_mint FROM earn_positions")
         .first<{ token_mint: string; share_mint: string }>();
       expect(position).toEqual({ token_mint: TOKEN_MINT, share_mint: SHARE_MINT });
     }
   );
 
-  it("leaves an ambiguous broadcast as signed pending for reconciliation", async () => {
+  it("leaves an ambiguous broadcast as a signed intent for reconciliation", async () => {
     broadcastVaultTransaction.mockRejectedValue(new Error("socket hang up"));
 
     const result = await depositIntoVault(env, depositInput());
 
-    expect(result.movement).toMatchObject({ status: "pending", signature: "sig_original" });
+    expect(result.movement).toMatchObject({ status: "requested", signature: "sig_original" });
   });
 
   it("returns a matching terminal CAS winner after broadcast", async () => {
     broadcastVaultTransaction.mockImplementation(async () => {
       const movement = await getDb(env)
-        .prepare("SELECT id FROM earn_vault_movements")
+        .prepare("SELECT id FROM earn_movements")
         .first<{ id: string }>();
       if (!movement) throw new Error("missing movement fixture");
-      await createPostgresEarnVaultRepository(getDb(env)).advanceMovement({
+      await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultMovement({
         movementId: movement.id,
         organizationId: ORG,
-        fromStatuses: ["pending"],
         toStatus: "failed",
         failureReason: "chain rejected",
       });
@@ -566,7 +590,7 @@ describe("depositIntoVault — signed persistence boundary", () => {
       signature: "sig_original",
       failure_reason: "chain rejected",
     });
-    const listed = await createPostgresEarnVaultRepository(getDb(env)).listPositions({
+    const listed = await createPostgresEarnMovementsRepository(getDb(env)).listVaultPositions({
       organizationId: ORG,
       environment: "sandbox",
       custodyWalletIds: [WALLET_ROW_ID],
@@ -577,15 +601,14 @@ describe("depositIntoVault — signed persistence boundary", () => {
   });
 
   it("keeps a position active when a later failed attempt follows a confirmed deposit", async () => {
-    const repository = createPostgresEarnVaultRepository(getDb(env));
+    const repository = createPostgresEarnMovementsRepository(getDb(env));
     const first = await depositIntoVault(
       env,
       depositInput({ requestId: "11111111-1111-4111-8111-111111111111" })
     );
-    await repository.advanceMovement({
+    await repository.advanceVaultMovement({
       movementId: first.movement.id,
       organizationId: ORG,
-      fromStatuses: ["submitted"],
       toStatus: "confirmed",
       confirmedAt: new Date().toISOString(),
     });
@@ -598,14 +621,13 @@ describe("depositIntoVault — signed persistence boundary", () => {
     broadcastVaultTransaction.mockImplementation(async () => {
       const movement = await getDb(env)
         .prepare(
-          "SELECT id FROM earn_vault_movements WHERE status = 'pending' ORDER BY created_at DESC LIMIT 1"
+          "SELECT id FROM earn_movements WHERE status = 'requested' ORDER BY created_at DESC LIMIT 1"
         )
         .first<{ id: string }>();
       if (!movement) throw new Error("missing later movement fixture");
-      await repository.advanceMovement({
+      await repository.advanceVaultMovement({
         movementId: movement.id,
         organizationId: ORG,
-        fromStatuses: ["pending"],
         toStatus: "failed",
         failureReason: "chain rejected",
       });
@@ -616,7 +638,7 @@ describe("depositIntoVault — signed persistence boundary", () => {
       depositInput({ requestId: "22222222-2222-4222-8222-222222222222" })
     );
 
-    const listed = await repository.listPositions({
+    const listed = await repository.listVaultPositions({
       organizationId: ORG,
       environment: "sandbox",
       custodyWalletIds: [WALLET_ROW_ID],
@@ -647,20 +669,18 @@ describe("depositIntoVault — signed persistence boundary", () => {
       env,
       depositInput({ requestId: "22222222-2222-4222-8222-222222222222" })
     );
-    const repository = createPostgresEarnVaultRepository(getDb(env));
+    const repository = createPostgresEarnMovementsRepository(getDb(env));
 
     const settled = await Promise.all([
-      repository.advanceMovement({
+      repository.advanceVaultMovement({
         movementId: first.movement.id,
         organizationId: ORG,
-        fromStatuses: ["pending"],
         toStatus: "failed",
         failureReason: "expired",
       }),
-      repository.advanceMovement({
+      repository.advanceVaultMovement({
         movementId: second.movement.id,
         organizationId: ORG,
-        fromStatuses: ["pending"],
         toStatus: "failed",
         failureReason: "expired",
       }),
@@ -676,41 +696,44 @@ describe("depositIntoVault — signed persistence boundary", () => {
   });
 
   it("keeps confirmed and failed movements terminal and rejects irrelevant metadata", async () => {
-    const repository = createPostgresEarnVaultRepository(getDb(env));
+    const repository = createPostgresEarnMovementsRepository(getDb(env));
     await expect(
-      repository.advanceMovement({
+      repository.advanceVaultMovement({
         movementId: "earn_vault_movement_missing",
         organizationId: ORG,
-        fromStatuses: ["pending"],
         toStatus: "confirmed",
       })
     ).rejects.toThrow("confirmedAt is required");
     await expect(
-      repository.advanceMovement({
+      repository.advanceVaultMovement({
         movementId: "earn_vault_movement_missing",
         organizationId: ORG,
-        fromStatuses: ["pending"],
         toStatus: "failed",
       })
     ).rejects.toThrow("failureReason is required");
     const confirmed = await depositIntoVault(env, depositInput());
-    await repository.advanceMovement({
+    await repository.advanceVaultMovement({
       movementId: confirmed.movement.id,
       organizationId: ORG,
-      fromStatuses: ["submitted"],
       toStatus: "confirmed",
       confirmedAt: new Date().toISOString(),
-      shares: "9.5",
+      sharesOut: "9.5",
     });
+    // NULL, not a throw. Legal source states come from the shared matrix now, so a
+    // caller cannot name an illegal one and there is nothing to assert against —
+    // the guard is the CAS matching zero rows, which is the same answer a lost race
+    // gives and the same contract every other guarded write in the codebase has.
     await expect(
-      repository.advanceMovement({
+      repository.advanceVaultMovement({
         movementId: confirmed.movement.id,
         organizationId: ORG,
-        fromStatuses: ["confirmed"],
         toStatus: "failed",
         failureReason: "must not regress",
       })
-    ).rejects.toThrow("Illegal earn vault movement transition");
+    ).resolves.toBeNull();
+    await expect(
+      repository.getMovementById({ movementId: confirmed.movement.id, organizationId: ORG })
+    ).resolves.toMatchObject({ status: "confirmed" });
 
     signVaultPlan.mockResolvedValue({
       bytes: new Uint8Array([2]),
@@ -722,30 +745,43 @@ describe("depositIntoVault — signed persistence boundary", () => {
       env,
       depositInput({ requestId: "22222222-2222-4222-8222-222222222222" })
     );
-    await repository.advanceMovement({
+    await repository.advanceVaultMovement({
       movementId: failed.movement.id,
       organizationId: ORG,
-      fromStatuses: ["pending"],
       toStatus: "failed",
       failureReason: "expired",
     });
     await expect(
-      repository.advanceMovement({
+      repository.advanceVaultMovement({
         movementId: failed.movement.id,
         organizationId: ORG,
-        fromStatuses: ["failed"],
         toStatus: "confirmed",
+        confirmedAt: new Date().toISOString(),
       })
-    ).rejects.toThrow("Illegal earn vault movement transition");
+    ).resolves.toBeNull();
     await expect(
-      repository.advanceMovement({
+      repository.getMovementById({ movementId: failed.movement.id, organizationId: ORG })
+    ).resolves.toMatchObject({ status: "failed" });
+    await expect(
+      repository.advanceVaultMovement({
         movementId: failed.movement.id,
         organizationId: ORG,
-        fromStatuses: ["pending"],
         toStatus: "failed",
-        shares: "1",
+        // A reason is supplied so the SHARES coupling is what fails here, not the
+        // missing-reason check that would otherwise fire first.
+        failureReason: "expired",
+        sharesOut: "1",
       })
-    ).rejects.toThrow("shares are only valid");
+    ).rejects.toThrow("sharesOut is only valid");
+    // A target the vocabulary has no transition for is still a caller bug, and
+    // still throws: there is no source set to guard with.
+    await expect(
+      repository.advanceVaultMovement({
+        movementId: failed.movement.id,
+        organizationId: ORG,
+        toStatus: "requested",
+      })
+    ).rejects.toThrow("Illegal earn movement transition");
   });
 
   it.each([
@@ -769,8 +805,8 @@ describe("depositIntoVault — signed persistence boundary", () => {
 
     await expect(depositIntoVault(env, depositInput())).rejects.toBeTruthy();
 
-    expect(await tableCount("earn_vault_positions")).toBe(0);
-    expect(await tableCount("earn_vault_movements")).toBe(0);
+    expect(await tableCount("earn_positions")).toBe(0);
+    expect(await tableCount("earn_movements")).toBe(0);
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
   });
 });
@@ -838,7 +874,7 @@ describe("depositIntoVault — approved-operation effect fencing", () => {
       runIntentTransaction: (mutation) =>
         runApprovedWalletOperationEffectTransaction(context, mutation),
     });
-    expect(result.movement.status).toBe("pending");
+    expect(result.movement.status).toBe("requested");
     const fenced = await repository.getWalletOperationById(operation.id);
     expect(fenced?.execution_effect_started_at).not.toBeNull();
     await getDb(env)
@@ -858,7 +894,7 @@ describe("depositIntoVault — approved-operation effect fencing", () => {
     expect((await repository.getWalletOperationById(operation.id))?.execution_error).toContain(
       "manual reconciliation"
     );
-    expect(await tableCount("earn_vault_movements")).toBe(1);
+    expect(await tableCount("earn_movements")).toBe(1);
   });
 });
 
@@ -890,30 +926,30 @@ describe("earn vault project attribution", () => {
         )
         .bind(orgWallet, orgConfig, VAULT_B),
     ]);
-    const repository = createPostgresEarnVaultRepository(getDb(env));
+    const repository = createPostgresEarnMovementsRepository(getDb(env));
     const base = {
       organizationId: ORG,
       environment: "sandbox" as const,
       provider: "kamino",
-      providerReference: VAULT_A,
+      vaultAddress: VAULT_A,
       custodyWalletId: orgWallet,
+      sourceAddress: WALLET_ADDRESS,
       tokenMint: TOKEN_MINT,
       shareMint: SHARE_MINT,
       label: "Shared Vault",
       requestedAmount: "1",
-      acceptedAmount: "1",
       signedTransaction: "AQ==",
       lastValidBlockHeight: "12345",
       createdBy: USER,
     };
-    const first = await repository.createSignedDepositIntent({
+    const first = await repository.createSignedVaultDepositIntent({
       ...base,
       projectId: PROJECT,
       signature: "sig_project_attribution_first",
       requestId: "11111111-1111-4111-8111-111111111111",
       idempotencyFingerprint: "fingerprint_project_attribution_first",
     });
-    const second = await repository.createSignedDepositIntent({
+    const second = await repository.createSignedVaultDepositIntent({
       ...base,
       projectId: otherProject,
       signature: "sig_project_attribution_second",
@@ -925,13 +961,11 @@ describe("earn vault project attribution", () => {
     await getDb(env).prepare("DELETE FROM projects WHERE id = ?").bind(PROJECT).run();
 
     const position = await getDb(env)
-      .prepare("SELECT project_id FROM earn_vault_positions WHERE id = ?")
+      .prepare("SELECT project_id FROM earn_positions WHERE id = ?")
       .bind(first.position.id)
       .first<{ project_id: string | null }>();
     const movements = await getDb(env)
-      .prepare(
-        "SELECT project_id FROM earn_vault_movements WHERE position_id = ? ORDER BY request_id"
-      )
+      .prepare("SELECT project_id FROM earn_movements WHERE position_id = ? ORDER BY request_id")
       .bind(first.position.id)
       .all<{ project_id: string | null }>();
     expect(position?.project_id).toBeNull();

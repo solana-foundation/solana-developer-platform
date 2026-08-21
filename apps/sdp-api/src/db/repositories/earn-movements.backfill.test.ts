@@ -11,19 +11,24 @@ import type { EarnMovementRow, EarnPositionRow } from "./earn-movements.reposito
  *
  * The dual-write suite proves NEW writes reach the ledger. This proves EXISTING
  * history does — legacy rows written long before the unified tables existed, and
- * rows an outgoing revision writes during a rollout window, which reach neither
- * the first backfill pass nor the mirror. Those are swept up by re-running this
- * exact migration in a later release, so "idempotent" is a shipped requirement
- * and not a nicety.
+ * rows an outgoing revision writes or updates during a rollout window, which can
+ * miss the first backfill pass or leave its projection stale. A later convergence
+ * migration sweeps those changes, so "idempotent" is a shipped requirement and
+ * not a nicety.
  *
  * It runs the REAL migration file rather than a copy of its statements: a test
  * against a transcription would pass while the shipped artifact was broken.
  */
 
-const BACKFILL_SQL = path.join(
-  __dirname,
-  "../migrations/postgres/0064_earn_movements_backfill.sql"
-);
+const MIGRATIONS = path.join(__dirname, "../migrations/postgres");
+const BACKFILL_SQL = path.join(MIGRATIONS, "0064_earn_movements_backfill.sql");
+/**
+ * The later release re-runs the same projection to sweep rows the outgoing
+ * revision wrote or updated during the rollout window. It is a separate
+ * migration because editing applied history would not run it again; unlike the
+ * insert-only first pass, this convergence pass also refreshes stale rows.
+ */
+const BACKFILL_SWEEP_SQL = path.join(MIGRATIONS, "0065_earn_movements_backfill_sweep.sql");
 
 const ORG = "org_earn_bf";
 const USER = "usr_earn_bf";
@@ -41,12 +46,12 @@ const VAULT = "BackfillVaultAddress1111111111111111111111";
  * than a local one, so this test cannot disagree with the shipped tool about
  * where a statement ends.
  */
-function backfillStatements(): string[] {
-  return splitSqlStatements(readFileSync(BACKFILL_SQL, "utf8"));
+function backfillStatements(file: string = BACKFILL_SQL): string[] {
+  return splitSqlStatements(readFileSync(file, "utf8"));
 }
 
-async function runBackfill(db: AppDb): Promise<void> {
-  for (const statement of backfillStatements()) {
+async function runBackfill(db: AppDb, file: string = BACKFILL_SQL): Promise<void> {
+  for (const statement of backfillStatements(file)) {
     await db.prepare(statement).run();
   }
 }
@@ -368,5 +373,178 @@ describe("Earn movement backfill (migration 0064)", () => {
     const rows = await ledger(db);
     expect(rows.map((row) => row.id)).toContain("earn_vault_movement_bf_pending");
     expect(rows).toHaveLength(4);
+  });
+
+  it("sweeps a rollout-window row through the LATER migration exactly as the first pass would", async () => {
+    const db = getDb(env);
+    await seedLegacyHistory(db);
+    await runBackfill(db);
+    const before = await ledger(db);
+
+    // The window 0065 exists for: migrations finish before the new revision takes
+    // traffic, so the outgoing revision writes legacy alone for a moment.
+    await db
+      .prepare(
+        `INSERT INTO earn_vault_movements
+           (id, organization_id, project_id, environment, position_id, provider,
+            provider_reference, custody_wallet_id, direction, status,
+            requested_amount, amount, signature, signed_transaction,
+            last_valid_block_height, request_id, idempotency_fingerprint,
+            created_at, updated_at)
+         VALUES ('earn_vault_movement_bf_window', ?, ?, 'sandbox', 'earn_vault_position_bf',
+            'kamino', ?, ?, 'deposit', 'pending', '7', '7.000000',
+            'BfSigWindow', 'BfBytesWindow', 424242, 'bf-v-window', 'bf-vfp-window',
+            '2026-03-20T00:00:00.000Z', '2026-03-20T00:00:00.000Z')`
+      )
+      .bind(ORG, PROJECT, VAULT, WALLET)
+      .run();
+
+    await runBackfill(db, BACKFILL_SWEEP_SQL);
+
+    const after = await ledger(db);
+    expect(after).toHaveLength(before.length + 1);
+    expect(after.find((row) => row.id === "earn_vault_movement_bf_window")).toMatchObject({
+      status: "requested",
+      amount_requested: "7",
+      denomination: TOKEN_MINT,
+      source_address: WALLET_PUBKEY,
+    });
+    // Sources that did not change after the first pass remain byte-identical.
+    for (const row of before) {
+      expect(after.find((candidate) => candidate.id === row.id)).toEqual(row);
+    }
+
+    // And it is itself idempotent, because it will run on databases that already
+    // have nothing left to sweep.
+    await runBackfill(db, BACKFILL_SWEEP_SQL);
+    expect(await ledger(db)).toEqual(after);
+  });
+
+  it("refreshes rollout-window updates without changing ids or regressing finalization", async () => {
+    const db = getDb(env);
+    await seedLegacyHistory(db);
+    await runBackfill(db);
+
+    const beforePositions = await holdings(db);
+    const beforeLedger = await ledger(db);
+
+    // The outgoing legacy-only revision can advance rows that 0064 already
+    // projected. Exercise both execution models and the vault holding state that
+    // changes alongside terminal movement transitions.
+    await db
+      .prepare(
+        `UPDATE earn_provider_wallets
+            SET label = 'Treasury refreshed',
+                updated_at = '2026-04-01T00:00:00.000Z'
+          WHERE id = 'epw_bf_labelled'`
+      )
+      .run();
+    await db
+      .prepare(
+        `UPDATE earn_vault_positions
+            SET label = 'USDC vault refreshed',
+                closed_at = '2026-04-01T00:05:00.000Z',
+                updated_at = '2026-04-01T00:05:00.000Z'
+          WHERE id = 'earn_vault_position_bf'`
+      )
+      .run();
+    await db
+      .prepare(
+        `UPDATE earn_program_withdrawals
+            SET status = 'completed',
+                amount_paid_usd = '245',
+                fee_usd = '5',
+                provider_reference = 'gw-withdrawal-bf-2',
+                provider_data = '{"lastObservation":{"status":"completed"}}'::jsonb,
+                completed_at = '2026-04-02T00:00:00.000Z',
+                updated_at = '2026-04-02T00:00:00.000Z'
+          WHERE id = 'earn_program_withdrawal_bf_intent'`
+      )
+      .run();
+    await db
+      .prepare(
+        `UPDATE earn_vault_movements
+            SET status = 'confirmed',
+                shares = '99.75',
+                confirmed_at = '2026-04-03T00:00:00.000Z',
+                updated_at = '2026-04-03T00:00:00.000Z'
+          WHERE id = 'earn_vault_movement_bf_pending'`
+      )
+      .run();
+
+    // `finalized` exists only in the unified ledger. Even a newer legacy
+    // observation must not project `confirmed` back over it or erase settlement.
+    await db
+      .prepare(
+        `UPDATE earn_movements
+            SET status = 'finalized',
+                settled_at = '2026-04-04T00:00:00.000Z',
+                updated_at = '2026-04-04T00:00:00.000Z'
+          WHERE id = 'earn_vault_movement_bf_confirmed'`
+      )
+      .run();
+    await db
+      .prepare(
+        `UPDATE earn_vault_movements
+            SET shares = '299.75',
+                updated_at = '2026-04-05T00:00:00.000Z'
+          WHERE id = 'earn_vault_movement_bf_confirmed'`
+      )
+      .run();
+
+    await runBackfill(db, BACKFILL_SWEEP_SQL);
+
+    const afterPositions = await holdings(db);
+    const afterLedger = await ledger(db);
+    expect(afterPositions.map((row) => row.id).sort()).toEqual(
+      beforePositions.map((row) => row.id).sort()
+    );
+    expect(afterLedger.map((row) => row.id).sort()).toEqual(
+      beforeLedger.map((row) => row.id).sort()
+    );
+
+    expect(
+      afterPositions.find((row) => row.provider_wallet_id === "epw_bf_labelled")
+    ).toMatchObject({
+      id: beforePositions.find((row) => row.provider_wallet_id === "epw_bf_labelled")?.id,
+      label: "Treasury refreshed",
+      updated_at: "2026-04-01T00:00:00.000Z",
+    });
+    expect(afterPositions.find((row) => row.id === "earn_vault_position_bf")).toMatchObject({
+      label: "USDC vault refreshed",
+      closed_at: "2026-04-01T00:05:00.000Z",
+      updated_at: "2026-04-01T00:05:00.000Z",
+    });
+
+    expect(afterLedger.find((row) => row.id === "earn_program_withdrawal_bf_intent")).toMatchObject(
+      {
+        status: "completed",
+        amount_settled: "245",
+        fee_amount: "5",
+        provider_reference: "gw-withdrawal-bf-2",
+        provider_data: { lastObservation: { status: "completed" } },
+        settled_at: "2026-04-02T00:00:00.000Z",
+        updated_at: "2026-04-02T00:00:00.000Z",
+      }
+    );
+    expect(afterLedger.find((row) => row.id === "earn_vault_movement_bf_pending")).toMatchObject({
+      status: "confirmed",
+      amount_settled: "100.000000",
+      shares_out: "99.75",
+      confirmed_at: "2026-04-03T00:00:00.000Z",
+      updated_at: "2026-04-03T00:00:00.000Z",
+    });
+    expect(afterLedger.find((row) => row.id === "earn_vault_movement_bf_confirmed")).toMatchObject({
+      status: "finalized",
+      shares_out: "299.5",
+      settled_at: "2026-04-04T00:00:00.000Z",
+      updated_at: "2026-04-04T00:00:00.000Z",
+    });
+
+    // The convergence pass is itself repeatable: once source and projection agree,
+    // another run changes neither data nor canonical ids.
+    await runBackfill(db, BACKFILL_SWEEP_SQL);
+    expect(await holdings(db)).toEqual(afterPositions);
+    expect(await ledger(db)).toEqual(afterLedger);
   });
 });
