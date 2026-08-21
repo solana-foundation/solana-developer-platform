@@ -156,6 +156,56 @@ describe("resolveVaultDirectClient", () => {
     expect(createRpc).not.toHaveBeenCalled();
   });
 
+  it("resolves an executing client for every provider that can move money", () => {
+    const createRpc = vi.spyOn(solanaRpc, "createRpc");
+
+    for (const provider of ["kamino", "veda"]) {
+      const client = resolveVaultDirectClient(executionEnv, provider, createVaultDeadline());
+      expect(client, provider).not.toBeNull();
+      expect(client?.provider, provider).toBe(provider);
+      // The superset, not a replacement: the executing client still catalogues.
+      expect(typeof client?.listStrategies, provider).toBe("function");
+    }
+    expect(createRpc).not.toHaveBeenCalled();
+  });
+
+  /**
+   * This resolver is the ONE sanctioned provider-id branch in the codebase, and
+   * unknown ids must answer null rather than throw: a strategy row written by a
+   * newer deploy would otherwise 500 a read that merely touched it.
+   */
+  it("answers null for anything this deployment cannot execute", () => {
+    for (const provider of ["ground", "upshift", "perena", "not-a-provider", "__proto__", ""]) {
+      expect(
+        resolveVaultDirectClient(executionEnv, provider, createVaultDeadline()),
+        provider
+      ).toBeNull();
+    }
+  });
+
+  /**
+   * SDP has no confirmed Veda deployment, so a deposit fails on THAT rather
+   * than on an RPC — and it fails before any endpoint work, because an
+   * unconfigured deployment is a fact about SDP that should not depend on a
+   * node being reachable.
+   */
+  it("refuses Veda work on the missing deployment, before any RPC", async () => {
+    const createRpc = vi.spyOn(solanaRpc, "createRpc");
+    const client = resolveVaultDirectClient(executionEnv, "veda", createVaultDeadline());
+    if (!client) throw new Error("expected a Veda vault-direct client");
+
+    await expect(
+      client.buildVaultDeposit(runtime, { ...depositInput, minSharesOut: "1" })
+    ).rejects.toMatchObject({ code: "DEPLOYMENT_NOT_CONFIGURED" });
+    await expect(
+      client.readVaultPositions(runtime, {
+        owner: depositInput.owner,
+        providerReferences: [depositInput.providerReference],
+      })
+    ).rejects.toMatchObject({ code: "DEPLOYMENT_NOT_CONFIGURED" });
+    expect(createRpc).not.toHaveBeenCalled();
+  });
+
   it("refuses build and position work before the SDK when genesis is wrong", async () => {
     mockGenesisSend().mockResolvedValue(GENESIS_HASH_BY_CLUSTER["mainnet-beta"]);
     const client = resolveVaultDirectClient(executionEnv, "kamino", createVaultDeadline());

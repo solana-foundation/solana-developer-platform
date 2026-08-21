@@ -4,6 +4,7 @@ import { SdpKaminoError } from "@sdp/kamino";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
+import { SdpVedaError } from "@sdp/veda";
 import { type AppDb, getDb } from "@/db";
 import {
   assertMovementIsOwnReplay,
@@ -127,6 +128,37 @@ export function requireAcceptedPlan(
   return { minSharesOut };
 }
 
+/**
+ * Build failures whose reason belongs in front of the CALLER, not in a 500.
+ *
+ * Each names something the request or the vault's current state makes
+ * impossible, and the provider's own sentence explains it better than any
+ * status code:
+ *
+ * - `INVALID_AMOUNT` — the number is unusable at the mint's scale, or below
+ *   what the vault will mint a share for.
+ * - `DEPOSIT_REFUSED` — the vault will not take this right now: paused, at its
+ *   deposit cap, the asset disabled, the wallet short of balance.
+ * - `COMPLIANCE_APPROVAL_REQUIRED` — the vault gates deposits on an approval
+ *   from the provider's compliance service, which SDP does not implement. A
+ *   definite, explainable refusal rather than an internal fault.
+ *
+ * Matched on the shared `code` shape rather than per provider, so a new
+ * vault-direct provider inherits the mapping by using the same vocabulary.
+ * Anything else keeps bubbling: an unrecognised build failure is SDP's problem
+ * to look at, and telling a customer their request was wrong would be a guess.
+ */
+const REFUSED_BUILD_CODES: ReadonlySet<string> = new Set([
+  "INVALID_AMOUNT",
+  "DEPOSIT_REFUSED",
+  "COMPLIANCE_APPROVAL_REQUIRED",
+]);
+
+function refusedBuildMessage(error: unknown): string | null {
+  if (!(error instanceof SdpKaminoError || error instanceof SdpVedaError)) return null;
+  return REFUSED_BUILD_CODES.has(error.code) ? error.message : null;
+}
+
 export async function depositIntoVault(
   env: Env,
   input: VaultDepositInput,
@@ -214,9 +246,8 @@ export async function depositIntoVault(
     plan = appendVaultRequestMemo(built, "vault-deposit", input.requestId);
   } catch (error) {
     getLogger().error({ error }, "vault deposit: build failed before signing");
-    if (error instanceof SdpKaminoError && error.code === "INVALID_AMOUNT") {
-      throw badRequest(error.message);
-    }
+    const refusal = refusedBuildMessage(error);
+    if (refusal) throw badRequest(refusal);
     throw error;
   }
 
