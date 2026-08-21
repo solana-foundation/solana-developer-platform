@@ -179,6 +179,9 @@ describe("depositIntoVault — idempotency", () => {
     expect(resolveVaultDirectClient).not.toHaveBeenCalled();
     expect(buildVaultDeposit).not.toHaveBeenCalled();
     expect(signVaultPlan).not.toHaveBeenCalled();
+    // A replay is a durable read. Resolving sponsorship first would 5xx every
+    // retry of an already-signed movement during a paymaster outage.
+    expect(resolveVaultSponsorship).not.toHaveBeenCalled();
   });
 
   it("treats insignificant decimal zeroes as the same on-chain intent", async () => {
@@ -989,11 +992,18 @@ describe("earn vault project attribution", () => {
   describe("share-ATA rent funder", () => {
     const SPONSOR = "4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q";
 
-    async function recordedFunder(): Promise<string | null> {
+    /**
+     * Read by POSITION ID, not `LIMIT 1`. An unscoped read makes the two
+     * expect-null cases pass vacuously if the row is ever absent, which is the
+     * failure they exist to catch.
+     */
+    async function recordedFunder(positionId: string): Promise<string | null> {
       const row = await getDb(env)
-        .prepare("SELECT share_ata_rent_funder FROM earn_positions LIMIT 1")
+        .prepare("SELECT share_ata_rent_funder FROM earn_positions WHERE id = ?")
+        .bind(positionId)
         .first<{ share_ata_rent_funder: string | null }>();
-      return row?.share_ata_rent_funder ?? null;
+      if (!row) throw new Error(`missing position fixture ${positionId}`);
+      return row.share_ata_rent_funder ?? null;
     }
 
     function sponsored() {
@@ -1008,9 +1018,29 @@ describe("earn vault project attribution", () => {
       sponsored();
       buildVaultDeposit.mockResolvedValue(plan({ createsShareAccount: true }));
 
+      const result = await depositIntoVault(env, depositInput());
+
+      expect(await recordedFunder(result.position.id)).toBe(SPONSOR);
+    });
+
+    /**
+     * The actual bug this feature fixed. Fees were already sponsorable; the
+     * `rentPayer` inside the instructions still defaulted to the owner, so a
+     * wallet holding zero SOL could not make a first deposit. Nothing else
+     * asserts that the resolved sponsor reaches the builder.
+     */
+    it("hands the sponsor to the builder as the rent payer", async () => {
+      sponsored();
+
       await depositIntoVault(env, depositInput());
 
-      expect(await recordedFunder()).toBe(SPONSOR);
+      expect(buildVaultDeposit.mock.calls[0]?.[1]).toMatchObject({ rentPayer: SPONSOR });
+    });
+
+    it("names no rent payer when the wallet pays its own fees", async () => {
+      await depositIntoVault(env, depositInput());
+
+      expect(buildVaultDeposit.mock.calls[0]?.[1]).not.toHaveProperty("rentPayer");
     });
 
     /**
@@ -1023,17 +1053,77 @@ describe("earn vault project attribution", () => {
       sponsored();
       buildVaultDeposit.mockResolvedValue(plan({ createsShareAccount: false }));
 
-      await depositIntoVault(env, depositInput());
+      const result = await depositIntoVault(env, depositInput());
 
-      expect(await recordedFunder()).toBeNull();
+      expect(await recordedFunder(result.position.id)).toBeNull();
     });
 
     it("records nothing when the wallet funds its own rent", async () => {
       buildVaultDeposit.mockResolvedValue(plan({ createsShareAccount: true }));
 
-      await depositIntoVault(env, depositInput());
+      const result = await depositIntoVault(env, depositInput());
 
-      expect(await recordedFunder()).toBeNull();
+      expect(await recordedFunder(result.position.id)).toBeNull();
+    });
+
+    /**
+     * The loser of the insert race must not attribute rent. Its bytes never
+     * broadcast, so it pays nothing, and it is not merely sometimes-last: the
+     * claim upsert holds the position row's lock, so the loser is serialised
+     * second and its funder would overwrite the winner's every time.
+     *
+     * Reachable because the idempotency fingerprint omits the fee mode, so two
+     * same-key requests that resolved different sponsors replay-match instead
+     * of conflicting. A rolling deploy (the flag is per-revision) or a
+     * round-robin Kora signer pool is enough to skew them.
+     */
+    it("keeps the winner's funder when identical requests race under different fee modes", async () => {
+      const SPONSOR_ROTATED = "8pPyFjmDGXnstD9Yg8H1jd1CyJcCPHwRvUBhZ4NRLPMe";
+      let releaseBuilds: (() => void) | undefined;
+      const bothBuilding = new Promise<void>((resolve) => {
+        releaseBuilds = resolve;
+      });
+      let resolvedCount = 0;
+      resolveVaultSponsorship.mockImplementation(async () => {
+        resolvedCount += 1;
+        return {
+          kind: "sponsored",
+          sponsor: resolvedCount === 1 ? SPONSOR : SPONSOR_ROTATED,
+          feePayment: { getFeePayer: vi.fn(), signAsFeePayer: vi.fn(), signAndSend: vi.fn() },
+        };
+      });
+      let buildCount = 0;
+      buildVaultDeposit.mockImplementation(async () => {
+        buildCount += 1;
+        if (buildCount === 2) releaseBuilds?.();
+        await bothBuilding;
+        return plan({ createsShareAccount: true });
+      });
+      const sponsorBySignature = new Map<string, string>();
+      signVaultPlan.mockImplementation(
+        async (_env: unknown, input: { fee: { sponsor: string } }) => {
+          const signature = `sig_fee_mode_${sponsorBySignature.size + 1}`;
+          sponsorBySignature.set(signature, input.fee.sponsor);
+          return { bytes: new Uint8Array([1]), signature, lastValidBlockHeight: "12345" };
+        }
+      );
+
+      const results = await Promise.all([
+        depositIntoVault(env, depositInput()),
+        depositIntoVault(env, depositInput()),
+      ]);
+
+      // One insert won, both callers see that movement, and only it broadcast.
+      expect(results.map((result) => result.replayed).sort()).toEqual([false, true]);
+      expect(await tableCount("earn_movements")).toBe(1);
+      expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+      // Two sponsors were resolved, so the assertion below is not vacuous.
+      expect(new Set(sponsorBySignature.values()).size).toBe(2);
+      // The refund is owed to whoever signed the bytes that can land.
+      const winner = results.find((result) => !result.replayed);
+      expect(await recordedFunder(results[0].position.id)).toBe(
+        sponsorBySignature.get(winner?.movement.signature ?? "")
+      );
     });
   });
 });

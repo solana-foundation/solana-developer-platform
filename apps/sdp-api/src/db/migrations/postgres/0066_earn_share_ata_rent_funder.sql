@@ -33,15 +33,26 @@
 -- directions write it: an exit creates the account too when it has to
 -- consolidate auxiliary share accounts, and it funds that creation.
 --
+-- ONLY THE MOVEMENT THAT WON ITS IDEMPOTENCY INSERT writes it. A loser's bytes
+-- are never broadcast, so it pays no rent, and its write is not a race it merely
+-- might lose: the deposit path holds this row's lock from its claim upsert, so a
+-- loser is serialised second and would be the last writer every time. The
+-- fingerprint omits the fee mode, so two same-key requests that resolved
+-- different sponsors replay-match rather than conflict.
+--
 -- Authoritative only while the account EXISTS, which is the only window anything
 -- reads it. A value left from an already-refunded entry is unreachable, because
 -- a position with no share account has no shares to exit.
 --
--- KNOWN RESIDUAL: the funder is observed before broadcast, so a create from
--- outside SDP in that window records a funder that paid nothing. Concurrent SDP
--- movements are safe (one fee mode per deployment and cluster means they name
--- the same funder). Confirming the funder from the landed transaction at
--- settlement is the real fix and is not attempted here.
+-- KNOWN RESIDUAL: the funder is observed before broadcast, so the observation can
+-- be wrong in BOTH directions. Someone else creating the account first records a
+-- funder that paid nothing; the account being CLOSED first makes an idempotent
+-- create fire for real and records nobody. Concurrency does not rule this out
+-- (the fee mode is per process, so a rolling deploy has both answers live), and
+-- a movement whose write committed but whose transaction never landed leaves the
+-- attribution behind indefinitely rather than for seconds. Confirming the funder
+-- from the landed transaction at settlement is the real fix and is not attempted
+-- here.
 
 ALTER TABLE earn_positions
     ADD COLUMN IF NOT EXISTS share_ata_rent_funder TEXT;

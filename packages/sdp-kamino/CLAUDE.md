@@ -102,15 +102,21 @@ Rent is **recoverable, but only because this package makes it so.** klend's
 closed and its 2,039,280 lamports stayed locked in a zero-share account on every
 exit, whoever had paid. `buildShareAccountCloseInstruction`
 (`./withdraw-instructions.ts`) closes it when the exit provably empties it and
-sends the rent to the funder the DEPOSIT recorded. Two rules that follow:
+sends the rent to whoever actually funded it. Two rules that follow:
 
-- **Pass the recorded funder, never the current sponsor.** Rent is paid at
-  deposit time and the fee mode can flip before the exit, so `rentRefundTo` must
-  come from persisted state. Refunding today's sponsor for rent the customer paid
-  takes the customer's lamports.
+- **Pass the recorded funder, never the current sponsor.** Rent is paid when the
+  account is created and the fee mode can flip before the exit, so `rentRefundTo`
+  must come from persisted state. Refunding today's sponsor for rent the customer
+  paid takes the customer's lamports. One exception, and `./sdk.ts` implements it:
+  when THIS exit creates the account (consolidation's idempotent create), its own
+  `rentPayer` funded it moments earlier in the same transaction and the recorded
+  value describes an older instance.
 - **The close condition is exact, not optimistic.** `CloseAccount` fails on a
   non-zero balance and rides the same transaction as the redemptions, so guessing
-  wrong fails the customer's exit rather than merely stranding rent.
+  wrong fails the customer's exit rather than merely stranding rent. It takes two
+  equalities: the redeemed quantity must match both what the ATA will hold and
+  the owner's total across every share account, because closing on an
+  emptied-but-not-exited position hands the next entry a stale funder.
 
 Still bounding the decision: `max_allowed_lamports` caps a sponsored transaction
 at 4 new ATAs on devnet, and a re-entry after a close pays rent again. Full

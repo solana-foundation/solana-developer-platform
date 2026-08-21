@@ -417,16 +417,23 @@ export interface EarnVaultTransactionPlan {
    * needs to know because it must remember who to give the rent back to when
    * the account is closed. Absent or false means no rent was charged here.
    *
-   * KNOWN RESIDUAL: this is a pre-execution read, so a party that creates the
-   * account between the read and the broadcast makes this true when no rent was
-   * actually charged. Two concurrent SDP movements cannot cause harm, because
-   * the fee mode is resolved per deployment and per cluster, so both would name
-   * the SAME funder. The reachable case is a create from OUTSIDE SDP (the
-   * customer transacting with the provider directly) in that window, which would
-   * later refund one ATA's rent to a sponsor that did not pay it. Bounded at
-   * 2,039,280 lamports per position and only on a full exit. Closing it properly
-   * needs the funder confirmed from the LANDED transaction at settlement rather
-   * than predicted at build; that is deliberately not in this change.
+   * KNOWN RESIDUAL: this is a pre-execution read, so it can be wrong in BOTH
+   * directions if chain state moves between the read and the broadcast. True
+   * when no rent was charged (someone else created the account first), and false
+   * when rent WAS charged (the account was closed in between, so the idempotent
+   * create fires for real and nothing records it). Either way one ATA's rent,
+   * 2,039,280 lamports, is later credited to a party that did not pay it, and
+   * only on a full exit.
+   *
+   * Concurrency does not make this safe: the fee mode is per PROCESS, so a
+   * rolling deploy has both answers live at once, and a create from outside SDP
+   * needs no concurrency at all. Note too that a movement whose funder write
+   * committed and whose transaction never landed leaves the attribution behind
+   * indefinitely, not just for the build-to-broadcast window.
+   *
+   * Closing it properly needs the funder confirmed from the LANDED transaction
+   * at settlement rather than predicted at build; that is deliberately not in
+   * this change.
    */
   createsShareAccount?: boolean;
 }
@@ -560,11 +567,12 @@ export interface EarnVaultDirectProvider extends EarnVaultProvider {
    * transaction is rejected outright by the paymaster unless every program it
    * touches is allowlisted in the paymaster's own config, which lives in
    * another repository and cannot import this one. Declaring the set HERE, next
-   * to the code that emits the instructions, lets the live paymaster smoke
-   * suite assert the deployed allowlist is a superset of every provider's
-   * declaration. A new provider is then covered by that check the moment it
-   * implements this method, and a forgotten allowlist entry fails CI instead of
-   * failing a customer's first deposit.
+   * to the code that emits the instructions, lets an allowlist be asserted a
+   * superset of every provider's declaration: the local harness config on every
+   * CI run, and the deployed config through the live Kora smoke suite. A new
+   * provider is covered by both the moment it implements this method, so a
+   * forgotten allowlist entry surfaces in a test rather than in a customer's
+   * first deposit.
    *
    * Synchronous and pure: this is a static declaration about code, never a
    * chain read. Cluster-parameterised because a program id may differ per

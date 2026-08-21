@@ -138,12 +138,16 @@ export async function withdrawFromVault(
 
   // Same ordering rule as deposit: after the replay reads, before the build.
   //
-  // Sponsorship matters here for the FEE, not for rent. klend's exit emits an
-  // idempotent create for the owner's deposit-token ATA, but that account must
-  // already exist for the deposit to have succeeded and nothing closes it, so
-  // the create is a no-op costing no rent. `rentPayer` is passed anyway, so the
-  // two directions read the same and a provider whose exit DOES create an
-  // account is covered without another change here.
+  // Sponsorship matters here mostly for the FEE. klend's exit emits an
+  // idempotent create for the owner's deposit-token ATA, which normally costs
+  // nothing because that account had to exist for the deposit to succeed, but
+  // SDP does not enforce that: nothing here closes it, and nothing stops the
+  // owner closing it once a full-balance deposit leaves it empty. `rentPayer` is
+  // passed regardless, so the two directions read the same and a provider whose
+  // exit DOES create an account is covered without another change here. What is
+  // NOT covered: only the SHARE ATA's rent is attributed and refunded, so rent
+  // this exit pays for any other account is charged to the sponsor and stays
+  // there.
   const fee = await resolveVaultSponsorship(env, {
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -169,7 +173,14 @@ export async function withdrawFromVault(
     environment: input.environment,
     positionId: input.positionId,
   });
-  const rentRefundTo = position?.share_ata_rent_funder ?? undefined;
+  if (!position) {
+    // A miss is not a "nobody sponsored this" answer, it is an unanswerable
+    // question. The route resolves this same org+environment-scoped id before
+    // it calls in, so a null here is a broken invariant, and the owner fallback
+    // it used to take would hand the customer rent that a sponsor paid.
+    throw internalError(`Vault withdrawal references missing position ${input.positionId}`);
+  }
+  const rentRefundTo = position.share_ata_rent_funder ?? undefined;
 
   let plan: EarnVaultTransactionPlan;
   try {

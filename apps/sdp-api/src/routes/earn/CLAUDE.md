@@ -442,20 +442,23 @@ organization's own custody wallets.
   - **Sponsorship is devnet-only, and the cluster gate is exit safety, not
     caution.** One process serves both clusters and withdrawals are deliberately
     NOT environment-gated, so a deployment-global flag would sponsor mainnet
-    exits the instant devnet deposits were enabled, against a mainnet Kora with
-    no Kamino programs allowlisted and a disabled mainnet budget policy. That is
+    exits the instant devnet deposits were enabled, against a mainnet Kora whose
+    `allow_create_account` is false and a disabled mainnet budget policy. That is
     a 5xx on a customer's money-OUT path, the one failure ADR 0002 rules out.
     `isEarnVaultSponsorshipEnabled` therefore takes the cluster.
   - Sponsored signing stays sign-only, so record-before-broadcast survives
     unchanged. Turning the flag off returns both routes to `wallet-pays` with no
     code change.
-  - **The exit refunds the share-ATA rent to whoever the DEPOSIT recorded**, from
-    `earn_positions.share_ata_rent_funder` (migration 0066), never from the
-    current fee mode. klend never closed that account, so its rent used to stay
-    locked in a zero-share account on every exit; the exit now closes it when it
-    provably empties it. Do not re-derive the destination: sponsorship can be
-    toggled between entering and exiting a position, and refunding today's
-    sponsor for rent the customer paid takes the customer's lamports.
+  - **The exit refunds the share-ATA rent to whoever actually paid it**, which
+    for an account that pre-dates the exit means `share_ata_rent_funder`
+    (migration 0066) and never the current fee mode. klend never closed that
+    account, so its rent used to stay locked in a zero-share account on every
+    exit; the exit now closes it when it provably empties it. Do not re-derive
+    the destination: sponsorship can be toggled between entering and exiting a
+    position, and refunding today's sponsor for rent the customer paid takes the
+    customer's lamports. The single exception is an exit that CREATES the account
+    itself while consolidating, where its own rent payer funded it seconds
+    earlier and the recorded value describes an older instance.
 - `GET /vault-deposits` — this workspace's recorded deposits, **DB only**,
   newest first, keyset-paged. The DISCOVERY tier: it is what lets a client
   re-derive which of its deposits are still in flight after losing local state,

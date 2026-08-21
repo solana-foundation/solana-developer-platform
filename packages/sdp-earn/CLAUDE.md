@@ -56,9 +56,11 @@ DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm db:seed:local
 - **Sponsored vault movements** (`EARN_VAULT_FEE_SPONSORSHIP_ENABLED=true`, API
   only) additionally need a Kora to sign against: `pnpm kora:up`, then point
   `KORA_RPC_URL` at it. `infra/kora/kora.toml` already carries the Kamino program
-  ids and `allow_create_account = true`, so the harness mirrors deployed devnet
-  and needs no edit; its `SIGNER_PRIVATE_KEY` does need devnet SOL, because it
-  pays the fee AND the share-ATA rent for real. The flag fails CLOSED, so a value
+  ids and `allow_create_account = true`, so the harness needs no edit, and the
+  harness is the only option today: deployed devnet Kora matches on the policy
+  flag but not on the allowlist, which lands with sdp-infra#64. Its
+  `SIGNER_PRIVATE_KEY` does need devnet SOL, because it pays the fee AND the
+  share-ATA rent for real. The flag fails CLOSED, so a value
   the wrapper drops looks like "sponsorship silently did nothing" rather than an
   error — if deposits still come out `wallet-pays`, check that first.
 

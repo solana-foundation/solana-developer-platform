@@ -316,11 +316,15 @@ export function decodeKvaultWithdrawShares(
  * encode exactly `redeemedBaseUnits`. A partial exit returns null and correctly
  * leaves the account open, still holding shares and still holding its rent.
  *
- * `refundTo` must be the funder RECORDED when the account was created, never a
- * currently-configured sponsor: rent was paid at deposit time and the fee mode
- * may have changed since, so refunding "whoever sponsors today" would sooner or
- * later pay a sponsor with the customer's lamports. Omitted means the owner
- * funded it and keeps it, which is also the correct unsponsored default.
+ * `refundTo` must be whoever ACTUALLY funded the account, which for an account
+ * that pre-dates this exit is the value recorded when it was created and never a
+ * currently-configured sponsor: rent was paid then, the fee mode may have changed
+ * since, and refunding "whoever sponsors today" would sooner or later pay a
+ * sponsor with the customer's lamports. The caller resolves that; when the exit
+ * ITSELF creates the account, the caller passes its own rent payer instead (see
+ * `./sdk.ts`), because the recorded value then describes an older instance.
+ * Omitted means the owner funded it and keeps it, which is also the correct
+ * unsponsored default.
  */
 export function buildShareAccountCloseInstruction(input: {
   shareAta: Address;

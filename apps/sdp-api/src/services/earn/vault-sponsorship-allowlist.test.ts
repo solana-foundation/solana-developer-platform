@@ -21,9 +21,11 @@ import { createVaultDeadline } from "./vault-deadline";
  * than remembered.
  *
  * SCOPE, stated so nobody mistakes a green run for more than it is: this proves
- * the LOCAL harness only. The deployed devnet and mainnet allowlists are
- * asserted against a live `getConfig` by the Kora smoke suite, because only the
- * running service knows what it was actually deployed with.
+ * the LOCAL harness only. The deployed devnet and mainnet allowlists take a
+ * live `getConfig`, because only the running service knows what it was actually
+ * deployed with, and that suite
+ * (`packages/sdp-api-integration/src/tests/kora-earn-sponsorship.test.ts`) is
+ * opt-in until sdp-infra#64 deploys the ids to devnet Kora.
  */
 const HARNESS_CONFIG = resolve(
   dirname(fileURLToPath(import.meta.url)),

@@ -807,13 +807,18 @@ before any of this; sponsorship only changes who is out the lamports.
 
 So the exit now closes the account and returns the rent to whoever paid it:
 
-- **The funder is recorded at deposit time**, on `earn_positions.share_ata_rent_funder`
-  (migration 0066). It cannot be re-derived at exit: nothing on chain records who
-  funded rent, and the fee mode may have flipped in between, so refunding
-  "whoever sponsors today" would eventually pay a sponsor with the customer's
-  lamports. The column is rewritten by every deposit that actually creates the
-  account, including back to NULL, so a re-entry under a different fee mode cannot
-  inherit the previous entry's funder.
+- **The funder is recorded when the account is created**, on
+  `earn_positions.share_ata_rent_funder` (migration 0066). It cannot be
+  re-derived at exit: nothing on chain records who funded rent, and the fee mode
+  may have flipped in between, so refunding "whoever sponsors today" would
+  eventually pay a sponsor with the customer's lamports. The column is rewritten,
+  including back to NULL, by every movement that actually creates the account in
+  EITHER direction (an exit consolidates auxiliary share accounts and can create
+  the ATA itself), and only by one that WON its idempotency insert, since a loser
+  broadcasts nothing and pays nothing. The one exception to reading it: when the
+  exit itself creates the account, the party owed the refund is that exit's own
+  rent payer, who funded it moments earlier in the same transaction. The recorded
+  funder is authoritative only for an account that pre-dates the exit.
 - **Creation is observed, not inferred.** `createAtasIdempotent` emits the same
   instruction whether or not the account exists and charges nothing when it does,
   so only a chain read distinguishes them. The builder reports
@@ -821,9 +826,12 @@ So the exit now closes the account and returns the rent to whoever paid it:
   is recorded.
 - **The close condition is exact.** `CloseAccount` fails on a non-zero balance and
   rides the same transaction as the redemptions, so a wrong guess fails the
-  customer's exit rather than merely stranding rent. It closes only when the
-  redeemed quantity equals what the account will hold, which the separate
-  share-encoding assertion already pins.
+  customer's exit rather than merely stranding rent. Two equalities, not one: the
+  redeemed quantity must equal what the ATA will hold (which the separate
+  share-encoding assertion already pins) AND the owner's total holding of the
+  share mint across every account. An emptied ATA with auxiliary accounts still
+  holding shares is not a full exit, and closing there hands the next entry a
+  funder describing a previous instance of the account.
 
 ### Accepted costs, stated so they are not rediscovered
 
@@ -836,10 +844,13 @@ So the exit now closes the account and returns the rent to whoever paid it:
   out of the same vault.
 - **`max_allowed_lamports` caps a sponsored transaction at 4 new ATAs** on devnet
   (9,900,000 / 2,039,280). Real plans create one, or two for a wSOL vault.
-- **Sponsorship costs 97 bytes** (one signature, one account key, one instruction
-  account index) against the 1232-byte limit, and providers size plans without
-  knowing a sponsor is coming. The size guard runs on final bytes so this fails
-  closed, and its message now names sponsorship as a cause.
+- **Sponsorship costs 96 bytes** (one 64-byte signature slot, one 32-byte account
+  key; no instruction account index is added, the payer index just points
+  elsewhere) against the 1232-byte limit, and providers size plans without knowing
+  a sponsor is coming. The guard runs on the owner-signed bytes, BEFORE the
+  paymaster is called: the compiled header fixes the signature count, so those
+  bytes are already final length, and checking after would spend a budget
+  reservation on a plan that can never be sent.
 - **No farm rent.** SDP passes `farmState: null, flcFarmState: null`, so klend's
   farm-stake instructions are always empty and no farm user-state account is
   created. (That also means V1 forfeits farm rewards, which is a separate
@@ -852,14 +863,19 @@ reading one deployment-global boolean, because a global flag would be unsafe
 here. One API process serves both clusters, and vault **withdrawals are
 deliberately not environment-gated** under the exit-safety rule above. A global
 flag would therefore flip mainnet exits to sponsored at the instant devnet
-deposits were enabled, against a mainnet Kora that allowlists no Kamino program
-and a mainnet budget policy that is seeded disabled: a 5xx on a customer's
-money-OUT path, the one failure this ADR rules out.
+deposits were enabled, against a mainnet Kora whose
+`fee_payer_policy.system.allow_create_account` is false and a mainnet budget
+policy that is seeded disabled: a 5xx on a customer's money-OUT path, the one
+failure this ADR rules out. The policy flag is the durable leg of that argument,
+not the allowlist: sdp-infra#64 puts the mainnet Kamino ids in place while
+leaving the policy shut.
 
 **To open mainnet**, three things land together and none is a flag flip: the
-Kamino ids reach `kora.mainnet.toml`'s `allowed_programs` (done here, so the
-clusters do not drift); `allow_create_account` is opened there, deferred until
-compensated pricing ships; and `sbp_mainnet_global.enabled` is turned on. One
+Kamino ids reach `kora.mainnet.toml`'s `allowed_programs`
+([sdp-infra#64](https://github.com/solana-foundation/sdp-infra/pull/64), open as
+of this addendum, and it writes both cluster configs at once so the two cannot
+drift); `allow_create_account` is opened there, deferred until compensated
+pricing ships; and `sbp_mainnet_global.enabled` is turned on. One
 trap worth naming: opening the mainnet policy **without** lowering
 `max_allowed_lamports` from 10,000,000 would push the reservation to 10,005,000,
 past the seeded per-transaction budget, and deny **all** sponsorship, payments
@@ -874,6 +890,8 @@ capability detection and returns 501 rather than silently executing unsponsored.
 Kamino's implementation returns the set `assertPlanTargetsCluster` already
 enforces on its own output, so what is declared to a paymaster cannot drift from
 what is emitted. A unit test asserts the local harness allowlist covers every
-provider the execution registry can build a client for; the deployed allowlists
-are asserted against a live `getConfig`, because only the running service knows
-what it was deployed with.
+provider the execution registry can build a client for. The deployed allowlists
+need a live `getConfig`, because only the running service knows what it was
+deployed with, so that assertion ships here behind
+`EARN_KORA_SPONSORSHIP_SMOKE` and goes unconditional once sdp-infra#64 reaches
+devnet.

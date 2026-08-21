@@ -12,8 +12,8 @@
  *    no live coverage at all before this file.
  *
  * OPT-IN, deliberately. It stays off until the Kamino program ids are deployed
- * to devnet Kora (the sdp-infra half of PRO-1736), because until then a correct
- * failure here would red an unrelated suite. Turn it on with
+ * to devnet Kora (sdp-infra#64, open at time of writing), because until then a
+ * correct failure here would red an unrelated suite. Turn it on with
  * EARN_KORA_SPONSORSHIP_SMOKE=true once that deploy lands, then make it
  * unconditional.
  *

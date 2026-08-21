@@ -937,7 +937,6 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         }
 
         const claimed = await claimVaultPosition(transaction, input);
-        await recordShareAccountRentFunder(transaction, input, claimed.id);
         const inserted = await insertVaultMovement(transaction, input, claimed.id);
         if (!inserted) {
           // A concurrent request committed after the preflight. A divergent
@@ -955,6 +954,13 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
             replayed: true,
           };
         }
+
+        // AFTER the insert, and only for the winner, the same rule the
+        // withdrawal path below follows. A loser broadcasts nothing and so pays
+        // nothing, and its write would not merely race: the claim upsert above
+        // holds this position row's lock, so a loser is always serialised
+        // second and would overwrite the winner's funder every time.
+        await recordShareAccountRentFunder(transaction, input, claimed.id);
 
         return { position: claimed, movement: inserted, replayed: false };
       });
@@ -986,12 +992,6 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         if (prior) return prior;
 
         const movement = await insertVaultWithdrawalMovement(transaction, input);
-        if (movement) {
-          // An exit that creates the share account funds its rent, so it owns
-          // the attribution from here. Only on the winning insert: a loser
-          // broadcasts nothing and so pays nothing.
-          await recordShareAccountRentFunder(transaction, input, movement.position_id);
-        }
         if (!movement) {
           // A concurrent identical request committed after the preflight. Its
           // signed transaction, not ours, is the one that may be broadcast.
@@ -999,6 +999,11 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           if (!winner) throw new Error("Failed to resolve concurrent earn vault withdrawal");
           return winner;
         }
+
+        // An exit that creates the share account funds its rent, so it owns the
+        // attribution from here. Only on the winning insert, for the same reason
+        // as the deposit above.
+        await recordShareAccountRentFunder(transaction, input, movement.position_id);
         return {
           position: await requireMovementPosition(transaction, movement),
           movement,
@@ -1395,6 +1400,14 @@ async function requireMovementPosition(
  *
  * Runs inside the caller's transaction, so a rolled-back intent leaves no claim
  * about rent that was never paid.
+ *
+ * CALL IT ONLY FOR THE MOVEMENT THAT WON ITS INSERT, in either direction. A
+ * loser's bytes are never broadcast, so it pays no rent, and its write is not
+ * merely a race it might lose: the deposit path holds the position row's lock
+ * from its claim upsert, which serialises the loser second and makes its funder
+ * the last one written. The idempotency fingerprint omits the fee mode, so two
+ * same-key requests that resolved different sponsors replay-match rather than
+ * conflict, and the exit would then refund whichever of them lost.
  */
 async function recordShareAccountRentFunder(
   db: AppDb,
