@@ -1,0 +1,20 @@
+{
+  "fetchedAt": "2026-08-19T23:13:16.313Z",
+  "declaredDepositTokens": [
+    "USDC"
+  ],
+  "clusters": [
+    {
+      "cluster": "devnet",
+      "skipped": "SDP has no confirmed Veda deployment for this cluster",
+      "configuredVaults": 0,
+      "rows": []
+    },
+    {
+      "cluster": "mainnet-beta",
+      "skipped": "SDP has no confirmed Veda deployment for this cluster",
+      "configuredVaults": 0,
+      "rows": []
+    }
+  ]
+}
