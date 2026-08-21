@@ -38,6 +38,7 @@ import {
   RECURRING_PAYMENTS_COLLECTION_CRON,
   runRecurringPaymentsCollection,
 } from "./recurring-payments";
+import { RINGS_INDEXING_CRON, runRingsIndexingPoll } from "./rings-indexing";
 import { runWorkflowExecutions, WORKFLOW_EXECUTIONS_CRON } from "./workflow-executions";
 import {
   runWorkflowSecretRetirements,
@@ -169,6 +170,21 @@ export function startCron(deps: CronDeps): CronHandle | null {
       })
     );
   }
+
+  // Cheap to schedule unconditionally: the job early-returns unless the rings
+  // flag is on and the live gateway adapter is selected.
+  tasks.push(
+    schedule(RINGS_INDEXING_CRON, () => {
+      if (stopping) {
+        return;
+      }
+      runRingsIndexingPoll({
+        env: deps.env,
+        bg: deps.bg,
+        observability: deps.observability,
+      });
+    })
+  );
 
   if (isEarnEnabled(deps.env)) {
     tasks.push(

@@ -48,6 +48,7 @@ import { normalizePem } from "@sdp/custody/provisioning";
 import type { SigningPort } from "@sdp/custody/signing";
 import { SigningError } from "@sdp/custody/signing";
 import { parsePostgresJson } from "@/db/postgres-utils";
+import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import type { Env } from "@/types/env";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -85,6 +86,16 @@ function parseSigningConfigJson<T>(record: SigningConfigRecord, providerName: st
 // Factory Functions
 // ═══════════════════════════════════════════════════════════════════════════
 
+export function assertSigningProviderAllowed(env: Env): void {
+  const provider = env.SIGNING_PROVIDER ?? "local";
+  if (provider === "local" && !isSelfHostedDeployment(env)) {
+    throw new SigningError(
+      "Local signing is not available in a managed deployment; configure an external custody provider",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+}
+
 /**
  * Create a signing adapter from environment variables.
  * Used as fallback when no database configuration exists.
@@ -92,6 +103,7 @@ function parseSigningConfigJson<T>(record: SigningConfigRecord, providerName: st
  * Returns a Promise since KeychainMemoryAdapter initialization is async.
  */
 export async function createSigningAdapterFromEnv(env: Env): Promise<SigningPort> {
+  assertSigningProviderAllowed(env);
   const provider = env.SIGNING_PROVIDER ?? "local";
 
   switch (provider) {

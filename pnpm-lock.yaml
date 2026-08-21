@@ -106,6 +106,9 @@ importers:
       '@sdp/env-config':
         specifier: workspace:*
         version: link:../../packages/sdp-env-config
+      '@sdp/helius-rings':
+        specifier: workspace:*
+        version: link:../../packages/sdp-helius-rings
       '@sdp/issuance':
         specifier: workspace:*
         version: link:../../packages/sdp-issuance
