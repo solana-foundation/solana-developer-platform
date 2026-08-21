@@ -1,7 +1,7 @@
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 /**
- * One recorded withdrawal leg, so the dashboard can poll a signed exit to its
+ * One recorded withdrawal, so the dashboard can poll a signed exit to its
  * terminal state. No `upstreamHeaders`: unlike the create next door, this read
  * accepts no client-owned transport metadata at all.
  */

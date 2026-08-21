@@ -69,26 +69,19 @@ async function mapSettledWithConcurrency<T, U>(
 export function toEarnVaultTransactionPlan(plan: KaminoInstructionPlan): EarnVaultTransactionPlan {
   return {
     cluster: plan.cluster,
-    transactions: plan.instructions.map((batch) =>
-      batch.map(
-        (instruction): EarnVaultInstruction => ({
-          programAddress: String(instruction.programAddress),
-          accounts: (instruction.accounts ?? []).map((account) => ({
-            address: String(account.address),
-            role: Number(account.role),
-          })),
-          // Base64 keeps the contract JSON-safe: a plan may cross a queue or a
-          // log before it is compiled, and a Uint8Array does not survive that.
-          data: Buffer.from(instruction.data ?? new Uint8Array()).toString("base64"),
-        })
-      )
+    instructions: plan.instructions.map(
+      (instruction): EarnVaultInstruction => ({
+        programAddress: String(instruction.programAddress),
+        accounts: (instruction.accounts ?? []).map((account) => ({
+          address: String(account.address),
+          role: Number(account.role),
+        })),
+        // Base64 keeps the contract JSON-safe: a plan may cross a queue or a
+        // log before it is compiled, and a Uint8Array does not survive that.
+        data: Buffer.from(instruction.data ?? new Uint8Array()).toString("base64"),
+      })
     ),
     lookupTables: plan.lookupTables.map(String),
-    // Present on withdrawal plans only: the exact shares each transaction leg
-    // redeems, which the API ledgers as one movement row per leg.
-    ...(plan.transactionShares === undefined
-      ? {}
-      : { transactionShares: [...plan.transactionShares] }),
     assetIdentity: {
       depositTokenMint: String(plan.assetIdentity.depositTokenMint),
       shareMint: String(plan.assetIdentity.shareMint),
@@ -197,15 +190,13 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
 
   /**
    * The money-OUT half (`EarnVaultWithdrawProvider`), implemented LAST on
-   * purpose — after the builder honoured the transaction-sized-batch contract
-   * (vault lookup table, compile-measured splits at protocol boundaries) and
-   * the API grew resumable multi-leg submission with per-leg ledger rows.
+   * purpose, after the builder preserved the complete instruction sequence,
+   * carried the vault lookup table, and verified the encoded share quantity.
    * Implementing it is what flips `supportsVaultWithdraw` to true, so the
    * order of that work was the mechanism keeping the exit route closed while
-   * an unsized plan could still strand a customer mid-exit (PRO-1702).
+   * the complete transaction could still be built incorrectly (PRO-1702).
    *
-   * The slot is read here, once, so every leg of one exit is priced against
-   * the same slot — the same rule `readVaultPositions` applies to a page.
+   * The slot is read here once, the same rule `readVaultPositions` applies to a page.
    */
   async buildVaultWithdrawal(
     ctx: EarnRuntimeContext,

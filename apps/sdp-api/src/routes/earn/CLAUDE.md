@@ -573,22 +573,19 @@ movement failed. Never rebuild a transaction during recovery.
     `supportsVaultWithdraw` and a provider without it is a 501 — a statement
     about SDP's plumbing, never permission. Pinned by the exit-safety describe
     in `../earn.vault-withdrawals.test.ts`.
-  - **LEG MODEL (migration 0066).** A multi-reserve exit is one
-    `earn_movements` business movement denominated in the share mint, with
-    ordered signed transactions in `earn_vault_withdrawal_legs`. The parent
-    owns the total request, raw idempotency key, actor and aggregate status.
-    Child rows own exact literal shares, signatures, signed bytes and blockhash
-    windows. All children are durable before the first broadcast, then execute
-    strictly in order. The request path and sweep use the same predecessor gate.
-  - The wire exposes one withdrawal lifecycle. Transaction details remain
-    available for explorer links and diagnostics without becoming separate
-    financial movements. `confirmed` remains non-terminal; only `finalized`
-    and `failed` stop polling.
+  - **ONE TRANSACTION MODEL.** A vault exit is one `earn_movements` row,
+    denominated in the share mint, with one signature, signed transaction and
+    blockhash window. The complete Kamino instruction sequence is compiled with
+    its lookup table and idempotency memo; plans above Solana's packet limit are
+    rejected. The row is durable before broadcast and uses the same reconciler
+    as a deposit.
+  - The wire exposes the movement signature directly for explorer links.
+    `confirmed` remains non-terminal; only `finalized` and `failed` stop polling.
 - `GET /vault-withdrawals` / `GET /vault-withdrawals/:movementId` — the deposit
   reads mirrored: DB only, NO provider gate (ADR 0002), same four 404 scoping
   rules with `direction = 'withdrawal'`, same wallet-binding scope through
   `listReadableEarnVaultWallets`. `?requestId=` serves the one logical
-  withdrawal and its ordered transactions, and `?settled=` uses the ledger terminal set
+  withdrawal, and `?settled=` uses the ledger terminal set
   (`finalized|failed`), not the deposits' legacy one.
 
 One gap remains around approvals, and it is narrower than it was. An approved

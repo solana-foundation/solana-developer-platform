@@ -30,8 +30,8 @@ api/dashboard/markets/earn/
   vault-deposits/route.ts            POST create (vault_direct)
   vault-deposits/route.ts            …and GET the workspace list (recovery)
   vault-deposits/[movementId]/       GET one recorded deposit (poll to terminal)
-  vault-withdrawals/route.ts         POST create (vault exit) · GET the leg list
-  vault-withdrawals/[movementId]/    GET one recorded withdrawal leg
+  vault-withdrawals/route.ts         POST create (vault exit) · GET the movement list
+  vault-withdrawals/[movementId]/    GET one recorded withdrawal
   vault-positions/route.ts           GET list (keyset cursor)
   movements/route.ts                 GET the cross-provider ledger feed
                                      (keyset cursor + equality filters)
@@ -245,8 +245,7 @@ program create still sends the body `requestId` form.
   over the last observed balance — the network stays the authority). Mirrors
   the deposit modal's key lifecycle exactly, including the held-key pre-flight
   (`fetchEarnVaultWithdrawalsByRequestId`) and the absorbed-by-approval
-  outcome. The result screen lists every transaction LEG with its explorer
-  link; a multi-transaction exit says so and that SDP finishes the sequence.
+  outcome. The result screen links the withdrawal transaction in Explorer.
   Exports `EarnVaultWithdrawalOutcomeTracker`, mounted once per withdrawal.
 - `earn-vault-withdraw-tracking.ts` — the withdrawal idempotency-key store
   (fingerprint: project, position, shares) under its own versioned

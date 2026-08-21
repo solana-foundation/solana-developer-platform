@@ -415,17 +415,17 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(document.body.textContent).not.toContain("earn_vault_movement_failed");
   });
 
-  it("recovers every in-flight vault withdrawal leg from the server ledger", async () => {
+  it("recovers every in-flight vault withdrawal from the server ledger", async () => {
     mocks.vaultWithdrawals = [
-      { movementId: "earn_movement_leg_requested", status: "requested" },
-      { movementId: "earn_movement_leg_submitted", status: "submitted" },
+      { movementId: "earn_movement_requested", status: "requested" },
+      { movementId: "earn_movement_submitted", status: "submitted" },
       // The unified ledger's vocabulary: `confirmed` is optimistic commitment,
       // NOT terminal — a fork can still drop it, so it stays watched.
-      { movementId: "earn_movement_leg_confirmed", status: "confirmed" },
+      { movementId: "earn_movement_confirmed", status: "confirmed" },
       // A repeated ledger result must still mount only one keyed tracker.
-      { movementId: "earn_movement_leg_confirmed", status: "confirmed" },
-      { movementId: "earn_movement_leg_finalized", status: "finalized" },
-      { movementId: "earn_movement_leg_failed", status: "failed" },
+      { movementId: "earn_movement_confirmed", status: "confirmed" },
+      { movementId: "earn_movement_finalized", status: "finalized" },
+      { movementId: "earn_movement_failed", status: "failed" },
     ];
 
     renderWorkspace();
@@ -438,13 +438,9 @@ describe("TreasurySolutionsWorkspace", () => {
         .getAllByTestId("vault-withdrawal-outcome-tracker")
         .map((tracker) => tracker.textContent)
         .sort()
-    ).toEqual([
-      "earn_movement_leg_confirmed",
-      "earn_movement_leg_requested",
-      "earn_movement_leg_submitted",
-    ]);
-    expect(document.body.textContent).not.toContain("earn_movement_leg_finalized");
-    expect(document.body.textContent).not.toContain("earn_movement_leg_failed");
+    ).toEqual(["earn_movement_confirmed", "earn_movement_requested", "earn_movement_submitted"]);
+    expect(document.body.textContent).not.toContain("earn_movement_finalized");
+    expect(document.body.textContent).not.toContain("earn_movement_failed");
   });
 
   it("mounts no deposit tracker when the ledger reports nothing in flight", async () => {

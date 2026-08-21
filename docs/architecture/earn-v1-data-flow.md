@@ -134,11 +134,9 @@ release retires them, so the sources of truth in the table above are the unified
 ones for every READ.
 
 The withdraw counterpart landed with PRO-1702: `POST /v1/earn/vault-withdrawals`
-records a multi-transaction exit as per-leg `earn_movements` rows (migration
-0066 — share-mint denominated, ordered by `leg_group_id`/`leg_index`, every leg
-signed and recorded before the first broadcast), and the treasury dashboard's
-exit action drives it. The reconciliation sweep finishes legs the request
-budget could not, gating each on its predecessor's commitment. Production vault
+records one share-mint-denominated signed movement before broadcasting it, and
+the treasury dashboard's exit action drives it. The shared vault reconciliation
+sweep finishes an ambiguous or interrupted submission. Production vault
 deposits remain closed until PRO-1703 surfaces vault positions on the Active
 tab (`VAULT_DIRECT_DEPOSIT_ENVIRONMENTS`); the exit route itself takes no
 environment gate — money out beats money off.

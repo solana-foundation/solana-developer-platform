@@ -82,7 +82,7 @@ it for share-ATA rent — a spend its `FeePayerPolicy` may refuse and which
 `sponsorship-budget.service.ts` does not account for. The field is `rentPayer`
 here for exactly that reason, and it defaults to the owner.
 
-## Plans are transaction-sized BATCHES
+## Withdrawals are one complete transaction
 
 Every plan also carries required `assetIdentity` with the deposit-token mint and
 share mint read from the same live vault state used to build its instructions.
@@ -90,40 +90,20 @@ Catalogue metadata drives policy and ledger labels but is not builder truth; the
 API must compare both mints before signing so a stale or poisoned row cannot
 authorize one asset while the transaction moves another.
 
-`KaminoInstructionPlan.instructions` is `Instruction[][]`, one entry per
-transaction — not a flat list. A multi-reserve exit emits several withdraw
-instructions each carrying the vault's full reserve remaining-accounts list, and
-can exceed Solana's 1232-byte packet; Kamino publishes a per-vault lookup table
-(`VaultState.vaultLookupTable`) precisely for this. Handing back a flat list
-would make the caller discover that at `compileTransaction`, far from the code
-that could fix it.
-
-**`buildKaminoWithdrawPlan` honours this contract now** (PRO-1702), and
+`KaminoInstructionPlan.instructions` keeps the provider-neutral `Instruction[][]`
+shape, but Kamino emits exactly one entry containing the complete ordered exit.
 `KaminoVaultDirectClient` implements `buildVaultWithdrawal`, so
-`supportsVaultWithdraw` answers true. How the exit is batched
-(`withdraw-batching.ts`, deliberately OUTSIDE the SDK firewall so it is
-unit-testable with synthetic instructions):
+`supportsVaultWithdraw` answers true.
 
 - The vault's published lookup table is loaded best-effort (`lookup-table.ts`,
-  via kit's `fetchAddressesForLookupTables`) — an exit must never fail for want
-  of a compression aid, so an unset/unreadable table just means the plan splits
-  earlier. When used, its ADDRESS travels on `lookupTables` so the API compiles
-  with the same compression the sizing assumed.
-- Batches are compile-measured against `1232 −
-  EARN_VAULT_TRANSACTION_HEADROOM_BYTES` (`@sdp/earn` — the API's reservation
-  for the request memo it appends per transaction), with kit's own compiler so
-  a batch measured here cannot compile to a different size there.
-- **Every batch must redeem shares.** This is "an unstake must never land
-  without its withdraw" in its strong form: a boundary that would strand
-  unstake/ATA/cleanup work in a transaction that redeems nothing REFUSES the
-  whole plan (`TRANSACTION TOO LARGE` class errors), because a leg that moves
-  nothing is also a leg the ledger cannot honestly record.
-- **Per-batch share quantities are decoded from the instruction bytes**
+  via kit's `fetchAddressesForLookupTables`). When used, its address travels on
+  `lookupTables` so the API compiles the final message with compression.
+- The API appends the request memo, compiles and signs the final transaction,
+  then rejects signed bytes above Solana's 1232-byte limit.
+- **The total share quantity is decoded from the instruction bytes**
   (`sharesAmount: u64` behind the `withdraw`/`withdraw_from_available` anchor
-  discriminators — pinned to their sha256 derivation by test) and returned as
-  `transactionShares`; the decoded total must equal the accepted request
-  exactly or the plan is refused. The API ledgers one movement row per leg
-  with exactly these quantities.
+  discriminators, pinned to their sha256 derivation by test). The decoded total
+  must equal the accepted request exactly or the plan is refused.
 
 ## Known gaps (deliberate, and owed to the caller)
 
@@ -141,7 +121,7 @@ unit-testable with synthetic instructions):
   passes no farm state, matching the deposit builder (which never stakes), so
   an SDP-managed position has nothing staked and nothing to unstake. Shares
   staked OUTSIDE SDP must be unstaked outside SDP before they can exit through
-  it — the batching still handles unstake instructions generically for the day
+  it. The instruction planner still preserves unstake instructions for the day
   farm support arrives.
 
 ## Amounts are checked against the MINT, not just parsed

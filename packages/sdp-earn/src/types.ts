@@ -374,44 +374,16 @@ export interface EarnVaultInstruction {
 }
 
 /**
- * Bytes every plan batch must leave FREE below Solana's 1232-byte packet limit.
- *
- * The execution layer appends per-transaction metadata the builder cannot know —
- * today one memo instruction binding the caller's idempotency key into the
- * message, whose worst legal case (a 255-character key, the memo program as an
- * extra static account, and encoding overhead) measures ≈319 bytes. A builder
- * that sized batches to the raw packet limit would hand back transactions the
- * API can no longer stamp, and the failure would land at compile time, far from
- * the sizing decision. Rounded up so the reservation survives small metadata
- * changes without every provider re-measuring.
- */
-export const EARN_VAULT_TRANSACTION_HEADROOM_BYTES = 384;
-
-/**
  * Unsigned work for a non-custodial vault, ready for the API to compile.
  *
- * `transactions` is a list of TRANSACTION-SIZED batches, not one flat list: a
- * multi-reserve vault exit emits several instructions each carrying the vault's
- * full reserve account list and can exceed Solana's 1232-byte packet. Returning
- * batches makes that the builder's problem, where the vault's shape is known,
- * rather than the caller's at compile time. "Transaction-sized" means each
- * batch, compiled with the plan's lookup tables and the owner as fee payer,
- * fits `1232 - EARN_VAULT_TRANSACTION_HEADROOM_BYTES` — the reservation is the
- * API's, for the metadata it appends per transaction.
+ * `instructions` is one complete transaction. Vault execution rejects final
+ * signed bytes that exceed Solana's packet limit.
  */
 export interface EarnVaultTransactionPlan {
   cluster: SolanaCluster;
-  transactions: EarnVaultInstruction[][];
+  instructions: EarnVaultInstruction[];
   /** Address lookup tables the caller should apply when compiling. */
   lookupTables: string[];
-  /**
-   * Exact share quantity each batch redeems, parallel to `transactions`, in
-   * SHARE-mint units. Withdrawal plans populate this — the execution layer
-   * ledgers one movement row per transaction leg, and the quantity that leg
-   * encodes is the only exact intent-time fact a withdrawal has (tokens
-   * received are decided by the chain at execution). Deposit plans omit it.
-   */
-  transactionShares?: string[];
   /**
    * Asset addresses observed from the live vault state used to build this plan.
    *
@@ -524,13 +496,9 @@ export interface EarnVaultDirectProvider extends EarnVaultProvider {
  * Optional capability: the money-OUT half of the vault-direct model, kept
  * SEPARATE from money-in deliberately.
  *
- * Splitting it is not taxonomy for its own sake. A vault EXIT is the case that
- * genuinely needs several transactions — one withdraw instruction per reserve
- * the vault must draw from, each carrying the vault's full remaining-accounts
- * list — so `transactions` having more than one entry is normal here and
- * impossible on deposit. Folding both into one capability therefore made "can
- * build a deposit" silently assert "can build a correctly BATCHED exit", which
- * is a different and much harder claim.
+ * Splitting it is not taxonomy for its own sake. Deposit and withdrawal are
+ * independent provider capabilities: supporting money in does not prove that a
+ * client can construct, validate, and safely price the provider's exit path.
  *
  * Discovered via `supportsVaultWithdraw` (capabilities.ts). A provider may
  * implement `EarnVaultDirectProvider` alone, and an exit route must then refuse

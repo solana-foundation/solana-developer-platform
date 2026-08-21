@@ -45,20 +45,13 @@ describe("KaminoVaultDirectClient capabilities", () => {
     expect(supportsVaultDirect(client)).toBe(true);
   });
 
-  /**
-   * The withdraw capability is IMPLEMENTED (PRO-1702). This inverts the pin
-   * that held it withheld while `buildKaminoWithdrawPlan` still flattened a
-   * multi-reserve exit into one unsized batch: the builder now honours the
-   * transaction-sized-batch contract (vault lookup table, compile-measured
-   * splits, per-batch share quantities), so answering yes is what lets the
-   * exit route narrow onto this client.
-   */
-  it("reports the withdraw capability now that the plan is batched", () => {
+  /** The implemented capability lets the exit route narrow onto this client. */
+  it("reports the withdraw capability", () => {
     expect(supportsVaultWithdraw(client)).toBe(true);
     expect(typeof client.buildVaultWithdrawal).toBe("function");
   });
 
-  it("prices the withdrawal against one slot and maps the batched plan", async () => {
+  it("prices the withdrawal against one slot and maps the plan", async () => {
     const resolvedRpcUrl = "https://devnet.example.invalid";
     const probe = new KaminoVaultDirectClient(async () => resolvedRpcUrl, runOperation);
     const slot = 456n;
@@ -69,9 +62,8 @@ describe("KaminoVaultDirectClient capabilities", () => {
     const owner = "11111111111111111111111111111112";
     const builtPlan: KaminoInstructionPlan = {
       cluster: "devnet",
-      instructions: [[], []],
+      instructions: [],
       lookupTables: [address(SHARE_MINT)],
-      transactionShares: ["1.25", "0.75"],
       assetIdentity: {
         depositTokenMint: address(DEPOSIT_TOKEN_MINT),
         shareMint: address(SHARE_MINT),
@@ -102,7 +94,6 @@ describe("KaminoVaultDirectClient capabilities", () => {
     expect(plan).toMatchObject({
       cluster: "devnet",
       lookupTables: [SHARE_MINT],
-      transactionShares: ["1.25", "0.75"],
       accepted: { shares: "2" },
     });
   });
@@ -499,7 +490,7 @@ describe("toEarnVaultTransactionPlan", () => {
 
     expect(toEarnVaultTransactionPlan(plan)).toMatchObject({
       cluster: "devnet",
-      transactions: [],
+      instructions: [],
       lookupTables: [],
       assetIdentity: {
         depositTokenMint: DEPOSIT_TOKEN_MINT,

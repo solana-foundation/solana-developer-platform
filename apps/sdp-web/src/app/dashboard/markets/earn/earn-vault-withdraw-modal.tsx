@@ -25,7 +25,6 @@ import {
 import {
   createEarnVaultWithdrawal,
   type EarnVaultWithdrawal,
-  type EarnVaultWithdrawalTransaction,
   fetchEarnVaultWithdrawalsByRequestId,
   useEarnVaultWithdrawalOutcomeToast,
 } from "./earn-program-data";
@@ -162,47 +161,32 @@ function applyVaultWithdrawalIdempotencyKeyOutcome(
   }
 }
 
-function TransactionList({
-  transactions,
+function TransactionLink({
+  signature,
   environment,
 }: {
-  transactions: EarnVaultWithdrawalTransaction[];
+  signature: string;
   environment: SdpEnvironment;
 }) {
   const t = useTranslations();
-  const locale = useLocale();
   const cluster = CLUSTER_BY_SDP_ENVIRONMENT[environment];
 
   return (
     <dl className="mt-5 rounded-lg border border-border-default bg-fill-subtle p-4 text-sm">
-      {transactions.map((transaction) => (
-        <div className="flex items-baseline justify-between gap-5 py-1" key={transaction.signature}>
-          <dt className="text-tertiary">
-            {transactions.length > 1
-              ? t("DashboardEarn.vaultWithdraw.legLabel", {
-                  index: transaction.index + 1,
-                  count: transactions.length,
-                })
-              : t("DashboardEarn.vaultWithdraw.transaction")}
-          </dt>
-          <dd className="text-right">
-            <span className="mr-3 tabular-nums text-secondary">
-              {t("DashboardEarn.vaultWithdraw.legShares", {
-                shares: formatProviderAmount(transaction.shares, locale),
-              })}
-            </span>
-            <a
-              className="inline-flex items-center gap-1 text-primary underline underline-offset-2"
-              href={explorerTxUrl(transaction.signature, cluster)}
-              rel="noreferrer"
-              target="_blank"
-            >
-              {shortenMarketAddress(transaction.signature)}
-              <ExternalLinkIcon aria-hidden="true" className="size-3.5" />
-            </a>
-          </dd>
-        </div>
-      ))}
+      <div className="flex items-baseline justify-between gap-5 py-1">
+        <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.transaction")}</dt>
+        <dd className="text-right">
+          <a
+            className="inline-flex items-center gap-1 text-primary underline underline-offset-2"
+            href={explorerTxUrl(signature, cluster)}
+            rel="noreferrer"
+            target="_blank"
+          >
+            {shortenMarketAddress(signature)}
+            <ExternalLinkIcon aria-hidden="true" className="size-3.5" />
+          </a>
+        </dd>
+      </div>
     </dl>
   );
 }
@@ -259,7 +243,6 @@ function WithdrawalResult({
   }
 
   const { withdrawal } = outcome;
-  const multiLeg = withdrawal.transactions.length > 1;
   const copy = outcome.absorbedByApproval
     ? {
         title: t("DashboardEarn.vaultWithdraw.absorbedTitle"),
@@ -268,11 +251,7 @@ function WithdrawalResult({
       }
     : {
         title: t("DashboardEarn.vaultWithdraw.submittedTitle"),
-        body: multiLeg
-          ? t("DashboardEarn.vaultWithdraw.submittedBodyMultiLeg", {
-              count: withdrawal.transactions.length,
-            })
-          : t("DashboardEarn.vaultWithdraw.submittedBody"),
+        body: t("DashboardEarn.vaultWithdraw.submittedBody"),
         note: t("DashboardEarn.vaultWithdraw.settlingNote"),
       };
 
@@ -286,7 +265,7 @@ function WithdrawalResult({
         {copy.title}
       </h2>
       <p className="mt-1 text-sm leading-6 text-secondary">{copy.body}</p>
-      <TransactionList environment={environment} transactions={withdrawal.transactions} />
+      <TransactionLink environment={environment} signature={withdrawal.signature} />
       <p className="mt-4 text-sm leading-6 text-secondary">{copy.note}</p>
       <div className="mt-6 flex justify-end">
         <Button onClick={onClose}>{t("DashboardEarn.withdraw.done")}</Button>
@@ -303,7 +282,7 @@ interface EarnVaultWithdrawalOutcomeTrackerProps {
 
 /**
  * Keeps one logical withdrawal under observation independently of the
- * dismissible modal. The canonical hook polls the parent movement until every
+ * dismissible modal. The canonical hook polls the movement until the
  * internal transaction reaches a terminal result.
  */
 export function EarnVaultWithdrawalOutcomeTracker({

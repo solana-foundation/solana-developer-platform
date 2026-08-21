@@ -496,24 +496,14 @@ describe("GET /v1/earn/vault-deposits/:movementId", () => {
 
   it("refuses a withdrawal from the deposit path", async () => {
     const created = await createPosition({ providerReference: "vault_read_direction" });
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `UPDATE earn_movements
-              SET direction = 'withdrawal', denomination = ?,
-                  signature = NULL, signed_transaction = NULL,
-                  last_valid_block_height = NULL, min_shares_out = NULL
-            WHERE id = ?`
-        )
-        .bind(SHARE_MINT, created.movement.id),
-      getDb(env)
-        .prepare(
-          `INSERT INTO earn_vault_withdrawal_legs
-             (movement_id, leg_index, shares, signature, signed_transaction, last_valid_block_height)
-           VALUES (?, 0, '10', ?, 'AQ==', 12345)`
-        )
-        .bind(created.movement.id, `sig_${crypto.randomUUID()}`),
-    ]);
+    await getDb(env)
+      .prepare(
+        `UPDATE earn_movements
+            SET direction = 'withdrawal', denomination = ?, min_shares_out = NULL
+          WHERE id = ?`
+      )
+      .bind(SHARE_MINT, created.movement.id)
+      .run();
 
     expect((await getDeposit(created.movement.id)).status).toBe(404);
   });
@@ -615,24 +605,14 @@ describe("GET /v1/earn/vault-deposits", () => {
   it("omits a withdrawal, which is not a deposit", async () => {
     const deposit = await createPosition({ providerReference: "vault_list_deposit" });
     const withdrawal = await createPosition({ providerReference: "vault_list_withdrawal" });
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `UPDATE earn_movements
-              SET direction = 'withdrawal', denomination = ?,
-                  signature = NULL, signed_transaction = NULL,
-                  last_valid_block_height = NULL, min_shares_out = NULL
-            WHERE id = ?`
-        )
-        .bind(SHARE_MINT, withdrawal.movement.id),
-      getDb(env)
-        .prepare(
-          `INSERT INTO earn_vault_withdrawal_legs
-             (movement_id, leg_index, shares, signature, signed_transaction, last_valid_block_height)
-           VALUES (?, 0, '10', ?, 'AQ==', 12345)`
-        )
-        .bind(withdrawal.movement.id, `sig_${crypto.randomUUID()}`),
-    ]);
+    await getDb(env)
+      .prepare(
+        `UPDATE earn_movements
+            SET direction = 'withdrawal', denomination = ?, min_shares_out = NULL
+          WHERE id = ?`
+      )
+      .bind(SHARE_MINT, withdrawal.movement.id)
+      .run();
 
     const body = (await (await listDeposits()).json()) as {
       data: { deposits: Array<{ movementId: string }> };

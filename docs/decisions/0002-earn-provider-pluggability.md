@@ -708,33 +708,22 @@ lives. Before the contract phase stops dual-writing, a read-only parity check
 (row counts plus a per-row projection diff) runs in the deployed environments,
 expecting zero differences.
 
-## Addendum — 2026-08-20 The vault exit route, as per-transaction leg rows (PRO-1702)
+## Addendum — 2026-08-20 The vault exit route (PRO-1702)
 
 The vault-direct model's money-out half ships: `POST /v1/earn/vault-withdrawals`
 plus the treasury exit action, with Kamino the first `EarnVaultWithdrawProvider`
-implementor. The capability had been deliberately withheld while
-`buildKaminoWithdrawPlan` flattened a multi-reserve exit into one unsized batch;
-the batching work (vault lookup table, compile-measured splits, per-batch share
-quantities decoded from the instruction bytes) landed with the route, which is
-what flipping `supportsVaultWithdraw` to true was always defined to mean.
+implementor. The builder preserves Kamino's complete instruction sequence and
+the vault lookup table. The API appends the idempotency memo, compiles and signs
+one final transaction, then rejects it if its bytes exceed Solana's packet
+limit.
 
-- **A multi-transaction exit is recorded as PER-LEG MOVEMENT ROWS** (migration
-  0066: `leg_group_id`, `leg_index`, `leg_count` on `earn_movements`). Each leg
-  is a real on-chain money movement with its own signature, bytes, blockhash
-  window and fate — exactly the shape the reconciliation sweep already settles,
-  so a leg row plugs into record-before-broadcast, rebroadcast and finalization
-  with no second machinery. Every leg is signed and durably recorded before the
-  FIRST byte is broadcast; legs broadcast strictly in `leg_index` order, each
-  only after its predecessor reaches commitment (a later leg's instructions may
-  consume state an earlier one creates), in-request while the budget lasts and
-  by the sweep after it. A leg whose predecessor failed fails too — its
-  instructions were built against state that will now never exist — and the
-  shares it would have redeemed remain in the wallet, immediately
-  re-withdrawable. Partial completion is therefore an honest, recorded state,
-  never a stranding.
+- **One exit is one signed movement.** The `earn_movements` row owns the share
+  amount, signature, signed bytes and blockhash window. It is recorded before
+  broadcast and reconciled through the same path as a vault deposit. There is
+  no child table, ordering state or parent aggregation.
 - **A vault WITHDRAWAL row is denominated in the SHARE MINT**, and
-  `amount_requested` is the exact share quantity that leg's transaction encodes
-  (`sharesAmount: u64`, decoded — never estimated). This refines the 2026-08-19
+  `amount_requested` is the exact share quantity the transaction encodes
+  (`sharesAmount: u64`, decoded, never estimated). This refines the 2026-08-19
   "vault movements are denominated in the token mint" line, which was written
   when every vault movement was a deposit: a deposit's exact intent-time fact
   is a token amount, a withdrawal's is a share count, and the tokens a
@@ -752,8 +741,5 @@ what flipping `supportsVaultWithdraw` to true was always defined to mean.
   SDP's plumbing and never permission. Wallet policy still runs: it is the
   organization's own custody control, not a provider gate.
 - **The withdrawal wire speaks the ledger's own vocabulary** (`requested …
-  finalized`), unlike the deposit DTO's legacy mapping — this surface postdates
-  the unification, so there is no client to translate for. A withdrawal has no
-  single aggregate status on the wire, deliberately: legs settle independently
-  and the honest answer is the legs.
-
+  finalized`) and exposes the movement signature directly. This surface
+  postdates the unification, so there is no legacy client to translate for.

@@ -5,7 +5,6 @@ import { getDb } from "@/db";
 import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
-  type EarnVaultWithdrawalLegRow,
 } from "@/db/repositories/earn-movements.repository";
 import { getLogger } from "@/runtime/logger";
 import {
@@ -34,14 +33,8 @@ const OUTBOX_BATCH_SIZE = 256;
  */
 export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
   const ledger = createPostgresEarnMovementsRepository(getDb(env));
-  const [movements, withdrawalLegs] = await Promise.all([
-    ledger.claimUnsettledVaultMovements(OUTBOX_BATCH_SIZE),
-    ledger.claimUnsettledVaultWithdrawalLegs(OUTBOX_BATCH_SIZE),
-  ]);
-  const byEnvironment = groupByEnvironment([
-    ...movements.map((movement) => ({ movement })),
-    ...withdrawalLegs,
-  ]);
+  const movements = await ledger.claimUnsettledVaultMovements(OUTBOX_BATCH_SIZE);
+  const byEnvironment = groupByEnvironment(movements);
 
   // Sequential on purpose. Each environment opens its own RPC client and polls a
   // batch of signature statuses, so running the handful of them together only
@@ -51,17 +44,12 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
   }
 }
 
-type VaultReconciliationItem = {
-  movement: EarnMovementRow;
-  leg?: EarnVaultWithdrawalLegRow;
-};
-
-function groupByEnvironment(items: VaultReconciliationItem[]) {
-  const byEnvironment = new Map<EarnMovementRow["environment"], VaultReconciliationItem[]>();
-  for (const item of items) {
-    const rows = byEnvironment.get(item.movement.environment);
-    if (rows) rows.push(item);
-    else byEnvironment.set(item.movement.environment, [item]);
+function groupByEnvironment(movements: EarnMovementRow[]) {
+  const byEnvironment = new Map<EarnMovementRow["environment"], EarnMovementRow[]>();
+  for (const movement of movements) {
+    const rows = byEnvironment.get(movement.environment);
+    if (rows) rows.push(movement);
+    else byEnvironment.set(movement.environment, [movement]);
   }
   return byEnvironment;
 }
@@ -70,7 +58,7 @@ async function reconcileEnvironment(
   env: Env,
   ledger: ReturnType<typeof createPostgresEarnMovementsRepository>,
   environment: SdpEnvironment,
-  rows: VaultReconciliationItem[]
+  rows: EarnMovementRow[]
 ): Promise<void> {
   const cluster = earnClusterFor(environment);
   const rpcUrl = resolveClusterRpcUrl(env, cluster);
@@ -82,7 +70,7 @@ async function reconcileEnvironment(
       rpc,
       // Non-null for every vault_direct row by 0062's model-shape constraint;
       // the outbox scan only ever returns those.
-      rows.map((row) => (row.leg?.signature ?? row.movement.signature) as Signature),
+      rows.map((row) => row.signature as Signature),
       { searchTransactionHistory: true }
     );
   } catch (error) {
@@ -110,10 +98,10 @@ async function reconcileEnvironment(
   // `Promise.all` would put 256 concurrent broadcasts on the RPC endpoint and 256
   // writes on the connection pool from one tick. Pacing is the point; the batch is
   // already bounded, and every other job in this directory reconciles the same way.
-  for (const [index, item] of rows.entries()) {
+  for (const [index, movement] of rows.entries()) {
     try {
       // react-doctor-disable-next-line react-doctor/async-await-in-loop -- pacing protects the RPC endpoint and database pool from a 256-way fanout.
-      await reconcileMovement(env, ledger, item, statuses[index] ?? null, {
+      await reconcileMovement(env, ledger, movement, statuses[index] ?? null, {
         cluster,
         rpcUrl,
         currentBlockHeight,
@@ -123,8 +111,8 @@ async function reconcileEnvironment(
       // checks the recorded signature before rebroadcasting the same bytes.
       getLogger().error(
         {
-          movementId: item.movement.id,
-          signature: item.leg?.signature ?? item.movement.signature,
+          movementId: movement.id,
+          signature: movement.signature,
           error,
         },
         "earn vault reconciliation: movement remains unsettled"
@@ -136,13 +124,12 @@ async function reconcileEnvironment(
 async function reconcileMovement(
   env: Env,
   ledger: ReturnType<typeof createPostgresEarnMovementsRepository>,
-  item: VaultReconciliationItem,
+  movement: EarnMovementRow,
   status: SignatureStatusInfo | null,
   chain: { cluster: SolanaCluster; rpcUrl: string; currentBlockHeight: bigint | null }
 ): Promise<void> {
-  const { movement, leg } = item;
   if (status?.err) {
-    await failMovement(ledger, item, JSON.stringify(status.err));
+    await failMovement(ledger, movement, JSON.stringify(status.err));
     return;
   }
   if (status?.confirmationStatus === "finalized") {
@@ -152,7 +139,7 @@ async function reconcileMovement(
     // requires the column for any settled row — the writer COALESCEs it, so a
     // movement that did report one keeps the moment it was actually observed.
     const observedAt = new Date().toISOString();
-    await advanceTransaction(ledger, item, {
+    await advanceTransaction(ledger, movement, {
       toStatus: "finalized",
       confirmedAt: observedAt,
       settledAt: observedAt,
@@ -162,30 +149,30 @@ async function reconcileMovement(
   if (status?.confirmationStatus === "confirmed") {
     // Optimistic commitment. Recorded, and kept in the queue: a later tick asks
     // the chain again until it finalizes.
-    if ((leg?.status ?? movement.status) === "confirmed") return;
-    await advanceTransaction(ledger, item, {
+    if (movement.status === "confirmed") return;
+    await advanceTransaction(ledger, movement, {
       toStatus: "confirmed",
       confirmedAt: new Date().toISOString(),
     });
     return;
   }
   if (status !== null) {
-    await markSubmitted(ledger, item);
+    await markSubmitted(ledger, movement);
     return;
   }
   // A confirmed row whose signature has aged out of the RPC's history is NOT a
   // failure: the transaction demonstrably landed. Leave it for a later tick
   // rather than expiring it on the blockhash rule below, which only ever applied
   // to a transaction that never made it on chain.
-  if ((leg?.status ?? movement.status) === "confirmed") return;
+  if (movement.status === "confirmed") return;
 
   // Nullable at the type level because `earn_movements` holds custodial rows too;
   // NOT NULL for every vault row by 0062's model-shape constraint, which is all
   // the outbox scan returns. Proven rather than coerced: rebroadcasting empty
   // bytes, or expiring a row against a missing block height, would both be
   // decisions made from a value that is not there.
-  const signedTransaction = leg?.signed_transaction ?? movement.signed_transaction;
-  const lastValidBlockHeight = leg?.last_valid_block_height ?? movement.last_valid_block_height;
+  const signedTransaction = movement.signed_transaction;
+  const lastValidBlockHeight = movement.last_valid_block_height;
   if (signedTransaction === null || lastValidBlockHeight === null) {
     throw new Error(
       `Earn vault movement ${movement.id} is missing the signed transaction it must be reconciled from`
@@ -196,47 +183,10 @@ async function reconcileMovement(
     chain.currentBlockHeight !== null &&
     chain.currentBlockHeight > BigInt(lastValidBlockHeight)
   ) {
-    await failMovement(ledger, item, "Transaction blockhash expired before confirmation");
+    await failMovement(ledger, movement, "Transaction blockhash expired before confirmation");
     return;
   }
   if (chain.currentBlockHeight === null) return;
-
-  // WITHDRAWAL LEG ORDERING (0066). A later leg's instructions may consume
-  // state its predecessor creates, so a leg is (re)broadcast only after the
-  // leg before it reached commitment — the same rule the request-path
-  // submitter follows, applied here so a resumed group cannot land out of
-  // order. A failed predecessor fails this leg too, because its instructions
-  // were built against state that will now never exist; the shares it would
-  // have redeemed remain in the wallet, immediately re-withdrawable. This gate
-  // deliberately runs AFTER the expiry check — an expired leg can never land,
-  // whatever its predecessor does.
-  if (leg && leg.leg_index > 0) {
-    const predecessor = await ledger.getVaultWithdrawalLegByIndex({
-      movementId: movement.id,
-      legIndex: leg.leg_index - 1,
-    });
-    if (!predecessor) {
-      // 0066's leg-shape check and the group insert's atomicity make this
-      // unreachable; loud, because broadcasting without the gate could land a
-      // leg before its dependency.
-      throw new Error(
-        `Earn vault withdrawal leg ${movement.id} has no predecessor row to order against`
-      );
-    }
-    if (predecessor.status === "failed") {
-      await failMovement(
-        ledger,
-        item,
-        `Predecessor withdrawal leg ${predecessor.signature} failed`
-      );
-      return;
-    }
-    if (predecessor.status !== "confirmed" && predecessor.status !== "finalized") {
-      // Not this leg's turn yet. Leave it recorded; a later tick reconsiders
-      // once the predecessor commits, fails, or expires.
-      return;
-    }
-  }
 
   await broadcastVaultTransaction(env, {
     cluster: chain.cluster,
@@ -244,30 +194,30 @@ async function reconcileMovement(
     bytes: Uint8Array.from(Buffer.from(signedTransaction, "base64")),
     rpcUrl: chain.rpcUrl,
   });
-  await markSubmitted(ledger, item);
+  await markSubmitted(ledger, movement);
 }
 
 async function markSubmitted(
   ledger: ReturnType<typeof createPostgresEarnMovementsRepository>,
-  item: VaultReconciliationItem
+  movement: EarnMovementRow
 ): Promise<void> {
   // Only an unbroadcast intent can become `submitted`; anything further along
   // would lose its CAS anyway, and skipping the round trip keeps the sweep quiet.
-  if ((item.leg?.status ?? item.movement.status) !== "requested") return;
-  await advanceTransaction(ledger, item, { toStatus: "submitted" });
+  if (movement.status !== "requested") return;
+  await advanceTransaction(ledger, movement, { toStatus: "submitted" });
 }
 
 async function failMovement(
   ledger: ReturnType<typeof createPostgresEarnMovementsRepository>,
-  item: VaultReconciliationItem,
+  movement: EarnMovementRow,
   reason: string
 ): Promise<void> {
-  await advanceTransaction(ledger, item, { toStatus: "failed", failureReason: reason });
+  await advanceTransaction(ledger, movement, { toStatus: "failed", failureReason: reason });
 }
 
 async function advanceTransaction(
   ledger: ReturnType<typeof createPostgresEarnMovementsRepository>,
-  item: VaultReconciliationItem,
+  movement: EarnMovementRow,
   change: {
     toStatus: string;
     failureReason?: string;
@@ -275,18 +225,9 @@ async function advanceTransaction(
     settledAt?: string;
   }
 ): Promise<void> {
-  if (item.leg) {
-    await ledger.advanceVaultWithdrawalLeg({
-      movementId: item.movement.id,
-      legIndex: item.leg.leg_index,
-      organizationId: item.movement.organization_id,
-      ...change,
-    });
-    return;
-  }
   await ledger.advanceVaultMovement({
-    movementId: item.movement.id,
-    organizationId: item.movement.organization_id,
+    movementId: movement.id,
+    organizationId: movement.organization_id,
     ...change,
   });
 }

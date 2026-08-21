@@ -28,7 +28,6 @@ import {
   type EarnVaultPositionsPage,
   type EarnVaultWithdrawal,
   type EarnVaultWithdrawalRequest,
-  type EarnVaultWithdrawalTransaction,
   type ListEarnProgramsResponse,
   type ListEarnProgramWithdrawalsResponse,
   type ListEarnStrategiesResponse,
@@ -64,7 +63,6 @@ export type {
   EarnVaultPositionsPage,
   EarnVaultWithdrawal,
   EarnVaultWithdrawalRequest,
-  EarnVaultWithdrawalTransaction,
   ListEarnProgramsResponse,
   ListEarnProgramWithdrawalsResponse,
 } from "@sdp/types";
@@ -894,29 +892,19 @@ export function useEarnVaultDepositOutcomeToast(
  * schemas are: a field added or renamed in `@sdp/types` must fail typecheck
  * here rather than be silently stripped from a parsed leg.
  */
-const earnVaultWithdrawalTransactionSchema: z.ZodType<EarnVaultWithdrawalTransaction> = z.object({
-  index: z.number().int().nonnegative(),
-  status: z.enum(EARN_MOVEMENT_STATUSES.vault_direct),
-  signature: z.string(),
-  shares: z.string(),
-  failureReason: z.string().nullable(),
-  confirmedAt: z.string().nullable(),
-  settledAt: z.string().nullable(),
-});
-
 const earnVaultWithdrawalSchema: z.ZodType<EarnVaultWithdrawal> = z.object({
   movementId: z.string(),
   positionId: z.string(),
   provider: z.string(),
   providerReference: z.string(),
   status: z.enum(EARN_MOVEMENT_STATUSES.vault_direct),
+  signature: z.string(),
   shares: z.string(),
   shareMint: z.string(),
   failureReason: z.string().nullable(),
   createdAt: z.string(),
   confirmedAt: z.string().nullable(),
   settledAt: z.string().nullable(),
-  transactions: z.array(earnVaultWithdrawalTransactionSchema).min(1),
   replayed: z.boolean().optional(),
 });
 
@@ -990,7 +978,7 @@ const earnVaultWithdrawalResponseSchema = z.object({
 });
 
 /**
- * Read one recorded withdrawal leg. `undefined` for every unusable answer, and
+ * Read one recorded withdrawal. `undefined` for every unusable answer, and
  * deliberately NOT terminal — the caller keeps polling, because a read that
  * failed says nothing about whether the exit landed.
  */
@@ -1014,7 +1002,7 @@ const earnVaultWithdrawalsPageSchema = z.object({
 });
 
 /**
- * This workspace's recorded withdrawal legs, newest first. PAGES TO THE END
+ * This workspace's recorded withdrawals, newest first. PAGES TO THE END
  * and fails loudly rather than truncating, exactly like the deposits reader —
  * a silently short page here is an exit that stops being tracked.
  */
@@ -1053,7 +1041,7 @@ export async function fetchEarnVaultWithdrawals(
 }
 
 /**
- * The legs a given idempotency key produced, if any exist yet — the held-key
+ * The movement a given idempotency key produced, if one exists yet. The held-key
  * pre-flight for the approval path, with the same three-outcome contract as
  * the deposit's: collapsing `unavailable` into `absent` would let a failed
  * read reuse a spent key.
@@ -1077,7 +1065,7 @@ export async function fetchEarnVaultWithdrawalsByRequestId(
 }
 
 /**
- * The DISCOVERY tier for in-flight withdrawal legs — 30s, mirroring
+ * The DISCOVERY tier for in-flight withdrawals, 30s, mirroring
  * `useEarnVaultDeposits`, and the reason an exit signed before a reload, in
  * another tab, or unblocked by a policy approval minutes later becomes
  * visible (and watched) again.
@@ -1111,10 +1099,7 @@ const VAULT_WITHDRAWAL_OUTCOME_KEYS = {
   failed: "DashboardEarn.vaultWithdraw.outcomeFailed",
 } as const satisfies Record<"finalized" | "failed", MessageKey>;
 
-/**
- * Announce how one logical withdrawal ended. Internal transactions settle
- * independently, but the parent movement is the only user-facing lifecycle.
- */
+/** Announce how the recorded withdrawal movement ended. */
 export function useEarnVaultWithdrawalOutcomeToast(
   movementId: string | undefined,
   onSettled?: () => void

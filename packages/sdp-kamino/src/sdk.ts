@@ -4,7 +4,6 @@ import {
   KaminoVaultClient,
   KVaultGlobalConfig,
 } from "@kamino-finance/klend-sdk";
-import { EARN_VAULT_TRANSACTION_HEADROOM_BYTES } from "@sdp/earn/types";
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
 import type { Address, Instruction } from "@solana/kit";
 import Decimal from "decimal.js";
@@ -25,11 +24,9 @@ import type {
 } from "./types";
 import {
   decodeKvaultWithdrawShares,
-  planWithdrawBatches,
   type RoleTaggedInstruction,
   resolveBurnAllSentinel,
-  SOLANA_TRANSACTION_SIZE_LIMIT_BYTES,
-} from "./withdraw-batching";
+} from "./withdraw-instructions";
 
 /**
  * ════════════════════════════════════════════════════════════════════════════
@@ -175,9 +172,8 @@ function asInstructions(raw: readonly Kit2[]): readonly Instruction[] {
 /**
  * Build a deposit.
  *
- * Returned as a single batch: a deposit touches one vault and creates at most
- * the user's share ATA, which has always fit one transaction in measurement.
- * Withdrawals are the multi-batch case (see below).
+ * A deposit touches one vault and creates at most the user's share ATA. The
+ * complete instruction sequence is compiled as one transaction.
  */
 export async function buildKaminoDepositPlan(
   runtime: KaminoRuntime,
@@ -241,7 +237,7 @@ export async function buildKaminoDepositPlan(
 
   return assertPlanTargetsCluster({
     cluster: config.cluster,
-    instructions: [instructions],
+    instructions,
     lookupTables: [],
     assetIdentity,
     accepted: {
@@ -252,32 +248,16 @@ export async function buildKaminoDepositPlan(
 }
 
 /**
- * Build a withdrawal as TRANSACTION-SIZED batches — the exit half of the
- * vault-direct model.
+ * Build one complete withdrawal transaction.
  *
- * The pinned SDK documents that `withdrawIxs` returns "one or multiple withdraw
- * instructions, based on how many reserves it's needed to withdraw from. This
- * might have to be split in multiple transactions", and each withdraw carries
- * the vault's full reserve remaining-accounts list. Honouring the plan contract
- * therefore takes three steps, all here:
+ * Kamino may return several withdraw instructions, but they remain one atomic
+ * instruction sequence. The vault lookup table travels with the plan so the
+ * API can compress the final transaction, including its idempotency memo. The
+ * API rejects the final signed bytes if they exceed Solana's packet limit.
  *
- * 1. **The vault's published lookup table is loaded** (`VaultState.
- *    vaultLookupTable`) and applied to sizing, best-effort — a vault whose
- *    table is unset or unreadable still gets a plan, just one that splits
- *    earlier. The table travels on `lookupTables` so the API compiles with the
- *    same compression this sizing assumed.
- * 2. **Batches are compile-measured** against the packet limit minus the API's
- *    reserved metadata headroom, and split only at boundaries where every
- *    resulting transaction still redeems shares — an unstake or an ATA
- *    creation must never land in a transaction without its withdraw. An exit
- *    that cannot satisfy that is REFUSED at build time, not discovered at
- *    submit time.
- * 3. **Each batch's exact share quantity is decoded from its own
- *    instructions** (`sharesAmount: u64`) and returned as `transactionShares`,
- *    so the API can ledger one movement row per transaction leg with the
- *    quantity that leg actually encodes. The decoded total must equal the
- *    accepted request exactly, or the plan is refused — a bundle that encodes
- *    a different quantity than it was asked for must never be signed.
+ * Every share-redeeming instruction is decoded and the total must exactly match
+ * the accepted request. This prevents the ledger from claiming a quantity that
+ * differs from what the signed transaction can move.
  *
  * NOT covered, deliberately (see CLAUDE.md → known gaps): withdrawal penalties
  * are not quoted, and shares staked in a vault farm are not unstaked — the
@@ -412,31 +392,10 @@ export async function buildKaminoWithdrawPlan(
     );
   }
 
-  const batches = planWithdrawBatches({
-    instructions: tagged,
-    feePayer: input.owner.address,
-    lookupTables,
-    maxTransactionBytes:
-      SOLANA_TRANSACTION_SIZE_LIMIT_BYTES - EARN_VAULT_TRANSACTION_HEADROOM_BYTES,
-  });
-  for (const batch of batches) {
-    // The batcher guarantees a withdraw-role instruction per batch; this
-    // asserts the stronger fact the ledger needs — every leg moves something.
-    if (batch.sharesBaseUnits <= 0n) {
-      throw new SdpKaminoError(
-        "VAULT_UNREADABLE",
-        "Kamino withdraw plan produced a transaction that redeems zero shares"
-      );
-    }
-  }
-
   return assertPlanTargetsCluster({
     cluster: config.cluster,
-    instructions: batches.map((batch) => batch.instructions),
+    instructions: tagged.map((entry) => entry.instruction),
     lookupTables: Object.keys(lookupTables) as Address[],
-    transactionShares: batches.map((batch) =>
-      formatDecimalAmount(batch.sharesBaseUnits, shareDecimals)
-    ),
     assetIdentity,
     accepted: { shares: acceptedShares },
   });

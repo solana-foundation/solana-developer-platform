@@ -1,33 +1,13 @@
-import type {
-  AddressesByLookupTableAddress,
-  Blockhash,
-  Instruction,
-  TransactionSigner,
-} from "@solana/kit";
-import {
-  appendTransactionMessageInstructions,
-  compileTransaction,
-  compressTransactionMessageUsingAddressLookupTables,
-  createTransactionMessage,
-  getTransactionEncoder,
-  pipe,
-  setTransactionMessageFeePayer,
-  setTransactionMessageLifetimeUsingBlockhash,
-} from "@solana/kit";
+import type { Instruction } from "@solana/kit";
 import { SdpKaminoError } from "./errors";
 
 /**
- * Transaction-sized batching for a K-Vault exit.
+ * Instruction verification for a K-Vault exit.
  *
  * Deliberately OUTSIDE the klend-sdk firewall (`./sdk.ts`): everything here is
- * `@solana/kit` 6.8 over already-built instructions, so the batching rules are
- * unit-testable with synthetic instructions and no 13MB SDK load. `sdk.ts`
- * tags each instruction with its protocol role and decoded share quantity;
- * this module only decides where the transaction boundaries fall.
+ * `@solana/kit` 6.8 over already-built instructions, so share decoding and
+ * burn-all rewriting are unit-testable with no 13MB SDK load.
  */
-
-/** Solana's hard packet ceiling for one serialized transaction. */
-export const SOLANA_TRANSACTION_SIZE_LIMIT_BYTES = 1232;
 
 /**
  * The protocol role of one instruction in a withdraw bundle, in execution
@@ -47,19 +27,6 @@ export interface RoleTaggedInstruction {
    */
   sharesBaseUnits: bigint | null;
 }
-
-/** One transaction's worth of an exit, with the exact shares it redeems. */
-export interface WithdrawBatch {
-  instructions: Instruction[];
-  sharesBaseUnits: bigint;
-}
-
-/**
- * All-ones base58 decodes to 32 zero bytes — shaped like a real blockhash, so
- * a message can be compiled for MEASUREMENT before any RPC read. Never signed
- * or broadcast; the API fetches a live blockhash when it compiles for real.
- */
-const PLACEHOLDER_BLOCKHASH = "11111111111111111111111111111111" as Blockhash;
 
 /**
  * Anchor discriminators (sha256("global:<name>")[0..8]) for the two kvault
@@ -188,118 +155,4 @@ export function decodeKvaultWithdrawShares(
     value = (value << 8n) | BigInt(data[8 + index] as number);
   }
   return value;
-}
-
-/**
- * The exact wire size one transaction would have: compiled v0 message plus the
- * signature section for its (single) required signer. Uses the same kit
- * compilation the API's signer uses, so a batch measured here cannot compile
- * to a different size there.
- */
-export function measureTransactionBytes(input: {
-  instructions: readonly Instruction[];
-  feePayer: TransactionSigner["address"];
-  lookupTables: AddressesByLookupTableAddress;
-}): number {
-  const message = pipe(
-    createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayer(input.feePayer, m),
-    (m) =>
-      setTransactionMessageLifetimeUsingBlockhash(
-        { blockhash: PLACEHOLDER_BLOCKHASH, lastValidBlockHeight: 0n },
-        m
-      ),
-    (m) => appendTransactionMessageInstructions([...input.instructions], m),
-    (m) =>
-      Object.keys(input.lookupTables).length > 0
-        ? compressTransactionMessageUsingAddressLookupTables(m, input.lookupTables)
-        : m
-  );
-  return getTransactionEncoder().encode(compileTransaction(message)).length;
-}
-
-function batchTooLarge(kind: string): SdpKaminoError {
-  return new SdpKaminoError(
-    "VAULT_UNREADABLE",
-    `Kamino withdraw plan cannot be batched: ${kind} exceeds the transaction size budget even ` +
-      "with the vault lookup table applied. Refusing to build a plan whose submission would fail."
-  );
-}
-
-/**
- * Split an ordered withdraw bundle into transaction-sized batches.
- *
- * Instruction ORDER is preserved everywhere — the SDK documents unstake before
- * withdraw before cleanup, and later batches are submitted only after earlier
- * ones land. Two invariants beyond size:
- *
- * - **Every batch carries at least one `withdraw`.** This is the atomicity rule
- *   ("an unstake must never land without its withdraw") stated in its strong
- *   form, and it is also what makes every batch a real money movement the
- *   ledger can record: a leg that redeems zero shares would be unledgerable and
- *   unexplainable. When a prefix (unstake, ATA creation) plus a single withdraw
- *   cannot fit one transaction, the plan is REFUSED rather than weakened.
- * - **Nothing is dropped or reordered to fit.** A single instruction larger
- *   than the budget fails the whole plan; the fix is the lookup table, never
- *   a silent omission.
- *
- * `maxTransactionBytes` is the caller's budget: the packet limit minus the
- * API's reserved headroom (see `EARN_VAULT_TRANSACTION_HEADROOM_BYTES`).
- */
-export function planWithdrawBatches(input: {
-  instructions: readonly RoleTaggedInstruction[];
-  feePayer: TransactionSigner["address"];
-  lookupTables: AddressesByLookupTableAddress;
-  maxTransactionBytes: number;
-}): WithdrawBatch[] {
-  const { feePayer, lookupTables, maxTransactionBytes } = input;
-  if (input.instructions.length === 0) {
-    throw new SdpKaminoError("VAULT_UNREADABLE", "Kamino withdraw bundle carried no instructions");
-  }
-
-  const fits = (candidate: readonly RoleTaggedInstruction[]) =>
-    measureTransactionBytes({
-      instructions: candidate.map((tagged) => tagged.instruction),
-      feePayer,
-      lookupTables,
-    }) <= maxTransactionBytes;
-
-  const closable = (batch: readonly RoleTaggedInstruction[]) =>
-    batch.some((tagged) => tagged.role === "withdraw");
-
-  const batches: RoleTaggedInstruction[][] = [];
-  let current: RoleTaggedInstruction[] = [];
-
-  for (const tagged of input.instructions) {
-    if (fits([...current, tagged])) {
-      current.push(tagged);
-      continue;
-    }
-    if (current.length === 0) {
-      throw batchTooLarge("a single instruction");
-    }
-    if (!closable(current)) {
-      // Closing here would strand this batch's unstake or preparation work in
-      // a transaction that redeems nothing, which the invariant forbids.
-      throw batchTooLarge("a transaction that would redeem no shares");
-    }
-    batches.push(current);
-    current = [tagged];
-    if (!fits(current)) {
-      throw batchTooLarge("a single instruction");
-    }
-  }
-  if (current.length > 0) {
-    if (!closable(current)) {
-      // A trailing cleanup-only transaction is refused for the same reason:
-      // cleanup must ride with the final withdraw or the plan is not built.
-      throw batchTooLarge("a transaction that would redeem no shares");
-    }
-    batches.push(current);
-  }
-
-  return batches.map((batch) => ({
-    instructions: batch.map((tagged) => tagged.instruction),
-    sharesBaseUnits: batch.reduce((sum, tagged) => sum + (tagged.sharesBaseUnits ?? 0n), 0n),
-  }));
 }

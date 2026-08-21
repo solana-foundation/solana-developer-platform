@@ -7,7 +7,6 @@ import type {
   EarnVaultWithdrawal,
   EarnVaultWithdrawalResponse,
   EarnVaultWithdrawalsPage,
-  EarnVaultWithdrawalTransaction,
   SdpEnvironment,
 } from "@sdp/types";
 import {
@@ -22,7 +21,6 @@ import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
   type EarnPositionRow,
-  type EarnVaultWithdrawalLegRow,
 } from "@/db/repositories/earn-movements.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
@@ -1290,18 +1288,13 @@ export async function findEarnVaultWithdrawalIdempotentKeyReplay(
     ) {
       throw conflict("Idempotency key already used with different request payload");
     }
-    const legs = await repo.listVaultWithdrawalLegs({
-      organizationId: resolved.auth.organizationId,
-      movementId: movement.id,
-    });
-    if (legs.length === 0) {
+    if (!movement.signature) {
       throw internalError(`Replayed withdrawal ${movement.id} has no transaction details`);
     }
     return success(
       c,
       buildEarnVaultWithdrawalResponse({
         movement,
-        legs,
         replayed: true,
       })
     );
@@ -1319,9 +1312,8 @@ export async function findEarnVaultWithdrawalIdempotentKeyReplay(
 
 /**
  * POST /v1/earn/vault-withdrawals — exit a vault position, signed by the
- * custody wallet that holds it. Build → simulate → sign every leg → record
- * every leg → broadcast in order; the reconciliation sweep finishes whatever
- * the request budget could not.
+ * custody wallet that holds it. Build, simulate, sign, record, then broadcast;
+ * the reconciliation sweep finishes an ambiguous send.
  */
 export async function createEarnVaultWithdrawal(
   c: ValidatedBodyContext<typeof earnVaultWithdrawalSchema>
@@ -1362,10 +1354,9 @@ export async function createEarnVaultWithdrawal(
 
   if (result.replayed && approvedWalletOperationId(c)) {
     // Sequential replays do not pass through the insert transaction, so fence
-    // the approved operation before returning their durable outcome — the
-    // deposit's rule, group-shaped.
+    // the approved operation before returning its durable outcome.
     await beginApprovedWalletOperationEffect(c);
-    if (result.legs.some((leg) => !leg.signature || leg.status === "failed")) {
+    if (!result.movement.signature || result.movement.status === "failed") {
       throw conflict(
         "Approved vault withdrawal execution is incomplete and requires manual reconciliation"
       );
@@ -1376,7 +1367,6 @@ export async function createEarnVaultWithdrawal(
     c,
     buildEarnVaultWithdrawalResponse({
       movement: result.movement,
-      legs: result.legs,
       replayed: result.replayed,
     })
   );
@@ -1384,26 +1374,21 @@ export async function createEarnVaultWithdrawal(
 
 function buildEarnVaultWithdrawalResponse(input: {
   movement: EarnMovementRow;
-  legs: EarnVaultWithdrawalLegRow[];
   replayed: boolean;
 }): { withdrawal: EarnVaultWithdrawal } {
   return {
-    withdrawal: toEarnVaultWithdrawal(input.movement, input.legs, input.replayed),
+    withdrawal: toEarnVaultWithdrawal(input.movement, input.replayed),
   };
 }
 
 /**
- * Shared row → wire mapping for withdrawal legs, the list and detail's single
- * source. Speaks the LEDGER's own status vocabulary — this surface postdates
+ * Shared row to wire mapping for withdrawal reads. Speaks the ledger's own
+ * status vocabulary. This surface postdates
  * the unified ledger, so there is no legacy client to translate for, and
  * `finalized` finally has its own name on the wire.
  */
-function toEarnVaultWithdrawal(
-  movement: EarnMovementRow,
-  legs: EarnVaultWithdrawalLegRow[],
-  replayed?: boolean
-): EarnVaultWithdrawal {
-  if (!movement.vault_address || legs.length === 0) {
+function toEarnVaultWithdrawal(movement: EarnMovementRow, replayed?: boolean): EarnVaultWithdrawal {
+  if (!movement.vault_address || !movement.signature) {
     throw internalError(`Earn vault withdrawal ${movement.id} is missing execution details`);
   }
   return {
@@ -1412,33 +1397,19 @@ function toEarnVaultWithdrawal(
     provider: movement.provider,
     providerReference: movement.vault_address,
     status: movement.status as EarnVaultWithdrawal["status"],
+    signature: movement.signature,
     shares: movement.amount_requested,
     shareMint: movement.denomination,
     failureReason: movement.failure_reason,
     createdAt: movement.created_at,
     confirmedAt: movement.confirmed_at,
     settledAt: movement.settled_at,
-    transactions: legs.map(toEarnVaultWithdrawalTransaction),
     ...(replayed === undefined ? {} : { replayed }),
   };
 }
 
-function toEarnVaultWithdrawalTransaction(
-  leg: EarnVaultWithdrawalLegRow
-): EarnVaultWithdrawalTransaction {
-  return {
-    index: leg.leg_index,
-    status: leg.status as EarnVaultWithdrawalTransaction["status"],
-    signature: leg.signature,
-    shares: leg.shares,
-    failureReason: leg.failure_reason,
-    confirmedAt: leg.confirmed_at,
-    settledAt: leg.settled_at,
-  };
-}
-
 /**
- * GET /v1/earn/vault-withdrawals/:movementId — one recorded withdrawal leg.
+ * GET /v1/earn/vault-withdrawals/:movementId - one recorded withdrawal.
  *
  * Same contract as the deposit detail read, mirrored: NO provider gate (it
  * reports on an exit already signed from the org's own wallet), and the same
@@ -1472,20 +1443,16 @@ export async function getEarnVaultWithdrawal(c: AppContext) {
     throw notFound("Earn vault withdrawal");
   }
 
-  const legs = await repo.listVaultWithdrawalLegs({
-    organizationId: auth.organizationId,
-    movementId: movement.id,
-  });
   const response: EarnVaultWithdrawalResponse = {
-    withdrawal: toEarnVaultWithdrawal(movement, legs),
+    withdrawal: toEarnVaultWithdrawal(movement),
   };
   return success(c, response);
 }
 
 /**
- * GET /v1/earn/vault-withdrawals — this workspace's recorded withdrawal legs,
+ * GET /v1/earn/vault-withdrawals - this workspace's recorded withdrawals,
  * newest first: the deposits list's mirror, with the same discovery duty
- * (`?requestId=` finds a whole leg group, including one an approval executor
+ * (`?requestId=` finds a movement, including one an approval executor
  * created after the original request was parked) and the same recovery filter
  * (`?settled=false`). Wire statuses are the ledger's own — `settled` here
  * means the LEDGER's terminal set, where `confirmed` is still in flight.
@@ -1508,8 +1475,7 @@ export async function listEarnVaultWithdrawals(c: AppContext) {
   const scopedWalletIds = new Set(custodyWalletIds);
   const repo = createPostgresEarnMovementsRepository(getDb(c.env));
 
-  // The single-key lookup resolves one logical withdrawal. Scoping is applied
-  // to the parent before its internal transactions are loaded.
+  // The single-key lookup resolves one withdrawal movement.
   if (query.requestId !== undefined) {
     const movement = await repo.findVaultMovementByRequestId({
       organizationId: auth.organizationId,
@@ -1522,15 +1488,8 @@ export async function listEarnVaultWithdrawals(c: AppContext) {
       isMovementInProject(movement, projectId) &&
       movement.custody_wallet_id !== null &&
       scopedWalletIds.has(movement.custody_wallet_id);
-    const legs =
-      visible && movement
-        ? await repo.listVaultWithdrawalLegs({
-            organizationId: auth.organizationId,
-            movementId: movement.id,
-          })
-        : [];
     return success(c, {
-      withdrawals: visible && movement ? [toEarnVaultWithdrawal(movement, legs)] : [],
+      withdrawals: visible && movement ? [toEarnVaultWithdrawal(movement)] : [],
       hasMore: false,
       nextCursor: null,
     });
@@ -1549,17 +1508,7 @@ export async function listEarnVaultWithdrawals(c: AppContext) {
 
   const last = rows.at(-1);
   const nextCursor = hasMore && last ? encodeKeysetCursor(last.created_at, last.id) : null;
-  const withdrawals = await Promise.all(
-    rows.map(async (movement) =>
-      toEarnVaultWithdrawal(
-        movement,
-        await repo.listVaultWithdrawalLegs({
-          organizationId: auth.organizationId,
-          movementId: movement.id,
-        })
-      )
-    )
-  );
+  const withdrawals = rows.map((movement) => toEarnVaultWithdrawal(movement));
   const response: EarnVaultWithdrawalsPage = {
     withdrawals,
     hasMore,

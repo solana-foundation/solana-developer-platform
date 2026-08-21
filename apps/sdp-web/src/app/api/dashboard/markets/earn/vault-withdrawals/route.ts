@@ -18,9 +18,8 @@ export async function POST(request: Request) {
 }
 
 /**
- * This workspace's recorded withdrawal legs, so the dashboard can re-derive
- * what is still in flight after a reload — the deposits list's mirror, with
- * `?requestId=` resolving a whole leg group. No `upstreamHeaders`: unlike the
+ * This workspace's recorded withdrawals, so the dashboard can re-derive what
+ * is still in flight after a reload. No `upstreamHeaders`: unlike the
  * POST above, this read accepts no client-owned transport metadata.
  */
 export async function GET(request: Request) {

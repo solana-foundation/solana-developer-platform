@@ -42,7 +42,7 @@ import type { VaultDeadline } from "./vault-deadline";
  */
 
 /** A plain-data instruction from the provider contract, back in kit form. */
-function toKitInstruction(instruction: EarnVaultTransactionPlan["transactions"][number][number]) {
+function toKitInstruction(instruction: EarnVaultTransactionPlan["instructions"][number]) {
   return {
     programAddress: address(instruction.programAddress),
     accounts: instruction.accounts.map((account) => ({
@@ -61,16 +61,14 @@ export type VaultFeeMode =
 const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 
 /**
- * Bind the caller's idempotency key into every transaction of a plan.
+ * Bind the caller's idempotency key into the transaction plan.
  *
  * Deterministic Solana signing plus a shared recent blockhash would make
  * otherwise independent requests produce the same signature. The memo gives
  * each ledger intent a unique on-chain identity while retries of the same key
  * remain byte-for-byte equivalent. One helper for both directions so the
- * format cannot drift — and so the size stays inside the headroom every plan
- * batch reserves for it (`EARN_VAULT_TRANSACTION_HEADROOM_BYTES` in
- * `@sdp/earn`): the worst legal key is 255 bytes, and a memo instruction
- * carrying it measures within that reservation.
+ * format cannot drift. The final signed transaction is measured after this
+ * memo and any lookup-table compression are applied.
  */
 export function appendVaultRequestMemo(
   plan: EarnVaultTransactionPlan,
@@ -84,7 +82,7 @@ export function appendVaultRequestMemo(
   };
   return {
     ...plan,
-    transactions: plan.transactions.map((batch) => [...batch, memo]),
+    instructions: [...plan.instructions, memo],
   };
 }
 
@@ -190,31 +188,15 @@ function applyLookupTables<TMessage>(
   ) as TMessage;
 }
 
-/**
- * Sign every transaction a plan carries, WITHOUT sending any of them.
- *
- * Split from the broadcast so the caller can durably record every signature
- * before any transaction can possibly land. That ordering is the only thing
- * that makes an ambiguous send recoverable: once bytes are on the wire, a
- * timeout, a crash or a lost DB write leaves a transaction that may be on chain
- * with money moved, and without the signature there is nothing to reconcile it
- * against — SDP would not know the transfer exists.
- *
- * All batches share ONE blockhash read: a multi-leg plan is one intent, and one
- * expiry window for the whole group is what lets the reconciliation sweep
- * reason about "this group can no longer land" leg by leg with the same rule.
- *
- * Works for both fee modes. Sponsored signing is deliberately sign-only: the
- * custody owner signs first, the fee-payment port adds the fee-payer signature
- * without broadcasting, and the fully signed bytes plus deterministic
- * signature return to the caller for durable intent persistence.
- */
-export async function signVaultPlanTransactions(
+const SOLANA_TRANSACTION_SIZE_LIMIT_BYTES = 1232;
+
+/** Sign exactly one complete vault transaction without broadcasting it. */
+export async function signVaultPlan(
   env: Env,
   input: SignVaultPlanInput
-): Promise<SignedVaultTransaction[]> {
+): Promise<SignedVaultTransaction> {
   assertExpectedPlan(input.plan, input.cluster, input.expectedAssetIdentity);
-  const batches = planBatches(input.plan).map((batch) => batch.map(toKitInstruction));
+  const instructions = planInstructions(input.plan).map(toKitInstruction);
   await verifyVaultRpc(env, input);
   const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
   const [lookupTables, { blockhash, lastValidBlockHeight }] = await Promise.all([
@@ -224,85 +206,59 @@ export async function signVaultPlanTransactions(
     ),
   ]);
 
-  const signedTransactions: SignedVaultTransaction[] = [];
-  for (const instructions of batches) {
-    let signedBytes: Uint8Array;
-    if (input.fee.kind === "sponsored") {
-      const { feePayment } = input.fee;
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- custody signing is intentionally serialized because signer ports may be stateful or rate-limited.
-      const feePayer = await input.deadline.run("Resolving the sponsored fee payer", () =>
-        feePayment.getFeePayer()
-      );
-      const message = pipe(
-        createTransactionMessage({ version: 0 }),
-        (m) => setTransactionMessageFeePayer(feePayer, m),
-        (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-        (m) => appendTransactionMessageInstructions(instructions, m),
-        (m) => applyLookupTables(m, lookupTables),
-        (m) => addSignersToTransactionMessage([input.owner], m)
-      );
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- preserve signer ordering across transaction legs.
-      const ownerSigned = await input.deadline.run("Signing the vault transaction", () =>
-        partiallySignTransactionMessageWithSigners(message)
-      );
-      const ownerSignedBytes = new Uint8Array(getTransactionEncoder().encode(ownerSigned));
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- fee-payer signing depends on the owner-signed bytes and stays ordered across legs.
-      signedBytes = await input.deadline.run("Signing the sponsored vault fee", () =>
-        feePayment.signAsFeePayer(ownerSignedBytes)
-      );
-    } else {
-      const message = pipe(
-        createTransactionMessage({ version: 0 }),
-        (m) => setTransactionMessageFeePayerSigner(input.owner, m),
-        (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-        (m) => appendTransactionMessageInstructions(instructions, m),
-        (m) => applyLookupTables(m, lookupTables),
-        (m) => addSignersToTransactionMessage([input.owner], m)
-      );
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- preserve signer ordering across transaction legs.
-      const signed = await input.deadline.run("Signing the vault transaction", () =>
-        signTransactionMessageWithSigners(message)
-      );
-      signedBytes = new Uint8Array(getTransactionEncoder().encode(signed));
-    }
-
-    const signed = getTransactionDecoder().decode(signedBytes);
-    if (
-      signed.signatures[input.owner.address] === null ||
-      signed.signatures[input.owner.address] === undefined
-    ) {
-      throw new Error("Vault transaction is missing the custody-owner signature");
-    }
-    signedTransactions.push({
-      bytes: signedBytes,
-      signature: getSignatureFromTransaction(signed),
-      lastValidBlockHeight: String(lastValidBlockHeight),
-    });
+  let signedBytes: Uint8Array;
+  if (input.fee.kind === "sponsored") {
+    const { feePayment } = input.fee;
+    const feePayer = await input.deadline.run("Resolving the sponsored fee payer", () =>
+      feePayment.getFeePayer()
+    );
+    const message = pipe(
+      createTransactionMessage({ version: 0 }),
+      (m) => setTransactionMessageFeePayer(feePayer, m),
+      (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+      (m) => appendTransactionMessageInstructions(instructions, m),
+      (m) => applyLookupTables(m, lookupTables),
+      (m) => addSignersToTransactionMessage([input.owner], m)
+    );
+    const ownerSigned = await input.deadline.run("Signing the vault transaction", () =>
+      partiallySignTransactionMessageWithSigners(message)
+    );
+    const ownerSignedBytes = new Uint8Array(getTransactionEncoder().encode(ownerSigned));
+    signedBytes = await input.deadline.run("Signing the sponsored vault fee", () =>
+      feePayment.signAsFeePayer(ownerSignedBytes)
+    );
+  } else {
+    const message = pipe(
+      createTransactionMessage({ version: 0 }),
+      (m) => setTransactionMessageFeePayerSigner(input.owner, m),
+      (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+      (m) => appendTransactionMessageInstructions(instructions, m),
+      (m) => applyLookupTables(m, lookupTables),
+      (m) => addSignersToTransactionMessage([input.owner], m)
+    );
+    const signed = await input.deadline.run("Signing the vault transaction", () =>
+      signTransactionMessageWithSigners(message)
+    );
+    signedBytes = new Uint8Array(getTransactionEncoder().encode(signed));
   }
-  return signedTransactions;
-}
 
-/**
- * The single-transaction path (deposits). A deposit plan never legitimately
- * carries more than one batch, and signing several under a caller that records
- * only one movement row would broadcast money the ledger cannot see — so the
- * old submitter refusal survives here, at the same seam, for the path that
- * still needs it.
- */
-export async function signVaultPlan(
-  env: Env,
-  input: SignVaultPlanInput
-): Promise<SignedVaultTransaction> {
-  if (input.plan.transactions.length > 1) {
+  if (signedBytes.length > SOLANA_TRANSACTION_SIZE_LIMIT_BYTES) {
     throw new Error(
-      `Vault plan needs ${input.plan.transactions.length} transactions; this path signs exactly one`
+      `Vault transaction is ${signedBytes.length} bytes; Solana allows at most ${SOLANA_TRANSACTION_SIZE_LIMIT_BYTES}`
     );
   }
-  const [signed] = await signVaultPlanTransactions(env, input);
-  if (!signed) {
-    throw new Error("Vault plan carried no instructions");
+  const signed = getTransactionDecoder().decode(signedBytes);
+  if (
+    signed.signatures[input.owner.address] === null ||
+    signed.signatures[input.owner.address] === undefined
+  ) {
+    throw new Error("Vault transaction is missing the custody-owner signature");
   }
-  return signed;
+  return {
+    bytes: signedBytes,
+    signature: getSignatureFromTransaction(signed),
+    lastValidBlockHeight: String(lastValidBlockHeight),
+  };
 }
 
 /**
@@ -324,21 +280,12 @@ export async function broadcastVaultTransaction(
   );
 }
 
-/**
- * A plan's batches, validated for SHAPE: at least one batch, none empty. Size
- * and count are the BUILDER's contract (transaction-sized batches); this seam
- * only refuses the shapes nothing could legitimately produce.
- */
-function planBatches(plan: EarnVaultTransactionPlan) {
-  if (plan.transactions.length === 0) {
+/** Return the one complete transaction supported by vault execution. */
+function planInstructions(plan: EarnVaultTransactionPlan) {
+  if (plan.instructions.length === 0) {
     throw new Error("Vault plan carried no instructions");
   }
-  for (const batch of plan.transactions) {
-    if (batch.length === 0) {
-      throw new Error("Vault plan carried an empty transaction batch");
-    }
-  }
-  return plan.transactions;
+  return plan.instructions;
 }
 
 /**
@@ -349,11 +296,6 @@ function planBatches(plan: EarnVaultTransactionPlan) {
  * set or a changed vault config surfaces here as a readable program error
  * instead of a landed, failed transaction the customer still paid for.
  *
- * Only the FIRST batch is simulated, by necessity rather than economy: a later
- * leg's instructions consume state its predecessor creates (an unstake frees
- * the shares later withdraws burn), so simulating it against current chain
- * state would fail spuriously. Later legs are protected by ordered submission
- * — each broadcasts only after its predecessor is committed.
  */
 export async function simulateVaultPlan(
   env: Env,
@@ -364,9 +306,9 @@ export async function simulateVaultPlan(
   }
 ): Promise<{ ok: true } | { ok: false; error: string; logs: readonly string[] }> {
   assertExpectedPlan(input.plan, input.cluster, input.expectedAssetIdentity);
-  let batch: EarnVaultTransactionPlan["transactions"][number];
+  let instructions: EarnVaultTransactionPlan["instructions"];
   try {
-    [batch] = planBatches(input.plan);
+    instructions = planInstructions(input.plan);
   } catch (cause) {
     return {
       ok: false,
@@ -395,7 +337,7 @@ export async function simulateVaultPlan(
     createTransactionMessage({ version: 0 }),
     (m) => setTransactionMessageFeePayer(input.owner, m),
     (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-    (m) => appendTransactionMessageInstructions(batch.map(toKitInstruction), m),
+    (m) => appendTransactionMessageInstructions(instructions.map(toKitInstruction), m),
     (m) => applyLookupTables(m, lookupTables)
   );
 

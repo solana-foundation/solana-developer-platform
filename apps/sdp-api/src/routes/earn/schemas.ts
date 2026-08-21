@@ -322,15 +322,15 @@ export const earnVaultWithdrawalSchema = z.object({
     .optional(),
 });
 
-/** One recorded withdrawal leg; org-scoped lookup answers 404 for foreign rows. */
+/** One recorded withdrawal; org-scoped lookup answers 404 for foreign rows. */
 export const earnVaultWithdrawalParamsSchema = z.object({
   movementId: z.string().min(1).max(128),
 });
 
 /**
- * Bounded keyset page over recorded withdrawal legs, newest first — the same
+ * Bounded keyset page over recorded withdrawals, newest first. The same
  * shape and the same reasoning as the deposits list: `requestId` narrows to
- * the caller's own idempotency key (returning the WHOLE leg group, which is
+ * the caller's own idempotency key (returning the signed movement, which is
  * how an approval-gated withdrawal becomes findable), and `settled=false` is
  * what recovery asks.
  */

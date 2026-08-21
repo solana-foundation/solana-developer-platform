@@ -298,37 +298,7 @@ export interface EarnVaultWithdrawalRequest {
   shares: string;
 }
 
-/**
- * One recorded withdrawal transaction LEG.
- *
- * A vault exit may need several transactions (one withdraw instruction per
- * reserve the vault draws from), and each is recorded, broadcast and settled
- * individually — strictly in `legIndex` order, later legs only after earlier
- * ones commit. A single-transaction withdrawal is simply a group of one.
- *
- * This surface speaks the LEDGER's own vocabulary (`requested` … `finalized`),
- * unlike the older deposit DTO's legacy mapping: `confirmed` here is optimistic
- * commitment and NOT terminal — `finalized` is settlement.
- *
- * `shares` is the exact quantity this leg's transaction encodes, in SHARE
- * units. The tokens received are decided by the chain at execution and are
- * deliberately not stated here — a number SDP did not observe is worse than
- * none. Every field comes off the movement row itself, no catalogue and no
- * position join (the same exit-safety rule as the deposit record); the
- * position named by `positionId` carries the deposit-token mint for display.
- */
-export interface EarnVaultWithdrawalTransaction {
-  index: number;
-  status: EarnVaultDirectMovementStatus;
-  signature: string;
-  /** Exact literal shares encoded in this transaction. */
-  shares: string;
-  failureReason: string | null;
-  confirmedAt: string | null;
-  settledAt: string | null;
-}
-
-/** One logical vault withdrawal, regardless of transaction count. */
+/** One signed vault withdrawal movement. */
 export interface EarnVaultWithdrawal {
   movementId: string;
   positionId: string;
@@ -336,6 +306,7 @@ export interface EarnVaultWithdrawal {
   /** The vault's on-chain address — the instrument, not the payout. */
   providerReference: string;
   status: EarnVaultDirectMovementStatus;
+  signature: string;
   /** Total shares requested by the caller, decimal string, share units. */
   shares: string;
   shareMint: string;
@@ -343,8 +314,6 @@ export interface EarnVaultWithdrawal {
   createdAt: string;
   confirmedAt: string | null;
   settledAt: string | null;
-  /** Ordered internal execution detail, exposed for transaction diagnostics. */
-  transactions: EarnVaultWithdrawalTransaction[];
   /** Present on POST responses; true when the idempotency anchor was replayed. */
   replayed?: boolean;
 }

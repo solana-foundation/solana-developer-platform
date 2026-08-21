@@ -15,9 +15,10 @@ const UNSET_LOOKUP_TABLE = "11111111111111111111111111111111";
  *
  * BEST-EFFORT BY DESIGN: this is an exit path, and the lookup table is a
  * compression aid, not a correctness requirement. A vault whose table is
- * unset, missing, or unreadable still gets a plan — the batcher simply works
- * against uncompressed sizes and splits earlier. Failing the withdrawal for a
- * missing optimisation would invert the priority ADR 0002 sets.
+ * unset, missing, or unreadable still gets a plan. The API compiles it without
+ * compression and rejects it only if the final transaction exceeds Solana's
+ * packet limit. Failing earlier for a missing optimisation would invert the
+ * priority ADR 0002 sets.
  *
  * An EMPTY result map (`{}`) is the "no table" answer; callers must not carry
  * an empty table into a plan's `lookupTables`, because the API would then

@@ -6,7 +6,6 @@ import { getDb } from "@/db";
 import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
-  type EarnVaultWithdrawalLegRow,
   generateEarnPositionId,
 } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
@@ -29,7 +28,7 @@ vi.mock("@sdp/types/provider-access", async (importOriginal) => ({
 
 /**
  * `POST /v1/earn/vault-withdrawals` and its reads — the gates, the exit-safety
- * ASYMMETRY, and the leg-group read contract.
+ * ASYMMETRY, and the signed-movement read contract.
  *
  * The deliberate contrast with `earn.vault.test.ts` (the deposit route) is the
  * point of half of these: the deposit takes surfacing + entitlement +
@@ -187,34 +186,14 @@ function movementRow(overrides: Partial<EarnMovementRow> = {}): EarnMovementRow 
     source_address: VAULT,
     destination_address: WALLET_ADDRESS,
     provider_reference: null,
-    signature: null,
-    signed_transaction: null,
-    last_valid_block_height: null,
+    signature: `sig_${crypto.randomUUID()}`,
+    signed_transaction: "AQ==",
+    last_valid_block_height: "12345",
     request_id: crypto.randomUUID(),
     idempotency_fingerprint: "{}",
     provider_data: {},
     created_by: null,
     initiated_by_key_id: null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    ...overrides,
-  };
-}
-
-function transactionRow(
-  overrides: Partial<EarnVaultWithdrawalLegRow> = {}
-): EarnVaultWithdrawalLegRow {
-  return {
-    movement_id: "earn_movement_mock",
-    leg_index: 0,
-    shares: "10",
-    status: "submitted",
-    signature: `sig_${crypto.randomUUID()}`,
-    signed_transaction: "AQ==",
-    last_valid_block_height: "12345",
-    failure_reason: null,
-    confirmed_at: null,
-    settled_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     ...overrides,
@@ -261,7 +240,6 @@ beforeEach(async () => {
   withdrawFromVault.mockImplementation(async (_env, input) => ({
     position: { id: input.positionId },
     movement: movementRow({ position_id: input.positionId, request_id: input.requestId }),
-    legs: [transactionRow()],
     replayed: false,
   }));
 });
@@ -403,10 +381,10 @@ describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      data: { withdrawal: { positionId: string; transactions: unknown[]; replayed: boolean } };
+      data: { withdrawal: { positionId: string; signature: string; replayed: boolean } };
     };
     expect(body.data.withdrawal.positionId).toBe(positionId);
-    expect(body.data.withdrawal.transactions).toHaveLength(1);
+    expect(body.data.withdrawal.signature).toBeTruthy();
     expect(withdrawFromVault).toHaveBeenCalledTimes(1);
   });
 
@@ -479,7 +457,7 @@ describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
 });
 
 describe("POST /v1/earn/vault-withdrawals — response shape", () => {
-  it("serves one movement with ordered transaction diagnostics", async () => {
+  it("serves one movement with its transaction signature", async () => {
     await seedAuth();
     const positionId = await seedPosition();
     withdrawFromVault.mockResolvedValue({
@@ -489,10 +467,6 @@ describe("POST /v1/earn/vault-withdrawals — response shape", () => {
         status: "submitted",
         amount_requested: "10",
       }),
-      legs: [
-        transactionRow({ leg_index: 0, status: "confirmed", shares: "6" }),
-        transactionRow({ leg_index: 1, status: "requested", shares: "4" }),
-      ],
       replayed: false,
     });
 
@@ -504,34 +478,23 @@ describe("POST /v1/earn/vault-withdrawals — response shape", () => {
           movementId: string;
           shares: string;
           shareMint: string;
-          transactions: Array<{
-            index: number;
-            status: string;
-            shares: string;
-          }>;
+          signature: string;
         };
       };
     };
     expect(body.data.withdrawal.shares).toBe("10");
     expect(body.data.withdrawal.shareMint).toBe(SHARE_MINT);
-    expect(body.data.withdrawal.transactions.map((leg) => leg.status)).toEqual([
-      "confirmed",
-      "requested",
-    ]);
-    expect(body.data.withdrawal.transactions.map((leg) => leg.shares)).toEqual(["6", "4"]);
-    expect(body.data.withdrawal.transactions.map((leg) => leg.index)).toEqual([0, 1]);
+    expect(body.data.withdrawal.signature).toBeTruthy();
   });
 });
 
-describe("GET /v1/earn/vault-withdrawals — the recorded legs", () => {
-  async function recordGroup(params: {
+describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
+  async function recordWithdrawal(params: {
     requestId: string;
-    legs?: number;
     projectId?: string;
     positionId?: string;
   }) {
     const positionId = params.positionId ?? (await seedPosition());
-    const legCount = params.legs ?? 2;
     return {
       positionId,
       recorded: await createPostgresEarnMovementsRepository(
@@ -545,14 +508,11 @@ describe("GET /v1/earn/vault-withdrawals — the recorded legs", () => {
         vaultAddress: VAULT,
         custodyWalletId: CUSTODY_WALLET_ID,
         shareMint: SHARE_MINT,
-        requestedShares: String((legCount * (legCount + 1)) / 2),
+        requestedShares: "10",
         walletAddress: WALLET_ADDRESS,
-        legs: Array.from({ length: legCount }, (_unused, index) => ({
-          shares: String(index + 1),
-          signature: `sig_${crypto.randomUUID()}`,
-          signedTransaction: "AQ==",
-          lastValidBlockHeight: "12345",
-        })),
+        signature: `sig_${crypto.randomUUID()}`,
+        signedTransaction: "AQ==",
+        lastValidBlockHeight: "12345",
         requestId: params.requestId,
         idempotencyFingerprint: `fp_${params.requestId}`,
       }),
@@ -561,7 +521,7 @@ describe("GET /v1/earn/vault-withdrawals — the recorded legs", () => {
 
   it("lists one logical withdrawal and reads it back by movement id", async () => {
     await seedAuth();
-    const { recorded } = await recordGroup({ requestId: "vw-list-key" });
+    const { recorded } = await recordWithdrawal({ requestId: "vw-list-key" });
 
     const list = await getWithdrawal("");
     expect(list.status).toBe(200);
@@ -573,37 +533,29 @@ describe("GET /v1/earn/vault-withdrawals — the recorded legs", () => {
     const detail = await getWithdrawal(`/${recorded.movement.id}`);
     expect(detail.status).toBe(200);
     const body = (await detail.json()) as {
-      data: { withdrawal: { movementId: string; transactions: Array<{ index: number }> } };
+      data: { withdrawal: { movementId: string; signature: string } };
     };
     expect(body.data.withdrawal.movementId).toBe(recorded.movement.id);
-    expect(body.data.withdrawal.transactions.map((transaction) => transaction.index)).toEqual([
-      0, 1,
-    ]);
+    expect(body.data.withdrawal.signature).toBe(recorded.movement.signature);
   });
 
-  it("serves one withdrawal for ?requestId= with ordered transactions", async () => {
+  it("serves one withdrawal for ?requestId=", async () => {
     await seedAuth();
-    await recordGroup({ requestId: "vw-group-key", legs: 3 });
+    const { recorded } = await recordWithdrawal({ requestId: "vw-group-key" });
 
     const res = await getWithdrawal("?requestId=vw-group-key");
     expect(res.status).toBe(200);
     const page = (await res.json()) as {
-      data: { withdrawals: Array<{ transactions: Array<{ index: number }> }> };
+      data: { withdrawals: Array<{ signature: string }> };
     };
     expect(page.data.withdrawals).toHaveLength(1);
-    expect(page.data.withdrawals[0]?.transactions.map((transaction) => transaction.index)).toEqual([
-      0, 1, 2,
-    ]);
+    expect(page.data.withdrawals[0]?.signature).toBe(recorded.movement.signature);
   });
 
   it("refuses a deposit from the withdrawal path — direction is the boundary", async () => {
     await seedAuth();
-    const { recorded } = await recordGroup({ requestId: "vw-direction-key", legs: 1 });
+    const { recorded } = await recordWithdrawal({ requestId: "vw-direction-key" });
     // Flip the row to a deposit shape; the withdrawal detail must 404 it.
-    await getDb(env)
-      .prepare("DELETE FROM earn_vault_withdrawal_legs WHERE movement_id = ?")
-      .bind(recorded.movement.id)
-      .run();
     await getDb(env)
       .prepare(
         `UPDATE earn_movements
@@ -631,9 +583,8 @@ describe("GET /v1/earn/vault-withdrawals — the recorded legs", () => {
       )
       .bind(TEST_ORG.id, TEST_USER.id)
       .run();
-    const { recorded } = await recordGroup({
+    const { recorded } = await recordWithdrawal({
       requestId: "vw-sibling-key",
-      legs: 1,
       projectId: "prj_earn_vw_sibling",
     });
 
@@ -647,15 +598,13 @@ describe("GET /v1/earn/vault-withdrawals — the recorded legs", () => {
 
   it("filters to unsettled logical withdrawals for recovery", async () => {
     await seedAuth();
-    const settled = await recordGroup({ requestId: "vw-settled-key", legs: 1 });
-    const pending = await recordGroup({
+    const settled = await recordWithdrawal({ requestId: "vw-settled-key" });
+    const pending = await recordWithdrawal({
       requestId: "vw-pending-key",
-      legs: 2,
       positionId: settled.positionId,
     });
-    await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultWithdrawalLeg({
+    await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultMovement({
       movementId: settled.recorded.movement.id,
-      legIndex: 0,
       organizationId: TEST_ORG.id,
       toStatus: "failed",
       failureReason: "Transaction blockhash expired before confirmation",

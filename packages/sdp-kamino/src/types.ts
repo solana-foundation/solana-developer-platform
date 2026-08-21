@@ -35,28 +35,16 @@ export interface KaminoRuntime {
  * A built, unsigned unit of work: instructions plus what the caller needs to
  * compile them.
  *
- * `instructions` is deliberately `Instruction[][]` — TRANSACTION-SIZED BATCHES,
- * not one flat list. A multi-reserve K-Vault exit emits several withdraw
- * instructions, each carrying the vault's full reserve remaining-accounts list,
- * and routinely exceeds Solana's 1232-byte packet. Handing back a flat list
- * makes the caller discover that at `compileTransaction`, far from the code that
- * could split it. One entry means one transaction.
+ * `instructions` is the complete sequence for one transaction.
  */
 export interface KaminoInstructionPlan {
   cluster: SolanaCluster;
-  instructions: readonly (readonly Instruction[])[];
+  instructions: readonly Instruction[];
   /**
    * Address lookup tables the caller SHOULD apply when compiling. Kamino
    * publishes a per-vault LUT precisely because these account lists are large.
    */
   lookupTables: readonly Address[];
-  /**
-   * Exact shares each batch redeems, parallel to `instructions`, in share-mint
-   * units — decoded from the instructions themselves, never estimated. Present
-   * on withdrawal plans only: the API ledgers one movement row per transaction
-   * leg, and this is the quantity that leg actually encodes.
-   */
-  transactionShares?: readonly string[];
   /** Asset mints observed from the same live vault state used to build. */
   assetIdentity: KaminoVaultAssetIdentity;
   /** What the instructions above actually encode. See `KaminoAcceptedAmounts`. */

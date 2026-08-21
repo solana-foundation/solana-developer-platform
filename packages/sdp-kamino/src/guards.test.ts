@@ -21,13 +21,11 @@ function plan(
 ): KaminoInstructionPlan {
   return {
     cluster,
-    instructions: [
-      programs.map((programAddress) => ({
-        programAddress: address(programAddress),
-        accounts: [],
-        data: new Uint8Array(),
-      })),
-    ],
+    instructions: programs.map((programAddress) => ({
+      programAddress: address(programAddress),
+      accounts: [],
+      data: new Uint8Array(),
+    })),
     lookupTables: [],
     assetIdentity: ASSET_IDENTITY,
     accepted: {},
@@ -91,30 +89,28 @@ describe("assertPlanTargetsCluster", () => {
     ).toThrow(KaminoProgramMismatchError);
   });
 
-  it("checks every batch, not just the first", () => {
+  it("checks every instruction, not just the first", () => {
     const devnet = kaminoClusterConfig("devnet");
-    const twoBatches: KaminoInstructionPlan = {
+    const mixedPrograms: KaminoInstructionPlan = {
       cluster: "devnet",
       instructions: [
-        [{ programAddress: devnet.kvaultProgramId, accounts: [], data: new Uint8Array() }],
-        [
-          {
-            programAddress: address(KAMINO_KVAULT_PROGRAM_IDS["mainnet-beta"]),
-            accounts: [],
-            data: new Uint8Array(),
-          },
-        ],
+        { programAddress: devnet.kvaultProgramId, accounts: [], data: new Uint8Array() },
+        {
+          programAddress: address(KAMINO_KVAULT_PROGRAM_IDS["mainnet-beta"]),
+          accounts: [],
+          data: new Uint8Array(),
+        },
       ],
       lookupTables: [],
       assetIdentity: ASSET_IDENTITY,
       accepted: {},
     } as KaminoInstructionPlan;
-    expect(() => assertPlanTargetsCluster(twoBatches)).toThrow(KaminoProgramMismatchError);
+    expect(() => assertPlanTargetsCluster(mixedPrograms)).toThrow(KaminoProgramMismatchError);
   });
 });
 
 describe("planProgramAddresses", () => {
-  it("dedupes across batches — the shape a Kora allowlist assertion needs", () => {
+  it("dedupes program addresses for Kora allowlist assertions", () => {
     const devnet = kaminoClusterConfig("devnet");
     const programs = planProgramAddresses(
       plan("devnet", [devnet.kvaultProgramId, devnet.kvaultProgramId, ATA_PROGRAM])

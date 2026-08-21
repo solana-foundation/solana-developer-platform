@@ -30,15 +30,13 @@ Things that will bite:
 - **Every movement needs a holding, and a missing one must never fail a money
   write.** Resolve or open the holding before writing the movement. The custodial
   holding for a program is minted when its provider wallet is linked.
-- **Amounts carry a `denomination`** (`usd`, the token mint — or the SHARE mint
-  on a vault withdrawal, whose exact intent-time quantity is shares; see 0066's
-  header). No read may sum across rows without grouping by denomination.
-- **A vault withdrawal is one movement with internal transaction legs** (0066).
-  The parent owns the total requested shares, actor and raw idempotency key. The
-  child outbox owns exact literal per-transaction shares, signatures, signed
-  bytes and ordering. A leg may only broadcast after its predecessor commits;
-  the writer records the parent and every child atomically before anything is
-  sent, and the sweep enforces the same order on resume.
+- **Amounts carry a `denomination`** (`usd`, the token mint, or the SHARE mint
+  on a vault withdrawal, whose exact intent-time quantity is shares). No read
+  may sum across rows without grouping by denomination.
+- **A vault withdrawal is one signed movement.** The movement owns the requested
+  shares, actor, idempotency key, signature, signed bytes and blockhash window.
+  It is recorded before broadcast and reconciled through the same outbox path
+  as a vault deposit.
 - **Ids are heterogeneous by design.** History keeps the ids the projection
   preserved, so nothing may parse an id for its kind — read `execution_model`.
 
