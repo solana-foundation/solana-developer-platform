@@ -34,6 +34,7 @@ const MODULE_METADATA = [
       "@sdp/spc-escrow",
       "@sdp/spc-withdraw",
       "@sdp/types",
+      "@sdp/veda",
     ],
   },
   {
@@ -114,6 +115,20 @@ const MODULE_METADATA = [
     // and @sdp/earn must never depend back — its hourly catalogue cron would
     // then load klend-sdk (13MB, built against a different @solana/kit major).
     // That one-way edge is also why the Kamino program-id table lives in
+    // @sdp/types, which both reach without a cycle.
+    allowedDependencies: ["@sdp/earn", "@sdp/solana", "@sdp/types"],
+  },
+  {
+    name: "@sdp/veda",
+    directory: "packages/sdp-veda",
+    purpose:
+      "Kit-native Veda SVM vault deposit plans and position reads over the private @vedatech/svm-sdk.",
+    // The arrow points INWARD and only inward: this package depends on
+    // @sdp/earn (for the provider contract and the catalogue client it extends),
+    // and @sdp/earn must never depend back — its hourly catalogue cron would
+    // then load a chain SDK built against a different @solana/kit major, from a
+    // PRIVATE registry every consumer of @sdp/earn would suddenly need a token
+    // for. That one-way edge is also why the Veda deployment registry lives in
     // @sdp/types, which both reach without a cycle.
     allowedDependencies: ["@sdp/earn", "@sdp/solana", "@sdp/types"],
   },
