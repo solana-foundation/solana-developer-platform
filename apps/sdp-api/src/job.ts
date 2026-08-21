@@ -22,6 +22,7 @@ import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import { getSentryOptions, isSentryEnabled } from "@/runtime/observability";
 import { initNodeSentry, nodeObservability } from "@/runtime/observability-node";
+import { assertSigningProviderAllowed } from "@/services/adapters/signing";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
@@ -113,6 +114,7 @@ export async function runCronJob(): Promise<void> {
   if (!env.REDIS_URL?.trim()) {
     throw new Error("REDIS_URL is required for the reconciliation job");
   }
+  assertSigningProviderAllowed(env);
 
   initNodeSentry(getSentryOptions(env));
 
