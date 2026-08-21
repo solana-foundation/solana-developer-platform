@@ -193,6 +193,18 @@ describe("collectDueRecurringPayments", () => {
     expect(staleCollectionQuery?.query).toContain("PARTITION BY rp.id");
   });
 
+  it("keeps parked collections out of the stale-recovery window", async () => {
+    // A parked cycle waits for an operator; its frozen updated_at would
+    // otherwise pin it to the head of this oldest-first window forever.
+    mocks.rows.due = [];
+    await collectDueRecurringPayments({} as Env);
+
+    const staleQuery = mocks.queryCalls.find((call) =>
+      call.query.includes("JOIN payment_subscription_collection_attempts")
+    );
+    expect(staleQuery?.query).toContain("submission_outcome");
+  });
+
   it("treats collection conflicts as duplicate-prevention skips", async () => {
     mocks.rows.due = [recurringRow("active")];
     mocks.collectRecurringPayment.mockRejectedValue(new AppError("CONFLICT", "Already claimed"));

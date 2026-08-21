@@ -906,7 +906,8 @@ export const transferBatchRecipientSchema = z
     amount: tokenAmountSchema,
     status: paymentTransferBatchRecipientStatusSchema,
     error: z.string().nullable().openapi({
-      description: "Recipient-level failure reason, when available.",
+      description:
+        "Recipient-level failure reason, or the reconciliation notice carried while its chunk's submission outcome is unknown and the recipient stays processing. Non-null does not imply a failed status.",
     }),
     createdAt: isoDateTimeSchema,
     updatedAt: isoDateTimeSchema,

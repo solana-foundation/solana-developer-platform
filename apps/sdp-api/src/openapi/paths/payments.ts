@@ -314,7 +314,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create transfer batch",
     operationId: "createPaymentTransferBatch",
     description:
-      "Executes a custody-signed outbound transfer batch to counterparty crypto-wallet accounts, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Supply an Idempotency-Key to retry safely: an identical resolved request returns the original batch without another on-chain submission, while reusing the key for a different request returns 409.",
+      "Executes a custody-signed outbound transfer batch to counterparty crypto-wallet accounts, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Supply an Idempotency-Key to retry safely: an identical resolved request returns the original batch without another on-chain submission, while reusing the key for a different request returns 409. A chunk whose provider outcome is unknown comes back inside a 200 as a processing transfer without a signature and with a reconciliation notice in error, its recipients left processing — it may already be on chain, so do NOT re-send that batch.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeWithIdempotencyHeaders,
@@ -502,7 +502,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Collect recurring payment",
     operationId: "collectPaymentRecurringPayment",
     description:
-      "Manually collects a due active SDP-custody recurring payment by submitting the Solana subscriptions collection transaction, creating a linked payment transfer, recording the collection attempt, and advancing the next due time.",
+      "Manually collects a due active SDP-custody recurring payment by submitting the Solana subscriptions collection transaction, creating a linked payment transfer, recording the collection attempt, and advancing the next due time. A 409 with error.details.reason = transfer_submission_outcome_unknown means the provider outcome is unknown: the attempt and its transfer stay processing behind a reconciliation marker and the cycle is deliberately NOT rescheduled — do not retry, and do not read it as a failed collection.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

@@ -20,6 +20,7 @@ import { getTransferSolInstruction } from "@solana-program/system";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPolicyRepository } from "@/db/repositories";
+import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import app from "@/index";
 import { buildPaymentTransferFingerprint } from "@/lib/idempotency";
@@ -2630,6 +2631,56 @@ describe("Payments routes — transfers", () => {
       expect(row).toMatchObject({ status: "failed", signature: null });
       expect(row.error).toContain("Sponsorship preflight is unavailable");
       expect(row.providerData ?? {}).not.toMatchObject({ submission_outcome: "unknown" });
+    });
+
+    it("parks a broadcast transfer whose signature writes were all lost", async () => {
+      // The transaction is on chain, but no write of its signature survived.
+      // An unsigned `processing` row is what the pending-transfers job times
+      // out into a false `failed`, and that failure invites a second send.
+      const createRepository = paymentsRepositoryPostgres.createPostgresPaymentsRepository;
+      const repositorySpy = vi.spyOn(
+        paymentsRepositoryPostgres,
+        "createPostgresPaymentsRepository"
+      );
+      repositorySpy.mockImplementation((db, scope) => {
+        const repository = createRepository(db, scope);
+        return {
+          ...repository,
+          updateTransfer: async (input) => {
+            if (input.signature) {
+              throw new Error("simulated signature persist failure");
+            }
+            return repository.updateTransfer(input);
+          },
+        };
+      });
+      try {
+        mockAdapterSubmitting(SUBMITTED_SIGNATURE);
+        confirmTransactionMock.mockRejectedValueOnce(new Error("confirmation timed out"));
+
+        const res = await transferRequest("1");
+
+        expect(res.status).toBe(200);
+        // Declared in PR-1's Impact: the caller is handed a signature the row
+        // never took, and that row waits for an operator instead of settling.
+        const body = (await res.json()) as {
+          data: { transfer: { status: string; signature: string | null } };
+        };
+        expect(body.data.transfer).toMatchObject({
+          status: "processing",
+          signature: SUBMITTED_SIGNATURE,
+        });
+        const row = await latestTransferRow();
+        expect(row).toMatchObject({ status: "processing", signature: null });
+        // The column refused the signature, so provider_data carries it — that
+        // is where the runbook sends the operator.
+        expect(row.providerData).toMatchObject({
+          submission_outcome: "unknown",
+          submitted_signature: SUBMITTED_SIGNATURE,
+        });
+      } finally {
+        repositorySpy.mockRestore();
+      }
     });
 
     it("journals a definite on-chain failure as failed with the submitted signature", async () => {

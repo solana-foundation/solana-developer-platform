@@ -1,4 +1,6 @@
+import type { FeePaymentPort } from "@sdp/payments/fee-payment";
 import { FeePaymentError, type FeePaymentErrorCode } from "@sdp/payments/fee-payment";
+import { AppError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 
 /**
@@ -68,6 +70,22 @@ export function isPreBroadcastRejection(error: unknown): boolean {
 }
 
 /**
+ * The write that parks a row: `processing`, the reconciliation notice and the
+ * durable marker, in one place so a new consumer cannot park a row half-way.
+ * A signature whose own column refused it rides along in `provider_data`, which
+ * is where the operator is told to look for it.
+ */
+export function submissionOutcomeUnknownPatch(submittedSignature?: string) {
+  return {
+    status: "processing" as const,
+    error: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
+    // An absent signature writes no key: the repository JSON.stringifies this
+    // before the `provider_data || ?::jsonb` merge, and that drops undefined.
+    providerData: { ...SUBMISSION_OUTCOME_UNKNOWN_MARKER, submitted_signature: submittedSignature },
+  };
+}
+
+/**
  * Persist the manual-reconciliation marker without ever throwing: a DB blip
  * here is likely correlated with the provider trouble that made the outcome
  * ambiguous, and replacing the caller's outcome-unknown 409 with a raw 500
@@ -94,5 +112,48 @@ export async function persistOutcomeUnknownMarker(
         "failed to persist the submission-outcome-unknown marker; the row may auto-fail — reconcile manually"
       );
     }
+  }
+}
+
+/**
+ * The outcome-unknown conflict every money path throws and every consumer
+ * detects. The provider failure travels as `cause` — server-side only, never
+ * serialized to the client — so the forced manual reconciliation starts from
+ * the real error instead of this constant sentence.
+ */
+export function transferSubmissionOutcomeUnknown(
+  cause: unknown,
+  message: string = TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR
+): AppError {
+  const error = new AppError("CONFLICT", message, {
+    reason: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
+  });
+  error.cause = cause;
+  return error;
+}
+
+export function isTransferSubmissionOutcomeUnknown(error: unknown): error is AppError {
+  return (
+    error instanceof AppError &&
+    error.details?.reason === TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON
+  );
+}
+
+/**
+ * Submit through one closed chokepoint: a provably pre-broadcast provider
+ * rejection passes through for a plain terminal failure, anything else becomes
+ * the outcome-unknown conflict the caller must park and rethrow.
+ */
+export async function signAndSendClosed(
+  feePayment: Pick<FeePaymentPort, "signAndSend">,
+  txBytes: Uint8Array
+) {
+  try {
+    return await feePayment.signAndSend(txBytes);
+  } catch (error) {
+    if (isPreBroadcastRejection(error)) {
+      throw error;
+    }
+    throw transferSubmissionOutcomeUnknown(error);
   }
 }

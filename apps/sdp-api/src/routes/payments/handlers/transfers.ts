@@ -61,11 +61,10 @@ import {
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
 import {
-  isPreBroadcastRejection,
+  isTransferSubmissionOutcomeUnknown,
   persistOutcomeUnknownMarker,
-  SUBMISSION_OUTCOME_UNKNOWN_MARKER,
-  TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
-  TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
+  signAndSendClosed,
+  submissionOutcomeUnknownPatch,
 } from "@/services/payments/submission-outcome";
 import {
   approvedWalletOperationAttemptId,
@@ -465,42 +464,6 @@ async function updateTransferRecord(
   return updated;
 }
 
-function transferSubmissionOutcomeUnknown(cause: unknown): AppError {
-  const error = new AppError("CONFLICT", TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR, {
-    reason: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
-  });
-  // Server-side only (`toResponse` never serializes it): the marker branch
-  // logs the cause so the manual reconciliation starts from the real failure.
-  error.cause = cause;
-  return error;
-}
-
-function isTransferSubmissionOutcomeUnknown(error: unknown): error is AppError {
-  return (
-    error instanceof AppError &&
-    error.details?.reason === TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON
-  );
-}
-
-/**
- * Submit through one closed chokepoint: a provably pre-broadcast provider
- * rejection passes through for a plain terminal failure, anything else
- * becomes the outcome-unknown 409 the caller must mark and rethrow.
- */
-async function signAndSendClosed(
-  feePayment: ReturnType<typeof getFeePayment>,
-  txBytes: Uint8Array
-) {
-  try {
-    return await feePayment.signAndSend(txBytes);
-  } catch (error) {
-    if (isPreBroadcastRejection(error)) {
-      throw error;
-    }
-    throw transferSubmissionOutcomeUnknown(error);
-  }
-}
-
 /**
  * Persists a submitted transfer's signature while confirmation is pending so
  * a timeout or crash never strands a broadcast transaction as unsigned
@@ -509,8 +472,8 @@ async function signAndSendClosed(
  * happens, so a caller that never reads `submittedRow` still gets both
  * attempts. If both fail the durable row is still unsigned, which the
  * pending-transfers job would time out into a false `failed`, so
- * `onSignatureLost` runs last for the caller to close that row another way.
- * Exported for unit tests.
+ * `onSignatureLost` runs last for the caller to close that row another way;
+ * like the writes, it never throws out of here.
  */
 export function createSubmissionRecorder(
   transfer: TransferRow,
@@ -519,18 +482,20 @@ export function createSubmissionRecorder(
 ) {
   let signature: string | null = null;
   let row: TransferRow | null = null;
+  const logFailure = (sig: string, error: unknown, message: string) =>
+    getLogger().error(
+      {
+        transfer_id: transfer.id,
+        signature: sig,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      message
+    );
   const persist = async (sig: string) => {
     try {
       row = await persistSignature(sig);
     } catch (error) {
-      getLogger().error(
-        {
-          transfer_id: transfer.id,
-          signature: sig,
-          error: error instanceof Error ? error.message : String(error),
-        },
-        "createTransfer: failed to persist submitted transfer signature"
-      );
+      logFailure(sig, error, "failed to persist submitted transfer signature");
     }
   };
   return {
@@ -540,8 +505,15 @@ export function createSubmissionRecorder(
       if (!row) {
         await persist(sig);
       }
-      if (!row) {
-        await onSignatureLost?.(sig);
+      if (!row && onSignatureLost) {
+        try {
+          await onSignatureLost(sig);
+        } catch (error) {
+          // Same contract as the writes above: this runs after a broadcast, so
+          // a throw here would surface as a 500 and invite the client to send
+          // the payment again.
+          logFailure(sig, error, "failed to close a lost submitted transfer signature");
+        }
       }
     },
     submittedRow: async (): Promise<TransferRow | null> => {
@@ -561,7 +533,7 @@ function createTransferSubmissionRecorder(c: AppContext, transfer: TransferRow) 
     // reading that failure sends the payment a second time. Park it instead,
     // with the signature in `provider_data`: the column refused it, JSON still
     // takes it, and the operator reconciles from there.
-    (signature) => markTransferOutcomeUnknown(c, transfer.id, { submitted_signature: signature })
+    (signature) => markTransferOutcomeUnknown(c, transfer.id, signature)
   );
 }
 
@@ -574,17 +546,10 @@ function createTransferSubmissionRecorder(c: AppContext, transfer: TransferRow) 
 function markTransferOutcomeUnknown(
   c: AppContext,
   transferId: string,
-  providerData?: Record<string, unknown>
+  submittedSignature?: string
 ): Promise<void> {
   return persistOutcomeUnknownMarker(
-    () =>
-      updateTransferRecord(c, transferId, {
-        status: "processing",
-        error: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
-        signature: null,
-        blockTime: null,
-        providerData: { ...SUBMISSION_OUTCOME_UNKNOWN_MARKER, ...providerData },
-      }),
+    () => updateTransferRecord(c, transferId, submissionOutcomeUnknownPatch(submittedSignature)),
     transferId
   );
 }

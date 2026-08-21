@@ -109,6 +109,9 @@ async function collectRow(
     return "ok";
   } catch (error) {
     if (shouldSkipCollectionError(error)) {
+      // The tick that parks a cycle lands here too; later ticks do not, because
+      // both queries above leave a parked attempt out. The park is logged where
+      // it happens, with the attempt and transfer ids the operator needs.
       return "skipped";
     }
     logCronFailure("collectDueRecurringPayments: failed to collect recurring payment", row, error);
@@ -234,6 +237,16 @@ export async function collectDueRecurringPayments(
           AND rp.next_collection_due_at IS NOT NULL
           AND a.status IN ('processing', 'confirmed')
           AND (a.status = 'confirmed' OR a.updated_at <= ?)
+          -- A parked cycle waits for an operator and is never re-collected, so
+          -- its frozen updated_at would otherwise keep it permanently at the
+          -- head of this oldest-first window and starve genuinely stale ones.
+          AND NOT EXISTS (
+            SELECT 1
+              FROM payment_transfers parked
+             WHERE parked.id = a.transfer_id
+               AND parked.status = 'processing'
+               AND parked.provider_data ->> 'submission_outcome' = 'unknown'
+          )
        ) recoverable_attempts
       WHERE attempt_rank = 1
       ORDER BY attempt_updated_at ASC

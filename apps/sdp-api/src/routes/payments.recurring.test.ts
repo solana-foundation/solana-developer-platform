@@ -15,6 +15,7 @@ import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories";
 import app from "@/index";
+import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import {
@@ -1953,6 +1954,183 @@ describe("Payments routes — recurring", () => {
       signature: collectionSignature,
     });
     expect(signAndSendMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("parks a collection whose submission outcome is unknown instead of re-charging the payer", async () => {
+    // The provider may have broadcast the collection without returning a
+    // signature. Journaling a failure would reschedule the cycle, and the next
+    // tick would charge the payer a second time for the same period.
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+      )
+      .mockResolvedValueOnce(
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      )
+      .mockRejectedValue(new Error("kora timed out"));
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+      signAsFeePayer: vi.fn(),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForTest(headers);
+    const recurringPaymentId = activated.id;
+    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, recurringPaymentId)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, activated.subscriptionId)
+      .run();
+
+    const collectRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
+      { method: "POST", headers, body: "{}" },
+      env
+    );
+
+    expect(collectRes.status).toBe(409);
+    const collectError = (await collectRes.json()) as {
+      error: { details?: { reason?: string } };
+    };
+    expect(collectError.error.details?.reason).toBe("transfer_submission_outcome_unknown");
+
+    const attempt = await getDb(env)
+      .prepare(
+        `SELECT a.id, a.status, a.transfer_id, t.status AS transfer_status,
+                t.signature AS transfer_signature, t.error AS transfer_error,
+                t.provider_data AS transfer_provider_data
+           FROM payment_subscription_collection_attempts a
+           JOIN payment_transfers t ON t.id = a.transfer_id
+          WHERE a.subscription_id = ?
+          ORDER BY a.created_at DESC
+          LIMIT 1`
+      )
+      .bind(activated.subscriptionId)
+      .first<{
+        id: string;
+        status: string;
+        transfer_id: string;
+        transfer_status: string;
+        transfer_signature: string | null;
+        transfer_error: string | null;
+        transfer_provider_data: unknown;
+      }>();
+    // The attempt is NOT failed: failing it reschedules the cycle.
+    expect(attempt?.status).toBe("processing");
+    expect(attempt?.transfer_status).toBe("processing");
+    expect(attempt?.transfer_signature).toBeNull();
+    const providerData =
+      typeof attempt?.transfer_provider_data === "string"
+        ? JSON.parse(attempt.transfer_provider_data)
+        : attempt?.transfer_provider_data;
+    // Literal on purpose: the durable contract the jobs and the operator match.
+    expect(providerData).toMatchObject({ submission_outcome: "unknown" });
+
+    // A second collect must not create a second transfer for the same cycle.
+    const retryRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
+      { method: "POST", headers, body: "{}" },
+      env
+    );
+    expect(retryRes.status).toBe(409);
+    const transferCount = await getDb(env)
+      .prepare(
+        `SELECT count(*) AS total
+           FROM payment_subscription_collection_attempts
+          WHERE subscription_id = ? AND due_at = ?`
+      )
+      .bind(activated.subscriptionId, dueAt)
+      .first<{ total: number }>();
+    expect(Number(transferCount?.total)).toBe(1);
+
+    // Neither must stale recovery rebuild it: that fails the attempt, which
+    // reschedules the cycle and charges the payer for the same period twice.
+    const submitsBeforeCron = signAndSendMock.mock.calls.length;
+    await getDb(env)
+      .prepare(
+        `UPDATE payment_subscription_collection_attempts
+            SET updated_at = ?
+          WHERE subscription_id = ?`
+      )
+      .bind(new Date(Date.now() - 60 * 60 * 1000).toISOString(), activated.subscriptionId)
+      .run();
+    const cronResult = await collectDueRecurringPayments(env);
+    expect(signAndSendMock.mock.calls.length).toBe(submitsBeforeCron);
+    // `skipped` counts a row that entered collection and threw: the parked
+    // cycle must not even be selected, or it crowds the oldest-first window
+    // and starves the collections that are genuinely stuck.
+    expect(cronResult).toMatchObject({ skipped: 0 });
+    const afterCron = await getDb(env)
+      .prepare(
+        `SELECT count(*) AS total
+           FROM payment_subscription_collection_attempts
+          WHERE subscription_id = ?`
+      )
+      .bind(activated.subscriptionId)
+      .first<{ total: number }>();
+    expect(Number(afterCron?.total)).toBe(1);
+
+    // Lifecycle stays blocked while the cycle is unresolved — but the client
+    // asked to cancel a subscription, so the refusal must say that, not hand
+    // back a transfer's reconciliation notice.
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/cancel`,
+      { method: "POST", headers, body: "{}" },
+      env
+    );
+    expect(cancelRes.status).toBe(409);
+    const cancelBody = (await cancelRes.json()) as {
+      error: { message: string; details?: { reason?: string } };
+    };
+    expect(cancelBody.error.details?.reason).toBe("transfer_submission_outcome_unknown");
+    expect(cancelBody.error.message).toContain("awaits manual reconciliation");
+
+    // A rollback can leave the marker behind while the old cron settles the
+    // transfer. After rolling forward, that settled marker is inert: recovery
+    // must advance past the old attempt instead of blocking it forever.
+    const parkedTransferId = attempt?.transfer_id;
+    if (!parkedTransferId) {
+      throw new Error("Expected the parked attempt to reference its transfer");
+    }
+    await getDb(env)
+      .prepare(
+        `UPDATE payment_transfers
+            SET status = 'failed',
+                error = 'Transfer processing timed out'
+          WHERE id = ?`
+      )
+      .bind(parkedTransferId)
+      .run();
+    const recoveryResult = await collectDueRecurringPayments(env);
+
+    expect(recoveryResult).toEqual({ recovered: 0, collected: 0, failed: 0, skipped: 1 });
+    const recoveredAttempts = await getDb(env)
+      .prepare(
+        `SELECT status
+           FROM payment_subscription_collection_attempts
+          WHERE subscription_id = ?
+          ORDER BY created_at`
+      )
+      .bind(activated.subscriptionId)
+      .all<{ status: string }>();
+    expect(recoveredAttempts.rows.map((row) => row.status).sort()).toEqual([
+      "failed",
+      "processing",
+    ]);
   });
 
   it("collects due recurring payments through SDP API routes", async () => {

@@ -37,6 +37,15 @@ import {
   resolveSourceTokenAccountOrAta,
 } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
+import {
+  isTransferSubmissionOutcomeUnknown,
+  persistOutcomeUnknownMarker,
+  SUBMISSION_OUTCOME_UNKNOWN_MARKER,
+  signAndSendClosed,
+  submissionOutcomeUnknownPatch,
+  TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
+  transferSubmissionOutcomeUnknown,
+} from "@/services/payments/submission-outcome";
 import * as solanaServices from "@/services/solana";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -655,7 +664,75 @@ async function journalRecurringPaymentCollectionError(input: {
     return;
   }
 
+  if (!input.submittedSignature && isTransferSubmissionOutcomeUnknown(input.error)) {
+    await parkRecurringPaymentCollection(input);
+    return;
+  }
+
   await markRecurringPaymentCollectionFailedAtomically(input);
+}
+
+/**
+ * Leave a collection whose submission outcome is unknown exactly where it is:
+ * the attempt stays `processing` and the transfer keeps its `processing` row
+ * behind the shared reconciliation marker. Journaling a failure here would
+ * reschedule the collection, and rescheduling re-charges the payer for a cycle
+ * that may already have settled on chain. The marker also stops the
+ * pending-transfers job from timing the transfer out into a false `failed`.
+ */
+async function parkRecurringPaymentCollection(
+  input: Parameters<typeof journalRecurringPaymentCollectionError>[0]
+): Promise<void> {
+  getLogger().warn(
+    {
+      attempt_id: input.attempt.id,
+      error: activationErrorMessage(input.error),
+      organization_id: input.organizationId,
+      project_id: input.projectId,
+      reason: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
+      recurring_payment_id: input.recurringPaymentId,
+      transfer_id: input.transfer?.id ?? null,
+    },
+    "Recurring payment collection parked; awaiting manual reconciliation"
+  );
+  const transfer = input.transfer;
+  if (!transfer) {
+    return;
+  }
+  // Link the attempt to its transfer if that write was the one that was lost:
+  // both parking guards key off `transfer_id`, and an unlinked attempt would be
+  // failed and rescheduled by stale recovery — the double charge itself.
+  if (!input.attempt.transfer_id) {
+    try {
+      await input.subscriptionsRepo.updateCollectionAttempt({
+        attemptId: input.attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        transferId: transfer.id,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (linkError) {
+      getLogger().error(
+        {
+          attempt_id: input.attempt.id,
+          error: activationErrorMessage(linkError),
+          transfer_id: transfer.id,
+        },
+        "Failed to link a parked collection attempt to its transfer; reconcile manually"
+      );
+    }
+  }
+  await persistOutcomeUnknownMarker(
+    () =>
+      input.paymentsRepo.updateTransfer({
+        transferId: transfer.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        ...submissionOutcomeUnknownPatch(),
+        updatedAt: new Date().toISOString(),
+      }),
+    transfer.id
+  );
 }
 
 async function safeJournalRecurringPaymentCollectionError(input: {
@@ -680,6 +757,7 @@ async function safeJournalRecurringPaymentCollectionError(input: {
         has_submitted_signature: input.submittedSignature !== null,
         original_error: activationErrorMessage(input.error),
         recurring_payment_id: input.recurringPaymentId,
+        submitted_signature: input.submittedSignature,
         transfer_id: input.transfer?.id ?? null,
       },
       "Failed to journal recurring payment collection after failure"
@@ -743,6 +821,27 @@ async function recoverRecurringPaymentCollection(input: {
   }
   const recoveredSignature = existing.signature ?? transfer.signature;
   if (!recoveredSignature) {
+    // A parked collection has no signature by definition: the provider may
+    // have broadcast without returning one. Failing it here would reschedule
+    // the cycle and re-charge the payer, so it stays parked until an operator
+    // reconciles it on chain.
+    if (
+      transfer.status === "processing" &&
+      transfer.provider_data?.submission_outcome ===
+        SUBMISSION_OUTCOME_UNKNOWN_MARKER.submission_outcome
+    ) {
+      getLogger().warn(
+        {
+          attempt_id: existing.id,
+          reason: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
+          transfer_id: transfer.id,
+        },
+        "Refused to recover a parked recurring payment collection; awaiting manual reconciliation"
+      );
+      throw transferSubmissionOutcomeUnknown(
+        new Error("Recurring payment collection is parked for manual reconciliation")
+      );
+    }
     // A fresh unsigned attempt means another request is between local persistence and Kora
     // submission; wait for it to either submit or become stale instead of creating a second transfer.
     if (!isStaleCollectionAttempt(existing)) {
@@ -874,6 +973,21 @@ export async function recoverOrBlockLifecycleCollection(input: {
     recurringPayment: input.recurringPayment,
     subscription,
     dueAt: input.recurringPayment.next_collection_due_at,
+  }).catch((error) => {
+    if (!isTransferSubmissionOutcomeUnknown(error)) {
+      throw error;
+    }
+    // The caller asked to change the subscription, not to collect it: the
+    // transfer's reconciliation sentence reads as a payment error on a cancel
+    // request. The block itself stands for `update` and `resume`, which move
+    // `next_collection_due_at` and would orphan the parked attempt. Cancel
+    // moves nothing: whether a customer may stop a subscription while one
+    // charge is unresolved is a product call, and until it is made the block
+    // covers cancel too.
+    throw transferSubmissionOutcomeUnknown(
+      error.cause,
+      "Recurring payment cannot be changed while the current cycle's collection awaits manual reconciliation"
+    );
   });
 
   if (recovered) {
@@ -1156,6 +1270,9 @@ export async function collectRecurringPayment(input: {
       throw new AppError("CONFLICT", "Recurring payment is no longer active");
     }
 
+    // Collection is the one recurring path that parks instead of failing: a
+    // journaled failure reschedules the cycle, and rescheduling re-charges the
+    // payer. The other recurring flows keep their own error handling.
     const signature = await sendSubscriptionInstructions({
       env: input.env,
       organizationId: input.organizationId,
@@ -1164,6 +1281,7 @@ export async function collectRecurringPayment(input: {
       sourceSigner,
       instructions: [createDestinationAtaInstruction, collectInstruction],
       feePayer,
+      submit: signAndSendClosed,
     });
     submittedSignature = signature;
     const submittedAt = new Date().toISOString();

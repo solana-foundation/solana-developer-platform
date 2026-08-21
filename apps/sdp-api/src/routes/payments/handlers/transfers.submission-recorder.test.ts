@@ -80,6 +80,16 @@ describe("createSubmissionRecorder", () => {
     expect(onSignatureLost).toHaveBeenCalledWith(SIGNATURE);
   });
 
+  it("swallows a throwing last resort instead of failing the request", async () => {
+    const persist = vi.fn().mockRejectedValue(new Error("db unavailable"));
+    const onSignatureLost = vi.fn().mockRejectedValue(new Error("marker write refused"));
+    const recorder = createSubmissionRecorder(transfer, persist, onSignatureLost);
+
+    // The transaction is already broadcast: a throw out of here becomes a 500,
+    // and a 500 is the client retry that sends the payment a second time.
+    await expect(recorder.onSubmitted(SIGNATURE)).resolves.toBeUndefined();
+  });
+
   it("leaves a recorded signature to the caller alone", async () => {
     const persist = vi.fn().mockResolvedValue({ ...transfer, signature: SIGNATURE });
     const onSignatureLost = vi.fn().mockResolvedValue(undefined);

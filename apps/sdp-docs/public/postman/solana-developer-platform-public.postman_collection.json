@@ -1579,7 +1579,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/transfer-batches",
-            "description": "Executes a custody-signed outbound transfer batch to counterparty crypto-wallet accounts, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Supply an Idempotency-Key to retry safely: an identical resolved request returns the original batch without another on-chain submission, while reusing the key for a different request returns 409.",
+            "description": "Executes a custody-signed outbound transfer batch to counterparty crypto-wallet accounts, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Supply an Idempotency-Key to retry safely: an identical resolved request returns the original batch without another on-chain submission, while reusing the key for a different request returns 409. A chunk whose provider outcome is unknown comes back inside a 200 as a processing transfer without a signature and with a reconciliation notice in error, its recipients left processing — it may already be on chain, so do NOT re-send that batch.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"source\": \"privy_wallet_123\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cp_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
@@ -1690,7 +1690,7 @@
             "method": "POST",
             "header": [],
             "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/collect",
-            "description": "Manually collects a due active SDP-custody recurring payment by submitting the Solana subscriptions collection transaction, creating a linked payment transfer, recording the collection attempt, and advancing the next due time."
+            "description": "Manually collects a due active SDP-custody recurring payment by submitting the Solana subscriptions collection transaction, creating a linked payment transfer, recording the collection attempt, and advancing the next due time. A 409 with error.details.reason = transfer_submission_outcome_unknown means the provider outcome is unknown: the attempt and its transfer stay processing behind a reconciliation marker and the cycle is deliberately NOT rescheduled — do not retry, and do not read it as a failed collection."
           }
         },
         {
