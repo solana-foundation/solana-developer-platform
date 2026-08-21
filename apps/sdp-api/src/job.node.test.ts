@@ -147,6 +147,7 @@ function makeEnv(overrides: Partial<Record<keyof Env, string>> = {}): Env {
   return {
     DATABASE_URL: "postgres://unit",
     REDIS_URL: "redis://unit",
+    SIGNING_PROVIDER: "coinbase_cdp",
     ...overrides,
   } as Env;
 }
@@ -183,6 +184,15 @@ describe("runCronJob", () => {
     vi.mocked(closeDatabasePools).mockClear();
     vi.mocked(closeAllRedisClients).mockClear();
     vi.mocked(Sentry.close).mockClear();
+  });
+
+  it("refuses to run when a managed deployment would sign with a platform-held key", async () => {
+    vi.mocked(getProcessEnv).mockReturnValue({
+      DATABASE_URL: "postgres://unit",
+      REDIS_URL: "redis://unit",
+      SIGNING_PROVIDER: "local",
+    } as Env);
+    await expect(runCronJob()).rejects.toThrow(/Local signing/);
   });
 
   it("fails fast when DATABASE_URL or REDIS_URL is missing", async () => {
