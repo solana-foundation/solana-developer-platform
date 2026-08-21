@@ -871,6 +871,33 @@ describe("depositIntoVault — signed persistence boundary", () => {
     expect(await tableCount("earn_movements")).toBe(0);
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
   });
+
+  /**
+   * A blown slippage floor is the caller's tolerance, not a fault: the 400
+   * carries `details.reason` so the dashboard can reopen its slippage control
+   * with its own copy instead of relaying a simulation log. Matched on the
+   * program's NAMED error — the bare custom-error number is every Anchor
+   * program's first error code and would relabel unrelated failures.
+   */
+  it("names a slippage-exceeded simulation in the caller's terms", async () => {
+    simulateVaultPlan.mockResolvedValue({
+      ok: false,
+      error: "custom program error: 0x1770",
+      logs: [
+        "Program log: AnchorError occurred. Error Code: SlippageExceeded. " +
+          "Error Number: 6000. Error Message: Slippage tolerance exceeded.",
+      ],
+    });
+
+    await expect(depositIntoVault(env, depositInput())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      details: { reason: "slippage_exceeded" },
+      message: expect.stringContaining("slippage"),
+    });
+
+    expect(await tableCount("earn_movements")).toBe(0);
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
 });
 
 describe("depositIntoVault — approved-operation effect fencing", () => {

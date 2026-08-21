@@ -255,6 +255,23 @@ export const earnVaultDepositSchema = z.object({
 });
 
 /**
+ * Quote what a vault deposit would mint right now — a read, no side effects,
+ * so no wallet and no idempotency key. Same amount grammar as the deposit
+ * itself: the quote exists to derive that deposit's floor, and quoting an
+ * amount the deposit route would refuse answers a question nobody can act on.
+ */
+export const earnVaultDepositPreviewSchema = z.object({
+  /** Catalogue strategy id, resolved to a vault address server-side. */
+  strategyId: z.string().min(1),
+  /** Deposit amount in the vault token's units, as a decimal string. */
+  amount: z
+    .string()
+    .max(128)
+    .regex(/^\d+(\.\d+)?$/, "amount must be a positive decimal string")
+    .refine((value) => /[1-9]/.test(value), "amount must be greater than zero"),
+});
+
+/**
  * The recorded movement a caller polls. Bounded because the value goes
  * straight into a bind parameter; the row lookup is org-scoped, so anything
  * this organization does not own answers 404 rather than a validation error.

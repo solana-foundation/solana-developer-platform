@@ -1,5 +1,6 @@
 import {
   supportsPortfolioWallets,
+  supportsVaultDepositQuote,
   supportsVaultDirect,
   supportsVaultWithdraw,
 } from "@sdp/earn/capabilities";
@@ -35,11 +36,13 @@ const DEPLOYMENT: VedaDeployment = {
 
 const mocks = vi.hoisted(() => ({
   buildVedaDepositPlan: vi.fn(),
+  previewVedaDeposit: vi.fn(),
   readVedaPosition: vi.fn(),
 }));
 
 vi.mock("./sdk", () => ({
   buildVedaDepositPlan: mocks.buildVedaDepositPlan,
+  previewVedaDeposit: mocks.previewVedaDeposit,
   readVedaPosition: mocks.readVedaPosition,
 }));
 
@@ -377,5 +380,34 @@ describe("an unconfigured deployment", () => {
 
   it("still exposes the fixture-driven config helper the builder uses", () => {
     expect(toClusterConfig("devnet", DEPLOYMENT).cluster).toBe("devnet");
+  });
+});
+
+describe("quoteVaultDeposit", () => {
+  it("reports the capability and serializes the quote unchanged", async () => {
+    expect(supportsVaultDepositQuote(client)).toBe(true);
+    mocks.previewVedaDeposit.mockResolvedValue({
+      sharesOut: "0.99999",
+      shareDecimals: 6,
+      issues: [{ code: "TELLER_PAUSED", message: "The teller is paused" }],
+    });
+
+    const quote = await client.quoteVaultDeposit(sandbox, {
+      providerReference: VAULT_A,
+      amount: "1",
+    });
+
+    expect(quote).toEqual({
+      sharesOut: "0.99999",
+      shareDecimals: 6,
+      blockingIssues: [{ code: "TELLER_PAUSED", message: "The teller is paused" }],
+    });
+    const [, , input] = mocks.previewVedaDeposit.mock.calls[0] as [
+      unknown,
+      unknown,
+      { vault: unknown; amount: string },
+    ];
+    expect(String(input.vault)).toBe(VAULT_A);
+    expect(input.amount).toBe("1");
   });
 });

@@ -51,6 +51,7 @@ export {
   assertVedaVaultUsable,
   buildVedaDepositPlan,
   mapVedaSdkError,
+  previewVedaDeposit,
   readVedaPosition,
   resetVedaCompatibilityCache,
   VEDA_COMPATIBILITY_TTL_MS,
@@ -58,6 +59,9 @@ export {
 export type {
   VedaAcceptedAmounts,
   VedaDepositInput,
+  VedaDepositQuote,
+  VedaDepositQuoteInput,
+  VedaDepositQuoteIssue,
   VedaInstructionPlan,
   VedaPosition,
   VedaPositionInput,
