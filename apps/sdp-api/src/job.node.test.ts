@@ -9,6 +9,7 @@ import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { isSentryEnabled } from "@/runtime/observability";
 import { nodeObservability } from "@/runtime/observability-node";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
+import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
@@ -61,6 +62,10 @@ vi.mock("@/cron/recurring-payments", () => ({
   RECURRING_PAYMENTS_COLLECTION_MONITOR: "sdp-api-collect-recurring-payments",
 }));
 
+vi.mock("@/cron/rings-indexing", () => ({
+  RINGS_INDEXING_MONITOR: "sdp-api-poll-rings-indexing",
+}));
+
 vi.mock("@/cron/workflow-executions", () => ({
   WORKFLOW_EXECUTIONS_MONITOR: "sdp-api-run-workflow-executions",
 }));
@@ -108,6 +113,10 @@ vi.mock("@/services/jobs/run-workflow-executions", () => ({
 
 vi.mock("@/services/jobs/collect-recurring-payments", () => ({
   collectDueRecurringPayments: vi.fn(async () => {}),
+}));
+
+vi.mock("@/services/jobs/poll-rings-indexing", () => ({
+  pollRingsIndexing: vi.fn(async () => {}),
 }));
 
 vi.mock("@/services/jobs/track-pending-deposits", () => ({
@@ -158,6 +167,7 @@ describe("runCronJob", () => {
     vi.mocked(collectDueRecurringPayments)
       .mockReset()
       .mockResolvedValue({ recovered: 0, collected: 0, failed: 0, skipped: 0 });
+    vi.mocked(pollRingsIndexing).mockReset().mockResolvedValue(undefined);
     vi.mocked(trackPendingDeposits).mockReset().mockResolvedValue(undefined);
     vi.mocked(trackPendingWithdrawals).mockReset().mockResolvedValue(undefined);
     vi.mocked(reconcileEarnVaultMovements).mockReset().mockResolvedValue(undefined);
@@ -198,6 +208,9 @@ describe("runCronJob", () => {
     // Recurring payments are an always-on product surface: the collection tick
     // is deliberately behind no flag.
     expect(collectDueRecurringPayments).toHaveBeenCalledExactlyOnceWith(env);
+    // The rings poll gates itself on the flag plus the http adapter, so the job
+    // hands it every tick — this is its only tick on a managed deployment.
+    expect(pollRingsIndexing).toHaveBeenCalledExactlyOnceWith(env);
     expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
     // Managed deployments always have asset profiles on, so the workflow tick runs.
     expect(runDueWorkflowExecutions).toHaveBeenCalledTimes(1);
@@ -216,6 +229,16 @@ describe("runCronJob", () => {
 
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
     expect(closeAllRedisClients).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails the job on a rings-poll error but still runs the ticks after it", async () => {
+    vi.mocked(pollRingsIndexing).mockRejectedValue(new Error("photon down"));
+
+    await expect(runCronJob()).rejects.toThrow("photon down");
+
+    expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
+    expect(runDueWorkflowExecutions).toHaveBeenCalledTimes(1);
+    expect(closeDatabasePools).toHaveBeenCalledTimes(1);
   });
 
   it("runs both private-channel reconcilers behind the flag", async () => {
@@ -373,7 +396,14 @@ describe("runCronJob", () => {
 
     // The pair keeps the transfers monitor; the workflow tick and the retirement sweep
     // each report to their own, so neither masquerades as a reconciliation failure.
-    expect(nodeObservability.withMonitor).toHaveBeenCalledTimes(5);
+    expect(nodeObservability.withMonitor).toHaveBeenCalledTimes(6);
+    // The rings poll declares this job's cadence, not its per-minute crontab,
+    // so Sentry does not alert on four "missed" check-ins between executions.
+    expect(nodeObservability.withMonitor).toHaveBeenCalledWith(
+      "sdp-api-poll-rings-indexing",
+      expect.any(Function),
+      { schedule: { type: "crontab", value: "*/5 * * * *" } }
+    );
     expect(nodeObservability.withMonitor).toHaveBeenCalledWith(
       EARN_VAULT_MOVEMENTS_MONITOR,
       expect.any(Function),
