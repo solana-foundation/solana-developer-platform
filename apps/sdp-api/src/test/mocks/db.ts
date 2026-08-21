@@ -78,6 +78,16 @@ const POSTGRES_TEST_TABLES = [
   "private_channel_deposits",
   "private_channels",
   "private_channel_instances",
+  "helius_rings_events",
+  "helius_rings_timelocks",
+  "helius_rings_operations",
+  "helius_rings_zones",
+  "helius_rings_key_refs",
+  "helius_rings_wallets",
+  "helius_rings_runtime_health",
+  // helius_rings_asset_allowlist is deliberately absent: it is platform
+  // reference data seeded by migration 0057, not per-test state. Truncating it
+  // would empty it for the rest of the run, and nothing re-seeds it.
   "magic_links",
   "sessions",
   "project_members",

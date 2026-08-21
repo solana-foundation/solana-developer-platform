@@ -1,10 +1,16 @@
 /**
  * Wraps a secret value so it never leaks through logs, JSON serialization, or
- * template literals. `reveal()` is the only path to the raw value; the scope
- * argument is a documentation-level contract for reviewers, not enforced at
- * runtime. A lint rule (A23) will forbid `JSON.stringify` on any value typed
- * `SecretRef<*>`; until then the `toJSON`/`toString` overrides are the safety
- * net.
+ * template literals. The `toJSON`/`toString` overrides mean a wrapped secret is
+ * safe wherever it is serialized or interpolated, at any depth.
+ *
+ * `reveal()` is the only path to the raw value, and the only real leak vector:
+ * the result is an ordinary string or Uint8Array with no redaction behaviour.
+ * The scope argument is a documentation-level contract for reviewers, not
+ * enforced at runtime. `scripts/check-secretref-serialization.mjs` fails the
+ * build if a `reveal()` result reaches `JSON.stringify`, a logger, `String()`,
+ * or a template literal — test files excepted, which is what the "test" scope is
+ * for. Plaintext key material that never got wrapped is caught separately by the
+ * log redaction registry in `apps/sdp-api/src/runtime/log-redaction.ts`.
  */
 export type RevealScope = "adapter" | "signer" | "test";
 

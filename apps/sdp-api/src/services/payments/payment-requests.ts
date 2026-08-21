@@ -1,4 +1,6 @@
+import type { Signature } from "@sdp/rpc/solana";
 import * as solanaRpc from "@sdp/rpc/solana";
+import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
 import { assertValidAddress } from "@sdp/solana/address";
 import { toNumberAmount } from "@sdp/solana/amount";
 import { SOL_MINT } from "@sdp/types";
@@ -94,6 +96,11 @@ async function settlePaymentRequestIfPaid(
     FindReferenceError
   );
   if (found === null) {
+    return row;
+  }
+
+  const verified = await verifyTransactionLanded(rpc, found.signature as unknown as Signature);
+  if (!verified.ok) {
     return row;
   }
 
