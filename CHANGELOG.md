@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.67.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.66.0...v0.67.0) (2026-08-21)
+
+### Features
+
+* **earn:** add Kamino vault withdrawals ([#1439](https://github.com/solana-foundation/solana-developer-platform/pull/1439)) ([4a233db](https://github.com/solana-foundation/solana-developer-platform/commit/4a233db503dbd03be48c7ab1a4ea44268a4e67fe))
+* **helius:** add the Helius Rings shielded wallet module ([#1438](https://github.com/solana-foundation/solana-developer-platform/pull/1438)) ([ac8fe3a](https://github.com/solana-foundation/solana-developer-platform/commit/ac8fe3ae949b71e4d24f0a8aaae21e3142606005))
+* **payments:** cross-check Solana Pay settlement via verifyTransactionLanded ([#1431](https://github.com/solana-foundation/solana-developer-platform/pull/1431)) ([ac8564d](https://github.com/solana-foundation/solana-developer-platform/commit/ac8564d7bb262753d21e7cedd9ac310ce73be140))
+* **rpc:** reusable verified-confirmation helper for on-chain writes ([#1430](https://github.com/solana-foundation/solana-developer-platform/pull/1430)) ([5e2d693](https://github.com/solana-foundation/solana-developer-platform/commit/5e2d693be19eceaaefd4d1b4dcc33582231114a3))
+* **earn:** serve every Earn read from the unified ledger, settle to finalized, add the cross-provider feed (PRO-1705) ([#1409](https://github.com/solana-foundation/solana-developer-platform/pull/1409)) ([ba384bb](https://github.com/solana-foundation/solana-developer-platform/commit/ba384bb43666514696842537cfc72dc67ead01bc))
+
+### Bug Fixes
+
+* **payments:** make the recurring detail amount label match exactly one node ([#1445](https://github.com/solana-foundation/solana-developer-platform/pull/1445)) ([ba3d10c](https://github.com/solana-foundation/solana-developer-platform/commit/ba3d10c0788474a4615ad16cbece213fad891584))
+* **custody:** prohibit platform-held signing keys in managed deployments ([#1444](https://github.com/solana-foundation/solana-developer-platform/pull/1444)) ([772acee](https://github.com/solana-foundation/solana-developer-platform/commit/772aceef077a9df39c276b983595a1d0ba82a646))
+* **rpc:** classify transient Solana JSON-RPC server codes as retryable ([#1432](https://github.com/solana-foundation/solana-developer-platform/pull/1432)) ([92db497](https://github.com/solana-foundation/solana-developer-platform/commit/92db497f186734790bb84227b4fac98633502a1a))
+* **ci:** pin actions to commit SHAs and stop interpolating changed paths into shell ([#1404](https://github.com/solana-foundation/solana-developer-platform/pull/1404)) ([ba00967](https://github.com/solana-foundation/solana-developer-platform/commit/ba0096739e9d38616e8db27efa3f1dea6d1b8c1e))
+
+### Refactors
+
+* **rpc:** use kit primitives for airdrop and commitment ordering ([#1440](https://github.com/solana-foundation/solana-developer-platform/pull/1440)) ([8e56b4f](https://github.com/solana-foundation/solana-developer-platform/commit/8e56b4f0b4283e929d476491f118ff21ce0931f1))
+* **earn:** flip Earn writes to the unified ledger and retire the split tables' code (PRO-1705) ([#1410](https://github.com/solana-foundation/solana-developer-platform/pull/1410)) ([14b18be](https://github.com/solana-foundation/solana-developer-platform/commit/14b18be88d4e2087d648f2de2ccce2dda6b55a0b))
+
+### Maintenance
+
+* **skills:** share agent workflows across Claude and Codex ([#1428](https://github.com/solana-foundation/solana-developer-platform/pull/1428)) ([8b0c3e7](https://github.com/solana-foundation/solana-developer-platform/commit/8b0c3e7c3dd71242913a391484c3aa7a9b9e58bf))
+
 ## [0.66.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.65.0...v0.66.0) (2026-08-20)
 
 ### Features
