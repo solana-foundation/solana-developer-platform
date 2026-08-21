@@ -152,7 +152,7 @@ describe("withdrawFromVault", () => {
     expect(broadcastVaultTransaction).toHaveBeenCalledOnce();
   });
 
-  it("replays the durable movement without rebuilding or rebroadcasting", async () => {
+  it("replays the original vault withdrawal for the same requestId and payload", async () => {
     const first = await withdrawFromVault(env, input());
     vi.clearAllMocks();
 
@@ -164,7 +164,7 @@ describe("withdrawFromVault", () => {
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
   });
 
-  it("rejects reuse of the idempotency key for a different amount", async () => {
+  it("rejects the same requestId with a different payload", async () => {
     await withdrawFromVault(env, input());
     await expect(withdrawFromVault(env, input({ shares: "5" }))).rejects.toMatchObject({
       code: "CONFLICT",
