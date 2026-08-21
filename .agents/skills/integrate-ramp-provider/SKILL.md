@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Integrate a ramp provider
 
-The umbrella. This ties the per-capability skills into one sequence. Read `apps/sdp-api/src/lib/ramps/providers/lightspark/client.ts` as the canonical example, then work the steps below.
+The umbrella. This ties the per-capability skills into one sequence. Read `packages/sdp-payments/src/ramps/providers/lightspark/client.ts` as the canonical example, then work the steps below.
 
 ## Inputs
 

@@ -1,9 +1,9 @@
 ---
-title: Set Up Your Organization
-description: Create and configure your SDP organization through the dashboard.
+title: Set Up Your Organization & Projects
+description: Set up your SDP organization and see how projects scope work within it.
 ---
 
-An organization is the top-level container for all your SDP resources — projects, wallets, API keys, and tokens. Every API request is scoped to an organization.
+Every SDP user works through an **organization** — a team workspace containing one or more **projects**, each a provisioned environment with its own API keys, wallets, and members. This guide creates your organization and covers how projects scope your resources.
 
 ### 1. Sign up
 
@@ -25,9 +25,12 @@ If you already have an organization, the **Organization Switcher** in the top-le
 
 <img src="/images/getting-started/org-switcher.png" alt="Organization Switcher dropdown" width="436" style={{ display: "block", maxWidth: "100%" }} />
 
-### 3. Next steps
+### 3. Organize with projects
+
+A **project** is a provisioned environment within your organization — sandbox or production-style — with its own API keys, wallets, tokens, and members, so teams don't share the same wallet and token surface. See the [Projects API reference](/docs/reference/api/projects) for managing them programmatically.
+
+### 4. Next steps
 
 - [Set up wallets](/docs/guides/setup-wallets) for signing transactions
-- [Create API keys](/docs/guides/manage-api-keys) for programmatic access
-- [Projects API reference](/docs/reference/api/projects) when you want to segment apps, tenants, or environments within the organization
-- [Create your first token](/docs/guides/create-a-token)
+- [Create API keys](/docs/developing-with-sdp/manage-api-keys) for programmatic access
+- [Create your first token](/docs/tokens/create-a-token)
