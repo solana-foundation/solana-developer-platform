@@ -6,7 +6,7 @@ import type { CustodyWalletSummary, CustodyWalletTokenBalance } from "@sdp/types
 import type { Address } from "@solana/kit";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError, badRequest } from "@/lib/errors";
+import { AppError, badRequest, conflict } from "@/lib/errors";
 import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
@@ -16,8 +16,8 @@ import { resolveIssuedTokenLabelsByMint } from "@/routes/payments/token-labels";
 import { getLogger } from "@/runtime/logger";
 import {
   assertApiKeyNotWalletScoped,
-  assertApiKeyWalletAccess,
-  getAllowedApiKeyWalletIdsForPermissions,
+  getAllowedApiKeyCustodyWalletIdsForPermissions,
+  resolveApiKeyCustodyWalletId,
   resolveApiKeySigningWalletId,
 } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
@@ -106,7 +106,7 @@ async function queryWalletSummaries(
   filters: ReturnType<typeof resolveWalletFilters>
 ): Promise<CustodyWalletSummary[]> {
   const auth = getAuth(c);
-  const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["wallets:read"]);
+  const allowedWalletIds = getAllowedApiKeyCustodyWalletIdsForPermissions(auth, ["wallets:read"]);
   if (allowedWalletIds !== null && allowedWalletIds.length === 0) {
     return [];
   }
@@ -119,7 +119,59 @@ async function queryWalletSummaries(
   });
   return allowedWalletIds === null
     ? wallets
-    : wallets.filter((wallet) => allowedWalletIds.includes(wallet.walletId));
+    : wallets.filter((wallet) => allowedWalletIds.includes(wallet.id));
+}
+
+async function findAuthorizedOperationalWallet(
+  c: AppContext,
+  walletId: string,
+  permissions: Parameters<typeof resolveApiKeyCustodyWalletId>[2],
+  allowRecordIdAlias = false
+) {
+  const auth = getAuth(c);
+  const actor = resolveActor(c);
+  const projectId = c.get("projectId");
+  const targets = new CustodyRuntimeTargets(getDb(c.env), c.env, new Map());
+  const custodyWalletId = resolveApiKeyCustodyWalletId(
+    auth,
+    walletId,
+    permissions,
+    allowRecordIdAlias
+  );
+  if (custodyWalletId) {
+    const wallet = await targets.findOperationalWalletById({
+      organizationId: actor.organizationId,
+      projectId,
+      custodyWalletId,
+    });
+    if (!wallet || !allowRecordIdAlias) {
+      return wallet;
+    }
+
+    const collision =
+      wallet.walletId === walletId
+        ? await targets.findOperationalWalletById({
+            organizationId: actor.organizationId,
+            projectId,
+            custodyWalletId: walletId,
+          })
+        : await targets.findOperationalWallet({
+            organizationId: actor.organizationId,
+            projectId,
+            walletId,
+          });
+    if (collision && collision.id !== wallet.id) {
+      throw conflict("Custody wallet ownership is ambiguous");
+    }
+    return wallet;
+  }
+
+  return targets.findOperationalWallet({
+    organizationId: actor.organizationId,
+    projectId,
+    walletId,
+    allowRecordIdAlias,
+  });
 }
 
 async function getWalletSummaries(
@@ -353,11 +405,15 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
 
 export const deleteWallet = async (c: ValidatedBodyContext<typeof deleteWalletSchema>) => {
   const actor = resolveActor(c);
+  const auth = getAuth(c);
 
   const body = c.req.valid("json");
 
+  let authorizedCustodyWalletId: string | null;
   try {
-    assertApiKeyWalletAccess(getAuth(c), body.walletId, ["wallets:write"]);
+    authorizedCustodyWalletId = resolveApiKeyCustodyWalletId(getAuth(c), body.walletId, [
+      "wallets:write",
+    ]);
   } catch (error) {
     if (error instanceof AppError && error.code === "FORBIDDEN") {
       throw new AppError("NOT_FOUND", "Custody wallet not found");
@@ -369,15 +425,27 @@ export const deleteWallet = async (c: ValidatedBodyContext<typeof deleteWalletSc
   const signingService = signingServiceModule.createSigningService(c.env, getRequestTenantScope(c));
 
   try {
-    const ownedWallet = await new CustodyRuntimeTargets(
-      getDb(c.env),
-      c.env,
-      new Map()
-    ).findOwnedWalletForMutation({
-      organizationId: actor.organizationId,
+    const selectedConfig = await signingService.getConfigurationForMutation(
+      actor.organizationId,
       projectId,
-      walletId: body.walletId,
-    });
+      body.provider
+    );
+    const targets = new CustodyRuntimeTargets(getDb(c.env), c.env, new Map());
+    const lookupProjectId =
+      authorizedCustodyWalletId && auth.authType === "api_key"
+        ? (auth.projectId ?? undefined)
+        : projectId;
+    const ownedWallet = authorizedCustodyWalletId
+      ? await targets.findOperationalWalletById({
+          organizationId: actor.organizationId,
+          projectId: lookupProjectId,
+          custodyWalletId: authorizedCustodyWalletId,
+        })
+      : await targets.findOwnedWalletForMutation({
+          organizationId: actor.organizationId,
+          projectId,
+          walletId: body.walletId,
+        });
     if (!ownedWallet) {
       const config = await signingService.getConfigurationForMutation(
         actor.organizationId,
@@ -393,6 +461,9 @@ export const deleteWallet = async (c: ValidatedBodyContext<typeof deleteWalletSc
             : "Custody not initialized"
       );
     }
+    if (ownedWallet.custodyConfigId && selectedConfig?.id !== ownedWallet.custodyConfigId) {
+      throw new AppError("NOT_FOUND", "Custody wallet not found");
+    }
     if (ownedWallet.custodyConnectionId) {
       if (body.provider && body.provider !== ownedWallet.provider) {
         throw badRequest("Provider does not match custody wallet");
@@ -404,6 +475,7 @@ export const deleteWallet = async (c: ValidatedBodyContext<typeof deleteWalletSc
     await signingService.deleteWallet(actor.organizationId, projectId, {
       provider: body.provider,
       walletId: body.walletId,
+      configId: ownedWallet.custodyConfigId,
     });
 
     const auditService = new AuditService(getDb(c.env));
@@ -443,10 +515,9 @@ export const setDefaultWallet = async (c: ValidatedBodyContext<typeof setDefault
 
   const body = c.req.valid("json");
 
-  // A wallet-scoped key may only re-default to a wallet it is bound to.
-  // Unbound wallets are indistinguishable from unknown ones.
+  let wallet: Awaited<ReturnType<typeof findAuthorizedOperationalWallet>>;
   try {
-    assertApiKeyWalletAccess(getAuth(c), body.walletId, ["wallets:write"]);
+    wallet = await findAuthorizedOperationalWallet(c, body.walletId, ["wallets:write"]);
   } catch (error) {
     if (error instanceof AppError && error.code === "FORBIDDEN") {
       throw badRequest("Unknown walletId for this wallet signing configuration");
@@ -455,15 +526,6 @@ export const setDefaultWallet = async (c: ValidatedBodyContext<typeof setDefault
   }
 
   const projectId = c.get("projectId");
-  const wallet = await new CustodyRuntimeTargets(
-    getDb(c.env),
-    c.env,
-    new Map()
-  ).findOperationalWallet({
-    organizationId: actor.organizationId,
-    projectId,
-    walletId: body.walletId,
-  });
   if (!wallet) {
     throw badRequest("Unknown walletId for this wallet signing configuration");
   }
@@ -576,8 +638,6 @@ export const setDefaultWallet = async (c: ValidatedBodyContext<typeof setDefault
 };
 
 export const updateWallet = async (c: ValidatedBodyContext<typeof updateWalletSchema>) => {
-  const actor = resolveActor(c);
-  const auth = getAuth(c);
   const projectId = c.get("projectId");
   const walletId = c.req.param("walletId")?.trim();
 
@@ -587,28 +647,17 @@ export const updateWallet = async (c: ValidatedBodyContext<typeof updateWalletSc
 
   const body = c.req.valid("json");
 
-  const wallet = await new CustodyRuntimeTargets(
-    getDb(c.env),
-    c.env,
-    new Map()
-  ).findOperationalWallet({
-    organizationId: actor.organizationId,
-    projectId,
-    walletId,
-    allowRecordIdAlias: true,
-  });
-
-  if (!wallet) {
-    throw new AppError("NOT_FOUND", "Wallet not found");
-  }
-
+  let wallet: Awaited<ReturnType<typeof findAuthorizedOperationalWallet>>;
   try {
-    assertApiKeyWalletAccess(auth, wallet.walletId, ["wallets:write"]);
+    wallet = await findAuthorizedOperationalWallet(c, walletId, ["wallets:write"], true);
   } catch (error) {
     if (error instanceof AppError && error.code === "FORBIDDEN") {
       throw new AppError("NOT_FOUND", "Wallet not found");
     }
     throw error;
+  }
+  if (!wallet) {
+    throw new AppError("NOT_FOUND", "Wallet not found");
   }
 
   const nextLabel = body.label?.trim() ? body.label.trim() : null;
@@ -722,37 +771,23 @@ export const getWalletAggregate = async (c: AppContext) => {
 };
 
 export const getWalletById = async (c: AppContext) => {
-  const actor = resolveActor(c);
-  const auth = getAuth(c);
-  const projectId = c.get("projectId");
   const walletId = c.req.param("walletId")?.trim();
 
   if (!walletId) {
     throw badRequest("Invalid wallet ID");
   }
 
-  const wallet = await new CustodyRuntimeTargets(
-    getDb(c.env),
-    c.env,
-    new Map()
-  ).findOperationalWallet({
-    organizationId: actor.organizationId,
-    projectId,
-    walletId,
-    allowRecordIdAlias: true,
-  });
-
-  if (!wallet) {
-    throw new AppError("NOT_FOUND", "Wallet not found");
-  }
-
+  let wallet: Awaited<ReturnType<typeof findAuthorizedOperationalWallet>>;
   try {
-    assertApiKeyWalletAccess(auth, wallet.walletId, ["wallets:read"]);
+    wallet = await findAuthorizedOperationalWallet(c, walletId, ["wallets:read"], true);
   } catch (error) {
     if (error instanceof AppError && error.code === "FORBIDDEN") {
       throw new AppError("NOT_FOUND", "Wallet not found");
     }
     throw error;
+  }
+  if (!wallet) {
+    throw new AppError("NOT_FOUND", "Wallet not found");
   }
 
   const walletMetadata: CustodyWalletMetadataResponse["wallet"] = {
@@ -826,7 +861,25 @@ export const getPublicKey = async (c: AppContext) => {
   const signingService = signingServiceModule.createSigningService(c.env, getRequestTenantScope(c));
 
   try {
-    const walletId = resolveApiKeySigningWalletId(auth, requestedWalletId, ["wallets:read"]);
+    const custodyWalletId = resolveApiKeyCustodyWalletId(auth, requestedWalletId, ["wallets:read"]);
+    const walletId = custodyWalletId
+      ? null
+      : resolveApiKeySigningWalletId(auth, requestedWalletId, ["wallets:read"]);
+    if (custodyWalletId) {
+      const wallet = await new CustodyRuntimeTargets(
+        getDb(c.env),
+        c.env,
+        new Map()
+      ).findOperationalWalletById({
+        organizationId: actor.organizationId,
+        projectId,
+        custodyWalletId,
+      });
+      if (!wallet) {
+        throw new AppError("NOT_FOUND", "Wallet not found");
+      }
+      return success(c, { publicKey: wallet.publicKey });
+    }
     if (walletId) {
       const wallet = await new CustodyRuntimeTargets(
         getDb(c.env),

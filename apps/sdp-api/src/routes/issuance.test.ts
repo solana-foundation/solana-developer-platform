@@ -8,6 +8,7 @@ import * as FeePaymentAdapters from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as SolanaRpc from "@sdp/rpc/solana";
 import type { Address } from "@sdp/solana/address";
+import type { CachedApiKey } from "@sdp/types";
 import { address, createNoopSigner } from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
@@ -32,6 +33,7 @@ import {
 } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
+import { seedCachedApiKey } from "@/test/mocks/kv";
 
 // Check if running in mock mode (no RPC access)
 const isMockMode = (env as { SOLANA_MOCK?: string }).SOLANA_MOCK === "true";
@@ -728,15 +730,11 @@ describe("Issuance Routes", () => {
   });
 
   describe("GET /v1/issuance/transactions", () => {
-    async function cacheProjectApiKey(overrides: Record<string, unknown>) {
-      const { apiKeys } = createKVStoreSet(env);
-      await apiKeys.put(
-        `key:${apiKeyHash}`,
-        JSON.stringify({
-          ...TEST_PROJECT_CACHED_KEY,
-          ...overrides,
-        })
-      );
+    async function cacheProjectApiKey(overrides: Partial<CachedApiKey>) {
+      await seedCachedApiKey(env, apiKeyHash, {
+        ...TEST_PROJECT_CACHED_KEY,
+        ...overrides,
+      });
     }
 
     it("returns matching wallet transactions across all types when type is omitted", async () => {

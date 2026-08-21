@@ -5,9 +5,11 @@ import {
   assertApiKeyWalletAccess,
   assertGrantableApiKeyPermissions,
   filterApiKeyWallets,
+  getAllowedApiKeyCustodyWalletIdsForPermissions,
   getAllowedApiKeyWalletIds,
   getAllowedApiKeyWalletIdsForPermissions,
   parseWalletBindingPatch,
+  resolveApiKeyCustodyWalletId,
   resolveApiKeySigningWalletId,
   resolveCreateWalletScope,
   resolveUpdateWalletScope,
@@ -112,6 +114,59 @@ describe("api key scope service", () => {
     ).toEqual([{ walletId: "wal_a", label: "A" }]);
   });
 
+  it("keeps selected authorization pinned to exact custody wallet IDs", () => {
+    const auth = createApiKeyAuth({
+      walletScope: "selected",
+      walletBindings: [
+        {
+          walletId: "wal_shared",
+          custodyWalletId: "cwal_exact",
+          permissions: ["wallets:read"],
+        },
+      ],
+    });
+
+    expect(getAllowedApiKeyCustodyWalletIdsForPermissions(auth, ["wallets:read"])).toEqual([
+      "cwal_exact",
+    ]);
+    expect(resolveApiKeyCustodyWalletId(auth, "wal_shared", ["wallets:read"])).toBe("cwal_exact");
+  });
+
+  it("fails closed when selected scope has no usable exact binding", () => {
+    const auth = createApiKeyAuth({
+      walletScope: "selected",
+      signingWalletId: "wal_unresolved",
+      walletBindings: [],
+    });
+
+    expect(getAllowedApiKeyCustodyWalletIdsForPermissions(auth)).toEqual([]);
+    expect(() => resolveApiKeyCustodyWalletId(auth, "wal_unresolved")).toThrowError(AppError);
+    expect(() => resolveApiKeySigningWalletId(auth, undefined)).toThrowError(AppError);
+  });
+
+  it("requires an explicit wallet when the preferred binding is unresolved", () => {
+    const auth = createApiKeyAuth({
+      walletScope: "selected",
+      signingWalletId: "wal_preferred",
+      walletBindings: [
+        {
+          walletId: "wal_other",
+          custodyWalletId: "cwal_other",
+          permissions: ["wallets:read"],
+        },
+      ],
+    });
+
+    expect(() => resolveApiKeySigningWalletId(auth, undefined, ["wallets:read"])).toThrowError(
+      AppError
+    );
+    expect(() => resolveApiKeyCustodyWalletId(auth, undefined, ["wallets:read"])).toThrowError(
+      AppError
+    );
+    expect(resolveApiKeySigningWalletId(auth, "wal_other", ["wallets:read"])).toBe("wal_other");
+    expect(resolveApiKeyCustodyWalletId(auth, "wal_other", ["wallets:read"])).toBe("cwal_other");
+  });
+
   it("supports legacy single signingWalletId payloads", () => {
     const parsed = parseWalletBindingPatch({
       signingWalletId: "wal_legacy",
@@ -162,6 +217,25 @@ describe("api key scope service", () => {
         walletScope: "selected",
       })
     ).toThrowError(AppError);
+  });
+
+  it("rejects connectionId without wallet provisioning", () => {
+    expect(() =>
+      resolveCreateWalletScope({
+        walletScope: "selected",
+        connectionId: "cconn_selected",
+      })
+    ).toThrowError("connectionId requires provisionWallet");
+  });
+
+  it("accepts connectionId for selected wallet provisioning", () => {
+    expect(
+      resolveCreateWalletScope({
+        walletScope: "selected",
+        provisionWallet: true,
+        connectionId: "cconn_selected",
+      })
+    ).toMatchObject({ walletScope: "selected", bindings: [] });
   });
 
   it("rejects wallet binding fields when walletScope is all on create", () => {

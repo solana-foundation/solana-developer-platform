@@ -12,6 +12,11 @@ const apiKeyWalletBindingSchema = z.object({
   permissions: z.array(z.enum(PERMISSIONS)).optional(),
 });
 
+const apiKeyWalletProvisioningSchema = z.union([
+  z.boolean(),
+  z.object({ connectionId: z.string().min(1) }).strict(),
+]);
+
 export const apiKeyCreateSchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().max(500).optional(),
@@ -23,7 +28,8 @@ export const apiKeyCreateSchema = z.object({
   signingWalletId: z.string().min(1).optional(),
   signingWalletIds: z.array(z.string().min(1)).optional(),
   walletBindings: z.array(apiKeyWalletBindingSchema).optional(),
-  provisionWallet: z.boolean().optional(),
+  provisionWallet: apiKeyWalletProvisioningSchema.optional(),
+  connectionId: z.never().optional(),
   walletLabel: z.string().max(100).optional(),
   walletPurpose: z
     .enum(["root", "mint_authority", "freeze_authority", "fee_payer", "transfer"])
