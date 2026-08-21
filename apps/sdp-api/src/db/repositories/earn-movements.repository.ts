@@ -1284,10 +1284,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           if (!winner) throw new Error("Failed to resolve concurrent earn vault withdrawal");
           return winner;
         }
-        const legs: EarnVaultWithdrawalLegRow[] = [];
-        for (let legIndex = 0; legIndex < input.legs.length; legIndex += 1) {
-          legs.push(await insertVaultWithdrawalLeg(transaction, movement.id, input, legIndex));
-        }
+        const legs = await insertVaultWithdrawalLegs(transaction, movement.id, input);
         return {
           position: await requireMovementPosition(transaction, movement),
           movement,
@@ -1671,32 +1668,32 @@ async function insertVaultWithdrawalMovement(
   return row ? mapMovementRow(row) : null;
 }
 
-async function insertVaultWithdrawalLeg(
+async function insertVaultWithdrawalLegs(
   db: AppDb,
   movementId: string,
-  input: CreateSignedVaultWithdrawalIntentInput,
-  legIndex: number
-): Promise<EarnVaultWithdrawalLegRow> {
-  const leg = input.legs[legIndex];
-  if (!leg) throw new Error(`Earn vault withdrawal leg ${legIndex} is missing from the input`);
-  const row = await db
-    .prepare(
-      `INSERT INTO earn_vault_withdrawal_legs (
-         movement_id, leg_index, shares, signature, signed_transaction, last_valid_block_height
-       ) VALUES (?, ?, ?, ?, ?, ?)
-       RETURNING *`
-    )
-    .bind(
-      movementId,
-      legIndex,
-      leg.shares,
-      leg.signature,
-      leg.signedTransaction,
-      leg.lastValidBlockHeight
-    )
-    .first<Record<string, unknown>>();
-  if (!row) throw new Error(`Failed to record earn vault withdrawal leg ${legIndex}`);
-  return mapVaultWithdrawalLegRow(row);
+  input: CreateSignedVaultWithdrawalIntentInput
+): Promise<EarnVaultWithdrawalLegRow[]> {
+  if (input.legs.length === 0) return [];
+  const values = input.legs.map(() => "(?, ?, ?, ?, ?, ?)").join(", ");
+  const bindings = input.legs.flatMap((leg, legIndex) => [
+    movementId,
+    legIndex,
+    leg.shares,
+    leg.signature,
+    leg.signedTransaction,
+    leg.lastValidBlockHeight,
+  ]);
+  const rows = await db.queryMany<Record<string, unknown>>(
+    `INSERT INTO earn_vault_withdrawal_legs (
+       movement_id, leg_index, shares, signature, signed_transaction, last_valid_block_height
+     ) VALUES ${values}
+     RETURNING *`,
+    bindings
+  );
+  if (rows.length !== input.legs.length) {
+    throw new Error("Failed to record every earn vault withdrawal leg");
+  }
+  return rows.map(mapVaultWithdrawalLegRow).sort((left, right) => left.leg_index - right.leg_index);
 }
 
 async function findVaultMovementByRequest(

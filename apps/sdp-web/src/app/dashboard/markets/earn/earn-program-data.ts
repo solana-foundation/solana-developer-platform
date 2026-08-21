@@ -34,7 +34,7 @@ import {
   type ListEarnStrategiesResponse,
   SOLANA_CLUSTERS,
 } from "@sdp/types";
-import { useEffect, useRef } from "react";
+import { useEffect, useEffectEvent, useRef } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { z } from "zod";
@@ -850,10 +850,7 @@ export function useEarnVaultDepositOutcomeToast(
 ): void {
   const t = useTranslations();
   const announced = useRef<string | undefined>(undefined);
-  // A ref so a re-created callback identity can never re-trigger the effect —
-  // the announcement (and therefore the retire signal) must fire exactly once.
-  const onSettledRef = useRef(onSettled);
-  onSettledRef.current = onSettled;
+  const notifySettled = useEffectEvent(() => onSettled?.());
 
   const { data } = useSWR(
     movementId ? (["dashboard-earn-vault-deposit", movementId] as const) : null,
@@ -880,7 +877,7 @@ export function useEarnVaultDepositOutcomeToast(
       // actionable and "the deposit failed" is not.
       toast.error(data.failureReason || t(VAULT_DEPOSIT_OUTCOME_KEYS.failed));
     }
-    onSettledRef.current?.();
+    notifySettled();
   }, [data, t]);
 }
 
@@ -1124,8 +1121,7 @@ export function useEarnVaultWithdrawalOutcomeToast(
 ): void {
   const t = useTranslations();
   const announced = useRef<string | undefined>(undefined);
-  const onSettledRef = useRef(onSettled);
-  onSettledRef.current = onSettled;
+  const notifySettled = useEffectEvent(() => onSettled?.());
 
   const { data } = useSWR(
     movementId ? (["dashboard-earn-vault-withdrawal", movementId] as const) : null,
@@ -1147,7 +1143,7 @@ export function useEarnVaultWithdrawalOutcomeToast(
     } else {
       toast.error(data.failureReason || t(VAULT_WITHDRAWAL_OUTCOME_KEYS.failed));
     }
-    onSettledRef.current?.();
+    notifySettled();
   }, [data, t]);
 }
 
@@ -1303,10 +1299,7 @@ export function useEarnWithdrawalOutcomeToast(
 ): void {
   const t = useTranslations();
   const announced = useRef<string | undefined>(undefined);
-  // A ref so a re-created callback identity can never re-trigger the effect —
-  // the announcement (and therefore the retire signal) must fire exactly once.
-  const onSettledRef = useRef(onSettled);
-  onSettledRef.current = onSettled;
+  const notifySettled = useEffectEvent(() => onSettled?.());
 
   const { data } = useSWR(
     programId && withdrawalRef ? ["dashboard-earn-withdrawal", programId, withdrawalRef] : null,
@@ -1339,6 +1332,6 @@ export function useEarnWithdrawalOutcomeToast(
       // avoid.
       toast.error(message);
     }
-    onSettledRef.current?.();
+    notifySettled();
   }, [data, t]);
 }

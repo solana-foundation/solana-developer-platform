@@ -39,7 +39,7 @@ import {
 
 const MAX_SHARES_LENGTH = 128;
 
-export type VaultWithdrawalSharesValidation =
+type VaultWithdrawalSharesValidation =
   | { kind: "valid"; canonicalShares: string }
   | { kind: "invalid" };
 
@@ -49,7 +49,7 @@ export type VaultWithdrawalSharesValidation =
  * the well-known token table), so scale is the BUILDER's check: the API
  * answers over-precision with a readable 400 before anything is signed.
  */
-export function validateVaultWithdrawalShares(value: string): VaultWithdrawalSharesValidation {
+function validateVaultWithdrawalShares(value: string): VaultWithdrawalSharesValidation {
   const shares = parseUnsignedDecimal(value, { maxLength: MAX_SHARES_LENGTH });
   if (!shares || compareUnsignedDecimals(shares.canonical, "0") !== 1) {
     return { kind: "invalid" };
@@ -435,7 +435,7 @@ export function EarnVaultWithdrawModal({
     } finally {
       if (requestControllerRef.current === controller) requestControllerRef.current = null;
       submittingRef.current = false;
-      if (!controller.signal.aborted) setSubmitting(false);
+      setSubmitting(false);
     }
   }
 

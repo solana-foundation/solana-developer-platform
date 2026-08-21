@@ -112,6 +112,7 @@ async function reconcileEnvironment(
   // already bounded, and every other job in this directory reconciles the same way.
   for (const [index, item] of rows.entries()) {
     try {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- pacing protects the RPC endpoint and database pool from a 256-way fanout.
       await reconcileMovement(env, ledger, item, statuses[index] ?? null, {
         cluster,
         rpcUrl,

@@ -128,7 +128,7 @@ export function resolveBurnAllSentinel(input: {
     0n
   );
   const remainder = input.requestedBaseUnits - literalBaseUnits;
-  if (remainder <= 0n || remainder >= KVAULT_BURN_ALL_SHARES_SENTINEL) {
+  if (remainder <= 0n || remainder > KVAULT_BURN_ALL_SHARES_SENTINEL) {
     throw new SdpKaminoError(
       "INVALID_AMOUNT",
       `Kamino withdraw instructions leave ${remainder} share base units for their final leg; ` +

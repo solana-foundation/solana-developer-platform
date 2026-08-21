@@ -143,6 +143,17 @@ describe("resolveBurnAllSentinel", () => {
     );
   });
 
+  it("accepts a full exit at the maximum u64 share quantity", () => {
+    const resolved = resolveBurnAllSentinel({
+      instructions: [withdrawIx(SENTINEL)],
+      requestedBaseUnits: SENTINEL,
+    });
+    expect(resolved[0].sharesBaseUnits).toBe(SENTINEL);
+    expect(decodeKvaultWithdrawShares(resolved[0].instruction, String(KVAULT_PROGRAM))).toBe(
+      SENTINEL
+    );
+  });
+
   it("rewrites the final sentinel to the remainder after literal reserve legs", () => {
     const resolved = resolveBurnAllSentinel({
       instructions: [withdrawIx(40n), taggedIx("prepare"), withdrawIx(SENTINEL)],

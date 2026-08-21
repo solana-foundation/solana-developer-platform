@@ -217,17 +217,19 @@ export async function signVaultPlanTransactions(
   const batches = planBatches(input.plan).map((batch) => batch.map(toKitInstruction));
   await verifyVaultRpc(env, input);
   const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
-  const lookupTables = await resolveLookupTables(env, input);
-  const { blockhash, lastValidBlockHeight } = await input.deadline.run(
-    "Fetching the vault transaction blockhash",
-    () => solanaRpc.getRecentBlockhash(rpc, "confirmed")
-  );
+  const [lookupTables, { blockhash, lastValidBlockHeight }] = await Promise.all([
+    resolveLookupTables(env, input),
+    input.deadline.run("Fetching the vault transaction blockhash", () =>
+      solanaRpc.getRecentBlockhash(rpc, "confirmed")
+    ),
+  ]);
 
   const signedTransactions: SignedVaultTransaction[] = [];
   for (const instructions of batches) {
     let signedBytes: Uint8Array;
     if (input.fee.kind === "sponsored") {
       const { feePayment } = input.fee;
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- custody signing is intentionally serialized because signer ports may be stateful or rate-limited.
       const feePayer = await input.deadline.run("Resolving the sponsored fee payer", () =>
         feePayment.getFeePayer()
       );
@@ -239,10 +241,12 @@ export async function signVaultPlanTransactions(
         (m) => applyLookupTables(m, lookupTables),
         (m) => addSignersToTransactionMessage([input.owner], m)
       );
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- preserve signer ordering across transaction legs.
       const ownerSigned = await input.deadline.run("Signing the vault transaction", () =>
         partiallySignTransactionMessageWithSigners(message)
       );
       const ownerSignedBytes = new Uint8Array(getTransactionEncoder().encode(ownerSigned));
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- fee-payer signing depends on the owner-signed bytes and stays ordered across legs.
       signedBytes = await input.deadline.run("Signing the sponsored vault fee", () =>
         feePayment.signAsFeePayer(ownerSignedBytes)
       );
@@ -255,6 +259,7 @@ export async function signVaultPlanTransactions(
         (m) => applyLookupTables(m, lookupTables),
         (m) => addSignersToTransactionMessage([input.owner], m)
       );
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- preserve signer ordering across transaction legs.
       const signed = await input.deadline.run("Signing the vault transaction", () =>
         signTransactionMessageWithSigners(message)
       );

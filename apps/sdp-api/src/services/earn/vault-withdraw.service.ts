@@ -153,6 +153,7 @@ async function waitForLegCommitment(
   for (;;) {
     let status: SignatureStatusInfo | null;
     try {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- this is a bounded commitment poll; the next read must wait for the prior result and delay.
       const statuses = await deadline.run("Confirming the vault withdrawal leg", () =>
         getSignatureStatuses(rpc, [signature as Signature])
       );
@@ -167,6 +168,7 @@ async function waitForLegCommitment(
       return status;
     }
     try {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- polling delays are sequential by definition.
       await deadline.run(
         "Waiting for vault withdrawal leg commitment",
         () => new Promise<void>((resolve) => setTimeout(resolve, LEG_COMMITMENT_POLL_INTERVAL_MS))
@@ -459,6 +461,7 @@ async function submitWithdrawalLegs(
       // succeed. Fail them now rather than lazily — the shares they would have
       // redeemed remain in the wallet and are immediately re-withdrawable.
       for (let rest = index + 1; rest < legs.length; rest += 1) {
+        // react-doctor-disable-next-line react-doctor/async-await-in-loop -- aggregate movement state is recomputed transactionally after each ordered leg transition.
         await advance(rest, {
           toStatus: "failed",
           failureReason: `Predecessor withdrawal leg ${legs[index].signature} failed on chain`,
