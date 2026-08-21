@@ -167,6 +167,55 @@ The workflow validates the SHA, resolves its tag to an immutable digest, verifie
 
 Database schema rollback is not automated. If the selected image is incompatible with the current schema, stop and prepare a forward fix instead of improvising a destructive migration.
 
+### Transfers awaiting manual reconciliation
+
+When a fee-payment provider fails without telling us whether it broadcast the transaction, the API
+parks the transfer: it stays `processing`, carries the marker `provider_data.submission_outcome =
+'unknown'`, and returns `409 transfer_submission_outcome_unknown` telling the client not to retry.
+The cron job never times out a signatureless parked transfer: the recovery query excludes it. If
+`signature` is present, the job still reconciles it from chain normally; otherwise an operator must
+establish what happened on chain. List them with:
+
+```sql
+SELECT id, type, organization_id, project_id, source_address, destination_address,
+       token, amount, signature, created_at, updated_at,
+       provider_data ->> 'submitted_signature' AS submitted_signature
+FROM payment_transfers
+WHERE status = 'processing'
+  AND provider_data ->> 'submission_outcome' = 'unknown'
+ORDER BY created_at;
+```
+
+A signatureless parked row waits indefinitely, so resolve parked rows promptly. Reconcile every one
+before a planned rollback to a pre-fence image. If the row carries
+`provider_data ->> 'submitted_signature'`, start from that signature; otherwise look up the source
+address on chain around `created_at` for a matching transaction. Then:
+
+```sql
+-- The transaction DID land: record its signature and drop the marker. The
+-- pending-transfers job settles the row to confirmed/finalized on its next run.
+UPDATE payment_transfers
+SET signature = :signature,
+    error = NULL,
+    provider_data = provider_data - 'submission_outcome',
+    updated_at = sdp_iso_now()
+WHERE id = :transfer_id AND status = 'processing';
+
+-- The transaction provably did NOT land: fail it terminally and drop the
+-- marker. Only after confirming no matching transaction exists on chain —
+-- a wrong call here invites the client to send the payment twice.
+UPDATE payment_transfers
+SET status = 'failed',
+    error = 'Reconciled manually: transaction was never broadcast',
+    provider_data = provider_data - 'submission_outcome',
+    updated_at = sdp_iso_now()
+WHERE id = :transfer_id AND status = 'processing';
+```
+
+If a pre-fence rollback cannot wait for every row, record the transfer ids left parked in the
+incident timeline: the older job will fail them, and each one is a payment the client may send
+again.
+
 ### Schema compatibility
 
 Migrations must remain backward-compatible across the rollback window:

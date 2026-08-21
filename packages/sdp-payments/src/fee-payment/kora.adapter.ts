@@ -11,14 +11,14 @@ import {
   getTransactionDecoder,
   type Signature,
 } from "@solana/kit";
-import {
-  type Config,
-  type FeePayerPolicy,
-  KoraClient,
-  type KoraClientOptions,
-  type SignAndSendTransactionRequest,
-  type SignTransactionRequest,
+import type {
+  Config,
+  FeePayerPolicy,
+  KoraClientOptions,
+  SignAndSendTransactionRequest,
+  SignTransactionRequest,
 } from "@solana/kora";
+import { KoraErrorCode } from "@solana/kora";
 import type { FeePaymentPort, SponsorshipProviderConfiguration } from "./port";
 import { FeePaymentError } from "./port";
 
@@ -94,17 +94,13 @@ export class KoraAdapter implements FeePaymentPort {
       (identityTokenAudience
         ? createCloudRunIdentityTokenProvider(identityTokenAudience)
         : undefined);
+    // Always our own client, with or without an identity token: the vendored
+    // one does not check `response.ok`, so an HTTP refusal reaches us as a
+    // JSON parse failure with nothing to classify — and an unclassifiable
+    // refusal is parked for an operator rather than failed.
     this.client =
       config.client ??
-      (identityTokenProvider
-        ? new AuthorizedKoraClient({
-            rpcUrl,
-            apiKey,
-            getRecaptchaToken,
-            hmacSecret,
-            identityTokenProvider,
-          })
-        : new KoraClient({ rpcUrl, apiKey, getRecaptchaToken, hmacSecret }));
+      new KoraHttpClient({ rpcUrl, apiKey, getRecaptchaToken, hmacSecret, identityTokenProvider });
     this.client = withCallTimeouts(this.client, config.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     this.userId = userId?.trim() || "sdp:unscoped";
   }
@@ -177,6 +173,11 @@ export class KoraAdapter implements FeePaymentPort {
     //  - 502/503/Bad Gateway: The underlying RPC (e.g. Helius devnet) can return transient
     //    HTTP gateway errors that resolve on the next attempt.
     const maxRetries = 2;
+    // Once any attempt dies ambiguously (timeout, dropped connection, gateway
+    // error), the request may have REACHED Kora — from then on no rejection in
+    // this call can vouch that nothing was broadcast. The verdict travels on
+    // the thrown FeePaymentError as `maybeBroadcast` (data, not message text).
+    let maybeBroadcast = false;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         const { signature: submittedSignature, signed_transaction } =
@@ -195,17 +196,26 @@ export class KoraAdapter implements FeePaymentPort {
 
         return signature;
       } catch (error) {
+        maybeBroadcast ||= isAmbiguousTransportError(error);
         if (attempt < maxRetries && isRetryableSignAndSendError(error)) {
           await sleep((attempt + 1) * 500);
           continue;
         }
 
-        throw this.wrapError(error, "Failed to sign and send transaction");
+        throw this.wrapError(error, "Failed to sign and send transaction", {
+          maybeBroadcast,
+          // A final error that proves nothing was submitted makes the whole
+          // call provably pre-broadcast — as long as no earlier attempt was
+          // ambiguous. Terminal failure is then safe, with no 409 wedge.
+          preBroadcast: !maybeBroadcast && isProvablyPreBroadcast(error),
+        });
       }
     }
 
     // Unreachable: loop always returns or throws.
-    throw new FeePaymentError("Failed to sign and send transaction", "NETWORK_ERROR");
+    throw new FeePaymentError("Failed to sign and send transaction", "NETWORK_ERROR", undefined, {
+      maybeBroadcast,
+    });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -303,19 +313,26 @@ export class KoraAdapter implements FeePaymentPort {
     return feeToken;
   }
 
-  private wrapError(error: unknown, message: string): FeePaymentError {
+  private wrapError(
+    error: unknown,
+    message: string,
+    options?: { maybeBroadcast?: boolean; preBroadcast?: boolean }
+  ): FeePaymentError {
     const rpcCode = extractRpcErrorCode(error);
     if (rpcCode !== undefined) {
       return new FeePaymentError(
         `${message}: ${formatErrorMessage(error)}`,
-        mapKoraErrorCode(rpcCode)
+        mapKoraErrorCode(rpcCode),
+        undefined,
+        options
       );
     }
 
     return new FeePaymentError(
       `${message}: ${formatErrorMessage(error)}`,
       "NETWORK_ERROR",
-      error instanceof Error ? error : undefined
+      error instanceof Error ? error : undefined,
+      options
     );
   }
 }
@@ -409,6 +426,54 @@ function extractRpcErrorCode(error: unknown): number | undefined {
   return Number.parseInt(match[1], 10);
 }
 
+// A refused connection was never established, so its outcome IS known:
+// nothing reached Kora. Node's fetch (undici) reports it as "fetch failed"
+// with the socket error in `cause`, so walk the cause chain instead of
+// trusting the top-level message.
+function isRefusedConnection(error: unknown): boolean {
+  for (let current = error; current instanceof Error; current = current.cause) {
+    if (
+      current.message.toLowerCase().includes("econnrefused") ||
+      (current as { code?: unknown }).code === "ECONNREFUSED"
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// The request may have REACHED Kora even though no usable response came
+// back. Derived from the retryable set so a future transport class cannot be
+// retried-but-unflagged by list drift; the exclusions are the cases where
+// the outcome of the failed attempt IS known: a refused connection was never
+// established, and "Blockhash not found" is a real server answer.
+/**
+ * Proof that nothing reached Kora's transaction handling: a connection it
+ * refused, a status answered before the payload was read (a wrong or missing
+ * Cloud Run audience answers 401 to every call), or an identity token this
+ * process never obtained, so no request left it. 408 and 499 are excluded —
+ * both mean the request was cut off, possibly after it began to be handled.
+ * A terminal failure is safe here; parking these would put every payment of a
+ * misconfigured deployment behind an operator.
+ */
+function isProvablyPreBroadcast(error: unknown): boolean {
+  if (isRefusedConnection(error)) return true;
+  if (!(error instanceof Error)) return false;
+  if (/cloud run identity token/i.test(error.message)) return true;
+  const status = Number(/\bKora HTTP (\d{3})\b/.exec(error.message)?.[1]);
+  return status >= 400 && status < 500 && status !== 408 && status !== 499;
+}
+
+function isAmbiguousTransportError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return (
+    isRetryableSignAndSendError(error) &&
+    !isProvablyPreBroadcast(error) &&
+    !message.includes("blockhash not found")
+  );
+}
+
 function isRetryableSignAndSendError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const message = error.message.toLowerCase();
@@ -447,17 +512,34 @@ function isRetryableGetFeePayerError(error: unknown): boolean {
   );
 }
 
+/**
+ * Straight off `KoraErrorCode` — the enum, not a transcription of it, because
+ * the bug this replaced was a transcription. Getting one wrong is not
+ * cosmetic: a code outside DETERMINISTIC_REJECTION_CODES is treated as an
+ * unknown outcome and parked for an operator, so a routine refusal would wait
+ * for a human instead of failing. Only codes whose meaning rules out a
+ * post-submit origin are named: the request was malformed, the signature was
+ * never produced, the caller was refused at the gate. Everything else stays
+ * parked on purpose — InvalidTransaction is the provider's catch-all and
+ * carries simulation failures, AccountNotFound can come from the node during
+ * a send, and the server-side codes cannot prove nothing was sent.
+ */
 function mapKoraErrorCode(code: number): import("./port").FeePaymentErrorCode {
   switch (code) {
-    case -32001:
-      return "RATE_LIMITED";
-    case -32002:
-      return "INSUFFICIENT_BALANCE";
-    case -32600:
-    case -32602:
+    case KoraErrorCode.ValidationError:
+    case KoraErrorCode.UnsupportedFeeToken:
+    case KoraErrorCode.InvalidRequest:
+    case KoraErrorCode.SigningError:
+    case KoraErrorCode.Unauthorized:
+    case KoraErrorCode.RecaptchaError:
+    case -32600: // JSON-RPC invalid request
+    case -32602: // JSON-RPC invalid params
       return "SIGNING_FAILED";
-    case -32003:
-      return "SUBMISSION_FAILED";
+    case KoraErrorCode.InsufficientFunds:
+      return "INSUFFICIENT_BALANCE";
+    case KoraErrorCode.RateLimitExceeded:
+    case KoraErrorCode.UsageLimitExceeded:
+      return "RATE_LIMITED";
     default:
       return "NETWORK_ERROR";
   }
@@ -506,10 +588,10 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-class AuthorizedKoraClient implements KoraClientTransport {
+class KoraHttpClient implements KoraClientTransport {
   constructor(
     private readonly config: KoraClientOptions & {
-      identityTokenProvider: () => Promise<string>;
+      identityTokenProvider?: () => Promise<string>;
     }
   ) {}
 
@@ -552,10 +634,10 @@ class AuthorizedKoraClient implements KoraClientTransport {
 
   private async rpcRequest<T>(method: string, params?: unknown): Promise<T> {
     const body = JSON.stringify({ id: 1, jsonrpc: "2.0", method, params });
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${await this.config.identityTokenProvider()}`,
-      "Content-Type": "application/json",
-    };
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (this.config.identityTokenProvider) {
+      headers.Authorization = `Bearer ${await this.config.identityTokenProvider()}`;
+    }
     if (this.config.apiKey) {
       headers["x-api-key"] = this.config.apiKey;
     }

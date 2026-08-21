@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   FeePaymentError,
+  type FeePaymentErrorCode,
   type FeePaymentPort,
   type SponsorshipProviderConfiguration,
 } from "@sdp/payments/fee-payment";
@@ -27,6 +28,7 @@ import {
 } from "@/db/repositories/sponsorship-budget.repository";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
+import { isPreBroadcastRejection } from "@/services/payments/submission-outcome";
 import type { Env } from "@/types/env";
 import type { SponsorshipScope } from "./sponsorship.service";
 
@@ -93,11 +95,26 @@ function decodeBase64(value: string): Uint8Array {
   return new Uint8Array(getBase64Encoder().encode(value));
 }
 
+/**
+ * An admission/preflight rejection: it fires before the transaction is handed
+ * to the provider, so it carries the structural pre-broadcast verdict — a
+ * terminal failure is provably safe whatever the code. The code alone cannot
+ * say this: PROVIDER_NOT_AVAILABLE is shared with genuinely ambiguous
+ * outcomes (see resolveDurableReplay), which must NOT go through this helper.
+ */
+function preBroadcastRejection(
+  message: string,
+  code: FeePaymentErrorCode,
+  cause?: Error
+): FeePaymentError {
+  return new FeePaymentError(message, code, cause, { preBroadcast: true });
+}
+
 function getRecentBlockhash(transaction: Uint8Array): string {
   const decoded = getTransactionDecoder().decode(transaction);
   const message = getCompiledTransactionMessageDecoder().decode(decoded.messageBytes);
   if (!("lifetimeToken" in message) || typeof message.lifetimeToken !== "string") {
-    throw new FeePaymentError(
+    throw preBroadcastRejection(
       "Sponsored transaction does not contain a recent blockhash",
       "SIGNING_FAILED"
     );
@@ -247,7 +264,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
     try {
       signature = await this.provider.signAndSend(transaction);
     } catch (error) {
-      if (isDeterministicProviderRejection(error)) {
+      if (isPreBroadcastRejection(error)) {
         await this.releaseDeterministic(reservation, error);
       } else {
         await this.markAmbiguous(reservation, error);
@@ -262,7 +279,8 @@ export class BudgetedFeePayment implements FeePaymentPort {
         resolveNetwork(this.env),
         "Submitted sponsorship outcome could not be persisted",
         "Submitted sponsorship persistence failed",
-        error
+        error,
+        { signature, reservationId: reservation.id }
       );
     }
     if (result === "duplicate_signature") {
@@ -276,7 +294,9 @@ export class BudgetedFeePayment implements FeePaymentPort {
       return this.accountingUnavailable(
         resolveNetwork(this.env),
         "Submitted sponsorship outcome could not be persisted",
-        "Submitted sponsorship outcome lost its durable state transition"
+        "Submitted sponsorship outcome lost its durable state transition",
+        undefined,
+        { signature, reservationId: reservation.id }
       );
     }
     return signature;
@@ -299,7 +319,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
 
   private async prepareAdmission(transaction: Uint8Array): Promise<AdmissionContext> {
     if (!this.provider.getSponsorshipConfiguration) {
-      throw new FeePaymentError(
+      throw preBroadcastRejection(
         "Managed sponsorship provider does not expose fail-closed configuration",
         "PROVIDER_NOT_AVAILABLE"
       );
@@ -315,7 +335,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
         this.getNetworkFee(transaction),
       ]);
     } catch (error) {
-      throw new FeePaymentError(
+      throw preBroadcastRejection(
         "Sponsorship preflight is unavailable",
         "PROVIDER_NOT_AVAILABLE",
         error instanceof Error ? error : undefined
@@ -326,7 +346,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
       : 0n;
     const ceiling = networkFee + providerOutflow;
     if (ceiling < 0n || ceiling > MAX_SAFE_LAMPORTS) {
-      throw new FeePaymentError(
+      throw preBroadcastRejection(
         "Sponsored transaction cost cannot be represented safely",
         "TRANSACTION_TOO_LARGE"
       );
@@ -430,7 +450,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
         "sponsorship disabled during admission"
       );
     }
-    throw new FeePaymentError("Sponsorship is disabled for this scope", "PROVIDER_NOT_AVAILABLE");
+    throw preBroadcastRejection("Sponsorship is disabled for this scope", "PROVIDER_NOT_AVAILABLE");
   }
 
   private async admitAgainstCurrentPolicy(
@@ -451,7 +471,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
         );
         if (durable.kind === "replay") return durable.result;
         if (durable.kind === "in_progress") {
-          throw new FeePaymentError(
+          throw preBroadcastRejection(
             "An identical sponsorship operation is already in progress",
             "PROVIDER_NOT_AVAILABLE"
           );
@@ -467,7 +487,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
             ? "budget exceeded during admission"
             : "policy changed during admission"
         );
-        throw new FeePaymentError(
+        throw preBroadcastRejection(
           admission === "denied"
             ? "Sponsorship budget exceeded"
             : "Sponsorship policy changed during admission",
@@ -480,7 +500,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
           reservationAttempt,
           "redundant redis reservation during admission"
         );
-        throw new FeePaymentError(
+        throw preBroadcastRejection(
           "An identical sponsorship operation is already in progress",
           "PROVIDER_NOT_AVAILABLE"
         );
@@ -490,7 +510,7 @@ export class BudgetedFeePayment implements FeePaymentPort {
     if (durable?.kind === "owned") {
       await this.releaseDurable(context, reservationAttempt, "policy changed during admission");
     }
-    throw new FeePaymentError(
+    throw preBroadcastRejection(
       "Sponsorship policy changed during admission",
       "PROVIDER_NOT_AVAILABLE"
     );
@@ -697,7 +717,11 @@ export class BudgetedFeePayment implements FeePaymentPort {
     network: SponsorshipNetwork,
     message: string,
     breakerReason: string,
-    error?: unknown
+    error?: unknown,
+    // On post-broadcast paths, carry the one fact that makes the forced manual
+    // reconciliation trivial: the broadcast signature (a public on-chain
+    // identifier — redaction-safe) and the reservation it belongs to.
+    submission?: { signature: string; reservationId: string }
   ): Promise<never> {
     logEvent("error", {
       event: "sdp_api_sponsorship_accounting_unavailable",
@@ -705,6 +729,9 @@ export class BudgetedFeePayment implements FeePaymentPort {
       reason: breakerReason,
       organization_id: this.scope.organizationId,
       project_id: this.scope.projectId,
+      ...(submission === undefined
+        ? {}
+        : { signature: submission.signature, reservation_id: submission.reservationId }),
       ...(error === undefined ? {} : describeError(error)),
     });
     try {
@@ -796,15 +823,6 @@ export class BudgetedFeePayment implements FeePaymentPort {
       );
     }
   }
-}
-
-function isDeterministicProviderRejection(error: unknown): boolean {
-  return (
-    error instanceof FeePaymentError &&
-    ["SIGNING_FAILED", "TRANSACTION_TOO_LARGE", "INSUFFICIENT_BALANCE", "RATE_LIMITED"].includes(
-      error.code
-    )
-  );
 }
 
 function reservationHasResponse(

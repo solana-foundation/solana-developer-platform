@@ -238,6 +238,8 @@ describe("BudgetedFeePayment", () => {
 
     await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
       code: "PROVIDER_NOT_AVAILABLE",
+      // Admission proves nothing was submitted; consumers may fail terminally.
+      preBroadcast: true,
     });
     expect(repository.createReservation).toHaveBeenCalledOnce();
     expect(repository.markReleased).toHaveBeenCalledWith(
@@ -274,6 +276,11 @@ describe("BudgetedFeePayment", () => {
         network: "devnet",
         organization_id: "org_1",
         error_name: "Error",
+        // The broadcast already happened: the log must carry the signature and
+        // reservation so the forced manual reconciliation is a lookup, not an
+        // address-history search.
+        signature: expect.any(String),
+        reservation_id: expect.any(String),
       })
     );
     expect(logEvent).toHaveBeenCalledWith(
@@ -309,6 +316,33 @@ describe("BudgetedFeePayment", () => {
     expect(repository.markChargedUnknown).not.toHaveBeenCalled();
   });
 
+  it("releases provider failures proven to be pre-broadcast", async () => {
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    vi.mocked(provider.signAndSend).mockRejectedValueOnce(
+      new FeePaymentError("connect ECONNREFUSED", "NETWORK_ERROR", undefined, {
+        preBroadcast: true,
+      })
+    );
+
+    await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
+      code: "NETWORK_ERROR",
+      preBroadcast: true,
+    });
+    expect(repository.markReleased).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      "connect ECONNREFUSED"
+    );
+    expect(budgetRedis.settle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actualLamports: 0,
+        attempt: 1,
+        detectMissingReservation: true,
+      })
+    );
+    expect(repository.markChargedUnknown).not.toHaveBeenCalled();
+  });
+
   it("leaves a durable terminal-unsynced row when the Redis sync marker write fails", async () => {
     const { feePayment, provider, repository, budgetRedis } = harness();
     vi.mocked(provider.signAndSend).mockRejectedValueOnce(
@@ -333,6 +367,23 @@ describe("BudgetedFeePayment", () => {
       1,
       "request timed out"
     );
+    expect(repository.markReleased).not.toHaveBeenCalled();
+    expect(budgetRedis.cancel).not.toHaveBeenCalled();
+  });
+
+  it("treats a deterministic-looking rejection as ambiguous when it may have broadcast", async () => {
+    // After a lost response the retry's INSUFFICIENT_BALANCE can be CAUSED by
+    // the hidden broadcast — the budget must stay charged_unknown, not release.
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    vi.mocked(provider.signAndSend).mockRejectedValueOnce(
+      new FeePaymentError("insufficient balance for fee", "INSUFFICIENT_BALANCE", undefined, {
+        maybeBroadcast: true,
+      })
+    );
+    await expect(feePayment.signAndSend(buildTransaction())).rejects.toThrow(
+      "insufficient balance"
+    );
+    expect(repository.markChargedUnknown).toHaveBeenCalledOnce();
     expect(repository.markReleased).not.toHaveBeenCalled();
     expect(budgetRedis.cancel).not.toHaveBeenCalled();
   });
@@ -366,6 +417,9 @@ describe("BudgetedFeePayment", () => {
     });
     await expect(feePayment.signAsFeePayer(transaction)).rejects.toMatchObject({
       code: "PROVIDER_NOT_AVAILABLE",
+      // Genuinely ambiguous: the previous attempt may have broadcast, so this
+      // rejection must NOT carry the structural pre-broadcast verdict.
+      preBroadcast: false,
     });
     expect(provider.signAsFeePayer).toHaveBeenCalledOnce();
     expect(budgetRedis.reserve).toHaveBeenCalledOnce();
@@ -385,6 +439,7 @@ describe("BudgetedFeePayment", () => {
     });
     await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
       code: "PROVIDER_NOT_AVAILABLE",
+      preBroadcast: true,
     });
     expect(provider.signAndSend).not.toHaveBeenCalled();
     expect(budgetRedis.reserve).not.toHaveBeenCalled();

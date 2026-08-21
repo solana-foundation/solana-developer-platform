@@ -12,7 +12,9 @@ vi.mock("./money-path-events", async (importOriginal) => ({
   logEvent,
 }));
 
-const REDIS_URL = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
+// Dedicated Redis DB index: parallel vitest workers share one Redis instance,
+// so flushing the default database would wipe other suites' keys mid-test.
+const REDIS_URL = `${process.env.REDIS_URL ?? "redis://127.0.0.1:6379"}/14`;
 const EMPTY_USAGE = {
   hour: { global: 0, organization: 0, project: 0 },
   day: { global: 0, organization: 0, project: 0 },
@@ -55,7 +57,7 @@ describe("SponsorshipBudgetRedis", () => {
   });
 
   beforeEach(async () => {
-    await raw.flushall();
+    await raw.flushdb();
   });
 
   it("admits organization-only scopes without corrupting Lua argument indexes", async () => {

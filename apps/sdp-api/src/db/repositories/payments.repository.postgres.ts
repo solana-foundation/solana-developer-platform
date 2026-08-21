@@ -594,6 +594,7 @@ export function createPostgresPaymentsRepository(
       statuses,
       types,
       hasSignature,
+      excludeSubmissionOutcomeUnknown,
       createdBefore,
       updatedBefore,
       limit,
@@ -619,6 +620,11 @@ export function createPostgresPaymentsRepository(
         clauses.push("signature IS NOT NULL");
       } else if (hasSignature === false) {
         clauses.push("signature IS NULL");
+      }
+      if (excludeSubmissionOutcomeUnknown) {
+        // Marker semantics live in services/payments/submission-outcome.ts.
+        clauses.push("provider_data ->> ? IS DISTINCT FROM ?");
+        values.push("submission_outcome", "unknown");
       }
       if (createdBefore) {
         clauses.push("created_at < ?");

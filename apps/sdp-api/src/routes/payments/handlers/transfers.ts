@@ -61,6 +61,13 @@ import {
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
 import {
+  isPreBroadcastRejection,
+  persistOutcomeUnknownMarker,
+  SUBMISSION_OUTCOME_UNKNOWN_MARKER,
+  TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
+  TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
+} from "@/services/payments/submission-outcome";
+import {
   approvedWalletOperationAttemptId,
   approvedWalletOperationId,
   beginApprovedWalletOperationEffect,
@@ -432,6 +439,7 @@ async function updateTransferRecord(
     blockTime?: string | null;
     fee?: number | null;
     error?: string | null;
+    providerData?: Record<string, unknown>;
   }
 ): Promise<TransferRow> {
   const repository = getPaymentsRepository(c);
@@ -446,6 +454,7 @@ async function updateTransferRecord(
     blockTime: patch.blockTime,
     fee: patch.fee,
     error: patch.error,
+    providerData: patch.providerData,
     updatedAt: now,
   });
 
@@ -454,6 +463,188 @@ async function updateTransferRecord(
   }
 
   return updated;
+}
+
+function transferSubmissionOutcomeUnknown(cause: unknown): AppError {
+  const error = new AppError("CONFLICT", TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR, {
+    reason: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON,
+  });
+  // Server-side only (`toResponse` never serializes it): the marker branch
+  // logs the cause so the manual reconciliation starts from the real failure.
+  error.cause = cause;
+  return error;
+}
+
+function isTransferSubmissionOutcomeUnknown(error: unknown): error is AppError {
+  return (
+    error instanceof AppError &&
+    error.details?.reason === TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_REASON
+  );
+}
+
+/**
+ * Submit through one closed chokepoint: a provably pre-broadcast provider
+ * rejection passes through for a plain terminal failure, anything else
+ * becomes the outcome-unknown 409 the caller must mark and rethrow.
+ */
+async function signAndSendClosed(
+  feePayment: ReturnType<typeof getFeePayment>,
+  txBytes: Uint8Array
+) {
+  try {
+    return await feePayment.signAndSend(txBytes);
+  } catch (error) {
+    if (isPreBroadcastRejection(error)) {
+      throw error;
+    }
+    throw transferSubmissionOutcomeUnknown(error);
+  }
+}
+
+/**
+ * Persists a submitted transfer's signature while confirmation is pending so
+ * a timeout or crash never strands a broadcast transaction as unsigned
+ * `failed` — the pending-transfers job settles signed `processing` rows.
+ * Write failures are logged, not thrown; the write is retried once where it
+ * happens, so a caller that never reads `submittedRow` still gets both
+ * attempts. If both fail the durable row is still unsigned, which the
+ * pending-transfers job would time out into a false `failed`, so
+ * `onSignatureLost` runs last for the caller to close that row another way.
+ * Exported for unit tests.
+ */
+export function createSubmissionRecorder(
+  transfer: TransferRow,
+  persistSignature: (signature: string) => Promise<TransferRow>,
+  onSignatureLost?: (signature: string) => Promise<void>
+) {
+  let signature: string | null = null;
+  let row: TransferRow | null = null;
+  const persist = async (sig: string) => {
+    try {
+      row = await persistSignature(sig);
+    } catch (error) {
+      getLogger().error(
+        {
+          transfer_id: transfer.id,
+          signature: sig,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        "createTransfer: failed to persist submitted transfer signature"
+      );
+    }
+  };
+  return {
+    onSubmitted: async (sig: string) => {
+      signature = sig;
+      await persist(sig);
+      if (!row) {
+        await persist(sig);
+      }
+      if (!row) {
+        await onSignatureLost?.(sig);
+      }
+    },
+    submittedRow: async (): Promise<TransferRow | null> => {
+      const sig = signature;
+      if (!sig) return null;
+      return row ?? { ...transfer, signature: sig };
+    },
+  };
+}
+
+function createTransferSubmissionRecorder(c: AppContext, transfer: TransferRow) {
+  return createSubmissionRecorder(
+    transfer,
+    (signature) => updateTransferRecord(c, transfer.id, { signature }),
+    // Both writes lost after a broadcast. Left alone the row is an unsigned
+    // `processing` that the job times out into a false `failed`, and a client
+    // reading that failure sends the payment a second time. Park it instead,
+    // with the signature in `provider_data`: the column refused it, JSON still
+    // takes it, and the operator reconciles from there.
+    (signature) => markTransferOutcomeUnknown(c, transfer.id, { submitted_signature: signature })
+  );
+}
+
+/**
+ * Mark a transfer as awaiting manual reconciliation. The durable marker is
+ * the provider_data entry — jobs and the operator query match it; the prose
+ * in `error` is display only. See persistOutcomeUnknownMarker for why a
+ * failed write never replaces the caller's 409.
+ */
+function markTransferOutcomeUnknown(
+  c: AppContext,
+  transferId: string,
+  providerData?: Record<string, unknown>
+): Promise<void> {
+  return persistOutcomeUnknownMarker(
+    () =>
+      updateTransferRecord(c, transferId, {
+        status: "processing",
+        error: TRANSFER_SUBMISSION_OUTCOME_UNKNOWN_ERROR,
+        signature: null,
+        blockTime: null,
+        providerData: { ...SUBMISSION_OUTCOME_UNKNOWN_MARKER, ...providerData },
+      }),
+    transferId
+  );
+}
+
+/** Thrown only after the network reported the submitted transaction as failed. */
+function isDefiniteOnChainFailure(error: unknown): boolean {
+  return error instanceof AppError && error.code === "TRANSACTION_FAILED";
+}
+
+function logSubmittedUnconfirmed(transferId: string, signature: string | null, error: unknown) {
+  getLogger().warn(
+    {
+      transfer_id: transferId,
+      signature,
+      error: error instanceof Error ? error.message : String(error),
+    },
+    "createTransfer: transfer submitted but not confirmed; leaving processing for reconciliation"
+  );
+}
+
+/**
+ * Settle a createTransfer failure through the fence, one ladder for every
+ * branch: submitted-but-unconfirmed returns the settling row; an unknown
+ * submission outcome marks the row and rethrows the 409; anything else is a
+ * plain terminal failure (keeping the signature when one was submitted).
+ */
+async function settleTransferExecutionFailure(
+  c: AppContext,
+  transfer: TransferRow,
+  recorder: ReturnType<typeof createTransferSubmissionRecorder>,
+  error: unknown,
+  toPayload: (row: TransferRow) => Record<string, unknown>
+): Promise<Response> {
+  const submitted = await recorder.submittedRow();
+  if (submitted && !isDefiniteOnChainFailure(error)) {
+    logSubmittedUnconfirmed(transfer.id, submitted.signature, error);
+    return success(c, toPayload(submitted));
+  }
+  if (isTransferSubmissionOutcomeUnknown(error)) {
+    // The provider may have broadcast without returning a signature: keep the
+    // processing row behind the durable marker (the pending-transfers job
+    // never times it out into a false failure); a terminal failure invites a
+    // client retry and a double send. The log carries the original provider
+    // failure — the row and the 409 only say "unknown", and the operator
+    // reconciling it needs to know what actually happened.
+    getLogger().warn(
+      { transfer_id: transfer.id, error: error.cause },
+      "createTransfer: submission outcome unknown; parking the transfer behind the reconciliation marker"
+    );
+    await markTransferOutcomeUnknown(c, transfer.id);
+    throw error;
+  }
+  const message = error instanceof Error ? error.message : "Unknown transfer error";
+  await updateTransferRecord(c, transfer.id, {
+    status: "failed",
+    error: message,
+    signature: submitted?.signature,
+    blockTime: null,
+  });
+  throw mapTransferExecutionError(error);
 }
 
 /**
@@ -480,7 +671,8 @@ async function executeSolTransfer(
   c: AppContext,
   sourceWallet: CustodyWallet,
   destinationAddress: Address,
-  amount: string
+  amount: string,
+  onSubmitted: (signature: string) => Promise<void>
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
   const lamports = parseDecimalAmount(amount, 9);
   if (lamports <= 0n) {
@@ -522,7 +714,8 @@ async function executeSolTransfer(
   const txEncoder = getTransactionEncoder();
   const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
   await beginApprovedWalletOperationEffect(c);
-  const signature = await feePayment.signAndSend(txBytes);
+  const signature = await signAndSendClosed(feePayment, txBytes);
+  await onSubmitted(signature);
 
   const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
     commitment: "confirmed",
@@ -801,7 +994,8 @@ async function executePreparedPrivateTransfer(
   scope: ResolvedScope,
   operation: OutboundPaymentOperation,
   serializedTx: string,
-  metadata: PreparedPrivateTransferMetadata
+  metadata: PreparedPrivateTransferMetadata,
+  onSubmitted: (signature: string) => Promise<void>
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
   const walletsByAddress = new Map(scope.wallets.map((wallet) => [wallet.publicKey, wallet]));
   const signerWallets = new Map<string, CustodyWallet>();
@@ -892,7 +1086,8 @@ async function executePreparedPrivateTransfer(
   );
 
   await beginApprovedWalletOperationEffect(c);
-  const signature = await feePayment.signAndSend(encodedSignedTransaction);
+  const signature = await signAndSendClosed(feePayment, encodedSignedTransaction);
+  await onSubmitted(signature);
   const rpc = solanaRpc.createRpc(c.env);
   const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
     commitment: "confirmed",
@@ -914,7 +1109,8 @@ async function executeSplTransfer(
   sourceWallet: CustodyWallet,
   destinationAddress: Address,
   mintAddress: Address,
-  amount: string
+  amount: string,
+  onSubmitted: (signature: string) => Promise<void>
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
   const auth = getAuth(c);
   const signer = await solanaServices.createOrgSigner(
@@ -958,7 +1154,8 @@ async function executeSplTransfer(
   const txEncoder = getTransactionEncoder();
   const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
   await beginApprovedWalletOperationEffect(c);
-  const signature = await feePayment.signAndSend(txBytes);
+  const signature = await signAndSendClosed(feePayment, txBytes);
+  await onSubmitted(signature);
 
   const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
     commitment: "confirmed",
@@ -1075,13 +1272,15 @@ export async function createTransfer(c: AppContext) {
       return success(c, buildTransferReplayPayload(transfer));
     }
 
+    const privateRecorder = createTransferSubmissionRecorder(c, transfer);
     try {
       const result = await executePreparedPrivateTransfer(
         c,
         scope,
         operation,
         mapped.prepared.serializedTx,
-        mapped.metadata
+        mapped.metadata,
+        privateRecorder.onSubmitted
       );
       const updated = await updateTransferRecord(c, transfer.id, {
         status: "confirmed",
@@ -1096,14 +1295,10 @@ export async function createTransfer(c: AppContext) {
         privateTransfer: mapped.metadata,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown transfer error";
-      await updateTransferRecord(c, transfer.id, {
-        status: "failed",
-        error: message,
-        blockTime: null,
-      });
-
-      throw mapTransferExecutionError(error);
+      return settleTransferExecutionFailure(c, transfer, privateRecorder, error, (row) => ({
+        transfer: mapTransferRow(row),
+        privateTransfer: mapped.metadata,
+      }));
     }
   }
 
@@ -1126,13 +1321,15 @@ export async function createTransfer(c: AppContext) {
     return success(c, buildTransferReplayPayload(transfer));
   }
 
+  const recorder = createTransferSubmissionRecorder(c, transfer);
   try {
     if (isNativePaymentToken(operation.token)) {
       const solResult = await executeSolTransfer(
         c,
         operation.sourceWallet,
         operation.destinationAddress,
-        operation.amount
+        operation.amount,
+        recorder.onSubmitted
       );
       const updated = await updateTransferRecord(c, transfer.id, {
         status: "confirmed",
@@ -1150,7 +1347,8 @@ export async function createTransfer(c: AppContext) {
       operation.sourceWallet,
       operation.destinationAddress,
       mintAddress,
-      operation.amount
+      operation.amount,
+      recorder.onSubmitted
     );
 
     const updated = await updateTransferRecord(c, transfer.id, {
@@ -1163,14 +1361,9 @@ export async function createTransfer(c: AppContext) {
 
     return success(c, { transfer: mapTransferRow(updated) });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown transfer error";
-    await updateTransferRecord(c, transfer.id, {
-      status: "failed",
-      error: message,
-      blockTime: null,
-    });
-
-    throw mapTransferExecutionError(error);
+    return settleTransferExecutionFailure(c, transfer, recorder, error, (row) => ({
+      transfer: mapTransferRow(row),
+    }));
   }
 }
 

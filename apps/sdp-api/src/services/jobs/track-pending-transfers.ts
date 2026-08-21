@@ -78,6 +78,67 @@ async function updateTerminalTransfer(
   await repo.updateTransfer({ ...input, expectedStatus: "processing" });
 }
 
+/**
+ * Applies a complete on-chain verdict to one processing transfer. A null
+ * verdict is terminal only after a successful transaction-history lookup;
+ * recent-cache misses must not be passed here.
+ */
+async function applyOnChainVerdict(
+  env: Env,
+  repo: PaymentsRepository,
+  transfer: PaymentTransferRow,
+  status: SignatureStatusInfo | null,
+  nowIso: string
+): Promise<void> {
+  try {
+    if (!status) {
+      await updateTerminalTransfer(env, repo, transfer, {
+        transferId: transfer.id,
+        status: "failed",
+        error: "Transaction not found on chain",
+        updatedAt: nowIso,
+      });
+      return;
+    }
+
+    if (status.err) {
+      await updateTerminalTransfer(env, repo, transfer, {
+        transferId: transfer.id,
+        status: "failed",
+        slot: Number(status.slot),
+        error: JSON.stringify(status.err),
+        updatedAt: nowIso,
+      });
+      return;
+    }
+
+    if (status.confirmationStatus === "finalized") {
+      await updateTerminalTransfer(env, repo, transfer, {
+        transferId: transfer.id,
+        status: "finalized",
+        slot: Number(status.slot),
+        updatedAt: nowIso,
+      });
+    } else if (status.confirmationStatus === "confirmed") {
+      await updateTerminalTransfer(env, repo, transfer, {
+        transferId: transfer.id,
+        status: "confirmed",
+        slot: Number(status.slot),
+        updatedAt: nowIso,
+      });
+    }
+    // "processed" confirmation is too weak to record as confirmed — skip.
+  } catch (err) {
+    getLogger().error(
+      {
+        transfer_id: transfer.id,
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "trackPendingTransfers: failed to update transfer"
+    );
+  }
+}
+
 export async function trackPendingTransfers(env: Env): Promise<void> {
   const repo = createSystemPaymentsRepository(env);
   const now = new Date();
@@ -228,6 +289,11 @@ async function recoverStuckProcessingTransfers(
     statuses: ["processing"],
     types: WALLET_TRANSFER_TYPES,
     hasSignature: false,
+    // Rows marked submission-outcome-unknown are deliberately never
+    // auto-failed: the provider may have broadcast without returning a
+    // signature, and a terminal `failed` invites a client retry and a double
+    // send. Excluded in SQL so they can never crowd the recovery window.
+    excludeSubmissionOutcomeUnknown: true,
     updatedBefore: cutoff,
     limit: MAX_SIGNATURES_PER_BATCH,
   });
@@ -261,6 +327,12 @@ async function syncProcessingTransfersOnChain(
   repo: PaymentsRepository,
   nowIso: string
 ): Promise<void> {
+  // No marker exclusion here, unlike the window above, and deliberately: that
+  // one concludes from a timeout, and a guess about a row that may be on chain
+  // is what parking forbids. This one asks the chain. Five minutes is well past
+  // a blockhash's lifetime, so "absent from the recent cache and from the
+  // history" proves the transaction can never confirm — and a parked row that
+  // has its signature is exactly the one an operator no longer has to touch.
   const processingWithSig = await repo.listTransfersByStatus({
     statuses: ["processing"],
     types: WALLET_TRANSFER_TYPES,
@@ -276,8 +348,9 @@ async function syncProcessingTransfersOnChain(
 
   let statuses: Array<SignatureStatusInfo | null>;
 
+  let rpc: ReturnType<typeof solanaRpc.createRpc>;
   try {
-    const rpc = solanaRpc.createRpc(env);
+    rpc = solanaRpc.createRpc(env);
     statuses = await solanaRpc.getSignatureStatuses(rpc, signatures);
   } catch (err) {
     getLogger().error(
@@ -291,61 +364,64 @@ async function syncProcessingTransfersOnChain(
 
   const now = new Date();
 
+  // The batch lookup above covers the node's recent cache only, so a signature
+  // older than the stuck window reads as "never landed" even when it did — a
+  // row an operator has just resolved is hours old by definition. A terminal
+  // failure invites the client to send the payment again, so every candidate
+  // for one is confirmed against the transaction history first, in one call.
+  const agedOut = processingWithSig.filter(
+    (transfer, index) =>
+      !statuses[index] &&
+      now.getTime() - new Date(transfer.updated_at).getTime() > STUCK_PROCESSING_AFTER_MS
+  );
+
+  // Persist every verdict already returned by the recent cache before a slow
+  // transaction-history lookup can delay the rest of the selected batch.
   for (let i = 0; i < processingWithSig.length; i++) {
     const transfer = processingWithSig[i];
     const status = statuses[i] ?? null;
+    if (status) {
+      await applyOnChainVerdict(env, repo, transfer, status, nowIso);
+    }
+  }
 
-    try {
-      if (!status) {
-        // Signature not found on chain. If the transfer has been processing long
-        // enough, assume the transaction was dropped and mark it failed.
-        const ageMs = now.getTime() - new Date(transfer.updated_at).getTime();
-        if (ageMs > STUCK_PROCESSING_AFTER_MS) {
-          await updateTerminalTransfer(env, repo, transfer, {
-            transferId: transfer.id,
-            status: "failed",
-            error: "Transaction not found on chain",
-            updatedAt: nowIso,
-          });
-        }
-        continue;
-      }
+  const archived = await getArchivedStatuses(rpc, agedOut);
+  if (archived === null) {
+    return;
+  }
 
-      if (status.err) {
-        await updateTerminalTransfer(env, repo, transfer, {
-          transferId: transfer.id,
-          status: "failed",
-          slot: Number(status.slot),
-          error: JSON.stringify(status.err),
-          updatedAt: nowIso,
-        });
-        continue;
-      }
+  for (let i = 0; i < agedOut.length; i++) {
+    await applyOnChainVerdict(env, repo, agedOut[i], archived[i] ?? null, nowIso);
+  }
+}
 
-      if (status.confirmationStatus === "finalized") {
-        await updateTerminalTransfer(env, repo, transfer, {
-          transferId: transfer.id,
-          status: "finalized",
-          slot: Number(status.slot),
-          updatedAt: nowIso,
-        });
-      } else if (status.confirmationStatus === "confirmed") {
-        await updateTerminalTransfer(env, repo, transfer, {
-          transferId: transfer.id,
-          status: "confirmed",
-          slot: Number(status.slot),
-          updatedAt: nowIso,
-        });
-      }
-      // "processed" confirmation is too weak to record as confirmed — skip.
-    } catch (err) {
-      getLogger().error(
-        {
-          transfer_id: transfer.id,
-          error: err instanceof Error ? err.message : String(err),
-        },
-        "trackPendingTransfers: failed to update transfer"
+async function getArchivedStatuses(
+  rpc: ReturnType<typeof solanaRpc.createRpc>,
+  transfers: PaymentTransferRow[]
+): Promise<Array<SignatureStatusInfo | null> | null> {
+  if (transfers.length === 0) {
+    return [];
+  }
+
+  try {
+    const statuses = await solanaRpc.getSignatureStatuses(
+      rpc,
+      transfers.map((transfer) => transfer.signature as Signature),
+      { searchTransactionHistory: true }
+    );
+    if (statuses.length !== transfers.length) {
+      throw internalError(
+        `getSignatureStatuses returned ${statuses.length} statuses for ${transfers.length} signatures`
       );
     }
+    return statuses;
+  } catch (err) {
+    getLogger().error(
+      {
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "trackPendingTransfers: archival getSignatureStatuses RPC call failed"
+    );
+    return null;
   }
 }

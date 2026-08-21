@@ -31,13 +31,14 @@ async function insertTransfer(params: {
   createdAt: string;
   updatedAt: string;
   confirmedAt?: string;
+  providerData?: Record<string, unknown>;
 }): Promise<void> {
   await getDb(env)
     .prepare(
       `INSERT INTO payment_transfers
        (id, organization_id, wallet_id, source_address, destination_address,
-        token, amount, type, direction, status, signature, confirmed_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        token, amount, type, direction, status, signature, provider_data, confirmed_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)`
     )
     .bind(
       params.id,
@@ -51,6 +52,7 @@ async function insertTransfer(params: {
       "outbound",
       params.status,
       params.signature ?? null,
+      JSON.stringify(params.providerData ?? {}),
       params.confirmedAt ?? null,
       params.createdAt,
       params.updatedAt
@@ -100,6 +102,36 @@ describe("trackPendingTransfers", () => {
       const updated = await getTransfer("xfr_stuck_processing");
       expect(updated?.status).toBe("failed");
       expect(updated?.error).toBe("Transfer processing timed out");
+    });
+
+    it("never times out a transfer marked submission-outcome-unknown", async () => {
+      // Literal marker on purpose: rows already written in production must
+      // keep matching even if the exported constants are ever renamed. A
+      // terminal `failed` here would invite a client retry and a double send.
+      await insertTransfer({
+        id: "xfr_outcome_unknown",
+        status: "processing",
+        signature: null,
+        createdAt: minutesAgo(90),
+        updatedAt: minutesAgo(90),
+        providerData: { submission_outcome: "unknown" },
+      });
+      await insertTransfer({
+        id: "xfr_genuinely_stuck",
+        status: "processing",
+        signature: null,
+        createdAt: minutesAgo(90),
+        updatedAt: minutesAgo(90),
+      });
+
+      await trackPendingTransfers(env);
+
+      const marked = await getTransfer("xfr_outcome_unknown");
+      expect(marked?.status).toBe("processing");
+      // The genuinely stuck sibling still recovers — the exclusion is
+      // surgical, not a disable switch.
+      const stuck = await getTransfer("xfr_genuinely_stuck");
+      expect(stuck?.status).toBe("failed");
     });
 
     it("does not fail processing transfers that are still within the threshold", async () => {
@@ -195,7 +227,131 @@ describe("trackPendingTransfers", () => {
       expect(updated?.error).toContain("InsufficientFunds");
     });
 
+    it("settles a transfer whose signature only aged out of the recent cache", async () => {
+      // The batch lookup covers the node's recent cache only. A parked row that
+      // an operator has just resolved is hours old by definition, so "not
+      // found" there means nothing — and a terminal failure on it is what
+      // invites the client to send the payment a second time.
+      getSignatureStatusesMock.mockResolvedValueOnce([null]);
+      getSignatureStatusesMock.mockResolvedValueOnce([
+        { slot: 4242n, confirmationStatus: "finalized", err: null },
+      ] as unknown as Awaited<ReturnType<typeof solanaRpc.getSignatureStatuses>>);
+
+      await insertTransfer({
+        id: "xfr_processing_aged_out",
+        status: "processing",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(120),
+        updatedAt: minutesAgo(120),
+      });
+
+      await trackPendingTransfers(env);
+
+      const updated = await getTransfer("xfr_processing_aged_out");
+      expect(updated?.status).toBe("finalized");
+      expect(getSignatureStatusesMock).toHaveBeenLastCalledWith(expect.anything(), [TEST_SIG_1], {
+        searchTransactionHistory: true,
+      });
+    });
+
+    it("persists recent cache hits before the archival lookup completes", async () => {
+      let signalArchivalStarted: () => void = () => undefined;
+      const archivalStarted = new Promise<void>((resolve) => {
+        signalArchivalStarted = resolve;
+      });
+      let rejectArchival: (reason: Error) => void = () => undefined;
+      const archivalResult = new Promise<
+        Awaited<ReturnType<typeof solanaRpc.getSignatureStatuses>>
+      >((_resolve, reject) => {
+        rejectArchival = reject;
+      });
+      getSignatureStatusesMock
+        .mockResolvedValueOnce([
+          null,
+          {
+            slot: 12345n,
+            confirmations: 10n,
+            confirmationStatus: "confirmed",
+            err: null,
+          },
+        ])
+        .mockImplementationOnce(() => {
+          signalArchivalStarted();
+          return archivalResult;
+        })
+        .mockResolvedValueOnce([
+          {
+            slot: 12346n,
+            confirmations: null,
+            confirmationStatus: "finalized",
+            err: null,
+          },
+        ]);
+
+      await insertTransfer({
+        id: "xfr_aged_archive_unavailable",
+        status: "processing",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(10),
+        updatedAt: minutesAgo(10),
+      });
+      await insertTransfer({
+        id: "xfr_recent_cache_hit",
+        status: "processing",
+        signature: String(TEST_SIG_2),
+        createdAt: minutesAgo(1),
+        updatedAt: minutesAgo(1),
+      });
+
+      const reconciliation = trackPendingTransfers(env);
+      await archivalStarted;
+
+      try {
+        const recent = await getTransfer("xfr_recent_cache_hit");
+        expect(recent).toMatchObject({ status: "confirmed", slot: 12345 });
+        expect(recent?.confirmed_at).not.toBeNull();
+      } finally {
+        rejectArchival(new Error("archival rpc unavailable"));
+        await reconciliation;
+      }
+
+      const [aged, recent] = await Promise.all([
+        getTransfer("xfr_aged_archive_unavailable"),
+        getTransfer("xfr_recent_cache_hit"),
+      ]);
+      expect(aged).toMatchObject({ status: "processing", error: null, slot: null });
+      expect(recent).toMatchObject({ status: "finalized", slot: 12346 });
+      expect(recent?.confirmed_at).not.toBeNull();
+      expect(recent?.finalization_last_polled_at).not.toBeNull();
+    });
+
+    it("settles a parked transfer once it has a signature to check", async () => {
+      // Parking blocks the timeout window, not this one. A parked row that has
+      // been given its signature is resolvable from the chain, so leaving it
+      // alone would only hold a resolved payment for an operator — and would
+      // strand it silently if the marker outlived the signature write.
+      getSignatureStatusesMock.mockResolvedValueOnce([
+        { slot: 77n, confirmationStatus: "finalized", err: null },
+      ] as unknown as Awaited<ReturnType<typeof solanaRpc.getSignatureStatuses>>);
+
+      await insertTransfer({
+        id: "xfr_parked_with_signature",
+        status: "processing",
+        signature: String(TEST_SIG_1),
+        providerData: { submission_outcome: "unknown" },
+        createdAt: minutesAgo(30),
+        updatedAt: minutesAgo(30),
+      });
+
+      await trackPendingTransfers(env);
+
+      const updated = await getTransfer("xfr_parked_with_signature");
+      expect(updated?.status).toBe("finalized");
+    });
+
     it("marks old processing transfer as failed when signature is not found on chain", async () => {
+      // Absent from the recent cache and from the history search: it never landed.
+      getSignatureStatusesMock.mockResolvedValueOnce([null]);
       getSignatureStatusesMock.mockResolvedValueOnce([null]);
 
       await insertTransfer({
@@ -211,6 +367,10 @@ describe("trackPendingTransfers", () => {
       const updated = await getTransfer("xfr_processing_not_found");
       expect(updated?.status).toBe("failed");
       expect(updated?.error).toBe("Transaction not found on chain");
+      // Failed only after the history search missed it too.
+      expect(getSignatureStatusesMock).toHaveBeenLastCalledWith(expect.anything(), [TEST_SIG_1], {
+        searchTransactionHistory: true,
+      });
     });
 
     it("leaves processing transfer alone when signature not found but transfer is recent", async () => {

@@ -228,11 +228,9 @@ const signingSinkInventory: Record<string, string[]> = {
   ],
   "apps/sdp-api/src/routes/pay.ts": ["signAsFeePayer"],
   "apps/sdp-api/src/routes/payments/handlers/transfer-batches/execute.ts": ["signAndSend"],
-  "apps/sdp-api/src/routes/payments/handlers/transfers.ts": [
-    "signAndSend",
-    "signAndSend",
-    "signAndSend",
-  ],
+  // All three transfer paths route through the signAndSendClosed chokepoint,
+  // which fails closed on ambiguous provider outcomes.
+  "apps/sdp-api/src/routes/payments/handlers/transfers.ts": ["signAndSend"],
   "apps/sdp-api/src/services/payments/recurring-payments/shared.ts": ["signAndSend"],
   "apps/sdp-api/src/services/private-channels/deposit.ts": ["signTransactionMessageWithSigners"],
   "apps/sdp-api/src/services/private-channels/transfer.ts": ["signTransactionMessageWithSigners"],
