@@ -57,7 +57,7 @@ import {
 import {
   type EarnProgram,
   isEarnVaultDepositInFlight,
-  isEarnVaultWithdrawalLegInFlight,
+  isEarnVaultWithdrawalInFlight,
   useEarnPrograms,
   useEarnProgramWithdrawals,
   useEarnStrategies,
@@ -65,6 +65,7 @@ import {
   useEarnVaultPositions,
   useEarnVaultWithdrawals,
 } from "../earn/earn-program-data";
+import { compareUnsignedDecimals } from "../earn/earn-decimal";
 import { type EarnProviderAccess, earnVaultDepositAvailability } from "../earn/earn-surfacing";
 import {
   EarnVaultDepositModal,
@@ -182,7 +183,7 @@ function strategyPositionValue(
 ): { count: number; value?: string } {
   const active = (positions ?? []).filter(
     (position) =>
-      position.closedAt === null &&
+      isOpenVaultPosition(position) &&
       earnStrategyReferenceKey(position.provider, position.providerReference) ===
         earnStrategyReferenceKey(strategy.provider, strategy.providerReference)
   );
@@ -190,6 +191,13 @@ function strategyPositionValue(
   const values = active.map((position) => position.tokenValue);
   if (values.some((value) => value === undefined)) return { count: active.length };
   return { count: active.length, value: sumDecimalStrings(values as string[]) };
+}
+
+function isOpenVaultPosition(position: EarnVaultPosition): boolean {
+  return (
+    position.closedAt === null &&
+    (position.shares === undefined || compareUnsignedDecimals(position.shares, "0") !== 0)
+  );
 }
 
 function StrategyTable({
@@ -308,7 +316,7 @@ function ActiveVaultPositionsCard({
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const activePositions = (positions ?? []).filter((position) => position.closedAt === null);
+  const activePositions = (positions ?? []).filter(isOpenVaultPosition);
   const walletById = new Map(wallets.map((wallet) => [wallet.id, wallet] as const));
 
   return (
@@ -610,11 +618,8 @@ function EarnVaultDepositLedgerRecovery({
 }
 
 /**
- * The withdrawal-leg mirror of the deposit recovery above, over the unified
- * ledger's vocabulary (terminal = finalized | failed). Legs are watched
- * individually — a multi-transaction exit settles leg by leg, and the sweep
- * finishes legs the submitting request could not, so this is also how an exit
- * interrupted by a reload keeps announcing its outcome.
+ * The withdrawal mirror of the deposit recovery above. One business movement
+ * is watched regardless of how many internal transactions execute it.
  */
 function EarnVaultWithdrawalLedgerRecovery({
   onRecover,
@@ -626,8 +631,8 @@ function EarnVaultWithdrawalLedgerRecovery({
   useEffect(() => {
     if (!withdrawals) return;
     const inFlight = withdrawals
-      .filter(isEarnVaultWithdrawalLegInFlight)
-      .map((leg) => leg.movementId);
+      .filter(isEarnVaultWithdrawalInFlight)
+      .map((withdrawal) => withdrawal.movementId);
     if (inFlight.length > 0) onRecover(inFlight);
   }, [withdrawals, onRecover]);
 
@@ -868,10 +873,7 @@ export function TreasurySolutionsWorkspace({
           environment={sdpEnvironment}
           onClose={() => setWithdrawPosition(null)}
           onWithdrawn={(withdrawal) => {
-            // Watch every LEG: a multi-transaction exit settles leg by leg, and
-            // the sweep drives legs the submitting request could not. Balances
-            // refresh now for the optimistic view and again per leg settlement.
-            addVaultWithdrawalWatches(withdrawal.movements.map((leg) => leg.movementId));
+            addVaultWithdrawalWatches([withdrawal.movementId]);
             refreshPositions();
             refreshWallets();
           }}

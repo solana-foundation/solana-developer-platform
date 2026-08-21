@@ -112,6 +112,19 @@ vi.mock("../earn/earn-program-data", () => ({
         shares: "5",
         tokenValue: "5.25",
       },
+      {
+        id: "earn_vault_position_exited",
+        provider: "kamino",
+        providerReference: "KvaultExited1111111111111111111111111111111",
+        label: "Exited provider vault",
+        custodyWalletId: "cwlt_live",
+        tokenMint: USDC_MINT,
+        shareMint: "ShareExited11111111111111111111111111111111",
+        createdAt: "2026-08-16T00:00:00.000Z",
+        closedAt: null,
+        shares: "0",
+        tokenValue: "0",
+      },
     ],
   }),
   useEarnPrograms: () => ({
@@ -185,8 +198,8 @@ vi.mock("../earn/earn-program-data", () => ({
   // (confirmed is still in flight; finalized is terminal).
   isEarnVaultDepositInFlight: (deposit: { status: string }) =>
     deposit.status !== "confirmed" && deposit.status !== "failed",
-  isEarnVaultWithdrawalLegInFlight: (leg: { status: string }) =>
-    leg.status !== "finalized" && leg.status !== "failed",
+  isEarnVaultWithdrawalInFlight: (withdrawal: { status: string }) =>
+    withdrawal.status !== "finalized" && withdrawal.status !== "failed",
 }));
 
 vi.mock("../earn/earn-vault-withdraw-modal", () => ({
@@ -263,6 +276,7 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(vaultPositionRow.textContent).toContain("125.25 USDC");
     expect(vaultStrategyRow.textContent).toContain("6.2%");
     expect(screen.getByText("Retired provider vault")).toBeTruthy();
+    expect(screen.queryByText("Exited provider vault")).toBeNull();
 
     // The exit verb is LIVE (PRO-1702) and takes no availability gate: money
     // out beats money off, so it stays enabled even where deposits are not.

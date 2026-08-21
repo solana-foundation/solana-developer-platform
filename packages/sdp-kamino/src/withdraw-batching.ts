@@ -84,62 +84,86 @@ export const KVAULT_SHARE_REDEEMING_DISCRIMINATORS: readonly Uint8Array[] = [
 export const KVAULT_BURN_ALL_SHARES_SENTINEL = 18446744073709551615n;
 
 /**
- * Resolve the burn-all sentinel to an exact quantity, or refuse.
+ * Replace the burn-all sentinel with an exact literal quantity, or refuse.
  *
- * A ledger row must state the exact shares its transaction moves, and the
- * sentinel deliberately does not: it moves "whatever the account holds at
- * execution". The one situation where that IS an exact claim is a full exit
- * whose requested quantity equals the wallet's balance as read at build time —
- * then the sentinel and the request name the same shares, and the request is
- * the honest number to record. Everything else is refused:
- *
- * - a request EXCEEDING the balance also encodes the sentinel, but would burn
- *   fewer shares than requested — recording either number would be a lie;
- * - a sentinel beside literal-amount withdraw instructions has no coherent
- *   total at all.
- *
- * Returns the per-instruction base-unit quantities with the sentinel replaced
- * by its resolved value, ready for batching and per-leg ledgering.
+ * The SDK uses one sentinel on the final reserve leg of a full withdrawal. It
+ * means "whatever this token account holds when the transaction executes", so
+ * resolving it from a build-time balance would still leave the signed bytes
+ * balance-dependent. Instead, derive the exact remainder from the request and
+ * the preceding literal legs, then rewrite the instruction's u64 argument.
+ * The transaction and the ledger consequently name the same immutable amount.
  */
 export function resolveBurnAllSentinel(input: {
   instructions: readonly RoleTaggedInstruction[];
   requestedBaseUnits: bigint;
-  walletShareBaseUnits: bigint;
 }): RoleTaggedInstruction[] {
   const sentinelCount = input.instructions.filter(
     (tagged) => tagged.sharesBaseUnits === KVAULT_BURN_ALL_SHARES_SENTINEL
   ).length;
   if (sentinelCount === 0) return [...input.instructions];
 
-  const redeeming = input.instructions.filter((tagged) => tagged.role === "withdraw").length;
-  if (sentinelCount !== redeeming) {
-    throw new SdpKaminoError(
-      "VAULT_UNREADABLE",
-      "Kamino withdraw bundle mixes burn-all and literal share amounts; refusing to build a " +
-        "plan whose total cannot be stated exactly."
-    );
-  }
   if (sentinelCount !== 1) {
-    // Several burn-alls would each claim the whole balance; no exact split exists.
     throw new SdpKaminoError(
       "VAULT_UNREADABLE",
       "Kamino withdraw bundle carries more than one burn-all instruction; refusing to build."
     );
   }
-  if (input.requestedBaseUnits !== input.walletShareBaseUnits) {
+  const redeeming = input.instructions.filter((tagged) => tagged.role === "withdraw");
+  const sentinelIndex = redeeming.findIndex(
+    (tagged) => tagged.sharesBaseUnits === KVAULT_BURN_ALL_SHARES_SENTINEL
+  );
+  if (sentinelIndex !== redeeming.length - 1) {
+    throw new SdpKaminoError(
+      "VAULT_UNREADABLE",
+      "Kamino withdraw bundle places burn-all before a later share redemption; refusing to " +
+        "rewrite an order the provider did not document."
+    );
+  }
+  const literalBaseUnits = redeeming.reduce(
+    (sum, tagged) =>
+      sum +
+      (tagged.sharesBaseUnits === KVAULT_BURN_ALL_SHARES_SENTINEL
+        ? 0n
+        : (tagged.sharesBaseUnits ?? 0n)),
+    0n
+  );
+  const remainder = input.requestedBaseUnits - literalBaseUnits;
+  if (remainder <= 0n || remainder >= KVAULT_BURN_ALL_SHARES_SENTINEL) {
     throw new SdpKaminoError(
       "INVALID_AMOUNT",
-      `Kamino encodes a full exit for this request, but the wallet holds ` +
-        `${input.walletShareBaseUnits} share base units and the request is ` +
-        `${input.requestedBaseUnits}. Request at most the position's current share balance; ` +
-        "an over-balance request would burn fewer shares than the ledger recorded."
+      `Kamino withdraw instructions leave ${remainder} share base units for their final leg; ` +
+        "the requested amount must exceed every preceding literal redemption."
     );
   }
   return input.instructions.map((tagged) =>
     tagged.sharesBaseUnits === KVAULT_BURN_ALL_SHARES_SENTINEL
-      ? { ...tagged, sharesBaseUnits: input.requestedBaseUnits }
+      ? {
+          ...tagged,
+          instruction: rewriteKvaultWithdrawShares(tagged.instruction, remainder),
+          sharesBaseUnits: remainder,
+        }
       : tagged
   );
+}
+
+function rewriteKvaultWithdrawShares(
+  instruction: Instruction,
+  sharesBaseUnits: bigint
+): Instruction {
+  const current = instruction.data;
+  if (!current || current.length < 16) {
+    throw new SdpKaminoError(
+      "VAULT_UNREADABLE",
+      "Kamino burn-all instruction does not carry a writable sharesAmount argument"
+    );
+  }
+  const data = new Uint8Array(current);
+  let remaining = sharesBaseUnits;
+  for (let index = 0; index < 8; index += 1) {
+    data[8 + index] = Number(remaining & 0xffn);
+    remaining >>= 8n;
+  }
+  return { ...instruction, data };
 }
 
 /**

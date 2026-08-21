@@ -573,29 +573,22 @@ movement failed. Never rebuild a transaction during recovery.
     `supportsVaultWithdraw` and a provider without it is a 501 — a statement
     about SDP's plumbing, never permission. Pinned by the exit-safety describe
     in `../earn.vault-withdrawals.test.ts`.
-  - **LEG MODEL (migration 0066).** A multi-reserve exit may need several
-    transactions; each is one `earn_movements` row — `direction='withdrawal'`,
-    denominated in the SHARE MINT with `amount_requested` the exact shares that
-    leg's instructions encode (see 0066's header for why a withdrawal is not
-    token-denominated) — tied together by `(leg_group_id, leg_index,
-    leg_count)`. Every leg is signed and durably recorded BEFORE the first
-    byte is broadcast; legs then broadcast strictly in order, each only after
-    its predecessor reaches commitment, in-request while the `VaultDeadline`
-    budget lasts and by the reconciliation sweep after it (the sweep's
-    predecessor gate enforces the same ordering, and fails a leg whose
-    predecessor failed). leg 0's `request_id` is the caller's raw key — the
-    replay anchor; later legs derive theirs with a newline separator no legal
-    key can contain.
-  - The wire (`EarnVaultWithdrawalLeg`) speaks the LEDGER's own vocabulary —
-    `requested/submitted/confirmed/finalized/failed`, `confirmed` NOT terminal
-    — unlike the deposit DTO's legacy mapping. There is no aggregate status on
-    purpose: legs settle independently and the honest answer is the legs.
+  - **LEG MODEL (migration 0066).** A multi-reserve exit is one
+    `earn_movements` business movement denominated in the share mint, with
+    ordered signed transactions in `earn_vault_withdrawal_legs`. The parent
+    owns the total request, raw idempotency key, actor and aggregate status.
+    Child rows own exact literal shares, signatures, signed bytes and blockhash
+    windows. All children are durable before the first broadcast, then execute
+    strictly in order. The request path and sweep use the same predecessor gate.
+  - The wire exposes one withdrawal lifecycle. Transaction details remain
+    available for explorer links and diagnostics without becoming separate
+    financial movements. `confirmed` remains non-terminal; only `finalized`
+    and `failed` stop polling.
 - `GET /vault-withdrawals` / `GET /vault-withdrawals/:movementId` — the deposit
   reads mirrored: DB only, NO provider gate (ADR 0002), same four 404 scoping
   rules with `direction = 'withdrawal'`, same wallet-binding scope through
-  `listReadableEarnVaultWallets`. `?requestId=` serves the WHOLE leg group —
-  the caller's question is "what happened to my withdrawal" and a multi-leg
-  exit's answer is every leg — and `?settled=` uses the LEDGER terminal set
+  `listReadableEarnVaultWallets`. `?requestId=` serves the one logical
+  withdrawal and its ordered transactions, and `?settled=` uses the ledger terminal set
   (`finalized|failed`), not the deposits' legacy one.
 
 One gap remains around approvals, and it is narrower than it was. An approved

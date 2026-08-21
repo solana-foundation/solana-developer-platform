@@ -390,21 +390,13 @@ export async function buildKaminoWithdrawPlan(
   ];
 
   const requestedBaseUnits = parseDecimalAmount(acceptedShares, shareDecimals);
-  // A FULL exit never encodes the literal amount: the SDK writes the burn-all
-  // sentinel whenever the request reaches the wallet's whole balance (measured
-  // 2026-08-20 on a devnet fork). The sentinel is accepted only when it
-  // provably names the requested quantity — the balance read here is the same
-  // exact base-unit read the position report uses.
-  const walletShareBaseUnits = await readUnstakedShareBaseUnits(
-    rpc,
-    input.owner.address,
-    assetIdentity.shareMint
-  );
-  assertActive();
+  // A full exit uses a burn-all sentinel on its final reserve leg. Replace it
+  // with the exact remaining requested shares before sizing or signing, so the
+  // transaction cannot move a different amount if the token-account balance
+  // changes between build and execution.
   const tagged = resolveBurnAllSentinel({
     instructions: decoded,
     requestedBaseUnits,
-    walletShareBaseUnits,
   });
   const encodedBaseUnits = tagged.reduce((sum, entry) => sum + (entry.sharesBaseUnits ?? 0n), 0n);
   if (encodedBaseUnits !== requestedBaseUnits) {

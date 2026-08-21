@@ -317,49 +317,46 @@ export interface EarnVaultWithdrawalRequest {
  * position join (the same exit-safety rule as the deposit record); the
  * position named by `positionId` carries the deposit-token mint for display.
  */
-export interface EarnVaultWithdrawalLeg {
+export interface EarnVaultWithdrawalTransaction {
+  index: number;
+  status: EarnVaultDirectMovementStatus;
+  signature: string;
+  /** Exact literal shares encoded in this transaction. */
+  shares: string;
+  failureReason: string | null;
+  confirmedAt: string | null;
+  settledAt: string | null;
+}
+
+/** One logical vault withdrawal, regardless of transaction count. */
+export interface EarnVaultWithdrawal {
   movementId: string;
   positionId: string;
   provider: string;
   /** The vault's on-chain address — the instrument, not the payout. */
   providerReference: string;
-  groupId: string;
-  legIndex: number;
-  legCount: number;
   status: EarnVaultDirectMovementStatus;
-  signature: string;
-  /** Exact shares this leg redeems, decimal string, share units. */
+  /** Total shares requested by the caller, decimal string, share units. */
   shares: string;
   shareMint: string;
   failureReason: string | null;
   createdAt: string;
-  /** Optimistic chain commitment; set once observed. */
   confirmedAt: string | null;
-  /** Irreversible settlement (finalization); set once observed. */
   settledAt: string | null;
+  /** Ordered internal execution detail, exposed for transaction diagnostics. */
+  transactions: EarnVaultWithdrawalTransaction[];
+  /** Present on POST responses; true when the idempotency anchor was replayed. */
+  replayed?: boolean;
 }
 
-/**
- * Durable result of POST /v1/earn/vault-withdrawals (fresh or idempotently
- * replayed): every leg of the group, submission order. The withdrawal as a
- * whole has no single status by design — legs settle independently, and the
- * honest aggregate is the legs themselves.
- */
-export interface EarnVaultWithdrawal {
-  positionId: string;
-  groupId: string;
-  movements: EarnVaultWithdrawalLeg[];
-  replayed: boolean;
-}
-
-/** Response body of GET /v1/earn/vault-withdrawals/:movementId. */
+/** Response body of GET /v1/earn/vault-withdrawals/:movementId and POST. */
 export interface EarnVaultWithdrawalResponse {
-  withdrawal: EarnVaultWithdrawalLeg;
+  withdrawal: EarnVaultWithdrawal;
 }
 
-/** Response body of GET /v1/earn/vault-withdrawals — recorded legs, newest first. */
+/** Response body of GET /v1/earn/vault-withdrawals: logical withdrawals, newest first. */
 export interface EarnVaultWithdrawalsPage {
-  withdrawals: EarnVaultWithdrawalLeg[];
+  withdrawals: EarnVaultWithdrawal[];
   hasMore: boolean;
   nextCursor: string | null;
 }

@@ -246,8 +246,8 @@ program create still sends the body `requestId` form.
   the deposit modal's key lifecycle exactly, including the held-key pre-flight
   (`fetchEarnVaultWithdrawalsByRequestId`) and the absorbed-by-approval
   outcome. The result screen lists every transaction LEG with its explorer
-  link; a multi-leg exit says so and that SDP finishes the sequence. Exports
-  `EarnVaultWithdrawalOutcomeTracker`, mounted by Treasury per in-flight leg.
+  link; a multi-transaction exit says so and that SDP finishes the sequence.
+  Exports `EarnVaultWithdrawalOutcomeTracker`, mounted once per withdrawal.
 - `earn-vault-withdraw-tracking.ts` — the withdrawal idempotency-key store
   (fingerprint: project, position, shares) under its own versioned
   `sessionStorage` key.
@@ -256,9 +256,9 @@ program create still sends the body `requestId` form.
   `answerRetiresIdempotencyKey`, the shared retire-decision rule. Extracted
   when the withdrawal flow arrived; two copies of a double-spend guard is how
   one drifts.
-- **The withdrawal outcome poll uses the UNIFIED ledger vocabulary** —
+- **The withdrawal outcome poll uses the UNIFIED ledger vocabulary**:
   `EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct` (`finalized | failed`),
-  `confirmed` still in flight — because `EarnVaultWithdrawalLeg` speaks the
+  `confirmed` still in flight because `EarnVaultWithdrawal` speaks the
   ledger's own words. This is the OPPOSITE of the deposit poll's rule (legacy
   DTO, legacy terminal set); the two sets sit side by side in
   `earn-program-data.ts` with the reasoning attached to each.
@@ -269,7 +269,7 @@ program create still sends the body `requestId` form.
 `useEarnVaultWithdrawals`, `createEarnVaultDeposit`,
 `createEarnVaultWithdrawal`, `useEarnVaultDepositOutcomeToast`,
 `useEarnVaultWithdrawalOutcomeToast`, `isEarnVaultDepositInFlight`,
-`isEarnVaultWithdrawalLegInFlight`, `earn-vault-deposit-tracking.ts`,
+`isEarnVaultWithdrawalInFlight`, `earn-vault-deposit-tracking.ts`,
 `earn-vault-withdraw-tracking.ts`, `EarnWithdrawModal`, `EarnVaultDepositModal`,
 `EarnVaultWithdrawModal`, `EarnVaultDepositOutcomeTracker` and
 `EarnVaultWithdrawalOutcomeTracker` have **no caller inside this module**. That is a module boundary, not an oversight: this module is the Earn

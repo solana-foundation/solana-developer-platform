@@ -128,45 +128,41 @@ describe("resolveBurnAllSentinel", () => {
     const resolved = resolveBurnAllSentinel({
       instructions: legs,
       requestedBaseUnits: 7n,
-      walletShareBaseUnits: 100n,
     });
     expect(resolved.map((leg) => leg.sharesBaseUnits)).toEqual([3n, 4n]);
   });
 
-  it("resolves a full exit's sentinel to the requested quantity", () => {
+  it("rewrites a full exit's sentinel to the requested literal quantity", () => {
     const resolved = resolveBurnAllSentinel({
       instructions: [taggedIx("prepare"), withdrawIx(SENTINEL), taggedIx("post")],
       requestedBaseUnits: 150_000_000n,
-      walletShareBaseUnits: 150_000_000n,
     });
     expect(resolved[1].sharesBaseUnits).toBe(150_000_000n);
+    expect(decodeKvaultWithdrawShares(resolved[1].instruction, String(KVAULT_PROGRAM))).toBe(
+      150_000_000n
+    );
   });
 
-  it("refuses a sentinel for a request that is not the wallet's exact balance", () => {
-    // An over-balance request ALSO encodes the sentinel, and would burn fewer
-    // shares than requested — no honest number exists for that row.
-    expect(() =>
-      resolveBurnAllSentinel({
-        instructions: [withdrawIx(SENTINEL)],
-        requestedBaseUnits: 200_000_000n,
-        walletShareBaseUnits: 150_000_000n,
-      })
-    ).toThrow(/current share balance/);
+  it("rewrites the final sentinel to the remainder after literal reserve legs", () => {
+    const resolved = resolveBurnAllSentinel({
+      instructions: [withdrawIx(40n), taggedIx("prepare"), withdrawIx(SENTINEL)],
+      requestedBaseUnits: 100n,
+    });
+    expect(resolved.map((leg) => leg.sharesBaseUnits)).toEqual([40n, null, 60n]);
+    expect(decodeKvaultWithdrawShares(resolved[2].instruction, String(KVAULT_PROGRAM))).toBe(60n);
   });
 
-  it("refuses mixed sentinel and literal amounts, and multiple sentinels", () => {
+  it("refuses a non-final sentinel and multiple sentinels", () => {
     expect(() =>
       resolveBurnAllSentinel({
         instructions: [withdrawIx(SENTINEL), withdrawIx(5n)],
         requestedBaseUnits: 10n,
-        walletShareBaseUnits: 10n,
       })
-    ).toThrow(/mixes burn-all and literal/);
+    ).toThrow(/burn-all before a later/);
     expect(() =>
       resolveBurnAllSentinel({
         instructions: [withdrawIx(SENTINEL), withdrawIx(SENTINEL)],
         requestedBaseUnits: 10n,
-        walletShareBaseUnits: 10n,
       })
     ).toThrow(/more than one burn-all/);
   });

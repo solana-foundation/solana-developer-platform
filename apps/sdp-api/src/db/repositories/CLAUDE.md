@@ -33,12 +33,12 @@ Things that will bite:
 - **Amounts carry a `denomination`** (`usd`, the token mint — or the SHARE mint
   on a vault withdrawal, whose exact intent-time quantity is shares; see 0066's
   header). No read may sum across rows without grouping by denomination.
-- **Vault withdrawals are PER-LEG rows** (`leg_group_id`/`leg_index`/`leg_count`,
-  0066), and the ordering is load-bearing: a leg may only be broadcast after its
-  predecessor commits, so the writer records the whole group atomically before
-  anything is sent, and the sweep's predecessor gate enforces the same order on
-  resume. Leg 0's `request_id` is the caller's raw idempotency key (the replay
-  anchor); later legs derive theirs with a newline no legal key can contain.
+- **A vault withdrawal is one movement with internal transaction legs** (0066).
+  The parent owns the total requested shares, actor and raw idempotency key. The
+  child outbox owns exact literal per-transaction shares, signatures, signed
+  bytes and ordering. A leg may only broadcast after its predecessor commits;
+  the writer records the parent and every child atomically before anything is
+  sent, and the sweep enforces the same order on resume.
 - **Ids are heterogeneous by design.** History keeps the ids the projection
   preserved, so nothing may parse an id for its kind — read `execution_model`.
 

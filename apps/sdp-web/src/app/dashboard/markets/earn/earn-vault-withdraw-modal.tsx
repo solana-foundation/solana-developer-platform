@@ -25,7 +25,7 @@ import {
 import {
   createEarnVaultWithdrawal,
   type EarnVaultWithdrawal,
-  type EarnVaultWithdrawalLeg,
+  type EarnVaultWithdrawalTransaction,
   fetchEarnVaultWithdrawalsByRequestId,
   useEarnVaultWithdrawalOutcomeToast,
 } from "./earn-program-data";
@@ -102,10 +102,10 @@ function resolveWithdrawalSubmission(
   }
 
   const withdrawal = result.data.withdrawal;
-  if (withdrawal.movements.every((leg) => leg.status === "failed")) {
+  if (withdrawal.status === "failed") {
     return {
       kind: "error",
-      message: withdrawal.movements[0]?.failureReason || fallbackError,
+      message: withdrawal.failureReason || fallbackError,
     };
   }
   if (withdrawal.replayed && keyWasHeld) {
@@ -162,36 +162,45 @@ function applyVaultWithdrawalIdempotencyKeyOutcome(
   }
 }
 
-function LegList({ legs, environment }: { legs: EarnVaultWithdrawalLeg[]; environment: SdpEnvironment }) {
+function TransactionList({
+  transactions,
+  environment,
+}: {
+  transactions: EarnVaultWithdrawalTransaction[];
+  environment: SdpEnvironment;
+}) {
   const t = useTranslations();
   const locale = useLocale();
   const cluster = CLUSTER_BY_SDP_ENVIRONMENT[environment];
 
   return (
     <dl className="mt-5 rounded-lg border border-border-default bg-fill-subtle p-4 text-sm">
-      {legs.map((leg) => (
-        <div className="flex items-baseline justify-between gap-5 py-1" key={leg.movementId}>
+      {transactions.map((transaction) => (
+        <div
+          className="flex items-baseline justify-between gap-5 py-1"
+          key={transaction.signature}
+        >
           <dt className="text-tertiary">
-            {legs.length > 1
+            {transactions.length > 1
               ? t("DashboardEarn.vaultWithdraw.legLabel", {
-                  index: leg.legIndex + 1,
-                  count: leg.legCount,
+                  index: transaction.index + 1,
+                  count: transactions.length,
                 })
               : t("DashboardEarn.vaultWithdraw.transaction")}
           </dt>
           <dd className="text-right">
             <span className="mr-3 tabular-nums text-secondary">
               {t("DashboardEarn.vaultWithdraw.legShares", {
-                shares: formatProviderAmount(leg.shares, locale),
+                shares: formatProviderAmount(transaction.shares, locale),
               })}
             </span>
             <a
               className="inline-flex items-center gap-1 text-primary underline underline-offset-2"
-              href={explorerTxUrl(leg.signature, cluster)}
+              href={explorerTxUrl(transaction.signature, cluster)}
               rel="noreferrer"
               target="_blank"
             >
-              {shortenMarketAddress(leg.signature)}
+              {shortenMarketAddress(transaction.signature)}
               <ExternalLinkIcon aria-hidden="true" className="size-3.5" />
             </a>
           </dd>
@@ -253,7 +262,7 @@ function WithdrawalResult({
   }
 
   const { withdrawal } = outcome;
-  const multiLeg = withdrawal.movements.length > 1;
+  const multiLeg = withdrawal.transactions.length > 1;
   const copy = outcome.absorbedByApproval
     ? {
         title: t("DashboardEarn.vaultWithdraw.absorbedTitle"),
@@ -264,7 +273,7 @@ function WithdrawalResult({
         title: t("DashboardEarn.vaultWithdraw.submittedTitle"),
         body: multiLeg
           ? t("DashboardEarn.vaultWithdraw.submittedBodyMultiLeg", {
-              count: withdrawal.movements.length,
+              count: withdrawal.transactions.length,
             })
           : t("DashboardEarn.vaultWithdraw.submittedBody"),
         note: t("DashboardEarn.vaultWithdraw.settlingNote"),
@@ -280,7 +289,7 @@ function WithdrawalResult({
         {copy.title}
       </h2>
       <p className="mt-1 text-sm leading-6 text-secondary">{copy.body}</p>
-      <LegList environment={environment} legs={withdrawal.movements} />
+      <TransactionList environment={environment} transactions={withdrawal.transactions} />
       <p className="mt-4 text-sm leading-6 text-secondary">{copy.note}</p>
       <div className="mt-6 flex justify-end">
         <Button onClick={onClose}>{t("DashboardEarn.withdraw.done")}</Button>
@@ -296,10 +305,9 @@ interface EarnVaultWithdrawalOutcomeTrackerProps {
 }
 
 /**
- * Keeps one recorded withdrawal LEG under observation independently of the
- * dismissible modal — the deposit tracker's mirror. Treasury mounts one per
- * in-flight leg; the canonical hook polls until the ledger says `finalized`
- * or `failed`, announces exactly once, and asks the caller to retire it.
+ * Keeps one logical withdrawal under observation independently of the
+ * dismissible modal. The canonical hook polls the parent movement until every
+ * internal transaction reaches a terminal result.
  */
 export function EarnVaultWithdrawalOutcomeTracker({
   movementId,

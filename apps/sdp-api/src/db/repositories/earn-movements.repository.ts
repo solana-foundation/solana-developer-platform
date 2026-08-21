@@ -50,11 +50,6 @@ export function generateEarnMovementId(): string {
   return `earn_movement_${crypto.randomUUID()}`;
 }
 
-/** One id per withdrawal GROUP — the exit request all of its legs share. */
-export function generateEarnMovementGroupId(): string {
-  return `earn_movement_group_${crypto.randomUUID()}`;
-}
-
 /**
  * Assert a prior movement under this idempotency key is THIS request's own replay
  * — same project AND same fingerprint — before it is returned as one.
@@ -144,17 +139,24 @@ export interface EarnMovementRow {
   request_id: string;
   idempotency_fingerprint: string;
   provider_data: Record<string, unknown>;
-  /**
-   * Vault WITHDRAWAL rows only (0066): one exit request = one leg group, with
-   * `leg_index` the 0-based submission order and `leg_count` stamped on every
-   * row. Ordering is load-bearing — a leg is broadcast only after its
-   * predecessor reaches commitment. All three null on every other row.
-   */
-  leg_group_id: string | null;
-  leg_index: number | null;
-  leg_count: number | null;
   created_by: string | null;
   initiated_by_key_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Internal signed-transaction outbox row beneath one vault withdrawal movement. */
+export interface EarnVaultWithdrawalLegRow {
+  movement_id: string;
+  leg_index: number;
+  shares: string;
+  status: EarnMovementStatus;
+  signature: string;
+  signed_transaction: string;
+  last_valid_block_height: string;
+  failure_reason: string | null;
+  confirmed_at: string | null;
+  settled_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -292,20 +294,20 @@ export interface EarnMovementsRepository {
     before: EarnMovementCursor | null;
     settled?: boolean;
   }): Promise<{ rows: EarnMovementRow[]; hasMore: boolean }>;
-  /** Every leg of one withdrawal group, submission order, org-scoped (BOLA). */
+  /** Every internal transaction leg of one withdrawal, submission order. */
   listVaultWithdrawalLegs(params: {
     organizationId: string;
-    legGroupId: string;
-  }): Promise<EarnMovementRow[]>;
+    movementId: string;
+  }): Promise<EarnVaultWithdrawalLegRow[]>;
   /**
    * One leg by (group, index) — global like the provider-reference lookup, for
    * the reconciliation sweep's predecessor gate; callers already hold a row of
    * the same group, which is what scopes the question.
    */
   getVaultWithdrawalLegByIndex(params: {
-    legGroupId: string;
+    movementId: string;
     legIndex: number;
-  }): Promise<EarnMovementRow | null>;
+  }): Promise<EarnVaultWithdrawalLegRow | null>;
   /** One program's withdrawal history, offset-paged with a total. */
   listCustodialMovements(params: {
     organizationId: string;
@@ -353,6 +355,10 @@ export interface EarnMovementsRepository {
   }): Promise<{ rows: EarnMovementRow[]; hasMore: boolean }>;
   /** Atomically select a fair, bounded batch and rotate its attempt cursor; not a work lease. */
   claimUnsettledVaultMovements(limit: number): Promise<EarnMovementRow[]>;
+  /** Fairly claim unsettled child transactions for withdrawal reconciliation. */
+  claimUnsettledVaultWithdrawalLegs(
+    limit: number
+  ): Promise<Array<{ movement: EarnMovementRow; leg: EarnVaultWithdrawalLegRow }>>;
 
   // ── Writes ───────────────────────────────────────────────────────────────
 
@@ -378,7 +384,8 @@ export interface EarnMovementsRepository {
    */
   createSignedVaultWithdrawalIntent(input: CreateSignedVaultWithdrawalIntentInput): Promise<{
     position: EarnPositionRow;
-    movements: EarnMovementRow[];
+    movement: EarnMovementRow;
+    legs: EarnVaultWithdrawalLegRow[];
     replayed: boolean;
   }>;
   /**
@@ -387,6 +394,11 @@ export interface EarnMovementsRepository {
    * merely discouraged, and a lost race returns null rather than an error.
    */
   advanceVaultMovement(input: AdvanceVaultMovementInput): Promise<EarnMovementRow | null>;
+  /** Advance one withdrawal transaction and recompute its parent movement atomically. */
+  advanceVaultWithdrawalLeg(input: AdvanceVaultWithdrawalLegInput): Promise<{
+    movement: EarnMovementRow;
+    leg: EarnVaultWithdrawalLegRow;
+  } | null>;
   /**
    * Insert-at-intent for a custodial movement: the row exists before the provider
    * accepts. Always returns the row — a missing holding heals then retries, and a
@@ -439,6 +451,16 @@ export interface AdvanceVaultMovementInput {
   settledAt?: string | null;
 }
 
+export interface AdvanceVaultWithdrawalLegInput {
+  movementId: string;
+  legIndex: number;
+  organizationId: string;
+  toStatus: string;
+  failureReason?: string | null;
+  confirmedAt?: string | null;
+  settledAt?: string | null;
+}
+
 /** One signed transaction leg of a vault withdrawal, ready to record. */
 export interface SignedVaultWithdrawalLegInput {
   /**
@@ -466,25 +488,16 @@ export interface CreateSignedVaultWithdrawalIntentInput {
    * quantity a leg encodes is shares, and tokens received are chain-decided.
    */
   shareMint: string;
+  /** Total caller intent in share units; stored once on the parent movement. */
+  requestedShares: string;
   /** The custody wallet's public key: shares burn from it, tokens return to it. */
   walletAddress: string;
-  /** Ordered legs; index 0 broadcasts first and anchors the caller's key. */
+  /** Ordered internal transactions; the parent alone owns the caller's key. */
   legs: readonly SignedVaultWithdrawalLegInput[];
   requestId: string;
   idempotencyFingerprint: string;
   createdBy?: string | null;
   initiatedByKeyId?: string | null;
-}
-
-/**
- * request_id for leg `index` of a withdrawal group. Leg 0 carries the caller's
- * raw Idempotency-Key — the replay anchor under 0059's (org, request_id)
- * unique. Later legs derive theirs with a NEWLINE separator, which a legal key
- * ([\x20-\x7e], middleware/idempotency-key.ts) can never contain, so a derived
- * id can never collide with any caller's real key.
- */
-export function vaultWithdrawalLegRequestId(requestId: string, legIndex: number): string {
-  return legIndex === 0 ? requestId : `${requestId}\nleg:${legIndex}`;
 }
 
 export interface CreateCustodialMovementInput {
@@ -584,13 +597,172 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
     request_id: row.request_id as string,
     idempotency_fingerprint: row.idempotency_fingerprint as string,
     provider_data: (row.provider_data ?? {}) as Record<string, unknown>,
-    leg_group_id: (row.leg_group_id ?? null) as string | null,
-    leg_index: (row.leg_index ?? null) as number | null,
-    leg_count: (row.leg_count ?? null) as number | null,
     created_by: row.created_by as string | null,
     initiated_by_key_id: row.initiated_by_key_id as string | null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
+  };
+}
+
+function mapVaultWithdrawalLegRow(row: Record<string, unknown>): EarnVaultWithdrawalLegRow {
+  return {
+    movement_id: row.movement_id as string,
+    leg_index: row.leg_index as number,
+    shares: row.shares as string,
+    status: row.status as EarnMovementStatus,
+    signature: row.signature as string,
+    signed_transaction: row.signed_transaction as string,
+    last_valid_block_height: row.last_valid_block_height as string,
+    failure_reason: row.failure_reason as string | null,
+    confirmed_at: row.confirmed_at as string | null,
+    settled_at: row.settled_at as string | null,
+    created_at: row.created_at as string,
+    updated_at: row.updated_at as string,
+  };
+}
+
+interface VaultWithdrawalAggregate {
+  total: number;
+  finalized: number;
+  confirmed: number;
+  started: number;
+  failed: number;
+  first_confirmed_at: string | null;
+  last_settled_at: string | null;
+  failure_reason: string | null;
+  finalized_shares: string | null;
+}
+
+function vaultWithdrawalParentStatus(aggregate: VaultWithdrawalAggregate): EarnMovementStatus {
+  if (aggregate.failed > 0) return "failed";
+  if (aggregate.finalized === aggregate.total) return "finalized";
+  if (aggregate.confirmed === aggregate.total) return "confirmed";
+  if (aggregate.started > 0) return "submitted";
+  return "requested";
+}
+
+async function updateVaultWithdrawalLeg(
+  transaction: AppDb,
+  input: AdvanceVaultWithdrawalLegInput
+): Promise<Record<string, unknown> | null> {
+  const sources = allowedSourceStatuses("vault_direct", input.toStatus);
+  const assignments = ["status = ?", "updated_at = sdp_iso_now()"];
+  const values: unknown[] = [input.toStatus];
+  if (input.failureReason !== undefined) {
+    assignments.push("failure_reason = ?");
+    values.push(input.failureReason);
+  }
+  if (input.confirmedAt !== undefined) {
+    assignments.push("confirmed_at = COALESCE(confirmed_at, ?)");
+    values.push(input.confirmedAt);
+  }
+  if (input.settledAt !== undefined) {
+    assignments.push("settled_at = ?");
+    values.push(input.settledAt);
+  }
+  return transaction
+    .prepare(
+      `UPDATE earn_vault_withdrawal_legs
+          SET ${assignments.join(", ")}
+        WHERE movement_id = ? AND leg_index = ?
+          AND status IN (${sources.map(() => "?").join(", ")})
+        RETURNING *`
+    )
+    .bind(...values, input.movementId, input.legIndex, ...sources)
+    .first<Record<string, unknown>>();
+}
+
+async function loadVaultWithdrawalAggregate(
+  transaction: AppDb,
+  movementId: string
+): Promise<VaultWithdrawalAggregate | null> {
+  return transaction
+    .prepare(
+      `SELECT
+         COUNT(*)::integer AS total,
+         COUNT(*) FILTER (WHERE status = 'finalized')::integer AS finalized,
+         COUNT(*) FILTER (WHERE status IN ('confirmed', 'finalized'))::integer AS confirmed,
+         COUNT(*) FILTER (WHERE status IN ('submitted', 'confirmed', 'finalized'))::integer AS started,
+         COUNT(*) FILTER (WHERE status = 'failed')::integer AS failed,
+         MIN(confirmed_at) FILTER (WHERE confirmed_at IS NOT NULL) AS first_confirmed_at,
+         MAX(settled_at) FILTER (WHERE settled_at IS NOT NULL) AS last_settled_at,
+         MIN(failure_reason) FILTER (WHERE failure_reason IS NOT NULL) AS failure_reason,
+         SUM(shares::numeric) FILTER (WHERE status = 'finalized')::text AS finalized_shares
+       FROM earn_vault_withdrawal_legs WHERE movement_id = ?`
+    )
+    .bind(movementId)
+    .first<VaultWithdrawalAggregate>();
+}
+
+async function updateVaultWithdrawalParent(
+  transaction: AppDb,
+  movementId: string,
+  aggregate: VaultWithdrawalAggregate
+): Promise<Record<string, unknown> | null> {
+  const status = vaultWithdrawalParentStatus(aggregate);
+  return transaction
+    .prepare(
+      `UPDATE earn_movements
+          SET status = ?,
+              failure_reason = CASE WHEN ? = 'failed' THEN ? ELSE NULL END,
+              confirmed_at = CASE
+                WHEN ? IN ('confirmed', 'finalized')
+                THEN COALESCE(confirmed_at, ?)
+                ELSE NULL
+              END,
+              settled_at = CASE WHEN ? = 'finalized' THEN ? ELSE NULL END,
+              amount_settled = CASE
+                WHEN ? IN ('confirmed', 'finalized') THEN amount_requested
+                WHEN ? = 'failed' THEN ?
+                ELSE NULL
+              END,
+              updated_at = sdp_iso_now()
+        WHERE id = ?
+        RETURNING *`
+    )
+    .bind(
+      status,
+      status,
+      aggregate.failure_reason,
+      status,
+      aggregate.first_confirmed_at,
+      status,
+      aggregate.last_settled_at,
+      status,
+      status,
+      aggregate.finalized_shares,
+      movementId
+    )
+    .first<Record<string, unknown>>();
+}
+
+async function advanceVaultWithdrawalLegTransaction(
+  transaction: AppDb,
+  input: AdvanceVaultWithdrawalLegInput
+): Promise<{ movement: EarnMovementRow; leg: EarnVaultWithdrawalLegRow } | null> {
+  const parent = await transaction
+    .prepare(
+      `SELECT id FROM earn_movements
+        WHERE id = ? AND organization_id = ?
+          AND execution_model = 'vault_direct' AND direction = 'withdrawal'
+        FOR UPDATE`
+    )
+    .bind(input.movementId, input.organizationId)
+    .first<{ id: string }>();
+  if (!parent) return null;
+
+  const updated = await updateVaultWithdrawalLeg(transaction, input);
+  if (!updated) return null;
+
+  const aggregate = await loadVaultWithdrawalAggregate(transaction, input.movementId);
+  if (!aggregate || aggregate.total < 1) {
+    throw new Error(`Vault withdrawal ${input.movementId} has no transaction legs`);
+  }
+  const parentRow = await updateVaultWithdrawalParent(transaction, input.movementId, aggregate);
+  if (!parentRow) throw new Error(`Vault withdrawal ${input.movementId} disappeared`);
+  return {
+    movement: mapMovementRow(parentRow),
+    leg: mapVaultWithdrawalLegRow(updated),
   };
 }
 
@@ -693,15 +865,18 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
     },
 
     async listVaultWithdrawalLegs(params) {
-      return listLegsByGroup(db, params.organizationId, params.legGroupId);
+      return listWithdrawalLegs(db, params.organizationId, params.movementId);
     },
 
     async getVaultWithdrawalLegByIndex(params) {
       const row = await db
-        .prepare(`SELECT * FROM earn_movements WHERE leg_group_id = ? AND leg_index = ?`)
-        .bind(params.legGroupId, params.legIndex)
+        .prepare(
+          `SELECT * FROM earn_vault_withdrawal_legs
+            WHERE movement_id = ? AND leg_index = ?`
+        )
+        .bind(params.movementId, params.legIndex)
         .first<Record<string, unknown>>();
-      return row ? mapMovementRow(row) : null;
+      return row ? mapVaultWithdrawalLegRow(row) : null;
     },
 
     async listCustodialMovements(params) {
@@ -882,6 +1057,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           `WITH blockhash_bound AS MATERIALIZED (
              SELECT id FROM earn_movements
               WHERE execution_model = 'vault_direct'
+                AND direction = 'deposit'
                 AND status IN ('requested', 'submitted')
               ORDER BY COALESCE(reconciliation_attempted_at, created_at) ASC,
                        created_at ASC,
@@ -891,6 +1067,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
            ), confirmed AS MATERIALIZED (
              SELECT id FROM earn_movements
               WHERE execution_model = 'vault_direct'
+                AND direction = 'deposit'
                 AND status = 'confirmed'
               ORDER BY COALESCE(reconciliation_attempted_at, created_at) ASC,
                        created_at ASC,
@@ -905,6 +1082,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
              SELECT movement.id
                FROM earn_movements movement
               WHERE movement.execution_model = 'vault_direct'
+                AND movement.direction = 'deposit'
                 AND movement.status IN ('requested', 'submitted', 'confirmed')
                 AND NOT EXISTS (
                   SELECT 1 FROM reserved WHERE reserved.id = movement.id
@@ -932,6 +1110,97 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .bind(blockhashBoundQuota, confirmedQuota, limit)
         .all<Record<string, unknown>>();
       return (result.results ?? []).map(mapMovementRow);
+    },
+
+    async claimUnsettledVaultWithdrawalLegs(limit) {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 256) {
+        throw new Error("Withdrawal reconciliation limit must be an integer from 1 to 256");
+      }
+      const confirmedQuota = limit > 1 ? Math.max(1, Math.floor(limit / 4)) : 0;
+      const blockhashBoundQuota = limit - confirmedQuota;
+      const result = await db
+        .prepare(
+          `WITH blockhash_bound AS MATERIALIZED (
+             SELECT movement_id, leg_index FROM earn_vault_withdrawal_legs
+              WHERE status IN ('requested', 'submitted')
+              ORDER BY COALESCE(reconciliation_attempted_at, created_at) ASC,
+                       created_at ASC, movement_id ASC, leg_index ASC
+              LIMIT ?
+              FOR UPDATE SKIP LOCKED
+           ), confirmed AS MATERIALIZED (
+             SELECT movement_id, leg_index FROM earn_vault_withdrawal_legs
+              WHERE status = 'confirmed'
+              ORDER BY COALESCE(reconciliation_attempted_at, created_at) ASC,
+                       created_at ASC, movement_id ASC, leg_index ASC
+              LIMIT ?
+              FOR UPDATE SKIP LOCKED
+           ), reserved AS MATERIALIZED (
+             SELECT * FROM blockhash_bound
+             UNION ALL
+             SELECT * FROM confirmed
+           ), overflow AS (
+             SELECT leg.movement_id, leg.leg_index
+               FROM earn_vault_withdrawal_legs leg
+              WHERE leg.status IN ('requested', 'submitted', 'confirmed')
+                AND NOT EXISTS (
+                  SELECT 1 FROM reserved
+                   WHERE reserved.movement_id = leg.movement_id
+                     AND reserved.leg_index = leg.leg_index
+                )
+              ORDER BY (leg.status = 'confirmed') ASC,
+                       COALESCE(leg.reconciliation_attempted_at, leg.created_at) ASC,
+                       leg.created_at ASC, leg.movement_id ASC, leg.leg_index ASC
+              LIMIT GREATEST(0, ? - (SELECT COUNT(*) FROM reserved))
+              FOR UPDATE OF leg SKIP LOCKED
+           ), claimed AS (
+             SELECT * FROM reserved
+             UNION ALL
+             SELECT * FROM overflow
+           ), touched AS (
+             UPDATE earn_vault_withdrawal_legs leg
+                SET reconciliation_attempted_at = sdp_iso_now()
+               FROM claimed
+              WHERE leg.movement_id = claimed.movement_id
+                AND leg.leg_index = claimed.leg_index
+             RETURNING leg.*
+           )
+           SELECT movement.*,
+                  touched.movement_id AS outbox_movement_id,
+                  touched.leg_index AS outbox_leg_index,
+                  touched.shares AS outbox_shares,
+                  touched.status AS outbox_status,
+                  touched.signature AS outbox_signature,
+                  touched.signed_transaction AS outbox_signed_transaction,
+                  touched.last_valid_block_height AS outbox_last_valid_block_height,
+                  touched.failure_reason AS outbox_failure_reason,
+                  touched.confirmed_at AS outbox_confirmed_at,
+                  touched.settled_at AS outbox_settled_at,
+                  touched.created_at AS outbox_created_at,
+                  touched.updated_at AS outbox_updated_at
+             FROM touched
+             JOIN earn_movements movement ON movement.id = touched.movement_id
+            ORDER BY (touched.status = 'confirmed') ASC,
+                     touched.created_at ASC, touched.movement_id ASC, touched.leg_index ASC`
+        )
+        .bind(blockhashBoundQuota, confirmedQuota, limit)
+        .all<Record<string, unknown>>();
+      return (result.results ?? []).map((row) => ({
+        movement: mapMovementRow(row),
+        leg: mapVaultWithdrawalLegRow({
+          movement_id: row.outbox_movement_id,
+          leg_index: row.outbox_leg_index,
+          shares: row.outbox_shares,
+          status: row.outbox_status,
+          signature: row.outbox_signature,
+          signed_transaction: row.outbox_signed_transaction,
+          last_valid_block_height: row.outbox_last_valid_block_height,
+          failure_reason: row.outbox_failure_reason,
+          confirmed_at: row.outbox_confirmed_at,
+          settled_at: row.outbox_settled_at,
+          created_at: row.outbox_created_at,
+          updated_at: row.outbox_updated_at,
+        }),
+      }));
     },
 
     async createSignedVaultDepositIntent(input) {
@@ -993,15 +1262,13 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           );
           if (!prior) return null;
           assertMovementIsOwnReplay(prior, input);
-          if (!prior.leg_group_id) {
-            // A matching fingerprint on a legless row should be unreachable
-            // (the fingerprint scopes deposit and withdrawal apart), so a hit
-            // here is a corrupt anchor, not a replay to serve.
+          if (prior.direction !== "withdrawal") {
             throw conflict("Idempotency key already used with different request payload");
           }
           return {
             position: await requireMovementPosition(transaction, prior),
-            movements: await listLegsByGroup(transaction, input.organizationId, prior.leg_group_id),
+            movement: prior,
+            legs: await listWithdrawalLegs(transaction, input.organizationId, prior.id),
             replayed: true,
           };
         };
@@ -1009,28 +1276,22 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         const prior = await resolveReplay();
         if (prior) return prior;
 
-        const legGroupId = generateEarnMovementGroupId();
-        const first = await insertVaultWithdrawalLeg(transaction, input, legGroupId, 0);
-        if (!first) {
+        const movement = await insertVaultWithdrawalMovement(transaction, input);
+        if (!movement) {
           // A concurrent identical request committed after the preflight; its
           // signed legs — not ours — are the ones that may be broadcast.
           const winner = await resolveReplay();
           if (!winner) throw new Error("Failed to resolve concurrent earn vault withdrawal");
           return winner;
         }
-        const movements = [first];
-        for (let legIndex = 1; legIndex < input.legs.length; legIndex += 1) {
-          const inserted = await insertVaultWithdrawalLeg(transaction, input, legGroupId, legIndex);
-          if (!inserted) {
-            // Unreachable while derived leg ids cannot collide (newline rule);
-            // loud because a missing leg row is a leg the sweep cannot resume.
-            throw new Error(`Failed to record earn vault withdrawal leg ${legIndex}`);
-          }
-          movements.push(inserted);
+        const legs: EarnVaultWithdrawalLegRow[] = [];
+        for (let legIndex = 0; legIndex < input.legs.length; legIndex += 1) {
+          legs.push(await insertVaultWithdrawalLeg(transaction, movement.id, input, legIndex));
         }
         return {
-          position: await requireMovementPosition(transaction, first),
-          movements,
+          position: await requireMovementPosition(transaction, movement),
+          movement,
+          legs,
           replayed: false,
         };
       });
@@ -1141,6 +1402,31 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         }
         return movement;
       });
+    },
+
+    async advanceVaultWithdrawalLeg(input) {
+      if (input.confirmedAt !== undefined && !["confirmed", "finalized"].includes(input.toStatus)) {
+        throw new Error("confirmedAt is only valid when confirming a withdrawal leg");
+      }
+      if (["confirmed", "finalized"].includes(input.toStatus) && !input.confirmedAt?.trim()) {
+        throw new Error("confirmedAt is required when confirming a withdrawal leg");
+      }
+      if (input.settledAt !== undefined && input.toStatus !== "finalized") {
+        throw new Error("settledAt is only valid when finalizing a withdrawal leg");
+      }
+      if (input.toStatus === "finalized" && !input.settledAt?.trim()) {
+        throw new Error("settledAt is required when finalizing a withdrawal leg");
+      }
+      if (input.failureReason !== undefined && input.toStatus !== "failed") {
+        throw new Error("failureReason is only valid when failing a withdrawal leg");
+      }
+      if (input.toStatus === "failed" && !input.failureReason?.trim()) {
+        throw new Error("failureReason is required when failing a withdrawal leg");
+      }
+
+      return db.transaction((executor) =>
+        advanceVaultWithdrawalLegTransaction(asTransactionalClient(executor), input)
+      );
     },
 
     async createCustodialMovement(input) {
@@ -1315,24 +1601,25 @@ function assertVaultTransitionMetadata(input: AdvanceVaultMovementInput): void {
   }
 }
 
-async function listLegsByGroup(
+async function listWithdrawalLegs(
   db: AppDb,
   organizationId: string,
-  legGroupId: string
-): Promise<EarnMovementRow[]> {
+  movementId: string
+): Promise<EarnVaultWithdrawalLegRow[]> {
   const result = await db
     .prepare(
-      `SELECT * FROM earn_movements
-        WHERE organization_id = ? AND leg_group_id = ?
-        ORDER BY leg_index ASC`
+      `SELECT leg.* FROM earn_vault_withdrawal_legs leg
+        JOIN earn_movements movement ON movement.id = leg.movement_id
+       WHERE movement.organization_id = ? AND movement.id = ?
+       ORDER BY leg.leg_index ASC`
     )
-    .bind(organizationId, legGroupId)
+    .bind(organizationId, movementId)
     .all<Record<string, unknown>>();
-  return (result.results ?? []).map(mapMovementRow);
+  return (result.results ?? []).map(mapVaultWithdrawalLegRow);
 }
 
 /**
- * One withdrawal leg, inserted `requested` with its signed outbox payload.
+ * One logical withdrawal movement, inserted before any signed bytes broadcast.
  *
  * The two composite FKs onto `earn_positions` are the claim check: a leg whose
  * (position, organization, environment, provider, vault, wallet) tuple does not
@@ -1341,14 +1628,10 @@ async function listLegsByGroup(
  * `amount_requested` the exact shares this leg's transaction encodes — see
  * 0066's header for why a withdrawal is not token-denominated.
  */
-async function insertVaultWithdrawalLeg(
+async function insertVaultWithdrawalMovement(
   db: AppDb,
-  input: CreateSignedVaultWithdrawalIntentInput,
-  legGroupId: string,
-  legIndex: number
+  input: CreateSignedVaultWithdrawalIntentInput
 ): Promise<EarnMovementRow | null> {
-  const leg = input.legs[legIndex];
-  if (!leg) throw new Error(`Earn vault withdrawal leg ${legIndex} is missing from the input`);
   const row = await db
     .prepare(
       `INSERT INTO earn_movements (
@@ -1356,12 +1639,10 @@ async function insertVaultWithdrawalLeg(
          execution_model, direction, position_id, status,
          denomination, amount_requested,
          custody_wallet_id, vault_address, source_address, destination_address,
-         signature, signed_transaction, last_valid_block_height,
          request_id, idempotency_fingerprint,
-         leg_group_id, leg_index, leg_count,
          created_by, initiated_by_key_id
        ) VALUES (?, ?, ?, ?, ?, 'vault_direct', 'withdrawal', ?, 'requested',
-                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (organization_id, request_id) WHERE execution_model = 'vault_direct'
        DO NOTHING
        RETURNING *`
@@ -1374,26 +1655,48 @@ async function insertVaultWithdrawalLeg(
       input.provider,
       input.positionId,
       input.shareMint,
-      leg.shares,
+      input.requestedShares,
       input.custodyWalletId,
       input.vaultAddress,
       // Money leaves the INSTRUMENT and returns to the org's own wallet — the
       // mirror image of a deposit's source/destination.
       input.vaultAddress,
       input.walletAddress,
-      leg.signature,
-      leg.signedTransaction,
-      leg.lastValidBlockHeight,
-      vaultWithdrawalLegRequestId(input.requestId, legIndex),
+      input.requestId,
       input.idempotencyFingerprint,
-      legGroupId,
-      legIndex,
-      input.legs.length,
       input.createdBy ?? null,
       input.initiatedByKeyId ?? null
     )
     .first<Record<string, unknown>>();
   return row ? mapMovementRow(row) : null;
+}
+
+async function insertVaultWithdrawalLeg(
+  db: AppDb,
+  movementId: string,
+  input: CreateSignedVaultWithdrawalIntentInput,
+  legIndex: number
+): Promise<EarnVaultWithdrawalLegRow> {
+  const leg = input.legs[legIndex];
+  if (!leg) throw new Error(`Earn vault withdrawal leg ${legIndex} is missing from the input`);
+  const row = await db
+    .prepare(
+      `INSERT INTO earn_vault_withdrawal_legs (
+         movement_id, leg_index, shares, signature, signed_transaction, last_valid_block_height
+       ) VALUES (?, ?, ?, ?, ?, ?)
+       RETURNING *`
+    )
+    .bind(
+      movementId,
+      legIndex,
+      leg.shares,
+      leg.signature,
+      leg.signedTransaction,
+      leg.lastValidBlockHeight
+    )
+    .first<Record<string, unknown>>();
+  if (!row) throw new Error(`Failed to record earn vault withdrawal leg ${legIndex}`);
+  return mapVaultWithdrawalLegRow(row);
 }
 
 async function findVaultMovementByRequest(

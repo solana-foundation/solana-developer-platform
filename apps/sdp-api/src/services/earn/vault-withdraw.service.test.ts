@@ -144,12 +144,17 @@ async function seedWalletAndPosition(): Promise<void> {
 async function movementRows() {
   const result = await getDb(env)
     .prepare(
-      `SELECT id, status, leg_group_id, leg_index, leg_count, denomination,
-              amount_requested, signature, request_id, failure_reason,
+      `SELECT id, status, denomination, amount_requested, request_id, failure_reason,
               source_address, destination_address
-         FROM earn_movements
-        ORDER BY leg_index ASC`
+         FROM earn_movements`
     )
+    .all<Record<string, unknown>>();
+  return result.results ?? [];
+}
+
+async function withdrawalLegRows() {
+  const result = await getDb(env)
+    .prepare(`SELECT * FROM earn_vault_withdrawal_legs ORDER BY leg_index ASC`)
     .all<Record<string, unknown>>();
   return result.results ?? [];
 }
@@ -177,7 +182,8 @@ describe("withdrawFromVault — idempotency", () => {
     const second = await withdrawFromVault(env, withdrawalInput());
 
     expect(second).toMatchObject({ replayed: true });
-    expect(second.movements.map((leg) => leg.id)).toEqual(first.movements.map((leg) => leg.id));
+    expect(second.movement.id).toBe(first.movement.id);
+    expect(second.legs.map((leg) => leg.signature)).toEqual(first.legs.map((leg) => leg.signature));
     expect(second.position.id).toBe(positionId);
     expect(signVaultPlanTransactions).toHaveBeenCalledTimes(1);
     expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
@@ -209,12 +215,12 @@ describe("withdrawFromVault — idempotency", () => {
     signVaultPlanTransactions.mockResolvedValue(signedLegs(2));
 
     const first = await withdrawFromVault(env, withdrawalInput());
-    expect(first.movements).toHaveLength(2);
+    expect(first.legs).toHaveLength(2);
     vi.clearAllMocks();
 
     const replay = await withdrawFromVault(env, withdrawalInput());
     expect(replay.replayed).toBe(true);
-    expect(replay.movements.map((leg) => leg.leg_index)).toEqual([0, 1]);
+    expect(replay.legs.map((leg) => leg.leg_index)).toEqual([0, 1]);
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
   });
 
@@ -240,26 +246,23 @@ describe("withdrawFromVault — idempotency", () => {
 });
 
 describe("withdrawFromVault — recording and submission", () => {
-  it("records every leg with its exact shares, share-mint denomination, and leg identity", async () => {
+  it("records one logical movement with exact ordered transaction legs", async () => {
     buildVaultWithdrawal.mockResolvedValue(multiLegPlan());
     signVaultPlanTransactions.mockResolvedValue(signedLegs(2));
 
     const result = await withdrawFromVault(env, withdrawalInput());
     const rows = await movementRows();
+    const legs = await withdrawalLegRows();
 
-    expect(rows).toHaveLength(2);
-    expect(rows.map((row) => row.leg_index)).toEqual([0, 1]);
-    expect(new Set(rows.map((row) => row.leg_group_id)).size).toBe(1);
-    expect(rows.map((row) => row.leg_count)).toEqual([2, 2]);
-    expect(rows.map((row) => row.amount_requested)).toEqual(["6", "4"]);
-    expect(rows.every((row) => row.denomination === SHARE_MINT)).toBe(true);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ amount_requested: "10", denomination: SHARE_MINT });
+    expect(legs.map((row) => row.leg_index)).toEqual([0, 1]);
+    expect(legs.map((row) => row.shares)).toEqual(["6", "4"]);
     // Money leaves the instrument and returns to the org's own wallet.
-    expect(rows.every((row) => row.source_address === VAULT)).toBe(true);
-    expect(rows.every((row) => row.destination_address === WALLET_ADDRESS)).toBe(true);
-    // Leg 0 anchors the caller's key; leg 1 derives with the newline rule.
+    expect(rows[0].source_address).toBe(VAULT);
+    expect(rows[0].destination_address).toBe(WALLET_ADDRESS);
     expect(rows[0].request_id).toBe(withdrawalInput().requestId);
-    expect(rows[1].request_id).toBe(`${withdrawalInput().requestId}\nleg:1`);
-    expect(result.movements.map((leg) => leg.signature)).toEqual([
+    expect(result.legs.map((leg) => leg.signature)).toEqual([
       "sig_withdraw_leg_0",
       "sig_withdraw_leg_1",
     ]);
@@ -271,7 +274,7 @@ describe("withdrawFromVault — recording and submission", () => {
     let rowsAtFirstBroadcast = -1;
     broadcastVaultTransaction.mockImplementation(async () => {
       if (rowsAtFirstBroadcast === -1) {
-        rowsAtFirstBroadcast = (await movementRows()).length;
+        rowsAtFirstBroadcast = (await withdrawalLegRows()).length;
       }
     });
 
@@ -283,8 +286,9 @@ describe("withdrawFromVault — recording and submission", () => {
   it("submits a single-leg withdrawal without waiting for commitment", async () => {
     const result = await withdrawFromVault(env, withdrawalInput());
 
-    expect(result.movements).toHaveLength(1);
-    expect(result.movements[0].status).toBe("submitted");
+    expect(result.legs).toHaveLength(1);
+    expect(result.legs[0].status).toBe("submitted");
+    expect(result.movement.status).toBe("submitted");
     expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
     // The sweep settles the last leg; the request never polls for it.
     expect(getSignatureStatuses).not.toHaveBeenCalled();
@@ -305,9 +309,9 @@ describe("withdrawFromVault — recording and submission", () => {
     const result = await withdrawFromVault(env, withdrawalInput());
 
     expect(broadcastOrder).toEqual([1, 2]);
-    expect(result.movements[0].status).toBe("confirmed");
-    expect(result.movements[0].confirmed_at).toBeTruthy();
-    expect(result.movements[1].status).toBe("submitted");
+    expect(result.legs[0].status).toBe("confirmed");
+    expect(result.legs[0].confirmed_at).toBeTruthy();
+    expect(result.legs[1].status).toBe("submitted");
   });
 
   it("stops after an ambiguous broadcast and leaves later legs for the sweep", async () => {
@@ -320,7 +324,7 @@ describe("withdrawFromVault — recording and submission", () => {
     expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
     // Both legs remain reconcilable by signature: the first may have landed,
     // the second must not be sent until the first's fate is known.
-    expect(result.movements.map((leg) => leg.status)).toEqual(["requested", "requested"]);
+    expect(result.legs.map((leg) => leg.status)).toEqual(["requested", "requested"]);
     expect(getSignatureStatuses).not.toHaveBeenCalled();
   });
 
@@ -334,10 +338,11 @@ describe("withdrawFromVault — recording and submission", () => {
     const result = await withdrawFromVault(env, withdrawalInput());
 
     expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
-    expect(result.movements[0].status).toBe("failed");
-    expect(result.movements[0].failure_reason).toContain("InstructionError");
-    expect(result.movements[1].status).toBe("failed");
-    expect(result.movements[1].failure_reason).toContain("Predecessor withdrawal leg");
+    expect(result.legs[0].status).toBe("failed");
+    expect(result.legs[0].failure_reason).toContain("InstructionError");
+    expect(result.legs[1].status).toBe("failed");
+    expect(result.legs[1].failure_reason).toContain("Predecessor withdrawal leg");
+    expect(result.movement.status).toBe("failed");
   });
 
   it("returns with legs pending when the commitment wait exhausts the budget", async () => {
@@ -349,8 +354,8 @@ describe("withdrawFromVault — recording and submission", () => {
     const result = await withdrawFromVault(env, withdrawalInput());
 
     expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
-    expect(result.movements[0].status).toBe("submitted");
-    expect(result.movements[1].status).toBe("requested");
+    expect(result.legs[0].status).toBe("submitted");
+    expect(result.legs[1].status).toBe("requested");
   });
 });
 

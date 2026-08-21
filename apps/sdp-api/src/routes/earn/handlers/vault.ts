@@ -5,9 +5,9 @@ import type {
   EarnVaultDepositResponse,
   EarnVaultDepositsPage,
   EarnVaultWithdrawal,
-  EarnVaultWithdrawalLeg,
   EarnVaultWithdrawalResponse,
   EarnVaultWithdrawalsPage,
+  EarnVaultWithdrawalTransaction,
   SdpEnvironment,
 } from "@sdp/types";
 import {
@@ -22,6 +22,7 @@ import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
   type EarnPositionRow,
+  type EarnVaultWithdrawalLegRow,
 } from "@/db/repositories/earn-movements.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
@@ -1188,7 +1189,7 @@ export async function extractEarnVaultWithdrawalPolicyCandidate(
     environment,
     positionId: body.positionId,
   });
-  if (!positionRow || positionRow.kind !== "vault_direct") {
+  if (positionRow?.kind !== "vault_direct") {
     throw notFound("Earn vault position");
   }
   const position = toVaultHolding(positionRow);
@@ -1289,21 +1290,18 @@ export async function findEarnVaultWithdrawalIdempotentKeyReplay(
     ) {
       throw conflict("Idempotency key already used with different request payload");
     }
-    if (!movement.leg_group_id) {
-      throw internalError(`Replayed movement ${movement.id} is not a withdrawal leg group anchor`);
-    }
-    const movements = await repo.listVaultWithdrawalLegs({
+    const legs = await repo.listVaultWithdrawalLegs({
       organizationId: resolved.auth.organizationId,
-      legGroupId: movement.leg_group_id,
+      movementId: movement.id,
     });
-    if (movements.length === 0) {
-      throw internalError(`Replayed withdrawal ${movement.id} references a missing leg group`);
+    if (legs.length === 0) {
+      throw internalError(`Replayed withdrawal ${movement.id} has no transaction details`);
     }
     return success(
       c,
       buildEarnVaultWithdrawalResponse({
-        positionId: movement.position_id,
-        movements,
+        movement,
+        legs,
         replayed: true,
       })
     );
@@ -1367,7 +1365,7 @@ export async function createEarnVaultWithdrawal(
     // the approved operation before returning their durable outcome — the
     // deposit's rule, group-shaped.
     await beginApprovedWalletOperationEffect(c);
-    if (result.movements.some((leg) => !leg.signature || leg.status === "failed")) {
+    if (result.legs.some((leg) => !leg.signature || leg.status === "failed")) {
       throw conflict(
         "Approved vault withdrawal execution is incomplete and requires manual reconciliation"
       );
@@ -1377,29 +1375,20 @@ export async function createEarnVaultWithdrawal(
   return success(
     c,
     buildEarnVaultWithdrawalResponse({
-      positionId: result.position.id,
-      movements: result.movements,
+      movement: result.movement,
+      legs: result.legs,
       replayed: result.replayed,
     })
   );
 }
 
 function buildEarnVaultWithdrawalResponse(input: {
-  positionId: string;
-  movements: EarnMovementRow[];
+  movement: EarnMovementRow;
+  legs: EarnVaultWithdrawalLegRow[];
   replayed: boolean;
 }): { withdrawal: EarnVaultWithdrawal } {
-  const [first] = input.movements;
-  if (!first?.leg_group_id) {
-    throw internalError("Earn vault withdrawal was recorded without a leg group");
-  }
   return {
-    withdrawal: {
-      positionId: input.positionId,
-      groupId: first.leg_group_id,
-      movements: input.movements.map(toEarnVaultWithdrawalLeg),
-      replayed: input.replayed,
-    },
+    withdrawal: toEarnVaultWithdrawal(input.movement, input.legs, input.replayed),
   };
 }
 
@@ -1409,36 +1398,42 @@ function buildEarnVaultWithdrawalResponse(input: {
  * the unified ledger, so there is no legacy client to translate for, and
  * `finalized` finally has its own name on the wire.
  */
-function toEarnVaultWithdrawalLeg(movement: EarnMovementRow): EarnVaultWithdrawalLeg {
-  if (
-    !movement.vault_address ||
-    !movement.signature ||
-    movement.leg_group_id === null ||
-    movement.leg_index === null ||
-    movement.leg_count === null
-  ) {
-    throw internalError(
-      `Earn vault movement ${movement.id} is missing its instrument, signature, or leg identity`
-    );
+function toEarnVaultWithdrawal(
+  movement: EarnMovementRow,
+  legs: EarnVaultWithdrawalLegRow[],
+  replayed?: boolean
+): EarnVaultWithdrawal {
+  if (!movement.vault_address || legs.length === 0) {
+    throw internalError(`Earn vault withdrawal ${movement.id} is missing execution details`);
   }
   return {
     movementId: movement.id,
     positionId: movement.position_id,
     provider: movement.provider,
     providerReference: movement.vault_address,
-    groupId: movement.leg_group_id,
-    legIndex: movement.leg_index,
-    legCount: movement.leg_count,
-    status: movement.status as EarnVaultWithdrawalLeg["status"],
-    signature: movement.signature,
-    // The exact shares this leg encodes — 0066 denominates withdrawal rows in
-    // the share mint, so `amount_requested` IS the share quantity.
+    status: movement.status as EarnVaultWithdrawal["status"],
     shares: movement.amount_requested,
     shareMint: movement.denomination,
     failureReason: movement.failure_reason,
     createdAt: movement.created_at,
     confirmedAt: movement.confirmed_at,
     settledAt: movement.settled_at,
+    transactions: legs.map(toEarnVaultWithdrawalTransaction),
+    ...(replayed === undefined ? {} : { replayed }),
+  };
+}
+
+function toEarnVaultWithdrawalTransaction(
+  leg: EarnVaultWithdrawalLegRow
+): EarnVaultWithdrawalTransaction {
+  return {
+    index: leg.leg_index,
+    status: leg.status as EarnVaultWithdrawalTransaction["status"],
+    signature: leg.signature,
+    shares: leg.shares,
+    failureReason: leg.failure_reason,
+    confirmedAt: leg.confirmed_at,
+    settledAt: leg.settled_at,
   };
 }
 
@@ -1477,8 +1472,12 @@ export async function getEarnVaultWithdrawal(c: AppContext) {
     throw notFound("Earn vault withdrawal");
   }
 
+  const legs = await repo.listVaultWithdrawalLegs({
+    organizationId: auth.organizationId,
+    movementId: movement.id,
+  });
   const response: EarnVaultWithdrawalResponse = {
-    withdrawal: toEarnVaultWithdrawalLeg(movement),
+    withdrawal: toEarnVaultWithdrawal(movement, legs),
   };
   return success(c, response);
 }
@@ -1509,10 +1508,8 @@ export async function listEarnVaultWithdrawals(c: AppContext) {
   const scopedWalletIds = new Set(custodyWalletIds);
   const repo = createPostgresEarnMovementsRepository(getDb(c.env));
 
-  // The single-key lookup resolves the anchor leg, then serves its WHOLE
-  // group: the caller's question is "what happened to my withdrawal", and a
-  // multi-leg exit's answer is every leg. Scoping is re-applied to the anchor;
-  // the group shares its tenancy by construction (one insert, one position).
+  // The single-key lookup resolves one logical withdrawal. Scoping is applied
+  // to the parent before its internal transactions are loaded.
   if (query.requestId !== undefined) {
     const movement = await repo.findVaultMovementByRequestId({
       organizationId: auth.organizationId,
@@ -1522,19 +1519,18 @@ export async function listEarnVaultWithdrawals(c: AppContext) {
       movement !== null &&
       movement.environment === environment &&
       movement.direction === "withdrawal" &&
-      movement.leg_group_id !== null &&
       isMovementInProject(movement, projectId) &&
       movement.custody_wallet_id !== null &&
       scopedWalletIds.has(movement.custody_wallet_id);
-    const movements =
-      visible && movement?.leg_group_id
+    const legs =
+      visible && movement
         ? await repo.listVaultWithdrawalLegs({
             organizationId: auth.organizationId,
-            legGroupId: movement.leg_group_id,
+            movementId: movement.id,
           })
         : [];
     return success(c, {
-      withdrawals: movements.map(toEarnVaultWithdrawalLeg),
+      withdrawals: visible && movement ? [toEarnVaultWithdrawal(movement, legs)] : [],
       hasMore: false,
       nextCursor: null,
     });
@@ -1553,8 +1549,19 @@ export async function listEarnVaultWithdrawals(c: AppContext) {
 
   const last = rows.at(-1);
   const nextCursor = hasMore && last ? encodeKeysetCursor(last.created_at, last.id) : null;
+  const withdrawals = await Promise.all(
+    rows.map(async (movement) =>
+      toEarnVaultWithdrawal(
+        movement,
+        await repo.listVaultWithdrawalLegs({
+          organizationId: auth.organizationId,
+          movementId: movement.id,
+        })
+      )
+    )
+  );
   const response: EarnVaultWithdrawalsPage = {
-    withdrawals: rows.map(toEarnVaultWithdrawalLeg),
+    withdrawals,
     hasMore,
     nextCursor,
   };

@@ -27,7 +27,7 @@ import {
   type EarnVaultPosition,
   type EarnVaultPositionsPage,
   type EarnVaultWithdrawal,
-  type EarnVaultWithdrawalLeg,
+  type EarnVaultWithdrawalTransaction,
   type EarnVaultWithdrawalRequest,
   type ListEarnProgramsResponse,
   type ListEarnProgramWithdrawalsResponse,
@@ -63,7 +63,7 @@ export type {
   EarnVaultPosition,
   EarnVaultPositionsPage,
   EarnVaultWithdrawal,
-  EarnVaultWithdrawalLeg,
+  EarnVaultWithdrawalTransaction,
   EarnVaultWithdrawalRequest,
   ListEarnProgramsResponse,
   ListEarnProgramWithdrawalsResponse,
@@ -893,33 +893,34 @@ export function useEarnVaultDepositOutcomeToast(
 // ---------------------------------------------------------------------------
 
 /**
- * Annotated `z.ZodType<EarnVaultWithdrawalLeg>` for the same reason the deposit
+ * Annotated shared withdrawal schemas for the same reason the deposit
  * schemas are: a field added or renamed in `@sdp/types` must fail typecheck
  * here rather than be silently stripped from a parsed leg.
  */
-const earnVaultWithdrawalLegSchema: z.ZodType<EarnVaultWithdrawalLeg> = z.object({
+const earnVaultWithdrawalTransactionSchema: z.ZodType<EarnVaultWithdrawalTransaction> = z.object({
+  index: z.number().int().nonnegative(),
+  status: z.enum(EARN_MOVEMENT_STATUSES.vault_direct),
+  signature: z.string(),
+  shares: z.string(),
+  failureReason: z.string().nullable(),
+  confirmedAt: z.string().nullable(),
+  settledAt: z.string().nullable(),
+});
+
+const earnVaultWithdrawalSchema: z.ZodType<EarnVaultWithdrawal> = z.object({
   movementId: z.string(),
   positionId: z.string(),
   provider: z.string(),
   providerReference: z.string(),
-  groupId: z.string(),
-  legIndex: z.number().int().nonnegative(),
-  legCount: z.number().int().positive(),
   status: z.enum(EARN_MOVEMENT_STATUSES.vault_direct),
-  signature: z.string(),
   shares: z.string(),
   shareMint: z.string(),
   failureReason: z.string().nullable(),
   createdAt: z.string(),
   confirmedAt: z.string().nullable(),
   settledAt: z.string().nullable(),
-});
-
-const earnVaultWithdrawalSchema: z.ZodType<EarnVaultWithdrawal> = z.object({
-  positionId: z.string(),
-  groupId: z.string(),
-  movements: z.array(earnVaultWithdrawalLegSchema).min(1),
-  replayed: z.boolean(),
+  transactions: z.array(earnVaultWithdrawalTransactionSchema).min(1),
+  replayed: z.boolean().optional(),
 });
 
 const earnVaultWithdrawalOutcomeSchema = z.union([
@@ -988,7 +989,7 @@ export async function createEarnVaultWithdrawal(
 }
 
 const earnVaultWithdrawalResponseSchema = z.object({
-  data: z.object({ withdrawal: earnVaultWithdrawalLegSchema }),
+  data: z.object({ withdrawal: earnVaultWithdrawalSchema }),
 });
 
 /**
@@ -996,9 +997,9 @@ const earnVaultWithdrawalResponseSchema = z.object({
  * deliberately NOT terminal — the caller keeps polling, because a read that
  * failed says nothing about whether the exit landed.
  */
-export async function fetchEarnVaultWithdrawalLeg(
+export async function fetchEarnVaultWithdrawal(
   movementId: string
-): Promise<EarnVaultWithdrawalLeg | undefined> {
+): Promise<EarnVaultWithdrawal | undefined> {
   const result = await dashboardFetch<unknown>(
     `/api/dashboard/markets/earn/vault-withdrawals/${encodeURIComponent(movementId)}`
   );
@@ -1009,7 +1010,7 @@ export async function fetchEarnVaultWithdrawalLeg(
 
 const earnVaultWithdrawalsPageSchema = z.object({
   data: z.object({
-    withdrawals: z.array(earnVaultWithdrawalLegSchema),
+    withdrawals: z.array(earnVaultWithdrawalSchema),
     hasMore: z.boolean(),
     nextCursor: z.string().nullable(),
   }),
@@ -1022,8 +1023,8 @@ const earnVaultWithdrawalsPageSchema = z.object({
  */
 export async function fetchEarnVaultWithdrawals(
   options: { settled?: boolean } = {}
-): Promise<EarnVaultWithdrawalLeg[]> {
-  const withdrawals: EarnVaultWithdrawalLeg[] = [];
+): Promise<EarnVaultWithdrawal[]> {
+  const withdrawals: EarnVaultWithdrawal[] = [];
   const seenCursors = new Set<string>();
   let before: string | null = null;
 
@@ -1061,7 +1062,7 @@ export async function fetchEarnVaultWithdrawals(
  * read reuse a spent key.
  */
 export type EarnVaultWithdrawalsByRequestId =
-  | { kind: "found"; legs: EarnVaultWithdrawalLeg[] }
+  | { kind: "found"; withdrawal: EarnVaultWithdrawal }
   | { kind: "absent" }
   | { kind: "unavailable" };
 
@@ -1074,8 +1075,8 @@ export async function fetchEarnVaultWithdrawalsByRequestId(
   if (!result.ok) return { kind: "unavailable" };
   const parsed = earnVaultWithdrawalsPageSchema.safeParse(result.data);
   if (!parsed.success) return { kind: "unavailable" };
-  const legs = parsed.data.data.withdrawals;
-  return legs.length > 0 ? { kind: "found", legs } : { kind: "absent" };
+  const [withdrawal] = parsed.data.data.withdrawals;
+  return withdrawal ? { kind: "found", withdrawal } : { kind: "absent" };
 }
 
 /**
@@ -1104,8 +1105,8 @@ const SETTLED_VAULT_WITHDRAWAL_STATUSES: ReadonlySet<EarnVaultDirectMovementStat
 );
 
 /** Shared by the recovery filter and the poll's stop condition — one rule. */
-export function isEarnVaultWithdrawalLegInFlight(leg: EarnVaultWithdrawalLeg): boolean {
-  return !SETTLED_VAULT_WITHDRAWAL_STATUSES.has(leg.status);
+export function isEarnVaultWithdrawalInFlight(withdrawal: EarnVaultWithdrawal): boolean {
+  return !SETTLED_VAULT_WITHDRAWAL_STATUSES.has(withdrawal.status);
 }
 
 const VAULT_WITHDRAWAL_OUTCOME_KEYS = {
@@ -1114,10 +1115,8 @@ const VAULT_WITHDRAWAL_OUTCOME_KEYS = {
 } as const satisfies Record<"finalized" | "failed", MessageKey>;
 
 /**
- * Announce how one withdrawal LEG actually ended, once it has ended — the
- * deposit outcome hook's mirror over the ledger vocabulary. A multi-leg exit
- * mounts one of these per leg: legs settle independently and each is a real
- * on-chain transaction with its own fate.
+ * Announce how one logical withdrawal ended. Internal transactions settle
+ * independently, but the parent movement is the only user-facing lifecycle.
  */
 export function useEarnVaultWithdrawalOutcomeToast(
   movementId: string | undefined,
@@ -1130,10 +1129,10 @@ export function useEarnVaultWithdrawalOutcomeToast(
 
   const { data } = useSWR(
     movementId ? (["dashboard-earn-vault-withdrawal", movementId] as const) : null,
-    ([, watchedId]) => fetchEarnVaultWithdrawalLeg(watchedId),
+    ([, watchedId]) => fetchEarnVaultWithdrawal(watchedId),
     {
-      refreshInterval: (leg) =>
-        leg && SETTLED_VAULT_WITHDRAWAL_STATUSES.has(leg.status) ? 0 : 5_000,
+      refreshInterval: (withdrawal) =>
+        withdrawal && SETTLED_VAULT_WITHDRAWAL_STATUSES.has(withdrawal.status) ? 0 : 5_000,
       dedupingInterval: EARN_PROGRAM_DEDUPING_MS,
     }
   );

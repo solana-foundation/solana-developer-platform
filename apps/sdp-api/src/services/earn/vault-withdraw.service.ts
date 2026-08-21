@@ -11,6 +11,7 @@ import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
   type EarnPositionRow,
+  type EarnVaultWithdrawalLegRow,
   type SignedVaultWithdrawalLegInput,
 } from "@/db/repositories/earn-movements.repository";
 import { badRequest, internalError } from "@/lib/errors";
@@ -78,8 +79,10 @@ export interface VaultWithdrawalInput {
 
 export interface VaultWithdrawalResult {
   position: EarnPositionRow;
-  /** Every leg of the group, submission order, with its freshest known status. */
-  movements: EarnMovementRow[];
+  /** The single business movement exposed to API and ledger consumers. */
+  movement: EarnMovementRow;
+  /** Internal signed transactions, retained for execution and diagnostics. */
+  legs: EarnVaultWithdrawalLegRow[];
   /** True when an existing signed group won; none of its bytes were re-sent. */
   replayed: boolean;
 }
@@ -204,22 +207,22 @@ export async function withdrawFromVault(
       projectId: input.projectId,
       idempotencyFingerprint: fingerprint,
     });
-    if (!prior.leg_group_id) {
-      throw internalError(`Replayed movement ${prior.id} is not a withdrawal leg group anchor`);
+    if (prior.direction !== "withdrawal") {
+      throw internalError(`Replayed movement ${prior.id} is not a vault withdrawal`);
     }
-    const movements = await ledger.listVaultWithdrawalLegs({
+    const legs = await ledger.listVaultWithdrawalLegs({
       organizationId: input.organizationId,
-      legGroupId: prior.leg_group_id,
+      movementId: prior.id,
     });
     const position = await ledger.getPositionById({
       organizationId: input.organizationId,
       environment: input.environment,
       positionId: prior.position_id,
     });
-    if (!position || movements.length === 0) {
-      throw internalError(`Replayed withdrawal ${prior.id} references a missing group or holding`);
+    if (!position || legs.length === 0) {
+      throw internalError(`Replayed withdrawal ${prior.id} references missing execution details`);
     }
-    return { position, movements, replayed: true };
+    return { position, movement: prior, legs, replayed: true };
   }
 
   const deadline = createVaultDeadline();
@@ -313,7 +316,7 @@ export async function withdrawFromVault(
     throw error;
   }
 
-  const legs: SignedVaultWithdrawalLegInput[] = signed.map((transaction, index) => {
+  const signedLegs: SignedVaultWithdrawalLegInput[] = signed.map((transaction, index) => {
     const shares = transactionShares[index];
     if (!shares) {
       throw internalError(`Vault withdrawal leg ${index} has no share quantity to record`);
@@ -339,8 +342,9 @@ export async function withdrawFromVault(
       vaultAddress: input.vaultAddress,
       custodyWalletId: input.wallet.id,
       shareMint: input.shareMint,
+      requestedShares: input.shares,
       walletAddress: input.wallet.publicKey,
-      legs,
+      legs: signedLegs,
       requestId: input.requestId,
       idempotencyFingerprint: fingerprint,
       createdBy: input.userId ?? null,
@@ -352,17 +356,22 @@ export async function withdrawFromVault(
   // signed bytes — not ours — are the only ones that may be broadcast.
   if (result.replayed) return result;
 
-  const movements = [...result.movements];
+  const legs = [...result.legs];
+  let movement = result.movement;
   await submitWithdrawalLegs(env, {
     ledger,
     deadline,
     cluster,
     rpcUrl,
     organizationId: input.organizationId,
-    movements,
+    movement,
+    legs,
     signed,
+    onMovement: (next) => {
+      movement = next;
+    },
   });
-  return { ...result, movements };
+  return { ...result, movement, legs };
 }
 
 /**
@@ -382,25 +391,31 @@ async function submitWithdrawalLegs(
     cluster: ReturnType<typeof earnClusterFor>;
     rpcUrl: string;
     organizationId: string;
-    movements: EarnMovementRow[];
+    movement: EarnMovementRow;
+    legs: EarnVaultWithdrawalLegRow[];
     signed: readonly SignedVaultTransaction[];
+    onMovement: (movement: EarnMovementRow) => void;
   }
 ): Promise<void> {
-  const { ledger, movements } = input;
+  const { ledger, legs } = input;
   const advance = async (
     index: number,
     change: Omit<Parameters<typeof ledger.advanceVaultMovement>[0], "movementId" | "organizationId">
   ) => {
-    const advanced = await ledger.advanceVaultMovement({
-      movementId: movements[index].id,
+    const advanced = await ledger.advanceVaultWithdrawalLeg({
+      movementId: input.movement.id,
+      legIndex: index,
       organizationId: input.organizationId,
       ...change,
     });
-    if (advanced) movements[index] = advanced;
+    if (advanced) {
+      legs[index] = advanced.leg;
+      input.onMovement(advanced.movement);
+    }
     return advanced;
   };
 
-  for (let index = 0; index < movements.length; index += 1) {
+  for (let index = 0; index < legs.length; index += 1) {
     const bytes = input.signed[index]?.bytes;
     if (!bytes) return;
     try {
@@ -415,7 +430,7 @@ async function submitWithdrawalLegs(
       // it (and every later leg) pending for the sweep; broadcasting the next
       // leg now could land it before a predecessor whose fate is unknown.
       getLogger().error(
-        { movementId: movements[index].id, signature: movements[index].signature, error },
+        { movementId: input.movement.id, signature: legs[index].signature, error },
         "vault withdrawal: leg broadcast outcome unknown; left reconcilable"
       );
       return;
@@ -425,13 +440,13 @@ async function submitWithdrawalLegs(
     // The last leg needs no in-request wait: the sweep settles it like any
     // deposit. Intermediate legs must reach commitment before their successor
     // may be broadcast.
-    if (index === movements.length - 1) return;
+    if (index === legs.length - 1) return;
 
     const status = await waitForLegCommitment(
       env,
       input.deadline,
       input.rpcUrl,
-      String(movements[index].signature)
+      legs[index].signature
     );
     if (status === null) return;
     if (status.err) {
@@ -443,10 +458,10 @@ async function submitWithdrawalLegs(
       // produce; submitting them would burn fees on transactions that cannot
       // succeed. Fail them now rather than lazily — the shares they would have
       // redeemed remain in the wallet and are immediately re-withdrawable.
-      for (let rest = index + 1; rest < movements.length; rest += 1) {
+      for (let rest = index + 1; rest < legs.length; rest += 1) {
         await advance(rest, {
           toStatus: "failed",
-          failureReason: `Predecessor withdrawal leg ${movements[index].signature} failed on chain`,
+          failureReason: `Predecessor withdrawal leg ${legs[index].signature} failed on chain`,
         });
       }
       return;
