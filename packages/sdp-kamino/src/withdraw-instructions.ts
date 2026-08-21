@@ -1,10 +1,12 @@
 import type { Address, Instruction, TransactionSigner } from "@solana/kit";
 import {
   findAssociatedTokenPda,
+  getCreateAssociatedTokenIdempotentInstruction,
   getTransferCheckedInstruction,
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
 import { SdpKaminoError } from "./errors";
+import type { ShareTokenAccountBalance } from "./share-balances";
 
 /**
  * Instruction verification for a K-Vault exit.
@@ -56,11 +58,104 @@ export const KVAULT_SHARE_REDEEMING_DISCRIMINATORS: readonly Uint8Array[] = [
 export const KVAULT_BURN_ALL_SHARES_SENTINEL = 18446744073709551615n;
 
 /**
+ * Move enough shares from auxiliary owner accounts into the ATA that kvault
+ * always uses as its redemption source. This keeps a multi-account position in
+ * one atomic transaction and gives the SDK the post-transfer ATA balance it
+ * must use when planning reserve withdrawals.
+ */
+export async function buildShareAccountConsolidation(input: {
+  requestedBaseUnits: bigint;
+  shareMint: Address;
+  shareDecimals: number;
+  owner: TransactionSigner;
+  rentPayer?: TransactionSigner;
+  accounts: readonly ShareTokenAccountBalance[];
+}): Promise<{
+  instructions: Instruction[];
+  shareAta: Address;
+  totalBaseUnits: bigint;
+  postConsolidationAtaBaseUnits: bigint;
+}> {
+  const [shareAta] = await findAssociatedTokenPda({
+    owner: input.owner.address,
+    mint: input.shareMint,
+    tokenProgram: TOKEN_PROGRAM_ADDRESS,
+  });
+  const totalBaseUnits = input.accounts.reduce((sum, account) => sum + account.amount, 0n);
+  if (totalBaseUnits > KVAULT_BURN_ALL_SHARES_SENTINEL) {
+    throw new SdpKaminoError(
+      "VAULT_UNREADABLE",
+      "Kamino share-token balances exceed the mint's u64 supply range."
+    );
+  }
+  if (input.requestedBaseUnits > totalBaseUnits) {
+    throw new SdpKaminoError(
+      "INVALID_AMOUNT",
+      `Kamino wallet holds ${totalBaseUnits} share base units, below the requested ${input.requestedBaseUnits}.`
+    );
+  }
+
+  const ataBaseUnits = input.accounts
+    .filter((account) => account.address === shareAta)
+    .reduce((sum, account) => sum + account.amount, 0n);
+  let remaining = input.requestedBaseUnits - ataBaseUnits;
+  if (remaining <= 0n) {
+    return {
+      instructions: [],
+      shareAta,
+      totalBaseUnits,
+      postConsolidationAtaBaseUnits: ataBaseUnits,
+    };
+  }
+
+  const instructions: Instruction[] = [
+    getCreateAssociatedTokenIdempotentInstruction({
+      payer: input.rentPayer ?? input.owner,
+      ata: shareAta,
+      owner: input.owner.address,
+      mint: input.shareMint,
+      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    }),
+  ];
+  for (const account of input.accounts) {
+    if (remaining === 0n) break;
+    if (account.address === shareAta || account.amount === 0n) continue;
+    const amount = account.amount < remaining ? account.amount : remaining;
+    instructions.push(
+      getTransferCheckedInstruction(
+        {
+          source: account.address,
+          mint: input.shareMint,
+          destination: shareAta,
+          authority: input.owner,
+          amount,
+          decimals: input.shareDecimals,
+        },
+        { programAddress: TOKEN_PROGRAM_ADDRESS }
+      )
+    );
+    remaining -= amount;
+  }
+  if (remaining !== 0n) {
+    throw new SdpKaminoError(
+      "VAULT_UNREADABLE",
+      "Kamino share-token account balances did not cover the requested consolidation."
+    );
+  }
+
+  return {
+    instructions,
+    shareAta,
+    totalBaseUnits,
+    postConsolidationAtaBaseUnits: input.requestedBaseUnits,
+  };
+}
+
+/**
  * Build an atomic balance assertion for the one amount kvault reserves as its
- * burn-all sentinel. SPL Token validates a same-account transfer completely,
- * including available funds, then returns without changing the balance. Placed
- * after any farm unstake and before the first redemption, this makes burn-all
- * mean exactly maximum-u64 or fail the whole transaction.
+ * burn-all sentinel. Any auxiliary share accounts are consolidated into the
+ * ATA first. SPL Token then validates this same-account transfer completely,
+ * including available funds, before returning without changing the balance.
  */
 export async function buildMaximumWithdrawalBalanceGuard(input: {
   requestedBaseUnits: bigint;

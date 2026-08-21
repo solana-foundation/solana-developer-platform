@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import type { Instruction } from "@solana/kit";
 import { address, createNoopSigner } from "@solana/kit";
-import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
+import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { describe, expect, it } from "vitest";
 import {
   buildMaximumWithdrawalBalanceGuard,
+  buildShareAccountConsolidation,
   decodeKvaultWithdrawShares,
   KVAULT_BURN_ALL_SHARES_SENTINEL,
   KVAULT_SHARE_REDEEMING_DISCRIMINATORS,
@@ -145,5 +146,59 @@ describe("buildMaximumWithdrawalBalanceGuard", () => {
         owner: createNoopSigner(address("11111111111111111111111111111112")),
       })
     ).resolves.toBeNull();
+  });
+});
+
+describe("buildShareAccountConsolidation", () => {
+  it("moves only the missing shares from auxiliary accounts into the ATA", async () => {
+    const owner = createNoopSigner(address("11111111111111111111111111111112"));
+    const mint = address("So11111111111111111111111111111111111111112");
+    const [shareAta] = await findAssociatedTokenPda({
+      owner: owner.address,
+      mint,
+      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    });
+    const auxiliary = address("11111111111111111111111111111113");
+    const result = await buildShareAccountConsolidation({
+      requestedBaseUnits: 9n,
+      shareMint: mint,
+      shareDecimals: 6,
+      owner,
+      accounts: [
+        { address: shareAta, amount: 4n },
+        { address: auxiliary, amount: 10n },
+      ],
+    });
+
+    expect(result.totalBaseUnits).toBe(14n);
+    expect(result.postConsolidationAtaBaseUnits).toBe(9n);
+    expect(result.instructions).toHaveLength(2);
+    expect(result.instructions[1].accounts?.[0].address).toBe(auxiliary);
+    expect(result.instructions[1].accounts?.[2].address).toBe(shareAta);
+    expect(result.instructions[1].data?.slice(1, 9)).toEqual(
+      Uint8Array.from([5, 0, 0, 0, 0, 0, 0, 0])
+    );
+  });
+
+  it("consolidates a split maximum-u64 position before its atomic guard", async () => {
+    const owner = createNoopSigner(address("11111111111111111111111111111112"));
+    const mint = address("So11111111111111111111111111111111111111112");
+    const result = await buildShareAccountConsolidation({
+      requestedBaseUnits: KVAULT_BURN_ALL_SHARES_SENTINEL,
+      shareMint: mint,
+      shareDecimals: 6,
+      owner,
+      accounts: [
+        { address: address("11111111111111111111111111111113"), amount: 10n },
+        {
+          address: address("11111111111111111111111111111114"),
+          amount: KVAULT_BURN_ALL_SHARES_SENTINEL - 10n,
+        },
+      ],
+    });
+
+    expect(result.totalBaseUnits).toBe(KVAULT_BURN_ALL_SHARES_SENTINEL);
+    expect(result.postConsolidationAtaBaseUnits).toBe(KVAULT_BURN_ALL_SHARES_SENTINEL);
+    expect(result.instructions).toHaveLength(3);
   });
 });

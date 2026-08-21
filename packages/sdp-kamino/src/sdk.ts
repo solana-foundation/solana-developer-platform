@@ -14,7 +14,7 @@ import { assertPlanTargetsCluster } from "./guards";
 import { loadVaultLookupTableAddresses } from "./lookup-table";
 import { kaminoClusterConfig } from "./programs";
 import { createKaminoRpc } from "./rpc";
-import { sumRawTokenAccountBaseUnits } from "./share-balances";
+import { parseShareTokenAccountBalances, sumRawTokenAccountBaseUnits } from "./share-balances";
 import type {
   KaminoDepositInput,
   KaminoInstructionPlan,
@@ -24,6 +24,7 @@ import type {
 } from "./types";
 import {
   buildMaximumWithdrawalBalanceGuard,
+  buildShareAccountConsolidation,
   decodeKvaultWithdrawShares,
   type RoleTaggedInstruction,
   resolveBurnAllSentinel,
@@ -283,6 +284,25 @@ export async function buildKaminoWithdrawPlan(
   const shares = toDecimal(acceptedShares, "shares");
 
   assertActive();
+  const shareAccountsResponse = await rpc
+    .getTokenAccountsByOwner(
+      input.owner.address,
+      { mint: assetIdentity.shareMint },
+      { encoding: "jsonParsed" }
+    )
+    .send();
+  assertActive();
+  const shareAccounts = parseShareTokenAccountBalances(shareAccountsResponse?.value);
+  const consolidation = await buildShareAccountConsolidation({
+    requestedBaseUnits,
+    shareMint: assetIdentity.shareMint,
+    shareDecimals,
+    owner: input.owner,
+    rentPayer: input.rentPayer,
+    accounts: shareAccounts,
+  });
+
+  assertActive();
   const reserves = await client.loadVaultReserves(state);
   assertActive();
 
@@ -326,16 +346,42 @@ export async function buildKaminoWithdrawPlan(
     ),
   };
 
-  const bundle = await vault.withdrawIxs(
-    input.owner as Kit2,
-    shares,
-    input.slot as Kit2,
-    reserves,
-    null,
-    null,
-    (input.rentPayer ?? input.owner) as Kit2,
-    withdrawalPenalties as Kit2
-  );
+  // klend-sdk plans exits from the share ATA only. SDP position reads correctly
+  // include every owner token account, so when consolidation is needed, give
+  // this request-scoped SDK client the exact post-transfer ATA state it will
+  // observe inside the same transaction. The client is not shared, and the
+  // original method is restored immediately after instruction construction.
+  const sdkClient = client as Kit2;
+  const originalGetUserSharesState = sdkClient.getUserSharesState.bind(sdkClient);
+  if (consolidation.instructions.length > 0) {
+    const postConsolidationAta = new Decimal(
+      formatDecimalAmount(consolidation.postConsolidationAtaBaseUnits, shareDecimals)
+    );
+    const totalShares = new Decimal(
+      formatDecimalAmount(consolidation.totalBaseUnits, shareDecimals)
+    );
+    sdkClient.getUserSharesState = async () => ({
+      userSharesAta: consolidation.shareAta,
+      ataBalance: postConsolidationAta,
+      farmBalance: new Decimal(0),
+      totalShares,
+    });
+  }
+  let bundle: Awaited<ReturnType<typeof vault.withdrawIxs>>;
+  try {
+    bundle = await vault.withdrawIxs(
+      input.owner as Kit2,
+      shares,
+      input.slot as Kit2,
+      reserves,
+      null,
+      null,
+      (input.rentPayer ?? input.owner) as Kit2,
+      withdrawalPenalties as Kit2
+    );
+  } finally {
+    sdkClient.getUserSharesState = originalGetUserSharesState;
+  }
   assertActive();
 
   // Best-effort: an exit must never fail for want of a compression aid. The
@@ -378,19 +424,28 @@ export async function buildKaminoWithdrawPlan(
     owner: input.owner,
   });
   const firstRedemptionIndex = decoded.findIndex((entry) => entry.role === "withdraw");
-  if (maximumBalanceGuard && firstRedemptionIndex === -1) {
+  const preRedemptionInstructions = [
+    ...consolidation.instructions,
+    ...(maximumBalanceGuard ? [maximumBalanceGuard] : []),
+  ];
+  if (preRedemptionInstructions.length > 0 && firstRedemptionIndex === -1) {
     throw new SdpKaminoError(
       "VAULT_UNREADABLE",
-      "Kamino produced no redemption instruction for a maximum-u64 withdrawal."
+      "Kamino produced no redemption instruction after preparing the withdrawal share balance."
     );
   }
-  const guarded = maximumBalanceGuard
-    ? [
-        ...decoded.slice(0, firstRedemptionIndex),
-        { instruction: maximumBalanceGuard, role: "prepare" as const, sharesBaseUnits: null },
-        ...decoded.slice(firstRedemptionIndex),
-      ]
-    : decoded;
+  const guarded =
+    preRedemptionInstructions.length > 0
+      ? [
+          ...decoded.slice(0, firstRedemptionIndex),
+          ...preRedemptionInstructions.map((instruction) => ({
+            instruction,
+            role: "prepare" as const,
+            sharesBaseUnits: null,
+          })),
+          ...decoded.slice(firstRedemptionIndex),
+        ]
+      : decoded;
 
   // A full exit uses a burn-all sentinel on its final redemption instruction.
   // Replace it with the exact remainder, except at maximum-u64 where the atomic
