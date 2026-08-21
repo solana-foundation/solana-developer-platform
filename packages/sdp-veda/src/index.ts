@@ -50,8 +50,10 @@ export { createVedaRpc, VEDA_RPC_REQUEST_TIMEOUT_MS, withVedaRpcTimeout } from "
 export {
   assertVedaVaultUsable,
   buildVedaDepositPlan,
+  buildVedaWithdrawPlan,
   mapVedaSdkError,
   previewVedaDeposit,
+  previewVedaWithdraw,
   readVedaPosition,
   resetVedaCompatibilityCache,
   VEDA_COMPATIBILITY_TTL_MS,
@@ -67,4 +69,7 @@ export type {
   VedaPositionInput,
   VedaRuntime,
   VedaVaultAssetIdentity,
+  VedaWithdrawInput,
+  VedaWithdrawQuote,
+  VedaWithdrawQuoteInput,
 } from "./types";

@@ -7,9 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EarnFundingWallet } from "./deposit/earn-funding-wallets";
 import {
   EarnVaultDepositModal,
-  isSlippageExceededRefusal,
-  minSharesOutForTolerance,
-  parseSlippageToleranceBps,
   validateVaultDepositAmount,
   walletBalanceForMint,
 } from "./earn-vault-deposit-modal";
@@ -17,6 +14,11 @@ import {
   claimVaultDepositIdempotencyKey,
   vaultDepositRequestFingerprint,
 } from "./earn-vault-deposit-tracking";
+import {
+  floorForTolerance,
+  isSlippageExceededRefusal,
+  parseSlippageToleranceBps,
+} from "./earn-vault-slippage";
 
 const USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 const IDEMPOTENCY_KEY = "11111111-1111-4111-8111-111111111111";
@@ -755,14 +757,14 @@ describe("slippage tolerance helpers", () => {
   });
 
   it("derives the floor at mint scale without a number round trip", () => {
-    expect(minSharesOutForTolerance("20", 6, 10)).toBe("19.98");
-    expect(minSharesOutForTolerance("1", 6, 10)).toBe("0.999");
+    expect(floorForTolerance("20", 6, 10)).toBe("19.98");
+    expect(floorForTolerance("1", 6, 10)).toBe("0.999");
     // Rounds DOWN to the atom — never up past what the vault would quote.
-    expect(minSharesOutForTolerance("0.000003", 6, 10)).toBe("0.000002");
+    expect(floorForTolerance("0.000003", 6, 10)).toBe("0.000002");
     // Dust clamps to one atom rather than a zero floor the builder refuses.
-    expect(minSharesOutForTolerance("0.000001", 6, 10)).toBe("0.000001");
+    expect(floorForTolerance("0.000001", 6, 10)).toBe("0.000001");
     // Exact above 2^53 atoms.
-    expect(minSharesOutForTolerance("10000000000000000", 6, 100)).toBe("9900000000000000");
+    expect(floorForTolerance("10000000000000000", 6, 100)).toBe("9900000000000000");
   });
 
   it("recognizes the API's slippage refusal envelope and nothing else", () => {

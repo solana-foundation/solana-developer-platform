@@ -85,6 +85,8 @@ export interface VedaAcceptedAmounts {
   minSharesOut?: string;
   /** Shares redeemed, canonical to the share mint's decimals. */
   shares?: string;
+  /** Exit floor, canonical to the deposit mint's decimals. */
+  minAmountOut?: string;
 }
 
 export interface VedaDepositInput {
@@ -116,6 +118,45 @@ export interface VedaDepositInput {
    * over with a default.
    */
   minSharesOut: string;
+}
+
+export interface VedaWithdrawInput {
+  /** The vault-state account address — its `providerReference` in the catalogue. */
+  vault: Address;
+  /**
+   * The wallet whose shares are burned and whose token account is paid. An
+   * ADDRESS, not a signer — custody lives in the API, same as the deposit.
+   */
+  owner: Address;
+  /** Shares to redeem, canonical to the share mint's decimals. */
+  shares: string;
+  /**
+   * Minimum deposit-token amount to accept, in the vault asset's own units.
+   * REQUIRED: Veda's SDK refuses an implicit slippage tolerance on the way out
+   * exactly as it does on the way in, and SDP does not invent one.
+   */
+  minAmountOut: string;
+}
+
+export interface VedaWithdrawQuoteInput {
+  /** The vault-state account address — its `providerReference` in the catalogue. */
+  vault: Address;
+  /** Shares to redeem, canonical to the share mint's decimals. */
+  shares: string;
+}
+
+/**
+ * What redeeming these shares would pay RIGHT NOW — the exit twin of
+ * `VedaDepositQuote`, and the read an exit floor is derived from. The figure is
+ * the vault's own accounting including its oracle and any withdraw premium.
+ */
+export interface VedaWithdrawQuote {
+  /** Deposit-token amount at the live rate, decimal string at token scale. */
+  assetsOut: string;
+  /** The deposit token's decimals — the scale a floor must be quantized to. */
+  assetDecimals: number;
+  /** Blocking conditions the vault reports, empty when the exit would go. */
+  issues: readonly VedaDepositQuoteIssue[];
 }
 
 export interface VedaDepositQuoteInput {

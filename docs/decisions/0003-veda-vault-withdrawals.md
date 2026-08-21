@@ -1,9 +1,15 @@
 # 0003. Veda vault withdrawals — the exit path for `vault_direct`
 
 Date: 2026-08-19
-Status: Proposed — no code lands from this document. It exists because the
-withdrawal work needs decisions made before it, not after (see "Why a document
-first").
+Status: Partially implemented (2026-08-21). The context below predates
+PRO-1702, which landed `POST /v1/earn/vault-withdrawals`, its service and the
+Kamino exit — so "there is no route at all" is HISTORY, not the present.
+Decision 3 ("instant lands first, and alone") is implemented: `@sdp/veda`
+builds the instant redemption through that route, with a quote-derived
+`minAmountOut` floor (`supportsVaultWithdrawQuote` /
+`POST /v1/earn/vault-withdrawal-previews`). Decisions 1 (the queued
+capability), 4 (the request table) and 6 (the closed-request indexer) remain
+open on the product answer to open question 5.
 
 ## Context
 

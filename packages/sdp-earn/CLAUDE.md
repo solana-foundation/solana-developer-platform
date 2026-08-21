@@ -179,11 +179,12 @@ not, and that is deliberate — one reading of a Veda exchange rate is not a rat
 of return, so it reports no APY at all rather than a fabricated one.
 
 Money OUT is a separate capability, `EarnVaultWithdrawProvider` /
-`supportsVaultWithdraw`, which Kamino implements since PRO-1702
-(`POST /v1/earn/vault-withdrawals`). Veda does not implement it yet: it can
-build a correct single-transaction instant exit, but its queued exit
-(`boring_onchain_queue`) does not fit the movement model, so the capability
-waits on the design in `docs/decisions/0003-veda-vault-withdrawals.md`.
+`supportsVaultWithdraw`, which BOTH implement now — Kamino since PRO-1702 and
+Veda's instant redemption since ADR 0003's "instant lands first" step, both
+through `POST /v1/earn/vault-withdrawals`. Veda's QUEUED exit
+(`boring_onchain_queue`) remains unimplemented: its lifecycle is settled by a
+solver Veda operates and does not fit the movement model, so it waits on its
+own capability and schema (`docs/decisions/0003-veda-vault-withdrawals.md` §4).
 
 The split is not taxonomy either way: "can build a deposit" must not silently
 assert "can build an exit SDP can carry" — a deposit-only provider's exit

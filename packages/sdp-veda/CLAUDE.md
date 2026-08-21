@@ -77,20 +77,27 @@ Verdicts are cached per (cluster, endpoint, vault) for ten minutes.
 **Failures are never cached**: an incompatible or unreachable deployment is
 re-checked, not remembered.
 
-## The withdraw capability is WITHHELD
+## The INSTANT exit is implemented; the QUEUE deliberately is not
 
-`VedaVaultDirectClient` implements `buildVaultDeposit` and `readVaultPositions`
-and deliberately not `buildVaultWithdrawal`, so `supportsVaultWithdraw` answers
-false. Veda offers two independent exits — an instant redemption and a
-request → fulfil → cancel queue. The queue's lifecycle does not fit the
-`pending|submitted|confirmed|failed` movement model the `POST /vault-withdrawals`
-route carries, and exposing only the instant half would auto-select a mechanism
-Veda deliberately leaves to the caller.
+`VedaVaultDirectClient` implements `buildVaultWithdrawal` (ADR 0003 — "instant
+lands first, and alone"): burn shares, receive the vault asset, one
+transaction, carried by the same `POST /vault-withdrawals` movement model
+Kamino uses. `quoteVaultWithdrawal` (`supportsVaultWithdrawQuote`) is the read
+the exit floor derives from, exactly as `quoteVaultDeposit` feeds the deposit
+floor; `minAmountOut` is required for the same reason `minSharesOut` is.
 
-Nothing is fund-trapped by that: the shares sit in the organization's own
-custody wallet and Veda's own surfaces can redeem them. Implementing the method
-is the LAST step of the withdrawal work, not the first (`client.test.ts` pins
-this).
+The exit build deliberately does NOT run `assertVedaVaultUsable`: that check
+demands the withdrawal QUEUE and exists to stop money going IN. The vault's
+own refusals — `RESTRICTED_REDEMPTION` when a withdraw authority is set,
+`SHARE_LOCKED` inside the post-deposit lock window — surface as
+`WITHDRAW_REFUSED` with the SDK's own sentence, which the API maps to a 400.
+
+Veda's OTHER exit, the request → fulfil → cancel queue, stays unimplemented:
+its lifecycle is settled by a solver Veda operates and does not fit the
+movement model, so it waits on its own capability and schema (ADR 0003 §4).
+Implementing only the instant half is not auto-selecting a route — the caller
+asked for an immediate redemption and gets exactly that or a typed refusal;
+SDP never silently substitutes the queue.
 
 ## Slippage protection is never invented
 

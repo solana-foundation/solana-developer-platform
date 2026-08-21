@@ -2,7 +2,7 @@
 
 import { decimalScale } from "@sdp/solana/amount";
 import { type EarnStrategy, earnDepositSlippageFloor, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
-import { ChevronDownIcon, ExternalLinkIcon, Loader2Icon } from "lucide-react";
+import { ExternalLinkIcon, Loader2Icon } from "lucide-react";
 import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +37,14 @@ import {
   vaultDepositIdempotencyKeyStore,
   vaultDepositRequestFingerprint,
 } from "./earn-vault-deposit-tracking";
+import {
+  floorForTolerance,
+  isSlippageExceededRefusal,
+  parseSlippageToleranceBps,
+  useDebouncedVaultQuote,
+  type VaultQuoteState,
+  VaultSlippageSection,
+} from "./earn-vault-slippage";
 
 const MAX_AMOUNT_LENGTH = 128;
 
@@ -78,100 +86,25 @@ function atomsToDecimalString(atoms: bigint, decimals: number): string {
   return fraction ? `${whole}.${fraction}` : whole;
 }
 
-/** Inverse of `atomsToDecimalString` for a CANONICAL amount at ≤ `decimals` scale. */
-function decimalStringToAtoms(canonical: string, decimals: number): bigint {
-  const [whole, fraction = ""] = canonical.split(".");
-  return BigInt((whole || "0") + fraction.padEnd(decimals, "0"));
-}
-
-/** Whole basis points a slippage tolerance may take; 10% is already an outlier. */
-export const MAX_SLIPPAGE_TOLERANCE_BPS = 1000;
-
-/** Whole basis points in 1..1000, or `null` for anything else. */
-export function parseSlippageToleranceBps(value: string): number | null {
-  if (!/^\d{1,4}$/.test(value.trim())) return null;
-  const bps = Number(value.trim());
-  return bps >= 1 && bps <= MAX_SLIPPAGE_TOLERANCE_BPS ? bps : null;
-}
-
 /**
- * The share floor a tolerance implies over a LIVE quote: `quotedShares ×
- * (1 − bps/10⁴)`, floored to the share mint's own scale so the builder is
- * never handed sub-atomic precision it would rightly refuse.
- *
- * The quote is the vault's own accounting for this exact amount, so the
- * tolerance covers only what it honestly can — the rate moving between the
- * quote and the transaction landing. Floored, with a one-atom floor under
- * THAT: rounding up could exceed the quote itself, and a zero floor is no
- * protection at all (the builder refuses it). A dust quote therefore demands
- * its whole quoted shares back, which is the honest floor for dust.
+ * Exact balance for one mint. `undefined` means the RPC observation was absent
+ * or malformed; a successful observation with no row for the mint is real zero.
  */
-export function minSharesOutForTolerance(
-  quotedShares: string,
-  shareDecimals: number,
-  toleranceBps: number
-): string {
-  const atoms = decimalStringToAtoms(quotedShares, shareDecimals);
-  const floor = (atoms * BigInt(10_000 - toleranceBps)) / 10_000n;
-  return atomsToDecimalString(floor > 0n ? floor : 1n, shareDecimals);
-}
+export function walletBalanceForMint(
+  wallet: EarnFundingWallet,
+  mint: string,
+  decimals: number
+): string | undefined {
+  if (wallet.balances === undefined) return undefined;
+  const balances = wallet.balances.filter((balance) => balance.mint === mint);
+  if (balances.length === 0) return "0";
 
-type VaultDepositQuoteState =
-  | { kind: "idle" }
-  | { kind: "loading" }
-  | { kind: "unavailable" }
-  | { kind: "quoted"; preview: EarnVaultDepositPreview };
-
-const QUOTE_DEBOUNCE_MS = 400;
-
-/**
- * The live quote the floor is derived from. Debounced behind typing, aborted
- * on change and unmount, and re-fetched when `refreshKey` bumps — a blown
- * floor retries against a FRESH rate, never the one that just refused.
- *
- * `null` amount means "nothing to quote" (no floor policy, or the amount is
- * not valid yet) and resolves to `idle` without a request. Every failure is
- * `unavailable`, and unavailable DISABLES the deposit: the floor must come
- * from a quote or not exist, because arithmetic on the raw amount is only
- * correct while the share rate happens to be 1:1.
- */
-function useVaultDepositQuote(
-  strategyId: string,
-  canonicalAmount: string | null,
-  refreshKey: number
-): VaultDepositQuoteState {
-  const [state, setState] = useState<VaultDepositQuoteState>({ kind: "idle" });
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is deliberately unused in the body — bumping it re-runs the quote after a blown floor.
-  useEffect(() => {
-    if (canonicalAmount === null) {
-      setState({ kind: "idle" });
-      return;
-    }
-    const controller = new AbortController();
-    setState({ kind: "loading" });
-    const timer = setTimeout(() => {
-      fetchEarnVaultDepositPreview({ strategyId, amount: canonicalAmount }, controller.signal).then(
-        (result) => {
-          if (controller.signal.aborted) return;
-          setState(
-            result.kind === "quoted"
-              ? { kind: "quoted", preview: result.preview }
-              : { kind: "unavailable" }
-          );
-        },
-        () => {
-          if (!controller.signal.aborted) setState({ kind: "unavailable" });
-        }
-      );
-    }, QUOTE_DEBOUNCE_MS);
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [strategyId, canonicalAmount, refreshKey]);
-
-  return state;
+  let atoms = 0n;
+  for (const balance of balances) {
+    if (balance.decimals !== decimals || !/^\d+$/.test(balance.amount)) return undefined;
+    atoms += BigInt(balance.amount);
+  }
+  return atomsToDecimalString(atoms, decimals);
 }
 
 /** The quote's own rows in the confirm summary: expected shares and the floor. */
@@ -179,7 +112,7 @@ function DepositQuoteSummaryRows({
   quote,
   minSharesOut,
 }: {
-  quote: VaultDepositQuoteState;
+  quote: VaultQuoteState<EarnVaultDepositPreview>;
   minSharesOut: string | undefined;
 }) {
   const t = useTranslations();
@@ -202,7 +135,7 @@ function DepositQuoteSummaryRows({
 }
 
 /** Quote-state notices under the summary: loading, unavailable, or blocked. */
-function DepositQuoteNotices({ quote }: { quote: VaultDepositQuoteState }) {
+function DepositQuoteNotices({ quote }: { quote: VaultQuoteState<EarnVaultDepositPreview> }) {
   const t = useTranslations();
   if (quote.kind === "loading") {
     return (
@@ -232,113 +165,11 @@ function DepositQuoteNotices({ quote }: { quote: VaultDepositQuoteState }) {
 /** The floor the current quote and tolerance imply, or `undefined` while they cannot. */
 function derivedMinSharesOut(
   toleranceBps: number | null,
-  quote: VaultDepositQuoteState
+  quote: VaultQuoteState<EarnVaultDepositPreview>
 ): string | undefined {
   if (toleranceBps === null || quote.kind !== "quoted") return undefined;
   if (quote.preview.blockingIssues.length > 0) return undefined;
-  return minSharesOutForTolerance(
-    quote.preview.sharesOut,
-    quote.preview.shareDecimals,
-    toleranceBps
-  );
-}
-
-interface DepositSlippageSectionProps {
-  toleranceBps: number | null;
-  input: string;
-  open: boolean;
-  invalid: boolean;
-  submitting: boolean;
-  onToggle: () => void;
-  onChange: (value: string) => void;
-}
-
-/** The disclosure hiding the tolerance until someone asks to configure it. */
-function DepositSlippageSection({
-  toleranceBps,
-  input,
-  open,
-  invalid,
-  submitting,
-  onToggle,
-  onChange,
-}: DepositSlippageSectionProps) {
-  const t = useTranslations();
-  const locale = useLocale();
-  const percent =
-    toleranceBps === null
-      ? "—"
-      : `${(toleranceBps / 100).toLocaleString(locale, { maximumFractionDigits: 2 })}%`;
-
-  return (
-    <div className="mt-3">
-      <button
-        aria-controls="earn-vault-deposit-slippage-section"
-        aria-expanded={open}
-        className="inline-flex items-center gap-1 text-xs text-secondary transition-colors hover:text-primary"
-        disabled={submitting}
-        onClick={onToggle}
-        type="button"
-      >
-        <ChevronDownIcon
-          aria-hidden="true"
-          className={cn("size-3.5 transition-transform", open && "rotate-180")}
-        />
-        {t("DashboardEarn.deposit.vaultSlippageToggle", { percent })}
-      </button>
-      {open ? (
-        <div
-          className="mt-2 space-y-2 rounded-lg border border-border-default p-3"
-          id="earn-vault-deposit-slippage-section"
-        >
-          <Label htmlFor="earn-vault-deposit-slippage">
-            {t("DashboardEarn.deposit.vaultSlippageLabel")}
-          </Label>
-          <Input
-            aria-invalid={invalid ? true : undefined}
-            disabled={submitting}
-            id="earn-vault-deposit-slippage"
-            inputMode="numeric"
-            maxLength={4}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(event.target.value)}
-            value={input}
-          />
-          {invalid ? (
-            <p className="text-xs text-error" role="alert">
-              {t("DashboardEarn.deposit.vaultSlippageInvalid", {
-                max: MAX_SLIPPAGE_TOLERANCE_BPS,
-              })}
-            </p>
-          ) : (
-            <p className="text-xs leading-5 text-tertiary">
-              {t("DashboardEarn.deposit.vaultSlippageHelp")}
-            </p>
-          )}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * Exact balance for one mint. `undefined` means the RPC observation was absent
- * or malformed; a successful observation with no row for the mint is real zero.
- */
-export function walletBalanceForMint(
-  wallet: EarnFundingWallet,
-  mint: string,
-  decimals: number
-): string | undefined {
-  if (wallet.balances === undefined) return undefined;
-  const balances = wallet.balances.filter((balance) => balance.mint === mint);
-  if (balances.length === 0) return "0";
-
-  let atoms = 0n;
-  for (const balance of balances) {
-    if (balance.decimals !== decimals || !/^\d+$/.test(balance.amount)) return undefined;
-    atoms += BigInt(balance.amount);
-  }
-  return atomsToDecimalString(atoms, decimals);
+  return floorForTolerance(quote.preview.sharesOut, quote.preview.shareDecimals, toleranceBps);
 }
 
 type DepositOutcome =
@@ -366,20 +197,6 @@ type DepositOutcome =
 type DepositSubmissionResolution =
   | { kind: "error"; message: string; slippageExceeded?: true }
   | { kind: "outcome"; outcome: DepositOutcome; deposited?: EarnVaultDeposit };
-
-/**
- * The API names a blown floor with `error.details.reason` precisely so this
- * surface can answer with its own copy and reopen the slippage control, instead
- * of relaying a simulation log. Anything unrecognized stays a plain error.
- */
-export function isSlippageExceededRefusal(body: unknown): boolean {
-  if (typeof body !== "object" || body === null) return false;
-  const error = (body as { error?: unknown }).error;
-  if (typeof error !== "object" || error === null) return false;
-  const details = (error as { details?: unknown }).details;
-  if (typeof details !== "object" || details === null) return false;
-  return (details as { reason?: unknown }).reason === "slippage_exceeded";
-}
 
 function resolveDepositSubmission(
   result: Awaited<ReturnType<typeof createEarnVaultDeposit>>,
@@ -818,11 +635,14 @@ export function EarnVaultDepositModal({
   const slippageBps = slippagePolicy ? parseSlippageToleranceBps(slippageInput) : null;
   const slippageInvalid = slippagePolicy !== null && slippageBps === null;
   const [quoteRefreshKey, setQuoteRefreshKey] = useState(0);
-  const quote = useVaultDepositQuote(
-    strategy.id,
+  const quoteKey =
     slippagePolicy !== null && amountValidation.kind === "valid"
       ? amountValidation.canonicalAmount
-      : null,
+      : null;
+  const quote = useDebouncedVaultQuote<EarnVaultDepositPreview>(
+    quoteKey,
+    (signal) =>
+      fetchEarnVaultDepositPreview({ strategyId: strategy.id, amount: quoteKey ?? "" }, signal),
     quoteRefreshKey
   );
   const minSharesOut = derivedMinSharesOut(slippageBps, quote);
@@ -1047,7 +867,9 @@ export function EarnVaultDepositModal({
         <DepositQuoteNotices quote={quote} />
 
         {slippagePolicy ? (
-          <DepositSlippageSection
+          <VaultSlippageSection
+            help={t("DashboardEarn.deposit.vaultSlippageHelp")}
+            idPrefix="earn-vault-deposit"
             input={slippageInput}
             invalid={slippageInvalid}
             onChange={(value) => {

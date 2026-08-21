@@ -212,6 +212,33 @@ export function earnDepositSlippageFloor(provider: string): { defaultToleranceBp
     : null;
 }
 
+/**
+ * The EXIT twin of `EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR`: the provider's
+ * withdrawal builder requires an explicit `minAmountOut` and quotes exits
+ * (`supportsVaultWithdrawQuote`), so the dashboard derives the floor from a
+ * live quote — `quotedAssets × (1 − toleranceBps/10⁴)` — never from the share
+ * count. Declared separately because the two directions are separate
+ * capabilities with separate builders: Kamino carries withdrawals today with
+ * no floor contract at all, and folding the declarations together would let a
+ * provider inherit an exit policy from its deposit one.
+ */
+export const EARN_PROVIDER_WITHDRAW_SLIPPAGE_FLOOR = {
+  veda: { defaultToleranceBps: 10 },
+  upshift: null,
+  perena: null,
+  ground: null,
+  kamino: null,
+} as const satisfies Record<EarnProviderId, { defaultToleranceBps: number } | null>;
+
+/** Exit slippage-floor policy for an OPEN provider string — fails closed to none. */
+export function earnWithdrawSlippageFloor(
+  provider: string
+): { defaultToleranceBps: number } | null {
+  return Object.hasOwn(EARN_PROVIDER_WITHDRAW_SLIPPAGE_FLOOR, provider)
+    ? EARN_PROVIDER_WITHDRAW_SLIPPAGE_FLOOR[provider as EarnProviderId]
+    : null;
+}
+
 /** The offered providers, in `EARN_PROVIDERS` order. */
 export const SURFACED_EARN_PROVIDERS: readonly EarnProviderId[] = EARN_PROVIDERS.filter(
   (provider) => EARN_PROVIDER_SURFACING[provider]
