@@ -1448,6 +1448,20 @@ function shareAccountClaimBindings(input: ShareAccountRentAttribution): [boolean
  * last creation is the live one". Callers hold the position row lock already:
  * both intent creators take it through their claim upsert or their own
  * transaction, and `advanceVaultMovement` takes it explicitly.
+ *
+ * ── The confirmed-fork tail, and why excluding only `failed` is enough ─────
+ * A claimant that reached `confirmed` and was then dropped by a fork can never
+ * be failed (the transition matrix forbids `confirmed -> failed` on purpose;
+ * see @sdp/types EARN_MOVEMENT_TRANSITIONS), so its claim stays selected here.
+ * That inherits the ledger's own accepted open question rather than adding a
+ * new reachable loss: the dropped create never landed, so the account is still
+ * missing, and an exit only reads this projection when the account EXISTS at
+ * its build (an exit that creates the account refunds its own rent payer and
+ * ignores the projection). Whoever re-created it was either a later SDP
+ * movement, whose newer claim supersedes the stale one, or an external actor,
+ * which is the already-documented external-create residual, reachable with or
+ * without any fork. Confirming the funder from the LANDED transaction at
+ * settlement closes both and is deliberately not attempted here.
  */
 async function projectShareAccountRentFunder(
   db: AppDb,

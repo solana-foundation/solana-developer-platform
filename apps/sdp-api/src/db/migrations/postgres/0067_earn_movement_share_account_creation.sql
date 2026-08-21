@@ -36,10 +36,17 @@
 --
 -- KNOWN RESIDUAL, unchanged and still the honest bound: creation is OBSERVED at
 -- build time, so the claim itself can be wrong in either direction if chain
--- state moves before the transaction lands. Confirming the funder from the
--- LANDED transaction is the real fix and is still not attempted here. What this
--- migration removes is the separate, larger failure of never revisiting a claim
--- whose transaction did not land at all.
+-- state moves before the transaction lands. One shape of that deserves naming:
+-- a claimant that reached `confirmed` and was then dropped by a fork cannot be
+-- failed (the transition matrix forbids confirmed -> failed rather than guess),
+-- so its claim stays projected. It is not a new reachable loss: the dropped
+-- create never landed, an exit only reads the projection when the account
+-- exists at its build, and whoever re-created the account either wrote a newer
+-- superseding claim (any SDP movement) or was external, which is this same
+-- residual. Confirming the funder from the LANDED transaction is the real fix
+-- and is still not attempted here. What this migration removes is the separate,
+-- larger failure of never revisiting a claim whose transaction did not land at
+-- all.
 
 ALTER TABLE earn_movements
     ADD COLUMN IF NOT EXISTS creates_share_account BOOLEAN NOT NULL DEFAULT FALSE,
