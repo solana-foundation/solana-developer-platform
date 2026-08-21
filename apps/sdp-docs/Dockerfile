@@ -22,6 +22,7 @@ COPY packages/sdp-env-config/package.json ./packages/sdp-env-config/
 COPY packages/sdp-payments/package.json ./packages/sdp-payments/
 COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
 COPY packages/sdp-custody/package.json ./packages/sdp-custody/
+COPY packages/sdp-redaction/package.json ./packages/sdp-redaction/
 COPY packages/sdp-solana/package.json ./packages/sdp-solana/
 COPY packages/sdp-issuance/package.json ./packages/sdp-issuance/
 COPY patches ./patches
@@ -40,6 +41,7 @@ COPY packages/sdp-env-config ./packages/sdp-env-config
 COPY packages/sdp-payments ./packages/sdp-payments
 COPY packages/sdp-rpc ./packages/sdp-rpc
 COPY packages/sdp-custody ./packages/sdp-custody
+COPY packages/sdp-redaction ./packages/sdp-redaction
 COPY packages/sdp-solana ./packages/sdp-solana
 COPY packages/sdp-issuance ./packages/sdp-issuance
 
