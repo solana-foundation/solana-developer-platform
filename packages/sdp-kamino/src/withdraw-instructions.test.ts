@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import type { Instruction } from "@solana/kit";
-import { address } from "@solana/kit";
+import { address, createNoopSigner } from "@solana/kit";
+import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { describe, expect, it } from "vitest";
 import {
-  assertExactWithdrawalAmountEncodable,
+  buildMaximumWithdrawalBalanceGuard,
   decodeKvaultWithdrawShares,
   KVAULT_BURN_ALL_SHARES_SENTINEL,
   KVAULT_SHARE_REDEEMING_DISCRIMINATORS,
@@ -86,13 +87,20 @@ describe("resolveBurnAllSentinel", () => {
     expect(decodeKvaultWithdrawShares(resolved[1].instruction, String(KVAULT_PROGRAM))).toBe(60n);
   });
 
-  it("refuses an exact maximum-u64 remainder because the protocol reserves it for burn-all", () => {
+  it("requires an atomic balance guard for an exact maximum-u64 remainder", () => {
     expect(() =>
       resolveBurnAllSentinel({
         instructions: [withdraw(sentinel)],
         requestedBaseUnits: sentinel,
       })
-    ).toThrow(/cannot encode that value as an exact withdrawal/);
+    ).toThrow(/requires an atomic share-balance guard/);
+
+    const guarded = resolveBurnAllSentinel({
+      instructions: [withdraw(sentinel)],
+      requestedBaseUnits: sentinel,
+      maximumBalanceGuarded: true,
+    });
+    expect(guarded[0].sharesBaseUnits).toBe(sentinel);
   });
 
   it("refuses ambiguous sentinel placement", () => {
@@ -111,13 +119,31 @@ describe("resolveBurnAllSentinel", () => {
   });
 });
 
-describe("assertExactWithdrawalAmountEncodable", () => {
-  it("accepts the largest exact amount and rejects the reserved burn-all value", () => {
-    expect(() =>
-      assertExactWithdrawalAmountEncodable(KVAULT_BURN_ALL_SHARES_SENTINEL - 1n)
-    ).not.toThrow();
-    expect(() => assertExactWithdrawalAmountEncodable(KVAULT_BURN_ALL_SHARES_SENTINEL)).toThrow(
-      /one fewer base unit/
-    );
+describe("buildMaximumWithdrawalBalanceGuard", () => {
+  it("builds a no-op self-transfer that atomically requires the maximum balance", async () => {
+    const owner = createNoopSigner(address("11111111111111111111111111111112"));
+    const guard = await buildMaximumWithdrawalBalanceGuard({
+      requestedBaseUnits: KVAULT_BURN_ALL_SHARES_SENTINEL,
+      shareMint: address("So11111111111111111111111111111111111111112"),
+      shareDecimals: 6,
+      owner,
+    });
+    expect(guard?.programAddress).toBe(TOKEN_PROGRAM_ADDRESS);
+    expect(guard?.accounts?.[0].address).toBe(guard?.accounts?.[2].address);
+    expect(guard?.accounts?.[3].address).toBe(owner.address);
+    expect(guard?.data?.[0]).toBe(12);
+    expect(guard?.data?.slice(1, 9)).toEqual(Uint8Array.from({ length: 8 }, () => 255));
+    expect(guard?.data?.[9]).toBe(6);
+  });
+
+  it("adds no instruction for ordinary exact withdrawals", async () => {
+    await expect(
+      buildMaximumWithdrawalBalanceGuard({
+        requestedBaseUnits: 1n,
+        shareMint: address("So11111111111111111111111111111111111111112"),
+        shareDecimals: 6,
+        owner: createNoopSigner(address("11111111111111111111111111111112")),
+      })
+    ).resolves.toBeNull();
   });
 });

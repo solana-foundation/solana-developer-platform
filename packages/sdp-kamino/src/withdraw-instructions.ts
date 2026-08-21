@@ -1,4 +1,9 @@
-import type { Instruction } from "@solana/kit";
+import type { Address, Instruction, TransactionSigner } from "@solana/kit";
+import {
+  findAssociatedTokenPda,
+  getTransferCheckedInstruction,
+  TOKEN_PROGRAM_ADDRESS,
+} from "@solana-program/token";
 import { SdpKaminoError } from "./errors";
 
 /**
@@ -51,16 +56,34 @@ export const KVAULT_SHARE_REDEEMING_DISCRIMINATORS: readonly Uint8Array[] = [
 export const KVAULT_BURN_ALL_SHARES_SENTINEL = 18446744073709551615n;
 
 /**
- * Refuse the one u64 value the kvault program cannot interpret literally.
- * A holder at this theoretical boundary can still exit exactly in two requests:
- * `u64::MAX - 1`, then the remaining base unit.
+ * Build an atomic balance assertion for the one amount kvault reserves as its
+ * burn-all sentinel. SPL Token validates a same-account transfer completely,
+ * including available funds, then returns without changing the balance. Placed
+ * after any farm unstake and before the first redemption, this makes burn-all
+ * mean exactly maximum-u64 or fail the whole transaction.
  */
-export function assertExactWithdrawalAmountEncodable(requestedBaseUnits: bigint): void {
-  if (requestedBaseUnits !== KVAULT_BURN_ALL_SHARES_SENTINEL) return;
-  throw new SdpKaminoError(
-    "INVALID_AMOUNT",
-    "Kamino reserves maximum-u64 shares for burn-all, so it cannot encode that value as an " +
-      "exact withdrawal. Withdraw one fewer base unit, then withdraw the remaining base unit."
+export async function buildMaximumWithdrawalBalanceGuard(input: {
+  requestedBaseUnits: bigint;
+  shareMint: Address;
+  shareDecimals: number;
+  owner: TransactionSigner;
+}): Promise<Instruction | null> {
+  if (input.requestedBaseUnits !== KVAULT_BURN_ALL_SHARES_SENTINEL) return null;
+  const [shareAccount] = await findAssociatedTokenPda({
+    owner: input.owner.address,
+    mint: input.shareMint,
+    tokenProgram: TOKEN_PROGRAM_ADDRESS,
+  });
+  return getTransferCheckedInstruction(
+    {
+      source: shareAccount,
+      mint: input.shareMint,
+      destination: shareAccount,
+      authority: input.owner,
+      amount: input.requestedBaseUnits,
+      decimals: input.shareDecimals,
+    },
+    { programAddress: TOKEN_PROGRAM_ADDRESS }
   );
 }
 
@@ -77,8 +100,8 @@ export function assertExactWithdrawalAmountEncodable(requestedBaseUnits: bigint)
 export function resolveBurnAllSentinel(input: {
   instructions: readonly RoleTaggedInstruction[];
   requestedBaseUnits: bigint;
+  maximumBalanceGuarded?: boolean;
 }): RoleTaggedInstruction[] {
-  assertExactWithdrawalAmountEncodable(input.requestedBaseUnits);
   const sentinelCount = input.instructions.filter(
     (tagged) => tagged.sharesBaseUnits === KVAULT_BURN_ALL_SHARES_SENTINEL
   ).length;
@@ -110,11 +133,17 @@ export function resolveBurnAllSentinel(input: {
     0n
   );
   const remainder = input.requestedBaseUnits - literalBaseUnits;
-  if (remainder <= 0n || remainder >= KVAULT_BURN_ALL_SHARES_SENTINEL) {
+  if (remainder <= 0n || remainder > KVAULT_BURN_ALL_SHARES_SENTINEL) {
     throw new SdpKaminoError(
       "INVALID_AMOUNT",
       `Kamino withdraw instructions leave ${remainder} share base units for their final redemption; ` +
-        "the remainder must be positive and below the protocol's reserved burn-all value."
+        "the remainder must be positive and fit in the protocol's u64 field."
+    );
+  }
+  if (remainder === KVAULT_BURN_ALL_SHARES_SENTINEL && !input.maximumBalanceGuarded) {
+    throw new SdpKaminoError(
+      "VAULT_UNREADABLE",
+      "Kamino's maximum-u64 burn-all instruction requires an atomic share-balance guard."
     );
   }
   return input.instructions.map((tagged) =>

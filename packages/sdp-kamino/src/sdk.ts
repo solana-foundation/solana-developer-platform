@@ -23,7 +23,7 @@ import type {
   KaminoWithdrawInput,
 } from "./types";
 import {
-  assertExactWithdrawalAmountEncodable,
+  buildMaximumWithdrawalBalanceGuard,
   decodeKvaultWithdrawShares,
   type RoleTaggedInstruction,
   resolveBurnAllSentinel,
@@ -280,7 +280,6 @@ export async function buildKaminoWithdrawPlan(
   const acceptedShares = acceptAtMintScale("shares", input.shares, shareDecimals);
   if (isZeroAmount(acceptedShares)) throw invalidAmount("shares", input.shares);
   const requestedBaseUnits = parseDecimalAmount(acceptedShares, shareDecimals);
-  assertExactWithdrawalAmountEncodable(requestedBaseUnits);
   const shares = toDecimal(acceptedShares, "shares");
 
   assertActive();
@@ -372,13 +371,34 @@ export async function buildKaminoWithdrawPlan(
     })),
   ];
 
-  // A full exit uses a burn-all sentinel on its final redemption instruction. Replace it
-  // with the exact remaining requested shares before sizing or signing, so the
-  // transaction cannot move a different amount if the token-account balance
-  // changes between build and execution.
-  const tagged = resolveBurnAllSentinel({
-    instructions: decoded,
+  const maximumBalanceGuard = await buildMaximumWithdrawalBalanceGuard({
     requestedBaseUnits,
+    shareMint: state.sharesMint as Address,
+    shareDecimals,
+    owner: input.owner,
+  });
+  const firstRedemptionIndex = decoded.findIndex((entry) => entry.role === "withdraw");
+  if (maximumBalanceGuard && firstRedemptionIndex === -1) {
+    throw new SdpKaminoError(
+      "VAULT_UNREADABLE",
+      "Kamino produced no redemption instruction for a maximum-u64 withdrawal."
+    );
+  }
+  const guarded = maximumBalanceGuard
+    ? [
+        ...decoded.slice(0, firstRedemptionIndex),
+        { instruction: maximumBalanceGuard, role: "prepare" as const, sharesBaseUnits: null },
+        ...decoded.slice(firstRedemptionIndex),
+      ]
+    : decoded;
+
+  // A full exit uses a burn-all sentinel on its final redemption instruction.
+  // Replace it with the exact remainder, except at maximum-u64 where the atomic
+  // balance guard above makes the sentinel exact or fails the transaction.
+  const tagged = resolveBurnAllSentinel({
+    instructions: guarded,
+    requestedBaseUnits,
+    maximumBalanceGuarded: maximumBalanceGuard !== null,
   });
   const encodedBaseUnits = tagged.reduce((sum, entry) => sum + (entry.sharesBaseUnits ?? 0n), 0n);
   if (encodedBaseUnits !== requestedBaseUnits) {
