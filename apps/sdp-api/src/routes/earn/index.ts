@@ -32,6 +32,7 @@ import {
 import { getEarnStrategy, listEarnStrategies } from "./handlers/strategies";
 import {
   createEarnVaultDeposit,
+  createEarnVaultDepositPreview,
   createEarnVaultWithdrawal,
   extractEarnVaultDepositPolicyCandidate,
   extractEarnVaultWithdrawalPolicyCandidate,
@@ -51,6 +52,7 @@ import {
   earnProgramRetargetSchema,
   earnProgramWithdrawalCreateSchema,
   earnProgramWithdrawalPreviewSchema,
+  earnVaultDepositPreviewSchema,
   earnVaultDepositSchema,
   earnVaultWithdrawalSchema,
 } from "./schemas";
@@ -140,6 +142,16 @@ earn.post(
     findIdempotentKeyReplay: findEarnVaultDepositIdempotentKeyReplay,
   }),
   createEarnVaultDeposit
+);
+// The deposit QUOTE: a read carrying the deposit's own money-in gates (it
+// exists only to open a new position) but no policy gate, no wallet and no
+// idempotency key — it moves nothing. POST because the parameters are a body,
+// exactly like the custodial withdrawal-preview.
+earn.post(
+  "/vault-deposit-previews",
+  requirePermissions("earn:read"),
+  validateBody(earnVaultDepositPreviewSchema),
+  createEarnVaultDepositPreview
 );
 // The deposit READS take no policy gate and no provider gate — they move no
 // money and report on money that already left the wallet. They are what makes a

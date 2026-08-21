@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
     listAssets: vi.fn(),
     getUserPosition: vi.fn(),
     previewWithdraw: vi.fn(),
+    previewDeposit: vi.fn(),
     buildDeposit: vi.fn(),
   },
   validateDeployment: vi.fn(),
@@ -49,7 +50,12 @@ vi.mock("./mint", () => ({ readMintDecimals: mocks.readMintDecimals }));
 // The RPC client is only handed to the (mocked) SDK; keep it inert.
 vi.mock("./rpc", () => ({ createVedaRpc: vi.fn(() => ({})) }));
 
-import { buildVedaDepositPlan, readVedaPosition, resetVedaCompatibilityCache } from "./sdk";
+import {
+  buildVedaDepositPlan,
+  previewVedaDeposit,
+  readVedaPosition,
+  resetVedaCompatibilityCache,
+} from "./sdk";
 
 const USDC_DEVNET = wellKnownMint("USDC", "devnet") as string;
 const USDC_MAINNET = wellKnownMint("USDC", "mainnet-beta") as string;
@@ -215,5 +221,40 @@ describe("buildVedaDepositPlan owns the deposit gate", () => {
     await expect(buildVedaDepositPlan(runtime, config, input)).rejects.toMatchObject({
       code: "VAULT_UNREADABLE",
     });
+  });
+});
+
+describe("previewVedaDeposit is an ungated read", () => {
+  it("returns the vault's own numbers and reports issues instead of throwing", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+    mocks.vault.previewDeposit.mockResolvedValue({
+      sharesOut: 999_990n,
+      shareDecimals: 6,
+      issues: [{ code: "DEPOSIT_CAP_EXCEEDED", message: "The vault deposit cap is exceeded" }],
+    });
+
+    const quote = await previewVedaDeposit(runtime, config, { vault: VAULT, amount: "1" });
+
+    expect(quote.sharesOut).toBe("0.99999");
+    expect(quote.shareDecimals).toBe(6);
+    expect(quote.issues).toEqual([
+      { code: "DEPOSIT_CAP_EXCEEDED", message: "The vault deposit cap is exceeded" },
+    ]);
+    expect(mocks.vault.previewDeposit).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 1_000_000n })
+    );
+    // A quote is a READ: no deployment or compatibility gate, no queue demand —
+    // gating it would be a read consuming a money-in gate (ADR 0002).
+    expect(mocks.validateDeployment).not.toHaveBeenCalled();
+    expect(mocks.vault.validateCompatibility).not.toHaveBeenCalled();
+  });
+
+  it("refuses an over-precise amount as the caller's INVALID_AMOUNT", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+
+    await expect(
+      previewVedaDeposit(runtime, config, { vault: VAULT, amount: "1.0000001" })
+    ).rejects.toMatchObject({ code: "INVALID_AMOUNT" });
+    expect(mocks.vault.previewDeposit).not.toHaveBeenCalled();
   });
 });

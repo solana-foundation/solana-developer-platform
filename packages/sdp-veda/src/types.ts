@@ -118,6 +118,35 @@ export interface VedaDepositInput {
   minSharesOut: string;
 }
 
+export interface VedaDepositQuoteInput {
+  /** The vault-state account address — its `providerReference` in the catalogue. */
+  vault: Address;
+  /** Deposit amount in the vault asset's own units, as a decimal string. */
+  amount: string;
+}
+
+/** A vault-reported condition that would block the quoted deposit. */
+export interface VedaDepositQuoteIssue {
+  /** The SDK's stable issue code (e.g. `TELLER_PAUSED`), passed through. */
+  code: string;
+  message: string;
+}
+
+/**
+ * What the vault would mint for an amount RIGHT NOW — the read a slippage
+ * floor is derived from. Commits to nothing; the floor a caller derives from
+ * it covers only the state moving between this quote and the transaction
+ * landing.
+ */
+export interface VedaDepositQuote {
+  /** Shares at the live rate, as a decimal string at the share mint's scale. */
+  sharesOut: string;
+  /** The share mint's decimals — the scale a floor must be quantized to. */
+  shareDecimals: number;
+  /** Blocking conditions the vault reports, empty when the deposit would go. */
+  issues: readonly VedaDepositQuoteIssue[];
+}
+
 export interface VedaPositionInput {
   vault: Address;
   owner: Address;

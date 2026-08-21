@@ -510,6 +510,44 @@ export interface EarnVaultWithdrawInput {
   rentPayer?: string;
 }
 
+export interface EarnVaultDepositQuoteInput {
+  /** Vault address — the strategy's `providerReference`. */
+  providerReference: string;
+  /** Deposit amount in the vault token's own units, as a decimal string. */
+  amount: string;
+}
+
+/** A provider-reported condition that would block the quoted deposit. */
+export interface EarnVaultDepositQuoteIssue {
+  /** The provider's own stable code (e.g. `TELLER_PAUSED`), passed through. */
+  code: string;
+  /** The provider's own sentence for it. */
+  message: string;
+}
+
+/**
+ * One provider's answer to "what would this deposit mint right now".
+ *
+ * A quote is a READ: it applies the vault's live exchange rate, fees and caps
+ * to an amount and commits to nothing. Its purpose is to let a caller derive a
+ * truthful `minSharesOut` floor — `sharesOut` minus a chosen tolerance — so
+ * the floor tracks the LIVE rate instead of assuming one. The tolerance then
+ * covers only what it honestly can: the state moving between this quote and
+ * the transaction landing.
+ */
+export interface EarnVaultDepositQuote {
+  /** Shares the vault would mint right now, decimal string at share scale. */
+  sharesOut: string;
+  /** The share mint's decimals — the scale a floor must be quantized to. */
+  shareDecimals: number;
+  /**
+   * Conditions the provider reports would block this deposit, empty when none.
+   * Reported rather than thrown: "the vault is paused" is an answer about the
+   * vault, not a failure to answer.
+   */
+  blockingIssues: readonly EarnVaultDepositQuoteIssue[];
+}
+
 export interface EarnVaultPositionInput {
   owner: string;
   /** Vault addresses to read. Empty means every owner-held vault the provider can discover. */
@@ -603,6 +641,22 @@ export interface EarnVaultWithdrawProvider extends EarnVaultDirectProvider {
     ctx: EarnRuntimeContext,
     input: EarnVaultWithdrawInput
   ): Promise<EarnVaultTransactionPlan>;
+}
+
+/**
+ * Optional capability: a live deposit quote (see `EarnVaultDepositQuote`).
+ *
+ * Separate from `EarnVaultDirectProvider` because a quote is a promise about
+ * the provider's READ surface, not implied by being able to build a deposit —
+ * and separate from the floor REQUIREMENT, which the deposit builder itself
+ * enforces. A provider that requires a floor should implement this so callers
+ * can derive one from the live rate rather than guessing.
+ */
+export interface EarnVaultDepositQuoteProvider extends EarnVaultDirectProvider {
+  quoteVaultDeposit(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultDepositQuoteInput
+  ): Promise<EarnVaultDepositQuote>;
 }
 
 /**

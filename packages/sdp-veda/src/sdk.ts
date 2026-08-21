@@ -9,6 +9,8 @@ import type { VedaClusterConfig } from "./programs";
 import { createVedaRpc } from "./rpc";
 import type {
   VedaDepositInput,
+  VedaDepositQuote,
+  VedaDepositQuoteInput,
   VedaInstructionPlan,
   VedaPosition,
   VedaPositionInput,
@@ -303,6 +305,57 @@ export async function buildVedaDepositPlan(
     },
     config
   );
+}
+
+/**
+ * Quote a deposit — the READ a slippage floor is derived from.
+ *
+ * `previewDeposit` applies the vault's LIVE exchange rate, fees, premium, caps
+ * and pause state to an amount and commits to nothing, so a floor of
+ * `sharesOut × (1 − tolerance)` is truthful at any rate — the arithmetic a
+ * caller might otherwise do on the deposit amount is only right while the rate
+ * happens to be 1:1, and stops being right the day yield accrues.
+ *
+ * Deliberately NOT gated by `assertVedaVaultUsable`: that check demands the
+ * withdrawal queue and exists to stop money going IN; a quote moves nothing,
+ * and a read that consumed a money-in gate is the pattern ADR 0002 forbids.
+ * Blocking conditions are RETURNED (`issues`) rather than thrown — "the vault
+ * is paused" is an answer about the vault, not a failure to answer — while a
+ * malformed amount stays a thrown `INVALID_AMOUNT`, because that one is about
+ * the request.
+ */
+export async function previewVedaDeposit(
+  runtime: VedaRuntime,
+  config: VedaClusterConfig,
+  input: VedaDepositQuoteInput
+): Promise<VedaDepositQuote> {
+  const vaultClient = client(runtime, config).vault(input.vault as Kit7);
+  const asset = await resolveVaultAsset(runtime, config, vaultClient, input.vault);
+  const amount = acceptPositiveAtMintScale("amount", input.amount, asset.decimals);
+
+  let quote: {
+    sharesOut: bigint;
+    shareDecimals: unknown;
+    issues: readonly { code: unknown; message: unknown }[];
+  };
+  try {
+    quote = await vaultClient.previewDeposit({
+      asset: { kind: "mint", address: asset.mint as Kit7 },
+      amount: amount.baseUnits,
+    });
+  } catch (cause) {
+    throw mapVedaSdkError(cause, `Veda could not quote a deposit for vault ${input.vault}`);
+  }
+
+  const shareDecimals = shareMintDecimals(quote.shareDecimals, input.vault);
+  return {
+    sharesOut: formatAtomic(quote.sharesOut, shareDecimals),
+    shareDecimals,
+    issues: quote.issues.map((issue) => ({
+      code: String(issue.code),
+      message: String(issue.message),
+    })),
+  };
 }
 
 /**

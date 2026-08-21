@@ -879,6 +879,47 @@ export async function fetchEarnVaultDepositByRequestId(
   return deposit ? { kind: "found", deposit } : { kind: "absent" };
 }
 
+const earnVaultDepositPreviewEnvelopeSchema = z.object({
+  data: z.object({
+    strategyId: z.string(),
+    /** Shares at the provider's live rate, decimal string at share scale. */
+    sharesOut: z.string().regex(/^\d+(\.\d+)?$/),
+    shareDecimals: z.number().int().min(0).max(38),
+    blockingIssues: z.array(z.object({ code: z.string(), message: z.string() })),
+  }),
+});
+
+export type EarnVaultDepositPreview = z.infer<typeof earnVaultDepositPreviewEnvelopeSchema>["data"];
+
+export type EarnVaultDepositPreviewResult =
+  | { kind: "quoted"; preview: EarnVaultDepositPreview }
+  | { kind: "unavailable" };
+
+/**
+ * What the vault would mint for this amount right now — the live rate the
+ * deposit modal derives its `minSharesOut` floor from. `unavailable` covers
+ * every failure the same way: a floor must come from a quote or not exist, so
+ * an unreadable quote DISABLES the deposit rather than falling back to
+ * arithmetic on the amount (which is only correct while the rate is 1:1).
+ */
+export async function fetchEarnVaultDepositPreview(
+  input: { strategyId: string; amount: string },
+  signal?: AbortSignal
+): Promise<EarnVaultDepositPreviewResult> {
+  const result = await dashboardFetch<unknown>(
+    "/api/dashboard/markets/earn/vault-deposit-previews",
+    {
+      method: "POST",
+      body: { strategyId: input.strategyId, amount: input.amount },
+      signal,
+    }
+  );
+  if (!result.ok) return { kind: "unavailable" };
+  const parsed = earnVaultDepositPreviewEnvelopeSchema.safeParse(result.data);
+  if (!parsed.success) return { kind: "unavailable" };
+  return { kind: "quoted", preview: parsed.data.data };
+}
+
 /**
  * The DISCOVERY tier for in-flight deposits, mirroring `useEarnProgramWithdrawals`.
  *

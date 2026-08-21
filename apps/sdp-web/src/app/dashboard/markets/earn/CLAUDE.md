@@ -176,7 +176,14 @@ program create still sends the body `requestId` form.
   record-before-broadcast window must carry the SAME key or the chain accepts
   the transfer twice — there is no provider-side dedupe behind this route — and
   a React ref dies with the modal and with the page load.
-  - The fingerprint is `(project, strategy, wallet, amount)`. The PROJECT is in
+  - The fingerprint is `(project, strategy, wallet, amount, toleranceBps)` —
+    the USER'S tolerance, never the quote-derived floor, because the
+    fingerprint must be reproducible from what the user can re-enter after a
+    reload or the cross-reload replay is fiction. "Raise the tolerance and
+    retry" still mints a fresh key. The floor a HELD key was minted with is
+    remembered separately and replayed verbatim (the API's own fingerprint
+    includes `minSharesOut` and refuses a replay whose floor changed); see
+    `rememberVaultDepositFloor` in earn-vault-deposit-tracking.ts. The PROJECT is in
     there because an organization-level custody config gives two projects the same
     `custody_wallets` row: without it, switching project in one tab and
     re-submitting the same strategy and amount reuses the first project's key, and
