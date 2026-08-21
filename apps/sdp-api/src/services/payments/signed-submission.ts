@@ -22,6 +22,10 @@ export interface SignedSubmissionStore {
   hasStarted(): Promise<boolean>;
 }
 
+export type TransferSignedSubmissionStore = SignedSubmissionStore & {
+  submittedRow(): Promise<PaymentTransferRow | null>;
+};
+
 export function isDefiniteSubmissionError(error: unknown): boolean {
   return (
     error instanceof AppError &&
@@ -45,7 +49,7 @@ function mapPreflightError(error: unknown): AppError | null {
 export function createTransferSignedSubmissionStore(
   repository: PaymentsRepository,
   transfer: PaymentTransferRow
-): SignedSubmissionStore & { submittedRow(): Promise<PaymentTransferRow | null> } {
+): TransferSignedSubmissionStore {
   let row: PaymentTransferRow | null = null;
   let startState: "not_started" | "unknown" | "started" = "not_started";
   return {

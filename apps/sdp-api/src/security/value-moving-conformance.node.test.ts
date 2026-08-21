@@ -257,7 +257,6 @@ const signingSinkInventory: Record<string, string[]> = {
     "signTransactionMessageWithSigners",
   ],
   "apps/sdp-api/src/routes/pay.ts": ["signAsFeePayer"],
-  "apps/sdp-api/src/routes/payments/handlers/transfer-batches/execute.ts": ["signAndSend"],
   "apps/sdp-api/src/services/payments/signed-submission.ts": ["prepareOwnedSubmission"],
   "apps/sdp-api/src/services/payments/recurring-payments/shared.ts": ["signAndSend"],
   "apps/sdp-api/src/services/private-channels/deposit.ts": ["signTransactionMessageWithSigners"],

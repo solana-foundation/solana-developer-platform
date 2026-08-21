@@ -170,6 +170,19 @@ describe("collectDueRecurringPayments", () => {
     );
   });
 
+  it("recovers a canceled payment attempt without creating a future collection", async () => {
+    const canceled = recurringRow("canceled");
+    mocks.rows.staleCollection = [canceled];
+
+    const result = await collectDueRecurringPayments({} as Env);
+
+    expect(result).toEqual({ recovered: 1, collected: 0, failed: 0, skipped: 0 });
+    expect(collectRecurringPayment).toHaveBeenCalledWith(
+      expect.objectContaining({ recurringPayment: canceled })
+    );
+    expect(collectRecurringPayment).toHaveBeenCalledTimes(1);
+  });
+
   it("uses batch-size and retry-after controls while excluding active attempts", async () => {
     await collectDueRecurringPayments(
       {
@@ -191,6 +204,12 @@ describe("collectDueRecurringPayments", () => {
     );
     expect(staleCollectionQuery?.query).toContain("ROW_NUMBER() OVER");
     expect(staleCollectionQuery?.query).toContain("PARTITION BY rp.id");
+    expect(staleCollectionQuery?.query).toContain(
+      "rp.status IN ('active', 'canceling', 'canceled')"
+    );
+    expect(staleCollectionQuery?.query).toContain(
+      "rp.status = 'active' AND a.status = 'confirmed'"
+    );
   });
 
   it("treats collection conflicts as duplicate-prevention skips", async () => {

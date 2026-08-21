@@ -480,7 +480,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Cancel recurring payment",
     operationId: "cancelPaymentRecurringPayment",
     description:
-      "Cancels an active SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction and storing the resulting lifecycle state.",
+      "Stops future collections for an active SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction. A collection already in processing may still settle independently.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -502,7 +502,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Collect recurring payment",
     operationId: "collectPaymentRecurringPayment",
     description:
-      "Manually collects a due active SDP-custody recurring payment by submitting the Solana subscriptions collection transaction, creating a linked payment transfer, recording the collection attempt, and advancing the next due time.",
+      "Manually starts a due active SDP-custody recurring payment collection, creating a linked payment transfer and collection attempt. If submission cannot be confirmed immediately, a 200 response returns the same transfer as `processing` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -510,7 +510,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     },
     responses: {
       200: {
-        description: "Recurring payment collected",
+        description: "Recurring payment collection result",
         content: jsonContent(paymentRecurringPaymentCollectionResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
