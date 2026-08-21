@@ -150,3 +150,30 @@ export function vedaDepositMints(cluster: SolanaCluster): readonly string[] {
     (mint): mint is string => mint !== undefined
   );
 }
+
+/**
+ * Whether SDP fronts this mint for Veda ON THIS CLUSTER — the admission rule,
+ * in ONE place.
+ *
+ * Two very different code paths ask it and they must never disagree: the
+ * catalogue read in `@sdp/earn` decides which of a vault's enabled assets
+ * become a row's `depositMints`, and the builder in `@sdp/veda` decides which
+ * asset a deposit instruction spends. A row admitted under one rule and spent
+ * under another is how a deposit ends up moving a token the ledger did not
+ * record, which is exactly what `EarnVaultAssetIdentity` exists to catch — and
+ * a check that fires is still a customer-visible failure, so the two sides
+ * share this predicate rather than each restating it.
+ *
+ * CLUSTER-AWARE by exact mint membership, never a symbol comparison. Mainnet
+ * USDC and devnet USDC share a symbol but are different mints, so a
+ * symbol-level check would admit the OTHER cluster's mint — a devnet vault
+ * whose asset config named mainnet USDC would catalogue (and try to spend) a
+ * mint that does not exist on devnet, failing only downstream as "account not
+ * found".
+ *
+ * Fails closed on an unknown mint: a mint the well-known catalogue does not
+ * carry is not something SDP fronts anywhere.
+ */
+export function isVedaDepositMint(mint: string, cluster: SolanaCluster): boolean {
+  return vedaDepositMints(cluster).includes(mint);
+}
