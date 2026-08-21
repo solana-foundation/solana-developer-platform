@@ -188,6 +188,15 @@ function applyLookupTables<TMessage>(
   ) as TMessage;
 }
 
+/**
+ * Solana's serialized transaction packet limit, including signatures and the
+ * message: https://solana.com/docs/core/transactions/transaction-structure
+ *
+ * Vault exits deliberately fail closed here after lookup-table compression. If
+ * a real provider plan exceeds this limit, supporting it requires a deliberate
+ * multi-transaction design with ordered persistence, submission and
+ * reconciliation. Do not silently split the plan or revive child records here.
+ */
 const SOLANA_TRANSACTION_SIZE_LIMIT_BYTES = 1232;
 
 /** Sign exactly one complete vault transaction without broadcasting it. */

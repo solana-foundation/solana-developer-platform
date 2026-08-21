@@ -715,7 +715,13 @@ plus the treasury exit action, with Kamino the first `EarnVaultWithdrawProvider`
 implementor. The builder preserves Kamino's complete instruction sequence and
 the vault lookup table. The API appends the idempotency memo, compiles and signs
 one final transaction, then rejects it if its bytes exceed Solana's packet
-limit.
+limit. Solana documents that serialized transaction limit as 1,232 bytes in
+[Transaction Structure](https://solana.com/docs/core/transactions/transaction-structure).
+The current route fails closed if a future vault layout still exceeds the limit
+after lookup-table compression. Supporting that case would require a new,
+explicit multi-transaction design for ordered persistence, submission and
+reconciliation. This implementation intentionally carries no dormant batching
+code or child-record schema for that hypothetical path.
 
 - **One exit is one signed movement.** The `earn_movements` row owns the share
   amount, signature, signed bytes and blockhash window. It is recorded before
