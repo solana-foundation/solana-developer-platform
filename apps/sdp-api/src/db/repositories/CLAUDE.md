@@ -27,6 +27,15 @@ Things that will bite:
   `shares_out` to the commitment states, so recording it could only succeed by
   erasing an observation SDP made. Do not add a transition without checking the
   constraint it would have to violate.
+- **`earn_positions.share_ata_rent_funder` is written ONLY by a deposit that
+  actually creates the share account, and then written even when NULL**
+  (migration 0066). It says who is owed that account's rent back when the exit
+  closes it. Two ways to get this wrong: writing it on every deposit records a
+  funder for rent nobody paid (account creation is idempotent), and skipping the
+  NULL write lets a re-entry under a different fee mode inherit the previous
+  entry's funder, so a later exit refunds a sponsor with the customer's lamports.
+  It is authoritative only while the share account exists, which is the only
+  window anything reads it.
 - **Every movement needs a holding, and a missing one must never fail a money
   write.** Resolve or open the holding before writing the movement. The custodial
   holding for a program is minted when its provider wallet is linked.

@@ -333,6 +333,15 @@ rates come from the same paged endpoint the catalogue uses.
 - Optional capabilities so far: portfolio wallets, withdrawal approvals, and
   live metrics. All three are method-presence guards in capabilities.ts, and a
   provider may implement any subset — Kamino has only the third.
+- **`sponsoredPrograms(cluster)` is a REQUIRED member of
+  `EarnVaultDirectProvider`, not an optional capability** (PRO-1736). It returns
+  every program the client may emit an instruction for, as plain base58 strings,
+  so a paymaster allowlist in another repository can be asserted a superset of it.
+  Consequence worth knowing before you add a provider: a client that implements
+  `buildVaultDeposit` and `readVaultPositions` but omits this one answers FALSE
+  to `supportsVaultDirect`, and its deposit route returns 501. That is deliberate.
+  A client that cannot say which programs it touches cannot be sponsored safely,
+  and failing loudly beats executing unsponsored by surprise.
 
 ## Hard invariants (ADR 0002)
 
