@@ -35,6 +35,7 @@
     "@sdp/earn": "workspace:*",
     "@sdp/solana": "workspace:*",
     "@sdp/types": "workspace:*",
+    "@solana-program/token": "catalog:",
     "@solana/kit": "catalog:",
     "decimal.js": "10.6.0"
   },

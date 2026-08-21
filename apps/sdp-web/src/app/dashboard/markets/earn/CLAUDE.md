@@ -30,12 +30,14 @@ api/dashboard/markets/earn/
   vault-deposits/route.ts            POST create (vault_direct)
   vault-deposits/route.ts            …and GET the workspace list (recovery)
   vault-deposits/[movementId]/       GET one recorded deposit (poll to terminal)
+  vault-withdrawals/route.ts         POST create (vault exit) · GET the movement list
+  vault-withdrawals/[movementId]/    GET one recorded withdrawal
   vault-positions/route.ts           GET list (keyset cursor)
   movements/route.ts                 GET the cross-provider ledger feed
                                      (keyset cursor + equality filters)
 ```
 
-`provider-query.ts` holds FOUR validators with deliberately different failure
+`provider-query.ts` holds FIVE validators with deliberately different failure
 modes. `programProxyQuery` is permissive-by-omission — an unrecognized param is
 dropped — because those routes predate the typed client and are reachable with
 arbitrary query strings. `vaultPositionsProxyQuery` is **strict**: it is
@@ -46,6 +48,7 @@ reshaping the page. A typo must not return a different page of someone's money.
 `ProxyQueryValidation` and `MAX_CURSOR_LENGTH` rather than restating them; its
 `requestId` is validated to the API's OWN `[\x20-\x7e]{1,255}` idempotency-key
 shape, because a tidier rule would 400 a legitimate key containing a slash.
+`vaultWithdrawalsProxyQuery` is its exit mirror, parameter for parameter.
 `earnMovementsProxyQuery` (PRO-1705) is strict in the same way over the
 cross-provider feed, and its filter values are checked for SHAPE and length only,
 never against a vocabulary: `status` is per execution model and `provider` is an
@@ -57,9 +60,9 @@ is the honest result.
 tracing stay server-owned — so a client-set `Idempotency-Key` never reaches the
 API on its own. A route forwards one deliberately, per header, through the
 optional `upstreamHeaders` argument, spelling it `IDEMPOTENCY_KEY_HEADER`
-(`src/lib/idempotency.ts`). `vault-deposits/` is the one route that opts in,
-forwarding that single header and nothing else; the program create still sends
-the body `requestId` form.
+(`src/lib/idempotency.ts`). `vault-deposits/` and `vault-withdrawals/` are the
+two routes that opt in, forwarding that single header and nothing else; the
+program create still sends the body `requestId` form.
 
 ## Routes
 
@@ -236,13 +239,39 @@ the body `requestId` form.
     a workspace switch. `GET /v1/earn/vault-deposits` owns it now and is
     workspace-scoped by construction.
 
+- `earn-vault-withdraw-modal.tsx` — the `vault_direct` EXIT (PRO-1702):
+  redeem a position's shares back into the custody wallet that holds them,
+  shares-denominated with a Max fill from the live position read (soft warning
+  over the last observed balance — the network stays the authority). Mirrors
+  the deposit modal's key lifecycle exactly, including the held-key pre-flight
+  (`fetchEarnVaultWithdrawalsByRequestId`) and the absorbed-by-approval
+  outcome. The result screen links the withdrawal transaction in Explorer.
+  Exports `EarnVaultWithdrawalOutcomeTracker`, mounted once per withdrawal.
+- `earn-vault-withdraw-tracking.ts` — the withdrawal idempotency-key store
+  (fingerprint: project, position, shares) under its own versioned
+  `sessionStorage` key.
+- `earn-idempotency-key-store.ts` — the shared machinery behind BOTH tracking
+  modules (storage tiers, quota divergence, approval holds, entry bounds), plus
+  `answerRetiresIdempotencyKey`, the shared retire-decision rule. Extracted
+  when the withdrawal flow arrived; two copies of a double-spend guard is how
+  one drifts.
+- **The withdrawal outcome poll uses the UNIFIED ledger vocabulary**:
+  `EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct` (`finalized | failed`),
+  `confirmed` still in flight because `EarnVaultWithdrawal` speaks the
+  ledger's own words. This is the OPPOSITE of the deposit poll's rule (legacy
+  DTO, legacy terminal set); the two sets sit side by side in
+  `earn-program-data.ts` with the reasoning attached to each.
+
 ## Where these seams are consumed — do not delete them as dead code
 
 `useEarnPrograms`, `useEarnVaultPositions`, `useEarnVaultDeposits`,
-`createEarnVaultDeposit`, `useEarnVaultDepositOutcomeToast`,
-`isEarnVaultDepositInFlight`, `earn-vault-deposit-tracking.ts`,
-`EarnWithdrawModal`, `EarnVaultDepositModal` and
-`EarnVaultDepositOutcomeTracker` have **no caller inside this module**. That is a module boundary, not an oversight: this module is the Earn
+`useEarnVaultWithdrawals`, `createEarnVaultDeposit`,
+`createEarnVaultWithdrawal`, `useEarnVaultDepositOutcomeToast`,
+`useEarnVaultWithdrawalOutcomeToast`, `isEarnVaultDepositInFlight`,
+`isEarnVaultWithdrawalInFlight`, `earn-vault-deposit-tracking.ts`,
+`earn-vault-withdraw-tracking.ts`, `EarnWithdrawModal`, `EarnVaultDepositModal`,
+`EarnVaultWithdrawModal`, `EarnVaultDepositOutcomeTracker` and
+`EarnVaultWithdrawalOutcomeTracker` have **no caller inside this module**. That is a module boundary, not an oversight: this module is the Earn
 Program page (select a strategy → build a button → integrate the API), and the
 surface that reads positions, opens the vault-deposit modal and drives
 withdrawals is **Treasury Solutions**

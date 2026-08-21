@@ -3,10 +3,14 @@ import * as solanaRpc from "@sdp/rpc/solana";
 import type { SolanaCluster } from "@sdp/types";
 import {
   type Address,
+  type AddressesByLookupTableAddress,
   address,
   addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
+  type Blockhash,
+  compressTransactionMessageUsingAddressLookupTables,
   createTransactionMessage,
+  fetchAddressesForLookupTables,
   getBase64EncodedWireTransaction,
   getSignatureFromTransaction,
   getTransactionDecoder,
@@ -39,7 +43,7 @@ import type { VaultDeadline } from "./vault-deadline";
  */
 
 /** A plain-data instruction from the provider contract, back in kit form. */
-function toKitInstruction(instruction: EarnVaultTransactionPlan["transactions"][number][number]) {
+function toKitInstruction(instruction: EarnVaultTransactionPlan["instructions"][number]) {
   return {
     programAddress: address(instruction.programAddress),
     accounts: instruction.accounts.map((account) => ({
@@ -53,6 +57,35 @@ function toKitInstruction(instruction: EarnVaultTransactionPlan["transactions"][
 export type VaultFeeMode =
   | { kind: "sponsored"; feePayment: FeePaymentPort }
   | { kind: "wallet-pays" };
+
+// biome-ignore lint/security/noSecrets: public Solana Memo program address.
+const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+
+/**
+ * Bind the caller's idempotency key into the transaction plan.
+ *
+ * Deterministic Solana signing plus a shared recent blockhash would make
+ * otherwise independent requests produce the same signature. The memo gives
+ * each ledger intent a unique on-chain identity while retries of the same key
+ * remain byte-for-byte equivalent. One helper for both directions so the
+ * format cannot drift. The final signed transaction is measured after this
+ * memo and any lookup-table compression are applied.
+ */
+export function appendVaultRequestMemo(
+  plan: EarnVaultTransactionPlan,
+  kind: "vault-deposit" | "vault-withdrawal",
+  requestId: string
+): EarnVaultTransactionPlan {
+  const memo = {
+    programAddress: MEMO_PROGRAM_ADDRESS,
+    accounts: [],
+    data: Buffer.from(`sdp:earn:${kind}:${requestId}`, "utf8").toString("base64"),
+  };
+  return {
+    ...plan,
+    instructions: [...plan.instructions, memo],
+  };
+}
 
 export interface VaultExecutionScope {
   /** Cluster derived from the authenticated SDP project environment. */
@@ -72,6 +105,15 @@ export interface SignVaultPlanInput extends VaultPlanExecutionScope {
   owner: TransactionSigner;
   rpcUrl: string;
   fee: VaultFeeMode;
+  /** Successful simulation preparation reused to sign the exact same plan. */
+  prepared?: PreparedVaultPlanExecution;
+}
+
+export interface PreparedVaultPlanExecution {
+  plan: EarnVaultTransactionPlan;
+  lookupTables: AddressesByLookupTableAddress;
+  blockhash: Blockhash;
+  lastValidBlockHeight: bigint;
 }
 
 export interface SignedVaultTransaction {
@@ -121,32 +163,75 @@ async function verifyVaultRpc(
 }
 
 /**
- * Sign, WITHOUT sending.
+ * Resolve a plan's declared lookup tables to their address lists.
  *
- * Split from the broadcast so the caller can durably record the signature
- * before the transaction can possibly land. That ordering is the only thing
- * that makes an ambiguous send recoverable: once bytes are on the wire, a
- * timeout, a crash or a lost DB write leaves a transaction that may be on chain
- * with money moved, and without the signature there is nothing to reconcile it
- * against — SDP would not know the transfer exists.
- *
- * Works for both fee modes. Sponsored signing is deliberately sign-only: the
- * custody owner signs first, the fee-payment port adds the fee-payer signature
- * without broadcasting, and the fully signed bytes plus deterministic
- * signature return to the caller for durable intent persistence.
+ * REQUIRED, not best-effort, and that asymmetry with the builder is deliberate:
+ * the builder may build WITHOUT a table (it just splits earlier), but a plan
+ * that declares one was SIZED with it, so compiling without it here could
+ * exceed the packet limit — or worse, compile a different message than the one
+ * simulated. A fetch failure is therefore a retryable error, never a silent
+ * fallback.
  */
+async function resolveLookupTables(
+  env: Env,
+  input: VaultExecutionScope & { plan: EarnVaultTransactionPlan; rpcUrl: string }
+): Promise<AddressesByLookupTableAddress> {
+  if (input.plan.lookupTables.length === 0) return {};
+  const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
+  return input.deadline.run("Fetching the vault lookup tables", () =>
+    fetchAddressesForLookupTables(
+      input.plan.lookupTables.map((table) => address(table)),
+      rpc
+    )
+  );
+}
+
+function applyLookupTables<TMessage>(
+  message: TMessage,
+  lookupTables: AddressesByLookupTableAddress
+): TMessage {
+  if (Object.keys(lookupTables).length === 0) return message;
+  return compressTransactionMessageUsingAddressLookupTables(
+    // biome-ignore lint/suspicious/noExplicitAny: kit narrows the message type through each pipe stage; compression preserves compilability.
+    message as any,
+    lookupTables
+  ) as TMessage;
+}
+
+/**
+ * Solana's serialized transaction packet limit, including signatures and the
+ * message: https://solana.com/docs/core/transactions/transaction-structure
+ *
+ * Vault exits deliberately fail closed here after lookup-table compression. If
+ * a real provider plan exceeds this limit, supporting it requires a deliberate
+ * multi-transaction design with ordered persistence, submission and
+ * reconciliation. Do not silently split the plan or revive child records here.
+ */
+const SOLANA_TRANSACTION_SIZE_LIMIT_BYTES = 1232;
+
+/** Sign exactly one complete vault transaction without broadcasting it. */
 export async function signVaultPlan(
   env: Env,
   input: SignVaultPlanInput
 ): Promise<SignedVaultTransaction> {
   assertExpectedPlan(input.plan, input.cluster, input.expectedAssetIdentity);
-  const instructions = singleBatchInstructions(input.plan).map(toKitInstruction);
-  await verifyVaultRpc(env, input);
-  const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
-  const { blockhash, lastValidBlockHeight } = await input.deadline.run(
-    "Fetching the vault transaction blockhash",
-    () => solanaRpc.getRecentBlockhash(rpc, "confirmed")
-  );
+  const instructions = planInstructions(input.plan).map(toKitInstruction);
+  let prepared = input.prepared;
+  if (prepared && prepared.plan !== input.plan) {
+    throw new Error("Vault execution preparation belongs to a different plan");
+  }
+  if (!prepared) {
+    await verifyVaultRpc(env, input);
+    const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
+    const [lookupTables, { blockhash, lastValidBlockHeight }] = await Promise.all([
+      resolveLookupTables(env, input),
+      input.deadline.run("Fetching the vault transaction blockhash", () =>
+        solanaRpc.getRecentBlockhash(rpc, "confirmed")
+      ),
+    ]);
+    prepared = { plan: input.plan, lookupTables, blockhash, lastValidBlockHeight };
+  }
+  const { lookupTables, blockhash, lastValidBlockHeight } = prepared;
 
   let signedBytes: Uint8Array;
   if (input.fee.kind === "sponsored") {
@@ -159,6 +244,7 @@ export async function signVaultPlan(
       (m) => setTransactionMessageFeePayer(feePayer, m),
       (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
       (m) => appendTransactionMessageInstructions(instructions, m),
+      (m) => applyLookupTables(m, lookupTables),
       (m) => addSignersToTransactionMessage([input.owner], m)
     );
     const ownerSigned = await input.deadline.run("Signing the vault transaction", () =>
@@ -174,6 +260,7 @@ export async function signVaultPlan(
       (m) => setTransactionMessageFeePayerSigner(input.owner, m),
       (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
       (m) => appendTransactionMessageInstructions(instructions, m),
+      (m) => applyLookupTables(m, lookupTables),
       (m) => addSignersToTransactionMessage([input.owner], m)
     );
     const signed = await input.deadline.run("Signing the vault transaction", () =>
@@ -182,6 +269,11 @@ export async function signVaultPlan(
     signedBytes = new Uint8Array(getTransactionEncoder().encode(signed));
   }
 
+  if (signedBytes.length > SOLANA_TRANSACTION_SIZE_LIMIT_BYTES) {
+    throw new Error(
+      `Vault transaction is ${signedBytes.length} bytes; Solana allows at most ${SOLANA_TRANSACTION_SIZE_LIMIT_BYTES}`
+    );
+  }
   const signed = getTransactionDecoder().decode(signedBytes);
   if (
     signed.signatures[input.owner.address] === null ||
@@ -215,27 +307,12 @@ export async function broadcastVaultTransaction(
   );
 }
 
-/** The single batch a deposit plan carries, with the multi-transaction refusal. */
-function singleBatchInstructions(plan: EarnVaultTransactionPlan) {
-  if (plan.lookupTables.length > 0) {
-    // Address lookup tables require a different compilation path. Refuse them
-    // at the shared boundary so simulation, signing and submission cannot each
-    // make a different assumption about the same provider plan.
-    throw new Error("Vault plans with address lookup tables are not implemented");
-  }
-  const batch = plan.transactions[0];
-  if (!batch || batch.length === 0) {
+/** Return the one complete transaction supported by vault execution. */
+function planInstructions(plan: EarnVaultTransactionPlan) {
+  if (plan.instructions.length === 0) {
     throw new Error("Vault plan carried no instructions");
   }
-  if (plan.transactions.length > 1) {
-    // Multi-transaction plans need per-leg ledger rows and a resume story; the
-    // deposit path never produces one today, so refuse rather than silently
-    // land only the first leg.
-    throw new Error(
-      `Vault plan needs ${plan.transactions.length} transactions; multi-transaction submission is not implemented`
-    );
-  }
-  return batch;
+  return plan.instructions;
 }
 
 /**
@@ -245,6 +322,7 @@ function singleBatchInstructions(plan: EarnVaultTransactionPlan) {
  * assembled by a third-party SDK against live vault state, so a stale reserve
  * set or a changed vault config surfaces here as a readable program error
  * instead of a landed, failed transaction the customer still paid for.
+ *
  */
 export async function simulateVaultPlan(
   env: Env,
@@ -253,11 +331,14 @@ export async function simulateVaultPlan(
     owner: Address;
     rpcUrl: string;
   }
-): Promise<{ ok: true } | { ok: false; error: string; logs: readonly string[] }> {
+): Promise<
+  | { ok: true; prepared: PreparedVaultPlanExecution }
+  | { ok: false; error: string; logs: readonly string[] }
+> {
   assertExpectedPlan(input.plan, input.cluster, input.expectedAssetIdentity);
-  let batch: ReturnType<typeof singleBatchInstructions>;
+  let instructions: EarnVaultTransactionPlan["instructions"];
   try {
-    batch = singleBatchInstructions(input.plan);
+    instructions = planInstructions(input.plan);
   } catch (cause) {
     return {
       ok: false,
@@ -268,15 +349,21 @@ export async function simulateVaultPlan(
 
   await verifyVaultRpc(env, input);
   const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
-  const { blockhash, lastValidBlockHeight } = await input.deadline.run(
-    "Fetching the vault simulation blockhash",
-    () => solanaRpc.getRecentBlockhash(rpc, "confirmed")
-  );
+  // Lookup-table transport failures are infrastructure failures, not a
+  // program simulation verdict. Let them reject so callers preserve their
+  // idempotency key and return a retryable 5xx instead of a caller-fault 400.
+  const [lookupTables, { blockhash, lastValidBlockHeight }] = await Promise.all([
+    resolveLookupTables(env, input),
+    input.deadline.run("Fetching the vault simulation blockhash", () =>
+      solanaRpc.getRecentBlockhash(rpc, "confirmed")
+    ),
+  ]);
   const message = pipe(
     createTransactionMessage({ version: 0 }),
     (m) => setTransactionMessageFeePayer(input.owner, m),
     (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-    (m) => appendTransactionMessageInstructions(batch.map(toKitInstruction), m)
+    (m) => appendTransactionMessageInstructions(instructions.map(toKitInstruction), m),
+    (m) => applyLookupTables(m, lookupTables)
   );
 
   // `sigVerify: false` + `replaceRecentBlockhash` so an unsigned message can be
@@ -304,5 +391,8 @@ export async function simulateVaultPlan(
       logs: result.value.logs ?? [],
     };
   }
-  return { ok: true };
+  return {
+    ok: true,
+    prepared: { plan: input.plan, lookupTables, blockhash, lastValidBlockHeight },
+  };
 }

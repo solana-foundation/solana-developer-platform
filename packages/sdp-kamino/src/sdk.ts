@@ -1,4 +1,9 @@
-import { KaminoVault, KaminoVaultClient } from "@kamino-finance/klend-sdk";
+import {
+  getKvaultGlobalConfigPda,
+  KaminoVault,
+  KaminoVaultClient,
+  KVaultGlobalConfig,
+} from "@kamino-finance/klend-sdk";
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
 import type { Address, Instruction } from "@solana/kit";
 import Decimal from "decimal.js";
@@ -6,9 +11,10 @@ import { acceptAtMintScale, isZeroAmount, mintDecimals } from "./amounts";
 import { vaultAssetIdentityFromState } from "./asset-identity";
 import { invalidAmount, SdpKaminoError, vaultUnreadable } from "./errors";
 import { assertPlanTargetsCluster } from "./guards";
+import { loadVaultLookupTableAddresses } from "./lookup-table";
 import { kaminoClusterConfig } from "./programs";
 import { createKaminoRpc } from "./rpc";
-import { sumRawTokenAccountBaseUnits } from "./share-balances";
+import { parseShareTokenAccountBalances, sumRawTokenAccountBaseUnits } from "./share-balances";
 import type {
   KaminoDepositInput,
   KaminoInstructionPlan,
@@ -16,6 +22,13 @@ import type {
   KaminoRuntime,
   KaminoWithdrawInput,
 } from "./types";
+import {
+  buildMaximumWithdrawalBalanceGuard,
+  buildShareAccountConsolidation,
+  decodeKvaultWithdrawShares,
+  type RoleTaggedInstruction,
+  resolveBurnAllSentinel,
+} from "./withdraw-instructions";
 
 /**
  * ════════════════════════════════════════════════════════════════════════════
@@ -161,9 +174,8 @@ function asInstructions(raw: readonly Kit2[]): readonly Instruction[] {
 /**
  * Build a deposit.
  *
- * Returned as a single batch: a deposit touches one vault and creates at most
- * the user's share ATA, which has always fit one transaction in measurement.
- * Withdrawals are the multi-batch case (see below).
+ * A deposit touches one vault and creates at most the user's share ATA. The
+ * complete instruction sequence is compiled as one transaction.
  */
 export async function buildKaminoDepositPlan(
   runtime: KaminoRuntime,
@@ -227,7 +239,7 @@ export async function buildKaminoDepositPlan(
 
   return assertPlanTargetsCluster({
     cluster: config.cluster,
-    instructions: [instructions],
+    instructions,
     lookupTables: [],
     assetIdentity,
     accepted: {
@@ -238,68 +250,233 @@ export async function buildKaminoDepositPlan(
 }
 
 /**
- * Build a withdrawal. **NOT CONTRACT-COMPLETE — see the warning below.**
+ * Build one complete withdrawal transaction.
  *
- * ── Why this is not exported as a capability ────────────────────────────────
- * `KaminoInstructionPlan.instructions` promises TRANSACTION-SIZED batches: one
- * entry, one transaction. This function cannot honour that promise yet. It
- * flattens `unstake → withdraw → post` into a single batch and returns no
- * lookup table, while the pinned SDK documents the opposite — `withdrawIxs`
- * returns "one or multiple withdraw instructions, based on how many reserves
- * it's needed to withdraw from. This might have to be split in multiple
- * transactions". A multi-reserve exit therefore builds a plan that can exceed
- * Solana's 1232-byte packet, and the API's submitter refuses any plan with more
- * than one transaction — so the failure lands at submit, after the caller has
- * been told a withdrawal was prepared.
+ * Kamino may return several withdraw instructions, but they remain one atomic
+ * instruction sequence. The vault lookup table travels with the plan so the
+ * API can compress the final transaction, including its idempotency memo. The
+ * API rejects the final signed bytes if they exceed Solana's packet limit.
  *
- * Honouring the contract needs three things this does not do: load the vault's
- * published lookup table, compile-measure and split at valid protocol
- * boundaries (an unstake must never land without its withdraw), and give the
- * API a resumable multi-leg submission with per-leg ledger rows.
+ * Every share-redeeming instruction is decoded and the total must exactly match
+ * the accepted request. This prevents the ledger from claiming a quantity that
+ * differs from what the signed transaction can move.
  *
- * Until then the WITHDRAW CAPABILITY IS WITHHELD: `KaminoVaultDirectClient` does
- * not implement `buildVaultWithdrawal`, so `supportsVaultWithdraw` answers false
- * and no route can move money out through an unsized plan. This builder stays in
- * the package because it is proven against a mainnet-forked surfnet and is the
- * starting point for that work — it is deliberately NOT re-exported from
- * `index.ts`, so the only callers are this package's own smoke tests.
- *
- * Tracked as the exit half of the vault-direct path; see `CLAUDE.md`.
+ * NOT covered, deliberately (see CLAUDE.md → known gaps): withdrawal penalties
+ * are not quoted, and shares staked in a vault farm are not unstaked — the
+ * deposit path never stakes (it passes no farm state), so an SDP-managed
+ * position has none; externally staked shares must be unstaked outside SDP
+ * before they can exit through it.
  */
 export async function buildKaminoWithdrawPlan(
   runtime: KaminoRuntime,
-  input: KaminoWithdrawInput
+  input: KaminoWithdrawInput,
+  assertActive: AssertActive = alwaysActive
 ): Promise<KaminoInstructionPlan> {
-  const { client, vault, state, config, assetIdentity } = await bindVault(runtime, input.vault);
-  const acceptedShares = acceptAtMintScale(
-    "shares",
-    input.shares,
-    mintDecimals(state.sharesMintDecimals, "sharesMintDecimals")
+  const { client, vault, state, config, rpc, assetIdentity } = await bindVault(
+    runtime,
+    input.vault,
+    assertActive
   );
+  const shareDecimals = mintDecimals(state.sharesMintDecimals, "sharesMintDecimals");
+  const acceptedShares = acceptAtMintScale("shares", input.shares, shareDecimals);
   if (isZeroAmount(acceptedShares)) throw invalidAmount("shares", input.shares);
+  const requestedBaseUnits = parseDecimalAmount(acceptedShares, shareDecimals);
   const shares = toDecimal(acceptedShares, "shares");
 
-  const reserves = await client.loadVaultReserves(state);
-  const bundle = await vault.withdrawIxs(
-    input.owner as Kit2,
-    shares,
-    input.slot as Kit2,
-    reserves,
-    null,
-    null,
-    (input.rentPayer ?? input.owner) as Kit2
-  );
-
-  const instructions = asInstructions([
-    ...(bundle.unstakeFromFarmIfNeededIxs ?? []),
-    ...(bundle.withdrawIxs ?? []),
-    ...(bundle.postWithdrawIxs ?? []),
+  assertActive();
+  // These reads are independent and share one deadline-bounded RPC client.
+  // Keeping them concurrent removes several serial round trips from the exit
+  // path without weakening any of the validation below.
+  const [shareAccountsResponse, reserves, globalConfig, lookupTables] = await Promise.all([
+    rpc
+      .getTokenAccountsByOwner(
+        input.owner.address,
+        { mint: assetIdentity.shareMint },
+        { encoding: "jsonParsed" }
+      )
+      .send(),
+    client.loadVaultReserves(state),
+    (async () => {
+      const globalConfigAddress = await getKvaultGlobalConfigPda(config.kvaultProgramId as Kit2);
+      return KVaultGlobalConfig.fetch(rpc, globalConfigAddress, config.kvaultProgramId as Kit2);
+    })(),
+    loadVaultLookupTableAddresses(
+      rpc as ReturnType<typeof createKaminoRpc>,
+      state.vaultLookupTable === undefined ? undefined : String(state.vaultLookupTable)
+    ),
   ]);
+  assertActive();
+  const shareAccounts = parseShareTokenAccountBalances(shareAccountsResponse?.value);
+  const consolidation = await buildShareAccountConsolidation({
+    requestedBaseUnits,
+    shareMint: assetIdentity.shareMint,
+    shareDecimals,
+    owner: input.owner,
+    rentPayer: input.rentPayer,
+    accounts: shareAccounts,
+  });
+
+  // The SDK's global-config loader repeats the constructor trap.
+  // `withdrawIxs` without explicit penalties calls `loadKVaultGlobalConfig`,
+  // which derives the config PDA with the client's program id but then fetches
+  // it with the DEFAULT (mainnet) id as the expected owner — so a devnet exit
+  // throws "belongs to wrong program" before building anything. Measured
+  // 2026-08-20 against a devnet fork; deposits never load the config, which is
+  // why only the exit path bites. Passing `withdrawalPenalties` short-circuits
+  // that loader entirely; the values are computed exactly as the SDK's private
+  // `getEffectiveWithdrawalPenaltyParams` does — max(vault, global config),
+  // per field — from a config fetched with the RIGHT program id.
+  if (!globalConfig) {
+    throw vaultUnreadable(input.vault, runtime.cluster, "kvault global config not found");
+  }
+  assertActive();
+  const withdrawalPenalties = {
+    withdrawalPenaltyLamports: Decimal.max(
+      requireNonNegativeFiniteDecimal(
+        "vault withdrawal penalty lamports",
+        state.withdrawalPenaltyLamports
+      ),
+      requireNonNegativeFiniteDecimal(
+        "global withdrawal penalty lamports",
+        globalConfig.withdrawalPenaltyLamports
+      )
+    ),
+    withdrawalPenaltyBps: Decimal.max(
+      requireNonNegativeFiniteDecimal("vault withdrawal penalty bps", state.withdrawalPenaltyBps),
+      requireNonNegativeFiniteDecimal(
+        "global withdrawal penalty bps",
+        globalConfig.withdrawalPenaltyBps
+      )
+    ),
+  };
+
+  // THIRD-PARTY SDK PATCH: klend-sdk plans exits from the share ATA only and
+  // exposes no supported shares-state parameter. SDP position reads include
+  // every owner token account, so consolidation temporarily replaces this
+  // request-scoped client's method with the exact post-transfer ATA state the
+  // same transaction will observe. The runtime assertion and construction test
+  // intentionally fail an SDK upgrade that removes or renames this method.
+  const sdkClient = client as Kit2;
+  if (typeof sdkClient.getUserSharesState !== "function") {
+    throw vaultUnreadable(
+      input.vault,
+      runtime.cluster,
+      "klend-sdk no longer exposes getUserSharesState required for safe consolidation"
+    );
+  }
+  const originalGetUserSharesState = sdkClient.getUserSharesState.bind(sdkClient);
+  if (consolidation.instructions.length > 0) {
+    const postConsolidationAta = new Decimal(
+      formatDecimalAmount(consolidation.postConsolidationAtaBaseUnits, shareDecimals)
+    );
+    const totalShares = new Decimal(
+      formatDecimalAmount(consolidation.totalBaseUnits, shareDecimals)
+    );
+    sdkClient.getUserSharesState = async () => ({
+      userSharesAta: consolidation.shareAta,
+      ataBalance: postConsolidationAta,
+      farmBalance: new Decimal(0),
+      totalShares,
+    });
+  }
+  let bundle: Awaited<ReturnType<typeof vault.withdrawIxs>>;
+  try {
+    bundle = await vault.withdrawIxs(
+      input.owner as Kit2,
+      shares,
+      input.slot as Kit2,
+      reserves,
+      null,
+      null,
+      (input.rentPayer ?? input.owner) as Kit2,
+      withdrawalPenalties as Kit2
+    );
+  } finally {
+    sdkClient.getUserSharesState = originalGetUserSharesState;
+  }
+  assertActive();
+
+  const kvaultProgramAddress = String(config.kvaultProgramId);
+  const decoded: RoleTaggedInstruction[] = [
+    ...asInstructions(bundle.unstakeFromFarmIfNeededIxs ?? []).map((instruction) => ({
+      instruction,
+      role: "unstake" as const,
+      sharesBaseUnits: null,
+    })),
+    // The SDK interleaves prerequisites (ATA creation) into `withdrawIxs`, so
+    // membership alone does not mean "redeems shares" — the instruction bytes
+    // decide, and only decodable instructions count toward the ledgered total.
+    ...asInstructions(bundle.withdrawIxs ?? []).map((instruction): RoleTaggedInstruction => {
+      const sharesBaseUnits = decodeKvaultWithdrawShares(instruction, kvaultProgramAddress);
+      return {
+        instruction,
+        role: sharesBaseUnits === null ? "prepare" : "withdraw",
+        sharesBaseUnits,
+      };
+    }),
+    ...asInstructions(bundle.postWithdrawIxs ?? []).map((instruction) => ({
+      instruction,
+      role: "post" as const,
+      sharesBaseUnits: null,
+    })),
+  ];
+
+  const maximumBalanceGuard = await buildMaximumWithdrawalBalanceGuard({
+    requestedBaseUnits,
+    shareMint: state.sharesMint as Address,
+    shareDecimals,
+    owner: input.owner,
+  });
+  const firstRedemptionIndex = decoded.findIndex((entry) => entry.role === "withdraw");
+  const preRedemptionInstructions = [
+    ...consolidation.instructions,
+    ...(maximumBalanceGuard ? [maximumBalanceGuard] : []),
+  ];
+  if (preRedemptionInstructions.length > 0 && firstRedemptionIndex === -1) {
+    throw new SdpKaminoError(
+      "VAULT_UNREADABLE",
+      "Kamino produced no redemption instruction after preparing the withdrawal share balance."
+    );
+  }
+  const guarded =
+    preRedemptionInstructions.length > 0
+      ? [
+          ...decoded.slice(0, firstRedemptionIndex),
+          ...preRedemptionInstructions.map((instruction) => ({
+            instruction,
+            role: "prepare" as const,
+            sharesBaseUnits: null,
+          })),
+          ...decoded.slice(firstRedemptionIndex),
+        ]
+      : decoded;
+
+  // A full exit uses a burn-all sentinel on its final redemption instruction.
+  // Replace it with the exact remainder, except at maximum-u64 where the atomic
+  // balance guard above makes the sentinel exact or fails the transaction.
+  const tagged = resolveBurnAllSentinel({
+    instructions: guarded,
+    requestedBaseUnits,
+    maximumBalanceGuarded: maximumBalanceGuard !== null,
+  });
+  const encodedBaseUnits = tagged.reduce((sum, entry) => sum + (entry.sharesBaseUnits ?? 0n), 0n);
+  if (encodedBaseUnits !== requestedBaseUnits) {
+    // Includes the zero-withdraw-instruction case. Whatever the SDK did — a
+    // capped amount, a sentinel encoding, a new instruction variant this decode
+    // does not know — signing it would ledger a quantity the chain will not
+    // move, so the only safe answer is a loud refusal.
+    throw new SdpKaminoError(
+      "VAULT_UNREADABLE",
+      `Kamino withdraw instructions encode ${encodedBaseUnits} share base units where the ` +
+        `accepted request is ${requestedBaseUnits}; refusing to build a plan whose ledger ` +
+        "record would not match what moves on chain."
+    );
+  }
 
   return assertPlanTargetsCluster({
     cluster: config.cluster,
-    instructions: [instructions],
-    lookupTables: [],
+    instructions: tagged.map((entry) => entry.instruction),
+    lookupTables: Object.keys(lookupTables) as Address[],
     assetIdentity,
     accepted: { shares: acceptedShares },
   });
@@ -438,6 +615,7 @@ export async function readKaminoPosition(
     owner: input.owner,
     cluster: config.cluster,
     shares: shares.toFixed(),
+    withdrawableShares: formatDecimalAmount(unstakedBase, shareDecimals),
     ...(tokenValue === undefined ? {} : { tokenValue }),
     tokenMint: assetIdentity.depositTokenMint,
     sharesMint: assetIdentity.shareMint,

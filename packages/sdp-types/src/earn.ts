@@ -178,6 +178,8 @@ export interface EarnVaultPosition {
   closedAt: string | null;
   /** Absent when the provider read failed; never coerce an unavailable value to zero. */
   shares?: string;
+  /** Unstaked shares immediately redeemable through SDP; absent when unreadable. */
+  withdrawableShares?: string;
   /** Deposit-token value, absent when the provider cannot hydrate the position. */
   tokenValue?: string;
 }
@@ -286,6 +288,46 @@ export interface EarnVaultDepositResponse {
  */
 export interface EarnVaultDepositsPage {
   deposits: EarnVaultDepositRecord[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
+/** JSON body for POST /v1/earn/vault-withdrawals. Idempotency is header-only. */
+export interface EarnVaultWithdrawalRequest {
+  /** The vault position being exited — from GET /v1/earn/vault-positions. */
+  positionId: string;
+  /** Shares to redeem; the position's `withdrawableShares` is the observed ceiling. */
+  shares: string;
+}
+
+/** One signed vault withdrawal movement. */
+export interface EarnVaultWithdrawal {
+  movementId: string;
+  positionId: string;
+  provider: string;
+  /** The vault's on-chain address — the instrument, not the payout. */
+  providerReference: string;
+  status: EarnVaultDirectMovementStatus;
+  signature: string;
+  /** Total shares requested by the caller, decimal string, share units. */
+  shares: string;
+  shareMint: string;
+  failureReason: string | null;
+  createdAt: string;
+  confirmedAt: string | null;
+  settledAt: string | null;
+  /** Present on POST responses; true when the idempotency anchor was replayed. */
+  replayed?: boolean;
+}
+
+/** Response body of GET /v1/earn/vault-withdrawals/:movementId and POST. */
+export interface EarnVaultWithdrawalResponse {
+  withdrawal: EarnVaultWithdrawal;
+}
+
+/** Response body of GET /v1/earn/vault-withdrawals: logical withdrawals, newest first. */
+export interface EarnVaultWithdrawalsPage {
+  withdrawals: EarnVaultWithdrawal[];
   hasMore: boolean;
   nextCursor: string | null;
 }
