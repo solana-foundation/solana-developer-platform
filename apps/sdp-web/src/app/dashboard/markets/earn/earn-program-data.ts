@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  EARN_MOVEMENT_STATUSES,
+  EARN_TERMINAL_MOVEMENT_STATUSES,
   EARN_TERMINAL_VAULT_MOVEMENT_STATUSES,
   EARN_TERMINAL_WITHDRAWAL_STATUSES,
   EARN_VAULT_MOVEMENT_STATUSES,
@@ -20,15 +22,18 @@ import {
   type EarnVaultDeposit,
   type EarnVaultDepositRecord,
   type EarnVaultDepositRequest,
+  type EarnVaultDirectMovementStatus,
   type EarnVaultMovementStatus,
   type EarnVaultPosition,
   type EarnVaultPositionsPage,
+  type EarnVaultWithdrawal,
+  type EarnVaultWithdrawalRequest,
   type ListEarnProgramsResponse,
   type ListEarnProgramWithdrawalsResponse,
   type ListEarnStrategiesResponse,
   SOLANA_CLUSTERS,
 } from "@sdp/types";
-import { useEffect, useRef } from "react";
+import { useEffect, useEffectEvent, useRef } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { z } from "zod";
@@ -56,6 +61,8 @@ export type {
   EarnVaultDepositRequest,
   EarnVaultPosition,
   EarnVaultPositionsPage,
+  EarnVaultWithdrawal,
+  EarnVaultWithdrawalRequest,
   ListEarnProgramsResponse,
   ListEarnProgramWithdrawalsResponse,
 } from "@sdp/types";
@@ -669,14 +676,55 @@ const earnVaultDepositsPageSchema = z.object({
   }),
 });
 
-const VAULT_DEPOSITS_PAGE_SIZE = 100;
+const VAULT_MOVEMENTS_PAGE_SIZE = 100;
 
 /**
  * Hard stop on the paging loop, same reason as the other readers: a server that
  * never stops advancing its cursor must not spin forever. 20 pages x 100 is far
- * past any plausible number of SIMULTANEOUSLY in-flight deposits.
+ * past any plausible number of simultaneously in-flight vault movements.
  */
-const VAULT_DEPOSITS_PAGE_LIMIT = 20;
+const VAULT_MOVEMENTS_PAGE_LIMIT = 20;
+
+interface VaultMovementPage<T> {
+  items: T[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
+async function fetchAllVaultMovementPages<T>(input: {
+  resource: "deposits" | "withdrawals";
+  settled?: boolean;
+  parsePage: (value: unknown) => VaultMovementPage<T> | null;
+}): Promise<T[]> {
+  const items: T[] = [];
+  const seenCursors = new Set<string>();
+  let before: string | null = null;
+
+  for (let page = 0; page < VAULT_MOVEMENTS_PAGE_LIMIT; page += 1) {
+    const query = new URLSearchParams({ limit: String(VAULT_MOVEMENTS_PAGE_SIZE) });
+    if (input.settled !== undefined) query.set("settled", String(input.settled));
+    if (before) query.set("before", before);
+
+    const result = await dashboardFetch<unknown>(
+      `/api/dashboard/markets/earn/vault-${input.resource}?${query.toString()}`
+    );
+    if (!result.ok) throw new Error(result.error);
+    const body = input.parsePage(result.data);
+    if (!body) throw new Error(`Invalid vault ${input.resource} response`);
+
+    items.push(...body.items);
+    if (!body.hasMore) return items;
+
+    const nextCursor = body.nextCursor;
+    if (!nextCursor || nextCursor === before || seenCursors.has(nextCursor)) {
+      throw new Error(`Vault ${input.resource} pagination did not advance`);
+    }
+    seenCursors.add(nextCursor);
+    before = nextCursor;
+  }
+
+  throw new Error(`Vault ${input.resource} pagination exceeded its safety limit`);
+}
 
 /**
  * This workspace's recorded deposits, newest first. The API derives the
@@ -698,35 +746,19 @@ const VAULT_DEPOSITS_PAGE_LIMIT = 20;
 export async function fetchEarnVaultDeposits(
   options: { settled?: boolean } = {}
 ): Promise<EarnVaultDepositRecord[]> {
-  const deposits: EarnVaultDepositRecord[] = [];
-  const seenCursors = new Set<string>();
-  let before: string | null = null;
-
-  for (let page = 0; page < VAULT_DEPOSITS_PAGE_LIMIT; page += 1) {
-    const query = new URLSearchParams({ limit: String(VAULT_DEPOSITS_PAGE_SIZE) });
-    if (options.settled !== undefined) query.set("settled", String(options.settled));
-    if (before) query.set("before", before);
-
-    const result = await dashboardFetch<unknown>(
-      `/api/dashboard/markets/earn/vault-deposits?${query.toString()}`
-    );
-    if (!result.ok) throw new Error(result.error);
-    const parsed = earnVaultDepositsPageSchema.safeParse(result.data);
-    if (!parsed.success) throw new Error("Invalid vault deposits response");
-
-    const body = parsed.data.data;
-    deposits.push(...body.deposits);
-    if (!body.hasMore) return deposits;
-
-    const nextCursor = body.nextCursor;
-    if (!nextCursor || nextCursor === before || seenCursors.has(nextCursor)) {
-      throw new Error("Vault deposits pagination did not advance");
-    }
-    seenCursors.add(nextCursor);
-    before = nextCursor;
-  }
-
-  throw new Error("Vault deposits pagination exceeded its safety limit");
+  return fetchAllVaultMovementPages({
+    resource: "deposits",
+    settled: options.settled,
+    parsePage(value) {
+      const parsed = earnVaultDepositsPageSchema.safeParse(value);
+      if (!parsed.success) return null;
+      return {
+        items: parsed.data.data.deposits,
+        hasMore: parsed.data.data.hasMore,
+        nextCursor: parsed.data.data.nextCursor,
+      };
+    },
+  });
 }
 
 /**
@@ -841,10 +873,7 @@ export function useEarnVaultDepositOutcomeToast(
 ): void {
   const t = useTranslations();
   const announced = useRef<string | undefined>(undefined);
-  // A ref so a re-created callback identity can never re-trigger the effect —
-  // the announcement (and therefore the retire signal) must fire exactly once.
-  const onSettledRef = useRef(onSettled);
-  onSettledRef.current = onSettled;
+  const notifySettled = useEffectEvent(() => onSettled?.());
 
   const { data } = useSWR(
     movementId ? (["dashboard-earn-vault-deposit", movementId] as const) : null,
@@ -871,7 +900,244 @@ export function useEarnVaultDepositOutcomeToast(
       // actionable and "the deposit failed" is not.
       toast.error(data.failureReason || t(VAULT_DEPOSIT_OUTCOME_KEYS.failed));
     }
-    onSettledRef.current?.();
+    notifySettled();
+  }, [data, t]);
+}
+
+// ---------------------------------------------------------------------------
+// Vault withdrawals (PRO-1702) — the deposit seam's exit mirror. One
+// deliberate vocabulary difference: this surface speaks the unified LEDGER's
+// own statuses (`requested … finalized`), where `confirmed` is NOT terminal —
+// so everything here keys terminality on
+// `EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct`, never the legacy deposit set.
+// ---------------------------------------------------------------------------
+
+/**
+ * Annotated shared withdrawal schemas for the same reason the deposit
+ * schemas are: a field added or renamed in `@sdp/types` must fail typecheck
+ * here rather than be silently stripped from a parsed leg.
+ */
+const earnVaultWithdrawalSchema: z.ZodType<EarnVaultWithdrawal> = z.object({
+  movementId: z.string(),
+  positionId: z.string(),
+  provider: z.string(),
+  providerReference: z.string(),
+  status: z.enum(EARN_MOVEMENT_STATUSES.vault_direct),
+  signature: z.string(),
+  shares: z.string(),
+  shareMint: z.string(),
+  failureReason: z.string().nullable(),
+  createdAt: z.string(),
+  confirmedAt: z.string().nullable(),
+  settledAt: z.string().nullable(),
+  replayed: z.boolean().optional(),
+});
+
+const earnVaultWithdrawalOutcomeSchema = z.union([
+  z
+    .object({ data: z.object({ withdrawal: earnVaultWithdrawalSchema }) })
+    .transform(({ data }) => ({ kind: "submitted" as const, withdrawal: data.withdrawal })),
+  z
+    .object({
+      error: z.object({
+        code: z.literal("SIGNING_PENDING"),
+        message: z.string(),
+        details: z
+          .object({
+            approvalRequestId: z.string().optional(),
+            walletOperationId: z.string().optional(),
+          })
+          .optional(),
+      }),
+    })
+    .transform(({ error }) => ({
+      kind: "approval_pending" as const,
+      message: error.message,
+      approvalRequestId: error.details?.approvalRequestId,
+      walletOperationId: error.details?.walletOperationId,
+    })),
+]);
+
+export type EarnVaultWithdrawalOutcome = z.infer<typeof earnVaultWithdrawalOutcomeSchema>;
+
+/**
+ * Exit a vault position back to the custody wallet that holds it. Same
+ * body-rebuild and 202-contract rules as `createEarnVaultDeposit`: the caller
+ * cannot smuggle fields into a value-moving request, and an approval hold is
+ * accepted only on a 202.
+ */
+export async function createEarnVaultWithdrawal(
+  input: EarnVaultWithdrawalRequest,
+  idempotencyKey: string,
+  signal?: AbortSignal
+): Promise<DashboardFetchResult<EarnVaultWithdrawalOutcome>> {
+  const body: EarnVaultWithdrawalRequest = {
+    positionId: input.positionId,
+    shares: input.shares,
+  };
+  const result = await dashboardFetch<unknown>("/api/dashboard/markets/earn/vault-withdrawals", {
+    method: "POST",
+    headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
+    body,
+    signal,
+  });
+
+  if (!result.ok) return result;
+
+  const invalid = {
+    ok: false,
+    error: "Invalid vault withdrawal response",
+    status: result.status,
+    body: result.data,
+  } as const;
+
+  const parsed = earnVaultWithdrawalOutcomeSchema.safeParse(result.data);
+  if (!parsed.success) return invalid;
+  if (parsed.data.kind === "approval_pending" && result.status !== 202) return invalid;
+
+  return { ok: true, status: result.status, data: parsed.data };
+}
+
+const earnVaultWithdrawalResponseSchema = z.object({
+  data: z.object({ withdrawal: earnVaultWithdrawalSchema }),
+});
+
+/**
+ * Read one recorded withdrawal. `undefined` for every unusable answer, and
+ * deliberately NOT terminal — the caller keeps polling, because a read that
+ * failed says nothing about whether the exit landed.
+ */
+export async function fetchEarnVaultWithdrawal(
+  movementId: string
+): Promise<EarnVaultWithdrawal | undefined> {
+  const result = await dashboardFetch<unknown>(
+    `/api/dashboard/markets/earn/vault-withdrawals/${encodeURIComponent(movementId)}`
+  );
+  if (!result.ok) return undefined;
+  const parsed = earnVaultWithdrawalResponseSchema.safeParse(result.data);
+  return parsed.success ? parsed.data.data.withdrawal : undefined;
+}
+
+const earnVaultWithdrawalsPageSchema = z.object({
+  data: z.object({
+    withdrawals: z.array(earnVaultWithdrawalSchema),
+    hasMore: z.boolean(),
+    nextCursor: z.string().nullable(),
+  }),
+});
+
+/**
+ * This workspace's recorded withdrawals, newest first. PAGES TO THE END
+ * and fails loudly rather than truncating, exactly like the deposits reader —
+ * a silently short page here is an exit that stops being tracked.
+ */
+export async function fetchEarnVaultWithdrawals(
+  options: { settled?: boolean } = {}
+): Promise<EarnVaultWithdrawal[]> {
+  return fetchAllVaultMovementPages({
+    resource: "withdrawals",
+    settled: options.settled,
+    parsePage(value) {
+      const parsed = earnVaultWithdrawalsPageSchema.safeParse(value);
+      if (!parsed.success) return null;
+      return {
+        items: parsed.data.data.withdrawals,
+        hasMore: parsed.data.data.hasMore,
+        nextCursor: parsed.data.data.nextCursor,
+      };
+    },
+  });
+}
+
+/**
+ * The movement a given idempotency key produced, if one exists yet. The held-key
+ * pre-flight for the approval path, with the same three-outcome contract as
+ * the deposit's: collapsing `unavailable` into `absent` would let a failed
+ * read reuse a spent key.
+ */
+export type EarnVaultWithdrawalsByRequestId =
+  | { kind: "found"; withdrawal: EarnVaultWithdrawal }
+  | { kind: "absent" }
+  | { kind: "unavailable" };
+
+export async function fetchEarnVaultWithdrawalsByRequestId(
+  requestId: string
+): Promise<EarnVaultWithdrawalsByRequestId> {
+  const result = await dashboardFetch<unknown>(
+    `/api/dashboard/markets/earn/vault-withdrawals?requestId=${encodeURIComponent(requestId)}`
+  );
+  if (!result.ok) return { kind: "unavailable" };
+  const parsed = earnVaultWithdrawalsPageSchema.safeParse(result.data);
+  if (!parsed.success) return { kind: "unavailable" };
+  const [withdrawal] = parsed.data.data.withdrawals;
+  return withdrawal ? { kind: "found", withdrawal } : { kind: "absent" };
+}
+
+/**
+ * The DISCOVERY tier for in-flight withdrawals, 30s, mirroring
+ * `useEarnVaultDeposits`, and the reason an exit signed before a reload, in
+ * another tab, or unblocked by a policy approval minutes later becomes
+ * visible (and watched) again.
+ */
+export function useEarnVaultWithdrawals() {
+  const { data, error, isLoading, mutate } = useSWR(
+    "dashboard-earn-vault-withdrawals-in-flight",
+    () => fetchEarnVaultWithdrawals({ settled: false }),
+    { refreshInterval: 30_000 }
+  );
+  return { withdrawals: data, error, isLoading, refresh: () => void mutate() };
+}
+
+/**
+ * The unified ledger's terminal set for a vault movement: `finalized | failed`.
+ * NOT the legacy deposit set — on this surface `confirmed` is optimistic chain
+ * commitment that a fork can still drop, and a poll that stopped there would
+ * announce a settlement the chain has not finished making.
+ */
+const SETTLED_VAULT_WITHDRAWAL_STATUSES: ReadonlySet<EarnVaultDirectMovementStatus> = new Set(
+  EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct
+);
+
+/** Shared by the recovery filter and the poll's stop condition — one rule. */
+export function isEarnVaultWithdrawalInFlight(withdrawal: EarnVaultWithdrawal): boolean {
+  return !SETTLED_VAULT_WITHDRAWAL_STATUSES.has(withdrawal.status);
+}
+
+const VAULT_WITHDRAWAL_OUTCOME_KEYS = {
+  finalized: "DashboardEarn.vaultWithdraw.outcomeFinalized",
+  failed: "DashboardEarn.vaultWithdraw.outcomeFailed",
+} as const satisfies Record<"finalized" | "failed", MessageKey>;
+
+/** Announce how the recorded withdrawal movement ended. */
+export function useEarnVaultWithdrawalOutcomeToast(
+  movementId: string | undefined,
+  onSettled?: () => void
+): void {
+  const t = useTranslations();
+  const announced = useRef<string | undefined>(undefined);
+  const notifySettled = useEffectEvent(() => onSettled?.());
+
+  const { data } = useSWR(
+    movementId ? (["dashboard-earn-vault-withdrawal", movementId] as const) : null,
+    ([, watchedId]) => fetchEarnVaultWithdrawal(watchedId),
+    {
+      refreshInterval: (withdrawal) =>
+        withdrawal && SETTLED_VAULT_WITHDRAWAL_STATUSES.has(withdrawal.status) ? 0 : 5_000,
+      dedupingInterval: EARN_PROGRAM_DEDUPING_MS,
+    }
+  );
+
+  useEffect(() => {
+    if (!data || !SETTLED_VAULT_WITHDRAWAL_STATUSES.has(data.status)) return;
+    if (announced.current === data.movementId) return;
+    announced.current = data.movementId;
+
+    if (data.status === "finalized") {
+      toast.success(t(VAULT_WITHDRAWAL_OUTCOME_KEYS.finalized));
+    } else {
+      toast.error(data.failureReason || t(VAULT_WITHDRAWAL_OUTCOME_KEYS.failed));
+    }
+    notifySettled();
   }, [data, t]);
 }
 
@@ -1027,10 +1293,7 @@ export function useEarnWithdrawalOutcomeToast(
 ): void {
   const t = useTranslations();
   const announced = useRef<string | undefined>(undefined);
-  // A ref so a re-created callback identity can never re-trigger the effect —
-  // the announcement (and therefore the retire signal) must fire exactly once.
-  const onSettledRef = useRef(onSettled);
-  onSettledRef.current = onSettled;
+  const notifySettled = useEffectEvent(() => onSettled?.());
 
   const { data } = useSWR(
     programId && withdrawalRef ? ["dashboard-earn-withdrawal", programId, withdrawalRef] : null,
@@ -1063,6 +1326,6 @@ export function useEarnWithdrawalOutcomeToast(
       // avoid.
       toast.error(message);
     }
-    onSettledRef.current?.();
+    notifySettled();
   }, [data, t]);
 }
