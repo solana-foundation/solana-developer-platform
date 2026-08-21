@@ -3,6 +3,9 @@ import { VedaEarnClient } from "@sdp/earn/providers/veda/client";
 import type {
   EarnRuntimeContext,
   EarnVaultDepositInput,
+  EarnVaultDepositQuote,
+  EarnVaultDepositQuoteInput,
+  EarnVaultDepositQuoteProvider,
   EarnVaultDirectProvider,
   EarnVaultInstruction,
   EarnVaultPositionInput,
@@ -13,7 +16,7 @@ import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
 import { address } from "@solana/kit";
 import { SdpVedaError } from "./errors";
 import { type VedaClusterConfig, vedaClusterConfig } from "./programs";
-import { buildVedaDepositPlan, readVedaPosition } from "./sdk";
+import { buildVedaDepositPlan, previewVedaDeposit, readVedaPosition } from "./sdk";
 import type { VedaInstructionPlan, VedaRuntime } from "./types";
 
 /** One position page may fan out over several vaults; never fan out unbounded. */
@@ -111,7 +114,10 @@ export function toEarnVaultTransactionPlan(plan: VedaInstructionPlan): EarnVault
  * the organization's own custody wallet and Veda's own surfaces can redeem them.
  * See `docs/decisions/` for the withdrawal design that lands it.
  */
-export class VedaVaultDirectClient extends VedaEarnClient implements EarnVaultDirectProvider {
+export class VedaVaultDirectClient
+  extends VedaEarnClient
+  implements EarnVaultDirectProvider, EarnVaultDepositQuoteProvider
+{
   /**
    * Where a PROVEN RPC endpoint comes from and how its operation is bounded.
    *
@@ -170,6 +176,32 @@ export class VedaVaultDirectClient extends VedaEarnClient implements EarnVaultDi
       assertActive();
       return operation(runtime, config, assertActive);
     });
+  }
+
+  /**
+   * The live quote a slippage floor is derived from (`supportsVaultDepositQuote`).
+   *
+   * A READ: it enters through the same proof-then-deadline boundary as every
+   * chain call, but takes no floor itself and moves nothing. Blocking
+   * conditions come back in `blockingIssues` in the vault's own words rather
+   * than as a thrown error — the caller is deciding whether to offer a
+   * deposit, and "the vault is paused" is part of that answer.
+   */
+  async quoteVaultDeposit(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultDepositQuoteInput
+  ): Promise<EarnVaultDepositQuote> {
+    const quote = await this.withRuntime(ctx, "Quoting the vault deposit", (runtime, config) =>
+      previewVedaDeposit(runtime, config, {
+        vault: address(input.providerReference),
+        amount: input.amount,
+      })
+    );
+    return {
+      sharesOut: quote.sharesOut,
+      shareDecimals: quote.shareDecimals,
+      blockingIssues: quote.issues,
+    };
   }
 
   async buildVaultDeposit(

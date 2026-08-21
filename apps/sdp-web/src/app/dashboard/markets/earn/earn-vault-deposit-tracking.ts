@@ -52,8 +52,23 @@ export function vaultDepositRequestFingerprint(input: {
   strategyId: string;
   custodyWalletId: string;
   amount: string;
+  /**
+   * The derived share floor, or `null` when the provider takes no derived
+   * floor. In the fingerprint because the API's own idempotency fingerprint
+   * includes it: replaying a held key with a DIFFERENT floor is a changed
+   * request the server refuses, so the client must mint a fresh key for it —
+   * exactly the property that lets "raise the tolerance and retry" work after
+   * a slippage refusal.
+   */
+  minSharesOut: string | null;
 }): string {
-  return JSON.stringify([input.projectId, input.strategyId, input.custodyWalletId, input.amount]);
+  return JSON.stringify([
+    input.projectId,
+    input.strategyId,
+    input.custodyWalletId,
+    input.amount,
+    input.minSharesOut,
+  ]);
 }
 
 export function claimVaultDepositIdempotencyKey(fingerprint: string): string {

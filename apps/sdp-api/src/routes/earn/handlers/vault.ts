@@ -1,4 +1,7 @@
 import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
+import { supportsVaultDepositQuote } from "@sdp/earn/capabilities";
+import { notImplemented } from "@sdp/earn/errors";
+import type { EarnVaultDepositQuote } from "@sdp/earn/types";
 import { isDecimalString } from "@sdp/solana/amount";
 import type {
   EarnVaultDepositRecord,
@@ -14,6 +17,7 @@ import {
   earnDepositStyle,
   isVaultDirectDepositEnabled,
 } from "@sdp/types/provider-access";
+import { SdpVedaError } from "@sdp/veda";
 import { z } from "zod";
 import { getDb } from "@/db";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
@@ -69,6 +73,7 @@ import type { AppContext } from "../context";
 import { earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
 import {
   earnVaultDepositParamsSchema,
+  type earnVaultDepositPreviewSchema,
   type earnVaultDepositSchema,
   earnVaultDepositsQuerySchema,
   earnVaultPositionsQuerySchema,
@@ -90,6 +95,88 @@ import { parseParams, parseQuery } from "./shared";
  * endpoint that meant both would have to explain which half happened when the
  * chain rejected the transfer.
  */
+/**
+ * POST /v1/earn/vault-deposit-previews — what would this deposit mint right
+ * now, from the provider's own live accounting. The dashboard derives its
+ * `minSharesOut` floor from this quote, so the floor tracks the live share
+ * rate instead of assuming one.
+ *
+ * A READ that takes the deposit's own money-in gates: the quote exists only
+ * to open a NEW position, so surfacing, entitlement, admission and the
+ * environment capability all apply exactly as they do on the deposit —
+ * but no wallet, no policy gate and no idempotency key, because it moves
+ * nothing and holds nothing.
+ */
+export async function createEarnVaultDepositPreview(
+  c: ValidatedBodyContext<typeof earnVaultDepositPreviewSchema>
+) {
+  const body = c.req.valid("json");
+  const environment = resolveSdpEnvironment(c);
+  const auth = getAuth(c);
+
+  if (!isVaultDirectDepositEnabled(environment)) {
+    throw new AppError(
+      "FORBIDDEN",
+      "Vault deposits are not available in production yet, so there is nothing to quote."
+    );
+  }
+
+  const strategy = await getEarnRepository(c).getStrategyById(body.strategyId);
+  if (!strategy || strategy.environment !== environment) {
+    throw notFound("Earn strategy");
+  }
+  if (earnDepositStyle(strategy.provider) !== "vault_direct") {
+    throw badRequest(
+      `${strategy.provider} is a custodial provider; use POST /v1/earn/programs instead.`
+    );
+  }
+  if (!isEarnProviderId(strategy.provider)) {
+    throw providerNotConfigured(
+      `Earn provider ${strategy.provider} is not available in this deployment`
+    );
+  }
+  const provider = strategy.provider;
+
+  assertEarnProviderSurfaced(provider);
+  await assertProviderAvailable(
+    c.env,
+    getDb(c.env),
+    auth.organizationId,
+    "earn",
+    provider,
+    environment === "sandbox"
+  );
+  assertStrategyDepositable(strategy, environment);
+
+  const deadline = createVaultDeadline();
+  const client = resolveVaultDirectClient(c.env, provider, deadline);
+  if (!client || !supportsVaultDepositQuote(client)) {
+    throw notImplemented(provider, "vault deposit quoting");
+  }
+
+  let quote: EarnVaultDepositQuote;
+  try {
+    quote = await client.quoteVaultDeposit(earnRuntime(c), {
+      providerReference: strategy.provider_reference,
+      amount: body.amount,
+    });
+  } catch (error) {
+    // An unusable amount is the CALLER's, in the provider's own words —
+    // same mapping the deposit build applies. Everything else keeps bubbling.
+    if (error instanceof SdpVedaError && error.code === "INVALID_AMOUNT") {
+      throw badRequest(error.message);
+    }
+    throw error;
+  }
+
+  return success(c, {
+    strategyId: strategy.id,
+    sharesOut: quote.sharesOut,
+    shareDecimals: quote.shareDecimals,
+    blockingIssues: quote.blockingIssues,
+  });
+}
+
 export async function createEarnVaultDeposit(
   c: ValidatedBodyContext<typeof earnVaultDepositSchema>
 ) {

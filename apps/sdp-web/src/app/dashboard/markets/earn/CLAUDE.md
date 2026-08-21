@@ -150,7 +150,10 @@ program create still sends the body `requestId` form.
   record-before-broadcast window must carry the SAME key or the chain accepts
   the transfer twice — there is no provider-side dedupe behind this route — and
   a React ref dies with the modal and with the page load.
-  - The fingerprint is `(project, strategy, wallet, amount)`. The PROJECT is in
+  - The fingerprint is `(project, strategy, wallet, amount, minSharesOut)` —
+    the derived slippage floor is in there because the API's own fingerprint
+    includes it, so "raise the tolerance and retry" is a CHANGED request that
+    must mint a fresh key rather than replay the refused one. The PROJECT is in
     there because an organization-level custody config gives two projects the same
     `custody_wallets` row: without it, switching project in one tab and
     re-submitting the same strategy and amount reuses the first project's key, and

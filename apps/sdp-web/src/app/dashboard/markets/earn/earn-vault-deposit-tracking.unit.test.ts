@@ -17,6 +17,7 @@ const request = {
   strategyId: "strategy_1",
   custodyWalletId: "wallet_1",
   amount: "1",
+  minSharesOut: null,
 };
 
 let nextUuid = 0;
@@ -48,6 +49,9 @@ describe("vaultDepositRequestFingerprint", () => {
       { ...request, strategyId: "strategy_2" },
       { ...request, custodyWalletId: "wallet_2" },
       { ...request, amount: "2" },
+      // A changed floor is a changed request the API's own fingerprint refuses
+      // under a replayed key — "raise the tolerance and retry" needs a fresh one.
+      { ...request, minSharesOut: "0.999" },
     ]) {
       expect(vaultDepositRequestFingerprint(different)).not.toBe(base);
     }
