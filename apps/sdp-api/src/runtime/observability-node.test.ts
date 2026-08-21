@@ -1,3 +1,4 @@
+import { sentryScrubbingHooks } from "@sdp/redaction";
 import * as Sentry from "@sentry/node";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SentryOptions } from "./observability";
@@ -15,6 +16,7 @@ const baseOpts = (overrides: Partial<SentryOptions> = {}): SentryOptions => ({
   environment: "test",
   tracesSampleRate: 1,
   sendDefaultPii: false,
+  ...sentryScrubbingHooks,
   ...overrides,
 });
 

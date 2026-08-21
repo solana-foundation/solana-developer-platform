@@ -84,3 +84,64 @@ describe("logger context", () => {
     expect(records[0]).toMatchObject({ level: 50, severity: "ERROR" });
   });
 });
+
+// The log sink's half of the PII policy. These go through a real pino instance
+// on purpose: the scrubbing lives in the logger's own hook, so a test that
+// mocked the logger would prove nothing about what reaches Cloud Logging.
+describe("logger PII scrubbing", () => {
+  it("redacts counterparty identity fields a caller passed by hand", () => {
+    const { logger, records } = captureLogger();
+
+    logger.info(
+      {
+        counterpartyId: "cp_1",
+        email: "jane.doe@example.com",
+        identity: { firstName: "Jane", dateOfBirth: "1988-04-02", phone: "+15551234567" },
+        walletAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+      },
+      "counterparty created"
+    );
+
+    expect(records[0]).toMatchObject({
+      counterpartyId: "cp_1",
+      email: "[REDACTED]",
+      identity: "[REDACTED]",
+      // The Solana address is public on-chain and the handle for tracing the
+      // payment; scrubbing it would blind the on-call engineer.
+      walletAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    });
+  });
+
+  it("redacts an address that only appears inside the message", () => {
+    const { logger, records } = captureLogger();
+
+    logger.warn({ provider: "mural" }, "rejected quote for jane.doe@example.com");
+
+    expect(records[0].message).toBe("rejected quote for [REDACTED_EMAIL]");
+    expect(records[0].provider).toBe("mural");
+  });
+
+  it("redacts credentials that leaked into a provider error message", () => {
+    const { logger, records } = captureLogger();
+
+    logger.error({ error: new Error('Privy 401 {"appSecret":"privy-secret"}') }, "provider failed");
+
+    const serialized = JSON.stringify(records[0]);
+    expect(serialized).not.toContain("privy-secret");
+    // Still an Error to pino, so the `error` serializer shape is unchanged.
+    expect(records[0].error).toMatchObject({ type: "Error" });
+  });
+
+  it("scrubs nested payloads without flattening the structure around them", () => {
+    const { logger, records } = captureLogger();
+
+    logger.info(
+      { accounts: [{ accountNumber: "000123456789", accountKind: "bank_account" }] },
+      "listed accounts"
+    );
+
+    expect(records[0].accounts).toEqual([
+      { accountNumber: "[REDACTED]", accountKind: "bank_account" },
+    ]);
+  });
+});

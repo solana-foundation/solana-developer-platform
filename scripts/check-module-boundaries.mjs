@@ -28,6 +28,7 @@ const MODULE_METADATA = [
       "@sdp/payments",
       "@sdp/policy",
       "@sdp/private-channels",
+      "@sdp/redaction",
       "@sdp/rpc",
       "@sdp/solana",
       "@sdp/spc-escrow",
@@ -58,6 +59,7 @@ const MODULE_METADATA = [
       "@sdp/issuance",
       "@sdp/policy",
       "@sdp/private-channels",
+      "@sdp/redaction",
       "@sdp/solana",
       "@sdp/types",
     ],
@@ -84,7 +86,7 @@ const MODULE_METADATA = [
     name: "@sdp/custody",
     directory: "packages/sdp-custody",
     purpose: "Custody provider abstractions and keychain adapters.",
-    allowedDependencies: ["@sdp/types"],
+    allowedDependencies: ["@sdp/redaction", "@sdp/types"],
   },
   {
     name: "@sdp/earn",
@@ -120,7 +122,7 @@ const MODULE_METADATA = [
     name: "@sdp/payments",
     directory: "packages/sdp-payments",
     purpose: "Payment domain services, fee payment, and ramp providers.",
-    allowedDependencies: ["@sdp/rpc", "@sdp/solana", "@sdp/types"],
+    allowedDependencies: ["@sdp/redaction", "@sdp/rpc", "@sdp/solana", "@sdp/types"],
   },
   {
     name: "@sdp/policy",
@@ -139,6 +141,13 @@ const MODULE_METADATA = [
     directory: "packages/sdp-private-channels",
     purpose: "Solana Private Channels gateway, auth, and instance clients.",
     allowedDependencies: ["@sdp/rpc", "@sdp/types"],
+  },
+  {
+    name: "@sdp/redaction",
+    directory: "packages/sdp-redaction",
+    purpose:
+      "Central PII and credential denylist plus the scrubbers every log, Sentry, and audit boundary applies.",
+    allowedDependencies: [],
   },
   {
     name: "@sdp/rpc",

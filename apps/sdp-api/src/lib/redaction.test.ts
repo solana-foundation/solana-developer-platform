@@ -1,4 +1,4 @@
-import { redactCredentialSecrets, redactCredentialString } from "@sdp/custody";
+import { redactCredentialSecrets, redactCredentialString } from "@sdp/redaction";
 import { describe, expect, it } from "vitest";
 
 describe("credential redaction", () => {
@@ -51,6 +51,24 @@ describe("credential redaction", () => {
   it("keeps plain Basic/Bearer prose intact", () => {
     expect(redactCredentialString("Basic validation failed")).toBe("Basic validation failed");
     expect(redactCredentialString("Bearer access denied")).toBe("Bearer access denied");
+  });
+
+  it("leaves counterparty PII alone, because this pass feeds client-facing errors", () => {
+    // A 4xx body goes back to the tenant that submitted the data, so a
+    // validation error has to keep naming the field that failed. PII scrubbing
+    // is the telemetry pass (`scrubTelemetry` / `scrubAuditMetadata`), not this
+    // one — see docs/security/pii-scrubbing-policy.md.
+    const redacted = redactCredentialSecrets({
+      email: "jane.doe@example.com",
+      identity: { firstName: "Jane" },
+      appSecret: "privy-secret",
+    });
+
+    expect(redacted).toEqual({
+      email: "jane.doe@example.com",
+      identity: { firstName: "Jane" },
+      appSecret: "[REDACTED]",
+    });
   });
 
   it("redacts PEM blocks", () => {

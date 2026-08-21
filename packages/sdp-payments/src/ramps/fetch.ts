@@ -1,3 +1,4 @@
+import { scrubTelemetryString } from "@sdp/redaction";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { SdpPaymentsError, type SdpPaymentsErrorCode } from "../errors";
 
@@ -33,6 +34,13 @@ export function classifyProviderStatus(status: number): SdpPaymentsErrorCode {
   return "BAD_REQUEST";
 }
 
+/**
+ * Ramp providers validate the counterparty fields we submit and echo them back
+ * in the failure ("email jane@doe.test is already registered", "phone must be
+ * E.164"). That message becomes an `SdpPaymentsError` that is both logged and
+ * returned, so it is scrubbed at the one place every provider's error passes
+ * through — the wording stays actionable, the identifier does not survive.
+ */
 export function extractProviderErrorMessage(payload: unknown, fallback: string): string {
   if (!payload || typeof payload !== "object") return fallback;
   const record = payload as {
@@ -43,7 +51,7 @@ export function extractProviderErrorMessage(payload: unknown, fallback: string):
     errorMessage?: unknown;
   };
   const message = record.error?.message ?? record.message ?? record.reason ?? record.errorMessage;
-  return typeof message === "string" && message.trim() ? message : fallback;
+  return typeof message === "string" && message.trim() ? scrubTelemetryString(message) : fallback;
 }
 
 export async function providerFetch<TBody = never>(

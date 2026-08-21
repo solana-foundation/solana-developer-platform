@@ -128,7 +128,8 @@ export const invitePrivateChannelUser = async (
       invitedBy: auth.userId ?? null,
     });
 
-    // Email is scaffolded — log the URL so admins can copy it from stdout.
+    // Email is scaffolded — the URL comes back in the response body so an admin
+    // can copy it from there. It is not logged: it embeds the invite token.
     const frontendUrl = c.env.FRONTEND_URL ?? "";
     const inviteUrl = frontendUrl
       ? `${frontendUrl.replace(/\/$/, "")}/invite/${encodeURIComponent(inviteToken)}`

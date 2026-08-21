@@ -5,6 +5,7 @@
  * inject lightweight implementations while production uses `@sentry/node`.
  */
 
+import { type SentryScrubbingHooks, sentryScrubbingHooks } from "@sdp/redaction";
 import type { Env } from "@/types/env";
 
 export interface ObservabilityScope {
@@ -22,7 +23,7 @@ export interface Observability {
   withMonitor<T>(slug: string, fn: () => Promise<T>, opts: MonitorOptions): Promise<T>;
 }
 
-export interface SentryOptions {
+export interface SentryOptions extends SentryScrubbingHooks {
   dsn?: string;
   enabled: boolean;
   environment: string;
@@ -68,6 +69,10 @@ export function getSentryOptions(env: Env): SentryOptions {
     enabled: isSentryEnabled(env),
     environment: env.ENVIRONMENT,
     tracesSampleRate,
+    // `sendDefaultPii: false` only stops the SDK collecting PII by itself; it
+    // says nothing about what this application attaches. The scrubbing hooks
+    // are what actually holds the line, on every payload type the SDK sends.
     sendDefaultPii: false,
+    ...sentryScrubbingHooks,
   };
 }

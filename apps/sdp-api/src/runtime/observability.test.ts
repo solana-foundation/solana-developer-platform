@@ -132,3 +132,64 @@ describe("getSentryOptions", () => {
     });
   });
 });
+
+describe("getSentryOptions PII scrubbing", () => {
+  const PAYLOAD = {
+    counterpartyId: "cp_1",
+    email: "jane.doe@example.com",
+    identity: { firstName: "Jane", dateOfBirth: "1988-04-02" },
+    walletAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+  };
+
+  it("wires a hook for every payload type the SDK sends", () => {
+    // Sentry scrubs nothing on its own: a payload type without a hook is a sink
+    // with no scrubbing, which is the gap this ticket exists to close.
+    const opts = getSentryOptions(envWith({}));
+
+    for (const hook of [
+      "beforeSend",
+      "beforeSendTransaction",
+      "beforeSendSpan",
+      "beforeSendLog",
+      "beforeSendMetric",
+      "beforeBreadcrumb",
+    ] as const) {
+      expect(typeof opts[hook]).toBe("function");
+    }
+  });
+
+  it("scrubs an error event while keeping the ids an issue is read through", () => {
+    const opts = getSentryOptions(envWith({}));
+
+    const event = opts.beforeSend({
+      event_id: "evt_1",
+      user: { id: "user_1", email: "jane.doe@example.com" },
+      extra: PAYLOAD,
+    });
+
+    const serialized = JSON.stringify(event);
+    expect(serialized).not.toContain("jane.doe@example.com");
+    expect(serialized).not.toContain("Jane");
+    expect(event?.event_id).toBe("evt_1");
+    expect(event?.user.id).toBe("user_1");
+    expect(event?.extra.walletAddress).toBe("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM");
+  });
+
+  it("scrubs traces, spans, logs, metrics, and breadcrumbs too", () => {
+    const opts = getSentryOptions(envWith({}));
+
+    const payloads = [
+      opts.beforeSendTransaction({ transaction: "POST /v1/counterparties", extra: PAYLOAD }),
+      opts.beforeSendSpan({ span_id: "span_1", data: PAYLOAD }),
+      opts.beforeSendLog({ level: "info", body: "created jane.doe@example.com" }),
+      opts.beforeSendMetric({ name: "counterparty.created", value: 1, attributes: PAYLOAD }),
+      opts.beforeBreadcrumb({ category: "http", data: PAYLOAD }),
+    ];
+
+    for (const payload of payloads) {
+      const serialized = JSON.stringify(payload);
+      expect(serialized).not.toContain("jane.doe@example.com");
+      expect(serialized).not.toContain("1988-04-02");
+    }
+  });
+});
