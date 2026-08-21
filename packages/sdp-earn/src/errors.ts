@@ -62,7 +62,14 @@ export function providerUnavailable(
   return new SdpEarnError("PROVIDER_UNAVAILABLE", message, details);
 }
 
-export function notImplemented(provider: EarnProviderId, operation: string): SdpEarnError {
+// `EarnProviderId | string`: provider ids read from DB rows are OPEN strings
+// (ADR 0001 drift rule — a row can outlive its provider's registry entry), and
+// the capability answer for one of those is exactly this error. The union
+// keeps registry-typed call sites checked while admitting row-sourced ids.
+export function notImplemented(
+  provider: EarnProviderId | (string & {}),
+  operation: string
+): SdpEarnError {
   return new SdpEarnError("NOT_IMPLEMENTED", `${provider} ${operation} is not implemented yet`, {
     provider,
     operation,

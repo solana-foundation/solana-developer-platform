@@ -19,6 +19,7 @@ import { getLogger } from "@/runtime/logger";
 import { getSentryOptions, isSentryEnabled } from "@/runtime/observability";
 import { initNodeSentry, nodeObservability } from "@/runtime/observability-node";
 import { shutdown } from "@/runtime/shutdown-node";
+import { assertSigningProviderAllowed } from "@/services/adapters/signing";
 import type { Env } from "@/types/env";
 
 const DEFAULT_PORT = 8787;
@@ -98,6 +99,7 @@ function assertRequiredEnv(env: Env): void {
   if (!env.REDIS_URL?.trim()) {
     throw new Error("REDIS_URL is required for the Node runtime");
   }
+  assertSigningProviderAllowed(env);
 }
 
 async function main(): Promise<void> {

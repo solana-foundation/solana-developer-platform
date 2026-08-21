@@ -178,6 +178,8 @@ export interface EarnVaultPosition {
   closedAt: string | null;
   /** Absent when the provider read failed; never coerce an unavailable value to zero. */
   shares?: string;
+  /** Unstaked shares immediately redeemable through SDP; absent when unreadable. */
+  withdrawableShares?: string;
   /** Deposit-token value, absent when the provider cannot hydrate the position. */
   tokenValue?: string;
 }
@@ -286,6 +288,46 @@ export interface EarnVaultDepositResponse {
  */
 export interface EarnVaultDepositsPage {
   deposits: EarnVaultDepositRecord[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
+/** JSON body for POST /v1/earn/vault-withdrawals. Idempotency is header-only. */
+export interface EarnVaultWithdrawalRequest {
+  /** The vault position being exited — from GET /v1/earn/vault-positions. */
+  positionId: string;
+  /** Shares to redeem; the position's `withdrawableShares` is the observed ceiling. */
+  shares: string;
+}
+
+/** One signed vault withdrawal movement. */
+export interface EarnVaultWithdrawal {
+  movementId: string;
+  positionId: string;
+  provider: string;
+  /** The vault's on-chain address — the instrument, not the payout. */
+  providerReference: string;
+  status: EarnVaultDirectMovementStatus;
+  signature: string;
+  /** Total shares requested by the caller, decimal string, share units. */
+  shares: string;
+  shareMint: string;
+  failureReason: string | null;
+  createdAt: string;
+  confirmedAt: string | null;
+  settledAt: string | null;
+  /** Present on POST responses; true when the idempotency anchor was replayed. */
+  replayed?: boolean;
+}
+
+/** Response body of GET /v1/earn/vault-withdrawals/:movementId and POST. */
+export interface EarnVaultWithdrawalResponse {
+  withdrawal: EarnVaultWithdrawal;
+}
+
+/** Response body of GET /v1/earn/vault-withdrawals: logical withdrawals, newest first. */
+export interface EarnVaultWithdrawalsPage {
+  withdrawals: EarnVaultWithdrawal[];
   hasMore: boolean;
   nextCursor: string | null;
 }
@@ -732,16 +774,13 @@ export function isTerminalEarnMovementStatus(
  * movement, only advancement.
  *
  * ── Who enforces this, and when ───────────────────────────────────────────
- * The custodial half is enforced NOW: `earn-withdrawal-ledger.service.ts`
- * derives its compare-and-swap source statuses from it, so there is no second
- * copy to drift from. The vault half has no enforcer in this release — the
- * live guard (`assertValidMovementTransition` in `earn-vault.repository.ts`)
- * still speaks migration 0059's legacy vocabulary (`pending`, and `confirmed`
- * as terminal) because it guards the LEGACY table, which is still the
- * authoritative writer here. It is replaced by a guard reading this matrix in
- * the release that switches reads to the unified ledger; until then the
- * vault half describes the ledger's intended lifecycle, and the conformance
- * test in `earn-movements.repository.test.ts` pins it against
+ * Both halves are enforced NOW, by a single guard. `allowedSourceStatuses` in
+ * `earn-movements.repository.ts` derives every compare-and-swap's legal source
+ * states from this matrix, for both execution models, so there is no second
+ * copy to drift from. Naming a target the matrix does not carry throws; a
+ * source it does not allow is refused by the CAS matching zero rows, which is
+ * the answer a lost race already gave. The conformance test in
+ * `earn-movements.repository.test.ts` pins the matrix against
  * `earn_movement_statuses`.
  *
  * The matrix is written to be consistent with migration 0062's CHECK
@@ -790,3 +829,70 @@ export const EARN_MOVEMENT_TRANSITIONS = {
     >
   >;
 };
+
+/**
+ * One row of the unified Earn ledger — the cross-provider movement record.
+ *
+ * This is the read PRO-1669 asked for and neither legacy shape could serve: one
+ * chronological history of every money movement an organization made through
+ * Earn, whichever provider executed it and whichever way. `EarnVaultDepositRecord`
+ * and `EarnProgramWithdrawalRecord` remain the per-family views, and both are
+ * projections of this same row.
+ *
+ * Unlike those two, this speaks the ledger's own vocabulary — `requested` and
+ * `finalized` included — because it is a new contract with no client to keep
+ * compatible. A consumer reads `executionModel` to know which optional fields to
+ * expect.
+ *
+ * Every amount is denominated in `denomination`: `usd` for a custodial movement,
+ * the token MINT for a vault one. Never sum across rows without grouping by it.
+ * Share quantities appear only in the share-named fields and are not comparable
+ * to the amounts.
+ */
+export interface EarnMovementRecord {
+  id: string;
+  /** Open string — a row can outlive its provider's registry entry. */
+  provider: string;
+  executionModel: EarnExecutionModel;
+  direction: EarnMovementDirection;
+  status: EarnMovementStatus;
+  /** The holding this movement belongs to; every movement has exactly one. */
+  positionId: string;
+  /** `usd`, or the token mint. The unit of every amount below. */
+  denomination: string;
+  amountRequested: string;
+  /** What actually moved, once the provider or the chain has said so. */
+  amountSettled?: string;
+  feeAmount?: string;
+  /** Share units (vault movements only). */
+  minSharesOut?: string;
+  sharesOut?: string;
+  /** Payout stablecoin symbol for a custodial withdrawal; not the unit. */
+  payoutToken?: string;
+  /** The vault's on-chain address (vault movements only). */
+  vaultAddress?: string;
+  /** Where the money came from and went, when SDP observed either. */
+  sourceAddress?: string;
+  destinationAddress?: string;
+  /** The provider's own id for THIS movement, when it has one. */
+  providerReference?: string;
+  /** Solana transaction signature (vault movements only). */
+  signature?: string;
+  failureReason?: string;
+  /** Who moved it: a dashboard user, an API key, or neither for a system write. */
+  createdBy?: string;
+  initiatedByKeyId?: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Optimistic chain commitment; not settlement. */
+  confirmedAt?: string;
+  /** Success-terminal: finalization, or provider completion. */
+  settledAt?: string;
+}
+
+/** Response body of GET /v1/earn/movements — newest first, keyset-paged. */
+export interface EarnMovementsPage {
+  movements: EarnMovementRecord[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}

@@ -8,7 +8,7 @@ A set of **agent skills** that walk an engineer through integrating a new fiat�
 
 ## How agents pick them up
 
-Skills load automatically in coding agents that scan a skills directory. The canonical home is `.agents/skills/`:
+The canonical home is `.agents/skills/`. These workflows are explicit-only: discover them in the agent's skill menu and invoke the one you want; their descriptions do not need to occupy normal task context.
 
 - **Codex** reads `$CWD/.agents/skills` natively — run it from the repo root.
 - **Claude Code** reads them via the `.claude/skills` → `.agents/skills` symlink.
@@ -16,7 +16,7 @@ Skills load automatically in coding agents that scan a skills directory. The can
 
 ## Where to start
 
-Open **`integrate-ramp-provider`** first — the umbrella that sequences the work and lists the non-negotiable rules (no fallbacks, HTTP in the provider / DB in the handler, fully typed webhooks, env-var secrets). Pass it a **`docs`** parameter pointing at your provider's API documentation (e.g. `docs: https://docs.yourprovider.com`) so each step maps your endpoints accurately. Then work the steps:
+Explicitly invoke **`integrate-ramp-provider`** first — the umbrella that sequences the work and lists the non-negotiable rules (no fallbacks, HTTP in the provider / DB in the handler, fully typed webhooks, env-var secrets). Pass it a **`docs`** parameter pointing at your provider's API documentation (e.g. `docs: https://docs.yourprovider.com`) so each step maps your endpoints accurately. Then work the steps:
 
 | Skill | Covers |
 |---|---|

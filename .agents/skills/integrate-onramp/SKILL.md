@@ -1,6 +1,7 @@
 ---
 name: integrate-onramp
 description: Implement a ramp provider's fiat→crypto on-ramp quote — createOnrampQuote → PaymentRampQuote — and wire the handler dispatch that resolves DB state. Use when opening a PR against apps/sdp-api to add on-ramp support for a ramp provider.
+disable-model-invocation: true
 ---
 
 # Integrate on-ramp

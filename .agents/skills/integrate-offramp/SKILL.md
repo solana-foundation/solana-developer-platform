@@ -1,6 +1,7 @@
 ---
 name: integrate-offramp
 description: Implement a ramp provider's crypto→fiat off-ramp quote — createOfframpQuote (required) → PaymentRampQuote — and wire the handler dispatch that resolves the source wallet and payout account. Use when opening a PR against apps/sdp-api to add off-ramp support for a ramp provider.
+disable-model-invocation: true
 ---
 
 # Integrate off-ramp

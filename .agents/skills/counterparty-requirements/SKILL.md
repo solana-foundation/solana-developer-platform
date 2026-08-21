@@ -1,6 +1,7 @@
 ---
 name: counterparty-requirements
 description: Implement a ramp provider's validateCounterparty → CounterpartyRequirements — a pure, synchronous decision over stored provider_data — plus the JIT collected-field advance flow. Use when opening a PR against apps/sdp-api to add counterparty/KYC requirements for a ramp provider.
+disable-model-invocation: true
 ---
 
 # Counterparty requirements

@@ -35,14 +35,12 @@ const signature =
 
 const plan: EarnVaultTransactionPlan = {
   cluster: "devnet",
-  transactions: [
-    [
-      {
-        programAddress: "11111111111111111111111111111111",
-        accounts: [],
-        data: "",
-      },
-    ],
+  instructions: [
+    {
+      programAddress: "11111111111111111111111111111111",
+      accounts: [],
+      data: "",
+    },
   ],
   lookupTables: [],
   assetIdentity: {
@@ -71,14 +69,12 @@ function feePayment(overrides: Partial<FeePaymentPort> = {}): FeePaymentPort {
 function planForOwner(owner: Address): EarnVaultTransactionPlan {
   return {
     ...plan,
-    transactions: [
-      [
-        {
-          programAddress: "11111111111111111111111111111111",
-          accounts: [{ address: owner, role: AccountRole.READONLY_SIGNER }],
-          data: "",
-        },
-      ],
+    instructions: [
+      {
+        programAddress: "11111111111111111111111111111111",
+        accounts: [{ address: owner, role: AccountRole.READONLY_SIGNER }],
+        data: "",
+      },
     ],
   };
 }
@@ -189,9 +185,80 @@ describe("vault execution validation", () => {
     expect(solanaRpc.createRpc).not.toHaveBeenCalled();
     expect(solanaRpc.getRecentBlockhash).not.toHaveBeenCalled();
   });
+
+  it("rejects lookup-table transport failures instead of returning a simulation verdict", async () => {
+    const planWithLookupTable = {
+      ...plan,
+      lookupTables: ["11111111111111111111111111111112"],
+    };
+
+    await expect(
+      simulateVaultPlan(env, {
+        cluster: "devnet",
+        deadline: createVaultDeadline(),
+        expectedAssetIdentity: plan.assetIdentity,
+        plan: planWithLookupTable,
+        owner: ownerAddress,
+        rpcUrl,
+      })
+    ).rejects.toBeTruthy();
+  });
 });
 
 describe("vault signing lifecycle", () => {
+  it("reuses successful simulation preparation for signing", async () => {
+    const owner = await generateKeyPairSigner();
+    const simulation = await simulateVaultPlan(env, {
+      cluster: "devnet",
+      deadline: createVaultDeadline(),
+      expectedAssetIdentity: plan.assetIdentity,
+      plan,
+      owner: owner.address,
+      rpcUrl,
+    });
+    if (!simulation.ok) throw new Error("expected simulation to succeed");
+
+    await signVaultPlan(env, {
+      cluster: "devnet",
+      deadline: createVaultDeadline(),
+      expectedAssetIdentity: plan.assetIdentity,
+      plan,
+      owner,
+      rpcUrl,
+      fee: { kind: "wallet-pays" },
+      prepared: simulation.prepared,
+    });
+
+    expect(genesisSend).toHaveBeenCalledTimes(1);
+    expect(solanaRpc.getRecentBlockhash).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a signed transaction above Solana's byte limit", async () => {
+    const owner = await generateKeyPairSigner();
+    const oversizedPlan: EarnVaultTransactionPlan = {
+      ...plan,
+      instructions: [
+        {
+          programAddress: "11111111111111111111111111111111",
+          accounts: [{ address: owner.address, role: AccountRole.READONLY_SIGNER }],
+          data: Buffer.alloc(1_500).toString("base64"),
+        },
+      ],
+    };
+
+    await expect(
+      signVaultPlan(env, {
+        cluster: "devnet",
+        deadline: createVaultDeadline(),
+        expectedAssetIdentity: plan.assetIdentity,
+        plan: oversizedPlan,
+        owner,
+        rpcUrl,
+        fee: { kind: "wallet-pays" },
+      })
+    ).rejects.toThrow("Solana allows at most 1232");
+  });
+
   it("fully signs a sponsored transaction without sending it", async () => {
     const owner = await generateKeyPairSigner();
     const sponsor = await generateKeyPairSigner();
