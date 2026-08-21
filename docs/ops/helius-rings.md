@@ -101,10 +101,18 @@ Cloud Run deployment gets — web replicas skip the in-process scheduler under
 `K_SERVICE`). Registered unconditionally in both, inert unless
 `HELIUS_RINGS_ENABLED=true` and `HELIUS_RINGS_ADAPTER=http`:
 
-1. Operations in `indexing` poll `verifyIndexed` through the port; a hit
+1. Operations in `submitted` are advanced to `indexing` and polled in the same
+   call. This is the crash-recovery path: the broadcast happens inside
+   `submitted`, so a process that dies before the indexing transition commits
+   leaves a live transaction there. The signed bytes are not persisted, so
+   there is nothing to resubmit — the signature is handed to Photon and the
+   indexing budget settles it either way.
+2. Operations in `indexing` poll `verifyIndexed` through the port; a hit
    completes them.
-2. Operations stuck in `indexing` past 30 minutes fail as `indexing_timeout`
-   (retryable).
+3. Operations stuck in `indexing` past 30 minutes fail as `indexing_timeout`
+   (retryable). The budget is not applied to a resumed `submitted` row: it
+   measures how long Photon has been asked, and that row has not been asked
+   yet.
 
 ## Diagnostics
 
@@ -131,7 +139,13 @@ method at a time (health first), flipping `HELIUS_RINGS_ADAPTER=http` when the
 sidecar is reachable.
 
 One gap remains in `runPipeline` for the moment that flip happens: **nothing
-sweeps `ready_to_sign` or `submitted`.** `poll-rings-indexing` only picks up
-`indexing`, so an operation that dies mid-transition needs a human. The
-signature is persisted before the broadcast, so the recovery is a lookup rather
-than a search — but the sweep itself is still to write.
+sweeps `ready_to_sign`.** An operation that dies between the proof landing and
+the signature being persisted needs a human. Nothing was broadcast in that
+window, so there is no on-chain effect to reconcile — the row is stale state,
+not a lost transaction.
+
+`submitted` is covered. The broadcast happens inside `submitted`, so that was
+the one window where a crash could strand a live transaction; the sweep now
+picks those rows up and `executeOperation` treats `submitted` as executable, so
+a stranded broadcast either completes on a Photon hit or fails retryably at the
+indexing budget.

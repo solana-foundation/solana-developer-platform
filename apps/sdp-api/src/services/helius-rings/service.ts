@@ -95,7 +95,11 @@ export interface PrepareOperationContext extends HeliusRingsActor {
 }
 
 /** States `executeOperation` acts on; the rest return unchanged. */
-const EXECUTABLE_STATES: ReadonlySet<OperationState> = new Set(["approval_required", "indexing"]);
+const EXECUTABLE_STATES: ReadonlySet<OperationState> = new Set([
+  "approval_required",
+  "submitted",
+  "indexing",
+]);
 
 export function createHeliusRingsService(
   env: Env,
@@ -309,10 +313,11 @@ export class HeliusRingsService {
   /**
    * Advances an operation that is waiting on an external condition. Idempotent
    * per state: an approval still pending or a signature not yet indexed leaves
-   * the row untouched.
+   * the row untouched. `submitted` is executable too, so a broadcast whose
+   * indexing transition never committed is resumed rather than stranded.
    */
   async executeOperation(operationId: string): Promise<PrivateOperation> {
-    const operation = await this.requireOperation(operationId);
+    let operation = await this.requireOperation(operationId);
     if (!EXECUTABLE_STATES.has(operation.state)) {
       return this.toPrivateOperation(operation);
     }
@@ -345,6 +350,21 @@ export class HeliusRingsService {
       const proving = await this.transition(operation.id, "approval_required", "approved");
       if (!proving) return this.toPrivateOperation(await this.requireOperation(operation.id));
       return this.toPrivateOperation(await this.runPipeline(proving));
+    }
+
+    // submitted: the broadcast either landed or never left the process, and
+    // nothing here can tell the two apart — only the signature is persisted, not
+    // the signed bytes, so there is nothing to resubmit. Both readings resolve
+    // the same way: hand the signature to Photon and let the indexing budget
+    // settle it. A hit completes the operation; a miss times out as
+    // `indexing_timeout` (retryable). Without this, a crash between the RPC
+    // call and the submitted → indexing transition left a live transaction
+    // outside reconciliation forever — the poll skips non-`indexing` rows,
+    // execute ignored `submitted`, and retry requires `failed`.
+    if (operation.state === "submitted") {
+      const resumed = await this.transition(operation.id, "submitted", "submitted");
+      if (!resumed) return this.toPrivateOperation(await this.requireOperation(operation.id));
+      operation = resumed;
     }
 
     // indexing: poll Photon through the port.

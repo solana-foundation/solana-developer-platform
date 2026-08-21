@@ -140,4 +140,30 @@ describe("pollRingsIndexing", () => {
     expect(row?.failure_code).toBe("indexing_timeout");
     expect(row?.retryable).toBe(true);
   });
+
+  it("sweeps a broadcast stranded in submitted into reconciliation", async () => {
+    const gateway = new InMemoryRingsGateway({ indexingDelayMs: 0 });
+    const operation = await serviceWith(gateway).prepareOperation(
+      { walletId, opType: "shield", clientNonce: "job-stranded" },
+      { apiKeyId: null, actor: null, custodyWalletId: null }
+    );
+    expect(operation.state).toBe("indexing");
+    gateway.recordSubmission(OUTER_TX.signature);
+
+    // Exactly the row a process that died between the RPC broadcast and the
+    // submitted → indexing commit leaves behind. Before the sweep covered
+    // `submitted`, nothing in the system would ever look at this row again.
+    await getDb(env)
+      .prepare("UPDATE helius_rings_operations SET state = 'submitted' WHERE id = ?")
+      .bind(operation.id)
+      .run();
+
+    await pollRingsIndexing(jobEnv, { createService: () => serviceWith(gateway) });
+
+    const row = await createHeliusRingsOperationRepository(env).getOperationById({
+      ...tenant,
+      id: operation.id,
+    });
+    expect(row?.state).toBe("completed");
+  });
 });

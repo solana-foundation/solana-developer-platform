@@ -1,10 +1,15 @@
 /**
- * Background job: poll Photon for rings operations stuck in `indexing`.
+ * Background job: reconcile rings operations that have already been broadcast.
  *
  * Each tick sweeps in-flight operations:
- *  1. `indexing` → `executeOperation` polls `verifyIndexed` through the port;
+ *  1. `submitted` → `executeOperation` advances it to `indexing` and polls in
+ *     the same call. This is the crash-recovery path: the broadcast happens
+ *     inside `submitted`, so a process that dies before the indexing
+ *     transition commits leaves a live transaction here, and nothing else
+ *     would ever look at it again.
+ *  2. `indexing` → `executeOperation` polls `verifyIndexed` through the port;
  *     a hit completes the operation, a miss leaves it untouched (idempotent).
- *  2. `indexing` older than the timeout budget → `failed:indexing_timeout`
+ *  3. `indexing` older than the timeout budget → `failed:indexing_timeout`
  *     (retryable) — the sweep never leaves an operation in limbo forever.
  *
  * Ships dormant: the job early-returns unless the feature flag is on AND
@@ -63,15 +68,26 @@ export async function pollRingsIndexing(
   const logger = getLogger();
   const timeoutCutoff = now().getTime() - RINGS_INDEXING_TIMEOUT_MS;
 
-  // Deliberately sequential. Each iteration builds a per-tenant service and runs
-  // a transactional state transition, so fanning the batch out concurrently
-  // would put up to MAX_PER_RUN pipelines on the shared pool in one tick — and
-  // the per-operation catch below would no longer isolate a single failure.
-  // The 30-minute indexing budget leaves ample room for a serial sweep.
+  // Deliberately sequential. executeOperation makes one Photon call per
+  // operation, so fanning MAX_PER_RUN out would put 100 unthrottled requests at
+  // the indexer every tick. It would not even buy much: the pool caps at 10
+  // connections with a 5s acquire timeout, so the batch serializes there anyway
+  // and any operation that waits longer is logged as a failure that never
+  // happened. Serial also keeps listInFlightOperations' oldest-first ordering
+  // meaningful when there is a backlog. The 60s tick against the 30-minute
+  // indexing budget leaves ample headroom.
+  //
+  // Note this is not about error isolation: the catch below is per-operation and
+  // would survive a Promise.all over the same body unchanged.
   for (const operation of inFlight) {
-    if (operation.state !== "indexing") continue;
+    // `submitted` rides along with `indexing`: executeOperation advances it and
+    // polls in one call, which is the only thing that rescues a broadcast whose
+    // indexing transition never committed. The timeout is deliberately not
+    // applied to it — the budget measures how long Photon has been asked, and a
+    // resumed operation has not been asked yet.
+    if (operation.state !== "indexing" && operation.state !== "submitted") continue;
     try {
-      if (Date.parse(operation.updated_at) < timeoutCutoff) {
+      if (operation.state === "indexing" && Date.parse(operation.updated_at) < timeoutCutoff) {
         await failIndexingTimeout(repository, operation);
         continue;
       }

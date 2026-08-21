@@ -302,6 +302,30 @@ describe("HeliusRingsService", () => {
       // Executing a terminal operation is a no-op.
       expect((await svc.executeOperation(operation.id)).state).toBe("completed");
     });
+
+    it("resumes a broadcast stranded in submitted", async () => {
+      const gateway = new InMemoryRingsGateway({ indexingDelayMs: 0 });
+      const svc = liveishService({ gateway });
+      const operation = await svc.prepareOperation(
+        operationInput({ clientNonce: "nonce-stranded" }),
+        actorContext
+      );
+      expect(operation.state).toBe("indexing");
+
+      // Exactly the row a process that died between the RPC broadcast and the
+      // submitted → indexing commit leaves behind: the signature is durable,
+      // the state never moved on.
+      await getDb(env)
+        .prepare("UPDATE helius_rings_operations SET state = 'submitted' WHERE id = ?")
+        .bind(operation.id)
+        .run();
+      gateway.recordSubmission(OUTER_TX.signature);
+
+      // One execute both advances it out of `submitted` and polls Photon, so a
+      // stranded broadcast lands in reconciliation instead of sitting forever.
+      const resumed = await svc.executeOperation(operation.id);
+      expect(resumed.state).toBe("completed");
+    });
   });
 
   describe("retryOperation", () => {
