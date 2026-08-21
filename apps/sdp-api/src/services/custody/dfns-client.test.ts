@@ -62,7 +62,7 @@ describe("dfns client redirects", () => {
     ).rejects.toThrow(/cross-origin redirect/);
 
     const attackerCalls = fetchMock.mock.calls.filter(([input]) =>
-      toUrlString(input).startsWith(ATTACKER_ORIGIN)
+      hasOrigin(input, ATTACKER_ORIGIN)
     );
     expect(attackerCalls).toHaveLength(0);
   });
@@ -120,7 +120,7 @@ describe("dfns client redirects", () => {
     ).rejects.toThrow(/IBM Digital Asset Haven API returned a cross-origin redirect/);
 
     const attackerCalls = fetchMock.mock.calls.filter(([input]) =>
-      toUrlString(input).startsWith(ATTACKER_ORIGIN)
+      hasOrigin(input, ATTACKER_ORIGIN)
     );
     expect(attackerCalls).toHaveLength(0);
   });
@@ -295,6 +295,15 @@ function toUrlString(input: string | URL | Request): string {
   }
 
   return input.url;
+}
+
+/**
+ * Exact origin match. A `startsWith` prefix test would also accept
+ * `attacker.example.test.somewhere-else`, so it cannot prove a request never
+ * reached the attacker — and it is the comparison the client itself makes.
+ */
+function hasOrigin(input: string | URL | Request, origin: string): boolean {
+  return new URL(toUrlString(input)).origin === origin;
 }
 
 function jsonResponse(body: unknown, status: number): Response {
