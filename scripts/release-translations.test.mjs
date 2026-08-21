@@ -800,9 +800,11 @@ test("reports a run that threw before it could summarize", () => {
   assert.match(markdown, /<!-- sdp-translation-summary -->/, "must update the summary in place");
   assert.match(markdown, /Status: \*\*failed\*\*/);
   assert.match(markdown, /Cannot add wallet\.balance\.label: balance is not an object/);
-  assert.match(
-    markdown,
-    /https:\/\/github\.com\/solana-foundation\/solana-developer-platform\/actions\/runs\/424242/
+  assert.ok(
+    markdown.includes(
+      "- Failing run: https://github.com/solana-foundation/solana-developer-platform/actions/runs/424242"
+    ),
+    "the comment has to link the run that failed, because the run itself is green"
   );
   assert.match(markdown, /does not gate the push to `main`/);
 });
