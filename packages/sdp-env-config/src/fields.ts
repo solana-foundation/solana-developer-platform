@@ -714,6 +714,30 @@ export const FIELDS: EnvField[] = [
     help: "Gates Private Channels API routes and deposit/withdrawal reconcilers.",
   },
   {
+    key: "HELIUS_RINGS_ENABLED",
+    section: "advanced",
+    kind: "select",
+    label: "Helius Rings enabled",
+    defaultValue: "false",
+    options: [
+      { value: "false", label: "Disabled" },
+      { value: "true", label: "Enabled" },
+    ],
+    help: "Gates the devnet-only Helius Rings shielded wallet API routes.",
+  },
+  {
+    key: "HELIUS_RINGS_ADAPTER",
+    section: "advanced",
+    kind: "select",
+    label: "Helius Rings gateway adapter",
+    defaultValue: "none",
+    options: [
+      { value: "none", label: "Not implemented (default)" },
+      { value: "http", label: "Live HTTP gateway" },
+    ],
+    help: 'Only "http" activates the live Rings gateway and the indexing-poll job.',
+  },
+  {
     key: "SPC_CREDENTIAL_ENCRYPTION_KEY",
     section: "secrets",
     kind: "secret",

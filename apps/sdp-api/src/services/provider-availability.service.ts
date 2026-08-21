@@ -136,7 +136,7 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
   custody: {
     local: {
       label: "Local",
-      isConfigured: (env) => hasEnv(env, "CUSTODY_PRIVATE_KEY"),
+      isConfigured: (env) => isSelfHostedDeployment(env) && hasEnv(env, "CUSTODY_PRIVATE_KEY"),
     },
     fireblocks: {
       label: "Fireblocks",

@@ -13,6 +13,18 @@ import type { CounterpartyAccountsRepository } from "./counterparty-account.repo
 import { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 import type { EarnRepository } from "./earn.repository";
 import { createPostgresEarnRepository } from "./earn.repository.postgres";
+import type { HeliusRingsEventRepository } from "./helius-rings-event.repository";
+import { createPostgresHeliusRingsEventRepository } from "./helius-rings-event.repository.postgres";
+import type { HeliusRingsHealthRepository } from "./helius-rings-health.repository";
+import { createPostgresHeliusRingsHealthRepository } from "./helius-rings-health.repository.postgres";
+import type { HeliusRingsKeyRefRepository } from "./helius-rings-key-ref.repository";
+import { createPostgresHeliusRingsKeyRefRepository } from "./helius-rings-key-ref.repository.postgres";
+import type { HeliusRingsOperationRepository } from "./helius-rings-operation.repository";
+import { createPostgresHeliusRingsOperationRepository } from "./helius-rings-operation.repository.postgres";
+import type { HeliusRingsWalletRepository } from "./helius-rings-wallet.repository";
+import { createPostgresHeliusRingsWalletRepository } from "./helius-rings-wallet.repository.postgres";
+import type { HeliusRingsZoneRepository } from "./helius-rings-zone.repository";
+import { createPostgresHeliusRingsZoneRepository } from "./helius-rings-zone.repository.postgres";
 import type { KycWalletsRepository } from "./kyc-wallet.repository";
 import { createPostgresKycWalletsRepository } from "./kyc-wallet.repository.postgres";
 import type { NotificationsRepository } from "./notification.repository";
@@ -216,6 +228,30 @@ export function createNotificationsRepository(env: Env): NotificationsRepository
 
 export function createEarnRepository(env: Env): EarnRepository {
   return createPostgresEarnRepository(getDb(env));
+}
+
+export function createHeliusRingsWalletRepository(env: Env): HeliusRingsWalletRepository {
+  return createPostgresHeliusRingsWalletRepository(getDb(env));
+}
+
+export function createHeliusRingsOperationRepository(env: Env): HeliusRingsOperationRepository {
+  return createPostgresHeliusRingsOperationRepository(getDb(env));
+}
+
+export function createHeliusRingsKeyRefRepository(env: Env): HeliusRingsKeyRefRepository {
+  return createPostgresHeliusRingsKeyRefRepository(getDb(env));
+}
+
+export function createHeliusRingsZoneRepository(env: Env): HeliusRingsZoneRepository {
+  return createPostgresHeliusRingsZoneRepository(getDb(env));
+}
+
+export function createHeliusRingsEventRepository(env: Env): HeliusRingsEventRepository {
+  return createPostgresHeliusRingsEventRepository(getDb(env));
+}
+
+export function createHeliusRingsHealthRepository(env: Env): HeliusRingsHealthRepository {
+  return createPostgresHeliusRingsHealthRepository(getDb(env));
 }
 
 export function createPrivateChannelInstanceRepository(env: Env): PrivateChannelInstanceRepository {
