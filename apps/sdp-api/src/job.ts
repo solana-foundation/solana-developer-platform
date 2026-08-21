@@ -8,6 +8,7 @@ import { PENDING_DEPOSITS_MONITOR } from "@/cron/pending-deposits";
 import { PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
 import { PENDING_WITHDRAWALS_MONITOR } from "@/cron/pending-withdrawals";
 import { RECURRING_PAYMENTS_COLLECTION_MONITOR } from "@/cron/recurring-payments";
+import { RINGS_INDEXING_MONITOR } from "@/cron/rings-indexing";
 import { WORKFLOW_EXECUTIONS_MONITOR } from "@/cron/workflow-executions";
 import { WORKFLOW_SECRET_RETIREMENTS_MONITOR } from "@/cron/workflow-secret-retirements";
 import { closeDatabasePools } from "@/db/client";
@@ -22,6 +23,7 @@ import { getLogger } from "@/runtime/logger";
 import { getSentryOptions, isSentryEnabled } from "@/runtime/observability";
 import { initNodeSentry, nodeObservability } from "@/runtime/observability-node";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
+import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
@@ -72,20 +74,28 @@ const MANAGED_JOB_CRON = "*/5 * * * *";
  *    their own monitors so a failing leg never skips the other. The job's
  *    five-minute schedule is the effective cadence, the same degradation from
  *    the per-minute crontab that pending-transfers accepts. Fatal.
- * 4. **Earn vault-movement reconciliation** — deliberately outside the Earn
+ * 4. **Rings indexing poll** — behind no gate here, because the job itself
+ *    early-returns unless the rings flag is on AND `HELIUS_RINGS_ADAPTER` is
+ *    `http`, which is why the in-process runner also schedules it
+ *    unconditionally. This job is the poll's only tick on managed deployments;
+ *    without it an operation that reached `indexing` would neither complete nor
+ *    ever time out. The five-minute schedule sits well inside the 30-minute
+ *    indexing budget, so the degradation from the per-minute crontab costs
+ *    nothing. Fatal.
+ * 5. **Earn vault-movement reconciliation** — deliberately outside the Earn
  *    gate: signed vault intents are an outbox, not feature state, so disabling
  *    new deposits cannot strand old ones. Fatal.
- * 5. **Workflow executions** (gated on asset profiles) — this job is the
+ * 6. **Workflow executions** (gated on asset profiles) — this job is the
  *    workflow engine's only tick on managed deployments; without it, enqueued
  *    executions would sit `pending` forever. Fatal.
- * 6. **Workflow secret retirements** — behind no flag, because the queue holds
+ * 7. **Workflow secret retirements** — behind no flag, because the queue holds
  *    credentials that are ALREADY orphaned, so cleanup must outlive the
  *    feature that filled it — and managed Cloud Run is where GCP Secret
  *    Manager is the default backend, so it is precisely where retirements are
  *    queued. Non-fatal: a queued row is never abandoned, the next run picks it
  *    up, and a failing sweep must not sink the reconciliation this job exists
  *    for.
- * 7. **Earn metrics refresh, then catalogue sync** (both gated on the two Earn
+ * 8. **Earn metrics refresh, then catalogue sync** (both gated on the two Earn
  *    flags). Refresh first — unslotted, this job's schedule IS its cadence —
  *    so a slow catalogue pass cannot eat the tick and leave rates stale;
  *    non-fatal because rates going one tick stale must not stop the sync.
@@ -155,6 +165,7 @@ export async function runCronJob(): Promise<void> {
       ]);
       failures.push(...rejectionReasons(outcomes));
     }
+    await collect(monitored(RINGS_INDEXING_MONITOR, () => pollRingsIndexing(env)));
     await collect(monitored(EARN_VAULT_MOVEMENTS_MONITOR, () => reconcileEarnVaultMovements(env)));
     if (isAssetProfilesEnabled(env)) {
       await collect(monitored(WORKFLOW_EXECUTIONS_MONITOR, () => runDueWorkflowExecutions(env)));

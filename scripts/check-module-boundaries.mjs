@@ -23,6 +23,7 @@ const MODULE_METADATA = [
       "@sdp/custody",
       "@sdp/earn",
       "@sdp/env-config",
+      "@sdp/helius-rings",
       "@sdp/issuance",
       "@sdp/kamino",
       "@sdp/payments",
