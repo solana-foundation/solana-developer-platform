@@ -2,6 +2,7 @@ import { isAddress } from "@sdp/solana/address";
 import {
   EARN_APY_TYPES,
   EARN_LIQUIDITY_TERMS,
+  EARN_MOVEMENT_DIRECTIONS,
   EARN_PORTFOLIO_TOKENS,
   EARN_STRATEGY_SOURCE_KINDS,
 } from "@sdp/types";
@@ -251,6 +252,64 @@ export const earnVaultDepositSchema = z.object({
   requestId: z
     .never(`Use the ${IDEMPOTENCY_KEY_HEADER} header; body requestId is not accepted`)
     .optional(),
+});
+
+/**
+ * The recorded movement a caller polls. Bounded because the value goes
+ * straight into a bind parameter; the row lookup is org-scoped, so anything
+ * this organization does not own answers 404 rather than a validation error.
+ */
+export const earnVaultDepositParamsSchema = z.object({
+  movementId: z.string().min(1).max(128),
+});
+
+/**
+ * Bounded keyset page over recorded deposits, newest first.
+ *
+ * `requestId` narrows to the caller's OWN idempotency key, which is how an
+ * approval-gated deposit becomes findable: the approval executor replays the
+ * original `Idempotency-Key`, so the movement it eventually creates carries it.
+ * A key is caller-chosen and only `[\x20-\x7e]{1,255}` (see
+ * `middleware/idempotency-key.ts`), so it can be short and guessable and can
+ * contain `/` or `?` — hence a QUERY filter rather than a path segment, and
+ * hence the route re-applies every scoping rule the detail route applies
+ * instead of treating the key as a capability.
+ */
+export const earnVaultDepositsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  before: z.string().min(1).optional(),
+  requestId: z.string().min(1).max(255).optional(),
+  /**
+   * `settled=false` returns only movements that can still change, which is what
+   * recovery wants. Without it a client has to page an unbounded history and
+   * filter locally — and a workspace busy enough to push an in-flight deposit
+   * past the first page would silently stop tracking it.
+   */
+  settled: z
+    .enum(["true", "false"])
+    .transform((value) => value === "true")
+    .optional(),
+});
+
+/**
+ * The cross-provider movement feed.
+ *
+ * Filters are narrow on purpose — each one answers a question a dashboard
+ * actually asks (what moved, in which direction, through which provider, on which
+ * holding, from or to which counterparty address) and every one of them is an
+ * equality match the ledger has an index for. `status` is left an open string
+ * because the vocabulary is per execution model: a value that belongs to the
+ * other model simply matches nothing, which is the honest answer.
+ */
+export const earnMovementsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  before: z.string().min(1).optional(),
+  direction: z.enum(EARN_MOVEMENT_DIRECTIONS).optional(),
+  status: z.string().min(1).max(64).optional(),
+  provider: z.string().min(1).max(64).optional(),
+  positionId: z.string().min(1).max(128).optional(),
+  sourceAddress: z.string().min(1).max(128).optional(),
+  destinationAddress: z.string().min(1).max(128).optional(),
 });
 
 /** Bounded keyset page over active vault holdings, newest first. */

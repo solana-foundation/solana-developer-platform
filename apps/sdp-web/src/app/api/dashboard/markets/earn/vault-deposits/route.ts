@@ -1,5 +1,7 @@
+import { NextResponse } from "next/server";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { proxyToSdpApi } from "@/lib/sdp-api";
+import { vaultDepositsProxyQuery } from "../provider-query";
 
 export async function POST(request: Request) {
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER);
@@ -12,5 +14,23 @@ export async function POST(request: Request) {
     // transport metadata the endpoint accepts; proxyToSdpApi owns every other
     // upstream header.
     upstreamHeaders: idempotencyKey ? { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey } : undefined,
+  });
+}
+
+/**
+ * This workspace's recorded deposits, so the dashboard can re-derive what is
+ * still in flight after a reload. No `upstreamHeaders`: unlike the POST above,
+ * this read accepts no client-owned transport metadata.
+ */
+export async function GET(request: Request) {
+  const validated = vaultDepositsProxyQuery(request);
+  if (!validated.ok) {
+    return NextResponse.json({ error: { message: validated.message } }, { status: 400 });
+  }
+
+  return proxyToSdpApi({
+    request,
+    traceSource: "route.dashboard.earn.vault_deposits.list",
+    path: `/v1/earn/vault-deposits${validated.query}`,
   });
 }

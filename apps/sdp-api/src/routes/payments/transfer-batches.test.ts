@@ -1749,15 +1749,16 @@ describe("payment transfer batches", () => {
     expect(body.data.transfers).toHaveLength(2);
 
     getSignatureStatusesMock.mockImplementation(async (_rpc, signatures) =>
-      signatures.map((signature) =>
-        String(signature) === FIRST_SIGNATURE
-          ? { slot: 200n, confirmations: 5n, confirmationStatus: "confirmed" as const, err: null }
-          : {
-              slot: 201n,
-              confirmations: 0n,
-              confirmationStatus: "confirmed" as const,
-              err: { InstructionError: [0, "Custom"] },
-            }
+      signatures.map(
+        (signature): solanaRpc.SignatureStatusInfo =>
+          String(signature) === FIRST_SIGNATURE
+            ? { slot: 200n, confirmations: 5n, confirmationStatus: "confirmed", err: null }
+            : {
+                slot: 201n,
+                confirmations: 0n,
+                confirmationStatus: "confirmed",
+                err: { InstructionError: [0, { Custom: 1 }] },
+              }
       )
     );
     await trackPendingTransfers(env);

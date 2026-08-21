@@ -1,0 +1,134 @@
+[package]
+name = "sdp-helius-gateway"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Stateless HTTP gateway over the Helius Rings (zolana) Rust SDK. Builds unsigned Solana transactions for SDP to sign and submit."
+
+# Upstream is edition 2021 and its root manifest warns that Solana platform-tools
+# Cargo 1.84 cannot build edition2024 crates. That applies to on-chain program
+# builds under platform-tools only -- this is a host-side binary built with
+# ordinary cargo, and Cargo mixes editions across the dependency graph freely.
+
+[dependencies]
+# --- Helius Rings (zolana) -----------------------------------------------------
+#
+# Unpublished workspace path members at 0.1.0, so a git rev pin is the only
+# option. This is helius-labs/zolana main HEAD as of 2026-08-06 -- the tree every
+# claim in this crate's README was verified against, including the account layout
+# src/zolana/preflight.rs asserts and the merge call graph src/zolana/authority.rs
+# depends on.
+#
+# NOT the v0.1.0-alpha tag: it has diverged from main (23 ahead, 4 behind), so it
+# is not an ancestor and would silently drop main's fixes.
+#
+# The rev is pinned for stability. Upstream had 15 open PRs in a three-day window,
+# several reworking the SDK. Bump it only after checking what changed, and revisit
+# once Helius freezes a supported devnet version.
+#
+# Only two of the 21 version pins this build needs are visible below. The other 19
+# are `cargo update --precise` alignments that live in Cargo.lock alone -- see the
+# first finding in README.md before running a bare `cargo update`.
+zolana-wallet = { git = "https://github.com/helius-labs/zolana", rev = "c53d7998e284a43ec29930cc342038e51c30fd0a" }
+zolana-client = { git = "https://github.com/helius-labs/zolana", rev = "c53d7998e284a43ec29930cc342038e51c30fd0a", features = [
+  "client",
+] }
+zolana-transaction = { git = "https://github.com/helius-labs/zolana", rev = "c53d7998e284a43ec29930cc342038e51c30fd0a" }
+zolana-keypair = { git = "https://github.com/helius-labs/zolana", rev = "c53d7998e284a43ec29930cc342038e51c30fd0a" }
+zolana-interface = { git = "https://github.com/helius-labs/zolana", rev = "c53d7998e284a43ec29930cc342038e51c30fd0a", features = [
+  "solana",
+] }
+
+# --- Transitive pins the zolana git dependency cannot give us ------------------
+#
+# READ THIS BEFORE RELAXING EITHER PIN.
+#
+# zolana constrains these in its own `[workspace.dependencies]`, but a git
+# consumer is the resolution root and does not inherit that table -- a
+# `[workspace.dependencies]` entry only constrains versions for crates that
+# actually reference it via `workspace = true`. Without the pins below, cargo
+# resolves latest-compatible and the agave wire graph fails to compile with ~47
+# errors of the form `Address: SchemaWrite<__WincodeConfig> is not satisfied`,
+# all inside `solana-message`.
+#
+# The mechanism: `solana-message 4.4.0` is built against `wincode 0.5.x`, so
+# every type it serializes must implement wincode 0.5's traits. Two crates will
+# silently upgrade `Address` (or its dependencies) to the wincode 0.6 trait
+# generation, and the two generations are not interchangeable:
+#
+#   solana-address    2.6.1 -> wincode ^0.5.0     2.7.0 -> wincode ^0.6.0
+#   solana-reward-info 6.2.0 -> wincode 0.5.x     6.3.0 -> wincode 0.6.0
+#
+# zolana pins `solana-reward-info = "=6.2.0"` with the same reasoning, but only
+# `version = "2.6"` (a caret range) on solana-address -- so 2.7.0 satisfies it
+# and only their committed Cargo.lock is holding their own build together. Worth
+# reporting upstream: `cargo update` on their side reproduces this failure.
+#
+# Features on solana-address mirror zolana's declaration so feature unification
+# produces the same build.
+solana-address = { version = "=2.6.1", features = [
+  "atomic",
+  "borsh",
+  "bytemuck",
+  "copy",
+  "decode",
+  "wincode",
+] }
+# Constraint-only: never imported. Present solely to hold the wincode 0.5 graph
+# together, which is why it has no corresponding `use` anywhere in src/.
+solana-reward-info = "=6.2.0"
+
+# --- HTTP stack ----------------------------------------------------------------
+# Needed to implement upstream's `#[async_trait]` WalletAuthority trait.
+async-trait = "0.1.92"
+axum = "0.8.9"
+# `time` is declared rather than inherited: tower-http's `timeout` feature and
+# axum both pull it in today, so this changes no resolution, but handler-level
+# `tokio::time::timeout` must not depend on either of them staying.
+tokio = { version = "1.53.1", features = [
+  "rt-multi-thread",
+  "macros",
+  "net",
+  "signal",
+  "time",
+] }
+tower = { version = "0.5.3", features = ["util"] }
+tower-http = { version = "0.7.0", features = ["trace", "timeout", "limit"] }
+
+# --- Serialization -------------------------------------------------------------
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+base64 = "0.23.1"
+
+# --- Observability -------------------------------------------------------------
+# `json` because Cloud Logging ingests structured JSON from stdout.
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["json", "env-filter"] }
+
+# --- Errors and secret handling ------------------------------------------------
+thiserror = "2.0.20"
+zeroize = { version = "1.9.0", features = ["derive"] }
+# RustCrypto's newer breaking line. Snippets written for hmac 0.12 / sha2 0.10
+# will not compile against these -- read the current docs, do not copy examples.
+hmac = "0.13.0"
+sha2 = "0.11.0"
+subtle = "2.6.1"
+
+[dev-dependencies]
+tokio = { version = "1.53.1", features = [
+  "rt-multi-thread",
+  "macros",
+  "net",
+  "signal",
+  "test-util",
+] }
+
+[lints.rust]
+# The wire layer is the contract; an undocumented public type there is a defect.
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+[lints.clippy]
+# Key material must never reach a panic path that could surface it in a message.
+unwrap_used = "warn"
+expect_used = "warn"

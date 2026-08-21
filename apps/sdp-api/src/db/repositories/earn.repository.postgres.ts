@@ -1,8 +1,6 @@
 import type {
   EarnApyType,
   EarnLiquidityTerm,
-  EarnPortfolioToken,
-  EarnProgramWithdrawalRecordStatus,
   EarnStrategyRiskMetadata,
   EarnStrategySourceKind,
   EarnStrategyStatus,
@@ -10,30 +8,22 @@ import type {
   SolanaCluster,
 } from "@sdp/types";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
-import type { AppDb } from "@/db";
+import { type AppDb, asTransactionalClient } from "@/db";
 import type {
-  CreateEarnProgramWithdrawalInput,
   DeleteUnlistedEarnStrategiesInput,
-  EarnProgramWithdrawalRow,
   EarnProviderWalletRow,
   EarnRepository,
   EarnStrategyRow,
   InsertEarnProviderWalletInput,
-  ListEarnProgramWithdrawalsInput,
-  ListEarnProgramWithdrawalsResult,
   ListEarnProviderWalletsInput,
   ListEarnProviderWalletsResult,
   ListEarnStrategiesInput,
   ListEarnStrategiesResult,
-  UpdateEarnProgramWithdrawalStatusGuardedInput,
   UpdateEarnStrategyMetricsInput,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
-import {
-  generateEarnProgramWithdrawalId,
-  generateEarnProviderWalletId,
-  generateEarnStrategyId,
-} from "./earn.repository";
+import { generateEarnProviderWalletId, generateEarnStrategyId } from "./earn.repository";
+import { mintEarnPositionForProviderWallet } from "./earn-movements.repository";
 
 /**
  * `host_cluster` is NULLABLE in the schema on purpose (migration 0057 is the
@@ -77,7 +67,7 @@ function mapProviderWalletRow(row: Record<string, unknown>): EarnProviderWalletR
   return {
     id: row.id as string,
     organization_id: row.organization_id as string,
-    project_id: row.project_id as string,
+    project_id: row.project_id as string | null,
     environment: row.environment as SdpEnvironment,
     provider: row.provider as string,
     provider_wallet_ref: row.provider_wallet_ref as string,
@@ -85,32 +75,6 @@ function mapProviderWalletRow(row: Record<string, unknown>): EarnProviderWalletR
     created_by: row.created_by as string,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
-  };
-}
-
-function mapProgramWithdrawalRow(row: Record<string, unknown>): EarnProgramWithdrawalRow {
-  return {
-    id: row.id as string,
-    organization_id: row.organization_id as string,
-    project_id: row.project_id as string,
-    wallet_id: row.wallet_id as string,
-    provider: row.provider as string,
-    status: row.status as EarnProgramWithdrawalRecordStatus,
-    amount_requested_usd: row.amount_requested_usd as string,
-    amount_paid_usd: row.amount_paid_usd as string | null,
-    fee_usd: row.fee_usd as string | null,
-    token: row.token as EarnPortfolioToken,
-    destination_address: row.destination_address as string,
-    failure_reason: row.failure_reason as string | null,
-    request_id: row.request_id as string,
-    idempotency_fingerprint: row.idempotency_fingerprint as string,
-    provider_reference: row.provider_reference as string | null,
-    provider_data: row.provider_data as Record<string, unknown>,
-    created_by: row.created_by as string | null,
-    initiated_by_key_id: row.initiated_by_key_id as string | null,
-    created_at: row.created_at as string,
-    updated_at: row.updated_at as string,
-    completed_at: row.completed_at as string | null,
   };
 }
 
@@ -129,7 +93,7 @@ function mapProgramWithdrawalRow(row: Record<string, unknown>): EarnProgramWithd
  */
 async function selectPage<Row>(
   db: AppDb,
-  table: "earn_strategies" | "earn_program_withdrawals" | "earn_provider_wallets",
+  table: "earn_strategies" | "earn_provider_wallets",
   conditions: string[],
   bindings: unknown[],
   window: { limit: number; offset: number },
@@ -409,163 +373,36 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
     async insertProviderWallet(input: InsertEarnProviderWalletInput) {
       const id = generateEarnProviderWalletId();
 
-      const row = await db
-        .prepare(
-          `INSERT INTO earn_provider_wallets (
+      // Linking a program also opens its custodial HOLDING in the unified
+      // ledger, atomically. Without it the program's first withdrawal would have
+      // no position to belong to, and the ledger requires every movement to have
+      // one (PRO-1705). 0064 does the same for programs that already exist.
+      return db.transaction(async (executor) => {
+        const transaction = asTransactionalClient(executor);
+        const row = await transaction
+          .prepare(
+            `INSERT INTO earn_provider_wallets (
              id, organization_id, project_id, environment,
              provider, provider_wallet_ref, label, created_by
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
            RETURNING *`
-        )
-        .bind(
-          id,
-          input.organizationId,
-          input.projectId,
-          input.environment,
-          input.provider,
-          input.providerWalletRef,
-          input.label,
-          input.createdBy
-        )
-        .first<Record<string, unknown>>();
+          )
+          .bind(
+            id,
+            input.organizationId,
+            input.projectId,
+            input.environment,
+            input.provider,
+            input.providerWalletRef,
+            input.label,
+            input.createdBy
+          )
+          .first<Record<string, unknown>>();
+        if (!row) return null;
 
-      return row ? mapProviderWalletRow(row) : null;
-    },
-
-    async createProgramWithdrawal(input: CreateEarnProgramWithdrawalInput) {
-      const id = generateEarnProgramWithdrawalId();
-
-      // Status comes from the DB default ('requested'): an intent row exists
-      // before the provider call is accepted, never in any other state.
-      const row = await db
-        .prepare(
-          `INSERT INTO earn_program_withdrawals (
-             id, organization_id, project_id, wallet_id, provider,
-             amount_requested_usd, token, destination_address,
-             request_id, idempotency_fingerprint, provider_data,
-             created_by, initiated_by_key_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)
-           RETURNING *`
-        )
-        .bind(
-          id,
-          input.organizationId,
-          input.projectId,
-          input.walletId,
-          input.provider,
-          input.amountRequestedUsd,
-          input.token,
-          input.destinationAddress,
-          input.requestId,
-          input.idempotencyFingerprint,
-          JSON.stringify(input.providerData ?? {}),
-          input.createdBy,
-          input.initiatedByKeyId
-        )
-        .first<Record<string, unknown>>();
-
-      return row ? mapProgramWithdrawalRow(row) : null;
-    },
-
-    async getProgramWithdrawalByRequestId(params) {
-      const row = await db
-        .prepare(
-          `SELECT * FROM earn_program_withdrawals
-             WHERE organization_id = ? AND wallet_id = ? AND request_id = ?`
-        )
-        .bind(params.organizationId, params.walletId, params.requestId)
-        .first<Record<string, unknown>>();
-      return row ? mapProgramWithdrawalRow(row) : null;
-    },
-
-    async getProgramWithdrawalByProviderReference(params) {
-      const row = await db
-        .prepare(
-          `SELECT * FROM earn_program_withdrawals
-             WHERE provider = ? AND provider_reference = ?`
-        )
-        .bind(params.provider, params.providerReference)
-        .first<Record<string, unknown>>();
-      return row ? mapProgramWithdrawalRow(row) : null;
-    },
-
-    async updateProgramWithdrawalStatusGuarded(
-      input: UpdateEarnProgramWithdrawalStatusGuardedInput
-    ) {
-      // Dynamic SET list, payments idiom: `undefined` means "don't touch",
-      // `null` is a real write; provider_data is a shallow JSONB merge.
-      // updated_at is DB-stamped (earn convention), never caller-supplied.
-      const assignments = ["status = ?", "updated_at = sdp_iso_now()"];
-      const assignmentValues: unknown[] = [input.toStatus];
-      if (input.providerReference !== undefined) {
-        assignments.push("provider_reference = ?");
-        assignmentValues.push(input.providerReference);
-      }
-      if (input.amountPaidUsd !== undefined) {
-        assignments.push("amount_paid_usd = ?");
-        assignmentValues.push(input.amountPaidUsd);
-      }
-      if (input.feeUsd !== undefined) {
-        assignments.push("fee_usd = ?");
-        assignmentValues.push(input.feeUsd);
-      }
-      if (input.failureReason !== undefined) {
-        assignments.push("failure_reason = ?");
-        assignmentValues.push(input.failureReason);
-      }
-      if (input.completedAt !== undefined) {
-        assignments.push("completed_at = ?");
-        assignmentValues.push(input.completedAt);
-      }
-      if (input.providerData !== undefined) {
-        assignments.push("provider_data = provider_data || ?::jsonb");
-        assignmentValues.push(JSON.stringify(input.providerData));
-      }
-
-      // The CAS guard and the org scope live in the same WHERE as the selector,
-      // so the whole transition is one atomic statement: the loser of a
-      // concurrent race simply matches zero rows.
-      const conditions = ["organization_id = ?", "status = ANY(?)"];
-      const conditionValues: unknown[] = [input.organizationId, [...input.fromStatuses]];
-      if ("withdrawalId" in input.selector) {
-        conditions.push("id = ?");
-        conditionValues.push(input.selector.withdrawalId);
-      } else {
-        conditions.push("provider = ?", "provider_reference = ?");
-        conditionValues.push(input.selector.provider, input.selector.providerReference);
-      }
-
-      const row = await db
-        .prepare(
-          `UPDATE earn_program_withdrawals
-             SET ${assignments.join(", ")}
-           WHERE ${conditions.join(" AND ")}
-           RETURNING *`
-        )
-        .bind(...assignmentValues, ...conditionValues)
-        .first<Record<string, unknown>>();
-
-      return row ? mapProgramWithdrawalRow(row) : null;
-    },
-
-    async listProgramWithdrawals(
-      input: ListEarnProgramWithdrawalsInput
-    ): Promise<ListEarnProgramWithdrawalsResult> {
-      // Wallet-scoped, not (org, project): every project in the environment
-      // reaches the same programs, and since PRO-1670 an organization may hold
-      // several — so the wallet id is what both joins sibling projects' history
-      // and keeps a sibling PROGRAM's payouts out. One program = one history.
-      const conditions = ["organization_id = ?", "wallet_id = ?"];
-      const bindings: unknown[] = [input.organizationId, input.walletId];
-
-      return selectPage(
-        db,
-        "earn_program_withdrawals",
-        conditions,
-        bindings,
-        input,
-        mapProgramWithdrawalRow
-      );
+        await mintEarnPositionForProviderWallet(transaction, id);
+        return mapProviderWalletRow(row);
+      });
     },
   };
 }

@@ -18,6 +18,8 @@ import {
   getTransactionDecoder,
   type RpcTransport,
   type Signature,
+  type Slot,
+  type TransactionError,
   type TransactionMessageBytesBase64,
 } from "@solana/kit";
 import { getSolanaConfig } from "./config";
@@ -564,10 +566,10 @@ export async function getSignaturesForAddress(
 // ═══════════════════════════════════════════════════════════════════════════
 
 export interface SignatureStatusInfo {
-  slot: bigint;
+  slot: Slot;
   confirmations: bigint | null;
-  confirmationStatus: "processed" | "confirmed" | "finalized" | null;
-  err: unknown | null;
+  confirmationStatus: Commitment | null;
+  err: TransactionError | null;
 }
 
 /**
@@ -591,10 +593,9 @@ export async function getSignatureStatuses(
     item
       ? {
           slot: item.slot,
-          confirmations: item.confirmations ?? null,
-          confirmationStatus:
-            (item.confirmationStatus as SignatureStatusInfo["confirmationStatus"]) ?? null,
-          err: item.err ?? null,
+          confirmations: item.confirmations,
+          confirmationStatus: item.confirmationStatus,
+          err: item.err,
         }
       : null
   );

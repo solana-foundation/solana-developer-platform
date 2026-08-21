@@ -303,7 +303,7 @@ apps/sdp-api/src/
                                    the programs family (list/create/re-target,
                                    live provider reads + the withdrawal
                                    ledger); strategies is the catalogue family.
-  db/migrations/postgres/0048–0056 earn_strategies (0048);
+  db/migrations/postgres/0048–0065 earn_strategies (0048);
                                    earn_provider_wallets (0049, the program
                                    link); earn_program_withdrawals (0055, the
                                    withdrawal ledger — 0055 also dropped the
@@ -311,11 +311,23 @@ apps/sdp-api/src/
                                    tables, PRO-1628); 0056 lifted the
                                    one-program-per-org cap and moved uniqueness
                                    onto (provider, provider_wallet_ref),
-                                   PRO-1670.
+                                   PRO-1670; earn_vault_positions +
+                                   earn_vault_movements (0059, the non-custodial
+                                   claim index and its signed-movement ledger);
+                                   earn_movements + earn_positions (0062-0065,
+                                   PRO-1705 — the ONE provider-neutral movement
+                                   ledger and ONE holdings table that supersede
+                                   the two mechanism-split tables above).
+                                   The mechanism-split tables above take no
+                                   reads and no writes any more; a later
+                                   migration drops them.
+                                   earn_provider_wallets stays — it is an
+                                   ACCOUNT at a provider, not a holding.
   services/earn-withdrawal-ledger.service.ts
-                                   Withdrawal-ledger status machine + appliers
+                                   Custodial movement status machine + appliers
                                    (Hono-free; poll path today, sweep/webhooks
-                                   later).
+                                   later). Transitions come from the shared
+                                   matrix in @sdp/types, not a local list.
   db/repositories/earn.*           Row types + Postgres impl (open-string
                                    provider columns; dispatch must go through
                                    the fail-closed resolver).

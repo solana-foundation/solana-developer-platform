@@ -237,6 +237,16 @@ const STORE_PREFIXES = {
 } as const;
 
 /**
+ * Prefix stores with the vitest pool id so parallel workers cannot clobber
+ * API-key cache or the audit-ledger checkpoint if Redis SELECT-by-pathname
+ * is ignored. Empty in production.
+ */
+function testWorkerStorePrefix(): string {
+  const worker = process.env.VITEST_POOL_ID;
+  return worker ? `vitest-${worker}:` : "";
+}
+
+/**
  * Build a KVStoreSet from a shared (per-URL) ioredis client. Synchronous —
  * the stores hold a Promise<Redis>; the import and connection happen lazily
  * on the first method call. Fails fast on missing/whitespace REDIS_URL.
@@ -249,10 +259,11 @@ export function createKVStoreSet(env: Env): KVStoreSet {
     );
   }
   const clientPromise = ensureClient(url);
+  const namespace = testWorkerStorePrefix();
   return {
-    apiKeys: new RedisKVStore(clientPromise, STORE_PREFIXES.apiKeys),
-    rateLimits: new RedisKVStore(clientPromise, STORE_PREFIXES.rateLimits),
-    cache: new RedisKVStore(clientPromise, STORE_PREFIXES.cache),
+    apiKeys: new RedisKVStore(clientPromise, `${namespace}${STORE_PREFIXES.apiKeys}`),
+    rateLimits: new RedisKVStore(clientPromise, `${namespace}${STORE_PREFIXES.rateLimits}`),
+    cache: new RedisKVStore(clientPromise, `${namespace}${STORE_PREFIXES.cache}`),
   };
 }
 
