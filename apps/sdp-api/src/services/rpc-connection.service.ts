@@ -378,7 +378,7 @@ export async function deactivateRpcConnection(
 ): Promise<SafeRpcConnection> {
   const { auth, store, scopeKeys } = await loadConnectionWithSecret(c, connectionId);
 
-  const credentialBeforeDeactivation = await store.findConnectionSecret({
+  const credential = await store.findConnectionSecret({
     organizationId: auth.organizationId,
     connectionId,
     scopeKeys,
@@ -393,13 +393,7 @@ export async function deactivateRpcConnection(
     throw conflict("The RPC connection is already deactivated");
   }
 
-  await destroyConnectionSecretBestEffort(c, credentialBeforeDeactivation);
-
-  const credential = await store.findConnectionSecret({
-    organizationId: auth.organizationId,
-    connectionId,
-    scopeKeys,
-  });
+  await destroyConnectionSecretBestEffort(c, credential);
 
   return toSafeWithCredential(deactivated, credential);
 }

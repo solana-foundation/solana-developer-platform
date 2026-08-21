@@ -37,6 +37,46 @@ function serviceContext() {
   } as unknown as Parameters<typeof activateRpcConnection>[0];
 }
 
+async function seedActiveConnection(connectionId: string, credentialId: string): Promise<void> {
+  const db = getDb(appEnv);
+  await db
+    .prepare(
+      `INSERT INTO provider_credentials (
+         id, organization_id, project_id, provider, label, scope, source,
+         storage_backend, secret_ref, secret_version_ref, encrypted_secret_payload,
+         status, created_by
+       ) VALUES (?, ?, NULL, 'helius', 'Tenant Helius', 'organization', 'stored',
+                 'gcp_secret_manager', ?, ?, NULL, 'active', ?)`
+    )
+    .bind(
+      credentialId,
+      ORG_ID,
+      "projects/p/secrets/sdp-provider-credentials-x",
+      SECRET_VERSION_REF,
+      USER_ID
+    )
+    .run();
+
+  const connections = new RpcConnectionStore(db);
+  await connections.insertConnection({
+    id: connectionId,
+    organizationId: ORG_ID,
+    projectId: null,
+    provider: "helius",
+    providerCredentialId: credentialId,
+    providerCredentialScopeKey: "__organization__",
+    network: "devnet",
+    displayMetadata: { endpointHost: "127.0.0.1", apiKeySuffix: "1234" },
+    createdBy: USER_ID,
+  });
+  await connections.activateConnection({
+    organizationId: ORG_ID,
+    connectionId,
+    scopeKeys: ["__organization__"],
+    makeDefault: false,
+  });
+}
+
 beforeAll(async () => {
   await seedTestDatabase(appEnv as Parameters<typeof seedTestDatabase>[0]);
 
@@ -65,42 +105,6 @@ beforeAll(async () => {
     )
     .bind(USER_ID)
     .run();
-  await db
-    .prepare(
-      `INSERT INTO provider_credentials (
-         id, organization_id, project_id, provider, label, scope, source,
-         storage_backend, secret_ref, secret_version_ref, encrypted_secret_payload,
-         status, created_by
-       ) VALUES (?, ?, NULL, 'helius', 'Tenant Helius', 'organization', 'stored',
-                 'gcp_secret_manager', ?, ?, NULL, 'active', ?)`
-    )
-    .bind(
-      CREDENTIAL_ID,
-      ORG_ID,
-      "projects/p/secrets/sdp-provider-credentials-x",
-      SECRET_VERSION_REF,
-      USER_ID
-    )
-    .run();
-
-  const connections = new RpcConnectionStore(db);
-  await connections.insertConnection({
-    id: CONNECTION_ID,
-    organizationId: ORG_ID,
-    projectId: null,
-    provider: "helius",
-    providerCredentialId: CREDENTIAL_ID,
-    providerCredentialScopeKey: "__organization__",
-    network: "devnet",
-    displayMetadata: { endpointHost: "127.0.0.1", apiKeySuffix: "1234" },
-    createdBy: USER_ID,
-  });
-  await connections.activateConnection({
-    organizationId: ORG_ID,
-    connectionId: CONNECTION_ID,
-    scopeKeys: ["__organization__"],
-    makeDefault: false,
-  });
 });
 
 afterAll(() => {
@@ -110,6 +114,8 @@ afterAll(() => {
 
 describe("deactivateRpcConnection", () => {
   it("destroys the stored secret version so a withdrawn credential stops existing", async () => {
+    await seedActiveConnection(CONNECTION_ID, CREDENTIAL_ID);
+
     const result = await deactivateRpcConnection(serviceContext(), CONNECTION_ID);
 
     expect(result.status).toBe("deactivated");
@@ -117,7 +123,12 @@ describe("deactivateRpcConnection", () => {
   });
 
   it("refuses a second deactivation", async () => {
-    await expect(deactivateRpcConnection(serviceContext(), CONNECTION_ID)).rejects.toThrow(
+    const connectionId = `${CONNECTION_ID}_repeat`;
+    await seedActiveConnection(connectionId, `${CREDENTIAL_ID}_repeat`);
+
+    await deactivateRpcConnection(serviceContext(), connectionId);
+
+    await expect(deactivateRpcConnection(serviceContext(), connectionId)).rejects.toThrow(
       /already deactivated/i
     );
   });
