@@ -1,6 +1,28 @@
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+/**
+ * Surfacing is real by default here (Kamino is offered, so the happy paths need
+ * no help) and forced ON only for the Veda block below.
+ *
+ * Veda is registered and executable but NOT offered — `EARN_PROVIDER_SURFACING`
+ * keeps it at `false` until deposits are proven end to end in sandbox. That is
+ * business config, not a property of the dispatch this file tests, so the Veda
+ * cases flip this flag rather than editing the map, and the gate keeps its own
+ * test that runs against the real one. Same pattern as `earn-program.test.ts`.
+ */
+const surfacing = vi.hoisted(() => ({ forceOn: false }));
+
+vi.mock("@sdp/types", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@sdp/types")>();
+  return {
+    ...actual,
+    isEarnProviderSurfaced: (provider: string) =>
+      surfacing.forceOn || actual.isEarnProviderSurfaced(provider),
+  };
+});
+
 import { getDb } from "@/db";
 import {
   createPostgresEarnRepository,
@@ -157,7 +179,7 @@ async function seedAuth(): Promise<void> {
         TEST_ORG.slug,
         "enterprise",
         "active",
-        JSON.stringify({ providerOverrides: { earn: { kamino: true } } })
+        JSON.stringify({ providerOverrides: { earn: { kamino: true, veda: true } } })
       ),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
@@ -279,6 +301,7 @@ beforeEach(async () => {
 afterEach(() => {
   env.MARKETS_ENABLED = originalMarketsEnabled;
   env.EARN_ENABLED = originalEarnEnabled;
+  surfacing.forceOn = false;
   vi.restoreAllMocks();
 });
 
@@ -742,6 +765,122 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
     });
 
     expect(res.status).toBe(403);
+    expect(depositIntoVault).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Veda's dispatch through the provider-neutral deposit route.
+ *
+ * The route names no provider — it resolves a catalogue row, applies the
+ * money-in gates and hands the resolved identity to `depositIntoVault`, which
+ * narrows on capability. So "does Veda work here?" is really "does a second
+ * `vault_direct` provider need any route change?", and the answer these cases
+ * pin is no.
+ */
+describe("POST /v1/earn/vault-deposits — Veda", () => {
+  const VEDA_SHARE_MINT = "9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D";
+
+  async function seedVedaStrategy() {
+    return seedStrategy({
+      provider: "veda",
+      name: "Veda USDC vault #7",
+      underlyingSource: undefined,
+      shareMint: VEDA_SHARE_MINT,
+      currentApy: null,
+      riskMetadata: { platformFeeBps: 25, performanceFeeBps: 1000 },
+    });
+  }
+
+  /**
+   * THE GATE THAT IS REAL TODAY, run against the unmocked map: Veda is
+   * registered and executable but not OFFERED, so a deposit is refused before
+   * the provider is ever called. Flipping `EARN_PROVIDER_SURFACING.veda` is its
+   * own change, made only once deposits are proven end to end in sandbox.
+   */
+  it("is refused as not currently offered while it stays un-surfaced", async () => {
+    await seedAuth();
+    const strategy = await seedVedaStrategy();
+    await seedWallet({
+      configId: "cfg_earn_vault_veda_gate",
+      custodyWalletId: "cwlt_earn_vault_veda_gate",
+      providerWalletId: "privy_earn_vault_veda_gate",
+    });
+
+    const res = await postVaultDeposit({
+      strategyId: strategy.id,
+      custodyWalletId: "cwlt_earn_vault_veda_gate",
+      amount: "10",
+      minSharesOut: "9.5",
+      requestId: crypto.randomUUID(),
+    });
+
+    expect(res.status).toBe(403);
+    expect(depositIntoVault).not.toHaveBeenCalled();
+  });
+
+  it("dispatches a surfaced Veda row with the catalogue's own asset identity", async () => {
+    surfacing.forceOn = true;
+    await seedAuth();
+    const strategy = await seedVedaStrategy();
+    await seedWallet({
+      configId: "cfg_earn_vault_veda",
+      custodyWalletId: "cwlt_earn_vault_veda",
+      providerWalletId: "privy_earn_vault_veda",
+    });
+    const requestId = crypto.randomUUID();
+
+    const res = await postVaultDeposit({
+      strategyId: strategy.id,
+      custodyWalletId: "cwlt_earn_vault_veda",
+      amount: "10",
+      minSharesOut: "9.5",
+      requestId,
+    });
+
+    expect(res.status).toBe(200);
+    expect(depositIntoVault).toHaveBeenCalledTimes(1);
+    expect(depositIntoVault.mock.calls[0]?.[1]).toMatchObject({
+      provider: "veda",
+      providerReference: strategy.provider_reference,
+      // Straight from the catalogue row, and the same values the builder's
+      // `assetIdentity` is later compared against.
+      tokenMint: USDC_MINT,
+      shareMint: VEDA_SHARE_MINT,
+      amount: "10",
+      minSharesOut: "9.5",
+      requestId,
+    });
+  });
+
+  /**
+   * A row whose provider this deployment cannot execute must fail CLOSED at the
+   * provider gate, never reach dispatch. Catalogue rows persist `provider` as
+   * open TEXT, so a newer deploy's id can reach this route.
+   */
+  it("fails closed on a strategy naming a provider this deployment cannot execute", async () => {
+    surfacing.forceOn = true;
+    await seedAuth();
+    const strategy = await seedVedaStrategy();
+    await getDb(env)
+      .prepare("UPDATE earn_strategies SET provider = 'vedanext' WHERE id = ?")
+      .bind(strategy.id)
+      .run();
+    await seedWallet({
+      configId: "cfg_earn_vault_unknown",
+      custodyWalletId: "cwlt_earn_vault_unknown",
+      providerWalletId: "privy_earn_vault_unknown",
+    });
+
+    const res = await postVaultDeposit({
+      strategyId: strategy.id,
+      custodyWalletId: "cwlt_earn_vault_unknown",
+      amount: "10",
+      minSharesOut: "9.5",
+      requestId: crypto.randomUUID(),
+    });
+
+    expect(res.status).toBe(503);
     expect(depositIntoVault).not.toHaveBeenCalled();
   });
 });
