@@ -8,6 +8,7 @@ export const DASHBOARD_SIDE_NAV_HREFS = {
   apiKeys: "/dashboard/api-keys",
   policies: "/dashboard/policies",
   approvals: "/dashboard/approvals",
+  webhooks: "/dashboard/issuance/webhooks",
   settings: "/dashboard/settings",
   integrations: "/dashboard/integrations",
 } as const;
@@ -59,6 +60,8 @@ export type DashboardLoadingRoute =
   | "policies"
   | "approvals-list"
   | "approval-detail"
+  | "webhooks-list"
+  | "webhook-detail"
   | "settings"
   | "integrations"
   | "integration-detail"
@@ -90,6 +93,17 @@ function resolveWalletLoadingRoute(pathname: string): DashboardLoadingRoute | nu
   return null;
 }
 
+/** The Manage-section access surfaces: keys, policies and approvals. */
+function resolveAccessControlLoadingRoute(pathname: string): DashboardLoadingRoute | null {
+  if (pathname === "/dashboard/api-keys") return "api-keys-list";
+  if (pathname === "/dashboard/api-keys/new") return "api-key-new";
+  if (/^\/dashboard\/api-keys\/[^/]+\/edit$/.test(pathname)) return "api-key-edit";
+  if (pathname === "/dashboard/policies") return "policies";
+  if (pathname === "/dashboard/approvals") return "approvals-list";
+  if (/^\/dashboard\/approvals\/[^/]+$/.test(pathname)) return "approval-detail";
+  return null;
+}
+
 function resolveMarketsLoadingRoute(pathname: string): DashboardLoadingRoute | null {
   if (
     pathname === DASHBOARD_SIDE_NAV_HREFS.markets ||
@@ -117,6 +131,10 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
 
   if (pathname === "/dashboard/issuance") return "issuance-overview";
   if (pathname === "/dashboard/issuance/create") return "issuance-create";
+  // Both webhook routes precede the token catch-all below: `webhooks` is a static
+  // segment sitting beside `[tokenId]`, so the catch-all would claim it otherwise.
+  if (pathname === "/dashboard/issuance/webhooks") return "webhooks-list";
+  if (/^\/dashboard\/issuance\/webhooks\/[^/]+$/.test(pathname)) return "webhook-detail";
   if (/^\/dashboard\/issuance\/[^/]+$/.test(pathname)) return "issuance-detail";
 
   const marketsRoute = resolveMarketsLoadingRoute(pathname);
@@ -138,12 +156,9 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
     return "recurring-payment-detail";
   }
 
-  if (pathname === "/dashboard/api-keys") return "api-keys-list";
-  if (pathname === "/dashboard/api-keys/new") return "api-key-new";
-  if (/^\/dashboard\/api-keys\/[^/]+\/edit$/.test(pathname)) return "api-key-edit";
-  if (pathname === "/dashboard/policies") return "policies";
-  if (pathname === "/dashboard/approvals") return "approvals-list";
-  if (/^\/dashboard\/approvals\/[^/]+$/.test(pathname)) return "approval-detail";
+  const accessControlRoute = resolveAccessControlLoadingRoute(pathname);
+  if (accessControlRoute) return accessControlRoute;
+
   if (pathname === "/dashboard/settings") return "settings";
   if (pathname === "/dashboard/integrations") return "integrations";
   if (/^\/dashboard\/integrations\/[^/]+$/.test(pathname)) return "integration-detail";

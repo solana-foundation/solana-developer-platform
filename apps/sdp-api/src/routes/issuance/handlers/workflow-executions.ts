@@ -38,6 +38,9 @@ const RESULT_FIELDS = [
   "alreadyFrozen",
   "alreadyThawed",
   "mirrorFailed",
+  // send_webhook via a registry endpoint: links the execution to its delivery-log row.
+  "deliveryId",
+  "endpointId",
 ] as const;
 
 function project(

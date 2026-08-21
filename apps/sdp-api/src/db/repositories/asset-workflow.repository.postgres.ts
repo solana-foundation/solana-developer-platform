@@ -57,6 +57,41 @@ async function queueOrphanedSecret(
   });
 }
 
+// Secret bookkeeping that must commit with an update's write, run inside its
+// transaction after the UPDATE matched. A rotation retires whatever the locked read
+// found (unless it is the same version) and cancels the installed version's provisional
+// obligation. A drop retires the reference the definition just stopped holding —
+// queued rather than destroyed inline, because the handler's view of the displaced
+// version predates the transaction; the sweeper drains it.
+async function settleUpdatedSecretObligations(
+  tx: Pick<AppDb, "prepare">,
+  input: UpdateAssetWorkflowInput,
+  currentSecret: StoredCredentialSecret | null
+): Promise<void> {
+  if (input.rotateSecretTo) {
+    if (currentSecret?.secretVersionRef !== input.rotateSecretTo.secretVersionRef) {
+      await queueOrphanedSecret(tx, {
+        organizationId: input.organizationId,
+        workflowId: input.workflowId,
+        retireSecret: currentSecret,
+        reason: "superseded by a key rotation",
+      });
+    }
+    // …and the version this rotation installs is now referenced, so its provisional
+    // obligation goes away with the same commit.
+    await clearQueuedSecret(tx, input.rotateSecretTo);
+    return;
+  }
+  if (input.dropActionSecret && input.definition) {
+    await queueOrphanedSecret(tx, {
+      organizationId: input.organizationId,
+      workflowId: input.workflowId,
+      retireSecret: currentSecret,
+      reason: "dropped by a migration to a registry webhook endpoint",
+    });
+  }
+}
+
 function mapWorkflowRow(row: Record<string, unknown>): AssetWorkflowRow {
   return {
     id: row.id as string,
@@ -138,8 +173,14 @@ export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflow
           return null;
         }
         const currentSecret = (locked.definition as AssetWorkflowDefinition).actionSecret ?? null;
+        // Precedence: a rotation installs its version; a drop erases the reference; and
+        // an edit that says neither preserves the stored secret (reads redact it, so
+        // requiring it on every save would silently erase it).
         const definition = input.definition
-          ? { ...input.definition, actionSecret: input.rotateSecretTo ?? currentSecret }
+          ? {
+              ...input.definition,
+              actionSecret: input.rotateSecretTo ?? (input.dropActionSecret ? null : currentSecret),
+            }
           : undefined;
 
         const row = await tx
@@ -162,21 +203,11 @@ export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflow
             input.projectId
           )
           .first<Record<string, unknown>>();
-        // Only once the rotation actually landed: a statement that matched nothing left
+        // Only once the write actually landed: a statement that matched nothing left
         // the rule pointing at the version the caller wanted retired, and queueing it
         // would have the sweeper destroy the key the live rule still signs with.
-        if (row && input.rotateSecretTo) {
-          if (currentSecret?.secretVersionRef !== input.rotateSecretTo.secretVersionRef) {
-            await queueOrphanedSecret(tx, {
-              organizationId: input.organizationId,
-              workflowId: input.workflowId,
-              retireSecret: currentSecret,
-              reason: "superseded by a key rotation",
-            });
-          }
-          // …and the version this rotation installs is now referenced, so its provisional
-          // obligation goes away with the same commit.
-          await clearQueuedSecret(tx, input.rotateSecretTo);
+        if (row) {
+          await settleUpdatedSecretObligations(tx, input, currentSecret);
         }
         return row ? mapWorkflowRow(row) : null;
       });
@@ -264,6 +295,19 @@ export function createPostgresAssetWorkflowsRepository(db: AppDb): AssetWorkflow
         )
         .all<Record<string, unknown>>();
       return result.results.map(mapWorkflowRow);
+    },
+
+    async countEnabledWorkflowsReferencingEndpoint(params) {
+      const row = await db
+        .prepare(
+          `SELECT COUNT(*)::int AS total FROM asset_workflows
+             WHERE organization_id = ? AND project_id = ?
+               AND action_type = 'send_webhook' AND enabled = TRUE AND deleted_at IS NULL
+               AND definition->'action'->'params'->>'endpointId' = ?`
+        )
+        .bind(params.organizationId, params.projectId, params.endpointId)
+        .first<{ total: number }>();
+      return Number(row?.total ?? 0);
     },
   };
 }

@@ -14,8 +14,7 @@ import {
   TriangleAlert,
   Zap,
 } from "lucide-react";
-import { Fragment } from "react";
-import { Badge } from "@/components/ui/badge";
+import { Fragment, type ReactNode } from "react";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import {
@@ -25,22 +24,36 @@ import {
   type GuardDraft,
   humanizeType,
 } from "../workflows.data";
-import { ACTION_ICONS, ConnectorBadge } from "./workflow-builder-cards";
+import {
+  ACTION_ICONS,
+  type CardOptionTone,
+  ConnectorBadge,
+  ToneMarker,
+} from "./workflow-builder-cards";
 
 // Read-only "exactly what happens" panel for the rule currently being built. Computed
-// live from the same catalog the controls use — no backend call. It surfaces the
-// otherwise-invisible AUTOMATIC capability gate as a real pipeline node, alongside the
-// user-authored WHEN → (only if…) → review → THEN legs. Rendered as a connected node
-// graph: an icon chip per step (tinted by status), joined by arrows.
+// live from the same catalog the controls use — no backend call. The spine is the
+// user-authored WHEN → (only if…) → review → THEN sequence; the AUTOMATIC capability gate
+// is not a step in it (nothing happens there), so it rides along as a chip on the action
+// node that needs it. Rendered as a connected node graph: an icon chip per step (tinted
+// by status), joined by arrows.
 
 type StepTone = "ok" | "warn" | "blocked" | "pending";
-type StepKind = "when" | "guard" | "capability" | "walletgap" | "review" | "action";
+type StepKind = "when" | "guard" | "walletgap" | "review" | "action";
+
+// The authority/allowlist the action rides on. A requirement, not an event — so it hangs
+// off its node instead of taking a slot in the sequence.
+interface FlowNote {
+  text: string;
+  blocked: boolean;
+}
 
 interface FlowStep {
   tone: StepTone;
   kind: StepKind;
   title: string;
-  detail?: string;
+  detail?: ReactNode;
+  note?: FlowNote;
   badge?: ExecutionTier;
   actionType?: string;
 }
@@ -66,7 +79,7 @@ const TIER_VARIANT: Record<ExecutionTier, "success" | "warning" | "danger"> = {
   requires_approval: "danger",
 };
 
-const OP_LABEL_KEY: Record<GuardDraft["op"], string> = {
+export const OP_LABEL_KEY: Record<GuardDraft["op"], string> = {
   eq: "guardIs",
   neq: "guardIsNot",
   in: "guardIsOneOf",
@@ -84,8 +97,6 @@ function stepIcon(step: FlowStep): LucideIcon {
       return Zap;
     case "guard":
       return Filter;
-    case "capability":
-      return step.tone === "blocked" ? ShieldAlert : ShieldCheck;
     case "walletgap":
       return TriangleAlert;
     case "review":
@@ -113,7 +124,7 @@ export function WorkflowFlowGraph({
   action: CatalogActionView | null;
   guards: GuardDraft[];
   reviewMode: "auto" | "manual";
-  paramSummary: string;
+  paramSummary: ReactNode;
   walletGap: boolean;
   orientation?: "vertical" | "horizontal";
   showChrome?: boolean;
@@ -174,31 +185,39 @@ export function WorkflowFlowGraph({
   }
 
   if (action) {
-    // Capability gate (AUTOMATIC) — the rail that's invisible in the raw controls.
+    // Capability gate (AUTOMATIC) — the rail that's invisible in the raw controls. It is a
+    // standing requirement rather than a stage, so it ends up as a chip on the action node
+    // below instead of a node of its own.
     const req = action.action.requires;
     const supported = action.support.ok;
-    let capTitle: string;
+    let capTitle: string | null;
     if (req.kind === "allowlist") {
       capTitle = wf("flowCapabilityAllowlist");
     } else if (req.kind === "token_transaction") {
       capTitle = interp("flowCapabilityToken", { capability: humanizeType(req.action) });
     } else if (req.kind === "base") {
-      // Mint/burn ride the asset's base authorities — say so instead of the misleading
-      // "no capability required".
+      // Mint/burn ride the asset's base authorities — name the authority rather than
+      // claiming no capability is involved.
       capTitle = interp("flowCapabilityBase", { capability: humanizeType(req.action) });
     } else {
-      capTitle = wf("flowCapabilityNone");
+      // Nothing gates this action: no chip, rather than a chip announcing an absence.
+      capTitle = null;
     }
-    steps.push(
-      supported
-        ? { tone: "ok", kind: "capability", title: capTitle }
-        : {
-            tone: "blocked",
-            kind: "capability",
-            title: capTitle,
-            detail: wf(SUPPORT_REASON_KEY[action.support.reason] ?? "flowReasonUnknownAction"),
-          }
-    );
+    // The reason is what makes an unsupported capability actionable, so it travels with the
+    // requirement — and is the whole chip when there is no requirement to name.
+    const capNote: FlowNote | undefined = supported
+      ? capTitle
+        ? { text: capTitle, blocked: false }
+        : undefined
+      : {
+          text: [
+            capTitle,
+            wf(SUPPORT_REASON_KEY[action.support.reason] ?? "flowReasonUnknownAction"),
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          blocked: true,
+        };
 
     // Target-wallet gate — a trigger that never identifies a wallet cannot drive a
     // wallet-targeting action unless a param fills the gap. Without this step the
@@ -227,12 +246,14 @@ export function WorkflowFlowGraph({
         : { tone: "ok", kind: "review", title: wf("flowAutoApplies") }
     );
 
-    // Action leg.
+    // Action leg — and the home of the capability chip: this is the step the requirement
+    // actually gates.
     steps.push({
       tone: supported && !walletGap ? "ok" : "blocked",
       kind: "action",
       title: interp("flowRuns", { action: dyn("action", action.type) }),
       detail: paramSummary || undefined,
+      note: capNote,
       badge: tier,
       actionType: action.type,
     });
@@ -244,11 +265,14 @@ export function WorkflowFlowGraph({
     steps.length === 0 ? (
       <p className="text-sm text-secondary">{wf("flowEmpty")}</p>
     ) : (
+      // The vertical column is stretched to the settings panel's height, so justify-between
+      // shares the slack out between the nodes and their connectors instead of letting it
+      // pool at the bottom.
       <div
         className={cn(
           orientation === "horizontal"
             ? "flex flex-wrap items-stretch gap-x-1 gap-y-2"
-            : "flex flex-col"
+            : "flex h-full flex-col justify-between"
         )}
       >
         {steps.map((step, index) => {
@@ -262,6 +286,7 @@ export function WorkflowFlowGraph({
                 tone={step.tone}
                 title={step.title}
                 detail={step.detail}
+                note={step.note}
                 badge={step.badge ? wf(`tierLabels.${step.badge}`) : undefined}
                 badgeVariant={step.badge ? TIER_VARIANT[step.badge] : undefined}
                 orientation={orientation}
@@ -277,11 +302,15 @@ export function WorkflowFlowGraph({
     return graph;
   }
 
+  // h-full: this panel sits beside the settings panel in a two-column grid, and both are
+  // grid items that stretch to the row. Without it the border stopped at the content and
+  // the two panels' bottom edges did not line up.
   return (
-    <div className="rounded-xl border border-border-default bg-fill-subtle/30 p-4">
+    <div className="flex h-full flex-col rounded-xl border border-border-default bg-fill-subtle/30 p-4">
       <h4 className="text-sm font-semibold text-primary">{wf("flowTitle")}</h4>
       <p className="mt-0.5 text-xs text-secondary">{wf("flowIntro")}</p>
-      <div className="mt-4">{graph}</div>
+      {/* flex-1: hands the panel's spare height to the graph, which shares it out. */}
+      <div className="mt-4 flex-1">{graph}</div>
     </div>
   );
 }
@@ -291,6 +320,7 @@ function FlowNode({
   tone,
   title,
   detail,
+  note,
   badge,
   badgeVariant,
   orientation,
@@ -298,12 +328,14 @@ function FlowNode({
   icon: LucideIcon;
   tone: StepTone;
   title: string;
-  detail?: string;
+  detail?: ReactNode;
+  note?: FlowNote;
   badge?: string;
-  badgeVariant?: "success" | "warning" | "danger";
+  badgeVariant?: CardOptionTone;
   orientation: "vertical" | "horizontal";
 }) {
   const StatusIcon = STATUS_ICON[tone];
+  const NoteIcon = note?.blocked ? ShieldAlert : ShieldCheck;
   return (
     <div
       className={cn(
@@ -311,19 +343,33 @@ function FlowNode({
         orientation === "horizontal" && "min-w-[11rem] flex-1 basis-[11rem]"
       )}
     >
+      {/* Not aria-hidden when it carries the tier marker: the marker's label is the only
+          place the tier is stated now that the pill is gone. */}
       <span
-        className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-secondary"
-        aria-hidden
+        className="relative flex size-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-secondary"
+        aria-hidden={badge ? undefined : true}
       >
-        <Icon className="size-[18px]" />
+        <Icon className="size-[18px]" aria-hidden />
+        {badge ? <ToneMarker label={badge} tone={badgeVariant ?? "default"} /> : null}
       </span>
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-          <span className="text-sm font-medium text-primary">{title}</span>
-          {badge ? (
-            <Badge variant={badgeVariant} className="align-middle">
-              {badge}
-            </Badge>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-sm font-medium text-primary">{title}</span>
+          {/* The capability chip sits directly after the title it annotates, not stacked
+              under it and not flushed to the far edge — it belongs to the title, and the
+              status glyph is what owns the right edge. Truncates before the title does. */}
+          {note ? (
+            <span
+              className={cn(
+                "inline-flex min-w-0 shrink items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs",
+                note.blocked
+                  ? "border-error-border bg-error-bg text-error"
+                  : "border-border-subtle bg-fill-subtle text-secondary"
+              )}
+            >
+              <NoteIcon className="size-3.5 shrink-0" aria-hidden />
+              <span className="truncate">{note.text}</span>
+            </span>
           ) : null}
         </div>
         {detail ? <p className="mt-0.5 truncate text-xs text-secondary">{detail}</p> : null}

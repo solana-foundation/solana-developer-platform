@@ -10,7 +10,7 @@ import {
   Settings2Icon,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   ApiKeyAuthoringSkeleton,
@@ -29,6 +29,10 @@ import {
   IssuanceDetailSkeleton,
   IssuancePageSkeleton,
 } from "@/app/dashboard/issuance/issuance-page-skeleton";
+import {
+  WebhookEndpointDetailSkeleton,
+  WebhookEndpointsListSkeleton,
+} from "@/app/dashboard/issuance/webhooks/webhook-page-skeletons";
 import DashboardLoading from "@/app/dashboard/loading";
 import {
   EarnProgramSkeleton,
@@ -193,6 +197,10 @@ function resolvePageLoadingComponent(
       return ApprovalInboxSkeleton;
     case "approval-detail":
       return ApprovalDetailSkeleton;
+    case "webhooks-list":
+      return WebhookEndpointsListSkeleton;
+    case "webhook-detail":
+      return WebhookEndpointDetailSkeleton;
     case "settings":
       return SettingsPageSkeleton;
     case "allowlist":
@@ -483,6 +491,7 @@ export function DashboardShell({
   const t = useTranslations();
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
@@ -508,7 +517,9 @@ export function DashboardShell({
     pathname,
     t,
     assetProfilesEnabled,
-    privateChannelsEnabled
+    privateChannelsEnabled,
+    // The webhooks list's back action depends on the asset that opened it.
+    searchParams.get("from")
   );
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
@@ -578,6 +589,7 @@ export function DashboardShell({
     isWalletSetupRoute ||
     isOrganizationOnboardingRoute ||
     pathname.startsWith("/dashboard/approvals") ||
+    pathname.startsWith("/dashboard/issuance/webhooks") ||
     isWalletDetailRoute;
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;

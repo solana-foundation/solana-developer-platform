@@ -443,6 +443,8 @@ export {
   createSystemPaymentTransferBatchesRepository,
   createTokenRepository,
   createWalletAssetEnrollmentsRepository,
+  createWebhookDeliveriesRepository,
+  createWebhookEndpointsRepository,
   createWorkflowExecutionsRepository,
   createWorkflowSecretRetirementsRepository,
 } from "./repository-factory";
@@ -459,6 +461,23 @@ export type {
   WalletAssetEnrollmentsRepository,
 } from "./wallet-asset-enrollment.repository";
 export { createPostgresWalletAssetEnrollmentsRepository } from "./wallet-asset-enrollment.repository.postgres";
+export type {
+  CreateWebhookDeliveryInput,
+  WebhookDeliveriesRepository,
+  WebhookDeliveryRow,
+  WebhookDeliveryStatus,
+} from "./webhook-delivery.repository";
+export { generateWebhookDeliveryId } from "./webhook-delivery.repository";
+export { createPostgresWebhookDeliveriesRepository } from "./webhook-delivery.repository.postgres";
+export type {
+  CreateWebhookEndpointInput,
+  WebhookEndpointRow,
+  WebhookEndpointSecretWriteResult,
+  WebhookEndpointStatus,
+  WebhookEndpointsRepository,
+} from "./webhook-endpoint.repository";
+export { generateWebhookEndpointId } from "./webhook-endpoint.repository";
+export { createPostgresWebhookEndpointsRepository } from "./webhook-endpoint.repository.postgres";
 export type {
   CreateWorkflowExecutionInput,
   ListWorkflowExecutionsInput,

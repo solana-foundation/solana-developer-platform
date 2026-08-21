@@ -20,6 +20,7 @@ import { registerPolicyPaths } from "./paths/policies";
 import { registerPrivateChannelsPaths } from "./paths/private-channels";
 import { registerProjectPaths } from "./paths/projects";
 import { registerRpcPaths } from "./paths/rpc";
+import { registerWebhookEndpointPaths } from "./paths/webhook-endpoints";
 
 const OPENAPI_TAG = {
   HEALTH: { name: "Health", description: "Service health and readiness endpoints." },
@@ -58,6 +59,11 @@ const OPENAPI_TAG = {
     name: "Asset Profiles",
     description: "Issued-asset identity and metadata profiles, plus the public token metadata URI.",
   },
+  WEBHOOK_ENDPOINTS: {
+    name: "Webhook Endpoints",
+    description:
+      "Managed outbound-webhook endpoint registry: signing secrets, rotation, delivery log, and redelivery.",
+  },
   ADMIN: { name: "Admin", description: "Administrative allowlist management." },
   ONBOARDING: { name: "Onboarding", description: "Clerk organization sync status." },
 } as const;
@@ -73,6 +79,7 @@ const PUBLIC_OPENAPI_TAGS = [
   OPENAPI_TAG.COMPLIANCE,
   OPENAPI_TAG.COUNTERPARTIES,
   OPENAPI_TAG.ASSET_PROFILES,
+  OPENAPI_TAG.WEBHOOK_ENDPOINTS,
 ];
 
 const OPENAPI_TAGS = [
@@ -91,6 +98,7 @@ const OPENAPI_TAGS = [
   OPENAPI_TAG.COMPLIANCE,
   OPENAPI_TAG.COUNTERPARTIES,
   OPENAPI_TAG.ASSET_PROFILES,
+  OPENAPI_TAG.WEBHOOK_ENDPOINTS,
   OPENAPI_TAG.ADMIN,
   OPENAPI_TAG.ONBOARDING,
 ];
@@ -132,6 +140,7 @@ function registerPublicPaths(registry: OpenAPIRegistry) {
   registerCompliancePaths(registry);
   registerCounterpartyPaths(registry);
   registerAssetProfilePaths(registry);
+  registerWebhookEndpointPaths(registry);
 }
 
 function registerAllPaths(registry: OpenAPIRegistry) {
@@ -150,6 +159,7 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerCompliancePaths(registry);
   registerCounterpartyPaths(registry);
   registerAssetProfilePaths(registry);
+  registerWebhookEndpointPaths(registry);
   registerNotificationPaths(registry);
   registerAdminPaths(registry);
   registerOnboardingPaths(registry);

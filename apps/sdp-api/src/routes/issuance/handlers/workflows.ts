@@ -18,6 +18,7 @@ import { z } from "zod";
 import type { AssetWorkflowDefinition, AssetWorkflowRow } from "@/db/repositories";
 import {
   createAssetWorkflowsRepository,
+  createWebhookEndpointsRepository,
   createWorkflowExecutionsRepository,
   generateAssetWorkflowId,
 } from "@/db/repositories";
@@ -164,6 +165,32 @@ function assertActionParamsValid(
   }
 }
 
+// A rule that references a registry endpoint must reference one that exists in this
+// org/project (soft-deleted counts as gone — the repo read excludes it). A disabled
+// endpoint is allowed at save: disable/enable is a toggle, and only the executions
+// that fire while it is disabled fail.
+async function assertWebhookEndpointUsable(
+  env: Env,
+  params: Record<string, string | number>,
+  orgId: string,
+  projectId: string
+): Promise<void> {
+  const endpointId = params.endpointId;
+  if (typeof endpointId !== "string" || !endpointId) {
+    return;
+  }
+  const endpoint = await createWebhookEndpointsRepository(env).getEndpointById({
+    endpointId,
+    organizationId: orgId,
+    projectId,
+  });
+  if (!endpoint) {
+    throw badRequest("Unknown webhook endpoint", {
+      errors: { endpointId: ["Webhook endpoint not found in this project"] },
+    });
+  }
+}
+
 export const createWorkflow = async (c: ValidatedBodyContext<typeof createWorkflowSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
@@ -177,6 +204,7 @@ export const createWorkflow = async (c: ValidatedBodyContext<typeof createWorkfl
 
   const actionParams = body.actionParams ?? {};
   assertActionParamsValid(body.actionType, actionParams);
+  await assertWebhookEndpointUsable(c.env, actionParams, orgId, projectId);
   assertGuardFieldsKnown(body.triggerType, (body.condition ?? null) as WorkflowCondition | null);
 
   const gate = await resolveAssetGateContext(c.env, {
@@ -336,6 +364,7 @@ export const updateWorkflow = async (c: ValidatedBodyContext<typeof updateWorkfl
   let secret: string | null = null;
   if (body.actionParams !== undefined) {
     assertActionParamsValid(existing.action_type, body.actionParams);
+    await assertWebhookEndpointUsable(c.env, body.actionParams, orgId, projectId);
     ({ params, secret } = splitOutSecret(body.actionParams));
   }
   if (body.condition !== undefined) {
@@ -369,7 +398,10 @@ export const updateWorkflow = async (c: ValidatedBodyContext<typeof updateWorkfl
             : existing.definition.condition,
         action: { type: existing.action_type, params },
         retryPolicy: body.retryPolicy ?? existing.definition.retryPolicy,
-        actionSecret,
+        // A rule migrated onto a registry endpoint drops its inline-secret reference —
+        // the endpoint's own key signs now, and keeping the stale handle would leave
+        // `hasSecret` reporting a key that no longer signs anything.
+        actionSecret: params.endpointId !== undefined ? null : actionSecret,
       }
     : undefined;
 
@@ -388,6 +420,11 @@ export const updateWorkflow = async (c: ValidatedBodyContext<typeof updateWorkfl
       // under lock inside the transaction — `previousSecret` above came from a read that
       // predates it, so a concurrent rotation would make it name a version already gone.
       rotateSecretTo: secret ? actionSecret : null,
+      // Endpoint-mode definitions carry no inline key (see `actionSecret` above), and
+      // without this flag the repo would preserve the stored secret — that guard exists
+      // so an edit that doesn't resend the secret can't erase it, but here erasing is
+      // the point. The displaced version is queued under the row lock and swept.
+      dropActionSecret: definitionSupplied && params.endpointId !== undefined && !secret,
     })
     .catch(async (error: unknown) => {
       await destroyActionSecret(c.env, secret ? actionSecret : null, { orgId, workflowId });

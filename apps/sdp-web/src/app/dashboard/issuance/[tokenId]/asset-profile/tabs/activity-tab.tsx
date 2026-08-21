@@ -32,10 +32,11 @@ import { getPageCount, getPageSummary } from "../../../pagination.utils";
 import { formatDateTime } from "../../token-management-workspace.utils";
 import { fetchAssetAuditHistory } from "../asset-audit.data";
 import {
-  auditActionIcon,
   auditActionLabel,
   auditActorBadgeClass,
   auditActorTypeLabel,
+  auditEventActionIcon,
+  auditEventActionLabel,
   auditStatusBadgeClass,
 } from "../asset-audit-presentation";
 
@@ -132,13 +133,13 @@ function ActivityEventRow({
   locale: ReturnType<typeof useLocale>;
   t: ReturnType<typeof useTranslations>;
 }) {
-  const ActionIcon = auditActionIcon(event.action);
+  const ActionIcon = auditEventActionIcon(event);
   return (
     <TableRow data-testid={`audit-row-${event.id}`}>
       <TableCell align="left">
         <span className="inline-flex items-center gap-1.5 rounded-md bg-fill-subtle px-2 py-1 text-xs font-medium text-secondary">
           <ActionIcon className="h-3.5 w-3.5 shrink-0" />
-          {auditActionLabel(event.action)}
+          {auditEventActionLabel(event, t)}
         </span>
       </TableCell>
       <TableCell align="left" className="text-sm text-secondary">

@@ -269,6 +269,7 @@ describe("OpenAPI spec", () => {
       "Compliance",
       "Counterparties",
       "Asset Profiles",
+      "Webhook Endpoints",
     ]);
 
     expect(doc.paths?.["/v1/auth/me"]).toBeUndefined();

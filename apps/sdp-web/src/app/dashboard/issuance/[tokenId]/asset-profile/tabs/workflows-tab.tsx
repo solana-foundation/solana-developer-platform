@@ -9,23 +9,29 @@ import {
   CircleSlash,
   Clock,
   Filter,
+  GitBranch,
   Inbox,
   Loader2,
   type LucideIcon,
   Pencil,
   Play,
+  Plus,
   Power,
   PowerOff,
   RefreshCw,
   Trash2,
   TriangleAlert,
+  UserCheck,
   Wallet,
   X,
   Zap,
 } from "lucide-react";
-import { type ReactNode, useCallback, useMemo, useState } from "react";
+import { Fragment, type ReactNode, useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { formatRelativeTime } from "@/app/dashboard/activity-format-utils";
+import { isValidSolanaAddress } from "@/app/dashboard/custody/[walletId]/policy/wallet-policy-authoring";
+import { fetchWebhookEndpoints } from "@/app/dashboard/issuance/webhooks/webhook-endpoints.client";
+import type { WebhookEndpointsPage } from "@/app/dashboard/issuance/webhooks/webhook-endpoints.data";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,6 +48,7 @@ import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { Select, SelectItem } from "@/components/ui/select";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
@@ -72,14 +79,17 @@ import {
   type WorkflowRuleView,
 } from "../workflows.data";
 import { GuardEditor } from "./guard-editor";
+import { SendWebhookParams } from "./send-webhook-params";
 import {
   ACTION_ICONS,
   CardSelect,
   type CardSelectOption,
   ConnectorBadge,
+  ToneMarker,
   TRIGGER_ICONS,
+  WORKFLOW_PILL_CLASS,
 } from "./workflow-builder-cards";
-import { WorkflowFlowGraph } from "./workflow-flow-preview";
+import { OP_LABEL_KEY, WorkflowFlowGraph } from "./workflow-flow-preview";
 
 // ── Static catalog metadata ─────────────────────────────────────────────────────────
 
@@ -112,8 +122,11 @@ const ACTION_PARAM_FIELDS: Record<string, ParamField[]> = {
     { key: "destination", labelKey: "paramDestination", required: true },
     { key: "source", labelKey: "paramSource", helpKey: WALLET_HELP },
   ],
+  // Registry endpoint XOR inline url (+secret) — enforced in validateBuilder and by
+  // the SendWebhookParams mode toggle, so neither field is `required` here.
   send_webhook: [
-    { key: "url", labelKey: "paramWebhookUrl", required: true },
+    { key: "endpointId", labelKey: "paramWebhookEndpoint" },
+    { key: "url", labelKey: "paramWebhookUrl" },
     { key: "secret", labelKey: "paramSecret", secret: true },
   ],
   notify: [
@@ -179,6 +192,15 @@ const ACTION_WALLET_PARAM: Record<string, string> = {
 };
 
 const AMOUNT_RE = /^\d+(\.\d+)?$/;
+// Params the engine hands to the chain as addresses — validated like the server does.
+const WALLET_PARAM_KEYS = new Set(["wallet", "destination", "source"]);
+// Input caps mirroring the save-time schemas (2,000 is the server's blanket per-param
+// cap; the rest are that field's own tighter bound).
+const PARAM_MAX_LENGTH: Record<string, number> = {
+  secret: 200,
+  email: 254,
+  label: 120,
+};
 
 // ── i18n helpers ────────────────────────────────────────────────────────────────────
 
@@ -206,6 +228,12 @@ function makeLabel(t: TFunc) {
       return humanizeType(type);
     }
   };
+}
+
+// Guard values are scalars, except the `in` operator's list — rendered as a tidy
+// comma-separated run, same as the builder preview.
+function formatGuardValue(value: string | number | Array<string | number>): string {
+  return Array.isArray(value) ? value.map(String).join(", ") : String(value);
 }
 
 // One-line explanation of what a trigger fires on / what an action does, rendered as
@@ -258,6 +286,35 @@ export function failureLabel(error: string, wf: ReturnType<typeof makeWf>): stri
   return detail ? `${wf(key)} (${detail})` : wf(key);
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Format rules for a filled-in param, mirroring the save-time schemas: a bad address /
+// short secret / malformed email is a guaranteed 400, so it surfaces on the field
+// instead of as a failed save. The loose url regex is deliberate — legacy http rules
+// must stay editable in custom mode.
+function paramFormatError(
+  key: string,
+  value: string,
+  wf: ReturnType<typeof makeWf>
+): string | null {
+  if (key === "amount" && (!AMOUNT_RE.test(value) || Number(value) <= 0)) {
+    return wf("validationAmount");
+  }
+  if (key === "url" && !/^https?:\/\/\S+$/i.test(value)) {
+    return wf("validationUrl");
+  }
+  if (WALLET_PARAM_KEYS.has(key) && !isValidSolanaAddress(value)) {
+    return wf("validationAddress");
+  }
+  if (key === "secret" && (value.length < 8 || value.length > 200)) {
+    return wf("validationSecret");
+  }
+  if (key === "email" && !EMAIL_RE.test(value)) {
+    return wf("validationEmail");
+  }
+  return null;
+}
+
 // ── Builder validation ──────────────────────────────────────────────────────────────
 
 interface BuilderValidation {
@@ -287,11 +344,19 @@ export function validateBuilder(input: {
     if (!value) {
       continue;
     }
-    if (field.key === "amount" && (!AMOUNT_RE.test(value) || Number(value) <= 0)) {
-      fieldErrors[field.key] = wf("validationAmount");
+    const formatError = paramFormatError(field.key, value, wf);
+    if (formatError) {
+      fieldErrors[field.key] = formatError;
     }
-    if (field.key === "url" && !/^https?:\/\/\S+$/i.test(value)) {
-      fieldErrors[field.key] = wf("validationUrl");
+  }
+
+  // send_webhook targets exactly one of: a registry endpoint or an inline URL. (The
+  // loose url regex above stays so legacy http rules remain editable in custom mode.)
+  if (action?.type === "send_webhook") {
+    const endpointId = (params.endpointId ?? "").trim();
+    const url = (params.url ?? "").trim();
+    if ((!endpointId && !url) || (endpointId && url)) {
+      fieldErrors.endpointId = wf("validationEndpoint");
     }
   }
 
@@ -504,6 +569,16 @@ export function WorkflowsTab({
     loadFailed,
   } = useWorkflowsData(tokenId, executionsPageSize);
 
+  // First page only (the picker is a dropdown, not a browser); `total` rides along so
+  // the params block can say when the registry holds more than one page.
+  const webhookEndpointsSwr = usePersistedDashboardSWR<WebhookEndpointsPage>(
+    ["webhook-endpoints"],
+    () => fetchWebhookEndpoints(1, 100),
+    { revalidateOnFocus: false },
+    { key: "webhook-endpoints", ttlMs: 15_000 }
+  );
+  const webhookEndpoints = webhookEndpointsSwr.data;
+
   // ── Builder state ──
   const [triggerType, setTriggerType] = useState<string | null>(null);
   const [actionType, setActionType] = useState<string | null>(null);
@@ -552,20 +627,49 @@ export function WorkflowsTab({
 
   // One-line "field: value · …" summary of the collected action params, for the
   // preview. Secrets are masked, option values localized.
-  const paramSummary = paramFields
-    .map((field) => {
+  const summaryParts = paramFields
+    .map((field): { key: string; node: ReactNode } | null => {
       const value = (params[field.key] ?? "").trim();
       if (!value) {
         return null;
       }
       if (field.secret) {
-        return `${wf(field.labelKey)}: ••••`;
+        return { key: field.key, node: `${wf(field.labelKey)}: ••••` };
+      }
+      // A raw endpoint id says nothing in a preview — show the endpoint's label, as a
+      // pill so the referenced registry entity reads as an object, not free text.
+      if (field.key === "endpointId") {
+        const endpoint = webhookEndpoints?.endpoints.find((e) => e.id === value);
+        return {
+          key: field.key,
+          node: (
+            <span className="inline-flex items-center gap-1.5">
+              {wf(field.labelKey)}
+              <Badge className={WORKFLOW_PILL_CLASS} variant="default">
+                {endpoint?.label ?? value}
+              </Badge>
+            </span>
+          ),
+        };
       }
       const option = field.options?.find((opt) => opt.value === value);
-      return `${wf(field.labelKey)}: ${option ? wf(option.labelKey) : value}`;
+      return {
+        key: field.key,
+        node: `${wf(field.labelKey)}: ${option ? wf(option.labelKey) : value}`,
+      };
     })
-    .filter((entry): entry is string => entry !== null)
-    .join(" · ");
+    .filter((entry): entry is { key: string; node: ReactNode } => entry !== null);
+  // Empty string (not an empty element) so the preview's `paramSummary || undefined`
+  // still reads "no params collected" as falsy.
+  const paramSummary: ReactNode =
+    summaryParts.length === 0
+      ? ""
+      : summaryParts.map((part, index) => (
+          <Fragment key={part.key}>
+            {index > 0 ? " · " : null}
+            {part.node}
+          </Fragment>
+        ));
 
   const resetBuilder = useCallback(() => {
     setEditingRule(null);
@@ -849,6 +953,8 @@ export function WorkflowsTab({
               selectedAction={selectedAction}
               conditionFields={conditionFields}
               guards={guards}
+              webhookEndpoints={webhookEndpoints}
+              editingRuleId={editingRule?.id ?? null}
               validation={validation}
               showValidation={showValidation}
               paramSummary={paramSummary}
@@ -951,16 +1057,6 @@ interface LayoutArgs {
 
 // `heading`, not `title`: a `title` JSX prop is read as user-facing copy by the i18n
 // audit, which would then flag the i18n keys passed through it.
-function StageHeading({ heading, hint }: { heading: string; hint?: string }) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="h-3.5 w-1 shrink-0 rounded-full bg-fill-strong" aria-hidden />
-      <span className="text-sm font-semibold text-primary">{heading}</span>
-      {hint ? <span className="text-xs text-tertiary">{hint}</span> : null}
-    </div>
-  );
-}
-
 // Surfaces only the unsupported reason (the cards already carry the tier badge).
 function TierNotice({ t, selectedAction }: { t: TFunc; selectedAction: CatalogActionView | null }) {
   const support = selectedAction?.support;
@@ -975,7 +1071,8 @@ function TierNotice({ t, selectedAction }: { t: TFunc; selectedAction: CatalogAc
 }
 
 function ReviewField({
-  wf,
+  // Bound as `t` so the ui-copy audit recognizes the key literals as translated.
+  wf: t,
   reviewMode,
   reviewLocked,
   onChange,
@@ -985,21 +1082,96 @@ function ReviewField({
   reviewLocked: boolean;
   onChange: (value: "auto" | "manual") => void;
 }) {
+  const value = reviewLocked ? "manual" : reviewMode;
+  // Two choices: big always-visible card-buttons side by side (the WHEN/THEN card
+  // grammar), stretched to the bottom of the settings panel — a dropdown hides one of
+  // two options for no win.
+  const options = [
+    {
+      value: "auto" as const,
+      icon: Zap,
+      label: t("autoApply"),
+      description: t("autoApplyDescription"),
+      disabled: reviewLocked,
+    },
+    {
+      value: "manual" as const,
+      icon: UserCheck,
+      label: t("manualReview"),
+      description: t("manualReviewDescription"),
+      disabled: false,
+    },
+  ];
   return (
-    <div className="space-y-1.5 text-sm">
-      <span className="font-medium text-secondary">{wf("review")}</span>
-      <Select
-        ariaLabel={wf("review")}
-        value={reviewLocked ? "manual" : reviewMode}
-        disabled={reviewLocked}
-        onValueChange={(v) => onChange(v === "manual" ? "manual" : "auto")}
-      >
-        <SelectItem value="auto" disabled={reviewLocked}>
-          {wf("autoApply")}
-        </SelectItem>
-        <SelectItem value="manual">{wf("manualReview")}</SelectItem>
-      </Select>
-      {reviewLocked ? <p className="text-secondary text-xs">{wf("reviewLockedNote")}</p> : null}
+    // Content height, not flex-1: when both this and the parameters block grew, the slack
+    // split between them and the leftover under these cards read as an oversized margin
+    // above the block below. The parameters block absorbs it all instead.
+    <div className="flex flex-col gap-1.5 text-sm">
+      {/* Peer of the parameters heading below — same size, or the section under it would
+          out-shout it. */}
+      <span className="text-sm font-medium text-primary">{t("review")}</span>
+      {/* items-stretch is the default, but stated: both cards must be the row's height so
+          their bottom edges line up whatever their descriptions wrap to. */}
+      <div className="grid flex-1 content-start items-stretch gap-3 sm:grid-cols-2">
+        {options.map((option) => {
+          const Icon = option.icon;
+          const selected = option.value === value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={selected}
+              disabled={option.disabled}
+              onClick={() => onChange(option.value)}
+              className={cn(
+                // Grows with the column (the preview panel next door sets the height) but
+                // never *forces* it: the icon sits beside the label rather than above it,
+                // so the card's natural height stays under a short preview's and the
+                // settings panel can't end up taller than the preview it explains.
+                // Content is top-aligned, not centred: the two descriptions wrap to
+                // different line counts, and centring each card's content independently
+                // put their icon rows and labels at different heights.
+                "relative flex h-full max-h-40 cursor-pointer flex-col items-start justify-start gap-2 rounded-xl border p-4 pr-11 text-left transition-colors",
+                // Inset focus ring. The browser default is drawn outside the border box, so
+                // on a pair of cards it made whichever one was last clicked look taller and
+                // misaligned rather than focused.
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--input-focus-ring)]",
+                selected
+                  ? "border-primary bg-fill-subtle/50"
+                  : "border-border-default bg-fill-subtle/20 hover:bg-fill-subtle",
+                "disabled:pointer-events-none disabled:opacity-40"
+              )}
+            >
+              <span
+                className={cn(
+                  "absolute top-3 right-3 flex size-5 items-center justify-center rounded-full border transition-colors",
+                  selected
+                    ? "border-primary bg-primary text-on-primary"
+                    : "border-border-default text-transparent"
+                )}
+                aria-hidden
+              >
+                <Check className="size-3" strokeWidth={3} />
+              </span>
+              <span className="flex min-w-0 items-center gap-2.5">
+                <span
+                  className={cn(
+                    "flex size-10 shrink-0 items-center justify-center rounded-xl bg-fill-subtle",
+                    selected ? "text-primary" : "text-tertiary"
+                  )}
+                >
+                  <Icon className="size-[22px]" />
+                </span>
+                <span className="truncate text-[15px] font-medium text-primary">
+                  {option.label}
+                </span>
+              </span>
+              <span className="block text-sm leading-5 text-tertiary">{option.description}</span>
+            </button>
+          );
+        })}
+      </div>
+      {reviewLocked ? <p className="text-secondary text-xs">{t("reviewLockedNote")}</p> : null}
     </div>
   );
 }
@@ -1025,7 +1197,7 @@ function ParamsBlock({
   return (
     <div
       className={cn(
-        "grid gap-3 rounded-xl border border-border-subtle bg-fill-subtle/40 p-3",
+        "grid gap-4 rounded-xl border border-border-subtle bg-fill-subtle/40 p-4",
         // A lone field (e.g. allowlist's wallet) takes the full row; pairs split.
         paramFields.length > 1 && "sm:grid-cols-2"
       )}
@@ -1094,7 +1266,15 @@ function SubmitRow({
         size="sm"
         onClick={onSubmit}
         disabled={!canSubmit}
-        iconLeft={busy ? <Loader2 className="size-3.5 animate-spin" /> : undefined}
+        iconLeft={
+          busy ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : editing ? (
+            <Check className="size-3.5" />
+          ) : (
+            <Plus className="size-3.5" />
+          )
+        }
       >
         {editing ? wf("saveChanges") : wf("create")}
       </Button>
@@ -1183,7 +1363,8 @@ function ActionSelect({
       icon: ACTION_ICONS[a.type] ?? Play,
       label: label("action", a.type),
       description: describe("action", a.type),
-      badge: <Badge variant={TIER_BADGE_VARIANT[tier]}>{tierLabel}</Badge>,
+      badgeText: tierLabel,
+      badgeTone: TIER_BADGE_VARIANT[tier],
       note: unsupported
         ? stripSuffix(wf("unavailableSuffix"))
         : permitted
@@ -1205,14 +1386,7 @@ function ActionSelect({
   );
 }
 
-// ── Builder: small presentational helpers for the sketch-style layouts ──────────────
-
-// Renders a literal/prop string without the i18n audit reading it as copy (`text` is a
-// non-user-facing prop). These sketch layouts are throwaway comparison scaffolding, so a
-// few structural labels ("WHEN", "Summary"…) stay untranslated until a layout is chosen.
-function MetaText({ text, className }: { text: string; className?: string }) {
-  return <span className={className}>{text}</span>;
-}
+// ── Builder: small presentational helpers ───────────────────────────────────────────
 
 // A single node/panel box: kicker (WHEN/THEN/GUARD), icon, optional step number, control.
 function BuilderNode({
@@ -1246,10 +1420,9 @@ function BuilderNode({
         <span className="flex size-9 items-center justify-center rounded-lg bg-fill-subtle text-secondary">
           <Icon className="size-[18px]" aria-hidden />
         </span>
-        <MetaText
-          text={kicker}
-          className="text-[11px] font-semibold uppercase tracking-wide text-tertiary"
-        />
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-tertiary">
+          {kicker}
+        </span>
       </div>
       {children}
     </div>
@@ -1272,7 +1445,7 @@ function RowArrow() {
 // WHEN → THEN → GUARD across the top, then rule settings + the live execution preview.
 // The GUARD slot is the user's "only if…" filter (never "capability enabled" — capability
 // is automatic and shows only in the preview). A rule is always exactly one trigger → one
-// action → optional filter. The WHEN/THEN/GUARD kicker labels are untranslated for now.
+// action → optional filter.
 
 function GuardSlot(args: LayoutArgs) {
   return (
@@ -1283,28 +1456,40 @@ function GuardSlot(args: LayoutArgs) {
 // TL — "Wizard row": WHEN → THEN → GUARD as a horizontal card row, settings + live
 // execution preview below (real engine steps, not invented narration).
 function WizardRowLayout(args: LayoutArgs) {
+  // Bound as `t` so the ui-copy audit recognizes the key literals as translated.
+  const t = args.wf;
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-2 xl:flex-row xl:items-stretch">
-        <BuilderNode icon={args.triggerIcon} kicker="WHEN">
+        <BuilderNode icon={args.triggerIcon} kicker={t("when")}>
           {args.triggerSelect}
         </BuilderNode>
         <RowArrow />
-        <BuilderNode icon={args.actionIcon} kicker="THEN">
+        <BuilderNode icon={args.actionIcon} kicker={t("then")}>
           {args.actionSelect}
         </BuilderNode>
         <RowArrow />
-        <BuilderNode icon={Filter} kicker="GUARD">
+        <BuilderNode icon={Filter} kicker={t("guard")}>
           <GuardSlot {...args} />
         </BuilderNode>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-3 rounded-xl border border-border-default bg-fill-subtle/10 p-3">
-          <StageHeading heading="Rule settings" />
-          {args.reviewField}
-          {args.paramsBlock}
+        <div className="flex flex-col rounded-xl border border-border-default bg-fill-subtle/30 p-4">
+          {/* Same heading grammar as the Execution preview panel next door: h4 title,
+              caption beneath, no accent bar. */}
+          <h4 className="text-sm font-semibold text-primary">{t("settingsTitle")}</h4>
+          <p className="mt-0.5 text-xs text-secondary">{t("settingsIntro")}</p>
+          {/* gap-4 is the minimum between the two sections; justify-between then shares the
+              panel's spare height out between them, the way the preview column next door
+              spaces its nodes, instead of pooling it under the last control. */}
+          <div className="mt-4 flex flex-1 flex-col justify-between gap-4">
+            {args.reviewField}
+            {args.paramsBlock}
+          </div>
         </div>
-        <div className="space-y-2">{args.flowPanel}</div>
+        {/* The panel itself is the grid item — no wrapper div, which would be the thing
+            that stretches while the bordered panel inside it stayed content-height. */}
+        {args.flowPanel}
       </div>
       {args.tierNotice}
       {args.validationMessage}
@@ -1331,9 +1516,11 @@ function WorkflowBuilder(props: {
   selectedAction: CatalogActionView | null;
   conditionFields: string[];
   guards: GuardDraft[];
+  webhookEndpoints: WebhookEndpointsPage | undefined;
+  editingRuleId: string | null;
   validation: BuilderValidation;
   showValidation: boolean;
-  paramSummary: string;
+  paramSummary: ReactNode;
   busy: boolean;
   canSubmit: boolean;
   canUseAction: (type: string) => boolean;
@@ -1355,6 +1542,8 @@ function WorkflowBuilder(props: {
   // Icons for the WHEN/THEN nodes; fall back to a neutral glyph.
   const triggerIcon = (props.triggerType && TRIGGER_ICONS[props.triggerType]) || Zap;
   const actionIcon = (props.actionType && ACTION_ICONS[props.actionType]) || Play;
+  // The parameters block names its action rather than saying "Parameters" generically.
+  const actionLabel = props.actionType ? label("action", props.actionType) : "";
 
   const args: LayoutArgs = {
     wf,
@@ -1415,9 +1604,14 @@ function WorkflowBuilder(props: {
       />
     ),
     paramsBlock: (
-      <ParamsBlock
+      <BuilderParamsBlock
+        actionType={props.actionType}
+        actionIcon={actionIcon}
+        actionLabel={actionLabel}
+        editingRuleId={props.editingRuleId}
         paramFields={props.paramFields}
         params={props.params}
+        webhookEndpoints={props.webhookEndpoints}
         wf={wf}
         showValidation={props.showValidation}
         validation={props.validation}
@@ -1446,6 +1640,129 @@ function WorkflowBuilder(props: {
   return <WizardRowLayout {...args} />;
 }
 
+// Per-action copy for the parameters block. `makeWf` returns a humanized key rather than
+// throwing on a miss, so which actions have bespoke copy is stated here instead of being
+// discovered at render: an action the catalog grows before this file does falls back to a
+// generic line rather than printing a mangled key.
+const ACTIONS_WITH_PARAM_COPY = new Set([
+  "mint",
+  "burn",
+  "force_burn",
+  "seize",
+  "send_webhook",
+  "notify",
+  "freeze",
+  "unfreeze",
+  "allowlist_add",
+  "allowlist_remove",
+]);
+const ACTIONS_WITH_BANNER_COPY = new Set(["pause", "unpause", "record"]);
+
+// pause / unpause / record take no parameters at all, which left the settings panel with a
+// bare void under the review cards. Rather than announcing the absence, the banner says
+// what the action actually does — the void is where that explanation was missing anyway.
+function NoParamsBanner({
+  // Bound as `t` so the ui-copy audit recognizes the key literals as translated.
+  wf: t,
+  icon: Icon,
+  action,
+  actionType,
+}: {
+  wf: ReturnType<typeof makeWf>;
+  icon: LucideIcon;
+  action: string;
+  actionType: string;
+}) {
+  const bespoke = ACTIONS_WITH_BANNER_COPY.has(actionType);
+  return (
+    <div className="flex flex-1 items-center gap-3 rounded-xl border border-dashed border-border-default bg-fill-subtle/20 p-4">
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-fill-subtle text-tertiary">
+        <Icon className="size-[22px]" aria-hidden />
+      </span>
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-primary">
+          {bespoke ? t(`noParamsTitles.${actionType}`) : t("noParamsTitle", { action })}
+        </p>
+        <p className="mt-0.5 text-xs leading-5 text-secondary">
+          {bespoke ? t(`noParamsBodies.${actionType}`) : t("noParamsBody", { action })}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// The per-action parameter inputs. send_webhook gets its bespoke registry/custom
+// picker; every other action renders its ACTION_PARAM_FIELDS as plain controls.
+function BuilderParamsBlock({
+  actionType,
+  editingRuleId,
+  paramFields,
+  params,
+  webhookEndpoints,
+  wf: t,
+  showValidation,
+  validation,
+  actionIcon,
+  actionLabel,
+  onParamChange,
+}: {
+  actionType: string | null;
+  editingRuleId: string | null;
+  paramFields: ParamField[];
+  params: Record<string, string>;
+  webhookEndpoints: WebhookEndpointsPage | undefined;
+  wf: ReturnType<typeof makeWf>;
+  showValidation: boolean;
+  validation: BuilderValidation;
+  actionIcon: LucideIcon;
+  actionLabel: string;
+  onParamChange: (key: string, value: string) => void;
+}) {
+  // No action picked yet: the panel's own intro already covers that state.
+  if (!actionType) {
+    return null;
+  }
+  if (paramFields.length === 0) {
+    return <NoParamsBanner action={actionLabel} actionType={actionType} icon={actionIcon} wf={t} />;
+  }
+  const bespoke = ACTIONS_WITH_PARAM_COPY.has(actionType);
+  const heading = bespoke
+    ? t(`paramsTitles.${actionType}`)
+    : t("paramsTitle", { action: actionLabel });
+  const caption = bespoke
+    ? t(`paramsIntros.${actionType}`)
+    : t("paramsIntro", { action: actionLabel });
+  return (
+    // gap-1.5 between a heading and its controls, matching the Review label above it.
+    <div className="flex flex-col gap-1.5">
+      <div>
+        {/* Set like the "Review" label above it — the line beneath carries the detail. */}
+        <h5 className="text-sm font-medium text-primary">{heading}</h5>
+        <p className="mt-0.5 text-xs text-tertiary">{caption}</p>
+      </div>
+      {actionType === "send_webhook" ? (
+        <SendWebhookParams
+          key={editingRuleId ?? "new"}
+          wf={t}
+          params={params}
+          endpoints={webhookEndpoints}
+          errors={showValidation ? validation.fieldErrors : {}}
+          onParamChange={onParamChange}
+        />
+      ) : (
+        <ParamsBlock
+          paramFields={paramFields}
+          params={params}
+          wf={t}
+          showValidation={showValidation}
+          validation={validation}
+          onParamChange={onParamChange}
+        />
+      )}
+    </div>
+  );
+}
+
 function ParamFieldControl({
   field,
   wf,
@@ -1462,7 +1779,9 @@ function ParamFieldControl({
   const inputId = `wf-param-${field.key}`;
   if (field.options) {
     return (
-      <div className="space-y-1.5 text-sm">
+      // flex, not space-y: the help/error line below the control is a <span>, and margin-top
+      // does nothing to an inline element — as a flex item it actually gets the gap.
+      <div className="flex flex-col gap-2 text-sm">
         <Label htmlFor={inputId} className="text-secondary">
           {wf(field.labelKey)}
         </Label>
@@ -1481,7 +1800,7 @@ function ParamFieldControl({
     );
   }
   return (
-    <div className="space-y-1.5 text-sm">
+    <div className="flex flex-col gap-2 text-sm">
       <Label htmlFor={inputId} className="text-secondary">
         {wf(field.labelKey)}
         {field.required ? <span className="text-error"> *</span> : null}
@@ -1493,6 +1812,8 @@ function ParamFieldControl({
         id={inputId}
         type={field.secret ? "password" : "text"}
         autoComplete={field.secret ? "off" : undefined}
+        inputMode={field.key === "amount" ? "decimal" : undefined}
+        maxLength={PARAM_MAX_LENGTH[field.key] ?? 2_000}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={field.helpKey ? wf(field.helpKey) : undefined}
@@ -1507,6 +1828,137 @@ function ParamFieldControl({
 }
 
 // ── Rules card ──────────────────────────────────────────────────────────────────────
+
+function guardClauseTexts(
+  rule: WorkflowRuleView,
+  wf: ReturnType<typeof makeWf>,
+  label: ReturnType<typeof makeLabel>
+): string[] {
+  return (rule.definition?.condition?.all ?? []).map(
+    (clause) =>
+      `${label("conditionField", clause.field)} ${wf(
+        OP_LABEL_KEY[clause.op]
+      ).toLocaleLowerCase()} ${formatGuardValue(clause.value)}`
+  );
+}
+
+// A saved rule's guard: one filled pill carrying the whole condition as a sentence,
+// trailing the action. A guarded rule must never read as unconditional, so the clause is
+// always shown rather than reduced to a mark.
+function GuardDisplay({
+  rule,
+  // Bound as `t` so the ui-copy audit recognizes the key literal as translated.
+  wf: t,
+  label,
+  className,
+}: {
+  rule: WorkflowRuleView;
+  wf: ReturnType<typeof makeWf>;
+  label: ReturnType<typeof makeLabel>;
+  className?: string;
+}) {
+  const texts = guardClauseTexts(rule, t, label);
+  if (texts.length === 0) {
+    return null;
+  }
+  return (
+    <Badge className={cn(className, WORKFLOW_PILL_CLASS)} variant="default">
+      <span className="inline-flex items-center gap-1">
+        <GitBranch aria-hidden className="size-3" />
+        <span>{t("flowOnlyIf", { clauses: texts.join(", ") })}</span>
+      </span>
+    </Badge>
+  );
+}
+
+// The little circled connector between a rule row's trigger and action.
+function RuleArrow() {
+  return (
+    <span
+      className="flex size-5 shrink-0 items-center justify-center rounded-full border border-border-default text-tertiary"
+      aria-hidden
+    >
+      <ArrowRight className="size-3" />
+    </span>
+  );
+}
+
+// One half of a rule row: icon tile + label, the tile optionally carrying the tier marker.
+function RuleStepChip({
+  icon: Icon,
+  text,
+  marker,
+}: {
+  icon: LucideIcon;
+  text: string;
+  marker?: ReactNode;
+}) {
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      <span className="relative flex size-8 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-secondary">
+        <Icon className="size-4" />
+        {marker}
+      </span>
+      <span className="truncate text-sm font-medium text-primary">{text}</span>
+    </span>
+  );
+}
+
+// Review mode as a glyph with a tooltip — the row is deliberately terse, and the two
+// modes are a binary that a lightning/approver icon carries without spending a word.
+function ReviewIndicator({
+  rule,
+  wf: t,
+}: {
+  rule: WorkflowRuleView;
+  wf: ReturnType<typeof makeWf>;
+}) {
+  const manual = rule.review_mode === "manual";
+  const Icon = manual ? UserCheck : Zap;
+  const text = manual ? t("manualReview") : t("autoApply");
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span aria-label={text} className="inline-flex text-secondary" role="img">
+          <Icon aria-hidden className="size-4" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{text}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+// A saved rule as one line: trigger → action, with the guard clause trailing the action
+// and the tier stated as a marker on the action's icon tile (the way the builder states
+// it) rather than a pill, which was the row's widest element.
+function RuleFlowLine({
+  rule,
+  // Bound as `t` so the ui-copy audit recognizes the key literal as translated.
+  wf: t,
+  label,
+  tier,
+}: {
+  rule: WorkflowRuleView;
+  wf: ReturnType<typeof makeWf>;
+  label: ReturnType<typeof makeLabel>;
+  tier: ExecutionTier;
+}) {
+  return (
+    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+      <RuleStepChip
+        icon={TRIGGER_ICONS[rule.trigger_type] ?? Zap}
+        text={label("trigger", rule.trigger_type)}
+      />
+      <RuleArrow />
+      <RuleStepChip
+        icon={ACTION_ICONS[rule.action_type] ?? Play}
+        marker={<ToneMarker label={t(`tierLabels.${tier}`)} tone={TIER_BADGE_VARIANT[tier]} />}
+        text={label("action", rule.action_type)}
+      />
+      <GuardDisplay label={label} rule={rule} wf={t} />
+    </div>
+  );
+}
 
 function RulesCard({
   rules,
@@ -1619,7 +2071,11 @@ function HoldersCard({
               onClick={onEnroll}
               disabled={busyId !== null || !walletAddress.trim()}
               iconLeft={
-                busyId === "enroll" ? <Loader2 className="size-3.5 animate-spin" /> : undefined
+                busyId === "enroll" ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Wallet className="size-3.5" />
+                )
               }
             >
               {wf("enrollWallet")}
@@ -1765,78 +2221,91 @@ function RuleRow({
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const ActionIcon = ACTION_ICONS[rule.action_type] ?? Play;
-  const tierLabel = wf(`tierLabels.${tier}`);
   return (
-    <li className="flex items-center justify-between gap-4 py-3.5">
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-secondary">
-          <ActionIcon className="size-[18px]" />
-        </span>
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm font-medium text-primary">
-            <span className="truncate">{label("trigger", rule.trigger_type)}</span>
-            <span
-              className="flex size-5 shrink-0 items-center justify-center rounded-full border border-border-default text-tertiary"
-              aria-hidden
-            >
-              <ArrowRight className="size-3" />
-            </span>
-            <span className="truncate">{label("action", rule.action_type)}</span>
-            <Badge variant={TIER_BADGE_VARIANT[tier]}>{tierLabel}</Badge>
-          </div>
-          <p className="mt-0.5 text-xs text-secondary">
-            {rule.review_mode === "manual" ? wf("manualReview") : wf("autoApply")}
-            {" · "}
-            {formatRelativeTime(rule.created_at, locale)}
-          </p>
-        </div>
-      </div>
+    <li className="flex items-center justify-between gap-4 py-3">
+      <RuleFlowLine label={label} rule={rule} tier={tier} wf={wf} />
       <div className="flex shrink-0 items-center gap-2">
+        <ReviewIndicator rule={rule} wf={wf} />
+        <span className="whitespace-nowrap text-xs text-tertiary">
+          {formatRelativeTime(rule.created_at, locale)}
+        </span>
         {rowBusy ? <Loader2 className="size-3.5 animate-spin text-secondary" /> : null}
-        <Badge variant={rule.enabled ? "success" : "default"}>
+        <Badge className={WORKFLOW_PILL_CLASS} variant={rule.enabled ? "success" : "default"}>
           {rule.enabled ? wf("enabled") : wf("disabled")}
         </Badge>
-        {canManage ? (
-          <>
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="ghost"
-              aria-label={wf("editRule")}
-              title={wf("editRule")}
-              onClick={onEdit}
-              disabled={busy || editing}
-            >
-              <Pencil className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="ghost"
-              aria-label={wf("deleteRule")}
-              title={wf("deleteRule")}
-              onClick={onDelete}
-              disabled={busy}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              onClick={onToggle}
-              disabled={busy}
-              iconLeft={
-                rule.enabled ? <PowerOff className="size-3.5" /> : <Power className="size-3.5" />
-              }
-            >
-              {rule.enabled ? wf("disable") : wf("enable")}
-            </Button>
-          </>
-        ) : null}
+        <RuleRowActions
+          busy={busy}
+          canManage={canManage}
+          editing={editing}
+          enabled={rule.enabled}
+          onDelete={onDelete}
+          onEdit={onEdit}
+          onToggle={onToggle}
+          wf={wf}
+        />
       </div>
     </li>
+  );
+}
+
+// Edit / delete / enable-disable for one rule row.
+function RuleRowActions({
+  wf,
+  canManage,
+  busy,
+  editing,
+  enabled,
+  onToggle,
+  onEdit,
+  onDelete,
+}: {
+  wf: ReturnType<typeof makeWf>;
+  canManage: boolean;
+  busy: boolean;
+  editing: boolean;
+  enabled: boolean;
+  onToggle: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  if (!canManage) {
+    return null;
+  }
+  return (
+    <>
+      <Button
+        type="button"
+        size="icon-sm"
+        variant="ghost"
+        aria-label={wf("editRule")}
+        title={wf("editRule")}
+        onClick={onEdit}
+        disabled={busy || editing}
+      >
+        <Pencil className="h-3.5 w-3.5" />
+      </Button>
+      <Button
+        type="button"
+        size="icon-sm"
+        variant="ghost"
+        aria-label={wf("deleteRule")}
+        title={wf("deleteRule")}
+        onClick={onDelete}
+        disabled={busy}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant="secondary"
+        onClick={onToggle}
+        disabled={busy}
+        iconLeft={enabled ? <PowerOff className="size-3.5" /> : <Power className="size-3.5" />}
+      >
+        {enabled ? wf("disable") : wf("enable")}
+      </Button>
+    </>
   );
 }
 
@@ -1881,7 +2350,7 @@ function HoldersList({
                 </p>
               </div>
             </div>
-            <Badge variant={status.variant}>
+            <Badge className={WORKFLOW_PILL_CLASS} variant={status.variant}>
               <span className="inline-flex items-center gap-1 leading-none">
                 <StatusIcon className="size-3 shrink-0" aria-hidden />
                 {label("status", holder.kyc_status)}
@@ -1952,7 +2421,7 @@ function ExecutionRow({
             <span className="text-sm font-medium text-primary">
               {label("action", execution.action_type)}
             </span>
-            <Badge variant={STATUS_BADGE_VARIANT[execution.status]}>
+            <Badge className={WORKFLOW_PILL_CLASS} variant={STATUS_BADGE_VARIANT[execution.status]}>
               <span className="inline-flex items-center gap-1 leading-none">
                 <StatusGlyph
                   className={cn(

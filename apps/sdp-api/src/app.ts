@@ -54,6 +54,7 @@ import policies from "@/routes/policies";
 import privateChannels from "@/routes/private-channels";
 import projects from "@/routes/projects";
 import rpc from "@/routes/rpc";
+import webhookEndpoints from "@/routes/webhook-endpoints";
 import webhooks from "@/routes/webhooks";
 import { getLogger } from "@/runtime/logger";
 import { isSentryEnabled, type Observability } from "@/runtime/observability";
@@ -367,6 +368,8 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/private-channels", privateChannels);
   v1.route("/helius-rings", heliusRings);
   v1.route("/compliance", compliance);
+  // Outbound-webhook endpoint registry (workflow send_webhook targets).
+  v1.route("/webhook-endpoints", webhookEndpoints);
 
   const registeredPluginNames = new Set<string>();
   for (const plugin of deps.plugins ?? []) {
