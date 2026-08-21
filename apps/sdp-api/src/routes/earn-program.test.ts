@@ -38,6 +38,7 @@ import {
   type InsertEarnProviderWalletInput,
   type UpsertEarnStrategyInput,
 } from "@/db/repositories";
+import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
 import { deriveProviderRequestId } from "@/lib/idempotency";
 import { env } from "@/test/helpers/env";
@@ -1147,7 +1148,9 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
     expect(sentA).not.toBe(sentB);
 
     const count = await getDb(env)
-      .prepare("SELECT COUNT(*)::int AS total FROM earn_program_withdrawals")
+      .prepare(
+        "SELECT COUNT(*)::int AS total FROM earn_movements WHERE execution_model = 'custodial'"
+      )
       .first<{ total: number }>();
     expect(count?.total).toBe(2);
   });
@@ -1674,7 +1677,9 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
 
       // Exactly ONE intent row anchors both attempts.
       const count = await getDb(env)
-        .prepare("SELECT COUNT(*)::int AS total FROM earn_program_withdrawals")
+        .prepare(
+          "SELECT COUNT(*)::int AS total FROM earn_movements WHERE execution_model = 'custodial'"
+        )
         .first<{ total: number }>();
       expect(count?.total).toBe(1);
     });
@@ -1728,9 +1733,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       expect(first.status).toBe(500);
       // The intent row survives the failure, ref-less and re-drivable.
       const stranded = await getDb(env)
-        .prepare(
-          "SELECT status, provider_reference FROM earn_program_withdrawals ORDER BY created_at DESC"
-        )
+        .prepare("SELECT status, provider_reference FROM earn_movements ORDER BY created_at DESC")
         .first<{ status: string; provider_reference: string | null }>();
       expect(stranded).toEqual({ status: "requested", provider_reference: null });
 
@@ -1751,9 +1754,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       expect(retryCall?.[1]?.requestId).toBe(firstCall?.[1]?.requestId);
       // And the re-drive healed the row.
       const healed = await getDb(env)
-        .prepare(
-          "SELECT status, provider_reference FROM earn_program_withdrawals ORDER BY created_at DESC"
-        )
+        .prepare("SELECT status, provider_reference FROM earn_movements ORDER BY created_at DESC")
         .first<{ status: string; provider_reference: string | null }>();
       expect(healed).toEqual({ status: "processing", provider_reference: "wd_test_1" });
     });
@@ -1850,7 +1851,12 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
 
   async function readLedgerRows(): Promise<Array<Record<string, unknown>>> {
     const { results } = await getDb(env)
-      .prepare("SELECT * FROM earn_program_withdrawals ORDER BY created_at DESC, id DESC")
+      .prepare(
+        `SELECT movement.*, position.provider_wallet_id AS wallet_id
+           FROM earn_movements movement
+           INNER JOIN earn_positions position ON position.id = movement.position_id
+          ORDER BY movement.created_at DESC, movement.id DESC`
+      )
       .all<Record<string, unknown>>();
     return results ?? [];
   }
@@ -1866,12 +1872,14 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
     expect(res.status).toBe(201);
 
     const [row] = await readLedgerRows();
-    expect(row?.id).toMatch(/^earn_program_withdrawal_/);
+    // One id space for every movement now; only migrated history keeps a
+    // per-family prefix, which is why nothing may parse an id for its kind.
+    expect(row?.id).toMatch(/^earn_movement_/);
     expect(row?.status).toBe("processing");
     expect(row?.provider).toBe("ground");
     expect(row?.wallet_id).toBe(program.id);
     expect(row?.provider_reference).toBe(WITHDRAWAL.withdrawalRef);
-    expect(row?.amount_requested_usd).toBe("10.00");
+    expect(row?.amount_requested).toBe("10.00");
     expect(row?.destination_address).toBe(SOLANA_DESTINATION);
     // The anchor is the DERIVED id, never the caller's raw key.
     expect(row?.request_id).toBe(
@@ -1958,9 +1966,9 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
     expect(res.status).toBe(200);
     const [row] = await readLedgerRows();
     expect(row?.status).toBe("completed");
-    expect(row?.amount_paid_usd).toBe("9.90");
-    expect(row?.fee_usd).toBe("0.10");
-    expect(row?.completed_at).toBe("2026-08-11T05:00:00.000Z");
+    expect(row?.amount_settled).toBe("9.90");
+    expect(row?.fee_amount).toBe("0.10");
+    expect(row?.settled_at).toBe("2026-08-11T05:00:00.000Z");
   });
 
   it("serves live state for a pre-ledger withdrawal without inventing a row", async () => {
@@ -2009,13 +2017,16 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
       label: null,
       createdBy: TEST_USER.id,
     });
-    const victimRow = await repo.createProgramWithdrawal({
+    const victimRow = await createPostgresEarnMovementsRepository(
+      getDb(env)
+    ).createCustodialMovement({
       organizationId: "org_earn_program_victim",
       projectId: "prj_earn_program_victim",
-      walletId: victimWallet?.id ?? "",
+      environment: "sandbox",
+      providerWalletId: victimWallet?.id ?? "",
       provider: "ground",
       amountRequestedUsd: "50.00",
-      token: "usdc",
+      payoutToken: "usdc",
       destinationAddress: SOLANA_DESTINATION,
       requestId: crypto.randomUUID(),
       idempotencyFingerprint: '{"scope":"earn_program_withdrawal"}',
@@ -2023,10 +2034,9 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
       createdBy: TEST_USER.id,
       initiatedByKeyId: null,
     });
-    await repo.updateProgramWithdrawalStatusGuarded({
-      selector: { withdrawalId: victimRow?.id ?? "" },
+    await createPostgresEarnMovementsRepository(getDb(env)).updateCustodialMovementGuarded({
+      selector: { movementId: victimRow?.id ?? "" },
       organizationId: "org_earn_program_victim",
-      fromStatuses: ["requested"],
       toStatus: "processing",
       providerReference: "wd_victim_org",
     });
@@ -2071,7 +2081,7 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
       expect(body.data.pageSize).toBe(20);
       expect(body.data.withdrawals.map((w) => w.withdrawalRef).sort()).toEqual(["wd_a", "wd_b"]);
       const [record] = body.data.withdrawals;
-      expect(record?.id).toMatch(/^earn_program_withdrawal_/);
+      expect(record?.id).toMatch(/^earn_movement_/);
       expect(record?.provider).toBe("ground");
       expect(record?.destinationAddress).toBe(SOLANA_DESTINATION);
       // Ledger records never leak the derivation internals.

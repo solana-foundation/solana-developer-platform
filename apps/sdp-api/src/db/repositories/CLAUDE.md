@@ -5,31 +5,38 @@ next to the routes that consume it, which means they are easy to miss from
 here — this file exists to point at the ones that will break money movement if
 you don't know them.
 
-## Earn: two movement shapes exist right now, and every writer must feed both
+## Earn: one movement ledger, one writer
 
-Earn is mid-migration (PRO-1705, migrations `0062`-`0064`) from two movement
-tables split by execution mechanism to one unified ledger.
+`earn_movements` is the single authoritative record of every Earn money
+movement — both directions, both execution models — and `earn_positions` is the
+single holdings table behind it (PRO-1705). `earn-movements.repository.ts` is
+the ONLY writer of either. The mechanism-split predecessors
+(`earn_program_withdrawals`, `earn_vault_movements`, `earn_vault_positions`) no
+longer have writers, and their code is retired.
 
-**If you add or change a writer of `earn_program_withdrawals`,
-`earn_vault_movements` or `earn_vault_positions`, it MUST mirror into
-`earn_movements` / `earn_positions` in the SAME transaction.** Call the
-projection functions in `earn-movements.repository.ts`; never hand-write an
-insert into the unified tables. The mapping lives in SQL views created by `0063`
-and is shared with the bulk backfill, so history and new rows cannot disagree.
+Things that will bite:
 
-Two traps worth stating outright:
+- **Legal source states come from `EARN_MOVEMENT_TRANSITIONS` (`@sdp/types`),
+  never from the caller.** Terminal regression is unrepresentable rather than
+  merely refused. The guard is applied as a compare-and-swap in the same
+  statement as the write, so a concurrent writer that already advanced a row
+  makes the loser match zero rows instead of overwriting it. A transition from an
+  illegal state returns NULL — the same answer a lost race gives.
+- **The matrix agrees with migration 0062's CHECK constraints, not merely with
+  itself.** There is no `confirmed → failed`: the schema ties `confirmed_at` and
+  `shares_out` to the commitment states, so recording it could only succeed by
+  erasing an observation SDP made. Do not add a transition without checking the
+  constraint it would have to violate.
+- **Every movement needs a holding, and a missing one must never fail a money
+  write.** Resolve or open the holding before writing the movement. The custodial
+  holding for a program is minted when its provider wallet is linked.
+- **Amounts carry a `denomination`** (`usd`, or the token mint); share counts live
+  only in share-named columns. No read may sum across rows without grouping by
+  denomination.
+- **Ids are heterogeneous by design.** History keeps the ids the projection
+  preserved, so nothing may parse an id for its kind — read `execution_model`.
 
-- `INSERT ... SELECT` from a projection view that yields nothing inserts zero
-  rows and **succeeds**. A money movement can be dropped with no error, so the
-  projections assert the row is projectable before writing. Do not "simplify"
-  that check away, and do not substitute the mirror's own row count for it —
-  zero rows is also the legitimate answer when the finalization guard declines.
-- Every movement needs a holding, so project the HOLDING before the movement on
-  every path, including replays and non-terminal transitions.
-
-The full rule set, including what `finalized` protects and why the vault
-transition guard still speaks the legacy vocabulary, is in
-[`../../routes/earn/CLAUDE.md`](../../routes/earn/CLAUDE.md). Architecture and
-the migration inventory are in
+The full rule set is in [`../../routes/earn/CLAUDE.md`](../../routes/earn/CLAUDE.md).
+Architecture and the migration inventory are in
 [`packages/sdp-earn/README.md`](../../../../../packages/sdp-earn/README.md);
 invariants are in ADR 0002 (`docs/decisions/0002-earn-provider-pluggability.md`).

@@ -295,7 +295,9 @@ describe("Earn routes — retired surfaces stay retired (PRO-1628)", () => {
     for (const path of [
       "/v1/earn/positions",
       "/v1/earn/positions/pos_1",
-      "/v1/earn/movements",
+      // `/v1/earn/movements` is NOT in this list any more — see the deliberate
+      // re-introduction below. The ITEM route still is: PRO-1705 brought back the
+      // collection alone, and a movement is read by its family's detail route.
       "/v1/earn/movements/mov_1",
       `/v1/earn/strategies/${strategy.id}/nav`,
     ]) {
@@ -318,6 +320,28 @@ describe("Earn routes — retired surfaces stay retired (PRO-1628)", () => {
       );
       expect(res.status, path).toBe(404);
     }
+  });
+
+  it("serves the DELIBERATELY re-introduced movements collection (PRO-1705)", async () => {
+    // This is the re-introduction the test above demands be deliberate. PRO-1628
+    // pruned `/v1/earn/movements` together with 0048's never-written table, and
+    // PRO-1669 was explicit that the NAME was free while the SHAPE was not: the
+    // old route was a position-scoped read over base-unit amounts. What answers
+    // here is the unified ledger's cross-provider feed — a different contract that
+    // happens to reclaim the path.
+    //
+    // Paired with a real response rather than just a non-404, for the same reason
+    // the /nav probe rides a real strategy id: asserting the absence of a 404
+    // would pass on a route that is registered but broken.
+    await seedAuth();
+
+    const res = await getEarn("/v1/earn/movements");
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { movements: unknown[]; hasMore: boolean; nextCursor: string | null };
+    };
+    expect(body.data).toEqual({ movements: [], hasMore: false, nextCursor: null });
   });
 });
 
