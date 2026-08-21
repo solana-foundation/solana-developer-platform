@@ -2,6 +2,13 @@
  * Shared RPC helpers used by the Solana RPC layer and the fee-payment adapters.
  */
 
+import {
+  isSolanaError,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_LONG_TERM_STORAGE_UNREACHABLE,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
+} from "@solana/kit";
+
 // Overloaded-gateway / timeout HTTP statuses worth retrying.
 const TRANSIENT_HTTP_STATUS = /\b(408|429|500|502|503|504)\b/;
 
@@ -20,19 +27,20 @@ const TRANSIENT_ERROR_TEXT =
  * insufficient funds) are intentionally excluded so callers don't retry
  * unrecoverable submissions.
  */
-// Transient Solana JSON-RPC server codes: -32005 node unhealthy/behind,
-// -32014 block status not yet available, -32019 long-term storage failed.
-const TRANSIENT_SOLANA_RPC_CODE = /#?-320(05|14|19)\b/;
-const TRANSIENT_SOLANA_RPC_TEXT =
-  /failed to query long-term storage|block status is not (?:yet )?available|node is (?:unhealthy|behind)/i;
+// Transient Solana JSON-RPC server codes: node unhealthy/behind, block status
+// not yet available, long-term storage unreachable.
+const TRANSIENT_SOLANA_RPC_CODES = [
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_LONG_TERM_STORAGE_UNREACHABLE,
+] as const;
 
 export function isTransientRpcError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return (
     TRANSIENT_HTTP_STATUS.test(message) ||
     TRANSIENT_ERROR_TEXT.test(message) ||
-    TRANSIENT_SOLANA_RPC_CODE.test(message) ||
-    TRANSIENT_SOLANA_RPC_TEXT.test(message)
+    TRANSIENT_SOLANA_RPC_CODES.some((code) => isSolanaError(error, code))
   );
 }
 

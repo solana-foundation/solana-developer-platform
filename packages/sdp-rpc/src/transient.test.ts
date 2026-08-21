@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_LONG_TERM_STORAGE_UNREACHABLE,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
+  SolanaError,
+} from "@solana/kit";
 import { withTransientRpcRetry } from "./transient";
 
 test("retries a transient error and returns the eventual success", async () => {
@@ -25,14 +30,12 @@ test("does not retry a persistent error", async () => {
   assert.equal(calls, 1);
 });
 
-test("treats Solana JSON-RPC server codes as transient", async () => {
+test("retries a long-term-storage server error", async () => {
   let calls = 0;
   const result = await withTransientRpcRetry(async () => {
     calls += 1;
     if (calls === 1) {
-      throw new Error(
-        "Solana error #-32019; Decode this error by running `npx @solana/errors decode -- -32019`"
-      );
+      throw new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_LONG_TERM_STORAGE_UNREACHABLE);
     }
     return "ok";
   }, [0, 0, 0]);
@@ -40,18 +43,22 @@ test("treats Solana JSON-RPC server codes as transient", async () => {
   assert.equal(calls, 2);
 });
 
-test("treats raw Solana server messages as transient", async () => {
+test("retries an unhealthy-node server error", async () => {
   let calls = 0;
   const result = await withTransientRpcRetry(async () => {
     calls += 1;
-    if (calls === 1) throw new Error("Failed to query long-term storage; please try again");
+    if (calls === 1) {
+      throw new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY, {
+        numSlotsBehind: 100,
+      });
+    }
     return "ok";
   }, [0, 0, 0]);
   assert.equal(result, "ok");
   assert.equal(calls, 2);
 });
 
-test("does not misread ordinary numbers as Solana error codes", async () => {
+test("does not retry a plain error whose text merely resembles a server code", async () => {
   let calls = 0;
   await assert.rejects(
     withTransientRpcRetry(async () => {
