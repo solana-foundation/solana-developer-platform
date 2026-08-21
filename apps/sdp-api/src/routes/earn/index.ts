@@ -21,11 +21,16 @@ import {
 import { getEarnStrategy, listEarnStrategies } from "./handlers/strategies";
 import {
   createEarnVaultDeposit,
+  createEarnVaultWithdrawal,
   extractEarnVaultDepositPolicyCandidate,
+  extractEarnVaultWithdrawalPolicyCandidate,
   findEarnVaultDepositIdempotentKeyReplay,
+  findEarnVaultWithdrawalIdempotentKeyReplay,
   getEarnVaultDeposit,
+  getEarnVaultWithdrawal,
   listEarnVaultDeposits,
   listEarnVaultPositions,
+  listEarnVaultWithdrawals,
 } from "./handlers/vault";
 import {
   earnProgramCreateSchema,
@@ -33,6 +38,7 @@ import {
   earnProgramWithdrawalCreateSchema,
   earnProgramWithdrawalPreviewSchema,
   earnVaultDepositSchema,
+  earnVaultWithdrawalSchema,
 } from "./schemas";
 
 const earn = new Hono<{ Bindings: Env }>();
@@ -99,6 +105,38 @@ earn.get(
   "/vault-deposits/:movementId",
   requirePermissions("earn:read", "wallets:read"),
   getEarnVaultDeposit
+);
+// The EXIT half (PRO-1702): redeem a position's shares back to the custody
+// wallet that holds them. Policy-gated for the same reason the deposit is —
+// it reaches `createOrgSigner` and broadcasts value-moving transactions, and
+// wallet policy is the ORG'S control over its own custody, not a provider
+// gate. Beyond it this route takes only the capability answer (501 when the
+// provider cannot build an exit): ADR 0002 exit safety forbids money-out
+// inheriting surfacing, entitlement, availability, environment capability, or
+// any catalogue dependency — the position row names the instrument, so a
+// delisted vault stays exitable.
+earn.post(
+  "/vault-withdrawals",
+  requirePermissions("earn:write", "wallets:read"),
+  validateBody(earnVaultWithdrawalSchema),
+  policyGate({
+    extract: extractEarnVaultWithdrawalPolicyCandidate,
+    findIdempotentKeyReplay: findEarnVaultWithdrawalIdempotentKeyReplay,
+  }),
+  createEarnVaultWithdrawal
+);
+// Withdrawal READS mirror the deposit reads: no policy gate, no provider gate,
+// collection before the `:movementId` route, `?requestId=` finds the whole leg
+// group (including one an approval executor created later).
+earn.get(
+  "/vault-withdrawals",
+  requirePermissions("earn:read", "wallets:read"),
+  listEarnVaultWithdrawals
+);
+earn.get(
+  "/vault-withdrawals/:movementId",
+  requirePermissions("earn:read", "wallets:read"),
+  getEarnVaultWithdrawal
 );
 earn.get(
   "/vault-positions",

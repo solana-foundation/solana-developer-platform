@@ -167,6 +167,7 @@ beforeEach(async () => {
         owner: input.owner,
         cluster: "devnet",
         shares: "1",
+        withdrawableShares: "1",
         tokenValue: "1",
         tokenMint: TOKEN_MINT,
         shareMint: SHARE_MINT,
@@ -274,6 +275,7 @@ describe("GET /v1/earn/vault-positions", () => {
         owner: PUBLIC_KEY_A,
         cluster: "devnet",
         shares: "99",
+        withdrawableShares: "99",
         tokenValue: "99",
         tokenMint: PUBLIC_KEY_B,
         shareMint: SHARE_MINT,
@@ -298,6 +300,7 @@ describe("GET /v1/earn/vault-positions", () => {
   it.each([
     ["owner", { owner: PUBLIC_KEY_B }],
     ["amount", { shares: "NaN" }],
+    ["withdrawable amount", { withdrawableShares: "NaN" }],
   ] as const)("does not attach live balances under a mismatched %s", async (kind, override) => {
     const providerReference = `vault_${kind}_mismatch`;
     await createPosition({ providerReference });
@@ -307,6 +310,7 @@ describe("GET /v1/earn/vault-positions", () => {
         owner: PUBLIC_KEY_A,
         cluster: "devnet",
         shares: "99",
+        withdrawableShares: "99",
         tokenValue: "99",
         tokenMint: TOKEN_MINT,
         shareMint: SHARE_MINT,
@@ -497,8 +501,12 @@ describe("GET /v1/earn/vault-deposits/:movementId", () => {
   it("refuses a withdrawal from the deposit path", async () => {
     const created = await createPosition({ providerReference: "vault_read_direction" });
     await getDb(env)
-      .prepare("UPDATE earn_movements SET direction = 'withdrawal' WHERE id = ?")
-      .bind(created.movement.id)
+      .prepare(
+        `UPDATE earn_movements
+            SET direction = 'withdrawal', denomination = ?, min_shares_out = NULL
+          WHERE id = ?`
+      )
+      .bind(SHARE_MINT, created.movement.id)
       .run();
 
     expect((await getDeposit(created.movement.id)).status).toBe(404);
@@ -602,8 +610,12 @@ describe("GET /v1/earn/vault-deposits", () => {
     const deposit = await createPosition({ providerReference: "vault_list_deposit" });
     const withdrawal = await createPosition({ providerReference: "vault_list_withdrawal" });
     await getDb(env)
-      .prepare("UPDATE earn_movements SET direction = 'withdrawal' WHERE id = ?")
-      .bind(withdrawal.movement.id)
+      .prepare(
+        `UPDATE earn_movements
+            SET direction = 'withdrawal', denomination = ?, min_shares_out = NULL
+          WHERE id = ?`
+      )
+      .bind(SHARE_MINT, withdrawal.movement.id)
       .run();
 
     const body = (await (await listDeposits()).json()) as {

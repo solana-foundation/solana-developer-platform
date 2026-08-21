@@ -105,19 +105,23 @@ export function vaultPositionsProxyQuery(request: Request): ProxyQueryValidation
  * tidier one, because a narrower rule would 400 a legitimate key containing a
  * slash or a space.
  */
-export function vaultDepositsProxyQuery(request: Request): ProxyQueryValidation {
+function vaultMovementsProxyQuery(
+  request: Request,
+  resource: "deposits" | "withdrawals"
+): ProxyQueryValidation {
   const incoming = new URL(request.url).searchParams;
   const allowed = new Set(["limit", "before", "requestId", "settled"]);
+  const label = resource === "deposits" ? "Vault deposits" : "Vault withdrawals";
 
   for (const key of incoming.keys()) {
     if (!allowed.has(key)) {
-      return { ok: false, message: `Unsupported vault deposits query parameter: ${key}` };
+      return { ok: false, message: `Unsupported vault ${resource} query parameter: ${key}` };
     }
   }
 
   for (const key of allowed) {
     if (incoming.getAll(key).length > 1) {
-      return { ok: false, message: `Vault deposits query parameter must be unique: ${key}` };
+      return { ok: false, message: `${label} query parameter must be unique: ${key}` };
     }
   }
 
@@ -125,7 +129,7 @@ export function vaultDepositsProxyQuery(request: Request): ProxyQueryValidation 
   const limit = incoming.get("limit");
   if (limit !== null) {
     if (!/^(?:[1-9]|[1-9]\d|100)$/.test(limit)) {
-      return { ok: false, message: "Vault deposits limit must be an integer from 1 to 100" };
+      return { ok: false, message: `${label} limit must be an integer from 1 to 100` };
     }
     query.set("limit", limit);
   }
@@ -137,7 +141,7 @@ export function vaultDepositsProxyQuery(request: Request): ProxyQueryValidation 
       before.length > MAX_CURSOR_LENGTH ||
       !/^[A-Za-z0-9_-]+$/.test(before)
     ) {
-      return { ok: false, message: "Vault deposits cursor is invalid" };
+      return { ok: false, message: `${label} cursor is invalid` };
     }
     query.set("before", before);
   }
@@ -147,7 +151,7 @@ export function vaultDepositsProxyQuery(request: Request): ProxyQueryValidation 
     if (!/^[\x20-\x7e]{1,255}$/.test(requestId)) {
       return {
         ok: false,
-        message: "Vault deposits requestId must be printable ASCII, 1-255 characters",
+        message: `${label} requestId must be printable ASCII, 1-255 characters`,
       };
     }
     query.set("requestId", requestId);
@@ -156,12 +160,25 @@ export function vaultDepositsProxyQuery(request: Request): ProxyQueryValidation 
   const settled = incoming.get("settled");
   if (settled !== null) {
     if (settled !== "true" && settled !== "false") {
-      return { ok: false, message: "Vault deposits settled filter must be true or false" };
+      return { ok: false, message: `${label} settled filter must be true or false` };
     }
     query.set("settled", settled);
   }
 
   return { ok: true, query: query.size > 0 ? `?${query}` : "" };
+}
+
+export function vaultDepositsProxyQuery(request: Request): ProxyQueryValidation {
+  return vaultMovementsProxyQuery(request, "deposits");
+}
+
+/**
+ * Strict allowlist for the keyset-paginated withdrawal read. It mirrors the
+ * deposit reader's posture and parameter set, including the
+ * idempotency-key shape rule (the API's `[\x20-\x7e]{1,255}`).
+ */
+export function vaultWithdrawalsProxyQuery(request: Request): ProxyQueryValidation {
+  return vaultMovementsProxyQuery(request, "withdrawals");
 }
 
 /**

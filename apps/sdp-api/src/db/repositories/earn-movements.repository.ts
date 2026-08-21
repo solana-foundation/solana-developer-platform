@@ -261,12 +261,19 @@ export interface EarnMovementsRepository {
     provider: string;
     providerReference: string;
   }): Promise<EarnMovementRow | null>;
-  /** One workspace's recorded vault DEPOSITS, newest first, as a keyset page. */
-  listVaultDeposits(params: {
+  /**
+   * One workspace's recorded vault movements of ONE direction, newest first, as
+   * a keyset page. The direction is a required parameter rather than two copies
+   * of this query: deposits and withdrawals share every scoping rule
+   * (organization, environment, exact project, wallet binding), and a shared
+   * builder is what keeps them from drifting apart.
+   */
+  listVaultMovements(params: {
     organizationId: string;
     environment: SdpEnvironment;
     projectId: string;
     custodyWalletIds: readonly string[];
+    direction: EarnMovementDirection;
     limit: number;
     before: EarnMovementCursor | null;
     settled?: boolean;
@@ -332,6 +339,19 @@ export interface EarnMovementsRepository {
     replayed: boolean;
   }>;
   /**
+   * Atomically record one signed vault withdrawal against an EXISTING holding.
+   * Never creates or activates a holding: an exit is only ever
+   * asked of a position the organization already holds, and the movement
+   * rows' composite FK onto that position is what refuses a claim whose vault
+   * or wallet does not match. A divergent idempotency loser throws so the
+   * transaction rolls back; an identical loser returns the winning movement.
+   */
+  createSignedVaultWithdrawalIntent(input: CreateSignedVaultWithdrawalIntentInput): Promise<{
+    position: EarnPositionRow;
+    movement: EarnMovementRow;
+    replayed: boolean;
+  }>;
+  /**
    * Guarded CAS on a vault movement. Legal source states come from the shared
    * transition matrix, so terminal regression is unrepresentable rather than
    * merely discouraged, and a lost race returns null rather than an error.
@@ -389,6 +409,34 @@ export interface AdvanceVaultMovementInput {
   settledAt?: string | null;
 }
 
+export interface CreateSignedVaultWithdrawalIntentInput {
+  organizationId: string;
+  projectId: string;
+  environment: SdpEnvironment;
+  provider: string;
+  /** The EXISTING vault holding being exited; never created here. */
+  positionId: string;
+  /** Claim facts, FK-verified against the position row on insert. */
+  vaultAddress: string;
+  custodyWalletId: string;
+  /**
+   * The share mint: the exact quantity the transaction encodes is shares, and
+   * tokens received are decided by the chain.
+   */
+  shareMint: string;
+  /** Total caller intent in share units; stored on the withdrawal movement. */
+  requestedShares: string;
+  /** The custody wallet's public key: shares burn from it, tokens return to it. */
+  walletAddress: string;
+  signature: string;
+  signedTransaction: string;
+  lastValidBlockHeight: string;
+  requestId: string;
+  idempotencyFingerprint: string;
+  createdBy?: string | null;
+  initiatedByKeyId?: string | null;
+}
+
 export interface CreateCustodialMovementInput {
   organizationId: string;
   projectId: string;
@@ -438,21 +486,22 @@ function allowedSourceStatuses(model: EarnExecutionModel, toStatus: string): rea
   return sources;
 }
 
-/**
- * The statuses a CLIENT of the legacy wire sees as final.
- *
- * `confirmed` is in it, and that is deliberate for as long as the legacy
- * vault-deposit DTO is served: that vocabulary has no `finalized`, so a client
- * reads chain commitment as the end of the story, and `?settled=` must keep
- * answering the question the client is actually asking. The ledger's own terminal
- * set (`EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct`) is narrower, and becomes
- * the filter when a caller reads the unified vocabulary directly.
- */
 /** Mirrors 0062's amount format checks, so app-layer refusals match the DB's. */
 const DECIMAL_STRING = /^\d+(?:\.\d+)?$/;
 const NON_ZERO_DIGIT = /[1-9]/;
 
-const WIRE_SETTLED_VAULT_STATUSES = ["confirmed", "finalized", "failed"] as const;
+/**
+ * Deposit and withdrawal routes expose different status vocabularies.
+ *
+ * The legacy deposit DTO ends at `confirmed`, while withdrawals expose the
+ * unified ledger where `confirmed` is optimistic and only `finalized` or
+ * `failed` is terminal. Keep this direction-aware or recovery can silently
+ * drop a confirmed withdrawal before finalization.
+ */
+const SETTLED_VAULT_STATUSES_BY_DIRECTION = {
+  deposit: ["confirmed", "finalized", "failed"],
+  withdrawal: ["finalized", "failed"],
+} as const satisfies Record<EarnMovementDirection, readonly EarnMovementStatus[]>;
 
 function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
   return {
@@ -543,9 +592,11 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       return row ? mapMovementRow(row) : null;
     },
 
-    async listVaultDeposits(params) {
+    async listVaultMovements(params) {
       if (params.custodyWalletIds.length === 0) {
-        throw new Error("listVaultDeposits requires at least one project-scoped custody wallet id");
+        throw new Error(
+          "listVaultMovements requires at least one project-scoped custody wallet id"
+        );
       }
       const beforeClause = params.before ? "AND (created_at, id) < (?, ?)" : "";
       const beforeValues = params.before ? [params.before.createdAt, params.before.id] : [];
@@ -555,18 +606,21 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           : params.settled
             ? "AND status = ANY (?::text[])"
             : "AND NOT (status = ANY (?::text[]))";
-      const settledValues = params.settled === undefined ? [] : [[...WIRE_SETTLED_VAULT_STATUSES]];
+      const settledValues =
+        params.settled === undefined
+          ? []
+          : [[...SETTLED_VAULT_STATUSES_BY_DIRECTION[params.direction]]];
       const result = await db
         .prepare(
           // An EXACT project match. `project_id` is nullable only through
           // ON DELETE SET NULL, so a null means the project was deleted — and
-          // accepting it here would expose that project's deposits to every
+          // accepting it here would expose that project's movements to every
           // sibling project sharing an organization-level custody wallet.
           `SELECT * FROM earn_movements
              WHERE organization_id = ?
                AND environment = ?
                AND execution_model = 'vault_direct'
-               AND direction = 'deposit'
+               AND direction = ?
                AND custody_wallet_id = ANY (?::text[])
                AND project_id = ?
                ${settledClause}
@@ -577,6 +631,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .bind(
           params.organizationId,
           params.environment,
+          params.direction,
           params.custodyWalletIds,
           params.projectId,
           ...settledValues,
@@ -862,6 +917,47 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       });
     },
 
+    async createSignedVaultWithdrawalIntent(input) {
+      return db.transaction(async (executor) => {
+        const transaction = asTransactionalClient(executor);
+
+        const resolveReplay = async () => {
+          const prior = await findVaultMovementByRequest(
+            transaction,
+            input.organizationId,
+            input.requestId
+          );
+          if (!prior) return null;
+          assertMovementIsOwnReplay(prior, input);
+          if (prior.direction !== "withdrawal") {
+            throw conflict("Idempotency key already used with different request payload");
+          }
+          return {
+            position: await requireMovementPosition(transaction, prior),
+            movement: prior,
+            replayed: true,
+          };
+        };
+
+        const prior = await resolveReplay();
+        if (prior) return prior;
+
+        const movement = await insertVaultWithdrawalMovement(transaction, input);
+        if (!movement) {
+          // A concurrent identical request committed after the preflight. Its
+          // signed transaction, not ours, is the one that may be broadcast.
+          const winner = await resolveReplay();
+          if (!winner) throw new Error("Failed to resolve concurrent earn vault withdrawal");
+          return winner;
+        }
+        return {
+          position: await requireMovementPosition(transaction, movement),
+          movement,
+          replayed: false,
+        };
+      });
+    },
+
     async advanceVaultMovement(input) {
       assertVaultTransitionMetadata(input);
       const sources = allowedSourceStatuses("vault_direct", input.toStatus);
@@ -1139,6 +1235,62 @@ function assertVaultTransitionMetadata(input: AdvanceVaultMovementInput): void {
   ) {
     throw new Error("sharesOut must be a positive unsigned decimal with at most 128 characters");
   }
+}
+
+/**
+ * One withdrawal movement, inserted before its signed bytes are broadcast.
+ *
+ * The two composite FKs onto `earn_positions` are the claim check: a movement whose
+ * (position, organization, environment, provider, vault, wallet) tuple does not
+ * exactly match the holding fails the INSERT rather than recording money
+ * against someone else's claim. Denomination is the SHARE MINT and
+ * `amount_requested` is the exact shares the transaction encodes.
+ */
+async function insertVaultWithdrawalMovement(
+  db: AppDb,
+  input: CreateSignedVaultWithdrawalIntentInput
+): Promise<EarnMovementRow | null> {
+  const row = await db
+    .prepare(
+      `INSERT INTO earn_movements (
+         id, organization_id, project_id, environment, provider,
+         execution_model, direction, position_id, status,
+         denomination, amount_requested,
+         custody_wallet_id, vault_address, source_address, destination_address,
+         signature, signed_transaction, last_valid_block_height,
+         request_id, idempotency_fingerprint,
+         created_by, initiated_by_key_id
+       ) VALUES (?, ?, ?, ?, ?, 'vault_direct', 'withdrawal', ?, 'requested',
+                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (organization_id, request_id) WHERE execution_model = 'vault_direct'
+       DO NOTHING
+       RETURNING *`
+    )
+    .bind(
+      generateEarnMovementId(),
+      input.organizationId,
+      input.projectId,
+      input.environment,
+      input.provider,
+      input.positionId,
+      input.shareMint,
+      input.requestedShares,
+      input.custodyWalletId,
+      input.vaultAddress,
+      // Money leaves the INSTRUMENT and returns to the org's own wallet — the
+      // mirror image of a deposit's source/destination.
+      input.vaultAddress,
+      input.walletAddress,
+      input.signature,
+      input.signedTransaction,
+      input.lastValidBlockHeight,
+      input.requestId,
+      input.idempotencyFingerprint,
+      input.createdBy ?? null,
+      input.initiatedByKeyId ?? null
+    )
+    .first<Record<string, unknown>>();
+  return row ? mapMovementRow(row) : null;
 }
 
 async function findVaultMovementByRequest(

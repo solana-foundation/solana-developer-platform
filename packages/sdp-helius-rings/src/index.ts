@@ -11,6 +11,18 @@ export {
   ZONE_KINDS,
 } from "./constants";
 export { HeliusRingsError, type HeliusRingsErrorCode } from "./errors";
+export { NotImplementedRingsGateway } from "./not-implemented-gateway";
+export type {
+  BuildOperationInput,
+  BuildOperationResult,
+  ProvisionIdentityInput,
+  ProvisionIdentityResult,
+  RequestProofInput,
+  RingsGatewayPort,
+  SyncPhotonInput,
+  SyncPhotonResult,
+  VerifyIndexedResult,
+} from "./port";
 export { type RevealScope, SecretRef } from "./secrets";
 export {
   type FailEdge,
