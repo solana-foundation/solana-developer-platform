@@ -165,8 +165,8 @@ export function vaultDepositsProxyQuery(request: Request): ProxyQueryValidation 
 }
 
 /**
- * Strict allowlist for the keyset-paginated withdrawal-leg read — the deposits
- * reader's mirror, sharing its exact posture, parameter set, and the
+ * Strict allowlist for the keyset-paginated withdrawal read. It mirrors the
+ * deposit reader's posture and parameter set, including the
  * idempotency-key shape rule (the API's `[\x20-\x7e]{1,255}`).
  */
 export function vaultWithdrawalsProxyQuery(request: Request): ProxyQueryValidation {

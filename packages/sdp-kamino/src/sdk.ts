@@ -370,7 +370,7 @@ export async function buildKaminoWithdrawPlan(
   ];
 
   const requestedBaseUnits = parseDecimalAmount(acceptedShares, shareDecimals);
-  // A full exit uses a burn-all sentinel on its final reserve leg. Replace it
+  // A full exit uses a burn-all sentinel on its final redemption instruction. Replace it
   // with the exact remaining requested shares before sizing or signing, so the
   // transaction cannot move a different amount if the token-account balance
   // changes between build and execution.

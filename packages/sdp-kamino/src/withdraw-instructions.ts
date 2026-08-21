@@ -31,7 +31,7 @@ export interface RoleTaggedInstruction {
 /**
  * Anchor discriminators (sha256("global:<name>")[0..8]) for the two kvault
  * instructions that redeem shares. Both encode `sharesAmount: u64` as their
- * first and only argument, so the exact quantity a withdraw leg moves is
+ * first and only argument, so the exact quantity each instruction moves is
  * decodable from the instruction bytes themselves — no estimate involved.
  * Hardcoded because only `./sdk.ts` may import the SDK; a test pins these
  * against the hash derivation so a protocol rename cannot drift silently.
@@ -53,11 +53,11 @@ export const KVAULT_BURN_ALL_SHARES_SENTINEL = 18446744073709551615n;
 /**
  * Replace the burn-all sentinel with an exact literal quantity, or refuse.
  *
- * The SDK uses one sentinel on the final reserve leg of a full withdrawal. It
+ * The SDK uses one sentinel on the final redemption instruction of a full withdrawal. It
  * means "whatever this token account holds when the transaction executes", so
  * resolving it from a build-time balance would still leave the signed bytes
  * balance-dependent. Instead, derive the exact remainder from the request and
- * the preceding literal legs, then rewrite the instruction's u64 argument.
+ * the preceding literal instructions, then rewrite the instruction's u64 argument.
  * The transaction and the ledger consequently name the same immutable amount.
  */
 export function resolveBurnAllSentinel(input: {
@@ -98,7 +98,7 @@ export function resolveBurnAllSentinel(input: {
   if (remainder <= 0n || remainder > KVAULT_BURN_ALL_SHARES_SENTINEL) {
     throw new SdpKaminoError(
       "INVALID_AMOUNT",
-      `Kamino withdraw instructions leave ${remainder} share base units for their final leg; ` +
+      `Kamino withdraw instructions leave ${remainder} share base units for their final redemption; ` +
         "the requested amount must exceed every preceding literal redemption."
     );
   }

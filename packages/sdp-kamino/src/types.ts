@@ -118,8 +118,8 @@ export interface KaminoWithdrawInput {
   shares: string;
   /**
    * Slot the withdrawal is priced against. Required by klend-sdk and by the
-   * reserve math; the caller reads it once so a multi-position pass prices every
-   * leg against the same slot.
+   * reserve math; the caller reads it once so every reserve calculation uses
+   * the same slot.
    */
   slot: Slot;
 }
