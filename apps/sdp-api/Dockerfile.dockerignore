@@ -19,6 +19,7 @@ packages/*
 !packages/sdp-types
 !packages/sdp-env-config
 !packages/sdp-earn
+!packages/sdp-helius-rings
 !packages/sdp-rpc
 !packages/sdp-custody
 !packages/sdp-solana

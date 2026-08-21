@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import pino, { type Logger, type LoggerOptions } from "pino";
+import { LOG_REDACTION_PATHS, REDACTION_CENSOR } from "./log-redaction";
 
 export interface LogContext {
   request_id?: string;
@@ -43,6 +44,7 @@ export function baseLoggerOptions(): LoggerOptions {
       },
     },
     serializers: { error: serializeError, err: serializeError },
+    redact: { paths: [...LOG_REDACTION_PATHS], censor: REDACTION_CENSOR },
     mixin: () => ({ ...getLogContext() }),
     ...(process.env.LOG_FORMAT === "pretty" ? { transport: { target: "pino-pretty" } } : {}),
   };
