@@ -1,4 +1,4 @@
-import { tokenFilterAliases } from "@sdp/types";
+import { type PaymentTransferStatus, tokenFilterAliases } from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import type {
@@ -10,7 +10,7 @@ import type {
   PaymentTransferRow,
   UpdatePaymentTransferInput,
 } from "./payments.repository";
-import { generatePaymentTransferId } from "./payments.repository";
+import { generatePaymentTransferId, WALLET_TRANSFER_TYPES } from "./payments.repository";
 
 function buildInClause(length: number): string {
   return Array.from({ length }, () => "?").join(", ");
@@ -162,6 +162,9 @@ function mapTransferRow(row: Record<string, unknown>): PaymentTransferRow {
     initiated_by_key_id: (row.initiated_by_key_id as string | null | undefined) ?? null,
     idempotency_key: (row.idempotency_key as string | null | undefined) ?? null,
     idempotency_fingerprint: (row.idempotency_fingerprint as string | null | undefined) ?? null,
+    confirmed_at: (row.confirmed_at as string | null | undefined) ?? null,
+    finalization_last_polled_at:
+      (row.finalization_last_polled_at as string | null | undefined) ?? null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -240,9 +243,10 @@ export function createPostgresPaymentsRepository(
              initiated_by_key_id,
              idempotency_key,
              idempotency_fingerprint,
+             confirmed_at,
              created_at,
              updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, sdp_iso_now(), sdp_iso_now())
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, CASE WHEN ?::boolean THEN sdp_iso_now() END, sdp_iso_now(), sdp_iso_now())
            RETURNING *`
         )
         .bind(
@@ -271,7 +275,8 @@ export function createPostgresPaymentsRepository(
           input.slot,
           input.initiatedByKeyId,
           input.idempotencyKey ?? null,
-          input.idempotencyFingerprint ?? null
+          input.idempotencyFingerprint ?? null,
+          input.status === "confirmed"
         )
         .first<Record<string, unknown>>();
 
@@ -342,6 +347,7 @@ export function createPostgresPaymentsRepository(
                delivery_mode = CASE WHEN ?::boolean THEN ? ELSE delivery_mode END,
                provider_data = CASE WHEN ?::boolean THEN provider_data || ?::jsonb ELSE provider_data END,
                error = CASE WHEN ?::boolean THEN ? ELSE error END,
+               confirmed_at = CASE WHEN ?::boolean THEN COALESCE(confirmed_at, ?) ELSE confirmed_at END,
                updated_at = ?
            WHERE ${clauses.join(" AND ")}
            RETURNING *`
@@ -370,6 +376,8 @@ export function createPostgresPaymentsRepository(
           JSON.stringify(input.providerData ?? {}),
           input.error !== undefined,
           input.error ?? null,
+          input.status === "confirmed" || input.status === "finalized",
+          input.updatedAt,
           input.updatedAt,
           ...values
         )
@@ -626,7 +634,7 @@ export function createPostgresPaymentsRepository(
           `SELECT *
            FROM payment_transfers
            WHERE ${clauses.join(" AND ")}
-           ORDER BY updated_at ASC
+           ORDER BY updated_at ASC, id ASC
            LIMIT ?
            OFFSET ?`
         )
@@ -634,6 +642,71 @@ export function createPostgresPaymentsRepository(
         .all<Record<string, unknown>>();
 
       return rows.results.map(mapTransferRow);
+    },
+
+    async listConfirmedTransfersToPoll({ confirmedAfter, limit }) {
+      if (tenantScope) {
+        throw new TenantScopeViolationError(
+          "PaymentsRepository.listConfirmedTransfersToPoll is system-only"
+        );
+      }
+      const pollableStatus: PaymentTransferStatus = "confirmed";
+      const rows = await db
+        .prepare(
+          `SELECT *
+           FROM payment_transfers
+           WHERE status = ?
+             AND type IN (${buildInClause(WALLET_TRANSFER_TYPES.length)})
+             AND signature IS NOT NULL
+             AND confirmed_at > ?
+           ORDER BY finalization_last_polled_at ASC NULLS FIRST, id ASC
+           LIMIT ?`
+        )
+        .bind(pollableStatus, ...WALLET_TRANSFER_TYPES, confirmedAfter, limit)
+        .all<Record<string, unknown>>();
+
+      return rows.results.map(mapTransferRow);
+    },
+
+    async advanceConfirmedTransfers({ polled, updatedAt }) {
+      if (tenantScope) {
+        throw new TenantScopeViolationError(
+          "PaymentsRepository.advanceConfirmedTransfers is system-only"
+        );
+      }
+      if (polled.length === 0) {
+        return;
+      }
+
+      const fromStatus: PaymentTransferStatus = "confirmed";
+      const toStatus: PaymentTransferStatus = "finalized";
+      await db
+        .prepare(
+          `UPDATE payment_transfers AS t
+              SET status = CASE WHEN v.finalized THEN ? ELSE t.status END,
+                  slot = CASE WHEN v.finalized THEN v.slot ELSE t.slot END,
+                  updated_at = CASE WHEN v.finalized THEN ? ELSE t.updated_at END,
+                  finalization_last_polled_at = ?
+             FROM jsonb_to_recordset(?::jsonb) AS v(transfer_id text, organization_id text, finalized boolean, slot bigint)
+            WHERE t.id = v.transfer_id
+              AND t.organization_id = v.organization_id
+              AND t.status = ?`
+        )
+        .bind(
+          toStatus,
+          updatedAt,
+          updatedAt,
+          JSON.stringify(
+            polled.map((t) => ({
+              transfer_id: t.transferId,
+              organization_id: t.organizationId,
+              finalized: t.finalized,
+              slot: t.slot,
+            }))
+          ),
+          fromStatus
+        )
+        .run();
     },
   };
 }

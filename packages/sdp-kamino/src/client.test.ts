@@ -19,6 +19,7 @@ const SHARE_MINT = "So11111111111111111111111111111111111111112";
 
 const mocks = vi.hoisted(() => ({
   buildKaminoDepositPlan: vi.fn(),
+  buildKaminoWithdrawPlan: vi.fn(),
   createKaminoRpc: vi.fn(),
   discoverKaminoPositionVaults: vi.fn(),
   readKaminoPosition: vi.fn(),
@@ -27,6 +28,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("./rpc", () => ({ createKaminoRpc: mocks.createKaminoRpc }));
 vi.mock("./sdk", () => ({
   buildKaminoDepositPlan: mocks.buildKaminoDepositPlan,
+  buildKaminoWithdrawPlan: mocks.buildKaminoWithdrawPlan,
   discoverKaminoPositionVaults: mocks.discoverKaminoPositionVaults,
   readKaminoPosition: mocks.readKaminoPosition,
 }));
@@ -43,21 +45,57 @@ describe("KaminoVaultDirectClient capabilities", () => {
     expect(supportsVaultDirect(client)).toBe(true);
   });
 
-  /**
-   * The withdraw capability is WITHHELD on purpose, and this pins it so that
-   * implementing `buildVaultWithdrawal` cannot happen by accident.
-   *
-   * `buildKaminoWithdrawPlan` returns every unstake/withdraw/cleanup
-   * instruction in ONE batch with no lookup table, while the pinned SDK
-   * documents that a multi-reserve exit may need several transactions.
-   * Answering yes here would let a future exit route narrow onto this client
-   * and receive a plan the API submitter refuses — after the customer was told
-   * their withdrawal was prepared. Deleting this test is the wrong way to make
-   * it pass; batching the plan is the right way.
-   */
-  it("does NOT report the withdraw capability until the plan is batched", () => {
-    expect(supportsVaultWithdraw(client)).toBe(false);
-    expect((client as unknown as Record<string, unknown>).buildVaultWithdrawal).toBeUndefined();
+  /** The implemented capability lets the exit route narrow onto this client. */
+  it("reports the withdraw capability", () => {
+    expect(supportsVaultWithdraw(client)).toBe(true);
+    expect(typeof client.buildVaultWithdrawal).toBe("function");
+  });
+
+  it("prices the withdrawal against one slot and maps the plan", async () => {
+    const resolvedRpcUrl = "https://devnet.example.invalid";
+    const probe = new KaminoVaultDirectClient(async () => resolvedRpcUrl, runOperation);
+    const slot = 456n;
+    const getSlotSend = vi.fn().mockResolvedValue(slot);
+    mocks.createKaminoRpc.mockReturnValue({ getSlot: () => ({ send: getSlotSend }) });
+
+    const vault = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
+    const owner = "11111111111111111111111111111112";
+    const builtPlan: KaminoInstructionPlan = {
+      cluster: "devnet",
+      instructions: [],
+      lookupTables: [address(SHARE_MINT)],
+      assetIdentity: {
+        depositTokenMint: address(DEPOSIT_TOKEN_MINT),
+        shareMint: address(SHARE_MINT),
+      },
+      accepted: { shares: "2" },
+    };
+    mocks.buildKaminoWithdrawPlan.mockResolvedValue(builtPlan);
+
+    const plan = await probe.buildVaultWithdrawal(
+      { env: {}, environment: "sandbox" },
+      { providerReference: vault, owner, shares: "2" }
+    );
+
+    expect(mocks.createKaminoRpc).toHaveBeenCalledWith(resolvedRpcUrl);
+    expect(getSlotSend).toHaveBeenCalledOnce();
+    expect(mocks.buildKaminoWithdrawPlan).toHaveBeenCalledWith(
+      { cluster: "devnet", rpcUrl: resolvedRpcUrl },
+      expect.objectContaining({
+        vault: address(vault),
+        shares: "2",
+        slot,
+      }),
+      expect.any(Function)
+    );
+    // The noop signer carries the custody address; the API attaches the real
+    // signer at compile time by address match.
+    expect(String(mocks.buildKaminoWithdrawPlan.mock.calls[0][1].owner.address)).toBe(owner);
+    expect(plan).toMatchObject({
+      cluster: "devnet",
+      lookupTables: [SHARE_MINT],
+      accepted: { shares: "2" },
+    });
   });
 
   /**
@@ -203,6 +241,7 @@ describe("KaminoVaultDirectClient capabilities", () => {
         owner: input.owner,
         cluster: runtime.cluster,
         shares: String(input.vault) === providerReferences[1] ? "0" : "1",
+        withdrawableShares: String(input.vault) === providerReferences[1] ? "0" : "1",
         tokenMint: address(DEPOSIT_TOKEN_MINT),
         sharesMint: address(SHARE_MINT),
       })
@@ -322,6 +361,7 @@ describe("KaminoVaultDirectClient capabilities", () => {
           owner: input.owner,
           cluster: runtime.cluster,
           shares: "1",
+          withdrawableShares: "1",
           tokenMint: address(DEPOSIT_TOKEN_MINT),
           sharesMint: address(SHARE_MINT),
         };
@@ -362,6 +402,7 @@ describe("KaminoVaultDirectClient capabilities", () => {
           owner: input.owner,
           cluster: runtime.cluster,
           shares: "1",
+          withdrawableShares: "1",
           tokenMint: input.vault,
           sharesMint: input.vault,
         };
@@ -452,7 +493,7 @@ describe("toEarnVaultTransactionPlan", () => {
 
     expect(toEarnVaultTransactionPlan(plan)).toMatchObject({
       cluster: "devnet",
-      transactions: [],
+      instructions: [],
       lookupTables: [],
       assetIdentity: {
         depositTokenMint: DEPOSIT_TOKEN_MINT,

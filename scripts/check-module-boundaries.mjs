@@ -23,6 +23,7 @@ const MODULE_METADATA = [
       "@sdp/custody",
       "@sdp/earn",
       "@sdp/env-config",
+      "@sdp/helius-rings",
       "@sdp/issuance",
       "@sdp/kamino",
       "@sdp/payments",
@@ -34,6 +35,13 @@ const MODULE_METADATA = [
       "@sdp/spc-withdraw",
       "@sdp/types",
     ],
+  },
+  {
+    name: "@sdp/helius-gateway",
+    directory: "apps/sdp-helius-gateway",
+    purpose:
+      "Rust sidecar over the Helius Rings (zolana) SDK; builds unsigned Solana transactions. Built with cargo, not pnpm.",
+    allowedDependencies: [],
   },
   {
     name: "sdp-docs",

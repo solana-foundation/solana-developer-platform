@@ -559,7 +559,7 @@ export function RecurringPaymentDetailWorkspace({
                   logoUrl={resolvedToken.metadataImageUrl}
                   size="sm"
                 />
-                {amountLabel}
+                <span>{amountLabel}</span>
               </p>
             </div>
             <div>

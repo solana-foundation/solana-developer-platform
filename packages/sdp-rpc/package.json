@@ -28,15 +28,24 @@
       "types": "./src/solana.ts",
       "import": "./src/solana.ts",
       "default": "./src/solana.ts"
+    },
+    "./verified-confirmation": {
+      "types": "./src/verified-confirmation.ts",
+      "import": "./src/verified-confirmation.ts",
+      "default": "./src/verified-confirmation.ts"
     }
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "lint": "biome check src/"
   },
   "dependencies": {
     "@sdp/types": "workspace:*",
     "@solana/addresses": "catalog:",
     "@solana/kit": "catalog:"
+  },
+  "devDependencies": {
+    "tsx": "4.23.5"
   }
 }
