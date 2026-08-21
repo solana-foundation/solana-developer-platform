@@ -23,6 +23,7 @@ import type {
   KaminoWithdrawInput,
 } from "./types";
 import {
+  assertExactWithdrawalAmountEncodable,
   decodeKvaultWithdrawShares,
   type RoleTaggedInstruction,
   resolveBurnAllSentinel,
@@ -278,6 +279,8 @@ export async function buildKaminoWithdrawPlan(
   const shareDecimals = mintDecimals(state.sharesMintDecimals, "sharesMintDecimals");
   const acceptedShares = acceptAtMintScale("shares", input.shares, shareDecimals);
   if (isZeroAmount(acceptedShares)) throw invalidAmount("shares", input.shares);
+  const requestedBaseUnits = parseDecimalAmount(acceptedShares, shareDecimals);
+  assertExactWithdrawalAmountEncodable(requestedBaseUnits);
   const shares = toDecimal(acceptedShares, "shares");
 
   assertActive();
@@ -369,7 +372,6 @@ export async function buildKaminoWithdrawPlan(
     })),
   ];
 
-  const requestedBaseUnits = parseDecimalAmount(acceptedShares, shareDecimals);
   // A full exit uses a burn-all sentinel on its final redemption instruction. Replace it
   // with the exact remaining requested shares before sizing or signing, so the
   // transaction cannot move a different amount if the token-account balance

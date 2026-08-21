@@ -51,6 +51,20 @@ export const KVAULT_SHARE_REDEEMING_DISCRIMINATORS: readonly Uint8Array[] = [
 export const KVAULT_BURN_ALL_SHARES_SENTINEL = 18446744073709551615n;
 
 /**
+ * Refuse the one u64 value the kvault program cannot interpret literally.
+ * A holder at this theoretical boundary can still exit exactly in two requests:
+ * `u64::MAX - 1`, then the remaining base unit.
+ */
+export function assertExactWithdrawalAmountEncodable(requestedBaseUnits: bigint): void {
+  if (requestedBaseUnits !== KVAULT_BURN_ALL_SHARES_SENTINEL) return;
+  throw new SdpKaminoError(
+    "INVALID_AMOUNT",
+    "Kamino reserves maximum-u64 shares for burn-all, so it cannot encode that value as an " +
+      "exact withdrawal. Withdraw one fewer base unit, then withdraw the remaining base unit."
+  );
+}
+
+/**
  * Replace the burn-all sentinel with an exact literal quantity, or refuse.
  *
  * The SDK uses one sentinel on the final redemption instruction of a full withdrawal. It
@@ -64,6 +78,7 @@ export function resolveBurnAllSentinel(input: {
   instructions: readonly RoleTaggedInstruction[];
   requestedBaseUnits: bigint;
 }): RoleTaggedInstruction[] {
+  assertExactWithdrawalAmountEncodable(input.requestedBaseUnits);
   const sentinelCount = input.instructions.filter(
     (tagged) => tagged.sharesBaseUnits === KVAULT_BURN_ALL_SHARES_SENTINEL
   ).length;

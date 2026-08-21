@@ -3,6 +3,7 @@ import type { Instruction } from "@solana/kit";
 import { address } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import {
+  assertExactWithdrawalAmountEncodable,
   decodeKvaultWithdrawShares,
   KVAULT_BURN_ALL_SHARES_SENTINEL,
   KVAULT_SHARE_REDEEMING_DISCRIMINATORS,
@@ -91,7 +92,7 @@ describe("resolveBurnAllSentinel", () => {
         instructions: [withdraw(sentinel)],
         requestedBaseUnits: sentinel,
       })
-    ).toThrow(/reserved burn-all value/);
+    ).toThrow(/cannot encode that value as an exact withdrawal/);
   });
 
   it("refuses ambiguous sentinel placement", () => {
@@ -107,5 +108,16 @@ describe("resolveBurnAllSentinel", () => {
         requestedBaseUnits: 10n,
       })
     ).toThrow(/more than one burn-all/);
+  });
+});
+
+describe("assertExactWithdrawalAmountEncodable", () => {
+  it("accepts the largest exact amount and rejects the reserved burn-all value", () => {
+    expect(() =>
+      assertExactWithdrawalAmountEncodable(KVAULT_BURN_ALL_SHARES_SENTINEL - 1n)
+    ).not.toThrow();
+    expect(() => assertExactWithdrawalAmountEncodable(KVAULT_BURN_ALL_SHARES_SENTINEL)).toThrow(
+      /one fewer base unit/
+    );
   });
 });
