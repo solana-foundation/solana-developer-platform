@@ -1,0 +1,124 @@
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { getDb } from "@/db";
+import * as credentialSecretStore from "@/services/credential-secret-store";
+import {
+  type activateRpcConnection,
+  deactivateRpcConnection,
+} from "@/services/rpc-connection.service";
+import { RpcConnectionStore } from "@/services/stores/rpc-connection.store";
+import { env } from "@/test/helpers/env";
+import { seedTestDatabase } from "@/test/mocks/db";
+import type { Env } from "@/types/env";
+
+const appEnv = env as Env;
+const ORG_ID = "org_rpc_deactivation";
+const USER_ID = "user_rpc_deactivation";
+const CREDENTIAL_ID = "pcred_rpc_deactivation";
+const CONNECTION_ID = "rconn_rpc_deactivation";
+const SECRET_VERSION_REF = "projects/p/secrets/sdp-provider-credentials-x/versions/3";
+
+const destroyVersion = vi.fn().mockResolvedValue(undefined);
+
+let originalEncryptionKey: string | undefined;
+
+function serviceContext() {
+  const values: Record<string, unknown> = {
+    clerk: {
+      userId: USER_ID,
+      organizationId: ORG_ID,
+      role: "admin",
+      permissions: ["org:read", "org:write", "org:admin"],
+    },
+    projectId: null,
+  };
+  return {
+    env: appEnv,
+    get: (key: string) => values[key],
+  } as unknown as Parameters<typeof activateRpcConnection>[0];
+}
+
+beforeAll(async () => {
+  await seedTestDatabase(appEnv as Parameters<typeof seedTestDatabase>[0]);
+
+  originalEncryptionKey = appEnv.CUSTODY_ENCRYPTION_KEY;
+  appEnv.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
+
+  vi.spyOn(credentialSecretStore, "createCredentialSecretStore").mockReturnValue({
+    storageBackend: "gcp_secret_manager",
+    write: vi.fn(),
+    read: vi.fn(),
+    destroyVersion,
+  } as unknown as credentialSecretStore.CredentialSecretStore);
+
+  const db = getDb(appEnv);
+  await db
+    .prepare(
+      `INSERT INTO organizations (id, name, slug, tier, status)
+       VALUES (?, 'RPC Deactivation', 'rpc-deactivation', 'enterprise', 'active')`
+    )
+    .bind(ORG_ID)
+    .run();
+  await db
+    .prepare(
+      `INSERT INTO users (id, email, email_verified, status)
+       VALUES (?, 'rpc-deactivation@example.com', 1, 'active')`
+    )
+    .bind(USER_ID)
+    .run();
+  await db
+    .prepare(
+      `INSERT INTO provider_credentials (
+         id, organization_id, project_id, provider, label, scope, source,
+         storage_backend, secret_ref, secret_version_ref, encrypted_secret_payload,
+         status, created_by
+       ) VALUES (?, ?, NULL, 'helius', 'Tenant Helius', 'organization', 'stored',
+                 'gcp_secret_manager', ?, ?, NULL, 'active', ?)`
+    )
+    .bind(
+      CREDENTIAL_ID,
+      ORG_ID,
+      "projects/p/secrets/sdp-provider-credentials-x",
+      SECRET_VERSION_REF,
+      USER_ID
+    )
+    .run();
+
+  const connections = new RpcConnectionStore(db);
+  await connections.insertConnection({
+    id: CONNECTION_ID,
+    organizationId: ORG_ID,
+    projectId: null,
+    provider: "helius",
+    providerCredentialId: CREDENTIAL_ID,
+    providerCredentialScopeKey: "__organization__",
+    network: "devnet",
+    displayMetadata: { endpointHost: "127.0.0.1", apiKeySuffix: "1234" },
+    createdBy: USER_ID,
+  });
+  await connections.activateConnection({
+    organizationId: ORG_ID,
+    connectionId: CONNECTION_ID,
+    scopeKeys: ["__organization__"],
+    makeDefault: false,
+  });
+});
+
+afterAll(() => {
+  appEnv.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
+  vi.restoreAllMocks();
+});
+
+describe("deactivateRpcConnection", () => {
+  it("destroys the stored secret version so a withdrawn credential stops existing", async () => {
+    const result = await deactivateRpcConnection(serviceContext(), CONNECTION_ID);
+
+    expect(result.status).toBe("deactivated");
+    expect(destroyVersion).toHaveBeenCalledWith({ secretVersionRef: SECRET_VERSION_REF });
+  });
+
+  it("refuses a second deactivation", async () => {
+    await expect(deactivateRpcConnection(serviceContext(), CONNECTION_ID)).rejects.toThrow(
+      /already deactivated/i
+    );
+  });
+});
