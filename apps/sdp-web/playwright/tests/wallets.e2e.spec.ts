@@ -110,7 +110,6 @@ async function createAndDeployWalletActivityToken(
     template: "stablecoin",
     decimals: 6,
     uri: `https://example.com/metadata/e2e-wallet-burn-${suffix.toLowerCase()}.json`,
-    imageUrl: "https://example.com/assets/e2e-wallet-burn.png",
     description: "Wallet activity burn coverage token",
     signingWalletId,
     requiresAllowlist: false,

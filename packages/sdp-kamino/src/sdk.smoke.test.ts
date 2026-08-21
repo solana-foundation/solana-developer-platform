@@ -64,15 +64,14 @@ describe.skipIf(!RPC_URL || !SIGNER_HEX)("Kamino plans against a live chain", ()
     expect(programs).toContain(kaminoClusterConfig("mainnet-beta").kvaultProgramId);
     expect(programs).not.toContain(kaminoClusterConfig("devnet").kvaultProgramId);
 
-    const batch = plan.instructions[0];
-    expect(batch, "deposit plan must carry one transaction's worth").toBeDefined();
+    expect(plan.instructions.length).toBeGreaterThan(0);
 
     const { value: latest } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
     const message = pipe(
       createTransactionMessage({ version: 0 }),
       (m) => setTransactionMessageFeePayerSigner(owner, m),
       (m) => setTransactionMessageLifetimeUsingBlockhash(latest, m),
-      (m) => appendTransactionMessageInstructions([...(batch ?? [])], m)
+      (m) => appendTransactionMessageInstructions([...plan.instructions], m)
     );
     const signed = await signTransactionMessageWithSigners(message);
     const wire = getBase64EncodedWireTransaction(signed);
@@ -126,6 +125,6 @@ describe.skipIf(!RPC_URL || !SIGNER_HEX)("Kamino plans against a live chain", ()
     expect(planProgramAddresses(plan)).toContain(
       kaminoClusterConfig("mainnet-beta").kvaultProgramId
     );
-    expect(plan.instructions[0]?.length ?? 0).toBeGreaterThan(0);
+    expect(plan.instructions.length).toBeGreaterThan(0);
   });
 });

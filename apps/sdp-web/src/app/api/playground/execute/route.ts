@@ -24,7 +24,7 @@ function normalizePublicApiPath(path: string, requestUrl: string): string | null
  * as a URL before the mount check so fetch cannot reinterpret traversal
  * segments after validation. apiKey must be non-empty — an absent key
  * previously fell back to the caller's dashboard session, escalating scope
- * past the selected key (Hacktron audit).
+ * past the selected key.
  */
 const playgroundExecuteSchema = z.object({
   method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"], { error: "Invalid method" }),

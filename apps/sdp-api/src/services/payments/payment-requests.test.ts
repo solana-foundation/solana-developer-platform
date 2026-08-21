@@ -1,3 +1,4 @@
+import * as verifiedConfirmation from "@sdp/rpc/verified-confirmation";
 import * as solanaPay from "@solana/pay";
 import { FindReferenceError, ValidateTransferError } from "@solana/pay";
 import {
@@ -28,6 +29,15 @@ const SIGNATURE = "S".repeat(64);
 
 let findReferenceSpy: MockInstance<typeof solanaPay.findReference>;
 let validateTransferSpy: MockInstance<typeof solanaPay.validateTransfer>;
+let verifyTransactionLandedSpy: MockInstance<typeof verifiedConfirmation.verifyTransactionLanded>;
+
+function verifiedOk(): Awaited<ReturnType<typeof verifiedConfirmation.verifyTransactionLanded>> {
+  return {
+    ok: true,
+    status: { slot: 1n, confirmations: 5n, confirmationStatus: "confirmed", err: null },
+    transaction: { slot: 1n, err: null, instructions: [] },
+  };
+}
 
 function foundSignature(): Awaited<ReturnType<typeof solanaPay.findReference>> {
   return {
@@ -42,6 +52,7 @@ function foundSignature(): Awaited<ReturnType<typeof solanaPay.findReference>> {
 
 function mockSettlementSucceeds() {
   findReferenceSpy.mockResolvedValue(foundSignature());
+  verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
   validateTransferSpy.mockResolvedValue(
     undefined as unknown as Awaited<ReturnType<typeof solanaPay.validateTransfer>>
   );
@@ -84,6 +95,7 @@ describe("reconcilePaymentRequest", () => {
   beforeEach(async () => {
     findReferenceSpy = vi.spyOn(solanaPay, "findReference");
     validateTransferSpy = vi.spyOn(solanaPay, "validateTransfer");
+    verifyTransactionLandedSpy = vi.spyOn(verifiedConfirmation, "verifyTransactionLanded");
 
     const db = getDb(env);
     await db.prepare("DELETE FROM payment_requests").run();
@@ -157,6 +169,35 @@ describe("reconcilePaymentRequest", () => {
     expect(await listInboundTransfers()).toHaveLength(1);
   });
 
+  it("does not settle when the signature fails the independent confirmation check", async () => {
+    findReferenceSpy.mockResolvedValue(foundSignature());
+    verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_confirmed" });
+    validateTransferSpy.mockResolvedValue(
+      undefined as unknown as Awaited<ReturnType<typeof solanaPay.validateTransfer>>
+    );
+
+    const result = await reconcilePaymentRequest(env, await createRequest(), {
+      bestEffort: false,
+    });
+
+    expect(result.status).toBe("awaiting_payment");
+    expect(validateTransferSpy).not.toHaveBeenCalled();
+    expect(await listInboundTransfers()).toHaveLength(0);
+  });
+
+  it("does not settle while the transaction is confirmed but not yet indexed", async () => {
+    findReferenceSpy.mockResolvedValue(foundSignature());
+    verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_indexed" });
+
+    const result = await reconcilePaymentRequest(env, await createRequest(), {
+      bestEffort: false,
+    });
+
+    expect(result.status).toBe("awaiting_payment");
+    expect(validateTransferSpy).not.toHaveBeenCalled();
+    expect(await listInboundTransfers()).toHaveLength(0);
+  });
+
   it("leaves the request awaiting when no transfer references it", async () => {
     findReferenceSpy.mockRejectedValue(new FindReferenceError("not found"));
 
@@ -170,6 +211,7 @@ describe("reconcilePaymentRequest", () => {
 
   it("leaves the request awaiting when the referenced transfer is invalid", async () => {
     findReferenceSpy.mockResolvedValue(foundSignature());
+    verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
     validateTransferSpy.mockRejectedValue(new ValidateTransferError("wrong amount"));
 
     const result = await reconcilePaymentRequest(env, await createRequest(), { bestEffort: false });

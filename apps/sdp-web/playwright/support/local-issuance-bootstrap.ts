@@ -89,7 +89,6 @@ async function createFixtureToken(
     symbol: input.symbol,
     template: "stablecoin",
     uri: input.uri,
-    imageUrl: "https://example.com/assets/sdp-e2e-token.png",
     description: `${input.name} description`,
     signingWalletId: input.signingWalletId,
     requiresAllowlist: input.requiresAllowlist,

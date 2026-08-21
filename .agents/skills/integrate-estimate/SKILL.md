@@ -1,6 +1,7 @@
 ---
 name: integrate-estimate
 description: Implement a ramp provider's estimateOnramp / estimateOfframp → PaymentRampEstimate, the fiat↔crypto rate preview. The cheapest live call — no DB, no counterparty, no KYC — so build it first to prove your config and auth work. Use when opening a PR against apps/sdp-api to add ramp rate estimates for a provider.
+disable-model-invocation: true
 ---
 
 # Integrate estimate
