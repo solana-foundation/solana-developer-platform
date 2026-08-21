@@ -284,13 +284,27 @@ export async function buildKaminoWithdrawPlan(
   const shares = toDecimal(acceptedShares, "shares");
 
   assertActive();
-  const shareAccountsResponse = await rpc
-    .getTokenAccountsByOwner(
-      input.owner.address,
-      { mint: assetIdentity.shareMint },
-      { encoding: "jsonParsed" }
-    )
-    .send();
+  // These reads are independent and share one deadline-bounded RPC client.
+  // Keeping them concurrent removes several serial round trips from the exit
+  // path without weakening any of the validation below.
+  const [shareAccountsResponse, reserves, globalConfig, lookupTables] = await Promise.all([
+    rpc
+      .getTokenAccountsByOwner(
+        input.owner.address,
+        { mint: assetIdentity.shareMint },
+        { encoding: "jsonParsed" }
+      )
+      .send(),
+    client.loadVaultReserves(state),
+    (async () => {
+      const globalConfigAddress = await getKvaultGlobalConfigPda(config.kvaultProgramId as Kit2);
+      return KVaultGlobalConfig.fetch(rpc, globalConfigAddress, config.kvaultProgramId as Kit2);
+    })(),
+    loadVaultLookupTableAddresses(
+      rpc as ReturnType<typeof createKaminoRpc>,
+      state.vaultLookupTable === undefined ? undefined : String(state.vaultLookupTable)
+    ),
+  ]);
   assertActive();
   const shareAccounts = parseShareTokenAccountBalances(shareAccountsResponse?.value);
   const consolidation = await buildShareAccountConsolidation({
@@ -302,11 +316,7 @@ export async function buildKaminoWithdrawPlan(
     accounts: shareAccounts,
   });
 
-  assertActive();
-  const reserves = await client.loadVaultReserves(state);
-  assertActive();
-
-  // ── The SDK's global-config loader repeats the constructor trap ───────────
+  // The SDK's global-config loader repeats the constructor trap.
   // `withdrawIxs` without explicit penalties calls `loadKVaultGlobalConfig`,
   // which derives the config PDA with the client's program id but then fetches
   // it with the DEFAULT (mainnet) id as the expected owner — so a devnet exit
@@ -316,12 +326,6 @@ export async function buildKaminoWithdrawPlan(
   // that loader entirely; the values are computed exactly as the SDK's private
   // `getEffectiveWithdrawalPenaltyParams` does — max(vault, global config),
   // per field — from a config fetched with the RIGHT program id.
-  const globalConfigAddress = await getKvaultGlobalConfigPda(config.kvaultProgramId as Kit2);
-  const globalConfig = await KVaultGlobalConfig.fetch(
-    rpc,
-    globalConfigAddress,
-    config.kvaultProgramId as Kit2
-  );
   if (!globalConfig) {
     throw vaultUnreadable(input.vault, runtime.cluster, "kvault global config not found");
   }
@@ -346,12 +350,20 @@ export async function buildKaminoWithdrawPlan(
     ),
   };
 
-  // klend-sdk plans exits from the share ATA only. SDP position reads correctly
-  // include every owner token account, so when consolidation is needed, give
-  // this request-scoped SDK client the exact post-transfer ATA state it will
-  // observe inside the same transaction. The client is not shared, and the
-  // original method is restored immediately after instruction construction.
+  // THIRD-PARTY SDK PATCH: klend-sdk plans exits from the share ATA only and
+  // exposes no supported shares-state parameter. SDP position reads include
+  // every owner token account, so consolidation temporarily replaces this
+  // request-scoped client's method with the exact post-transfer ATA state the
+  // same transaction will observe. The runtime assertion and construction test
+  // intentionally fail an SDK upgrade that removes or renames this method.
   const sdkClient = client as Kit2;
+  if (typeof sdkClient.getUserSharesState !== "function") {
+    throw vaultUnreadable(
+      input.vault,
+      runtime.cluster,
+      "klend-sdk no longer exposes getUserSharesState required for safe consolidation"
+    );
+  }
   const originalGetUserSharesState = sdkClient.getUserSharesState.bind(sdkClient);
   if (consolidation.instructions.length > 0) {
     const postConsolidationAta = new Decimal(
@@ -382,14 +394,6 @@ export async function buildKaminoWithdrawPlan(
   } finally {
     sdkClient.getUserSharesState = originalGetUserSharesState;
   }
-  assertActive();
-
-  // Best-effort: an exit must never fail for want of a compression aid. The
-  // rpc client is the same deadline-bounded transport every other read uses.
-  const lookupTables = await loadVaultLookupTableAddresses(
-    rpc as ReturnType<typeof createKaminoRpc>,
-    state.vaultLookupTable === undefined ? undefined : String(state.vaultLookupTable)
-  );
   assertActive();
 
   const kvaultProgramAddress = String(config.kvaultProgramId);
@@ -611,6 +615,7 @@ export async function readKaminoPosition(
     owner: input.owner,
     cluster: config.cluster,
     shares: shares.toFixed(),
+    withdrawableShares: formatDecimalAmount(unstakedBase, shareDecimals),
     ...(tokenValue === undefined ? {} : { tokenValue }),
     tokenMint: assetIdentity.depositTokenMint,
     sharesMint: assetIdentity.shareMint,

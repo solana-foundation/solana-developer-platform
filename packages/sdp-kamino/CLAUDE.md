@@ -90,8 +90,8 @@ Catalogue metadata drives policy and ledger labels but is not builder truth; the
 API must compare both mints before signing so a stale or poisoned row cannot
 authorize one asset while the transaction moves another.
 
-`KaminoInstructionPlan.instructions` keeps the provider-neutral `Instruction[][]`
-shape, but Kamino emits exactly one entry containing the complete ordered exit.
+`KaminoInstructionPlan.instructions` keeps the provider-neutral `Instruction[]`
+shape containing one complete ordered transaction instruction sequence.
 `KaminoVaultDirectClient` implements `buildVaultWithdrawal`, so
 `supportsVaultWithdraw` answers true.
 

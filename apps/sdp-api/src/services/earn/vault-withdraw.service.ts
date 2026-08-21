@@ -3,7 +3,6 @@ import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/typ
 import { SdpKaminoError } from "@sdp/kamino";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types";
-import { address } from "@solana/kit";
 import { type AppDb, getDb } from "@/db";
 import {
   assertMovementIsOwnReplay,
@@ -14,7 +13,6 @@ import {
 import { badRequest, internalError } from "@/lib/errors";
 import { buildEarnVaultWithdrawalFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
-import * as solanaServices from "@/services/solana";
 import type { Env } from "@/types/env";
 import {
   earnClusterFor,
@@ -22,13 +20,8 @@ import {
   resolveVaultWithdrawClient,
 } from "./execution-registry";
 import { createVaultDeadline } from "./vault-deadline";
-import {
-  appendVaultRequestMemo,
-  broadcastVaultTransaction,
-  type SignedVaultTransaction,
-  signVaultPlan,
-  simulateVaultPlan,
-} from "./vault-execution.service";
+import { appendVaultRequestMemo } from "./vault-execution.service";
+import { executeSignedVaultIntent } from "./vault-intent-execution.service";
 
 /**
  * Exit a non-custodial vault position with one transaction.
@@ -170,115 +163,39 @@ export async function withdrawFromVault(
   }
   requireAcceptedWithdrawalPlan(plan, input);
 
-  try {
-    const simulation = await simulateVaultPlan(env, {
-      cluster,
-      deadline,
-      expectedAssetIdentity,
-      plan,
-      owner: address(input.wallet.publicKey),
-      rpcUrl,
-    });
-    if (!simulation.ok) {
-      getLogger().error(
-        { error: simulation.error, logs: simulation.logs.slice(-5) },
-        "vault withdrawal: simulation failed before signing"
-      );
-      throw badRequest(`Vault withdrawal simulation failed: ${simulation.error}`);
-    }
-  } catch (error) {
-    if (
-      !(error instanceof Error && error.message.startsWith("Vault withdrawal simulation failed:"))
-    ) {
-      getLogger().error({ error }, "vault withdrawal: simulation call failed before signing");
-    }
-    throw error;
-  }
-
-  let signed: SignedVaultTransaction;
-  try {
-    const signer = await deadline.run("Resolving the vault withdrawal signer", () =>
-      solanaServices.createOrgSignerForCustodyWallet(
-        env,
-        input.organizationId,
-        input.projectId,
-        input.wallet.id
-      )
-    );
-    if (signer.address !== input.wallet.publicKey) {
-      throw badRequest("Resolved signing wallet does not match the position's wallet");
-    }
-    signed = await signVaultPlan(env, {
-      cluster,
-      deadline,
-      expectedAssetIdentity,
-      plan,
-      owner: signer,
-      rpcUrl,
-      fee: { kind: "wallet-pays" },
-    });
-  } catch (error) {
-    getLogger().error({ error }, "vault withdrawal: signer resolution or signing failed");
-    throw error;
-  }
-
-  const runIntentTransaction =
-    options.runIntentTransaction ??
-    (<T>(mutation: (db: AppDb) => Promise<T>) => mutation(getDb(env)));
-  const result = await runIntentTransaction((db) =>
-    createPostgresEarnMovementsRepository(db).createSignedVaultWithdrawalIntent({
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      environment: input.environment,
-      provider: input.provider,
-      positionId: input.positionId,
-      vaultAddress: input.vaultAddress,
-      custodyWalletId: input.wallet.id,
-      shareMint: input.shareMint,
-      requestedShares: input.shares,
-      walletAddress: input.wallet.publicKey,
-      signature: signed.signature,
-      signedTransaction: Buffer.from(signed.bytes).toString("base64"),
-      lastValidBlockHeight: signed.lastValidBlockHeight,
-      requestId: input.requestId,
-      idempotencyFingerprint: fingerprint,
-      createdBy: input.userId ?? null,
-      initiatedByKeyId: input.apiKeyId ?? null,
-    })
-  );
-
-  if (result.replayed) return result;
-
-  try {
-    await broadcastVaultTransaction(env, {
-      cluster,
-      deadline,
-      bytes: signed.bytes,
-      rpcUrl,
-    });
-  } catch (error) {
-    getLogger().error(
-      { movementId: result.movement.id, signature: signed.signature, error },
-      "vault withdrawal: broadcast outcome unknown; left reconcilable"
-    );
-    return result;
-  }
-
-  const advanced = await ledger.advanceVaultMovement({
-    movementId: result.movement.id,
+  return executeSignedVaultIntent({
+    operation: "withdrawal",
+    env,
     organizationId: input.organizationId,
-    toStatus: "submitted",
+    projectId: input.projectId,
+    walletId: input.wallet.id,
+    walletPublicKey: input.wallet.publicKey,
+    signerMismatchMessage: "Resolved signing wallet does not match the position's wallet",
+    cluster,
+    deadline,
+    expectedAssetIdentity,
+    plan,
+    rpcUrl,
+    runIntentTransaction: options.runIntentTransaction,
+    persist: (db, signed) =>
+      createPostgresEarnMovementsRepository(db).createSignedVaultWithdrawalIntent({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        environment: input.environment,
+        provider: input.provider,
+        positionId: input.positionId,
+        vaultAddress: input.vaultAddress,
+        custodyWalletId: input.wallet.id,
+        shareMint: input.shareMint,
+        requestedShares: input.shares,
+        walletAddress: input.wallet.publicKey,
+        signature: signed.signature,
+        signedTransaction: Buffer.from(signed.bytes).toString("base64"),
+        lastValidBlockHeight: signed.lastValidBlockHeight,
+        requestId: input.requestId,
+        idempotencyFingerprint: fingerprint,
+        createdBy: input.userId ?? null,
+        initiatedByKeyId: input.apiKeyId ?? null,
+      }),
   });
-  if (advanced) return { ...result, movement: advanced };
-
-  const observed = await ledger.getMovementById({
-    movementId: result.movement.id,
-    organizationId: input.organizationId,
-  });
-  if (observed?.signature === signed.signature) {
-    return { ...result, movement: observed };
-  }
-  throw internalError(
-    "Vault withdrawal was broadcast but its ledger transition could not be verified"
-  );
 }

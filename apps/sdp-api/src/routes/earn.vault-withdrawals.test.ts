@@ -9,6 +9,7 @@ import {
   generateEarnPositionId,
 } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
+import { buildEarnVaultWithdrawalFingerprint } from "@/lib/idempotency";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
@@ -388,6 +389,31 @@ describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
     expect(withdrawFromVault).toHaveBeenCalledTimes(1);
   });
 
+  it("allows a sibling project's position when both projects share an org-level wallet", async () => {
+    await seedAuth();
+    await getDb(env).batch([
+      getDb(env)
+        .prepare("UPDATE custody_configs SET project_id = NULL WHERE id = 'cfg_earn_vw'")
+        .bind(),
+      getDb(env)
+        .prepare(
+          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+           VALUES ('prj_earn_vw_sibling', ?, 'Sibling', 'earn-vw-sibling', 'sandbox', 'active', ?)`
+        )
+        .bind(TEST_ORG.id, TEST_USER.id),
+    ]);
+    const positionId = await seedPosition({ projectId: "prj_earn_vw_sibling" });
+
+    const res = await postVaultWithdrawal({ positionId, shares: "10" });
+
+    expect(res.status).toBe(200);
+    expect(withdrawFromVault).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ projectId: TEST_PROJECT.id, positionId }),
+      expect.any(Object)
+    );
+  });
+
   it("withdraws in PRODUCTION even while vault deposits are environment-closed there", async () => {
     // The deposit route fail-closes production; an exit must work wherever a
     // position exists, or the fail-close itself would trap funds.
@@ -485,6 +511,49 @@ describe("POST /v1/earn/vault-withdrawals — response shape", () => {
     expect(body.data.withdrawal.shares).toBe("10");
     expect(body.data.withdrawal.shareMint).toBe(SHARE_MINT);
     expect(body.data.withdrawal.signature).toBeTruthy();
+  });
+
+  it("returns 409 when replaying a failed withdrawal", async () => {
+    await seedAuth();
+    const positionId = await seedPosition();
+    const requestId = "vw-failed-replay";
+    const repository = createPostgresEarnMovementsRepository(getDb(env));
+    const recorded = await repository.createSignedVaultWithdrawalIntent({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      environment: "sandbox",
+      provider: "kamino",
+      positionId,
+      vaultAddress: VAULT,
+      custodyWalletId: CUSTODY_WALLET_ID,
+      shareMint: SHARE_MINT,
+      requestedShares: "10",
+      walletAddress: WALLET_ADDRESS,
+      signature: "sig_failed_replay",
+      signedTransaction: "AQ==",
+      lastValidBlockHeight: "12345",
+      requestId,
+      idempotencyFingerprint: buildEarnVaultWithdrawalFingerprint({
+        environment: "sandbox",
+        provider: "kamino",
+        positionId,
+        shares: "10",
+      }),
+    });
+    await repository.advanceVaultMovement({
+      movementId: recorded.movement.id,
+      organizationId: TEST_ORG.id,
+      toStatus: "failed",
+      failureReason: "expired",
+    });
+
+    const res = await postVaultWithdrawal(
+      { positionId, shares: "10" },
+      { idempotencyKey: requestId }
+    );
+
+    expect(res.status).toBe(409);
+    expect(withdrawFromVault).not.toHaveBeenCalled();
   });
 });
 
@@ -603,11 +672,27 @@ describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
       requestId: "vw-pending-key",
       positionId: settled.positionId,
     });
-    await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultMovement({
+    const confirmed = await recordWithdrawal({
+      requestId: "vw-confirmed-key",
+      positionId: settled.positionId,
+    });
+    const repository = createPostgresEarnMovementsRepository(getDb(env));
+    await repository.advanceVaultMovement({
       movementId: settled.recorded.movement.id,
       organizationId: TEST_ORG.id,
       toStatus: "failed",
       failureReason: "Transaction blockhash expired before confirmation",
+    });
+    await repository.advanceVaultMovement({
+      movementId: confirmed.recorded.movement.id,
+      organizationId: TEST_ORG.id,
+      toStatus: "submitted",
+    });
+    await repository.advanceVaultMovement({
+      movementId: confirmed.recorded.movement.id,
+      organizationId: TEST_ORG.id,
+      toStatus: "confirmed",
+      confirmedAt: new Date().toISOString(),
     });
 
     const res = await getWithdrawal("?settled=false");
@@ -615,6 +700,7 @@ describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
       data: { withdrawals: Array<{ movementId: string; status: string }> };
     };
     expect(page.data.withdrawals.map((withdrawal) => withdrawal.movementId)).toEqual([
+      confirmed.recorded.movement.id,
       pending.recorded.movement.id,
     ]);
   });

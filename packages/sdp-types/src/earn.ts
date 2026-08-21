@@ -178,6 +178,8 @@ export interface EarnVaultPosition {
   closedAt: string | null;
   /** Absent when the provider read failed; never coerce an unavailable value to zero. */
   shares?: string;
+  /** Unstaked shares immediately redeemable through SDP; absent when unreadable. */
+  withdrawableShares?: string;
   /** Deposit-token value, absent when the provider cannot hydrate the position. */
   tokenValue?: string;
 }
@@ -294,7 +296,7 @@ export interface EarnVaultDepositsPage {
 export interface EarnVaultWithdrawalRequest {
   /** The vault position being exited — from GET /v1/earn/vault-positions. */
   positionId: string;
-  /** Shares to redeem, decimal string in share units; the position's `shares` is the ceiling. */
+  /** Shares to redeem; the position's `withdrawableShares` is the observed ceiling. */
   shares: string;
 }
 

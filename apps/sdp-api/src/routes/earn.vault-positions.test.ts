@@ -167,6 +167,7 @@ beforeEach(async () => {
         owner: input.owner,
         cluster: "devnet",
         shares: "1",
+        withdrawableShares: "1",
         tokenValue: "1",
         tokenMint: TOKEN_MINT,
         shareMint: SHARE_MINT,
@@ -274,6 +275,7 @@ describe("GET /v1/earn/vault-positions", () => {
         owner: PUBLIC_KEY_A,
         cluster: "devnet",
         shares: "99",
+        withdrawableShares: "99",
         tokenValue: "99",
         tokenMint: PUBLIC_KEY_B,
         shareMint: SHARE_MINT,
@@ -298,6 +300,7 @@ describe("GET /v1/earn/vault-positions", () => {
   it.each([
     ["owner", { owner: PUBLIC_KEY_B }],
     ["amount", { shares: "NaN" }],
+    ["withdrawable amount", { withdrawableShares: "NaN" }],
   ] as const)("does not attach live balances under a mismatched %s", async (kind, override) => {
     const providerReference = `vault_${kind}_mismatch`;
     await createPosition({ providerReference });
@@ -307,6 +310,7 @@ describe("GET /v1/earn/vault-positions", () => {
         owner: PUBLIC_KEY_A,
         cluster: "devnet",
         shares: "99",
+        withdrawableShares: "99",
         tokenValue: "99",
         tokenMint: TOKEN_MINT,
         shareMint: SHARE_MINT,

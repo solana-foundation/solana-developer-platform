@@ -443,6 +443,32 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(document.body.textContent).not.toContain("earn_movement_failed");
   });
 
+  it("keeps recovered vault trackers mounted until their detail poll settles", async () => {
+    mocks.vaultDeposits = [{ movementId: "earn_deposit_recovered", status: "submitted" }];
+    mocks.vaultWithdrawals = [{ movementId: "earn_withdrawal_recovered", status: "confirmed" }];
+    const view = renderWorkspace();
+
+    await waitFor(() => {
+      expect(screen.getByText("earn_deposit_recovered")).toBeTruthy();
+      expect(screen.getByText("earn_withdrawal_recovered")).toBeTruthy();
+    });
+
+    // A collection refresh can stop returning an id before the independent
+    // detail poll sees terminal state. The persisted watches must survive it.
+    mocks.vaultDeposits = [];
+    mocks.vaultWithdrawals = [];
+    view.rerender(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <TreasurySolutionsWorkspace
+          providerAccess={{ kamino: { entitled: true, configured: true, enabled: true } }}
+        />
+      </I18nProvider>
+    );
+
+    expect(screen.getByText("earn_deposit_recovered")).toBeTruthy();
+    expect(screen.getByText("earn_withdrawal_recovered")).toBeTruthy();
+  });
+
   it("mounts no deposit tracker when the ledger reports nothing in flight", async () => {
     mocks.vaultDeposits = [{ movementId: "earn_vault_movement_done", status: "confirmed" }];
 

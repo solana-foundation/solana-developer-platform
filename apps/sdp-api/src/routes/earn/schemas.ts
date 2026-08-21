@@ -259,9 +259,10 @@ export const earnVaultDepositSchema = z.object({
  * straight into a bind parameter; the row lookup is org-scoped, so anything
  * this organization does not own answers 404 rather than a validation error.
  */
-export const earnVaultDepositParamsSchema = z.object({
+const earnVaultMovementParamsSchema = z.object({
   movementId: z.string().min(1).max(128),
 });
+export const earnVaultDepositParamsSchema = earnVaultMovementParamsSchema;
 
 /**
  * Bounded keyset page over recorded deposits, newest first.
@@ -275,7 +276,7 @@ export const earnVaultDepositParamsSchema = z.object({
  * hence the route re-applies every scoping rule the detail route applies
  * instead of treating the key as a capability.
  */
-export const earnVaultDepositsQuerySchema = z.object({
+const earnVaultMovementsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
   before: z.string().min(1).optional(),
   requestId: z.string().min(1).max(255).optional(),
@@ -290,6 +291,7 @@ export const earnVaultDepositsQuerySchema = z.object({
     .transform((value) => value === "true")
     .optional(),
 });
+export const earnVaultDepositsQuerySchema = earnVaultMovementsQuerySchema;
 
 /**
  * Exit a non-custodial vault position, redeeming shares back to the custody
@@ -323,9 +325,7 @@ export const earnVaultWithdrawalSchema = z.object({
 });
 
 /** One recorded withdrawal; org-scoped lookup answers 404 for foreign rows. */
-export const earnVaultWithdrawalParamsSchema = z.object({
-  movementId: z.string().min(1).max(128),
-});
+export const earnVaultWithdrawalParamsSchema = earnVaultMovementParamsSchema;
 
 /**
  * Bounded keyset page over recorded withdrawals, newest first. The same
@@ -334,15 +334,7 @@ export const earnVaultWithdrawalParamsSchema = z.object({
  * how an approval-gated withdrawal becomes findable), and `settled=false` is
  * what recovery asks.
  */
-export const earnVaultWithdrawalsQuerySchema = z.object({
-  limit: z.coerce.number().int().min(1).max(100).default(20),
-  before: z.string().min(1).optional(),
-  requestId: z.string().min(1).max(255).optional(),
-  settled: z
-    .enum(["true", "false"])
-    .transform((value) => value === "true")
-    .optional(),
-});
+export const earnVaultWithdrawalsQuerySchema = earnVaultMovementsQuerySchema;
 
 /**
  * The cross-provider movement feed.

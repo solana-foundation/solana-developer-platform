@@ -676,14 +676,55 @@ const earnVaultDepositsPageSchema = z.object({
   }),
 });
 
-const VAULT_DEPOSITS_PAGE_SIZE = 100;
+const VAULT_MOVEMENTS_PAGE_SIZE = 100;
 
 /**
  * Hard stop on the paging loop, same reason as the other readers: a server that
  * never stops advancing its cursor must not spin forever. 20 pages x 100 is far
- * past any plausible number of SIMULTANEOUSLY in-flight deposits.
+ * past any plausible number of simultaneously in-flight vault movements.
  */
-const VAULT_DEPOSITS_PAGE_LIMIT = 20;
+const VAULT_MOVEMENTS_PAGE_LIMIT = 20;
+
+interface VaultMovementPage<T> {
+  items: T[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
+async function fetchAllVaultMovementPages<T>(input: {
+  resource: "deposits" | "withdrawals";
+  settled?: boolean;
+  parsePage: (value: unknown) => VaultMovementPage<T> | null;
+}): Promise<T[]> {
+  const items: T[] = [];
+  const seenCursors = new Set<string>();
+  let before: string | null = null;
+
+  for (let page = 0; page < VAULT_MOVEMENTS_PAGE_LIMIT; page += 1) {
+    const query = new URLSearchParams({ limit: String(VAULT_MOVEMENTS_PAGE_SIZE) });
+    if (input.settled !== undefined) query.set("settled", String(input.settled));
+    if (before) query.set("before", before);
+
+    const result = await dashboardFetch<unknown>(
+      `/api/dashboard/markets/earn/vault-${input.resource}?${query.toString()}`
+    );
+    if (!result.ok) throw new Error(result.error);
+    const body = input.parsePage(result.data);
+    if (!body) throw new Error(`Invalid vault ${input.resource} response`);
+
+    items.push(...body.items);
+    if (!body.hasMore) return items;
+
+    const nextCursor = body.nextCursor;
+    if (!nextCursor || nextCursor === before || seenCursors.has(nextCursor)) {
+      throw new Error(`Vault ${input.resource} pagination did not advance`);
+    }
+    seenCursors.add(nextCursor);
+    before = nextCursor;
+  }
+
+  throw new Error(`Vault ${input.resource} pagination exceeded its safety limit`);
+}
 
 /**
  * This workspace's recorded deposits, newest first. The API derives the
@@ -705,35 +746,19 @@ const VAULT_DEPOSITS_PAGE_LIMIT = 20;
 export async function fetchEarnVaultDeposits(
   options: { settled?: boolean } = {}
 ): Promise<EarnVaultDepositRecord[]> {
-  const deposits: EarnVaultDepositRecord[] = [];
-  const seenCursors = new Set<string>();
-  let before: string | null = null;
-
-  for (let page = 0; page < VAULT_DEPOSITS_PAGE_LIMIT; page += 1) {
-    const query = new URLSearchParams({ limit: String(VAULT_DEPOSITS_PAGE_SIZE) });
-    if (options.settled !== undefined) query.set("settled", String(options.settled));
-    if (before) query.set("before", before);
-
-    const result = await dashboardFetch<unknown>(
-      `/api/dashboard/markets/earn/vault-deposits?${query.toString()}`
-    );
-    if (!result.ok) throw new Error(result.error);
-    const parsed = earnVaultDepositsPageSchema.safeParse(result.data);
-    if (!parsed.success) throw new Error("Invalid vault deposits response");
-
-    const body = parsed.data.data;
-    deposits.push(...body.deposits);
-    if (!body.hasMore) return deposits;
-
-    const nextCursor = body.nextCursor;
-    if (!nextCursor || nextCursor === before || seenCursors.has(nextCursor)) {
-      throw new Error("Vault deposits pagination did not advance");
-    }
-    seenCursors.add(nextCursor);
-    before = nextCursor;
-  }
-
-  throw new Error("Vault deposits pagination exceeded its safety limit");
+  return fetchAllVaultMovementPages({
+    resource: "deposits",
+    settled: options.settled,
+    parsePage(value) {
+      const parsed = earnVaultDepositsPageSchema.safeParse(value);
+      if (!parsed.success) return null;
+      return {
+        items: parsed.data.data.deposits,
+        hasMore: parsed.data.data.hasMore,
+        nextCursor: parsed.data.data.nextCursor,
+      };
+    },
+  });
 }
 
 /**
@@ -1009,35 +1034,19 @@ const earnVaultWithdrawalsPageSchema = z.object({
 export async function fetchEarnVaultWithdrawals(
   options: { settled?: boolean } = {}
 ): Promise<EarnVaultWithdrawal[]> {
-  const withdrawals: EarnVaultWithdrawal[] = [];
-  const seenCursors = new Set<string>();
-  let before: string | null = null;
-
-  for (let page = 0; page < VAULT_DEPOSITS_PAGE_LIMIT; page += 1) {
-    const query = new URLSearchParams({ limit: String(VAULT_DEPOSITS_PAGE_SIZE) });
-    if (options.settled !== undefined) query.set("settled", String(options.settled));
-    if (before) query.set("before", before);
-
-    const result = await dashboardFetch<unknown>(
-      `/api/dashboard/markets/earn/vault-withdrawals?${query.toString()}`
-    );
-    if (!result.ok) throw new Error(result.error);
-    const parsed = earnVaultWithdrawalsPageSchema.safeParse(result.data);
-    if (!parsed.success) throw new Error("Invalid vault withdrawals response");
-
-    const body = parsed.data.data;
-    withdrawals.push(...body.withdrawals);
-    if (!body.hasMore) return withdrawals;
-
-    const nextCursor = body.nextCursor;
-    if (!nextCursor || nextCursor === before || seenCursors.has(nextCursor)) {
-      throw new Error("Vault withdrawals pagination did not advance");
-    }
-    seenCursors.add(nextCursor);
-    before = nextCursor;
-  }
-
-  throw new Error("Vault withdrawals pagination exceeded its safety limit");
+  return fetchAllVaultMovementPages({
+    resource: "withdrawals",
+    settled: options.settled,
+    parsePage(value) {
+      const parsed = earnVaultWithdrawalsPageSchema.safeParse(value);
+      if (!parsed.success) return null;
+      return {
+        items: parsed.data.data.withdrawals,
+        hasMore: parsed.data.data.hasMore,
+        nextCursor: parsed.data.data.nextCursor,
+      };
+    },
+  });
 }
 
 /**

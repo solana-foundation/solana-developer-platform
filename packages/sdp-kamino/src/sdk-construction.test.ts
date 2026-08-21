@@ -119,4 +119,12 @@ describe("vault construction", () => {
       /let tokenValue:[\s\S]*?try\s*\{[\s\S]*?requireNonNegativeFiniteDecimal\(\s*"vault exchange rate"/
     );
   });
+
+  it("fails closed if the patched klend-sdk shares-state method disappears", () => {
+    const sdk = read("sdk.ts");
+    expect(sdk).toContain('typeof sdkClient.getUserSharesState !== "function"');
+    expect(sdk).toContain(
+      "klend-sdk no longer exposes getUserSharesState required for safe consolidation"
+    );
+  });
 });

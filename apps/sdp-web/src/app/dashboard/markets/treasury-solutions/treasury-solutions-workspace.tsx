@@ -760,18 +760,31 @@ export function TreasurySolutionsWorkspace({
 
   const activeWallets = wallets ?? [];
   const programs = programsState?.kind === "ready" ? programsState.programs : [];
-  const recoveredVaultDepositIds = (discoveredVaultDeposits ?? []).flatMap((deposit) =>
-    isEarnVaultDepositInFlight(deposit) ? [deposit.movementId] : []
+  // Recovery seeds durable component state. Do not derive tracker mounts
+  // directly from the live list: the list can stop returning a movement just
+  // before its detail poll observes terminal state, which would unmount the
+  // tracker and skip `onSettled` balance refreshes and outcome messaging.
+  useEffect(() => {
+    addVaultDepositWatches(
+      (discoveredVaultDeposits ?? []).flatMap((deposit) =>
+        isEarnVaultDepositInFlight(deposit) ? [deposit.movementId] : []
+      )
+    );
+  }, [addVaultDepositWatches, discoveredVaultDeposits]);
+  useEffect(() => {
+    addVaultWithdrawalWatches(
+      (discoveredVaultWithdrawals ?? []).flatMap((withdrawal) =>
+        isEarnVaultWithdrawalInFlight(withdrawal) ? [withdrawal.movementId] : []
+      )
+    );
+  }, [addVaultWithdrawalWatches, discoveredVaultWithdrawals]);
+
+  const watchedVaultDepositIds = vaultDepositWatches.filter(
+    (movementId) => !settledVaultDepositIds.has(movementId)
   );
-  const watchedVaultDepositIds = [
-    ...new Set([...vaultDepositWatches, ...recoveredVaultDepositIds]),
-  ].filter((movementId) => !settledVaultDepositIds.has(movementId));
-  const recoveredVaultWithdrawalIds = (discoveredVaultWithdrawals ?? []).flatMap((withdrawal) =>
-    isEarnVaultWithdrawalInFlight(withdrawal) ? [withdrawal.movementId] : []
+  const watchedVaultWithdrawalIds = vaultWithdrawalWatches.filter(
+    (movementId) => !settledVaultWithdrawalIds.has(movementId)
   );
-  const watchedVaultWithdrawalIds = [
-    ...new Set([...vaultWithdrawalWatches, ...recoveredVaultWithdrawalIds]),
-  ].filter((movementId) => !settledVaultWithdrawalIds.has(movementId));
 
   return (
     <DashboardWorkspaceOverviewPanel>

@@ -279,6 +279,42 @@ export interface IdempotencyKeyStore {
   release(fingerprint: string): void;
 }
 
+type HeldIdempotencyKeyResolution =
+  | { kind: "key"; key: string; wasHeld: boolean }
+  | { kind: "aborted" }
+  | { kind: "unavailable" };
+
+type HeldIdempotencyKeyLookup = { kind: "found" } | { kind: "absent" } | { kind: "unavailable" };
+
+/**
+ * Resolve a reusable key without guessing whether an approval already spent it.
+ *
+ * `wasHeld` is load-bearing: an approval can execute between the preflight and
+ * POST, so the response must distinguish that absorbed race from a fresh
+ * submission. Both vault money flows use this exact lifecycle.
+ */
+export async function resolveHeldIdempotencyKey(
+  store: IdempotencyKeyStore,
+  fingerprint: string,
+  signal: AbortSignal,
+  fetchRecorded: (key: string) => Promise<HeldIdempotencyKeyLookup>
+): Promise<HeldIdempotencyKeyResolution> {
+  const key = store.claim(fingerprint);
+  if (!store.isHeld(fingerprint)) return { kind: "key", key, wasHeld: false };
+
+  const recorded = await fetchRecorded(key);
+  if (signal.aborted) return { kind: "aborted" };
+  if (recorded.kind === "unavailable") return { kind: "unavailable" };
+  if (recorded.kind === "absent") return { kind: "key", key, wasHeld: true };
+
+  store.release(fingerprint);
+  return { kind: "key", key: store.claim(fingerprint), wasHeld: false };
+}
+
+type IdempotencyKeyOutcome =
+  | { ok: true; status: number; data: { kind: string } }
+  | { ok: false; status: number | null };
+
 /**
  * Whether the API has ANSWERED for an idempotency key, which is the only
  * condition under which retiring it is safe. Shared by both vault money flows;
@@ -300,15 +336,26 @@ export interface IdempotencyKeyStore {
  *   that already recorded and broadcast looks exactly like a provider being
  *   unavailable before it did.
  */
-export function answerRetiresIdempotencyKey(result: {
-  ok: boolean;
-  status: number | null;
-  data?: { kind: string };
-}): boolean {
+function answerRetiresIdempotencyKey(result: IdempotencyKeyOutcome): boolean {
   if (result.ok) {
     return result.data?.kind !== "approval_pending";
   }
   return result.status !== null && result.status >= 400 && result.status < 500;
+}
+
+/** Apply the shared retire, hold, or preserve rule to one API answer. */
+export function applyIdempotencyKeyOutcome(
+  store: IdempotencyKeyStore,
+  fingerprint: string,
+  result: IdempotencyKeyOutcome
+): void {
+  if (answerRetiresIdempotencyKey(result)) {
+    store.release(fingerprint);
+    return;
+  }
+  if (result.ok && result.data.kind === "approval_pending") {
+    store.hold(fingerprint);
+  }
 }
 
 /** One per money flow, each under its own versioned `sessionStorage` key. */

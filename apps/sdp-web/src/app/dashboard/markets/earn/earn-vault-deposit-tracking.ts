@@ -16,7 +16,9 @@ import {
  * under — never change it casually) and what makes two submissions the SAME
  * request.
  */
-const store = createIdempotencyKeyStore("sdp:earn:vault-deposit:idempotency:v1");
+export const vaultDepositIdempotencyKeyStore = createIdempotencyKeyStore(
+  "sdp:earn:vault-deposit:idempotency:v1"
+);
 
 /**
  * Test-only: clear the shared module-scope tiers so specs are
@@ -55,17 +57,17 @@ export function vaultDepositRequestFingerprint(input: {
 }
 
 export function claimVaultDepositIdempotencyKey(fingerprint: string): string {
-  return store.claim(fingerprint);
+  return vaultDepositIdempotencyKeyStore.claim(fingerprint);
 }
 
 export function holdVaultDepositIdempotencyKey(fingerprint: string): void {
-  store.hold(fingerprint);
+  vaultDepositIdempotencyKeyStore.hold(fingerprint);
 }
 
 export function isVaultDepositIdempotencyKeyHeld(fingerprint: string): boolean {
-  return store.isHeld(fingerprint);
+  return vaultDepositIdempotencyKeyStore.isHeld(fingerprint);
 }
 
 export function releaseVaultDepositIdempotencyKey(fingerprint: string): void {
-  store.release(fingerprint);
+  vaultDepositIdempotencyKeyStore.release(fingerprint);
 }

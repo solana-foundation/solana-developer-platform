@@ -486,21 +486,22 @@ function allowedSourceStatuses(model: EarnExecutionModel, toStatus: string): rea
   return sources;
 }
 
-/**
- * The statuses a CLIENT of the legacy wire sees as final.
- *
- * `confirmed` is in it, and that is deliberate for as long as the legacy
- * vault-deposit DTO is served: that vocabulary has no `finalized`, so a client
- * reads chain commitment as the end of the story, and `?settled=` must keep
- * answering the question the client is actually asking. The ledger's own terminal
- * set (`EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct`) is narrower, and becomes
- * the filter when a caller reads the unified vocabulary directly.
- */
 /** Mirrors 0062's amount format checks, so app-layer refusals match the DB's. */
 const DECIMAL_STRING = /^\d+(?:\.\d+)?$/;
 const NON_ZERO_DIGIT = /[1-9]/;
 
-const WIRE_SETTLED_VAULT_STATUSES = ["confirmed", "finalized", "failed"] as const;
+/**
+ * Deposit and withdrawal routes expose different status vocabularies.
+ *
+ * The legacy deposit DTO ends at `confirmed`, while withdrawals expose the
+ * unified ledger where `confirmed` is optimistic and only `finalized` or
+ * `failed` is terminal. Keep this direction-aware or recovery can silently
+ * drop a confirmed withdrawal before finalization.
+ */
+const SETTLED_VAULT_STATUSES_BY_DIRECTION = {
+  deposit: ["confirmed", "finalized", "failed"],
+  withdrawal: ["finalized", "failed"],
+} as const satisfies Record<EarnMovementDirection, readonly EarnMovementStatus[]>;
 
 function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
   return {
@@ -605,7 +606,10 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           : params.settled
             ? "AND status = ANY (?::text[])"
             : "AND NOT (status = ANY (?::text[]))";
-      const settledValues = params.settled === undefined ? [] : [[...WIRE_SETTLED_VAULT_STATUSES]];
+      const settledValues =
+        params.settled === undefined
+          ? []
+          : [[...SETTLED_VAULT_STATUSES_BY_DIRECTION[params.direction]]];
       const result = await db
         .prepare(
           // An EXACT project match. `project_id` is nullable only through

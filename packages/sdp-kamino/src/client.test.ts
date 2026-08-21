@@ -241,6 +241,7 @@ describe("KaminoVaultDirectClient capabilities", () => {
         owner: input.owner,
         cluster: runtime.cluster,
         shares: String(input.vault) === providerReferences[1] ? "0" : "1",
+        withdrawableShares: String(input.vault) === providerReferences[1] ? "0" : "1",
         tokenMint: address(DEPOSIT_TOKEN_MINT),
         sharesMint: address(SHARE_MINT),
       })
@@ -360,6 +361,7 @@ describe("KaminoVaultDirectClient capabilities", () => {
           owner: input.owner,
           cluster: runtime.cluster,
           shares: "1",
+          withdrawableShares: "1",
           tokenMint: address(DEPOSIT_TOKEN_MINT),
           sharesMint: address(SHARE_MINT),
         };
@@ -400,6 +402,7 @@ describe("KaminoVaultDirectClient capabilities", () => {
           owner: input.owner,
           cluster: runtime.cluster,
           shares: "1",
+          withdrawableShares: "1",
           tokenMint: input.vault,
           sharesMint: input.vault,
         };

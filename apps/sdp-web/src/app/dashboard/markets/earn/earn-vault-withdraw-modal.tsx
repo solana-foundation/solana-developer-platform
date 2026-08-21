@@ -16,7 +16,10 @@ import { explorerTxUrl } from "@/lib/explorer";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { compareUnsignedDecimals, parseUnsignedDecimal } from "./earn-decimal";
 import { formatTokenQuantity, tokenSymbol } from "./earn-format";
-import { answerRetiresIdempotencyKey } from "./earn-idempotency-key-store";
+import {
+  applyIdempotencyKeyOutcome,
+  resolveHeldIdempotencyKey,
+} from "./earn-idempotency-key-store";
 import {
   earnMintAsset,
   formatProviderAmount,
@@ -29,10 +32,7 @@ import {
   useEarnVaultWithdrawalOutcomeToast,
 } from "./earn-program-data";
 import {
-  claimVaultWithdrawalIdempotencyKey,
-  holdVaultWithdrawalIdempotencyKey,
-  isVaultWithdrawalIdempotencyKeyHeld,
-  releaseVaultWithdrawalIdempotencyKey,
+  vaultWithdrawalIdempotencyKeyStore,
   vaultWithdrawalRequestFingerprint,
 } from "./earn-vault-withdraw-tracking";
 
@@ -115,50 +115,6 @@ function resolveWithdrawalSubmission(
     };
   }
   return { kind: "outcome", outcome: { kind: "withdrawal", withdrawal }, withdrawn: withdrawal };
-}
-
-/**
- * The key to send for this request — the deposit path's resolution, mirrored:
- * an unheld key needs no round trip, a HELD key is checked against the server
- * before reuse (a movement under it means the approval executed and the key is
- * spent), and an unanswerable check REFUSES rather than guessing in either
- * direction over someone's funds.
- */
-type VaultWithdrawalKeyResolution =
-  | { kind: "key"; key: string; wasHeld: boolean }
-  | { kind: "aborted" }
-  | { kind: "unavailable" };
-
-async function resolveVaultWithdrawalIdempotencyKey(
-  fingerprint: string,
-  signal: AbortSignal
-): Promise<VaultWithdrawalKeyResolution> {
-  const key = claimVaultWithdrawalIdempotencyKey(fingerprint);
-  if (!isVaultWithdrawalIdempotencyKeyHeld(fingerprint)) {
-    return { kind: "key", key, wasHeld: false };
-  }
-
-  const recorded = await fetchEarnVaultWithdrawalsByRequestId(key);
-  if (signal.aborted) return { kind: "aborted" };
-  if (recorded.kind === "unavailable") return { kind: "unavailable" };
-  if (recorded.kind === "absent") return { kind: "key", key, wasHeld: true };
-
-  releaseVaultWithdrawalIdempotencyKey(fingerprint);
-  return { kind: "key", key: claimVaultWithdrawalIdempotencyKey(fingerprint), wasHeld: false };
-}
-
-/** Retire, pin, or keep the key for the answer the API gave — one place. */
-function applyVaultWithdrawalIdempotencyKeyOutcome(
-  fingerprint: string,
-  result: Awaited<ReturnType<typeof createEarnVaultWithdrawal>>
-): void {
-  if (answerRetiresIdempotencyKey(result.ok ? result : { ...result, data: undefined })) {
-    releaseVaultWithdrawalIdempotencyKey(fingerprint);
-    return;
-  }
-  if (result.ok && result.data.kind === "approval_pending") {
-    holdVaultWithdrawalIdempotencyKey(fingerprint);
-  }
 }
 
 function TransactionLink({
@@ -249,11 +205,17 @@ function WithdrawalResult({
         body: t("DashboardEarn.vaultWithdraw.absorbedBody"),
         note: t("DashboardEarn.vaultWithdraw.absorbedNote"),
       }
-    : {
-        title: t("DashboardEarn.vaultWithdraw.submittedTitle"),
-        body: t("DashboardEarn.vaultWithdraw.submittedBody"),
-        note: t("DashboardEarn.vaultWithdraw.settlingNote"),
-      };
+    : withdrawal.status === "requested"
+      ? {
+          title: t("DashboardEarn.vaultWithdraw.recordedTitle"),
+          body: t("DashboardEarn.vaultWithdraw.recordedBody"),
+          note: t("DashboardEarn.vaultWithdraw.recordedNote"),
+        }
+      : {
+          title: t("DashboardEarn.vaultWithdraw.submittedTitle"),
+          body: t("DashboardEarn.vaultWithdraw.submittedBody"),
+          note: t("DashboardEarn.vaultWithdraw.settlingNote"),
+        };
 
   return (
     <>
@@ -265,7 +227,9 @@ function WithdrawalResult({
         {copy.title}
       </h2>
       <p className="mt-1 text-sm leading-6 text-secondary">{copy.body}</p>
-      <TransactionLink environment={environment} signature={withdrawal.signature} />
+      {withdrawal.status === "requested" ? null : (
+        <TransactionLink environment={environment} signature={withdrawal.signature} />
+      )}
       <p className="mt-4 text-sm leading-6 text-secondary">{copy.note}</p>
       <div className="mt-6 flex justify-end">
         <Button onClick={onClose}>{t("DashboardEarn.withdraw.done")}</Button>
@@ -346,10 +310,15 @@ export function EarnVaultWithdrawModal({
   const asset = earnMintAsset(position.tokenMint);
   const shareSymbol = tokenSymbol(position.shareMint);
   const sharesValidation = validateVaultWithdrawalShares(sharesInput);
-  const knownShares = position.shares;
-  const overKnownShares =
-    sharesValidation.kind === "valid" && knownShares !== undefined
-      ? compareUnsignedDecimals(sharesValidation.canonicalShares, knownShares) === 1
+  const totalShares = position.shares;
+  const withdrawableShares = position.withdrawableShares;
+  const hasStakedShares =
+    totalShares !== undefined &&
+    withdrawableShares !== undefined &&
+    compareUnsignedDecimals(totalShares, withdrawableShares) === 1;
+  const overWithdrawableShares =
+    sharesValidation.kind === "valid" && withdrawableShares !== undefined
+      ? compareUnsignedDecimals(sharesValidation.canonicalShares, withdrawableShares) === 1
       : false;
   const sharesError =
     sharesInput.trim() === "" || sharesValidation.kind === "valid"
@@ -373,9 +342,11 @@ export function EarnVaultWithdrawModal({
     setSubmitError(null);
 
     try {
-      const resolvedKey = await resolveVaultWithdrawalIdempotencyKey(
+      const resolvedKey = await resolveHeldIdempotencyKey(
+        vaultWithdrawalIdempotencyKeyStore,
         fingerprint,
-        controller.signal
+        controller.signal,
+        fetchEarnVaultWithdrawalsByRequestId
       );
       if (resolvedKey.kind === "aborted") return;
       if (resolvedKey.kind === "unavailable") {
@@ -390,7 +361,7 @@ export function EarnVaultWithdrawModal({
       );
       // Key bookkeeping FIRST and unconditionally: the store outlives the
       // component, so an unmount mid-flight must not skip recording the answer.
-      applyVaultWithdrawalIdempotencyKeyOutcome(fingerprint, result);
+      applyIdempotencyKeyOutcome(vaultWithdrawalIdempotencyKeyStore, fingerprint, result);
       if (controller.signal.aborted) return;
       const resolution = resolveWithdrawalSubmission(
         result,
@@ -451,20 +422,19 @@ export function EarnVaultWithdrawModal({
             <Label htmlFor="earn-vault-withdraw-shares">
               {t("DashboardEarn.vaultWithdraw.sharesLabel")}
             </Label>
-            {knownShares !== undefined ? (
-              <Button
-                disabled={submitting}
-                onClick={() => {
-                  setSharesInput(knownShares);
-                  setSubmitError(null);
-                }}
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                {t("DashboardEarn.vaultWithdraw.max")}
-              </Button>
-            ) : null}
+            <Button
+              disabled={submitting || withdrawableShares === undefined}
+              onClick={() => {
+                if (withdrawableShares === undefined) return;
+                setSharesInput(withdrawableShares);
+                setSubmitError(null);
+              }}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              {t("DashboardEarn.vaultWithdraw.max")}
+            </Button>
           </div>
           <Input
             aria-describedby="earn-vault-withdraw-balance earn-vault-withdraw-note"
@@ -481,18 +451,27 @@ export function EarnVaultWithdrawModal({
             value={sharesInput}
           />
           <div className="min-h-5 text-xs text-tertiary" id="earn-vault-withdraw-balance">
-            {knownShares === undefined
-              ? t("DashboardEarn.vaultWithdraw.sharesUnknown")
-              : t("DashboardEarn.vaultWithdraw.sharesHeld", {
-                  shares: formatProviderAmount(knownShares, locale),
-                })}
+            {withdrawableShares === undefined
+              ? totalShares === undefined
+                ? t("DashboardEarn.vaultWithdraw.sharesUnknown")
+                : t("DashboardEarn.vaultWithdraw.withdrawableUnknown", {
+                    shares: formatProviderAmount(totalShares, locale),
+                  })
+              : hasStakedShares && totalShares !== undefined
+                ? t("DashboardEarn.vaultWithdraw.sharesAvailable", {
+                    available: formatProviderAmount(withdrawableShares, locale),
+                    total: formatProviderAmount(totalShares, locale),
+                  })
+                : t("DashboardEarn.vaultWithdraw.sharesHeld", {
+                    shares: formatProviderAmount(withdrawableShares, locale),
+                  })}
           </div>
           {sharesError ? (
             <p className="text-xs text-error" role="alert">
               {sharesError}
             </p>
           ) : null}
-          {overKnownShares ? (
+          {overWithdrawableShares ? (
             <p className="text-xs text-warning" role="status">
               {t("DashboardEarn.vaultWithdraw.overShares")}
             </p>

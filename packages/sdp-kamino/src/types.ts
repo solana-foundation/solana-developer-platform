@@ -131,6 +131,8 @@ export interface KaminoPosition {
   cluster: SolanaCluster;
   /** Shares held, as a decimal string. */
   shares: string;
+  /** Unstaked shares available to the vault withdrawal builder. */
+  withdrawableShares: string;
   /**
    * Current value of those shares in the vault's deposit token, as a decimal
    * string. Undefined when the exchange rate could not be read — the caller

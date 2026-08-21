@@ -1,9 +1,6 @@
 "use client";
 
-import {
-  createIdempotencyKeyStore,
-  resetIdempotencyKeyStoresForTests,
-} from "./earn-idempotency-key-store";
+import { createIdempotencyKeyStore } from "./earn-idempotency-key-store";
 
 /**
  * The vault WITHDRAWAL idempotency key store — the deposit store's mirror
@@ -12,17 +9,9 @@ import {
  * window must carry the same key or the chain accepts the same exit twice; an
  * approval hold pins the key for as long as a human may take.
  */
-const store = createIdempotencyKeyStore("sdp:earn:vault-withdrawal:idempotency:v1");
-
-/**
- * Test-only: clear the shared module-scope tiers so specs are
- * order-independent. Production never calls this.
- *
- * @internal
- */
-export function resetVaultWithdrawTrackingStateForTests(): void {
-  resetIdempotencyKeyStoresForTests();
-}
+export const vaultWithdrawalIdempotencyKeyStore = createIdempotencyKeyStore(
+  "sdp:earn:vault-withdrawal:idempotency:v1"
+);
 
 /**
  * What makes two submissions the SAME exit: the PROJECT, the position, and the
@@ -39,20 +28,4 @@ export function vaultWithdrawalRequestFingerprint(input: {
   shares: string;
 }): string {
   return JSON.stringify([input.projectId, input.positionId, input.shares]);
-}
-
-export function claimVaultWithdrawalIdempotencyKey(fingerprint: string): string {
-  return store.claim(fingerprint);
-}
-
-export function holdVaultWithdrawalIdempotencyKey(fingerprint: string): void {
-  store.hold(fingerprint);
-}
-
-export function isVaultWithdrawalIdempotencyKeyHeld(fingerprint: string): boolean {
-  return store.isHeld(fingerprint);
-}
-
-export function releaseVaultWithdrawalIdempotencyKey(fingerprint: string): void {
-  store.release(fingerprint);
 }

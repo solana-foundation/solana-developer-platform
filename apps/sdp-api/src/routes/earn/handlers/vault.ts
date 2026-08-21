@@ -1000,6 +1000,7 @@ export async function listEarnVaultPositions(c: AppContext) {
     string,
     {
       shares: string;
+      withdrawableShares: string;
       tokenValue: string | undefined;
     }
   >();
@@ -1039,6 +1040,7 @@ export async function listEarnVaultPositions(c: AppContext) {
             snapshot.tokenMint !== trusted.tokenMint ||
             snapshot.shareMint !== trusted.shareMint ||
             !isBoundedSnapshotAmount(snapshot.shares) ||
+            !isBoundedSnapshotAmount(snapshot.withdrawableShares) ||
             (snapshot.tokenValue !== undefined && !isBoundedSnapshotAmount(snapshot.tokenValue))
           ) {
             getLogger().warn(
@@ -1057,6 +1059,7 @@ export async function listEarnVaultPositions(c: AppContext) {
           }
           live.set(vaultPositionLiveKey(provider, walletId, snapshot.providerReference), {
             shares: snapshot.shares,
+            withdrawableShares: snapshot.withdrawableShares,
             tokenValue: snapshot.tokenValue,
           });
         }
@@ -1090,6 +1093,7 @@ export async function listEarnVaultPositions(c: AppContext) {
         closedAt: row.closedAt,
         // Absent (not zero) when the chain read failed or returned nothing.
         shares: hydrated?.shares,
+        withdrawableShares: hydrated?.withdrawableShares,
         tokenValue: hydrated?.tokenValue,
       };
     }),
@@ -1159,10 +1163,11 @@ interface EarnVaultWithdrawalResolved {
  * the vault, the wallet and both mints — so an exit works for a paused
  * strategy, a delisted vault, an un-surfaced or un-entitled provider, and in
  * every environment a position exists in. The only refusals left are the ones
- * that protect the org itself: the position must be the caller's own (404),
- * the key binding must carry a write scope for the signing wallet, and the
- * org's own wallet policy still runs — policy is the org's control over its
- * custody, not a provider gate.
+ * that protect the org itself: the position must belong to the caller's org
+ * and environment (404), the key binding must carry a write scope for the
+ * signing wallet, and the org's own wallet policy still runs. A shared
+ * organization-level custody wallet intentionally lets sibling projects exit
+ * the same org-owned position, matching the deposit route's wallet boundary.
  */
 export async function extractEarnVaultWithdrawalPolicyCandidate(
   c: ValidatedBodyContext<typeof earnVaultWithdrawalSchema>
@@ -1290,6 +1295,9 @@ export async function findEarnVaultWithdrawalIdempotentKeyReplay(
     }
     if (!movement.signature) {
       throw internalError(`Replayed withdrawal ${movement.id} has no transaction details`);
+    }
+    if (movement.status === "failed") {
+      throw conflict("The recorded vault withdrawal failed and cannot be replayed");
     }
     return success(
       c,

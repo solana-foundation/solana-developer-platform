@@ -453,6 +453,8 @@ export interface EarnVaultPositionSnapshot {
   owner: string;
   cluster: SolanaCluster;
   shares: string;
+  /** Unstaked shares the provider can redeem immediately. */
+  withdrawableShares: string;
   /** Value of those shares in the deposit token; omitted when unreadable. */
   tokenValue?: string;
   tokenMint: string;

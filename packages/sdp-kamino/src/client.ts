@@ -300,6 +300,7 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
             owner: String(position.owner),
             cluster: position.cluster,
             shares: position.shares,
+            withdrawableShares: position.withdrawableShares,
             ...(position.tokenValue === undefined ? {} : { tokenValue: position.tokenValue }),
             tokenMint: String(position.tokenMint),
             shareMint: String(position.sharesMint),

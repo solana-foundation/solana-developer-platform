@@ -7,6 +7,7 @@ import {
   address,
   addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
+  type Blockhash,
   compressTransactionMessageUsingAddressLookupTables,
   createTransactionMessage,
   fetchAddressesForLookupTables,
@@ -104,6 +105,15 @@ export interface SignVaultPlanInput extends VaultPlanExecutionScope {
   owner: TransactionSigner;
   rpcUrl: string;
   fee: VaultFeeMode;
+  /** Successful simulation preparation reused to sign the exact same plan. */
+  prepared?: PreparedVaultPlanExecution;
+}
+
+export interface PreparedVaultPlanExecution {
+  plan: EarnVaultTransactionPlan;
+  lookupTables: AddressesByLookupTableAddress;
+  blockhash: Blockhash;
+  lastValidBlockHeight: bigint;
 }
 
 export interface SignedVaultTransaction {
@@ -206,14 +216,22 @@ export async function signVaultPlan(
 ): Promise<SignedVaultTransaction> {
   assertExpectedPlan(input.plan, input.cluster, input.expectedAssetIdentity);
   const instructions = planInstructions(input.plan).map(toKitInstruction);
-  await verifyVaultRpc(env, input);
-  const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
-  const [lookupTables, { blockhash, lastValidBlockHeight }] = await Promise.all([
-    resolveLookupTables(env, input),
-    input.deadline.run("Fetching the vault transaction blockhash", () =>
-      solanaRpc.getRecentBlockhash(rpc, "confirmed")
-    ),
-  ]);
+  let prepared = input.prepared;
+  if (prepared && prepared.plan !== input.plan) {
+    throw new Error("Vault execution preparation belongs to a different plan");
+  }
+  if (!prepared) {
+    await verifyVaultRpc(env, input);
+    const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
+    const [lookupTables, { blockhash, lastValidBlockHeight }] = await Promise.all([
+      resolveLookupTables(env, input),
+      input.deadline.run("Fetching the vault transaction blockhash", () =>
+        solanaRpc.getRecentBlockhash(rpc, "confirmed")
+      ),
+    ]);
+    prepared = { plan: input.plan, lookupTables, blockhash, lastValidBlockHeight };
+  }
+  const { lookupTables, blockhash, lastValidBlockHeight } = prepared;
 
   let signedBytes: Uint8Array;
   if (input.fee.kind === "sponsored") {
@@ -313,7 +331,10 @@ export async function simulateVaultPlan(
     owner: Address;
     rpcUrl: string;
   }
-): Promise<{ ok: true } | { ok: false; error: string; logs: readonly string[] }> {
+): Promise<
+  | { ok: true; prepared: PreparedVaultPlanExecution }
+  | { ok: false; error: string; logs: readonly string[] }
+> {
   assertExpectedPlan(input.plan, input.cluster, input.expectedAssetIdentity);
   let instructions: EarnVaultTransactionPlan["instructions"];
   try {
@@ -328,20 +349,15 @@ export async function simulateVaultPlan(
 
   await verifyVaultRpc(env, input);
   const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
-  let lookupTables: AddressesByLookupTableAddress;
-  try {
-    lookupTables = await resolveLookupTables(env, input);
-  } catch (cause) {
-    return {
-      ok: false,
-      error: cause instanceof Error ? cause.message : "vault lookup tables unavailable",
-      logs: [],
-    };
-  }
-  const { blockhash, lastValidBlockHeight } = await input.deadline.run(
-    "Fetching the vault simulation blockhash",
-    () => solanaRpc.getRecentBlockhash(rpc, "confirmed")
-  );
+  // Lookup-table transport failures are infrastructure failures, not a
+  // program simulation verdict. Let them reject so callers preserve their
+  // idempotency key and return a retryable 5xx instead of a caller-fault 400.
+  const [lookupTables, { blockhash, lastValidBlockHeight }] = await Promise.all([
+    resolveLookupTables(env, input),
+    input.deadline.run("Fetching the vault simulation blockhash", () =>
+      solanaRpc.getRecentBlockhash(rpc, "confirmed")
+    ),
+  ]);
   const message = pipe(
     createTransactionMessage({ version: 0 }),
     (m) => setTransactionMessageFeePayer(input.owner, m),
@@ -375,5 +391,8 @@ export async function simulateVaultPlan(
       logs: result.value.logs ?? [],
     };
   }
-  return { ok: true };
+  return {
+    ok: true,
+    prepared: { plan: input.plan, lookupTables, blockhash, lastValidBlockHeight },
+  };
 }
