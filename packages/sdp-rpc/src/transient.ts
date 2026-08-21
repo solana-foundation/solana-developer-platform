@@ -2,6 +2,13 @@
  * Shared RPC helpers used by the Solana RPC layer and the fee-payment adapters.
  */
 
+import {
+  isSolanaError,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_LONG_TERM_STORAGE_UNREACHABLE,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
+} from "@solana/kit";
+
 // Overloaded-gateway / timeout HTTP statuses worth retrying.
 const TRANSIENT_HTTP_STATUS = /\b(408|429|500|502|503|504)\b/;
 
@@ -20,9 +27,21 @@ const TRANSIENT_ERROR_TEXT =
  * insufficient funds) are intentionally excluded so callers don't retry
  * unrecoverable submissions.
  */
+// Transient Solana JSON-RPC server codes: node unhealthy/behind, block status
+// not yet available, long-term storage unreachable.
+const TRANSIENT_SOLANA_RPC_CODES = [
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_LONG_TERM_STORAGE_UNREACHABLE,
+] as const;
+
 export function isTransientRpcError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return TRANSIENT_HTTP_STATUS.test(message) || TRANSIENT_ERROR_TEXT.test(message);
+  return (
+    TRANSIENT_HTTP_STATUS.test(message) ||
+    TRANSIENT_ERROR_TEXT.test(message) ||
+    TRANSIENT_SOLANA_RPC_CODES.some((code) => isSolanaError(error, code))
+  );
 }
 
 /**
@@ -39,4 +58,34 @@ export function isUnauthorizedRpcError(error: unknown): boolean {
     return false;
   }
   return (context as { statusCode?: unknown }).statusCode === 401;
+}
+
+const TRANSIENT_RPC_RETRY_DELAYS_MS = [250, 750, 1500];
+
+/**
+ * Run an RPC operation, retrying transient failures (as classified by
+ * `isTransientRpcError`) on a short backoff schedule. Persistent errors and
+ * errors that survive the whole schedule are rethrown.
+ */
+export async function withTransientRpcRetry<T>(
+  operation: () => Promise<T>,
+  delaysMs: readonly number[] = TRANSIENT_RPC_RETRY_DELAYS_MS
+): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= delaysMs.length; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+
+      if (attempt === delaysMs.length || !isTransientRpcError(error)) {
+        throw error;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, delaysMs[attempt]));
+    }
+  }
+
+  throw lastError;
 }

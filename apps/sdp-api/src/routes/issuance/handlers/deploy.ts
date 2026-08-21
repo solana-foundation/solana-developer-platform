@@ -4,14 +4,12 @@ import {
   PACKET_DATA_SIZE,
 } from "@sdp/issuance/mosaic";
 import {
-  accountExists,
   createRpc,
   getAccountInfo,
-  getSignatureStatuses,
-  getTransaction,
   type ParsedTransaction,
   simulateTransaction,
 } from "@sdp/rpc/solana";
+import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
 import { SPL_TOKEN_PROGRAMS, type TokenResponse } from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
 import type { Context } from "hono";
@@ -712,38 +710,30 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
 
   // Verify the deploy actually landed before recording it: any tokens:write
   // caller could otherwise pin an arbitrary mint to this token and poison the
-  // public metadata.json. The create tx must be confirmed (no error, past the
-  // `processed`-only stage) and the mint account must now exist on-chain.
+  // public metadata.json. See verifyTransactionLanded for why each of the
+  // three checks exists; the caller-side check below (findMintInitialization)
+  // is the third leg — it links the signature to THIS mint.
   const signature = body.signature as Signature;
   const rpc = createRpc(c.env);
-  const [status] = await getSignatureStatuses(rpc, [signature]);
+  const verified = await verifyTransactionLanded(rpc, signature, { expectAccount: mint });
 
-  if (!status || status.err !== null || status.confirmationStatus === "processed") {
-    throw badRequest("Deploy transaction is not confirmed on-chain");
-  }
-
-  if (!(await accountExists(rpc, mint))) {
-    throw badRequest("Mint account does not exist on-chain");
-  }
-
-  // Confirmed + exists is not enough: the two checks above are independent, so a
-  // caller could pair a confirmed signature from an unrelated tx (e.g. a SOL
-  // transfer) with any pre-existing mint and pass both. Fetch the tx and require
-  // that it actually initialized THIS mint, linking the signature to the mint.
-  const confirmedTx = await getTransaction(rpc, signature);
-
-  // `getSignatureStatuses` and `getTransaction` are indexed independently on the
-  // RPC, so a client that confirms via the former and immediately calls here can
-  // outrun the latter: the tx is valid but not yet queryable and `getTransaction`
-  // returns null. Surface that as a retryable error rather than the "wrong tx"
-  // 400 below — which would tell the caller their deploy was bad and give them no
-  // reason to retry, permanently rejecting a legitimate deploy.
-  if (!confirmedTx) {
+  if (!verified.ok) {
+    if (verified.reason === "not_confirmed") {
+      throw badRequest("Deploy transaction is not confirmed on-chain");
+    }
+    if (verified.reason === "account_missing") {
+      throw badRequest("Mint account does not exist on-chain");
+    }
+    // not_indexed: confirmed but not yet queryable via getTransaction — a
+    // retryable race, not a bad deploy. A 400 here would permanently reject a
+    // legitimate deploy.
     throw new AppError(
       "SOLANA_RPC_ERROR",
       "Deploy transaction is confirmed but not yet indexed by the RPC; retry shortly"
     );
   }
+
+  const confirmedTx = verified.transaction;
 
   const mintInitialization = findMintInitialization(confirmedTx, mint);
   if (!mintInitialization) {
@@ -793,7 +783,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
       mode: "confirm",
       mintAddress: mint,
       signature,
-      slot: status.slot.toString(),
+      slot: verified.status.slot.toString(),
       template: token.template,
       ablListAddress: listAddress ?? null,
     },
@@ -825,7 +815,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
       freezeAuthority,
       listAddress,
       signature: body.signature,
-      slot: status.slot,
+      slot: verified.status.slot,
       deployedToken,
     });
 
