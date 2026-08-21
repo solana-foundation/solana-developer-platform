@@ -53,6 +53,14 @@ DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm db:seed:local
   no dev-only default-on: `MARKETS_ENABLED=true` and `EARN_ENABLED=true`, needed
   by **both** apps (same unprefixed names). Under the Doppler wrapper, plain
   shell exports are ignored unless named in `DOPPLER_PRESERVE_ENV`.
+- **Sponsored vault movements** (`EARN_VAULT_FEE_SPONSORSHIP_ENABLED=true`, API
+  only) additionally need a Kora to sign against: `pnpm kora:up`, then point
+  `KORA_RPC_URL` at it. `infra/kora/kora.toml` already carries the Kamino program
+  ids and `allow_create_account = true`, so the harness mirrors deployed devnet
+  and needs no edit; its `SIGNER_PRIVATE_KEY` does need devnet SOL, because it
+  pays the fee AND the share-ATA rent for real. The flag fails CLOSED, so a value
+  the wrapper drops looks like "sponsorship silently did nothing" rather than an
+  error — if deposits still come out `wallet-pays`, check that first.
 
 ### 3. Run it
 
@@ -62,6 +70,10 @@ DOPPLER_PRESERVE_ENV=DATABASE_URL,REDIS_URL,MARKETS_ENABLED,EARN_ENABLED \
   REDIS_URL=redis://127.0.0.1:6380 \
   MARKETS_ENABLED=true EARN_ENABLED=true \
   pnpm dev:api:local          # API on :8787
+# add EARN_VAULT_FEE_SPONSORSHIP_ENABLED to BOTH the preserve list and the
+# exports above to sponsor vault movements, or put it in
+# apps/sdp-api/.env.local, which run-with-config.sh overlays on top of Doppler
+# and which its own comment calls the intended local override path.
 
 DOPPLER_PRESERVE_ENV=NEXT_PUBLIC_SDP_API_BASE_URL,MARKETS_ENABLED,EARN_ENABLED \
   NEXT_PUBLIC_SDP_API_BASE_URL=http://127.0.0.1:8787 \
