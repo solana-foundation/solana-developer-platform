@@ -22,6 +22,7 @@ import {
 import { createVaultDeadline } from "./vault-deadline";
 import { appendVaultRequestMemo } from "./vault-execution.service";
 import { executeSignedVaultIntent } from "./vault-intent-execution.service";
+import { resolveVaultSponsorship, vaultRentPayer } from "./vault-sponsorship";
 
 /**
  * Exit a non-custodial vault position with one transaction.
@@ -134,11 +135,41 @@ export async function withdrawFromVault(
 
   const cluster = earnClusterFor(input.environment);
   const rpcUrl = resolveClusterRpcUrl(env, cluster);
+
+  // Same ordering rule as deposit: after the replay reads, before the build.
+  //
+  // Sponsorship matters here for the FEE, not for rent. klend's exit emits an
+  // idempotent create for the owner's deposit-token ATA, but that account must
+  // already exist for the deposit to have succeeded and nothing closes it, so
+  // the create is a no-op costing no rent. `rentPayer` is passed anyway, so the
+  // two directions read the same and a provider whose exit DOES create an
+  // account is covered without another change here.
+  const fee = await resolveVaultSponsorship(env, {
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    walletId: input.wallet.id,
+    cluster,
+    deadline,
+  });
+  const rentPayer = vaultRentPayer(fee);
   const expectedAssetIdentity = {
     depositTokenMint: input.tokenMint,
     shareMint: input.shareMint,
   };
   const runtime: EarnRuntimeContext = { env, environment: input.environment };
+
+  // Who gets the share-ATA rent back when this exit empties the account. Read
+  // from the position rather than derived from the CURRENT fee mode: the rent
+  // was paid at deposit time, and sponsorship may have been toggled since.
+  // Refunding a sponsor for rent the customer paid would take the customer's
+  // lamports, so the recorded funder is the only safe source. Null means the
+  // custody wallet funded it and keeps it.
+  const position = await ledger.getPositionById({
+    organizationId: input.organizationId,
+    environment: input.environment,
+    positionId: input.positionId,
+  });
+  const rentRefundTo = position?.share_ata_rent_funder ?? undefined;
 
   let plan: EarnVaultTransactionPlan;
   try {
@@ -146,6 +177,8 @@ export async function withdrawFromVault(
       providerReference: input.vaultAddress,
       owner: input.wallet.publicKey,
       shares: input.shares,
+      ...(rentPayer === undefined ? {} : { rentPayer }),
+      ...(rentRefundTo === undefined ? {} : { rentRefundTo }),
     });
     plan = appendVaultRequestMemo(built, "vault-withdrawal", input.requestId);
   } catch (error) {
@@ -176,6 +209,7 @@ export async function withdrawFromVault(
     expectedAssetIdentity,
     plan,
     rpcUrl,
+    fee,
     runIntentTransaction: options.runIntentTransaction,
     persist: (db, signed) =>
       createPostgresEarnMovementsRepository(db).createSignedVaultWithdrawalIntent({

@@ -27,10 +27,10 @@ import {
   partiallySignTransactionMessageWithSigners,
   signTransactionMessageWithSigners,
 } from "@solana/signers";
-import type { FeePaymentPort } from "@/services/ports";
 import type { Env } from "@/types/env";
 import { assertClusterEndpoint } from "./execution-registry";
 import type { VaultDeadline } from "./vault-deadline";
+import type { VaultFeeMode } from "./vault-sponsorship";
 
 /**
  * Turn a provider's unsigned plan into a landed transaction, signed by an SDP
@@ -53,10 +53,6 @@ function toKitInstruction(instruction: EarnVaultTransactionPlan["instructions"][
     data: Uint8Array.from(Buffer.from(instruction.data, "base64")),
   } as unknown as Instruction;
 }
-
-export type VaultFeeMode =
-  | { kind: "sponsored"; feePayment: FeePaymentPort }
-  | { kind: "wallet-pays" };
 
 // biome-ignore lint/security/noSecrets: public Solana Memo program address.
 const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
@@ -235,10 +231,11 @@ export async function signVaultPlan(
 
   let signedBytes: Uint8Array;
   if (input.fee.kind === "sponsored") {
-    const { feePayment } = input.fee;
-    const feePayer = await input.deadline.run("Resolving the sponsored fee payer", () =>
-      feePayment.getFeePayer()
-    );
+    // The sponsor was resolved before the provider built, because its address
+    // also had to travel into the instructions as the rent payer. Reusing it
+    // here is not just a saved round trip: re-reading it could hand signing a
+    // DIFFERENT address than the one the instructions already name.
+    const { feePayment, sponsor: feePayer } = input.fee;
     const message = pipe(
       createTransactionMessage({ version: 0 }),
       (m) => setTransactionMessageFeePayer(feePayer, m),
@@ -271,7 +268,12 @@ export async function signVaultPlan(
 
   if (signedBytes.length > SOLANA_TRANSACTION_SIZE_LIMIT_BYTES) {
     throw new Error(
-      `Vault transaction is ${signedBytes.length} bytes; Solana allows at most ${SOLANA_TRANSACTION_SIZE_LIMIT_BYTES}`
+      `Vault transaction is ${signedBytes.length} bytes; Solana allows at most ` +
+        `${SOLANA_TRANSACTION_SIZE_LIMIT_BYTES}` +
+        (input.fee.kind === "sponsored"
+          ? ". Sponsorship adds 97 bytes (one signature plus one account key) that the " +
+            "provider did not know about when it sized this plan."
+          : "")
     );
   }
   const signed = getTransactionDecoder().decode(signedBytes);
@@ -330,6 +332,14 @@ export async function simulateVaultPlan(
     plan: EarnVaultTransactionPlan;
     owner: Address;
     rpcUrl: string;
+    /**
+     * The SAME fee mode signing will use. Simulation enforces that the fee
+     * payer can cover the fee, so simulating as the owner while signing as a
+     * sponsor asks the chain a question about a transaction SDP never sends: a
+     * custody wallet holding zero SOL is rejected here, with `AccountNotFound`
+     * and no logs, and never reaches the signing it would have passed.
+     */
+    fee: VaultFeeMode;
   }
 ): Promise<
   | { ok: true; prepared: PreparedVaultPlanExecution }
@@ -358,9 +368,14 @@ export async function simulateVaultPlan(
       solanaRpc.getRecentBlockhash(rpc, "confirmed")
     ),
   ]);
+  // The owner stays a writable signer through the plan's own instruction
+  // accounts either way, so the sponsored shape simulates as it will be sent:
+  // funded sponsor as fee payer, owner unfunded, both signature slots still
+  // empty (`sigVerify: false` is what makes that legal).
+  const feePayer = input.fee.kind === "sponsored" ? input.fee.sponsor : input.owner;
   const message = pipe(
     createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayer(input.owner, m),
+    (m) => setTransactionMessageFeePayer(feePayer, m),
     (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
     (m) => appendTransactionMessageInstructions(instructions.map(toKitInstruction), m),
     (m) => applyLookupTables(m, lookupTables)

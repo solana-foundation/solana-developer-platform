@@ -5,6 +5,7 @@ import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/t
 import { describe, expect, it } from "vitest";
 import {
   buildMaximumWithdrawalBalanceGuard,
+  buildShareAccountCloseInstruction,
   buildShareAccountConsolidation,
   decodeKvaultWithdrawShares,
   KVAULT_BURN_ALL_SHARES_SENTINEL,
@@ -200,5 +201,73 @@ describe("buildShareAccountConsolidation", () => {
     expect(result.totalBaseUnits).toBe(KVAULT_BURN_ALL_SHARES_SENTINEL);
     expect(result.postConsolidationAtaBaseUnits).toBe(KVAULT_BURN_ALL_SHARES_SENTINEL);
     expect(result.instructions).toHaveLength(3);
+  });
+});
+
+describe("buildShareAccountCloseInstruction", () => {
+  const OWNER = createNoopSigner(address("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"));
+  const SHARE_ATA = address("7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx");
+  const SPONSOR = address("4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q");
+
+  it("refunds the recorded funder when the exit empties the account", () => {
+    const instruction = buildShareAccountCloseInstruction({
+      shareAta: SHARE_ATA,
+      owner: OWNER,
+      refundTo: SPONSOR,
+      ataBaseUnitsBeforeExit: 500n,
+      redeemedBaseUnits: 500n,
+    });
+
+    expect(instruction).not.toBeNull();
+    const accounts = (instruction?.accounts ?? []).map((account) => String(account.address));
+    // SPL CloseAccount orders them account, destination, owner.
+    expect(accounts).toEqual([SHARE_ATA, SPONSOR, OWNER.address]);
+    expect(String(instruction?.programAddress)).toBe(String(TOKEN_PROGRAM_ADDRESS));
+  });
+
+  it("refunds the owner when no funder was recorded", () => {
+    const instruction = buildShareAccountCloseInstruction({
+      shareAta: SHARE_ATA,
+      owner: OWNER,
+      ataBaseUnitsBeforeExit: 500n,
+      redeemedBaseUnits: 500n,
+    });
+
+    expect((instruction?.accounts ?? []).map((account) => String(account.address))[1]).toBe(
+      OWNER.address
+    );
+  });
+
+  /**
+   * The load-bearing case. `CloseAccount` fails on a non-zero balance and rides
+   * the same transaction as the redemptions, so closing on a partial exit would
+   * not strand rent, it would fail the customer's withdrawal.
+   */
+  it.each([
+    ["a partial exit leaves shares behind", 500n, 200n],
+    ["redeeming more than the ATA holds cannot be a clean close", 200n, 500n],
+  ])("returns null when %s", (_case, held, redeemed) => {
+    expect(
+      buildShareAccountCloseInstruction({
+        shareAta: SHARE_ATA,
+        owner: OWNER,
+        refundTo: SPONSOR,
+        ataBaseUnitsBeforeExit: held,
+        redeemedBaseUnits: redeemed,
+      })
+    ).toBeNull();
+  });
+
+  it("closes a zero-balance account that redeems nothing", () => {
+    // Degenerate but well defined: both sides zero still means the account ends
+    // empty, so its rent is recoverable.
+    expect(
+      buildShareAccountCloseInstruction({
+        shareAta: SHARE_ATA,
+        owner: OWNER,
+        ataBaseUnitsBeforeExit: 0n,
+        redeemedBaseUnits: 0n,
+      })
+    ).not.toBeNull();
   });
 });

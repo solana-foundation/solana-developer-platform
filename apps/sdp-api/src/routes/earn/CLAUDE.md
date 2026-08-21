@@ -432,11 +432,30 @@ organization's own custody wallets.
     Only the insert winner broadcasts. A send error leaves that row `pending`
     and never `failed`, because a lost response does not prove the transaction
     did not land.
-  - Fee payer is the CUSTODY WALLET. Kora only sponsors allow-listed programs and
-    the kvault/klend ids are not on that list. The shared execution runtime can
-    add a sponsor signature without broadcasting, preserving record-before-send,
-    but this route deliberately selects `wallet-pays` until those programs are
-    eligible for sponsorship.
+  - **Who pays is configuration, not a literal** (PRO-1736). One
+    `resolveVaultSponsorship` call answers it for deposits and exits alike, and
+    the resolved value drives all three places that must agree: the compile-time
+    fee payer, the `rentPayer` inside the provider's instructions, and the fee
+    payer used to SIMULATE. Simulation matters as much as signing here, because
+    it enforces that the fee payer can pay: a zero-SOL wallet simulated as its
+    own fee payer dies with `AccountNotFound` and no logs, before signing.
+  - **Sponsorship is devnet-only, and the cluster gate is exit safety, not
+    caution.** One process serves both clusters and withdrawals are deliberately
+    NOT environment-gated, so a deployment-global flag would sponsor mainnet
+    exits the instant devnet deposits were enabled, against a mainnet Kora with
+    no Kamino programs allowlisted and a disabled mainnet budget policy. That is
+    a 5xx on a customer's money-OUT path, the one failure ADR 0002 rules out.
+    `isEarnVaultSponsorshipEnabled` therefore takes the cluster.
+  - Sponsored signing stays sign-only, so record-before-broadcast survives
+    unchanged. Turning the flag off returns both routes to `wallet-pays` with no
+    code change.
+  - **The exit refunds the share-ATA rent to whoever the DEPOSIT recorded**, from
+    `earn_positions.share_ata_rent_funder` (migration 0066), never from the
+    current fee mode. klend never closed that account, so its rent used to stay
+    locked in a zero-share account on every exit; the exit now closes it when it
+    provably empties it. Do not re-derive the destination: sponsorship can be
+    toggled between entering and exiting a position, and refunding today's
+    sponsor for rent the customer paid takes the customer's lamports.
 - `GET /vault-deposits` — this workspace's recorded deposits, **DB only**,
   newest first, keyset-paged. The DISCOVERY tier: it is what lets a client
   re-derive which of its deposits are still in flight after losing local state,

@@ -19,6 +19,7 @@ const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
 const simulateVaultPlan = vi.hoisted(() => vi.fn());
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 const resolveVaultDirectClient = vi.hoisted(() => vi.fn());
+const resolveVaultSponsorship = vi.hoisted(() => vi.fn());
 
 vi.mock("./execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./execution-registry")>()),
@@ -36,6 +37,13 @@ vi.mock("./vault-execution.service", async (importOriginal) => ({
 vi.mock("@/services/solana", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/solana")>()),
   createOrgSignerForCustodyWallet,
+}));
+
+// `vaultRentPayer` stays real: it is the thing under test in the rent-funder
+// cases below, and it only reads whatever this mock returns.
+vi.mock("./vault-sponsorship", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./vault-sponsorship")>()),
+  resolveVaultSponsorship,
 }));
 
 const { depositIntoVault } = await import("./vault-deposit.service");
@@ -132,6 +140,9 @@ beforeEach(async () => {
   vi.clearAllMocks();
   resolveVaultDirectClient.mockReturnValue({ buildVaultDeposit });
   buildVaultDeposit.mockResolvedValue(plan());
+  // Matches the real resolver with the flag unset, which is the default in every
+  // existing case here.
+  resolveVaultSponsorship.mockResolvedValue({ kind: "wallet-pays" });
   simulateVaultPlan.mockResolvedValue({ ok: true });
   createOrgSignerForCustodyWallet.mockResolvedValue({ address: WALLET_ADDRESS });
   signVaultPlan.mockResolvedValue({
@@ -968,5 +979,61 @@ describe("earn vault project attribution", () => {
       .all<{ project_id: string | null }>();
     expect(position?.project_id).toBeNull();
     expect(movements.results.map((row) => row.project_id)).toEqual([null, otherProject]);
+  });
+
+  /**
+   * Who is owed the share-ATA rent back. Recorded at DEPOSIT time because the
+   * exit that closes the account may be months later and under a different fee
+   * mode, and nothing on chain records who paid.
+   */
+  describe("share-ATA rent funder", () => {
+    const SPONSOR = "4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q";
+
+    async function recordedFunder(): Promise<string | null> {
+      const row = await getDb(env)
+        .prepare("SELECT share_ata_rent_funder FROM earn_positions LIMIT 1")
+        .first<{ share_ata_rent_funder: string | null }>();
+      return row?.share_ata_rent_funder ?? null;
+    }
+
+    function sponsored() {
+      resolveVaultSponsorship.mockResolvedValue({
+        kind: "sponsored",
+        sponsor: SPONSOR,
+        feePayment: { getFeePayer: vi.fn(), signAsFeePayer: vi.fn(), signAndSend: vi.fn() },
+      });
+    }
+
+    it("records the sponsor when this deposit creates the account", async () => {
+      sponsored();
+      buildVaultDeposit.mockResolvedValue(plan({ createsShareAccount: true }));
+
+      await depositIntoVault(env, depositInput());
+
+      expect(await recordedFunder()).toBe(SPONSOR);
+    });
+
+    /**
+     * The case that protects the customer. Account creation is idempotent, so a
+     * sponsored deposit into a vault the wallet already holds pays no rent.
+     * Recording a funder here would later refund a sponsor with lamports the
+     * customer had put up.
+     */
+    it("records nothing when the account already existed", async () => {
+      sponsored();
+      buildVaultDeposit.mockResolvedValue(plan({ createsShareAccount: false }));
+
+      await depositIntoVault(env, depositInput());
+
+      expect(await recordedFunder()).toBeNull();
+    });
+
+    it("records nothing when the wallet funds its own rent", async () => {
+      buildVaultDeposit.mockResolvedValue(plan({ createsShareAccount: true }));
+
+      await depositIntoVault(env, depositInput());
+
+      expect(await recordedFunder()).toBeNull();
+    });
   });
 });

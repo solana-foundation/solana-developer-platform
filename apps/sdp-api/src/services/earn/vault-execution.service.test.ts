@@ -120,6 +120,7 @@ describe("vault execution validation", () => {
         plan,
         owner: ownerAddress,
         rpcUrl,
+        fee: { kind: "wallet-pays" },
       })
     ).rejects.toThrow(/reports genesis/);
     await expect(
@@ -179,6 +180,7 @@ describe("vault execution validation", () => {
         plan,
         owner: ownerAddress,
         rpcUrl,
+        fee: { kind: "wallet-pays" },
       })
     ).rejects.toThrow(/share mint.*does not match/);
 
@@ -200,6 +202,7 @@ describe("vault execution validation", () => {
         plan: planWithLookupTable,
         owner: ownerAddress,
         rpcUrl,
+        fee: { kind: "wallet-pays" },
       })
     ).rejects.toBeTruthy();
   });
@@ -215,6 +218,7 @@ describe("vault signing lifecycle", () => {
       plan,
       owner: owner.address,
       rpcUrl,
+      fee: { kind: "wallet-pays" },
     });
     if (!simulation.ok) throw new Error("expected simulation to succeed");
 
@@ -283,7 +287,7 @@ describe("vault signing lifecycle", () => {
       plan: planForOwner(owner.address),
       owner,
       rpcUrl,
-      fee: { kind: "sponsored", feePayment: fee },
+      fee: { kind: "sponsored", feePayment: fee, sponsor: sponsor.address },
     });
 
     const decoded = getTransactionDecoder().decode(result.bytes);
@@ -316,23 +320,9 @@ describe("vault signing lifecycle", () => {
 });
 
 describe("vault execution deadline", () => {
-  it("shares one absolute budget across blockhash and sponsored fee-payer work", async () => {
+  it("bounds blockhash work with the stage-labelled deadline", async () => {
     vi.useFakeTimers();
-    vi.mocked(solanaRpc.getRecentBlockhash).mockImplementation(
-      () =>
-        new Promise((resolve) =>
-          setTimeout(() => resolve({ blockhash, lastValidBlockHeight: 100n }), 15)
-        )
-    );
-    let resolveFeePayer!: (value: Address) => void;
-    const getFeePayer = vi.fn<() => Promise<Address>>(
-      () =>
-        new Promise((resolve) => {
-          resolveFeePayer = resolve;
-        })
-    );
-    const signAsFeePayer = vi.fn<(_bytes: Uint8Array) => Promise<Uint8Array>>();
-    const sponsor = feePayment({ getFeePayer, signAsFeePayer });
+    vi.mocked(solanaRpc.getRecentBlockhash).mockReturnValue(new Promise(() => undefined));
     const result = signVaultPlan(env, {
       cluster: "devnet",
       deadline: createVaultDeadline(25),
@@ -340,20 +330,48 @@ describe("vault execution deadline", () => {
       plan,
       owner: createNoopSigner(ownerAddress),
       rpcUrl,
-      fee: { kind: "sponsored", feePayment: sponsor },
+      fee: { kind: "wallet-pays" },
     });
     const rejection = expect(result).rejects.toThrow(
-      "Resolving the sponsored fee payer timed out after 25ms"
+      "Fetching the vault transaction blockhash timed out after 25ms"
     );
 
-    await vi.advanceTimersByTimeAsync(15);
-    expect(getFeePayer).toHaveBeenCalledOnce();
-    await vi.advanceTimersByTimeAsync(10);
+    await vi.advanceTimersByTimeAsync(25);
     await rejection;
+  });
 
-    resolveFeePayer(feePayerAddress);
-    await Promise.resolve();
-    expect(signAsFeePayer).not.toHaveBeenCalled();
+  it("signs with the sponsor it was given and never re-reads it", async () => {
+    // The sponsor address travelled into the provider's instructions as the rent
+    // payer before this point, so the instructions already commit to it.
+    // Re-reading it here could name a DIFFERENT address than they name, which is
+    // why signing must not ask the paymaster who it is.
+    const owner = await generateKeyPairSigner();
+    const sponsor = await generateKeyPairSigner();
+    const getFeePayer = vi.fn<() => Promise<Address>>();
+    const signAsFeePayer = vi.fn(async (ownerSignedBytes: Uint8Array) => {
+      const ownerSigned = getTransactionDecoder().decode(ownerSignedBytes);
+      const fullySigned = await partiallySignTransaction([sponsor.keyPair], ownerSigned);
+      return new Uint8Array(getTransactionEncoder().encode(fullySigned));
+    });
+
+    const result = await signVaultPlan(env, {
+      cluster: "devnet",
+      deadline: createVaultDeadline(),
+      expectedAssetIdentity: plan.assetIdentity,
+      plan: planForOwner(owner.address),
+      owner,
+      rpcUrl,
+      fee: {
+        kind: "sponsored",
+        feePayment: feePayment({ getFeePayer, signAsFeePayer }),
+        sponsor: sponsor.address,
+      },
+    });
+
+    expect(getFeePayer).not.toHaveBeenCalled();
+    const decoded = getTransactionDecoder().decode(result.bytes);
+    expect(decoded.signatures[sponsor.address]).not.toBeNull();
+    expect(decoded.signatures[owner.address]).not.toBeNull();
   });
 
   it("bounds broadcast with the same stage-labelled deadline", async () => {

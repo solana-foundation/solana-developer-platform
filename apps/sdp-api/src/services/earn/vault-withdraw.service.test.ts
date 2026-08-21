@@ -213,4 +213,31 @@ describe("withdrawFromVault", () => {
     ).rejects.toThrow();
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
   });
+
+  /**
+   * Rent recovery. The share ATA's rent is refunded to whoever the DEPOSIT
+   * recorded, not to whoever sponsors today: the fee mode can flip between
+   * entering and exiting a position, and refunding a sponsor for rent the
+   * customer paid would take the customer's lamports.
+   */
+  describe("share-ATA rent refund", () => {
+    const SPONSOR = "4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q";
+
+    it("refunds the funder recorded on the position", async () => {
+      await getDb(env)
+        .prepare("UPDATE earn_positions SET share_ata_rent_funder = ? WHERE id = ?")
+        .bind(SPONSOR, positionId)
+        .run();
+
+      await withdrawFromVault(env, input());
+
+      expect(buildVaultWithdrawal.mock.calls[0]?.[1]).toMatchObject({ rentRefundTo: SPONSOR });
+    });
+
+    it("names no refund destination when the wallet funded its own rent", async () => {
+      await withdrawFromVault(env, input());
+
+      expect(buildVaultWithdrawal.mock.calls[0]?.[1]).not.toHaveProperty("rentRefundTo");
+    });
+  });
 });

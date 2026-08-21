@@ -99,6 +99,17 @@ export interface EarnPositionRow {
   updated_at: string;
   activated_at: string | null;
   closed_at: string | null;
+  /**
+   * Address owed this position's share-ATA rent back when the exit closes that
+   * account. Null means the custody wallet funded it and keeps it.
+   *
+   * Authoritative WHENEVER THE SHARE ACCOUNT EXISTS, which is the only window
+   * anything reads it: it is rewritten by every deposit that actually creates
+   * the account, and a position with no share account has no shares to exit. A
+   * value left over from a previous, already-refunded entry is therefore
+   * unreachable rather than wrong.
+   */
+  share_ata_rent_funder: string | null;
 }
 
 export interface EarnMovementRow {
@@ -397,6 +408,24 @@ export interface CreateSignedVaultDepositIntentInput {
   idempotencyFingerprint: string;
   createdBy?: string | null;
   initiatedByKeyId?: string | null;
+  /**
+   * Whether this deposit's instructions CREATE the share token account, as
+   * OBSERVED by the builder rather than inferred from the instruction list.
+   * True is what makes `shareAtaRentFunder` below meaningful.
+   *
+   * Optional, and the default is the safe direction: omitted means "no rent was
+   * charged here", so the funder is left untouched and no refund can be
+   * misdirected. A caller that cannot observe account creation gets the
+   * historical behaviour rather than a guess.
+   */
+  createsShareAccount?: boolean;
+  /**
+   * Who funds that creation: a sponsor address, or null when the custody wallet
+   * pays. Only consulted when `createsShareAccount` is true, and then it is
+   * written even if null, so a re-entry under a different fee mode cannot
+   * inherit the previous entry's funder.
+   */
+  shareAtaRentFunder?: string | null;
 }
 
 export interface AdvanceVaultMovementInput {
@@ -895,6 +924,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         }
 
         const claimed = await claimVaultPosition(transaction, input);
+        await recordShareAccountRentFunder(transaction, input, claimed.id);
         const inserted = await insertVaultMovement(transaction, input, claimed.id);
         if (!inserted) {
           // A concurrent request committed after the preflight. A divergent
@@ -1332,6 +1362,37 @@ async function requireMovementPosition(
  * SQL. A mint-identity mismatch returns nothing and answers 409: the caller named a
  * holding whose asset identity is not the one being deposited.
  */
+/**
+ * Remember who is owed this position's share-ATA rent, but only when this
+ * deposit actually creates that account.
+ *
+ * A separate statement rather than a column on the upsert above, because the
+ * write is CONDITIONAL on something the upsert cannot express: a deposit that
+ * creates the account must overwrite the funder even with NULL (the fee mode may
+ * have changed since the last entry), while a deposit that finds the account
+ * already there must not touch it at all. Folding both into one `ON CONFLICT`
+ * clause would need a transient column to carry the condition, and the version
+ * that reads correctly is the one that says "only when created".
+ *
+ * Runs inside the caller's transaction, so a rolled-back intent leaves no claim
+ * about rent that was never paid.
+ */
+async function recordShareAccountRentFunder(
+  db: AppDb,
+  input: CreateSignedVaultDepositIntentInput,
+  positionId: string
+): Promise<void> {
+  if (!input.createsShareAccount) return;
+  await db
+    .prepare(
+      `UPDATE earn_positions
+          SET share_ata_rent_funder = ?, updated_at = sdp_iso_now()
+        WHERE id = ? AND organization_id = ?`
+    )
+    .bind(input.shareAtaRentFunder ?? null, positionId, input.organizationId)
+    .run();
+}
+
 async function claimVaultPosition(
   db: AppDb,
   input: CreateSignedVaultDepositIntentInput
