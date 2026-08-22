@@ -132,7 +132,11 @@ describe("submitSignedPaymentTransaction", () => {
       markStarted: vi.fn(),
       hasStarted: vi.fn(),
     };
-    const error = preflightError();
+    const cause = new SolanaError(SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM, {
+      code: 42,
+      index: 0,
+    });
+    const error = preflightError(cause);
     vi.spyOn(solanaRpc, "sendTransaction").mockRejectedValueOnce(error);
 
     await expect(
@@ -143,7 +147,7 @@ describe("submitSignedPaymentTransaction", () => {
         lastValidBlockHeight: 123n,
         store,
       })
-    ).rejects.toMatchObject({ code: "TRANSACTION_FAILED" });
+    ).rejects.toMatchObject({ code: "TRANSACTION_FAILED", message: cause.message });
 
     expect(releaseDefinitelyUnbroadcast).toHaveBeenCalledWith(error);
   });

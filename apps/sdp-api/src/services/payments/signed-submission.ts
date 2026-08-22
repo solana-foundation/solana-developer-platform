@@ -36,9 +36,10 @@ function mapPreflightError(error: unknown): AppError | null {
     return null;
   }
   const cause = unwrapSimulationError(error);
+  const message = cause instanceof Error ? cause.message : error.message;
   return isSolanaError(cause, SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM) && cause.context.code === 17
-    ? accountFrozen(error.message)
-    : transactionFailed(error.message);
+    ? accountFrozen(message)
+    : transactionFailed(message);
 }
 
 export function createTransferSignedSubmissionStore(
