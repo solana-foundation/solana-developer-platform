@@ -592,25 +592,26 @@ export const signerCheckResponseSchema = z
       example: "privy_wallet_123",
     }),
     walletAddress: solanaAddressSchema.openapi({
-      description: "Resolved signer address used for the memo transaction.",
+      description: "Resolved signer address used for the check message.",
     }),
     feePayer: solanaAddressSchema.openapi({
-      description: "Fee payer address (Kora signer).",
+      description:
+        "Funded fee payer address used in the simulated message; nothing is spent from it.",
     }),
     memo: z.string().openapi({
-      description: "Server-generated memo text submitted on-chain.",
+      description: "Server-generated memo text in the simulated check message.",
       example: "SDP signer check 123e4567-e89b-42d3-a456-426614174000",
     }),
     signature: z.string().openapi({
-      description: "Submitted Solana transaction signature.",
+      description:
+        "The custody wallet's Ed25519 signature over the check message, base58. Verified server-side and exercised in RPC simulation only — the check never broadcasts, so this signature does not exist on chain.",
       example: "sig_example",
     }),
-    slot: z.number().int().openapi({
-      description: "Confirmed slot number.",
-      example: 123456789,
+    simulated: z.literal(true).openapi({
+      description: "Always true: signer checks run in simulation and cannot spend sponsorship.",
     }),
-    blockTime: isoDateTimeSchema.openapi({
-      description: "Timestamp recorded after confirmation.",
+    checkedAt: isoDateTimeSchema.openapi({
+      description: "Timestamp recorded after the simulation succeeded.",
       example: "2026-02-20T00:00:00.000Z",
     }),
   })

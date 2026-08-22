@@ -105,9 +105,10 @@ export interface SignerCheckApiResponse
     walletAddress: string;
     feePayer: string;
     memo: string;
+    /** The wallet's own signature over the check message — never broadcast. */
     signature: string;
-    slot: number;
-    blockTime: string;
+    simulated: true;
+    checkedAt: string;
   }> {}
 
 export interface TokenAllowlistResponse

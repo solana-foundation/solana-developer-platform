@@ -17,6 +17,12 @@ import {
   createCredentialSecretStore,
 } from "@/services/credential-secret-store";
 import { probeRpcEndpoint, toRedactedFailureCode } from "@/services/rpc-probe";
+import {
+  clearQueuedSecretVersion,
+  destroySecretVersion,
+  queueOrphanedSecretVersion,
+  queuePendingSecretVersion,
+} from "@/services/secret-retirement";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import {
   ORGANIZATION_SCOPE_KEY,
@@ -174,6 +180,18 @@ export async function submitRpcConnection(
     payload: { endpointUrl: credential.endpointUrl, apiKey: input.apiKey },
   });
 
+  const retirementContext = {
+    provider: "rpc_connection",
+    orgId: auth.organizationId,
+    sourceId: providerCredentialId,
+  };
+  // The version exists and nothing references it yet, so its destruction is
+  // queued NOW and cancelled by the committing transaction below. Recorded
+  // before the write — not in a catch block — because a process that dies
+  // mid-request leaves no catch block to run, and the queue is then the only
+  // record the tenant's key is still readable in the backend.
+  await queuePendingSecretVersion(c.env, stored, retirementContext);
+
   const db = getDb(c.env);
   try {
     return await db.transaction(async (tx) => {
@@ -210,6 +228,10 @@ export async function submitRpcConnection(
         executor: tx,
       });
 
+      // The rows now reference the version; the same commit cancels the
+      // provisional retirement recorded before this transaction started.
+      await clearQueuedSecretVersion(tx, stored);
+
       return mapRpcConnection({
         ...connection,
         scope_key: scopeKey,
@@ -219,13 +241,13 @@ export async function submitRpcConnection(
       });
     });
   } catch (error) {
-    // Best effort: an orphaned secret version is not reachable without its
-    // credential row, but leaving it behind still costs money and audit noise.
-    if (stored.secretVersionRef) {
-      await secretStore
-        .destroyVersion({ secretVersionRef: stored.secretVersionRef })
-        .catch(() => {});
-    }
+    // The transaction failed, so nothing references the version: destroy it
+    // now, and let `destroySecretVersion` fall back to the durable retirement
+    // queue when the destroy itself fails — a silently swallowed failure here
+    // left the tenant's key readable in the backend with nothing that would
+    // ever try again. (The pre-commit queue row above already covers the case
+    // where this process dies before reaching this block.)
+    await destroySecretVersion(c.env, stored, retirementContext);
     throw error;
   }
 }
@@ -377,20 +399,52 @@ export async function deactivateRpcConnection(
 ): Promise<SafeRpcConnection> {
   const { auth, store, scopeKeys } = await loadConnectionWithSecret(c, connectionId);
 
-  const deactivated = await store.deactivateConnection({
-    organizationId: auth.organizationId,
-    connectionId,
-    scopeKeys,
-  });
-  if (!deactivated) {
-    throw conflict("The RPC connection is already deactivated");
-  }
-
   const credential = await store.findConnectionSecret({
     organizationId: auth.organizationId,
     connectionId,
     scopeKeys,
   });
+  const storedSecret = credential
+    ? {
+        storageBackend: credential.storage_backend as CredentialSecretStorageBackend,
+        secretRef: credential.secret_ref ?? undefined,
+        secretVersionRef: credential.secret_version_ref ?? undefined,
+      }
+    : null;
+  const retirementContext = {
+    provider: "rpc_connection",
+    orgId: auth.organizationId,
+    sourceId: credential?.id ?? connectionId,
+  };
+
+  // Deactivation is terminal (a deactivated connection cannot be reactivated),
+  // so the commit that deactivates is exactly what orphans the stored key.
+  // Queue its retirement in the same transaction: left alone, the tenant's
+  // live RPC API key stayed readable in Secret Manager indefinitely after the
+  // connection was torn down.
+  const db = getDb(c.env);
+  const deactivated = await db.transaction(async (tx) => {
+    const row = await new RpcConnectionStore(tx).deactivateConnection({
+      organizationId: auth.organizationId,
+      connectionId,
+      scopeKeys,
+      executor: tx,
+    });
+    if (!row) {
+      throw conflict("The RPC connection is already deactivated");
+    }
+    await queueOrphanedSecretVersion(
+      tx,
+      retirementContext,
+      storedSecret,
+      "orphaned by RPC connection deactivation"
+    );
+    return row;
+  });
+
+  // Destroy immediately and discharge the queued obligation; a failure leaves
+  // the queue row for the sweeper.
+  await destroySecretVersion(c.env, storedSecret, retirementContext);
 
   return toSafeWithCredential(deactivated, credential);
 }

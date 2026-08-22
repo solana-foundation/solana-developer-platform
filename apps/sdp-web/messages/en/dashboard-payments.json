@@ -351,6 +351,8 @@
       "resultPartiallyFailed": "Batch partially failed",
       "resultFailed": "Batch failed",
       "resultSubmitted": "Batch submitted",
+      "resultApprovalPending": "Batch pending approval",
+      "approvalPendingDescription": "This batch requires policy approval before it sends. Nothing has moved yet.",
       "recipientsStep": "Recipients",
       "recipientsTitle": "Pay multiple recipients",
       "reviewStep": "Review",
