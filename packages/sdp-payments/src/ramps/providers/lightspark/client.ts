@@ -349,6 +349,42 @@ function gridExchangeRatesPath(params: {
   return `exchange-rates?${query}`;
 }
 
+/**
+ * A Grid quote is executed later purely by its id, so before persisting it we
+ * verify it is the quote we asked for: same currency pair and the exact locked
+ * sending amount. A response outside the request fails closed instead of
+ * binding the tenant to different economics.
+ */
+function assertLightsparkQuoteMatchesRequest(
+  quote: LightsparkQuote,
+  expected: {
+    sendingCurrencyCode: string;
+    receivingCurrencyCode: string;
+    lockedSendingAmount: number;
+  }
+): void {
+  const sendingCode = quote.sendingCurrency?.code?.trim().toUpperCase();
+  const receivingCode = quote.receivingCurrency?.code?.trim().toUpperCase();
+  if (
+    sendingCode !== expected.sendingCurrencyCode.trim().toUpperCase() ||
+    receivingCode !== expected.receivingCurrencyCode.trim().toUpperCase() ||
+    quote.totalSendingAmount !== expected.lockedSendingAmount
+  ) {
+    throw providerUnavailable(
+      "Lightspark returned a quote that does not match the requested currencies or amount.",
+      {
+        provider: "lightspark",
+        expected,
+        received: {
+          sendingCurrencyCode: sendingCode,
+          receivingCurrencyCode: receivingCode,
+          totalSendingAmount: quote.totalSendingAmount,
+        },
+      }
+    );
+  }
+}
+
 function parseGridExchangeRate(response: GridExchangeRatesResponse): GridExchangeRate {
   const entry = response.data[0];
   if (!entry) {
@@ -932,6 +968,11 @@ export class LightsparkRampClient implements RampProvider {
       cryptoCurrency,
       fiatAmountMinorUnits,
     });
+    assertLightsparkQuoteMatchesRequest(quote, {
+      sendingCurrencyCode: fiatCurrency,
+      receivingCurrencyCode: cryptoCurrency,
+      lockedSendingAmount: fiatAmountMinorUnits,
+    });
 
     return this.toRampQuote(quote);
   }
@@ -1078,7 +1119,13 @@ export class LightsparkRampClient implements RampProvider {
       },
     });
 
-    return this.toRampQuote(parseLightsparkQuote(response));
+    const quote = parseLightsparkQuote(response);
+    assertLightsparkQuoteMatchesRequest(quote, {
+      sendingCurrencyCode: cryptoCurrency,
+      receivingCurrencyCode: input.fiatCurrency,
+      lockedSendingAmount: cryptoAmountMinorUnits,
+    });
+    return this.toRampQuote(quote);
   }
 
   async sandboxSend({ env, mode }: RampRuntimeContext, payload: unknown): Promise<unknown> {
