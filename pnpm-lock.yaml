@@ -589,6 +589,10 @@ importers:
       jose:
         specifier: 6.2.8
         version: 6.2.8
+    devDependencies:
+      '@types/node':
+        specifier: 26.1.2
+        version: 26.1.2
 
   packages/sdp-earn:
     dependencies:

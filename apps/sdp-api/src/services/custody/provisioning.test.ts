@@ -174,6 +174,44 @@ describe("coinbase account provisioning", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("binds CDP JWTs to the expected issuer, audience, and short expiries", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = toUrlString(input);
+
+        if (url.endsWith("/platform/v2/solana/accounts") && init?.method === "POST") {
+          return jsonResponse({ address: CREATED_ADDRESS }, 200);
+        }
+
+        throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
+      });
+
+    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+      orgId: "org_abc",
+      projectId: "proj_1",
+    });
+
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    const bearer = decodeJwtPayload(headers.get("authorization")?.slice("Bearer ".length) ?? "");
+    expect(bearer).toMatchObject({
+      iss: "cdp",
+      aud: ["cdp_service"],
+      sub: "test-api-key-id",
+    });
+    expect(Number(bearer.exp) - Number(bearer.iat)).toBe(120);
+
+    // CDP documents iss/aud for the bearer token only; the wallet-auth token is
+    // bound by its short expiry, jti, and request hash instead.
+    const walletAuth = decodeJwtPayload(headers.get("x-wallet-auth") ?? "");
+    expect(walletAuth.iss).toBeUndefined();
+    expect(walletAuth.aud).toBeUndefined();
+    expect(walletAuth.jti).toEqual(expect.any(String));
+    expect(walletAuth.reqHash).toEqual(expect.any(String));
+    expect(walletAuth.nbf).toBe(walletAuth.iat);
+    expect(Number(walletAuth.exp) - Number(walletAuth.iat)).toBe(60);
+  });
+
   it("reads data.address when resolving an already-created account by name", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -569,6 +607,58 @@ describe("utila wallet provisioning", () => {
     expect(result.address).toBe(CREATED_ADDRESS);
     expect(result.vaultId).toBe("vault_123");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports only the upstream error code when wallet creation fails", async () => {
+    const leakedToken = "eyJhbGciOiJSUzI1NiJ9.leaked-service-account-token";
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url = toUrlString(input);
+
+        if (url.endsWith("/v2/vaults/vault_123/wallets") && init?.method === "POST") {
+          return jsonResponse(
+            {
+              error: {
+                code: 403,
+                status: "PERMISSION_DENIED",
+                message: `authorization: Bearer ${leakedToken} is not permitted for vaults/vault_123`,
+              },
+            },
+            403
+          );
+        }
+
+        throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
+      }
+    );
+
+    await expect(provisionUtilaWallet(createUtilaEnv(), {})).rejects.toMatchObject({
+      code: "NETWORK_ERROR",
+      message: "Utila CreateWallet failed (403): code=PERMISSION_DENIED",
+    });
+  });
+
+  it("omits upstream detail entirely when the error body has no known code field", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url = toUrlString(input);
+
+        if (url.endsWith("/v2/vaults/vault_123/wallets") && init?.method === "POST") {
+          return new Response("<html>authorization: Bearer leaked-token</html>", {
+            status: 502,
+            headers: { "Content-Type": "text/html" },
+          });
+        }
+
+        throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
+      }
+    );
+
+    await expect(provisionUtilaWallet(createUtilaEnv(), {})).rejects.toMatchObject({
+      code: "NETWORK_ERROR",
+      message: "Utila CreateWallet failed (502): code=unavailable",
+    });
   });
 
   it("uses the injected clock for service account JWTs", async () => {

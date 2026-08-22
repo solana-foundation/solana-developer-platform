@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import * as crypto from "node:crypto";
+import { summarizeUpstreamErrorBody } from "../redaction";
 import { SigningError } from "../signing";
 
 /**
@@ -167,7 +168,6 @@ interface DfnsRawResponse {
   status: number;
   rawBody: string;
   contentType: string | null;
-  url: string;
 }
 
 interface DfnsSignatureResult {
@@ -249,11 +249,6 @@ function normalizePrivateKey(raw: string): string {
   return unquoted.replace(/\\n/g, "\n");
 }
 
-function truncateForError(value: string): string {
-  const collapsed = value.replace(/\s+/g, " ").trim();
-  return collapsed.length <= 200 ? collapsed : `${collapsed.slice(0, 200)}...`;
-}
-
 function parseJsonSafely(value: string): unknown | null {
   try {
     return JSON.parse(value);
@@ -291,7 +286,6 @@ async function readDfnsResponse(response: Response): Promise<DfnsRawResponse> {
     status: response.status,
     rawBody: await response.text(),
     contentType: response.headers.get("content-type"),
-    url: response.url,
   };
 }
 
@@ -342,7 +336,7 @@ async function dfnsRequestJson<T>(
   const parsed = parseJsonSafely(rawBody);
   if (!parsed) {
     throw new SigningError(
-      `${ctx.providerLabel} API non-JSON response (${method} ${path}): status=${response.status} contentType=${response.contentType ?? "unknown"} url=${response.url} body=${truncateForError(rawBody)}`,
+      `${ctx.providerLabel} API non-JSON response (${method} ${path}): status=${response.status} contentType=${response.contentType ?? "unknown"}`,
       "NETWORK_ERROR"
     );
   }
@@ -378,33 +372,80 @@ async function dfnsRequestRaw(
   const location = response.headers.get("location");
 
   if (response.status >= 300 && response.status < 400 && location) {
-    const followUrl = new URL(location, url).toString();
-    if (method === "POST") {
-      const followResponse = await fetch(followUrl, {
-        method: "GET",
-        headers: createDfnsRequestHeaders(ctx),
-        redirect: "manual",
-      });
-      const follow = await readDfnsResponse(followResponse);
-      if (followResponse.ok) {
-        return follow;
-      }
-
-      throw new SigningError(
-        `${ctx.providerLabel} API redirect follow-up failed (${method} ${normalizedPath} -> ${followUrl}): ${follow.status} ${truncateForError(follow.rawBody)}`,
-        "NETWORK_ERROR"
-      );
-    }
+    return followDfnsRedirect(ctx, {
+      method,
+      normalizedPath,
+      requestUrl: url,
+      location,
+      status: current.status,
+    });
   }
 
   if (!response.ok) {
     throw new SigningError(
-      `${ctx.providerLabel} API error (${method} ${normalizedPath}): status=${current.status} contentType=${current.contentType ?? "unknown"} location=${location ?? "none"} url=${current.url} body=${truncateForError(current.rawBody)}`,
+      `${ctx.providerLabel} API error (${method} ${normalizedPath}): status=${current.status} contentType=${current.contentType ?? "unknown"} code=${summarizeUpstreamErrorBody(current.rawBody, current.status)}`,
       "NETWORK_ERROR"
     );
   }
 
   return current;
+}
+
+/**
+ * Re-issue a redirected request without ever handing the DFNS bearer token to
+ * another origin. Only POST calls redirected within the configured API origin
+ * are followed (DFNS answers some writes with a 3xx to the created resource);
+ * anything else fails closed.
+ */
+async function followDfnsRedirect(
+  ctx: DfnsClientContext,
+  redirect: {
+    method: "GET" | "POST";
+    normalizedPath: string;
+    requestUrl: URL;
+    location: string;
+    status: number;
+  }
+): Promise<DfnsRawResponse> {
+  const { method, normalizedPath, requestUrl, location, status } = redirect;
+  const target = resolveDfnsRedirectTarget(requestUrl, location);
+
+  if (!target || target.origin !== requestUrl.origin) {
+    throw new SigningError(
+      `${ctx.providerLabel} API returned a cross-origin redirect (${method} ${normalizedPath}): status=${status} redirectOrigin=${target?.origin ?? "invalid"}; refusing to forward credentials`,
+      "NETWORK_ERROR"
+    );
+  }
+
+  if (method !== "POST") {
+    throw new SigningError(
+      `${ctx.providerLabel} API returned an unsupported redirect (${method} ${normalizedPath}): status=${status}`,
+      "NETWORK_ERROR"
+    );
+  }
+
+  const followResponse = await fetch(target, {
+    method: "GET",
+    headers: createDfnsRequestHeaders(ctx),
+    redirect: "manual",
+  });
+  const follow = await readDfnsResponse(followResponse);
+  if (followResponse.ok) {
+    return follow;
+  }
+
+  throw new SigningError(
+    `${ctx.providerLabel} API redirect follow-up failed (${method} ${normalizedPath}): status=${follow.status} code=${summarizeUpstreamErrorBody(follow.rawBody, follow.status)}`,
+    "NETWORK_ERROR"
+  );
+}
+
+function resolveDfnsRedirectTarget(requestUrl: URL, location: string): URL | null {
+  try {
+    return new URL(location, requestUrl);
+  } catch {
+    return null;
+  }
 }
 
 async function createDfnsUserActionToken(
@@ -431,8 +472,10 @@ async function createDfnsUserActionToken(
     .filter((id): id is string => typeof id === "string" && id.length > 0);
 
   if (!allowedCredentialIds.includes(ctx.credentialId)) {
+    // Neither the configured credential id nor the account's allowed ids may
+    // appear here: this message reaches API clients and logs.
     throw new SigningError(
-      `${ctx.providerLabel} credential '${ctx.credentialId}' is not allowed. Allowed: ${allowedCredentialIds.join(", ") || "none"}`,
+      `${ctx.providerLabel} rejected the configured credential for user action signing (${allowedCredentialIds.length} credential(s) allowed on this account)`,
       "PROVIDER_NOT_CONFIGURED"
     );
   }

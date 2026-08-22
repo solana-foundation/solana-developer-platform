@@ -1,4 +1,8 @@
-import { redactCredentialSecrets, redactCredentialString } from "@sdp/custody";
+import {
+  redactCredentialSecrets,
+  redactCredentialString,
+  summarizeUpstreamErrorBody,
+} from "@sdp/custody";
 import { describe, expect, it } from "vitest";
 
 describe("credential redaction", () => {
@@ -59,5 +63,33 @@ describe("credential redaction", () => {
     );
 
     expect(redacted).toBe("bad pem [REDACTED]");
+  });
+});
+
+describe("upstream error summaries", () => {
+  it("keeps identifier-shaped codes from known error fields", () => {
+    expect(summarizeUpstreamErrorBody('{"errorCode":"WALLET_NOT_FOUND"}')).toBe("WALLET_NOT_FOUND");
+    expect(summarizeUpstreamErrorBody('{"errorType":"already_exists"}')).toBe("already_exists");
+    expect(summarizeUpstreamErrorBody('{"error":{"code":"InvalidCredential"}}')).toBe(
+      "InvalidCredential"
+    );
+  });
+
+  it("prefers the descriptive status over a code that repeats the HTTP status", () => {
+    expect(
+      summarizeUpstreamErrorBody('{"error":{"code":400,"status":"INVALID_ARGUMENT"}}', 400)
+    ).toBe("INVALID_ARGUMENT");
+  });
+
+  it("drops prose, oversized values, and unparsable bodies", () => {
+    expect(summarizeUpstreamErrorBody('{"error":{"code":"Bearer sk_live_abc is invalid"}}')).toBe(
+      "unavailable"
+    );
+    expect(summarizeUpstreamErrorBody(`{"code":"${"a".repeat(65)}"}`)).toBe("unavailable");
+    expect(summarizeUpstreamErrorBody('{"message":"authorization: Bearer sk_live_abc"}')).toBe(
+      "unavailable"
+    );
+    expect(summarizeUpstreamErrorBody("<html>Bearer sk_live_abc</html>")).toBe("unavailable");
+    expect(summarizeUpstreamErrorBody('["Bearer sk_live_abc"]')).toBe("unavailable");
   });
 });
