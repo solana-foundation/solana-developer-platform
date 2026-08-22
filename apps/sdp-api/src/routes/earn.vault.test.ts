@@ -7,7 +7,7 @@ import {
   type EarnStrategyRow,
   type UpsertEarnStrategyInput,
 } from "@/db/repositories";
-import { createPostgresEarnVaultRepository } from "@/db/repositories/earn-vault.repository";
+import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { createPostgresPolicyRepository } from "@/db/repositories/policy.repository.postgres";
 import app from "@/index";
 import { buildEarnVaultDepositFingerprint } from "@/lib/idempotency";
@@ -640,18 +640,18 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
     });
 
     const key = "key-first-used-by-the-sibling-project";
-    await createPostgresEarnVaultRepository(getDb(env)).createSignedDepositIntent({
+    await createPostgresEarnMovementsRepository(getDb(env)).createSignedVaultDepositIntent({
       organizationId: TEST_ORG.id,
       projectId: siblingProject,
       environment: "sandbox",
       provider: strategy.provider,
-      providerReference: strategy.provider_reference,
+      vaultAddress: strategy.provider_reference,
       custodyWalletId: "cwlt_earn_vault_org_level",
+      sourceAddress: "OrgLevelWalletPublicKey1111111111111111111",
       tokenMint: USDC_MINT,
       shareMint: SHARE_MINT,
       label: strategy.name,
       requestedAmount: "10",
-      acceptedAmount: "10",
       signature: `sig_${crypto.randomUUID()}`,
       signedTransaction: "AQ==",
       lastValidBlockHeight: "12345",

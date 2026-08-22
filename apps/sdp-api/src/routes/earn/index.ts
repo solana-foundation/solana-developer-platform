@@ -6,6 +6,7 @@ import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
+import { listEarnMovements } from "./handlers/movements";
 import {
   createEarnProgram,
   createEarnProgramWithdrawal,
@@ -20,11 +21,16 @@ import {
 import { getEarnStrategy, listEarnStrategies } from "./handlers/strategies";
 import {
   createEarnVaultDeposit,
+  createEarnVaultWithdrawal,
   extractEarnVaultDepositPolicyCandidate,
+  extractEarnVaultWithdrawalPolicyCandidate,
   findEarnVaultDepositIdempotentKeyReplay,
+  findEarnVaultWithdrawalIdempotentKeyReplay,
   getEarnVaultDeposit,
+  getEarnVaultWithdrawal,
   listEarnVaultDeposits,
   listEarnVaultPositions,
+  listEarnVaultWithdrawals,
 } from "./handlers/vault";
 import {
   earnProgramCreateSchema,
@@ -32,6 +38,7 @@ import {
   earnProgramWithdrawalCreateSchema,
   earnProgramWithdrawalPreviewSchema,
   earnVaultDepositSchema,
+  earnVaultWithdrawalSchema,
 } from "./schemas";
 
 const earn = new Hono<{ Bindings: Env }>();
@@ -99,11 +106,51 @@ earn.get(
   requirePermissions("earn:read", "wallets:read"),
   getEarnVaultDeposit
 );
+// The EXIT half (PRO-1702): redeem a position's shares back to the custody
+// wallet that holds them. Policy-gated for the same reason the deposit is —
+// it reaches `createOrgSigner` and broadcasts value-moving transactions, and
+// wallet policy is the ORG'S control over its own custody, not a provider
+// gate. Beyond it this route takes only the capability answer (501 when the
+// provider cannot build an exit): ADR 0002 exit safety forbids money-out
+// inheriting surfacing, entitlement, availability, environment capability, or
+// any catalogue dependency — the position row names the instrument, so a
+// delisted vault stays exitable.
+earn.post(
+  "/vault-withdrawals",
+  requirePermissions("earn:write", "wallets:read"),
+  validateBody(earnVaultWithdrawalSchema),
+  policyGate({
+    extract: extractEarnVaultWithdrawalPolicyCandidate,
+    findIdempotentKeyReplay: findEarnVaultWithdrawalIdempotentKeyReplay,
+  }),
+  createEarnVaultWithdrawal
+);
+// Withdrawal READS mirror the deposit reads: no policy gate, no provider gate,
+// collection before the `:movementId` route, `?requestId=` finds the whole leg
+// group (including one an approval executor created later).
+earn.get(
+  "/vault-withdrawals",
+  requirePermissions("earn:read", "wallets:read"),
+  listEarnVaultWithdrawals
+);
+earn.get(
+  "/vault-withdrawals/:movementId",
+  requirePermissions("earn:read", "wallets:read"),
+  getEarnVaultWithdrawal
+);
 earn.get(
   "/vault-positions",
   requirePermissions("earn:read", "wallets:read"),
   listEarnVaultPositions
 );
+
+// The cross-provider movement feed (source: earn_movements). One chronological
+// history spanning both execution models, which no per-family list can serve —
+// and like them it takes NO provider gate, because it reports on money that has
+// already moved. `wallets:read` is required for the same reason the vault reads
+// require it: the wallet-binding scope it enforces is what keeps a key bound to
+// particular wallets from seeing movements signed by others.
+earn.get("/movements", requirePermissions("earn:read", "wallets:read"), listEarnMovements);
 
 // Portfolio programs: N provider wallets per org+environment+provider
 // (PRO-1670), each addressed by its own id. Money-in (create, re-target) takes
@@ -111,8 +158,8 @@ earn.get(
 // require provider credentials (ADR 0002 exit safety — disabling a provider must
 // never trap funds). Source of truth per route: list/get/deposits/
 // withdrawal-detail read the provider LIVE; the withdrawals LIST reads the SDP
-// ledger (earn_program_withdrawals) and takes no provider gate at all — the
-// audit trail outlives credential removal.
+// ledger (custodial earn_movements rows) and takes no provider gate at all —
+// the audit trail outlives credential removal.
 //
 // The collection is declared BEFORE the `:programId` routes so a literal
 // segment can never be captured as an id.

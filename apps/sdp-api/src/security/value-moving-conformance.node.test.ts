@@ -215,6 +215,36 @@ const contracts: ValueMovingContract[] = [
       },
     ],
   },
+  {
+    /**
+     * The exit half (PRO-1702). Registered WITH the route rather than after
+     * it, so this money-moving surface is born governed — the deposit above is
+     * the cautionary tale.
+     */
+    family: "earn",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/earn/handlers/vault.ts",
+      evidence: "const wallet = resolveEarnVaultCustodyWallet(wallets, position.custodyWalletId)",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/earn/index.ts",
+      section: '"/vault-withdrawals",',
+      before: "extract: extractEarnVaultWithdrawalPolicyCandidate",
+      after: "createEarnVaultWithdrawal",
+    },
+    replay: [
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/services/earn/vault-withdraw.service.test.ts",
+        evidence: "replays the original vault withdrawal for the same requestId and payload",
+      },
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/services/earn/vault-withdraw.service.test.ts",
+        evidence: "rejects the same requestId with a different payload",
+      },
+    ],
+  },
 ];
 
 const signingSinkInventory: Record<string, string[]> = {
@@ -309,9 +339,13 @@ function sectionSource(boundary: OrderedBoundary): string {
 
 describe("value-moving authorization and replay conformance", () => {
   it("covers every required value-moving family", () => {
+    // `earn` appears twice: money-in (vault deposits) and money-out (vault
+    // withdrawals) are separately gated routes, and each carries its own
+    // authorization boundary and replay evidence.
     expect(contracts.map((contract) => contract.family).sort()).toEqual([
       "batch",
       "custody",
+      "earn",
       "earn",
       "issuance",
       "payments",
@@ -362,6 +396,50 @@ describe("value-moving authorization and replay conformance", () => {
 
   it("catalogs every production signing sink", () => {
     expect(discoverSigningSinks()).toEqual(signingSinkInventory);
+  });
+
+  it("refuses platform-held signing keys in a managed deployment", async () => {
+    const { assertSigningProviderAllowed } = await import("@/services/adapters/signing");
+
+    for (const env of [
+      { SDP_DEPLOYMENT_MODE: "managed", SIGNING_PROVIDER: "local", CUSTODY_PRIVATE_KEY: "k" },
+      { SDP_DEPLOYMENT_MODE: "managed", CUSTODY_PRIVATE_KEY: "k" },
+      { CUSTODY_PRIVATE_KEY: "k" },
+    ]) {
+      expect(() => assertSigningProviderAllowed(env as never)).toThrow(/Local signing/);
+    }
+
+    expect(() =>
+      assertSigningProviderAllowed({
+        SDP_DEPLOYMENT_MODE: "managed",
+        SIGNING_PROVIDER: "coinbase_cdp",
+      } as never)
+    ).not.toThrow();
+    expect(() =>
+      assertSigningProviderAllowed({
+        SDP_DEPLOYMENT_MODE: "self_hosted",
+        SIGNING_PROVIDER: "local",
+      } as never)
+    ).not.toThrow();
+  });
+
+  it("keeps the local custody provider unavailable in a managed deployment", async () => {
+    const { isProviderConfigured } = await import("@/services/provider-availability.service");
+
+    expect(
+      isProviderConfigured(
+        { SDP_DEPLOYMENT_MODE: "managed", CUSTODY_PRIVATE_KEY: "k" } as never,
+        "custody",
+        "local"
+      )
+    ).toBe(false);
+    expect(
+      isProviderConfigured(
+        { SDP_DEPLOYMENT_MODE: "self_hosted", CUSTODY_PRIVATE_KEY: "k" } as never,
+        "custody",
+        "local"
+      )
+    ).toBe(true);
   });
 
   it("keeps durable nonce lifetimes disabled", () => {

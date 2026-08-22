@@ -4,18 +4,16 @@ import { SdpKaminoError } from "@sdp/kamino";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
-import { address } from "@solana/kit";
 import { type AppDb, getDb } from "@/db";
 import {
   assertMovementIsOwnReplay,
-  createPostgresEarnVaultRepository,
-  type EarnVaultMovementRow,
-  type EarnVaultPositionRow,
-} from "@/db/repositories/earn-vault.repository";
+  createPostgresEarnMovementsRepository,
+  type EarnMovementRow,
+  type EarnPositionRow,
+} from "@/db/repositories/earn-movements.repository";
 import { badRequest, internalError } from "@/lib/errors";
 import { buildEarnVaultDepositFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
-import * as solanaServices from "@/services/solana";
 import type { Env } from "@/types/env";
 import {
   earnClusterFor,
@@ -23,15 +21,8 @@ import {
   resolveVaultDirectClient,
 } from "./execution-registry";
 import { createVaultDeadline } from "./vault-deadline";
-import {
-  broadcastVaultTransaction,
-  type SignedVaultTransaction,
-  signVaultPlan,
-  simulateVaultPlan,
-} from "./vault-execution.service";
-
-// biome-ignore lint/security/noSecrets: public Solana Memo program address.
-const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+import { appendVaultRequestMemo } from "./vault-execution.service";
+import { executeSignedVaultIntent } from "./vault-intent-execution.service";
 
 /**
  * Deposit ordering is deliberately `build → simulate → sign → record → send`.
@@ -63,8 +54,8 @@ export interface VaultDepositInput {
 }
 
 export interface VaultDepositResult {
-  position: EarnVaultPositionRow;
-  movement: EarnVaultMovementRow;
+  position: EarnPositionRow;
+  movement: EarnMovementRow;
   /** True when an existing signed movement won; its bytes were not re-sent. */
   replayed: boolean;
 }
@@ -79,11 +70,11 @@ export interface VaultDepositExecutionOptions {
 }
 
 async function replayResult(
-  repo: ReturnType<typeof createPostgresEarnVaultRepository>,
+  ledger: ReturnType<typeof createPostgresEarnMovementsRepository>,
   input: VaultDepositInput,
-  movement: EarnVaultMovementRow
+  movement: EarnMovementRow
 ): Promise<VaultDepositResult> {
-  const position = await repo.getPositionById({
+  const position = await ledger.getPositionById({
     organizationId: input.organizationId,
     environment: input.environment,
     positionId: movement.position_id,
@@ -100,7 +91,6 @@ function requireAcceptedPlan(
   plan: EarnVaultTransactionPlan,
   input: Pick<VaultDepositInput, "tokenMint" | "shareMint" | "amount" | "minSharesOut">
 ): {
-  amount: string;
   minSharesOut: string | null;
 } {
   if (plan.assetIdentity.depositTokenMint !== input.tokenMint) {
@@ -132,22 +122,7 @@ function requireAcceptedPlan(
       "Vault builder minSharesOut does not match the policy-approved slippage floor"
     );
   }
-  return { amount, minSharesOut };
-}
-
-function appendRequestMemo(
-  plan: EarnVaultTransactionPlan,
-  requestId: string
-): EarnVaultTransactionPlan {
-  const memo = {
-    programAddress: MEMO_PROGRAM_ADDRESS,
-    accounts: [],
-    data: Buffer.from(`sdp:earn:vault-deposit:${requestId}`, "utf8").toString("base64"),
-  };
-  return {
-    ...plan,
-    transactions: plan.transactions.map((batch) => [...batch, memo]),
-  };
+  return { minSharesOut };
 }
 
 export async function depositIntoVault(
@@ -155,7 +130,7 @@ export async function depositIntoVault(
   input: VaultDepositInput,
   options: VaultDepositExecutionOptions = {}
 ): Promise<VaultDepositResult> {
-  const primaryRepo = createPostgresEarnVaultRepository(getDb(env));
+  const ledger = createPostgresEarnMovementsRepository(getDb(env));
   const fingerprint = buildEarnVaultDepositFingerprint({
     environment: input.environment,
     provider: input.provider,
@@ -170,7 +145,7 @@ export async function depositIntoVault(
   // a transaction whose signed row already exists.
   const prior = await resolveIdempotencyReplay(
     () =>
-      primaryRepo.findMovementByRequestId({
+      ledger.findVaultMovementByRequestId({
         organizationId: input.organizationId,
         requestId: input.requestId,
       }),
@@ -188,7 +163,7 @@ export async function depositIntoVault(
       projectId: input.projectId,
       idempotencyFingerprint: fingerprint,
     });
-    return replayResult(primaryRepo, input, prior);
+    return replayResult(ledger, input, prior);
   }
 
   // Replays above are pure durable reads: they must keep working during an RPC
@@ -218,11 +193,7 @@ export async function depositIntoVault(
       amount: input.amount,
       minSharesOut: input.minSharesOut,
     });
-    // Deterministic Solana signing plus a shared recent blockhash would make
-    // otherwise independent requests produce the same signature. Bind the
-    // caller key into the message so each ledger intent has a unique on-chain
-    // identity while retries of the same key remain byte-for-byte equivalent.
-    plan = appendRequestMemo(built, input.requestId);
+    plan = appendVaultRequestMemo(built, "vault-deposit", input.requestId);
   } catch (error) {
     getLogger().error({ error }, "vault deposit: build failed before signing");
     if (error instanceof SdpKaminoError && error.code === "INVALID_AMOUNT") {
@@ -238,123 +209,41 @@ export async function depositIntoVault(
   }
   const accepted = requireAcceptedPlan(plan, input);
 
-  try {
-    const simulation = await simulateVaultPlan(env, {
-      cluster,
-      deadline,
-      expectedAssetIdentity,
-      plan,
-      owner: address(input.wallet.publicKey),
-      rpcUrl,
-    });
-    if (!simulation.ok) {
-      getLogger().error(
-        { error: simulation.error, logs: simulation.logs.slice(-5) },
-        "vault deposit: simulation failed before signing"
-      );
-      throw badRequest(`Vault deposit simulation failed: ${simulation.error}`);
-    }
-  } catch (error) {
-    if (!(error instanceof Error && error.message.startsWith("Vault deposit simulation failed:"))) {
-      getLogger().error({ error }, "vault deposit: simulation call failed before signing");
-    }
-    throw error;
-  }
-
-  let signed: SignedVaultTransaction;
-  try {
-    const signer = await deadline.run("Resolving the vault deposit signer", () =>
-      solanaServices.createOrgSignerForCustodyWallet(
-        env,
-        input.organizationId,
-        input.projectId,
-        input.wallet.id
-      )
-    );
-    if (signer.address !== input.wallet.publicKey) {
-      throw badRequest("Resolved signing wallet does not match the deposit wallet");
-    }
-    signed = await signVaultPlan(env, {
-      cluster,
-      deadline,
-      expectedAssetIdentity,
-      plan,
-      owner: signer,
-      rpcUrl,
-      fee: { kind: "wallet-pays" },
-    });
-  } catch (error) {
-    getLogger().error({ error }, "vault deposit: signer resolution or signing failed");
-    throw error;
-  }
-
-  const runIntentTransaction =
-    options.runIntentTransaction ??
-    (<T>(mutation: (db: AppDb) => Promise<T>) => mutation(getDb(env)));
-  const result = await runIntentTransaction((db) =>
-    createPostgresEarnVaultRepository(db).createSignedDepositIntent({
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      environment: input.environment,
-      provider: input.provider,
-      providerReference: input.providerReference,
-      custodyWalletId: input.wallet.id,
-      tokenMint: plan.assetIdentity.depositTokenMint,
-      shareMint: plan.assetIdentity.shareMint,
-      label: input.label,
-      requestedAmount: input.amount,
-      acceptedAmount: accepted.amount,
-      requestedMinSharesOut: input.minSharesOut ?? null,
-      acceptedMinSharesOut: accepted.minSharesOut,
-      signature: signed.signature,
-      signedTransaction: Buffer.from(signed.bytes).toString("base64"),
-      lastValidBlockHeight: signed.lastValidBlockHeight,
-      requestId: input.requestId,
-      idempotencyFingerprint: fingerprint,
-      createdBy: input.userId ?? null,
-      initiatedByKeyId: input.apiKeyId ?? null,
-    })
-  );
-
-  // A concurrent identical request already owns the durable signature. Its
-  // signed bytes—not ours—are the only ones that may be broadcast.
-  if (result.replayed) return result;
-
-  try {
-    await broadcastVaultTransaction(env, {
-      cluster,
-      deadline,
-      bytes: signed.bytes,
-      rpcUrl,
-    });
-  } catch (error) {
-    // Timeout/transport failure is ambiguous: the transaction may have landed.
-    // Leave the signed row pending for the confirmation sweep.
-    getLogger().error(
-      { movementId: result.movement.id, signature: signed.signature, error },
-      "vault deposit: broadcast outcome unknown; left reconcilable"
-    );
-    return result;
-  }
-
-  const advanced = await primaryRepo.advanceMovement({
-    movementId: result.movement.id,
+  return executeSignedVaultIntent({
+    operation: "deposit",
+    env,
     organizationId: input.organizationId,
-    fromStatuses: ["pending"],
-    toStatus: "submitted",
+    projectId: input.projectId,
+    walletId: input.wallet.id,
+    walletPublicKey: input.wallet.publicKey,
+    signerMismatchMessage: "Resolved signing wallet does not match the deposit wallet",
+    cluster,
+    deadline,
+    expectedAssetIdentity,
+    plan,
+    rpcUrl,
+    runIntentTransaction: options.runIntentTransaction,
+    persist: (db, signed) =>
+      createPostgresEarnMovementsRepository(db).createSignedVaultDepositIntent({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        environment: input.environment,
+        provider: input.provider,
+        vaultAddress: input.providerReference,
+        custodyWalletId: input.wallet.id,
+        tokenMint: plan.assetIdentity.depositTokenMint,
+        shareMint: plan.assetIdentity.shareMint,
+        label: input.label,
+        requestedAmount: input.amount,
+        acceptedMinSharesOut: accepted.minSharesOut,
+        sourceAddress: input.wallet.publicKey,
+        signature: signed.signature,
+        signedTransaction: Buffer.from(signed.bytes).toString("base64"),
+        lastValidBlockHeight: signed.lastValidBlockHeight,
+        requestId: input.requestId,
+        idempotencyFingerprint: fingerprint,
+        createdBy: input.userId ?? null,
+        initiatedByKeyId: input.apiKeyId ?? null,
+      }),
   });
-  if (advanced) return { ...result, movement: advanced };
-
-  // A confirmer may have won the CAS after broadcast. Return its newer state;
-  // never fabricate the stale pending row or overwrite a terminal observation.
-  const observed = await primaryRepo.getMovementById({
-    movementId: result.movement.id,
-    organizationId: input.organizationId,
-  });
-  if (observed?.signature === signed.signature) {
-    return { ...result, movement: observed };
-  }
-  throw internalError(
-    "Vault deposit was broadcast but its ledger transition could not be verified"
-  );
 }

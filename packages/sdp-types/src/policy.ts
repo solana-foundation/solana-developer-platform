@@ -4,6 +4,7 @@ export type EffectivePolicySource = "implicit_default_allow" | "customer_profile
 
 export const WALLET_OPERATION_TYPES = [
   "earn_vault_deposit",
+  "earn_vault_withdrawal",
   "issuance_burn_execute",
   "issuance_force_burn_execute",
   "issuance_mint_execute",
@@ -16,6 +17,18 @@ export const WALLET_OPERATION_TYPES = [
   "recurring_payment_collection",
   "recurring_payment_create",
   "recurring_payment_update",
+  // Helius Rings shielded operations. Mirror OP_TYPES in
+  // packages/sdp-helius-rings/src/constants.ts; the template type
+  // `rings_${OpType}` in the rings policy envelope fails to compile if the
+  // two lists drift.
+  "rings_shield",
+  "rings_transfer_registered",
+  "rings_transfer_anonymous",
+  "rings_withdraw",
+  "rings_merge",
+  "rings_timelock_create",
+  "rings_timelock_settle",
+  "rings_zone_create",
 ] as const;
 
 export type WalletOperationType = (typeof WALLET_OPERATION_TYPES)[number];

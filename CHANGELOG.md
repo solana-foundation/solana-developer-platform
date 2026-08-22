@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.66.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.65.0...v0.66.0) (2026-08-20)
+
+### Features
+
+* **earn:** add the unified movement ledger and dual-write into it (PRO-1705) ([#1408](https://github.com/solana-foundation/solana-developer-platform/pull/1408)) ([effaa2c](https://github.com/solana-foundation/solana-developer-platform/commit/effaa2c27e7eee1b9400a9d009153bb37382e3a9))
+* **helius:** Rings gateway skeleton, signed router, WalletAuthority, and container ([#1407](https://github.com/solana-foundation/solana-developer-platform/pull/1407)) ([8610d42](https://github.com/solana-foundation/solana-developer-platform/commit/8610d4283de45cab4d5a0634820fe8e4393e04ad))
+* **earn:** persist an in-flight vault deposit and poll it to a terminal state ([#1399](https://github.com/solana-foundation/solana-developer-platform/pull/1399)) ([3295539](https://github.com/solana-foundation/solana-developer-platform/commit/32955395f613bbb9da35bc3d7ed0d6546dfff668))
+* **web:** bring your own RPC credentials from the provider page ([#1347](https://github.com/solana-foundation/solana-developer-platform/pull/1347)) ([72e9a9b](https://github.com/solana-foundation/solana-developer-platform/commit/72e9a9b08c9753e3afefceed5c1b7d6603e08ad5))
+* **api:** resolve stored RPC connections in the relay ([#1346](https://github.com/solana-foundation/solana-developer-platform/pull/1346)) ([01e524d](https://github.com/solana-foundation/solana-developer-platform/commit/01e524d6aa3ed02ca43f8865b3820aa699792459))
+* **api:** persist tenant-scoped RPC connections ([#1345](https://github.com/solana-foundation/solana-developer-platform/pull/1345)) ([fa591a5](https://github.com/solana-foundation/solana-developer-platform/commit/fa591a54ce8604172b371c6c8e567be1bb820ea1))
+* **api:** run the full reconciliation surface on the managed cron job (PRO-1715) ([#1403](https://github.com/solana-foundation/solana-developer-platform/pull/1403)) ([7c0e7a4](https://github.com/solana-foundation/solana-developer-platform/commit/7c0e7a4e20e5c179794fcece3893126021bc52fe))
+* **api:** migrate nested custody secrets to KMS envelopes in the backfill ([#1376](https://github.com/solana-foundation/solana-developer-platform/pull/1376)) ([fb6d252](https://github.com/solana-foundation/solana-developer-platform/commit/fb6d25212a01ba96f1280359f7ffe07184162c33))
+* **api:** support Custody Connections in API keys and policies(HOO-1022) ([#1336](https://github.com/solana-foundation/solana-developer-platform/pull/1336)) ([abdf145](https://github.com/solana-foundation/solana-developer-platform/commit/abdf145dd5216eead6ce57d291f802e6f1707851))
+* **api:** move request-body validation to route-level middleware ([#1373](https://github.com/solana-foundation/solana-developer-platform/pull/1373)) ([76c2dfa](https://github.com/solana-foundation/solana-developer-platform/commit/76c2dfadfee6e51d710fb03315598afc39639e09))
+* **web:** manage the RPC provider from its integration detail page ([#1344](https://github.com/solana-foundation/solana-developer-platform/pull/1344)) ([2f93f25](https://github.com/solana-foundation/solana-developer-platform/commit/2f93f251f078029530e008bf3a7f2ac0fbd12185))
+* **web:** list custody connections on the wallets surface ([#1308](https://github.com/solana-foundation/solana-developer-platform/pull/1308)) ([8108697](https://github.com/solana-foundation/solana-developer-platform/commit/8108697fd3ec99d278e6fca5f55f392ff17b93de))
+
+### Bug Fixes
+
+* **payments:** finalize confirmed transfers and standardize the reconciliation job (PRO-1713) ([#1402](https://github.com/solana-foundation/solana-developer-platform/pull/1402)) ([59189ed](https://github.com/solana-foundation/solana-developer-platform/commit/59189edf4ab7ac25e828c2782ef7f6d80ec3fb1c))
+* **api:** send tenant RPC egress through the address guard ([#1405](https://github.com/solana-foundation/solana-developer-platform/pull/1405)) ([6878070](https://github.com/solana-foundation/solana-developer-platform/commit/6878070e72fb9910262db7e25610b91d494e679a))
+
 ## [0.65.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.64.0...v0.65.0) (2026-08-19)
 
 ### Features
