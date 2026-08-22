@@ -1,0 +1,54 @@
+name: Workflow Security
+
+on:
+  pull_request:
+    paths:
+      - ".github/**"
+      - "scripts/ci/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/**"
+      - "scripts/ci/**"
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Lint workflows
+        uses: docker://rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        with:
+          args: "-color -ignore SC2[0-9]+:(info|style):"
+
+  action-pins:
+    name: Action pins
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Require full-SHA pins for external actions
+        run: |
+          UNPINNED=$(grep -rEn '^[[:space:]]*(-[[:space:]]+)?uses:' .github/workflows/ \
+            | grep -Ev 'uses:[[:space:]]*\./' \
+            | grep -Ev '^[^#]*uses:[^#@]*@[0-9a-f]{40}([[:space:]]+#.*)?$' \
+            | grep -Ev '^[^#]*uses:[[:space:]]*docker://[^#@]+@sha256:[0-9a-f]{64}([[:space:]]+#.*)?$' || true)
+          if [ -n "$UNPINNED" ]; then
+            echo "External actions must be pinned to a full commit SHA (or image digest):"
+            echo "$UNPINNED"
+            exit 1
+          fi
+
+  changed-packages-fixture:
+    name: Changed-packages injection fixture
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run malicious-path regression fixture
+        run: bash scripts/ci/changed-packages.test.sh

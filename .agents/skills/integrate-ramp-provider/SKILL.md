@@ -1,6 +1,7 @@
 ---
 name: integrate-ramp-provider
 description: Start here to add a new on/off-ramp provider (fiat↔crypto) to SDP. Routes you through the integration sequence and the non-negotiable rules; the individual steps live in their own skills. Use when opening a PR against apps/sdp-api to integrate a ramp or payment provider.
+disable-model-invocation: true
 ---
 
 # Integrate a ramp provider

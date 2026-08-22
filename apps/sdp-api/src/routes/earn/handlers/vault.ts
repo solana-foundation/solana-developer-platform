@@ -4,6 +4,9 @@ import type {
   EarnVaultDepositRecord,
   EarnVaultDepositResponse,
   EarnVaultDepositsPage,
+  EarnVaultWithdrawal,
+  EarnVaultWithdrawalResponse,
+  EarnVaultWithdrawalsPage,
   SdpEnvironment,
 } from "@sdp/types";
 import {
@@ -14,7 +17,11 @@ import {
 import { z } from "zod";
 import { getDb } from "@/db";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
-import { createPostgresEarnVaultRepository } from "@/db/repositories/earn-vault.repository";
+import {
+  createPostgresEarnMovementsRepository,
+  type EarnMovementRow,
+  type EarnPositionRow,
+} from "@/db/repositories/earn-movements.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import {
@@ -25,7 +32,10 @@ import {
   notFound,
   walletNotFound,
 } from "@/lib/errors";
-import { buildEarnVaultDepositFingerprint } from "@/lib/idempotency";
+import {
+  buildEarnVaultDepositFingerprint,
+  buildEarnVaultWithdrawalFingerprint,
+} from "@/lib/idempotency";
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
 import { isDryRunRequest } from "@/middleware/dry-run";
@@ -44,6 +54,7 @@ import {
 import { earnClusterFor, resolveVaultDirectClient } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { depositIntoVault } from "@/services/earn/vault-deposit.service";
+import { withdrawFromVault } from "@/services/earn/vault-withdraw.service";
 import {
   approvedWalletOperationId,
   beginApprovedWalletOperationEffect,
@@ -61,6 +72,9 @@ import {
   type earnVaultDepositSchema,
   earnVaultDepositsQuerySchema,
   earnVaultPositionsQuerySchema,
+  earnVaultWithdrawalParamsSchema,
+  type earnVaultWithdrawalSchema,
+  earnVaultWithdrawalsQuerySchema,
 } from "../schemas";
 import { assertStrategyDepositable } from "./admission";
 import { parseParams, parseQuery } from "./shared";
@@ -132,10 +146,16 @@ function buildEarnVaultDepositResponse(
   result: Awaited<ReturnType<typeof depositIntoVault>>,
   strategy: EarnStrategyRow
 ) {
+  if (!result.movement.signature) {
+    throw internalError(
+      `Earn vault movement ${result.movement.id} was recorded without a signature`
+    );
+  }
   return {
     positionId: result.position.id,
     movementId: result.movement.id,
-    status: result.movement.status,
+    // The ledger says `requested`; this contract's word for it is `pending`.
+    status: toLegacyVaultDepositStatus(result.movement.status),
     signature: result.movement.signature,
     failureReason: result.movement.failure_reason,
     // Tells a retrying caller that its key was already used and NOTHING was
@@ -201,18 +221,18 @@ export async function extractEarnVaultDepositPolicyCandidate(
 
   // ENVIRONMENT CAPABILITY, before anything else and before any lookup.
   //
-  // SDP can move money INTO a vault and not back out: there is no vault
-  // withdraw route. The dashboard surfaces the durable position but disables
-  // its exit action, so production remains refused server-side. Entitlement
-  // cannot express this — it is org-scoped, not environment-scoped — which is
-  // exactly why an entitled org would otherwise reach mainnet. The dashboard
-  // hides the affordance from the same constant, so the button and the route
-  // agree by construction.
+  // The exit path exists now (PRO-1702) and deliberately takes no such gate.
+  // What keeps production deposits closed is PRO-1703: the Active tab does not
+  // surface vault positions yet, so a mainnet position would sit outside the
+  // customer's primary portfolio view. Entitlement cannot express this — it is
+  // org-scoped, not environment-scoped — which is exactly why an entitled org
+  // would otherwise reach mainnet early. The dashboard hides the affordance
+  // from the same constant, so the button and the route agree by construction.
   if (!isVaultDirectDepositEnabled(environment)) {
     throw new AppError(
       "FORBIDDEN",
-      "Vault deposits are not available in production yet: SDP has no vault-withdraw path, " +
-        "so a position opened here could not be exited through SDP."
+      "Vault deposits are not available in production yet: vault positions are not surfaced " +
+        "on the Active tab, so a position opened here would sit outside the portfolio view."
     );
   }
 
@@ -388,8 +408,8 @@ export async function findEarnVaultDepositIdempotentKeyReplay(
   if (approvedWalletOperationId(c)) return null;
 
   const resolved = extraction.resolved as EarnVaultDepositResolved;
-  const repo = createPostgresEarnVaultRepository(getDb(c.env));
-  const movement = await repo.findMovementByRequestId({
+  const repo = createPostgresEarnMovementsRepository(getDb(c.env));
+  const movement = await repo.findVaultMovementByRequestId({
     organizationId: resolved.auth.organizationId,
     requestId: idempotencyKey,
   });
@@ -430,6 +450,33 @@ export async function findEarnVaultDepositIdempotentKeyReplay(
     );
   }
 
+  await throwOnPriorVaultPolicyOperation(c, {
+    organizationId: resolved.auth.organizationId,
+    projectId: resolved.projectId,
+    idempotencyKey,
+    idempotencyFingerprint: resolved.idempotencyFingerprint,
+    operationNoun: "vault deposit",
+  });
+  return null;
+}
+
+/**
+ * Pre-execution policy replays, shared by both vault money movers: a key that
+ * already produced a wallet operation must answer with that operation's state
+ * (still pending approval, executing, denied, canceled) rather than starting a
+ * second one — and a key reused with a different payload is a conflict even
+ * before any movement exists.
+ */
+async function throwOnPriorVaultPolicyOperation(
+  c: AppContext,
+  params: {
+    organizationId: string;
+    projectId: string;
+    idempotencyKey: string;
+    idempotencyFingerprint: string;
+    operationNoun: "vault deposit" | "vault withdrawal";
+  }
+): Promise<void> {
   const prior = await getDb(c.env)
     .prepare(
       `SELECT operation.id, operation.status, operation.raw_payload,
@@ -447,7 +494,7 @@ export async function findEarnVaultDepositIdempotentKeyReplay(
          AND operation.project_id = ?
          AND operation.idempotency_key = ?`
     )
-    .bind(resolved.auth.organizationId, resolved.projectId, idempotencyKey)
+    .bind(params.organizationId, params.projectId, params.idempotencyKey)
     .first<{
       id: string;
       status: string;
@@ -459,8 +506,8 @@ export async function findEarnVaultDepositIdempotentKeyReplay(
       requires_approval: boolean | null;
       approval_request_id: string | null;
     }>();
-  if (!prior) return null;
-  if (prior.raw_payload.idempotencyFingerprint !== resolved.idempotencyFingerprint) {
+  if (!prior) return;
+  if (prior.raw_payload.idempotencyFingerprint !== params.idempotencyFingerprint) {
     throw conflict("Idempotency key already used with different request payload");
   }
 
@@ -478,14 +525,14 @@ export async function findEarnVaultDepositIdempotentKeyReplay(
       "SIGNING_PENDING",
       prior.status === "pending_approval"
         ? "Wallet operation requires policy approval"
-        : "Approved vault deposit execution is still in progress",
+        : `Approved ${params.operationNoun} execution is still in progress`,
       details
     );
   }
   if (prior.decision === "deny" || prior.status === "canceled") {
     throw new AppError("FORBIDDEN", "Wallet operation denied by policy", details);
   }
-  throw conflict("The prior vault deposit policy operation has no replayable movement");
+  throw conflict(`The prior ${params.operationNoun} policy operation has no replayable movement`);
 }
 
 function resolveEarnVaultCustodyWallet(
@@ -526,8 +573,8 @@ function assertBoundWalletIdentifierIsUnique(
  * read wallet B's deposits either.
  *
  * The id spaces differ and that is the trap. `getAllowedApiKeyWalletIdsForPermissions`
- * returns PROVIDER wallet ids (`privy_…`), while `earn_vault_positions.custody_wallet_id`
- * and `earn_vault_movements.custody_wallet_id` are `custody_wallets` row ids
+ * returns PROVIDER wallet ids (`privy_…`), while `earn_positions.custody_wallet_id`
+ * and `earn_movements.custody_wallet_id` are `custody_wallets` row ids
  * (`cwlt_…`). The projection carries both, so it is the translation table;
  * comparing the allow-list directly against a stored id matches nothing and
  * silently answers "you hold none of this", which is a filter that looks like
@@ -536,7 +583,7 @@ function assertBoundWalletIdentifierIsUnique(
  * A provider wallet id that maps to more than one scoped custody row is
  * dropped: the binding cannot say which row it meant, so it authorizes neither.
  */
-async function listReadableEarnVaultWallets(
+export async function listReadableEarnVaultWallets(
   c: AppContext,
   auth: ApiKeyContext,
   projectId: string
@@ -629,10 +676,10 @@ function isMovementInProject(movement: { project_id: string | null }, projectId:
  *                  every project in the org. An EXACT match: a null
  *                  `project_id` means the project was deleted, not that the row
  *                  is public.
- *   direction    — a `withdraw` movement is not a deposit. The column is the
- *                  only thing separating the two on a shared table, and the
- *                  vault withdraw path is still unbuilt, so this closes the
- *                  path before there is anything to leak through it.
+ *   direction    — a withdrawal is not a deposit. The column is the only thing
+ *                  separating the two on a shared table; the withdrawal reads
+ *                  below apply the same rule pointed the other way, so each
+ *                  surface serves exactly its own direction.
  */
 export async function getEarnVaultDeposit(c: AppContext) {
   const { movementId } = parseParams(c, earnVaultDepositParamsSchema);
@@ -640,7 +687,7 @@ export async function getEarnVaultDeposit(c: AppContext) {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
-  const repo = createPostgresEarnVaultRepository(getDb(c.env));
+  const repo = createPostgresEarnMovementsRepository(getDb(c.env));
   const movement = await repo.getMovementById({
     movementId,
     organizationId: auth.organizationId,
@@ -648,6 +695,10 @@ export async function getEarnVaultDeposit(c: AppContext) {
   if (
     !movement ||
     movement.environment !== environment ||
+    // The ledger holds both execution models, so "is this a vault deposit" is now
+    // two columns rather than a table name. A custodial withdrawal reached by a
+    // guessed id must 404 exactly like a wrong-organization row.
+    movement.execution_model !== "vault_direct" ||
     movement.direction !== "deposit" ||
     !isMovementInProject(movement, projectId)
   ) {
@@ -666,27 +717,67 @@ export async function getEarnVaultDeposit(c: AppContext) {
   return success(c, response);
 }
 
-/** Shared row -> wire mapping, so the list and the detail cannot drift. */
-function toEarnVaultDepositRecord(movement: {
-  id: string;
-  position_id: string;
-  provider: string;
-  provider_reference: string;
-  status: EarnVaultDepositRecord["status"];
-  signature: string;
-  amount: string;
-  failure_reason: string | null;
-  created_at: string;
-  confirmed_at: string | null;
-}): EarnVaultDepositRecord {
+/**
+ * The published vault-deposit vocabulary, which predates the unified ledger.
+ *
+ * Two values need translating and both are deliberate: `requested` is the ledger's
+ * one word for "a signed transaction is durably recorded but is not known to be
+ * on the wire", which this DTO calls `pending`; and `finalized` — irreversible
+ * chain settlement — has no name here at all, because this vocabulary was written
+ * when optimistic commitment was the end of the story.
+ *
+ * Mapping `finalized` down to `confirmed` therefore tells the existing client
+ * exactly what it already understood, rather than sending it a status its own Zod
+ * enum would reject. Delete this table, and the `?settled=` note in the
+ * repository, when the DTO adopts the ledger vocabulary.
+ */
+const LEGACY_VAULT_DEPOSIT_STATUS = {
+  requested: "pending",
+  submitted: "submitted",
+  confirmed: "confirmed",
+  finalized: "confirmed",
+  failed: "failed",
+} as const satisfies Record<string, EarnVaultDepositRecord["status"]>;
+
+function toLegacyVaultDepositStatus(status: string): EarnVaultDepositRecord["status"] {
+  const mapped = LEGACY_VAULT_DEPOSIT_STATUS[status as keyof typeof LEGACY_VAULT_DEPOSIT_STATUS];
+  if (!mapped) {
+    throw internalError(`Earn vault movement carries the unmappable status ${status}`);
+  }
+  return mapped;
+}
+
+/**
+ * Shared row -> wire mapping, so the list and the detail cannot drift.
+ *
+ * `vault_address` is what this DTO calls `providerReference`. The unified ledger
+ * reserves `provider_reference` for the provider's id FOR THE MOVEMENT, which a
+ * vault movement does not have — the vault is the INSTRUMENT, and 0059 having
+ * used one column name for both meanings is exactly what made the two tables
+ * unmergeable until it was unpicked.
+ *
+ * `amount` serves `amount_requested`. 0059 stored the caller's text and the
+ * provider plan's canonical spelling in two columns and enforced them NUMERICALLY
+ * EQUAL, so this is the same quantity; only the spelling can differ (`100` where
+ * the padded form said `100.000000`).
+ */
+function toEarnVaultDepositRecord(movement: EarnMovementRow): EarnVaultDepositRecord {
+  // Guaranteed by 0062's model-shape constraint for a vault_direct row; asserted
+  // rather than coerced, because a blank instrument or signature on the wire
+  // would be a silent lie about a real on-chain transaction.
+  if (!movement.vault_address || !movement.signature) {
+    throw internalError(
+      `Earn vault movement ${movement.id} is missing its instrument or signature`
+    );
+  }
   return {
     movementId: movement.id,
     positionId: movement.position_id,
     provider: movement.provider,
-    providerReference: movement.provider_reference,
-    status: movement.status,
+    providerReference: movement.vault_address,
+    status: toLegacyVaultDepositStatus(movement.status),
     signature: movement.signature,
-    amount: movement.amount,
+    amount: movement.amount_requested,
     failureReason: movement.failure_reason,
     createdAt: movement.created_at,
     confirmedAt: movement.confirmed_at,
@@ -734,14 +825,14 @@ export async function listEarnVaultDeposits(c: AppContext) {
     return success(c, { deposits: [], hasMore: false, nextCursor: null });
   }
   const scopedWalletIds = new Set(custodyWalletIds);
-  const repo = createPostgresEarnVaultRepository(getDb(c.env));
+  const repo = createPostgresEarnMovementsRepository(getDb(c.env));
 
   // The single-key lookup deliberately does NOT page. It resolves at most one
-  // row (migration 0059's unique index on (organization_id, request_id)), and
-  // running it through the keyset query would mean indexing for a filter that
-  // can never return two rows.
+  // row (0062's partial unique index on (organization_id, request_id) for vault
+  // rows, carried over from 0059), and running it through the keyset query would
+  // mean indexing for a filter that can never return two rows.
   if (query.requestId !== undefined) {
-    const movement = await repo.findMovementByRequestId({
+    const movement = await repo.findVaultMovementByRequestId({
       organizationId: auth.organizationId,
       requestId: query.requestId,
     });
@@ -750,6 +841,7 @@ export async function listEarnVaultDeposits(c: AppContext) {
       movement.environment === environment &&
       movement.direction === "deposit" &&
       isMovementInProject(movement, projectId) &&
+      movement.custody_wallet_id !== null &&
       scopedWalletIds.has(movement.custody_wallet_id);
     return success(c, {
       deposits: visible && movement ? [toEarnVaultDepositRecord(movement)] : [],
@@ -758,11 +850,12 @@ export async function listEarnVaultDeposits(c: AppContext) {
     });
   }
 
-  const { rows, hasMore } = await repo.listDeposits({
+  const { rows, hasMore } = await repo.listVaultMovements({
     organizationId: auth.organizationId,
     environment,
     projectId,
     custodyWalletIds,
+    direction: "deposit",
     limit: query.limit,
     before,
     settled: query.settled,
@@ -779,9 +872,22 @@ export async function listEarnVaultDeposits(c: AppContext) {
 }
 
 const vaultMovementCursorSchema = z.object({
+  // `created_at` is ordered as canonical UTC text, so accepting offsets or a
+  // different precision would make a syntactically valid cursor sort wrongly.
   createdAt: z.string().datetime({ precision: 3 }),
+  // Shape and bound only, NOT a prefix. Movement ids are heterogeneous by design:
+  // the unification preserved every legacy row's id, so the table holds
+  // `earn_vault_movement_…` history beside `earn_movement_…` for anything minted
+  // since. Pinning a prefix here rejected page two outright.
+  //
+  // Safe because a cursor is a pagination BOUND, not an access grant — it lands in
+  // `(created_at, id) < (?, ?)` while organization, environment, project and wallet
+  // scope are separate conditions, so a forged one can only reposition a caller
+  // inside rows it could already read.
   id: z
-    .templateLiteral(["earn_vault_movement_", z.uuidv4()])
+    .string()
+    .min(1)
+    .max(128)
     .refine((id) => id === id.toLowerCase()),
 });
 
@@ -790,6 +896,44 @@ function decodeVaultMovementCursor(cursor: string): { createdAt: string; id: str
   if (!decoded) return null;
   const parsed = vaultMovementCursorSchema.safeParse({ createdAt: decoded.value, id: decoded.id });
   return parsed.success ? parsed.data : null;
+}
+
+/**
+ * One vault holding with its instrument columns proven present.
+ *
+ * `earn_positions` holds both custody models, so the vault-only columns are
+ * nullable at the type level even though 0062's shape constraint makes them
+ * NOT NULL for a `vault_direct` row. Narrowing once here keeps the hydration
+ * below from either coercing a blank vault address into a chain read or
+ * repeating the same assertion six times.
+ */
+interface VaultHolding {
+  id: string;
+  provider: string;
+  vaultAddress: string;
+  label: string;
+  custodyWalletId: string;
+  tokenMint: string;
+  shareMint: string;
+  createdAt: string;
+  closedAt: string | null;
+}
+
+function toVaultHolding(row: EarnPositionRow): VaultHolding {
+  if (!row.vault_address || !row.custody_wallet_id || !row.token_mint || !row.share_mint) {
+    throw internalError(`Earn vault position ${row.id} is missing its instrument identity`);
+  }
+  return {
+    id: row.id,
+    provider: row.provider,
+    vaultAddress: row.vault_address,
+    label: row.label,
+    custodyWalletId: row.custody_wallet_id,
+    tokenMint: row.token_mint,
+    shareMint: row.share_mint,
+    createdAt: row.created_at,
+    closedAt: row.closed_at,
+  };
 }
 
 /**
@@ -825,14 +969,19 @@ export async function listEarnVaultPositions(c: AppContext) {
     return success(c, { positions: [], hasMore: false, nextCursor: null });
   }
 
-  const repo = createPostgresEarnVaultRepository(getDb(c.env));
-  const { rows, hasMore } = await repo.listPositions({
+  const repo = createPostgresEarnMovementsRepository(getDb(c.env));
+  const page = await repo.listVaultPositions({
     organizationId: auth.organizationId,
     environment,
     custodyWalletIds,
     limit: query.limit,
     before,
   });
+  const hasMore = page.hasMore;
+  // Normalised once, so the instrument columns are proven non-null here rather
+  // than at each of the six places below that would otherwise have to coerce
+  // them — and a hydration request is never built against a blank vault address.
+  const rows = page.rows.map(toVaultHolding);
 
   // Group by provider so each client reads its whole shelf in one pass, sharing
   // one slot across the vaults — a per-position read would price a multi-vault
@@ -851,6 +1000,7 @@ export async function listEarnVaultPositions(c: AppContext) {
     string,
     {
       shares: string;
+      withdrawableShares: string;
       tokenValue: string | undefined;
     }
   >();
@@ -862,20 +1012,20 @@ export async function listEarnVaultPositions(c: AppContext) {
     if (!client) continue;
     const byWallet = new Map<string, typeof rows>();
     for (const row of providerRows) {
-      const walletRows = byWallet.get(row.custody_wallet_id);
+      const walletRows = byWallet.get(row.custodyWalletId);
       if (walletRows) walletRows.push(row);
-      else byWallet.set(row.custody_wallet_id, [row]);
+      else byWallet.set(row.custodyWalletId, [row]);
     }
     for (const [walletId, walletRows] of byWallet) {
       const owner = walletAddresses.get(walletId);
       if (!owner) continue;
       const trustedIdentity = new Map(
         walletRows.map((row) => [
-          row.provider_reference,
-          { tokenMint: row.token_mint, shareMint: row.share_mint },
+          row.vaultAddress,
+          { tokenMint: row.tokenMint, shareMint: row.shareMint },
         ])
       );
-      const references = walletRows.map((row) => row.provider_reference);
+      const references = walletRows.map((row) => row.vaultAddress);
       hydrationJobs.push(async () => {
         const snapshots = await client.readVaultPositions(earnRuntime(c), {
           owner,
@@ -890,6 +1040,7 @@ export async function listEarnVaultPositions(c: AppContext) {
             snapshot.tokenMint !== trusted.tokenMint ||
             snapshot.shareMint !== trusted.shareMint ||
             !isBoundedSnapshotAmount(snapshot.shares) ||
+            !isBoundedSnapshotAmount(snapshot.withdrawableShares) ||
             (snapshot.tokenValue !== undefined && !isBoundedSnapshotAmount(snapshot.tokenValue))
           ) {
             getLogger().warn(
@@ -908,6 +1059,7 @@ export async function listEarnVaultPositions(c: AppContext) {
           }
           live.set(vaultPositionLiveKey(provider, walletId, snapshot.providerReference), {
             shares: snapshot.shares,
+            withdrawableShares: snapshot.withdrawableShares,
             tokenValue: snapshot.tokenValue,
           });
         }
@@ -922,25 +1074,26 @@ export async function listEarnVaultPositions(c: AppContext) {
   }
 
   const last = rows.at(-1);
-  const nextCursor = hasMore && last ? encodeVaultPositionCursor(last.created_at, last.id) : null;
+  const nextCursor = hasMore && last ? encodeVaultPositionCursor(last.createdAt, last.id) : null;
 
   return success(c, {
     positions: rows.map((row) => {
       const hydrated = live.get(
-        vaultPositionLiveKey(row.provider, row.custody_wallet_id, row.provider_reference)
+        vaultPositionLiveKey(row.provider, row.custodyWalletId, row.vaultAddress)
       );
       return {
         id: row.id,
         provider: row.provider,
-        providerReference: row.provider_reference,
+        providerReference: row.vaultAddress,
         label: row.label,
-        custodyWalletId: row.custody_wallet_id,
-        tokenMint: row.token_mint,
-        shareMint: row.share_mint,
-        createdAt: row.created_at,
-        closedAt: row.closed_at,
+        custodyWalletId: row.custodyWalletId,
+        tokenMint: row.tokenMint,
+        shareMint: row.shareMint,
+        createdAt: row.createdAt,
+        closedAt: row.closedAt,
         // Absent (not zero) when the chain read failed or returned nothing.
         shares: hydrated?.shares,
+        withdrawableShares: hydrated?.withdrawableShares,
         tokenValue: hydrated?.tokenValue,
       };
     }),
@@ -961,10 +1114,14 @@ const vaultPositionCursorSchema = z.object({
   // `created_at` is ordered as canonical UTC text, so accepting offsets or a
   // different precision would make a syntactically valid cursor sort wrongly.
   createdAt: z.string().datetime({ precision: 3 }),
-  // Generated UUIDs are lowercase. Preserve that canonical spelling because
-  // PostgreSQL compares the prefixed position id as text in the keyset tuple.
+  // Shape and bound only, for the same reason as the movement cursor above:
+  // holdings carry `earn_vault_position_…` ids the unification preserved beside
+  // `earn_position_…` for newer ones. Lowercase is still asserted because
+  // PostgreSQL compares the prefixed id as text in the keyset tuple.
   id: z
-    .templateLiteral(["earn_vault_position_", z.uuidv4()])
+    .string()
+    .min(1)
+    .max(128)
     .refine((id) => id === id.toLowerCase()),
 });
 
@@ -977,4 +1134,393 @@ function decodeVaultPositionCursor(cursor: string): { createdAt: string; id: str
   if (!decoded) return null;
   const parsed = vaultPositionCursorSchema.safeParse({ createdAt: decoded.value, id: decoded.id });
   return parsed.success ? parsed.data : null;
+}
+
+// ---------------------------------------------------------------------------
+// Vault withdrawals — the exit half of the vault-direct model (PRO-1702).
+// ---------------------------------------------------------------------------
+
+type EarnVaultWithdrawalBody = z.output<typeof earnVaultWithdrawalSchema>;
+
+interface EarnVaultWithdrawalResolved {
+  position: VaultHolding;
+  wallet: CustodyRuntimeWalletProjection;
+  auth: ApiKeyContext;
+  projectId: string;
+  environment: SdpEnvironment;
+  requestId: string | null;
+  idempotencyFingerprint: string;
+}
+
+/**
+ * Parse and resolve a vault withdrawal into its wallet-operation policy
+ * candidate — the same trusted-context-before-the-gate rule as the deposit's.
+ *
+ * WHAT IS DELIBERATELY MISSING is the point (ADR 0002 exit safety, "money out
+ * beats money off"): no surfacing gate, no entitlement gate, no availability
+ * gate, no environment capability, no catalogue lookup and no admission check.
+ * The caller names its own POSITION — the org's recorded claim, which carries
+ * the vault, the wallet and both mints — so an exit works for a paused
+ * strategy, a delisted vault, an un-surfaced or un-entitled provider, and in
+ * every environment a position exists in. The only refusals left are the ones
+ * that protect the org itself: the position must belong to the caller's org
+ * and environment (404), the key binding must carry a write scope for the
+ * signing wallet, and the org's own wallet policy still runs. A shared
+ * organization-level custody wallet intentionally lets sibling projects exit
+ * the same org-owned position, matching the deposit route's wallet boundary.
+ */
+export async function extractEarnVaultWithdrawalPolicyCandidate(
+  c: ValidatedBodyContext<typeof earnVaultWithdrawalSchema>
+): Promise<PolicyGateExtraction> {
+  const rawBody: Record<string, unknown> = await c.req.json();
+  const body = c.req.valid("json");
+
+  const requestId = c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null;
+  if (requestId === null && !isDryRunRequest(c)) {
+    throw badRequest(`${IDEMPOTENCY_KEY_HEADER} is required for vault withdrawals`);
+  }
+  const environment = resolveSdpEnvironment(c);
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+
+  // The org's own claim row, org+environment-scoped in the query (404 for a
+  // foreign or sandbox/production-crossed id), narrowed to the vault shape with
+  // its instrument columns proven present.
+  const repo = createPostgresEarnMovementsRepository(getDb(c.env));
+  const positionRow = await repo.getPositionById({
+    organizationId: auth.organizationId,
+    environment,
+    positionId: body.positionId,
+  });
+  if (positionRow?.kind !== "vault_direct") {
+    throw notFound("Earn vault position");
+  }
+  const position = toVaultHolding(positionRow);
+
+  // The signing wallet comes from the POSITION, never the body: a withdrawal
+  // returns shares to tokens in the wallet that holds them, and letting a
+  // caller name a different wallet would be a transfer wearing an exit's
+  // clothes. Same binding rules as the deposit — the projection must be
+  // visible to this project, unambiguous for a selected-scope key, and bound
+  // with a WRITE scope.
+  const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
+    organizationId: auth.organizationId,
+    projectId,
+    includeAllProviders: true,
+  });
+  const wallet = resolveEarnVaultCustodyWallet(wallets, position.custodyWalletId);
+  assertBoundWalletIdentifierIsUnique(auth, wallets, wallet);
+  assertApiKeyWalletAccess(auth, wallet.walletId, ["earn:write"]);
+
+  const resolved: EarnVaultWithdrawalResolved = {
+    position,
+    wallet,
+    auth,
+    projectId,
+    environment,
+    requestId,
+    idempotencyFingerprint: buildEarnVaultWithdrawalFingerprint({
+      environment,
+      provider: position.provider,
+      positionId: position.id,
+      shares: body.shares,
+    }),
+  };
+
+  return {
+    candidate: {
+      organizationId: auth.organizationId,
+      projectId,
+      custodyWalletId: wallet.id,
+      walletId: wallet.walletId,
+      apiKeyId: auth.apiKeyId ?? null,
+      actor: walletOperationActorFromAuth(auth),
+      source: "earn_vault_withdrawal",
+      // Same family as the deposit: an interaction with an on-chain program,
+      // with the proceeds returning to the same custody wallet.
+      operationFamily: "program",
+      operationType: "earn_vault_withdrawal",
+      // The SHARE mint: it is the asset this operation actually moves out of
+      // the wallet (the deposit token comes back IN), so an asset-scoped rule
+      // sees what is being spent.
+      asset: position.shareMint,
+      amount: body.shares,
+      // The vault account — the instrument the shares are redeemed against.
+      destination: position.vaultAddress,
+      context: {
+        provider: position.provider,
+        positionId: position.id,
+        tokenMint: position.tokenMint,
+        environment,
+        depositStyle: "vault_direct",
+      },
+      providerExtensions: {},
+    },
+    legs: [],
+    body,
+    resolved,
+    rawPayload: {
+      ...rawBody,
+      idempotencyFingerprint: resolved.idempotencyFingerprint,
+    },
+    idempotencyKey: requestId,
+  };
+}
+
+/** Resolve both durable withdrawal-group replays and pre-execution policy replays. */
+export async function findEarnVaultWithdrawalIdempotentKeyReplay(
+  c: AppContext,
+  extraction: PolicyGateExtraction,
+  idempotencyKey: string
+): Promise<Response | null> {
+  // An approval executor must pass through policy resume and the handler's
+  // effect fence, even when the domain movements were already recorded.
+  if (approvedWalletOperationId(c)) return null;
+
+  const resolved = extraction.resolved as EarnVaultWithdrawalResolved;
+  const repo = createPostgresEarnMovementsRepository(getDb(c.env));
+  const movement = await repo.findVaultMovementByRequestId({
+    organizationId: resolved.auth.organizationId,
+    requestId: idempotencyKey,
+  });
+  if (movement) {
+    // Same project boundary and same conflict-shape as the deposit's replay:
+    // the vault anchor is org-scoped, so a sibling project's key must answer
+    // as "key already used", never with the sibling's movements.
+    if (
+      !isMovementInProject(movement, resolved.projectId) ||
+      movement.idempotency_fingerprint !== resolved.idempotencyFingerprint
+    ) {
+      throw conflict("Idempotency key already used with different request payload");
+    }
+    if (!movement.signature) {
+      throw internalError(`Replayed withdrawal ${movement.id} has no transaction details`);
+    }
+    if (movement.status === "failed") {
+      throw conflict("The recorded vault withdrawal failed and cannot be replayed");
+    }
+    return success(
+      c,
+      buildEarnVaultWithdrawalResponse({
+        movement,
+        replayed: true,
+      })
+    );
+  }
+
+  await throwOnPriorVaultPolicyOperation(c, {
+    organizationId: resolved.auth.organizationId,
+    projectId: resolved.projectId,
+    idempotencyKey,
+    idempotencyFingerprint: resolved.idempotencyFingerprint,
+    operationNoun: "vault withdrawal",
+  });
+  return null;
+}
+
+/**
+ * POST /v1/earn/vault-withdrawals — exit a vault position, signed by the
+ * custody wallet that holds it. Build, simulate, sign, record, then broadcast;
+ * the reconciliation sweep finishes an ambiguous send.
+ */
+export async function createEarnVaultWithdrawal(
+  c: ValidatedBodyContext<typeof earnVaultWithdrawalSchema>
+) {
+  const { body: parsedData, resolved } = getPolicyGateContext<
+    EarnVaultWithdrawalBody,
+    EarnVaultWithdrawalResolved
+  >(c);
+  const { position, wallet, auth, projectId, environment } = resolved;
+  const requestId = resolved.requestId;
+  if (requestId === null) {
+    throw internalError(
+      "Vault withdrawal execution reached the handler without an idempotency key"
+    );
+  }
+
+  const result = await withdrawFromVault(
+    c.env,
+    {
+      organizationId: auth.organizationId,
+      projectId,
+      environment,
+      provider: position.provider,
+      positionId: position.id,
+      vaultAddress: position.vaultAddress,
+      tokenMint: position.tokenMint,
+      shareMint: position.shareMint,
+      wallet,
+      shares: parsedData.shares,
+      requestId,
+      userId: auth.userId ?? null,
+      apiKeyId: auth.apiKeyId ?? null,
+    },
+    {
+      runIntentTransaction: (mutation) => runApprovedWalletOperationEffectTransaction(c, mutation),
+    }
+  );
+
+  if (result.replayed && approvedWalletOperationId(c)) {
+    // Sequential replays do not pass through the insert transaction, so fence
+    // the approved operation before returning its durable outcome.
+    await beginApprovedWalletOperationEffect(c);
+    if (!result.movement.signature || result.movement.status === "failed") {
+      throw conflict(
+        "Approved vault withdrawal execution is incomplete and requires manual reconciliation"
+      );
+    }
+  }
+
+  return success(
+    c,
+    buildEarnVaultWithdrawalResponse({
+      movement: result.movement,
+      replayed: result.replayed,
+    })
+  );
+}
+
+function buildEarnVaultWithdrawalResponse(input: {
+  movement: EarnMovementRow;
+  replayed: boolean;
+}): { withdrawal: EarnVaultWithdrawal } {
+  return {
+    withdrawal: toEarnVaultWithdrawal(input.movement, input.replayed),
+  };
+}
+
+/**
+ * Shared row to wire mapping for withdrawal reads. Speaks the ledger's own
+ * status vocabulary. This surface postdates
+ * the unified ledger, so there is no legacy client to translate for, and
+ * `finalized` finally has its own name on the wire.
+ */
+function toEarnVaultWithdrawal(movement: EarnMovementRow, replayed?: boolean): EarnVaultWithdrawal {
+  if (!movement.vault_address || !movement.signature) {
+    throw internalError(`Earn vault withdrawal ${movement.id} is missing execution details`);
+  }
+  return {
+    movementId: movement.id,
+    positionId: movement.position_id,
+    provider: movement.provider,
+    providerReference: movement.vault_address,
+    status: movement.status as EarnVaultWithdrawal["status"],
+    signature: movement.signature,
+    shares: movement.amount_requested,
+    shareMint: movement.denomination,
+    failureReason: movement.failure_reason,
+    createdAt: movement.created_at,
+    confirmedAt: movement.confirmed_at,
+    settledAt: movement.settled_at,
+    ...(replayed === undefined ? {} : { replayed }),
+  };
+}
+
+/**
+ * GET /v1/earn/vault-withdrawals/:movementId - one recorded withdrawal.
+ *
+ * Same contract as the deposit detail read, mirrored: NO provider gate (it
+ * reports on an exit already signed from the org's own wallet), and the same
+ * four scoping rules all answering 404 — organization (in the query),
+ * environment, project (exact match), and DIRECTION, which now guards the
+ * opposite side: a deposit reached by a guessed id is not a withdrawal.
+ */
+export async function getEarnVaultWithdrawal(c: AppContext) {
+  const { movementId } = parseParams(c, earnVaultWithdrawalParamsSchema);
+  const environment = resolveSdpEnvironment(c);
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+
+  const repo = createPostgresEarnMovementsRepository(getDb(c.env));
+  const movement = await repo.getMovementById({
+    movementId,
+    organizationId: auth.organizationId,
+  });
+  if (
+    !movement ||
+    movement.environment !== environment ||
+    movement.execution_model !== "vault_direct" ||
+    movement.direction !== "withdrawal" ||
+    !isMovementInProject(movement, projectId)
+  ) {
+    throw notFound("Earn vault withdrawal");
+  }
+
+  const scopedWallets = await listReadableEarnVaultWallets(c, auth, projectId);
+  if (!scopedWallets.some((wallet) => wallet.id === movement.custody_wallet_id)) {
+    throw notFound("Earn vault withdrawal");
+  }
+
+  const response: EarnVaultWithdrawalResponse = {
+    withdrawal: toEarnVaultWithdrawal(movement),
+  };
+  return success(c, response);
+}
+
+/**
+ * GET /v1/earn/vault-withdrawals - this workspace's recorded withdrawals,
+ * newest first: the deposits list's mirror, with the same discovery duty
+ * (`?requestId=` finds a movement, including one an approval executor
+ * created after the original request was parked) and the same recovery filter
+ * (`?settled=false`). Wire statuses are the ledger's own — `settled` here
+ * means the LEDGER's terminal set, where `confirmed` is still in flight.
+ */
+export async function listEarnVaultWithdrawals(c: AppContext) {
+  const query = parseQuery(c, earnVaultWithdrawalsQuerySchema);
+  const before = query.before ? decodeVaultMovementCursor(query.before) : null;
+  if (query.before && !before) {
+    throw badRequest("Invalid vault withdrawal pagination cursor");
+  }
+  const environment = resolveSdpEnvironment(c);
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+
+  const scopedWallets = await listReadableEarnVaultWallets(c, auth, projectId);
+  const custodyWalletIds = [...new Set(scopedWallets.map((wallet) => wallet.id))];
+  if (custodyWalletIds.length === 0) {
+    return success(c, { withdrawals: [], hasMore: false, nextCursor: null });
+  }
+  const scopedWalletIds = new Set(custodyWalletIds);
+  const repo = createPostgresEarnMovementsRepository(getDb(c.env));
+
+  // The single-key lookup resolves one withdrawal movement.
+  if (query.requestId !== undefined) {
+    const movement = await repo.findVaultMovementByRequestId({
+      organizationId: auth.organizationId,
+      requestId: query.requestId,
+    });
+    const visible =
+      movement !== null &&
+      movement.environment === environment &&
+      movement.direction === "withdrawal" &&
+      isMovementInProject(movement, projectId) &&
+      movement.custody_wallet_id !== null &&
+      scopedWalletIds.has(movement.custody_wallet_id);
+    return success(c, {
+      withdrawals: visible && movement ? [toEarnVaultWithdrawal(movement)] : [],
+      hasMore: false,
+      nextCursor: null,
+    });
+  }
+
+  const { rows, hasMore } = await repo.listVaultMovements({
+    organizationId: auth.organizationId,
+    environment,
+    projectId,
+    custodyWalletIds,
+    direction: "withdrawal",
+    limit: query.limit,
+    before,
+    settled: query.settled,
+  });
+
+  const last = rows.at(-1);
+  const nextCursor = hasMore && last ? encodeKeysetCursor(last.created_at, last.id) : null;
+  const withdrawals = rows.map((movement) => toEarnVaultWithdrawal(movement));
+  const response: EarnVaultWithdrawalsPage = {
+    withdrawals,
+    hasMore,
+    nextCursor,
+  };
+  return success(c, response);
 }

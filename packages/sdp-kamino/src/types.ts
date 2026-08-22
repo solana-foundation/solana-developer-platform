@@ -35,16 +35,11 @@ export interface KaminoRuntime {
  * A built, unsigned unit of work: instructions plus what the caller needs to
  * compile them.
  *
- * `instructions` is deliberately `Instruction[][]` — TRANSACTION-SIZED BATCHES,
- * not one flat list. A multi-reserve K-Vault exit emits several withdraw
- * instructions, each carrying the vault's full reserve remaining-accounts list,
- * and routinely exceeds Solana's 1232-byte packet. Handing back a flat list
- * makes the caller discover that at `compileTransaction`, far from the code that
- * could split it. One entry means one transaction.
+ * `instructions` is the complete sequence for one transaction.
  */
 export interface KaminoInstructionPlan {
   cluster: SolanaCluster;
-  instructions: readonly (readonly Instruction[])[];
+  instructions: readonly Instruction[];
   /**
    * Address lookup tables the caller SHOULD apply when compiling. Kamino
    * publishes a per-vault LUT precisely because these account lists are large.
@@ -123,8 +118,8 @@ export interface KaminoWithdrawInput {
   shares: string;
   /**
    * Slot the withdrawal is priced against. Required by klend-sdk and by the
-   * reserve math; the caller reads it once so a multi-position pass prices every
-   * leg against the same slot.
+   * reserve math; the caller reads it once so every reserve calculation uses
+   * the same slot.
    */
   slot: Slot;
 }
@@ -136,6 +131,8 @@ export interface KaminoPosition {
   cluster: SolanaCluster;
   /** Shares held, as a decimal string. */
   shares: string;
+  /** Unstaked shares available to the vault withdrawal builder. */
+  withdrawableShares: string;
   /**
    * Current value of those shares in the vault's deposit token, as a decimal
    * string. Undefined when the exchange rate could not be read — the caller
