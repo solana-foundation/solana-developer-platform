@@ -10,7 +10,7 @@
  *    a named system identity.
  *  - Every other path is explicitly marked identity-less, so any database
  *    access that happens before an auth middleware narrows the request is
- *    denied by row-level security (migration 0063) instead of silently
+ *    denied by row-level security (migration 0067) instead of silently
  *    reading across tenants.
  *
  * Adding a prefix here grants cross-tenant database access to an

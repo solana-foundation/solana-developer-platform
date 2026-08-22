@@ -92,7 +92,7 @@ export function startCron(deps: CronDeps): CronHandle | null {
   const tasks: ScheduledTask[] = [];
 
   // Every tick runs under a named system database identity: reconciliation is
-  // inherently cross-tenant, and row-level security (migration 0063) denies
+  // inherently cross-tenant, and row-level security (migration 0067) denies
   // database access to any workload that never declared one.
   const scheduleSystemTask = (
     cronExpression: string,
@@ -165,18 +165,7 @@ export function startCron(deps: CronDeps): CronHandle | null {
 
   // Cheap to schedule unconditionally: the job early-returns unless the rings
   // flag is on and the live gateway adapter is selected.
-  tasks.push(
-    schedule(RINGS_INDEXING_CRON, () => {
-      if (stopping) {
-        return;
-      }
-      runRingsIndexingPoll({
-        env: deps.env,
-        bg: deps.bg,
-        observability: deps.observability,
-      });
-    })
-  );
+  tasks.push(scheduleSystemTask(RINGS_INDEXING_CRON, "cron:rings-indexing", runRingsIndexingPoll));
 
   if (isEarnEnabled(deps.env)) {
     tasks.push(

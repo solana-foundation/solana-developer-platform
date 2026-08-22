@@ -1,5 +1,5 @@
 /**
- * Coverage ratchet for database-enforced tenant isolation (migration 0063).
+ * Coverage ratchet for database-enforced tenant isolation (migration 0067).
  *
  * Every table in the live schema must either carry forced row-level security
  * with at least one policy, or be registered here as a deliberately shared
@@ -21,6 +21,10 @@ const SHARED_TABLES: Record<string, string> = {
   sponsorship_reconciliation_state: "singleton per-network failure counter",
   private_channel_settlement_observations:
     "on-chain oracle observations, deliberately unlinked from tenant intents",
+  earn_execution_models: "shared movement vocabulary (0062_earn_movements)",
+  earn_movement_directions: "shared movement vocabulary (0062_earn_movements)",
+  earn_movement_statuses: "shared movement vocabulary (0062_earn_movements)",
+  helius_rings_asset_allowlist: "platform reference data seeded by 0057_helius_rings",
 };
 
 interface TableSecurityRow {
@@ -53,6 +57,25 @@ describe("tenant isolation coverage", () => {
       .map((row) => row.table_name);
 
     expect(unprotected).toEqual([]);
+  });
+
+  it("makes every view run with the invoker's row-level security", async () => {
+    // A default (owner-rights) view reads its underlying tables as the
+    // migration role, letting a tenant see straight through RLS. Every view
+    // must therefore opt into security_invoker.
+    const views = await env.db.queryMany<{ view_name: string; options: string[] | null }>(
+      `SELECT c.relname AS view_name, c.reloptions AS options
+       FROM pg_class c
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = 'public' AND c.relkind = 'v'
+       ORDER BY c.relname`
+    );
+
+    const ownerRights = views
+      .filter((view) => !(view.options ?? []).some((option) => option === "security_invoker=true"))
+      .map((view) => view.view_name);
+
+    expect(ownerRights).toEqual([]);
   });
 
   it("keeps the shared-table registry free of stale entries", async () => {

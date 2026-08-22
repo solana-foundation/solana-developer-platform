@@ -16,6 +16,60 @@
 -- expression itself makes the effective key unique, so a provider reference
 -- resolves to at most one active counterparty in any migration phase.
 
+-- Pre-flight: a cross-representation duplicate (one active row claiming a
+-- reference in the denormalized column while another claims the same value
+-- only in JSON) was representable before this migration, and both rows are
+-- live lookup candidates — the webhook lookups already fail closed on the
+-- ambiguity today. Which row legitimately owns the provider relationship is
+-- not decidable mechanically, so the migration deliberately stops with the
+-- conflicting ids instead of silently reassigning a payment-provider
+-- relationship; resolve ownership (archive or clear the stale copy) via the
+-- runbook in docs/ops/tenant-isolation.md and re-run.
+DO $$
+DECLARE
+  bvnk_conflicts TEXT;
+  mural_conflicts TEXT;
+BEGIN
+  SELECT string_agg(format('%s -> [%s]', effective_reference, ids), '; ')
+  INTO bvnk_conflicts
+  FROM (
+    SELECT
+      COALESCE(bvnk_customer_reference, provider_data->'bvnk'->'customer'->>'customerReference')
+        AS effective_reference,
+      string_agg(id, ', ' ORDER BY id) AS ids
+    FROM counterparties
+    WHERE status = 'active'
+      AND COALESCE(bvnk_customer_reference, provider_data->'bvnk'->'customer'->>'customerReference')
+        IS NOT NULL
+    GROUP BY 1
+    HAVING count(*) > 1
+  ) duplicates;
+
+  SELECT string_agg(format('%s -> [%s]', effective_reference, ids), '; ')
+  INTO mural_conflicts
+  FROM (
+    SELECT
+      COALESCE(mural_organization_id, provider_data->'mural'->'organization'->>'id')
+        AS effective_reference,
+      string_agg(id, ', ' ORDER BY id) AS ids
+    FROM counterparties
+    WHERE status = 'active'
+      AND COALESCE(mural_organization_id, provider_data->'mural'->'organization'->>'id')
+        IS NOT NULL
+    GROUP BY 1
+    HAVING count(*) > 1
+  ) duplicates;
+
+  IF bvnk_conflicts IS NOT NULL OR mural_conflicts IS NOT NULL THEN
+    RAISE EXCEPTION USING
+      MESSAGE = format(
+        'Duplicate active counterparty provider references must be resolved before this migration can enforce uniqueness. bvnk: %s | mural: %s. See docs/ops/tenant-isolation.md.',
+        COALESCE(bvnk_conflicts, 'none'),
+        COALESCE(mural_conflicts, 'none')
+      );
+  END IF;
+END $$;
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_counterparties_bvnk_customer_reference_effective_active
 ON counterparties ((COALESCE(bvnk_customer_reference, provider_data->'bvnk'->'customer'->>'customerReference')))
 WHERE status = 'active'

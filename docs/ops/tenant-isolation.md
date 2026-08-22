@@ -1,6 +1,6 @@
 # Database-enforced tenant isolation
 
-Migration `0063_tenant_isolation_rls.sql` puts forced row-level security on
+Migration `0067_tenant_isolation_rls.sql` puts forced row-level security on
 every tenant-owned table in the SDP API database, so an application query or
 scoping mistake cannot cross an organization boundary. This is
 defense-in-depth beneath the application layer's `TenantScope` repository
@@ -51,7 +51,7 @@ or an explicit entry there.
 
 Provider webhooks resolve tenants from provider references
 (`bvnk_customer_reference`, `mural_organization_id`). Migration
-`0062_counterparty_provider_lookup_integrity.sql` makes the *effective*
+`0066_counterparty_provider_lookup_integrity.sql` makes the *effective*
 lookup key — `COALESCE(denormalized column, provider_data JSON path)` —
 unique among active counterparties, so a reference resolves to at most one
 tenant in every PII-migration phase (dual-write included). Tenant-scoped
@@ -59,6 +59,18 @@ repository paths keep writing provider data through
 `mutateProviderData`/`upsertBvnkCustomerProviderData`; two tenants racing to
 claim the same reference get a unique-violation failure instead of a silent
 cross-tenant resolution.
+
+### If migration 0066 refuses to apply
+
+The migration pre-checks for active counterparties that already share an
+effective reference (one row claiming it in the denormalized column, another
+only in `provider_data` JSON — a state the historical indexes permitted) and
+stops with the conflicting ids. Those rows are *already* broken in
+production: the webhook lookups fail closed on the ambiguity today. Which
+row legitimately owns the provider relationship is a business decision, so
+the migration never picks a winner. Confirm ownership with the provider,
+then archive the loser or clear its stale reference via
+`runWithOperatorDatabaseAccess` (recording why), and re-run the migration.
 
 ## Runtime role requirements
 
@@ -81,11 +93,15 @@ dedicated `sdp_runtime` role (`NOSUPERUSER NOBYPASSRLS`), so the enforcement
 suite (`src/db/tenant-isolation.test.ts`,
 `src/routes/tenant-isolation-http.test.ts`) exercises the real policies.
 
-## Adding a new table or entry point
+## Adding a new table, view, or entry point
 
 - New tenant-owned table → add it to the appropriate block of the RLS
   migration series (a follow-up migration with the same policy shape) or the
   coverage test fails.
+- New view → create it `WITH (security_invoker = true)`. A default
+  (owner-rights) view reads its underlying tables as the migration role and
+  punches straight through RLS; the coverage test rejects any view without
+  the option.
 - New public/unauthenticated surface that reaches the database → grant a
   named system identity where the surface is registered
   (`src/middleware/database-identity.ts` for HTTP prefixes, or an explicit

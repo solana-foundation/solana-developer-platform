@@ -2,7 +2,7 @@
  * Cross-tenant access through the full HTTP stack under the plain
  * NOSUPERUSER/NOBYPASSRLS runtime role: API-key resolution runs under the
  * system database identity, the request narrows to the key's organization,
- * and row-level security (migration 0063) keeps one tenant's key from
+ * and row-level security (migration 0067) keeps one tenant's key from
  * reading another tenant's records even if a handler forgot its scoping.
  */
 

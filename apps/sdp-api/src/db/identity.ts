@@ -119,15 +119,28 @@ export function setDefaultDatabaseIdentityForTesting(identity: DatabaseIdentity 
 }
 
 /**
- * The single statement the client runs to stamp the current identity onto a
- * transaction. `set_config(..., true)` is transaction-local, so pooled
- * connection reuse can never leak one caller's identity into another's
- * statements.
+ * GUC values travel as escaped literals because the stamp must be `SET LOCAL`
+ * utility commands, which cannot be parameterized. With
+ * standard_conforming_strings (the PostgreSQL default) doubling single quotes
+ * is a complete escape; NUL can never appear in a valid value and is refused
+ * outright.
  */
-export function databaseIdentityConfigStatement(identity: DatabaseIdentity): {
-  text: string;
-  values: string[];
-} {
+function quoteGucLiteral(value: string): string {
+  if (value.includes("\0")) {
+    throw new DatabaseIdentityError("A database identity value cannot contain NUL");
+  }
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+/**
+ * The statement text the client runs to stamp the current identity onto a
+ * transaction. `SET LOCAL` is transaction-local, so pooled connection reuse
+ * can never leak one caller's identity into another's statements — and,
+ * unlike `SELECT set_config(...)`, it is a utility command that takes no
+ * snapshot, so a transaction callback can still open with
+ * `SET TRANSACTION ISOLATION LEVEL ...`.
+ */
+export function databaseIdentityConfigStatement(identity: DatabaseIdentity): { text: string } {
   let organizationId = "";
   let actor = "";
   switch (identity.kind) {
@@ -147,9 +160,8 @@ export function databaseIdentityConfigStatement(identity: DatabaseIdentity): {
   }
   return {
     text:
-      "SELECT set_config('app.tenant_isolation_identity', $1, true), " +
-      "set_config('app.tenant_isolation_organization_id', $2, true), " +
-      "set_config('app.tenant_isolation_actor', $3, true)",
-    values: [identity.kind, organizationId, actor],
+      `SET LOCAL app.tenant_isolation_identity = ${quoteGucLiteral(identity.kind)}; ` +
+      `SET LOCAL app.tenant_isolation_organization_id = ${quoteGucLiteral(organizationId)}; ` +
+      `SET LOCAL app.tenant_isolation_actor = ${quoteGucLiteral(actor)}`,
   };
 }

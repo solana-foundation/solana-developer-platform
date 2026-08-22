@@ -2,7 +2,7 @@
  * Audited break-glass access across tenant boundaries.
  *
  * `runWithOperatorDatabaseAccess` is the only way to obtain the `operator`
- * database identity (the RLS policies from migration 0063 treat it like
+ * database identity (the RLS policies from migration 0067 treat it like
  * `system`). It refuses to run the callback until the bypass is durably
  * recorded in the append-only, hash-chained audit ledger — the ledger's
  * external Redis checkpoint means neither the operator nor the database alone

@@ -1,5 +1,5 @@
 /**
- * Database-enforced tenant isolation (migration 0063) under the plain
+ * Database-enforced tenant isolation (migration 0067) under the plain
  * NOSUPERUSER/NOBYPASSRLS runtime role. These tests prove the RLS floor holds
  * even when the application layer is bypassed entirely: raw SQL under a
  * tenant identity cannot read or write another organization, identity-less
@@ -20,6 +20,7 @@ import {
   createCounterpartiesRepository,
   createSystemCounterpartiesRepository,
 } from "@/db/repositories/repository-factory";
+import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -171,6 +172,26 @@ describe("database-enforced tenant isolation", () => {
         ])
       )
     ).resolves.toBe(0);
+  });
+
+  it("keeps the NULL-scoped sponsorship defaults resolvable under a tenant identity", async () => {
+    // Sponsorship admission runs in the request path and resolves the full
+    // policy hierarchy — global, organization default (scope_id IS NULL),
+    // project default — and trips the breaker when any level is missing. The
+    // platform defaults carry no tenant data, so the SELECT policy must keep
+    // them visible to every tenant.
+    const policies = await runWithTenantDatabaseIdentity({ organizationId: ORG_A }, () =>
+      new SponsorshipBudgetRepository(getDb(env)).resolvePolicies({
+        network: "devnet",
+        organizationId: ORG_A,
+        projectId: PROJECT_A,
+      })
+    );
+    expect(policies.map((policy) => policy.scopeType).sort()).toEqual([
+      "global",
+      "organization",
+      "project",
+    ]);
   });
 
   it("keeps explicit cross-tenant access for the system identity", async () => {

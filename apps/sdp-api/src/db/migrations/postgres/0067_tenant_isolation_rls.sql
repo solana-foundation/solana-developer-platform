@@ -119,7 +119,11 @@ BEGIN
     'earn_program_withdrawals',
     'earn_vault_positions',
     'earn_vault_movements',
-    'rpc_connections'
+    'earn_positions',
+    'earn_movements',
+    'rpc_connections',
+    'helius_rings_wallets',
+    'helius_rings_operations'
   ]
   LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tenant_table);
@@ -168,7 +172,12 @@ BEGIN
     ARRAY['api_key_wallet_policy_bindings', 'api_keys', 'api_key_id'],
     ARRAY['approval_group_members', 'approval_groups', 'approval_group_id'],
     ARRAY['policy_evaluations', 'wallet_operations', 'wallet_operation_id'],
-    ARRAY['private_channel_memberships', 'private_channels', 'channel_id']
+    ARRAY['private_channel_memberships', 'private_channels', 'channel_id'],
+    ARRAY['helius_rings_key_refs', 'helius_rings_wallets', 'wallet_id'],
+    ARRAY['helius_rings_zones', 'helius_rings_wallets', 'wallet_id'],
+    ARRAY['helius_rings_timelocks', 'helius_rings_operations', 'operation_id'],
+    ARRAY['helius_rings_events', 'helius_rings_operations', 'operation_id'],
+    ARRAY['helius_rings_runtime_health', 'projects', 'project_id']
   ]
   LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', entry[1]);
@@ -232,6 +241,10 @@ BEGIN
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', scoped_table);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', scoped_table);
     EXECUTE format('DROP POLICY IF EXISTS sdp_tenant_isolation_select ON %I', scoped_table);
+    -- NULL-scoped organization/project rows are the platform-wide fallback
+    -- defaults every tenant's admission check resolves against
+    -- (SponsorshipBudgetRepository.resolvePolicies requires the complete
+    -- hierarchy); they carry no tenant data, so every tenant may read them.
     EXECUTE format(
       'CREATE POLICY sdp_tenant_isolation_select ON %I FOR SELECT USING ('
       || ' sdp_tenant_isolation_is_privileged()'
@@ -239,8 +252,10 @@ BEGIN
       || '   sdp_tenant_isolation_identity() = ''tenant'''
       || '   AND ('
       || '     scope_type = ''global'''
-      || '     OR (scope_type = ''organization'' AND scope_id = sdp_tenant_isolation_organization_id())'
-      || '     OR (scope_type = ''project'' AND scope_id IN (SELECT id FROM projects))'
+      || '     OR (scope_type = ''organization'''
+      || '         AND (scope_id = sdp_tenant_isolation_organization_id() OR scope_id IS NULL))'
+      || '     OR (scope_type = ''project'''
+      || '         AND (scope_id IN (SELECT id FROM projects) OR scope_id IS NULL))'
       || '   )'
       || ' ))',
       scoped_table
@@ -283,11 +298,27 @@ CREATE POLICY audit_logs_insert ON audit_logs FOR INSERT WITH CHECK (
   )
 );
 
+-- ---------------------------------------------------------------------------
+-- Views execute with their OWNER's privileges by default, which would let a
+-- tenant read the underlying tables through the migration role's unfiltered
+-- eyes. security_invoker makes the querying session's identity govern the
+-- underlying row-level security instead. The coverage test ratchets this for
+-- every future view.
+-- ---------------------------------------------------------------------------
+ALTER VIEW earn_projected_position_from_vault_position SET (security_invoker = true);
+ALTER VIEW earn_projected_position_from_provider_wallet SET (security_invoker = true);
+ALTER VIEW earn_projected_movement_from_withdrawal SET (security_invoker = true);
+ALTER VIEW earn_projected_movement_from_vault_movement SET (security_invoker = true);
+
 -- Deliberately left without tenant policies (shared/global/operator tables):
 --   users, auth_user_identities        global identity; tenancy lives in
 --                                      organization_members / project_members
 --   allowlist                          platform-operator allowlist
 --   earn_strategies                    shared yield catalog (environment-keyed)
+--   earn_execution_models,
+--   earn_movement_directions,
+--   earn_movement_statuses             shared movement vocabulary tables
+--   helius_rings_asset_allowlist       platform reference data (seeded by 0057)
 --   audit_ledger_anchors               integrity evidence (policies from 0047)
 --   counterparty_pii_migration_state   singleton migration phase flag
 --   sponsorship_reconciliation_state   singleton per-network counter

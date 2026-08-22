@@ -122,7 +122,7 @@ export async function runCronJob(): Promise<void> {
   const sentryEnabled = isSentryEnabled(env);
   const monitored = async (monitor: string, tickWork: () => Promise<unknown>) => {
     // Reconciliation is cross-tenant by nature: each tick runs under a named
-    // system database identity so row-level security (migration 0063) admits
+    // system database identity so row-level security (migration 0067) admits
     // it explicitly rather than by accident.
     const work = () => runWithSystemDatabaseIdentity(`job:${monitor}`, tickWork);
     try {

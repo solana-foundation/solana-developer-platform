@@ -58,7 +58,7 @@ export const adminDatabaseUrl = workerDatabaseUrl(baseDatabaseUrl, workerId);
  * role (created by node-global-setup.ts), mirroring the production posture
  * from docs/ops/audit-ledger.md. Everything the app-under-test and the
  * repositories touch goes through this role so the tenant-isolation policies
- * from migration 0063 are actually enforced in tests.
+ * from migration 0067 are actually enforced in tests.
  */
 function runtimeDatabaseUrl(adminUrl: string): string {
   const url = new URL(adminUrl);
