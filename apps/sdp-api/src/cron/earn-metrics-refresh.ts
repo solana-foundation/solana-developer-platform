@@ -5,8 +5,10 @@
  * DRIFT is slow: a provider onboarding or delisting a vault. Rates are not
  * slow. An APY on a comparison table is a number a customer compares vaults by
  * and then moves money on, and an hour-old one is not that number. So the
- * volatile figures get their own pass on a five-minute cadence, while identity,
- * mints, liquidity terms and admission to the catalogue stay hourly.
+ * volatile figures get their own frequent pass, while identity, mints,
+ * liquidity terms and admission to the catalogue stay hourly. Self-hosted
+ * scheduling uses five minutes; managed scheduling follows the deployment's
+ * Managed Reconciliation Cadence.
  *
  * Two properties keep the two passes from fighting:
  *
@@ -46,9 +48,10 @@ import type { Env } from "@/types/env";
 export const EARN_METRICS_REFRESH_MONITOR = "sdp-api-refresh-earn-metrics";
 
 /**
- * Five minutes: the shortest cadence that is unambiguously polite to a public
- * API (Kamino's whole shelf is two requests, so this is 24 requests an hour per
- * environment) while putting a hard ceiling on how stale a quoted rate can be.
+ * Five minutes for the in-process path: the shortest cadence that is
+ * unambiguously polite to a public API (Kamino's whole shelf is two requests,
+ * so this is 24 requests an hour per environment) while putting a hard ceiling
+ * on how stale a quoted rate can be.
  * Vault APYs move with underlying reserve utilisation — meaningfully over
  * hours, not over minutes — so five minutes is comfortably inside the noise and
  * there is nothing to gain from going lower.
@@ -150,7 +153,7 @@ async function refreshProviderMetrics(
     }
     // Degrades per provider, exactly like the catalogue sync: one provider's
     // outage must not cost every other provider its refresh. The rows keep
-    // their last-known figures until the next tick — five minutes, not an hour.
+    // their last-known figures until the next frequent tick, not for an hour.
     getLogger().error(
       { ...logContext, error: err instanceof Error ? err.message : String(err) },
       "refreshEarnStrategyMetrics: failed to list provider metrics"
@@ -160,7 +163,8 @@ async function refreshProviderMetrics(
 
   if (metrics === undefined) {
     // Logged at error, not warn: the whole point of this pass is that a rate is
-    // never more than five minutes old, and a provider that cannot answer
+    // stays bounded by the frequent refresh cadence, and a provider that
+    // cannot answer
     // inside the deadline is not meeting that — even though the rows keep their
     // last-known figures and every other provider still refreshes.
     getLogger().error(
@@ -231,11 +235,11 @@ export function runEarnMetricsRefresh(deps: EarnMetricsRefreshDeps): void {
 /**
  * One tick of the managed Cloud Run Job (`src/job.ts`).
  *
- * Deliberately UNSLOTTED, unlike the catalogue sync. That job already ticks
- * every five minutes, which is exactly this pass's cadence, so there is no
- * window to claim — the job's own schedule is the schedule. Two overlapping
- * executions would at worst write the same figures twice, which is harmless
- * here in a way a duplicated catalogue pass (with its delist half) is not.
+ * Deliberately UNSLOTTED, unlike the catalogue sync. The job's deployment-owned
+ * schedule is this pass's managed cadence, so there is no second window to
+ * claim. Two overlapping executions would at worst write the same figures
+ * twice, which is harmless here in a way a duplicated catalogue pass (with its
+ * delist half) is not.
  *
  * Callers gate on isEarnEnabled first, mirroring the catalogue sync.
  */
