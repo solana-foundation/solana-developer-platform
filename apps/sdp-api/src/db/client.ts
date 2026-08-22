@@ -1,4 +1,9 @@
 import { Pool, type QueryResult, types } from "pg";
+import {
+  currentDatabaseIdentity,
+  type DatabaseIdentity,
+  databaseIdentityConfigStatement,
+} from "@/db/identity";
 import { getLogger } from "@/runtime/logger";
 
 types.setTypeParser(20, (value) => Number.parseInt(value, 10));
@@ -267,6 +272,60 @@ abstract class BasePostgresClient extends PostgresExecutor implements DatabaseCl
   ): Promise<T>;
 }
 
+/**
+ * Stamp the ambient database identity (src/db/identity.ts) onto a pinned
+ * connection. Must run inside an open transaction: the GUCs are set with
+ * `is_local = true`, so COMMIT/ROLLBACK clears them and pooled connection
+ * reuse can never leak an identity across callers. A missing or `none`
+ * identity stamps nothing — row-level security then denies by default.
+ */
+async function stampDatabaseIdentity(
+  client: Queryable,
+  identity: DatabaseIdentity | undefined
+): Promise<void> {
+  if (!identity || identity.kind === "none") {
+    return;
+  }
+  await client.query(databaseIdentityConfigStatement(identity));
+}
+
+/**
+ * Queryable for statements issued outside an explicit transaction. When an
+ * identity is present, the statement runs in its own short transaction so the
+ * transaction-local identity GUCs cover it; without one, the statement goes
+ * straight to the pool and RLS fails closed.
+ */
+class IdentityStampingPoolQueryable implements Queryable {
+  constructor(private readonly pool: Pool) {}
+
+  async query(args: QueryArgs): Promise<QueryResult> {
+    const identity = currentDatabaseIdentity();
+    if (!identity || identity.kind === "none") {
+      return this.pool.query(args);
+    }
+
+    const client = await this.pool.connect();
+    let releaseError: Error | undefined;
+    try {
+      await client.query("BEGIN");
+      await stampDatabaseIdentity(client, identity);
+      const result = await client.query(args);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        releaseError =
+          rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
+      }
+      throw error;
+    } finally {
+      client.release(releaseError);
+    }
+  }
+}
+
 class PooledPostgresClient extends BasePostgresClient {
   private readonly pool: Pool;
 
@@ -275,7 +334,7 @@ class PooledPostgresClient extends BasePostgresClient {
       connectionString,
       ...NODE_POOL_OPTIONS,
     });
-    super(pool);
+    super(new IdentityStampingPoolQueryable(pool));
     this.pool = pool;
 
     // Idle pool errors are EventEmitter errors; without a listener Node treats
@@ -291,6 +350,7 @@ class PooledPostgresClient extends BasePostgresClient {
 
     try {
       await client.query("BEGIN");
+      await stampDatabaseIdentity(client, currentDatabaseIdentity());
       const executor = new PostgresExecutor(client);
       const result = await callback(executor);
       await client.query("COMMIT");
@@ -331,6 +391,7 @@ class PooledPostgresClient extends BasePostgresClient {
 
       await client.query("BEGIN");
       transactionOpen = true;
+      await stampDatabaseIdentity(client, currentDatabaseIdentity());
       const executor = new PostgresExecutor(client);
       const result = await callback(executor);
       callbackResult = result;

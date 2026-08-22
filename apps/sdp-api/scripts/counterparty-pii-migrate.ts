@@ -5,7 +5,13 @@ import type {
   CounterpartyIdentity,
   CounterpartyProviderData,
 } from "@sdp/types";
-import { type AppDb, closeDatabasePools, type DatabaseExecutor, getDb } from "../src/db";
+import {
+  type AppDb,
+  closeDatabasePools,
+  type DatabaseExecutor,
+  getDb,
+  runWithSystemDatabaseIdentity,
+} from "../src/db";
 import {
   acquireCounterpartyPiiLifecycleLock,
   COUNTERPARTY_PII_MIGRATION_ID,
@@ -546,6 +552,12 @@ function requestedPhase(): Phase {
 
 async function main(env: Env): Promise<void> {
   const phase = requestedPhase();
+  return runWithSystemDatabaseIdentity(`script:counterparty-pii-migrate:${phase}`, () =>
+    runPhase(env, phase)
+  );
+}
+
+async function runPhase(env: Env, phase: Phase): Promise<void> {
   const db = getDb(env);
   const cipher = createPiiCipher(env);
 

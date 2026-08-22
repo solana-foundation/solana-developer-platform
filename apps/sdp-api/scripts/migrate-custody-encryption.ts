@@ -1,4 +1,4 @@
-import { closeDatabasePools, getDb } from "../src/db";
+import { closeDatabasePools, getDb, runWithSystemDatabaseIdentity } from "../src/db";
 import { getProcessEnv } from "../src/lib/runtime-env";
 import { createCustodyCipher } from "../src/services/custody-cipher/cipher-router";
 import { migrateNestedCustodySecrets } from "../src/services/custody-cipher/nested-secret-migration";
@@ -164,7 +164,7 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((e: unknown) => {
+runWithSystemDatabaseIdentity("script:migrate-custody-encryption", main).catch((e: unknown) => {
   console.error(e);
   process.exit(1);
 });

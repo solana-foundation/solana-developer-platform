@@ -1,6 +1,11 @@
 -- Seed data for local development
 -- Run with: pnpm db:seed:local
 
+-- Seeding crosses tenant boundaries; forced row-level security (migration
+-- 0063) also binds non-superuser table owners, so declare the privileged
+-- session identity explicitly.
+SET app.tenant_isolation_identity = 'system';
+
 -- Add some allowlist entries for testing
 INSERT INTO allowlist (id, type, value, tier, notes) VALUES
     ('al_001', 'domain', 'solana.org', 'enterprise', 'Solana Foundation'),
