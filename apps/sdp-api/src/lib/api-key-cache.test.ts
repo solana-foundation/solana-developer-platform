@@ -7,12 +7,17 @@
  * (TTL expiry or cache eviction removed the winner). Falling back to the
  * fill's own pre-race snapshot would let a revocation that landed during
  * those windows be ignored by the very request that raced it.
+ *
+ * Also covers refreshApiKeyCache's convergence contract: an empty slot is
+ * never claimed with unverified non-terminal state, and CAS exhaustion that
+ * leaves a possibly-stale entry cached is reported to the caller instead of
+ * passing as success.
  */
 
 import type { CachedApiKey } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import type { KVStore } from "@/runtime/kv";
-import { fillApiKeyCache } from "./api-key-cache";
+import { fillApiKeyCache, refreshApiKeyCache } from "./api-key-cache";
 
 const KEY_HASH = "hash_fill_race_exhaustion";
 
@@ -265,6 +270,78 @@ describe("fillApiKeyCache under CAS exhaustion", () => {
     expect(adopted.status).toBe("revoked");
   });
 
+  it("re-reads Postgres when a drift repair finds the slot emptied", async () => {
+    // Drifted verify, and by the time the repair looks at the slot our own
+    // pending marker is gone — exactly what an evicted revocation entry
+    // looks like. Winning a CAS(null → fresh) there would republish a
+    // possibly-revoked key as trusted active state for a full TTL, so the
+    // repair must write nothing and resolve from Postgres instead.
+    const casValues: string[] = [];
+    const kv = {
+      ...contendedStore(null),
+      get: async () => null,
+      compareAndSet: async (_key: string, _expected: string | null, value: string) => {
+        casValues.push(value);
+        return true;
+      },
+      put: async () => {},
+    } as KVStore;
+    const activeRow = { ...revokedRow(), status: "active" };
+
+    const adopted = await fillApiKeyCache(
+      dbReturningSequence([activeRow, revokedRow()]),
+      kv,
+      KEY_HASH,
+      {
+        ...entryWithStatus("active"),
+        // Distinct from what the DB returns so the verify takes the drift path.
+        permissions: [],
+      }
+    );
+
+    expect(adopted.status).toBe("revoked");
+    // Only the pending install may ever land in the observed-empty slot.
+    const trustedInstalls = casValues
+      .map((value) => JSON.parse(value) as CachedApiKey)
+      .filter((parsed) => !parsed.pendingVerification);
+    expect(trustedInstalls).toHaveLength(0);
+  });
+
+  it("resolves a drift repair from Postgres when churn wins every round", async () => {
+    // The repair's overwrite loses all three CAS rounds to concurrent
+    // non-terminal writes. Those wins postdate the verify read, so the
+    // fresh active snapshot proves nothing — only Postgres can say whether
+    // one of them was racing a revocation.
+    const churnValue = JSON.stringify({
+      ...entryWithStatus("active"),
+      rateLimitTier: "elevated" as const,
+    });
+    let casCalls = 0;
+    const kv = {
+      ...contendedStore(null),
+      get: async () => churnValue,
+      compareAndSet: async () => {
+        casCalls += 1;
+        return casCalls === 1; // install wins, every repair round loses
+      },
+      put: async () => {},
+    } as KVStore;
+    const activeRow = { ...revokedRow(), status: "active" };
+
+    const adopted = await fillApiKeyCache(
+      dbReturningSequence([activeRow, revokedRow()]),
+      kv,
+      KEY_HASH,
+      {
+        ...entryWithStatus("active"),
+        // Distinct from what the DB returns so the verify takes the drift path.
+        permissions: [],
+      }
+    );
+
+    expect(adopted.status).toBe("revoked");
+  });
+
   it("keeps the terminal entry it observed when a drift repair defers to it", async () => {
     // Drifted verify: the terminal-sticky overwrite sees a revocation's
     // entry and keeps it — then Redis evicts it before any later fence
@@ -360,5 +437,76 @@ describe("fillApiKeyCache under CAS exhaustion", () => {
 
     expect(adopted).toBe(entry);
     expect(writes).toHaveLength(0);
+  });
+});
+
+describe("refreshApiKeyCache convergence contract", () => {
+  it("leaves an empty slot empty rather than installing unverified state", async () => {
+    // Emptiness is indistinguishable from eviction of a newer terminal
+    // entry. A refresh must not claim the slot with trusted non-terminal
+    // state — an empty slot is already convergent, because the next request
+    // misses and re-fills through the verified two-phase path.
+    const writes: string[] = [];
+    const kv = {
+      ...contendedStore(null),
+      get: async () => null,
+      compareAndSet: async (_key: string, _expected: string | null, value: string) => {
+        writes.push(value);
+        return true;
+      },
+      put: async (_key: string, value: string) => {
+        writes.push(value);
+      },
+    } as KVStore;
+    const activeRow = { ...revokedRow(), status: "active" };
+
+    const converged = await refreshApiKeyCache(dbReturning(activeRow), kv, KEY_HASH);
+
+    expect(converged).toBe(true);
+    expect(writes).toHaveLength(0);
+  });
+
+  it("reports contention that leaves a possibly-stale entry cached", async () => {
+    // A permission reduction races sustained slot churn: every CAS round
+    // loses and the broader pre-mutation entry is still what readers see.
+    // The refresh must say so instead of letting the mutation report
+    // success over it.
+    const staleBroadValue = JSON.stringify(entryWithStatus("active"));
+    const kv = {
+      ...contendedStore(null),
+      get: async () => staleBroadValue,
+      compareAndSet: async () => false,
+      put: async () => {
+        throw new Error("a non-terminal refresh must never write unconditionally");
+      },
+    } as KVStore;
+    const reducedRow = {
+      ...revokedRow(),
+      status: "active",
+      permissions: JSON.stringify(["projects:read"]),
+    };
+
+    const converged = await refreshApiKeyCache(dbReturning(reducedRow), kv, KEY_HASH);
+
+    expect(converged).toBe(false);
+  });
+
+  it("lands a terminal state unconditionally after exhaustion", async () => {
+    const staleBroadValue = JSON.stringify(entryWithStatus("active"));
+    const puts: string[] = [];
+    const kv = {
+      ...contendedStore(null),
+      get: async () => staleBroadValue,
+      compareAndSet: async () => false,
+      put: async (_key: string, value: string) => {
+        puts.push(value);
+      },
+    } as KVStore;
+
+    const converged = await refreshApiKeyCache(dbReturning(revokedRow()), kv, KEY_HASH);
+
+    expect(converged).toBe(true);
+    expect(puts).toHaveLength(1);
+    expect((JSON.parse(puts[0] ?? "{}") as CachedApiKey).status).toBe("revoked");
   });
 });

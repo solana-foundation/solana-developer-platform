@@ -27,7 +27,7 @@ import {
   apiKeyFlashMaxAgeSeconds,
 } from "./api-key-flash";
 import { sealApiKeyFlash, unsealApiKeyFlash } from "./api-key-flash-seal";
-import { DELETE, GET } from "./flash/route";
+import { DELETE, POST } from "./flash/route";
 
 const SESSION = { sessionId: "sess_owner", userId: "user_owner" };
 const OTHER_SESSION = { sessionId: "sess_other", userId: "user_owner" };
@@ -125,13 +125,13 @@ describe("api key flash handoff", () => {
     });
   });
 
-  describe("GET /dashboard/api-keys/flash", () => {
+  describe("POST /dashboard/api-keys/flash", () => {
     it("delivers the flash once to the minting session and consumes the cookie", async () => {
       const sealed = (await sealApiKeyFlash(SECRET_FLASH, SESSION, 120)) as string;
       mocks.auth.mockResolvedValue(SESSION);
       mocks.cookies.mockResolvedValue(jarWithCookie(sealed));
 
-      const response = await GET();
+      const response = await POST();
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ flash: SECRET_FLASH });
 
@@ -144,7 +144,7 @@ describe("api key flash handoff", () => {
 
       // Replay: the cookie is gone, so a second read returns nothing.
       mocks.cookies.mockResolvedValue(jarWithCookie(undefined));
-      const replay = await GET();
+      const replay = await POST();
       expect(await replay.json()).toEqual({ flash: null });
     });
 
@@ -153,7 +153,7 @@ describe("api key flash handoff", () => {
       mocks.auth.mockResolvedValue(OTHER_SESSION);
       mocks.cookies.mockResolvedValue(jarWithCookie(sealed));
 
-      const response = await GET();
+      const response = await POST();
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ flash: null });
       expect(response.cookies.get(API_KEY_FLASH_COOKIE)?.value).toBe("");
@@ -165,7 +165,7 @@ describe("api key flash handoff", () => {
       mocks.auth.mockResolvedValue({ sessionId: null, userId: null });
       mocks.cookies.mockResolvedValue(jarWithCookie(sealed));
 
-      const response = await GET();
+      const response = await POST();
       expect(response.status).toBe(401);
       expect(await response.json()).toEqual({ flash: null });
       expect(response.cookies.get(API_KEY_FLASH_COOKIE)?.value).toBe("");
@@ -176,7 +176,7 @@ describe("api key flash handoff", () => {
       mocks.auth.mockResolvedValue(SESSION);
       mocks.cookies.mockResolvedValue(jarWithCookie(JSON.stringify(SECRET_FLASH)));
 
-      const response = await GET();
+      const response = await POST();
       expect(await response.json()).toEqual({ flash: null });
       expect(response.cookies.get(API_KEY_FLASH_COOKIE)?.value).toBe("");
     });

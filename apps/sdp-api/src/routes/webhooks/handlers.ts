@@ -142,12 +142,19 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
       getLogger().error({ error }, "Failed to revoke sessions after organization deletion")
     );
 
-  const failedRefreshes = cacheRefreshes.filter(
-    (result): result is PromiseRejectedResult => result.status === "rejected"
-  );
+  // A rejected refresh and one that resolved false (CAS contention left a
+  // possibly-stale entry cached) are equally unresolved.
+  const failedRefreshes: unknown[] = [];
+  for (const result of cacheRefreshes) {
+    if (result.status === "rejected") {
+      failedRefreshes.push(result.reason);
+    } else if (!result.value) {
+      failedRefreshes.push(new Error("api key cache refresh remained contended"));
+    }
+  }
   if (failedRefreshes.length > 0) {
     getLogger().error(
-      { errors: failedRefreshes.map((result) => result.reason) },
+      { errors: failedRefreshes },
       "Failed to invalidate cached API keys after webhook organization deletion"
     );
     throw new AppError(

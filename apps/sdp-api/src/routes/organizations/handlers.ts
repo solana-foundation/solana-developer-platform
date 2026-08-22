@@ -291,9 +291,17 @@ export const deleteOrganization = async (c: AppContext) => {
     refreshFailures = [];
     results.forEach((result, index) => {
       const hash = pendingHashes[index];
-      if (result.status === "rejected" && hash !== undefined) {
+      if (hash === undefined) {
+        return;
+      }
+      if (result.status === "rejected") {
         stillPending.push(hash);
         refreshFailures.push(result.reason);
+      } else if (!result.value) {
+        // A false return means CAS contention left a possibly-stale entry
+        // cached — as unresolved as a thrown write error.
+        stillPending.push(hash);
+        refreshFailures.push(new Error("api key cache refresh remained contended"));
       }
     });
     pendingHashes = stillPending;

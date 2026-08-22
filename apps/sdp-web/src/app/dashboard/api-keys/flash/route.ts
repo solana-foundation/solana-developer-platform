@@ -14,8 +14,14 @@ function clearFlashCookie(response: NextResponse) {
  * Clerk session and user it was minted for. Logout, a different account on
  * the same browser, an expired payload, or a tampered value all yield
  * `{ flash: null }` — never the secret.
+ *
+ * Consumption is a POST on purpose: a GET with this side effect could be
+ * triggered by link prefetching or a forged cross-site navigation, burning
+ * the one-time secret before the dashboard reads it. POST is never
+ * prefetched, and the strict-SameSite cookie stays home on cross-site
+ * requests.
  */
-export async function GET() {
+export async function POST() {
   const [{ sessionId, userId }, jar] = await Promise.all([auth(), cookies()]);
   const raw = jar.get(API_KEY_FLASH_COOKIE)?.value;
 

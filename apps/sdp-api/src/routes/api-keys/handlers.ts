@@ -47,6 +47,33 @@ import type {
 
 type AppContext = Context<{ Bindings: Env }>;
 
+/**
+ * A mutation must not report success while the cache may still serve the
+ * pre-mutation authorization. refreshApiKeyCache returns false when CAS
+ * contention left a possibly-stale trusted entry in the slot; retry with
+ * backoff, and if it never converges surface a retriable failure — the DB
+ * mutation is already committed, so the caller re-issues the request rather
+ * than trusting a success that silently kept the old cached authorization.
+ */
+async function ensureApiKeyCacheRefreshed(
+  db: DatabaseClient,
+  kv: Parameters<typeof refreshApiKeyCache>[1],
+  keyHash: string
+): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+    }
+    if (await refreshApiKeyCache(db, kv, keyHash)) {
+      return;
+    }
+  }
+  throw new AppError(
+    "INTERNAL_ERROR",
+    "The change was saved but the key's cached authorization could not be refreshed yet; retry the request"
+  );
+}
+
 function resolveActor(c: AppContext): {
   organizationId: string;
   permissions: Permission[];
@@ -412,7 +439,7 @@ export const updateApiKey = async (c: ValidatedBodyContext<typeof apiKeyUpdateSc
     body.expiresAt !== undefined ||
     walletSelection.touched
   ) {
-    await refreshApiKeyCache(getDb(c.env), c.var.kv.apiKeys, existing.key_hash);
+    await ensureApiKeyCacheRefreshed(getDb(c.env), c.var.kv.apiKeys, existing.key_hash);
   }
 
   // Audit log
@@ -604,7 +631,7 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
 
   // Refresh the old key's cache entry so its rotation deadline is enforced
   // immediately instead of after the previous entry's TTL runs out.
-  await refreshApiKeyCache(getDb(c.env), c.var.kv.apiKeys, rotation.previousKeyHash);
+  await ensureApiKeyCacheRefreshed(getDb(c.env), c.var.kv.apiKeys, rotation.previousKeyHash);
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));
@@ -656,7 +683,7 @@ export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSc
     // Already revoked in Postgres, but the cache may still say otherwise
     // (e.g. the earlier revocation crashed between the DB write and the
     // cache write). Re-assert before reporting success.
-    await refreshApiKeyCache(getDb(c.env), c.var.kv.apiKeys, existing.key_hash);
+    await ensureApiKeyCacheRefreshed(getDb(c.env), c.var.kv.apiKeys, existing.key_hash);
     return success(c, {
       success: true,
       revokedAt: existing.revoked_at ?? new Date().toISOString(),
@@ -681,7 +708,7 @@ export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSc
   // Overwrite the cache with the revoked state before reporting success.
   // A plain delete would leave a window where an in-flight fill from a
   // pre-revocation DB read repopulates the entry for the full cache TTL.
-  await refreshApiKeyCache(getDb(c.env), c.var.kv.apiKeys, revokedKey.keyHash);
+  await ensureApiKeyCacheRefreshed(getDb(c.env), c.var.kv.apiKeys, revokedKey.keyHash);
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));
