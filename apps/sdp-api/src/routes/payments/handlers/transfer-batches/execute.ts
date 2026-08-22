@@ -14,6 +14,7 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { logEvent } from "@/runtime/money-path-events";
 import {
   createTransferSignedSubmissionStore,
+  isDefiniteSubmissionError,
   submitSignedPaymentTransaction,
 } from "@/services/payments/signed-submission";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
@@ -225,7 +226,7 @@ export async function executeChunk(params: {
     });
   } catch (error) {
     const submitted = await submissionStore.submittedRow();
-    if (submitted) {
+    if (submitted && !isDefiniteSubmissionError(error)) {
       logEvent("warn", {
         event: "sdp_api_payment_submission_unresolved",
         flow: "batch",

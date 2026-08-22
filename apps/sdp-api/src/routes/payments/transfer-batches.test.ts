@@ -36,7 +36,11 @@ import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
-import { fullySignTestTransaction, sendTransactionMock } from "@/test/helpers/payments-routes";
+import {
+  fullySignTestTransaction,
+  sendTransactionMock,
+  sendTransactionPreflightError,
+} from "@/test/helpers/payments-routes";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -920,6 +924,56 @@ describe("payment transfer batches", () => {
       "sdp_api_payment_submission_unresolved"
     );
     warn.mockRestore();
+  });
+
+  it("fails a signed batch chunk when first-attempt preflight rejects it", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
+    createFeePaymentAdapterMock.mockReturnValueOnce({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+      signAndSend: vi.fn(),
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    sendTransactionMock.mockRejectedValueOnce(sendTransactionPreflightError());
+
+    const counterpartyId = await seedCounterparty("batch_preflight_rejection_counterparty");
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet3,
+    });
+    const response = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          token: "SOL",
+          recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+          options: { preflight: false },
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: {
+        batch: { status: string };
+        recipients: Array<{ status: string }>;
+        transfers: Array<{ status: string; signature: string | null }>;
+      };
+    };
+    expect(body.data.batch.status).toBe("failed");
+    expect(body.data.recipients).toMatchObject([{ status: "failed" }]);
+    expect(body.data.transfers).toMatchObject([{ status: "failed" }]);
+    expect(body.data.transfers[0]?.signature).toBeTruthy();
   });
 
   it("dry-runs a transfer batch with zero writes", async () => {

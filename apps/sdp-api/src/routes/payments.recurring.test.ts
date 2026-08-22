@@ -36,6 +36,7 @@ import {
   seedCachedKey,
   seedCounterparty,
   sendTransactionMock,
+  sendTransactionPreflightError,
   TEST_API_KEY,
   TEST_KORA_FEE_PAYER,
   TEST_ORG,
@@ -2352,6 +2353,61 @@ describe("Payments routes — recurring", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
     expect(sendTransactionMock).toHaveBeenCalledTimes(1);
     warn.mockRestore();
+  });
+
+  it("fails a collection when first-attempt preflight proves its account is frozen", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+      signAndSend: vi
+        .fn()
+        .mockResolvedValue(
+          "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+        ),
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForTest(headers);
+    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, activated.id)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, activated.subscriptionId)
+      .run();
+    sendTransactionMock.mockRejectedValueOnce(sendTransactionPreflightError(17));
+
+    const collectRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/collect`,
+      { method: "POST", headers, body: "{}" },
+      env
+    );
+
+    expect(collectRes.status).toBe(400);
+    await expect(collectRes.json()).resolves.toMatchObject({ error: { code: "ACCOUNT_FROZEN" } });
+    const attempt = await getDb(env)
+      .prepare(
+        "SELECT status, transfer_id FROM payment_subscription_collection_attempts WHERE subscription_id = ?"
+      )
+      .bind(activated.subscriptionId)
+      .first<{ status: string; transfer_id: string | null }>();
+    expect(attempt?.status).toBe("failed");
+    const transfer = await getDb(env)
+      .prepare("SELECT status, signature FROM payment_transfers WHERE id = ?")
+      .bind(attempt?.transfer_id)
+      .first<{ status: string; signature: string | null }>();
+    expect(transfer?.status).toBe("failed");
+    expect(transfer?.signature).toBeTruthy();
   });
 
   it("does not advance billing when the confirmed pull amount differs", async () => {

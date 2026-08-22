@@ -40,6 +40,7 @@ import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import {
   createTransferSignedSubmissionStore,
+  isDefiniteSubmissionError,
   type TransferSignedSubmissionStore,
 } from "@/services/payments/signed-submission";
 import * as solanaServices from "@/services/solana";
@@ -659,10 +660,7 @@ async function journalRecurringPaymentCollectionError(input: {
   submittedSignature: Signature | null;
   error: unknown;
 }): Promise<void> {
-  if (
-    input.submittedSignature &&
-    !(input.error instanceof AppError && input.error.code === "TRANSACTION_FAILED")
-  ) {
+  if (input.submittedSignature && !isDefiniteSubmissionError(input.error)) {
     const updatedAt = new Date().toISOString();
     const [attemptResult, transferResult] = await Promise.allSettled([
       input.subscriptionsRepo.updateCollectionAttempt({
@@ -769,10 +767,7 @@ async function handleRecurringPaymentCollectionError(input: {
   }
 
   const submitted = await input.submissionStore?.submittedRow();
-  if (
-    submitted?.signature &&
-    !(input.error instanceof AppError && input.error.code === "TRANSACTION_FAILED")
-  ) {
+  if (submitted?.signature && !isDefiniteSubmissionError(input.error)) {
     const submittedSignature = validatedStoredCollectionSignature({
       attemptId: input.attempt.id,
       signature: submitted.signature,

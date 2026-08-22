@@ -4,13 +4,17 @@ import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { type CachedApiKey, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { getBase58Codec } from "@solana/codecs";
-import type { Signature, SignatureBytes } from "@solana/kit";
 import {
   address,
   createNoopSigner,
   getSignatureFromTransaction,
   getTransactionDecoder,
   getTransactionEncoder,
+  type Signature,
+  type SignatureBytes,
+  SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
+  SolanaError,
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
@@ -98,6 +102,25 @@ export const TEST_SPONSORSHIP_PROVIDER_CONFIG = {
   feePayerMayTransferLamports: false,
   feePayerPolicy: { test: "zero-outflow" },
 } satisfies feePaymentAdapters.SponsorshipProviderConfiguration;
+
+export function sendTransactionPreflightError(customProgramErrorCode?: number): SolanaError {
+  const cause =
+    customProgramErrorCode === undefined
+      ? undefined
+      : new SolanaError(SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM, {
+          code: customProgramErrorCode,
+          index: 0,
+        });
+  return new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE, {
+    accounts: null,
+    loadedAccountsDataSize: null,
+    logs: null,
+    replacementBlockhash: null,
+    returnData: null,
+    unitsConsumed: null,
+    ...(cause === undefined ? {} : { cause }),
+  });
+}
 
 export function fullySignTestTransaction(transactionBytes: Uint8Array): Uint8Array {
   const transaction = getTransactionDecoder().decode(transactionBytes);
