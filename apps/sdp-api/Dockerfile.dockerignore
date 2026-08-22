@@ -29,7 +29,6 @@ packages/*
 !packages/sdp-private-channels
 !packages/sdp-spc-escrow
 !packages/sdp-spc-withdraw
-!packages/kit-augment
 !packages/sdp-kamino
 docs
 infra
