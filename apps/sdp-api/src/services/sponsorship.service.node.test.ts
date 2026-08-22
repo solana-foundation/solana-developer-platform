@@ -130,6 +130,9 @@ describe("sponsorship identity boundary", () => {
       lifecycle.markStarted.mock.invocationCallOrder[0]
     );
     expect(lifecycle.hasStarted).not.toHaveBeenCalled();
+    await expect(submission.releaseDefinitelyUnbroadcast(new Error("preflight"))).resolves.toBe(
+      undefined
+    );
   });
 
   it("derives request actors from authenticated middleware state, not request input", async () => {

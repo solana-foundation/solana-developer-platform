@@ -85,6 +85,7 @@ function harness() {
     markSubmitted: vi.fn().mockResolvedValue("persisted"),
     markChargedUnknown: vi.fn().mockResolvedValue(true),
     markReleased: vi.fn().mockResolvedValue(true),
+    settleReservation: vi.fn().mockResolvedValue(true),
     markRedisSettled: vi.fn().mockResolvedValue(true),
     tripGlobalBreaker: vi.fn().mockResolvedValue(null),
   };
@@ -518,6 +519,30 @@ describe("BudgetedFeePayment", () => {
     );
     expect(provider.getSponsorshipConfiguration).toHaveBeenCalledOnce();
     expect(repository.markReleased).not.toHaveBeenCalled();
+  });
+
+  it("releases a submitted reservation when RPC preflight proves it was not broadcast", async () => {
+    const { feePayment, repository, budgetRedis } = harness();
+    const lifecycle = {
+      persistSigned: vi.fn().mockResolvedValue(undefined),
+      markStarted: vi.fn().mockResolvedValue(undefined),
+      hasStarted: vi.fn(),
+    };
+    const submission = await feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle);
+
+    await submission.releaseDefinitelyUnbroadcast(new Error("Transaction simulation failed"));
+
+    expect(repository.settleReservation).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      "released",
+      0,
+      "Transaction simulation failed"
+    );
+    expect(budgetRedis.settle).toHaveBeenCalledWith(
+      expect.objectContaining({ actualLamports: 0, detectMissingReservation: true })
+    );
+    expect(repository.markRedisSettled).toHaveBeenCalledWith(expect.any(String), 1);
   });
 
   it("never releases after the owned marker when submitted accounting fails", async () => {

@@ -1,8 +1,15 @@
 import { isTransientRpcError, withTransientRpcRetry } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
-import { getBase64Decoder, type Signature } from "@solana/kit";
+import {
+  getBase64Decoder,
+  isSolanaError,
+  type Signature,
+  SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
+  unwrapSimulationError,
+} from "@solana/kit";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
-import { AppError } from "@/lib/errors";
+import { AppError, accountFrozen, transactionFailed } from "@/lib/errors";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 
 export interface SignedSubmissionStore {
@@ -13,6 +20,25 @@ export interface SignedSubmissionStore {
   }): Promise<void>;
   markStarted(): Promise<void>;
   hasStarted(): Promise<boolean>;
+}
+
+export function isDefiniteSubmissionError(error: unknown): boolean {
+  return (
+    error instanceof AppError &&
+    (error.code === "TRANSACTION_FAILED" || error.code === "ACCOUNT_FROZEN")
+  );
+}
+
+function mapPreflightError(error: unknown): AppError | null {
+  if (
+    !isSolanaError(error, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE)
+  ) {
+    return null;
+  }
+  const cause = unwrapSimulationError(error);
+  return isSolanaError(cause, SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM) && cause.context.code === 17
+    ? accountFrozen(error.message)
+    : transactionFailed(error.message);
 }
 
 export function createTransferSignedSubmissionStore(
@@ -92,6 +118,16 @@ export async function submitSignedPaymentTransaction(input: {
     try {
       return await solanaRpc.sendTransaction(input.rpc, submission.signedTransaction);
     } catch (error) {
+      const preflightError = sawTransientFailure ? null : mapPreflightError(error);
+      if (preflightError) {
+        try {
+          await submission.releaseDefinitelyUnbroadcast(error);
+        } catch {
+          // Managed sponsorship logs and trips its breaker; preserve the
+          // definitive chain verdict so the payment cannot remain processing.
+        }
+        throw preflightError;
+      }
       const transient = isTransientRpcError(error);
       if (sawTransientFailure && !transient) {
         throw new Error("Solana RPC submission outcome is ambiguous after a transient failure", {

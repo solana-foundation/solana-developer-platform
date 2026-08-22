@@ -1,5 +1,10 @@
 import * as solanaRpc from "@sdp/rpc/solana";
-import type { Signature } from "@solana/kit";
+import {
+  type Signature,
+  SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
+  SolanaError,
+} from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
@@ -10,6 +15,18 @@ import {
 
 const SIGNATURE =
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature;
+
+function preflightError(cause?: unknown) {
+  return new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE, {
+    accounts: null,
+    loadedAccountsDataSize: null,
+    logs: null,
+    replacementBlockhash: null,
+    returnData: null,
+    unitsConsumed: null,
+    ...(cause === undefined ? {} : { cause }),
+  });
+}
 
 describe("submitSignedPaymentTransaction", () => {
   afterEach(() => {
@@ -100,15 +117,79 @@ describe("submitSignedPaymentTransaction", () => {
     expect(store.markStarted).toHaveBeenCalledOnce();
   });
 
+  it("fails and releases a first-attempt preflight rejection", async () => {
+    const signedTransaction = new Uint8Array([1, 2, 3]);
+    const releaseDefinitelyUnbroadcast = vi.fn().mockResolvedValue(undefined);
+    const feePayment = {
+      prepareOwnedSubmission: vi.fn(async () => ({
+        signedTransaction,
+        signature: SIGNATURE,
+        releaseDefinitelyUnbroadcast,
+      })),
+    } as unknown as SponsorshipFeePayment;
+    const store = {
+      persistSigned: vi.fn(),
+      markStarted: vi.fn(),
+      hasStarted: vi.fn(),
+    };
+    const error = preflightError();
+    vi.spyOn(solanaRpc, "sendTransaction").mockRejectedValueOnce(error);
+
+    await expect(
+      submitSignedPaymentTransaction({
+        feePayment,
+        rpc: {} as solanaRpc.SolanaRpc,
+        transaction: new Uint8Array([9]),
+        lastValidBlockHeight: 123n,
+        store,
+      })
+    ).rejects.toMatchObject({ code: "TRANSACTION_FAILED" });
+
+    expect(releaseDefinitelyUnbroadcast).toHaveBeenCalledWith(error);
+  });
+
+  it("maps an account-frozen preflight rejection without losing definiteness", async () => {
+    const signedTransaction = new Uint8Array([1, 2, 3]);
+    const releaseDefinitelyUnbroadcast = vi.fn().mockResolvedValue(undefined);
+    const feePayment = {
+      prepareOwnedSubmission: vi.fn(async () => ({
+        signedTransaction,
+        signature: SIGNATURE,
+        releaseDefinitelyUnbroadcast,
+      })),
+    } as unknown as SponsorshipFeePayment;
+    const store = {
+      persistSigned: vi.fn(),
+      markStarted: vi.fn(),
+      hasStarted: vi.fn(),
+    };
+    vi.spyOn(solanaRpc, "sendTransaction").mockRejectedValueOnce(
+      preflightError(
+        new SolanaError(SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM, { code: 17, index: 0 })
+      )
+    );
+
+    await expect(
+      submitSignedPaymentTransaction({
+        feePayment,
+        rpc: {} as solanaRpc.SolanaRpc,
+        transaction: new Uint8Array([9]),
+        lastValidBlockHeight: 123n,
+        store,
+      })
+    ).rejects.toMatchObject({ code: "ACCOUNT_FROZEN" });
+  });
+
   it("keeps the result ambiguous when a later retry looks deterministic", async () => {
     vi.useFakeTimers();
     const signedTransaction = new Uint8Array([1, 2, 3]);
-    const deterministicError = new Error("custom program error: 0x11");
+    const deterministicError = preflightError();
+    const releaseDefinitelyUnbroadcast = vi.fn().mockResolvedValue(undefined);
     const feePayment = {
       prepareOwnedSubmission: vi.fn(async (_transaction, lifecycle) => {
         await lifecycle.persistSigned({ signedTransaction, signature: SIGNATURE });
         await lifecycle.markStarted();
-        return { signedTransaction, signature: SIGNATURE };
+        return { signedTransaction, signature: SIGNATURE, releaseDefinitelyUnbroadcast };
       }),
     } as unknown as SponsorshipFeePayment;
     const store = {
@@ -135,6 +216,7 @@ describe("submitSignedPaymentTransaction", () => {
     await vi.runAllTimersAsync();
 
     await result;
+    expect(releaseDefinitelyUnbroadcast).not.toHaveBeenCalled();
   });
 
   it("returns the final transient error after retry exhaustion", async () => {

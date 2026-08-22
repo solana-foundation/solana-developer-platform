@@ -33,6 +33,10 @@ export interface OwnedSignedSubmission {
   signature: Signature;
 }
 
+export interface PreparedOwnedSubmission extends OwnedSignedSubmission {
+  releaseDefinitelyUnbroadcast(error: unknown): Promise<void>;
+}
+
 export interface OwnedSubmissionLifecycle {
   persistSigned(submission: OwnedSignedSubmission): Promise<void>;
   markStarted(): Promise<void>;
@@ -44,7 +48,7 @@ export interface SponsorshipFeePayment extends FeePaymentPort {
   prepareOwnedSubmission(
     transaction: Uint8Array,
     lifecycle: OwnedSubmissionLifecycle
-  ): Promise<OwnedSignedSubmission>;
+  ): Promise<PreparedOwnedSubmission>;
 }
 
 function withOwnedSubmissionLifecycle(provider: FeePaymentPort): SponsorshipFeePayment {
@@ -61,7 +65,10 @@ function withOwnedSubmissionLifecycle(provider: FeePaymentPort): SponsorshipFeeP
       : {}),
     async prepareOwnedSubmission(transaction, lifecycle) {
       const signedTransaction = await provider.signAsFeePayer(transaction);
-      const submission = getFullySignedSubmission(signedTransaction);
+      const submission = {
+        ...getFullySignedSubmission(signedTransaction),
+        releaseDefinitelyUnbroadcast: async () => {},
+      };
       await lifecycle.persistSigned(submission);
       await lifecycle.markStarted();
       return submission;

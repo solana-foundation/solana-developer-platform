@@ -32,6 +32,7 @@ import type { Env } from "@/types/env";
 import type {
   OwnedSignedSubmission,
   OwnedSubmissionLifecycle,
+  PreparedOwnedSubmission,
   SponsorshipFeePayment,
   SponsorshipScope,
 } from "./sponsorship.service";
@@ -49,6 +50,7 @@ type BudgetRepository = Pick<
   | "markSubmitted"
   | "markChargedUnknown"
   | "markReleased"
+  | "settleReservation"
   | "markRedisSettled"
   | "tripGlobalBreaker"
 >;
@@ -259,7 +261,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
   async prepareOwnedSubmission(
     transaction: Uint8Array,
     lifecycle: OwnedSubmissionLifecycle
-  ): Promise<OwnedSignedSubmission> {
+  ): Promise<PreparedOwnedSubmission> {
     const reservation = await this.admit(transaction, "sign");
     if (reservation.replay) {
       throw new FeePaymentError(
@@ -267,10 +269,14 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
         "PROVIDER_NOT_AVAILABLE"
       );
     }
-    let submission: OwnedSignedSubmission;
+    let submission: PreparedOwnedSubmission;
     try {
       const signedTransaction = await this.provider.signAsFeePayer(transaction);
-      submission = getFullySignedSubmission(signedTransaction);
+      submission = {
+        ...getFullySignedSubmission(signedTransaction),
+        releaseDefinitelyUnbroadcast: (error) =>
+          this.releaseDeterministic(reservation, error, "after_submission"),
+      };
       const signedResult = await this.repository.markSigned(
         reservation.id,
         reservation.attempt,
@@ -867,12 +873,22 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
 
   private async releaseDeterministic(
     reservation: Awaited<ReturnType<BudgetedFeePayment["admit"]>>,
-    error: unknown
+    error: unknown,
+    boundary: "before_submission" | "after_submission" = "before_submission"
   ): Promise<void> {
     const reason = error instanceof Error ? error.message : "Kora rejected sponsorship";
     let released: boolean;
     try {
-      released = await this.repository.markReleased(reservation.id, reservation.attempt, reason);
+      released =
+        boundary === "after_submission"
+          ? await this.repository.settleReservation(
+              reservation.id,
+              reservation.attempt,
+              "released",
+              0,
+              reason
+            )
+          : await this.repository.markReleased(reservation.id, reservation.attempt, reason);
     } catch (releaseError) {
       return this.accountingUnavailable(
         resolveNetwork(this.env),

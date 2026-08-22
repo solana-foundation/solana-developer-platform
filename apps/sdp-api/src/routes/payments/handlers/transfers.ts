@@ -63,6 +63,7 @@ import {
 } from "@/services/payment-operation.service";
 import {
   createTransferSignedSubmissionStore,
+  isDefiniteSubmissionError,
   type SignedSubmissionStore,
   submitSignedPaymentTransaction,
 } from "@/services/payments/signed-submission";
@@ -477,8 +478,7 @@ async function updateTransferRecord(
 /** A chain verdict or preflight simulation proves this exact transaction cannot land. */
 function isDefiniteExecutionFailure(error: unknown): boolean {
   return (
-    (error instanceof AppError && error.code === "TRANSACTION_FAILED") ||
-    mapTransferExecutionError(error).code === "ACCOUNT_FROZEN"
+    isDefiniteSubmissionError(error) || mapTransferExecutionError(error).code === "ACCOUNT_FROZEN"
   );
 }
 
