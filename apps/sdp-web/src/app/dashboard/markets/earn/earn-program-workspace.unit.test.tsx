@@ -100,7 +100,7 @@ describe("EarnProgramWorkspace", () => {
     expect((screen.getByRole("button", { name: "Select" }) as HTMLButtonElement).disabled).toBe(
       true
     );
-    expect(document.body.textContent).toContain("vault-withdraw path");
+    expect(document.body.textContent).toContain("intentionally closed in production");
   });
 
   it("fails closed when the organization provider is not enabled", () => {

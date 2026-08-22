@@ -100,6 +100,7 @@ async function reconcileEnvironment(
   // already bounded, and every other job in this directory reconciles the same way.
   for (const [index, movement] of rows.entries()) {
     try {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- pacing protects the RPC endpoint and database pool from a 256-way fanout.
       await reconcileMovement(env, ledger, movement, statuses[index] ?? null, {
         cluster,
         rpcUrl,
@@ -109,7 +110,11 @@ async function reconcileEnvironment(
       // Transport errors are ambiguous and stay retryable; a later tick
       // checks the recorded signature before rebroadcasting the same bytes.
       getLogger().error(
-        { movementId: movement.id, signature: movement.signature, error },
+        {
+          movementId: movement.id,
+          signature: movement.signature,
+          error,
+        },
         "earn vault reconciliation: movement remains unsettled"
       );
     }
@@ -134,9 +139,7 @@ async function reconcileMovement(
     // requires the column for any settled row — the writer COALESCEs it, so a
     // movement that did report one keeps the moment it was actually observed.
     const observedAt = new Date().toISOString();
-    await ledger.advanceVaultMovement({
-      movementId: movement.id,
-      organizationId: movement.organization_id,
+    await advanceTransaction(ledger, movement, {
       toStatus: "finalized",
       confirmedAt: observedAt,
       settledAt: observedAt,
@@ -147,9 +150,7 @@ async function reconcileMovement(
     // Optimistic commitment. Recorded, and kept in the queue: a later tick asks
     // the chain again until it finalizes.
     if (movement.status === "confirmed") return;
-    await ledger.advanceVaultMovement({
-      movementId: movement.id,
-      organizationId: movement.organization_id,
+    await advanceTransaction(ledger, movement, {
       toStatus: "confirmed",
       confirmedAt: new Date().toISOString(),
     });
@@ -170,8 +171,8 @@ async function reconcileMovement(
   // the outbox scan returns. Proven rather than coerced: rebroadcasting empty
   // bytes, or expiring a row against a missing block height, would both be
   // decisions made from a value that is not there.
-  const { signed_transaction: signedTransaction, last_valid_block_height: lastValidBlockHeight } =
-    movement;
+  const signedTransaction = movement.signed_transaction;
+  const lastValidBlockHeight = movement.last_valid_block_height;
   if (signedTransaction === null || lastValidBlockHeight === null) {
     throw new Error(
       `Earn vault movement ${movement.id} is missing the signed transaction it must be reconciled from`
@@ -203,11 +204,7 @@ async function markSubmitted(
   // Only an unbroadcast intent can become `submitted`; anything further along
   // would lose its CAS anyway, and skipping the round trip keeps the sweep quiet.
   if (movement.status !== "requested") return;
-  await ledger.advanceVaultMovement({
-    movementId: movement.id,
-    organizationId: movement.organization_id,
-    toStatus: "submitted",
-  });
+  await advanceTransaction(ledger, movement, { toStatus: "submitted" });
 }
 
 async function failMovement(
@@ -215,10 +212,22 @@ async function failMovement(
   movement: EarnMovementRow,
   reason: string
 ): Promise<void> {
+  await advanceTransaction(ledger, movement, { toStatus: "failed", failureReason: reason });
+}
+
+async function advanceTransaction(
+  ledger: ReturnType<typeof createPostgresEarnMovementsRepository>,
+  movement: EarnMovementRow,
+  change: {
+    toStatus: string;
+    failureReason?: string;
+    confirmedAt?: string;
+    settledAt?: string;
+  }
+): Promise<void> {
   await ledger.advanceVaultMovement({
     movementId: movement.id,
     organizationId: movement.organization_id,
-    toStatus: "failed",
-    failureReason: reason,
+    ...change,
   });
 }

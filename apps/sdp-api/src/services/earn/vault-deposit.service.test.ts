@@ -79,9 +79,7 @@ function depositInput(overrides: Partial<VaultDepositInput> = {}): VaultDepositI
 function plan(overrides: Record<string, unknown> = {}) {
   return {
     cluster: "devnet",
-    transactions: [
-      [{ programAddress: "11111111111111111111111111111111", accounts: [], data: "" }],
-    ],
+    instructions: [{ programAddress: "11111111111111111111111111111111", accounts: [], data: "" }],
     lookupTables: [],
     assetIdentity: {
       depositTokenMint: TOKEN_MINT,
@@ -301,7 +299,7 @@ describe("depositIntoVault — idempotency", () => {
   it("binds independent request keys into distinct on-chain memo instructions", async () => {
     const memoPayloads: string[] = [];
     signVaultPlan.mockImplementation(async (_env, input) => {
-      const encoded = input.plan.transactions[0]?.at(-1)?.data;
+      const encoded = input.plan.instructions.at(-1)?.data;
       if (!encoded) throw new Error("missing request memo");
       memoPayloads.push(Buffer.from(encoded, "base64").toString("utf8"));
       return {

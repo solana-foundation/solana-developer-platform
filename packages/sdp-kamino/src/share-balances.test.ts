@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { SdpKaminoError } from "./errors";
-import { sumRawTokenAccountBaseUnits } from "./share-balances";
+import { parseShareTokenAccountBalances, sumRawTokenAccountBaseUnits } from "./share-balances";
 
 function tokenAccount(amount: unknown) {
   return {
+    pubkey: "11111111111111111111111111111112",
     account: {
       data: {
         parsed: {
@@ -38,5 +39,22 @@ describe("sumRawTokenAccountBaseUnits", () => {
 
   it("rejects a response with no account list", () => {
     expect(() => sumRawTokenAccountBaseUnits(undefined)).toThrow(/did not contain an account list/);
+  });
+});
+
+describe("parseShareTokenAccountBalances", () => {
+  it("keeps each account address paired with its exact balance", () => {
+    expect(parseShareTokenAccountBalances([tokenAccount("9007199254740993")])).toEqual([
+      {
+        address: "11111111111111111111111111111112",
+        amount: 9007199254740993n,
+      },
+    ]);
+  });
+
+  it("fails closed when a matching account has no address", () => {
+    expect(() =>
+      parseShareTokenAccountBalances([{ ...tokenAccount("1"), pubkey: undefined }])
+    ).toThrow(/did not contain an address/);
   });
 });
