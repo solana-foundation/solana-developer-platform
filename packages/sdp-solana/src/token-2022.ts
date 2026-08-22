@@ -239,14 +239,12 @@ export class Token2022Service {
       transferFeeAuthority: transferFee
         ? toAddress(
             transferFee.transferFeeConfigAuthority,
-            // biome-ignore lint/security/noSecrets: Not a secret, used as an error path label.
             "extensions.transferFee.transferFeeConfigAuthority"
           )
         : undefined,
       withdrawWithheldAuthority: transferFee
         ? toAddress(
             transferFee.withdrawWithheldAuthority,
-            // biome-ignore lint/security/noSecrets: Not a secret, used as an error path label.
             "extensions.transferFee.withdrawWithheldAuthority"
           )
         : undefined,
