@@ -11,13 +11,19 @@
  *    depend on, it is the one Kora method the sponsored path calls, and it had
  *    no live coverage at all before this file.
  *
- * OPT-IN, deliberately. It stays off until the Kamino program ids are deployed
- * to devnet Kora (sdp-infra#64, open at time of writing), because until then a
- * correct failure here would red an unrelated suite. Turn it on with
- * EARN_KORA_SPONSORSHIP_SMOKE=true once that deploy lands, then make it
- * unconditional.
+ * Runs unconditionally in the `Kora / Live Smoke` shard, alongside kora.test.ts
+ * and kora-flow.test.ts. It was briefly opt-in while sdp-infra#64 was open; that
+ * guard is gone because the reason for it is, and because an env-gated test in a
+ * file no run list referenced could only ever report a green skip.
  *
- *   EARN_KORA_SPONSORSHIP_SMOKE=true pnpm kora:devnet:test
+ * What this catches that nothing else does: the config reaches Kora as a Secret
+ * Manager volume pinned to `version = "latest"`, which Cloud Run resolves per
+ * INSTANCE at startup. So a `terraform apply` that adds a new secret version does
+ * not reach already-running instances, and the deployed allowlist can lag the
+ * committed toml until a revision rolls. This asserts the live `getConfig`, so it
+ * fails on exactly that gap instead of trusting the file.
+ *
+ *   pnpm kora:devnet:test
  */
 
 import { apiTestSupport } from "@sdp/api/test-support";
@@ -49,10 +55,7 @@ const {
   TOKEN_PROGRAM_ADDRESS,
 } = apiTestSupport;
 
-const ENABLED =
-  KORA_CONFIGURED &&
-  RUN_INTEGRATION_TESTS &&
-  (env as { EARN_KORA_SPONSORSHIP_SMOKE?: string }).EARN_KORA_SPONSORSHIP_SMOKE === "true";
+const ENABLED = KORA_CONFIGURED && RUN_INTEGRATION_TESTS;
 
 /** The live Kora deployment this suite targets serves devnet. */
 const CLUSTER = "devnet" as const;

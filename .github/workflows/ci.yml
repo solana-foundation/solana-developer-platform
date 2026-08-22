@@ -470,7 +470,7 @@ jobs:
         include:
           - name: Kora / Live Smoke
             provider: kora
-            test_files: src/tests/kora.test.ts src/tests/kora-flow.test.ts
+            test_files: src/tests/kora.test.ts src/tests/kora-flow.test.ts src/tests/kora-earn-sponsorship.test.ts
             rpc_provider: alchemy
             custody_provider: privy
           - name: Surfpool / Issuance Core
