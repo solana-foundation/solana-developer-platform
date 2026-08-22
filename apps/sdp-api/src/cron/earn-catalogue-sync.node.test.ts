@@ -16,6 +16,7 @@ import {
 } from "./earn-catalogue-sync";
 
 const SLOT_KEY = "cron:earn-catalogue-sync:slot";
+const MONITOR_SLOT_KEY = "cron:earn-catalogue-sync:disabled-monitor-slot";
 
 // Mutable registry the module reads through the mocked @sdp/earn binding —
 // tests install providers per case, proving the sync is registry-driven and
@@ -227,6 +228,30 @@ describe("runEarnCatalogueSyncIfDue", () => {
 
     await runEarnCatalogueSyncIfDue(env, observability);
 
+    expect(observability.withMonitor).toHaveBeenCalledExactlyOnceWith(
+      EARN_CATALOGUE_SYNC_MONITOR,
+      expect.any(Function),
+      { schedule: { type: "crontab", value: EARN_CATALOGUE_SYNC_CRON } }
+    );
+  });
+
+  it("keeps the hourly monitor healthy without running providers while Earn is disabled", async () => {
+    const listStrategies = vi.fn(async () => [makeSnapshot("vault-a")]);
+    installProviders({ ground: makeProvider("ground", listStrategies) });
+    const observability = makeObservability();
+
+    const outcome = await runEarnCatalogueSyncIfDue(env, observability, {
+      workEnabled: false,
+    });
+
+    expect(outcome).toBe("disabled");
+    expect(listStrategies).not.toHaveBeenCalled();
+    expect(createEarnRepository).not.toHaveBeenCalled();
+    expect(mocks.compareAndSet).toHaveBeenCalledExactlyOnceWith(
+      MONITOR_SLOT_KEY,
+      null,
+      expect.stringMatching(TOKEN_PATTERN)
+    );
     expect(observability.withMonitor).toHaveBeenCalledExactlyOnceWith(
       EARN_CATALOGUE_SYNC_MONITOR,
       expect.any(Function),
