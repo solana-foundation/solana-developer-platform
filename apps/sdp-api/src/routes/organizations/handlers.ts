@@ -9,6 +9,7 @@ import {
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
+import { refreshApiKeyCache } from "@/lib/api-key-cache";
 import { getAuth } from "@/lib/auth";
 import { getClientIp } from "@/lib/client-ip";
 import { AppError, badRequest, notFound } from "@/lib/errors";
@@ -260,6 +261,52 @@ export const deleteOrganization = async (c: AppContext) => {
       .bind(orgId),
   ]);
 
+  // Query the hashes AFTER the revocation batch commits: a key created
+  // concurrently with this request still gets revoked by the batch, and a
+  // pre-batch snapshot would miss it — leaving its cached credentials
+  // active for the full TTL.
+  const orgKeyHashes = await db
+    .prepare("SELECT key_hash FROM api_keys WHERE organization_id = ?")
+    .bind(orgId)
+    .all<{ key_hash: string }>();
+
+  // Push the revoked state into the auth cache for every one of the org's
+  // keys before reporting success — otherwise cached entries keep
+  // authenticating for the remainder of the cache TTL. The batch above is
+  // already committed and memberships removed, so a transient cache error
+  // must not abort the request into a state the caller cannot retry: failed
+  // hashes are retried with backoff before this handler answers, and only
+  // keys that never succeed become the 500 below (which the per-minute
+  // reconciliation sweep then repairs from the revoked rows).
+  let pendingHashes = (orgKeyHashes.results ?? []).map((row) => row.key_hash);
+  let refreshFailures: unknown[] = [];
+  for (let attempt = 0; attempt < 3 && pendingHashes.length > 0; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+    }
+    const results = await Promise.allSettled(
+      pendingHashes.map((hash) => refreshApiKeyCache(db, c.var.kv.apiKeys, hash))
+    );
+    const stillPending: string[] = [];
+    refreshFailures = [];
+    results.forEach((result, index) => {
+      const hash = pendingHashes[index];
+      if (hash === undefined) {
+        return;
+      }
+      if (result.status === "rejected") {
+        stillPending.push(hash);
+        refreshFailures.push(result.reason);
+      } else if (!result.value) {
+        // A false return means CAS contention left a possibly-stale entry
+        // cached — as unresolved as a thrown write error.
+        stillPending.push(hash);
+        refreshFailures.push(new Error("api key cache refresh remained contended"));
+      }
+    });
+    pendingHashes = stillPending;
+  }
+
   const sessionService = new SessionService(db);
   await sessionService
     .revokeOrganizationSessions(orgId)
@@ -274,6 +321,17 @@ export const deleteOrganization = async (c: AppContext) => {
     resourceType: "organization",
     resourceId: orgId,
   });
+
+  if (pendingHashes.length > 0) {
+    getLogger().error(
+      { errors: refreshFailures },
+      "Failed to invalidate cached API keys after organization deletion"
+    );
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "Organization was deleted but some cached API keys could not be invalidated yet; the reconciliation job repairs them automatically"
+    );
+  }
 
   return noContent(c);
 };

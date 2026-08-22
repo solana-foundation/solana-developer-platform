@@ -10,10 +10,12 @@ import type { SdpEnvironment } from "@sdp/types";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { Context } from "hono";
 import { getDb } from "@/db";
+import { refreshApiKeyCache } from "@/lib/api-key-cache";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError, badRequest } from "@/lib/errors";
 import { invitationWasRevoked } from "@/lib/invitations";
 import { success } from "@/lib/response";
+import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import {
   ensureClerkOrganizationMapping,
@@ -91,18 +93,20 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
     return;
   }
 
-  await getDb(c.env).batch([
-    getDb(c.env)
+  const db = getDb(c.env);
+
+  await db.batch([
+    db
       .prepare(
         `UPDATE organizations
          SET status = 'deleted', updated_at = datetime('now')
          WHERE id = ?`
       )
       .bind(mapping.organization_id),
-    getDb(c.env)
+    db
       .prepare("UPDATE organization_members SET status = 'removed' WHERE organization_id = ?")
       .bind(mapping.organization_id),
-    getDb(c.env)
+    db
       .prepare(
         `UPDATE api_keys
          SET status = 'revoked', revoked_at = datetime('now')
@@ -111,12 +115,53 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
       .bind(mapping.organization_id),
   ]);
 
-  const sessionService = new SessionService(getDb(c.env));
+  // Query the hashes AFTER the revocation batch commits: a key created
+  // concurrently with this webhook still gets revoked by the batch, and a
+  // pre-batch snapshot would miss it — leaving its cached credentials
+  // active for the full TTL.
+  const orgKeyHashes = await db
+    .prepare("SELECT key_hash FROM api_keys WHERE organization_id = ?")
+    .bind(mapping.organization_id)
+    .all<{ key_hash: string }>();
+
+  // Webhooks are a KV-free path (no c.var.kv), so build the store set
+  // directly — it shares the process-wide Redis client. Same invariant as
+  // the REST deletion: revoked keys must not keep authenticating from cache
+  // for the remainder of the TTL. allSettled so one failed refresh cannot
+  // skip session revocation; any failure is rethrown afterwards so the
+  // webhook 500s and Clerk redelivers (the whole handler is idempotent).
+  const apiKeysKV = createKVStoreSet(c.env).apiKeys;
+  const cacheRefreshes = await Promise.allSettled(
+    (orgKeyHashes.results ?? []).map((row) => refreshApiKeyCache(db, apiKeysKV, row.key_hash))
+  );
+
+  const sessionService = new SessionService(db);
   await sessionService
     .revokeOrganizationSessions(mapping.organization_id)
     .catch((error) =>
       getLogger().error({ error }, "Failed to revoke sessions after organization deletion")
     );
+
+  // A rejected refresh and one that resolved false (CAS contention left a
+  // possibly-stale entry cached) are equally unresolved.
+  const failedRefreshes: unknown[] = [];
+  for (const result of cacheRefreshes) {
+    if (result.status === "rejected") {
+      failedRefreshes.push(result.reason);
+    } else if (!result.value) {
+      failedRefreshes.push(new Error("api key cache refresh remained contended"));
+    }
+  }
+  if (failedRefreshes.length > 0) {
+    getLogger().error(
+      { errors: failedRefreshes },
+      "Failed to invalidate cached API keys after webhook organization deletion"
+    );
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "Organization was deleted but some cached API keys could not be invalidated yet; Clerk redelivery and the reconciliation job repair them"
+    );
+  }
 }
 
 async function resolveVerifiedUserEmail(env: Env, userId: string): Promise<string | null> {

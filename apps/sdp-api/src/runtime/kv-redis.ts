@@ -48,7 +48,11 @@ if ARGV[1] == 'missing' then
 elseif current ~= ARGV[2] then
   return 0
 end
-redis.call('SET', KEYS[1], ARGV[3])
+if ARGV[4] ~= '' then
+  redis.call('SET', KEYS[1], ARGV[3], 'PX', ARGV[4])
+else
+  redis.call('SET', KEYS[1], ARGV[3])
+end
 return 1
 `;
 
@@ -152,9 +156,17 @@ export class RedisKVStore implements KVStore {
     await client.del(this.namespaced(key));
   }
 
-  async compareAndSet(key: string, expected: string | null, value: string): Promise<boolean> {
+  async compareAndSet(
+    key: string,
+    expected: string | null,
+    value: string,
+    options?: KVPutOptions
+  ): Promise<boolean> {
     const client = await this.clientPromise;
-    const args = expected === null ? ["missing", "", value] : ["present", expected, value];
+    // expirationTtl is seconds; the Lua script applies it as PX milliseconds.
+    const ttlMs = options?.expirationTtl !== undefined ? String(options.expirationTtl * 1000) : "";
+    const args =
+      expected === null ? ["missing", "", value, ttlMs] : ["present", expected, value, ttlMs];
     let result: unknown;
     try {
       result = await client.evalsha(COMPARE_AND_SET_SHA, 1, this.namespaced(key), ...args);

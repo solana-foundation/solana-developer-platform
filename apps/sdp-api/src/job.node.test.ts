@@ -11,6 +11,7 @@ import { nodeObservability } from "@/runtime/observability-node";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
+import { reconcileRevokedApiKeyCache } from "@/services/jobs/reconcile-revoked-api-key-cache";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
 import { runDueWorkflowExecutions } from "@/services/jobs/run-workflow-executions";
@@ -131,6 +132,10 @@ vi.mock("@/services/jobs/track-pending-withdrawals", () => ({
   trackPendingWithdrawals: vi.fn(async () => {}),
 }));
 
+vi.mock("@/services/jobs/reconcile-revoked-api-key-cache", () => ({
+  reconcileRevokedApiKeyCache: vi.fn(async () => ({ scanned: 0, repaired: 0 })),
+}));
+
 vi.mock("@/services/jobs/reconcile-sponsorship-budgets", () => ({
   reconcileSponsorshipBudgets: vi.fn(async () => {}),
 }));
@@ -165,6 +170,9 @@ describe("runCronJob", () => {
     vi.mocked(reconcileSponsorshipBudgets)
       .mockReset()
       .mockResolvedValue(undefined as never);
+    vi.mocked(reconcileRevokedApiKeyCache)
+      .mockReset()
+      .mockResolvedValue({ scanned: 0, repaired: 0 });
     vi.mocked(collectDueRecurringPayments)
       .mockReset()
       .mockResolvedValue({ recovered: 0, collected: 0, failed: 0, skipped: 0 });
@@ -212,6 +220,11 @@ describe("runCronJob", () => {
 
     await runCronJob();
 
+    // The revoked-key cache sweep is ungated and leads the transfers chain.
+    expect(reconcileRevokedApiKeyCache).toHaveBeenCalledTimes(1);
+    const sweepOrder = vi.mocked(reconcileRevokedApiKeyCache).mock.invocationCallOrder[0];
+    const transfersOrder = vi.mocked(trackPendingTransfers).mock.invocationCallOrder[0];
+    expect(sweepOrder).toBeLessThan(transfersOrder);
     expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
     expect(recoverApprovedWalletOperations).toHaveBeenCalledTimes(1);
     expect(reconcileSponsorshipBudgets).toHaveBeenCalledTimes(1);
