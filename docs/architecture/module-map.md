@@ -23,14 +23,13 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/helius-rings` | Helius Rings shielded-wallet domain types, state machine, and gateway port (devnet). | None |
 | `@sdp/issuance` | Token issuance domain services and Mosaic integration. | `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/kamino` | Kit-native Kamino K-Vault deposit/withdraw instruction plans over klend-sdk. | `@sdp/earn`, `@sdp/solana`, `@sdp/types` |
-| `@sdp/kit-augment` | Shared @solana/kit type augmentation for the generated Codama clients. | None |
 | `@sdp/payments` | Payment domain services, fee payment, and ramp providers. | `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/policy` | Wallet-operation policy engine: rule evaluation and enforcement orchestration. | `@sdp/solana`, `@sdp/types` |
 | `@sdp/private-channels` | Solana Private Channels gateway, auth, and instance clients. | `@sdp/rpc`, `@sdp/types` |
 | `@sdp/rpc` | Solana RPC clients, errors, and relay helpers. | `@sdp/types` |
 | `@sdp/solana` | Solana transaction and token-program services. | `@sdp/rpc`, `@sdp/types` |
-| `@sdp/spc-escrow` | Generated @solana/kit client for the Private Channels escrow program. | `@sdp/kit-augment` |
-| `@sdp/spc-withdraw` | Generated @solana/kit client for the Private Channels withdraw program. | `@sdp/kit-augment` |
+| `@sdp/spc-escrow` | Generated @solana/kit client for the Private Channels escrow program. | None |
+| `@sdp/spc-withdraw` | Generated @solana/kit client for the Private Channels withdraw program. | None |
 | `@sdp/types` | Shared runtime types, constants, and product contracts. | None |
 | `sdp-docs` | Public documentation site and generated API reference. | `@sdp/env-config`, `@sdp/types` |
 | `sdp-web` | Dashboard application. | `@sdp/issuance`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/solana`, `@sdp/types` |
@@ -46,14 +45,13 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/helius-rings` -> None
 - `@sdp/issuance` -> `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/kamino` -> `@sdp/earn`, `@sdp/solana`, `@sdp/types`
-- `@sdp/kit-augment` -> None
 - `@sdp/payments` -> `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/policy` -> `@sdp/solana`, `@sdp/types`
 - `@sdp/private-channels` -> `@sdp/rpc`, `@sdp/types`
 - `@sdp/rpc` -> `@sdp/types`
 - `@sdp/solana` -> `@sdp/rpc`, `@sdp/types`
-- `@sdp/spc-escrow` -> `@sdp/kit-augment`
-- `@sdp/spc-withdraw` -> `@sdp/kit-augment`
+- `@sdp/spc-escrow` -> None
+- `@sdp/spc-withdraw` -> None
 - `@sdp/types` -> None
 - `sdp-docs` -> `@sdp/env-config`, `@sdp/types`
 - `sdp-web` -> `@sdp/issuance`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/solana`, `@sdp/types`

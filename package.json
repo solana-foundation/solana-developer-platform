@@ -10,7 +10,7 @@
   "pnpm": {
     "peerDependencyRules": {
       "allowedVersions": {
-        "@solana/kit": "^8.0.0"
+        "@solana/kit": "^6.5.0"
       }
     },
     "overrides": {
@@ -109,17 +109,17 @@
     "catalog": {
       "@solana-program/system": "0.13.0",
       "@solana-program/token-2022": "0.14.0",
-      "@solana/addresses": "8.0.0",
-      "@solana/codecs": "8.0.0",
-      "@solana/instructions": "8.0.0",
-      "@solana/keys": "8.0.0",
-      "@solana/kit": "8.0.0",
+      "@solana/addresses": "6.10.0",
+      "@solana/codecs": "6.10.0",
+      "@solana/instructions": "6.10.0",
+      "@solana/keys": "6.10.0",
+      "@solana/kit": "6.10.0",
       "@solana/mosaic-sdk": "0.1.1",
-      "@solana/programs": "8.0.0",
-      "@solana/rpc": "8.0.0",
-      "@solana/signers": "8.0.0",
-      "@solana/sysvars": "8.0.0",
-      "@solana/transactions": "8.0.0"
+      "@solana/programs": "6.10.0",
+      "@solana/rpc": "6.10.0",
+      "@solana/signers": "6.10.0",
+      "@solana/sysvars": "6.10.0",
+      "@solana/transactions": "6.10.0"
     }
   }
 }
