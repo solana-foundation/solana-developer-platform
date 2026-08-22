@@ -191,7 +191,8 @@ async function clearKvStore(store: KVStore) {
 async function seedCustodyWalletForOrg(
   organizationId: string,
   publicKey: string,
-  suffix: string
+  suffix: string,
+  options: { walletStatus?: string } = {}
 ): Promise<void> {
   const db = getDb(env);
   await db
@@ -206,9 +207,15 @@ async function seedCustodyWalletForOrg(
     .prepare(
       `INSERT INTO custody_wallets
          (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-       VALUES (?, ?, ?, ?, 'Faucet Wallet', 'transfer', 'active')`
+       VALUES (?, ?, ?, ?, 'Faucet Wallet', 'transfer', ?)`
     )
-    .bind(`cw_faucet_${suffix}`, `cfg_faucet_${suffix}`, `wallet_faucet_${suffix}`, publicKey)
+    .bind(
+      `cw_faucet_${suffix}`,
+      `cfg_faucet_${suffix}`,
+      `wallet_faucet_${suffix}`,
+      publicKey,
+      options.walletStatus ?? "active"
+    )
     .run();
 }
 
@@ -714,6 +721,20 @@ describe("RPC Relay Routes", () => {
       } finally {
         fetchSpy.mockRestore();
       }
+    });
+
+    it("refuses the tenant's own wallet once it is no longer active", async () => {
+      await seedCustodyWalletForOrg(
+        TEST_ORG.id,
+        "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T",
+        "inactive_wallet",
+        { walletStatus: "inactive" }
+      );
+
+      const response = await relayAirdrop(
+        airdropRequest("4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T")
+      );
+      expect(response.status).toBe(403);
     });
 
     it("refuses a malformed destination as bad input rather than forwarding it", async () => {

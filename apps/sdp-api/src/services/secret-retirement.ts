@@ -31,6 +31,7 @@ import {
   deleteWorkflowSecretRetirement,
   insertWorkflowSecretRetirement,
 } from "@/db/repositories/workflow-secret-retirement.repository.postgres";
+import { serviceUnavailable } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import {
   createCredentialSecretStore,
@@ -137,8 +138,13 @@ function logOrphanRisk(
  * fails — or a process that dies before running one — leaves the obligation
  * standing for the sweeper.
  *
- * Best effort by design: if this cannot be written the caller is no worse off
- * than before, so it must not fail a create that would otherwise succeed.
+ * Fails closed: this record is the ONLY thing that makes worker loss safe, so
+ * if it cannot be written the create must not proceed into the unprotected
+ * window. The version is taken back instead and the request refused — the
+ * caller retries against a clean slate, and no credential is ever live with
+ * nothing on record that it exists.
+ *
+ * @throws AppError SERVICE_UNAVAILABLE when the obligation cannot be recorded.
  */
 export async function queuePendingSecretVersion(
   env: Env,
@@ -154,12 +160,16 @@ export async function queuePendingSecretVersion(
     stored as StoredCredentialSecret,
     "written for a row that has not committed yet"
   );
-  if (!queued) {
-    logOrphanRisk(context, stored as StoredCredentialSecret, {
-      reason: "secret_precommit_queue_failed",
-      queuedForRetry: false,
-    });
+  if (queued) {
+    return;
   }
+  // Destroy now, while this process still remembers the version. If even that
+  // fails, `destroySecretVersion` re-attempts the queue and, as the last
+  // resort, logs the orphan risk with queuedForRetry:false — loud, not silent.
+  await destroySecretVersion(env, stored, context);
+  throw serviceUnavailable(
+    "Credential cleanup could not be durably recorded; nothing was created — retry the request"
+  );
 }
 
 /**

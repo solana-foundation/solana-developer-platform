@@ -10,10 +10,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
-import {
-  deactivateRpcConnection,
-  submitRpcConnection,
-} from "@/services/rpc-connection.service";
+import { deactivateRpcConnection, submitRpcConnection } from "@/services/rpc-connection.service";
 import { RpcConnectionStore } from "@/services/stores/rpc-connection.store";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -22,6 +19,32 @@ import type { Env } from "@/types/env";
 const gcpMock = vi.hoisted(() => ({
   destroyVersion: vi.fn<(input: { secretVersionRef: string }) => Promise<void>>(),
 }));
+
+const retirementQueueControl = vi.hoisted(() => ({ failRecordRetirement: false }));
+
+// The durable queue is a real table in these tests; this wrapper only exists
+// so one test can make the obligation insert fail and prove the create fails
+// closed instead of proceeding into the unprotected window.
+vi.mock("@/db/repositories", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/db/repositories")>();
+  return {
+    ...actual,
+    createWorkflowSecretRetirementsRepository: (
+      ...args: Parameters<typeof actual.createWorkflowSecretRetirementsRepository>
+    ) => {
+      const repository = actual.createWorkflowSecretRetirementsRepository(...args);
+      return {
+        ...repository,
+        recordRetirement: async (input: Parameters<typeof repository.recordRetirement>[0]) => {
+          if (retirementQueueControl.failRecordRetirement) {
+            throw new Error("retirement queue unavailable");
+          }
+          return repository.recordRetirement(input);
+        },
+      };
+    },
+  };
+});
 
 // A stand-in GCP store: the test environment has no Secret Manager, and what
 // is under test is the bookkeeping around the destroy, not the destroy itself.
@@ -137,6 +160,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  retirementQueueControl.failRecordRetirement = false;
   gcpMock.destroyVersion.mockReset();
   gcpMock.destroyVersion.mockResolvedValue(undefined);
   await getDb(appEnv).execute(
@@ -154,6 +178,24 @@ describe("BYOK RPC secret retirement", () => {
     // provisional obligation must have been cancelled by the same commit.
     expect(await retirementRows("projects/sdp-test/secrets/pcred_%")).toEqual([]);
     expect(gcpMock.destroyVersion).not.toHaveBeenCalled();
+  });
+
+  it("refuses the create and takes the version back when the obligation cannot be recorded", async () => {
+    retirementQueueControl.failRecordRetirement = true;
+
+    await expect(
+      submitRpcConnection(serviceContext(), submitInput("Unrecordable"))
+    ).rejects.toThrow(/durably recorded/i);
+
+    // Fail closed: the version this request wrote was destroyed immediately —
+    // no credential may exist with no durable record that it exists...
+    expect(gcpMock.destroyVersion).toHaveBeenCalledTimes(1);
+    // ...and no rows were created for a connection that never came to be.
+    const credentials = await getDb(appEnv).queryMany<{ id: string }>(
+      `SELECT id FROM provider_credentials WHERE organization_id = ? AND label = 'Unrecordable'`,
+      [ORG_ID]
+    );
+    expect(credentials).toEqual([]);
   });
 
   it("keeps a durable obligation when the transaction fails and the destroy also fails", async () => {

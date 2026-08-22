@@ -72,17 +72,24 @@ export async function assertFaucetDestinationsOwned(
 
   const addresses = [...destinations];
   const placeholders = addresses.map(() => "?").join(", ");
+  // Only live inventory counts: a wallet that was deactivated — or whose
+  // owning config/connection was — is no longer a wallet the tenant operates,
+  // so the faucet must not fund it.
   const owned = await db.queryMany<{ public_key: string }>(
     `SELECT w.public_key
        FROM custody_wallets w
        JOIN custody_configs c ON c.id = w.custody_config_id
       WHERE c.organization_id = ?
+        AND c.status = 'active'
+        AND w.status = 'active'
         AND w.public_key IN (${placeholders})
       UNION
      SELECT w.public_key
        FROM custody_wallets w
        JOIN custody_connections cc ON cc.id = w.custody_connection_id
       WHERE cc.organization_id = ?
+        AND cc.status = 'active'
+        AND w.status = 'active'
         AND w.public_key IN (${placeholders})`,
     [organizationId, ...addresses, organizationId, ...addresses]
   );

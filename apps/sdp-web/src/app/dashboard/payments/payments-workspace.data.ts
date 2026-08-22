@@ -672,14 +672,8 @@ export async function createTransferBatch(
     headers: { "Content-Type": "application/json", [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
     body: JSON.stringify(input),
   });
-  const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;
-  if (response.status === 202 && isSigningPendingEnvelope(body)) {
-    return {
-      kind: "approval_pending",
-      message: getApiError(body, t("DashboardPayments.batchSend.resultApprovalPending")),
-    };
-  }
   if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;
     throw new TransferBatchRequestError(
       getApiError(
         body,
@@ -687,6 +681,15 @@ export async function createTransferBatch(
       ),
       response.status
     );
+  }
+  const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;
+  // 202 is inside `response.ok`: an approval hold is an accepted request whose
+  // execution is parked, not a refusal.
+  if (response.status === 202 && isSigningPendingEnvelope(body)) {
+    return {
+      kind: "approval_pending",
+      message: getApiError(body, t("DashboardPayments.batchSend.resultApprovalPending")),
+    };
   }
   if (!body.data?.batch || !body.data.recipients || !body.data.transfers) {
     throw new Error(t("DashboardPayments.workspace.batchTransferMissing"));
