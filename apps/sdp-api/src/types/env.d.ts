@@ -299,6 +299,10 @@ export interface Env {
   // needs both; clearing MARKETS_ENABLED dark-launches the whole module.
   MARKETS_ENABLED?: string;
   EARN_ENABLED?: string;
+  // Whether Kora pays fees AND share-ATA rent for Earn vault movements.
+  // Narrowed to devnet by `isEarnVaultSponsorshipEnabled`, never global: one
+  // process serves both clusters and withdrawals are not environment-gated.
+  EARN_VAULT_FEE_SPONSORSHIP_ENABLED?: string;
 
   // Earn vault-infra provider configuration
   VEDA_API_KEY?: string;
