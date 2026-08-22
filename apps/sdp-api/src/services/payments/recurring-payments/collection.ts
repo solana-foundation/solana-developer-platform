@@ -1241,49 +1241,56 @@ export async function collectRecurringPayment(input: {
       },
     });
 
-    transfer = await paymentsRepo.createTransfer({
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      walletId: input.sourceWallet.walletId,
-      counterpartyId: input.recurringPayment.counterparty_id,
-      sourceAddress: input.sourceWallet.publicKey,
-      destinationAddress: input.recurringPayment.destination_address,
-      token: input.recurringPayment.token,
-      amount: input.recurringPayment.amount,
-      memo: null,
-      type: "transfer",
-      direction: "outbound",
-      status: "processing",
-      provider: null,
-      providerReference: null,
-      deliveryMode: null,
-      fiatCurrency: null,
-      fiatAmount: null,
-      providerData: {
-        recurringPaymentId: input.recurringPayment.id,
-        subscriptionId: subscription.id,
-        collectionDueAt: dueAt,
-      },
-      serializedTx: null,
-      signature: null,
-      slot: null,
-      initiatedByKeyId: input.initiatedByKeyId,
+    const claimedAttempt = attempt;
+    const linkedCollection = await getDb(input.env).transaction(async (tx) => {
+      const transactionPaymentsRepo = createPostgresPaymentsRepository(tx, tenantScope(input));
+      const transactionSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+      const createdTransfer = await transactionPaymentsRepo.createTransfer({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        walletId: input.sourceWallet.walletId,
+        counterpartyId: input.recurringPayment.counterparty_id,
+        sourceAddress: input.sourceWallet.publicKey,
+        destinationAddress: input.recurringPayment.destination_address,
+        token: input.recurringPayment.token,
+        amount: input.recurringPayment.amount,
+        memo: null,
+        type: "transfer",
+        direction: "outbound",
+        status: "processing",
+        provider: null,
+        providerReference: null,
+        deliveryMode: null,
+        fiatCurrency: null,
+        fiatAmount: null,
+        providerData: {
+          recurringPaymentId: input.recurringPayment.id,
+          subscriptionId: subscription.id,
+          collectionDueAt: dueAt,
+        },
+        serializedTx: null,
+        signature: null,
+        slot: null,
+        initiatedByKeyId: input.initiatedByKeyId,
+      });
+      if (!createdTransfer) {
+        throw new AppError("INTERNAL_ERROR", "Failed to create collection transfer");
+      }
+      const linkedAttempt = await transactionSubscriptionsRepo.updateCollectionAttempt({
+        attemptId: claimedAttempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        transferId: createdTransfer.id,
+        status: "processing",
+        updatedAt: new Date().toISOString(),
+      });
+      if (!linkedAttempt || linkedAttempt.transfer_id !== createdTransfer.id) {
+        throw new AppError("INTERNAL_ERROR", "Failed to link collection attempt to transfer");
+      }
+      return { attempt: linkedAttempt, transfer: createdTransfer };
     });
-    if (!transfer) {
-      throw new AppError("INTERNAL_ERROR", "Failed to create collection transfer");
-    }
-    const linkedAttempt = await subscriptionsRepo.updateCollectionAttempt({
-      attemptId: attempt.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      transferId: transfer.id,
-      status: "processing",
-      updatedAt: new Date().toISOString(),
-    });
-    if (!linkedAttempt || linkedAttempt.transfer_id !== transfer.id) {
-      throw new AppError("INTERNAL_ERROR", "Failed to link collection attempt to transfer");
-    }
-    attempt = linkedAttempt;
+    attempt = linkedCollection.attempt;
+    transfer = linkedCollection.transfer;
     submissionStore = createTransferSignedSubmissionStore(paymentsRepo, transfer);
 
     const rpc = solanaRpc.createRpc(input.env);

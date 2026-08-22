@@ -2124,6 +2124,93 @@ describe("Payments routes — recurring", () => {
     expect(submission?.submission_started_at).toBeTruthy();
   });
 
+  it("rolls back the collection transfer when attempt linking fails", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    mockRecurringActivationRpc();
+    const signAndSendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature
+      )
+      .mockResolvedValueOnce(
+        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV" as Signature
+      );
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+      signAndSend: signAndSendMock,
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const activated = await activateRecurringPaymentForTest(headers);
+    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, activated.id)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
+      .bind(dueAt, activated.subscriptionId)
+      .run();
+
+    const createSubscriptionsRepository =
+      paymentSubscriptionsRepositoryPostgres.createPostgresPaymentSubscriptionsRepository;
+    const subscriptionsRepositorySpy = vi
+      .spyOn(paymentSubscriptionsRepositoryPostgres, "createPostgresPaymentSubscriptionsRepository")
+      .mockImplementation((db) => {
+        const repository = createSubscriptionsRepository(db);
+        return {
+          ...repository,
+          updateCollectionAttempt: vi.fn(async (input) => {
+            if (input.transferId && input.status === "processing") {
+              throw new Error("collection attempt link unavailable");
+            }
+            return repository.updateCollectionAttempt(input);
+          }),
+        };
+      });
+    let collectRes: Response;
+    try {
+      collectRes = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}/collect`,
+        { method: "POST", headers, body: "{}" },
+        env
+      );
+    } finally {
+      subscriptionsRepositorySpy.mockRestore();
+    }
+
+    expect(collectRes.status).toBe(500);
+    expect(sendTransactionMock).not.toHaveBeenCalled();
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+    const attempt = await getDb(env)
+      .prepare(
+        `SELECT status, transfer_id
+           FROM payment_subscription_collection_attempts
+          WHERE subscription_id = ? AND due_at = ?`
+      )
+      .bind(activated.subscriptionId, dueAt)
+      .first<{ status: string; transfer_id: string | null }>();
+    expect(attempt).toEqual({ status: "failed", transfer_id: null });
+    const transfers = await getDb(env)
+      .prepare(
+        `SELECT COUNT(*)::integer AS count
+           FROM payment_transfers
+          WHERE organization_id = ?
+            AND project_id = ?
+            AND provider_data ->> 'recurringPaymentId' = ?`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id, activated.id)
+      .first<{ count: number }>();
+    expect(transfers?.count).toBe(0);
+  });
+
   it("keeps ambiguous collections processing and rejects corrupt recovery signatures", async () => {
     const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
     const sourceSigner = await generateKeyPairSigner();
