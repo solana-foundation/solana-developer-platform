@@ -69,9 +69,7 @@ test("rejects a missing, duplicated, or mismatched managed cadence", () => {
 });
 
 test("rejects a missing, duplicated, or mismatched managed timeout", () => {
-  const cadence = [
-    ["SDP_MANAGED_RECONCILIATION_CRON", "*/3 * * * *"],
-  ];
+  const cadence = [["SDP_MANAGED_RECONCILIATION_CRON", "*/3 * * * *"]];
   assert.throws(
     () => verifyManagedReconciliationCadence("*/3 * * * *", jobDescription(cadence)),
     /exactly one positive SDP_MANAGED_RECONCILIATION_TIMEOUT_SECONDS/
@@ -92,10 +90,7 @@ test("rejects a missing, duplicated, or mismatched managed timeout", () => {
     () =>
       verifyManagedReconciliationCadence(
         "*/3 * * * *",
-        jobDescription(
-          [...cadence, ["SDP_MANAGED_RECONCILIATION_TIMEOUT_SECONDS", "180"]],
-          120
-        )
+        jobDescription([...cadence, ["SDP_MANAGED_RECONCILIATION_TIMEOUT_SECONDS", "180"]], 120)
       ),
     /timeout mismatch/
   );
