@@ -10,6 +10,7 @@ import {
   confirmTransaction,
   createRpcForSdk,
   type SimulationResult,
+  type SolanaRpcSdkBridge,
   simulateTransaction,
 } from "@sdp/rpc/solana";
 import type { TokenExtensionsConfig } from "@sdp/types";
@@ -21,9 +22,7 @@ import {
   generateKeyPairSigner,
   getBase64EncodedWireTransaction,
   getTransactionEncoder,
-  type Rpc,
   type Signature,
-  type SolanaRpcApi,
   signTransactionMessageWithSigners,
   type TransactionSigner,
 } from "@solana/kit";
@@ -291,7 +290,7 @@ export class Token2022Service {
 
   private async signAndSubmit(
     fullTx: FullTransaction,
-    rpc: Rpc<SolanaRpcApi>,
+    rpc: SolanaRpcSdkBridge<MosaicSdkRpc>,
     failureMessage: string
   ): Promise<{ signature: Signature; slot: bigint }> {
     if (this.feePayment) {

@@ -18,6 +18,7 @@ import {
   type ConfirmTransactionOptions,
   confirmTransaction,
   createRpcForSdk,
+  type SolanaRpcSdkBridge,
 } from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
@@ -32,9 +33,7 @@ import {
   getBase64EncodedWireTransaction,
   getTransactionEncoder,
   pipe,
-  type Rpc,
   type Signature,
-  type SolanaRpcApi,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
@@ -159,7 +158,7 @@ export class MosaicService {
   private env: MosaicIssuanceEnv;
   private signer: TransactionSigner;
   private feePayment?: FeePaymentPort;
-  private rpc: Rpc<SolanaRpcApi> & MosaicSdkRpc;
+  private rpc: SolanaRpcSdkBridge<MosaicSdkRpc>;
   private transactionFailedError: (message: string) => Error;
 
   constructor(
