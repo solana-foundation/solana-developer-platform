@@ -22,6 +22,11 @@ async function loadApiKeyFlash(): Promise<ApiKeyFlash | null> {
       credentials: "same-origin",
     })
       .then(async (response) => {
+        if (!response.ok) {
+          // 401 (logged out) and unexpected errors alike mean "no flash";
+          // the route already destroyed any pending cookie on its side.
+          return null;
+        }
         const payload = (await response.json()) as ApiKeyFlashResponse;
         return payload.flash;
       })

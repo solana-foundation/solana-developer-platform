@@ -164,8 +164,17 @@ export async function fillApiKeyCache(
   // Deploy-compat: readers from the previous deploy interpret an empty
   // binding list as unrestricted, so a selected-scope key without bindings
   // must never be cached. Fills of that key class authenticate from their
-  // own DB read and leave the slot empty (a miss for every reader).
+  // own DB read and leave the slot empty (a miss for every reader) — but
+  // only after the terminal-slot fence every other path gets. This class
+  // never installs, so no lost CAS can signal a raced revocation; the slot
+  // it deliberately leaves empty can only ever hold a revocation's terminal
+  // write or a hard-delete tombstone, and one observed here can only mean a
+  // commit newer than this fill's DB read.
   if (entry.walletScope === "selected" && (entry.walletBindings ?? []).length === 0) {
+    const fenced = await readTerminalSlotEntry(kv, cacheKey);
+    if (fenced) {
+      return fenced;
+    }
     return entry;
   }
   // Installs go in marked pending: readers treat them as misses until the

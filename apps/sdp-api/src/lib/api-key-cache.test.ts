@@ -114,6 +114,57 @@ function revokedRow(): Record<string, unknown> {
   };
 }
 
+describe("fillApiKeyCache deploy-compat class (selected scope, no bindings)", () => {
+  it("fences the uncacheable class against a revocation that raced the DB read", async () => {
+    // This class never installs, so no lost CAS can ever signal a raced
+    // revocation. The slot it deliberately leaves empty can only hold a
+    // revocation's terminal write (or tombstone) — landing there strictly
+    // after this fill's DB read. Skipping the fence would authorize the
+    // pre-revocation snapshot.
+    const revoked = entryWithStatus("revoked");
+    const kv = {
+      ...contendedStore(null),
+      get: async () => JSON.stringify(revoked),
+      compareAndSet: async () => {
+        throw new Error("this key class must never be cached");
+      },
+      put: async () => {
+        throw new Error("this key class must never be cached");
+      },
+    } as KVStore;
+
+    const adopted = await fillApiKeyCache(dbThatMustNotBeRead(), kv, KEY_HASH, {
+      ...entryWithStatus("active"),
+      walletScope: "selected",
+      walletBindings: [],
+    });
+
+    expect(adopted.status).toBe("revoked");
+  });
+
+  it("still leaves the slot untouched when the fence observes nothing", async () => {
+    const kv = {
+      ...contendedStore(null),
+      get: async () => null,
+      compareAndSet: async () => {
+        throw new Error("this key class must never be cached");
+      },
+      put: async () => {
+        throw new Error("this key class must never be cached");
+      },
+    } as KVStore;
+    const entry: CachedApiKey = {
+      ...entryWithStatus("active"),
+      walletScope: "selected",
+      walletBindings: [],
+    };
+
+    const adopted = await fillApiKeyCache(dbThatMustNotBeRead(), kv, KEY_HASH, entry);
+
+    expect(adopted).toBe(entry);
+  });
+});
+
 describe("fillApiKeyCache under CAS exhaustion", () => {
   it("adopts the revoked state that won the slot instead of its own stale snapshot", async () => {
     const revoked = entryWithStatus("revoked");
