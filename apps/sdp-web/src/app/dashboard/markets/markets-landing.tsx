@@ -32,7 +32,7 @@ function MarketsPathCard({
           <span className="block text-xs font-medium uppercase tracking-wide text-tertiary">
             {audience}
           </span>
-          <span className="relative inline-block text-[22px] leading-none font-medium text-primary after:absolute after:left-0 after:-bottom-1 after:h-px after:w-full after:origin-left after:scale-x-0 after:bg-current after:transition-transform after:duration-200 group-hover:after:scale-x-100 group-focus-visible:after:scale-x-100 motion-reduce:after:transition-none">
+          <span className="relative inline-block text-[22px] leading-none font-medium text-primary after:absolute after:left-0 after:-bottom-1 after:h-px after:w-0 after:bg-current after:transition-[width] after:duration-200 group-hover:after:w-full group-focus-visible:after:w-full motion-reduce:after:transition-none">
             {title}
           </span>
           <span className="block max-w-md pt-0.5 text-sm leading-6 text-tertiary">
