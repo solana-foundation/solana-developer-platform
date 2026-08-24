@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { getLogger } from "@/runtime/logger";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import {
   type activateRpcConnection,
@@ -161,11 +162,12 @@ describe("deactivateRpcConnection", () => {
     expect(row?.encrypted_secret_payload).toBeNull();
   });
 
-  it("still deactivates when destroying the secret version fails", async () => {
+  it("still deactivates and logs the orphan risk when destroying the secret version fails", async () => {
     const connectionId = `${CONNECTION_ID}_orphan`;
     const credentialId = `${CREDENTIAL_ID}_orphan`;
     await seedActiveConnection(connectionId, credentialId);
     destroyVersion.mockRejectedValueOnce(new Error("gcp unavailable"));
+    const logError = vi.spyOn(getLogger(), "error");
 
     const result = await deactivateRpcConnection(serviceContext(), connectionId);
 
@@ -175,6 +177,32 @@ describe("deactivateRpcConnection", () => {
       .bind(credentialId)
       .first<{ status: string }>();
     expect(row?.status).toBe("deactivated");
+    expect(logError).toHaveBeenCalledWith(
+      expect.objectContaining({ provider_credential_id: credentialId }),
+      "rpc_connection_secret_orphan_risk"
+    );
+  });
+
+  it("rolls back the connection flip when the credential cannot be deactivated", async () => {
+    const connectionId = `${CONNECTION_ID}_torn`;
+    const credentialId = `${CREDENTIAL_ID}_torn`;
+    await seedActiveConnection(connectionId, credentialId);
+    await getDb(appEnv)
+      .prepare(
+        `UPDATE provider_credentials
+            SET status = 'deactivated', deactivated_at = sdp_iso_now()
+          WHERE id = ?`
+      )
+      .bind(credentialId)
+      .run();
+
+    await expect(deactivateRpcConnection(serviceContext(), connectionId)).rejects.toThrow();
+
+    const row = await getDb(appEnv)
+      .prepare(`SELECT status FROM rpc_connections WHERE id = ?`)
+      .bind(connectionId)
+      .first<{ status: string }>();
+    expect(row?.status).toBe("active");
   });
 
   it("refuses a second deactivation", async () => {

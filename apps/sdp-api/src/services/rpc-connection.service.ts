@@ -11,7 +11,7 @@ import type { Context } from "hono";
 import { getDb } from "@/db";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
 import { getAuth } from "@/lib/auth";
-import { badRequest, conflict, forbidden, notFound } from "@/lib/errors";
+import { badRequest, conflict, forbidden, internalError, notFound } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import {
   type CredentialSecretStorageBackend,
@@ -384,19 +384,32 @@ export async function deactivateRpcConnection(
     scopeKeys,
   });
 
-  const deactivated = await store.deactivateConnection({
-    organizationId: auth.organizationId,
-    connectionId,
-    scopeKeys,
-  });
-  if (!deactivated) {
-    throw conflict("The RPC connection is already deactivated");
-  }
-
-  await store.deactivateConnectionCredential({
-    organizationId: auth.organizationId,
-    connectionId,
-    scopeKeys,
+  // The connection and credential flips share one transaction: a crash
+  // between them would leave a deactivated connection whose retry 409s while
+  // the withdrawn credential silently stays active — the exact retention this
+  // endpoint exists to end. The Secret Manager destroy stays outside; it is
+  // best effort and must not roll back the committed deactivation.
+  const deactivated = await getDb(c.env).transaction(async (tx) => {
+    const txStore = new RpcConnectionStore(tx);
+    const row = await txStore.deactivateConnection({
+      organizationId: auth.organizationId,
+      connectionId,
+      scopeKeys,
+      executor: tx,
+    });
+    if (!row) {
+      throw conflict("The RPC connection is already deactivated");
+    }
+    const credentialFlips = await txStore.deactivateConnectionCredential({
+      organizationId: auth.organizationId,
+      connectionId,
+      scopeKeys,
+      executor: tx,
+    });
+    if (credentialFlips !== 1) {
+      throw internalError("The credential behind this RPC connection did not deactivate");
+    }
+    return row;
   });
 
   await destroyConnectionSecretBestEffort(c, credential);
