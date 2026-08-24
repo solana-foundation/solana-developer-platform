@@ -1,6 +1,9 @@
-import { redirect } from "next/navigation";
-import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import { notFound } from "next/navigation";
+import { earn } from "@/flags";
+import { MarketsLanding } from "./markets-landing";
 
-export default function MarketsPage() {
-  redirect(DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions);
+/** Both paths this page offers gate on earn, so the chooser inherits the same gate rather than rendering two dead cards. */
+export default async function MarketsPage() {
+  if (!(await earn())) notFound();
+  return <MarketsLanding />;
 }
