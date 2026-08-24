@@ -12,6 +12,12 @@
  *   reports a retriable failure instead of a success that leaves the old
  *   authorization live for the remaining cache TTL.
  *
+ * Rotation inverts the second guarantee on purpose: its response carries the
+ * replacement key's one-time secret, so failing the request over the old
+ * key's cache refresh would push the caller into rotating again and minting
+ * a second live credential. Rotation must deliver, and the reconciliation
+ * sweep — not a client retry — repairs the old key's cached entry.
+ *
  * Contention is simulated by mocking createKVStoreSet so compareAndSet on
  * `key:*` entries reports a lost race while armed — persistently, or for a
  * set number of calls.
@@ -61,6 +67,9 @@ vi.mock("@/runtime/kv-redis", async (importOriginal) => {
 
 import { getDb } from "@/db";
 import app from "@/index";
+import { apiKeyCacheKey } from "@/lib/api-key-cache";
+import { createKVStoreSet } from "@/runtime/kv-redis";
+import { reconcileRevokedApiKeyCache } from "@/services/jobs/reconcile-revoked-api-key-cache";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
@@ -220,5 +229,55 @@ describe("API key update with contended cache refresh", () => {
     // The retried update converges and the reduction takes effect.
     expect(await reduceTargetPermissions()).toBe(200);
     expect(await targetKeyListStatus()).toBe(403);
+  });
+
+  it("delivers the rotation once even when the old key's cache refresh never lands", async () => {
+    kvContention.contendApiKeyCas = true;
+
+    const res = await app.request(
+      `/v1/api-keys/${TARGET_KEY.id}/rotate`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${ADMIN_KEY.raw}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({}),
+      },
+      env
+    );
+
+    // The one-time secret must be delivered despite the failed refresh: a
+    // 500 would push the caller into rotating again, minting a second live
+    // credential while this one's secret is lost with the error response.
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { data: { apiKey: { key?: string } } };
+    expect(body.data.apiKey.key).toBeTruthy();
+
+    // Exactly one replacement key was created.
+    const replacements = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM api_keys WHERE rotated_from = ?")
+      .bind(TARGET_KEY.id)
+      .first<{ count: number }>();
+    expect(Number(replacements?.count)).toBe(1);
+
+    // The store recovers; no client retry exists for rotation, so the
+    // reconciliation sweep is what lands the old key's deadline in cache.
+    kvContention.contendApiKeyCas = false;
+    const outcome = await reconcileRevokedApiKeyCache(env);
+    expect(outcome.repaired).toBe(1);
+
+    const row = await getDb(env)
+      .prepare("SELECT rotation_deadline FROM api_keys WHERE id = ?")
+      .bind(TARGET_KEY.id)
+      .first<{ rotation_deadline: string | null }>();
+    expect(row?.rotation_deadline).toBeTruthy();
+
+    const targetHash = await hashString(TARGET_KEY.raw, env.API_KEY_PEPPER);
+    const cached = await createKVStoreSet(env).apiKeys.get<CachedApiKey>(
+      apiKeyCacheKey(targetHash),
+      "json"
+    );
+    expect(cached?.rotationDeadline).toBe(row?.rotation_deadline);
   });
 });

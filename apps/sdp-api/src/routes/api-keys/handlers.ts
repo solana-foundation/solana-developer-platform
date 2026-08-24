@@ -19,6 +19,7 @@ import { AppError, badRequest, forbidden, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { getLogger } from "@/runtime/logger";
 import { ApiKeyService } from "@/services/api-key.service";
 import {
   resolveCreateWalletScope,
@@ -72,6 +73,37 @@ async function ensureApiKeyCacheRefreshed(
     "INTERNAL_ERROR",
     "The change was saved but the key's cached authorization could not be refreshed yet; retry the request"
   );
+}
+
+/**
+ * Best-effort variant for rotation, the one mutation that must NOT fail the
+ * request over this write: the replacement key's one-time secret is already
+ * committed and exists only in the pending response, so a 500 here pushes
+ * the caller into rotating again — minting a second live credential while
+ * the first one's secret is lost. Retries absorb transient failures; a
+ * refresh that never lands is reported to the caller-independent
+ * reconciliation sweep, which enforces the old key's rotation deadline
+ * within its per-minute cadence.
+ */
+async function tryRefreshApiKeyCache(
+  db: DatabaseClient,
+  kv: Parameters<typeof refreshApiKeyCache>[1],
+  keyHash: string
+): Promise<boolean> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+    }
+    try {
+      if (await refreshApiKeyCache(db, kv, keyHash)) {
+        return true;
+      }
+    } catch {
+      // Thrown store errors retry like lost CAS rounds; the sweep is the
+      // durable path if the store stays down.
+    }
+  }
+  return false;
 }
 
 function resolveActor(c: AppContext): {
@@ -630,8 +662,20 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
   }
 
   // Refresh the old key's cache entry so its rotation deadline is enforced
-  // immediately instead of after the previous entry's TTL runs out.
-  await ensureApiKeyCacheRefreshed(getDb(c.env), c.var.kv.apiKeys, rotation.previousKeyHash);
+  // immediately instead of after the previous entry's TTL runs out. Best
+  // effort — see tryRefreshApiKeyCache: failing the request here would
+  // destroy the new secret and invite a duplicate rotation.
+  const oldKeyCacheRefreshed = await tryRefreshApiKeyCache(
+    getDb(c.env),
+    c.var.kv.apiKeys,
+    rotation.previousKeyHash
+  );
+  if (!oldKeyCacheRefreshed) {
+    getLogger().error(
+      { keyId },
+      "Rotated key cache refresh failed; the reconciliation sweep enforces the rotation deadline"
+    );
+  }
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));
