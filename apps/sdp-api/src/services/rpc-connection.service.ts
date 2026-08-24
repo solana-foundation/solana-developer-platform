@@ -393,9 +393,18 @@ export async function deactivateRpcConnection(
     throw conflict("The RPC connection is already deactivated");
   }
 
+  await store.deactivateConnectionCredential({
+    organizationId: auth.organizationId,
+    connectionId,
+    scopeKeys,
+  });
+
   await destroyConnectionSecretBestEffort(c, credential);
 
-  return toSafeWithCredential(deactivated, credential);
+  return toSafeWithCredential(
+    deactivated,
+    credential ? { ...credential, status: "deactivated" } : null
+  );
 }
 
 async function destroyConnectionSecretBestEffort(

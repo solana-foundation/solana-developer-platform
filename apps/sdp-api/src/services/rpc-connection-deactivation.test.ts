@@ -37,7 +37,11 @@ function serviceContext() {
   } as unknown as Parameters<typeof activateRpcConnection>[0];
 }
 
-async function seedActiveConnection(connectionId: string, credentialId: string): Promise<void> {
+async function seedActiveConnection(
+  connectionId: string,
+  credentialId: string,
+  backend: "gcp_secret_manager" | "encrypted_db" = "gcp_secret_manager"
+): Promise<void> {
   const db = getDb(appEnv);
   await db
     .prepare(
@@ -46,13 +50,15 @@ async function seedActiveConnection(connectionId: string, credentialId: string):
          storage_backend, secret_ref, secret_version_ref, encrypted_secret_payload,
          status, created_by
        ) VALUES (?, ?, NULL, 'helius', 'Tenant Helius', 'organization', 'stored',
-                 'gcp_secret_manager', ?, ?, NULL, 'active', ?)`
+                 ?, ?, ?, ?, 'active', ?)`
     )
     .bind(
       credentialId,
       ORG_ID,
-      "projects/p/secrets/sdp-provider-credentials-x",
-      SECRET_VERSION_REF,
+      backend,
+      backend === "gcp_secret_manager" ? "projects/p/secrets/sdp-provider-credentials-x" : null,
+      backend === "gcp_secret_manager" ? SECRET_VERSION_REF : null,
+      backend === "encrypted_db" ? "v2.stored-ciphertext" : null,
       USER_ID
     )
     .run();
@@ -120,6 +126,55 @@ describe("deactivateRpcConnection", () => {
 
     expect(result.status).toBe("deactivated");
     expect(destroyVersion).toHaveBeenCalledWith({ secretVersionRef: SECRET_VERSION_REF });
+  });
+
+  it("marks the provider credential deactivated alongside the connection", async () => {
+    const connectionId = `${CONNECTION_ID}_cred`;
+    const credentialId = `${CREDENTIAL_ID}_cred`;
+    await seedActiveConnection(connectionId, credentialId);
+
+    const result = await deactivateRpcConnection(serviceContext(), connectionId);
+
+    expect(result.providerCredential.status).toBe("deactivated");
+    const row = await getDb(appEnv)
+      .prepare(`SELECT status FROM provider_credentials WHERE id = ?`)
+      .bind(credentialId)
+      .first<{ status: string }>();
+    expect(row?.status).toBe("deactivated");
+  });
+
+  it("clears the stored ciphertext for an encrypted_db credential", async () => {
+    const connectionId = `${CONNECTION_ID}_db`;
+    const credentialId = `${CREDENTIAL_ID}_db`;
+    await seedActiveConnection(connectionId, credentialId, "encrypted_db");
+    destroyVersion.mockClear();
+
+    const result = await deactivateRpcConnection(serviceContext(), connectionId);
+
+    expect(result.status).toBe("deactivated");
+    expect(destroyVersion).not.toHaveBeenCalled();
+    const row = await getDb(appEnv)
+      .prepare(`SELECT status, encrypted_secret_payload FROM provider_credentials WHERE id = ?`)
+      .bind(credentialId)
+      .first<{ status: string; encrypted_secret_payload: string | null }>();
+    expect(row?.status).toBe("deactivated");
+    expect(row?.encrypted_secret_payload).toBeNull();
+  });
+
+  it("still deactivates when destroying the secret version fails", async () => {
+    const connectionId = `${CONNECTION_ID}_orphan`;
+    const credentialId = `${CREDENTIAL_ID}_orphan`;
+    await seedActiveConnection(connectionId, credentialId);
+    destroyVersion.mockRejectedValueOnce(new Error("gcp unavailable"));
+
+    const result = await deactivateRpcConnection(serviceContext(), connectionId);
+
+    expect(result.status).toBe("deactivated");
+    const row = await getDb(appEnv)
+      .prepare(`SELECT status FROM provider_credentials WHERE id = ?`)
+      .bind(credentialId)
+      .first<{ status: string }>();
+    expect(row?.status).toBe("deactivated");
   });
 
   it("refuses a second deactivation", async () => {
