@@ -4,7 +4,7 @@ import {
   earnButtonConfigurationPublicParamsSchema,
   earnButtonConfigurationSchema,
 } from "@/routes/earn/schemas";
-import { errorResponseSchema } from "../schemas";
+import { errorResponseSchema } from "../schemas/base";
 import {
   earnButtonConfigurationResponse,
   publicEarnButtonConfigurationResponse,
