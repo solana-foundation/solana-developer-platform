@@ -26,6 +26,7 @@ export default async function EarnButtonBuilderPage({
       earnHref="/dashboard/markets/earn"
       configurationLoad={configuration}
       key={configurationKey}
+      projectId={projectId ?? null}
       providerAccess={providerAccess}
       strategyId={typeof strategy === "string" ? strategy : undefined}
     />

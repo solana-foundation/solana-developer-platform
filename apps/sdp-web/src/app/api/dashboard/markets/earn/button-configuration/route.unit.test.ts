@@ -27,7 +27,11 @@ describe("/api/dashboard/markets/earn/button-configuration", () => {
   it("proxies only the configuration body on save", async () => {
     const request = new Request("https://dashboard.example.test/api/button-configuration", {
       method: "PUT",
-      headers: { "Content-Type": "application/json", Authorization: "Bearer browser-token" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer browser-token",
+        "x-project-id": "project_original",
+      },
       body: JSON.stringify({ strategyId: "strategy_1", style: "accent" }),
     });
 
@@ -37,6 +41,7 @@ describe("/api/dashboard/markets/earn/button-configuration", () => {
       request,
       traceSource: "route.dashboard.earn.button_configuration.upsert",
       path: "/v1/earn/button-configurations/current",
+      expectedProjectId: "project_original",
     });
   });
 });

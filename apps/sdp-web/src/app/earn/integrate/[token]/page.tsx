@@ -1,8 +1,6 @@
-import { EARN_BUTTON_ACCENT_COLOR_PATTERN, EARN_BUTTON_STYLES } from "@sdp/types";
 import { Code2Icon, ShieldCheckIcon } from "lucide-react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { z } from "zod";
 import { buildEarnServerIntegration } from "@/app/dashboard/markets/earn/earn-button-integration";
 import { EarnDepositButtonPreview } from "@/app/dashboard/markets/earn/earn-button-preview";
 import { resolvePlaygroundApiBaseUrl } from "@/app/dashboard/playground-api-data";
@@ -10,23 +8,12 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CodeBlock } from "@/components/ui/code-block";
 import { getTranslations } from "@/i18n/server";
+import { loadPublicEarnButtonConfiguration } from "./earn-integration-handoff-data";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
-
-const responseSchema = z.object({
-  data: z.object({
-    configuration: z.object({
-      strategyId: z.string().min(1),
-      strategyName: z.string().nullable(),
-      provider: z.string().nullable(),
-      style: z.enum(EARN_BUTTON_STYLES),
-      accentColor: z.string().regex(EARN_BUTTON_ACCENT_COLOR_PATTERN),
-    }),
-  }),
-});
 
 export default async function EarnIntegrationHandoffPage({
   params,
@@ -38,15 +25,8 @@ export default async function EarnIntegrationHandoffPage({
   const apiBaseUrl = resolvePlaygroundApiBaseUrl();
   if (!apiBaseUrl) throw new Error("SDP API base URL is not configured");
 
-  const response = await fetch(
-    `${apiBaseUrl}/v1/earn/button-configurations/public/${encodeURIComponent(token)}`,
-    { cache: "no-store" }
-  );
-  if (!response.ok) return notFound();
-
-  const parsed = responseSchema.safeParse(await response.json());
-  if (!parsed.success) notFound();
-  const { configuration } = parsed.data.data;
+  const configuration = await loadPublicEarnButtonConfiguration(apiBaseUrl, token);
+  if (!configuration) notFound();
 
   const integrationCode = buildEarnServerIntegration({ id: configuration.strategyId });
 

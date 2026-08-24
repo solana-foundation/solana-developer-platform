@@ -9,6 +9,7 @@ import { registerAuthPaths } from "./paths/auth";
 import { registerCompliancePaths } from "./paths/compliance";
 import { registerCounterpartyPaths } from "./paths/counterparties";
 import { registerCustodyPaths } from "./paths/custody";
+import { registerEarnPaths } from "./paths/earn";
 import { registerHealthPaths } from "./paths/health";
 import { registerIssuancePaths } from "./paths/issuance";
 import { registerMemberPaths } from "./paths/members";
@@ -58,6 +59,10 @@ const OPENAPI_TAG = {
     name: "Asset Profiles",
     description: "Issued-asset identity and metadata profiles, plus the public token metadata URI.",
   },
+  EARN: {
+    name: "Earn",
+    description: "Internal Earn button configuration and engineering handoff endpoints.",
+  },
   ADMIN: { name: "Admin", description: "Administrative allowlist management." },
   ONBOARDING: { name: "Onboarding", description: "Clerk organization sync status." },
 } as const;
@@ -91,6 +96,7 @@ const OPENAPI_TAGS = [
   OPENAPI_TAG.COMPLIANCE,
   OPENAPI_TAG.COUNTERPARTIES,
   OPENAPI_TAG.ASSET_PROFILES,
+  OPENAPI_TAG.EARN,
   OPENAPI_TAG.ADMIN,
   OPENAPI_TAG.ONBOARDING,
 ];
@@ -141,6 +147,7 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerMemberPaths(registry);
   registerAuthPaths(registry);
   registerCustodyPaths(registry);
+  registerEarnPaths(registry);
   registerProjectPaths(registry);
   registerRpcPaths(registry);
   registerIssuancePaths(registry);

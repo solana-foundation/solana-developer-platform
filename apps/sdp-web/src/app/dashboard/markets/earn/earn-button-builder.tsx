@@ -48,6 +48,7 @@ type EarnButtonConfigurationLoad =
 type EarnButtonBuilderProps = {
   configurationLoad: EarnButtonConfigurationLoad;
   earnHref: string;
+  projectId: string | null;
   providerAccess: EarnProviderAccess | null;
   strategyId?: string;
 };
@@ -173,6 +174,7 @@ function builderEmptyState(input: {
 export function EarnButtonBuilder({
   configurationLoad,
   earnHref,
+  projectId,
   providerAccess,
   strategyId,
 }: EarnButtonBuilderProps) {
@@ -240,7 +242,12 @@ export function EarnButtonBuilder({
   async function saveConfiguration() {
     dispatch({ type: "saveStarted" });
     try {
+      if (!projectId) {
+        dispatch({ type: "saveFailed", error: "Selected project required" });
+        return;
+      }
       const result = await saveEarnButtonConfiguration({
+        projectId,
         strategyId: availableStrategy.id,
         style,
         accentColor,

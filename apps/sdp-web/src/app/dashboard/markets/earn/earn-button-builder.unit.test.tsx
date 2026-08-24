@@ -93,6 +93,7 @@ describe("EarnButtonBuilder", () => {
       <EarnButtonBuilder
         configurationLoad={noConfiguration}
         earnHref="/dashboard/markets/earn"
+        projectId="project_original"
         providerAccess={providerAccess}
         strategyId="earn_strategy_live"
       />
@@ -131,6 +132,7 @@ describe("EarnButtonBuilder", () => {
 
     await user.click(screen.getByRole("button", { name: "Save configuration" }));
     expect(mocks.saveEarnButtonConfiguration).toHaveBeenCalledWith({
+      projectId: "project_original",
       strategyId: liveStrategy.id,
       style: "accent",
       accentColor: "#9945FF",
@@ -159,6 +161,7 @@ describe("EarnButtonBuilder", () => {
       <EarnButtonBuilder
         configurationLoad={{ kind: "ready", configuration: savedConfiguration }}
         earnHref="/dashboard/markets/earn"
+        projectId="project_original"
         providerAccess={providerAccess}
       />
     );
@@ -182,6 +185,7 @@ describe("EarnButtonBuilder", () => {
       <EarnButtonBuilder
         configurationLoad={noConfiguration}
         earnHref="/dashboard/markets/earn"
+        projectId="project_original"
         providerAccess={providerAccess}
         strategyId={liveStrategy.id}
       />
@@ -202,6 +206,7 @@ describe("EarnButtonBuilder", () => {
         configurationLoad={{ kind: "ready", configuration: savedConfiguration }}
         earnHref="/dashboard/markets/earn"
         key="saved-configuration"
+        projectId="project_original"
         providerAccess={providerAccess}
       />
     );
@@ -212,6 +217,7 @@ describe("EarnButtonBuilder", () => {
           configurationLoad={noConfiguration}
           earnHref="/dashboard/markets/earn"
           key="empty-configuration"
+          projectId="project_next"
           providerAccess={providerAccess}
           strategyId={liveStrategy.id}
         />
@@ -229,6 +235,7 @@ describe("EarnButtonBuilder", () => {
       <EarnButtonBuilder
         configurationLoad={noConfiguration}
         earnHref="/dashboard/markets/earn"
+        projectId="project_original"
         providerAccess={providerAccess}
         strategyId="earn_strategy_removed"
       />
@@ -248,6 +255,7 @@ describe("EarnButtonBuilder", () => {
       <EarnButtonBuilder
         configurationLoad={noConfiguration}
         earnHref="/dashboard/markets/earn"
+        projectId="project_original"
         providerAccess={providerAccess}
         strategyId="earn_strategy_live"
       />
@@ -263,6 +271,7 @@ describe("EarnButtonBuilder", () => {
       <EarnButtonBuilder
         configurationLoad={noConfiguration}
         earnHref="/dashboard/markets/earn"
+        projectId="project_original"
         providerAccess={{ kamino: { entitled: true, configured: false, enabled: false } }}
         strategyId="earn_strategy_live"
       />

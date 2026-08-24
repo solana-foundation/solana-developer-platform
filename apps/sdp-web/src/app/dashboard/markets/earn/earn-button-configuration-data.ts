@@ -9,6 +9,7 @@ import {
 } from "@sdp/types";
 import { z } from "zod";
 import { type DashboardFetchResult, dashboardFetch } from "@/lib/dashboard-fetch";
+import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 
 const configurationSchema: z.ZodType<EarnButtonConfiguration> = z.object({
   id: z.string().min(1),
@@ -28,13 +29,16 @@ const responseSchema: z.ZodType<{ data: EarnButtonConfigurationResponse }> = z.o
 });
 
 export async function saveEarnButtonConfiguration(input: {
+  projectId: string;
   strategyId: string;
   style: EarnButtonStyle;
   accentColor: string;
 }): Promise<DashboardFetchResult<EarnButtonConfiguration>> {
+  const { projectId, ...configuration } = input;
   const result = await dashboardFetch<unknown>("/api/dashboard/markets/earn/button-configuration", {
     method: "PUT",
-    body: input,
+    headers: { [PROJECT_HEADER_NAME]: projectId },
+    body: configuration,
   });
   if (!result.ok) return result;
 
