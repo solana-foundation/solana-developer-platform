@@ -3,6 +3,25 @@ import { SkeletonBlock } from "@/components/ui/skeleton-block";
 
 const BALANCE_SKELETON_IDS = ["sol", "usdc", "usdt", "usdg"];
 const STRATEGY_SKELETON_IDS = ["one", "two", "three", "four", "five"];
+const LANDING_PATH_SKELETON_IDS = ["treasury", "program"];
+
+export function MarketsLandingSkeleton() {
+  return (
+    <DashboardWorkspaceOverviewPanel aria-busy="true">
+      <div className="mx-auto w-full max-w-4xl space-y-5">
+        <div className="max-w-3xl">
+          <SkeletonBlock className="h-3 w-28" />
+          <SkeletonBlock className="mt-3 h-4 w-[32rem] max-w-full" />
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          {LANDING_PATH_SKELETON_IDS.map((id) => (
+            <SkeletonBlock className="h-40 w-full rounded-2xl" key={id} />
+          ))}
+        </div>
+      </div>
+    </DashboardWorkspaceOverviewPanel>
+  );
+}
 
 export function TreasurySolutionsSkeleton() {
   return (
