@@ -155,6 +155,9 @@ function mapTransferRow(row: Record<string, unknown>): PaymentTransferRow {
     provider_data: row.provider_data as Record<string, unknown>,
     signature: (row.signature as string | null | undefined) ?? null,
     serialized_tx: (row.serialized_tx as string | null | undefined) ?? null,
+    signed_transaction: (row.signed_transaction as string | null | undefined) ?? null,
+    last_valid_block_height: (row.last_valid_block_height as string | null | undefined) ?? null,
+    submission_started_at: (row.submission_started_at as string | null | undefined) ?? null,
     slot: (row.slot as number | null | undefined) ?? null,
     block_time: (row.block_time as string | null | undefined) ?? null,
     fee: (row.fee as number | null | undefined) ?? null,
@@ -381,6 +384,73 @@ export function createPostgresPaymentsRepository(
           input.updatedAt,
           ...values
         )
+        .first<Record<string, unknown>>();
+
+      return row ? mapTransferRow(row) : null;
+    },
+
+    async persistSignedTransfer(input) {
+      assertScope(input);
+      const scope = buildTransferScopeWhere({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
+        extraClauses: [
+          "id = ?",
+          "status = 'processing'",
+          "signature IS NULL",
+          "signed_transaction IS NULL",
+          "last_valid_block_height IS NULL",
+          "submission_started_at IS NULL",
+        ],
+        extraValues: [input.transferId],
+      });
+      const row = await db
+        .prepare(
+          `UPDATE payment_transfers
+           SET signature = ?,
+               signed_transaction = ?,
+               last_valid_block_height = ?::numeric,
+               updated_at = ?
+           WHERE ${scope.where}
+           RETURNING *`
+        )
+        .bind(
+          input.signature,
+          input.signedTransaction,
+          input.lastValidBlockHeight,
+          input.updatedAt,
+          ...scope.values
+        )
+        .first<Record<string, unknown>>();
+
+      return row ? mapTransferRow(row) : null;
+    },
+
+    async markTransferSubmissionStarted(input) {
+      assertScope(input);
+      const scope = buildTransferScopeWhere({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
+        extraClauses: [
+          "id = ?",
+          "status = 'processing'",
+          "signature IS NOT NULL",
+          "signed_transaction IS NOT NULL",
+          "last_valid_block_height IS NOT NULL",
+          "submission_started_at IS NULL",
+        ],
+        extraValues: [input.transferId],
+      });
+      const row = await db
+        .prepare(
+          `UPDATE payment_transfers
+           SET submission_started_at = ?, updated_at = ?
+           WHERE ${scope.where}
+           RETURNING *`
+        )
+        .bind(input.startedAt, input.startedAt, ...scope.values)
         .first<Record<string, unknown>>();
 
       return row ? mapTransferRow(row) : null;
