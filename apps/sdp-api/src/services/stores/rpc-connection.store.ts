@@ -280,6 +280,38 @@ export class RpcConnectionStore {
     );
   }
 
+  /**
+   * Withdraw the credential together with its connection. The `encrypted_db`
+   * ciphertext is dropped in the same statement: on self-hosted deployments it
+   * is the secret itself, and a deactivated credential must not keep a
+   * decryptable copy of a key the customer withdrew. Secret Manager versions
+   * are destroyed separately by the service, best effort.
+   */
+  async deactivateConnectionCredential(params: {
+    organizationId: string;
+    connectionId: string;
+    scopeKeys: readonly string[];
+    executor?: DatabaseExecutor;
+  }): Promise<number> {
+    const db = params.executor ?? this.db;
+    return db.execute(
+      `UPDATE provider_credentials
+          SET status = 'deactivated',
+              encrypted_secret_payload = NULL,
+              deactivated_at = sdp_iso_now(),
+              updated_at = sdp_iso_now()
+        WHERE id = (
+                SELECT c.provider_credential_id
+                  FROM rpc_connections c
+                 WHERE c.id = ?
+                   AND c.organization_id = ?
+                   AND c.scope_key IN (${params.scopeKeys.map(() => "?").join(", ")})
+              )
+          AND status <> 'deactivated'`,
+      [params.connectionId, params.organizationId, ...params.scopeKeys]
+    );
+  }
+
   async recordCheckFailure(params: {
     organizationId: string;
     connectionId: string;

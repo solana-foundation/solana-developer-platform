@@ -85,6 +85,7 @@ function harness() {
     markSubmitted: vi.fn().mockResolvedValue("persisted"),
     markChargedUnknown: vi.fn().mockResolvedValue(true),
     markReleased: vi.fn().mockResolvedValue(true),
+    settleReservation: vi.fn().mockResolvedValue(true),
     markRedisSettled: vi.fn().mockResolvedValue(true),
     tripGlobalBreaker: vi.fn().mockResolvedValue(null),
   };
@@ -369,6 +370,221 @@ describe("BudgetedFeePayment", () => {
     });
     expect(provider.signAsFeePayer).toHaveBeenCalledOnce();
     expect(budgetRedis.reserve).toHaveBeenCalledOnce();
+  });
+
+  it("releases an owned submission when sign-only custody fails", async () => {
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    vi.mocked(provider.signAsFeePayer).mockRejectedValueOnce(
+      new FeePaymentError("KMS response timed out after signing", "SIGNING_FAILED")
+    );
+    const lifecycle = {
+      persistSigned: vi.fn(),
+      markStarted: vi.fn(),
+      hasStarted: vi.fn(),
+    };
+
+    await expect(feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle)).rejects.toThrow(
+      "timed out"
+    );
+
+    expect(repository.markChargedUnknown).not.toHaveBeenCalled();
+    expect(repository.markReleased).toHaveBeenCalledOnce();
+    expect(budgetRedis.settle).toHaveBeenCalledWith(
+      expect.objectContaining({ actualLamports: 0, detectMissingReservation: true })
+    );
+    expect(lifecycle.persistSigned).not.toHaveBeenCalled();
+    expect(lifecycle.markStarted).not.toHaveBeenCalled();
+  });
+
+  it("releases an owned submission when its signed payment cannot be persisted", async () => {
+    const { feePayment, repository, budgetRedis } = harness();
+    const lifecycle = {
+      persistSigned: vi.fn().mockRejectedValue(new Error("payment persistence failed")),
+      markStarted: vi.fn(),
+      hasStarted: vi.fn(),
+    };
+
+    await expect(feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle)).rejects.toThrow(
+      "payment persistence failed"
+    );
+
+    expect(repository.markSigned).toHaveBeenCalledOnce();
+    expect(repository.markReleased).toHaveBeenCalledOnce();
+    expect(budgetRedis.settle).toHaveBeenCalledWith(
+      expect.objectContaining({ actualLamports: 0, detectMissingReservation: true })
+    );
+    expect(lifecycle.markStarted).not.toHaveBeenCalled();
+  });
+
+  it("releases a persisted owned submission when sponsorship is killed before its marker", async () => {
+    const { feePayment, repository, budgetRedis } = harness();
+    repository.resolvePolicies
+      .mockResolvedValueOnce([policy("global"), policy("organization"), policy("project")])
+      .mockResolvedValueOnce([policy("global", false), policy("organization"), policy("project")]);
+    const lifecycle = {
+      persistSigned: vi.fn().mockResolvedValue(undefined),
+      markStarted: vi.fn(),
+      hasStarted: vi.fn(),
+    };
+
+    await expect(
+      feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle)
+    ).rejects.toMatchObject({ code: "PROVIDER_NOT_AVAILABLE" });
+
+    expect(lifecycle.persistSigned).toHaveBeenCalledOnce();
+    expect(lifecycle.markStarted).not.toHaveBeenCalled();
+    expect(repository.markReleased).toHaveBeenCalledOnce();
+    expect(budgetRedis.settle).toHaveBeenCalledWith(
+      expect.objectContaining({ actualLamports: 0, detectMissingReservation: true })
+    );
+  });
+
+  it("releases an owned submission when marker persistence is proven absent", async () => {
+    const { feePayment, repository, budgetRedis } = harness();
+    const lifecycle = {
+      persistSigned: vi.fn().mockResolvedValue(undefined),
+      markStarted: vi.fn().mockRejectedValue(new Error("marker write failed")),
+      hasStarted: vi.fn().mockResolvedValue(false),
+    };
+
+    await expect(feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle)).rejects.toThrow(
+      "marker write failed"
+    );
+
+    expect(lifecycle.markStarted).toHaveBeenCalledOnce();
+    expect(lifecycle.hasStarted).toHaveBeenCalledOnce();
+    expect(repository.markReleased).toHaveBeenCalledOnce();
+    expect(budgetRedis.settle).toHaveBeenCalledWith(
+      expect.objectContaining({ actualLamports: 0, detectMissingReservation: true })
+    );
+  });
+
+  it("does not release an owned submission when marker persistence is confirmed", async () => {
+    const { feePayment, repository, budgetRedis } = harness();
+    const lifecycle = {
+      persistSigned: vi.fn().mockResolvedValue(undefined),
+      markStarted: vi.fn().mockRejectedValue(new Error("marker response lost")),
+      hasStarted: vi.fn().mockResolvedValue(true),
+    };
+
+    await expect(feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle)).rejects.toThrow(
+      "marker response lost"
+    );
+
+    expect(lifecycle.hasStarted).toHaveBeenCalledOnce();
+    expect(repository.markReleased).not.toHaveBeenCalled();
+    expect(budgetRedis.settle).not.toHaveBeenCalled();
+  });
+
+  it("does not release an owned submission when marker persistence is unknown", async () => {
+    const { feePayment, repository, budgetRedis } = harness();
+    const lifecycle = {
+      persistSigned: vi.fn().mockResolvedValue(undefined),
+      markStarted: vi.fn().mockRejectedValue(new Error("marker response lost")),
+      hasStarted: vi.fn().mockRejectedValue(new Error("marker read failed")),
+    };
+
+    await expect(feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle)).rejects.toThrow(
+      "marker response lost"
+    );
+
+    expect(repository.markReleased).not.toHaveBeenCalled();
+    expect(budgetRedis.settle).not.toHaveBeenCalled();
+  });
+
+  it("persists submitted accounting only after the owned marker is durable", async () => {
+    const { feePayment, provider, repository } = harness();
+    const lifecycle = {
+      persistSigned: vi.fn().mockResolvedValue(undefined),
+      markStarted: vi.fn().mockResolvedValue(undefined),
+      hasStarted: vi.fn(),
+    };
+
+    const submission = await feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle);
+
+    expect(lifecycle.persistSigned).toHaveBeenCalledWith(submission);
+    expect(repository.markSubmitted).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      submission.signature
+    );
+    expect(lifecycle.persistSigned.mock.invocationCallOrder[0]).toBeLessThan(
+      lifecycle.markStarted.mock.invocationCallOrder[0]
+    );
+    expect(repository.resolvePolicies.mock.invocationCallOrder[1]).toBeLessThan(
+      lifecycle.markStarted.mock.invocationCallOrder[0]
+    );
+    expect(lifecycle.markStarted.mock.invocationCallOrder[0]).toBeLessThan(
+      repository.markSubmitted.mock.invocationCallOrder[0]
+    );
+    expect(provider.getSponsorshipConfiguration).toHaveBeenCalledOnce();
+    expect(repository.markReleased).not.toHaveBeenCalled();
+  });
+
+  it("releases a submitted reservation when RPC preflight proves it was not broadcast", async () => {
+    const { feePayment, repository, budgetRedis } = harness();
+    const lifecycle = {
+      persistSigned: vi.fn().mockResolvedValue(undefined),
+      markStarted: vi.fn().mockResolvedValue(undefined),
+      hasStarted: vi.fn(),
+    };
+    const submission = await feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle);
+
+    await submission.releaseDefinitelyUnbroadcast(new Error("Transaction simulation failed"));
+
+    expect(repository.settleReservation).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      "released",
+      0,
+      "Transaction simulation failed"
+    );
+    expect(budgetRedis.settle).toHaveBeenCalledWith(
+      expect.objectContaining({ actualLamports: 0, detectMissingReservation: true })
+    );
+    expect(repository.markRedisSettled).toHaveBeenCalledWith(expect.any(String), 1);
+  });
+
+  it("never releases after the owned marker when submitted accounting fails", async () => {
+    const { feePayment, repository, budgetRedis } = harness();
+    repository.markSubmitted.mockRejectedValueOnce(new Error("ledger offline"));
+    const lifecycle = {
+      persistSigned: vi.fn().mockResolvedValue(undefined),
+      markStarted: vi.fn().mockResolvedValue(undefined),
+      hasStarted: vi.fn(),
+    };
+
+    await expect(
+      feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle)
+    ).rejects.toMatchObject({ code: "PROVIDER_NOT_AVAILABLE" });
+
+    expect(lifecycle.markStarted).toHaveBeenCalledOnce();
+    expect(repository.markReleased).not.toHaveBeenCalled();
+    expect(budgetRedis.settle).not.toHaveBeenCalled();
+    expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
+      "devnet",
+      "Owned submission accounting persistence failed"
+    );
+  });
+
+  it("releases an owned submission that is not fully signed", async () => {
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    vi.mocked(provider.signAsFeePayer).mockResolvedValueOnce(buildTransaction());
+    const lifecycle = {
+      persistSigned: vi.fn(),
+      markStarted: vi.fn(),
+      hasStarted: vi.fn(),
+    };
+
+    await expect(feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle)).rejects.toThrow(
+      "fully signed"
+    );
+
+    expect(lifecycle.persistSigned).not.toHaveBeenCalled();
+    expect(repository.markReleased).toHaveBeenCalledOnce();
+    expect(budgetRedis.settle).toHaveBeenCalledWith(
+      expect.objectContaining({ actualLamports: 0, detectMissingReservation: true })
+    );
   });
 
   it("never lets a duplicate in-progress caller execute Kora", async () => {
