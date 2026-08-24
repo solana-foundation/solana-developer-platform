@@ -17,11 +17,15 @@ export default async function EarnButtonBuilderPage({
     loadEarnButtonConfiguration(),
     getSelectedProjectId(),
   ]);
+  const configurationKey =
+    configuration.kind === "ready" && configuration.configuration
+      ? `${projectId ?? "no-project"}:${configuration.configuration.id}:${configuration.configuration.updatedAt}`
+      : `${projectId ?? "no-project"}:${configuration.kind}`;
   return (
     <EarnButtonBuilder
       earnHref="/dashboard/markets/earn"
       configurationLoad={configuration}
-      key={projectId ?? "no-project"}
+      key={configurationKey}
       providerAccess={providerAccess}
       strategyId={typeof strategy === "string" ? strategy : undefined}
     />

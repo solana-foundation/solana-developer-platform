@@ -201,6 +201,7 @@ describe("EarnButtonBuilder", () => {
       <EarnButtonBuilder
         configurationLoad={{ kind: "ready", configuration: savedConfiguration }}
         earnHref="/dashboard/markets/earn"
+        key="saved-configuration"
         providerAccess={providerAccess}
       />
     );
@@ -210,6 +211,7 @@ describe("EarnButtonBuilder", () => {
         <EarnButtonBuilder
           configurationLoad={noConfiguration}
           earnHref="/dashboard/markets/earn"
+          key="empty-configuration"
           providerAccess={providerAccess}
           strategyId={liveStrategy.id}
         />
