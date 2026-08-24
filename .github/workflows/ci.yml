@@ -599,6 +599,8 @@ jobs:
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
+          DOPPLER_PRESERVE_ENV: TEST_DATABASE_URL,REDIS_URL,SOLANA_NETWORK,KORA_SURFPOOL_MODE,COUNTERPARTY_PII_ENCRYPTION_KEY
+          COUNTERPARTY_PII_ENCRYPTION_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=
           SDP_INTEGRATION_CUSTODY_PROVIDER: ${{ matrix.custody_provider }}
         run: |
           read -r -a test_files <<< "${INTEGRATION_TEST_FILES}"
