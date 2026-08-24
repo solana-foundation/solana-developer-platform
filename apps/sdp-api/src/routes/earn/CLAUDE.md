@@ -88,6 +88,14 @@ record, not state: a route may resolve which provider wallet a program is and
 then read all of its money live — what it may never do is mix a persisted
 balance with a live one.
 
+- `GET|PUT /button-configurations/current`: **DB**, scoped to organization and
+  project. PUT repeats every vault money-in availability gate before saving the
+  strategy and style. The stable public token is preserved across updates.
+- `GET /button-configurations/public/:publicToken`: **DB** plus optional
+  catalogue display metadata, registered before auth for the engineering
+  handoff. Its response is deliberately limited to strategy and style. It never
+  returns organization, project, actor, or API-key data.
+
 - `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Rows are
   admitted only by the hourly sync cron; the 5-minute metrics refresh
   (`cron/earn-metrics-refresh.ts`) updates figures only and can never insert.

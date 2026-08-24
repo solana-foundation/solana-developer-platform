@@ -159,7 +159,10 @@ export function mapToEarnStrategy(row: EarnStrategyRow, environment: SdpEnvironm
  * the list route. The catalogue is platform-global, so environment scoping
  * happens here rather than via project scoping.
  */
-async function requireEarnStrategy(c: AppContext, strategyId: string): Promise<EarnStrategyRow> {
+export async function requireEarnStrategy(
+  c: AppContext,
+  strategyId: string
+): Promise<EarnStrategyRow> {
   const repo = getEarnRepository(c);
   const strategy = await repo.getStrategyById(strategyId);
 

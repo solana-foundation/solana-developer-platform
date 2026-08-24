@@ -50,6 +50,7 @@ describe("EarnRepository (postgres)", () => {
     const db = getDb(env);
     // The ledger references both the withdrawal's holding and the program
     // wallet, so it is cleared first.
+    await db.prepare("DELETE FROM earn_button_configurations").run();
     await db.prepare("DELETE FROM earn_movements").run();
     await db.prepare("DELETE FROM earn_positions").run();
     await db.prepare("DELETE FROM earn_strategies").run();
@@ -130,6 +131,88 @@ describe("EarnRepository (postgres)", () => {
       await setCreatedAt(table, id, SHARED_CREATED_AT);
     }
   }
+
+  describe("button configurations", () => {
+    it("persists one stable public handoff per organization and project", async () => {
+      const firstStrategy = await seedStrategy();
+      const first = await repo.upsertButtonConfiguration({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        strategyId: firstStrategy.id,
+        style: "ink",
+        accentColor: "#14F195",
+        actorId: TEST_USER.id,
+      });
+
+      expect(first.id).toMatch(/^earn_button_config_/);
+      expect(first.public_token).toMatch(/^[A-Za-z0-9_-]{24}$/);
+      await expect(
+        repo.getButtonConfiguration({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+        })
+      ).resolves.toEqual(first);
+      await expect(repo.getButtonConfigurationByPublicToken(first.public_token)).resolves.toEqual(
+        first
+      );
+
+      const nextStrategy = await seedStrategy({ providerReference: "vault-usdc-next" });
+      const updated = await repo.upsertButtonConfiguration({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        strategyId: nextStrategy.id,
+        style: "accent",
+        accentColor: "#9945FF",
+        actorId: "usr_should_not_replace_creator",
+      });
+
+      expect(updated).toMatchObject({
+        id: first.id,
+        public_token: first.public_token,
+        strategy_id: nextStrategy.id,
+        style: "accent",
+        accent_color: "#9945FF",
+        created_by: TEST_USER.id,
+      });
+    });
+
+    it("does not resolve a configuration through a sibling project scope", async () => {
+      const strategy = await seedStrategy();
+      await repo.upsertButtonConfiguration({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        strategyId: strategy.id,
+        style: "light",
+        accentColor: "#14F195",
+        actorId: TEST_USER.id,
+      });
+
+      await expect(
+        repo.getButtonConfiguration({
+          organizationId: TEST_ORG.id,
+          projectId: OTHER_PROJECT_ID,
+        })
+      ).resolves.toBeNull();
+    });
+
+    it("removes the project handoff when the owning project is deleted", async () => {
+      const strategy = await seedStrategy();
+      const configuration = await repo.upsertButtonConfiguration({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        strategyId: strategy.id,
+        style: "ink",
+        accentColor: "#14F195",
+        actorId: TEST_USER.id,
+      });
+
+      await getDb(env).prepare("DELETE FROM projects WHERE id = ?").bind(TEST_PROJECT_ID).run();
+
+      await expect(
+        repo.getButtonConfigurationByPublicToken(configuration.public_token)
+      ).resolves.toBeNull();
+    });
+  });
 
   /**
    * The five-minute metrics refresh writes through here. Its whole safety

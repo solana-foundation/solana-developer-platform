@@ -6,6 +6,11 @@ import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
+import {
+  getEarnButtonConfiguration,
+  getPublicEarnButtonConfiguration,
+  upsertEarnButtonConfiguration,
+} from "./handlers/button-configurations";
 import { listEarnMovements } from "./handlers/movements";
 import {
   createEarnProgram,
@@ -33,6 +38,7 @@ import {
   listEarnVaultWithdrawals,
 } from "./handlers/vault";
 import {
+  earnButtonConfigurationSchema,
   earnProgramCreateSchema,
   earnProgramRetargetSchema,
   earnProgramWithdrawalCreateSchema,
@@ -55,8 +61,26 @@ async function requireEarnFeature(c: Context<{ Bindings: Env }>, next: Next) {
 }
 
 earn.use("*", requireEarnFeature);
+
+// Public, read-only engineering handoff. Registered before auth intentionally:
+// possession of the unguessable token grants access to strategy/style only,
+// never tenant metadata or an API key.
+earn.get("/button-configurations/public/:publicToken", getPublicEarnButtonConfiguration);
+
 earn.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 earn.use("*", projectContextMiddleware());
+
+earn.get(
+  "/button-configurations/current",
+  requirePermissions("earn:read"),
+  getEarnButtonConfiguration
+);
+earn.put(
+  "/button-configurations/current",
+  requirePermissions("earn:write"),
+  validateBody(earnButtonConfigurationSchema),
+  upsertEarnButtonConfiguration
+);
 
 // Strategy catalogue (source: DB, admitted only by the sync cron).
 earn.get("/strategies", requirePermissions("earn:read"), listEarnStrategies);

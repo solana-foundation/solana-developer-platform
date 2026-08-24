@@ -1,22 +1,39 @@
 "use client";
 
+import {
+  DEFAULT_EARN_BUTTON_ACCENT_COLOR,
+  type EarnButtonStyle,
+  EARN_BUTTON_STYLES as SHARED_EARN_BUTTON_STYLES,
+} from "@sdp/types";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
-export const EARN_BUTTON_STYLES = ["ink", "light", "accent"] as const;
-export type EarnButtonStyle = (typeof EARN_BUTTON_STYLES)[number];
+// Kept as the preview module's public contract so the builder can assert its
+// labelled options against the exact styles the renderer supports at startup.
+export const EARN_BUTTON_STYLES = SHARED_EARN_BUTTON_STYLES;
+export type { EarnButtonStyle } from "@sdp/types";
 
 export const EARN_BUTTON_STYLE_CLASS_NAMES = {
   ink: "bg-primary text-on-primary shadow-sm",
   light: "border border-border-default bg-surface-raised text-primary shadow-sm",
-  accent: "bg-[#14F195] text-[#0f0f10] shadow-sm",
+  accent: "shadow-sm",
 } as const satisfies Record<EarnButtonStyle, string>;
 
+function accentForeground(accentColor: string): string {
+  const red = Number.parseInt(accentColor.slice(1, 3), 16);
+  const green = Number.parseInt(accentColor.slice(3, 5), 16);
+  const blue = Number.parseInt(accentColor.slice(5, 7), 16);
+  const perceivedBrightness = (red * 299 + green * 587 + blue * 114) / 1000;
+  return perceivedBrightness > 150 ? "#0f0f10" : "#ffffff";
+}
+
 export function EarnDepositButtonPreview({
+  accentColor = DEFAULT_EARN_BUTTON_ACCENT_COLOR,
   className,
   compact = false,
   style,
 }: {
+  accentColor?: string;
   className?: string;
   compact?: boolean;
   style: EarnButtonStyle;
@@ -30,6 +47,11 @@ export function EarnDepositButtonPreview({
         EARN_BUTTON_STYLE_CLASS_NAMES[style],
         className
       )}
+      style={
+        style === "accent"
+          ? { backgroundColor: accentColor, color: accentForeground(accentColor) }
+          : undefined
+      }
     >
       {t("DashboardMarkets.earnProgram.buttonLabel")}
     </span>

@@ -1,6 +1,9 @@
 import { isAddress } from "@sdp/solana/address";
 import {
+  DEFAULT_EARN_BUTTON_ACCENT_COLOR,
   EARN_APY_TYPES,
+  EARN_BUTTON_ACCENT_COLOR_PATTERN,
+  EARN_BUTTON_STYLES,
   EARN_LIQUIDITY_TERMS,
   EARN_MOVEMENT_DIRECTIONS,
   EARN_PORTFOLIO_TOKENS,
@@ -25,6 +28,22 @@ export const listEarnStrategiesQuerySchema = z.object({
   sourceKind: z.enum(EARN_STRATEGY_SOURCE_KINDS).optional(),
   apyType: z.enum(EARN_APY_TYPES).optional(),
   liquidityTerm: z.enum(EARN_LIQUIDITY_TERMS).optional(),
+});
+
+export const earnButtonConfigurationSchema = z.object({
+  strategyId: z.string().min(1).max(128),
+  style: z.enum(EARN_BUTTON_STYLES),
+  accentColor: z
+    .string()
+    .regex(EARN_BUTTON_ACCENT_COLOR_PATTERN)
+    .default(DEFAULT_EARN_BUTTON_ACCENT_COLOR),
+});
+
+export const earnButtonConfigurationPublicParamsSchema = z.object({
+  publicToken: z
+    .string()
+    .length(24)
+    .regex(/^[A-Za-z0-9_-]+$/, "Invalid Earn button integration token"),
 });
 
 // ---------------------------------------------------------------------------

@@ -488,6 +488,104 @@ describe("Earn routes — session-caller environment resolution", () => {
   });
 });
 
+describe("Earn routes - button configurations", () => {
+  async function enableKaminoForOrganization() {
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ providerOverrides: { earn: { kamino: true } } }), TEST_ORG.id)
+      .run();
+  }
+
+  function putConfiguration(strategyId: string, style = "accent", accentColor = "#9945FF") {
+    return app.request(
+      "/v1/earn/button-configurations/current",
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ strategyId, style, accentColor }),
+      },
+      env
+    );
+  }
+
+  it("persists a project-scoped configuration and serves its handoff without auth", async () => {
+    await seedAuth();
+    await enableKaminoForOrganization();
+    const strategy = await seedStrategy();
+
+    const missing = await getEarn("/v1/earn/button-configurations/current");
+    expect(missing.status).toBe(404);
+
+    const saved = await putConfiguration(strategy.id);
+    expect(saved.status).toBe(200);
+    const savedBody = (await saved.json()) as {
+      data: {
+        configuration: {
+          publicToken: string;
+          strategyId: string;
+          style: string;
+          accentColor: string;
+        };
+      };
+    };
+    expect(savedBody.data.configuration).toMatchObject({
+      strategyId: strategy.id,
+      style: "accent",
+      accentColor: "#9945FF",
+    });
+    expect(savedBody.data.configuration.publicToken).toMatch(/^[A-Za-z0-9_-]{24}$/);
+
+    const reloaded = await getEarn("/v1/earn/button-configurations/current");
+    expect(reloaded.status).toBe(200);
+    const reloadedBody = (await reloaded.json()) as typeof savedBody;
+    expect(reloadedBody.data.configuration).toEqual(savedBody.data.configuration);
+
+    const handoff = await app.request(
+      `/v1/earn/button-configurations/public/${savedBody.data.configuration.publicToken}`,
+      {},
+      env
+    );
+    expect(handoff.status).toBe(200);
+    const handoffBody = (await handoff.json()) as {
+      data: {
+        configuration: Record<string, unknown> & {
+          strategyId: string;
+          strategyName: string;
+          provider: string;
+          style: string;
+          accentColor: string;
+        };
+      };
+    };
+    expect(handoffBody.data.configuration).toEqual({
+      strategyId: strategy.id,
+      strategyName: strategy.name,
+      provider: strategy.provider,
+      style: "accent",
+      accentColor: "#9945FF",
+    });
+    expect(handoffBody.data.configuration).not.toHaveProperty("organizationId");
+    expect(handoffBody.data.configuration).not.toHaveProperty("projectId");
+    expect(handoffBody.data.configuration).not.toHaveProperty("apiKey");
+  });
+
+  it("refuses to configure a paused strategy and names the reason", async () => {
+    await seedAuth();
+    await enableKaminoForOrganization();
+    const strategy = await seedStrategy({ status: "paused" });
+
+    const response = await putConfiguration(strategy.id, "ink");
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("is paused and cannot accept new deposits");
+    expect(await getEarn("/v1/earn/button-configurations/current")).toHaveProperty("status", 404);
+  });
+});
+
 describe("Earn routes — strategy catalogue", () => {
   it("returns the paginated list envelope and omits non-active strategies", async () => {
     await seedAuth();

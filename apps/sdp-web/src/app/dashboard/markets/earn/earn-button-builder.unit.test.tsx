@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
-import type { EarnStrategy, SdpEnvironment } from "@sdp/types";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import type { EarnButtonConfiguration, EarnStrategy, SdpEnvironment } from "@sdp/types";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
@@ -26,7 +27,10 @@ const liveStrategy: EarnStrategy = {
   updatedAt: "2026-08-18T00:00:00.000Z",
 };
 
-const mocks = vi.hoisted(() => ({ environment: "sandbox" as SdpEnvironment }));
+const mocks = vi.hoisted(() => ({
+  environment: "sandbox" as SdpEnvironment,
+  saveEarnButtonConfiguration: vi.fn(),
+}));
 
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({ sdpEnvironment: mocks.environment }),
@@ -34,6 +38,10 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
 
 vi.mock("./earn-program-data", () => ({
   useEarnStrategies: () => ({ strategies: [liveStrategy], error: undefined, isLoading: false }),
+}));
+
+vi.mock("./earn-button-configuration-data", () => ({
+  saveEarnButtonConfiguration: mocks.saveEarnButtonConfiguration,
 }));
 
 vi.mock("@/components/ui/code-block", () => ({
@@ -53,14 +61,9 @@ function renderWithEnglish(children: ReactNode) {
   );
 }
 
-function previewFigure(label: string): HTMLElement {
-  const figure = screen.getByText(label).closest("figure");
-  if (!figure) throw new Error(`Could not find the ${label} figure`);
-  return figure;
-}
-
 afterEach(() => {
   mocks.environment = "sandbox";
+  vi.clearAllMocks();
   cleanup();
 });
 
@@ -68,30 +71,76 @@ describe("EarnButtonBuilder", () => {
   const providerAccess = {
     kamino: { entitled: true, configured: true, enabled: true },
   } as const;
+  const noConfiguration = { kind: "ready", configuration: null } as const;
+  const savedConfiguration: EarnButtonConfiguration = {
+    id: "earn_button_config_saved",
+    strategyId: liveStrategy.id,
+    style: "light",
+    accentColor: "#14F195",
+    publicToken: "PublicEarnButtonToken123",
+    createdAt: "2026-08-24T00:00:00.000Z",
+    updatedAt: "2026-08-24T00:00:00.000Z",
+  };
 
-  it("shows a disabled visual preview and emits the real header-idempotent server contract", () => {
+  it("edits, previews, and saves a live style while keeping the server contract explicit", async () => {
+    const user = userEvent.setup();
+    mocks.saveEarnButtonConfiguration.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ...savedConfiguration, style: "accent", accentColor: "#9945FF" },
+    });
     renderWithEnglish(
       <EarnButtonBuilder
+        configurationLoad={noConfiguration}
         earnHref="/dashboard/markets/earn"
         providerAccess={providerAccess}
         strategyId="earn_strategy_live"
       />
     );
 
-    const iosPreview = previewFigure("iOS preview");
-    const webPreview = previewFigure("Web browser preview");
+    const iosPreview = screen.getByRole("figure", { name: "iOS preview" });
     expect(within(iosPreview).getByText("Kamino USDC Vault")).toBeTruthy();
+    expect(screen.queryByRole("figure", { name: "Web browser preview" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Web" }));
+    const webPreview = screen.getByRole("figure", { name: "Web browser preview" });
     expect(within(webPreview).getByText("6.2% variable APY")).toBeTruthy();
+    expect(screen.queryByRole("figure", { name: "iOS preview" })).toBeNull();
 
     const accentRadio = screen.getByRole("radio", { name: /^Accent/ }) as HTMLInputElement;
-    expect(accentRadio.disabled).toBe(true);
+    expect(accentRadio.disabled).toBe(false);
     expect(accentRadio.checked).toBe(false);
+    await user.click(accentRadio);
+    expect(accentRadio.checked).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Purple" }));
     expect(
-      screen.getByText(/Button style export and persistence are not available yet/)
+      (within(webPreview).getByText("Deposit & earn") as HTMLElement).style.backgroundColor
+    ).toBe("rgb(153, 69, 255)");
+    await user.click(screen.getByRole("button", { name: "iOS" }));
+    expect(
+      within(screen.getByRole("figure", { name: "iOS preview" })).getByText("Deposit & earn")
+        .className
+    ).toContain("shadow-sm");
+    expect(
+      (
+        within(screen.getByRole("figure", { name: "iOS preview" })).getByText(
+          "Deposit & earn"
+        ) as HTMLElement
+      ).style.backgroundColor
+    ).toBe("rgb(153, 69, 255)");
+
+    await user.click(screen.getByRole("button", { name: "Save configuration" }));
+    expect(mocks.saveEarnButtonConfiguration).toHaveBeenCalledWith({
+      strategyId: liveStrategy.id,
+      style: "accent",
+      accentColor: "#9945FF",
+    });
+    expect(
+      await screen.findByText("Configuration saved. The handoff link is current.")
     ).toBeTruthy();
-    for (const preview of [iosPreview, webPreview]) {
-      expect(within(preview).getByText("Deposit & earn").className).toContain("bg-primary");
-    }
+    expect(
+      screen.getByRole("link", { name: /earn\/integrate\/PublicEarnButtonToken123/ })
+    ).toBeTruthy();
 
     const code = screen.getByText(/v1\/earn\/vault-deposits/).textContent ?? "";
     expect(code).toContain('"Idempotency-Key": idempotencyKey');
@@ -105,12 +154,65 @@ describe("EarnButtonBuilder", () => {
     );
   });
 
-  it("offers a recovery route when the live strategy id no longer resolves", () => {
+  it("restores the saved strategy, style, and handoff link without a query parameter", () => {
     renderWithEnglish(
-      <EarnButtonBuilder earnHref="/dashboard/markets/earn" providerAccess={providerAccess} />
+      <EarnButtonBuilder
+        configurationLoad={{ kind: "ready", configuration: savedConfiguration }}
+        earnHref="/dashboard/markets/earn"
+        providerAccess={providerAccess}
+      />
     );
 
-    expect(screen.getByText("Choose a strategy first")).toBeTruthy();
+    const lightRadio = screen.getByRole("radio", { name: /^Light/ }) as HTMLInputElement;
+    expect(lightRadio.checked).toBe(true);
+    expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("link", { name: /earn\/integrate\/PublicEarnButtonToken123/ })
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save configuration" })).toHaveProperty(
+      "disabled",
+      true
+    );
+  });
+
+  it("clears the prior project's style and handoff when the project scope changes", async () => {
+    const view = renderWithEnglish(
+      <EarnButtonBuilder
+        configurationLoad={{ kind: "ready", configuration: savedConfiguration }}
+        earnHref="/dashboard/markets/earn"
+        providerAccess={providerAccess}
+      />
+    );
+
+    view.rerender(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <EarnButtonBuilder
+          configurationLoad={noConfiguration}
+          earnHref="/dashboard/markets/earn"
+          providerAccess={providerAccess}
+          strategyId={liveStrategy.id}
+        />
+      </I18nProvider>
+    );
+
+    await waitFor(() => {
+      expect((screen.getByRole("radio", { name: /^Ink/ }) as HTMLInputElement).checked).toBe(true);
+    });
+    expect(screen.queryByRole("link", { name: /earn\/integrate\// })).toBeNull();
+  });
+
+  it("offers a recovery route when the live strategy id no longer resolves", () => {
+    renderWithEnglish(
+      <EarnButtonBuilder
+        configurationLoad={noConfiguration}
+        earnHref="/dashboard/markets/earn"
+        providerAccess={providerAccess}
+        strategyId="earn_strategy_removed"
+      />
+    );
+
+    expect(screen.getByText("Strategy no longer available")).toBeTruthy();
+    expect(screen.getByText(/no longer in the live catalogue/)).toBeTruthy();
     expect(screen.getByRole("link", { name: "Return to Earn" }).getAttribute("href")).toBe(
       "/dashboard/markets/earn"
     );
@@ -121,6 +223,7 @@ describe("EarnButtonBuilder", () => {
     mocks.environment = "production";
     renderWithEnglish(
       <EarnButtonBuilder
+        configurationLoad={noConfiguration}
         earnHref="/dashboard/markets/earn"
         providerAccess={providerAccess}
         strategyId="earn_strategy_live"
@@ -128,6 +231,22 @@ describe("EarnButtonBuilder", () => {
     );
 
     expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
+    expect(screen.getByText(/sandbox-only/)).toBeTruthy();
     expect(screen.queryByText("Server integration")).toBeNull();
+  });
+
+  it("names provider setup as the reason an otherwise live strategy cannot be configured", () => {
+    renderWithEnglish(
+      <EarnButtonBuilder
+        configurationLoad={noConfiguration}
+        earnHref="/dashboard/markets/earn"
+        providerAccess={{ kamino: { entitled: true, configured: false, enabled: false } }}
+        strategyId="earn_strategy_live"
+      />
+    );
+
+    expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
+    expect(screen.getByText(/provider is not enabled/)).toBeTruthy();
+    expect(screen.queryByRole("radio")).toBeNull();
   });
 });
