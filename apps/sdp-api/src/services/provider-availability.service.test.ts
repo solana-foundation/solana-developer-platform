@@ -298,7 +298,7 @@ describe("provider-availability.service", () => {
     });
   });
 
-  it("treats local custody as override-only and only configured when a local key is present", async () => {
+  it("treats local custody as override-only and configurable only in a self-hosted deployment", async () => {
     await syncProviderAccessFromClerk(getDb(env), {
       organizationId: TEST_ORG_ID,
       clerkOrganization: {
@@ -326,8 +326,16 @@ describe("provider-availability.service", () => {
     env.CUSTODY_PRIVATE_KEY =
       "3QpWV8xk4hs7vmQhSLAQWNi2KskuSVSpmR75QGqSuxaKcdA9XJkq8VBihspJddBWVfEybTWLKqHJ19N64DNuwSNd";
 
-    const withKey = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
-    expect(withKey.providers.custody.local).toEqual({
+    const managedWithKey = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    expect(managedWithKey.providers.custody.local).toEqual({
+      entitled: true,
+      configured: false,
+      enabled: false,
+    });
+
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    const selfHostedWithKey = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    expect(selfHostedWithKey.providers.custody.local).toEqual({
       entitled: true,
       configured: true,
       enabled: true,
@@ -498,7 +506,7 @@ describe("provider-availability.service", () => {
     expect(availability.tier).toBe("individual");
     expect(availability.providers.custody.local).toEqual({
       entitled: false,
-      configured: true,
+      configured: false,
       enabled: false,
     });
     expect(availability.providers.compliance.range.entitled).toBe(false);
@@ -549,11 +557,17 @@ describe("provider-availability.service", () => {
     expect(individual.providers.earn.upshift).toBe(false);
 
     const enterprise = resolveOrganizationProviderEntitlements({ tier: "enterprise" });
+    // Exhaustive on purpose: a new earn provider must show up here as a failing
+    // assertion, so nobody adds one that a tier silently entitles. `kamino`
+    // defaults false like the rest even though it needs no credential —
+    // entitlement and configuration are separate gates, and only money-in
+    // consults entitlement (a catalogue-only provider never reaches it).
     expect(enterprise.providers.earn).toEqual({
       veda: false,
       upshift: false,
       perena: false,
       ground: false,
+      kamino: false,
     });
   });
 

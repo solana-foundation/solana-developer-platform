@@ -395,7 +395,7 @@ export function WalletSetupFlow({
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-wallet-setup-flow="true">
-      <div className="shrink-0 px-4 pt-2 pb-6 md:px-6">
+      <div className="shrink-0 px-4 pt-8 pb-6 md:px-6">
         <div className="mx-auto w-full max-w-3xl">
           <WizardStepProgress
             data-wallet-setup-stepper="true"

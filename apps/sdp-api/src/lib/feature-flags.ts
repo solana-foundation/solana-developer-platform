@@ -7,12 +7,6 @@ function isTruthyFlag(value: string | undefined): boolean {
   return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }
 
-export function isRecurringPaymentCollectionEnabled(
-  env: Pick<Env, "PAYMENTS_RECURRING_COLLECTION_ENABLED">
-): boolean {
-  return isTruthyFlag(env.PAYMENTS_RECURRING_COLLECTION_ENABLED);
-}
-
 export function isAssetProfilesEnabled(
   env: Pick<Env, "SDP_FLAG_ASSET_PROFILES" | "ENVIRONMENT" | "SDP_DEPLOYMENT_MODE">
 ): boolean {
@@ -29,6 +23,10 @@ export function isAssetProfilesEnabled(
 
 export function isPrivateChannelsEnabled(env: Pick<Env, "PRIVATE_CHANNELS_ENABLED">): boolean {
   return isTruthyFlag(env.PRIVATE_CHANNELS_ENABLED);
+}
+
+export function isHeliusRingsEnabled(env: Pick<Env, "HELIUS_RINGS_ENABLED">): boolean {
+  return isTruthyFlag(env.HELIUS_RINGS_ENABLED);
 }
 
 export function isPrivyByokEnabled(env: Pick<Env, "PRIVY_BYOK_ENABLED">): boolean {

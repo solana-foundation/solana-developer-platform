@@ -1,5 +1,5 @@
-import { EarnOverviewSkeleton } from "./earn-route-skeletons";
+import { EarnProgramSkeleton } from "../markets-route-skeletons";
 
 export default function EarnLoading() {
-  return <EarnOverviewSkeleton />;
+  return <EarnProgramSkeleton />;
 }

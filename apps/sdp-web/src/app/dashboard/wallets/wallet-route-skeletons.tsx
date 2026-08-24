@@ -114,7 +114,7 @@ export function WalletsOnboardingSkeleton() {
 export function WalletSetupSkeleton() {
   return (
     <LoadingRegion layout="wallet-setup" className="flex h-full min-h-0 flex-col">
-      <div className="shrink-0 px-4 pt-2 pb-6 md:px-6">
+      <div className="shrink-0 px-4 pt-8 pb-6 md:px-6">
         <div className="mx-auto flex w-full max-w-3xl items-center gap-4">
           <div className="flex items-center gap-1.5">
             <Pulse className="h-1.5 w-5 rounded-full" />
@@ -444,6 +444,29 @@ export function WalletPolicyAuditDetailSkeleton() {
             ))}
           </aside>
         </div>
+      </LoadingRegion>
+    </DashboardWorkspaceOverviewPanel>
+  );
+}
+
+export function WalletConnectionsListSkeleton() {
+  return (
+    <DashboardWorkspaceOverviewPanel className="flex flex-col">
+      <LoadingRegion layout="wallet-connections" className="flex w-full flex-1 flex-col">
+        <DashboardWorkspaceCard>
+          <div
+            className="flex flex-col gap-3 border-b border-border-default p-4 sm:flex-row sm:items-center sm:justify-between"
+            data-loading-connections-toolbar
+          >
+            <Pulse className="h-4 w-72 max-w-full" />
+            <Pulse className="h-9 w-full rounded-lg sm:w-40" />
+          </div>
+          <div className="flex-1 space-y-3 p-4" data-loading-connections-rows>
+            {FIVE_ITEMS.map((row) => (
+              <Pulse key={row} className="h-12 w-full rounded-lg" />
+            ))}
+          </div>
+        </DashboardWorkspaceCard>
       </LoadingRegion>
     </DashboardWorkspaceOverviewPanel>
   );

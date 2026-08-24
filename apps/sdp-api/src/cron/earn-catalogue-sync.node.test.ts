@@ -69,6 +69,7 @@ function makeSnapshot(ref: string): ProviderStrategySnapshot {
     depositMints: ["EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"],
     apyType: "variable",
     liquidityTerm: "instant",
+    hostCluster: "devnet",
   };
 }
 
@@ -344,7 +345,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
   it("deletes rows the provider no longer lists, per provider and environment", async () => {
     // The keep set is what the provider still lists; the repository decides
     // what that leaves behind. This is what makes a tightened catalogue gate
-    // (Ground's `not_solana_hosted`) reach rows ALREADY stored.
+    // reach rows ALREADY stored.
     installProviders({
       ground: makeProvider(
         "ground",

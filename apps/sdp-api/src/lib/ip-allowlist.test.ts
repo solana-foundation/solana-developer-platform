@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isClientIpAllowed, isValidIpAllowlistEntry } from "./ip-allowlist";
+import {
+  canonicalizeIpAllowlistEntry,
+  isClientIpAllowed,
+  isValidIpAllowlistEntry,
+} from "./ip-allowlist";
 
 describe("isValidIpAllowlistEntry", () => {
   it.each(["203.0.113.42", "203.0.113.0/24", "0.0.0.0/0", "2001:db8::42", "2001:db8::/48", "::/0"])(
@@ -20,6 +24,54 @@ describe("isValidIpAllowlistEntry", () => {
     "fe80::1%eth0",
   ])("rejects a malformed or ambiguous range: %s", (value) => {
     expect(isValidIpAllowlistEntry(value)).toBe(false);
+  });
+});
+
+describe("canonicalizeIpAllowlistEntry", () => {
+  it.each([
+    // Host bits are cleared, so the stored range names what it selects rather
+    // than one of the addresses inside it.
+    ["203.0.113.5/24", "203.0.113.0/24"],
+    ["203.0.113.5/32", "203.0.113.5"],
+    ["203.0.113.5", "203.0.113.5"],
+    ["10.11.12.13/8", "10.0.0.0/8"],
+    ["203.0.113.5/0", "0.0.0.0/0"],
+    // RFC 5952 form: lowercase, no leading zeros, longest zero run elided.
+    ["2001:0DB8:0000:0000:0000:0000:0000:0042", "2001:db8::42"],
+    ["2001:db8:1:0:0:0:0:0/48", "2001:db8:1::/48"],
+    ["2001:db8::42/64", "2001:db8::/64"],
+    ["::", "::"],
+    ["::/0", "::/0"],
+    // A single zero group is written out; `::` stands for two or more.
+    ["2001:db8:0:1:1:1:1:1", "2001:db8:0:1:1:1:1:1"],
+    // An IPv4-mapped range authorizes IPv4 clients, so it is stored as the IPv4
+    // range it actually is.
+    ["::ffff:203.0.113.42", "203.0.113.42"],
+    ["::ffff:203.0.113.5/120", "203.0.113.0/24"],
+    // Below /96 the prefix cuts into the mapping prefix, so the range is no
+    // longer confined to the IPv4 space and stays in IPv6 form.
+    ["::ffff:203.0.113.5/95", "::fffe:0:0/95"],
+  ])("rewrites %s as %s", (value, expected) => {
+    expect(canonicalizeIpAllowlistEntry(value)).toBe(expected);
+  });
+
+  it.each(["", "not-an-ip", "203.0.113.0/33", " 203.0.113.0/24", "fe80::1%eth0", "010.0.0.1"])(
+    "returns null for an entry that is not a valid range: %s",
+    (value) => {
+      expect(canonicalizeIpAllowlistEntry(value)).toBeNull();
+    }
+  );
+
+  it("agrees with isValidIpAllowlistEntry on what it accepts", () => {
+    for (const value of ["203.0.113.0/24", "2001:db8::/48", "::", "not-an-ip", "203.0.113.0/33"]) {
+      expect(canonicalizeIpAllowlistEntry(value) !== null).toBe(isValidIpAllowlistEntry(value));
+    }
+  });
+
+  it("preserves the range a canonicalized entry matches", () => {
+    const canonical = canonicalizeIpAllowlistEntry("203.0.113.5/24") as string;
+    expect(isClientIpAllowed("203.0.113.42", [canonical])).toBe(true);
+    expect(isClientIpAllowed("203.0.114.42", [canonical])).toBe(false);
   });
 });
 

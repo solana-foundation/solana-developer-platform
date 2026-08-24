@@ -4,6 +4,7 @@ import {
   EARN_PORTFOLIO_POSITION_KINDS,
   EARN_PORTFOLIO_TOKENS,
   EARN_PORTFOLIO_WITHDRAWAL_STATUSES,
+  EARN_PROGRAM_SOLANA_PAYOUT_TOKENS,
   type EarnPortfolioAllocationInput,
   type EarnPortfolioDeposit,
   type EarnPortfolioDepositsPage,
@@ -24,7 +25,7 @@ import {
   type SdpEnvironment,
   wellKnownMint,
 } from "@sdp/types";
-import { badRequest, providerNotConfigured } from "../../errors";
+import { badRequest, providerNotConfigured, providerUnavailable } from "../../errors";
 import { providerFetchJson } from "../../fetch";
 import { bearerAuthHeader } from "../../shared";
 import type {
@@ -75,11 +76,12 @@ const GROUND_SOLANA_CHAINS = { sandbox: "solana_devnet", production: "solana" } 
  * the Solana addresses SDP surfaces, so `listStrategies` keeps it out of the
  * catalogue on every cluster, withdrawal preview/create refuse it before any
  * network call (`assertSolanaRoutable` — Ground's own rejection is wire text
- * partners can't act on), and the dashboard's withdraw-token whitelist
- * mirrors this set (apps/sdp-web/src/app/dashboard/markets/earn/
- * earn-withdraw-modal.tsx, `SOLANA_PAYOUT_TOKENS`).
+ * partners can't act on). The shared provider capability also drives the
+ * dashboard's withdraw-token choices.
  */
-const GROUND_SOLANA_ROUTED_TOKENS: ReadonlySet<string> = new Set(["usdc"]);
+const GROUND_SOLANA_ROUTED_TOKENS: ReadonlySet<string> = new Set(
+  EARN_PROGRAM_SOLANA_PAYOUT_TOKENS.ground
+);
 
 /**
  * Fail fast on a token Ground cannot route on Solana rails. Gates on a static
@@ -167,21 +169,10 @@ export interface GroundYieldSource {
   /** Documented: active | buy_only | sell_only | emergency_freeze — kept open. */
   mode: string;
   /**
-   * Where the yield source ITSELF is hosted — and THE catalogue gate for it
-   * (`not_solana_hosted`). SDP lists and stores Solana-hosted vaults only: a
-   * "Solana Earn" shelf means Solana-hosted yield, not merely Solana-rail
-   * access to yield hosted elsewhere.
-   *
-   * This reversed an earlier reading, which gated only the rails the customer
-   * touches (deposit address, payout address, `depositToken`) and catalogued
-   * off-Solana sources on purpose because Ground bridges internally — the
-   * `bridge` position kind. That admitted Aave, four Morpho vaults, Syrup and
-   * every RWA source (all Ethereum-hosted) into the catalogue; see
-   * docs/earn/ground-catalogue-inventory.md for the census that measured it.
-   *
-   * Ground does not document this field as required, so the gate is
-   * FAIL-CLOSED: an absent or unrecognised chain cannot be shown to be Solana,
-   * and an unlabelled source is exactly the drift this gate exists to catch.
+   * Where the yield source itself is hosted. This is inventory metadata, not a
+   * persistence gate: Ground may bridge Solana USDC to a source it hosts on a
+   * different chain. Product visibility belongs at the API read boundary so
+   * the database retains a truthful copy of Ground's routable catalogue.
    */
   chain?: string | null;
   apyBps?: number | null;
@@ -350,13 +341,128 @@ function narrow<T extends string>(
   return values.includes(value as T) ? (value as T) : undefined;
 }
 
+/**
+ * A successful Ground response that cannot satisfy SDP's closed wire contract
+ * is an unavailable provider response, not a customer error and never a cue to
+ * invent a value. Keep one error shape for every mapper at this trust boundary.
+ */
+function providerContractViolation(
+  field: string,
+  value: unknown,
+  providerReference?: string
+): ReturnType<typeof providerUnavailable> {
+  return providerUnavailable(`Ground provider contract violation: ${field} is missing or invalid`, {
+    provider: "ground",
+    field,
+    ...(providerReference === undefined ? {} : { providerReference }),
+    value,
+  });
+}
+
+function requireFiniteNumber(
+  value: unknown,
+  field: string,
+  providerReference?: string,
+  { min = -Infinity, max = Infinity }: { min?: number; max?: number } = {}
+): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max) {
+    throw providerContractViolation(field, value, providerReference);
+  }
+  return value;
+}
+
+function requireSafeInteger(value: unknown, field: string, providerReference?: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value)) {
+    throw providerContractViolation(field, value, providerReference);
+  }
+  return value;
+}
+
+function requireKnownValue<T extends string>(
+  values: readonly T[],
+  value: string | null | undefined,
+  field: string,
+  providerReference?: string
+): T {
+  const normalized = narrow(values, value);
+  if (normalized === undefined) {
+    throw providerContractViolation(field, value, providerReference);
+  }
+  return normalized;
+}
+
 /** apyBps 356 → "0.0356" via integer math — no float ever touches a rate. */
 function bpsToDecimalString(bps: number): string {
-  const whole = Math.trunc(bps / 10_000);
-  const fraction = String(Math.abs(Math.trunc(bps)) % 10_000)
+  const absoluteBps = Math.abs(bps);
+  const whole = Math.trunc(absoluteBps / 10_000);
+  const fraction = String(Math.trunc(absoluteBps) % 10_000)
     .padStart(4, "0")
     .replace(/0+$/, "");
-  return fraction ? `${whole}.${fraction}` : String(whole);
+  const magnitude = fraction ? `${whole}.${fraction}` : String(whole);
+  return bps < 0 ? `-${magnitude}` : magnitude;
+}
+
+/** Catalogue APY is optional, so malformed provider data remains unavailable. */
+function optionalApy(bps: number | null | undefined): string | undefined {
+  return Number.isSafeInteger(bps) ? bpsToDecimalString(bps as number) : undefined;
+}
+
+interface ExactUnsignedDecimal {
+  units: bigint;
+  scale: number;
+}
+
+/** Remove base-ten scale that carries no information before aligning weights. */
+function normalizeExactDecimal(units: bigint, scale: number): ExactUnsignedDecimal {
+  let normalizedUnits = units;
+  let normalizedScale = scale;
+  while (normalizedScale > 0 && normalizedUnits % 10n === 0n) {
+    normalizedUnits /= 10n;
+    normalizedScale -= 1;
+  }
+  return { units: normalizedUnits, scale: normalizedScale };
+}
+
+/** Convert a validated JSON number to the exact decimal denoted by its JSON spelling. */
+function exactDecimalFromNumber(value: number): ExactUnsignedDecimal {
+  const match = /^(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/i.exec(String(value));
+  if (!match) {
+    // Callers validate finite, non-negative numbers first; this is unreachable
+    // unless the JavaScript number serialization contract itself changes.
+    throw providerContractViolation("yield.position.pct", value);
+  }
+  const fraction = match[2] ?? "";
+  const exponent = Number(match[3] ?? "0");
+  let units = BigInt(`${match[1] ?? "0"}${fraction}`);
+  let scale = fraction.length - exponent;
+  if (scale < 0) {
+    units *= 10n ** BigInt(-scale);
+    scale = 0;
+  }
+  return normalizeExactDecimal(units, scale);
+}
+
+function exactIntegerWeights(values: readonly ExactUnsignedDecimal[]): bigint[] {
+  const commonScale = values.reduce((maximum, value) => Math.max(maximum, value.scale), 0);
+  return values.map(({ units, scale }) => units * 10n ** BigInt(commonScale - scale));
+}
+
+/** Round an exact ratio to the nearest integer, with ties away from zero. */
+function divideRounded(numerator: bigint, denominator: bigint): bigint {
+  const negative = numerator < 0n;
+  const magnitude = negative ? -numerator : numerator;
+  let quotient = magnitude / denominator;
+  if ((magnitude % denominator) * 2n >= denominator) quotient += 1n;
+  return negative ? -quotient : quotient;
+}
+
+function formatScaledInteger(value: bigint, scale: number, negativeZero = false): string {
+  const negative = value < 0n || (value === 0n && negativeZero);
+  const magnitude = (value < 0n ? -value : value).toString().padStart(scale + 1, "0");
+  if (scale === 0) return `${negative ? "-" : ""}${magnitude}`;
+  const whole = magnitude.slice(0, -scale);
+  const fraction = magnitude.slice(-scale);
+  return `${negative ? "-" : ""}${whole}.${fraction}`;
 }
 
 /**
@@ -369,20 +475,27 @@ function bpsToDecimalString(bps: number): string {
  * "no rate yet" rather than a misleading 0%.
  */
 function blendPositionApy(
-  positions: readonly { apy: string; pct: number; deployedValueUsd: string }[]
+  positions: readonly {
+    apyBps: number;
+    pctWeight: ExactUnsignedDecimal;
+    deployedWeight: ExactUnsignedDecimal;
+  }[]
 ): string | undefined {
-  const deployed = positions.map((position) => Number(position.deployedValueUsd) || 0);
-  const totalDeployed = deployed.reduce((sum, value) => sum + value, 0);
-  const weights = totalDeployed > 0 ? deployed : positions.map((position) => position.pct || 0);
-  const totalWeight = weights.reduce((sum, value) => sum + value, 0);
-  if (totalWeight <= 0) {
-    return undefined;
-  }
-  const blended = positions.reduce(
-    (sum, position, index) => sum + (Number(position.apy) || 0) * (weights[index] ?? 0),
-    0
+  const useDeployedWeights = positions.some((position) => position.deployedWeight.units > 0n);
+  const weights = exactIntegerWeights(
+    positions.map((position) => (useDeployedWeights ? position.deployedWeight : position.pctWeight))
   );
-  return (blended / totalWeight).toFixed(6);
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0n);
+  if (totalWeight === 0n) return undefined;
+
+  const weightedBps = positions.reduce(
+    (sum, position, index) => sum + BigInt(position.apyBps) * weights[index],
+    0n
+  );
+  // Six decimal rate places minus four basis-point places leaves two powers
+  // of ten. Round the resulting rational directly; no binary float is involved.
+  const scaledRate = divideRounded(weightedBps * 100n, totalWeight);
+  return formatScaledInteger(scaledRate, 6, weightedBps < 0n);
 }
 
 /**
@@ -391,15 +504,44 @@ function blendPositionApy(
  * catalogue never promises faster liquidity than the provider does.
  */
 function redeemLiquidity(
-  policy: GroundProcessingPolicy | undefined
+  policy: GroundProcessingPolicy | null | undefined,
+  providerReference: string
 ): Pick<ProviderStrategySnapshot, "liquidityTerm" | "redemptionDelayDays"> {
-  if (!policy || policy.typicalMaxUnits === 0) {
+  if (!policy) {
+    throw providerContractViolation("processingPolicies.redeem", policy, providerReference);
+  }
+  if (
+    policy.processingTimeBasis !== "elapsed_seconds" &&
+    policy.processingTimeBasis !== "banking_days"
+  ) {
+    throw providerContractViolation(
+      "processingPolicies.redeem.processingTimeBasis",
+      policy.processingTimeBasis,
+      providerReference
+    );
+  }
+  const typicalMinUnits = requireFiniteNumber(
+    policy.typicalMinUnits,
+    "processingPolicies.redeem.typicalMinUnits",
+    providerReference,
+    { min: 0 }
+  );
+  const typicalMaxUnits = requireFiniteNumber(
+    policy.typicalMaxUnits,
+    "processingPolicies.redeem.typicalMaxUnits",
+    providerReference,
+    { min: 0 }
+  );
+  if (typicalMinUnits > typicalMaxUnits) {
+    throw providerContractViolation("processingPolicies.redeem", policy, providerReference);
+  }
+  if (typicalMaxUnits === 0) {
     return { liquidityTerm: "instant" };
   }
   const redemptionDelayDays =
     policy.processingTimeBasis === "banking_days"
-      ? Math.ceil(policy.typicalMaxUnits)
-      : Math.ceil(policy.typicalMaxUnits / 86_400);
+      ? Math.ceil(typicalMaxUnits)
+      : Math.ceil(typicalMaxUnits / 86_400);
   return { liquidityTerm: "delayed", redemptionDelayDays };
 }
 
@@ -467,11 +609,9 @@ const GROUND_CURATOR_HOUSES = [
  * Exported for the catalogue-inventory script, which attributes sources
  * distillation drops.
  *
- * The `morpho` branch is deliberately KEPT even though no Morpho vault can be
- * catalogued any more (`not_solana_hosted`): this parses Ground's RAW response,
- * which still carries all 18 sources, and the inventory's dropped-source table
- * attributes them. Understanding what we refuse is not the same as listing it —
- * do not "clean up" EVM vocabulary from this layer.
+ * Morpho remains part of this parser because these rows are still indexed even
+ * when an API surface chooses not to return them. Persistence and presentation
+ * policy are deliberately separate.
  */
 export function deriveCurator(source: GroundYieldSource): string | undefined {
   const id = source.id.toLowerCase();
@@ -493,7 +633,6 @@ export function deriveCurator(source: GroundYieldSource): string | undefined {
 export type GroundCatalogueDropReason =
   | "inactive_mode"
   | "not_solana_routable"
-  | "not_solana_hosted"
   | "unknown_token_symbol"
   | "no_cluster_mint";
 
@@ -513,9 +652,8 @@ export function distillGroundYieldSource(
   source: GroundYieldSource,
   environment: SdpEnvironment
 ): GroundYieldSourceDistillation {
-  // Keyed by environment, not cluster, so the host-chain gate below can read
-  // the ONE pinned chain constant (GROUND_SOLANA_CHAINS) rather than a second
-  // cluster-keyed copy of the same fact drifting beside it.
+  // The API environment selects the cluster whose well-known mint makes this
+  // source fundable; the source's host chain remains provider-routing metadata.
   const cluster = CLUSTER_BY_SDP_ENVIRONMENT[environment];
   // Only fully tradable sources enter the catalogue. buy_only would let
   // deposits into an exit-frozen source — trapped funds, which the Earn
@@ -531,14 +669,6 @@ export function distillGroundYieldSource(
   // cluster/mint question like the check below).
   if (!GROUND_SOLANA_ROUTED_TOKENS.has(source.depositToken.toLowerCase())) {
     return { outcome: "dropped", reason: "not_solana_routable" };
-  }
-  // Solana-HOSTED only: where the vault itself lives, not just the rail the
-  // customer funds it over. Ordered after the token gate so a USDT source on
-  // another chain keeps reporting the rail constraint that binds it first
-  // (Ground cannot route USDT on Solana even if the vault were Solana-hosted).
-  // Fail-closed on an absent/unknown chain — see GroundYieldSource.chain.
-  if (source.chain?.trim().toLowerCase() !== GROUND_SOLANA_CHAINS[environment]) {
-    return { outcome: "dropped", reason: "not_solana_hosted" };
   }
   const symbol = source.depositToken.toUpperCase();
   if (!isWellKnownTokenSymbol(symbol)) {
@@ -560,9 +690,25 @@ export function distillGroundYieldSource(
       sourceKind: classifySourceKind(source.allocations),
       underlyingSource: source.protocol?.trim().toLowerCase() || undefined,
       depositMints: [mint],
+      // The environment's own cluster, and that stays right after #1299 removed
+      // the `not_solana_hosted` gate — for a different reason than before.
+      //
+      // It is no longer "this source is hosted on this Solana chain": Ground may
+      // host a source on another chain entirely and bridge to it internally. It
+      // is that the DEPOSIT is Solana-side on this cluster — `depositMints` is
+      // this cluster's mint (the `no_cluster_mint` gate above proves one exists)
+      // and the rail is `GROUND_SOLANA_ROUTED_TOKENS`. So the derived `fundable`
+      // stays correct: money leaving a wallet on this cluster does reach this
+      // source.
+      //
+      // A non-custodial provider cannot say this — Kamino's K-Vault takes the
+      // customer's own deposit at a mainnet address with no bridge in front of
+      // it, so its sandbox rows are honestly un-fundable. See `hostCluster` on
+      // ProviderStrategySnapshot.
+      hostCluster: cluster,
       apyType: "variable",
-      currentApy: source.apyBps == null ? undefined : bpsToDecimalString(source.apyBps),
-      ...redeemLiquidity(source.processingPolicies?.redeem),
+      currentApy: optionalApy(source.apyBps),
+      ...redeemLiquidity(source.processingPolicies?.redeem, source.id),
       riskMetadata: {
         ...(curator === undefined ? {} : { curator }),
         ...(source.tvlUsd == null ? {} : { tvlUsd: source.tvlUsd }),
@@ -684,13 +830,23 @@ function mapDeposit(deposit: GroundDeposit, solanaChain: string): EarnPortfolioD
   // Gate on the deposit's own rail; an absent chain withholds the identifiers
   // rather than guessing — the row, amount, token, and status still render.
   const onSolanaRail = deposit.chain === solanaChain;
+  const token = requireKnownValue(
+    EARN_PORTFOLIO_TOKENS,
+    deposit.token,
+    "deposit.token",
+    deposit.id
+  );
+  const status = requireKnownValue(
+    EARN_PORTFOLIO_DEPOSIT_STATUSES,
+    deposit.status,
+    "deposit.status",
+    deposit.id
+  );
   return {
     id: deposit.id,
     amountUsd: deposit.amount,
-    // Ground only routes the tokens SDP declares, so an undeclared token here
-    // is drift; surface it as usdc rather than dropping the funds from view.
-    token: narrow(EARN_PORTFOLIO_TOKENS, deposit.token) ?? "usdc",
-    status: narrow(EARN_PORTFOLIO_DEPOSIT_STATUSES, deposit.status) ?? "processing",
+    token,
+    status,
     fromAddress: onSolanaRail ? (deposit.fromAddress ?? undefined) : undefined,
     transactionSignature: onSolanaRail ? (deposit.txHash ?? undefined) : undefined,
     createdAt: deposit.createdAt,
@@ -713,7 +869,12 @@ function withdrawalAwaitsApproval(withdrawal: GroundWithdrawal): boolean {
 }
 
 function mapWithdrawal(withdrawal: GroundWithdrawal): EarnPortfolioWithdrawal {
-  const status = narrow(EARN_PORTFOLIO_WITHDRAWAL_STATUSES, withdrawal.status) ?? "processing";
+  const status = requireKnownValue(
+    EARN_PORTFOLIO_WITHDRAWAL_STATUSES,
+    withdrawal.status,
+    "withdrawal.status",
+    withdrawal.id
+  );
   return {
     withdrawalRef: withdrawal.id,
     // Fold a parked leg up into the distinct wire status, but never override
@@ -748,6 +909,24 @@ function mapTurnkeyActivity(activity: GroundTurnkeyActivity): EarnPendingWithdra
 }
 
 const USD_AMOUNT_PATTERN = /^\d+(\.\d+)?$/;
+const MAX_PROVIDER_DECIMAL_LENGTH = 256;
+
+/** Validate a provider-owned USD decimal before it participates in arithmetic. */
+function requireProviderUsdAmount(
+  value: unknown,
+  field: string,
+  providerReference?: string
+): ExactUnsignedDecimal {
+  if (typeof value !== "string") {
+    throw providerContractViolation(field, value, providerReference);
+  }
+  const decimal = value.trim();
+  if (decimal.length > MAX_PROVIDER_DECIMAL_LENGTH || !USD_AMOUNT_PATTERN.test(decimal)) {
+    throw providerContractViolation(field, value, providerReference);
+  }
+  const [whole = "0", fraction = ""] = decimal.split(".");
+  return normalizeExactDecimal(BigInt(`${whole}${fraction}`), fraction.length);
+}
 
 /** Ground speaks JSON doubles for USD amounts; validate before converting. */
 function parseUsdAmount(value: string): number {
@@ -914,15 +1093,34 @@ export class GroundEarnClient
       `${config.baseUrl}/v2/wallets/${pathSegment(input.providerWalletRef, "wallet reference")}/yield`,
       { method: "GET", headers: config.headers }
     );
-    const positions = (result.positions ?? []).map((position) => ({
-      yieldSourceId: position.yieldSourceId,
-      name: position.name,
-      apy: bpsToDecimalString(position.apyBps ?? 0),
-      pct: position.pct ?? 0,
-      deployedValueUsd: position.deployedValueUsd,
-    }));
+    const normalizedPositions = (result.positions ?? []).map((position, index) => {
+      const path = `yield.positions[${index}]`;
+      const apyBps = requireSafeInteger(position.apyBps, `${path}.apyBps`, position.yieldSourceId);
+      const pct = requireFiniteNumber(position.pct, `${path}.pct`, position.yieldSourceId, {
+        min: 0,
+        max: 100,
+      });
+      const deployedWeight = requireProviderUsdAmount(
+        position.deployedValueUsd,
+        `${path}.deployedValueUsd`,
+        position.yieldSourceId
+      );
+      return {
+        apyBps,
+        pctWeight: exactDecimalFromNumber(pct),
+        deployedWeight,
+        position: {
+          yieldSourceId: position.yieldSourceId,
+          name: position.name,
+          apy: bpsToDecimalString(apyBps),
+          pct,
+          deployedValueUsd: position.deployedValueUsd,
+        },
+      };
+    });
+    const positions = normalizedPositions.map(({ position }) => position);
     return {
-      currentApy: blendPositionApy(positions),
+      currentApy: blendPositionApy(normalizedPositions),
       earnedUsd: result.earnedUsd,
       annualizedUsd: result.annualizedUsd ?? undefined,
       positions,

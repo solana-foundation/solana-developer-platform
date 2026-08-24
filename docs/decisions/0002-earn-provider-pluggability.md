@@ -74,6 +74,12 @@ Independent switches, all runtime-safe:
   holds until the status is deliberately written back. See the playbook's vault
   checklist.
 - **Feature flag:** the whole `/v1/earn` family sits behind `EARN_ENABLED`.
+- **Surfacing (2026-08-14 addendum):** `EARN_PROVIDER_SURFACING` declares which
+  registered providers SDP currently OFFERS. An un-surfaced provider keeps its
+  code, credentials, crons and catalogue rows, but its strategies vanish from
+  every public read and `POST /programs` refuses it. This is the *product*
+  switch — the four above are deployment and customer switches — and it is the
+  only one that no per-organization override can lift.
 
 ### Invariants that make disabling safe
 
@@ -92,6 +98,11 @@ Independent switches, all runtime-safe:
   remain readable regardless of provider entitlement, and the withdrawal
   ledger list carries no provider gate at all (2026-08-11 addendum), so
   dashboards and partner integrations keep working while a provider is off.
+  Surfacing is the one exception, and only for the *catalogue* read: an
+  un-surfaced provider's strategies are hidden, while every route that reads or
+  exits an existing program stays open (2026-08-14 addendum). Hiding a shelf
+  nobody may buy from is presentation; hiding a position someone holds would be
+  hiding their money.
 
 ## Consequences
 
@@ -393,3 +404,348 @@ promised had nowhere to live. It now lives between programs.
   preview/create/list/detail). The implicit create-or-update `PUT /program` is
   gone: it was keyed on the triple that stops being addressable the moment a
   second program exists.
+
+## Addendum (2026-08-13) — catalogue-only providers, and the cluster a strategy lives on
+
+Earn V1 was designed around one provider shape: a **custodial** partner (Ground)
+fronting an omnibus portfolio wallet SDP provisions and moves money through.
+Serving the communal vaults — Kamino now, Jupiter Lend next — introduces a
+second shape that the pluggability constraint has to absorb without a rewrite.
+
+- **A provider may front a catalogue and no money movement, and that is a
+  complete integration.** Kamino's K-Vaults are non-custodial: the customer's
+  own wallet deposits on-chain, so there is no wallet for SDP to provision, fund
+  or pay out from. It implements the base `EarnVaultProvider` contract and none
+  of the portfolio-wallet capability, and every program route answers 501 for it
+  through `supportsPortfolioWallets` — the capability seam doing exactly the job
+  it was built for. This is NOT a partial integration to be finished later;
+  per-vault execution is a different money model (PRO-1634 territory).
+- **A provider may need no credential at all.** Kamino's data API is public.
+  `keyPairCredentialDefinition` assumed `<PREFIX>_API_KEY`/`_SANDBOX_API_KEY`
+  for every earn provider, in its parameter type and in a drift test that
+  expanded `EARN_PROVIDERS` by naming convention. Both now derive from what the
+  availability definitions actually READ (`credentialEnvKeys`), with
+  `publicApiDefinition` for the keyless case. Declaring a placeholder
+  `KAMINO_API_KEY` was rejected: `scripts/secret-keys.mjs` is "every env key the
+  SDP API reads", and a declared secret nothing reads is a standing question for
+  whoever next provisions the service. The drift test gained an inverse guard so
+  a credentialed provider cannot slip through by declaring nothing.
+- **The environment no longer implies the cluster; `hostCluster` states it.**
+  (The Kamino premise below was later found to be WRONG — it does have a devnet
+  deployment; see the 2026-08-14 addendum. The mechanism this bullet introduces
+  is unchanged and still load-bearing for any genuinely single-cluster provider.)
+  Kamino was believed to be mainnet-only and was catalogued into BOTH
+  environments, so a sandbox row honestly named a live mainnet vault and mint.
+  `status` could not carry this — it is the operator's stop switch, and reusing
+  it would both misstate the reason and collide with the sync's refusal to
+  overwrite an operator pause. So every `ProviderStrategySnapshot` states the
+  cluster its instrument lives on (migration 0057), and ONE predicate,
+  `isClusterFundableInEnvironment`, decides fundability at all three gates: the
+  API's `assertKnownYieldSources` before any provider mutation, the derived
+  `fundable` on the strategies wire shape, and the dashboard's strategy filter.
+  **Being catalogued and being fundable are now different questions, and the
+  wire says which.**
+- **A catalogue is admitted by an explicit, reviewable floor.** Kamino's vault
+  registry is permissionless, so its API is a census of everything ever created
+  — 170 vaults, ~90 of the stablecoin ones dust or literal test vaults.
+  `KAMINO_MIN_TVL_USD` admits 21. The floor is data, not judgement, and
+  `earn:inventory:kamino` commits the census (including the largest near-misses)
+  so raising or lowering it is reviewed against what it admits and refuses —
+  the same argument that produced the Ground inventory.
+- **Rates get their own cadence, and the one-source rule survives.** The hourly
+  catalogue sync is right for catalogue drift and wrong for APY. Rather than
+  overlay live figures onto stored rows at read time — which would blend two
+  sources on the one surface the 2026-08-11 addendum says must not — a second
+  pass (`EarnLiveMetricsProvider` / `supportsLiveMetrics`, every 5 minutes)
+  refreshes figures IN PLACE. It is UPDATE-only and cannot insert, and its input
+  type carries figures only, so it can neither admit a vault the catalogue
+  refused nor change what a strategy is. Freshness is cadence, not blending.
+  A provider whose rates cost one request per vault should not implement it.
+
+## Addendum (2026-08-14) — surfacing: which registered providers SDP actually offers
+
+The switches above (credentials, org entitlement, strategy status, feature flag)
+answer *deployment* and *customer* questions. None answers the **product**
+question — "is SDP selling this provider right now?" — and the first time it was
+asked, the honest options were all bad: delete a working integration, remove its
+credentials and let a `PROVIDER_NOT_CONFIGURED` stand in for a business
+decision, or pause every one of its strategies individually and hope the next
+catalogue sync respects it.
+
+So registration and surfacing are now separate declarations.
+`EARN_PROVIDER_SURFACING` in `packages/sdp-types/src/provider-access.ts` is an
+exhaustive `Record<EarnProviderId, boolean>` beside `EARN_PROVIDERS`: the latter
+is "what this deployment can talk to", the former is "what we offer today".
+
+- **One declaration, three consumers, no provider ids anywhere else.**
+  `GET /strategies` (list and detail) hides an un-surfaced provider's rows;
+  `POST /programs` refuses to open a new position with it
+  (`assertEarnProviderSurfaced`); the dashboard derives
+  `EARN_PROGRAM_CREATION_ENABLED` and drops every create affordance. Hiding at
+  the API rather than in the browser is deliberate — the API is the surface the
+  dashboard *and* every partner integration read, and a client-side copy of a
+  visibility rule is the second thing that drifts toward permissive.
+- **Exhaustive on purpose.** A provider added to `EARN_PROVIDERS` without an
+  entry is a compile error, so "we registered a provider and never decided
+  whether it was public" cannot happen quietly. The default for a new id is a
+  decision, not an omission.
+- **It gates the way IN, and only the way in.** Reads, withdrawal previews,
+  withdrawals, the ledger, and re-targeting an existing program all ignore
+  surfacing entirely. This is the money-out-beats-money-off invariant applied to
+  a new switch: an organization holding a position taken while a provider was
+  offered keeps every route that reads or exits it, and un-surfacing can never
+  trap funds. `POST /programs` is the only route that opens a *new* commitment,
+  so it is the only one that refuses.
+- **Its 403 is not the entitlement 403.** `assertProviderAvailable` answers an
+  organization-scoped question and tells the caller to request manual
+  activation. No override lifts surfacing, so it runs first and says "not
+  currently offered" — pointing a caller at an activation door that does not
+  exist is worse than a plain refusal.
+- **The catalogue sync and metrics refresh keep running.** `earn_strategies`
+  stays a truthful provider inventory, and re-surfacing takes effect on deploy
+  rather than after the next hourly pass. Same reasoning as the API's
+  `HIDDEN_STRATEGY_TERMS`: filter at the policy boundary, never by refusing to
+  store what a provider reports.
+
+**First application: Ground un-surfaced, Kamino the only offered provider.**
+Ground is the only portfolio-capable provider, so with it un-surfaced nothing
+can create a program and Earn is browse-only — a Kamino comparison catalogue
+plus whatever programs already exist. That is a product consequence of the
+switch, not a property of it; re-surfacing Ground is a one-line change.
+
+Two consequences worth naming, because both are load-bearing and neither is
+obvious:
+
+- **`assertKnownYieldSources` deliberately does NOT inherit the hide.** It
+  validates re-target allocations against the STORED catalogue, so a position
+  may keep pointing at a row the browse surface no longer shows. Collapsing the
+  two would freeze an existing customer's allocation because of an editorial
+  decision about new customers.
+- **The create test suite is config-independent.** `earn-program.test.ts`
+  partial-mocks `isEarnProviderSurfaced` to force it on, because idempotency,
+  replay, gate order and environment isolation have to keep working for whichever
+  provider is offered next — the gate itself gets its own tests that flip the
+  mock off and run against the real map.
+
+## Addendum (2026-08-14) — Kamino has a devnet deployment; each environment catalogues its own cluster
+
+The 2026-08-13 addendum recorded "Kamino is deployed on mainnet only" as a
+measured fact and built on it: sandbox was served the mainnet shelf, stamped
+`hostCluster: "mainnet-beta"`, permanently `fundable: false`. **The premise was
+wrong**, and the cost was a sandbox catalogue an integrator could look at and
+never act on.
+
+Measured 2026-08-14, on-chain:
+
+- Kamino runs a **separate devnet kvault program**,
+  `devkRngFnfp4gBc5a3LsadgbQKdPo8MSZ4prFiNSVmY` — not mainnet's `KvauGM…`, which
+  is *also* deployed to devnet but owns **zero** accounts there. Pointing at the
+  wrong one returns a confident empty shelf rather than an error.
+- **21 K-Vaults exist on devnet**, all with shares issued. Nine are denominated
+  in the official devnet USDC mint (`4zMMC…`, what the Circle faucet dispenses),
+  and several deliberately mirror mainnet names — Allez USDC, Steakhouse USDC,
+  RockawayX RWA USDC, Gauntlet Frontier USDC.
+
+### Why the original measurement missed it
+
+`api.kamino.finance` indexes mainnet only, and says so nowhere. `?env=devnet`
+and `?cluster=devnet` both return **200 with a byte-identical mainnet payload**
+(confirmed by hashing the responses), there is no devnet API host, and
+`/kvaults/vaults/{devnet pubkey}/metrics` answers 404. A parameter that is
+accepted and silently ignored is indistinguishable from a parameter that works.
+
+**The generalisable lesson, now in the playbook:** a hosted API is not evidence
+about cluster deployment. Check the chain for a per-cluster program id.
+
+### What changed
+
+- **Two clusters, two data SOURCES, not one source with a parameter.**
+  Production reads the mainnet REST shelf; every other environment reads devnet
+  vaults on-chain (`getProgramAccounts`, `VaultState` decoded positionally —
+  `@sdp/earn` still carries no dependency but `@sdp/types`). Non-production
+  issues no request to `api.kamino.finance` at all, which is stronger than
+  fetching and filtering.
+- **The catalogue sync refuses to STORE a mainnet instrument outside
+  production.** Provider-neutral, at the single writer of `earn_strategies`. It
+  does not trust a client to get this right, and it is independent of the
+  delist pass — which would otherwise leave stale mainnet rows behind whenever a
+  devnet read failed.
+- **No metrics outside production.** The bulk metrics endpoint is mainnet's, so
+  `listStrategyMetrics` returns `[]` elsewhere and sandbox rows render no rate.
+  A devnet APY would mean blending devnet Klend reserve rates — SDK-sized work
+  for a number that is ≈0 because those reserves have no real borrowers. `—` is
+  the honest answer.
+
+### What did NOT change, deliberately
+
+`hostCluster`, `fundable`, and `isClusterFundableInEnvironment` all stay. They
+stop *firing* for Kamino — its rows now match their environment's cluster in
+both — but they still guard Ground, production Kamino, rows already stored under
+the old behaviour, and the next genuinely single-cluster provider. The
+simplification here is to the mental model ("catalogued but not fundable" was a
+Kamino-shaped special case), not to the safety machinery.
+
+## Addendum (2026-08-19) — one provider-neutral movement ledger (PRO-1705)
+
+Earn ended up with **two authoritative movement tables split by execution
+mechanism**, not by business meaning:
+
+- `earn_program_withdrawals` (0055) — provider-API portfolio withdrawals.
+- `earn_vault_movements` (0059) — signed, on-chain vault deposits.
+
+Both record the same fact — money moved through Earn — so idempotency,
+lifecycle, reconciliation, history and reporting existed twice, in two shapes,
+and no single query could answer "what moved on this organization". Each new
+provider or direction deepened the split.
+
+**Decision: one `earn_movements` ledger, and one `earn_positions` holdings table
+behind it.** One row per real-world money movement, both directions, both
+execution models, discriminated by an `execution_model` column rather than by
+which table it lives in. Migrations 0062-0065.
+
+### What this supersedes
+
+Two earlier plans of record, both explicitly:
+
+- **This addendum's own 2026-08-11 note** that 0048's `earn_movements` was
+  "dropped rather than retrofitted", with a movements ledger deferred to the
+  execution era. The execution era arrived (0059), and it arrived as a *second*
+  ledger. The name is reclaimed; the 0048 SHAPE is not — that table was
+  position-scoped with base-unit amounts, a nullable provider, no environment, no
+  fingerprint, and a foreign key into the delist-pruned catalogue.
+- **Migration 0061's header**, which anticipated the vault withdraw direction
+  landing as more columns on `earn_vault_movements`. It lands in the unified
+  ledger instead, where `withdrawal` is already a seeded direction.
+
+### What did NOT change
+
+The ledger-vs-live rule from 2026-08-11 stands unaltered: **SDP ledgers what it
+initiates; SDP reads live what the provider observes; positions stay live.**
+`earn_positions` is a claim index, never a balance — balances and share counts
+are still read live on every request, and for a non-custodial vault the chain is
+the provider. Customer-initiated custodial deposits remain unledgered because SDP
+has no intent moment for them; when an observed-deposit feed is built, it writes
+rows into this ledger rather than a third table.
+
+Exit safety is unchanged and extended to the new read: `GET /v1/earn/movements`
+takes **no provider gate**, like the reads it generalises. It reports on money
+that has already moved, so un-offering a provider, removing its credentials, or
+un-entitling an organization closes the door IN and must never remove the record
+of what already went through it.
+
+### The parts that carry judgement
+
+- **Amounts carry an explicit `denomination`; shares live only in share-named
+  columns.** The concrete accounting hazard a merge could have introduced is USD,
+  mint units and vault share counts sharing a column. `denomination` is `usd` for
+  a custodial movement and the token MINT for a vault one, and no read may sum
+  across rows without grouping by it.
+- **Both idempotency anchors survive**, as partial unique indexes over their own
+  model's rows: custodial is holding-scoped (a custodial holding is 1:1 with its
+  program wallet, so this is 0055's wallet scope in the new shape), vault is
+  org-scoped per 0059. Flattening to one anchor would break whichever side lost.
+  No fingerprint builder or request-id derivation changed: those values are
+  persisted in `wallet_operations.raw_payload.executionRequest`, so altering one
+  would 409 every in-flight approved retry across a deploy.
+- **`provider_reference` means one thing again.** On 0059's positions it meant the
+  INSTRUMENT; on 0059's movements the same name meant the provider's id for the
+  movement. The unified ledger keeps the second meaning and names the first
+  `vault_address`. This overload is why the two tables could not simply be merged.
+- **Closed, earn-owned vocabularies are lookup tables with foreign keys**, not
+  `CHECK (x IN (...))` lists. The composite `(execution_model, status)` key makes
+  a custodial status unrepresentable on a vault movement. `provider` stays an open
+  registry string (ADR 0001) — a new provider must never require a migration.
+- **`finalized` is a real state, and `confirmed` is not terminal.** Optimistic
+  chain commitment can be dropped in a fork rollback, so settlement means
+  finalization for a vault movement and provider completion for a custodial one —
+  one meaning of settled across SDP, matching payments (PRO-1716).
+- **The transition matrix must agree with the SCHEMA, not merely with itself.**
+  `EARN_MOVEMENT_TRANSITIONS` declares no `confirmed → failed` for a vault
+  movement, because 0062 ties `confirmed_at`/`shares_out` to the commitment
+  states and recording that transition could only succeed by erasing an
+  observation SDP genuinely made — and would make "failed before landing"
+  indistinguishable from "landed, then dropped in a fork". A confirmed
+  transaction dropped by a fork stays in the reconciliation queue as an open
+  question rather than being declared failed on a guess.
+- **Project attribution is not a lifetime.** `project_id` is nullable with
+  `ON DELETE SET NULL` on the unified tables and, from 0062, on
+  `earn_provider_wallets` and `earn_program_withdrawals` too. 0055's CASCADE
+  meant deleting a project DESTROYED the withdrawal history of money that had
+  actually left the organization. Keeping the two shapes isomorphic through the
+  expand window also closes a trap: a divergence let a reused idempotency key
+  insert a fresh legacy row, collide with the surviving unified row on the
+  custodial anchor, and fail that key permanently — because the route
+  re-resolves the replay from the legacy table.
+- **A missing holding must never fail a money write.** Every movement belongs to
+  exactly one holding, so every write path projects the holding BEFORE the
+  movement, and the custodial projection opens one if the ledger has none.
+  Failing instead would take a program's whole withdrawal endpoint down, and on
+  the observation path — where the mirror shares its transaction with the legacy
+  write — it would roll back the `provider_reference` stamp for a payout the
+  provider had already made. A movement with no reference is the one row no later
+  observation can find again. The repair is ENSURE-shaped, not re-project: a
+  transition that changes no holding state must not take a row lock on the
+  holding, or two concurrent flows against the same one deadlock.
+
+### Migration posture
+
+Expand → backfill → switch → contract, with every intermediate deploy
+rollback-safe. The legacy tables keep their writers while their writes are
+mirrored into the unified shape in the same transaction; reads switch in a later
+release; the legacy tables are dropped last, alone. Each projection is defined
+ONCE as a SQL view shared by the bulk backfill and the runtime mirror, because a
+projection spelled twice would drift, and history disagreeing with new rows is
+the worst outcome this migration could produce.
+
+One asymmetry in that posture is worth stating, because its absence reads as a
+guarantee it is not: **0064 establishes history, it does not converge advances.**
+`ON CONFLICT DO NOTHING` cannot refresh a row a legacy-only writer ADVANCED
+during a rollout or rollback window, and nothing else reaches such a row — the
+custodial appliers early-return on a terminal status and the vault reconciliation
+queue selects only the unsettled states. 0065 is therefore the same projection
+re-stated as a guarded upsert, and it is where the convergence guarantee actually
+lives. Before the contract phase stops dual-writing, a read-only parity check
+(row counts plus a per-row projection diff) runs in the deployed environments,
+expecting zero differences.
+
+## Addendum — 2026-08-20 The vault exit route (PRO-1702)
+
+The vault-direct model's money-out half ships: `POST /v1/earn/vault-withdrawals`
+plus the treasury exit action, with Kamino the first `EarnVaultWithdrawProvider`
+implementor. The builder preserves Kamino's complete instruction sequence and
+the vault lookup table. The API appends the idempotency memo, compiles and signs
+one final transaction, then rejects it if its bytes exceed Solana's packet
+limit. Solana documents that serialized transaction limit as 1,232 bytes in
+[Transaction Structure](https://solana.com/docs/core/transactions/transaction-structure).
+The current route fails closed if a future vault layout still exceeds the limit
+after lookup-table compression. Supporting that case would require a new,
+explicit multi-transaction design for ordered persistence, submission and
+reconciliation. This implementation intentionally carries no dormant batching
+code or child-record schema for that hypothetical path.
+
+- **One exit is one signed movement.** The `earn_movements` row owns the share
+  amount, signature, signed bytes and blockhash window. It is recorded before
+  broadcast and reconciled through the same path as a vault deposit. There is
+  no child table, ordering state or parent aggregation.
+- **A vault WITHDRAWAL row is denominated in the SHARE MINT**, and
+  `amount_requested` is the exact share quantity the transaction encodes
+  (`sharesAmount: u64`, decoded, never estimated). This refines the 2026-08-19
+  "vault movements are denominated in the token mint" line, which was written
+  when every vault movement was a deposit: a deposit's exact intent-time fact
+  is a token amount, a withdrawal's is a share count, and the tokens a
+  withdrawal returns are decided by the chain at execution. Writing a
+  build-time token estimate into a money column would launder an estimate into
+  "what moved" the moment settlement copies it. The deeper invariant —
+  `denomination` is an open set and no read may sum amounts without grouping
+  by it — is exactly what makes the asymmetry safe.
+- **Exit safety, applied in its strongest form.** The route consults NO
+  surfacing, NO entitlement, NO availability, NO catalogue (the caller names
+  its own POSITION row, so a delisted vault stays exitable), and NOT the
+  `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` fail-close — an exit works in production
+  today, where deposits stay closed pending PRO-1703. The only provider-shaped
+  refusal is capability (501, `supportsVaultWithdraw` false), which describes
+  SDP's plumbing and never permission. Wallet policy still runs: it is the
+  organization's own custody control, not a provider gate.
+- **The withdrawal wire speaks the ledger's own vocabulary** (`requested …
+  finalized`) and exposes the movement signature directly. This surface
+  postdates the unification, so there is no legacy client to translate for.

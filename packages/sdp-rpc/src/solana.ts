@@ -7,22 +7,27 @@
 
 import {
   type Address,
+  airdropFactory,
   type Base64EncodedWireTransaction,
   type Blockhash,
   type Commitment,
+  commitmentComparator,
   createDefaultRpcTransport,
   type createSolanaRpc,
   createSolanaRpcFromTransport,
   createSolanaRpcSubscriptions,
   getBase64Decoder,
   getTransactionDecoder,
+  lamports as kitLamports,
   type RpcTransport,
   type Signature,
+  type Slot,
+  type TransactionError,
   type TransactionMessageBytesBase64,
 } from "@solana/kit";
 import { getSolanaConfig } from "./config";
 import { solanaRpcError } from "./errors";
-import { isTransientRpcError } from "./transient";
+import { isTransientRpcError, withTransientRpcRetry } from "./transient";
 import type { RpcEnv } from "./types";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -92,28 +97,6 @@ const DISALLOWED_RPC_HEADERS = new Set([
   "via",
 ]);
 
-const TRANSIENT_RPC_RETRY_DELAYS_MS = [250, 750, 1500];
-
-async function withTransientRpcRetry<T>(operation: () => Promise<T>): Promise<T> {
-  let lastError: unknown;
-
-  for (let attempt = 0; attempt <= TRANSIENT_RPC_RETRY_DELAYS_MS.length; attempt += 1) {
-    try {
-      return await operation();
-    } catch (error) {
-      lastError = error;
-
-      if (attempt === TRANSIENT_RPC_RETRY_DELAYS_MS.length || !isTransientRpcError(error)) {
-        throw error;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, TRANSIENT_RPC_RETRY_DELAYS_MS[attempt]));
-    }
-  }
-
-  throw lastError;
-}
-
 function assertAllowedRpcHeaders(
   headers: Readonly<Record<string, string>>
 ): asserts headers is AllowedSolanaRpcHeaders {
@@ -170,8 +153,10 @@ function withRequestTimeout(transport: RpcTransport, timeoutMs: number): RpcTran
  * Create a configured Solana RPC client from environment
  */
 export function createRpc(env: RpcEnv, options?: RpcClientOptions): SolanaRpc {
-  const config = getSolanaConfig(env);
-  const rpcUrl = options?.rpcUrl ?? config.rpcUrl;
+  // An explicit URL is already the complete endpoint selection. Do not force
+  // callers with a per-request/per-cluster URL to also configure the legacy
+  // process default merely to construct a client for that explicit endpoint.
+  const rpcUrl = options?.rpcUrl ?? getSolanaConfig(env).rpcUrl;
   const timeoutMs = options?.requestTimeoutMs ?? DEFAULT_RPC_REQUEST_TIMEOUT_MS;
 
   let transport: RpcTransport;
@@ -348,9 +333,8 @@ export async function confirmTransaction(
 
     if (result) {
       const isConfirmed =
-        result.confirmationStatus === commitment ||
-        (commitment === "confirmed" && result.confirmationStatus === "finalized") ||
-        result.confirmationStatus === "finalized";
+        result.confirmationStatus !== null &&
+        commitmentComparator(result.confirmationStatus, commitment) >= 0;
 
       if (isConfirmed || result.err) {
         return {
@@ -380,43 +364,20 @@ export async function requestAndConfirmAirdrop(
     timeoutMs?: number;
   }
 ): Promise<TransactionConfirmation> {
-  const rpcUrl = getSolanaConfig(env).rpcUrl;
-  const response = await fetch(rpcUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "requestAirdrop",
-      params: [address, Number(lamports)],
-    }),
+  const rpc = createRpc(env);
+  const commitment = options?.commitment ?? "confirmed";
+  const airdrop = airdropFactory({
+    rpc,
+    rpcSubscriptions: createRpcSubscriptions(env),
+  } as unknown as Parameters<typeof airdropFactory>[0]);
+
+  const signature = await airdrop({
+    commitment,
+    lamports: kitLamports(BigInt(lamports)),
+    recipientAddress: address,
   });
 
-  if (!response.ok) {
-    throw new Error(`Airdrop request failed with HTTP ${response.status}`);
-  }
-
-  const payload = (await response.json()) as {
-    result?: string;
-    error?: {
-      code?: number;
-      message?: string;
-      data?: unknown;
-    };
-  };
-
-  if (payload.error) {
-    throw new Error(payload.error.message ?? "Airdrop request failed");
-  }
-
-  if (!payload.result) {
-    throw new Error("Airdrop request returned no signature");
-  }
-
-  const rpc = createRpc(env);
-  const confirmation = await confirmTransaction(rpc, payload.result as Signature, {
+  const confirmation = await confirmTransaction(rpc, signature, {
     commitment: options?.commitment,
     timeoutMs: options?.timeoutMs,
   });
@@ -562,10 +523,10 @@ export async function getSignaturesForAddress(
 // ═══════════════════════════════════════════════════════════════════════════
 
 export interface SignatureStatusInfo {
-  slot: bigint;
+  slot: Slot;
   confirmations: bigint | null;
-  confirmationStatus: "processed" | "confirmed" | "finalized" | null;
-  err: unknown | null;
+  confirmationStatus: Commitment | null;
+  err: TransactionError | null;
 }
 
 /**
@@ -573,22 +534,25 @@ export interface SignatureStatusInfo {
  */
 export async function getSignatureStatuses(
   rpc: SolanaRpc,
-  signatures: Signature[]
+  signatures: Signature[],
+  options: { searchTransactionHistory?: boolean } = {}
 ): Promise<Array<SignatureStatusInfo | null>> {
   if (signatures.length === 0) {
     return [];
   }
 
-  const response = await rpc.getSignatureStatuses(signatures).send();
+  const response = await (options.searchTransactionHistory
+    ? rpc.getSignatureStatuses(signatures, { searchTransactionHistory: true })
+    : rpc.getSignatureStatuses(signatures)
+  ).send();
 
   return response.value.map((item) =>
     item
       ? {
           slot: item.slot,
-          confirmations: item.confirmations ?? null,
-          confirmationStatus:
-            (item.confirmationStatus as SignatureStatusInfo["confirmationStatus"]) ?? null,
-          err: item.err ?? null,
+          confirmations: item.confirmations,
+          confirmationStatus: item.confirmationStatus,
+          err: item.err,
         }
       : null
   );

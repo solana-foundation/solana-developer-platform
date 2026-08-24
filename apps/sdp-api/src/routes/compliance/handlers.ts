@@ -1,30 +1,19 @@
 import { assertValidAddress } from "@sdp/solana/address";
-import type { Context } from "hono";
-import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { createComplianceService } from "@/services/compliance";
 import { getEnabledProviders } from "@/services/provider-availability.service";
-import type { Env } from "@/types/env";
-import { screenAddressSchema } from "./schemas";
+import type { screenAddressSchema } from "./schemas";
 
-type AppContext = Context<{ Bindings: Env }>;
+export async function screenAddress(c: ValidatedBodyContext<typeof screenAddressSchema>) {
+  const body = c.req.valid("json");
 
-export async function screenAddress(c: AppContext) {
-  const body = await c.req.json();
-  const parsed = screenAddressSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-
-  const address = parsed.data.address.trim();
-  const network = parsed.data.network;
+  const address = body.address.trim();
+  const network = body.network;
 
   if (network === "solana") {
     try {
@@ -52,14 +41,14 @@ export async function screenAddress(c: AppContext) {
   const providers = await complianceService.screenAddress({
     address,
     network,
-    intent: parsed.data.intent,
+    intent: body.intent,
   });
 
   return success(c, {
     screening: {
       address,
       network,
-      intent: parsed.data.intent,
+      intent: body.intent,
       checkedAt: new Date().toISOString(),
       providers,
     },

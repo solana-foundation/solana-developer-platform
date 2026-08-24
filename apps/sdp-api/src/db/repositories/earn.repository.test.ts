@@ -10,8 +10,6 @@ import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type {
-  CreateEarnProgramWithdrawalInput,
-  EarnProgramWithdrawalRow,
   EarnProviderWalletRow,
   EarnRepository,
   EarnStrategyRow,
@@ -20,8 +18,13 @@ import type {
   ListEarnProviderWalletsResult,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
-import { EARN_SEED_REFERENCE_PREFIX } from "./earn.repository";
 import { createPostgresEarnRepository } from "./earn.repository.postgres";
+import {
+  type CreateCustodialMovementInput,
+  createPostgresEarnMovementsRepository,
+  type EarnMovementRow,
+  type EarnMovementsRepository,
+} from "./earn-movements.repository";
 
 const TEST_PROJECT_ID = "prj_earn_repo_test";
 const OTHER_PROJECT_ID = "prj_earn_repo_test_other";
@@ -45,6 +48,10 @@ describe("EarnRepository (postgres)", () => {
 
   beforeEach(async () => {
     const db = getDb(env);
+    // The unified ledger the repository mirrors into (PRO-1705) references both
+    // the withdrawal's holding and the program wallet, so it is cleared first.
+    await db.prepare("DELETE FROM earn_movements").run();
+    await db.prepare("DELETE FROM earn_positions").run();
     await db.prepare("DELETE FROM earn_program_withdrawals").run();
     await db.prepare("DELETE FROM earn_strategies").run();
     await db.prepare("DELETE FROM earn_provider_wallets").run();
@@ -94,6 +101,7 @@ describe("EarnRepository (postgres)", () => {
       redemptionDelayDays: null,
       riskMetadata: { curator: "gauntlet" },
       status: "active",
+      hostCluster: "devnet",
       environment: "sandbox",
       ...overrides,
     };
@@ -109,7 +117,7 @@ describe("EarnRepository (postgres)", () => {
     return row;
   }
 
-  type OrderedTable = "earn_strategies" | "earn_program_withdrawals" | "earn_provider_wallets";
+  type OrderedTable = "earn_strategies" | "earn_movements" | "earn_provider_wallets";
 
   async function setCreatedAt(table: OrderedTable, id: string, createdAt: string): Promise<void> {
     await getDb(env)
@@ -123,6 +131,103 @@ describe("EarnRepository (postgres)", () => {
       await setCreatedAt(table, id, SHARED_CREATED_AT);
     }
   }
+
+  /**
+   * The five-minute metrics refresh writes through here. Its whole safety
+   * argument is that it can only rewrite FIGURES on rows the hourly catalogue
+   * sync already admitted — these cases are that argument.
+   */
+  describe("updateStrategyMetrics", () => {
+    const metricsInput = (overrides: Record<string, unknown> = {}) => ({
+      provider: "veda" as const,
+      providerReference: "vault-usdc-prime",
+      environment: "sandbox" as const,
+      currentApy: "0.0731",
+      riskMetadata: { tvlUsd: 4_200_000 },
+      ...overrides,
+    });
+
+    it("refreshes the rate and merges volatile metadata over the stored object", async () => {
+      const seeded = await seedStrategy();
+
+      const applied = await repo.updateStrategyMetrics(metricsInput());
+
+      expect(applied).toBe(true);
+      const row = await repo.getStrategyById(seeded.id);
+      expect(row?.current_apy).toBe("0.0731");
+      // curator came from the catalogue sync and is NOT in the refresh payload;
+      // a replacing write would drop it and the dashboard would lose the label.
+      expect(row?.risk_metadata).toEqual({ curator: "gauntlet", tvlUsd: 4_200_000 });
+    });
+
+    it("never inserts — an unknown reference is a silent no-op", async () => {
+      // This is what lets the refresh hand over a provider's whole shelf
+      // without first working out which of it we catalogue. If it could
+      // insert, it would be a second way into the catalogue that skips every
+      // admission gate in the provider clients.
+      const applied = await repo.updateStrategyMetrics(
+        metricsInput({ providerReference: "a-vault-we-never-catalogued" })
+      );
+
+      expect(applied).toBe(false);
+      const { total } = await repo.listStrategies({
+        environment: "sandbox",
+        includeInactive: true,
+        limit: 10,
+        offset: 0,
+      });
+      expect(total).toBe(0);
+    });
+
+    it("does not cross environments or providers", async () => {
+      const seeded = await seedStrategy();
+
+      expect(await repo.updateStrategyMetrics(metricsInput({ environment: "production" }))).toBe(
+        false
+      );
+      expect(await repo.updateStrategyMetrics(metricsInput({ provider: "ground" }))).toBe(false);
+
+      expect((await repo.getStrategyById(seeded.id))?.current_apy).toBe("0.052");
+    });
+
+    it("clears a rate the provider has stopped reporting", async () => {
+      const seeded = await seedStrategy();
+
+      await repo.updateStrategyMetrics(metricsInput({ currentApy: null }));
+
+      // Null, not the last-known figure: a rate with no source behind it is
+      // worse than no rate — the UI renders "—" for null.
+      expect((await repo.getStrategyById(seeded.id))?.current_apy).toBeNull();
+    });
+
+    it("leaves identity alone — name, mints and liquidity term are the sync's", async () => {
+      const seeded = await seedStrategy();
+
+      await repo.updateStrategyMetrics(metricsInput());
+
+      const row = await repo.getStrategyById(seeded.id);
+      expect(row?.name).toBe(seeded.name);
+      expect(row?.deposit_mints).toEqual(seeded.deposit_mints);
+      expect(row?.liquidity_term).toBe(seeded.liquidity_term);
+      expect(row?.host_cluster).toBe(seeded.host_cluster);
+      expect(row?.source_kind).toBe(seeded.source_kind);
+    });
+
+    it("refreshes an operator-paused row's figures without reviving it", async () => {
+      // A pause stops deposits; it does not freeze the vault's real-world
+      // numbers. An operator deciding whether to unpause wants current figures,
+      // not the ones from the moment they hit stop.
+      const seeded = await seedStrategy();
+      await repo.upsertStrategy(strategyInput({ status: "paused" }));
+
+      const applied = await repo.updateStrategyMetrics(metricsInput());
+
+      expect(applied).toBe(true);
+      const row = await repo.getStrategyById(seeded.id);
+      expect(row?.status).toBe("paused");
+      expect(row?.current_apy).toBe("0.0731");
+    });
+  });
 
   describe("upsertStrategy", () => {
     it("inserts a catalogue row and round-trips the jsonb columns", async () => {
@@ -201,6 +306,40 @@ describe("EarnRepository (postgres)", () => {
       expect(total).toBe(1);
     });
 
+    /**
+     * The expand half of migration 0057 leaves `host_cluster` NULLABLE, because
+     * the deploy applies migrations BEFORE it rolls the service and the cron
+     * image — and a rollback restores the old image over the new schema. So a
+     * writer that predates the column can and will write a NULL row here.
+     *
+     * Both halves of that contract are pinned: the write must be ACCEPTED (a
+     * NOT NULL would fail every upsert in that window, stalling the catalogue
+     * refresh), and the read must resolve the row to the environment's own
+     * cluster so it stays fundable instead of silently leaving the wizard.
+     */
+    it("admits a row from a writer that predates host_cluster, and reads it as this environment's cluster", async () => {
+      const db = getDb(env);
+      const legacyId = "earn_strategy_pre_host_cluster";
+      for (const [id, environment, expected] of [
+        [legacyId, "sandbox", "devnet"],
+        [`${legacyId}_prod`, "production", "mainnet-beta"],
+      ] as const) {
+        await db
+          .prepare(
+            `INSERT INTO earn_strategies
+               (id, provider, provider_reference, name, source_kind, deposit_mints,
+                apy_type, current_apy, liquidity_term, risk_metadata, status, environment)
+             VALUES (?, 'ground', ?, 'Legacy Ground Vault', 'defi', ?::jsonb,
+                     'variable', '0.041', 'instant', '{}'::jsonb, 'active', ?)`
+          )
+          .bind(id, `${id}-ref`, JSON.stringify([USDC_MINT]), environment)
+          .run();
+
+        const row = await repo.getStrategyById(id);
+        expect(row?.host_cluster).toBe(expected);
+      }
+    });
+
     it("keys the sync on environment — one provider reference, separate sandbox/production rows", async () => {
       const sandbox = await seedStrategy();
       const production = await seedStrategy({ environment: "production" });
@@ -274,21 +413,6 @@ describe("EarnRepository (postgres)", () => {
       expect(second).toEqual([]);
     });
 
-    it("never touches dev-seed fixtures, which no provider lists", async () => {
-      const fixture = await seedStrategy({
-        providerReference: `${EARN_SEED_REFERENCE_PREFIX}kamino-allez-usdc`,
-      });
-
-      const deleted = await repo.deleteUnlistedStrategies({
-        provider: "ground",
-        environment: "sandbox",
-        listedProviderReferences: ["kamino-steakhouse-usdc"],
-      });
-
-      expect(deleted).toEqual([]);
-      expect((await repo.getStrategyById(fixture.id))?.status).toBe("active");
-    });
-
     it("refuses an empty keep set rather than deleting the whole shelf", async () => {
       // "The provider listed nothing" is indistinguishable from a misconfigured
       // account, so it can never tear down a catalogue.
@@ -346,6 +470,80 @@ describe("EarnRepository (postgres)", () => {
         offset: 0,
       });
       expect(all.total).toBe(2);
+    });
+  });
+
+  /**
+   * The per-vault curation knobs behind the API's HIDDEN_VAULTS / CURATED_VAULTS
+   * config. Both filter in SQL, so `total` has to move with the rows — a
+   * curated page that still counted the hidden vaults would paginate a reader
+   * into empty windows.
+   */
+  describe("listStrategies per-vault curation", () => {
+    it("drops a denied vault from rows AND total, keyed on provider:reference", async () => {
+      const kept = await seedStrategy({ providerReference: "vault-kept" });
+      await seedStrategy({ providerReference: "vault-denied" });
+
+      const { rows, total } = await repo.listStrategies({
+        environment: "sandbox",
+        // `veda` is this suite's default seed provider — deliberately not Ground,
+        // so the curation is proven against the canonical contract, not one
+        // provider's quirks.
+        excludeProviderKeys: ["veda:vault-denied"],
+        limit: 10,
+        offset: 0,
+      });
+
+      expect(total).toBe(1);
+      expect(rows.map((row) => row.id)).toEqual([kept.id]);
+    });
+
+    it("scopes the denylist to its provider, so a shared reference is not collateral", async () => {
+      // Same reference under two providers: only the keyed one may disappear.
+      const ground = await seedStrategy({ provider: "ground", providerReference: "shared-ref" });
+      const kamino = await seedStrategy({ provider: "kamino", providerReference: "shared-ref" });
+
+      const { rows } = await repo.listStrategies({
+        environment: "sandbox",
+        excludeProviderKeys: ["ground:shared-ref"],
+        limit: 10,
+        offset: 0,
+      });
+
+      expect(rows.map((row) => row.id)).toEqual([kamino.id]);
+      expect(rows.map((row) => row.id)).not.toContain(ground.id);
+    });
+
+    it("shows only the allowlisted references for a curated provider", async () => {
+      const picked = await seedStrategy({ provider: "kamino", providerReference: "kv-picked" });
+      await seedStrategy({ provider: "kamino", providerReference: "kv-other" });
+      // An uncurated provider passes through untouched.
+      const ground = await seedStrategy({ provider: "ground", providerReference: "ground-vault" });
+
+      const { rows, total } = await repo.listStrategies({
+        environment: "sandbox",
+        allowedProviderReferences: { kamino: ["kv-picked"] },
+        limit: 10,
+        offset: 0,
+      });
+
+      expect(total).toBe(2);
+      expect(rows.map((row) => row.id).sort()).toEqual([ground.id, picked.id].sort());
+    });
+
+    it("reads an EMPTY allowlist literally — that provider shows nothing", async () => {
+      await seedStrategy({ provider: "kamino", providerReference: "kv-any" });
+      const ground = await seedStrategy({ provider: "ground", providerReference: "ground-vault" });
+
+      const { rows, total } = await repo.listStrategies({
+        environment: "sandbox",
+        allowedProviderReferences: { kamino: [] },
+        limit: 10,
+        offset: 0,
+      });
+
+      expect(total).toBe(1);
+      expect(rows.map((row) => row.id)).toEqual([ground.id]);
     });
   });
 
@@ -679,10 +877,12 @@ describe("EarnRepository (postgres)", () => {
   // The whole ledger suite runs against a NON-Ground stub provider on purpose:
   // the ledger consumes only the canonical contract, so any registered
   // provider id must exercise it identically (ADR 0002 pluggability).
-  describe("program withdrawals ledger (earn_program_withdrawals)", () => {
-    const NON_TERMINAL = ["requested", "processing", "pending_approval"] as const;
-
+  describe("custodial movement ledger (earn_movements)", () => {
     let wallet: EarnProviderWalletRow;
+    // The withdrawal ledger is `earn_movements`; `repo` still owns the ACCOUNT
+    // table (`earn_provider_wallets`), which the unification deliberately left
+    // alone — an account is not a holding.
+    let ledger: EarnMovementsRepository;
 
     beforeEach(async () => {
       const row = await repo.insertProviderWallet({
@@ -698,18 +898,20 @@ describe("EarnRepository (postgres)", () => {
         throw new Error("failed to seed program wallet");
       }
       wallet = row;
+      ledger = createPostgresEarnMovementsRepository(getDb(env));
     });
 
     function withdrawalInput(
-      overrides: Partial<CreateEarnProgramWithdrawalInput> = {}
-    ): CreateEarnProgramWithdrawalInput {
+      overrides: Partial<CreateCustodialMovementInput> = {}
+    ): CreateCustodialMovementInput {
       return {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
-        walletId: wallet.id,
+        providerWalletId: wallet.id,
+        environment: "sandbox",
         provider: "veda",
         amountRequestedUsd: "125.50",
-        token: "usdc",
+        payoutToken: "usdc",
         destinationAddress: DESTINATION,
         requestId: crypto.randomUUID(),
         idempotencyFingerprint: '{"scope":"earn_program_withdrawal"}',
@@ -721,13 +923,9 @@ describe("EarnRepository (postgres)", () => {
     }
 
     async function seedWithdrawal(
-      overrides: Partial<CreateEarnProgramWithdrawalInput> = {}
-    ): Promise<EarnProgramWithdrawalRow> {
-      const row = await repo.createProgramWithdrawal(withdrawalInput(overrides));
-      if (!row) {
-        throw new Error("failed to seed withdrawal");
-      }
-      return row;
+      overrides: Partial<CreateCustodialMovementInput> = {}
+    ): Promise<EarnMovementRow> {
+      return ledger.createCustodialMovement(withdrawalInput(overrides));
     }
 
     function observed(overrides: Partial<EarnPortfolioWithdrawal> = {}): EarnPortfolioWithdrawal {
@@ -741,9 +939,9 @@ describe("EarnRepository (postgres)", () => {
       };
     }
 
-    async function readRow(id: string): Promise<EarnProgramWithdrawalRow | null> {
+    async function readRow(id: string): Promise<EarnMovementRow | null> {
       const raw = await getDb(env)
-        .prepare("SELECT * FROM earn_program_withdrawals WHERE id = ?")
+        .prepare("SELECT * FROM earn_movements WHERE id = ?")
         .bind(id)
         .first<Record<string, unknown>>();
       if (!raw) {
@@ -751,18 +949,20 @@ describe("EarnRepository (postgres)", () => {
       }
       // The repository has no unscoped get-by-id on purpose; a raw read keeps
       // assertions independent of the code under test.
-      return raw as unknown as EarnProgramWithdrawalRow;
+      return raw as unknown as EarnMovementRow;
     }
 
     it("inserts an intent row: status 'requested', no provider reference, fingerprint stored", async () => {
       const row = await seedWithdrawal();
 
-      expect(row.id).toMatch(/^earn_program_withdrawal_/);
+      // One id space for every movement now; only migrated history keeps a
+      // per-family prefix, which is why nothing may parse an id for its kind.
+      expect(row.id).toMatch(/^earn_movement_/);
       expect(row.status).toBe("requested");
       expect(row.provider_reference).toBeNull();
       expect(row.idempotency_fingerprint).toBe('{"scope":"earn_program_withdrawal"}');
-      expect(row.amount_requested_usd).toBe("125.50");
-      expect(row.amount_paid_usd).toBeNull();
+      expect(row.amount_requested).toBe("125.50");
+      expect(row.amount_settled).toBeNull();
       expect(row.provider_data).toEqual({});
       expect(row.created_by).toBe(TEST_USER.id);
     });
@@ -787,9 +987,21 @@ describe("EarnRepository (postgres)", () => {
         label: null,
         createdBy: TEST_USER.id,
       });
+      // A movement names its HOLDING, and the holding is 1:1 with the program
+      // wallet — so the sibling program resolves through it rather than through a
+      // wallet column the ledger does not carry.
+      const sibling = await seedWithdrawal({
+        requestId,
+        providerWalletId: otherWallet?.id,
+        provider: "ground",
+      });
       await expect(
-        seedWithdrawal({ requestId, walletId: otherWallet?.id, provider: "ground" })
-      ).resolves.toMatchObject({ wallet_id: otherWallet?.id });
+        ledger.getPositionById({
+          organizationId: TEST_ORG.id,
+          environment: "sandbox",
+          positionId: sibling.position_id,
+        })
+      ).resolves.toMatchObject({ provider_wallet_id: otherWallet?.id });
     });
 
     it("resolves replays by (org, wallet, request_id) and misses foreign orgs", async () => {
@@ -797,16 +1009,16 @@ describe("EarnRepository (postgres)", () => {
       const row = await seedWithdrawal({ requestId });
 
       await expect(
-        repo.getProgramWithdrawalByRequestId({
+        ledger.findCustodialMovementByRequestId({
           organizationId: TEST_ORG.id,
-          walletId: wallet.id,
+          providerWalletId: wallet.id,
           requestId,
         })
       ).resolves.toMatchObject({ id: row.id });
       await expect(
-        repo.getProgramWithdrawalByRequestId({
+        ledger.findCustodialMovementByRequestId({
           organizationId: "org_someone_else",
-          walletId: wallet.id,
+          providerWalletId: wallet.id,
           requestId,
         })
       ).resolves.toBeNull();
@@ -816,10 +1028,9 @@ describe("EarnRepository (postgres)", () => {
       it("transitions when the current status is in fromStatuses and stamps the provider reference", async () => {
         const row = await seedWithdrawal();
 
-        const updated = await repo.updateProgramWithdrawalStatusGuarded({
-          selector: { withdrawalId: row.id },
+        const updated = await ledger.updateCustodialMovementGuarded({
+          selector: { movementId: row.id },
           organizationId: TEST_ORG.id,
-          fromStatuses: NON_TERMINAL,
           toStatus: "processing",
           providerReference: "wd-provider-ref-1",
           providerData: { lastObservation: { status: "processing" } },
@@ -832,45 +1043,41 @@ describe("EarnRepository (postgres)", () => {
 
       it("is a no-op returning null when the status moved out of fromStatuses (the race)", async () => {
         const row = await seedWithdrawal();
-        await repo.updateProgramWithdrawalStatusGuarded({
-          selector: { withdrawalId: row.id },
+        await ledger.updateCustodialMovementGuarded({
+          selector: { movementId: row.id },
           organizationId: TEST_ORG.id,
-          fromStatuses: NON_TERMINAL,
           toStatus: "completed",
           providerReference: "wd-provider-ref-1",
-          completedAt: "2026-08-11T01:00:00.000Z",
+          settledAt: "2026-08-11T01:00:00.000Z",
         });
 
-        const regressed = await repo.updateProgramWithdrawalStatusGuarded({
-          selector: { withdrawalId: row.id },
+        const regressed = await ledger.updateCustodialMovementGuarded({
+          selector: { movementId: row.id },
           organizationId: TEST_ORG.id,
-          fromStatuses: NON_TERMINAL,
           toStatus: "processing",
         });
 
         expect(regressed).toBeNull();
         const current = await readRow(row.id);
         expect(current?.status).toBe("completed");
-        expect(current?.completed_at).toBe("2026-08-11T01:00:00.000Z");
+        expect(current?.settled_at).toBe("2026-08-11T01:00:00.000Z");
       });
 
       it("returns null for a missing row and for a foreign organization", async () => {
         const row = await seedWithdrawal();
 
         await expect(
-          repo.updateProgramWithdrawalStatusGuarded({
-            selector: { withdrawalId: "earn_program_withdrawal_missing" },
+          ledger.updateCustodialMovementGuarded({
+            selector: { movementId: "earn_program_withdrawal_missing" },
             organizationId: TEST_ORG.id,
-            fromStatuses: NON_TERMINAL,
             toStatus: "processing",
           })
         ).resolves.toBeNull();
 
         await expect(
-          repo.updateProgramWithdrawalStatusGuarded({
-            selector: { withdrawalId: row.id },
+          ledger.updateCustodialMovementGuarded({
+            selector: { movementId: row.id },
             organizationId: "org_someone_else",
-            fromStatuses: NON_TERMINAL,
             toStatus: "processing",
           })
         ).resolves.toBeNull();
@@ -879,79 +1086,72 @@ describe("EarnRepository (postgres)", () => {
 
       it("supports the (provider, provider_reference) selector for observation paths", async () => {
         const row = await seedWithdrawal();
-        await repo.updateProgramWithdrawalStatusGuarded({
-          selector: { withdrawalId: row.id },
+        await ledger.updateCustodialMovementGuarded({
+          selector: { movementId: row.id },
           organizationId: TEST_ORG.id,
-          fromStatuses: NON_TERMINAL,
           toStatus: "processing",
           providerReference: "wd-provider-ref-9",
         });
 
-        const updated = await repo.updateProgramWithdrawalStatusGuarded({
+        const updated = await ledger.updateCustodialMovementGuarded({
           selector: { provider: "veda", providerReference: "wd-provider-ref-9" },
           organizationId: TEST_ORG.id,
-          fromStatuses: NON_TERMINAL,
           toStatus: "completed",
-          amountPaidUsd: "124.9",
-          feeUsd: "0.6",
-          completedAt: "2026-08-11T02:00:00.000Z",
+          amountSettled: "124.9",
+          feeAmount: "0.6",
+          settledAt: "2026-08-11T02:00:00.000Z",
         });
 
         expect(updated?.id).toBe(row.id);
         expect(updated?.status).toBe("completed");
-        expect(updated?.amount_paid_usd).toBe("124.9");
-        expect(updated?.fee_usd).toBe("0.6");
+        expect(updated?.amount_settled).toBe("124.9");
+        expect(updated?.fee_amount).toBe("0.6");
       });
 
       it("self-transitions refresh fields without changing status", async () => {
         const row = await seedWithdrawal();
-        await repo.updateProgramWithdrawalStatusGuarded({
-          selector: { withdrawalId: row.id },
+        await ledger.updateCustodialMovementGuarded({
+          selector: { movementId: row.id },
           organizationId: TEST_ORG.id,
-          fromStatuses: NON_TERMINAL,
           toStatus: "processing",
           providerReference: "wd-provider-ref-2",
           providerData: { first: true },
         });
 
-        const refreshed = await repo.updateProgramWithdrawalStatusGuarded({
-          selector: { withdrawalId: row.id },
+        const refreshed = await ledger.updateCustodialMovementGuarded({
+          selector: { movementId: row.id },
           organizationId: TEST_ORG.id,
-          fromStatuses: ["processing"],
           toStatus: "processing",
-          feeUsd: "0.55",
+          feeAmount: "0.55",
           providerData: { second: true },
         });
 
         expect(refreshed?.status).toBe("processing");
-        expect(refreshed?.fee_usd).toBe("0.55");
+        expect(refreshed?.fee_amount).toBe("0.55");
         // JSONB shallow merge: both observations survive.
         expect(refreshed?.provider_data).toEqual({ first: true, second: true });
       });
 
       it("serializes concurrent terminal transitions — exactly one wins", async () => {
         const row = await seedWithdrawal();
-        await repo.updateProgramWithdrawalStatusGuarded({
-          selector: { withdrawalId: row.id },
+        await ledger.updateCustodialMovementGuarded({
+          selector: { movementId: row.id },
           organizationId: TEST_ORG.id,
-          fromStatuses: NON_TERMINAL,
           toStatus: "processing",
           providerReference: "wd-provider-ref-3",
         });
 
         const [completed, failed] = await Promise.all([
-          repo.updateProgramWithdrawalStatusGuarded({
-            selector: { withdrawalId: row.id },
+          ledger.updateCustodialMovementGuarded({
+            selector: { movementId: row.id },
             organizationId: TEST_ORG.id,
-            fromStatuses: NON_TERMINAL,
             toStatus: "completed",
-            amountPaidUsd: "125.5",
-            completedAt: "2026-08-11T03:00:00.000Z",
+            amountSettled: "125.5",
+            settledAt: "2026-08-11T03:00:00.000Z",
           }),
-          repo.updateProgramWithdrawalStatusGuarded({
-            selector: { withdrawalId: row.id },
+          ledger.updateCustodialMovementGuarded({
+            selector: { movementId: row.id },
             organizationId: TEST_ORG.id,
-            fromStatuses: NON_TERMINAL,
             toStatus: "failed",
             failureReason: "declined",
           }),
@@ -963,12 +1163,12 @@ describe("EarnRepository (postgres)", () => {
         expect([completed, failed].filter(Boolean)).toHaveLength(1);
         const current = await readRow(row.id);
         if (current?.status === "completed") {
-          expect(current.amount_paid_usd).toBe("125.5");
+          expect(current.amount_settled).toBe("125.5");
           expect(current.failure_reason).toBeNull();
         } else {
           expect(current?.status).toBe("failed");
           expect(current?.failure_reason).toBe("declined");
-          expect(current?.amount_paid_usd).toBeNull();
+          expect(current?.amount_settled).toBeNull();
         }
       });
     });
@@ -978,14 +1178,14 @@ describe("EarnRepository (postgres)", () => {
         const row = await seedWithdrawal();
 
         const updated = await applyEarnWithdrawalObservationToRow({
-          repo,
+          repo: ledger,
           row,
           observed: observed({ status: "processing", feeUsd: "0.5" }),
         });
 
         expect(updated?.status).toBe("processing");
         expect(updated?.provider_reference).toBe("wd-provider-ref-1");
-        expect(updated?.fee_usd).toBe("0.5");
+        expect(updated?.fee_amount).toBe("0.5");
         expect(updated?.provider_data).toMatchObject({
           lastObservation: { status: "processing" },
         });
@@ -994,15 +1194,15 @@ describe("EarnRepository (postgres)", () => {
       it("applyToRow is a no-op on a terminal row (belt before the SQL braces)", async () => {
         const row = await seedWithdrawal();
         await applyEarnWithdrawalObservationToRow({
-          repo,
+          repo: ledger,
           row,
           observed: observed({ status: "failed", failureReason: "declined" }),
         });
         const terminal = await readRow(row.id);
 
         const result = await applyEarnWithdrawalObservationToRow({
-          repo,
-          row: terminal as EarnProgramWithdrawalRow,
+          repo: ledger,
+          row: terminal as EarnMovementRow,
           observed: observed({ status: "processing" }),
         });
 
@@ -1016,13 +1216,13 @@ describe("EarnRepository (postgres)", () => {
       it("applyByReference persists an observation and completes the lifecycle", async () => {
         const row = await seedWithdrawal();
         await applyEarnWithdrawalObservationToRow({
-          repo,
+          repo: ledger,
           row,
           observed: observed({ status: "pending_approval" }),
         });
 
         const completed = await applyEarnWithdrawalObservationByReference({
-          repo,
+          repo: ledger,
           provider: "veda",
           organizationId: TEST_ORG.id,
           observed: observed({
@@ -1035,11 +1235,11 @@ describe("EarnRepository (postgres)", () => {
 
         expect(completed?.id).toBe(row.id);
         expect(completed?.status).toBe("completed");
-        expect(completed?.completed_at).toBe("2026-08-11T04:00:00.000Z");
+        expect(completed?.settled_at).toBe("2026-08-11T04:00:00.000Z");
 
         // Terminal rows never regress, even through the reference path.
         const after = await applyEarnWithdrawalObservationByReference({
-          repo,
+          repo: ledger,
           provider: "veda",
           organizationId: TEST_ORG.id,
           observed: observed({ status: "processing" }),
@@ -1050,7 +1250,7 @@ describe("EarnRepository (postgres)", () => {
       it("applyByReference no-ops cleanly on an unknown reference (pre-ledger withdrawals)", async () => {
         await expect(
           applyEarnWithdrawalObservationByReference({
-            repo,
+            repo: ledger,
             provider: "veda",
             organizationId: TEST_ORG.id,
             observed: observed({ withdrawalRef: "wd-never-seen" }),
@@ -1061,13 +1261,13 @@ describe("EarnRepository (postgres)", () => {
       it("applyByReference refuses to write across organizations", async () => {
         const row = await seedWithdrawal();
         await applyEarnWithdrawalObservationToRow({
-          repo,
+          repo: ledger,
           row,
           observed: observed({ status: "processing" }),
         });
 
         const result = await applyEarnWithdrawalObservationByReference({
-          repo,
+          repo: ledger,
           provider: "veda",
           organizationId: "org_someone_else",
           observed: observed({ status: "completed" }),
@@ -1084,7 +1284,7 @@ describe("EarnRepository (postgres)", () => {
         for (let i = 0; i < 5; i += 1) {
           ids.push((await seedWithdrawal()).id);
         }
-        await freezeCreatedAt("earn_program_withdrawals", ids);
+        await freezeCreatedAt("earn_movements", ids);
         const expected = [...ids].sort().reverse();
 
         // A sibling PROGRAM's history must never leak into the window or total —
@@ -1103,13 +1303,13 @@ describe("EarnRepository (postgres)", () => {
           createdBy: TEST_USER.id,
         });
         expect(siblingProgram?.id).not.toBe(wallet.id);
-        await seedWithdrawal({ walletId: siblingProgram?.id });
+        await seedWithdrawal({ providerWalletId: siblingProgram?.id });
 
         const seen: string[] = [];
         for (let offset = 0; offset < expected.length; offset += 2) {
-          const { rows, total } = await repo.listProgramWithdrawals({
+          const { rows, total } = await ledger.listCustodialMovements({
             organizationId: TEST_ORG.id,
-            walletId: wallet.id,
+            providerWalletId: wallet.id,
             limit: 2,
             offset,
           });

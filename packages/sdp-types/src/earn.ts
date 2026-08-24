@@ -1,4 +1,4 @@
-import type { WellKnownTokenSymbol } from "./well-known-tokens";
+import type { SolanaCluster, WellKnownTokenSymbol } from "./well-known-tokens";
 
 /**
  * Solana Earn (SDP Markets V1) — shared wire contracts.
@@ -6,10 +6,11 @@ import type { WellKnownTokenSymbol } from "./well-known-tokens";
  * Earn is a stablecoin deposit facility: organizations browse a catalogue of
  * yield strategies (DeFi protocols or tokenized RWAs, fronted by vault-infra
  * providers), fund a shared portfolio wallet, and withdraw to addresses they
- * control. Positions and balances are always read live from the provider
- * (never persisted); SDP-initiated withdrawals are recorded in a ledger —
- * "Record"-suffixed types are ledger rows, `EarnPortfolio*` types are live
- * provider reads (PRO-1628 / ADR 0002 addendum).
+ * control. Custodial portfolio balances are read live from the provider, while
+ * non-custodial vault ownership and movement records are durable and their
+ * balances are hydrated live. SDP-initiated portfolio withdrawals are recorded
+ * in a ledger — "Record"-suffixed types are ledger rows, `EarnPortfolio*`
+ * types are live provider reads (PRO-1628 / ADR 0002 addendum).
  *
  * Registries follow ADR 0001 (asset profiles): closed unions defined in code,
  * open TEXT columns in Postgres, Zod validation at the app layer — adding a
@@ -51,25 +52,27 @@ export type EarnStrategyStatus = (typeof EARN_STRATEGY_STATUSES)[number];
  * makes "onboarding a curator is a data change" literally true.
  */
 export const EARN_KNOWN_CURATOR_LABELS: Readonly<Record<string, string>> = {
-  // Curator houses. A house is chain-agnostic — it can curate a Solana vault
-  // whether or not it curates one today — so an entry stays as long as the house
-  // could plausibly appear on a Solana shelf, even with no current source.
+  // Curator houses. A house is chain-agnostic because Ground can route Solana
+  // USDC into sources it hosts elsewhere.
   gauntlet: "Gauntlet",
   steakhouse: "Steakhouse Financial",
   sentora: "Sentora",
   smokehouse: "Smokehouse",
+  morpho: "Morpho",
   allez: "Allez Labs",
   rockawayx: "RockawayX",
   august: "August",
   superstate: "Superstate",
   maple: "Maple",
   centrifuge: "Centrifuge",
-  // Ids a provider reports when a protocol curates its own vaults.
+  // Ids Ground reports when a protocol or fund curates its own vaults;
+  // `g<ticker>` is Ground's own wrapper of a Superstate fund. Some stored rows
+  // (Aave/Morpho) are hidden by strategy API policy, but inventory tooling still
+  // renders their metadata.
   kamino: "Kamino",
-  // No EVM-only ids here: SDP lists Solana-hosted vaults only, so `morpho`,
-  // `aave_v3` and Ground's `gustb`/`guscc` Superstate wrappers can no longer
-  // reach a catalogue row. Unknown ids render as-is, so re-adding one is a
-  // one-line data change if a Solana deployment ever surfaces it.
+  aave_v3: "Aave V3",
+  gustb: "Superstate USTB",
+  guscc: "Superstate USCC",
 };
 
 export function earnCuratorLabel(curator: string): string {
@@ -116,8 +119,217 @@ export interface EarnStrategy {
   redemptionDelayDays?: number;
   riskMetadata?: EarnStrategyRiskMetadata;
   status: EarnStrategyStatus;
+  /**
+   * The cluster the strategy's INSTRUMENT actually lives on — not the cluster
+   * of the environment that catalogued it, and the two can differ.
+   *
+   * A provider may front instruments that do not exist on every cluster, so a
+   * row can name a live mainnet vault while sitting in a sandbox catalogue:
+   * everything about it true, none of it fundable from devnet. Kamino was the
+   * original example and no longer is — it has a devnet deployment, so each
+   * environment now catalogues its own cluster, and the sync refuses to store a
+   * mainnet instrument outside production. The column stays because the
+   * mismatch is structural, not Kamino-shaped: rows written before that guard
+   * survive until a delist pass, and the next single-cluster provider brings it
+   * straight back.
+   *
+   * `status: "active"` cannot express that — it is the operator's stop switch,
+   * and reusing it here would both lie about why and collide with the
+   * repository's refusal to overwrite an operator pause. So the row states the
+   * cluster and every gate reads it. `fundable` below is the derived answer
+   * callers should branch on.
+   */
+  hostCluster: SolanaCluster;
+  /**
+   * Whether this strategy's instrument exists on **the caller's environment's
+   * cluster** — derived per request from `hostCluster`, never stored.
+   *
+   * `false` is the load-bearing half and is definitive: the instrument does not
+   * exist on your cluster, so a deposit cannot succeed. Read it rather than
+   * assuming a listed strategy is fundable — the catalogue lists what EXISTS,
+   * which is a larger set.
+   *
+   * `true` is necessary but NOT sufficient. It answers only the cluster
+   * question; a deposit additionally needs the provider to expose SDP a
+   * money-movement surface (a catalogue-only provider like Kamino answers 501
+   * on `POST /v1/earn/programs`) and your organization to be entitled to that
+   * provider. Those are deliberately not folded in here: this field describes
+   * the INSTRUMENT, and entitlement in particular is a property of the caller,
+   * not of a platform-global catalogue row.
+   */
+  fundable: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Non-custodial vault positions — the custody wallet owns the vault shares and
+ * SDP reads their current value live from the provider on every list request.
+ */
+export interface EarnVaultPosition {
+  id: string;
+  provider: string;
+  providerReference: string;
+  label: string;
+  custodyWalletId: string;
+  tokenMint: string;
+  shareMint: string;
+  createdAt: string;
+  closedAt: string | null;
+  /** Absent when the provider read failed; never coerce an unavailable value to zero. */
+  shares?: string;
+  /** Unstaked shares immediately redeemable through SDP; absent when unreadable. */
+  withdrawableShares?: string;
+  /** Deposit-token value, absent when the provider cannot hydrate the position. */
+  tokenValue?: string;
+}
+
+export interface EarnVaultPositionsPage {
+  positions: EarnVaultPosition[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
+/** JSON body for POST /v1/earn/vault-deposits. Idempotency is header-only. */
+export interface EarnVaultDepositRequest {
+  strategyId: string;
+  custodyWalletId: string;
+  amount: string;
+  minSharesOut?: string;
+}
+
+export const EARN_VAULT_MOVEMENT_STATUSES = [
+  "pending",
+  "submitted",
+  "confirmed",
+  "failed",
+] as const;
+export type EarnVaultMovementStatus = (typeof EARN_VAULT_MOVEMENT_STATUSES)[number];
+
+/**
+ * Statuses a vault movement never moves on from — in migration 0059's LEGACY
+ * vocabulary, which is what `earn_vault_movements` and every existing wire
+ * contract still speak.
+ *
+ * **Do not reach for this in new code.** The unified ledger's answer is
+ * `EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct`, and the two deliberately
+ * disagree: `confirmed` is terminal HERE because 0059 had no state after chain
+ * commitment, and is NOT terminal there because `finalized` now exists and a
+ * confirmed transaction can still be dropped by a fork. Treating `confirmed` as
+ * settled is exactly the conflation the unification exists to end, so this set
+ * is correct only for a consumer reading the legacy table or a legacy wire
+ * field. Both names are retired together when the legacy tables are dropped.
+ */
+export const EARN_TERMINAL_VAULT_MOVEMENT_STATUSES = ["confirmed", "failed"] as const;
+export type EarnTerminalVaultMovementStatus =
+  (typeof EARN_TERMINAL_VAULT_MOVEMENT_STATUSES)[number];
+
+/** Durable result of a submitted vault deposit (fresh or idempotently replayed). */
+export interface EarnVaultDeposit {
+  positionId: string;
+  movementId: string;
+  status: EarnVaultMovementStatus;
+  signature: string;
+  failureReason: string | null;
+  replayed: boolean;
+  strategy: {
+    id: string;
+    name: string;
+    provider: string;
+    providerReference: string;
+    hostCluster: SolanaCluster;
+  };
+}
+
+/**
+ * One recorded vault deposit, read back by movement id — what a caller polls
+ * to learn whether a signed deposit actually landed.
+ *
+ * Every field comes off the movement row ITSELF, with no catalogue join. That
+ * is deliberate: a strategy can be un-catalogued (paused, dropped by the sync,
+ * or belonging to a provider SDP stopped offering) while the deposit it funded
+ * is still in flight, and ADR 0002's exit-safety rule says reading money the
+ * organization already holds must never depend on the provider still being
+ * offered. `provider`/`providerReference` name the vault; the strategy's
+ * display name is the caller's to remember, and losing it must not cost the
+ * customer the outcome of a signed transaction.
+ *
+ * No `replayed`: that answers "did your idempotency key already spend itself",
+ * which is a property of a WRITE, not of the row.
+ */
+export interface EarnVaultDepositRecord {
+  movementId: string;
+  positionId: string;
+  provider: string;
+  providerReference: string;
+  status: EarnVaultMovementStatus;
+  signature: string;
+  /** Accepted deposit amount, in the vault token's units, as a decimal string. */
+  amount: string;
+  failureReason: string | null;
+  createdAt: string;
+  /** Set only once the sweep observed the transaction on chain. */
+  confirmedAt: string | null;
+}
+
+/** Response body of GET /v1/earn/vault-deposits/:movementId. */
+export interface EarnVaultDepositResponse {
+  deposit: EarnVaultDepositRecord;
+}
+
+/**
+ * Response body of GET /v1/earn/vault-deposits — one workspace's recorded
+ * deposits, newest first.
+ *
+ * A bounded window, not a complete history: it exists so a client can re-derive
+ * which of its deposits are still in flight after losing local state, and the
+ * reconciliation sweep settles a movement within about ninety seconds, so
+ * anything unsettled is by construction recent. Follow `nextCursor` for more.
+ */
+export interface EarnVaultDepositsPage {
+  deposits: EarnVaultDepositRecord[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
+/** JSON body for POST /v1/earn/vault-withdrawals. Idempotency is header-only. */
+export interface EarnVaultWithdrawalRequest {
+  /** The vault position being exited — from GET /v1/earn/vault-positions. */
+  positionId: string;
+  /** Shares to redeem; the position's `withdrawableShares` is the observed ceiling. */
+  shares: string;
+}
+
+/** One signed vault withdrawal movement. */
+export interface EarnVaultWithdrawal {
+  movementId: string;
+  positionId: string;
+  provider: string;
+  /** The vault's on-chain address — the instrument, not the payout. */
+  providerReference: string;
+  status: EarnVaultDirectMovementStatus;
+  signature: string;
+  /** Total shares requested by the caller, decimal string, share units. */
+  shares: string;
+  shareMint: string;
+  failureReason: string | null;
+  createdAt: string;
+  confirmedAt: string | null;
+  settledAt: string | null;
+  /** Present on POST responses; true when the idempotency anchor was replayed. */
+  replayed?: boolean;
+}
+
+/** Response body of GET /v1/earn/vault-withdrawals/:movementId and POST. */
+export interface EarnVaultWithdrawalResponse {
+  withdrawal: EarnVaultWithdrawal;
+}
+
+/** Response body of GET /v1/earn/vault-withdrawals: logical withdrawals, newest first. */
+export interface EarnVaultWithdrawalsPage {
+  withdrawals: EarnVaultWithdrawal[];
+  hasMore: boolean;
+  nextCursor: string | null;
 }
 
 /**
@@ -402,6 +614,48 @@ export interface EarnPortfolioLiquidityBalance {
 }
 
 // API response envelopes (mirrors the asset-profiles response naming).
+
+/**
+ * One provider-managed Earn program, hydrated from the provider on every read.
+ * The program id, label, and creation time are SDP-owned; wallet and yield state
+ * remain provider-authoritative and are never replaced with persisted balances.
+ */
+export interface EarnProgram {
+  /** SDP's own program id — how every `/programs/:programId` route names it. */
+  id: string;
+  /** Open provider id because a persisted program can outlive its registry entry. */
+  provider: string;
+  label: string | null;
+  createdAt: string;
+  wallet: EarnPortfolioWalletSnapshot;
+  /**
+   * Absent when the provider's yield lookup fails. Balances remain available,
+   * while consumers render an unavailable rate rather than fabricating 0%.
+   */
+  yield?: EarnPortfolioYield;
+}
+
+export interface EarnProgramResponse {
+  program: EarnProgram;
+}
+
+export interface ListEarnProgramsResponse {
+  programs: EarnProgram[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export type EarnProgramDepositsResponse = EarnPortfolioDepositsPage;
+
+export interface EarnProgramWithdrawalPreviewResponse {
+  preview: EarnPortfolioWithdrawalPreview;
+}
+
+export interface EarnProgramWithdrawalResponse {
+  withdrawal: EarnPortfolioWithdrawal;
+}
+
 export interface EarnStrategyResponse {
   strategy: EarnStrategy;
 }
@@ -418,4 +672,227 @@ export interface ListEarnProgramWithdrawalsResponse {
   total: number;
   page: number;
   pageSize: number;
+}
+
+/**
+ * The unified movement ledger (PRO-1705, migration 0062).
+ *
+ * One vocabulary for every Earn money movement, whichever way it was executed.
+ * Earn previously split its movements across two tables by EXECUTION MECHANISM
+ * — provider-API withdrawals in one, signed on-chain deposits in the other — so
+ * every status, terminal set and transition rule existed twice, in two
+ * different shapes, in two different packages.
+ *
+ * This is the single source of truth for movement BEHAVIOUR: which statuses
+ * exist, which are terminal, and which transitions are legal. The database
+ * mirrors the first two as rows in `earn_movement_statuses` (so SQL can read
+ * the terminal set instead of re-spelling it), and a conformance test asserts
+ * the rows equal these constants — a migration and a change here can only move
+ * together. Transitions stay here alone: a table cannot enforce them without
+ * triggers, and the guards need them at compile time.
+ */
+export const EARN_EXECUTION_MODELS = ["custodial", "vault_direct"] as const;
+export type EarnExecutionModel = (typeof EARN_EXECUTION_MODELS)[number];
+
+/**
+ * Spelled `withdrawal`, matching every wire contract, route and dashboard label
+ * that already exists. (Migration 0059 wrote `withdraw` on a column no row has
+ * ever carried, because the vault withdraw path does not exist yet.)
+ */
+export const EARN_MOVEMENT_DIRECTIONS = ["deposit", "withdrawal"] as const;
+export type EarnMovementDirection = (typeof EARN_MOVEMENT_DIRECTIONS)[number];
+
+/**
+ * Statuses per execution model, because the two lifecycles are genuinely
+ * different rather than one lifecycle wearing two vocabularies:
+ *
+ * * `custodial` — a provider reports settlement, and can report a PARTIAL one
+ *   or park a payout awaiting a customer approval stamp. This is 0055's
+ *   vocabulary unchanged.
+ * * `vault_direct` — a chain reports commitment, which is not settlement.
+ *   `confirmed` is an optimistic commitment a fork can still drop; `finalized`
+ *   is irreversible. `requested` is 0059's `pending` renamed, so that one word
+ *   means one thing on both models: a signed transaction is durably recorded
+ *   but is not known to be on the wire.
+ *
+ * So `completed` and `finalized` are not synonyms — they are different facts,
+ * and keeping them keyed by model is what lets one column hold both honestly.
+ */
+export const EARN_MOVEMENT_STATUSES = {
+  custodial: EARN_PROGRAM_WITHDRAWAL_RECORD_STATUSES,
+  vault_direct: ["requested", "submitted", "confirmed", "finalized", "failed"],
+} as const satisfies Record<EarnExecutionModel, readonly string[]>;
+
+export type EarnCustodialMovementStatus = (typeof EARN_MOVEMENT_STATUSES)["custodial"][number];
+export type EarnVaultDirectMovementStatus = (typeof EARN_MOVEMENT_STATUSES)["vault_direct"][number];
+export type EarnMovementStatus = EarnCustodialMovementStatus | EarnVaultDirectMovementStatus;
+
+/**
+ * Statuses a movement never moves on from, per model — the UNIFIED ledger's
+ * answer, and the one new code should use.
+ *
+ * Not to be confused with `EARN_TERMINAL_VAULT_MOVEMENT_STATUSES` above, which
+ * is the legacy `earn_vault_movements` vocabulary and calls `confirmed`
+ * terminal. See that constant's note for why the disagreement is intentional.
+ */
+export const EARN_TERMINAL_MOVEMENT_STATUSES = {
+  custodial: EARN_TERMINAL_WITHDRAWAL_STATUSES,
+  // `confirmed` is deliberately absent, unlike 0059's terminal set: the sweep's
+  // job does not end at chain commitment now that finalization is a state.
+  vault_direct: ["finalized", "failed"],
+} as const satisfies {
+  [Model in EarnExecutionModel]: readonly (typeof EARN_MOVEMENT_STATUSES)[Model][number][];
+};
+
+export function isTerminalEarnMovementStatus(
+  executionModel: EarnExecutionModel,
+  status: string
+): boolean {
+  return (EARN_TERMINAL_MOVEMENT_STATUSES[executionModel] as readonly string[]).includes(status);
+}
+
+/**
+ * Legal transitions, keyed by TARGET status to the statuses it may be reached
+ * from — the shape both legacy guards already used.
+ *
+ * Two properties make terminal-state regression unrepresentable rather than
+ * merely discouraged: terminal statuses appear in NO source list, and neither
+ * model's insert state (`requested`) is a target at all. Repositories apply
+ * these as a database-level compare-and-swap (`status IN (...)` in the same
+ * statement as the write), so a concurrent writer that already advanced a row
+ * makes the loser match zero rows instead of overwriting it.
+ *
+ * `custodial` self-transitions are intentional: a same-status observation still
+ * refreshes amounts, fees and provider_data, and `processing → processing` is
+ * the common poll case. `pending_approval ↔ processing` is a legitimate
+ * park/unpark cycle.
+ *
+ * `vault_direct` allows `submitted → finalized` directly, because a sweep whose
+ * first observation is already finalized must be able to record the truth
+ * rather than invent an intermediate commitment it never saw. It has no
+ * self-transitions: there is no in-place observation refresh on a signed
+ * movement, only advancement.
+ *
+ * ── Who enforces this, and when ───────────────────────────────────────────
+ * Both halves are enforced NOW, by a single guard. `allowedSourceStatuses` in
+ * `earn-movements.repository.ts` derives every compare-and-swap's legal source
+ * states from this matrix, for both execution models, so there is no second
+ * copy to drift from. Naming a target the matrix does not carry throws; a
+ * source it does not allow is refused by the CAS matching zero rows, which is
+ * the answer a lost race already gave. The conformance test in
+ * `earn-movements.repository.test.ts` pins the matrix against
+ * `earn_movement_statuses`.
+ *
+ * The matrix is written to be consistent with migration 0062's CHECK
+ * constraints, not merely with itself — see the `vault_direct` notes below.
+ */
+export const EARN_MOVEMENT_TRANSITIONS = {
+  custodial: {
+    processing: ["requested", "processing", "pending_approval"],
+    pending_approval: ["requested", "processing", "pending_approval"],
+    completed: ["requested", "processing", "pending_approval"],
+    partially_completed: ["requested", "processing", "pending_approval"],
+    failed: ["requested", "processing", "pending_approval"],
+    cancelled: ["requested", "processing", "pending_approval"],
+  },
+  vault_direct: {
+    submitted: ["requested"],
+    // From `requested` too, not only `submitted`: a broadcast whose response was
+    // lost leaves a movement unsubmitted WITH a signature, and the chain is then
+    // the only authority on it. Refusing the transition would strand exactly the
+    // rows reconciliation exists for.
+    confirmed: ["requested", "submitted"],
+    // Reachable from ANY pre-terminal state, for the same reason: the sweep may
+    // learn of finalization as its first observation of a movement, and a
+    // transaction the chain calls finalized was demonstrably submitted and
+    // committed whether or not SDP recorded those moments separately. The writer
+    // stamps `confirmed_at` on the way through, so the row is never a settled one
+    // with no record of its own commitment.
+    finalized: ["requested", "submitted", "confirmed"],
+    // NOT from `confirmed`, deliberately. Migration 0062 ties `confirmed_at` and
+    // `shares_out` to the commitment states, so failing a confirmed movement
+    // could only succeed by erasing observations SDP genuinely made — and it
+    // would make "failed before landing" indistinguishable from "landed, then
+    // dropped in a fork". The realistic chain path never asks for it: an
+    // execution error is reported with the FIRST status for a signature, not
+    // after a clean one. The remaining tail, a confirmed transaction dropped by
+    // a fork rollback, is an open question rather than something handled here:
+    // such a row stops being observable and is left in the reconciliation queue
+    // rather than declared failed on a guess.
+    failed: ["requested", "submitted"],
+  },
+} as const satisfies {
+  [Model in EarnExecutionModel]: Partial<
+    Record<
+      (typeof EARN_MOVEMENT_STATUSES)[Model][number],
+      readonly (typeof EARN_MOVEMENT_STATUSES)[Model][number][]
+    >
+  >;
+};
+
+/**
+ * One row of the unified Earn ledger — the cross-provider movement record.
+ *
+ * This is the read PRO-1669 asked for and neither legacy shape could serve: one
+ * chronological history of every money movement an organization made through
+ * Earn, whichever provider executed it and whichever way. `EarnVaultDepositRecord`
+ * and `EarnProgramWithdrawalRecord` remain the per-family views, and both are
+ * projections of this same row.
+ *
+ * Unlike those two, this speaks the ledger's own vocabulary — `requested` and
+ * `finalized` included — because it is a new contract with no client to keep
+ * compatible. A consumer reads `executionModel` to know which optional fields to
+ * expect.
+ *
+ * Every amount is denominated in `denomination`: `usd` for a custodial movement,
+ * the token MINT for a vault one. Never sum across rows without grouping by it.
+ * Share quantities appear only in the share-named fields and are not comparable
+ * to the amounts.
+ */
+export interface EarnMovementRecord {
+  id: string;
+  /** Open string — a row can outlive its provider's registry entry. */
+  provider: string;
+  executionModel: EarnExecutionModel;
+  direction: EarnMovementDirection;
+  status: EarnMovementStatus;
+  /** The holding this movement belongs to; every movement has exactly one. */
+  positionId: string;
+  /** `usd`, or the token mint. The unit of every amount below. */
+  denomination: string;
+  amountRequested: string;
+  /** What actually moved, once the provider or the chain has said so. */
+  amountSettled?: string;
+  feeAmount?: string;
+  /** Share units (vault movements only). */
+  minSharesOut?: string;
+  sharesOut?: string;
+  /** Payout stablecoin symbol for a custodial withdrawal; not the unit. */
+  payoutToken?: string;
+  /** The vault's on-chain address (vault movements only). */
+  vaultAddress?: string;
+  /** Where the money came from and went, when SDP observed either. */
+  sourceAddress?: string;
+  destinationAddress?: string;
+  /** The provider's own id for THIS movement, when it has one. */
+  providerReference?: string;
+  /** Solana transaction signature (vault movements only). */
+  signature?: string;
+  failureReason?: string;
+  /** Who moved it: a dashboard user, an API key, or neither for a system write. */
+  createdBy?: string;
+  initiatedByKeyId?: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Optimistic chain commitment; not settlement. */
+  confirmedAt?: string;
+  /** Success-terminal: finalization, or provider completion. */
+  settledAt?: string;
+}
+
+/** Response body of GET /v1/earn/movements — newest first, keyset-paged. */
+export interface EarnMovementsPage {
+  movements: EarnMovementRecord[];
+  hasMore: boolean;
+  nextCursor: string | null;
 }

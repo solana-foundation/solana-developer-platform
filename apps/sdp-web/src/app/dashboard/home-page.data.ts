@@ -29,6 +29,12 @@ export interface HomeActivityRow {
    */
   tokenMint: string | null;
   amount: string;
+  /**
+   * Raw source status ("confirmed", "failed", …). Both sources carry one, and
+   * without it a failed deploy rendered identically to a successful one — the
+   * only tell was the missing address.
+   */
+  status: string;
   address: string;
   explorer: HomeActivityExplorerRef | null;
   sourceKind: "payments" | "issuance";
@@ -160,6 +166,7 @@ export function buildHomeActivityRows(
       token: resolveTransferTokenLabel(transfer.token, issuedTokenSymbolsByMint) ?? "—",
       tokenMint: transfer.token?.trim() || null,
       amount: transfer.amount ?? "—",
+      status: transfer.status,
       address: resolvePaymentsAddress(transfer),
       explorer: resolvePaymentsExplorer(transfer),
       sourceKind: "payments" as const,
@@ -180,6 +187,7 @@ export function buildHomeActivityRows(
       token: token.symbol || token.name || "—",
       tokenMint: token.mintAddress?.trim() || null,
       amount: resolveIssuanceAmount(transaction),
+      status: transaction.status,
       address: resolveIssuanceAddress(transaction),
       explorer: resolveIssuanceExplorer(transaction),
       sourceKind: "issuance" as const,

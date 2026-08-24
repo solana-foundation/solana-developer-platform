@@ -14,7 +14,6 @@ import {
   isAssetProfilesEnabled,
   isEarnEnabled,
   isPrivateChannelsEnabled,
-  isRecurringPaymentCollectionEnabled,
 } from "@/lib/feature-flags";
 import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
@@ -24,6 +23,11 @@ import {
   runApprovedWalletOperationRecovery,
 } from "./approved-wallet-operations";
 import { EARN_CATALOGUE_SYNC_CRON, runEarnCatalogueSync } from "./earn-catalogue-sync";
+import { EARN_METRICS_REFRESH_CRON, runEarnMetricsRefresh } from "./earn-metrics-refresh";
+import {
+  EARN_VAULT_MOVEMENTS_CRON,
+  runEarnVaultMovementsReconciliation,
+} from "./earn-vault-movements";
 import { PENDING_DEPOSITS_CRON, runPendingDepositsReconciliation } from "./pending-deposits";
 import { PENDING_TRANSFERS_CRON, runPendingTransfersReconciliation } from "./pending-transfers";
 import {
@@ -34,6 +38,7 @@ import {
   RECURRING_PAYMENTS_COLLECTION_CRON,
   runRecurringPaymentsCollection,
 } from "./recurring-payments";
+import { RINGS_INDEXING_CRON, runRingsIndexingPoll } from "./rings-indexing";
 import { runWorkflowExecutions, WORKFLOW_EXECUTIONS_CRON } from "./workflow-executions";
 import {
   runWorkflowSecretRetirements,
@@ -111,20 +116,18 @@ export function startCron(deps: CronDeps): CronHandle | null {
     })
   );
 
-  if (isRecurringPaymentCollectionEnabled(deps.env)) {
-    tasks.push(
-      schedule(RECURRING_PAYMENTS_COLLECTION_CRON, () => {
-        if (stopping) {
-          return;
-        }
-        runRecurringPaymentsCollection({
-          env: deps.env,
-          bg: deps.bg,
-          observability: deps.observability,
-        });
-      })
-    );
-  }
+  tasks.push(
+    schedule(RECURRING_PAYMENTS_COLLECTION_CRON, () => {
+      if (stopping) {
+        return;
+      }
+      runRecurringPaymentsCollection({
+        env: deps.env,
+        bg: deps.bg,
+        observability: deps.observability,
+      });
+    })
+  );
 
   if (isAssetProfilesEnabled(deps.env)) {
     tasks.push(
@@ -168,6 +171,21 @@ export function startCron(deps: CronDeps): CronHandle | null {
     );
   }
 
+  // Cheap to schedule unconditionally: the job early-returns unless the rings
+  // flag is on and the live gateway adapter is selected.
+  tasks.push(
+    schedule(RINGS_INDEXING_CRON, () => {
+      if (stopping) {
+        return;
+      }
+      runRingsIndexingPoll({
+        env: deps.env,
+        bg: deps.bg,
+        observability: deps.observability,
+      });
+    })
+  );
+
   if (isEarnEnabled(deps.env)) {
     tasks.push(
       schedule(EARN_CATALOGUE_SYNC_CRON, () => {
@@ -175,6 +193,22 @@ export function startCron(deps: CronDeps): CronHandle | null {
           return;
         }
         runEarnCatalogueSync({
+          env: deps.env,
+          bg: deps.bg,
+          observability: deps.observability,
+        });
+      })
+    );
+    // Separate task, not folded into the sync above: the two have different
+    // cadences on purpose (catalogue drift is hourly, rates are not) and
+    // different blast radii — this one can only rewrite figures on rows that
+    // already exist. See cron/earn-metrics-refresh.ts.
+    tasks.push(
+      schedule(EARN_METRICS_REFRESH_CRON, () => {
+        if (stopping) {
+          return;
+        }
+        runEarnMetricsRefresh({
           env: deps.env,
           bg: deps.bg,
           observability: deps.observability,
@@ -198,6 +232,19 @@ export function startCron(deps: CronDeps): CronHandle | null {
         return;
       }
       runWorkflowSecretRetirements({
+        env: deps.env,
+        bg: deps.bg,
+        observability: deps.observability,
+      });
+    })
+  );
+
+  // Durable signed intents outlive the feature flag that admitted them. Keep
+  // draining their outbox even when Earn is disabled during an incident.
+  tasks.push(
+    schedule(EARN_VAULT_MOVEMENTS_CRON, () => {
+      if (stopping) return;
+      runEarnVaultMovementsReconciliation({
         env: deps.env,
         bg: deps.bg,
         observability: deps.observability,

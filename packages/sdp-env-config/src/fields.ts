@@ -688,13 +688,6 @@ export const FIELDS: EnvField[] = [
     help: "Allows dashboard-stored custody Connection setup without provider credentials in this deployment.",
   },
   {
-    key: "PAYMENTS_RECURRING_COLLECTION_ENABLED",
-    section: "advanced",
-    kind: "text",
-    label: "Recurring payment collection enabled",
-    defaultValue: "false",
-  },
-  {
     key: "PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE",
     section: "advanced",
     kind: "text",
@@ -719,6 +712,30 @@ export const FIELDS: EnvField[] = [
       { value: "true", label: "Enabled" },
     ],
     help: "Gates Private Channels API routes and deposit/withdrawal reconcilers.",
+  },
+  {
+    key: "HELIUS_RINGS_ENABLED",
+    section: "advanced",
+    kind: "select",
+    label: "Helius Rings enabled",
+    defaultValue: "false",
+    options: [
+      { value: "false", label: "Disabled" },
+      { value: "true", label: "Enabled" },
+    ],
+    help: "Gates the devnet-only Helius Rings shielded wallet API routes.",
+  },
+  {
+    key: "HELIUS_RINGS_ADAPTER",
+    section: "advanced",
+    kind: "select",
+    label: "Helius Rings gateway adapter",
+    defaultValue: "none",
+    options: [
+      { value: "none", label: "Not implemented (default)" },
+      { value: "http", label: "Live HTTP gateway" },
+    ],
+    help: 'Only "http" activates the live Rings gateway and the indexing-poll job.',
   },
   {
     key: "SPC_CREDENTIAL_ENCRYPTION_KEY",

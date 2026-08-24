@@ -1,24 +1,29 @@
-import { resolveEarnProviderClient, supportsPortfolioWallets } from "@sdp/earn";
+import { isClusterFundableInEnvironment, supportsPortfolioWallets } from "@sdp/earn";
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnPortfolioWalletProvider } from "@sdp/earn/types";
 import type {
   EarnPortfolioAllocationInput,
-  EarnPortfolioDepositsPage,
   EarnPortfolioWalletSnapshot,
   EarnPortfolioWithdrawal,
-  EarnPortfolioWithdrawalPreview,
   EarnPortfolioYield,
+  EarnProgram,
+  EarnProgramDepositsResponse,
+  EarnProgramResponse,
+  EarnProgramWithdrawalPreviewResponse,
   EarnProgramWithdrawalRecord,
+  EarnProgramWithdrawalResponse,
+  ListEarnProgramsResponse,
   ListEarnProgramWithdrawalsResponse,
 } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
-import type {
-  EarnProgramWithdrawalRow,
-  EarnProviderWalletRow,
-  EarnRepository,
-} from "@/db/repositories";
+import type { EarnProviderWalletRow } from "@/db/repositories";
+import {
+  createPostgresEarnMovementsRepository,
+  type EarnMovementRow,
+  type EarnMovementsRepository,
+} from "@/db/repositories/earn-movements.repository";
 import { getAuth } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
@@ -29,28 +34,40 @@ import {
 } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
+import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
+import { resolveEarnProviderClient } from "@/services/earn-provider-registry";
 import {
   applyEarnWithdrawalObservationByReference,
   applyEarnWithdrawalObservationToRow,
 } from "@/services/earn-withdrawal-ledger.service";
 import {
   assertEarnProviderConfigured,
+  assertEarnProviderSurfaced,
   assertProviderAvailable,
 } from "@/services/provider-availability.service";
 import { type AppContext, earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
 import {
-  earnProgramCreateSchema,
+  type earnProgramCreateSchema,
   earnProgramDepositsQuerySchema,
   earnProgramParamsSchema,
-  earnProgramRetargetSchema,
+  type earnProgramRetargetSchema,
   earnProgramsListQuerySchema,
-  earnProgramWithdrawalCreateSchema,
+  type earnProgramWithdrawalCreateSchema,
   earnProgramWithdrawalParamsSchema,
-  earnProgramWithdrawalPreviewSchema,
+  type earnProgramWithdrawalPreviewSchema,
   earnProgramWithdrawalsListQuerySchema,
 } from "../schemas";
-import { listResponse, pageWindow, parseBody, parseParams, parseQuery } from "./shared";
+import { listResponse, pageWindow, parseParams, parseQuery } from "./shared";
+
+export type {
+  EarnProgram,
+  EarnProgramDepositsResponse,
+  EarnProgramResponse,
+  EarnProgramWithdrawalPreviewResponse,
+  EarnProgramWithdrawalResponse,
+  ListEarnProgramsResponse,
+} from "@sdp/types";
 
 /**
  * Earn "programs": provider-managed portfolio wallets, N per (organization,
@@ -71,8 +88,8 @@ import { listResponse, pageWindow, parseBody, parseParams, parseQuery } from "./
  *
  * Source of truth per surface (PRO-1628): balances/positions/yield/deposits
  * are NEVER persisted — every read is a live provider fetch. Withdrawals are
- * the one money movement SDP initiates, so they get a ledger row
- * (earn_program_withdrawals): written at intent, advanced on every
+ * the one money movement SDP initiates, so they get a ledger row (a custodial
+ * `earn_movements` row): written at intent, advanced on every
  * observation, listed from the DB. No endpoint ever blends the two sources —
  * create/get answer with the provider's live object and update the ledger as
  * a side effect; the list answers from the ledger alone.
@@ -84,43 +101,6 @@ import { listResponse, pageWindow, parseBody, parseParams, parseQuery } from "./
  * API); the ledger list takes no provider gate at all — the audit trail
  * outlives even credential removal.
  */
-
-// Response envelopes (route-owned until a second surface needs them in @sdp/types).
-export interface EarnProgram {
-  /** SDP's own program id — how every `/programs/:programId` route names it. */
-  id: string;
-  provider: string;
-  label: string | null;
-  createdAt: string;
-  wallet: EarnPortfolioWalletSnapshot;
-  /**
-   * Yield metrics, absent when the provider's yield endpoint fails. Balances
-   * are the load-bearing part of this response, so a yield outage degrades the
-   * headline rate rather than the whole program view.
-   */
-  yield?: EarnPortfolioYield;
-}
-
-export interface EarnProgramResponse {
-  program: EarnProgram;
-}
-
-export interface ListEarnProgramsResponse {
-  programs: EarnProgram[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
-
-export type EarnProgramDepositsResponse = EarnPortfolioDepositsPage;
-
-export interface EarnProgramWithdrawalPreviewResponse {
-  preview: EarnPortfolioWithdrawalPreview;
-}
-
-export interface EarnProgramWithdrawalResponse {
-  withdrawal: EarnPortfolioWithdrawal;
-}
 
 function mapProgram(
   row: EarnProviderWalletRow,
@@ -243,7 +223,17 @@ async function assertKnownYieldSources(
   for (let offset = 0; ; offset += pageSize) {
     const { rows, total } = await repo.listStrategies({ environment, limit: pageSize, offset });
     for (const row of rows) {
-      if (row.provider === provider) {
+      // Being CATALOGUED in this environment is not the same as being FUNDABLE
+      // in it, and this is the last gate before a provider mutation. A
+      // mainnet-only provider's vaults are listed in sandbox so integrators can
+      // browse the real shelf; allocating devnet money to one would ask the
+      // provider to deposit into an instrument that does not exist on this
+      // cluster. `isClusterFundableInEnvironment` is the single rule — do not
+      // inline the comparison (see @sdp/earn support.ts).
+      if (
+        row.provider === provider &&
+        isClusterFundableInEnvironment(row.host_cluster, environment)
+      ) {
         known.add(row.provider_reference);
       }
     }
@@ -441,11 +431,21 @@ export const listEarnPrograms = async (c: AppContext) => {
   return success(c, response);
 };
 
-export const createEarnProgram = async (c: AppContext) => {
-  const body = await parseBody(c, earnProgramCreateSchema);
+export const createEarnProgram = async (
+  c: ValidatedBodyContext<typeof earnProgramCreateSchema>
+) => {
+  const body = c.req.valid("json");
   const client = requirePortfolioClient(body.provider);
   const auth = getAuth(c);
   const environment = resolveSdpEnvironment(c);
+
+  // Platform-level "we do not offer this provider", ahead of the org-level
+  // entitlement check below: no override lifts it, so answering "requires
+  // manual activation" would send the caller to a door that does not exist.
+  // Creation is the ONLY route that takes this gate — an organization holding a
+  // program with an un-surfaced provider keeps every read, re-target,
+  // withdrawal and ledger route (ADR 0002).
+  assertEarnProviderSurfaced(client.provider);
 
   // Money-in gate: full entitlement + mode-specific credential check.
   await assertProviderAvailable(
@@ -528,9 +528,11 @@ export const createEarnProgram = async (c: AppContext) => {
  * forcing withdraw → wait for settlement → re-deposit for what the provider
  * supports natively.
  */
-export const retargetEarnProgram = async (c: AppContext) => {
+export const retargetEarnProgram = async (
+  c: ValidatedBodyContext<typeof earnProgramRetargetSchema>
+) => {
   const { programId } = parseParams(c, earnProgramParamsSchema);
-  const body = await parseBody(c, earnProgramRetargetSchema);
+  const body = c.req.valid("json");
   const { row, client } = await requireProgramContext(c, programId);
   const auth = getAuth(c);
   const environment = resolveSdpEnvironment(c);
@@ -604,9 +606,11 @@ export const listEarnProgramDeposits = async (c: AppContext) => {
   return success(c, response);
 };
 
-export const previewEarnProgramWithdrawal = async (c: AppContext) => {
+export const previewEarnProgramWithdrawal = async (
+  c: ValidatedBodyContext<typeof earnProgramWithdrawalPreviewSchema>
+) => {
   const { programId } = parseParams(c, earnProgramParamsSchema);
-  const body = await parseBody(c, earnProgramWithdrawalPreviewSchema);
+  const body = c.req.valid("json");
   const { row, client, testMode } = await requireProgramContext(c, programId);
 
   // Money-out path: credentials only, never the entitlement gate.
@@ -674,8 +678,8 @@ const LEDGER_WRITE_ATTEMPTS = 3;
  * ledger sweep, never by fuzzy matching.
  */
 async function persistWithdrawalObservation(
-  repo: EarnRepository,
-  intentRow: EarnProgramWithdrawalRow,
+  repo: EarnMovementsRepository,
+  intentRow: EarnMovementRow,
   observed: EarnPortfolioWithdrawal
 ): Promise<void> {
   for (let attempt = 1; attempt <= LEDGER_WRITE_ATTEMPTS; attempt++) {
@@ -700,9 +704,11 @@ async function persistWithdrawalObservation(
   }
 }
 
-export const createEarnProgramWithdrawal = async (c: AppContext) => {
+export const createEarnProgramWithdrawal = async (
+  c: ValidatedBodyContext<typeof earnProgramWithdrawalCreateSchema>
+) => {
   const { programId } = parseParams(c, earnProgramParamsSchema);
-  const body = await parseBody(c, earnProgramWithdrawalCreateSchema);
+  const body = c.req.valid("json");
   const { row, client, testMode } = await requireProgramContext(c, programId);
 
   // Money-out path: credentials only, never the entitlement gate.
@@ -720,11 +726,11 @@ export const createEarnProgramWithdrawal = async (c: AppContext) => {
     destinationAddress: body.destinationAddress,
   });
 
-  const repo = getEarnRepository(c);
+  const ledger = createPostgresEarnMovementsRepository(getDb(c.env));
   const findIntentRow = () =>
-    repo.getProgramWithdrawalByRequestId({
+    ledger.findCustodialMovementByRequestId({
       organizationId: auth.organizationId,
-      walletId: row.id,
+      providerWalletId: row.id,
       requestId,
     });
 
@@ -735,12 +741,12 @@ export const createEarnProgramWithdrawal = async (c: AppContext) => {
   // True replay of an accepted withdrawal: answer with the provider's live
   // state and let the observation refresh the ledger. 200, not 201 — nothing
   // was created by this request.
-  const serveReplay = async (intent: EarnProgramWithdrawalRow, providerReference: string) => {
+  const serveReplay = async (intent: EarnMovementRow, providerReference: string) => {
     const withdrawal = await client.getPortfolioWithdrawal(earnRuntime(c), {
       providerWalletRef: row.provider_wallet_ref,
       withdrawalRef: providerReference,
     });
-    await persistWithdrawalObservation(repo, intent, withdrawal);
+    await persistWithdrawalObservation(ledger, intent, withdrawal);
     const response: EarnProgramWithdrawalResponse = { withdrawal };
     return success(c, response, 200);
   };
@@ -759,13 +765,14 @@ export const createEarnProgramWithdrawal = async (c: AppContext) => {
     // crash between here and acceptance leaves a re-drivable 'requested' row
     // (same-key retry or the ledger sweep) instead of an untracked payout.
     try {
-      intentRow = await repo.createProgramWithdrawal({
+      intentRow = await ledger.createCustodialMovement({
         organizationId: auth.organizationId,
         projectId: auth.projectId,
-        walletId: row.id,
+        environment: resolveSdpEnvironment(c),
+        providerWalletId: row.id,
         provider: client.provider,
         amountRequestedUsd: body.amountUsd,
-        token: body.token,
+        payoutToken: body.token,
         destinationAddress: body.destinationAddress,
         requestId,
         idempotencyFingerprint: fingerprint,
@@ -777,13 +784,14 @@ export const createEarnProgramWithdrawal = async (c: AppContext) => {
       if (!isPostgresUniqueViolation(error)) {
         throw error;
       }
-      // Concurrent same-key race: the other request claimed the (wallet,
+      // Concurrent same-key race: the other request claimed the (position,
       // request_id) slot — re-resolve as a replay. Fingerprint is NOT NULL by
       // schema, so this is always decisive: match, or 409.
-      intentRow = await resolveIdempotencyReplay(findIntentRow, fingerprint);
-    }
-    if (!intentRow) {
-      throw internalError("Failed to persist earn withdrawal intent");
+      const replayed = await resolveIdempotencyReplay(findIntentRow, fingerprint);
+      if (!replayed) {
+        throw internalError("Failed to persist earn withdrawal intent");
+      }
+      intentRow = replayed;
     }
     // Lost-race edge: the concurrent same-key winner may have already driven
     // the provider and stamped the ref while we waited on the re-resolve —
@@ -805,7 +813,7 @@ export const createEarnProgramWithdrawal = async (c: AppContext) => {
     destinationAddress: body.destinationAddress,
   });
 
-  await persistWithdrawalObservation(repo, intentRow, withdrawal);
+  await persistWithdrawalObservation(ledger, intentRow, withdrawal);
 
   const response: EarnProgramWithdrawalResponse = { withdrawal };
   return success(c, response, 201);
@@ -816,8 +824,6 @@ export const getEarnProgramWithdrawal = async (c: AppContext) => {
   const { row, client, testMode } = await requireProgramContext(c, programId);
 
   assertEarnProviderConfigured(c.env, client.provider, testMode);
-
-  const repo = getEarnRepository(c);
 
   // BOLA guard, defense in depth: every SDP organization shares one provider
   // account, so a withdrawal ref this program does not own must 404 HERE —
@@ -831,14 +837,25 @@ export const getEarnProgramWithdrawal = async (c: AppContext) => {
   // complete while an org held one program; with several, asking program A for
   // program B's ref would pass it and then drive the provider with A's wallet
   // ref and B's withdrawal ref — a mismatch whose answer is entirely the
-  // provider's to decide. wallet_id is strictly stronger and still lets an
+  // provider's to decide. Program scope is strictly stronger and still lets an
   // unknown ref fall through.
-  const ledgerRow = await repo.getProgramWithdrawalByProviderReference({
+  //
+  // A ledger movement names its HOLDING rather than the program wallet, and the
+  // holding is 1:1 with that wallet, so the comparison resolves through it.
+  const ledger = createPostgresEarnMovementsRepository(getDb(c.env));
+  const ledgerRow = await ledger.findMovementByProviderReference({
     provider: client.provider,
     providerReference: withdrawalRef,
   });
-  if (ledgerRow && ledgerRow.wallet_id !== row.id) {
-    throw notFound("Earn withdrawal");
+  if (ledgerRow) {
+    const holding = await ledger.getPositionById({
+      organizationId: ledgerRow.organization_id,
+      environment: ledgerRow.environment,
+      positionId: ledgerRow.position_id,
+    });
+    if (holding?.provider_wallet_id !== row.id) {
+      throw notFound("Earn withdrawal");
+    }
   }
 
   const withdrawal = await client.getPortfolioWithdrawal(earnRuntime(c), {
@@ -851,7 +868,7 @@ export const getEarnProgramWithdrawal = async (c: AppContext) => {
   // without provider_reference are invisible to this path by design.
   try {
     await applyEarnWithdrawalObservationByReference({
-      repo,
+      repo: ledger,
       provider: client.provider,
       organizationId: getAuth(c).organizationId,
       walletId: row.id,
@@ -868,28 +885,41 @@ export const getEarnProgramWithdrawal = async (c: AppContext) => {
   return success(c, response);
 };
 
-function mapToEarnProgramWithdrawalRecord(
-  row: EarnProgramWithdrawalRow
-): EarnProgramWithdrawalRecord {
+/**
+ * Ledger row -> the published withdrawal record.
+ *
+ * The custodial status vocabulary needs no translation: 0055's values ARE the
+ * ledger's custodial values. What the unified columns rename is the DENOMINATION
+ * story — `amount_requested`/`amount_settled`/`fee_amount` are denominated in the
+ * row's `denomination`, which is `usd` for every custodial movement, and the
+ * payout stablecoin moved to `payout_token` because naming the coin is not the
+ * same fact as naming the unit. `settled_at` is the provider's completion time.
+ */
+function mapToEarnProgramWithdrawalRecord(row: EarnMovementRow): EarnProgramWithdrawalRecord {
+  if (row.denomination !== "usd") {
+    // A non-USD custodial movement would mean this DTO's `*Usd` field names are
+    // lying about the unit. Refuse rather than mislabel money.
+    throw internalError(`Earn withdrawal ${row.id} is denominated in ${row.denomination}, not usd`);
+  }
   return {
     id: row.id,
     provider: row.provider,
-    status: row.status,
-    amountRequestedUsd: row.amount_requested_usd,
-    amountPaidUsd: row.amount_paid_usd ?? undefined,
-    feeUsd: row.fee_usd ?? undefined,
-    token: row.token,
-    destinationAddress: row.destination_address,
+    status: row.status as EarnProgramWithdrawalRecord["status"],
+    amountRequestedUsd: row.amount_requested,
+    amountPaidUsd: row.amount_settled ?? undefined,
+    feeUsd: row.fee_amount ?? undefined,
+    token: (row.payout_token ?? undefined) as EarnProgramWithdrawalRecord["token"],
+    destinationAddress: row.destination_address ?? "",
     failureReason: row.failure_reason ?? undefined,
     withdrawalRef: row.provider_reference ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    completedAt: row.completed_at ?? undefined,
+    completedAt: row.settled_at ?? undefined,
   };
 }
 
 /**
- * The withdrawal LEDGER list (source: earn_program_withdrawals, never the
+ * The withdrawal LEDGER list (source: earn_movements, never the
  * provider). Deliberately takes NO provider gate — not even the credential
  * check, and note it resolves the program WITHOUT requirePortfolioClient —
  * because the audit trail must survive credential removal, entitlement
@@ -902,9 +932,11 @@ export const listEarnProgramWithdrawals = async (c: AppContext) => {
   const query = parseQuery(c, earnProgramWithdrawalsListQuerySchema);
   const row = await requireProgram(c, programId);
 
-  const { rows, total } = await getEarnRepository(c).listProgramWithdrawals({
+  const { rows, total } = await createPostgresEarnMovementsRepository(
+    getDb(c.env)
+  ).listCustodialMovements({
     organizationId: getAuth(c).organizationId,
-    walletId: row.id,
+    providerWalletId: row.id,
     ...pageWindow(query),
   });
 

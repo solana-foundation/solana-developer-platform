@@ -77,7 +77,7 @@
             "description": "Creates a new API key. The full key is returned once.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Primary Key\",\n  \"description\": \"Used by backend service.\",\n  \"role\": \"api_developer\",\n  \"permissions\": [\n    \"tokens:read\",\n    \"tokens:write\"\n  ],\n  \"walletScope\": \"selected\",\n  \"allowedIps\": [\n    \"203.0.113.0/24\"\n  ],\n  \"expiresAt\": \"2025-12-31T00:00:00.000Z\",\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"signingWalletIds\": [\n    \"privy_wallet_123\",\n    \"dfns_wallet_456\"\n  ],\n  \"walletBindings\": [\n    {\n      \"walletId\": \"\",\n      \"permissions\": [\n        \"tokens:read\"\n      ]\n    }\n  ],\n  \"provisionWallet\": false,\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
+              "raw": "{\n  \"name\": \"Primary Key\",\n  \"role\": \"api_developer\",\n  \"walletScope\": \"selected\",\n  \"provisionWallet\": {\n    \"connectionId\": \"cconn_123\"\n  },\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -182,7 +182,7 @@
             "description": "Appends an immutable rule snapshot to an API-key control profile without activating it.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"rules\": [\n    {\n      \"id\": \"deny-raw-signing\",\n      \"kind\": \"operation_family\",\n      \"family\": \"raw_sign\",\n      \"action\": \"deny\"\n    }\n  ],\n  \"defaultAction\": \"deny\"\n}",
+              "raw": "{\n  \"rules\": [\n    {\n      \"id\": \"deny-issuance\",\n      \"kind\": \"operation_family\",\n      \"family\": \"issuance\",\n      \"action\": \"deny\"\n    }\n  ],\n  \"defaultAction\": \"deny\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -439,10 +439,10 @@
               }
             ],
             "url": "{{baseUrl}}/v1/wallets/signer-check",
-            "description": "Submits a memo transaction using the wallet bound to the authenticated API key. This endpoint requires API-key authentication.",
+            "description": "Submits a server-authored memo transaction using the wallet selected by an authenticated API key or dashboard session. The wallet is the only readonly signer, Kora pays the fee, and the request cannot supply memo text.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"memo\": \"\",\n  \"walletId\": \"\"\n}",
+              "raw": "{\n  \"walletId\": \"privy_wallet_123\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -675,7 +675,7 @@
             "description": "Creates an API key scoped to the project. The full key is returned once.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Primary Key\",\n  \"description\": \"Used by backend service.\",\n  \"role\": \"api_developer\",\n  \"permissions\": [\n    \"tokens:read\",\n    \"tokens:write\"\n  ],\n  \"walletScope\": \"selected\",\n  \"allowedIps\": [\n    \"203.0.113.0/24\"\n  ],\n  \"expiresAt\": \"2025-12-31T00:00:00.000Z\",\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"signingWalletIds\": [\n    \"privy_wallet_123\",\n    \"dfns_wallet_456\"\n  ],\n  \"walletBindings\": [\n    {\n      \"walletId\": \"\",\n      \"permissions\": [\n        \"tokens:read\"\n      ]\n    }\n  ],\n  \"provisionWallet\": false,\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
+              "raw": "{\n  \"name\": \"Primary Key\",\n  \"role\": \"api_developer\",\n  \"walletScope\": \"selected\",\n  \"provisionWallet\": {\n    \"connectionId\": \"cconn_123\"\n  },\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1456,7 +1456,7 @@
             "description": "Updates payment policy rules for a custody wallet. Wallet provisioning and default selection remain in /v1/wallets.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"commitMessage\": \"Require approval for transfers above 10,000 USDC.\",\n  \"defaultAction\": \"allow\",\n  \"rules\": [\n    {\n      \"id\": \"deny-raw-signing\",\n      \"kind\": \"operation_family\",\n      \"family\": \"raw_sign\",\n      \"action\": \"deny\"\n    }\n  ]\n}",
+              "raw": "{\n  \"commitMessage\": \"Require approval for transfers above 10,000 USDC.\",\n  \"defaultAction\": \"allow\",\n  \"rules\": [\n    {\n      \"id\": \"approve-vault-deposits\",\n      \"kind\": \"operation_type\",\n      \"operationTypes\": [\n        \"earn_vault_deposit\"\n      ],\n      \"action\": \"approval_required\"\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"

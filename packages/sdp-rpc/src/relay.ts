@@ -23,6 +23,8 @@ export { withHeliusApiKey } from "./config";
 export type ManagedRpcProviderId = OrganizationRpcProvider;
 export type ResolvedRpcProviderId = ManagedRpcProviderId | "custom";
 export type RpcSelectionMode =
+  | "project_connection"
+  | "organization_connection"
   | "project_provider"
   | "project_custom_provider"
   | "organization_provider"
@@ -62,6 +64,34 @@ export interface RpcProviderStatus {
   stats: RpcProviderStatsSummary;
 }
 
+/**
+ * What a tenant-owned connection resolves to, as seen from the relay.
+ *
+ * Deliberately carries no secret: the caller reads the credential through
+ * CredentialSecretStore, builds the target, and masks the label before handing
+ * it over, so key material never enters this package or anything it logs.
+ */
+export type TenantRpcConnectionResolution =
+  | { kind: "none" }
+  /** Configured for this scope but not usable -- must not fall back silently. */
+  | { kind: "unusable"; reason: string }
+  | {
+      kind: "active";
+      connectionId: string;
+      providerId: ManagedRpcProviderId;
+      endpoint: string;
+      endpointLabel: string;
+      headers: Record<string, string>;
+    };
+
+export interface TenantRpcConnectionLookup {
+  resolve(input: {
+    organizationId: string;
+    scopeKey: string;
+    network: string;
+  }): Promise<TenantRpcConnectionResolution>;
+}
+
 export interface ResolveRpcTargetInput {
   env: RpcEnv;
   kv: KVStoreSet;
@@ -69,6 +99,11 @@ export interface ResolveRpcTargetInput {
   organizationId: string;
   authProjectId: string | null;
   requestedProjectId: string | null;
+  /**
+   * Injected rather than imported: CredentialSecretStore lives in the API app,
+   * and this package may not depend on it.
+   */
+  connections?: TenantRpcConnectionLookup;
 }
 
 export interface ResolvedRpcTarget {
@@ -78,10 +113,14 @@ export interface ResolvedRpcTarget {
   endpointLabel: string;
   headers: Record<string, string>;
   selectionMode: RpcSelectionMode;
+  /** Set only for tenant-owned connections; telemetry uses ids, never endpoints. */
+  connectionId?: string;
 }
 
 export interface RelayTelemetryInput {
   providerId: ResolvedRpcProviderId;
+  /** Set for tenant-owned targets so their traffic keeps its own bucket. */
+  connectionId?: string;
   methodNames: string[];
   statusCode: number;
   latencyMs: number;
@@ -91,6 +130,22 @@ export interface RelayTelemetryInput {
 
 const ROUND_ROBIN_CURSOR_KEY = "rpc:relay:round-robin-cursor";
 const STATS_KEY_PREFIX = "rpc:relay:stats:";
+
+/**
+ * Where a target's counters live.
+ *
+ * A tenant connection resolves to the vendor's own id, so keying on
+ * `providerId` alone put an organization's BYOK traffic in the same bucket as
+ * the platform's endpoint for that vendor. The provider list then reported
+ * requests, errors and latency SDP never served as its own. Tenant traffic is
+ * keyed by connection instead, which also keeps one organization's volume out
+ * of another's.
+ */
+function statsKey(providerId: ResolvedRpcProviderId, connectionId?: string): string {
+  return connectionId
+    ? `${STATS_KEY_PREFIX}tenant:${connectionId}`
+    : `${STATS_KEY_PREFIX}${providerId}`;
+}
 const MAX_ORIGIN_BUCKETS = 20;
 const SEND_TRANSACTION_METHOD = ["send", "Transaction"].join("");
 const SEND_RAW_TRANSACTION_METHOD = ["sendRaw", "Transaction"].join("");
@@ -576,7 +631,71 @@ export function includesTransactionMethod(methodNames: string[]): boolean {
   return methodNames.some((methodName) => isTransactionMethod(methodName));
 }
 
+const ORGANIZATION_SCOPE_KEY = "__organization__";
+
+/**
+ * Tenant connections outrank every platform-managed selection (HOO-1093).
+ *
+ * A scope that holds a connection which is not live fails closed rather than
+ * falling through: an organization that has said "use my key" must never have
+ * its traffic quietly moved onto credentials SDP pays for.
+ */
+async function resolveTenantConnection(
+  input: ResolveRpcTargetInput,
+  projectId: string | null
+): Promise<ResolvedRpcTarget | null> {
+  if (!input.connections) {
+    return null;
+  }
+
+  const network = input.env.SOLANA_NETWORK ?? "devnet";
+  const scopes: Array<{ scopeKey: string; mode: RpcSelectionMode }> = [];
+  if (projectId) {
+    scopes.push({ scopeKey: projectId, mode: "project_connection" });
+  }
+  scopes.push({ scopeKey: ORGANIZATION_SCOPE_KEY, mode: "organization_connection" });
+
+  for (const scope of scopes) {
+    const resolution = await input.connections.resolve({
+      organizationId: input.organizationId,
+      scopeKey: scope.scopeKey,
+      network,
+    });
+
+    if (resolution.kind === "unusable") {
+      throw new SdpRpcError(
+        "SOLANA_RPC_ERROR",
+        `The RPC connection for this ${scope.mode === "project_connection" ? "project" : "organization"} is not active (${resolution.reason})`
+      );
+    }
+
+    if (resolution.kind === "active") {
+      return {
+        providerId: resolution.providerId,
+        projectId,
+        endpoint: resolution.endpoint,
+        endpointLabel: resolution.endpointLabel,
+        headers: resolution.headers,
+        selectionMode: scope.mode,
+        connectionId: resolution.connectionId,
+      };
+    }
+  }
+
+  return null;
+}
+
 export async function resolveRpcTarget(input: ResolveRpcTargetInput): Promise<ResolvedRpcTarget> {
+  // Precedence 1 and 2: an explicit tenant connection, project before
+  // organization, ahead of anything platform-managed.
+  const tenantTarget = await resolveTenantConnection(
+    input,
+    getEffectiveProjectId(input.authProjectId, input.requestedProjectId)
+  );
+  if (tenantTarget) {
+    return tenantTarget;
+  }
+
   const managedProviders = resolveManagedProviders(input.env);
   const access = await getRpcProviderAvailability(input.env, input.db, input.organizationId);
   const enabledManagedProviders = managedProviders.filter(
@@ -651,6 +770,19 @@ export async function resolveRpcTarget(input: ResolveRpcTargetInput): Promise<Re
 export async function resolveRoundRobinRpcTargets(
   input: ResolveRpcTargetInput
 ): Promise<ResolvedRpcTarget[]> {
+  // The faucet path resolves tenant connections on the same terms as the
+  // ordinary relay. Without this an organization that said "use my key" would
+  // still have airdrop requests served by platform credentials, and a
+  // connection that should fail closed would be bypassed rather than honoured.
+  const tenantTarget = await resolveTenantConnection(
+    input,
+    getEffectiveProjectId(input.authProjectId, input.requestedProjectId)
+  );
+  if (tenantTarget) {
+    // One connection, so there is nothing to rotate between.
+    return [tenantTarget];
+  }
+
   const managedProviders = resolveManagedProviders(input.env);
   const access = await getRpcProviderAvailability(input.env, input.db, input.organizationId);
   const enabledManagedProviders = managedProviders.filter(
@@ -673,7 +805,7 @@ export async function resolveRoundRobinRpcTargets(
 }
 
 export async function recordRpcRelayTelemetry(cache: KVStore, telemetry: RelayTelemetryInput) {
-  const key = `${STATS_KEY_PREFIX}${telemetry.providerId}`;
+  const key = statsKey(telemetry.providerId, telemetry.connectionId);
   const existing = (await cache.get(key, "json")) as Partial<RpcProviderStatsRecord> | null;
   const stats: RpcProviderStatsRecord = {
     ...emptyStats(),
@@ -709,9 +841,10 @@ export async function recordRpcRelayTelemetry(cache: KVStore, telemetry: RelayTe
 
 async function getProviderStats(
   cache: KVStore,
-  providerId: ResolvedRpcProviderId
+  providerId: ResolvedRpcProviderId,
+  connectionId?: string
 ): Promise<RpcProviderStatsSummary> {
-  const key = `${STATS_KEY_PREFIX}${providerId}`;
+  const key = statsKey(providerId, connectionId);
   const existing = (await cache.get(key, "json")) as RpcProviderStatsRecord | null;
   return toStatsSummary(existing ?? emptyStats());
 }
@@ -741,7 +874,11 @@ export async function listRpcProviders(input: ResolveRpcTargetInput) {
       projectId: resolvedTarget.projectId,
       selectionMode: resolvedTarget.selectionMode,
       endpoint: resolvedTarget.endpointLabel,
-      stats: await getProviderStats(input.kv.cache, resolvedTarget.providerId),
+      stats: await getProviderStats(
+        input.kv.cache,
+        resolvedTarget.providerId,
+        resolvedTarget.connectionId
+      ),
     },
     roundRobinOrder: enabledManagedProviders.map((provider) => provider.id),
   };

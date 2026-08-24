@@ -1,0 +1,6 @@
+interface:
+  display_name: "SDP Concise"
+  short_description: "Action-first output for SDP engineering work"
+  default_prompt: "Use $sdp-concise to make this SDP engineering response concise and actionable."
+policy:
+  allow_implicit_invocation: false

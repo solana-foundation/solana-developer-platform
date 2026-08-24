@@ -1,10 +1,15 @@
 import { GcpMetadataTokenProvider } from "@/lib/gcp/access-token";
 import { KmsClient } from "@/lib/gcp/kms-client";
+import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import type { Env } from "@/types/env";
 import { createEncryptionService } from "../encryption.service";
 import { KmsEnvelopeCipher } from "./envelope-cipher";
 
 const V2_PREFIX = "v2.";
+
+export function isV2Ciphertext(ciphertext: string): boolean {
+  return ciphertext.startsWith(V2_PREFIX);
+}
 
 export interface CustodyCipher {
   encrypt(orgId: string, plaintext: string): Promise<string>;
@@ -100,6 +105,19 @@ export function createCipherRouter(
     activeScheme: keyName ? "v2" : "legacy",
     ...(opts.legacyKeyEnvName ? { legacyKeyEnvName: opts.legacyKeyEnvName } : {}),
   });
+}
+
+export function assertCustodyEncryptionScheme(env: Env): void {
+  if (env.CUSTODY_KMS_KEY_NAME?.trim()) {
+    return;
+  }
+  if (isSelfHostedDeployment(env)) {
+    return;
+  }
+  throw new CustodyCipherError(
+    "CUSTODY_KMS_KEY_NAME is required unless SDP_DEPLOYMENT_MODE=self_hosted; " +
+      "refusing to write custody secrets with the legacy environment key"
+  );
 }
 
 export function createCustodyCipher(env: Env): CustodyCipher {

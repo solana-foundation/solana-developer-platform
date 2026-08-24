@@ -5,7 +5,32 @@ import type {
   EarnPortfolioWalletSnapshot,
   EarnPortfolioWithdrawal,
 } from "@sdp/types";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+/**
+ * Ground is the only portfolio-capable provider and it is currently UN-SURFACED
+ * (`EARN_PROVIDER_SURFACING` in @sdp/types), so `POST /programs` answers 403 for
+ * it in the shipped configuration. That is the product's business state, not a
+ * property of the create machinery this file tests — idempotency, replay,
+ * gate order, environment isolation and the yield-source gate all have to keep
+ * working for whichever provider is offered next.
+ *
+ * So surfacing is forced ON here and the gate gets its own explicit test, which
+ * flips this flag off. Deliberately a partial mock: everything else in
+ * `@sdp/types` is the real module.
+ */
+const surfacing = vi.hoisted(() => ({ forceOn: true }));
+
+vi.mock("@sdp/types", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@sdp/types")>();
+  return {
+    ...actual,
+    isEarnProviderSurfaced: (provider: string) =>
+      surfacing.forceOn || actual.isEarnProviderSurfaced(provider),
+  };
+});
+
 import { getDb } from "@/db";
 import {
   createPostgresEarnRepository,
@@ -13,6 +38,7 @@ import {
   type InsertEarnProviderWalletInput,
   type UpsertEarnStrategyInput,
 } from "@/db/repositories";
+import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
 import { deriveProviderRequestId } from "@/lib/idempotency";
 import { env } from "@/test/helpers/env";
@@ -213,6 +239,7 @@ async function seedSessionAuth(): Promise<void> {
 }
 
 async function seedGroundStrategy(overrides: Partial<UpsertEarnStrategyInput> = {}): Promise<void> {
+  const environment = overrides.environment ?? "sandbox";
   const strategy = await createPostgresEarnRepository(getDb(env)).upsertStrategy({
     provider: "ground",
     providerReference: GROUND_SOURCE,
@@ -227,7 +254,13 @@ async function seedGroundStrategy(overrides: Partial<UpsertEarnStrategyInput> = 
     redemptionDelayDays: null,
     riskMetadata: { curator: "gauntlet" },
     status: "active",
-    environment: "sandbox",
+    // Follows the environment by default because that is what Ground itself
+    // does — it catalogues a source against the environment's own Solana mint,
+    // so a fixture pinned to devnet would be un-fundable in the
+    // production-session cases and fail for the wrong reason. Tests exercising
+    // the cluster gate override it explicitly.
+    hostCluster: CLUSTER_BY_SDP_ENVIRONMENT[environment],
+    environment,
     ...overrides,
   });
   if (!strategy) {
@@ -409,6 +442,7 @@ beforeEach(async () => {
   // credential stays absent unless a test opts in.
   env.GROUND_SANDBOX_API_KEY = GROUND_SANDBOX_KEY;
   env.GROUND_API_KEY = undefined;
+  surfacing.forceOn = true;
   await seedTestDatabase(env);
 });
 
@@ -743,6 +777,77 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
     expect(body.error.code).toBe("NOT_IMPLEMENTED");
   });
 
+  it("returns 501 for a catalogue-only provider, whose vaults ARE in the catalogue", async () => {
+    // Kamino differs from the stub providers above: it lists real strategies,
+    // so its references resolve. The capability gate is the only thing between
+    // a caller and a program on a provider that moves no money through SDP —
+    // and it answers before entitlement or key resolution can muddy the reason.
+    await seedAuth();
+    await seedGroundStrategy({ provider: "kamino", hostCluster: "mainnet-beta" });
+
+    const res = await requestEarn("POST", PROGRAMS_PATH, {
+      provider: "kamino",
+      allocations: VALID_ALLOCATIONS,
+    });
+
+    expect(res.status).toBe(501);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("NOT_IMPLEMENTED");
+  });
+
+  /**
+   * The devnet-money guard. `assertKnownYieldSources` must refuse a reference
+   * whose instrument does not live on this environment's cluster — being listed
+   * is not the same as being fundable. The row is seeded with a flipped cluster
+   * rather than borrowed from a provider: Kamino was the original example and
+   * now catalogues per cluster, so a real provider reference would no longer
+   * exercise this at all.
+   *
+   * Deliberately uses a GROUND row with its cluster flipped rather than a
+   * Kamino row: a Kamino reference is already refused for being another
+   * provider's, which would pass this test without the cluster check existing
+   * at all. Same provider, same environment, one field different.
+   */
+  it("refuses an allocation whose strategy is hosted on another cluster", async () => {
+    await seedAuth();
+    await seedGroundStrategy({ hostCluster: "mainnet-beta" });
+    const createWallet = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet");
+
+    const res = await requestEarn(
+      "POST",
+      PROGRAMS_PATH,
+      createProgramBody({ requestId: crypto.randomUUID() })
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      error: { code: string; details?: { unknownYieldSourceIds?: string[] } };
+    };
+    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(body.error.details?.unknownYieldSourceIds).toEqual([GROUND_SOURCE]);
+    expect(createWallet).not.toHaveBeenCalled();
+  });
+
+  it("accepts the same allocation once the strategy is hosted on this cluster", async () => {
+    // The control for the case above: without it, a gate that refused
+    // everything would pass just as well.
+    await seedAuth();
+    await seedGroundStrategy({ hostCluster: "devnet" });
+    const createWallet = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet")
+      .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
+    stubProgramReads();
+
+    const res = await requestEarn(
+      "POST",
+      PROGRAMS_PATH,
+      createProgramBody({ requestId: crypto.randomUUID() })
+    );
+
+    expect(res.status).toBe(201);
+    expect(createWallet).toHaveBeenCalled();
+  });
+
   it("answers an unentitled create 403 even when no idempotency key was sent", async () => {
     await seedAuth({ entitleGround: false });
     await seedGroundStrategy();
@@ -1043,7 +1148,9 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
     expect(sentA).not.toBe(sentB);
 
     const count = await getDb(env)
-      .prepare("SELECT COUNT(*)::int AS total FROM earn_program_withdrawals")
+      .prepare(
+        "SELECT COUNT(*)::int AS total FROM earn_movements WHERE execution_model = 'custodial'"
+      )
       .first<{ total: number }>();
     expect(count?.total).toBe(2);
   });
@@ -1301,6 +1408,96 @@ describe("Earn program — live reads", () => {
   });
 });
 
+/**
+ * The surfacing gate — the only place `EARN_PROVIDER_SURFACING` is allowed to
+ * refuse anything. These tests turn the forced-on flag OFF, so they run against
+ * the real shipped map (Ground un-surfaced today).
+ */
+describe("Earn program — un-surfaced provider", () => {
+  beforeEach(() => {
+    surfacing.forceOn = false;
+  });
+
+  it("refuses to open a new position, even for a fully entitled and credentialed org", async () => {
+    await seedAuth();
+    await seedGroundStrategy();
+    const createWallet = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet");
+
+    const res = await requestEarn(
+      "POST",
+      PROGRAMS_PATH,
+      createProgramBody({ requestId: crypto.randomUUID() })
+    );
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { message: string } };
+    // Not the entitlement copy: no override lifts this, so pointing the caller
+    // at manual activation would send them to a door that does not exist.
+    expect(body.error.message).toContain("not currently offered");
+    expect(body.error.message).not.toContain("manual activation");
+    // Refused BEFORE the provider is touched — no orphaned wallet to reconcile.
+    expect(createWallet).not.toHaveBeenCalled();
+  });
+
+  /**
+   * ADR 0002: un-surfacing closes the door IN, never the door out. An
+   * organization holding a program taken while the provider was offered keeps
+   * every route that reads or exits it.
+   */
+  it("keeps an existing program readable, re-targetable and withdrawable", async () => {
+    await seedAuth();
+    await seedGroundStrategy();
+    const program = await seedProgramWallet();
+    stubProgramReads();
+    const updateStrategy = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "updatePortfolioStrategy")
+      .mockResolvedValue({ allocations: WALLET_SNAPSHOT.allocations });
+    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal").mockResolvedValue(
+      WITHDRAWAL
+    );
+
+    const read = await requestEarn("GET", programPath(program.id));
+    expect(read.status).toBe(200);
+
+    const list = await requestEarn("GET", `${PROGRAMS_PATH}?provider=ground`);
+    expect(list.status).toBe(200);
+
+    const retarget = await requestEarn("PUT", programPath(program.id), {
+      allocations: VALID_ALLOCATIONS,
+    });
+    expect(retarget.status).toBe(200);
+    expect(updateStrategy).toHaveBeenCalledTimes(1);
+
+    const withdrawal = await requestEarn("POST", programPath(program.id, "/withdrawals"), {
+      requestId: "0a1f4c2e-9b6d-4e83-8a11-5c7d2e9f4b60",
+      amountUsd: "25.50",
+      token: "usdc",
+      destinationAddress: SOLANA_DESTINATION,
+    });
+    expect(withdrawal.status).toBe(201);
+  });
+
+  /**
+   * The catalogue an existing program allocates into is hidden from
+   * `/strategies` reads, and `assertKnownYieldSources` must NOT inherit that:
+   * it validates against the STORED catalogue precisely so a position can keep
+   * pointing at a row the browse surface no longer shows. Covered by the
+   * re-target above; pinned here so collapsing the two filters fails loudly.
+   */
+  it("still validates re-target allocations against the stored catalogue", async () => {
+    await seedAuth();
+    await seedGroundStrategy();
+    const program = await seedProgramWallet();
+    stubProgramReads();
+
+    const res = await requestEarn("PUT", programPath(program.id), {
+      allocations: [{ token: "usdc", entries: [{ yieldSourceId: "not-in-catalogue", pct: 100 }] }],
+    });
+
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
   it("keeps withdrawals and previews working when the organization loses deposit entitlement", async () => {
     await seedAuth({ entitleGround: false });
@@ -1480,7 +1677,9 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
 
       // Exactly ONE intent row anchors both attempts.
       const count = await getDb(env)
-        .prepare("SELECT COUNT(*)::int AS total FROM earn_program_withdrawals")
+        .prepare(
+          "SELECT COUNT(*)::int AS total FROM earn_movements WHERE execution_model = 'custodial'"
+        )
         .first<{ total: number }>();
       expect(count?.total).toBe(1);
     });
@@ -1534,9 +1733,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       expect(first.status).toBe(500);
       // The intent row survives the failure, ref-less and re-drivable.
       const stranded = await getDb(env)
-        .prepare(
-          "SELECT status, provider_reference FROM earn_program_withdrawals ORDER BY created_at DESC"
-        )
+        .prepare("SELECT status, provider_reference FROM earn_movements ORDER BY created_at DESC")
         .first<{ status: string; provider_reference: string | null }>();
       expect(stranded).toEqual({ status: "requested", provider_reference: null });
 
@@ -1557,9 +1754,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       expect(retryCall?.[1]?.requestId).toBe(firstCall?.[1]?.requestId);
       // And the re-drive healed the row.
       const healed = await getDb(env)
-        .prepare(
-          "SELECT status, provider_reference FROM earn_program_withdrawals ORDER BY created_at DESC"
-        )
+        .prepare("SELECT status, provider_reference FROM earn_movements ORDER BY created_at DESC")
         .first<{ status: string; provider_reference: string | null }>();
       expect(healed).toEqual({ status: "processing", provider_reference: "wd_test_1" });
     });
@@ -1656,7 +1851,12 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
 
   async function readLedgerRows(): Promise<Array<Record<string, unknown>>> {
     const { results } = await getDb(env)
-      .prepare("SELECT * FROM earn_program_withdrawals ORDER BY created_at DESC, id DESC")
+      .prepare(
+        `SELECT movement.*, position.provider_wallet_id AS wallet_id
+           FROM earn_movements movement
+           INNER JOIN earn_positions position ON position.id = movement.position_id
+          ORDER BY movement.created_at DESC, movement.id DESC`
+      )
       .all<Record<string, unknown>>();
     return results ?? [];
   }
@@ -1672,12 +1872,14 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
     expect(res.status).toBe(201);
 
     const [row] = await readLedgerRows();
-    expect(row?.id).toMatch(/^earn_program_withdrawal_/);
+    // One id space for every movement now; only migrated history keeps a
+    // per-family prefix, which is why nothing may parse an id for its kind.
+    expect(row?.id).toMatch(/^earn_movement_/);
     expect(row?.status).toBe("processing");
     expect(row?.provider).toBe("ground");
     expect(row?.wallet_id).toBe(program.id);
     expect(row?.provider_reference).toBe(WITHDRAWAL.withdrawalRef);
-    expect(row?.amount_requested_usd).toBe("10.00");
+    expect(row?.amount_requested).toBe("10.00");
     expect(row?.destination_address).toBe(SOLANA_DESTINATION);
     // The anchor is the DERIVED id, never the caller's raw key.
     expect(row?.request_id).toBe(
@@ -1764,9 +1966,9 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
     expect(res.status).toBe(200);
     const [row] = await readLedgerRows();
     expect(row?.status).toBe("completed");
-    expect(row?.amount_paid_usd).toBe("9.90");
-    expect(row?.fee_usd).toBe("0.10");
-    expect(row?.completed_at).toBe("2026-08-11T05:00:00.000Z");
+    expect(row?.amount_settled).toBe("9.90");
+    expect(row?.fee_amount).toBe("0.10");
+    expect(row?.settled_at).toBe("2026-08-11T05:00:00.000Z");
   });
 
   it("serves live state for a pre-ledger withdrawal without inventing a row", async () => {
@@ -1815,13 +2017,16 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
       label: null,
       createdBy: TEST_USER.id,
     });
-    const victimRow = await repo.createProgramWithdrawal({
+    const victimRow = await createPostgresEarnMovementsRepository(
+      getDb(env)
+    ).createCustodialMovement({
       organizationId: "org_earn_program_victim",
       projectId: "prj_earn_program_victim",
-      walletId: victimWallet?.id ?? "",
+      environment: "sandbox",
+      providerWalletId: victimWallet?.id ?? "",
       provider: "ground",
       amountRequestedUsd: "50.00",
-      token: "usdc",
+      payoutToken: "usdc",
       destinationAddress: SOLANA_DESTINATION,
       requestId: crypto.randomUUID(),
       idempotencyFingerprint: '{"scope":"earn_program_withdrawal"}',
@@ -1829,10 +2034,9 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
       createdBy: TEST_USER.id,
       initiatedByKeyId: null,
     });
-    await repo.updateProgramWithdrawalStatusGuarded({
-      selector: { withdrawalId: victimRow?.id ?? "" },
+    await createPostgresEarnMovementsRepository(getDb(env)).updateCustodialMovementGuarded({
+      selector: { movementId: victimRow?.id ?? "" },
       organizationId: "org_earn_program_victim",
-      fromStatuses: ["requested"],
       toStatus: "processing",
       providerReference: "wd_victim_org",
     });
@@ -1877,7 +2081,7 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
       expect(body.data.pageSize).toBe(20);
       expect(body.data.withdrawals.map((w) => w.withdrawalRef).sort()).toEqual(["wd_a", "wd_b"]);
       const [record] = body.data.withdrawals;
-      expect(record?.id).toMatch(/^earn_program_withdrawal_/);
+      expect(record?.id).toMatch(/^earn_movement_/);
       expect(record?.provider).toBe("ground");
       expect(record?.destinationAddress).toBe(SOLANA_DESTINATION);
       // Ledger records never leak the derivation internals.

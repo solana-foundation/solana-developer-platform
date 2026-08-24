@@ -13,11 +13,12 @@ import { SdpEarnError } from "@sdp/earn/errors";
 import { SdpPaymentsError } from "@sdp/payments/errors";
 import { SdpRpcError } from "@sdp/rpc/errors";
 import { type Context, Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { logger } from "hono/logger";
 import { prettyJSON } from "hono/pretty-json";
 import { secureHeaders } from "hono/secure-headers";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { AppError } from "@/lib/errors";
+import { AppError, badRequest } from "@/lib/errors";
 import { corsMiddleware } from "@/middleware/cors";
 import { dryRunMiddleware } from "@/middleware/dry-run";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
@@ -35,7 +36,9 @@ import wallets from "@/routes/custody";
 import docs from "@/routes/docs";
 import earn from "@/routes/earn";
 import health from "@/routes/health";
+import heliusRings from "@/routes/helius-rings";
 import internalCustody from "@/routes/internal-custody";
+import internalRpc from "@/routes/internal-rpc";
 import issuance from "@/routes/issuance";
 import llms from "@/routes/llms";
 import members from "@/routes/members";
@@ -362,6 +365,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/places", places);
   v1.route("/policies", policies);
   v1.route("/private-channels", privateChannels);
+  v1.route("/helius-rings", heliusRings);
   v1.route("/compliance", compliance);
 
   const registeredPluginNames = new Set<string>();
@@ -379,6 +383,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // public OpenAPI and AI discovery surfaces.
   app.route("/internal/playground", playgroundInternal);
   app.route("/internal/dashboard/custody", internalCustody);
+  app.route("/internal/dashboard/rpc", internalRpc);
 
   // Admin routes (internal)
   app.route("/admin/allowlist", allowlist);
@@ -395,14 +400,19 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     const traceId = c.get("traceId");
     const requestSource = c.get("requestSource");
 
-    if (err instanceof AppError) {
+    // Hono core throws HTTPException(400) for malformed JSON bodies before
+    // route-level body validation runs; normalize it into the AppError envelope.
+    const normalizedError =
+      err instanceof HTTPException && err.status === 400 ? badRequest(err.message) : err;
+
+    if (normalizedError instanceof AppError) {
       c.header("X-SDP-Trace-ID", traceId);
       return c.json(
         {
-          error: err.toResponse().error,
+          error: normalizedError.toResponse().error,
           meta: { requestId },
         },
-        mapErrorStatusCode(err.statusCode)
+        mapErrorStatusCode(normalizedError.statusCode)
       );
     }
 
@@ -443,6 +453,20 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
     if (err instanceof FeePaymentError) {
       const mapped = mapFeePaymentError(err);
+      // The response message is sanitized; without this log entry the actual
+      // failure (breaker trip, provider outage, budget denial) is invisible.
+      getLogger().warn(
+        redactCredentialSecrets({
+          requestId,
+          traceId,
+          source: requestSource,
+          code: err.code,
+          mapped_status: mapped.status,
+          error: err.message,
+          cause: err.cause?.message,
+        }),
+        "Fee payment error"
+      );
       c.header("X-SDP-Trace-ID", traceId);
       return c.json(
         {

@@ -7,10 +7,24 @@
 
 import { getDb } from "@/db";
 import { createKVStoreSet, getRedisClient } from "@/runtime/kv-redis";
-import { AUDIT_LEDGER_CHECKPOINT_KEY } from "@/services/audit.service";
+import {
+  AUDIT_LEDGER_CHECKPOINT_KEY,
+  AUDIT_LEDGER_SESSION_LOCK_KEY,
+} from "@/services/audit.service";
 import type { Env } from "@/types/env";
 
+// FK-dependency ordered: dependents before the rows they point at.
+//
+// The Earn vocabulary tables (earn_execution_models, earn_movement_directions,
+// earn_movement_statuses) are deliberately ABSENT. They are seeded reference data
+// from migration 0062, not tenant state — truncating them would make every
+// subsequent movement insert fail its status foreign key. Nothing here is
+// referenced BY them, so CASCADE cannot reach them either.
 const POSTGRES_TEST_TABLES = [
+  "earn_movements",
+  "earn_positions",
+  "earn_vault_movements",
+  "earn_vault_positions",
   "sponsorship_budget_policy_revisions",
   "sponsorship_budget_reservations",
   "sponsorship_budget_policies",
@@ -64,6 +78,16 @@ const POSTGRES_TEST_TABLES = [
   "private_channel_deposits",
   "private_channels",
   "private_channel_instances",
+  "helius_rings_events",
+  "helius_rings_timelocks",
+  "helius_rings_operations",
+  "helius_rings_zones",
+  "helius_rings_key_refs",
+  "helius_rings_wallets",
+  "helius_rings_runtime_health",
+  // helius_rings_asset_allowlist is deliberately absent: it is platform
+  // reference data seeded by migration 0057, not per-test state. Truncating it
+  // would empty it for the rest of the run, and nothing re-seeds it.
   "magic_links",
   "sessions",
   "project_members",
@@ -120,10 +144,26 @@ export async function seedTestDatabase(env: Env): Promise<void> {
   const db = getDb(env);
 
   try {
-    await db
-      .prepare(`TRUNCATE TABLE ${POSTGRES_TEST_TABLES.join(", ")} RESTART IDENTITY CASCADE`)
-      .run();
-    await createKVStoreSet(env).cache.delete(AUDIT_LEDGER_CHECKPOINT_KEY);
+    // Serialize the reset with in-flight audit-ledger writers. TRUNCATE already
+    // waits for their transactions via its ACCESS EXCLUSIVE lock, but the
+    // checkpoint delete talks to Redis and would otherwise land between a
+    // writer's pre-commit witness and its post-commit advance, failing that
+    // write with "checkpoint did not advance" in whichever test runs next.
+    const lockedTransactionWithPostCommit = db.lockedTransactionWithPostCommit?.bind(db);
+    if (!lockedTransactionWithPostCommit) {
+      throw new Error("Test database client cannot serialize the audit-ledger reset");
+    }
+    await lockedTransactionWithPostCommit(
+      AUDIT_LEDGER_SESSION_LOCK_KEY,
+      async (tx) => {
+        await tx.execute(
+          `TRUNCATE TABLE ${POSTGRES_TEST_TABLES.join(", ")} RESTART IDENTITY CASCADE`
+        );
+      },
+      async () => {
+        await createKVStoreSet(env).cache.delete(AUDIT_LEDGER_CHECKPOINT_KEY);
+      }
+    );
     const redis = await getRedisClient(env);
     const sponsorshipKeys = await redis.keys("sdp:sponsorship:*");
     if (sponsorshipKeys.length > 0) {

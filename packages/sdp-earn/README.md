@@ -7,6 +7,22 @@ architecture is deliberately multi-provider — every Ground-specific detail
 lives behind a provider-neutral seam so that adding infra provider #2 (or new
 curators, or new vaults) is a contained, checklist-driven change.
 
+Two provider SHAPES now live here, and the difference decides which seams a new
+integration touches:
+
+| | **Custodial portfolio** (Ground) | **Catalogue-only** (Kamino) |
+|---|---|---|
+| Money model | SDP provisions an omnibus wallet; the provider spreads funds across sources | Non-custodial — the customer's own wallet deposits into an on-chain vault |
+| Contract | `EarnVaultProvider` + `EarnPortfolioWalletProvider` (+ approvals) | `EarnVaultProvider` + `EarnLiveMetricsProvider` |
+| `/v1/earn/programs` | the whole flow | **501** by capability detection |
+| Credential | `GROUND_API_KEY` / `GROUND_SANDBOX_API_KEY` | none — public data API |
+| Clusters | catalogued per environment's own cluster | production → mainnet (REST); non-production → **devnet, read on-chain** |
+| Dashboard | the deposit wizard | not shown — API surface only |
+
+A catalogue-only provider is a complete integration, not a partial one: there is
+no wallet to provision, so `supportsPortfolioWallets` returning false is the
+answer, not a TODO. See CLAUDE.md → "Two provider shapes".
+
 Companion docs:
 
 - [ADR 0002 — Earn provider pluggability](../../docs/decisions/0002-earn-provider-pluggability.md)
@@ -46,15 +62,15 @@ Companion docs:
   holds many portfolio wallets, and every SDP org shares a single account per
   environment — which is why a provider console's account-wide total will exceed
   what any one org sees in SDP.
-- **Solana-only surface, and USDC-only on it.** Deposits are funded by sending
-  **USDC** on Solana to the wallet's deposit address (`solana_devnet` in
+- **Solana-only customer rails, and USDC-only on them.** Deposits are funded by
+  sending **USDC** on Solana to the wallet's deposit address (`solana_devnet` in
   sandbox, `solana` in production); withdrawals settle to a Solana address the
   org controls. USDT is not a second option here: Ground routes it on Ethereum
   only (`GROUND_SOLANA_ROUTED_TOKENS`), so a USDT source never enters the
   catalogue and a USDT payout is refused before any network call. Ground can route
-  capital to yield sources on other chains internally, but SDP no longer
-  catalogues those sources at all: "Solana Earn" means Solana-HOSTED yield, not
-  Solana-rail access to yield hosted elsewhere (`not_solana_hosted`).
+  capital to yield sources on other chains internally. The sync retains those
+  routable sources in `earn_strategies`; customer catalogue visibility is an API
+  policy, currently excluding Aave- and Morpho-related rows.
 - **Funding is address-based in V1**: show the deposit address, track incoming
   deposits via the provider's deposits API. No custody signing in the flow.
   Webhooks (Ground supports Stripe-style HMAC) are future work; V1 polls.
@@ -73,7 +89,7 @@ Ground's [Portfolio Wallets API](https://docs.groundtech.co/docs/portfolio-walle
 | Yield-source id / name / protocol | `risk_metadata.curator` (known ids → `morpho-<curator>-<token>` convention → protocol fallback) |
 | `allocations[].type` (observed: `market`, `liquidity`, `loan`, `reserve`, `rwa`, `treasury`) | `source_kind`: `rwa` / `defi` (dominant allocation; `rwa` + `treasury` are the RWA side) |
 | `mode` | only `active` sources are listed; `buy_only` is excluded (would trap funds — ADR 0002 exit-safety) |
-| `chain` | **gate, not metadata**: only sources hosted on the environment's Solana chain are catalogued (`not_solana_hosted`, fail-closed on an absent/unknown chain). Ground's shelf is majority Ethereum-hosted — Aave, four Morpho vaults, Syrup and every RWA source — and SDP lists and stores none of it |
+| `chain` | Inventory metadata. Ground may bridge Solana USDC to a source hosted elsewhere, so host chain does not prevent persistence. Customer catalogue visibility is enforced by the Earn API read route. |
 | Portfolio wallet (`POST /v2/wallets`, `GET /v2/wallets/{id}`) | One SDP program: `earn_provider_wallets.provider_wallet_ref` (globally unique per provider) |
 | Strategy weights | `POST /v1/earn/programs` (create) / `PUT /v1/earn/programs/:programId` (re-target) allocations → Ground target weights. **V1 is single-vault (PRO-1667): exactly one entry per token group, which the sum rule pins to `pct: 100`.** The weighted wire shape (percent, 0.1 grid, sum = 100 per group) is unchanged and the multi-entry surface is dormant — the API side of re-enabling weights is relaxing the route-schema cap (wire shape and provider contract untouched), but the dashboard separately needs weight authoring + share display back (removed by design) before the cap can safely relax. Both branches send a `requestId` — **required on create** (`EarnPortfolioWalletCreateInput.requestId`, no client-side fallback since PRO-1670: an unkeyed retry would provision a second wallet), optional on update, where the client still mints one per call. Either way SDP derives it rather than forwarding the caller's key. Ground replays a matching payload and **409s a reused key with a changed payload**, so callers must re-mint whenever the allocation changes. An omitted token lane is preserved, not cleared. |
 | `depositAddresses.solana{,_devnet}` | The program's funding address (only Solana is surfaced) |
@@ -150,10 +166,9 @@ domains**; USDT stays on Ethereum. That is why USDT sources never enter SDP's
 catalogue at all — `GROUND_SOLANA_ROUTED_TOKENS` (client.ts) pins Ground's
 Solana rails to USDC, so an un-routable source is excluded on every cluster
 and withdrawal preview/create refuse un-routable tokens before any network
-call. `bridge` remains a position kind because a wallet funded before the
-host-chain gate can still hold value mid-route, but it is no longer a reason to
-catalogue an off-Solana source: since `not_solana_hosted`, SDP lists and stores
-Solana-hosted vaults only.
+call. `bridge` remains a position kind because Ground may move value between the
+Solana customer rail and a yield source it hosts elsewhere; host chain is not a
+catalogue persistence gate.
 
 Ground confirmed (2026-08-05) that **sandbox supports both `ethereum_sepolia`
 and `solana_devnet`**; Solana flows in sandbox ride the `solana_devnet` chain
@@ -288,7 +303,7 @@ apps/sdp-api/src/
                                    the programs family (list/create/re-target,
                                    live provider reads + the withdrawal
                                    ledger); strategies is the catalogue family.
-  db/migrations/postgres/0048–0056 earn_strategies (0048);
+  db/migrations/postgres/0048–0065 earn_strategies (0048);
                                    earn_provider_wallets (0049, the program
                                    link); earn_program_withdrawals (0055, the
                                    withdrawal ledger — 0055 also dropped the
@@ -296,11 +311,23 @@ apps/sdp-api/src/
                                    tables, PRO-1628); 0056 lifted the
                                    one-program-per-org cap and moved uniqueness
                                    onto (provider, provider_wallet_ref),
-                                   PRO-1670.
+                                   PRO-1670; earn_vault_positions +
+                                   earn_vault_movements (0059, the non-custodial
+                                   claim index and its signed-movement ledger);
+                                   earn_movements + earn_positions (0062-0065,
+                                   PRO-1705 — the ONE provider-neutral movement
+                                   ledger and ONE holdings table that supersede
+                                   the two mechanism-split tables above).
+                                   The mechanism-split tables above take no
+                                   reads and no writes any more; a later
+                                   migration drops them.
+                                   earn_provider_wallets stays — it is an
+                                   ACCOUNT at a provider, not a holding.
   services/earn-withdrawal-ledger.service.ts
-                                   Withdrawal-ledger status machine + appliers
+                                   Custodial movement status machine + appliers
                                    (Hono-free; poll path today, sweep/webhooks
-                                   later).
+                                   later). Transitions come from the shared
+                                   matrix in @sdp/types, not a local list.
   db/repositories/earn.*           Row types + Postgres impl (open-string
                                    provider columns; dispatch must go through
                                    the fail-closed resolver).
@@ -319,11 +346,50 @@ apps/sdp-web/src/app/
   api/dashboard/markets/earn/      BFF proxies to /v1/earn/*.
 ```
 
-## Catalogue data: the sync cron vs the dev seed
+## Catalogue data: the sync cron and metrics refresh
 
-Two things write `earn_strategies`, and only one of them is a production path.
+Two live paths write `earn_strategies`, split by how fast the data they own
+moves. The catalogue sync is the only path that can admit rows; the metrics
+refresh is update-only.
 
-### The sync cron — the production path
+### The metrics refresh — the fast half
+
+`apps/sdp-api/src/cron/earn-metrics-refresh.ts`
+
+- **What it does:** for every provider implementing the optional live-metrics
+  capability (`supportsLiveMetrics`), pulls the whole shelf's current figures in
+  one or two calls and rewrites `current_apy` plus volatile `risk_metadata`
+  (TVL, holders) on rows the catalogue already holds.
+- **When it runs:** every 5 minutes (`EARN_METRICS_REFRESH_CRON`), on both
+  schedulers behind the same `isEarnEnabled` gate. Unslotted on the managed job
+  — that job's own five-minute schedule IS the cadence — and entered through
+  `runEarnMetricsRefreshTick` so it reports to its own Sentry cron monitor.
+  That monitor is the point: "the refresh silently stopped running" is this
+  pass's worst failure (rates quietly go stale) and is invisible from the
+  catalogue sync's monitor.
+- **Ordered BEFORE the catalogue sync in the managed job**, which also protects
+  the sync: `runEarnCatalogueSyncIfDue` claims its hourly Redis slot before any
+  provider call, and a stall after that claim would hold the slot for its full
+  TTL (~59 min). Running the unslotted half first means a provider stall happens
+  before any slot exists to burn.
+- **What it cannot do**, and this is the whole safety argument:
+  - **Insert.** `updateStrategyMetrics` matches on
+    (provider, provider_reference, environment) and no-ops otherwise, so a
+    provider reporting figures for a vault the catalogue refused cannot admit
+    it. Every admission gate stays in the hourly sync below. Kamino reports 173
+    vaults each pass and 21 rows update — that gap is expected, not a warning.
+  - **Change what a strategy IS.** Its input carries the rate and volatile
+    metadata only; the metadata is MERGED, so `curator` survives.
+- **Why not read live at request time:** `GET /strategies` reads exactly one
+  source for the state it reports (ADR 0002, 2026-08-11 addendum), and an
+  overlay would blend two. Freshness comes from cadence, so every consumer —
+  API, dashboard, a partner's own cache — sees the same numbers.
+- **Ground does not implement it** on purpose: its rates arrive on the same
+  paged yield-sources endpoint the catalogue uses, so a five-minute pass would
+  re-pay the entire catalogue cost for the rate alone. Opting in is a promise
+  about cost as much as capability.
+
+### The sync cron — the admitting path
 
 `apps/sdp-api/src/cron/earn-catalogue-sync.ts`
 
@@ -348,71 +414,9 @@ Two things write `earn_strategies`, and only one of them is a production path.
   `paused`/`deprecated` status, so an emergency pause holds until someone writes
   the status back to `active` — a sync pass can no longer resurrect it. Metadata
   and rates keep converging while the row is closed.
-- **Known limitation:** rows a provider *delists* keep their last status (there
-  is no deactivation-of-missing-rows pass yet), so a vault that silently
-  disappears from a provider's catalogue stays `active` until someone acts.
-
-### The dev seed — local development only
-
-`apps/sdp-api/scripts/seed-earn-demo.ts` (`pnpm -C apps/sdp-api db:seed:earn`)
-
-- **Local only, enforced.** It refuses any `DATABASE_URL` whose host is not
-  `localhost` / `127.0.0.1` / `::1`, and it only ever writes `sandbox` fixtures
-  (the old `--environment production` flag is gone and now exits with an error).
-  It is never run by CI or any deploy.
-- **Why it exists:** browse a populated catalogue without a Ground API key and
-  without waiting for the cron; deterministic data for demos and UI work.
-- **What it seeds:** Ground's five Solana-hosted sandbox sources, ids/names/APYs/
-  liquidity/curators mirroring the committed inventory snapshot (so local dev
-  looks like production), plus exactly one **paused** row
-  (`seed-demo-kamino-superstate-usdc`) that exercises the operator-pause
-  invariants — hidden from the default catalogue, unselectable as an allocation
-  target, and sticky against the sync re-asserting `active`.
-  Solana-hosted only, matching the `not_solana_hosted` catalogue gate. That costs
-  local dev its delayed-liquidity, `rwa` and high-APY-outlier fixtures, because
-  Ground's Solana shelf has none — cover those in unit tests, not fixtures.
-- **It prunes its own stale rows.** Every run deletes prefixed rows the current
-  fixture set no longer defines, so a re-run after the set changes cannot leave
-  the old ones behind (an upsert-only seed would).
-- **Fixtures are labelled, never confused with real data:** every seeded row
-  carries the `seed-demo-` `provider_reference` prefix and
-  `riskMetadata.seedFixture`. `--clean` deletes **only** prefixed rows, so it can
-  never remove a row the live cron synced.
-- **It also links one program, and that part is NOT a fixture.** The seed points
-  your primary local org at one of the team's real Ground *sandbox* portfolio
-  wallets, so the dashboard opens onto live provider state (real allocation, real
-  forward APY, a real Solana deposit address) rather than an empty onboarding
-  screen. It links exactly ONE program — a seed choice, not a cap (the API takes
-  N per org since PRO-1670): the wallet it points at can be claimed by only one
-  link row platform-wide, so other local orgs stay unlinked rather than being
-  handed a sibling wallet that stands in for another org. If a developer has
-  already attached that wallet by hand, the seed says so and stops instead of
-  colliding on the global unique. The wallet is shared with teammates: funding
-  it, changing its strategy through the wizard, or withdrawing from it changes
-  what they see. Re-run the
-  seed after your first Clerk sign-in and it moves its own link onto your real
-  org; a program you created through the wizard is never moved. `--clean` removes
-  the link, never the Ground wallet.
-  The seeded program is an all-Solana/USDC wallet, funded via its devnet deposit
-  address (Circle's faucet, above) — shared with teammates, so its balance moves
-  and no particular figure is the baseline. Pointing the seed at one of the other
-  funded sandbox wallets instead would surface a withdrawable balance SDP cannot
-  withdraw, because those balances sit off the Solana rail while
-  `balance.withdrawableUsd` reports a wallet-level total.
-  Full local-dev detail: `CLAUDE.md` → "Get a program — the seed links one, the
-  API allows many".
-- **Commands**
-
-  ```bash
-  DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm -C apps/sdp-api db:seed:earn
-  DATABASE_URL=... pnpm -C apps/sdp-api db:seed:earn -- --clean     # remove the fixtures
-  ```
-
-  Idempotent: re-running upserts in place (ids stay stable, no duplicates).
-- **When *not* to use it:** never against a shared or deployed database. If you
-  have a Ground sandbox key, prefer the real cron path — and note that running
-  both leaves near-twin rows in your local DB (same names, different reference
-  prefix); `--clean` removes the fixtures and leaves the synced rows.
+- **Delist convergence:** after a successful non-empty provider response, active
+  rows absent from that provider's live catalogue are deleted. Operator-paused
+  or deprecated rows remain so a later sync cannot silently reactivate them.
 
 ## Invariants (do not break)
 
@@ -430,10 +434,10 @@ Two things write `earn_strategies`, and only one of them is a production path.
 4. **Declared support bounds the catalogue.** A synced strategy outside the
    provider's declared token/source envelope is rejected and logged, not
    persisted.
-5. **Solana-only surface.** No other chain's addresses or rails may leak into
-   wire types or UI — and since the `not_solana_hosted` gate, no other chain's
-   VAULTS either: the catalogue lists and stores Solana-hosted sources only,
-   and the sync deletes rows that stop qualifying.
+5. **Solana-only customer rails.** No other chain's addresses or transaction
+   identifiers may leak into wire types or UI. Yield-source host chain remains
+   provider metadata, and the API owns product visibility independently from
+   the sync's complete persisted inventory.
 
 ## Adding a provider (the 30-second version)
 

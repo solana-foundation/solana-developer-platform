@@ -26,19 +26,18 @@ describe("dashboard workspace tab URL state", () => {
     ).toBe(false);
   });
 
-  it.each([
-    "/dashboard/payments/transactions",
-    "/dashboard/payments/pay",
-    "/dashboard/settings",
-  ])("clears a leaked playground tab on %s", (pathname) => {
-    expect(
-      shouldClearDashboardTabAfterPathnameChange({
-        previousPathname: "/dashboard/payments",
-        pathname,
-        tab: "playground",
-      })
-    ).toBe(true);
-  });
+  it.each(["/dashboard/payments/transactions", "/dashboard/payments/pay", "/dashboard/settings"])(
+    "clears a leaked playground tab on %s",
+    (pathname) => {
+      expect(
+        shouldClearDashboardTabAfterPathnameChange({
+          previousPathname: "/dashboard/payments",
+          pathname,
+          tab: "playground",
+        })
+      ).toBe(true);
+    }
+  );
 
   it("retains the existing same-path behavior and clears unsupported tab values elsewhere", () => {
     expect(
@@ -55,5 +54,24 @@ describe("dashboard workspace tab URL state", () => {
         tab: "overview",
       })
     ).toBe(true);
+  });
+
+  it("keeps the playground tab when landing on the private channels overview", () => {
+    // A cross-route jump from a sibling sub-page, and the legacy
+    // /api-playground redirect, both arrive here carrying tab=playground.
+    expect(
+      shouldClearDashboardTabAfterPathnameChange({
+        previousPathname: "/dashboard/payments/private-channels/members",
+        pathname: "/dashboard/payments/private-channels/overview",
+        tab: "playground",
+      })
+    ).toBe(false);
+    expect(
+      shouldClearDashboardTabAfterPathnameChange({
+        previousPathname: "/dashboard/payments/private-channels/api-playground",
+        pathname: "/dashboard/payments/private-channels/overview",
+        tab: "playground",
+      })
+    ).toBe(false);
   });
 });
