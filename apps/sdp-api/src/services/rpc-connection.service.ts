@@ -429,6 +429,7 @@ async function destroyConnectionSecretBestEffort(
   }
 
   try {
+    // SAFETY: the guard above narrows storage_backend to "gcp_secret_manager".
     const store = createCredentialSecretStore(
       c.env,
       credential.storage_backend as CredentialSecretStorageBackend
