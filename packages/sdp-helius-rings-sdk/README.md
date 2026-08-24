@@ -28,10 +28,23 @@ An identity's Solana owner and its shielded keys come from different places, and
 reason this package looks the way it does.
 
 The owner is an SDP custody wallet. Its Ed25519 secret stays in custody, signs the outer Solana
-transaction, and is never readable here. The viewing and nullifier keys are derived in-process from a
-master seed with HKDF (`identity.ts`), so nothing shielded is stored at rest — an identity is recomputed
-from `(seed, scope, owner)` on every use, and a seed or scope change fails closed instead of silently
-addressing a different identity.
+transaction, and is never readable here. The shielded keys come from a `ShieldedMaterialSource`
+(`material.ts`), which hands material to a callback and destroys it when the callback ends, so no
+implementation can leave live secrets behind. Whatever the source, `assertShieldedIdentity` re-derives the
+persisted identity on every use and fails closed rather than silently addressing a different one.
+
+**The source is meant to be replaced, so it is quarantined.** The only one that exists today is
+`deterministic-ka`, which recomputes material from one master seed with HKDF and stores nothing at rest.
+What makes it interim is that the platform holds that seed and can therefore derive every tenant's viewing
+and nullifier keys — not that the derivation is deterministic. It lives behind its own entry point,
+`@sdp/helius-rings-sdk/deterministic-ka`, and the main barrel never re-exports it, so replacing it means
+adding another `ShieldedMaterialSource` and deleting one directory. Nothing downstream of the interface
+moves.
+
+A real key authority still has to put both secrets in this process, which is a constraint of the SDK
+rather than a shortcut: `WalletAuthority` returns concrete `ViewingKey` and `NullifierKey` instances, and
+`ViewingKeyLike` states that a backend answering viewing-key operations over a wire is unsupported. So the
+seam is where material comes from, not who holds it.
 
 **This is why the SDK's own types could not be reused.** Every `ShieldedKeypair` constructor —
 `generate`, `fromKeypair`, `withViewingKey` — expands the nullifier key from a signing secret, and

@@ -10,7 +10,7 @@ import type {
   WalletSyncMaterial,
 } from "@heliuslabs/zolana/wallet";
 import { address } from "@solana/kit";
-import type { ShieldedMaterial } from "./identity.js";
+import type { ShieldedMaterial } from "./material.js";
 
 /**
  * A flow this integration deliberately does not support. Thrown rather than
@@ -46,6 +46,14 @@ export interface OperationAuthorization {
   readonly owner: string;
   /** Correlates an approval callback with an SDP operation row. */
   readonly operationId: string;
+  /**
+   * The approved operation's `intent_key`. Required so an authority cannot be
+   * constructed without naming the approval it stands for. It is not checked
+   * inside `requestUserApproval`, because the SDK's `ApprovalRequest` carries
+   * only an owner and a summary; the caller compares it against the persisted
+   * operation, and the built transaction is validated structurally.
+   */
+  readonly intentKey: string;
 }
 
 export interface CustodyWalletAuthorityInput {
@@ -56,7 +64,8 @@ export interface CustodyWalletAuthorityInput {
 /**
  * A `WalletAuthority` whose Solana owner and shielded keys come from different
  * places: the owner's Ed25519 secret stays in SDP custody and signs the outer
- * transaction, while the viewing and nullifier keys are derived here.
+ * transaction, while the viewing and nullifier keys arrive as material from a
+ * `ShieldedMaterialSource`.
  *
  * The SDK's `LocalWalletAuthority` cannot express that split because every
  * `ShieldedKeypair` constructor expands both role keys from a signing secret.
@@ -71,6 +80,13 @@ export class CustodyWalletAuthority implements WalletAuthority {
   readonly #approvals: string[] = [];
 
   constructor(input: CustodyWalletAuthorityInput) {
+    if (input.authorization.operationId.length === 0) {
+      throw new Error("A Rings authority needs the operation it was authorized for.");
+    }
+    if (input.authorization.intentKey.length === 0) {
+      throw new Error("A Rings authority needs the approved intent key.");
+    }
+
     this.#material = input.material;
     this.#authorization = input.authorization;
     this.#owner = address(input.authorization.owner);
@@ -84,6 +100,11 @@ export class CustodyWalletAuthority implements WalletAuthority {
   /** The SDP operation this authority was authorized for. */
   operationId(): string {
     return this.#authorization.operationId;
+  }
+
+  /** The approved intent this authority stands for. */
+  intentKey(): string {
+    return this.#authorization.intentKey;
   }
 
   solanaPublicKey(): Address {

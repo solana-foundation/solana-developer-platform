@@ -15,8 +15,8 @@ import { address } from "@solana/kit";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CustodyWalletAuthority } from "../authority.js";
 import { createRingsClient } from "../client.js";
-import type { ShieldedMaterial } from "../identity.js";
-import { canonicalShieldedIdentity, deriveShieldedMaterial } from "../identity.js";
+import { deriveMaterial } from "../deterministic-ka/index.js";
+import { canonicalShieldedIdentity, type ShieldedMaterial } from "../material.js";
 import {
   assertDevnet,
   assertFunded,
@@ -75,7 +75,11 @@ const log = new FlowLog();
 function authorityFor(identity: Identity, operationId: string): CustodyWalletAuthority {
   return new CustodyWalletAuthority({
     material: identity.material,
-    authorization: { owner: identity.owner.address, operationId },
+    authorization: {
+      owner: identity.owner.address,
+      operationId,
+      intentKey: `devnet-e2e:${identity.owner.index}:${operationId}`,
+    },
   });
 }
 
@@ -108,9 +112,10 @@ function unspentSolNotes(identity: Identity): number {
 async function buildIdentity(index: number): Promise<Identity> {
   const { seed } = requireConfig();
   const owner = await deriveDevnetOwner(seed, index);
-  const material = await deriveShieldedMaterial({
-    seed,
-    scope: `devnet-e2e/${index}`,
+  const material = await deriveMaterial(seed, {
+    organizationId: "devnet-e2e",
+    projectId: "default-flows",
+    walletId: `owner-${index}`,
     owner: owner.address,
   });
 
