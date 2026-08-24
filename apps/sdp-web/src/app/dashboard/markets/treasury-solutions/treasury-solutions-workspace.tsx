@@ -78,10 +78,10 @@ import {
 } from "../earn/earn-vault-withdraw-modal";
 import { EarnWithdrawalOutcomeTracker, EarnWithdrawModal } from "../earn/earn-withdraw-modal";
 import {
-  deployedVaultValue,
   formatAllocationShare,
   isOpenVaultPosition,
   summarizeTreasuryAllocation,
+  walletDeployment,
 } from "./treasury-allocation";
 
 function AllocationFigure({
@@ -109,10 +109,12 @@ function AllocationFigure({
 function TreasuryAllocationCard({
   isLoading,
   positions,
+  vaultShareMints,
   wallets,
 }: {
   isLoading: boolean;
   positions: readonly EarnVaultPosition[] | undefined;
+  vaultShareMints: ReadonlySet<string>;
   wallets: readonly EarnFundingWallet[] | undefined;
 }) {
   const t = useTranslations();
@@ -130,7 +132,7 @@ function TreasuryAllocationCard({
     );
   }
 
-  const summary = summarizeTreasuryAllocation({ positions, wallets });
+  const summary = summarizeTreasuryAllocation({ positions, vaultShareMints, wallets });
   // Real zeros on both sides: shares are undefined because 0/0 is not a
   // share, not because a read failed.
   const emptyFloat = summary.availableCash === "0" && summary.deployedValue === "0";
@@ -280,17 +282,14 @@ function TreasuryWalletsCard({
               const walletPositions = positions?.filter(
                 (position) => position.custodyWalletId === wallet.id
               );
-              const openPositionCount = (walletPositions ?? []).filter(isOpenVaultPosition).length;
-              const walletDeployed = deployedVaultValue(walletPositions);
-              // An unavailable positions read must not present a deployed
-              // wallet as idle: its receipt-token balances still prove vault
-              // ownership, so the deployed line renders with the unavailable
-              // label instead of disappearing.
-              const holdsShareTokens = (wallet.balances ?? []).some((balance) =>
-                vaultShareMints.has(balance.mint)
-              );
-              const showDeployedRow =
-                positions === undefined ? holdsShareTokens : openPositionCount > 0;
+              // Receipt-token balances are independent evidence of vault
+              // ownership, so a holding SDP cannot value (failed read, or a
+              // position opened outside SDP) reads unavailable rather than
+              // vanishing from the card.
+              const heldShareMints = (wallet.balances ?? [])
+                .map((balance) => balance.mint)
+                .filter((mint) => vaultShareMints.has(mint));
+              const deployment = walletDeployment({ heldShareMints, positions: walletPositions });
               return (
                 <section
                   className="rounded-xl border border-border-default px-4 py-4"
@@ -310,14 +309,14 @@ function TreasuryWalletsCard({
                     </Badge>
                   </div>
                   <WalletBalanceList vaultShareMints={vaultShareMints} wallet={wallet} />
-                  {showDeployedRow ? (
+                  {deployment.kind !== "none" ? (
                     <div className="mt-3 flex items-center justify-between gap-4 border-t border-border-subtle pt-3">
                       <span className="text-xs text-tertiary">
                         {t("DashboardMarkets.treasury.walletDeployed")}
                       </span>
                       <span className="text-sm font-medium text-primary tabular-nums">
-                        {walletDeployed !== undefined
-                          ? formatUsd(walletDeployed, locale)
+                        {deployment.kind === "value"
+                          ? formatUsd(deployment.value, locale)
                           : t("DashboardMarkets.treasury.positionValueUnavailable")}
                       </span>
                     </div>
@@ -964,6 +963,7 @@ export function TreasurySolutionsWorkspace({
         <TreasuryAllocationCard
           isLoading={walletsLoading || positionsLoading}
           positions={positionsError ? undefined : positions}
+          vaultShareMints={vaultShareMints}
           wallets={walletsError ? undefined : wallets}
         />
 

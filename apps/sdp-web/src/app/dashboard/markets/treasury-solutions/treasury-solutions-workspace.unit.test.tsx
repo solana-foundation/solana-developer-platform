@@ -275,11 +275,10 @@ beforeEach(() => {
   mocks.vaultWithdrawals = [];
   mocks.walletBalances = [
     { token: "USDC", mint: USDC_MINT, amount: "2500000000", uiAmount: "2500", decimals: 6 },
-    // Vault receipt tokens the custody wallet actually holds on chain. They
-    // must render as vault ownership, never as token tiles — including one
-    // whose mint is known only through the strategy catalogue.
+    // The vault receipt token the custody wallet actually holds on chain, for
+    // a position that IS recorded. It must render as vault ownership, never as
+    // a token tile.
     { token: "kUSDC", mint: SHARE_MINT, amount: "119500000", uiAmount: "119.5", decimals: 6 },
-    { token: "kPYUSD", mint: CATALOGUE_SHARE_MINT, amount: "7000000", uiAmount: "7", decimals: 6 },
   ];
   mocks.livePositionTokenValue = "125.25";
   mocks.positionsError = false;
@@ -315,10 +314,8 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(screen.getByText("$130.50 in open vault positions")).toBeTruthy();
 
     // Vault ownership renders as the wallet's deployed line, never as a
-    // receipt-token tile or a raw share count — whether the mint is known
-    // from a position or only from the strategy catalogue.
+    // receipt-token tile or a raw share count.
     expect(screen.queryByText("kUSDC")).toBeNull();
-    expect(screen.queryByText("kPYUSD")).toBeNull();
     expect(screen.queryByText("119.5")).toBeNull();
     expect(screen.getByText("Deployed in vaults")).toBeTruthy();
     expect(screen.getByText("$130.50")).toBeTruthy();
@@ -366,6 +363,35 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(screen.getAllByText("Live value unavailable").length).toBeGreaterThan(0);
     expect(screen.queryByText("$130.50")).toBeNull();
     expect(screen.queryByText("0.0%")).toBeNull();
+  });
+
+  it("never erases a receipt-token holding that no recorded position accounts for", () => {
+    // kPYUSD's mint is known only from the strategy catalogue and has no
+    // position row (deposited outside SDP), so its tile is hidden. The
+    // deployment must then read unavailable rather than the recorded-only
+    // total, and the summary must not claim a share of a float it cannot see
+    // in full. Also pins the catalogue half of the share-mint union: drop it
+    // and the tile reappears here.
+    mocks.walletBalances = [
+      { token: "USDC", mint: USDC_MINT, amount: "2500000000", uiAmount: "2500", decimals: 6 },
+      { token: "kUSDC", mint: SHARE_MINT, amount: "119500000", uiAmount: "119.5", decimals: 6 },
+      {
+        token: "kPYUSD",
+        mint: CATALOGUE_SHARE_MINT,
+        amount: "7000000",
+        uiAmount: "7",
+        decimals: 6,
+      },
+    ];
+    renderWorkspace();
+
+    expect(screen.queryByText("kPYUSD")).toBeNull();
+    expect(screen.getByText("Deployed in vaults")).toBeTruthy();
+    expect(screen.getAllByText("Live value unavailable").length).toBeGreaterThan(0);
+    expect(screen.getByText("A position value could not be read")).toBeTruthy();
+    expect(screen.queryByText("$0.00")).toBeNull();
+    expect(screen.queryByText("0.0%")).toBeNull();
+    expect(screen.queryByText("100.0%")).toBeNull();
   });
 
   it("renders the empty-float caption for a readable empty treasury", () => {

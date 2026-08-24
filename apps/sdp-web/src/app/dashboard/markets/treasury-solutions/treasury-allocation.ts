@@ -35,6 +35,7 @@ export interface TreasuryAllocationWallet {
 export interface TreasuryAllocationPosition {
   closedAt: string | null;
   custodyWalletId: string;
+  shareMint: string;
   shares?: string;
   tokenMint: string;
   tokenValue?: string;
@@ -102,6 +103,68 @@ export function deployedVaultValue(
   return amounts.length === 0 ? "0" : sumDecimalStrings(amounts);
 }
 
+/**
+ * Does every vault share token any wallet holds have an open position behind
+ * it? A wallet balance is the independent witness here: a position opened
+ * outside SDP leaves shares in the wallet with no recorded row.
+ */
+function heldShareMintsRecorded({
+  positions,
+  vaultShareMints,
+  wallets,
+}: {
+  positions: readonly TreasuryAllocationPosition[];
+  vaultShareMints: ReadonlySet<string>;
+  wallets: readonly TreasuryAllocationWallet[] | undefined;
+}): boolean {
+  const recorded = new Set(
+    positions.filter(isOpenVaultPosition).map((position) => position.shareMint)
+  );
+  return (wallets ?? []).every((wallet) =>
+    (wallet.balances ?? []).every(
+      (balance) => !vaultShareMints.has(balance.mint) || recorded.has(balance.mint)
+    )
+  );
+}
+
+/**
+ * What one wallet's "deployed in vaults" line may claim.
+ *
+ * `unavailable` exists because a receipt-token balance is independent evidence
+ * of vault ownership: the wallet demonstrably holds shares SDP cannot value
+ * (the positions read failed, or the position was opened outside SDP and has no
+ * recorded row). Rendering nothing there would present a deployed wallet as
+ * idle, which is the same lie as rendering `0`.
+ */
+export type WalletDeploymentDisplay =
+  | { kind: "none" }
+  | { kind: "unavailable" }
+  | { kind: "value"; value: string };
+
+export function walletDeployment({
+  heldShareMints,
+  positions,
+}: {
+  /** Share mints this wallet's balances actually hold. */
+  heldShareMints: readonly string[];
+  /** This wallet's positions, or undefined when the read is unavailable. */
+  positions: readonly TreasuryAllocationPosition[] | undefined;
+}): WalletDeploymentDisplay {
+  if (positions === undefined) {
+    return heldShareMints.length > 0 ? { kind: "unavailable" } : { kind: "none" };
+  }
+
+  const open = positions.filter(isOpenVaultPosition);
+  const covered = new Set(open.map((position) => position.shareMint));
+  // A held share mint no open position accounts for means the recorded total
+  // is incomplete, so it must not be presented as this wallet's deployment.
+  if (heldShareMints.some((mint) => !covered.has(mint))) return { kind: "unavailable" };
+  if (open.length === 0) return { kind: "none" };
+
+  const value = deployedVaultValue(open);
+  return value === undefined ? { kind: "unavailable" } : { kind: "value", value };
+}
+
 function allocationShares(
   cash: string | undefined,
   deployed: string | undefined
@@ -124,13 +187,23 @@ function allocationShares(
 
 export function summarizeTreasuryAllocation({
   positions,
+  vaultShareMints,
   wallets,
 }: {
   positions: readonly TreasuryAllocationPosition[] | undefined;
+  /** Known vault share mints, so held-but-unrecorded shares can be detected. */
+  vaultShareMints?: ReadonlySet<string>;
   wallets: readonly TreasuryAllocationWallet[] | undefined;
 }): TreasuryAllocationSummary {
   const availableCash = availableStableCash(wallets);
-  const deployedValue = deployedVaultValue(positions);
+  // A wallet holding shares that no recorded position accounts for makes the
+  // deployed TOTAL incomplete. Reporting the recorded sum as the total would
+  // understate deployed money and overstate the idle share.
+  const everyHeldShareRecorded =
+    positions === undefined ||
+    vaultShareMints === undefined ||
+    heldShareMintsRecorded({ positions, vaultShareMints, wallets });
+  const deployedValue = everyHeldShareRecorded ? deployedVaultValue(positions) : undefined;
   // Shares additionally require the float to be fully OBSERVED. The wallet
   // read serves active wallets only, so an open position custodied by a wallet
   // absent from it (deactivated, say) means idle cash this read cannot see.
