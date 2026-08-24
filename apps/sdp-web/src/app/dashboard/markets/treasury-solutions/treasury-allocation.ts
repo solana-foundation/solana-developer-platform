@@ -301,6 +301,64 @@ function walletDeploymentLine({
   return value === undefined ? { kind: "unavailable" } : { kind: "value", value };
 }
 
+interface WalletCoverage {
+  deploymentByWalletId: Map<string, WalletDeploymentDisplay>;
+  /** Undefined when the witness could not be built at all. */
+  unrecordedShareMints: Set<string> | undefined;
+  someWalletUnreadable: boolean;
+}
+
+/**
+ * Walk the wallets once, resolving each one's line and the portfolio-wide set
+ * of holdings no position records. Both answers come from the same pass on
+ * purpose: they are the same question asked at two scopes.
+ */
+function resolveWalletCoverage({
+  positions,
+  shareMints,
+  wallets,
+}: {
+  positions: readonly TreasuryAllocationPosition[] | undefined;
+  shareMints: VaultShareMintVocabulary;
+  wallets: readonly TreasuryAllocationWallet[] | undefined;
+}): WalletCoverage {
+  const deploymentByWalletId = new Map<string, WalletDeploymentDisplay>();
+  // No wallet inventory is the same failure as one unreadable wallet, a level
+  // up: with no witness nothing can be certified. `[].every` would have
+  // answered TRUE here, which is how a total once got certified with no
+  // witness at all.
+  if (wallets === undefined) {
+    return { deploymentByWalletId, unrecordedShareMints: undefined, someWalletUnreadable: false };
+  }
+
+  const openByPublicKey =
+    positions === undefined ? undefined : openPositionsByPublicKey(wallets, positions);
+  let unrecordedShareMints: Set<string> | undefined =
+    positions === undefined || !shareMints.complete ? undefined : new Set<string>();
+  let someWalletUnreadable = false;
+
+  for (const wallet of wallets) {
+    const held = heldVaultShareMints(wallet, shareMints.known);
+    const open = openByPublicKey?.get(wallet.publicKey) ?? (openByPublicKey && []);
+    const recorded = new Set((open ?? []).map((position) => position.shareMint));
+    const uncovered = held?.filter((mint) => !recorded.has(mint)) ?? [];
+
+    for (const mint of uncovered) unrecordedShareMints?.add(mint);
+    // A wallet we could not read leaves the whole set indeterminate.
+    if (held === undefined) {
+      unrecordedShareMints = undefined;
+      someWalletUnreadable = true;
+    }
+
+    deploymentByWalletId.set(
+      wallet.id,
+      walletDeploymentLine({ complete: shareMints.complete, held, open, uncovered })
+    );
+  }
+
+  return { deploymentByWalletId, unrecordedShareMints, someWalletUnreadable };
+}
+
 export function summarizeTreasuryAllocation({
   positions,
   shareMints,
@@ -311,41 +369,8 @@ export function summarizeTreasuryAllocation({
   wallets: readonly TreasuryAllocationWallet[] | undefined;
 }): TreasuryAllocation {
   const availableCash = availableStableCash(wallets);
-  const deploymentByWalletId = new Map<string, WalletDeploymentDisplay>();
-
-  // No wallet inventory is the same failure as one unreadable wallet, a level
-  // up: with no witness nothing can be certified. `[].every` would have
-  // answered TRUE here, which is how a total once got certified with no
-  // witness at all.
-  let unrecordedShareMints: Set<string> | undefined =
-    wallets === undefined || positions === undefined || !shareMints.complete
-      ? undefined
-      : new Set<string>();
-
-  let someWalletUnreadable = false;
-  if (wallets !== undefined) {
-    const openByPublicKey =
-      positions === undefined ? undefined : openPositionsByPublicKey(wallets, positions);
-
-    for (const wallet of wallets) {
-      const held = heldVaultShareMints(wallet, shareMints.known);
-      const open = openByPublicKey?.get(wallet.publicKey) ?? (openByPublicKey && []);
-      const recorded = new Set((open ?? []).map((position) => position.shareMint));
-      const uncovered = held?.filter((mint) => !recorded.has(mint)) ?? [];
-
-      for (const mint of uncovered) unrecordedShareMints?.add(mint);
-      // A wallet we could not read leaves the whole set indeterminate.
-      if (held === undefined) {
-        unrecordedShareMints = undefined;
-        someWalletUnreadable = true;
-      }
-
-      deploymentByWalletId.set(
-        wallet.id,
-        walletDeploymentLine({ complete: shareMints.complete, held, open, uncovered })
-      );
-    }
-  }
+  const { deploymentByWalletId, someWalletUnreadable, unrecordedShareMints } =
+    resolveWalletCoverage({ positions, shareMints, wallets });
 
   // A holding no position records makes the recorded sum a floor, not a total.
   const certified = unrecordedShareMints !== undefined && unrecordedShareMints.size === 0;
