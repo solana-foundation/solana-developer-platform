@@ -503,10 +503,10 @@ jobs:
             test_files: src/tests/payments-wallet-scope.test.ts src/tests/api-keys-flow.test.ts src/tests/api-keys-rotation.test.ts src/tests/custody-local.test.ts
             rpc_provider: alchemy
             custody_provider: local
-          - name: Surfpool / Token Flows (Kora)
+          - name: Surfpool / Token and Payment Flows (Kora)
             provider: surfpool
             kora_mode: docker
-            test_files: src/tests/deploy.test.ts src/tests/mint.test.ts src/tests/burn.test.ts src/tests/freeze.test.ts
+            test_files: src/tests/deploy.test.ts src/tests/mint.test.ts src/tests/burn.test.ts src/tests/freeze.test.ts src/tests/transfer-batches.test.ts
             rpc_provider: alchemy
             custody_provider: local
     env:
@@ -599,6 +599,8 @@ jobs:
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
+          DOPPLER_PRESERVE_ENV: TEST_DATABASE_URL,REDIS_URL,SOLANA_NETWORK,KORA_SURFPOOL_MODE,COUNTERPARTY_PII_ENCRYPTION_KEY
+          COUNTERPARTY_PII_ENCRYPTION_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=
           SDP_INTEGRATION_CUSTODY_PROVIDER: ${{ matrix.custody_provider }}
         run: |
           read -r -a test_files <<< "${INTEGRATION_TEST_FILES}"

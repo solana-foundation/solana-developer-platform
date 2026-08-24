@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import type { Env } from "@/types/env";
 import { createEncryptionService } from "../encryption.service";
-import { CustodyCipherRouter } from "./cipher-router";
+import { assertCustodyEncryptionScheme, CustodyCipherRouter } from "./cipher-router";
 import { KmsEnvelopeCipher } from "./envelope-cipher";
 
 const LEGACY_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
@@ -47,5 +48,49 @@ describe("CustodyCipherRouter", () => {
     const ct = await router.encrypt("org1", "secret");
     expect(ct.startsWith("v2.")).toBe(false);
     expect(await router.decrypt("org1", ct)).toBe("secret");
+  });
+
+  describe("assertCustodyEncryptionScheme", () => {
+    it("accepts a managed deployment that configures a KMS key", () => {
+      expect(() =>
+        assertCustodyEncryptionScheme({
+          SDP_DEPLOYMENT_MODE: "managed",
+          CUSTODY_KMS_KEY_NAME: "projects/p/locations/l/keyRings/r/cryptoKeys/k",
+        } as Env)
+      ).not.toThrow();
+    });
+
+    it("rejects a managed deployment with no KMS key", () => {
+      expect(() =>
+        assertCustodyEncryptionScheme({
+          SDP_DEPLOYMENT_MODE: "managed",
+          CUSTODY_ENCRYPTION_KEY: LEGACY_KEY,
+        } as Env)
+      ).toThrow(/CUSTODY_KMS_KEY_NAME is required/);
+    });
+
+    it("rejects an unset deployment mode with no KMS key", () => {
+      expect(() =>
+        assertCustodyEncryptionScheme({ CUSTODY_ENCRYPTION_KEY: LEGACY_KEY } as Env)
+      ).toThrow(/CUSTODY_KMS_KEY_NAME is required/);
+    });
+
+    it("allows a self-hosted deployment to keep the legacy key", () => {
+      expect(() =>
+        assertCustodyEncryptionScheme({
+          SDP_DEPLOYMENT_MODE: "self_hosted",
+          CUSTODY_ENCRYPTION_KEY: LEGACY_KEY,
+        } as Env)
+      ).not.toThrow();
+    });
+
+    it("treats a blank KMS key name as absent", () => {
+      expect(() =>
+        assertCustodyEncryptionScheme({
+          SDP_DEPLOYMENT_MODE: "managed",
+          CUSTODY_KMS_KEY_NAME: "   ",
+        } as Env)
+      ).toThrow(/CUSTODY_KMS_KEY_NAME is required/);
+    });
   });
 });

@@ -148,6 +148,7 @@ function makeEnv(overrides: Partial<Record<keyof Env, string>> = {}): Env {
     DATABASE_URL: "postgres://unit",
     REDIS_URL: "redis://unit",
     SIGNING_PROVIDER: "coinbase_cdp",
+    CUSTODY_KMS_KEY_NAME: "projects/p/locations/l/keyRings/r/cryptoKeys/k",
     ...overrides,
   } as Env;
 }
@@ -186,13 +187,32 @@ describe("runCronJob", () => {
     vi.mocked(Sentry.close).mockClear();
   });
 
+  it("refuses to run when a managed deployment has no custody KMS key", async () => {
+    vi.mocked(getProcessEnv).mockReturnValue({
+      DATABASE_URL: "postgres://unit",
+      REDIS_URL: "redis://unit",
+      SIGNING_PROVIDER: "coinbase_cdp",
+    } as Env);
+    await expect(runCronJob()).rejects.toThrow(/CUSTODY_KMS_KEY_NAME is required/);
+  });
+
   it("refuses to run when a managed deployment would sign with a platform-held key", async () => {
     vi.mocked(getProcessEnv).mockReturnValue({
       DATABASE_URL: "postgres://unit",
       REDIS_URL: "redis://unit",
+      CUSTODY_KMS_KEY_NAME: "projects/p/locations/l/keyRings/r/cryptoKeys/k",
       SIGNING_PROVIDER: "local",
     } as Env);
     await expect(runCronJob()).rejects.toThrow(/Local signing/);
+  });
+
+  it("runs a self-hosted deployment without a custody KMS key", async () => {
+    vi.mocked(getProcessEnv).mockReturnValue({
+      DATABASE_URL: "postgres://unit",
+      REDIS_URL: "redis://unit",
+      SDP_DEPLOYMENT_MODE: "self_hosted",
+    } as Env);
+    await expect(runCronJob()).resolves.toBeUndefined();
   });
 
   it("fails fast when DATABASE_URL or REDIS_URL is missing", async () => {
