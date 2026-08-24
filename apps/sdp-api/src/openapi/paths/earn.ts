@@ -49,7 +49,7 @@ export function registerEarnPaths(registry: OpenAPIRegistry) {
         description: "Earn button configuration",
         content: jsonContent(earnButtonConfigurationResponse),
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
 

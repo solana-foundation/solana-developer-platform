@@ -54,6 +54,7 @@ describe("OpenAPI spec", () => {
 
     const current = internal.paths?.["/v1/earn/button-configurations/current"];
     expect(current?.get?.operationId).toBe("getEarnButtonConfiguration");
+    expect(current?.get?.responses?.["400"]).toBeDefined();
     expect(current?.put?.operationId).toBe("upsertEarnButtonConfiguration");
     expect(current?.put?.requestBody).toBeDefined();
 
