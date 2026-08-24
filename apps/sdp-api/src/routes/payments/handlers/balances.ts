@@ -10,6 +10,7 @@ import type {
 } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { type DatabaseExecutor, getDb } from "@/db";
+import { asPostgresJsonArray } from "@/db/postgres-utils";
 import type {
   ActiveWalletControlProfileResult,
   WalletPolicyEvaluationAuditRow,
@@ -18,7 +19,7 @@ import {
   generateWalletControlProfileId,
   generateWalletControlProfileRevisionId,
 } from "@/db/repositories/policy.repository";
-import { AppError } from "@/lib/errors";
+import { AppError, conflict, walletNotFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
@@ -98,8 +99,94 @@ async function getWalletPolicyAudit(
   };
 }
 
+/**
+ * Locks the wallet's active profile and returns its active revision id. Taken
+ * before the merge base is read so a concurrent update cannot interleave.
+ */
+async function lockActiveWalletControlProfile(
+  db: DatabaseExecutor,
+  custodyWalletId: string
+): Promise<{ profile_id: string; revision_id: string | null } | null> {
+  return await db
+    .prepare(
+      `SELECT p.id AS profile_id, p.active_revision_id AS revision_id
+       FROM wallet_control_profiles p
+       WHERE p.custody_wallet_id = ?
+         AND p.status = 'active'
+       ORDER BY p.activated_at DESC NULLS LAST, p.created_at DESC
+       LIMIT 1
+       FOR UPDATE`
+    )
+    .bind(custodyWalletId)
+    .first<{ profile_id: string; revision_id: string | null }>();
+}
+
+/**
+ * Must run on the update transaction's connection: a post-commit read could
+ * mix a concurrent update's profile into this request's response.
+ */
+async function readWalletControlProfileSummaryInTransaction(
+  db: DatabaseExecutor,
+  custodyWalletId: string
+): Promise<PaymentWalletControlProfileSummary | null> {
+  const row = await db
+    .prepare(
+      `SELECT p.id AS id,
+              p.status AS status,
+              p.active_revision_id AS active_revision_id,
+              p.created_at AS created_at,
+              p.updated_at AS updated_at,
+              p.activated_at AS activated_at,
+              r.id AS revision_id,
+              r.revision_number AS revision_number,
+              r.commit_message AS commit_message,
+              r.rules AS rules,
+              r.default_action AS default_action
+       FROM wallet_control_profiles p
+       LEFT JOIN wallet_control_profile_revisions r ON r.id = p.active_revision_id
+       WHERE p.custody_wallet_id = ?
+         AND p.status = 'active'
+       ORDER BY p.activated_at DESC NULLS LAST, p.created_at DESC
+       LIMIT 1`
+    )
+    .bind(custodyWalletId)
+    .first<{
+      id: string;
+      status: PaymentWalletControlProfileSummary["status"];
+      active_revision_id: string | null;
+      created_at: string;
+      updated_at: string;
+      activated_at: string | null;
+      revision_id: string | null;
+      revision_number: number | null;
+      commit_message: string | null;
+      rules: unknown;
+      default_action: PolicyDefaultAction | null;
+    }>();
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    status: row.status,
+    activeRevisionId: row.active_revision_id,
+    revisionId: row.revision_id,
+    revisionNumber: row.revision_number,
+    commitMessage: row.revision_id === null ? null : row.commit_message,
+    defaultAction: row.default_action ?? "allow",
+    rules: row.revision_id ? (asPostgresJsonArray(row.rules) as unknown as PolicyRule[]) : [],
+    providerMappingStatus: "not_applicable",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    activatedAt: row.activated_at,
+  };
+}
+
 async function activateWalletControlProfileRevisionInTransaction({
   db,
+  existingProfileId,
   organizationId,
   projectId,
   custodyWalletId,
@@ -111,6 +198,7 @@ async function activateWalletControlProfileRevisionInTransaction({
   activatedAt,
 }: {
   db: DatabaseExecutor;
+  existingProfileId: string | null;
   organizationId: string;
   projectId: string | null;
   custodyWalletId: string;
@@ -121,18 +209,7 @@ async function activateWalletControlProfileRevisionInTransaction({
   createdBy: string | null;
   activatedAt: string;
 }): Promise<void> {
-  const existingProfile = await db
-    .prepare(
-      `SELECT id
-       FROM wallet_control_profiles
-       WHERE custody_wallet_id = ?
-         AND status = 'active'
-       ORDER BY activated_at DESC NULLS LAST, created_at DESC
-       LIMIT 1
-       FOR UPDATE`
-    )
-    .bind(custodyWalletId)
-    .first<{ id: string }>();
+  const existingProfile = existingProfileId === null ? null : { id: existingProfileId };
 
   const profileId = existingProfile?.id ?? generateWalletControlProfileId();
 
@@ -326,9 +403,33 @@ export async function updateWalletPolicy(c: ValidatedBodyContext<typeof updateWa
   const body = c.req.valid("json");
 
   const now = new Date().toISOString();
-  await getDb(c.env).transaction(async (tx) => {
+  const controlProfile = await getDb(c.env).transaction(async (tx) => {
+    // Serializes per-wallet updates. Locking the profile alone is not enough:
+    // a wallet without one has no row to lock, so concurrent first writes
+    // would each insert their own profile.
+    const lockedWallet = await tx
+      .prepare(`SELECT id FROM custody_wallets WHERE id = ? FOR UPDATE`)
+      .bind(wallet.id)
+      .first<{ id: string }>();
+
+    if (!lockedWallet) {
+      throw walletNotFound();
+    }
+
+    const activeProfile = await lockActiveWalletControlProfile(tx, wallet.id);
+
+    if (
+      body.expectedRevisionId !== undefined &&
+      body.expectedRevisionId !== (activeProfile?.revision_id ?? null)
+    ) {
+      throw conflict(
+        "Wallet policy was changed by another update; refresh and retry with the current revision"
+      );
+    }
+
     await activateWalletControlProfileRevisionInTransaction({
       db: tx,
+      existingProfileId: activeProfile?.profile_id ?? null,
       organizationId: auth.organizationId,
       projectId: auth.projectId ?? null,
       custodyWalletId: wallet.id,
@@ -339,9 +440,10 @@ export async function updateWalletPolicy(c: ValidatedBodyContext<typeof updateWa
       createdBy: auth.userId ?? auth.apiKeyId ?? null,
       activatedAt: now,
     });
+
+    return await readWalletControlProfileSummaryInTransaction(tx, wallet.id);
   });
 
-  const controlProfile = await getWalletControlProfileSummary(c, wallet.id);
   const audit = await getWalletPolicyAudit(c, {
     organizationId: auth.organizationId,
     projectId: auth.projectId ?? null,

@@ -220,7 +220,9 @@ export function WalletPolicyStartingProfileFlow({
         wallet.walletId,
         buildPolicyPayload(wallet.walletId, state),
         t,
-        commitMessage
+        commitMessage,
+        // Stale base 409s instead of replacing another session's controls.
+        { expectedRevisionId: currentPolicy.controlProfile?.revisionId ?? null }
       );
       const returnedState = createPolicyAuthoringState(updated);
       setCurrentPolicy(updated);
@@ -256,7 +258,9 @@ export function WalletPolicyStartingProfileFlow({
       const updated = await updateWalletPolicy(
         wallet.walletId,
         buildDisabledPolicyPayload(wallet.walletId),
-        t
+        t,
+        undefined,
+        { expectedRevisionId: currentPolicy.controlProfile?.revisionId ?? null }
       );
       const returnedState = createPolicyAuthoringState(updated);
       setCurrentPolicy(updated);
