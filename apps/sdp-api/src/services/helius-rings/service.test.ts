@@ -54,6 +54,18 @@ function operationInput(overrides: Partial<PrivateOperationInput> = {}): Private
 
 const actorContext = { apiKeyId: "key_1", actor: null, custodyWalletId: "cw_1" };
 
+/** Fails an operation that has already signed, leaving its bytes in place. */
+async function failSigned(id: string, state: string): Promise<void> {
+  await createPostgresHeliusRingsOperationRepository(getDb(env)).failOperation({
+    ...tenant,
+    id,
+    expectedState: state as "indexing",
+    code: "indexing_timeout",
+    message: "photon never caught up",
+    retryable: true,
+  });
+}
+
 function service(deps: HeliusRingsServiceDependencies = {}) {
   return createHeliusRingsService(env, tenant, {
     enforcePolicy: policyStub("allow"),
@@ -411,15 +423,8 @@ describe("HeliusRingsService", () => {
       expect(operation.state).toBe("indexing");
 
       // It reached submission, so bytes exist; then it failed the way a slow
-      // Photon makes it fail — retryable, which is what invites another go.
-      await createPostgresHeliusRingsOperationRepository(getDb(env)).failOperation({
-        ...tenant,
-        id: operation.id,
-        expectedState: operation.state as "indexing",
-        code: "indexing_timeout",
-        message: "photon never caught up",
-        retryable: true,
-      });
+      // Photon makes it fail.
+      await failSigned(operation.id, operation.state);
 
       // The retry endpoint refuses, so the obvious next move is to file it
       // again under a new nonce — the door the guard did not cover. That
@@ -437,23 +442,73 @@ describe("HeliusRingsService", () => {
         operationInput({ clientNonce: "nonce-shield-ok-1", opType: "withdraw" }),
         actorContext
       );
-      await createPostgresHeliusRingsOperationRepository(getDb(env)).failOperation({
-        ...tenant,
-        id: operation.id,
-        expectedState: operation.state as "indexing",
-        code: "indexing_timeout",
-        message: "photon never caught up",
-        retryable: true,
-      });
+      await failSigned(operation.id, operation.state);
 
-      // A deposit creates notes rather than consuming them, so it cannot
-      // duplicate the stuck payment and must stay available.
+      // A deposit that lands late only adds notes, so it cannot duplicate the
+      // stuck payment. Blocking it would freeze the wallet further than the
+      // hazard justifies.
       await expect(
         liveishService().prepareOperation(
           operationInput({ clientNonce: "nonce-shield-ok-2", opType: "shield" }),
           actorContext
         )
       ).resolves.toBeDefined();
+    });
+
+    it("refuses a second shield while an earlier signed one is unaccounted for", async () => {
+      const operation = await liveishService().prepareOperation(
+        operationInput({ clientNonce: "nonce-shield-dup-1", opType: "shield" }),
+        actorContext
+      );
+      expect(operation.state).toBe("indexing");
+      await failSigned(operation.id, operation.state);
+
+      // A deposit cannot spend a note twice, which is why this was originally
+      // left open. It can still execute twice: the owner asked to move one
+      // amount and would have moved two out of their public balance.
+      await expect(
+        liveishService().prepareOperation(
+          operationInput({ clientNonce: "nonce-shield-dup-2", opType: "shield" }),
+          actorContext
+        )
+      ).rejects.toMatchObject({ code: "conflict" });
+    });
+
+    it("finds the blocking operation however far back it is", async () => {
+      const operation = await liveishService().prepareOperation(
+        operationInput({ clientNonce: "nonce-far-back", opType: "shield" }),
+        actorContext
+      );
+      expect(operation.state).toBe("indexing");
+      await failSigned(operation.id, operation.state);
+
+      // The stuck row is by definition old, and a wallet stays busy after it.
+      // A guard that read a page of recent operations would lose sight of it
+      // and leave the unique index to report a constraint name instead.
+      const db = getDb(env);
+      for (let index = 0; index < 60; index++) {
+        await db
+          .prepare(
+            `INSERT INTO helius_rings_operations
+               (id, organization_id, project_id, wallet_id, op_type, state, intent_key)
+             VALUES (?, ?, ?, ?, 'shield', 'completed', ?)`
+          )
+          .bind(
+            `hro_filler_${index}`,
+            TEST_ORG.id,
+            TEST_PROJECT_ID,
+            walletId,
+            `sha256:filler_${index}`
+          )
+          .run();
+      }
+
+      await expect(
+        liveishService().prepareOperation(
+          operationInput({ clientNonce: "nonce-far-back-2", opType: "shield" }),
+          actorContext
+        )
+      ).rejects.toMatchObject({ code: "conflict" });
     });
 
     it("refuses to retry an operation that was already signed", async () => {

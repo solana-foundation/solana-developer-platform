@@ -394,10 +394,32 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
 
   describe("listInFlightOperations", () => {
     it("returns only non-terminal operations older than the staleness cutoff", async () => {
-      const inFlight = await repo.reserveIntent(shieldIntent({ intentKey: "sha256:in-flight" }));
-      const draft = await repo.reserveIntent(shieldIntent({ intentKey: "sha256:draft" }));
-      const done = await repo.reserveIntent(shieldIntent({ intentKey: "sha256:done" }));
-      const fresh = await repo.reserveIntent(shieldIntent({ intentKey: "sha256:fresh" }));
+      // A wallet each, because a wallet may only have one deposit in flight at
+      // a time now. The sweep is per-project rather than per-wallet, so this is
+      // also closer to what it actually reads.
+      const walletFor = async (tag: string): Promise<string> => {
+        const row = await walletRepo.createWallet({
+          ...scope,
+          sdpWalletId: `wal_inflight_${tag}`,
+          name: tag,
+          materialTag: "simulated",
+        });
+        if (!row) throw new Error("wallet fixture was not created");
+        return row.id;
+      };
+
+      const inFlight = await repo.reserveIntent(
+        shieldIntent({ intentKey: "sha256:in-flight", walletId: await walletFor("inflight") })
+      );
+      const draft = await repo.reserveIntent(
+        shieldIntent({ intentKey: "sha256:draft", walletId: await walletFor("draft") })
+      );
+      const done = await repo.reserveIntent(
+        shieldIntent({ intentKey: "sha256:done", walletId: await walletFor("done") })
+      );
+      const fresh = await repo.reserveIntent(
+        shieldIntent({ intentKey: "sha256:fresh", walletId: await walletFor("fresh") })
+      );
 
       for (const id of [inFlight.operation.id, done.operation.id, fresh.operation.id]) {
         await repo.transitionState({

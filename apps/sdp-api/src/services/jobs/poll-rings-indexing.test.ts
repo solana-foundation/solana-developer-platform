@@ -147,8 +147,8 @@ describe("pollRingsIndexing", () => {
     );
     expect(operation.state).toBe("indexing");
 
-    // Sweep from a clock beyond the budget: the poll fails it rather than
-    // leaving it in limbo.
+    // Sweep from a clock beyond the budget, with the chain height unavailable
+    // so the reconciliation pass is skipped and this backstop is what runs.
     await pollRingsIndexing(jobEnv, {
       createService: () => serviceWith(gateway),
       now: () => new Date(Date.now() + RINGS_INDEXING_TIMEOUT_MS + 60_000),
@@ -159,9 +159,12 @@ describe("pollRingsIndexing", () => {
       ...tenant,
       id: operation.id,
     });
+    // Failed rather than left in limbo, but not retryable: nothing here
+    // confirmed whether the signed bytes landed, and inviting another attempt
+    // is how the same deposit gets made twice.
     expect(row?.state).toBe("failed");
-    expect(row?.failure_code).toBe("indexing_timeout");
-    expect(row?.retryable).toBe(true);
+    expect(row?.failure_code).toBe("manual_reconciliation_required");
+    expect(row?.retryable).toBe(false);
   });
 
   it("sweeps a broadcast stranded in submitted into reconciliation", async () => {
@@ -243,7 +246,7 @@ describe("pollRingsIndexing", () => {
       expect(row?.retryable).toBe(false);
     });
 
-    it("lets a stranded shield be retried", async () => {
+    it("refuses to offer a retry for a stranded shield either", async () => {
       const id = await strand("shield", "job-strand-shield");
 
       await pollRingsIndexing(jobEnv, {
@@ -255,9 +258,10 @@ describe("pollRingsIndexing", () => {
         ...tenant,
         id,
       });
-      // A deposit consumes no notes, so a fresh attempt cannot double-spend.
-      expect(row?.failure_code).toBe("indexing_timeout");
-      expect(row?.retryable).toBe(true);
+      // A deposit cannot spend a note twice, but it can execute twice, and the
+      // owner who asked to shield one amount would have moved two.
+      expect(row?.failure_code).toBe("manual_reconciliation_required");
+      expect(row?.retryable).toBe(false);
     });
 
     it("leaves everything alone when the chain height is unknown", async () => {

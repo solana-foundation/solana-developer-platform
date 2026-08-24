@@ -224,6 +224,18 @@ export interface HeliusRingsOperationRepository {
   listExpiredSubmissions(
     input: HeliusRingsExpiredSubmissionsInput
   ): Promise<HeliusRingsOperationRow[]>;
+  /**
+   * The operation, if any, that blocks a new one of these types.
+   *
+   * A targeted query rather than a scan of the wallet's recent page: the row
+   * being looked for is by definition old — it has been stuck since it failed —
+   * and enough later operations will push it out of any window. Missing it
+   * would let the database's unique index catch the duplicate instead, which
+   * reports a constraint name rather than the situation.
+   */
+  findBlockingOperation(
+    input: HeliusRingsProjectScope & { walletId: string; opTypes: readonly string[] }
+  ): Promise<HeliusRingsOperationRow | null>;
   /** Terminal failure. Writes the full failure triple the DB CHECK requires. */
   failOperation(input: FailHeliusRingsOperationInput): Promise<HeliusRingsOperationRow | null>;
   /** Resume sweep feed: non-terminal operations, oldest touched first. */

@@ -668,7 +668,45 @@ describe("one active private spend per wallet", () => {
     expect(Number(rows[0]?.count)).toBe(2);
   });
 
-  it("does not serialise shields, which create notes rather than consume them", async () => {
+  it("refuses a second deposit while an earlier one has unsettled bytes", async () => {
+    const seed = await seedWallet("shield_unsettled");
+    const common = {
+      organization_id: seed.organizationId,
+      project_id: seed.projectId,
+      wallet_id: seed.walletId,
+      op_type: "shield",
+    };
+
+    await insertOperation({
+      ...common,
+      id: "hro_su_first",
+      intent_key: "sha256:su_first",
+      state: "failed",
+      failure_code: "manual_reconciliation_required",
+      failure_message: "expired without being indexed",
+      retryable: false,
+      outer_tx_signature: "sig_su",
+      signed_transaction: "AQAB",
+      last_valid_block_height: "100",
+    });
+
+    // A deposit cannot double-spend a note, but it can execute twice, which
+    // debits the owner's public balance for an amount they never asked to move.
+    // The new row is in flight rather than failed, which is exactly why the
+    // predicate has to cover both: two rows only collide if both match it.
+    await expectSqlstate(
+      () =>
+        insertOperation({
+          ...common,
+          id: "hro_su_second",
+          intent_key: "sha256:su_second",
+          state: "proving",
+        }),
+      UNIQUE_VIOLATION
+    );
+  });
+
+  it("serialises deposits, at the cost of two at once", async () => {
     const seed = await seedWallet("spend_shield");
     const common = {
       organization_id: seed.organizationId,
@@ -679,7 +717,39 @@ describe("one active private spend per wallet", () => {
     };
 
     await insertOperation({ ...common, id: "hro_shield_a", intent_key: "sha256:shield_a" });
-    await insertOperation({ ...common, id: "hro_shield_b", intent_key: "sha256:shield_b" });
+
+    // Deliberate: two simultaneous deposits are a convenience, and allowing
+    // them would mean a duplicate never collides with the row it duplicates,
+    // leaving the service check as the only defence.
+    await expectSqlstate(
+      () => insertOperation({ ...common, id: "hro_shield_b", intent_key: "sha256:shield_b" }),
+      UNIQUE_VIOLATION
+    );
+  });
+
+  it("does not let a deposit block a spend, or the reverse", async () => {
+    const seed = await seedWallet("shield_vs_spend");
+    const common = {
+      organization_id: seed.organizationId,
+      project_id: seed.projectId,
+      wallet_id: seed.walletId,
+      state: "proving",
+    };
+
+    // Separate indexes rather than one: a deposit landing late only adds notes,
+    // so it has no bearing on what a withdrawal may spend.
+    await insertOperation({
+      ...common,
+      id: "hro_mix_shield",
+      intent_key: "sha256:mix_shield",
+      op_type: "shield",
+    });
+    await insertOperation({
+      ...common,
+      id: "hro_mix_withdraw",
+      intent_key: "sha256:mix_withdraw",
+      op_type: "withdraw",
+    });
 
     const { rows } = await client.query<{ count: number }>(
       "SELECT COUNT(*) AS count FROM helius_rings_operations WHERE wallet_id = $1",

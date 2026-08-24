@@ -185,9 +185,46 @@ ALTER TABLE helius_rings_operations
 -- fresh client nonce — past the retry guard, which only governs the retry
 -- endpoint — and pay the recipient again. Held until an operator resolves it;
 -- `completed`, and any failure from before signing, release it as they should.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_helius_rings_operations_active_spend
+-- Dropped first, not `IF NOT EXISTS`. This migration was iterated on before it
+-- shipped, and the runner keys `schema_migrations` on the file name — so a
+-- database that applied an earlier draft under its old name will run this file
+-- as new, find the index already present, and silently keep the old predicate.
+-- That is precisely the version without the failed-and-signed clause, so the
+-- skip would leave the double-pay hole open on exactly the databases that have
+-- been running longest.
+DROP INDEX IF EXISTS idx_helius_rings_operations_active_spend;
+
+CREATE UNIQUE INDEX idx_helius_rings_operations_active_spend
     ON helius_rings_operations(wallet_id)
     WHERE op_type IN ('transfer_registered', 'withdraw', 'merge')
+      AND (
+          state IN ('proving', 'ready_to_sign', 'submitted', 'indexing')
+          OR (state = 'failed' AND signed_transaction IS NOT NULL)
+      );
+
+
+-- --------------------------------------------------------------------------
+-- One unsettled deposit at a time, per wallet
+-- --------------------------------------------------------------------------
+-- A deposit that signed and then failed may still land, and re-filing it debits
+-- the owner's public balance a second time. Not a double-spend of any note —
+-- the owner asked to move one amount and moved two.
+--
+-- The same predicate as the spend index, for a reason worth stating: a partial
+-- unique index can only conflict two rows that both match it, so covering only
+-- the failed row would mean a new deposit never collided with it and the index
+-- enforced nothing. Covering the in-flight states too is what makes the
+-- duplicate collide with the row it duplicates.
+--
+-- The cost is that two simultaneous deposits on one wallet serialise rather
+-- than running together. That is a real restriction and it is the deliberate
+-- trade: two deposits at once is a convenience, and this is the only backstop
+-- behind a service check that queries for the blocking row and could miss it.
+DROP INDEX IF EXISTS idx_helius_rings_operations_unsettled_shield;
+
+CREATE UNIQUE INDEX idx_helius_rings_operations_unsettled_shield
+    ON helius_rings_operations(wallet_id)
+    WHERE op_type = 'shield'
       AND (
           state IN ('proving', 'ready_to_sign', 'submitted', 'indexing')
           OR (state = 'failed' AND signed_transaction IS NOT NULL)

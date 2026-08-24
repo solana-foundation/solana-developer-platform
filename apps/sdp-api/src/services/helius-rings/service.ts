@@ -230,7 +230,7 @@ export class HeliusRingsService {
   ): Promise<PrivateOperation> {
     const wallet = await this.requireWallet(input.walletId);
     await this.assertAssetAllowed(input);
-    await this.assertNoUnresolvedSpend(input);
+    await this.assertNoUnresolvedOperation(input);
     const intentKey = computeIntentKey(input);
 
     const { operation, reserved } = await this.operations.reserveIntent({
@@ -847,36 +847,36 @@ export class HeliusRingsService {
   }
 
   /**
-   * Refuses a new spend while an earlier one is still unaccounted for.
+   * Refuses a new operation while a comparable one is still unaccounted for.
    *
-   * The database index enforces this too, but a unique violation surfaces as a
-   * 500 naming a constraint. The caller needs to be told the actual situation:
-   * a previous spend was signed and may have settled, and filing another could
-   * pay the recipient twice.
+   * "Comparable" is the same op type for a shield, and any spend for a spend:
+   * two spends share one note pool, whereas a deposit only conflicts with
+   * another deposit. A shield does not block a withdrawal, because a deposit
+   * that lands late only adds notes.
    *
-   * Only spends. A shield creates notes rather than consuming them, so it
-   * cannot duplicate a payment and must stay available while an operator sorts
-   * the other operation out.
+   * Blocked while a comparable operation is in flight, or has failed with
+   * signed bytes. Failing is not the same as not having happened, and a failure
+   * code the dashboard marks retryable actively invites the caller to file this
+   * again — which for a deposit means the owner's public balance is debited
+   * twice, and for a spend means the recipient is paid twice.
+   *
+   * The unique indexes carry the same predicate and are the real enforcement;
+   * this exists so the caller is told what actually happened rather than
+   * receiving a constraint name.
    */
-  private async assertNoUnresolvedSpend(input: PrivateOperationInput): Promise<void> {
-    if (!SPEND_OP_TYPES.has(input.opType)) return;
+  private async assertNoUnresolvedOperation(input: PrivateOperationInput): Promise<void> {
+    const opTypes = SPEND_OP_TYPES.has(input.opType) ? [...SPEND_OP_TYPES] : [input.opType];
 
-    const recent = await this.operations.listOperationsByWallet({
+    const unresolved = await this.operations.findBlockingOperation({
       ...this.tenant,
       walletId: input.walletId,
+      opTypes,
     });
-
-    const unresolved = recent.find(
-      (operation) =>
-        SPEND_OP_TYPES.has(operation.op_type) &&
-        operation.signed_transaction !== null &&
-        operation.state !== "completed"
-    );
 
     if (unresolved) {
       throw new HeliusRingsError(
         "conflict",
-        `operation ${unresolved.id} was already signed for this wallet and has not settled; reconcile it on chain before starting another spend`
+        `operation ${unresolved.id} was already signed for this wallet and has not settled; reconcile it on chain before starting another ${input.opType}`
       );
     }
   }

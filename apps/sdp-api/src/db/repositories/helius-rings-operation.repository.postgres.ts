@@ -365,6 +365,31 @@ export function createPostgresHeliusRingsOperationRepository(
       return result.results.map(mapRow);
     },
 
+    async findBlockingOperation(
+      input: HeliusRingsProjectScope & { walletId: string; opTypes: readonly string[] }
+    ) {
+      // The same predicate the two unique indexes carry, deliberately in step
+      // with them: this exists to give the caller a real message before the
+      // index gives them a constraint name.
+      const row = await db
+        .prepare(
+          `SELECT * FROM helius_rings_operations
+            WHERE wallet_id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND op_type = ANY(?)
+              AND (
+                    state IN ('proving', 'ready_to_sign', 'submitted', 'indexing')
+                 OR (state = 'failed' AND signed_transaction IS NOT NULL)
+              )
+            ORDER BY created_at ASC
+            LIMIT 1`
+        )
+        .bind(input.walletId, input.organizationId, input.projectId, [...input.opTypes])
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
     async failOperation(input: FailHeliusRingsOperationInput) {
       return db.transaction(async (tx) => {
         const locked = await tx

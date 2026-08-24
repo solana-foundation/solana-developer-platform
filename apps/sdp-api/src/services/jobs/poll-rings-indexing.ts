@@ -9,8 +9,11 @@
  *     would ever look at it again.
  *  2. `indexing` → `executeOperation` polls `verifyIndexed` through the port;
  *     a hit completes the operation, a miss leaves it untouched (idempotent).
- *  3. `indexing` older than the timeout budget → `failed:indexing_timeout`
- *     (retryable) — the sweep never leaves an operation in limbo forever.
+ *  3. `indexing` older than the timeout budget, and still not indexed after
+ *     this tick's poll → failed, so nothing sits in limbo forever. A row with
+ *     signed bytes fails as `manual_reconciliation_required` and is never
+ *     retryable: nothing here established whether those bytes landed, and
+ *     inviting another attempt is how the same payment is made twice.
  *
  * Ships dormant: the job early-returns unless the feature flag is on AND
  * HELIUS_RINGS_ADAPTER selects the live adapter. Until then no operation can
@@ -95,15 +98,21 @@ export async function pollRingsIndexing(
     // resumed operation has not been asked yet.
     if (operation.state !== "indexing" && operation.state !== "submitted") continue;
     try {
-      if (operation.state === "indexing" && Date.parse(operation.updated_at) < timeoutCutoff) {
-        await failIndexingTimeout(repository, operation);
-        continue;
-      }
       const service = createService({
         organizationId: operation.organization_id,
         projectId: operation.project_id,
       });
-      await service.executeOperation(operation.id);
+
+      // Photon first, always, even for a row past the budget. Being over the
+      // budget says the indexer has been slow, not that it has nothing; failing
+      // a row the very same tick could have completed manufactures operator
+      // work for an operation that actually settled.
+      const settled = await service.executeOperation(operation.id);
+      if (settled.state === "completed") continue;
+
+      if (operation.state === "indexing" && Date.parse(operation.updated_at) < timeoutCutoff) {
+        await failIndexingTimeout(repository, operation);
+      }
     } catch (error) {
       // One stuck operation must not starve the rest of the sweep.
       logger.warn(
@@ -114,25 +123,22 @@ export async function pollRingsIndexing(
   }
 }
 
-/** Op types that consumed notes, and so cannot be safely re-planned. */
-const SPENDS = new Set(["transfer_registered", "withdraw", "merge"]);
-
 /**
  * Closes out operations whose blockhash has passed.
  *
  * Past the expiry there are only two possibilities — it landed, or it never
- * will — and no way to tell them apart from here. What separates the two
- * outcomes is what the operation consumed:
+ * will — and Photon is asked first, because the recorded expiry is exact only
+ * for a transfer or withdrawal. A shield and a merge take their blockhash from
+ * the SDK's own builder, so theirs is a lower bound and the row may be expired
+ * only on paper.
  *
- *  - A shield created notes. If it never landed, nothing moved and re-attempting
- *    it is safe, so it fails retryably.
- *  - A transfer, withdrawal or merge consumed notes. If it did land, rebuilding
- *    would pay the recipient a second time, and the pinned inputs would refuse
- *    to reselect anyway. It fails as `manual_reconciliation_required`: an
- *    operator reconciles the signature against the chain by hand.
- *
- * Without this, both sat in `indexing` until the 30-minute budget expired and
- * were then marked retryable — offering exactly the retry that double-pays.
+ * When Photon still cannot confirm it, the operation is unresolvable from here
+ * whatever it was going to do, and it is never marked retryable. An earlier
+ * version made an exception for shields, on the grounds that a deposit consumes
+ * no notes and so cannot double-spend. That confused two different things: a
+ * deposit cannot spend a note twice, but it can absolutely execute twice, and
+ * an owner who asked to shield one amount and had two leave their public
+ * balance has lost the use of the difference.
  */
 async function escalateExpiredSubmissions(
   env: Env,
@@ -154,13 +160,7 @@ async function escalateExpiredSubmissions(
       createHeliusRingsService(env, tenant));
 
   for (const operation of expired) {
-    const spend = SPENDS.has(operation.op_type);
     try {
-      // Ask Photon before writing anything off. The recorded expiry is exact
-      // for a transfer or withdrawal, but a shield and a merge take their
-      // blockhash from the SDK's own builder, so theirs is a lower bound and
-      // this row may be expired only on paper. Escalating without checking
-      // would mark a landed deposit retryable and invite a second one.
       const settled = await createService({
         organizationId: operation.organization_id,
         projectId: operation.project_id,
@@ -172,11 +172,9 @@ async function escalateExpiredSubmissions(
         projectId: operation.project_id,
         id: operation.id,
         expectedState: operation.state as "submitted" | "indexing",
-        code: spend ? "manual_reconciliation_required" : "indexing_timeout",
-        message: spend
-          ? `signed transaction ${operation.outer_tx_signature} expired without being indexed; reconcile it on chain before retrying`
-          : "the deposit's blockhash expired before it was indexed",
-        retryable: !spend,
+        code: "manual_reconciliation_required",
+        message: `signed transaction ${operation.outer_tx_signature} expired without being indexed; reconcile it on chain before starting another`,
+        retryable: false,
       });
     } catch (error) {
       logger.warn(
@@ -187,17 +185,33 @@ async function escalateExpiredSubmissions(
   }
 }
 
+/**
+ * The backstop for an operation Photon has never answered about.
+ *
+ * Reached when the reconciliation sweep did not close the row — most often
+ * because the chain height was unavailable, sometimes because a backlog pushed
+ * it past this tick's batch — and this tick's poll did not complete it either.
+ * So nothing has established whether these bytes landed, and signed bytes are
+ * never marked retryable here: the honest state is that a human has to look.
+ *
+ * `indexing_timeout` survives only for a row with no bytes behind it, which the
+ * pipeline no longer produces but older rows may still be sitting in.
+ */
 async function failIndexingTimeout(
   repository: ReturnType<typeof createHeliusRingsOperationRepository>,
   operation: HeliusRingsOperationRow
 ): Promise<void> {
+  const unresolvable = operation.signed_transaction !== null;
+
   await repository.failOperation({
     organizationId: operation.organization_id,
     projectId: operation.project_id,
     id: operation.id,
     expectedState: "indexing",
-    code: "indexing_timeout",
-    message: "Photon did not index the transaction within the budget",
-    retryable: true,
+    code: unresolvable ? "manual_reconciliation_required" : "indexing_timeout",
+    message: unresolvable
+      ? `Photon did not index ${operation.outer_tx_signature} within the budget; reconcile it on chain before starting another`
+      : "Photon did not index the transaction within the budget",
+    retryable: !unresolvable,
   });
 }
