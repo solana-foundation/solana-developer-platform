@@ -1681,7 +1681,7 @@
             "method": "POST",
             "header": [],
             "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/cancel",
-            "description": "Cancels an active SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction and storing the resulting lifecycle state."
+            "description": "Stops future collections for an active SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction. A collection already in processing may still settle independently."
           }
         },
         {
@@ -1690,7 +1690,7 @@
             "method": "POST",
             "header": [],
             "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/collect",
-            "description": "Manually collects a due active SDP-custody recurring payment by submitting the Solana subscriptions collection transaction, creating a linked payment transfer, recording the collection attempt, and advancing the next due time."
+            "description": "Manually starts a due active SDP-custody recurring payment collection, creating a linked payment transfer and collection attempt. If submission cannot be confirmed immediately, a 200 response returns the same transfer as `processing` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation."
           }
         },
         {
