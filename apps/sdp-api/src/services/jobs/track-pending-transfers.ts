@@ -439,12 +439,9 @@ async function syncProcessingTransfersOnChain(
     const transfer = processingWithSig[i];
     const status = statuses[i] ?? null;
     if (status && !(await applyOnChainVerdict(env, repo, transfer, status, nowIso))) {
-      await keepStartedSubmissionForReconciliation(
-        repo,
-        transfer,
-        nowIso,
-        unresolvedReasonForStatus(status)
-      );
+      const reason = unresolvedReasonForStatus(status);
+      if (reason === "processed_only" && !hasSignedSubmission(transfer)) continue;
+      await keepStartedSubmissionForReconciliation(repo, transfer, nowIso, reason);
     }
   }
 

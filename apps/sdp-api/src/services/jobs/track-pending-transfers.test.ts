@@ -470,7 +470,7 @@ describe("trackPendingTransfers", () => {
       expect(unchanged?.status).toBe("processing");
     });
 
-    it("does not update processing transfers in 'processed' confirmation status", async () => {
+    it("does not rotate a legacy transfer in 'processed' confirmation status", async () => {
       getSignatureStatusesMock.mockResolvedValueOnce([
         {
           slot: 11111n,
@@ -479,19 +479,27 @@ describe("trackPendingTransfers", () => {
           err: null,
         },
       ]);
+      const updatedAt = minutesAgo(1);
+      const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
 
-      await insertTransfer({
-        id: "xfr_processing_only_processed",
-        status: "processing",
-        signature: String(TEST_SIG_1),
-        createdAt: minutesAgo(1),
-        updatedAt: minutesAgo(1),
-      });
+      try {
+        await insertTransfer({
+          id: "xfr_processing_only_processed",
+          status: "processing",
+          signature: String(TEST_SIG_1),
+          createdAt: updatedAt,
+          updatedAt,
+        });
 
-      await trackPendingTransfers(env);
+        await trackPendingTransfers(env);
 
-      const unchanged = await getTransfer("xfr_processing_only_processed");
-      expect(unchanged?.status).toBe("processing");
+        const unchanged = await getTransfer("xfr_processing_only_processed");
+        expect(unchanged?.status).toBe("processing");
+        expect(unchanged?.updated_at).toBe(updatedAt);
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     it("reconciles mixed processing rows in one Postgres-backed run", async () => {
