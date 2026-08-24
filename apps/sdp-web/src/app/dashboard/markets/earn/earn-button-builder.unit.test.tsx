@@ -111,7 +111,7 @@ describe("EarnButtonBuilder", () => {
     );
 
     expect(screen.getByText("Choose a strategy first")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Return to Earn Program" }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: "Return to Earn" }).getAttribute("href")).toBe(
       "/dashboard/markets/earn"
     );
     expect(screen.queryByText("iOS preview")).toBeNull();
