@@ -16,7 +16,7 @@
     "test:e2e:dashboard": "playwright test --config=playwright.config.ts --project=public --project=dashboard",
     "test:e2e:dashboard-transactions": "playwright test --config=playwright.config.ts --project=dashboard-transactions",
     "test:e2e:issuance": "playwright test --config=playwright.config.ts --project=issuance",
-    "test:unit": "vitest run"
+    "test": "vitest run"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",
