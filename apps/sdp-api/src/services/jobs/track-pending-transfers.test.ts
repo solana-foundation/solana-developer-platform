@@ -3,17 +3,23 @@ import type { Signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createSystemPaymentsRepository } from "@/db/repositories";
+import { rootLogger } from "@/runtime/logger";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { trackPendingTransfers } from "./track-pending-transfers";
 
 const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 const getSignatureStatusesMock = vi.spyOn(solanaRpc, "getSignatureStatuses");
+const getBlockHeightMock = vi.fn();
 
 const TEST_SIG_1 =
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as unknown as Signature;
 const TEST_SIG_2 =
   "5hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as unknown as Signature;
+const TEST_SIG_3 =
+  "6hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as unknown as Signature;
+const TEST_SIG_4 =
+  "7hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as unknown as Signature;
 
 const TEST_ORG_ID = "org_job_test_001";
 
@@ -31,13 +37,18 @@ async function insertTransfer(params: {
   createdAt: string;
   updatedAt: string;
   confirmedAt?: string;
+  signedTransaction?: string;
+  lastValidBlockHeight?: string;
+  submissionStartedAt?: string;
+  type?: string;
 }): Promise<void> {
   await getDb(env)
     .prepare(
       `INSERT INTO payment_transfers
        (id, organization_id, wallet_id, source_address, destination_address,
-        token, amount, type, direction, status, signature, confirmed_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        token, amount, type, direction, status, signature, signed_transaction,
+        last_valid_block_height, submission_started_at, confirmed_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::numeric, ?, ?, ?, ?)`
     )
     .bind(
       params.id,
@@ -47,10 +58,13 @@ async function insertTransfer(params: {
       "9dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
       "SOL",
       "1.0",
-      "transfer",
+      params.type ?? "transfer",
       "outbound",
       params.status,
       params.signature ?? null,
+      params.signedTransaction ?? null,
+      params.lastValidBlockHeight ?? null,
+      params.submissionStartedAt ?? null,
       params.confirmedAt ?? null,
       params.createdAt,
       params.updatedAt
@@ -66,6 +80,7 @@ async function getTransfer(id: string) {
     slot: number | null;
     confirmed_at: string | null;
     finalization_last_polled_at: string | null;
+    updated_at: string;
   }>();
 }
 
@@ -79,7 +94,10 @@ describe("trackPendingTransfers", () => {
     await seedTestDatabase(env);
     await seedOrg();
     vi.clearAllMocks();
-    createRpcMock.mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);
+    getBlockHeightMock.mockResolvedValue(1_000n);
+    createRpcMock.mockReturnValue({
+      getBlockHeight: () => ({ send: getBlockHeightMock }),
+    } as unknown as ReturnType<typeof solanaRpc.createRpc>);
     getSignatureStatusesMock.mockImplementation(async (_rpc, signatures) =>
       signatures.map(() => null)
     );
@@ -158,6 +176,9 @@ describe("trackPendingTransfers", () => {
         id: "xfr_processing_finalized",
         status: "processing",
         signature: String(TEST_SIG_2),
+        signedTransaction: "AQ==",
+        lastValidBlockHeight: "100",
+        submissionStartedAt: minutesAgo(1),
         createdAt: minutesAgo(1),
         updatedAt: minutesAgo(1),
       });
@@ -167,6 +188,7 @@ describe("trackPendingTransfers", () => {
       const updated = await getTransfer("xfr_processing_finalized");
       expect(updated?.status).toBe("finalized");
       expect(updated?.slot).toBe(99999);
+      expect(getBlockHeightMock).not.toHaveBeenCalled();
     });
 
     it("marks processing transfer as failed when on-chain status has an error", async () => {
@@ -211,6 +233,224 @@ describe("trackPendingTransfers", () => {
       const updated = await getTransfer("xfr_processing_not_found");
       expect(updated?.status).toBe("failed");
       expect(updated?.error).toBe("Transaction not found on chain");
+      expect(getSignatureStatusesMock).toHaveBeenCalledOnce();
+    });
+
+    it("fails an expired signed submission whose broadcast never started", async () => {
+      getSignatureStatusesMock.mockResolvedValueOnce([null]);
+      getBlockHeightMock.mockResolvedValueOnce(101n);
+
+      await insertTransfer({
+        id: "xfr_unstarted_outbox_expired",
+        status: "processing",
+        signature: String(TEST_SIG_1),
+        signedTransaction: "AQ==",
+        lastValidBlockHeight: "100",
+        createdAt: minutesAgo(1),
+        updatedAt: minutesAgo(1),
+      });
+
+      await trackPendingTransfers(env);
+
+      const failed = await getTransfer("xfr_unstarted_outbox_expired");
+      expect(failed?.status).toBe("failed");
+      expect(failed?.error).toBe("Transaction not found on chain");
+      expect(getSignatureStatusesMock).toHaveBeenCalledOnce();
+    });
+
+    it("keeps and rotates an expired started submission when history is inconclusive", async () => {
+      getSignatureStatusesMock.mockResolvedValueOnce([null]).mockResolvedValueOnce([null]);
+      getBlockHeightMock.mockResolvedValueOnce(101n);
+      const staleAt = minutesAgo(10);
+      const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+
+      try {
+        await insertTransfer({
+          id: "xfr_started_outbox_not_found",
+          status: "processing",
+          signature: String(TEST_SIG_1),
+          signedTransaction: "AQ==",
+          lastValidBlockHeight: "100",
+          submissionStartedAt: staleAt,
+          createdAt: staleAt,
+          updatedAt: staleAt,
+        });
+
+        await trackPendingTransfers(env);
+
+        const unresolved = await getTransfer("xfr_started_outbox_not_found");
+        expect(unresolved?.status).toBe("processing");
+        expect(unresolved?.error).toBeNull();
+        expect(unresolved?.updated_at).not.toBe(staleAt);
+        expect(getSignatureStatusesMock).toHaveBeenLastCalledWith(expect.anything(), [TEST_SIG_1], {
+          searchTransactionHistory: true,
+        });
+        expect(warn).toHaveBeenCalledWith(
+          expect.objectContaining({
+            event: "sdp_api_payment_submission_unresolved",
+            flow: "reconciler",
+            reason: "history_absent",
+            organization_id: TEST_ORG_ID,
+            project_id: null,
+            transfer_id: "xfr_started_outbox_not_found",
+            transfer_type: "transfer",
+            signature: TEST_SIG_1,
+            last_valid_block_height: "100",
+            submission_started_at: staleAt,
+          }),
+          "sdp_api_payment_submission_unresolved"
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it("keeps and rotates expired submissions when archival history is unavailable", async () => {
+      getSignatureStatusesMock
+        .mockResolvedValueOnce([null])
+        .mockRejectedValueOnce(new Error("archive unavailable"));
+      getBlockHeightMock.mockResolvedValueOnce(101n);
+      const staleAt = minutesAgo(10);
+
+      await insertTransfer({
+        id: "xfr_started_outbox_archive_unavailable",
+        status: "processing",
+        signature: String(TEST_SIG_1),
+        signedTransaction: "AQ==",
+        lastValidBlockHeight: "100",
+        submissionStartedAt: staleAt,
+        createdAt: staleAt,
+        updatedAt: staleAt,
+      });
+
+      await trackPendingTransfers(env);
+
+      const unresolved = await getTransfer("xfr_started_outbox_archive_unavailable");
+      expect(unresolved?.status).toBe("processing");
+      expect(unresolved?.updated_at).not.toBe(staleAt);
+    });
+
+    it("keeps and rotates signed submissions when block height is unavailable", async () => {
+      getSignatureStatusesMock.mockResolvedValueOnce([null]);
+      getBlockHeightMock.mockRejectedValueOnce(new Error("block height unavailable"));
+      const staleAt = minutesAgo(10);
+
+      await insertTransfer({
+        id: "xfr_started_outbox_height_unavailable",
+        status: "processing",
+        signature: String(TEST_SIG_1),
+        signedTransaction: "AQ==",
+        lastValidBlockHeight: "100",
+        submissionStartedAt: staleAt,
+        createdAt: staleAt,
+        updatedAt: staleAt,
+      });
+
+      await trackPendingTransfers(env);
+
+      const unresolved = await getTransfer("xfr_started_outbox_height_unavailable");
+      expect(unresolved?.status).toBe("processing");
+      expect(unresolved?.updated_at).not.toBe(staleAt);
+      expect(getSignatureStatusesMock).toHaveBeenCalledOnce();
+    });
+
+    it("applies archival verdicts to the matching signatures", async () => {
+      getSignatureStatusesMock
+        .mockResolvedValueOnce([null, null, null, null])
+        .mockResolvedValueOnce([
+          { slot: 301n, confirmations: 1n, confirmationStatus: "confirmed", err: null },
+          { slot: 302n, confirmations: null, confirmationStatus: "finalized", err: null },
+          {
+            slot: 303n,
+            confirmations: 0n,
+            confirmationStatus: "confirmed",
+            err: { InstructionError: [0, "InsufficientFunds"] },
+          },
+          { slot: 304n, confirmations: 1n, confirmationStatus: "processed", err: null },
+        ]);
+      getBlockHeightMock.mockResolvedValueOnce(101n);
+      const staleAt = minutesAgo(10);
+      const rows = [
+        ["xfr_archive_a_confirmed", TEST_SIG_1],
+        ["xfr_archive_b_finalized", TEST_SIG_2],
+        ["xfr_archive_c_failed", TEST_SIG_3],
+        ["xfr_archive_d_processed", TEST_SIG_4],
+      ] as const;
+      for (const [id, signature] of rows) {
+        await insertTransfer({
+          id,
+          status: "processing",
+          signature: String(signature),
+          signedTransaction: "AQ==",
+          lastValidBlockHeight: "100",
+          submissionStartedAt: staleAt,
+          createdAt: staleAt,
+          updatedAt: staleAt,
+        });
+      }
+
+      await trackPendingTransfers(env);
+
+      await expect(getTransfer("xfr_archive_a_confirmed")).resolves.toMatchObject({
+        status: "confirmed",
+        slot: 301,
+      });
+      await expect(getTransfer("xfr_archive_b_finalized")).resolves.toMatchObject({
+        status: "finalized",
+        slot: 302,
+      });
+      await expect(getTransfer("xfr_archive_c_failed")).resolves.toMatchObject({
+        status: "failed",
+        slot: 303,
+      });
+      await expect(getTransfer("xfr_archive_d_processed")).resolves.toMatchObject({
+        status: "processing",
+        updated_at: expect.not.stringMatching(staleAt),
+      });
+    });
+
+    it("keeps and rotates a transfer when writing a terminal verdict fails", async () => {
+      getSignatureStatusesMock.mockResolvedValueOnce([
+        { slot: 401n, confirmations: 1n, confirmationStatus: "confirmed", err: null },
+      ]);
+      const staleAt = minutesAgo(10);
+
+      await insertTransfer({
+        id: "xfr_batch_verdict_write_failed",
+        type: "transfer_batch",
+        status: "processing",
+        signature: String(TEST_SIG_1),
+        createdAt: staleAt,
+        updatedAt: staleAt,
+      });
+
+      await trackPendingTransfers(env);
+
+      const unresolved = await getTransfer("xfr_batch_verdict_write_failed");
+      expect(unresolved?.status).toBe("processing");
+      expect(unresolved?.updated_at).not.toBe(staleAt);
+    });
+
+    it("uses block height rather than row age to expire a signed submission", async () => {
+      getSignatureStatusesMock.mockResolvedValueOnce([null]);
+      getBlockHeightMock.mockResolvedValueOnce(100n);
+
+      await insertTransfer({
+        id: "xfr_started_outbox_not_expired",
+        status: "processing",
+        signature: String(TEST_SIG_1),
+        signedTransaction: "AQ==",
+        lastValidBlockHeight: "100",
+        submissionStartedAt: minutesAgo(10),
+        createdAt: minutesAgo(10),
+        updatedAt: minutesAgo(10),
+      });
+
+      await trackPendingTransfers(env);
+
+      const unchanged = await getTransfer("xfr_started_outbox_not_expired");
+      expect(unchanged?.status).toBe("processing");
+      expect(getSignatureStatusesMock).toHaveBeenCalledOnce();
     });
 
     it("leaves processing transfer alone when signature not found but transfer is recent", async () => {
@@ -230,7 +470,7 @@ describe("trackPendingTransfers", () => {
       expect(unchanged?.status).toBe("processing");
     });
 
-    it("does not update processing transfers in 'processed' confirmation status", async () => {
+    it("does not rotate a legacy transfer in 'processed' confirmation status", async () => {
       getSignatureStatusesMock.mockResolvedValueOnce([
         {
           slot: 11111n,
@@ -239,19 +479,27 @@ describe("trackPendingTransfers", () => {
           err: null,
         },
       ]);
+      const updatedAt = minutesAgo(1);
+      const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
 
-      await insertTransfer({
-        id: "xfr_processing_only_processed",
-        status: "processing",
-        signature: String(TEST_SIG_1),
-        createdAt: minutesAgo(1),
-        updatedAt: minutesAgo(1),
-      });
+      try {
+        await insertTransfer({
+          id: "xfr_processing_only_processed",
+          status: "processing",
+          signature: String(TEST_SIG_1),
+          createdAt: updatedAt,
+          updatedAt,
+        });
 
-      await trackPendingTransfers(env);
+        await trackPendingTransfers(env);
 
-      const unchanged = await getTransfer("xfr_processing_only_processed");
-      expect(unchanged?.status).toBe("processing");
+        const unchanged = await getTransfer("xfr_processing_only_processed");
+        expect(unchanged?.status).toBe("processing");
+        expect(unchanged?.updated_at).toBe(updatedAt);
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     it("reconciles mixed processing rows in one Postgres-backed run", async () => {
@@ -290,6 +538,92 @@ describe("trackPendingTransfers", () => {
       expect(confirmed?.slot).toBe(22222);
       expect(stuck?.status).toBe("failed");
       expect(stuck?.error).toBe("Transfer processing timed out");
+    });
+
+    it("skips an invalid stored signature without blocking valid transfers", async () => {
+      getSignatureStatusesMock.mockImplementation(async (_rpc, signatures) =>
+        signatures.map((signature) =>
+          signature === TEST_SIG_1
+            ? {
+                slot: 22223n,
+                confirmations: 3n,
+                confirmationStatus: "confirmed",
+                err: null,
+              }
+            : null
+        )
+      );
+
+      await insertTransfer({
+        id: "xfr_invalid_signature",
+        status: "processing",
+        signature: "not-a-solana-signature",
+        createdAt: minutesAgo(2),
+        updatedAt: minutesAgo(2),
+      });
+      await insertTransfer({
+        id: "xfr_valid_signature",
+        status: "processing",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(1),
+        updatedAt: minutesAgo(1),
+      });
+
+      await trackPendingTransfers(env);
+
+      const [invalid, valid] = await Promise.all([
+        getTransfer("xfr_invalid_signature"),
+        getTransfer("xfr_valid_signature"),
+      ]);
+      expect(invalid?.status).toBe("processing");
+      expect(valid?.status).toBe("confirmed");
+      expect(
+        getSignatureStatusesMock.mock.calls.flatMap(([, signatures]) => signatures)
+      ).not.toContain("not-a-solana-signature");
+    });
+
+    it("rotates a full page of invalid signatures so a later valid transfer is reached", async () => {
+      getSignatureStatusesMock.mockImplementation(async (_rpc, signatures) =>
+        signatures.map((signature) =>
+          signature === TEST_SIG_1
+            ? {
+                slot: 22224n,
+                confirmations: 3n,
+                confirmationStatus: "confirmed",
+                err: null,
+              }
+            : null
+        )
+      );
+
+      await Promise.all(
+        Array.from({ length: 256 }, (_, i) =>
+          insertTransfer({
+            id: `xfr_processing_invalid_${i}`,
+            status: "processing",
+            signature: `invalid-signature-${i}`,
+            createdAt: minutesAgo(30),
+            updatedAt: minutesAgo(30),
+          })
+        )
+      );
+      await insertTransfer({
+        id: "xfr_processing_valid_behind_invalid_page",
+        status: "processing",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(2),
+        updatedAt: minutesAgo(2),
+      });
+
+      await trackPendingTransfers(env);
+      expect((await getTransfer("xfr_processing_valid_behind_invalid_page"))?.status).toBe(
+        "processing"
+      );
+
+      await trackPendingTransfers(env);
+      expect((await getTransfer("xfr_processing_valid_behind_invalid_page"))?.status).toBe(
+        "confirmed"
+      );
     });
 
     it("does not call getSignatureStatuses when there are no processing transfers with signatures", async () => {
@@ -374,7 +708,7 @@ describe("trackPendingTransfers", () => {
       expect(unchanged?.status).toBe("confirmed");
     });
 
-    it("rotates a full page of stuck rows so the next tick reaches a newer transfer", async () => {
+    it("rotates a full page of invalid signatures so the next tick reaches a valid transfer", async () => {
       getSignatureStatusesMock.mockImplementation(async (_rpc, signatures) =>
         signatures.map((signature) =>
           String(signature) === String(TEST_SIG_2)
@@ -386,9 +720,9 @@ describe("trackPendingTransfers", () => {
       await Promise.all(
         Array.from({ length: 256 }, (_, i) =>
           insertTransfer({
-            id: `xfr_confirmed_stuck_${i}`,
+            id: `xfr_confirmed_invalid_${i}`,
             status: "confirmed",
-            signature: `${TEST_SIG_1}stuck${i}`,
+            signature: `invalid-confirmed-signature-${i}`,
             createdAt: minutesAgo(30),
             updatedAt: minutesAgo(30),
             confirmedAt: minutesAgo(30),
@@ -415,8 +749,8 @@ describe("trackPendingTransfers", () => {
       const upgraded = await getTransfer("xfr_confirmed_zz_behind_stuck_page");
       expect(upgraded?.status).toBe("finalized");
       expect(upgraded?.slot).toBe(33333);
-      const stuck = await getTransfer("xfr_confirmed_stuck_0");
-      expect(stuck?.status).toBe("confirmed");
+      const invalid = await getTransfer("xfr_confirmed_invalid_0");
+      expect(invalid?.status).toBe("confirmed");
     });
 
     it("rotates the polled page even when the RPC batch call fails", async () => {

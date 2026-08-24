@@ -4,7 +4,11 @@ export {
   type SolanaConfig,
 } from "./config";
 export { SdpRpcError, type SdpRpcErrorCode, solanaRpcError } from "./errors";
-export { isTransientRpcError, isUnauthorizedRpcError } from "./transient";
+export {
+  isTransientRpcError,
+  isUnauthorizedRpcError,
+  withTransientRpcRetry,
+} from "./transient";
 export type { DatabaseClient, KVStore, KVStoreSet, PreparedStatement, RpcEnv } from "./types";
 export {
   type VerifyTransactionLandedOptions,

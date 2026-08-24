@@ -8,62 +8,19 @@ import type {
   PaymentTransferRecipientRow,
 } from "@/db/repositories/payment-transfer-batches.repository";
 import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
-import type {
-  PaymentTransferRow,
-  PaymentTransferStatus,
-} from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { internalError, transactionFailed } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
-import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
+import { logEvent } from "@/runtime/money-path-events";
 import {
-  type AppContext,
-  type getFeePayment,
-  getPaymentsRepository,
-  getPaymentTransferBatchesRepository,
-} from "../../context";
+  createTransferSignedSubmissionStore,
+  isDefiniteSubmissionError,
+  submitSignedPaymentTransaction,
+} from "@/services/payments/signed-submission";
+import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
+import { type AppContext, type getFeePayment, getPaymentsRepository } from "../../context";
 import type { TransactionChunk } from "./transaction";
 import type { ResolvedBatchRequest } from "./types";
-
-/**
- * Updates a chunk's payment_transfers row, failing loudly if it vanished.
- *
- * @param params.transferId - Transfer row to update.
- * @param params.status - New transfer status.
- * @param params.signature - Transaction signature, once submitted.
- * @param params.serializedTx - Base64 wire transaction for the chunk.
- * @param params.error - Failure detail, or null.
- * @returns The updated transfer row.
- */
-async function updateTransferRecord(
-  c: AppContext,
-  params: {
-    transferId: string;
-    organizationId: string;
-    projectId: string;
-    status: PaymentTransferStatus;
-    signature?: string;
-    serializedTx: string;
-    error: string | null;
-  }
-): Promise<PaymentTransferRow> {
-  const updated = await getPaymentsRepository(c).updateTransfer({
-    transferId: params.transferId,
-    organizationId: params.organizationId,
-    projectId: params.projectId,
-    status: params.status,
-    signature: params.signature,
-    serializedTx: params.serializedTx,
-    error: params.error,
-    updatedAt: new Date().toISOString(),
-  });
-
-  if (!updated) {
-    throw internalError("Payment transfer record not found for update");
-  }
-
-  return updated;
-}
 
 /**
  * Updates the recipient rows belonging to one chunk and returns the updated
@@ -143,9 +100,9 @@ export function applyRecipientRowUpdates(
  * The transfer row and its recipient links are written in ONE transaction so
  * a processing chunk transfer always has linked recipients — the invariant
  * settleTransferBatch enforces when the pending-transfers job settles it.
- * After signAndSend the signature is persisted as the sole immediate write
- * (recipients are already processing and linked), keeping the window where a
- * submitted payment lacks its recovery signature to a single database call.
+ * The exact signed bytes and signature are persisted before the durable start
+ * marker and first broadcast. Once that marker may exist, failures remain
+ * processing for reconciliation rather than falsely failing the recipients.
  *
  * @param params.resolved - Resolved batch request.
  * @param params.chunk - Chunk to sign and submit.
@@ -159,6 +116,7 @@ export async function executeChunk(params: {
   chunk: TransactionChunk;
   recipientsByIndex: Map<number, PaymentTransferRecipientRow>;
   feePayment: ReturnType<typeof getFeePayment>;
+  lastValidBlockHeight: bigint;
   preflight: boolean;
 }): Promise<void> {
   const { c, resolved, chunk } = params;
@@ -230,33 +188,16 @@ export async function executeChunk(params: {
   applyRecipientRowUpdates(params.recipientsByIndex, linkedTransfer.linked);
   const transfer = linkedTransfer.created;
 
-  const settle = async (params2: {
-    status: PaymentTransferStatus;
-    recipientStatus: PaymentTransferRecipientRow["status"];
-    signature?: string;
-    error: string | null;
-  }): Promise<PaymentTransferRow> => {
-    const updates = await updateRecipientRows({
-      repository: getPaymentTransferBatchesRepository(c),
-      recipientsByIndex: params.recipientsByIndex,
-      recipientIndexes: chunk.recipientIndexes,
-      organizationId: resolved.scope.auth.organizationId,
-      projectId: resolved.projectId,
-      transferId: transfer.id,
-      status: params2.recipientStatus,
-      error: params2.error,
-    });
-    applyRecipientRowUpdates(params.recipientsByIndex, updates);
-    return updateTransferRecord(c, {
+  const failChunk = (error: unknown) =>
+    createPostgresPaymentTransferBatchesRepository(getDb(c.env)).settleTransferBatch({
       transferId: transfer.id,
       organizationId: resolved.scope.auth.organizationId,
       projectId: resolved.projectId,
-      status: params2.status,
-      signature: params2.signature,
-      serializedTx,
-      error: params2.error,
+      transferStatus: "failed",
+      error: error instanceof Error ? error.message : String(error),
+      slot: null,
+      updatedAt: new Date().toISOString(),
     });
-  };
 
   if (params.preflight) {
     try {
@@ -268,35 +209,40 @@ export async function executeChunk(params: {
         );
       }
     } catch (error) {
-      await settle({
-        status: "failed",
-        recipientStatus: "failed",
-        error: error instanceof Error ? error.message : String(error),
-      });
+      await failChunk(error);
       return;
     }
   }
 
   await beginApprovedWalletOperationEffect(c);
-  let signature: Awaited<ReturnType<typeof params.feePayment.signAndSend>>;
+  const submissionStore = createTransferSignedSubmissionStore(getPaymentsRepository(c), transfer);
   try {
-    signature = await params.feePayment.signAndSend(txBytes);
-  } catch (error) {
-    await settle({
-      status: "failed",
-      recipientStatus: "failed",
-      error: error instanceof Error ? error.message : String(error),
+    await submitSignedPaymentTransaction({
+      feePayment: params.feePayment,
+      rpc: resolved.rpc,
+      transaction: txBytes,
+      lastValidBlockHeight: params.lastValidBlockHeight,
+      store: submissionStore,
     });
+  } catch (error) {
+    const submitted = await submissionStore.submittedRow();
+    if (submitted && !isDefiniteSubmissionError(error)) {
+      logEvent("warn", {
+        event: "sdp_api_payment_submission_unresolved",
+        flow: "batch",
+        reason: "broadcast_error",
+        organization_id: transfer.organization_id,
+        project_id: transfer.project_id,
+        batch_id: firstRecipient.batch_id,
+        transfer_id: transfer.id,
+        transfer_type: transfer.type,
+        signature: submitted.signature,
+        recipient_indexes: chunk.recipientIndexes,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+    await failChunk(error);
     return;
   }
-
-  await updateTransferRecord(c, {
-    transferId: transfer.id,
-    organizationId: resolved.scope.auth.organizationId,
-    projectId: resolved.projectId,
-    status: "processing",
-    signature,
-    serializedTx,
-    error: null,
-  });
 }

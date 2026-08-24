@@ -123,6 +123,37 @@ describe("MagicBlock private transfers", () => {
     });
   });
 
+  it.each([
+    ["zero", 0],
+    ["a negative value", -1],
+    ["a fraction", 123.5],
+    ["an unsafe integer", Number.MAX_SAFE_INTEGER + 1],
+  ])("rejects %s as the last valid block height", async (_label, lastValidBlockHeight) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          kind: "transfer",
+          version: "v0",
+          transactionBase64: "AQID",
+          sendTo: "base",
+          recentBlockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
+          lastValidBlockHeight,
+          instructionCount: 4,
+          requiredSigners: [TEST_SOURCE],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      )
+    );
+
+    await expect(prepareTransfer()).rejects.toMatchObject({
+      code: "PROVIDER_UNAVAILABLE",
+      message: "MagicBlock transfer response payload is invalid.",
+    });
+  });
+
   it("maps MagicBlock rate limits to RATE_LIMITED", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ message: "Too many MagicBlock requests" }), {
