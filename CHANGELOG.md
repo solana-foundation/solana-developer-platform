@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.67.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.67.0...v0.67.1) (2026-08-24)
+
+### Maintenance
+
+* **deps:** bump motion from 12.43.0 to 13.1.0 ([#1462](https://github.com/solana-foundation/solana-developer-platform/pull/1462)) ([113f015](https://github.com/solana-foundation/solana-developer-platform/commit/113f015d7646255c5389fbaf89fe411b21a042c2))
+
 ## [0.67.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.66.0...v0.67.0) (2026-08-24)
 
 ### Features
