@@ -1,10 +1,14 @@
-"use client";
-
 import { ArrowRightIcon, LandmarkIcon, type LucideIcon, UsersRoundIcon } from "lucide-react";
 import Link from "next/link";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { useTranslations } from "@/i18n/provider";
+import {
+  providerSelectionCardIconClassName,
+  providerSelectionCardTitleClassName,
+  providerSelectionCardTitleUnderlineClassName,
+} from "@/components/ui/provider-selection-card";
+import { getTranslations } from "@/i18n/server";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import { cn } from "@/lib/utils";
 
 function MarketsPathCard({
   audience,
@@ -25,14 +29,20 @@ function MarketsPathCard({
       href={href}
     >
       <span className="flex min-w-0 items-start gap-4">
-        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-fill-strong text-primary">
+        <span className={providerSelectionCardIconClassName}>
           <Icon aria-hidden="true" className="h-5 w-5" />
         </span>
         <span className="min-w-0 flex-1 space-y-2">
           <span className="block text-xs font-medium uppercase tracking-wide text-tertiary">
             {audience}
           </span>
-          <span className="relative inline-block text-[22px] leading-none font-medium text-primary after:absolute after:left-0 after:-bottom-1 after:h-px after:w-0 after:bg-current after:transition-[width] after:duration-200 group-hover:after:w-full group-focus-visible:after:w-full motion-reduce:after:transition-none">
+          <span
+            className={cn(
+              providerSelectionCardTitleClassName,
+              "text-primary",
+              providerSelectionCardTitleUnderlineClassName
+            )}
+          >
             {title}
           </span>
           <span className="block max-w-md pt-0.5 text-sm leading-6 text-tertiary">
@@ -50,12 +60,12 @@ function MarketsPathCard({
 
 /**
  * The Markets entry chooser: routes a visitor to the surface built for them
- * before either workspace loads. Static links only. The segment layout gates
- * markets and the page gates earn, so the cards never offer a destination the
- * visitor cannot open.
+ * before either workspace loads. A server component with static links only;
+ * the segment layout enforces the markets and earn gates for every surface it
+ * offers, so nothing here checks a flag or fetches data.
  */
-export function MarketsLanding() {
-  const t = useTranslations();
+export async function MarketsLanding() {
+  const t = await getTranslations();
 
   return (
     <DashboardWorkspaceOverviewPanel>

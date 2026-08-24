@@ -1,6 +1,21 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
+/**
+ * Selection-card grammar shared with the Markets path cards
+ * (app/dashboard/markets/markets-landing.tsx): one source so the two surfaces
+ * cannot drift. The underline grows by width rather than a scale-from-zero
+ * transform, which React Doctor flags on any PR touching the file.
+ */
+export const providerSelectionCardIconClassName =
+  "flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-fill-strong text-primary";
+
+export const providerSelectionCardTitleClassName =
+  "relative inline-block text-[22px] leading-none font-medium";
+
+export const providerSelectionCardTitleUnderlineClassName =
+  "after:absolute after:left-0 after:-bottom-1 after:h-px after:w-0 after:bg-current after:transition-[width] after:duration-200 group-hover:after:w-full group-focus-visible:after:w-full motion-reduce:after:transition-none";
+
 function ProviderSelectionCardBody({
   badge,
   description,
@@ -18,22 +33,16 @@ function ProviderSelectionCardBody({
 }) {
   return (
     <span className="flex items-start gap-4">
-      <span
-        className={cn(
-          "flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-fill-strong text-primary",
-          isMuted && "opacity-60"
-        )}
-      >
+      <span className={cn(providerSelectionCardIconClassName, isMuted && "opacity-60")}>
         {icon}
       </span>
       <span className="min-w-0 flex-1 space-y-1">
         <span className="flex flex-wrap items-center gap-2">
           <span
             className={cn(
-              "relative inline-block text-[22px] leading-none font-medium",
+              providerSelectionCardTitleClassName,
               isMuted ? "text-secondary" : "text-primary",
-              isSelectable &&
-                "after:absolute after:left-0 after:-bottom-1 after:h-px after:w-full after:origin-left after:scale-x-0 after:bg-current after:transition-transform after:duration-200 group-hover:after:scale-x-100 group-focus-visible:after:scale-x-100 motion-reduce:after:transition-none"
+              isSelectable && providerSelectionCardTitleUnderlineClassName
             )}
           >
             {title}
