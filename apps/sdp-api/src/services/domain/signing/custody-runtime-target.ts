@@ -1338,7 +1338,7 @@ export class CustodyRuntimeTargets {
         provider: target.provider,
         targetKind: target.kind,
         targetId: target.kind === "config" ? target.config.id : target.connectionId,
-        ...(custodyWalletId ? { custodyWalletId } : {}),
+        custodyWalletId: custodyWalletId ?? null,
         reason,
       },
       "custody_runtime_target_unavailable"

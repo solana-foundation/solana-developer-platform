@@ -500,6 +500,7 @@ describe("CustodyRuntimeTargets", () => {
     await setProjectDefault(config.id, null);
     env.PRIVY_BYOK_ENABLED = "false";
     const read = mockStoredCredentialRead();
+    const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
@@ -520,6 +521,18 @@ describe("CustodyRuntimeTargets", () => {
       )
     ).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
     expect(read).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      {
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        provider: "privy",
+        targetKind: "connection",
+        targetId: connection.id,
+        custodyWalletId: null,
+        reason: "runtime_disabled",
+      },
+      "custody_runtime_target_unavailable"
+    );
   });
 
   it("uses the legacy Config for provider resolution while runtime is off", async () => {
