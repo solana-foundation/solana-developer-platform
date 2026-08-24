@@ -323,6 +323,61 @@ describe("Auth Middleware", () => {
   });
 
   describe("key status validation", () => {
+    it("rejects an active API key whose project is archived (cold database path)", async () => {
+      await getDb(env)
+        .prepare("INSERT INTO users (id, email, status) VALUES (?, ?, ?)")
+        .bind(TEST_USER.id, TEST_USER.email, TEST_USER.status)
+        .run();
+      await getDb(env)
+        .prepare(
+          "INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        )
+        .bind(
+          TEST_PROJECT.id,
+          TEST_ORG.id,
+          TEST_PROJECT.name,
+          TEST_PROJECT.slug,
+          TEST_PROJECT.environment,
+          "archived",
+          TEST_USER.id
+        )
+        .run();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO api_keys (
+             id, organization_id, project_id, created_by, name, key_prefix, key_hash,
+             role, status
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          TEST_API_KEY.id,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          TEST_USER.id,
+          "Archived project key",
+          TEST_API_KEY.prefix,
+          validKeyHash,
+          "api_admin",
+          "active"
+        )
+        .run();
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      // No KV entry was seeded, so authentication goes through the Postgres
+      // lookup: an active key on an archived project must not authenticate.
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("INVALID_API_KEY");
+    });
     it("treats the exact rotation deadline as expired for a zero-hour grace period", () => {
       const deadline = "2026-07-23T12:00:00.000Z";
       const deadlineMs = Date.parse(deadline);

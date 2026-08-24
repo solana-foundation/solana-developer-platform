@@ -60,7 +60,11 @@ describe("ProjectService", () => {
     db = getDb(env);
     projectService = new ProjectService(db);
 
-    // Clear projects tables
+    // Clear projects tables (api_keys first: project_id is ON DELETE RESTRICT)
+    await db
+      .prepare("DELETE FROM api_keys")
+      .run()
+      .catch(() => {});
     await db
       .prepare("DELETE FROM project_members")
       .run()
@@ -211,6 +215,22 @@ describe("ProjectService", () => {
   });
 
   describe("archiveProject", () => {
+    async function seedApiKey(
+      id: string,
+      projectId: string,
+      status: string,
+      keyHash: string
+    ): Promise<void> {
+      await db
+        .prepare(
+          `INSERT INTO api_keys
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'api_developer', ?)`
+        )
+        .bind(id, TEST_ORG.id, projectId, TEST_USER.id, id, `${id}_pfx`, keyHash, status)
+        .run();
+    }
+
     it("sets project status to archived", async () => {
       await seedProject("prj_to_archive", "To Archive", "to-archive", null);
 
@@ -218,6 +238,38 @@ describe("ProjectService", () => {
 
       const archived = await projectService.getProject("prj_to_archive");
       expect(archived?.status).toBe("archived");
+    });
+
+    it("deactivates every active API key on the project and returns their key hashes", async () => {
+      await seedProject("prj_archive_keys", "Archive Keys", "archive-keys", null);
+      await seedProject("prj_other_alive", "Other Alive", "other-alive", null);
+      await seedApiKey("key_archive_active", "prj_archive_keys", "active", "hash_active_1");
+      await seedApiKey("key_archive_second", "prj_archive_keys", "active", "hash_active_2");
+      await seedApiKey("key_archive_revoked", "prj_archive_keys", "revoked", "hash_revoked");
+      await seedApiKey("key_other_project", "prj_other_alive", "active", "hash_other");
+
+      const keyHashes = await projectService.archiveProject("prj_archive_keys");
+
+      expect(keyHashes.sort()).toEqual(["hash_active_1", "hash_active_2"]);
+
+      const keys = await db
+        .prepare("SELECT id, status, revoked_at FROM api_keys WHERE project_id = ?")
+        .bind("prj_archive_keys")
+        .all<{ id: string; status: string; revoked_at: string | null }>();
+      const byId = new Map(keys.results.map((row) => [row.id, row]));
+      expect(byId.get("key_archive_active")).toMatchObject({
+        status: "deactivated",
+        revoked_at: expect.any(String),
+      });
+      expect(byId.get("key_archive_second")).toMatchObject({ status: "deactivated" });
+      // Already-inactive keys keep their existing status and are not reported.
+      expect(byId.get("key_archive_revoked")).toMatchObject({ status: "revoked" });
+
+      // Keys on other projects are untouched.
+      const otherKey = await db
+        .prepare("SELECT status FROM api_keys WHERE id = 'key_other_project'")
+        .first<{ status: string }>();
+      expect(otherKey?.status).toBe("active");
     });
   });
 

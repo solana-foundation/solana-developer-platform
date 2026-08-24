@@ -94,7 +94,12 @@ export const archiveProject = async (c: AppContext) => {
     throw notFound("Project");
   }
 
-  await projectService.archiveProject(projectId);
+  const deactivatedKeyHashes = await projectService.archiveProject(projectId);
+  // The transaction above already revoked the keys; purging their cache
+  // entries makes that effective immediately instead of at TTL expiry.
+  for (const keyHash of deactivatedKeyHashes) {
+    await c.var.kv.apiKeys.delete(`key:${keyHash}`);
+  }
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));

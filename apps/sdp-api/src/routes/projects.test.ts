@@ -61,11 +61,15 @@ describe("Projects Routes", () => {
     const db = getDb(env);
     const kv = createKVStoreSet(env);
 
-    // Clear rate limit KV to prevent 429 errors between tests
+    // Clear rate limit KV to prevent 429 errors between tests, and reset the
+    // api-key auth cache including negative-cache markers: a key rejected in
+    // one test (e.g. after archival) must not fail the next test's requests.
     const keys = await kv.rateLimits.list();
     for (const key of keys.keys) {
       await kv.rateLimits.delete(key.name);
     }
+    await kv.apiKeys.delete(`key:${apiKeyHash}`);
+    await kv.apiKeys.delete(`invalid:${apiKeyHash}`);
 
     // Delete in FK-safe order: api_keys → project_members → projects.
     // The migration added ON DELETE RESTRICT from api_keys.project_id, so
@@ -325,6 +329,40 @@ describe("Projects Routes", () => {
         .bind(TEST_PROJECT.id)
         .first<{ status: string }>();
       expect(project?.status).toBe("archived");
+    });
+
+    it("deactivates the project API keys and revokes the warm-cached key immediately", async () => {
+      const deleteRes = await app.request(
+        `/v1/projects/${TEST_PROJECT.id}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+      expect(deleteRes.status).toBe(204);
+
+      const keyRow = await getDb(env)
+        .prepare("SELECT status, revoked_at FROM api_keys WHERE id = ?")
+        .bind(TEST_API_KEY.id)
+        .first<{ status: string; revoked_at: string | null }>();
+      expect(keyRow).toMatchObject({ status: "deactivated", revoked_at: expect.any(String) });
+
+      // The key was warm in KV before archival (seeded in beforeEach). The
+      // archive response must purge it, so the very next request fails — even
+      // though the request races no cache TTL.
+      const kv = createKVStoreSet(env);
+      const cached = await kv.apiKeys.get(`key:${apiKeyHash}`, "json");
+      expect(cached).toBeNull();
+
+      const followUp = await app.request(
+        `/v1/projects/${TEST_PROJECT.id}`,
+        {
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+      expect(followUp.status).toBe(401);
     });
 
     it("returns 404 without archiving another project in the same organization", async () => {
