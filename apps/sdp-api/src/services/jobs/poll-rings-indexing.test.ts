@@ -45,7 +45,7 @@ function serviceWith(gateway: InMemoryRingsGateway) {
 describe("pollRingsIndexing", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
-    jobEnv = { ...env, HELIUS_RINGS_ENABLED: "true", HELIUS_RINGS_ADAPTER: "http" };
+    jobEnv = { ...env, HELIUS_RINGS_ENABLED: "true", HELIUS_RINGS_ADAPTER: "ts" };
     const db = getDb(env);
 
     await db
@@ -78,7 +78,7 @@ describe("pollRingsIndexing", () => {
     walletId = wallet.id;
   });
 
-  it("stays dormant unless the flag and the http adapter are both set", async () => {
+  it("stays dormant unless the flag and the live adapter are both set", async () => {
     const gateway = new InMemoryRingsGateway({ indexingDelayMs: 0 });
     const operation = await serviceWith(gateway).prepareOperation(
       { walletId, opType: "shield", clientNonce: "job-dormant" },

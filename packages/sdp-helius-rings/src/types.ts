@@ -4,6 +4,8 @@ import type {
   MATERIAL_TAGS,
   OP_TYPES,
   OPERATION_STATES,
+  PRIVATE_HISTORY_DIRECTIONS,
+  PRIVATE_HISTORY_KINDS,
   RUNTIME_HEALTH_COMPONENTS,
   RUNTIME_HEALTH_STATUSES,
   TRANSFER_MODES,
@@ -17,6 +19,8 @@ export type OpType = (typeof OP_TYPES)[number];
 export type FailureCode = (typeof FAILURE_CODES)[number];
 export type KeyKind = (typeof KEY_KINDS)[number];
 export type MaterialTag = (typeof MATERIAL_TAGS)[number];
+export type PrivateHistoryKind = (typeof PRIVATE_HISTORY_KINDS)[number];
+export type PrivateHistoryDirection = (typeof PRIVATE_HISTORY_DIRECTIONS)[number];
 export type RuntimeHealthStatus = (typeof RUNTIME_HEALTH_STATUSES)[number];
 export type RuntimeHealthComponent = (typeof RUNTIME_HEALTH_COMPONENTS)[number];
 export type WalletStatus = (typeof WALLET_STATUSES)[number];
@@ -62,6 +66,39 @@ export interface AssetBalance {
   symbol: string;
   amountRaw: string;
   decimals: number;
+}
+
+/**
+ * One row of a wallet's private history, as the shielded pool recorded it.
+ *
+ * Amounts and slots are decimal strings because the protocol's are 64-bit and
+ * larger: passing them as numbers would round silently, and this type crosses
+ * both a JSON boundary and a `@solana/kit` major boundary.
+ */
+export interface PrivateHistoryEntry {
+  /** Outer transaction signature the row was reconstructed from. */
+  signature: string;
+  slot: string;
+  /** Discriminates rows belonging to the same transaction. */
+  index: string;
+  kind: PrivateHistoryKind;
+  direction: PrivateHistoryDirection;
+  mint: string;
+  amountRaw: string;
+}
+
+/**
+ * What a full sync managed to read. `degraded` is the field callers must
+ * respect: a sync that could not decrypt or parse everything still returns
+ * balances, and treating those as complete would understate what a wallet
+ * holds.
+ */
+export interface SyncReport {
+  /** Unspent notes the wallet held when the sync finished. */
+  storedNotes: number;
+  unparsedTransactions: number;
+  undecryptableCandidates: number;
+  degraded: boolean;
 }
 
 export interface PrivateOperationSummary {

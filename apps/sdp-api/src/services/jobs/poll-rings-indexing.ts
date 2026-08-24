@@ -13,9 +13,9 @@
  *     (retryable) — the sweep never leaves an operation in limbo forever.
  *
  * Ships dormant: the job early-returns unless the feature flag is on AND
- * HELIUS_RINGS_ADAPTER is "http" — the live gateway selector Track B flips.
- * Until then no operation can reach `indexing` in production anyway (the
- * NotImplemented gateway fails the pipeline at `proving`).
+ * HELIUS_RINGS_ADAPTER selects the live adapter. Until then no operation can
+ * reach `indexing` in production anyway (the not-implemented gateway fails the
+ * pipeline at `proving`).
  */
 
 import {
@@ -41,7 +41,7 @@ export interface PollRingsIndexingDependencies {
 export function isRingsIndexingPollEnabled(
   env: Pick<Env, "HELIUS_RINGS_ENABLED" | "HELIUS_RINGS_ADAPTER">
 ): boolean {
-  return isHeliusRingsEnabled(env) && env.HELIUS_RINGS_ADAPTER === "http";
+  return isHeliusRingsEnabled(env) && env.HELIUS_RINGS_ADAPTER === "ts";
 }
 
 export async function pollRingsIndexing(

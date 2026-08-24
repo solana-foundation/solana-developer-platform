@@ -13,14 +13,29 @@ the adapter behind that port.
 included, and Kamino's klend-sdk drags in Kit 2.3.0. Four majors already coexist because pnpm's isolated
 layout keeps each subtree on its own resolution — so the fix is a boundary, not an upgrade.
 
-This package is the only place Kit 7 lives. Its public surface takes and returns plain strings, so the
-major does not leak into a consumer still on Kit 6, where the two `Address` brands would not be
-assignable to each other. Verified rather than assumed:
+This package is the only place Kit 7 lives. Verified rather than assumed:
 
 ```
 packages/sdp-helius-rings-sdk  @solana/kit 7.1.1   (shared with zolana and its @solana-program peers)
 apps/sdp-api                   @solana/kit 6.8.0
 ```
+
+The boundary is the main barrel, which exports exactly one thing: `createRingsGateway`, taking plain
+strings and returning a `RingsGatewayPort` whose types all come from the Kit-free `@sdp/helius-rings`.
+The client, the authority and the material types are Kit-7-typed and reachable only from inside this
+package. That is a hard rule rather than a convention, because the failure it prevents is not a compile
+error: two majors' branded `Address` types can match structurally, so a leaked type would typecheck and
+then behave as the wrong major's value at runtime.
+
+Two subpaths sit outside that rule and are worth knowing about. `./testing` is Kit-neutral by design and
+exists to be imported from Kit 6. `./deterministic-ka` is **not** — it hands back `ShieldedMaterial`,
+which carries a `ViewingKey` and a `ShieldedAddress` — so it is for use inside this package and its own
+tests. When the seed is wired up, `@sdp/api` should pass it to `createRingsGateway` as a string rather
+than construct a material source itself.
+
+Bytes still cross, since the port carries an encoded transaction. `apps/sdp-api` asserts from its own Kit 6
+that a transaction this package encoded under Kit 7 decodes and re-encodes byte-identically
+(`services/helius-rings/kit-cross-major.test.ts`), using the `./testing` subpath as the Kit 7 producer.
 
 ## Where key material comes from
 

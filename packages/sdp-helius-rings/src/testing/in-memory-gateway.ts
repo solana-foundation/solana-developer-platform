@@ -12,11 +12,14 @@ import type {
 import { SecretRef } from "../secrets";
 import type { ProofArtifact, RuntimeHealth } from "../types";
 
+/** Wrapped SOL, the mint SDP uses to mean native lamports. */
+// biome-ignore lint/security/noSecrets: wrapped SOL mint address, not a secret.
+const NATIVE_MINT = "So11111111111111111111111111111111111111112";
+
 /**
  * Test-only implementation of RingsGatewayPort. Never shipped: it lives under
  * src/testing/, is exported only via the `@sdp/helius-rings/testing` subpath,
- * and is not selectable by environment. Production uses
- * NotImplementedRingsGateway until Track B lands the live adapter.
+ * and is not selectable by environment.
  *
  * Deterministic by construction — outputs derive from a hash of the inputs,
  * and time comes from the injected clock — so the same test always sees the
@@ -102,31 +105,46 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
   async provisionIdentity(input: ProvisionIdentityInput): Promise<ProvisionIdentityResult> {
     const seed = `${input.walletId}:${input.sdpAddress}`;
     return {
-      shieldedAddress: `rings1${hashHex(`${seed}:address`, 16)}`,
-      keyRefs: (["viewing", "nullifier"] as const).map((kind) => ({
-        kind,
-        material: new SecretRef(hexToBytes(hashHex(`${seed}:${kind}`, 32))),
-        materialTag: "simulated",
-        keyVersion: "v1",
-      })),
+      identity: {
+        shieldedAddress: `rings1${hashHex(`${seed}:address`, 16)}`,
+        owner: input.sdpAddress,
+      },
+      registrationSignatures: [`sig:${hashHex(`${seed}:register`, 8)}`],
+      mergingEnabled: true,
+      materialTag: "simulated",
     };
   }
 
+  /**
+   * Each call reports one more shielded SOL note than the last, so a test can
+   * tell a second sync from a repeat of the first without reaching inside.
+   */
   async syncPhoton(input: SyncPhotonInput): Promise<SyncPhotonResult> {
     const next = (this.syncCounters.get(input.walletId) ?? 0) + 1;
     this.syncCounters.set(input.walletId, next);
+    const amountRaw = String(1_000_000_000 * next);
+
     return {
-      cursor: `slot:${next}`,
-      balances: [
+      balances: [{ mint: NATIVE_MINT, amountRaw, decimals: 9, symbol: "SOL" }],
+      history: [
         {
-          // biome-ignore lint/security/noSecrets: wrapped SOL mint address, not a secret.
-          mint: "So11111111111111111111111111111111111111112",
-          amountRaw: String(1_000_000_000 * next),
-          decimals: 9,
-          symbol: "SOL",
+          signature: `sig:${hashHex(`${input.walletId}:${next}`, 8)}`,
+          slot: String(next),
+          index: "0",
+          kind: "shield",
+          direction: "inbound",
+          mint: NATIVE_MINT,
+          amountRaw,
         },
       ],
+      report: {
+        storedNotes: next,
+        unparsedTransactions: 0,
+        undecryptableCandidates: 0,
+        degraded: false,
+      },
       indexedOperationSignatures: [],
+      observedAt: this.now(),
     };
   }
 
@@ -136,7 +154,11 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
       this.buildUnsignedTx?.(input) ?? bytesToBase64(hexToBytes(hashHex(`${seed}:tx`, 64)));
     return {
       outerUnsignedTxBase64,
-      requiredSigners: [input.operation.walletId],
+      // The owner address that signs the outer transaction, falling back to a
+      // deterministic stand-in. A wallet id here would type-check and read as
+      // an address to anything downstream, which is exactly the confusion a
+      // test double should not introduce.
+      requiredSigners: [input.operation.input?.from ?? `addr${hashHex(`${seed}:signer`, 16)}`],
       ringsMetadata: new SecretRef({ seed: hashHex(`${seed}:metadata`, 16) }),
     };
   }

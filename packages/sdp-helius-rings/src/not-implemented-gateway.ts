@@ -2,17 +2,14 @@ import { HeliusRingsError } from "./errors";
 import type { RingsGatewayPort } from "./port";
 
 /**
- * The production gateway until Track B lands the live HTTP adapter. Every
- * method throws `gateway_unavailable` naming its seam, so an operation that
- * reaches the port ends in `failed:gateway_unavailable` (retryable) and the UI
- * reports the integration honestly instead of simulating it.
+ * The gateway SDP runs when no live adapter is selected. Every method throws
+ * `gateway_unavailable` naming its seam, so an operation that reaches the port
+ * ends in `failed:gateway_unavailable` (retryable) and the UI reports the
+ * integration honestly instead of simulating it.
  */
 
 function notImplemented(method: string): never {
-  throw new HeliusRingsError(
-    "gateway_unavailable",
-    `${method} awaiting Zolana sidecar integration`
-  );
+  throw new HeliusRingsError("gateway_unavailable", `${method} has no Rings gateway configured`);
 }
 
 export class NotImplementedRingsGateway implements RingsGatewayPort {

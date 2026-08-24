@@ -3,8 +3,7 @@
 Helius Rings is SDP's devnet-only shielded-wallet module: private wallets bound
 to SDP custody wallets, with shielded transfers built on Zolana. This document
 covers the architecture an operator needs: the state machine, failure codes,
-configuration, and the seams that stay dark until the external integration
-(Track B) lands.
+configuration, and the seams that stay dark until the money flows land.
 
 ## Architecture
 
@@ -16,25 +15,43 @@ routes (/v1/helius-rings)               flag-gated, real policy enforcement
        │                                key refs, zones, events, health
        ├─ signer adapter                createOrgSigner → custody signing
        ├─ RPC adapter                   shared sendTransaction path
-       └─ RingsGatewayPort              THE seam. Production wiring is
-                                        NotImplementedRingsGateway until the
-                                        live HTTP adapter replaces it.
+       └─ RingsGatewayPort              THE seam. Either the in-process Rings
+                                        SDK adapter or, by default,
+                                        NotImplementedRingsGateway.
 ```
 
-`RingsGatewayPort` is the only place external Rings infrastructure (Zolana
-sidecar, Photon indexer, prover, key authority) is called. Everything on the
-SDP side of the port is real and fully tested; everything behind it throws
-`gateway_unavailable` until Track B wires the live adapter. No mocks ship: the
-test double lives behind the `@sdp/helius-rings/testing` subpath and is not
-selectable in production.
+`RingsGatewayPort` is the only place external Rings infrastructure (the Zolana
+SDK, Photon indexer, prover, key authority) is called. Everything on the SDP
+side of the port is real and fully tested. No mocks ship: the test double lives
+behind the `@sdp/helius-rings/testing` subpath and is not selectable in
+production.
+
+The live adapter runs the Rings SDK **in this process** rather than calling a
+sidecar, which is why the selector value is `ts`. It is pinned to `@solana/kit`
+7 while the rest of the API is on 6, so it is reached from exactly one file
+(`services/helius-rings/gateway.ts`) and only plain strings and Kit-free DTOs
+cross that boundary.
+
+Today the adapter implements `probeHealth`; every other method fails closed
+with `gateway_unavailable` until provisioning and the money flows land.
 
 ## Configuration
 
 | Variable | Values | Meaning |
 | --- | --- | --- |
 | `HELIUS_RINGS_ENABLED` | `false` (default) / `true` | Gates the API routes, the dashboard workspace, and the indexing-poll job. |
-| `HELIUS_RINGS_ADAPTER` | `none` (default) / `http` | Gateway selector. Only `http` activates the live adapter and the indexing poll; anything else keeps `NotImplementedRingsGateway`. |
+| `HELIUS_RINGS_ADAPTER` | `none` (default) / `ts` | Gateway selector. Only `ts` activates the in-process SDK adapter and the indexing poll; anything else keeps `NotImplementedRingsGateway`. |
+| `HELIUS_RINGS_INDEXER_URL` | URL | Photon indexer. Required when the adapter is `ts`. |
+| `HELIUS_RINGS_PROVER_URL` | URL | Proving service. Required when the adapter is `ts`. |
+| `HELIUS_RINGS_ALLOW_INSECURE_HTTP` | `false` (default) / `true` | Permits plain http to the two endpoints above. Needed only because the public devnet deployment is http; in plaintext the indexer response reveals which notes an identity owns and the prover request carries the witness. |
+| `HELIUS_RINGS_DETERMINISTIC_KA_SEED` | base64, 32 bytes | Master seed every shielded viewing and nullifier key is derived from. Permanent once a wallet is registered: changing it re-keys an identity that cannot be re-keyed on chain. |
 | `SOLANA_NETWORK` | must be `devnet` | `HeliusRingsService` refuses to construct on any other network, and the schema pins `helius_rings_wallets.network` to `'devnet'`. Going to mainnet is a deliberate forward migration, not a config flip. |
+
+The adapter reuses `SOLANA_RPC_HELIUS_URL` and `SOLANA_RPC_HELIUS_API_KEY` for
+its RPC endpoint; there is no separate Rings RPC variable. Selecting `ts`
+without the indexer and prover URLs is not silently downgraded: health reports
+every component red with the missing names, and any operation fails closed with
+`config_error`.
 
 ## State machine
 
@@ -63,7 +80,7 @@ through them in one pass.
 | `signer_failed` | ready_to_sign | varies | Custody signing failed; `WALLET_NOT_FOUND`-class errors are non-retryable. |
 | `submit_failed` | submitted | yes | RPC broadcast failed; the intent key makes resubmission safe. |
 | `indexing_timeout` | indexing | yes | Photon did not index within 30 minutes (`RINGS_INDEXING_TIMEOUT_MS`). |
-| `gateway_unavailable` | any port call | yes | The gateway seam is not implemented or unreachable. The expected failure until Track B lands. |
+| `gateway_unavailable` | any port call | yes | The gateway seam is not implemented or unreachable. Expected for every method the adapter has not filled in yet. |
 | `invalid_input` | preparing | varies | Policy evaluation threw, or an inconsistent row was found. |
 
 ## Idempotency and retries
@@ -99,7 +116,7 @@ through them in one pass.
 per managed-job execution every five minutes (`src/job.ts`, the only tick a
 Cloud Run deployment gets — web replicas skip the in-process scheduler under
 `K_SERVICE`). Registered unconditionally in both, inert unless
-`HELIUS_RINGS_ENABLED=true` and `HELIUS_RINGS_ADAPTER=http`:
+`HELIUS_RINGS_ENABLED=true` and `HELIUS_RINGS_ADAPTER=ts`:
 
 1. Operations in `submitted` are advanced to `indexing` and polled in the same
    call. This is the crash-recovery path: the broadcast happens inside
@@ -125,18 +142,16 @@ Cloud Run deployment gets — web replicas skip the in-process scheduler under
   recovery card. Degraded states render honestly: a wallet whose provisioning
   hit the seam stays `pending`; failed operations show their code verbatim.
 
-## What stays dark until Track B
+## What stays dark
 
 | Surface | Behavior today |
 | --- | --- |
 | Wallet provisioning | `503` seam response; wallet stays `pending`. |
 | Any operation past policy | `failed:gateway_unavailable` (retryable). |
-| Balances / Photon sync | Not rendered; no fake cursor ever advances. |
-| Health board | `gateway` red; unobserved components red. |
+| Balances / Photon sync | Not rendered; the adapter always full-syncs, so no cursor is kept. |
+| Health board | Live under the `ts` adapter; unobserved components read red. |
 
-Track B replaces `NotImplementedRingsGateway` with the live HTTP adapter one
-method at a time (health first), flipping `HELIUS_RINGS_ADAPTER=http` when the
-sidecar is reachable.
+The in-process adapter is being filled in one method at a time, health first.
 
 One gap remains in `runPipeline` for the moment that flip happens: **nothing
 sweeps `ready_to_sign`.** An operation that dies between the proof landing and

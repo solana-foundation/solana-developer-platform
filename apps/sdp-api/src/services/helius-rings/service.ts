@@ -10,9 +10,9 @@ import type {
 } from "@sdp/helius-rings";
 import {
   HeliusRingsError,
-  NotImplementedRingsGateway,
   nextState,
   type RingsGatewayPort,
+  RUNTIME_HEALTH_COMPONENTS,
 } from "@sdp/helius-rings";
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { ApprovalRequestStatus, WalletOperationActor } from "@sdp/types";
@@ -37,6 +37,7 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { enforceWalletOperationPolicy } from "@/services/policy/enforcement.service";
 import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
+import { resolveRingsGateway } from "./gateway";
 import { buildRingsWalletOperationInput } from "./policy-envelope";
 import { submitRingsOuterTransaction } from "./rpc-adapter";
 import { signRingsOuterTransaction } from "./signer-adapter";
@@ -47,8 +48,8 @@ import { signRingsOuterTransaction } from "./signer-adapter";
  * machine with compare-and-swap guards, and every hop is recorded on the
  * operation's event feed.
  *
- * Until Track B lands the live gateway, any path that reaches the port ends in
- * `failed:gateway_unavailable` (retryable) — the UI reports the pending
+ * Any path reaching a port method the selected gateway has not implemented ends
+ * in `failed:gateway_unavailable` (retryable) — the UI reports the pending
  * integration honestly instead of simulating it.
  */
 
@@ -133,7 +134,7 @@ export class HeliusRingsService {
     if ((env.SOLANA_NETWORK ?? "devnet") !== "devnet") {
       throw new AppError("SERVICE_UNAVAILABLE", "Helius Rings is devnet-only");
     }
-    this.gateway = dependencies.gateway ?? new NotImplementedRingsGateway();
+    this.gateway = dependencies.gateway ?? resolveRingsGateway(env);
     this.wallets = dependencies.wallets ?? createHeliusRingsWalletRepository(env);
     this.operations = dependencies.operations ?? createHeliusRingsOperationRepository(env);
     this.events = dependencies.events ?? createHeliusRingsEventRepository(env);
@@ -161,12 +162,12 @@ export class HeliusRingsService {
 
   /**
    * Creates (or returns) the rings wallet bound to one custody wallet, then
-   * asks the gateway for a shielded identity. Until Track B lands, the port
-   * throws and the wallet stays `pending` — the wizard renders that state.
+   * asks the gateway for a shielded identity. While the gateway cannot yet
+   * provision, the port throws and the wallet stays `pending` — the wizard
+   * renders that state.
    *
-   * Key material is deliberately not persisted here: sealing it through
-   * custody-cipher into `helius_rings_key_refs` is the key-authority work
-   * (Track B4), and holding it unsealed anywhere is not an option.
+   * Only the public identity crosses the port, so there is no key material to
+   * persist here and none is held in this process beyond the gateway call.
    */
   async provisionPrivateWallet(input: ProvisionPrivateWalletInput): Promise<PrivateWallet> {
     const wallet = await this.wallets.createWallet({
@@ -182,19 +183,16 @@ export class HeliusRingsService {
       return mapHeliusRingsWalletRow(wallet);
     }
 
-    const identity = await this.gateway.provisionIdentity({
+    const provision = await this.gateway.provisionIdentity({
       walletId: wallet.id,
       sdpAddress: input.sdpAddress,
     });
 
-    const materialTag = identity.keyRefs.every((keyRef) => keyRef.materialTag === "live")
-      ? "live"
-      : "simulated";
     const provisioned = await this.wallets.markProvisioned({
       ...this.tenant,
       id: wallet.id,
-      shieldedAddress: identity.shieldedAddress,
-      materialTag,
+      shieldedAddress: provision.identity.shieldedAddress,
+      materialTag: provision.materialTag,
       expectedStatus: "pending",
     });
     // A lost CAS means an operator paused the wallet mid-provision; honour it.
@@ -452,23 +450,33 @@ export class HeliusRingsService {
     try {
       const health = await this.gateway.probeHealth();
       await Promise.all(
-        (["rpc", "prover", "photon", "gateway"] as const).map((component) =>
+        RUNTIME_HEALTH_COMPONENTS.map((component) =>
           this.health.recordHealth({
             projectId: this.tenant.projectId,
             component,
             status: health[component],
+            // The response is rebuilt from these rows, so a reason that is not
+            // stored is a reason the operator never sees. The probe classifies
+            // its failures precisely so this field can carry them.
+            detail: health.detail?.[component] ? { reason: health.detail[component] } : null,
           })
         )
       );
     } catch (error) {
-      await this.health.recordHealth({
-        projectId: this.tenant.projectId,
-        component: "gateway",
-        status: "red",
-        detail: {
-          reason: error instanceof HeliusRingsError ? error.message : "gateway probe failed",
-        },
-      });
+      // Every component, not just the gateway: the probe is the only thing that
+      // observes the other three, so a probe that did not run leaves no
+      // evidence about any of them, and a stale green would be read as one.
+      const reason = error instanceof HeliusRingsError ? error.message : "gateway probe failed";
+      await Promise.all(
+        RUNTIME_HEALTH_COMPONENTS.map((component) =>
+          this.health.recordHealth({
+            projectId: this.tenant.projectId,
+            component,
+            status: "red",
+            detail: { reason },
+          })
+        )
+      );
     }
     return mapHeliusRingsHealthRows(
       await this.health.listHealthByProject({ projectId: this.tenant.projectId })
@@ -486,9 +494,7 @@ export class HeliusRingsService {
     // proving: build the outer tx and request the proof.
     try {
       const built = await this.gateway.buildOperation({
-        // The port receives the domain view; key refs arrive with Track B4.
         operation: this.toPrivateOperation(current),
-        keyRefs: [],
       });
       const proof = await this.gateway.requestProof({
         operationId: current.id,
@@ -565,13 +571,21 @@ export class HeliusRingsService {
     const failure =
       error instanceof RingsAdapterError
         ? { code: error.failureCode, message: error.message, retryable: error.retryable }
-        : error instanceof HeliusRingsError && error.code === "gateway_unavailable"
-          ? { code: "gateway_unavailable" as const, message: error.message, retryable: true }
-          : {
-              code: "gateway_unavailable" as const,
-              message: error instanceof Error ? error.message : "rings gateway failed",
-              retryable: true,
-            };
+        : // Missing configuration is not transient: no amount of retrying
+          // supplies an environment variable, and offering a retry that cannot
+          // succeed sends the operator back to the wrong lever. The code stays
+          // `gateway_unavailable` because `failure_code` is a CHECK-constrained
+          // vocabulary that has no `config_error` member yet; the message names
+          // the variables, and Phase 4's migration adds the accurate code.
+          error instanceof HeliusRingsError && error.code === "config_error"
+          ? { code: "gateway_unavailable" as const, message: error.message, retryable: false }
+          : error instanceof HeliusRingsError && error.code === "gateway_unavailable"
+            ? { code: "gateway_unavailable" as const, message: error.message, retryable: true }
+            : {
+                code: "gateway_unavailable" as const,
+                message: error instanceof Error ? error.message : "rings gateway failed",
+                retryable: true,
+              };
 
     const failed = await this.fail(operation.id, operation.state, failure);
     return failed ?? (await this.requireOperation(operation.id));

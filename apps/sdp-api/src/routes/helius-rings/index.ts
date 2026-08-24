@@ -22,7 +22,7 @@ const heliusRings = new Hono<{ Bindings: Env }>();
 
 /**
  * Router-wide gate: 403 unless the feature flag is on. The flag stays off in
- * every deployed environment until Track B lands the live gateway; the
+ * every deployed environment while the integration is incomplete; the
  * devnet-only guard inside HeliusRingsService is the second lock.
  */
 async function requireHeliusRingsFeature(c: Context<{ Bindings: Env }>, next: Next) {

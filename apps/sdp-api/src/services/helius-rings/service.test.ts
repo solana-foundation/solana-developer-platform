@@ -1,4 +1,4 @@
-import type { PrivateOperationInput } from "@sdp/helius-rings";
+import { HeliusRingsError, type PrivateOperationInput } from "@sdp/helius-rings";
 import { InMemoryRingsGateway } from "@sdp/helius-rings/testing";
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { PolicyDecision } from "@sdp/types";
@@ -188,6 +188,24 @@ describe("HeliusRingsService", () => {
 
       expect(operation.state).toBe("failed");
       expect(operation.failure).toMatchObject({ code: "gateway_unavailable", retryable: true });
+    });
+
+    it("does not offer a retry when the gateway is merely misconfigured", async () => {
+      const gateway = new InMemoryRingsGateway();
+      gateway.buildOperation = () =>
+        Promise.reject(
+          new HeliusRingsError("config_error", "misconfigured: missing HELIUS_RINGS_PROVER_URL")
+        );
+
+      const operation = await service({ gateway }).prepareOperation(
+        operationInput({ clientNonce: "nonce-misconfigured" }),
+        actorContext
+      );
+
+      // No amount of retrying supplies an environment variable, so the retry
+      // affordance would send the operator back to the wrong lever.
+      expect(operation.failure).toMatchObject({ retryable: false });
+      expect(operation.failure?.message).toContain("HELIUS_RINGS_PROVER_URL");
     });
 
     it("drives an allowed operation through sign and submit to indexing", async () => {
@@ -415,6 +433,44 @@ describe("HeliusRingsService", () => {
       }).probeHealth();
 
       expect(health).toMatchObject({ rpc: "green", prover: "amber", gateway: "green" });
+    });
+
+    it("carries the probe's reason through to the response", async () => {
+      // The response is rebuilt from the stored rows, so a reason the service
+      // does not persist is a reason the operator never sees — which is what
+      // made every classified probe failure invisible.
+      const health = await service({
+        gateway: new InMemoryRingsGateway({
+          health: {
+            rpc: "red",
+            prover: "green",
+            photon: "amber",
+            gateway: "green",
+            detail: { rpc: "timed out", photon: "reported unhealthy" },
+          },
+        }),
+      }).probeHealth();
+
+      expect(health.detail).toMatchObject({
+        "rpc.reason": "timed out",
+        "photon.reason": "reported unhealthy",
+      });
+    });
+
+    it("marks every component red when the probe itself throws", async () => {
+      const gateway = new InMemoryRingsGateway();
+      gateway.probeHealth = () => Promise.reject(new Error("boom"));
+
+      const health = await service({ gateway }).probeHealth();
+
+      // Not just the gateway: the probe is the only observer of the other
+      // three, so a probe that did not run leaves no evidence about any of them.
+      expect(health).toMatchObject({
+        rpc: "red",
+        prover: "red",
+        photon: "red",
+        gateway: "red",
+      });
     });
   });
 

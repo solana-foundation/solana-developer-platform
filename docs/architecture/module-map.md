@@ -38,14 +38,14 @@ This map is generated from the module-boundary check. It records the permitted w
 
 ## Declared Workspace Graph
 
-- `@sdp/api` -> `@sdp/custody`, `@sdp/earn`, `@sdp/env-config`, `@sdp/helius-rings`, `@sdp/issuance`, `@sdp/kamino`, `@sdp/payments`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`
+- `@sdp/api` -> `@sdp/custody`, `@sdp/earn`, `@sdp/env-config`, `@sdp/helius-rings`, `@sdp/helius-rings-sdk`, `@sdp/issuance`, `@sdp/kamino`, `@sdp/payments`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`
 - `@sdp/api-integration` -> `@sdp/api`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/spc-escrow`, `@sdp/types`
 - `@sdp/custody` -> `@sdp/types`
 - `@sdp/earn` -> `@sdp/types`
 - `@sdp/env-config` -> None
 - `@sdp/helius-gateway` -> None
 - `@sdp/helius-rings` -> None
-- `@sdp/helius-rings-sdk` -> None
+- `@sdp/helius-rings-sdk` -> `@sdp/helius-rings`
 - `@sdp/issuance` -> `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/kamino` -> `@sdp/earn`, `@sdp/solana`, `@sdp/types`
 - `@sdp/kit-augment` -> None

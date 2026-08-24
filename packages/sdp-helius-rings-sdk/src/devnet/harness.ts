@@ -29,6 +29,17 @@ export interface DevnetConfig {
 }
 
 /**
+ * Matches how `sdp-api` reads the same variable. `HELIUS_RINGS_ALLOW_INSECURE_HTTP`
+ * is shared with the running service and the configurator writes it as `true`,
+ * so accepting only `"1"` here meant a correctly configured environment failed
+ * to build a client under the gate and nowhere else.
+ */
+function isTruthyFlag(value: string | undefined): boolean {
+  if (!value) return false;
+  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+}
+
+/**
  * Reads the gate's configuration, or returns undefined when the gate is off.
  * Every value is explicit: this test moves real devnet funds, so nothing here
  * falls back to a default.
@@ -61,7 +72,7 @@ export function readDevnetConfig(): DevnetConfig | undefined {
     rpcUrl: required.rpcUrl as string,
     indexerUrl: required.indexerUrl as string,
     proverUrl: required.proverUrl as string,
-    allowInsecureHttp: process.env.HELIUS_RINGS_ALLOW_INSECURE_HTTP === "1",
+    allowInsecureHttp: isTruthyFlag(process.env.HELIUS_RINGS_ALLOW_INSECURE_HTTP),
     seed: new Uint8Array(seed),
     splMint: process.env.HELIUS_RINGS_E2E_SPL_MINT,
   };

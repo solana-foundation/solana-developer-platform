@@ -13,6 +13,11 @@
       "types": "./src/deterministic-ka/index.ts",
       "import": "./src/deterministic-ka/index.ts",
       "default": "./src/deterministic-ka/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "import": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
     }
   },
   "scripts": {
@@ -23,6 +28,7 @@
   },
   "dependencies": {
     "@heliuslabs/zolana": "0.1.1-alpha",
+    "@sdp/helius-rings": "workspace:*",
     "@solana/kit": "7.1.1"
   },
   "devDependencies": {

@@ -41,6 +41,19 @@ export const FAILURE_CODES = [
 
 export const KEY_KINDS = ["viewing", "nullifier"] as const;
 
+/**
+ * What a synced history row says happened on chain.
+ *
+ * Deliberately not `OP_TYPES`. That set is what SDP lets a caller *request*,
+ * while a history row is whatever the protocol recorded — including a `split`
+ * this integration never builds but another client could have. Reusing the
+ * request vocabulary would force such a row to be dropped or mislabelled.
+ */
+export const PRIVATE_HISTORY_KINDS = ["shield", "transfer", "withdraw", "merge", "split"] as const;
+
+/** A history row's direction relative to the wallet that synced it. */
+export const PRIVATE_HISTORY_DIRECTIONS = ["inbound", "outbound", "self"] as const;
+
 export const MATERIAL_TAGS = ["simulated", "live"] as const;
 
 export const RUNTIME_HEALTH_STATUSES = ["green", "amber", "red"] as const;
