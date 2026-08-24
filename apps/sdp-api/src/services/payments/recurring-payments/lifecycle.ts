@@ -317,31 +317,34 @@ async function runRecurringPaymentLifecycle(input: {
     return input.recurringPayment;
   }
 
-  const settled = await recoverOrBlockLifecycleCollection({
-    env: input.env,
-    recurringRepo,
-    subscriptionsRepo,
-    paymentsRepo,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    recurringPayment: input.recurringPayment,
-  });
+  const collectionState =
+    input.operation === "cancel"
+      ? { recurringPayment: input.recurringPayment, subscription: null }
+      : await recoverOrBlockLifecycleCollection({
+          env: input.env,
+          recurringRepo,
+          subscriptionsRepo,
+          paymentsRepo,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          recurringPayment: input.recurringPayment,
+        });
 
   assertLifecyclePreconditions({
     operation: input.operation,
-    recurringPayment: settled.recurringPayment,
+    recurringPayment: collectionState.recurringPayment,
     sourceWallet: input.sourceWallet,
     nowIso: new Date().toISOString(),
   });
   if (
-    settled.recurringPayment.status ===
+    collectionState.recurringPayment.status ===
     getRecurringPaymentLifecycleStatuses(input.operation).finalStatus
   ) {
-    return settled.recurringPayment;
+    return collectionState.recurringPayment;
   }
 
   const claimed = await recurringRepo.claimRecurringPaymentLifecycle({
-    recurringPaymentId: settled.recurringPayment.id,
+    recurringPaymentId: collectionState.recurringPayment.id,
     organizationId: input.organizationId,
     projectId: input.projectId,
     operation: input.operation,
@@ -372,8 +375,8 @@ async function runRecurringPaymentLifecycle(input: {
     }
 
     const subscription =
-      settled.subscription?.id === claimed.subscription_id
-        ? settled.subscription
+      collectionState.subscription?.id === claimed.subscription_id
+        ? collectionState.subscription
         : await subscriptionsRepo.getSubscriptionById({
             subscriptionId: claimed.subscription_id,
             organizationId: input.organizationId,

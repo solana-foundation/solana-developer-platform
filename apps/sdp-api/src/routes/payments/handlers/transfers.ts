@@ -49,6 +49,7 @@ import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
+import { logEvent } from "@/runtime/money-path-events";
 import {
   assertApiKeyWalletAccess,
   getAllowedApiKeyWalletIdsForPermissions,
@@ -60,6 +61,12 @@ import {
   type OutboundPaymentOperation,
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
+import {
+  createTransferSignedSubmissionStore,
+  isDefiniteSubmissionError,
+  type SignedSubmissionStore,
+  submitSignedPaymentTransaction,
+} from "@/services/payments/signed-submission";
 import {
   approvedWalletOperationAttemptId,
   approvedWalletOperationId,
@@ -423,9 +430,9 @@ export async function findTransferIdempotentKeyReplay(
 
 async function updateTransferRecord(
   c: AppContext,
-  transferId: string,
+  transfer: TransferRow,
   patch: {
-    status?: TransferStatus;
+    status: TransferStatus;
     signature?: string | null;
     serializedTx?: string | null;
     slot?: number | null;
@@ -438,7 +445,10 @@ async function updateTransferRecord(
   const now = new Date().toISOString();
 
   const updated = await repository.updateTransfer({
-    transferId,
+    transferId: transfer.id,
+    organizationId: transfer.organization_id,
+    projectId: transfer.project_id,
+    expectedStatus: "processing",
     status: patch.status,
     signature: patch.signature,
     serializedTx: patch.serializedTx,
@@ -449,11 +459,71 @@ async function updateTransferRecord(
     updatedAt: now,
   });
 
-  if (!updated) {
+  if (updated) {
+    return updated;
+  }
+
+  const current = await repository.getTransferById({
+    transferId: transfer.id,
+    organizationId: transfer.organization_id,
+    projectId: transfer.project_id,
+  });
+  if (!current) {
     throw new AppError("INTERNAL_ERROR", "Payment transfer record not found for update");
   }
 
-  return updated;
+  return current;
+}
+
+/** A chain verdict or preflight simulation proves this exact transaction cannot land. */
+function isDefiniteExecutionFailure(error: unknown): boolean {
+  return (
+    isDefiniteSubmissionError(error) || mapTransferExecutionError(error).code === "ACCOUNT_FROZEN"
+  );
+}
+
+function logSubmittedUnconfirmed(transfer: TransferRow, signature: string | null, error: unknown) {
+  logEvent("warn", {
+    event: "sdp_api_payment_submission_unresolved",
+    flow: "single",
+    reason: "submission_unconfirmed",
+    organization_id: transfer.organization_id,
+    project_id: transfer.project_id,
+    transfer_id: transfer.id,
+    transfer_type: transfer.type,
+    signature,
+    error: error instanceof Error ? error.message : String(error),
+  });
+}
+
+/**
+ * A failure after the durable start marker remains processing for chain
+ * reconciliation. Before that marker, no broadcast was possible and the
+ * transfer can fail normally.
+ */
+async function settleTransferExecutionFailure(
+  c: AppContext,
+  transfer: TransferRow,
+  recorder: { submittedRow(): Promise<TransferRow | null> },
+  error: unknown,
+  toPayload: (row: TransferRow) => Record<string, unknown>
+): Promise<Response> {
+  const submitted = await recorder.submittedRow();
+  if (submitted && !isDefiniteExecutionFailure(error)) {
+    logSubmittedUnconfirmed(transfer, submitted.signature, error);
+    return success(c, toPayload(submitted));
+  }
+  const message = error instanceof Error ? error.message : "Unknown transfer error";
+  const settled = await updateTransferRecord(c, transfer, {
+    status: "failed",
+    error: message,
+    signature: submitted?.signature,
+    blockTime: null,
+  });
+  if (settled.status !== "failed") {
+    return success(c, toPayload(settled));
+  }
+  throw mapTransferExecutionError(error);
 }
 
 /**
@@ -480,7 +550,8 @@ async function executeSolTransfer(
   c: AppContext,
   sourceWallet: CustodyWallet,
   destinationAddress: Address,
-  amount: string
+  amount: string,
+  submissionStore: SignedSubmissionStore
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
   const lamports = parseDecimalAmount(amount, 9);
   if (lamports <= 0n) {
@@ -522,7 +593,13 @@ async function executeSolTransfer(
   const txEncoder = getTransactionEncoder();
   const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
   await beginApprovedWalletOperationEffect(c);
-  const signature = await feePayment.signAndSend(txBytes);
+  const signature = await submitSignedPaymentTransaction({
+    feePayment,
+    rpc,
+    transaction: txBytes,
+    lastValidBlockHeight,
+    store: submissionStore,
+  });
 
   const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
     commitment: "confirmed",
@@ -568,7 +645,10 @@ function buildMagicBlockProviderTransferOptions(
   };
 }
 
-function mapMagicBlockPreparedTransfer(unsignedTransaction: MagicBlockUnsignedTransaction): {
+function mapMagicBlockPreparedTransfer(
+  unsignedTransaction: MagicBlockUnsignedTransaction,
+  trustedLastValidBlockHeight: bigint
+): {
   prepared: {
     serializedTx: string;
     blockhash: string;
@@ -576,11 +656,15 @@ function mapMagicBlockPreparedTransfer(unsignedTransaction: MagicBlockUnsignedTr
   };
   metadata: PreparedPrivateTransferMetadata;
 } {
+  const providerLastValidBlockHeight = BigInt(unsignedTransaction.lastValidBlockHeight);
   return {
     prepared: {
       serializedTx: unsignedTransaction.transactionBase64,
       blockhash: unsignedTransaction.recentBlockhash,
-      lastValidBlockHeight: unsignedTransaction.lastValidBlockHeight.toString(),
+      lastValidBlockHeight: (providerLastValidBlockHeight < trustedLastValidBlockHeight
+        ? providerLastValidBlockHeight
+        : trustedLastValidBlockHeight
+      ).toString(),
     },
     metadata: {
       provider: "magicblock",
@@ -628,18 +712,21 @@ async function prepareMagicBlockPrivateTransferForOperation(params: {
     );
   }
 
-  const magicBlockPrepared = await prepareMagicBlockPrivateTransfer(c.env, {
-    from: operation.sourceAddress,
-    to: operation.destinationAddress,
-    mint: mintAddress,
-    amount: Number(amountBaseUnits),
-    memo,
-    options: buildMagicBlockProviderTransferOptions(privateTransfer.magicBlock, {
-      koraSponsoredExecution: params.koraSponsoredExecution,
+  const [magicBlockPrepared, { lastValidBlockHeight }] = await Promise.all([
+    prepareMagicBlockPrivateTransfer(c.env, {
+      from: operation.sourceAddress,
+      to: operation.destinationAddress,
+      mint: mintAddress,
+      amount: Number(amountBaseUnits),
+      memo,
+      options: buildMagicBlockProviderTransferOptions(privateTransfer.magicBlock, {
+        koraSponsoredExecution: params.koraSponsoredExecution,
+      }),
     }),
-  });
+    solanaRpc.getRecentBlockhash(rpc, "confirmed"),
+  ]);
 
-  return mapMagicBlockPreparedTransfer(magicBlockPrepared);
+  return mapMagicBlockPreparedTransfer(magicBlockPrepared, lastValidBlockHeight);
 }
 
 function assertMagicBlockKoraSponsoredExecutionOptions(options: MagicBlockProductOptions): void {
@@ -801,7 +888,9 @@ async function executePreparedPrivateTransfer(
   scope: ResolvedScope,
   operation: OutboundPaymentOperation,
   serializedTx: string,
-  metadata: PreparedPrivateTransferMetadata
+  lastValidBlockHeight: bigint,
+  metadata: PreparedPrivateTransferMetadata,
+  submissionStore: SignedSubmissionStore
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
   const walletsByAddress = new Map(scope.wallets.map((wallet) => [wallet.publicKey, wallet]));
   const signerWallets = new Map<string, CustodyWallet>();
@@ -892,8 +981,14 @@ async function executePreparedPrivateTransfer(
   );
 
   await beginApprovedWalletOperationEffect(c);
-  const signature = await feePayment.signAndSend(encodedSignedTransaction);
   const rpc = solanaRpc.createRpc(c.env);
+  const signature = await submitSignedPaymentTransaction({
+    feePayment,
+    rpc,
+    transaction: encodedSignedTransaction,
+    lastValidBlockHeight,
+    store: submissionStore,
+  });
   const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
     commitment: "confirmed",
   });
@@ -914,7 +1009,8 @@ async function executeSplTransfer(
   sourceWallet: CustodyWallet,
   destinationAddress: Address,
   mintAddress: Address,
-  amount: string
+  amount: string,
+  submissionStore: SignedSubmissionStore
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
   const auth = getAuth(c);
   const signer = await solanaServices.createOrgSigner(
@@ -958,7 +1054,13 @@ async function executeSplTransfer(
   const txEncoder = getTransactionEncoder();
   const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
   await beginApprovedWalletOperationEffect(c);
-  const signature = await feePayment.signAndSend(txBytes);
+  const signature = await submitSignedPaymentTransaction({
+    feePayment,
+    rpc,
+    transaction: txBytes,
+    lastValidBlockHeight,
+    store: submissionStore,
+  });
 
   const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
     commitment: "confirmed",
@@ -1075,15 +1177,18 @@ export async function createTransfer(c: AppContext) {
       return success(c, buildTransferReplayPayload(transfer));
     }
 
+    const submissionStore = createTransferSignedSubmissionStore(getPaymentsRepository(c), transfer);
     try {
       const result = await executePreparedPrivateTransfer(
         c,
         scope,
         operation,
         mapped.prepared.serializedTx,
-        mapped.metadata
+        BigInt(mapped.prepared.lastValidBlockHeight),
+        mapped.metadata,
+        submissionStore
       );
-      const updated = await updateTransferRecord(c, transfer.id, {
+      const updated = await updateTransferRecord(c, transfer, {
         status: "confirmed",
         signature: result.signature,
         slot: result.slot,
@@ -1096,14 +1201,10 @@ export async function createTransfer(c: AppContext) {
         privateTransfer: mapped.metadata,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown transfer error";
-      await updateTransferRecord(c, transfer.id, {
-        status: "failed",
-        error: message,
-        blockTime: null,
-      });
-
-      throw mapTransferExecutionError(error);
+      return settleTransferExecutionFailure(c, transfer, submissionStore, error, (row) => ({
+        transfer: mapTransferRow(row),
+        privateTransfer: mapped.metadata,
+      }));
     }
   }
 
@@ -1126,15 +1227,17 @@ export async function createTransfer(c: AppContext) {
     return success(c, buildTransferReplayPayload(transfer));
   }
 
+  const submissionStore = createTransferSignedSubmissionStore(getPaymentsRepository(c), transfer);
   try {
     if (isNativePaymentToken(operation.token)) {
       const solResult = await executeSolTransfer(
         c,
         operation.sourceWallet,
         operation.destinationAddress,
-        operation.amount
+        operation.amount,
+        submissionStore
       );
-      const updated = await updateTransferRecord(c, transfer.id, {
+      const updated = await updateTransferRecord(c, transfer, {
         status: "confirmed",
         signature: solResult.signature,
         slot: solResult.slot,
@@ -1150,10 +1253,11 @@ export async function createTransfer(c: AppContext) {
       operation.sourceWallet,
       operation.destinationAddress,
       mintAddress,
-      operation.amount
+      operation.amount,
+      submissionStore
     );
 
-    const updated = await updateTransferRecord(c, transfer.id, {
+    const updated = await updateTransferRecord(c, transfer, {
       status: "confirmed",
       signature: result.signature,
       slot: result.slot,
@@ -1163,14 +1267,9 @@ export async function createTransfer(c: AppContext) {
 
     return success(c, { transfer: mapTransferRow(updated) });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown transfer error";
-    await updateTransferRecord(c, transfer.id, {
-      status: "failed",
-      error: message,
-      blockTime: null,
-    });
-
-    throw mapTransferExecutionError(error);
+    return settleTransferExecutionFailure(c, transfer, submissionStore, error, (row) => ({
+      transfer: mapTransferRow(row),
+    }));
   }
 }
 
