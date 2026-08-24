@@ -79,11 +79,10 @@ import {
 import { EarnWithdrawalOutcomeTracker, EarnWithdrawModal } from "../earn/earn-withdraw-modal";
 import {
   formatAllocationShare,
-  heldVaultShareMints,
   isOpenVaultPosition,
   summarizeTreasuryAllocation,
+  type TreasuryAllocation,
   type VaultShareMintVocabulary,
-  walletDeployment,
 } from "./treasury-allocation";
 
 function AllocationFigure({
@@ -109,15 +108,11 @@ function AllocationFigure({
 }
 
 function TreasuryAllocationCard({
+  allocation,
   isLoading,
-  positions,
-  shareMints,
-  wallets,
 }: {
+  allocation: TreasuryAllocation;
   isLoading: boolean;
-  positions: readonly EarnVaultPosition[] | undefined;
-  shareMints: VaultShareMintVocabulary;
-  wallets: readonly EarnFundingWallet[] | undefined;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -134,10 +129,7 @@ function TreasuryAllocationCard({
     );
   }
 
-  const summary = summarizeTreasuryAllocation({ positions, shareMints, wallets });
-  // Real zeros on both sides: shares are undefined because 0/0 is not a
-  // share, not because a read failed.
-  const emptyFloat = summary.availableCash === "0" && summary.deployedValue === "0";
+  const summary = allocation;
 
   return (
     <Card>
@@ -154,11 +146,15 @@ function TreasuryAllocationCard({
           />
           <AllocationFigure
             caption={
-              summary.deployedValue === undefined
-                ? t("DashboardMarkets.treasury.summaryDeployedUnavailable")
-                : t("DashboardMarkets.treasury.summaryDeployedCaption", {
+              summary.deployedValue !== undefined
+                ? t("DashboardMarkets.treasury.summaryDeployedCaption", {
                     value: formatUsd(summary.deployedValue, locale, 2),
                   })
+                : t(
+                    summary.deployedAbsence === "unreconciled"
+                      ? "DashboardMarkets.treasury.summaryDeployedUnreconciled"
+                      : "DashboardMarkets.treasury.summaryDeployedUnavailable"
+                  )
             }
             label={t("DashboardMarkets.treasury.summaryDeployed")}
             value={formatAllocationShare(summary.deployedShare, locale)}
@@ -167,7 +163,7 @@ function TreasuryAllocationCard({
             caption={t(
               summary.remainingShare !== undefined
                 ? "DashboardMarkets.treasury.summaryRemainingCaption"
-                : emptyFloat
+                : summary.sharesAbsence === "empty_float"
                   ? "DashboardMarkets.treasury.summaryEmptyFloat"
                   : "DashboardMarkets.treasury.summaryShareUnavailable"
             )}
@@ -181,6 +177,7 @@ function TreasuryAllocationCard({
           <div
             aria-hidden="true"
             className="mt-5 h-1.5 w-full overflow-hidden rounded-full bg-fill-strong"
+            data-testid="treasury-allocation-bar"
           >
             <div
               className="h-full rounded-full bg-primary"
@@ -238,15 +235,15 @@ function WalletBalanceList({
 }
 
 function TreasuryWalletsCard({
+  allocation,
   error,
   isLoading,
-  positions,
   shareMints,
   wallets,
 }: {
+  allocation: TreasuryAllocation;
   error: unknown;
   isLoading: boolean;
-  positions: readonly EarnVaultPosition[] | undefined;
   shareMints: VaultShareMintVocabulary;
   wallets: readonly EarnFundingWallet[];
 }) {
@@ -281,12 +278,11 @@ function TreasuryWalletsCard({
         ) : (
           <div className="grid gap-3 lg:grid-cols-2">
             {wallets.map((wallet) => {
-              // Receipt-token balances are independent evidence of vault
-              // ownership, so a holding SDP cannot value (failed read, or a
-              // position opened outside SDP) reads unavailable rather than
-              // vanishing from the card. Wallet scoping happens inside, on the
-              // same rules the summary applies.
-              const deployment = walletDeployment({ positions, shareMints, wallet });
+              // Straight from the same result the summary rendered, so the
+              // two cannot disagree about this wallet.
+              const deployment = allocation.deploymentByWalletId.get(wallet.id) ?? {
+                kind: "none" as const,
+              };
               return (
                 <section
                   className="rounded-xl border border-border-default px-4 py-4"
@@ -313,7 +309,7 @@ function TreasuryWalletsCard({
                       </span>
                       <span className="text-sm font-medium text-primary tabular-nums">
                         {deployment.kind === "value"
-                          ? formatUsd(deployment.value, locale)
+                          ? formatUsd(deployment.value, locale, 2)
                           : t("DashboardMarkets.treasury.positionValueUnavailable")}
                       </span>
                     </div>
@@ -331,8 +327,8 @@ function TreasuryWalletsCard({
 function strategyPositionValue(
   strategy: EarnStrategy,
   positions: readonly EarnVaultPosition[] | undefined,
-  /** Undefined when the held-share witness is unavailable. */
-  heldShareMints: ReadonlySet<string> | undefined
+  /** Undefined when the witness is unavailable, so nothing can be certified. */
+  unrecordedShareMints: ReadonlySet<string> | undefined
 ): { count: number; unrecorded?: boolean; value?: string } {
   const active = (positions ?? []).filter(
     (position) =>
@@ -340,17 +336,16 @@ function strategyPositionValue(
       earnStrategyReferenceKey(position.provider, position.providerReference) ===
         earnStrategyReferenceKey(strategy.provider, strategy.providerReference)
   );
-  if (active.length === 0) {
-    // No row, yet the org demonstrably holds this vault's receipt token. Never
-    // "no active position": that would contradict the summary and the wallet
-    // card, which both read unavailable in exactly this state.
-    // Without the witness, "no active position" is unsupportable: this row
-    // cannot see a holding that would contradict it.
-    const unrecorded =
-      heldShareMints === undefined ||
-      (strategy.shareMint !== undefined && heldShareMints.has(strategy.shareMint));
-    return unrecorded ? { count: 0, unrecorded } : { count: 0 };
-  }
+  // Applies to a row WITH recorded positions too, not just an empty one: a
+  // second wallet holding this vault's shares with no row behind them makes
+  // the recorded figure a floor, and printing it would contradict the summary
+  // and that wallet's card, which both read unavailable here. Without the
+  // witness at all, "no active position" is equally unsupportable.
+  const unrecorded =
+    unrecordedShareMints === undefined ||
+    (strategy.shareMint !== undefined && unrecordedShareMints.has(strategy.shareMint));
+  if (unrecorded) return { count: active.length, unrecorded };
+  if (active.length === 0) return { count: 0 };
   const values = active.map((position) => position.tokenValue);
   if (values.some((value) => value === undefined)) return { count: active.length };
   return { count: active.length, value: sumDecimalStrings(values as string[]) };
@@ -358,18 +353,18 @@ function strategyPositionValue(
 
 function StrategyTable({
   environment,
-  heldShareMints,
   onDeposit,
   positions,
   providerAccess,
   strategies,
+  unrecordedShareMints,
 }: {
   environment: SdpEnvironment;
-  heldShareMints: ReadonlySet<string> | undefined;
   onDeposit: (strategy: EarnStrategy) => void;
   positions: readonly EarnVaultPosition[] | undefined;
   providerAccess: EarnProviderAccess | null;
   strategies: readonly EarnStrategy[];
+  unrecordedShareMints: ReadonlySet<string> | undefined;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -393,7 +388,7 @@ function StrategyTable({
           {strategies.map((strategy) => {
             const asset = earnStrategyAsset(strategy);
             const position = positions
-              ? strategyPositionValue(strategy, positions, heldShareMints)
+              ? strategyPositionValue(strategy, positions, unrecordedShareMints)
               : null;
             const availability = earnVaultDepositAvailability(
               strategy,
@@ -468,12 +463,14 @@ function ActiveVaultPositionsCard({
   isLoading,
   onWithdraw,
   positions,
+  unrecordedShareMints,
   wallets,
 }: {
   error: unknown;
   isLoading: boolean;
   onWithdraw: (position: EarnVaultPosition) => void;
   positions: readonly EarnVaultPosition[] | undefined;
+  unrecordedShareMints: ReadonlySet<string> | undefined;
   wallets: readonly EarnFundingWallet[];
 }) {
   const t = useTranslations();
@@ -502,11 +499,23 @@ function ActiveVaultPositionsCard({
             message={t("DashboardMarkets.treasury.vaultPositionsErrorTitle")}
           />
         ) : activePositions.length === 0 ? (
-          <ListEmptyState
-            description={t("DashboardMarkets.treasury.vaultPositionsEmptyDescription")}
-            icon={<WalletCardsIcon aria-hidden="true" className="size-5" />}
-            message={t("DashboardMarkets.treasury.vaultPositionsEmptyTitle")}
-          />
+          // "No positions" is a claim of ABSENCE, so it needs the same witness
+          // every other surface needs. Receipt tokens with no row behind them,
+          // or a witness that could not be built, mean holdings may exist that
+          // this list cannot show.
+          unrecordedShareMints === undefined || unrecordedShareMints.size > 0 ? (
+            <ListEmptyState
+              description={t("DashboardMarkets.treasury.vaultPositionsIncompleteDescription")}
+              icon={<InfoIcon aria-hidden="true" className="size-5" />}
+              message={t("DashboardMarkets.treasury.vaultPositionsIncompleteTitle")}
+            />
+          ) : (
+            <ListEmptyState
+              description={t("DashboardMarkets.treasury.vaultPositionsEmptyDescription")}
+              icon={<WalletCardsIcon aria-hidden="true" className="size-5" />}
+              message={t("DashboardMarkets.treasury.vaultPositionsEmptyTitle")}
+            />
+          )
         ) : (
           <div className="overflow-x-auto border-y border-border-subtle">
             <Table className="table-fixed" style={{ minWidth: "52rem" }}>
@@ -696,23 +705,23 @@ function withdrawalWatchKey(watch: EarnWithdrawalWatch): string {
 function TreasuryStrategiesCard({
   environment,
   error,
-  heldShareMints,
   isLoading,
   onDeposit,
   onRefresh,
   positions,
   providerAccess,
   strategies,
+  unrecordedShareMints,
 }: {
   environment: SdpEnvironment;
   error: unknown;
-  heldShareMints: ReadonlySet<string> | undefined;
   isLoading: boolean;
   onDeposit: (strategy: EarnStrategy) => void;
   onRefresh: () => void;
   positions: readonly EarnVaultPosition[] | undefined;
   providerAccess: EarnProviderAccess | null;
   strategies: readonly EarnStrategy[] | undefined;
+  unrecordedShareMints: ReadonlySet<string> | undefined;
 }) {
   const t = useTranslations();
   const depositsEnabled = isVaultDirectDepositEnabled(environment);
@@ -756,11 +765,11 @@ function TreasuryStrategiesCard({
         ) : (
           <StrategyTable
             environment={environment}
-            heldShareMints={heldShareMints}
             onDeposit={onDeposit}
             positions={positions}
             providerAccess={providerAccess}
             strategies={strategies ?? []}
+            unrecordedShareMints={unrecordedShareMints}
           />
         )}
         <div className="flex items-start gap-2 border-t border-border-subtle px-6 py-4 text-xs leading-5 text-tertiary">
@@ -926,10 +935,16 @@ export function TreasurySolutionsWorkspace({
   // A USD-stable mint can never be a share mint; a corrupt catalogue row
   // claiming one must not hide real cash tiles the summary still counts.
   //
-  // `complete` is false until the catalogue lands, because for a holding with
-  // no position row the catalogue is the only witness that the token is a
-  // receipt. The known set stays best-effort either way: hiding a tile only
-  // needs the mint to be known, and a stale set is a harmless superset.
+  // The known set stays best-effort in every state, because hiding a receipt
+  // tile only needs the mint to be known. `complete` is the stricter claim,
+  // and it needs three things:
+  //   - the catalogue landed at all (it is the only witness for a holding with
+  //     no position row),
+  //   - the read is not stale behind a failed revalidation, which would be
+  //     missing any strategy added since (the strategy table already renders
+  //     its error state over stale rows, so this matches that posture), and
+  //   - every row actually NAMED its share mint, since a row without one
+  //     contributes nothing and leaves a real vault unnameable.
   const shareMints = {
     known: new Set(
       [
@@ -937,24 +952,18 @@ export function TreasurySolutionsWorkspace({
         ...(strategies ?? []).flatMap((strategy) => strategy.shareMint ?? []),
       ].filter((mint) => !WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.isUsdStable)
     ),
-    // A failed revalidation keeps stale rows, and stale means possibly MISSING
-    // a newly added strategy's share mint. The strategy table already renders
-    // its error state over stale data, so the vocabulary matches that posture.
-    complete: strategies !== undefined && !strategiesError,
+    complete:
+      strategies !== undefined &&
+      !strategiesError &&
+      strategies.every((strategy) => strategy.shareMint !== undefined),
   };
-  // Every receipt token the org demonstrably holds, so a strategy with no
-  // recorded row can say "unavailable" rather than "no active position".
-  //
-  // UNDEFINED when the witness itself is unavailable: without it, "no active
-  // position" is a claim of absence nothing on this page can support.
-  const heldShareMints = walletsError
-    ? undefined
-    : activeWallets.reduce<Set<string> | undefined>((held, wallet) => {
-        const mints = heldVaultShareMints(wallet, shareMints.known);
-        if (held === undefined || mints === undefined) return undefined;
-        for (const mint of mints) held.add(mint);
-        return held;
-      }, new Set<string>());
+  // Every figure on this page comes from here, so no two surfaces can compute
+  // the same thing differently.
+  const allocation = summarizeTreasuryAllocation({
+    positions: positionsError ? undefined : positions,
+    shareMints,
+    wallets: walletsError ? undefined : wallets,
+  });
   const programs = programsState?.kind === "ready" ? programsState.programs : [];
   // Recovery seeds durable component state. Do not derive tracker mounts
   // directly from the live list: the list can stop returning a movement just
@@ -1006,16 +1015,17 @@ export function TreasurySolutionsWorkspace({
          * vocabulary, it pages sequentially so it usually lands last, and
          * without it the summary can only report "unavailable". */}
         <TreasuryAllocationCard
-          isLoading={walletsLoading || positionsLoading || strategiesLoading}
-          positions={positionsError ? undefined : positions}
-          shareMints={shareMints}
-          wallets={walletsError ? undefined : wallets}
+          allocation={allocation}
+          isLoading={
+            !(walletsError || positionsError || strategiesError) &&
+            (walletsLoading || positionsLoading || strategiesLoading)
+          }
         />
 
         <TreasuryWalletsCard
+          allocation={allocation}
           error={walletsError}
           isLoading={walletsLoading}
-          positions={positionsError ? undefined : positions}
           shareMints={shareMints}
           wallets={activeWallets}
         />
@@ -1024,14 +1034,14 @@ export function TreasurySolutionsWorkspace({
           error={positionsError}
           isLoading={positionsLoading}
           onWithdraw={setWithdrawPosition}
-          positions={positions}
+          positions={positionsError ? undefined : positions}
+          unrecordedShareMints={allocation.unrecordedShareMints}
           wallets={activeWallets}
         />
 
         <TreasuryStrategiesCard
           environment={sdpEnvironment}
           error={strategiesError}
-          heldShareMints={heldShareMints}
           isLoading={strategiesLoading}
           onDeposit={setDepositStrategy}
           onRefresh={() => {
@@ -1043,6 +1053,7 @@ export function TreasurySolutionsWorkspace({
           positions={positionsError ? undefined : positions}
           providerAccess={providerAccess}
           strategies={strategies}
+          unrecordedShareMints={allocation.unrecordedShareMints}
         />
 
         {programsLoading ? <SkeletonBlock className="h-48 rounded-xl" /> : null}

@@ -1,11 +1,7 @@
-import {
-  decimalScale,
-  formatDecimalAmount,
-  isDecimalString,
-  parseDecimalAmount,
-} from "@sdp/solana/amount";
+import { decimalScale, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import { compareUnsignedDecimals } from "../earn/earn-decimal";
+import { isIntlDecimalLiteral } from "../earn/earn-format";
 import { sumDecimalStrings } from "../earn/earn-market-presentation";
 
 /**
@@ -13,25 +9,44 @@ import { sumDecimalStrings } from "../earn/earn-market-presentation";
  * cash in custody wallets, value deployed into vault positions, and the two
  * shares those make of the float.
  *
- * Only USD-stable tokens (`isUsdStable` in the well-known catalogue — "priced
- * at $1 without a feed") participate. A SOL gas balance is not treasury cash,
- * so it is EXCLUDED from the cash figure; but a vault position denominated in
- * a token this rule cannot price makes the deployed figure UNAVAILABLE rather
- * than being dropped, because omitting deployed money would misstate the very
- * share a treasurer acts on.
+ * ONE function computes every figure this page renders, including each wallet's
+ * own line and the set of holdings no position records. That is deliberate:
+ * every bug found in review here was two surfaces computing the same thing
+ * differently, so the surfaces now read from a single result rather than being
+ * kept in agreement by convention and tests.
  *
- * Unavailability is poisonous by design: one unreadable wallet balance or one
- * unhydratable position makes the affected figure `undefined`, never `0` and
- * never a fabricated share.
+ * Unavailability is poisonous by design. One unreadable wallet balance, one
+ * unhydratable position, or a share-mint vocabulary that cannot be certified
+ * makes the affected figure `undefined`, never `0` and never a fabricated
+ * share.
  */
 
-/** The slice of a funding wallet the allocation summary reads. */
+/** The slice of a funding wallet the allocation reads. */
 export interface TreasuryAllocationWallet {
   id: string;
-  balances?: readonly { mint: string; uiAmount: string }[];
+  /**
+   * The on-chain address. Load-bearing, not decoration: one wallet can appear
+   * as SEVERAL custody rows (an org-level config and a project-level one both
+   * describe it, and nothing constrains `public_key` to be unique), and the
+   * balance read keys off the address, so every row carries the SAME balances.
+   * Summing per row would count the same dollars once per configuration.
+   */
+  publicKey: string;
+  balances?: readonly TreasuryAllocationBalance[];
 }
 
-/** The slice of a vault position the allocation summary reads. */
+export interface TreasuryAllocationBalance {
+  mint: string;
+  uiAmount: string;
+  /**
+   * The API's own price for this balance, `1` for anything it treats as
+   * USD-stable. That includes SDP-ISSUED stablecoins, which a static catalogue
+   * cannot know about, so this is the authority on what counts as cash.
+   */
+  usdPrice?: number;
+}
+
+/** The slice of a vault position the allocation reads. */
 export interface TreasuryAllocationPosition {
   closedAt: string | null;
   custodyWalletId: string;
@@ -50,10 +65,15 @@ export interface TreasuryAllocationPosition {
  * known; certifying a deployed total needs the vocabulary to be complete,
  * because for a holding with no position row the strategy catalogue is the
  * only witness that the token is a receipt at all.
+ *
+ * `complete` certifies the CLIENT's copy is whole: the read succeeded, is not
+ * stale, and every row named its share mint. It cannot certify the SERVER's.
+ * `/strategies` applies surfacing filters and delisting hard-deletes the row,
+ * so a vault can hold money the catalogue never mentions. That residual is
+ * PRO-1741, which is why `complete` is a floor on trust rather than a proof.
  */
 export interface VaultShareMintVocabulary {
   known: ReadonlySet<string>;
-  /** False while the strategy catalogue is unavailable. */
   complete: boolean;
 }
 
@@ -69,68 +89,78 @@ export function isOpenVaultPosition(position: TreasuryAllocationPosition): boole
   );
 }
 
-export interface TreasuryAllocationSummary {
+/**
+ * What one wallet's "deployed in vaults" line may claim.
+ *
+ * `unavailable` exists because a receipt-token balance is independent evidence
+ * of vault ownership: the wallet demonstrably holds shares SDP cannot value
+ * (the positions read failed, the balances could not be read, or the position
+ * was opened outside SDP and has no recorded row). Rendering nothing there
+ * would present a deployed wallet as idle, which is the same lie as `0`.
+ */
+export type WalletDeploymentDisplay =
+  | { kind: "none" }
+  | { kind: "unavailable" }
+  | { kind: "value"; value: string };
+
+/** Why the percentage split is absent, so no caption re-derives it. */
+export type AllocationSharesAbsence = "unavailable" | "empty_float";
+
+/**
+ * Why the deployed figure is absent. Two genuinely different failures that a
+ * reader acts on differently: a read did not come back, versus every read came
+ * back and they cannot be squared with each other. Naming the second one "a
+ * position value could not be read" would be false on a screen that is listing
+ * those values, hydrated, in the table below.
+ */
+export type DeployedAbsence = "unreadable" | "unreconciled";
+
+export interface TreasuryAllocation {
   /** USD-stable cash across wallets; undefined when any wallet read is unavailable. */
   availableCash: string | undefined;
-  /** Value of open vault positions; undefined when any open position cannot be valued. */
+  /** Value of open vault positions; undefined when it cannot be certified complete. */
   deployedValue: string | undefined;
   /**
    * Shares as decimal RATE strings ("0.05" = 5%), quantized to tenths of a
-   * percent so the pair always totals exactly 100%. Undefined when either
-   * figure is unavailable or the float is zero.
+   * percent so the pair always totals exactly 100%.
    */
   deployedShare: string | undefined;
   remainingShare: string | undefined;
-}
-
-function availableStableCash(
-  wallets: readonly TreasuryAllocationWallet[] | undefined
-): string | undefined {
-  if (wallets === undefined) return undefined;
-  const amounts: string[] = [];
-  for (const wallet of wallets) {
-    // One wallet whose balances could not be read makes the TOTAL unknowable.
-    if (wallet.balances === undefined) return undefined;
-    for (const balance of wallet.balances) {
-      if (!WELL_KNOWN_TOKEN_BY_MINT.get(balance.mint)?.isUsdStable) continue;
-      amounts.push(balance.uiAmount);
-    }
-  }
-  // No stable balances is a real zero; `sumDecimalStrings` reserves undefined
-  // for a malformed amount, which is an unavailable read, not an empty one.
-  return amounts.length === 0 ? "0" : sumDecimalStrings(amounts);
+  /** Set exactly when the shares are absent. */
+  sharesAbsence: AllocationSharesAbsence | undefined;
+  /** Set exactly when `deployedValue` is absent. */
+  deployedAbsence: DeployedAbsence | undefined;
+  /** Each custody row's deployment line, keyed by wallet id. */
+  deploymentByWalletId: ReadonlyMap<string, WalletDeploymentDisplay>;
+  /**
+   * Share mints the org demonstrably holds that no open position records, or
+   * undefined when that cannot be determined. The strategy table reads this so
+   * a row never claims "no active position" over a holding.
+   */
+  unrecordedShareMints: ReadonlySet<string> | undefined;
 }
 
 /**
- * Value deployed across the open positions in `positions` — the whole
- * portfolio for the summary, or one wallet's slice for its "deployed in
- * vaults" line. Undefined when any open position cannot be honestly valued.
+ * Is this balance a dollar of treasury cash?
+ *
+ * The static catalogue is not the authority. The API prices everything it
+ * treats as USD-stable at exactly `1`, including SDP-issued stablecoins loaded
+ * from `issued_tokens`, and returns no price at all for volatile or
+ * unrecognized tokens. So `usdPrice` CLASSIFIES while the summed amount stays
+ * the decimal string: no `Number` touches an amount.
  */
-export function deployedVaultValue(
-  positions: readonly TreasuryAllocationPosition[] | undefined
-): string | undefined {
-  if (positions === undefined) return undefined;
-  const amounts: string[] = [];
-  for (const position of positions.filter(isOpenVaultPosition)) {
-    if (position.tokenValue === undefined) return undefined;
-    if (!WELL_KNOWN_TOKEN_BY_MINT.get(position.tokenMint)?.isUsdStable) return undefined;
-    amounts.push(position.tokenValue);
-  }
-  return amounts.length === 0 ? "0" : sumDecimalStrings(amounts);
+function isUsdStableBalance(balance: TreasuryAllocationBalance): boolean {
+  return WELL_KNOWN_TOKEN_BY_MINT.get(balance.mint)?.isUsdStable === true || balance.usdPrice === 1;
 }
 
 /**
- * The vault share mints one wallet actually holds, or `undefined` when its
- * balances could not be read.
+ * The vault share mints one wallet holds, or `undefined` when its balances
+ * could not be read.
  *
- * THE single definition of "holds shares", shared by the summary and by the
- * per-wallet line, because two copies of this predicate is how the two
- * surfaces drift into contradicting each other.
- *
- * UNREADABLE IS NOT EMPTY, and that distinction is the whole reason this
- * returns three states rather than a list. An unread wallet may hold a receipt
- * token with no recorded position behind it, so reading it as "holds nothing"
- * certifies a total on the strength of a read that never happened.
+ * UNREADABLE IS NOT EMPTY, and that distinction is why this returns three
+ * states rather than a list. An unread wallet may hold a receipt token with no
+ * recorded position behind it, so reading it as "holds nothing" certifies a
+ * total on the strength of a read that never happened.
  *
  * A provably-zero balance is not a holding: an emptied share account can
  * outlive the position it belonged to (this payload appends the SOL row at
@@ -153,97 +183,75 @@ export function heldVaultShareMints(
   return held;
 }
 
-/**
- * Does every vault share token any wallet holds have an open position behind
- * it? A wallet balance is the independent witness here: a position opened
- * outside SDP leaves shares in the wallet with no recorded row.
- *
- * Recorded mints are tracked PER WALLET. Two wallets can hold the same vault's
- * shares while only one of them has a recorded position, and a portfolio-wide
- * mint set would accept the other's holding as covered.
- */
-function heldShareMintsRecorded({
-  positions,
-  shareMints,
-  wallets,
-}: {
-  positions: readonly TreasuryAllocationPosition[];
-  shareMints: ReadonlySet<string>;
-  wallets: readonly TreasuryAllocationWallet[] | undefined;
-}): boolean {
-  const recordedByWallet = new Map<string, Set<string>>();
-  for (const position of positions.filter(isOpenVaultPosition)) {
-    const recorded = recordedByWallet.get(position.custodyWalletId) ?? new Set<string>();
-    recorded.add(position.shareMint);
-    recordedByWallet.set(position.custodyWalletId, recorded);
+/** Distinct on-chain wallets, keeping the first custody row that describes each. */
+function walletsByPublicKey(
+  wallets: readonly TreasuryAllocationWallet[]
+): Map<string, TreasuryAllocationWallet> {
+  const distinct = new Map<string, TreasuryAllocationWallet>();
+  for (const wallet of wallets) {
+    if (!distinct.has(wallet.publicKey)) distinct.set(wallet.publicKey, wallet);
   }
-  // No wallet inventory at all is the same failure as one unreadable wallet,
-  // one level up: there is no witness, so nothing can be certified. `[].every`
-  // would have answered true here and published the recorded sum as the total.
-  if (wallets === undefined) return false;
-  return wallets.every((wallet) => {
-    const held = heldVaultShareMints(wallet, shareMints);
-    if (held === undefined) return false;
-    return held.every((mint) => recordedByWallet.get(wallet.id)?.has(mint) === true);
-  });
+  return distinct;
+}
+
+function availableStableCash(
+  wallets: readonly TreasuryAllocationWallet[] | undefined
+): string | undefined {
+  if (wallets === undefined) return undefined;
+  const amounts: string[] = [];
+  for (const wallet of walletsByPublicKey(wallets).values()) {
+    // One wallet whose balances could not be read makes the TOTAL unknowable.
+    if (wallet.balances === undefined) return undefined;
+    for (const balance of wallet.balances) {
+      if (isUsdStableBalance(balance)) amounts.push(balance.uiAmount);
+    }
+  }
+  // No stable balances is a real zero; `sumDecimalStrings` reserves undefined
+  // for a malformed amount, which is an unavailable read, not an empty one.
+  return amounts.length === 0 ? "0" : sumDecimalStrings(amounts);
 }
 
 /**
- * What one wallet's "deployed in vaults" line may claim.
- *
- * `unavailable` exists because a receipt-token balance is independent evidence
- * of vault ownership: the wallet demonstrably holds shares SDP cannot value
- * (the positions read failed, or the position was opened outside SDP and has no
- * recorded row). Rendering nothing there would present a deployed wallet as
- * idle, which is the same lie as rendering `0`.
+ * Value deployed across the open positions given. Undefined when any open
+ * position cannot be honestly valued.
  */
-export type WalletDeploymentDisplay =
-  | { kind: "none" }
-  | { kind: "unavailable" }
-  | { kind: "value"; value: string };
+export function deployedVaultValue(
+  positions: readonly TreasuryAllocationPosition[] | undefined
+): string | undefined {
+  if (positions === undefined) return undefined;
+  const amounts: string[] = [];
+  for (const position of positions.filter(isOpenVaultPosition)) {
+    if (position.tokenValue === undefined) return undefined;
+    if (!WELL_KNOWN_TOKEN_BY_MINT.get(position.tokenMint)?.isUsdStable) return undefined;
+    amounts.push(position.tokenValue);
+  }
+  return amounts.length === 0 ? "0" : sumDecimalStrings(amounts);
+}
 
 /**
- * Takes the WHOLE position list and scopes it here, rather than trusting a
- * caller to pre-filter by wallet: a caller that filtered differently from the
- * summary is how these two surfaces drifted apart before.
+ * Open positions per on-chain wallet.
+ *
+ * Grouped by ADDRESS rather than by custody row, because a position records
+ * exactly one row id while the same wallet may appear as several. Grouping by
+ * row would read a sibling row's shares as unrecorded and park that wallet on
+ * "unavailable" forever.
  */
-export function walletDeployment({
-  positions,
-  shareMints,
-  wallet,
-}: {
-  /** Every position, or undefined when the read is unavailable. */
-  positions: readonly TreasuryAllocationPosition[] | undefined;
-  shareMints: VaultShareMintVocabulary;
-  wallet: TreasuryAllocationWallet;
-}): WalletDeploymentDisplay {
-  const heldShareMints = heldVaultShareMints(wallet, shareMints.known);
-  // Unreadable balances cannot rule OUT a deployment, and absence here would
-  // render a deployed wallet as idle.
-  if (heldShareMints === undefined) return { kind: "unavailable" };
-  if (positions === undefined) {
-    return heldShareMints.length > 0 ? { kind: "unavailable" } : { kind: "none" };
+function openPositionsByPublicKey(
+  wallets: readonly TreasuryAllocationWallet[],
+  positions: readonly TreasuryAllocationPosition[]
+): Map<string, TreasuryAllocationPosition[]> {
+  const publicKeyByWalletId = new Map(wallets.map((wallet) => [wallet.id, wallet.publicKey]));
+  const grouped = new Map<string, TreasuryAllocationPosition[]>();
+  for (const position of positions.filter(isOpenVaultPosition)) {
+    const publicKey = publicKeyByWalletId.get(position.custodyWalletId);
+    // A position whose custody wallet is absent from the read is handled by the
+    // observation check in the summary, not here.
+    if (publicKey === undefined) continue;
+    const forWallet = grouped.get(publicKey);
+    if (forWallet) forWallet.push(position);
+    else grouped.set(publicKey, [position]);
   }
-
-  const open = positions.filter(
-    (position) => position.custodyWalletId === wallet.id && isOpenVaultPosition(position)
-  );
-  // An incomplete vocabulary cannot certify this wallet's deployment either,
-  // and must not disagree with the summary above it.
-  if (!shareMints.complete) {
-    return open.length > 0 || heldShareMints.length > 0
-      ? { kind: "unavailable" }
-      : { kind: "none" };
-  }
-
-  const covered = new Set(open.map((position) => position.shareMint));
-  // A held share mint no open position accounts for means the recorded total
-  // is incomplete, so it must not be presented as this wallet's deployment.
-  if (heldShareMints.some((mint) => !covered.has(mint))) return { kind: "unavailable" };
-  if (open.length === 0) return { kind: "none" };
-
-  const value = deployedVaultValue(open);
-  return value === undefined ? { kind: "unavailable" } : { kind: "value", value };
+  return grouped;
 }
 
 function allocationShares(
@@ -266,6 +274,33 @@ function allocationShares(
   };
 }
 
+/** One wallet's line, given everything already resolved about it. */
+function walletDeploymentLine({
+  complete,
+  held,
+  open,
+  uncovered,
+}: {
+  complete: boolean;
+  held: readonly string[] | undefined;
+  open: readonly TreasuryAllocationPosition[] | undefined;
+  uncovered: readonly string[];
+}): WalletDeploymentDisplay {
+  // Unreadable balances cannot rule OUT a deployment, and an unavailable
+  // positions read cannot value one.
+  if (held === undefined) return { kind: "unavailable" };
+  if (open === undefined) return held.length > 0 ? { kind: "unavailable" } : { kind: "none" };
+  // An incomplete vocabulary cannot certify this line either, and it must not
+  // disagree with the summary above it.
+  if (!complete) {
+    return open.length > 0 || held.length > 0 ? { kind: "unavailable" } : { kind: "none" };
+  }
+  if (uncovered.length > 0) return { kind: "unavailable" };
+  if (open.length === 0) return { kind: "none" };
+  const value = deployedVaultValue(open);
+  return value === undefined ? { kind: "unavailable" } : { kind: "value", value };
+}
+
 export function summarizeTreasuryAllocation({
   positions,
   shareMints,
@@ -274,45 +309,87 @@ export function summarizeTreasuryAllocation({
   positions: readonly TreasuryAllocationPosition[] | undefined;
   shareMints: VaultShareMintVocabulary;
   wallets: readonly TreasuryAllocationWallet[] | undefined;
-}): TreasuryAllocationSummary {
+}): TreasuryAllocation {
   const availableCash = availableStableCash(wallets);
-  // A wallet holding shares that no recorded position accounts for makes the
-  // deployed TOTAL incomplete. Reporting the recorded sum as the total would
-  // understate deployed money and overstate the idle share.
-  //
-  // An INCOMPLETE vocabulary poisons the figure rather than bypassing the
-  // check: without the catalogue a receipt token is indistinguishable from a
-  // plain balance, so completeness cannot be certified at all.
-  const everyHeldShareRecorded =
-    positions !== undefined &&
-    shareMints.complete &&
-    heldShareMintsRecorded({ positions, shareMints: shareMints.known, wallets });
-  const deployedValue = everyHeldShareRecorded ? deployedVaultValue(positions) : undefined;
-  // Shares additionally require the float to be fully OBSERVED. The wallet
-  // read serves active wallets only, so an open position custodied by a wallet
-  // absent from it (deactivated, say) means idle cash this read cannot see.
-  // The deployed dollar figure still counts that position; only the split
-  // would be fabricated, so only the shares go unavailable.
+  const deploymentByWalletId = new Map<string, WalletDeploymentDisplay>();
+
+  // No wallet inventory is the same failure as one unreadable wallet, a level
+  // up: with no witness nothing can be certified. `[].every` would have
+  // answered TRUE here, which is how a total once got certified with no
+  // witness at all.
+  let unrecordedShareMints: Set<string> | undefined =
+    wallets === undefined || positions === undefined || !shareMints.complete
+      ? undefined
+      : new Set<string>();
+
+  let someWalletUnreadable = false;
+  if (wallets !== undefined) {
+    const openByPublicKey =
+      positions === undefined ? undefined : openPositionsByPublicKey(wallets, positions);
+
+    for (const wallet of wallets) {
+      const held = heldVaultShareMints(wallet, shareMints.known);
+      const open = openByPublicKey?.get(wallet.publicKey) ?? (openByPublicKey && []);
+      const recorded = new Set((open ?? []).map((position) => position.shareMint));
+      const uncovered = held?.filter((mint) => !recorded.has(mint)) ?? [];
+
+      for (const mint of uncovered) unrecordedShareMints?.add(mint);
+      // A wallet we could not read leaves the whole set indeterminate.
+      if (held === undefined) {
+        unrecordedShareMints = undefined;
+        someWalletUnreadable = true;
+      }
+
+      deploymentByWalletId.set(
+        wallet.id,
+        walletDeploymentLine({ complete: shareMints.complete, held, open, uncovered })
+      );
+    }
+  }
+
+  // A holding no position records makes the recorded sum a floor, not a total.
+  const certified = unrecordedShareMints !== undefined && unrecordedShareMints.size === 0;
+  const deployedValue = certified ? deployedVaultValue(positions) : undefined;
+
+  // Shares additionally require the float to be fully OBSERVED. The wallet read
+  // serves active wallets only, so an open position custodied by a wallet
+  // absent from it means idle cash this read cannot see. The deployed dollar
+  // figure still counts that position; only the split would be fabricated.
   const observedWalletIds = new Set((wallets ?? []).map((wallet) => wallet.id));
   const openPositionsObserved = (positions ?? [])
     .filter(isOpenVaultPosition)
     .every((position) => observedWalletIds.has(position.custodyWalletId));
   const shares = openPositionsObserved ? allocationShares(availableCash, deployedValue) : undefined;
+
+  const readFailed = positions === undefined || wallets === undefined || someWalletUnreadable;
   return {
     availableCash,
     deployedValue,
+    deployedAbsence:
+      deployedValue !== undefined
+        ? undefined
+        : // Certified but still absent means the position VALUES are unusable,
+          // which is a failed read however the reads themselves resolved.
+          certified || readFailed
+          ? "unreadable"
+          : "unreconciled",
     deployedShare: shares?.deployed,
     remainingShare: shares?.remaining,
+    sharesAbsence:
+      shares !== undefined
+        ? undefined
+        : // Both figures read as real zeros: there is nothing to split.
+          availableCash === "0" && deployedValue === "0"
+          ? "empty_float"
+          : "unavailable",
+    deploymentByWalletId,
+    unrecordedShareMints,
   };
-}
-
-function isIntlDecimalLiteral(value: string): value is Intl.StringNumericLiteral {
-  return isDecimalString(value);
 }
 
 /**
  * Render an allocation share at exactly one fraction digit. The share is
- * already quantized to tenths of a percent, so this formatting never rounds —
+ * already quantized to tenths of a percent, so this formatting never rounds:
  * the displayed pair keeps totalling 100.0%.
  */
 export function formatAllocationShare(share: string | undefined, locale: string): string {

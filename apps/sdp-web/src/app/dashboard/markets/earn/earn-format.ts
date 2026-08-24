@@ -23,7 +23,7 @@ import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
  * exactly what `Intl`'s string overload takes, so this reaches the exact
  * formatter without an `as` cast.
  */
-function isIntlDecimalLiteral(value: string): value is Intl.StringNumericLiteral {
+export function isIntlDecimalLiteral(value: string): value is Intl.StringNumericLiteral {
   return isDecimalString(value);
 }
 

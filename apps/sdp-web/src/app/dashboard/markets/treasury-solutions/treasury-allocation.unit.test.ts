@@ -4,9 +4,10 @@ import {
   formatAllocationShare,
   heldVaultShareMints,
   summarizeTreasuryAllocation,
+  type TreasuryAllocationBalance,
   type TreasuryAllocationPosition,
   type TreasuryAllocationWallet,
-  walletDeployment,
+  type VaultShareMintVocabulary,
 } from "./treasury-allocation";
 
 function requiredMint(symbol: WellKnownTokenSymbol): string {
@@ -18,14 +19,16 @@ function requiredMint(symbol: WellKnownTokenSymbol): string {
 const USDC_MINT = requiredMint("USDC");
 const USDG_MINT = requiredMint("USDG");
 const UNKNOWN_MINT = "Unknown11111111111111111111111111111111111";
+const ISSUED_MINT = "Issued11111111111111111111111111111111111111";
 const SHARE_MINT = "Share1111111111111111111111111111111111111";
 const UNRECORDED_SHARE_MINT = "ShareUnrecorded11111111111111111111111111111";
 
 function wallet(
-  balances: { mint: string; uiAmount: string }[] | undefined,
-  id = "wallet-a"
+  balances: TreasuryAllocationBalance[] | undefined,
+  id = "wallet-a",
+  publicKey = `pk-${id}`
 ): TreasuryAllocationWallet {
-  return { id, balances };
+  return { id, publicKey, balances };
 }
 
 function openPosition(overrides: Partial<TreasuryAllocationPosition>): TreasuryAllocationPosition {
@@ -40,10 +43,26 @@ function openPosition(overrides: Partial<TreasuryAllocationPosition>): TreasuryA
   };
 }
 
-describe("summarizeTreasuryAllocation", () => {
+/** Catalogue known and whole, which is the default precondition. */
+function vocabulary(...known: string[]): VaultShareMintVocabulary {
+  return { known: new Set(known), complete: true };
+}
+
+function summarize({
+  positions,
+  shareMints = vocabulary(SHARE_MINT),
+  wallets,
+}: {
+  positions: TreasuryAllocationPosition[] | undefined;
+  shareMints?: VaultShareMintVocabulary;
+  wallets: TreasuryAllocationWallet[] | undefined;
+}) {
+  return summarizeTreasuryAllocation({ positions, shareMints, wallets });
+}
+
+describe("summarizeTreasuryAllocation figures", () => {
   it("totals multi-wallet cash and multi-position value into shares summing to exactly 100%", () => {
-    const summary = summarizeTreasuryAllocation({
-      shareMints: { known: new Set(), complete: true },
+    const summary = summarize({
       wallets: [
         wallet([
           { mint: USDC_MINT, uiAmount: "1200.50" },
@@ -53,7 +72,7 @@ describe("summarizeTreasuryAllocation", () => {
         wallet(
           [
             { mint: USDG_MINT, uiAmount: "800" },
-            // Neither is a token the catalogue cannot price at $1.
+            // Nor is a token nothing can price at a dollar.
             { mint: UNKNOWN_MINT, uiAmount: "42" },
           ],
           "wallet-b"
@@ -72,16 +91,59 @@ describe("summarizeTreasuryAllocation", () => {
     expect(summary.deployedValue).toBe("3999.5");
     expect(summary.deployedShare).toBe("0.667");
     expect(summary.remainingShare).toBe("0.333");
+    expect(summary.sharesAbsence).toBeUndefined();
     expect(formatAllocationShare(summary.deployedShare, "en")).toBe("66.7%");
     expect(formatAllocationShare(summary.remainingShare, "en")).toBe("33.3%");
   });
 
-  it("makes both figures unavailable when any wallet balance cannot be read, never zero", () => {
-    // Deployed goes too, not just cash: an unread wallet may hold a receipt
-    // token with no recorded position, so the recorded sum cannot be certified
-    // as the total. Unreadable is not empty.
-    const summary = summarizeTreasuryAllocation({
-      shareMints: { known: new Set([SHARE_MINT]), complete: true },
+  it("counts an SDP-issued stablecoin the static catalogue cannot know", () => {
+    // The API prices everything it treats as USD-stable at exactly 1, issued
+    // tokens included. Dropping those silently understated the float, and a
+    // wallet holding only them read a real $0 with a confident 100% deployed.
+    const summary = summarize({
+      wallets: [
+        wallet([
+          { mint: ISSUED_MINT, uiAmount: "1000000", usdPrice: 1 },
+          { mint: USDC_MINT, uiAmount: "100" },
+          // Priced, but not at a dollar: not cash.
+          { mint: UNKNOWN_MINT, uiAmount: "5", usdPrice: 173.42 },
+        ]),
+      ],
+      positions: [],
+    });
+
+    expect(summary.availableCash).toBe("1000100");
+    expect(summary.deployedShare).toBe("0");
+    expect(summary.remainingShare).toBe("1");
+  });
+
+  it("does not count one on-chain wallet twice when it has several custody rows", () => {
+    // Org-level and project-level configs both describe one address, and the
+    // balance read keys off the address, so both rows carry the same balances.
+    const balances: TreasuryAllocationBalance[] = [
+      { mint: USDC_MINT, uiAmount: "500" },
+      { mint: SHARE_MINT, uiAmount: "60" },
+    ];
+    const summary = summarize({
+      wallets: [
+        wallet(balances, "wallet-org", "pk-shared"),
+        wallet(balances, "wallet-project", "pk-shared"),
+      ],
+      // Recorded against ONE row id, as positions always are.
+      positions: [openPosition({ custodyWalletId: "wallet-org", tokenValue: "100" })],
+    });
+
+    expect(summary.availableCash).toBe("500");
+    // And the sibling row's shares are not read as an unrecorded holding.
+    expect(summary.deployedValue).toBe("100");
+    expect(summary.deployedShare).toBe("0.167");
+    expect(summary.unrecordedShareMints?.size).toBe(0);
+  });
+
+  it("makes both figures unavailable when any wallet balance cannot be read", () => {
+    // An unread wallet may hold a receipt token with no recorded position, so
+    // the recorded sum cannot be certified as the total. Unreadable is not empty.
+    const summary = summarize({
       wallets: [wallet([{ mint: USDC_MINT, uiAmount: "500" }]), wallet(undefined, "wallet-b")],
       positions: [openPosition({ tokenValue: "125.25" })],
     });
@@ -89,45 +151,24 @@ describe("summarizeTreasuryAllocation", () => {
     expect(summary.availableCash).toBeUndefined();
     expect(summary.deployedValue).toBeUndefined();
     expect(summary.deployedShare).toBeUndefined();
-    expect(summary.remainingShare).toBeUndefined();
+    expect(summary.sharesAbsence).toBe("unavailable");
+    expect(summary.unrecordedShareMints).toBeUndefined();
     expect(formatAllocationShare(summary.deployedShare, "en")).toBe("—");
   });
 
-  it("cannot certify a total with no wallet inventory at all", () => {
-    // The one-level-up form of the same gap: an absent list must not pass the
-    // coverage check vacuously.
-    const summary = summarizeTreasuryAllocation({
-      shareMints: { known: new Set([SHARE_MINT]), complete: true },
+  it("certifies nothing with no wallet inventory at all", () => {
+    const summary = summarize({
       wallets: undefined,
       positions: [openPosition({ tokenValue: "125.25" })],
     });
 
     expect(summary.availableCash).toBeUndefined();
     expect(summary.deployedValue).toBeUndefined();
-    expect(summary.deployedShare).toBeUndefined();
-  });
-
-  it("reads an unreadable wallet's deployment as unavailable, never as idle", () => {
-    expect(
-      walletDeployment({
-        positions: [openPosition({ tokenValue: "100" })],
-        shareMints: { known: new Set([SHARE_MINT]), complete: true },
-        wallet: wallet(undefined),
-      })
-    ).toEqual({ kind: "unavailable" });
-    // Even with no recorded position: unreadable balances cannot rule out one.
-    expect(
-      walletDeployment({
-        positions: [],
-        shareMints: { known: new Set([SHARE_MINT]), complete: true },
-        wallet: wallet(undefined),
-      })
-    ).toEqual({ kind: "unavailable" });
+    expect(summary.unrecordedShareMints).toBeUndefined();
   });
 
   it("makes cash unavailable when a stable balance is malformed", () => {
-    const summary = summarizeTreasuryAllocation({
-      shareMints: { known: new Set(), complete: true },
+    const summary = summarize({
       wallets: [wallet([{ mint: USDC_MINT, uiAmount: "12,5" }])],
       positions: [],
     });
@@ -135,9 +176,8 @@ describe("summarizeTreasuryAllocation", () => {
     expect(summary.availableCash).toBeUndefined();
   });
 
-  it("makes deployed unavailable when any open position cannot be hydrated, never zero", () => {
-    const summary = summarizeTreasuryAllocation({
-      shareMints: { known: new Set(), complete: true },
+  it("makes deployed unavailable when an open position cannot be hydrated", () => {
+    const summary = summarize({
       wallets: [wallet([{ mint: USDC_MINT, uiAmount: "500" }])],
       positions: [openPosition({ tokenValue: undefined }), openPosition({ tokenValue: "40" })],
     });
@@ -145,23 +185,19 @@ describe("summarizeTreasuryAllocation", () => {
     expect(summary.availableCash).toBe("500");
     expect(summary.deployedValue).toBeUndefined();
     expect(summary.deployedShare).toBeUndefined();
-    expect(summary.remainingShare).toBeUndefined();
   });
 
   it("makes deployed unavailable when an open position value is malformed", () => {
-    const summary = summarizeTreasuryAllocation({
-      shareMints: { known: new Set(), complete: true },
+    const summary = summarize({
       wallets: [wallet([{ mint: USDC_MINT, uiAmount: "500" }])],
       positions: [openPosition({ tokenValue: "12,5" })],
     });
 
     expect(summary.deployedValue).toBeUndefined();
-    expect(summary.deployedShare).toBeUndefined();
   });
 
   it("makes deployed unavailable rather than pricing a non-USD-stable position at $1", () => {
-    const summary = summarizeTreasuryAllocation({
-      shareMints: { known: new Set(), complete: true },
+    const summary = summarize({
       wallets: [wallet([])],
       positions: [openPosition({ tokenMint: SOL_MINT, tokenValue: "10" })],
     });
@@ -169,12 +205,11 @@ describe("summarizeTreasuryAllocation", () => {
     expect(summary.deployedValue).toBeUndefined();
   });
 
-  it("withholds shares when an open position's custody wallet is not in the wallet read", () => {
-    // The wallet read serves active wallets only, so this position's idle-cash
-    // side is unobserved: both dollar figures still render, but a percentage
-    // split would be fabricated.
-    const summary = summarizeTreasuryAllocation({
-      shareMints: { known: new Set(), complete: true },
+  it("withholds only the shares when an open position's wallet is outside the read", () => {
+    // The wallet read serves active wallets only, so that position's idle-cash
+    // side is unobserved. Both dollar figures still render; the split would be
+    // fabricated.
+    const summary = summarize({
       wallets: [wallet([{ mint: USDC_MINT, uiAmount: "50" }])],
       positions: [openPosition({ custodyWalletId: "wallet-deactivated", tokenValue: "100" })],
     });
@@ -182,13 +217,11 @@ describe("summarizeTreasuryAllocation", () => {
     expect(summary.availableCash).toBe("50");
     expect(summary.deployedValue).toBe("100");
     expect(summary.deployedShare).toBeUndefined();
-    expect(summary.remainingShare).toBeUndefined();
+    expect(summary.sharesAbsence).toBe("unavailable");
   });
 
   it("makes deployed unavailable when a wallet holds shares no open position records", () => {
-    // Deposited outside SDP: the receipt token is in the wallet but there is
-    // no position row, so the recorded sum is not the deployed TOTAL.
-    const summary = summarizeTreasuryAllocation({
+    const summary = summarize({
       wallets: [
         wallet([
           { mint: USDC_MINT, uiAmount: "500" },
@@ -196,20 +229,44 @@ describe("summarizeTreasuryAllocation", () => {
         ]),
       ],
       positions: [openPosition({ tokenValue: "100" })],
-      shareMints: { known: new Set([SHARE_MINT, UNRECORDED_SHARE_MINT]), complete: true },
+      shareMints: vocabulary(SHARE_MINT, UNRECORDED_SHARE_MINT),
     });
 
     expect(summary.availableCash).toBe("500");
     expect(summary.deployedValue).toBeUndefined();
-    expect(summary.deployedShare).toBeUndefined();
-    expect(summary.remainingShare).toBeUndefined();
+    expect(summary.unrecordedShareMints).toEqual(new Set([UNRECORDED_SHARE_MINT]));
+  });
+
+  it("does not treat a CLOSED position as recording a held share mint", () => {
+    // The wallet still holds the receipt for a position SDP has marked closed,
+    // so the exit did not actually complete and the total is not knowable.
+    const summary = summarize({
+      wallets: [
+        wallet([
+          { mint: USDC_MINT, uiAmount: "500" },
+          { mint: SHARE_MINT, uiAmount: "60" },
+        ]),
+      ],
+      positions: [openPosition({ closedAt: "2026-08-20T00:00:00.000Z", tokenValue: "100" })],
+    });
+
+    expect(summary.deployedValue).toBeUndefined();
+    expect(summary.deployedAbsence).toBe("unreconciled");
+    expect(summary.unrecordedShareMints).toEqual(new Set([SHARE_MINT]));
+    expect(summary.deploymentByWalletId.get("wallet-a")).toEqual({ kind: "unavailable" });
+  });
+
+  it("names an unusable position value as unreadable, not as a reconciliation gap", () => {
+    const summary = summarize({
+      wallets: [wallet([{ mint: USDC_MINT, uiAmount: "500" }])],
+      positions: [openPosition({ tokenValue: undefined })],
+    });
+
+    expect(summary.deployedAbsence).toBe("unreadable");
   });
 
   it("does not let one wallet's position cover another wallet's holding of the same mint", () => {
-    // Same vault, two wallets, one recorded position. A portfolio-wide mint set
-    // would accept wallet-b's shares as covered and publish a confident split
-    // over an incomplete total.
-    const summary = summarizeTreasuryAllocation({
+    const summary = summarize({
       wallets: [
         wallet([
           { mint: USDC_MINT, uiAmount: "500" },
@@ -218,17 +275,14 @@ describe("summarizeTreasuryAllocation", () => {
         wallet([{ mint: SHARE_MINT, uiAmount: "25" }], "wallet-b"),
       ],
       positions: [openPosition({ custodyWalletId: "wallet-a", tokenValue: "100" })],
-      shareMints: { known: new Set([SHARE_MINT]), complete: true },
     });
 
-    expect(summary.availableCash).toBe("500");
     expect(summary.deployedValue).toBeUndefined();
-    expect(summary.deployedShare).toBeUndefined();
-    expect(summary.remainingShare).toBeUndefined();
+    expect(summary.unrecordedShareMints).toEqual(new Set([SHARE_MINT]));
   });
 
-  it("still totals deployed when every held share mint has an open position", () => {
-    const summary = summarizeTreasuryAllocation({
+  it("totals deployed when every held share mint has an open position behind it", () => {
+    const summary = summarize({
       wallets: [
         wallet([
           { mint: USDC_MINT, uiAmount: "300" },
@@ -236,69 +290,58 @@ describe("summarizeTreasuryAllocation", () => {
         ]),
       ],
       positions: [openPosition({ tokenValue: "100" })],
-      shareMints: { known: new Set([SHARE_MINT]), complete: true },
     });
 
-    expect(summary.availableCash).toBe("300");
     expect(summary.deployedValue).toBe("100");
     expect(summary.deployedShare).toBe("0.25");
   });
 
   it("propagates failed reads as unavailable on both sides", () => {
-    const summary = summarizeTreasuryAllocation({
-      shareMints: { known: new Set(), complete: true },
-      wallets: undefined,
-      positions: undefined,
-    });
+    const summary = summarize({ wallets: undefined, positions: undefined });
 
     expect(summary.availableCash).toBeUndefined();
     expect(summary.deployedValue).toBeUndefined();
-    expect(summary.deployedShare).toBeUndefined();
+    expect(summary.sharesAbsence).toBe("unavailable");
   });
 
   it("reports real zeros for a readable empty treasury without inventing an allocation", () => {
-    const summary = summarizeTreasuryAllocation({
-      shareMints: { known: new Set(), complete: true },
-      wallets: [wallet([])],
-      positions: [],
-    });
+    const summary = summarize({ wallets: [wallet([])], positions: [] });
 
     expect(summary.availableCash).toBe("0");
     expect(summary.deployedValue).toBe("0");
     expect(summary.deployedShare).toBeUndefined();
-    expect(summary.remainingShare).toBeUndefined();
+    // The caption reads from this, so it never re-derives intent from strings.
+    expect(summary.sharesAbsence).toBe("empty_float");
   });
 
-  it("reads a fully idle float as 0% deployed and 100% remaining", () => {
-    const summary = summarizeTreasuryAllocation({
-      shareMints: { known: new Set(), complete: true },
+  it("reads a fully idle float as 0% deployed and a fully deployed one as 100%", () => {
+    const idle = summarize({
       wallets: [wallet([{ mint: USDC_MINT, uiAmount: "500" }])],
       positions: [],
     });
+    expect(idle.deployedShare).toBe("0");
+    expect(idle.remainingShare).toBe("1");
+    expect(formatAllocationShare(idle.deployedShare, "en")).toBe("0.0%");
+    expect(formatAllocationShare(idle.remainingShare, "en")).toBe("100.0%");
 
-    expect(summary.deployedShare).toBe("0");
-    expect(summary.remainingShare).toBe("1");
-    expect(formatAllocationShare(summary.deployedShare, "en")).toBe("0.0%");
-    expect(formatAllocationShare(summary.remainingShare, "en")).toBe("100.0%");
-  });
-
-  it("reads a fully deployed float as 100% deployed", () => {
-    const summary = summarizeTreasuryAllocation({
-      shareMints: { known: new Set(), complete: true },
-      wallets: [wallet([])],
+    const deployed = summarize({
+      wallets: [wallet([{ mint: SHARE_MINT, uiAmount: "60" }])],
       positions: [openPosition({ tokenValue: "800" })],
     });
-
-    expect(summary.deployedShare).toBe("1");
-    expect(summary.remainingShare).toBe("0");
+    expect(deployed.deployedShare).toBe("1");
+    expect(deployed.remainingShare).toBe("0");
   });
 
   it("rounds half-up to tenths of a percent and keeps the complement exact", () => {
-    // 1 of 2000 is exactly 0.05%, which rounds up to 0.1%; the remaining
-    // share is the complement so the pair still totals exactly 100%.
-    const summary = summarizeTreasuryAllocation({
-      shareMints: { known: new Set(), complete: true },
-      wallets: [wallet([{ mint: USDC_MINT, uiAmount: "1999" }])],
+    // 1 of 2000 is exactly 0.05%, which rounds up to 0.1%; the remaining share
+    // is the complement so the pair still totals exactly 100%.
+    const summary = summarize({
+      wallets: [
+        wallet([
+          { mint: USDC_MINT, uiAmount: "1999" },
+          { mint: SHARE_MINT, uiAmount: "1" },
+        ]),
+      ],
       positions: [openPosition({ tokenValue: "1" })],
     });
 
@@ -309,94 +352,12 @@ describe("summarizeTreasuryAllocation", () => {
   });
 });
 
-describe("walletDeployment", () => {
-  it("reads unavailable when the positions read failed but the wallet holds shares", () => {
-    expect(
-      walletDeployment({
-        positions: undefined,
-        shareMints: { known: new Set([SHARE_MINT]), complete: true },
-        wallet: wallet([{ mint: SHARE_MINT, uiAmount: "60" }]),
-      })
-    ).toEqual({ kind: "unavailable" });
-  });
-
-  it("reads none when the positions read failed and the wallet holds no shares", () => {
-    expect(
-      walletDeployment({
-        positions: undefined,
-        shareMints: { known: new Set([SHARE_MINT]), complete: true },
-        wallet: wallet([{ mint: USDC_MINT, uiAmount: "10" }]),
-      })
-    ).toEqual({ kind: "none" });
-  });
-
-  it("reads unavailable for a held share mint no open position records", () => {
-    // The bot's case: the strategy left the catalogue, or the position was
-    // opened outside SDP. Hiding the tile AND the line would erase it.
-    expect(
-      walletDeployment({
-        positions: [openPosition({ tokenValue: "40" })],
-        shareMints: { known: new Set([SHARE_MINT, UNRECORDED_SHARE_MINT]), complete: true },
-        wallet: wallet([{ mint: UNRECORDED_SHARE_MINT, uiAmount: "5" }]),
-      })
-    ).toEqual({ kind: "unavailable" });
-  });
-
-  it("totals the recorded positions when every held share mint is accounted for", () => {
-    expect(
-      walletDeployment({
-        positions: [openPosition({ tokenValue: "40" }), openPosition({ tokenValue: "2.5" })],
-        shareMints: { known: new Set([SHARE_MINT]), complete: true },
-        wallet: wallet([{ mint: SHARE_MINT, uiAmount: "60" }]),
-      })
-    ).toEqual({ kind: "value", value: "42.5" });
-  });
-
-  it("counts only this wallet's positions, never another wallet's", () => {
-    // wallet-b's position is larger and shares the mint, so an unscoped sum
-    // would report the whole portfolio on wallet-a's line.
-    expect(
-      walletDeployment({
-        positions: [
-          openPosition({ custodyWalletId: "wallet-a", tokenValue: "100" }),
-          openPosition({ custodyWalletId: "wallet-b", tokenValue: "500" }),
-        ],
-        shareMints: { known: new Set([SHARE_MINT]), complete: true },
-        wallet: wallet([{ mint: SHARE_MINT, uiAmount: "60" }]),
-      })
-    ).toEqual({ kind: "value", value: "100" });
-  });
-
-  it("reads none for a wallet with neither shares nor open positions", () => {
-    expect(
-      walletDeployment({
-        positions: [openPosition({ shares: "0", tokenValue: "9" })],
-        shareMints: { known: new Set([SHARE_MINT]), complete: true },
-        wallet: wallet([]),
-      })
-    ).toEqual({ kind: "none" });
-  });
-
-  it("reads unavailable when a recorded position cannot be valued", () => {
-    expect(
-      walletDeployment({
-        positions: [openPosition({ tokenValue: undefined })],
-        shareMints: { known: new Set([SHARE_MINT]), complete: true },
-        wallet: wallet([{ mint: SHARE_MINT, uiAmount: "60" }]),
-      })
-    ).toEqual({ kind: "unavailable" });
-  });
-});
-
 describe("zero-balance share accounts", () => {
   // An emptied share account can outlive its position, and this payload
   // appends the SOL row at zero, so a zero row is a shape to handle rather
   // than an upstream invariant to lean on.
-  const vaultShareMints = new Set([SHARE_MINT]);
-
   it("is not a holding, so a fully exited treasury still totals", () => {
-    const summary = summarizeTreasuryAllocation({
-      shareMints: { known: vaultShareMints, complete: true },
+    const summary = summarize({
       wallets: [
         wallet([
           { mint: USDC_MINT, uiAmount: "500" },
@@ -409,49 +370,169 @@ describe("zero-balance share accounts", () => {
     expect(summary.availableCash).toBe("500");
     expect(summary.deployedValue).toBe("0");
     expect(summary.deployedShare).toBe("0");
-    expect(summary.remainingShare).toBe("1");
-  });
-
-  it("leaves the wallet line silent rather than unavailable", () => {
-    expect(
-      walletDeployment({
-        positions: [],
-        shareMints: { known: vaultShareMints, complete: true },
-        wallet: wallet([{ mint: SHARE_MINT, uiAmount: "0" }]),
-      })
-    ).toEqual({ kind: "none" });
+    expect(summary.deploymentByWalletId.get("wallet-a")).toEqual({ kind: "none" });
   });
 
   it("treats a trailing-zero form as zero and a dust amount as held", () => {
     expect(
-      heldVaultShareMints(wallet([{ mint: SHARE_MINT, uiAmount: "0.000" }]), vaultShareMints)
+      heldVaultShareMints(wallet([{ mint: SHARE_MINT, uiAmount: "0.000" }]), new Set([SHARE_MINT]))
     ).toEqual([]);
     expect(
-      heldVaultShareMints(wallet([{ mint: SHARE_MINT, uiAmount: "0.000001" }]), vaultShareMints)
+      heldVaultShareMints(
+        wallet([{ mint: SHARE_MINT, uiAmount: "0.000001" }]),
+        new Set([SHARE_MINT])
+      )
     ).toEqual([SHARE_MINT]);
   });
 
   it("treats an unparseable amount as held, since it is not evidence of empty", () => {
     expect(
-      heldVaultShareMints(wallet([{ mint: SHARE_MINT, uiAmount: "1,5" }]), vaultShareMints)
+      heldVaultShareMints(wallet([{ mint: SHARE_MINT, uiAmount: "1,5" }]), new Set([SHARE_MINT]))
     ).toEqual([SHARE_MINT]);
+  });
+
+  it("distinguishes unreadable balances from an empty wallet", () => {
+    expect(heldVaultShareMints(wallet(undefined), new Set([SHARE_MINT]))).toBeUndefined();
+    expect(heldVaultShareMints(wallet([]), new Set([SHARE_MINT]))).toEqual([]);
   });
 });
 
-describe("summary and wallet lines never disagree", () => {
-  // Two of the three bugs found in review were the summary claiming a figure
-  // a wallet line had already given up on. This pins the implication across
-  // the state matrix: any wallet reading unavailable forces the summary's
-  // deployed figure unavailable.
-  const vaultShareMints = new Set([SHARE_MINT, UNRECORDED_SHARE_MINT]);
+describe("an incomplete share-mint vocabulary", () => {
+  // The catalogue is the only witness that a token with no position row is a
+  // receipt, so while it is not whole no deployed figure can be certified.
+  const incomplete: VaultShareMintVocabulary = { known: new Set([SHARE_MINT]), complete: false };
+
+  it("makes the deployed figure unavailable even when every position reads", () => {
+    const summary = summarize({
+      wallets: [wallet([{ mint: USDC_MINT, uiAmount: "500" }])],
+      positions: [openPosition({ tokenValue: "100" })],
+      shareMints: incomplete,
+    });
+
+    expect(summary.availableCash).toBe("500");
+    expect(summary.deployedValue).toBeUndefined();
+    expect(summary.deployedShare).toBeUndefined();
+    expect(summary.unrecordedShareMints).toBeUndefined();
+  });
+
+  it("never reports a fully deployed wallet as an idle float", () => {
+    // Positions read succeeds and is EMPTY while the catalogue is unavailable
+    // and the wallet holds receipts: the fabrication this guard exists for.
+    const summary = summarize({
+      wallets: [
+        wallet([
+          { mint: USDC_MINT, uiAmount: "500" },
+          { mint: SHARE_MINT, uiAmount: "60" },
+        ]),
+      ],
+      positions: [],
+      shareMints: incomplete,
+    });
+
+    expect(summary.deployedValue).toBeUndefined();
+    expect(summary.deployedShare).toBeUndefined();
+    expect(summary.remainingShare).toBeUndefined();
+  });
+
+  it("makes a wallet line with open positions unavailable, not a confident value", () => {
+    const summary = summarize({
+      wallets: [wallet([{ mint: SHARE_MINT, uiAmount: "60" }])],
+      positions: [openPosition({ tokenValue: "100" })],
+      shareMints: incomplete,
+    });
+
+    expect(summary.deploymentByWalletId.get("wallet-a")).toEqual({ kind: "unavailable" });
+  });
+
+  it("stays silent for a wallet with nothing deployed", () => {
+    const summary = summarize({
+      wallets: [wallet([{ mint: USDC_MINT, uiAmount: "500" }])],
+      positions: [],
+      shareMints: incomplete,
+    });
+
+    expect(summary.deploymentByWalletId.get("wallet-a")).toEqual({ kind: "none" });
+  });
+});
+
+describe("per-wallet deployment lines", () => {
+  it("reads unavailable when the balances could not be read, never as idle", () => {
+    const withPosition = summarize({
+      wallets: [wallet(undefined)],
+      positions: [openPosition({ tokenValue: "100" })],
+    });
+    expect(withPosition.deploymentByWalletId.get("wallet-a")).toEqual({ kind: "unavailable" });
+
+    // Even with no recorded position: unreadable balances cannot rule one out.
+    const withoutPosition = summarize({ wallets: [wallet(undefined)], positions: [] });
+    expect(withoutPosition.deploymentByWalletId.get("wallet-a")).toEqual({ kind: "unavailable" });
+  });
+
+  it("reads unavailable when the positions read failed but shares are held", () => {
+    const summary = summarize({
+      wallets: [wallet([{ mint: SHARE_MINT, uiAmount: "60" }])],
+      positions: undefined,
+    });
+    expect(summary.deploymentByWalletId.get("wallet-a")).toEqual({ kind: "unavailable" });
+  });
+
+  it("stays silent when the positions read failed and no shares are held", () => {
+    const summary = summarize({
+      wallets: [wallet([{ mint: USDC_MINT, uiAmount: "10" }])],
+      positions: undefined,
+    });
+    expect(summary.deploymentByWalletId.get("wallet-a")).toEqual({ kind: "none" });
+  });
+
+  it("counts only this wallet's positions, never another wallet's", () => {
+    // wallet-b's position is larger and shares the mint, so an unscoped sum
+    // would report the whole portfolio on wallet-a's line.
+    const summary = summarize({
+      wallets: [
+        wallet([{ mint: SHARE_MINT, uiAmount: "60" }]),
+        wallet([{ mint: SHARE_MINT, uiAmount: "60" }], "wallet-b"),
+      ],
+      positions: [
+        openPosition({ custodyWalletId: "wallet-a", tokenValue: "100" }),
+        openPosition({ custodyWalletId: "wallet-b", tokenValue: "500" }),
+      ],
+    });
+
+    expect(summary.deploymentByWalletId.get("wallet-a")).toEqual({ kind: "value", value: "100" });
+    expect(summary.deploymentByWalletId.get("wallet-b")).toEqual({ kind: "value", value: "500" });
+  });
+
+  it("reads unavailable when a recorded position cannot be valued", () => {
+    const summary = summarize({
+      wallets: [wallet([{ mint: SHARE_MINT, uiAmount: "60" }])],
+      positions: [openPosition({ tokenValue: undefined })],
+    });
+    expect(summary.deploymentByWalletId.get("wallet-a")).toEqual({ kind: "unavailable" });
+  });
+
+  it("reads none for a wallet with neither shares nor open positions", () => {
+    const summary = summarize({
+      wallets: [wallet([{ mint: USDC_MINT, uiAmount: "10" }])],
+      positions: [openPosition({ shares: "0", tokenValue: "9" })],
+    });
+    expect(summary.deploymentByWalletId.get("wallet-a")).toEqual({ kind: "none" });
+  });
+});
+
+describe("no two surfaces disagree", () => {
+  // Most bugs found in review here were the summary claiming a figure a wallet
+  // line had already given up on. Every surface now reads one result, and this
+  // pins the implication across the state matrix.
+  const shareMints = vocabulary(SHARE_MINT, UNRECORDED_SHARE_MINT);
   const cash = { mint: USDC_MINT, uiAmount: "500" };
   const heldShare = { mint: SHARE_MINT, uiAmount: "60" };
   const heldUnrecorded = { mint: UNRECORDED_SHARE_MINT, uiAmount: "60" };
 
   const scenarios: Array<{
     name: string;
-    wallets: TreasuryAllocationWallet[];
+    wallets: TreasuryAllocationWallet[] | undefined;
     positions: TreasuryAllocationPosition[] | undefined;
+    shareMints?: VaultShareMintVocabulary;
   }> = [
     { name: "cash only", wallets: [wallet([cash])], positions: [] },
     {
@@ -486,97 +567,64 @@ describe("summary and wallet lines never disagree", () => {
       positions: [openPosition({ tokenValue: "100" })],
     },
     {
+      name: "incomplete vocabulary",
+      wallets: [wallet([cash, heldShare])],
+      positions: [openPosition({ tokenValue: "100" })],
+      shareMints: { known: new Set([SHARE_MINT]), complete: false },
+    },
+    {
       name: "zero share account",
       wallets: [wallet([cash, { mint: SHARE_MINT, uiAmount: "0" }])],
       positions: [],
     },
+    { name: "duplicate custody rows", wallets: undefined, positions: [] },
   ];
 
   for (const scenario of scenarios) {
     it(`holds for: ${scenario.name}`, () => {
       const summary = summarizeTreasuryAllocation({
         positions: scenario.positions,
-        shareMints: { known: vaultShareMints, complete: true },
+        shareMints: scenario.shareMints ?? shareMints,
         wallets: scenario.wallets,
       });
-      const anyWalletUnavailable = scenario.wallets.some(
-        (candidate) =>
-          walletDeployment({
-            positions: scenario.positions,
-            shareMints: { known: vaultShareMints, complete: true },
-            wallet: candidate,
-          }).kind === "unavailable"
-      );
 
+      const anyWalletUnavailable = [...summary.deploymentByWalletId.values()].some(
+        (line) => line.kind === "unavailable"
+      );
       if (anyWalletUnavailable) {
         expect(summary.deployedValue).toBeUndefined();
         expect(summary.deployedShare).toBeUndefined();
         expect(summary.remainingShare).toBeUndefined();
       }
-      // A share is never published without both figures behind it.
+
+      // Note the implication runs ONE way only. The converse does not hold and
+      // must not be asserted: when a DIFFERENT wallet is the uncertain one, a
+      // readable wallet's own figure is still true, and blanking it would hide
+      // real information rather than protect anyone.
+
+      // Shares are published only with both figures behind them, and their
+      // absence always carries a reason.
       if (summary.deployedShare !== undefined) {
         expect(summary.availableCash).not.toBeUndefined();
         expect(summary.deployedValue).not.toBeUndefined();
+        expect(summary.sharesAbsence).toBeUndefined();
+      } else {
+        expect(summary.sharesAbsence).not.toBeUndefined();
+      }
+
+      // The pair is always both-or-neither, and always totals 100%.
+      expect(summary.deployedShare === undefined).toBe(summary.remainingShare === undefined);
+      if (summary.deployedShare !== undefined && summary.remainingShare !== undefined) {
+        const deployedTenths = Number(summary.deployedShare) * 1000;
+        const remainingTenths = Number(summary.remainingShare) * 1000;
+        expect(Math.round(deployedTenths + remainingTenths)).toBe(1000);
+      }
+
+      // A strategy row can only claim "no active position" when the witness
+      // exists, and the deployed total is certified exactly when it is empty.
+      if (summary.unrecordedShareMints === undefined) {
+        expect(summary.deployedValue).toBeUndefined();
       }
     });
   }
-});
-
-describe("an incomplete share-mint vocabulary", () => {
-  // The strategy catalogue is the only witness that a token with no position
-  // row is a receipt, so while it is unavailable no deployed figure can be
-  // certified. This must POISON the figure, never bypass the check.
-  const known = new Set([SHARE_MINT]);
-
-  it("makes the deployed figure unavailable even when every position reads", () => {
-    const summary = summarizeTreasuryAllocation({
-      wallets: [wallet([{ mint: USDC_MINT, uiAmount: "500" }])],
-      positions: [openPosition({ tokenValue: "100" })],
-      shareMints: { known, complete: false },
-    });
-
-    expect(summary.availableCash).toBe("500");
-    expect(summary.deployedValue).toBeUndefined();
-    expect(summary.deployedShare).toBeUndefined();
-    expect(summary.remainingShare).toBeUndefined();
-  });
-
-  it("never reports a fully deployed wallet as an idle float", () => {
-    // The exact fabrication this guards: positions read succeeds and is
-    // EMPTY, the catalogue is unavailable, and the wallet holds receipts.
-    const summary = summarizeTreasuryAllocation({
-      wallets: [
-        wallet([
-          { mint: USDC_MINT, uiAmount: "500" },
-          { mint: UNRECORDED_SHARE_MINT, uiAmount: "60" },
-        ]),
-      ],
-      positions: [],
-      shareMints: { known, complete: false },
-    });
-
-    expect(summary.deployedValue).toBeUndefined();
-    expect(summary.deployedShare).toBeUndefined();
-    expect(summary.remainingShare).toBeUndefined();
-  });
-
-  it("makes a wallet line with open positions unavailable, not a confident value", () => {
-    expect(
-      walletDeployment({
-        positions: [openPosition({ tokenValue: "100" })],
-        shareMints: { known, complete: false },
-        wallet: wallet([{ mint: SHARE_MINT, uiAmount: "60" }]),
-      })
-    ).toEqual({ kind: "unavailable" });
-  });
-
-  it("stays silent for a wallet with nothing deployed", () => {
-    expect(
-      walletDeployment({
-        positions: [],
-        shareMints: { known, complete: false },
-        wallet: wallet([{ mint: USDC_MINT, uiAmount: "500" }]),
-      })
-    ).toEqual({ kind: "none" });
-  });
 });
