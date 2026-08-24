@@ -258,11 +258,7 @@ const signingSinkInventory: Record<string, string[]> = {
   ],
   "apps/sdp-api/src/routes/pay.ts": ["signAsFeePayer"],
   "apps/sdp-api/src/routes/payments/handlers/transfer-batches/execute.ts": ["signAndSend"],
-  "apps/sdp-api/src/routes/payments/handlers/transfers.ts": [
-    "signAndSend",
-    "signAndSend",
-    "signAndSend",
-  ],
+  "apps/sdp-api/src/services/payments/signed-submission.ts": ["prepareOwnedSubmission"],
   "apps/sdp-api/src/services/payments/recurring-payments/shared.ts": ["signAndSend"],
   "apps/sdp-api/src/services/private-channels/deposit.ts": ["signTransactionMessageWithSigners"],
   "apps/sdp-api/src/services/private-channels/transfer.ts": ["signTransactionMessageWithSigners"],
@@ -309,7 +305,8 @@ function sourceFiles(directory: string): string[] {
 }
 
 function discoverSigningSinks(): Record<string, string[]> {
-  const sinkPattern = /\.(signAndSend|signAsFeePayer)\(|\b(signTransactionMessageWithSigners)\(/g;
+  const sinkPattern =
+    /\.(signAndSend|signAsFeePayer|prepareOwnedSubmission)\(|\b(signTransactionMessageWithSigners)\(/g;
   const inventory: Record<string, string[]> = {};
 
   for (const root of valueMovingSourceRoots) {
