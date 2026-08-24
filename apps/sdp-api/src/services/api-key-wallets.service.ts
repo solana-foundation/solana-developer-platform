@@ -277,9 +277,17 @@ export async function cloneApiKeyWalletBindings(
 }
 
 function safeParsePermissions(raw: unknown): Permission[] | null {
-  const parsed = parsePostgresJsonOr<unknown>(raw, null);
-  if (!Array.isArray(parsed)) {
+  // Only a genuinely ABSENT value (SQL NULL) may map to null — the
+  // historical unrestricted default. A value that exists but cannot be
+  // parsed as an array fails CLOSED: conflating corrupt data with absence
+  // would widen a broken permissions row into full wallet access.
+  if (raw == null) {
     return null;
+  }
+
+  const parsed = parsePostgresJsonOr<unknown>(raw, undefined);
+  if (!Array.isArray(parsed)) {
+    return [];
   }
 
   return parsed.filter((entry): entry is Permission => typeof entry === "string");

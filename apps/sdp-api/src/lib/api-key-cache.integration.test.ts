@@ -61,6 +61,17 @@ describe("loadCachedApiKeyFromDb wallet binding permissions", () => {
           keyHash,
           JSON.stringify(["*"])
         ),
+      // Bindings only survive hydration when they resolve to exactly one
+      // active custody wallet; without this config every binding would be
+      // dropped as unresolved and the permissions under test never load.
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
+           VALUES ('cust_cache_loader_perms', ?, ?, 'local', 'test-config',
+                   'sdp-custody-encryption-v1', 'active')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id),
     ]);
   });
 
@@ -69,6 +80,13 @@ describe("loadCachedApiKeyFromDb wallet binding permissions", () => {
   });
 
   async function seedBindingRow(walletId: string, permissionsJson: string): Promise<void> {
+    await getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
+         VALUES (?, 'cust_cache_loader_perms', ?, ?, 'active')`
+      )
+      .bind(`cwlt_${walletId}`, walletId, `${walletId}_public_key`)
+      .run();
     await getDb(env)
       .prepare(
         `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
@@ -86,8 +104,12 @@ describe("loadCachedApiKeyFromDb wallet binding permissions", () => {
 
     expect(cached).not.toBeNull();
     expect(cached?.walletBindings).toEqual([
-      { walletId: "wal_denied", permissions: [] },
-      { walletId: "wal_scoped", permissions: ["payments:read"] },
+      { walletId: "wal_denied", custodyWalletId: "cwlt_wal_denied", permissions: [] },
+      {
+        walletId: "wal_scoped",
+        custodyWalletId: "cwlt_wal_scoped",
+        permissions: ["payments:read"],
+      },
     ]);
   });
 
@@ -96,6 +118,8 @@ describe("loadCachedApiKeyFromDb wallet binding permissions", () => {
 
     const cached = await loadCachedApiKeyFromDb(getDb(env), keyHash);
 
-    expect(cached?.walletBindings).toEqual([{ walletId: "wal_corrupt", permissions: [] }]);
+    expect(cached?.walletBindings).toEqual([
+      { walletId: "wal_corrupt", custodyWalletId: "cwlt_wal_corrupt", permissions: [] },
+    ]);
   });
 });
