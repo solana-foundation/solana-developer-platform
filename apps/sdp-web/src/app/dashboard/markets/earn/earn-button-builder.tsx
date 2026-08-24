@@ -22,7 +22,7 @@ import {
   WifiHighIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useReducer, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -61,6 +61,74 @@ import {
 type EarnButtonConfigurationLoad =
   | { kind: "ready"; configuration: EarnButtonConfiguration | null }
   | { kind: "error" };
+
+type EarnButtonBuilderProps = {
+  configurationLoad: EarnButtonConfigurationLoad;
+  earnHref: string;
+  providerAccess: EarnProviderAccess | null;
+  strategyId?: string;
+};
+
+type EarnButtonBuilderState = {
+  savedConfiguration: EarnButtonConfiguration | null;
+  style: EarnButtonStyle;
+  accentColor: string;
+  isSaving: boolean;
+  saveError: string | null;
+};
+
+type EarnButtonBuilderAction =
+  | { type: "styleChanged"; style: EarnButtonStyle }
+  | { type: "accentColorChanged"; accentColor: string }
+  | { type: "saveStarted" }
+  | { type: "saveSucceeded"; configuration: EarnButtonConfiguration }
+  | { type: "saveFailed"; error: string }
+  | { type: "saveFinished" };
+
+function createBuilderState(
+  configurationLoad: EarnButtonConfigurationLoad
+): EarnButtonBuilderState {
+  const configuration = configurationLoad.kind === "ready" ? configurationLoad.configuration : null;
+  return {
+    savedConfiguration: configuration,
+    style: configuration?.style ?? "ink",
+    accentColor: configuration?.accentColor ?? DEFAULT_EARN_BUTTON_ACCENT_COLOR,
+    isSaving: false,
+    saveError: null,
+  };
+}
+
+function earnButtonBuilderReducer(
+  state: EarnButtonBuilderState,
+  action: EarnButtonBuilderAction
+): EarnButtonBuilderState {
+  switch (action.type) {
+    case "styleChanged":
+      return { ...state, style: action.style, saveError: null };
+    case "accentColorChanged":
+      return { ...state, accentColor: action.accentColor, saveError: null };
+    case "saveStarted":
+      return { ...state, isSaving: true, saveError: null };
+    case "saveSucceeded":
+      return {
+        ...state,
+        savedConfiguration: action.configuration,
+        style: action.configuration.style,
+        accentColor: action.configuration.accentColor,
+        saveError: null,
+      };
+    case "saveFailed":
+      return { ...state, saveError: action.error };
+    case "saveFinished":
+      return { ...state, isSaving: false };
+  }
+}
+
+function configurationStateKey(configurationLoad: EarnButtonConfigurationLoad): string {
+  if (configurationLoad.kind === "error") return "error";
+  const configuration = configurationLoad.configuration;
+  return configuration ? `${configuration.id}:${configuration.updatedAt}` : "empty";
+}
 
 const STYLE_OPTIONS = [
   {
@@ -563,43 +631,24 @@ function BuilderFooter({
   );
 }
 
-export function EarnButtonBuilder({
+function EarnButtonBuilderSession({
   configurationLoad,
   earnHref,
   providerAccess,
   strategyId,
-}: {
-  configurationLoad: EarnButtonConfigurationLoad;
-  earnHref: string;
-  providerAccess: EarnProviderAccess | null;
-  strategyId?: string;
-}) {
+}: EarnButtonBuilderProps) {
   const t = useTranslations();
   const { sdpEnvironment } = useDashboardWorkspace();
   const { strategies, error, isLoading } = useEarnStrategies();
-  const initialConfiguration =
-    configurationLoad.kind === "ready" ? configurationLoad.configuration : null;
-  const [savedConfiguration, setSavedConfiguration] = useState<EarnButtonConfiguration | null>(
-    initialConfiguration
+  const [builderState, dispatch] = useReducer(
+    earnButtonBuilderReducer,
+    configurationLoad,
+    createBuilderState
   );
-  const [style, setStyle] = useState<EarnButtonStyle>(initialConfiguration?.style ?? "ink");
-  const [accentColor, setAccentColor] = useState(
-    initialConfiguration?.accentColor ?? DEFAULT_EARN_BUTTON_ACCENT_COLOR
-  );
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
   const [shareOrigin, setShareOrigin] = useState("");
+  const { accentColor, isSaving, savedConfiguration, saveError, style } = builderState;
 
   useEffect(() => setShareOrigin(window.location.origin), []);
-  useEffect(() => {
-    const nextConfiguration =
-      configurationLoad.kind === "ready" ? configurationLoad.configuration : null;
-    setSavedConfiguration(nextConfiguration);
-    setStyle(nextConfiguration?.style ?? "ink");
-    setAccentColor(nextConfiguration?.accentColor ?? DEFAULT_EARN_BUTTON_ACCENT_COLOR);
-    setIsSaving(false);
-    setSaveError(null);
-  }, [configurationLoad]);
 
   if (isLoading) return <EarnProgramSkeleton />;
 
@@ -652,19 +701,26 @@ export function EarnButtonBuilder({
     : null;
 
   async function saveConfiguration() {
-    setIsSaving(true);
-    setSaveError(null);
-    const result = await saveEarnButtonConfiguration({
-      strategyId: availableStrategy.id,
-      style,
-      accentColor,
-    });
-    setIsSaving(false);
-    if (!result.ok) {
-      setSaveError(result.error);
-      return;
+    dispatch({ type: "saveStarted" });
+    try {
+      const result = await saveEarnButtonConfiguration({
+        strategyId: availableStrategy.id,
+        style,
+        accentColor,
+      });
+      if (!result.ok) {
+        dispatch({ type: "saveFailed", error: result.error });
+        return;
+      }
+      dispatch({ type: "saveSucceeded", configuration: result.data });
+    } catch (error) {
+      dispatch({
+        type: "saveFailed",
+        error: error instanceof Error ? error.message : "Unexpected save failure",
+      });
+    } finally {
+      dispatch({ type: "saveFinished" });
     }
-    setSavedConfiguration(result.data);
   }
 
   return (
@@ -714,12 +770,10 @@ export function EarnButtonBuilder({
             <AppearanceStyleControls
               accentColor={accentColor}
               onAccentColorChange={(nextAccentColor) => {
-                setAccentColor(nextAccentColor);
-                setSaveError(null);
+                dispatch({ type: "accentColorChanged", accentColor: nextAccentColor });
               }}
               onStyleChange={(nextStyle) => {
-                setStyle(nextStyle);
-                setSaveError(null);
+                dispatch({ type: "styleChanged", style: nextStyle });
               }}
               style={style}
             />
@@ -765,5 +819,11 @@ export function EarnButtonBuilder({
         </Card>
       </div>
     </DashboardWorkspaceOverviewPanel>
+  );
+}
+
+export function EarnButtonBuilder(props: EarnButtonBuilderProps) {
+  return (
+    <EarnButtonBuilderSession {...props} key={configurationStateKey(props.configurationLoad)} />
   );
 }

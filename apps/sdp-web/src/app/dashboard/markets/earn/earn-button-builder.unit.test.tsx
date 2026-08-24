@@ -175,6 +175,27 @@ describe("EarnButtonBuilder", () => {
     );
   });
 
+  it("restores the save action after an unexpected request failure", async () => {
+    const user = userEvent.setup();
+    mocks.saveEarnButtonConfiguration.mockRejectedValue(new Error("Network unavailable"));
+    renderWithEnglish(
+      <EarnButtonBuilder
+        configurationLoad={noConfiguration}
+        earnHref="/dashboard/markets/earn"
+        providerAccess={providerAccess}
+        strategyId={liveStrategy.id}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Save configuration" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("Network unavailable");
+    expect(screen.getByRole("button", { name: "Save configuration" })).toHaveProperty(
+      "disabled",
+      false
+    );
+  });
+
   it("clears the prior project's style and handoff when the project scope changes", async () => {
     const view = renderWithEnglish(
       <EarnButtonBuilder

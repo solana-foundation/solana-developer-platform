@@ -42,7 +42,7 @@ export default async function EarnIntegrationHandoffPage({
     `${apiBaseUrl}/v1/earn/button-configurations/public/${encodeURIComponent(token)}`,
     { cache: "no-store" }
   );
-  if (!response.ok) notFound();
+  if (!response.ok) return notFound();
 
   const parsed = responseSchema.safeParse(await response.json());
   if (!parsed.success) notFound();
