@@ -76,17 +76,17 @@ describe.skipIf(!ENABLED)("Earn vault sponsorship against live Kora", () => {
     client = new KoraClient({ rpcUrl, apiKey: env.KORA_API_KEY });
   });
 
-  // TEMPORARILY SKIPPED — re-enable by deleting `.skip` once devnet Kora rolls a
-  // revision (PRO-1736). sdp-infra#64 is merged and its apply created config
-  // secret version 5 with the Kamino ids, but the config mounts as a Secret
-  // Manager volume at `version = "latest"`, which Cloud Run resolves per
-  // INSTANCE at startup — and no revision rolled, so live instances still serve
-  // v4. This assertion failed CORRECTLY against that gap (run 32577231064: the
-  // three Kamino ids missing from live getConfig). Roll the revision with
-  // kora/cloud-run/deploy.sh (its check.sh gate now asserts these same ids),
-  // then delete the .skip. The dual-role signing test below stays LIVE: it
-  // passed against deployed devnet Kora and guards the core mechanism.
-  it.skip("allowlists every program each executing Earn provider can emit", async () => {
+  // If this reds with the Kamino ids missing, suspect a STALE WARM INSTANCE
+  // before suspecting code. CI's KORA_RPC_URL is the dev-env Kora
+  // (api-kora-devnet.solana.com); its config mounts as a Secret Manager volume
+  // at `version = "latest"`, which Cloud Run resolves per instance AT STARTUP,
+  // so a `terraform apply` that bumps the config secret does not reach
+  // already-running instances. That exact gap failed this assertion once (run
+  // 32577231064, config at v5, instances serving v4) and cleared when the
+  // instance recycled. It stays possible until sdp-infra#67 lands a config
+  // stamp that rolls a revision on every config change; the durable fix is
+  // there, not here.
+  it("allowlists every program each executing Earn provider can emit", async () => {
     const config = await client.getConfig();
     const allowed = new Set(config.validation_config.allowed_programs ?? []);
     expect(allowed.size).toBeGreaterThan(5);
