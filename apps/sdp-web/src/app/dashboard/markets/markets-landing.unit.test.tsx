@@ -1,9 +1,9 @@
 import type { ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/i18n/provider", () => ({
-  useTranslations: () => (key: string) => key,
+vi.mock("@/i18n/server", () => ({
+  getTranslations: vi.fn(async () => (key: string) => key),
 }));
 
 vi.mock("next/link", () => ({
@@ -13,7 +13,11 @@ vi.mock("next/link", () => ({
 import { MarketsLanding } from "./markets-landing";
 
 describe("MarketsLanding", () => {
-  const markup = renderToStaticMarkup(<MarketsLanding />);
+  let markup = "";
+
+  beforeAll(async () => {
+    markup = renderToStaticMarkup(await MarketsLanding());
+  });
 
   it("links each path to its existing subnav destination", () => {
     expect(markup).toContain('href="/dashboard/markets/treasury-solutions"');

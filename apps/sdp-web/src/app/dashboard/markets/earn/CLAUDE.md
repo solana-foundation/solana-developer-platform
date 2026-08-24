@@ -74,9 +74,11 @@ program create still sends the body `requestId` form.
 - Both are `dynamic = "force-dynamic"` and resolve `loadEarnProviderAccess()`
   server-side per request. Provider access is organization-scoped; caching it
   would hand one org's entitlement to another.
-- `layout.tsx` — the `earn()` flag gate (`notFound()`); `../layout.tsx` gates
-  the whole Markets module the same way. Pages hold no flag checks — add new
-  Earn routes under this segment and they inherit both gates.
+- No layout of its own: `../layout.tsx` gates the whole Markets segment on
+  both `markets()` and `earn()` (`notFound()`), enforced once there so no child
+  layout suspends on a flag read (which would paint the parent's loading
+  boundary on hard navigations). Pages hold no flag checks: add new Earn routes
+  under this segment and they inherit both gates.
 - Loading states come from `../markets-route-skeletons` (`EarnProgramSkeleton`),
   shared with the shell's navigation-loading resolver
   (`lib/dashboard-navigation-loading.ts` → the single `earn-program` route id
@@ -422,9 +424,9 @@ browser pass on `/dashboard/markets/earn` and
 
 - **Flags: declare in `src/flags.ts`, gate by segment.** `markets`
   (`MARKETS_ENABLED`) and `earn` (`EARN_ENABLED`) are `flagDefault(..., false)`
-  declarations resolved in the dashboard layout and enforced only by the segment
-  layouts above. A bespoke env helper, a `process.env` read, or a
-  `NEXT_PUBLIC_*` twin is wrong.
+  declarations resolved in the dashboard layout and enforced once in the
+  Markets segment layout (`../layout.tsx`). A bespoke env helper, a
+  `process.env` read, or a `NEXT_PUBLIC_*` twin is wrong.
 - **i18n: English only.** Edit `messages/en/dashboard-earn.json` (this module's
   copy is the `DashboardMarkets.earnProgram.*` and `DashboardEarn.*` namespaces;
   `DashboardMarkets.treasury.*` in the same file belongs to Treasury Solutions
