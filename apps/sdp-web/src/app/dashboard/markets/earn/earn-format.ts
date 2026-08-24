@@ -55,8 +55,12 @@ export function formatProviderAmount(
   return symbol ? `${amount} ${symbol}` : amount;
 }
 
-export function formatUsd(value: string | undefined, locale: string): string {
-  const amount = formatProviderAmount(value, locale, undefined, 6, 2);
+export function formatUsd(
+  value: string | undefined,
+  locale: string,
+  maximumFractionDigits = 6
+): string {
+  const amount = formatProviderAmount(value, locale, undefined, maximumFractionDigits, 2);
   return amount === "—" ? amount : `$${amount}`;
 }
 

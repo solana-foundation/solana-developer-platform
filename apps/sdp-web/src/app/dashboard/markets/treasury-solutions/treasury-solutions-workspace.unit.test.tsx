@@ -17,9 +17,18 @@ const mocks = vi.hoisted(() => ({
   withdrawalsByProgram: {} as Record<string, Array<{ status: string; withdrawalRef?: string }>>,
   vaultDeposits: [] as Array<{ movementId: string; status: string }>,
   vaultWithdrawals: [] as Array<{ movementId: string; status: string }>,
+  walletBalances: undefined as
+    | Array<{ token: string; mint: string; amount: string; uiAmount: string; decimals: number }>
+    | undefined,
+  livePositionTokenValue: "125.25" as string | undefined,
+  positionsError: false,
+  positionsEmpty: false,
 }));
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const SHARE_MINT = "Share1111111111111111111111111111111111111";
+// A share mint known only through the strategy catalogue — no position row.
+const CATALOGUE_SHARE_MINT = "ShareCatalogue11111111111111111111111111111";
 
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({ sdpEnvironment: mocks.environment }),
@@ -42,15 +51,7 @@ vi.mock("../earn/deposit/earn-funding-wallets", () => ({
         status: "active",
         createdAt: "2026-08-18T00:00:00.000Z",
         provider: "privy",
-        balances: [
-          {
-            token: "USDC",
-            mint: USDC_MINT,
-            amount: "2500000000",
-            uiAmount: "2500",
-            decimals: 6,
-          },
-        ],
+        balances: mocks.walletBalances,
       },
     ],
   }),
@@ -69,9 +70,26 @@ vi.mock("../earn/earn-program-data", () => ({
         name: "Kamino USDC Vault",
         sourceKind: "defi",
         depositMints: [USDC_MINT],
-        shareMint: "Share1111111111111111111111111111111111111",
+        shareMint: SHARE_MINT,
         apyType: "variable",
         currentApy: "0.062",
+        liquidityTerm: "instant",
+        status: "active",
+        hostCluster: "devnet",
+        fundable: true,
+        createdAt: "2026-08-18T00:00:00.000Z",
+        updatedAt: "2026-08-18T00:00:00.000Z",
+      },
+      {
+        id: "earn_strategy_catalogue_only",
+        provider: "kamino",
+        providerReference: "KvaultCatalogue1111111111111111111111111111",
+        name: "Kamino PYUSD Vault",
+        sourceKind: "defi",
+        depositMints: [USDC_MINT],
+        shareMint: CATALOGUE_SHARE_MINT,
+        apyType: "variable",
+        currentApy: "0.041",
         liquidityTerm: "instant",
         status: "active",
         hostCluster: "devnet",
@@ -82,50 +100,54 @@ vi.mock("../earn/earn-program-data", () => ({
     ],
   }),
   useEarnVaultPositions: () => ({
-    error: undefined,
+    // Real SWR keeps stale data alongside an error; the workspace guard is
+    // what must refuse to render it as live.
+    error: mocks.positionsError ? new Error("positions unavailable") : undefined,
     isLoading: false,
     refresh: mocks.refreshPositions,
-    positions: [
-      {
-        id: "earn_vault_position_live",
-        provider: "kamino",
-        providerReference: "Kvault11111111111111111111111111111111111",
-        label: "Kamino USDC Vault",
-        custodyWalletId: "cwlt_live",
-        tokenMint: USDC_MINT,
-        shareMint: "Share1111111111111111111111111111111111111",
-        createdAt: "2026-08-18T00:00:00.000Z",
-        closedAt: null,
-        shares: "119.5",
-        tokenValue: "125.25",
-      },
-      {
-        id: "earn_vault_position_retired",
-        provider: "kamino",
-        providerReference: "KvaultRetired111111111111111111111111111111",
-        label: "Retired provider vault",
-        custodyWalletId: "cwlt_live",
-        tokenMint: USDC_MINT,
-        shareMint: "ShareRetired1111111111111111111111111111111",
-        createdAt: "2026-08-17T00:00:00.000Z",
-        closedAt: null,
-        shares: "5",
-        tokenValue: "5.25",
-      },
-      {
-        id: "earn_vault_position_exited",
-        provider: "kamino",
-        providerReference: "KvaultExited1111111111111111111111111111111",
-        label: "Exited provider vault",
-        custodyWalletId: "cwlt_live",
-        tokenMint: USDC_MINT,
-        shareMint: "ShareExited11111111111111111111111111111111",
-        createdAt: "2026-08-16T00:00:00.000Z",
-        closedAt: null,
-        shares: "0",
-        tokenValue: "0",
-      },
-    ],
+    positions: mocks.positionsEmpty
+      ? []
+      : [
+          {
+            id: "earn_vault_position_live",
+            provider: "kamino",
+            providerReference: "Kvault11111111111111111111111111111111111",
+            label: "Kamino USDC Vault",
+            custodyWalletId: "cwlt_live",
+            tokenMint: USDC_MINT,
+            shareMint: SHARE_MINT,
+            createdAt: "2026-08-18T00:00:00.000Z",
+            closedAt: null,
+            shares: "119.5",
+            tokenValue: mocks.livePositionTokenValue,
+          },
+          {
+            id: "earn_vault_position_retired",
+            provider: "kamino",
+            providerReference: "KvaultRetired111111111111111111111111111111",
+            label: "Retired provider vault",
+            custodyWalletId: "cwlt_live",
+            tokenMint: USDC_MINT,
+            shareMint: "ShareRetired1111111111111111111111111111111",
+            createdAt: "2026-08-17T00:00:00.000Z",
+            closedAt: null,
+            shares: "5",
+            tokenValue: "5.25",
+          },
+          {
+            id: "earn_vault_position_exited",
+            provider: "kamino",
+            providerReference: "KvaultExited1111111111111111111111111111111",
+            label: "Exited provider vault",
+            custodyWalletId: "cwlt_live",
+            tokenMint: USDC_MINT,
+            shareMint: "ShareExited11111111111111111111111111111111",
+            createdAt: "2026-08-16T00:00:00.000Z",
+            closedAt: null,
+            shares: "0",
+            tokenValue: "0",
+          },
+        ],
   }),
   useEarnPrograms: () => ({
     error: undefined,
@@ -251,6 +273,17 @@ beforeEach(() => {
   mocks.withdrawalsByProgram = {};
   mocks.vaultDeposits = [];
   mocks.vaultWithdrawals = [];
+  mocks.walletBalances = [
+    { token: "USDC", mint: USDC_MINT, amount: "2500000000", uiAmount: "2500", decimals: 6 },
+    // Vault receipt tokens the custody wallet actually holds on chain. They
+    // must render as vault ownership, never as token tiles — including one
+    // whose mint is known only through the strategy catalogue.
+    { token: "kUSDC", mint: SHARE_MINT, amount: "119500000", uiAmount: "119.5", decimals: 6 },
+    { token: "kPYUSD", mint: CATALOGUE_SHARE_MINT, amount: "7000000", uiAmount: "7", decimals: 6 },
+  ];
+  mocks.livePositionTokenValue = "125.25";
+  mocks.positionsError = false;
+  mocks.positionsEmpty = false;
   vi.clearAllMocks();
 });
 
@@ -268,13 +301,27 @@ describe("TreasurySolutionsWorkspace", () => {
       .getAllByText("Kamino USDC Vault")
       .map((element) => element.closest("tr"))
       .filter((row): row is HTMLTableRowElement => row !== null);
-    const vaultPositionRow = vaultRows.find((row) => row.textContent?.includes("119.5"));
+    const vaultPositionRow = vaultRows.find((row) => row.textContent?.includes("125.25 USDC"));
     const vaultStrategyRow = vaultRows.find((row) => row.textContent?.includes("6.2%"));
     if (!vaultPositionRow || !vaultStrategyRow) {
       throw new Error("Expected separate vault position and strategy rows");
     }
-    expect(vaultPositionRow.textContent).toContain("125.25 USDC");
     expect(vaultStrategyRow.textContent).toContain("6.2%");
+
+    // PRO-1723: the allocation summary totals the float above the tables.
+    expect(screen.getByText("$2,500.00")).toBeTruthy();
+    expect(screen.getByText("5.0%")).toBeTruthy();
+    expect(screen.getByText("95.0%")).toBeTruthy();
+    expect(screen.getByText("$130.50 in open vault positions")).toBeTruthy();
+
+    // Vault ownership renders as the wallet's deployed line, never as a
+    // receipt-token tile or a raw share count — whether the mint is known
+    // from a position or only from the strategy catalogue.
+    expect(screen.queryByText("kUSDC")).toBeNull();
+    expect(screen.queryByText("kPYUSD")).toBeNull();
+    expect(screen.queryByText("119.5")).toBeNull();
+    expect(screen.getByText("Deployed in vaults")).toBeTruthy();
+    expect(screen.getByText("$130.50")).toBeTruthy();
     expect(screen.getByText("Retired provider vault")).toBeTruthy();
     expect(screen.queryByText("Exited provider vault")).toBeNull();
 
@@ -291,6 +338,61 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(legacyRow.textContent).toContain("900.50 USD");
   });
 
+  it("reads an unreadable wallet balance as unavailable in the summary, never zero", () => {
+    mocks.walletBalances = undefined;
+    renderWorkspace();
+
+    expect(screen.getByText("A wallet balance could not be read")).toBeTruthy();
+    expect(screen.getByText("Unavailable until every figure reads")).toBeTruthy();
+    // The deployed dollar figure is still readable; the shares are not.
+    expect(screen.getByText("$130.50 in open vault positions")).toBeTruthy();
+    expect(screen.queryByText("$0.00")).toBeNull();
+    expect(screen.queryByText("$2,500.00")).toBeNull();
+    expect(screen.queryByText("100.0%")).toBeNull();
+    expect(screen.getByText("Balance unavailable")).toBeTruthy();
+  });
+
+  it("keeps a deployed wallet honest when the positions read fails", () => {
+    mocks.positionsError = true;
+    renderWorkspace();
+
+    // Summary side: deployed unavailable, never zero.
+    expect(screen.getByText("A position value could not be read")).toBeTruthy();
+    expect(screen.getByText("Unavailable until every figure reads")).toBeTruthy();
+    // Wallet card: receipt tiles stay hidden (their mints are known from the
+    // stale read), but the deployment must read unavailable, not idle.
+    expect(screen.queryByText("kUSDC")).toBeNull();
+    expect(screen.getByText("Deployed in vaults")).toBeTruthy();
+    expect(screen.getAllByText("Live value unavailable").length).toBeGreaterThan(0);
+    expect(screen.queryByText("$130.50")).toBeNull();
+    expect(screen.queryByText("0.0%")).toBeNull();
+  });
+
+  it("renders the empty-float caption for a readable empty treasury", () => {
+    mocks.positionsEmpty = true;
+    mocks.walletBalances = [];
+    renderWorkspace();
+
+    // Readable zeros are real zeros; only the shares stay unallocated.
+    expect(screen.getByText("$0.00")).toBeTruthy();
+    expect(screen.getByText("No stablecoin balances to allocate yet")).toBeTruthy();
+    expect(screen.getByText("No cash balances")).toBeTruthy();
+  });
+
+  it("reads an unhydratable position as unavailable in the summary, never zero", () => {
+    mocks.livePositionTokenValue = undefined;
+    renderWorkspace();
+
+    expect(screen.getByText("A position value could not be read")).toBeTruthy();
+    expect(screen.getByText("Unavailable until every figure reads")).toBeTruthy();
+    expect(screen.getByText("$2,500.00")).toBeTruthy();
+    expect(screen.queryByText("0.0%")).toBeNull();
+    expect(screen.queryByText("100.0%")).toBeNull();
+    // The wallet's deployed line refuses a partial total for the same reason.
+    expect(screen.getAllByText("Live value unavailable").length).toBeGreaterThan(0);
+    expect(screen.queryByText("$5.25")).toBeNull();
+  });
+
   it("opens the vault exit modal from a position row", async () => {
     const user = userEvent.setup();
     renderWorkspace();
@@ -298,7 +400,7 @@ describe("TreasurySolutionsWorkspace", () => {
     const vaultPositionRow = screen
       .getAllByText("Kamino USDC Vault")
       .map((element) => element.closest("tr"))
-      .find((row) => row?.textContent?.includes("119.5"));
+      .find((row) => row?.textContent?.includes("125.25 USDC"));
     if (!vaultPositionRow) throw new Error("Expected vault position row");
 
     await user.click(within(vaultPositionRow).getByRole("button", { name: "Withdraw" }));
@@ -314,7 +416,7 @@ describe("TreasurySolutionsWorkspace", () => {
     const vaultPositionRow = screen
       .getAllByText("Kamino USDC Vault")
       .map((element) => element.closest("tr"))
-      .find((row) => row?.textContent?.includes("119.5"));
+      .find((row) => row?.textContent?.includes("125.25 USDC"));
     if (!vaultPositionRow) throw new Error("Expected vault position row");
     expect(
       (within(vaultPositionRow).getByRole("button", { name: "Withdraw" }) as HTMLButtonElement)
