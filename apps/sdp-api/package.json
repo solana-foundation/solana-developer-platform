@@ -79,7 +79,7 @@
     "@solana/mosaic-sdk": "catalog:",
     "@solana/pay": "1.0.26",
     "@solana/signers": "catalog:",
-    "@solana/subscriptions": "0.4.0",
+    "@solana/subscriptions": "0.5.0",
     "@solana/token-acl-gate-sdk": "0.3.0",
     "@solana/transactions": "catalog:",
     "hono": "4.12.34",
