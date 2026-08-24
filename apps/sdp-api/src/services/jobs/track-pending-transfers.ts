@@ -16,6 +16,7 @@
  *    finality — confirmed is transitional, not terminal.
  */
 
+import { withTransientRpcRetry } from "@sdp/rpc";
 import type { SignatureStatusInfo } from "@sdp/rpc/solana";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertIsSignature, type Signature } from "@solana/kit";
@@ -478,7 +479,9 @@ async function reconcileSignedSubmissionCacheMisses(
 
   let currentBlockHeight: bigint | null = null;
   try {
-    currentBlockHeight = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
+    currentBlockHeight = await withTransientRpcRetry(() =>
+      rpc.getBlockHeight({ commitment: "confirmed" }).send()
+    );
   } catch (err) {
     getLogger().error(
       {
