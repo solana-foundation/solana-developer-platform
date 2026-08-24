@@ -8,7 +8,7 @@ import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import { getBase58Codec } from "@solana/codecs";
-import { type Address, createNoopSigner, type Signature } from "@solana/kit";
+import { type Address, assertIsSignature, createNoopSigner, type Signature } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import {
   findAssociatedTokenPda,
@@ -37,6 +37,12 @@ import {
   resolveSourceTokenAccountOrAta,
 } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
+import { logEvent } from "@/runtime/money-path-events";
+import {
+  createTransferSignedSubmissionStore,
+  isDefiniteSubmissionError,
+  type TransferSignedSubmissionStore,
+} from "@/services/payments/signed-submission";
 import * as solanaServices from "@/services/solana";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -64,6 +70,12 @@ interface VerifiedRecurringPaymentCollection {
   transferId: string;
 }
 
+interface RecurringPaymentCollectionResult {
+  recurringPayment: PaymentRecurringPaymentRow;
+  collectionAttempt: PaymentSubscriptionCollectionAttemptRow;
+  transfer: PaymentTransferRow;
+}
+
 function tenantScope(input: { organizationId: string; projectId: string }) {
   return createTenantScope({
     organizationId: input.organizationId,
@@ -84,6 +96,30 @@ function isStaleCollectionAttempt(row: PaymentSubscriptionCollectionAttemptRow):
 
 function isRecurringCollectionSource(value: unknown): value is RecurringCollectionSource {
   return value === "manual" || value === "automated";
+}
+
+function validatedStoredCollectionSignature(input: {
+  attemptId: string;
+  signature: string;
+  transferId: string;
+}): Signature {
+  try {
+    assertIsSignature(input.signature);
+    return input.signature;
+  } catch (error) {
+    getLogger().error(
+      {
+        attempt_id: input.attemptId,
+        error: activationErrorMessage(error),
+        transfer_id: input.transferId,
+      },
+      "Recurring payment collection stored signature is invalid"
+    );
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "Recurring payment collection has an invalid stored signature"
+    );
+  }
 }
 
 function recurringCollectionMetadata(input: {
@@ -191,6 +227,26 @@ async function verifyRecurringPaymentCollection(input: {
   dueAt: string;
   destinationTokenAccount: Address;
 }): Promise<VerifiedRecurringPaymentCollection> {
+  const proofMismatch = (
+    reason:
+      | "persisted_evidence_mismatch"
+      | "missing_verified_addresses"
+      | "on_chain_instruction_mismatch",
+    message: string
+  ): AppError => {
+    logEvent("error", {
+      event: "sdp_api_recurring_payment_collection_proof_mismatch",
+      reason,
+      organization_id: input.transfer.organization_id,
+      project_id: input.transfer.project_id,
+      recurring_payment_id: input.recurringPayment.id,
+      subscription_id: input.subscription.id,
+      attempt_id: input.attempt.id,
+      transfer_id: input.transfer.id,
+      signature: input.signature,
+    });
+    return new AppError("CONFLICT", message);
+  };
   const providerData = input.transfer.provider_data;
   const attemptMetadata = input.attempt.metadata;
   const providerEvidenceMatches =
@@ -221,8 +277,8 @@ async function verifyRecurringPaymentCollection(input: {
     input.transfer.signature === input.signature;
 
   if (!persistedEvidenceMatches) {
-    throw new AppError(
-      "CONFLICT",
+    throw proofMismatch(
+      "persisted_evidence_mismatch",
       "Recurring payment collection evidence does not match the due payment"
     );
   }
@@ -232,7 +288,10 @@ async function verifyRecurringPaymentCollection(input: {
     !input.subscription.subscription_authority_address ||
     !input.subscription.subscriber_token_account
   ) {
-    throw new AppError("CONFLICT", "Recurring payment collection is missing verified addresses");
+    throw proofMismatch(
+      "missing_verified_addresses",
+      "Recurring payment collection is missing verified addresses"
+    );
   }
 
   const planPda = input.recurringPayment.plan_pda;
@@ -275,8 +334,8 @@ async function verifyRecurringPaymentCollection(input: {
     })
   );
   if (!hasExpectedInstruction) {
-    throw new AppError(
-      "CONFLICT",
+    throw proofMismatch(
+      "on_chain_instruction_mismatch",
       "Confirmed transaction does not prove the expected recurring payment collection"
     );
   }
@@ -369,14 +428,18 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
           throw new AppError("INTERNAL_ERROR", "Failed to mark collection transfer failed");
         }
 
-        confirmedTransferSignature = (currentTransfer.signature ??
-          input.submittedSignature) as Signature | null;
-        if (!confirmedTransferSignature) {
+        const currentSignature = currentTransfer.signature ?? input.submittedSignature;
+        if (!currentSignature) {
           throw new AppError(
             "INTERNAL_ERROR",
             "Confirmed collection transfer is missing signature"
           );
         }
+        confirmedTransferSignature = validatedStoredCollectionSignature({
+          attemptId: input.attempt.id,
+          signature: currentSignature,
+          transferId: input.transfer.id,
+        });
       }
     }
 
@@ -474,11 +537,13 @@ async function finalizeRecurringPaymentCollection(input: {
       })
     );
 
+    const expectedTransferStatus = input.transfer.status;
     const updatedTransfer = await paymentsRepo.updateTransfer({
       transferId: input.transfer.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      status: "confirmed",
+      expectedStatus: expectedTransferStatus,
+      status: expectedTransferStatus === "finalized" ? "finalized" : "confirmed",
       signature: input.proof.signature,
       error: null,
       updatedAt: finalizedAt,
@@ -567,7 +632,7 @@ async function finalizeRecurringPaymentCollection(input: {
       finalizedAttempt.id !== input.proof.attemptId ||
       finalizedAttempt.transfer_id !== input.proof.transferId ||
       !finalizedTransfer ||
-      finalizedTransfer.status !== "confirmed" ||
+      (finalizedTransfer.status !== "confirmed" && finalizedTransfer.status !== "finalized") ||
       finalizedTransfer.signature !== input.proof.signature ||
       finalizedTransfer.id !== input.proof.transferId
     ) {
@@ -595,10 +660,7 @@ async function journalRecurringPaymentCollectionError(input: {
   submittedSignature: Signature | null;
   error: unknown;
 }): Promise<void> {
-  if (
-    input.submittedSignature &&
-    !(input.error instanceof AppError && input.error.code === "TRANSACTION_FAILED")
-  ) {
+  if (input.submittedSignature && !isDefiniteSubmissionError(input.error)) {
     const updatedAt = new Date().toISOString();
     const [attemptResult, transferResult] = await Promise.allSettled([
       input.subscriptionsRepo.updateCollectionAttempt({
@@ -687,6 +749,80 @@ async function safeJournalRecurringPaymentCollectionError(input: {
   }
 }
 
+async function handleRecurringPaymentCollectionError(input: {
+  env: Env;
+  subscriptionsRepo: PaymentSubscriptionsRepository;
+  paymentsRepo: ReturnType<typeof createPaymentsRepository>;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  attempt: PaymentSubscriptionCollectionAttemptRow | null;
+  transfer: PaymentTransferRow | null;
+  submissionStore: TransferSignedSubmissionStore | null;
+  submittedSignature: Signature | null;
+  error: unknown;
+}): Promise<RecurringPaymentCollectionResult> {
+  if (!input.attempt) {
+    throw input.error;
+  }
+
+  const submitted = await input.submissionStore?.submittedRow();
+  if (submitted?.signature && !isDefiniteSubmissionError(input.error)) {
+    const submittedSignature = validatedStoredCollectionSignature({
+      attemptId: input.attempt.id,
+      signature: submitted.signature,
+      transferId: submitted.id,
+    });
+    await safeJournalRecurringPaymentCollectionError({
+      env: input.env,
+      subscriptionsRepo: input.subscriptionsRepo,
+      paymentsRepo: input.paymentsRepo,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+      attempt: input.attempt,
+      transfer: submitted,
+      submittedSignature,
+      error: input.error,
+    });
+    if (input.error instanceof AppError && input.error.code === "CONFLICT") {
+      throw input.error;
+    }
+    logEvent("warn", {
+      event: "sdp_api_payment_submission_unresolved",
+      flow: "recurring",
+      reason: "submission_unconfirmed",
+      organization_id: input.organizationId,
+      project_id: input.projectId,
+      recurring_payment_id: input.recurringPayment.id,
+      attempt_id: input.attempt.id,
+      transfer_id: submitted.id,
+      transfer_type: submitted.type,
+      signature: submittedSignature,
+      error: activationErrorMessage(input.error),
+    });
+    return {
+      recurringPayment: input.recurringPayment,
+      collectionAttempt: { ...input.attempt, signature: submittedSignature },
+      transfer: submitted,
+    };
+  }
+
+  await safeJournalRecurringPaymentCollectionError({
+    env: input.env,
+    subscriptionsRepo: input.subscriptionsRepo,
+    paymentsRepo: input.paymentsRepo,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPaymentId: input.recurringPayment.id,
+    attempt: input.attempt,
+    transfer: input.transfer,
+    submittedSignature: input.submittedSignature,
+    error: input.error,
+  });
+  throw input.error;
+}
+
 async function recoverRecurringPaymentCollection(input: {
   env: Env;
   recurringRepo: PaymentRecurringPaymentsRepository;
@@ -739,10 +875,23 @@ async function recoverRecurringPaymentCollection(input: {
     throw new AppError("INTERNAL_ERROR", "Recurring payment collection transfer not found");
   }
   if (existing.signature && transfer.signature && existing.signature !== transfer.signature) {
+    logEvent("error", {
+      event: "sdp_api_recurring_payment_collection_proof_mismatch",
+      reason: "persisted_evidence_mismatch",
+      mismatch: "attempt_transfer_signature",
+      organization_id: input.organizationId,
+      project_id: input.projectId,
+      recurring_payment_id: input.recurringPayment.id,
+      subscription_id: input.subscription.id,
+      attempt_id: existing.id,
+      transfer_id: transfer.id,
+      attempt_signature: existing.signature,
+      transfer_signature: transfer.signature,
+    });
     throw new AppError("CONFLICT", "Recurring payment collection signatures do not match");
   }
-  const recoveredSignature = existing.signature ?? transfer.signature;
-  if (!recoveredSignature) {
+  const storedSignature = existing.signature ?? transfer.signature;
+  if (!storedSignature) {
     // A fresh unsigned attempt means another request is between local persistence and Kora
     // submission; wait for it to either submit or become stale instead of creating a second transfer.
     if (!isStaleCollectionAttempt(existing)) {
@@ -760,6 +909,32 @@ async function recoverRecurringPaymentCollection(input: {
     });
     return null;
   }
+  const recoveredSignature = validatedStoredCollectionSignature({
+    attemptId: existing.id,
+    signature: storedSignature,
+    transferId: transfer.id,
+  });
+  if (
+    transfer.status === "failed" &&
+    transfer.signed_transaction !== null &&
+    transfer.last_valid_block_height !== null &&
+    transfer.submission_started_at === null
+  ) {
+    if (!isStaleCollectionAttempt(existing)) {
+      throw new AppError("CONFLICT", "Recurring payment collection is already processing");
+    }
+    await markRecurringPaymentCollectionFailedAtomically({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+      attempt: existing,
+      transfer,
+      submittedSignature: recoveredSignature,
+      error: new Error("Recurring payment collection was interrupted before broadcast"),
+    });
+    return null;
+  }
   const recoveredAttempt =
     existing.signature === recoveredSignature
       ? existing
@@ -772,7 +947,7 @@ async function recoverRecurringPaymentCollection(input: {
   try {
     await confirmSubscriptionSignature(
       input.env,
-      recoveredSignature as Signature,
+      recoveredSignature,
       "Recurring payment collection failed on-chain"
     );
   } catch (error) {
@@ -784,7 +959,7 @@ async function recoverRecurringPaymentCollection(input: {
         recurringPaymentId: input.recurringPayment.id,
         attempt: existing,
         transfer,
-        submittedSignature: recoveredSignature as Signature,
+        submittedSignature: recoveredSignature,
         error,
       });
       return null;
@@ -794,49 +969,78 @@ async function recoverRecurringPaymentCollection(input: {
     // still prove the completed collection without treating RPC uncertainty as failure.
   }
 
-  const currentRecurringPayment =
-    (await input.recurringRepo.getRecurringPaymentById({
-      recurringPaymentId: input.recurringPayment.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-    })) ?? input.recurringPayment;
-  const currentSubscription =
-    (await input.subscriptionsRepo.getSubscriptionById({
-      subscriptionId: input.subscription.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-    })) ?? input.subscription;
-  const destinationTokenAccount = currentRecurringPayment.destination_token_account
-    ? assertValidAddress(
-        currentRecurringPayment.destination_token_account,
-        "destinationTokenAccount"
-      )
-    : await resolveDestinationTokenAccount({
-        env: input.env,
-        destinationAddress: currentRecurringPayment.destination_address,
-        token: currentRecurringPayment.token,
-      });
-  const proof = await verifyRecurringPaymentCollection({
-    env: input.env,
-    recurringPayment: currentRecurringPayment,
-    subscription: currentSubscription,
-    attempt: recoveredAttempt,
-    transfer: recoveredTransfer,
-    signature: recoveredSignature as Signature,
-    dueAt: input.dueAt,
-    destinationTokenAccount,
-  });
+  try {
+    const currentRecurringPayment =
+      (await input.recurringRepo.getRecurringPaymentById({
+        recurringPaymentId: input.recurringPayment.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      })) ?? input.recurringPayment;
+    const currentSubscription =
+      (await input.subscriptionsRepo.getSubscriptionById({
+        subscriptionId: input.subscription.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      })) ?? input.subscription;
+    const destinationTokenAccount = currentRecurringPayment.destination_token_account
+      ? assertValidAddress(
+          currentRecurringPayment.destination_token_account,
+          "destinationTokenAccount"
+        )
+      : await resolveDestinationTokenAccount({
+          env: input.env,
+          destinationAddress: currentRecurringPayment.destination_address,
+          token: currentRecurringPayment.token,
+        });
+    const proof = await verifyRecurringPaymentCollection({
+      env: input.env,
+      recurringPayment: currentRecurringPayment,
+      subscription: currentSubscription,
+      attempt: recoveredAttempt,
+      transfer: recoveredTransfer,
+      signature: recoveredSignature,
+      dueAt: input.dueAt,
+      destinationTokenAccount,
+    });
 
-  return finalizeRecurringPaymentCollection({
-    env: input.env,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    recurringPayment: currentRecurringPayment,
-    subscription: currentSubscription,
-    attempt: recoveredAttempt,
-    transfer: recoveredTransfer,
-    proof,
-  });
+    return finalizeRecurringPaymentCollection({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPayment: currentRecurringPayment,
+      subscription: currentSubscription,
+      attempt: recoveredAttempt,
+      transfer: recoveredTransfer,
+      proof,
+    });
+  } catch (error) {
+    if (error instanceof AppError && error.code === "TRANSACTION_FAILED") {
+      await markRecurringPaymentCollectionFailedAtomically({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPaymentId: input.recurringPayment.id,
+        attempt: existing,
+        transfer,
+        submittedSignature: recoveredSignature,
+        error,
+      });
+      return null;
+    }
+    await safeJournalRecurringPaymentCollectionError({
+      env: input.env,
+      subscriptionsRepo: input.subscriptionsRepo,
+      paymentsRepo: input.paymentsRepo,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+      attempt: existing,
+      transfer,
+      submittedSignature: recoveredSignature,
+      error,
+    });
+    throw error;
+  }
 }
 
 export async function recoverOrBlockLifecycleCollection(input: {
@@ -894,11 +1098,7 @@ export async function collectRecurringPayment(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   initiatedByKeyId: string | null;
   collectionSource?: RecurringCollectionSource;
-}): Promise<{
-  recurringPayment: PaymentRecurringPaymentRow;
-  collectionAttempt: PaymentSubscriptionCollectionAttemptRow;
-  transfer: PaymentTransferRow;
-}> {
+}): Promise<RecurringPaymentCollectionResult> {
   if (input.recurringPayment.source_wallet_id !== input.sourceWallet.walletId) {
     throw badRequest("Recurring payment source wallet does not match request");
   }
@@ -933,6 +1133,7 @@ export async function collectRecurringPayment(input: {
   let attempt: PaymentSubscriptionCollectionAttemptRow | null = null;
   let transfer: PaymentTransferRow | null = null;
   let submittedSignature: Signature | null = null;
+  let submissionStore: TransferSignedSubmissionStore | null = null;
   try {
     const recovered = await recoverRecurringPaymentCollection({
       env: input.env,
@@ -1035,46 +1236,57 @@ export async function collectRecurringPayment(input: {
       },
     });
 
-    transfer = await paymentsRepo.createTransfer({
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      walletId: input.sourceWallet.walletId,
-      counterpartyId: input.recurringPayment.counterparty_id,
-      sourceAddress: input.sourceWallet.publicKey,
-      destinationAddress: input.recurringPayment.destination_address,
-      token: input.recurringPayment.token,
-      amount: input.recurringPayment.amount,
-      memo: null,
-      type: "transfer",
-      direction: "outbound",
-      status: "processing",
-      provider: null,
-      providerReference: null,
-      deliveryMode: null,
-      fiatCurrency: null,
-      fiatAmount: null,
-      providerData: {
-        recurringPaymentId: input.recurringPayment.id,
-        subscriptionId: subscription.id,
-        collectionDueAt: dueAt,
-      },
-      serializedTx: null,
-      signature: null,
-      slot: null,
-      initiatedByKeyId: input.initiatedByKeyId,
-    });
-    if (!transfer) {
-      throw new AppError("INTERNAL_ERROR", "Failed to create collection transfer");
-    }
-    attempt =
-      (await subscriptionsRepo.updateCollectionAttempt({
-        attemptId: attempt.id,
+    const claimedAttempt = attempt;
+    const linkedCollection = await getDb(input.env).transaction(async (tx) => {
+      const transactionPaymentsRepo = createPostgresPaymentsRepository(tx, tenantScope(input));
+      const transactionSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+      const createdTransfer = await transactionPaymentsRepo.createTransfer({
         organizationId: input.organizationId,
         projectId: input.projectId,
-        transferId: transfer.id,
+        walletId: input.sourceWallet.walletId,
+        counterpartyId: input.recurringPayment.counterparty_id,
+        sourceAddress: input.sourceWallet.publicKey,
+        destinationAddress: input.recurringPayment.destination_address,
+        token: input.recurringPayment.token,
+        amount: input.recurringPayment.amount,
+        memo: null,
+        type: "transfer",
+        direction: "outbound",
+        status: "processing",
+        provider: null,
+        providerReference: null,
+        deliveryMode: null,
+        fiatCurrency: null,
+        fiatAmount: null,
+        providerData: {
+          recurringPaymentId: input.recurringPayment.id,
+          subscriptionId: subscription.id,
+          collectionDueAt: dueAt,
+        },
+        serializedTx: null,
+        signature: null,
+        slot: null,
+        initiatedByKeyId: input.initiatedByKeyId,
+      });
+      if (!createdTransfer) {
+        throw new AppError("INTERNAL_ERROR", "Failed to create collection transfer");
+      }
+      const linkedAttempt = await transactionSubscriptionsRepo.updateCollectionAttempt({
+        attemptId: claimedAttempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        transferId: createdTransfer.id,
         status: "processing",
         updatedAt: new Date().toISOString(),
-      })) ?? attempt;
+      });
+      if (!linkedAttempt || linkedAttempt.transfer_id !== createdTransfer.id) {
+        throw new AppError("INTERNAL_ERROR", "Failed to link collection attempt to transfer");
+      }
+      return { attempt: linkedAttempt, transfer: createdTransfer };
+    });
+    attempt = linkedCollection.attempt;
+    transfer = linkedCollection.transfer;
+    submissionStore = createTransferSignedSubmissionStore(paymentsRepo, transfer);
 
     const rpc = solanaRpc.createRpc(input.env);
     const sourceOwner = assertValidAddress(input.recurringPayment.source_address, "sourceAddress");
@@ -1164,6 +1376,7 @@ export async function collectRecurringPayment(input: {
       sourceSigner,
       instructions: [createDestinationAtaInstruction, collectInstruction],
       feePayer,
+      submissionStore,
     });
     submittedSignature = signature;
     const submittedAt = new Date().toISOString();
@@ -1218,20 +1431,18 @@ export async function collectRecurringPayment(input: {
       proof,
     });
   } catch (error) {
-    if (attempt) {
-      await safeJournalRecurringPaymentCollectionError({
-        env: input.env,
-        subscriptionsRepo,
-        paymentsRepo,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        recurringPaymentId: input.recurringPayment.id,
-        attempt,
-        transfer,
-        submittedSignature,
-        error,
-      });
-    }
-    throw error;
+    return handleRecurringPaymentCollectionError({
+      env: input.env,
+      subscriptionsRepo,
+      paymentsRepo,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPayment: input.recurringPayment,
+      attempt,
+      transfer,
+      submissionStore,
+      submittedSignature,
+      error,
+    });
   }
 }
