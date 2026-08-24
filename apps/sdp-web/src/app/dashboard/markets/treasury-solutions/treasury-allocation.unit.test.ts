@@ -2,6 +2,7 @@ import { SOL_MINT, type WellKnownTokenSymbol, wellKnownMint } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import {
   formatAllocationShare,
+  heldVaultShareMints,
   summarizeTreasuryAllocation,
   type TreasuryAllocationPosition,
   type TreasuryAllocationWallet,
@@ -305,4 +306,136 @@ describe("walletDeployment", () => {
       })
     ).toEqual({ kind: "unavailable" });
   });
+});
+
+describe("zero-balance share accounts", () => {
+  // An emptied share account can outlive its position, and this payload
+  // appends the SOL row at zero, so a zero row is a shape to handle rather
+  // than an upstream invariant to lean on.
+  const vaultShareMints = new Set([SHARE_MINT]);
+
+  it("is not a holding, so a fully exited treasury still totals", () => {
+    const summary = summarizeTreasuryAllocation({
+      wallets: [
+        wallet([
+          { mint: USDC_MINT, uiAmount: "500" },
+          { mint: SHARE_MINT, uiAmount: "0" },
+        ]),
+      ],
+      positions: [],
+      vaultShareMints,
+    });
+
+    expect(summary.availableCash).toBe("500");
+    expect(summary.deployedValue).toBe("0");
+    expect(summary.deployedShare).toBe("0");
+    expect(summary.remainingShare).toBe("1");
+  });
+
+  it("leaves the wallet line silent rather than unavailable", () => {
+    expect(
+      walletDeployment({
+        heldShareMints: heldVaultShareMints(
+          wallet([{ mint: SHARE_MINT, uiAmount: "0" }]),
+          vaultShareMints
+        ),
+        positions: [],
+      })
+    ).toEqual({ kind: "none" });
+  });
+
+  it("treats a trailing-zero form as zero and a dust amount as held", () => {
+    expect(
+      heldVaultShareMints(wallet([{ mint: SHARE_MINT, uiAmount: "0.000" }]), vaultShareMints)
+    ).toEqual([]);
+    expect(
+      heldVaultShareMints(wallet([{ mint: SHARE_MINT, uiAmount: "0.000001" }]), vaultShareMints)
+    ).toEqual([SHARE_MINT]);
+  });
+
+  it("treats an unparseable amount as held, since it is not evidence of empty", () => {
+    expect(
+      heldVaultShareMints(wallet([{ mint: SHARE_MINT, uiAmount: "1,5" }]), vaultShareMints)
+    ).toEqual([SHARE_MINT]);
+  });
+});
+
+describe("summary and wallet lines never disagree", () => {
+  // Two of the three bugs found in review were the summary claiming a figure
+  // a wallet line had already given up on. This pins the implication across
+  // the state matrix: any wallet reading unavailable forces the summary's
+  // deployed figure unavailable.
+  const vaultShareMints = new Set([SHARE_MINT, UNRECORDED_SHARE_MINT]);
+  const cash = { mint: USDC_MINT, uiAmount: "500" };
+  const heldShare = { mint: SHARE_MINT, uiAmount: "60" };
+  const heldUnrecorded = { mint: UNRECORDED_SHARE_MINT, uiAmount: "60" };
+
+  const scenarios: Array<{
+    name: string;
+    wallets: TreasuryAllocationWallet[];
+    positions: TreasuryAllocationPosition[] | undefined;
+  }> = [
+    { name: "cash only", wallets: [wallet([cash])], positions: [] },
+    {
+      name: "recorded holding",
+      wallets: [wallet([cash, heldShare])],
+      positions: [openPosition({ tokenValue: "100" })],
+    },
+    {
+      name: "unrecorded holding",
+      wallets: [wallet([cash, heldUnrecorded])],
+      positions: [openPosition({ tokenValue: "100" })],
+    },
+    {
+      name: "cross-wallet holding of a recorded mint",
+      wallets: [wallet([cash, heldShare]), wallet([heldShare], "wallet-b")],
+      positions: [openPosition({ tokenValue: "100" })],
+    },
+    {
+      name: "unhydratable position",
+      wallets: [wallet([cash, heldShare])],
+      positions: [openPosition({ tokenValue: undefined })],
+    },
+    {
+      name: "non-stable position token",
+      wallets: [wallet([cash, heldShare])],
+      positions: [openPosition({ tokenMint: SOL_MINT, tokenValue: "10" })],
+    },
+    { name: "positions unavailable", wallets: [wallet([cash, heldShare])], positions: undefined },
+    {
+      name: "zero share account",
+      wallets: [wallet([cash, { mint: SHARE_MINT, uiAmount: "0" }])],
+      positions: [],
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    it(`holds for: ${scenario.name}`, () => {
+      const summary = summarizeTreasuryAllocation({
+        positions: scenario.positions,
+        vaultShareMints,
+        wallets: scenario.wallets,
+      });
+      const anyWalletUnavailable = scenario.wallets.some(
+        (candidate) =>
+          walletDeployment({
+            heldShareMints: heldVaultShareMints(candidate, vaultShareMints),
+            positions: scenario.positions?.filter(
+              (position) => position.custodyWalletId === candidate.id
+            ),
+          }).kind === "unavailable"
+      );
+
+      if (anyWalletUnavailable) {
+        expect(summary.deployedValue).toBeUndefined();
+        expect(summary.deployedShare).toBeUndefined();
+        expect(summary.remainingShare).toBeUndefined();
+      }
+      // A share is never published without both figures behind it.
+      if (summary.deployedShare !== undefined) {
+        expect(summary.availableCash).not.toBeUndefined();
+        expect(summary.deployedValue).not.toBeUndefined();
+      }
+    });
+  }
 });

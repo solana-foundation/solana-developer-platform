@@ -79,6 +79,7 @@ import {
 import { EarnWithdrawalOutcomeTracker, EarnWithdrawModal } from "../earn/earn-withdraw-modal";
 import {
   formatAllocationShare,
+  heldVaultShareMints,
   isOpenVaultPosition,
   summarizeTreasuryAllocation,
   walletDeployment,
@@ -285,11 +286,12 @@ function TreasuryWalletsCard({
               // Receipt-token balances are independent evidence of vault
               // ownership, so a holding SDP cannot value (failed read, or a
               // position opened outside SDP) reads unavailable rather than
-              // vanishing from the card.
-              const heldShareMints = (wallet.balances ?? [])
-                .map((balance) => balance.mint)
-                .filter((mint) => vaultShareMints.has(mint));
-              const deployment = walletDeployment({ heldShareMints, positions: walletPositions });
+              // vanishing from the card. Same helper the summary uses, so the
+              // two can never disagree about what this wallet holds.
+              const deployment = walletDeployment({
+                heldShareMints: heldVaultShareMints(wallet, vaultShareMints),
+                positions: walletPositions,
+              });
               return (
                 <section
                   className="rounded-xl border border-border-default px-4 py-4"

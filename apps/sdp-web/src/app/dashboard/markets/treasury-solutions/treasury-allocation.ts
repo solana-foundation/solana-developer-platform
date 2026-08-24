@@ -104,6 +104,33 @@ export function deployedVaultValue(
 }
 
 /**
+ * The vault share mints one wallet actually holds.
+ *
+ * THE single definition of "holds shares", shared by the summary and by the
+ * per-wallet line, because two copies of this predicate is how the two
+ * surfaces drift into contradicting each other.
+ *
+ * A provably-zero balance is not a holding: an emptied share account can
+ * outlive the position it belonged to (this payload appends the SOL row at
+ * zero, so a zero row is a shape the client must handle rather than an
+ * upstream invariant to lean on), and counting one would keep a fully exited
+ * treasury permanently unavailable. Anything NOT provably zero counts, so an
+ * unparseable amount reads as held: it is not evidence of an empty account.
+ */
+export function heldVaultShareMints(
+  wallet: TreasuryAllocationWallet,
+  vaultShareMints: ReadonlySet<string>
+): string[] {
+  const held: string[] = [];
+  for (const balance of wallet.balances ?? []) {
+    if (!vaultShareMints.has(balance.mint)) continue;
+    if (compareUnsignedDecimals(balance.uiAmount, "0") === 0) continue;
+    held.push(balance.mint);
+  }
+  return held;
+}
+
+/**
  * Does every vault share token any wallet holds have an open position behind
  * it? A wallet balance is the independent witness here: a position opened
  * outside SDP leaves shares in the wallet with no recorded row.
@@ -128,10 +155,8 @@ function heldShareMintsRecorded({
     recordedByWallet.set(position.custodyWalletId, recorded);
   }
   return (wallets ?? []).every((wallet) =>
-    (wallet.balances ?? []).every(
-      (balance) =>
-        !vaultShareMints.has(balance.mint) ||
-        recordedByWallet.get(wallet.id)?.has(balance.mint) === true
+    heldVaultShareMints(wallet, vaultShareMints).every(
+      (mint) => recordedByWallet.get(wallet.id)?.has(mint) === true
     )
   );
 }
