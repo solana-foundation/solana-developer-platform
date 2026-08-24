@@ -258,15 +258,23 @@ describe("summarizeTreasuryAllocation", () => {
 
 describe("walletDeployment", () => {
   it("reads unavailable when the positions read failed but the wallet holds shares", () => {
-    expect(walletDeployment({ heldShareMints: [SHARE_MINT], positions: undefined })).toEqual({
-      kind: "unavailable",
-    });
+    expect(
+      walletDeployment({
+        positions: undefined,
+        vaultShareMints: new Set([SHARE_MINT]),
+        wallet: wallet([{ mint: SHARE_MINT, uiAmount: "60" }]),
+      })
+    ).toEqual({ kind: "unavailable" });
   });
 
   it("reads none when the positions read failed and the wallet holds no shares", () => {
-    expect(walletDeployment({ heldShareMints: [], positions: undefined })).toEqual({
-      kind: "none",
-    });
+    expect(
+      walletDeployment({
+        positions: undefined,
+        vaultShareMints: new Set([SHARE_MINT]),
+        wallet: wallet([{ mint: USDC_MINT, uiAmount: "10" }]),
+      })
+    ).toEqual({ kind: "none" });
   });
 
   it("reads unavailable for a held share mint no open position records", () => {
@@ -274,8 +282,9 @@ describe("walletDeployment", () => {
     // opened outside SDP. Hiding the tile AND the line would erase it.
     expect(
       walletDeployment({
-        heldShareMints: [UNRECORDED_SHARE_MINT],
         positions: [openPosition({ tokenValue: "40" })],
+        vaultShareMints: new Set([SHARE_MINT, UNRECORDED_SHARE_MINT]),
+        wallet: wallet([{ mint: UNRECORDED_SHARE_MINT, uiAmount: "5" }]),
       })
     ).toEqual({ kind: "unavailable" });
   });
@@ -283,17 +292,34 @@ describe("walletDeployment", () => {
   it("totals the recorded positions when every held share mint is accounted for", () => {
     expect(
       walletDeployment({
-        heldShareMints: [SHARE_MINT],
         positions: [openPosition({ tokenValue: "40" }), openPosition({ tokenValue: "2.5" })],
+        vaultShareMints: new Set([SHARE_MINT]),
+        wallet: wallet([{ mint: SHARE_MINT, uiAmount: "60" }]),
       })
     ).toEqual({ kind: "value", value: "42.5" });
+  });
+
+  it("counts only this wallet's positions, never another wallet's", () => {
+    // wallet-b's position is larger and shares the mint, so an unscoped sum
+    // would report the whole portfolio on wallet-a's line.
+    expect(
+      walletDeployment({
+        positions: [
+          openPosition({ custodyWalletId: "wallet-a", tokenValue: "100" }),
+          openPosition({ custodyWalletId: "wallet-b", tokenValue: "500" }),
+        ],
+        vaultShareMints: new Set([SHARE_MINT]),
+        wallet: wallet([{ mint: SHARE_MINT, uiAmount: "60" }]),
+      })
+    ).toEqual({ kind: "value", value: "100" });
   });
 
   it("reads none for a wallet with neither shares nor open positions", () => {
     expect(
       walletDeployment({
-        heldShareMints: [],
         positions: [openPosition({ shares: "0", tokenValue: "9" })],
+        vaultShareMints: new Set([SHARE_MINT]),
+        wallet: wallet([]),
       })
     ).toEqual({ kind: "none" });
   });
@@ -301,8 +327,9 @@ describe("walletDeployment", () => {
   it("reads unavailable when a recorded position cannot be valued", () => {
     expect(
       walletDeployment({
-        heldShareMints: [SHARE_MINT],
         positions: [openPosition({ tokenValue: undefined })],
+        vaultShareMints: new Set([SHARE_MINT]),
+        wallet: wallet([{ mint: SHARE_MINT, uiAmount: "60" }]),
       })
     ).toEqual({ kind: "unavailable" });
   });
@@ -335,11 +362,9 @@ describe("zero-balance share accounts", () => {
   it("leaves the wallet line silent rather than unavailable", () => {
     expect(
       walletDeployment({
-        heldShareMints: heldVaultShareMints(
-          wallet([{ mint: SHARE_MINT, uiAmount: "0" }]),
-          vaultShareMints
-        ),
         positions: [],
+        vaultShareMints,
+        wallet: wallet([{ mint: SHARE_MINT, uiAmount: "0" }]),
       })
     ).toEqual({ kind: "none" });
   });
@@ -419,10 +444,9 @@ describe("summary and wallet lines never disagree", () => {
       const anyWalletUnavailable = scenario.wallets.some(
         (candidate) =>
           walletDeployment({
-            heldShareMints: heldVaultShareMints(candidate, vaultShareMints),
-            positions: scenario.positions?.filter(
-              (position) => position.custodyWalletId === candidate.id
-            ),
+            positions: scenario.positions,
+            vaultShareMints,
+            wallet: candidate,
           }).kind === "unavailable"
       );
 

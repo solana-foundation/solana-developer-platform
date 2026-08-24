@@ -175,20 +175,29 @@ export type WalletDeploymentDisplay =
   | { kind: "unavailable" }
   | { kind: "value"; value: string };
 
+/**
+ * Takes the WHOLE position list and scopes it here, rather than trusting a
+ * caller to pre-filter by wallet: a caller that filtered differently from the
+ * summary is how these two surfaces drifted apart before.
+ */
 export function walletDeployment({
-  heldShareMints,
   positions,
+  vaultShareMints,
+  wallet,
 }: {
-  /** Share mints this wallet's balances actually hold. */
-  heldShareMints: readonly string[];
-  /** This wallet's positions, or undefined when the read is unavailable. */
+  /** Every position, or undefined when the read is unavailable. */
   positions: readonly TreasuryAllocationPosition[] | undefined;
+  vaultShareMints: ReadonlySet<string>;
+  wallet: TreasuryAllocationWallet;
 }): WalletDeploymentDisplay {
+  const heldShareMints = heldVaultShareMints(wallet, vaultShareMints);
   if (positions === undefined) {
     return heldShareMints.length > 0 ? { kind: "unavailable" } : { kind: "none" };
   }
 
-  const open = positions.filter(isOpenVaultPosition);
+  const open = positions.filter(
+    (position) => position.custodyWalletId === wallet.id && isOpenVaultPosition(position)
+  );
   const covered = new Set(open.map((position) => position.shareMint));
   // A held share mint no open position accounts for means the recorded total
   // is incomplete, so it must not be presented as this wallet's deployment.
