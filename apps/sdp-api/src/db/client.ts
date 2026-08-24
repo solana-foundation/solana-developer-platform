@@ -273,20 +273,21 @@ abstract class BasePostgresClient extends PostgresExecutor implements DatabaseCl
 }
 
 /**
- * Stamp the ambient database identity (src/db/identity.ts) onto a pinned
- * connection. Must run inside an open transaction: the GUCs are set with
- * `is_local = true`, so COMMIT/ROLLBACK clears them and pooled connection
- * reuse can never leak an identity across callers. A missing or `none`
- * identity stamps nothing — row-level security then denies by default.
+ * Open a transaction stamped with the ambient database identity
+ * (src/db/identity.ts) in a single round trip. The GUCs are `SET LOCAL`, so
+ * COMMIT/ROLLBACK clears them and pooled connection reuse can never leak an
+ * identity across callers. A missing or `none` identity opens a bare
+ * transaction — row-level security then denies by default.
  */
-async function stampDatabaseIdentity(
+async function beginWithDatabaseIdentity(
   client: Queryable,
   identity: DatabaseIdentity | undefined
 ): Promise<void> {
   if (!identity || identity.kind === "none") {
+    await client.query({ text: "BEGIN" });
     return;
   }
-  await client.query(databaseIdentityConfigStatement(identity));
+  await client.query({ text: `BEGIN; ${databaseIdentityConfigStatement(identity).text}` });
 }
 
 /**
@@ -307,8 +308,7 @@ class IdentityStampingPoolQueryable implements Queryable {
     const client = await this.pool.connect();
     let releaseError: Error | undefined;
     try {
-      await client.query("BEGIN");
-      await stampDatabaseIdentity(client, identity);
+      await beginWithDatabaseIdentity(client, identity);
       const result = await client.query(args);
       await client.query("COMMIT");
       return result;
@@ -349,8 +349,7 @@ class PooledPostgresClient extends BasePostgresClient {
     let releaseError: Error | undefined;
 
     try {
-      await client.query("BEGIN");
-      await stampDatabaseIdentity(client, currentDatabaseIdentity());
+      await beginWithDatabaseIdentity(client, currentDatabaseIdentity());
       const executor = new PostgresExecutor(client);
       const result = await callback(executor);
       await client.query("COMMIT");
@@ -389,9 +388,11 @@ class PooledPostgresClient extends BasePostgresClient {
       });
       lockHeld = true;
 
-      await client.query("BEGIN");
+      // Marked open before the combined BEGIN + identity stamp: if the stamp
+      // half fails, the connection may hold an aborted transaction, and a
+      // defensive ROLLBACK on an idle connection is only a warning.
       transactionOpen = true;
-      await stampDatabaseIdentity(client, currentDatabaseIdentity());
+      await beginWithDatabaseIdentity(client, currentDatabaseIdentity());
       const executor = new PostgresExecutor(client);
       const result = await callback(executor);
       callbackResult = result;

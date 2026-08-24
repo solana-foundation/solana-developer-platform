@@ -165,7 +165,6 @@ BEGIN
     ARRAY['token_allowlists', 'issued_tokens', 'token_id'],
     ARRAY['token_allowlist_statuses', 'token_allowlists', 'allowlist_id'],
     ARRAY['frozen_accounts', 'issued_tokens', 'token_id'],
-    ARRAY['custody_wallets', 'custody_configs', 'custody_config_id'],
     ARRAY['api_key_wallet_permissions', 'api_keys', 'api_key_id'],
     ARRAY['wallet_control_profile_revisions', 'wallet_control_profiles', 'profile_id'],
     ARRAY['api_key_control_profile_revisions', 'api_key_control_profiles', 'profile_id'],
@@ -193,6 +192,37 @@ BEGIN
     );
   END LOOP;
 END $$;
+
+-- Exactly one of two owners (0046_custody_connection_wallet_ownership's
+-- CHECK): a wallet belongs to a legacy custody_config OR to a
+-- custody_connection. The policy must delegate to whichever owner is set, or
+-- connection-owned wallets vanish for tenants.
+ALTER TABLE custody_wallets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE custody_wallets FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS sdp_tenant_isolation ON custody_wallets;
+CREATE POLICY sdp_tenant_isolation ON custody_wallets
+  USING (
+    sdp_tenant_isolation_is_privileged()
+    OR EXISTS (
+      SELECT 1 FROM custody_configs parent
+      WHERE parent.id = custody_wallets.custody_config_id
+    )
+    OR EXISTS (
+      SELECT 1 FROM custody_connections parent
+      WHERE parent.id = custody_wallets.custody_connection_id
+    )
+  )
+  WITH CHECK (
+    sdp_tenant_isolation_is_privileged()
+    OR EXISTS (
+      SELECT 1 FROM custody_configs parent
+      WHERE parent.id = custody_wallets.custody_config_id
+    )
+    OR EXISTS (
+      SELECT 1 FROM custody_connections parent
+      WHERE parent.id = custody_wallets.custody_connection_id
+    )
+  );
 
 -- Two alternative parents (a CHECK guarantees at least one is set).
 ALTER TABLE policy_provider_sync_status ENABLE ROW LEVEL SECURITY;

@@ -59,6 +59,9 @@ describe("tenant data-access boundary", () => {
       "middleware/database-identity.ts",
       "routes/issuance/index.ts",
       "routes/members/index.ts",
+      // BOLA guard: must see every organization's ledger rows to 404 a
+      // foreign withdrawal ref before any provider call.
+      "routes/earn/handlers/program.ts",
     ];
     const violations = sourceFiles(sourceRoot)
       .filter((path) => readFileSync(path, "utf8").includes("runWithSystemDatabaseIdentity"))

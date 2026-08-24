@@ -16,7 +16,7 @@ import type {
   ListEarnProgramWithdrawalsResponse,
 } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
-import { getDb } from "@/db";
+import { getDb, runWithSystemDatabaseIdentity } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type { EarnProviderWalletRow } from "@/db/repositories";
 import {
@@ -842,20 +842,34 @@ export const getEarnProgramWithdrawal = async (c: AppContext) => {
   //
   // A ledger movement names its HOLDING rather than the program wallet, and the
   // holding is 1:1 with that wallet, so the comparison resolves through it.
+  //
+  // The lookup runs under the system database identity: seeing every
+  // organization's rows is this guard's entire point, and under the request's
+  // tenant identity row-level security would hide a foreign ref, turning "you
+  // don't own this" into "never seen" and driving the provider call the guard
+  // exists to prevent. Everything read here collapses into an ownership
+  // comparison and a 404 — no foreign data reaches the response.
   const ledger = createPostgresEarnMovementsRepository(getDb(c.env));
-  const ledgerRow = await ledger.findMovementByProviderReference({
-    provider: client.provider,
-    providerReference: withdrawalRef,
-  });
-  if (ledgerRow) {
-    const holding = await ledger.getPositionById({
-      organizationId: ledgerRow.organization_id,
-      environment: ledgerRow.environment,
-      positionId: ledgerRow.position_id,
-    });
-    if (holding?.provider_wallet_id !== row.id) {
-      throw notFound("Earn withdrawal");
+  const ownershipCheckFailed = await runWithSystemDatabaseIdentity(
+    "earn:program-withdrawal-bola-guard",
+    async () => {
+      const ledgerRow = await ledger.findMovementByProviderReference({
+        provider: client.provider,
+        providerReference: withdrawalRef,
+      });
+      if (!ledgerRow) {
+        return false;
+      }
+      const holding = await ledger.getPositionById({
+        organizationId: ledgerRow.organization_id,
+        environment: ledgerRow.environment,
+        positionId: ledgerRow.position_id,
+      });
+      return holding?.provider_wallet_id !== row.id;
     }
+  );
+  if (ownershipCheckFailed) {
+    throw notFound("Earn withdrawal");
   }
 
   const withdrawal = await client.getPortfolioWithdrawal(earnRuntime(c), {
