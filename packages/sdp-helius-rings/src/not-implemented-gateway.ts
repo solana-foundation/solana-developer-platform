@@ -29,10 +29,6 @@ export class NotImplementedRingsGateway implements RingsGatewayPort {
     return notImplemented("buildOperation");
   }
 
-  async requestProof(): Promise<never> {
-    return notImplemented("requestProof");
-  }
-
   async verifyIndexed(): Promise<never> {
     return notImplemented("verifyIndexed");
   }

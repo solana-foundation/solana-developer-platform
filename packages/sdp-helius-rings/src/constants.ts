@@ -44,6 +44,13 @@ export const FAILURE_CODES = [
   "config_error",
   "invalid_input",
   "insufficient_balance",
+  /**
+   * Signed bytes exist, their blockhash has expired, and whether they landed is
+   * unknown. Neither retryable nor closed: a fresh attempt could pay twice and
+   * walking away could strand funds, so an operator reconciles the signature
+   * against the chain by hand.
+   */
+  "manual_reconciliation_required",
 ] as const;
 
 export const KEY_KINDS = ["viewing", "nullifier"] as const;

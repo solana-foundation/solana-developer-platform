@@ -54,17 +54,12 @@ describe("InMemoryRingsGateway", () => {
     expect(result.mergingEnabled).toBe(true);
   });
 
-  it("keeps gateway state and proof references redacted when serialized", async () => {
+  it("keeps proof references redacted when serialized", async () => {
     const gateway = new InMemoryRingsGateway({ now: () => "2026-08-17T00:00:00.000Z" });
 
     const built = await gateway.buildOperation({ operation: OPERATION, owner: OWNER });
-    expect(JSON.stringify(built.ringsMetadata)).toBe('"[REDACTED]"');
 
-    const proof = await gateway.requestProof({
-      operationId: "hro_1",
-      ringsMetadata: built.ringsMetadata,
-    });
-    expect(JSON.stringify(proof.ref)).toBe('"[REDACTED]"');
+    expect(JSON.stringify(built.proof.ref)).toBe('"[REDACTED]"');
   });
 
   it("reports a fresh full sync per call, without taking a resume position", async () => {
@@ -97,9 +92,9 @@ describe("InMemoryRingsGateway", () => {
   });
 
   it("always marks proofs simulated", async () => {
-    const proof = await new InMemoryRingsGateway({
+    const { proof } = await new InMemoryRingsGateway({
       now: () => "2026-08-17T00:00:00.000Z",
-    }).requestProof({ operationId: "hro_1", ringsMetadata: {} as never });
+    }).buildOperation({ operation: OPERATION, owner: OWNER });
 
     expect(proof.source).toBe("simulated");
     expect(proof.createdAt).toBe("2026-08-17T00:00:00.000Z");

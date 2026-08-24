@@ -3,14 +3,13 @@ import type {
   BuildOperationResult,
   ProvisionIdentityInput,
   ProvisionIdentityResult,
-  RequestProofInput,
   RingsGatewayPort,
   SyncPhotonInput,
   SyncPhotonResult,
   VerifyIndexedResult,
 } from "../port";
 import { SecretRef } from "../secrets";
-import type { ProofArtifact, RuntimeHealth } from "../types";
+import type { RuntimeHealth } from "../types";
 
 /** Wrapped SOL, the mint SDP uses to mean native lamports. */
 // biome-ignore lint/security/noSecrets: wrapped SOL mint address, not a secret.
@@ -35,7 +34,12 @@ export interface InMemoryRingsGatewayOptions {
   indexingDelayMs?: number;
   /** Override for tests that need a signable unsigned tx (A8/A9). */
   buildUnsignedTx?: (input: BuildOperationInput) => string;
+  /** Reported as the signed bytes' expiry, for the reconciliation sweep. */
+  blockHeight?: number;
 }
+
+/** Op types that consume notes, and so have inputs worth pinning. */
+const SPENDS = new Set<string>(["transfer_registered", "withdraw", "merge"]);
 
 const ALL_GREEN: RuntimeHealth = {
   rpc: "green",
@@ -88,6 +92,7 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
   private readonly health: RuntimeHealth;
   private readonly indexingDelayMs: number;
   private readonly buildUnsignedTx?: (input: BuildOperationInput) => string;
+  private readonly blockHeight: number;
   private readonly syncCounters = new Map<string, number>();
   private readonly submittedAt = new Map<string, number>();
 
@@ -96,6 +101,7 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
     this.health = options.health ?? ALL_GREEN;
     this.indexingDelayMs = options.indexingDelayMs ?? 0;
     this.buildUnsignedTx = options.buildUnsignedTx;
+    this.blockHeight = options.blockHeight ?? 1_000;
   }
 
   async probeHealth(): Promise<RuntimeHealth> {
@@ -145,6 +151,9 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
       },
       indexedOperationSignatures: [],
       observedAt: this.now(),
+      // The furthest slot this fake history reaches, so a caller that gates its
+      // next read on the position advances instead of asking for nothing.
+      observedSlot: String(next),
     };
   }
 
@@ -158,15 +167,17 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
       // and read as an address to everything downstream, which is exactly the
       // confusion a test double should not introduce.
       requiredSigners: [input.owner],
-      ringsMetadata: new SecretRef({ seed: hashHex(`${seed}:metadata`, 16) }),
-    };
-  }
-
-  async requestProof(input: RequestProofInput): Promise<ProofArtifact> {
-    return {
-      source: "simulated",
-      ref: new SecretRef(hashHex(`${input.operationId}:proof`, 32)),
-      createdAt: this.now(),
+      lastValidBlockHeight: String(this.blockHeight),
+      // Honours pinned inputs, so a test can assert that a rebuild spends what
+      // the first build committed to rather than choosing again.
+      inputNotes: SPENDS.has(input.operation.opType)
+        ? (input.pinnedInputs ?? [`note:${hashHex(`${seed}:note`, 16)}`])
+        : [],
+      proof: {
+        source: "simulated",
+        ref: new SecretRef(hashHex(`${seed}:proof`, 32)),
+        createdAt: this.now(),
+      },
     };
   }
 
@@ -183,6 +194,9 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
     return {
       indexedAt: this.now(),
       photonRef: `photon:${hashHex(signature, 8)}`,
+      // Past the configured expiry, so a wallet gating its next read on this
+      // slot does not wait for a position the double will never report.
+      slot: String(this.blockHeight),
     };
   }
 }

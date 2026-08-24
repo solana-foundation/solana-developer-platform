@@ -49,7 +49,6 @@ function misconfiguredGateway(missing: readonly string[]): RingsGatewayPort {
     provisionIdentity: fail,
     syncPhoton: fail,
     buildOperation: fail,
-    requestProof: fail,
     verifyIndexed: fail,
   };
 }

@@ -1,8 +1,8 @@
 import type { ZolanaClient } from "@heliuslabs/zolana/client";
 import {
+  type BuildOperationInput,
   type BuildOperationResult,
   HeliusRingsError,
-  type ProofArtifact,
   type ProvisionIdentityInput,
   type ProvisionIdentityResult,
   type RingsGatewayPort,
@@ -11,9 +11,11 @@ import {
   type SyncPhotonResult,
   type VerifyIndexedResult,
 } from "@sdp/helius-rings";
+import { buildRingsOperation } from "./build.js";
 import { createRingsClient } from "./client.js";
 import { createDeterministicMaterialSource, decodeSeed } from "./deterministic-ka/index.js";
 import { probeRingsHealth, withHealthTimeout } from "./health.js";
+import { verifyRingsIndexed } from "./indexed.js";
 import type { ShieldedMaterialSource } from "./material.js";
 import { provisionRingsIdentity } from "./provision.js";
 import { syncRingsWallet } from "./sync.js";
@@ -96,22 +98,14 @@ function readApiKey(rpcUrl: string): string | null {
   }
 }
 
-function notWired(method: string): never {
-  throw new HeliusRingsError(
-    "gateway_unavailable",
-    `${method} is not implemented by the Rings TypeScript gateway yet`
-  );
-}
-
 /**
  * The live gateway, running the Rings SDK in this process.
  *
- * `probeHealth`, `provisionIdentity` and `syncPhoton` are wired: an identity
- * can be registered and its balances read. The money flows — `buildOperation`,
- * `requestProof` and `verifyIndexed` — fail closed with the same
- * `gateway_unavailable` code the not-implemented gateway uses, so an operation
- * that reaches them lands in `failed:gateway_unavailable` rather than appearing
- * to have succeeded.
+ * Every port method is wired: an identity can be registered, its balances read,
+ * and the four default money flows built, signed and confirmed as indexed.
+ * Flows this integration does not implement — anonymous transfers, splits,
+ * zones, timelocks — are refused at request validation rather than here, so a
+ * caller learns they are unsupported before an approval is requested for them.
  *
  * The client is built on first use rather than here, because building it loads
  * the Poseidon hasher and callers construct a gateway per request.
@@ -229,18 +223,20 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
       );
     },
 
-    // `async` so an unwired method rejects rather than throwing synchronously;
-    // a port declared to return a promise must fail the way callers catch.
-    async buildOperation(): Promise<BuildOperationResult> {
-      return notWired("buildOperation");
+    async buildOperation(input: BuildOperationInput): Promise<BuildOperationResult> {
+      return buildRingsOperation(
+        {
+          client: await client(),
+          material: requireMaterial(),
+          organizationId: config.organizationId,
+          projectId: config.projectId,
+        },
+        input
+      );
     },
 
-    async requestProof(): Promise<ProofArtifact> {
-      return notWired("requestProof");
-    },
-
-    async verifyIndexed(): Promise<VerifyIndexedResult | null> {
-      return notWired("verifyIndexed");
+    async verifyIndexed(signature: string): Promise<VerifyIndexedResult | null> {
+      return verifyRingsIndexed(await client(), signature);
     },
   };
 }

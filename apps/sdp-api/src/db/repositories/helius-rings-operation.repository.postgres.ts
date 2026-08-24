@@ -4,12 +4,14 @@ import {
   DEFAULT_RINGS_OPERATION_LIST_LIMIT,
   type FailHeliusRingsOperationInput,
   generateHeliusRingsOperationId,
+  type HeliusRingsExpiredSubmissionsInput,
   type HeliusRingsOperationRepository,
   type HeliusRingsOperationRow,
   type HeliusRingsTimelockRow,
   type ListHeliusRingsInFlightOperationsInput,
   type ListHeliusRingsOperationsByProjectInput,
   type ListHeliusRingsOperationsByWalletInput,
+  type PersistHeliusRingsSignedInput,
   type ReleaseHeliusRingsTimelockInput,
   type ReserveHeliusRingsIntentInput,
   type TransitionHeliusRingsOperationInput,
@@ -52,9 +54,73 @@ function mapRow(row: Record<string, unknown>): HeliusRingsOperationRow {
     retryable: (row.retryable ?? null) as boolean | null,
     retry_of_operation_id: (row.retry_of_operation_id ?? null) as string | null,
     timelock_unlock_at: (row.timelock_unlock_at ?? null) as string | null,
+    input_notes: mapInputNotes(row.input_notes),
+    signed_transaction: (row.signed_transaction ?? null) as string | null,
+    // NUMERIC comes back as a string from pg, which is what we want: this is a
+    // uint64 and Number would start losing precision partway up the range.
+    last_valid_block_height:
+      row.last_valid_block_height === null || row.last_valid_block_height === undefined
+        ? null
+        : String(row.last_valid_block_height),
+    submission_started_at: (row.submission_started_at ?? null) as string | null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
+}
+
+/**
+ * jsonb arrives parsed, so this is a shape check rather than a decode. A row
+ * whose notes are not an array of strings cannot be rebuilt against, and
+ * silently treating it as absent would let the rebuild reselect freely — the
+ * exact thing pinning them prevents.
+ */
+function mapInputNotes(value: unknown): string[] | null {
+  if (value === null || value === undefined) return null;
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+    throw new Error("helius_rings_operations.input_notes is not an array of strings");
+  }
+  return value as string[];
+}
+
+/**
+ * The SET clause for a transition, covering only the columns the caller named.
+ *
+ * Only-what-was-named is the contract: a later step in the pipeline must not
+ * blank the approval id or the note set an earlier one recorded, and a patch
+ * type where every field is optional is how that is expressed.
+ */
+function transitionAssignments(input: TransitionHeliusRingsOperationInput): {
+  assignments: string[];
+  values: unknown[];
+} {
+  const patch = input.patch ?? {};
+  const assignments = ["state = ?", "updated_at = sdp_iso_now()"];
+  const values: unknown[] = [input.nextState];
+
+  const columns: ReadonlyArray<readonly [string, unknown]> = [
+    ["approval_request_id", patch.approvalRequestId],
+    ["policy_evaluation_id", patch.policyEvaluationId],
+    ["proof_source", patch.proofSource],
+    ["proof_ref", patch.proofRef],
+    ["outer_tx_signature", patch.outerTxSignature],
+    ["photon_indexed_at", patch.photonIndexedAt],
+  ];
+
+  for (const [column, value] of columns) {
+    if (value !== undefined) {
+      assignments.push(`${column} = ?`);
+      values.push(value);
+    }
+  }
+
+  // Separate because it is the one jsonb column, and it is written as text with
+  // an explicit cast rather than relying on the driver to guess the type.
+  if (patch.inputNotes !== undefined) {
+    assignments.push("input_notes = ?::jsonb");
+    values.push(patch.inputNotes === null ? null : JSON.stringify(patch.inputNotes));
+  }
+
+  return { assignments, values };
 }
 
 function mapTimelockRow(row: Record<string, unknown>): HeliusRingsTimelockRow {
@@ -218,36 +284,7 @@ export function createPostgresHeliusRingsOperationRepository(
 
         if (!locked || locked.state !== input.expectedState) return null;
 
-        const patch = input.patch ?? {};
-        const assignments: string[] = ["state = ?", "updated_at = sdp_iso_now()"];
-        const values: unknown[] = [input.nextState];
-
-        // Only columns the caller named are written, so a later step cannot
-        // blank the approval id an earlier one recorded.
-        if (patch.approvalRequestId !== undefined) {
-          assignments.push("approval_request_id = ?");
-          values.push(patch.approvalRequestId);
-        }
-        if (patch.policyEvaluationId !== undefined) {
-          assignments.push("policy_evaluation_id = ?");
-          values.push(patch.policyEvaluationId);
-        }
-        if (patch.proofSource !== undefined) {
-          assignments.push("proof_source = ?");
-          values.push(patch.proofSource);
-        }
-        if (patch.proofRef !== undefined) {
-          assignments.push("proof_ref = ?");
-          values.push(patch.proofRef);
-        }
-        if (patch.outerTxSignature !== undefined) {
-          assignments.push("outer_tx_signature = ?");
-          values.push(patch.outerTxSignature);
-        }
-        if (patch.photonIndexedAt !== undefined) {
-          assignments.push("photon_indexed_at = ?");
-          values.push(patch.photonIndexedAt);
-        }
+        const { assignments, values } = transitionAssignments(input);
 
         const row = await tx
           .prepare(
@@ -261,6 +298,71 @@ export function createPostgresHeliusRingsOperationRepository(
 
         return row ? mapRow(row) : null;
       });
+    },
+
+    async persistSigned(input: PersistHeliusRingsSignedInput) {
+      // The NULL guards are the idempotency contract, not defensive coding: a
+      // second signing of the same operation produces different bytes for the
+      // same intent, and both sets could land. Losing this update is how a
+      // concurrent worker is told the bytes are already chosen.
+      const row = await db
+        .prepare(
+          `UPDATE helius_rings_operations
+              SET outer_tx_signature = ?,
+                  signed_transaction = ?,
+                  last_valid_block_height = ?,
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND signed_transaction IS NULL
+              AND last_valid_block_height IS NULL
+              AND submission_started_at IS NULL
+          RETURNING *`
+        )
+        .bind(
+          input.signature,
+          input.signedTransaction,
+          input.lastValidBlockHeight,
+          input.id,
+          input.organizationId,
+          input.projectId
+        )
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async markSubmissionStarted(input: HeliusRingsProjectScope & { id: string; at: string }) {
+      const row = await db
+        .prepare(
+          `UPDATE helius_rings_operations
+              SET submission_started_at = ?,
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND signed_transaction IS NOT NULL
+              AND submission_started_at IS NULL
+          RETURNING *`
+        )
+        .bind(input.at, input.id, input.organizationId, input.projectId)
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async listExpiredSubmissions(input: HeliusRingsExpiredSubmissionsInput) {
+      const result = await db
+        .prepare(
+          `SELECT * FROM helius_rings_operations
+            WHERE signed_transaction IS NOT NULL
+              AND last_valid_block_height < ?
+              AND state IN ('submitted', 'indexing')
+            ORDER BY last_valid_block_height ASC
+            LIMIT ?`
+        )
+        .bind(input.blockHeight, input.limit ?? DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT)
+        .all<Record<string, unknown>>();
+      return result.results.map(mapRow);
     },
 
     async failOperation(input: FailHeliusRingsOperationInput) {

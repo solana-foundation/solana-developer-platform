@@ -30,6 +30,13 @@ const allowPolicy = async () =>
 
 const OUTER_TX = signedRingsTransaction(9);
 
+/**
+ * The reconciliation sweep sits in front of the indexing poll and asks the chain
+ * for its height. These tests are about the poll, so it is told the height is
+ * unavailable — which the sweep treats as "judge nothing this tick".
+ */
+const NO_HEIGHT = async () => null;
+
 let walletId: string;
 let jobEnv: typeof env;
 
@@ -101,7 +108,7 @@ describe("pollRingsIndexing", () => {
 
     await pollRingsIndexing(
       { ...env, HELIUS_RINGS_ENABLED: "true" },
-      { createService: () => serviceWith(gateway) }
+      { createService: () => serviceWith(gateway), readBlockHeight: NO_HEIGHT }
     );
 
     const row = await createHeliusRingsOperationRepository(env).getOperationById({
@@ -120,7 +127,10 @@ describe("pollRingsIndexing", () => {
     expect(operation.state).toBe("indexing");
     gateway.recordSubmission(OUTER_TX.signature);
 
-    await pollRingsIndexing(jobEnv, { createService: () => serviceWith(gateway) });
+    await pollRingsIndexing(jobEnv, {
+      createService: () => serviceWith(gateway),
+      readBlockHeight: NO_HEIGHT,
+    });
 
     const row = await createHeliusRingsOperationRepository(env).getOperationById({
       ...tenant,
@@ -142,6 +152,7 @@ describe("pollRingsIndexing", () => {
     await pollRingsIndexing(jobEnv, {
       createService: () => serviceWith(gateway),
       now: () => new Date(Date.now() + RINGS_INDEXING_TIMEOUT_MS + 60_000),
+      readBlockHeight: NO_HEIGHT,
     });
 
     const row = await createHeliusRingsOperationRepository(env).getOperationById({
@@ -170,12 +181,99 @@ describe("pollRingsIndexing", () => {
       .bind(operation.id)
       .run();
 
-    await pollRingsIndexing(jobEnv, { createService: () => serviceWith(gateway) });
+    await pollRingsIndexing(jobEnv, {
+      createService: () => serviceWith(gateway),
+      readBlockHeight: NO_HEIGHT,
+    });
 
     const row = await createHeliusRingsOperationRepository(env).getOperationById({
       ...tenant,
       id: operation.id,
     });
     expect(row?.state).toBe("completed");
+  });
+
+  /**
+   * What happens once signed bytes can no longer land. The distinction is not
+   * how long it waited but what it consumed: a shield created notes and can be
+   * re-attempted, a spend consumed them and might already have settled.
+   */
+  describe("reconciliation sweep", () => {
+    /** Never reports indexed, so nothing completes out from under the sweep. */
+    const stalled = () => new InMemoryRingsGateway({ indexingDelayMs: 60 * 60 * 1000 });
+
+    async function strand(opType: "shield" | "withdraw", nonce: string): Promise<string> {
+      const gateway = stalled();
+      const operation = await serviceWith(gateway).prepareOperation(
+        {
+          walletId,
+          opType,
+          asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+          ...(opType === "withdraw" ? { to: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin" } : {}),
+          clientNonce: nonce,
+        },
+        { apiKeyId: null, actor: null, custodyWalletId: null }
+      );
+
+      // The pipeline persists the expiry from the build; force it low so the
+      // sweep sees bytes that can no longer land.
+      await getDb(env)
+        .prepare("UPDATE helius_rings_operations SET last_valid_block_height = 10 WHERE id = ?")
+        .bind(operation.id)
+        .run();
+
+      return operation.id;
+    }
+
+    it("refuses to offer a retry for a stranded spend", async () => {
+      const id = await strand("withdraw", "job-strand-spend");
+
+      await pollRingsIndexing(jobEnv, {
+        createService: () => serviceWith(stalled()),
+        readBlockHeight: async () => "5000",
+      });
+
+      const row = await createHeliusRingsOperationRepository(env).getOperationById({
+        ...tenant,
+        id,
+      });
+      // A withdrawal consumed notes. If it landed, retrying pays twice; if it
+      // did not, the notes are still there. Only a human can tell which.
+      expect(row?.failure_code).toBe("manual_reconciliation_required");
+      expect(row?.retryable).toBe(false);
+    });
+
+    it("lets a stranded shield be retried", async () => {
+      const id = await strand("shield", "job-strand-shield");
+
+      await pollRingsIndexing(jobEnv, {
+        createService: () => serviceWith(stalled()),
+        readBlockHeight: async () => "5000",
+      });
+
+      const row = await createHeliusRingsOperationRepository(env).getOperationById({
+        ...tenant,
+        id,
+      });
+      // A deposit consumes no notes, so a fresh attempt cannot double-spend.
+      expect(row?.failure_code).toBe("indexing_timeout");
+      expect(row?.retryable).toBe(true);
+    });
+
+    it("leaves everything alone when the chain height is unknown", async () => {
+      const id = await strand("withdraw", "job-strand-unknown");
+
+      await pollRingsIndexing(jobEnv, {
+        createService: () => serviceWith(stalled()),
+        readBlockHeight: NO_HEIGHT,
+      });
+
+      const row = await createHeliusRingsOperationRepository(env).getOperationById({
+        ...tenant,
+        id,
+      });
+      // Not knowing the height is a reason to wait, not a reason to escalate.
+      expect(row?.state).toBe("indexing");
+    });
   });
 });

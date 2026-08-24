@@ -39,6 +39,12 @@ const RINGS_ERROR_CODES: Record<HeliusRingsError["code"], ErrorCode> = {
   // integration pending" from exactly this response.
   gateway_unavailable: "SERVICE_UNAVAILABLE",
   config_error: "SERVICE_UNAVAILABLE",
+  // The caller asked to move more than the wallet holds. Their request, not
+  // our outage, and no amount of retrying changes it.
+  insufficient_balance: "BAD_REQUEST",
+  // A conflict a caller cannot resolve: an operator has to reconcile the
+  // signature against the chain before anything else happens to this wallet.
+  manual_reconciliation_required: "CONFLICT",
 };
 
 /** Path param, typed as present — the router only matches when it is. */

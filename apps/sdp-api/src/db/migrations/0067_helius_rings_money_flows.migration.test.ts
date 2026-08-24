@@ -104,7 +104,7 @@ afterEach(async () => {
  * says nothing about an environment that provisioned wallets under 0057 —
  * which is the only environment the migration actually has to survive.
  */
-describe("0067 against rows that predate it", () => {
+describe("against rows that predate it", () => {
   /** Recreates what 0057 left behind: an identity with no owner beside it. */
   async function makeLegacyRow(tag: string): Promise<void> {
     const { walletId } = await seedWallet(tag);
@@ -162,7 +162,7 @@ describe("0067 against rows that predate it", () => {
   });
 });
 
-describe("0067 custody_wallet_id", () => {
+describe("custody_wallet_id", () => {
   it("links a Rings wallet to the custody row that signs for it", async () => {
     const { walletId, custodyWalletId } = await seedWallet("cw_ok");
 
@@ -217,7 +217,187 @@ describe("0067 custody_wallet_id", () => {
   });
 });
 
-describe("0067 config_error", () => {
+describe("last_indexed_slot", () => {
+  it("records how far the indexer must catch up before a read is trusted", async () => {
+    const { walletId } = await seedWallet("slot_ok");
+
+    // A slot near the top of the uint64 range: this is NUMERIC precisely so a
+    // real slot cannot be rounded by a driver that routes it through a double.
+    await client.query("UPDATE helius_rings_wallets SET last_indexed_slot = $1 WHERE id = $2", [
+      "18446744073709551000",
+      walletId,
+    ]);
+
+    const { rows } = await client.query<{ last_indexed_slot: string }>(
+      "SELECT last_indexed_slot FROM helius_rings_wallets WHERE id = $1",
+      [walletId]
+    );
+    expect(String(rows[0]?.last_indexed_slot)).toBe("18446744073709551000");
+  });
+
+  it("starts null, because a wallet that has never been read has no position", async () => {
+    const { walletId } = await seedWallet("slot_null");
+
+    const { rows } = await client.query<{ last_indexed_slot: string | null }>(
+      "SELECT last_indexed_slot FROM helius_rings_wallets WHERE id = $1",
+      [walletId]
+    );
+    expect(rows[0]?.last_indexed_slot).toBeNull();
+  });
+
+  it.each([
+    ["a fraction", "10.5"],
+    ["beyond a uint64", "18446744073709551616"],
+    ["negative", "-1"],
+  ])("refuses a slot that is %s", async (label, value) => {
+    const { walletId } = await seedWallet(`slot_bad_${label.replace(/\W/g, "")}`);
+
+    await expectSqlstate(
+      () =>
+        client.query("UPDATE helius_rings_wallets SET last_indexed_slot = $1 WHERE id = $2", [
+          value,
+          walletId,
+        ]),
+      CHECK_VIOLATION
+    );
+  });
+});
+
+describe("input_notes", () => {
+  async function operationWithNotes(tag: string, notes: string[] | null): Promise<string> {
+    const seed = await seedWallet(tag);
+    const id = `hro_${tag}`;
+    await insertOperation({
+      id,
+      organization_id: seed.organizationId,
+      project_id: seed.projectId,
+      wallet_id: seed.walletId,
+      intent_key: `sha256:${tag}`,
+      op_type: "withdraw",
+      state: "proving",
+    });
+
+    if (notes !== null) {
+      await client.query(
+        "UPDATE helius_rings_operations SET input_notes = $1::jsonb WHERE id = $2",
+        [JSON.stringify(notes), id]
+      );
+    }
+    return id;
+  }
+
+  it("records the commitments a build committed to spending", async () => {
+    const notes = ["aa11", "bb22"];
+    const id = await operationWithNotes("notes_ok", notes);
+
+    const { rows } = await client.query<{ input_notes: string[] }>(
+      "SELECT input_notes FROM helius_rings_operations WHERE id = $1",
+      [id]
+    );
+    // Read back whole and in order: a rebuild pins these positionally.
+    expect(rows[0]?.input_notes).toEqual(notes);
+  });
+
+  it("distinguishes a shield's empty set from a build that has not run", async () => {
+    const unbuilt = await operationWithNotes("notes_null", null);
+    const shielded = await operationWithNotes("notes_empty", []);
+
+    const { rows } = await client.query<{ id: string; input_notes: string[] | null }>(
+      "SELECT id, input_notes FROM helius_rings_operations WHERE id = ANY($1) ORDER BY id",
+      [[unbuilt, shielded]]
+    );
+
+    // Not the same fact: null means nothing was built, [] means a flow that
+    // consumes no notes was.
+    expect(rows.find((row) => row.id === unbuilt)?.input_notes).toBeNull();
+    expect(rows.find((row) => row.id === shielded)?.input_notes).toEqual([]);
+  });
+
+  it.each([
+    ["an object", '{"a":1}'],
+    ["a bare string", '"aa11"'],
+    ["a number", "42"],
+  ])("refuses %s rather than an array", async (label, value) => {
+    const id = await operationWithNotes(`notes_bad_${label.replace(/\W/g, "")}`, null);
+
+    // A serialization bug here would only surface as a failed rebuild, long
+    // after the write that caused it.
+    await expectSqlstate(
+      () =>
+        client.query("UPDATE helius_rings_operations SET input_notes = $1::jsonb WHERE id = $2", [
+          value,
+          id,
+        ]),
+      CHECK_VIOLATION
+    );
+  });
+});
+
+describe("manual_reconciliation_required", () => {
+  it("accepts the code for a spend that can neither be retried nor closed", async () => {
+    const seed = await seedWallet("mrr_ok");
+
+    await insertOperation({
+      id: "hro_mrr_ok",
+      organization_id: seed.organizationId,
+      project_id: seed.projectId,
+      wallet_id: seed.walletId,
+      intent_key: "sha256:mrr_ok",
+      op_type: "withdraw",
+      state: "failed",
+      failure_code: "manual_reconciliation_required",
+      failure_message: "expired without being indexed",
+      retryable: false,
+    });
+
+    const { rows } = await client.query<{ failure_code: string; retryable: boolean }>(
+      "SELECT failure_code, retryable FROM helius_rings_operations WHERE id = 'hro_mrr_ok'"
+    );
+    expect(rows[0]).toMatchObject({
+      failure_code: "manual_reconciliation_required",
+      // The whole point of the code: never offer a retry that could pay twice.
+      retryable: false,
+    });
+  });
+});
+
+describe("reconciliation lookup", () => {
+  it("finds a submitted operation whose signed bytes can no longer land", async () => {
+    const seed = await seedWallet("sweep");
+
+    await insertOperation({
+      id: "hro_sweep",
+      organization_id: seed.organizationId,
+      project_id: seed.projectId,
+      wallet_id: seed.walletId,
+      intent_key: "sha256:sweep",
+      op_type: "withdraw",
+      state: "submitted",
+      outer_tx_signature: "sig_sweep",
+      signed_transaction: "AQAB",
+      last_valid_block_height: "100",
+    });
+
+    // The query the sweep runs. uint64 heights are compared as NUMERIC, never
+    // through a JS number, so a height above 2^53 still orders correctly.
+    const expiredAt = async (height: string) =>
+      (
+        await client.query<{ id: string }>(
+          `SELECT id FROM helius_rings_operations
+            WHERE signed_transaction IS NOT NULL
+              AND last_valid_block_height < $1
+              AND state IN ('submitted', 'indexing')`,
+          [height]
+        )
+      ).rows.map((row) => row.id);
+
+    expect(await expiredAt("18446744073709551000")).toContain("hro_sweep");
+    // Still live at height 50, so the sweep must leave it alone.
+    expect(await expiredAt("50")).not.toContain("hro_sweep");
+  });
+});
+
+describe("config_error", () => {
   it("accepts config_error as a failure code", async () => {
     const seed = await seedWallet("fc_ok");
 
@@ -260,7 +440,7 @@ describe("0067 config_error", () => {
   });
 });
 
-describe("0067 one active private spend per wallet", () => {
+describe("one active private spend per wallet", () => {
   const SPENDS = ["transfer_registered", "withdraw", "merge"] as const;
 
   it.each(SPENDS)("refuses a second in-flight %s for the same wallet", async (opType) => {
@@ -460,7 +640,7 @@ describe("0067 one active private spend per wallet", () => {
   });
 });
 
-describe("0067 submission outbox", () => {
+describe("submission outbox", () => {
   async function base(tag: string) {
     const seed = await seedWallet(tag);
     return {

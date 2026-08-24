@@ -47,6 +47,7 @@ describe("createRingsGateway", () => {
   const needsMaterial: Array<[string, (gateway: RingsGatewayPort) => Promise<unknown>]> = [
     ["provisionIdentity", (g) => g.provisionIdentity({ walletId: "hrw_1", sdpAddress: "addr" })],
     ["syncPhoton", (g) => g.syncPhoton({ walletId: "hrw_1", owner: "addr" })],
+    ["buildOperation", (g) => g.buildOperation({ operation: {} as never, owner: "addr" })],
   ];
 
   // `config_error` and not `gateway_unavailable`: a deployment with no seed
@@ -84,21 +85,18 @@ describe("createRingsGateway", () => {
     expect((error as HeliusRingsError).message).not.toContain(derivationSeed);
   });
 
-  const unwired: Array<[string, (gateway: RingsGatewayPort) => Promise<unknown>]> = [
-    ["buildOperation", (g) => g.buildOperation({ operation: {} as never, owner: "addr" })],
-    ["requestProof", (g) => g.requestProof({ operationId: "hro_1", ringsMetadata: {} as never })],
-    ["verifyIndexed", (g) => g.verifyIndexed("sig")],
-  ];
+  it("surfaces an unreachable indexer rather than reporting not-indexed", async () => {
+    const error = await createRingsGateway(CONFIG)
+      .verifyIndexed("sig")
+      .then(
+        () => null,
+        (thrown: unknown) => thrown
+      );
 
-  it.each(unwired)("%s fails closed with gateway_unavailable", async (method, call) => {
-    const error = await call(createRingsGateway(CONFIG)).then(
-      () => null,
-      (thrown: unknown) => thrown
-    );
-
-    expect(error).toBeInstanceOf(HeliusRingsError);
-    expect((error as HeliusRingsError).code).toBe("gateway_unavailable");
-    expect((error as HeliusRingsError).message).toContain(method);
+    // Null is how this port says "Photon has not indexed it yet", so an
+    // unreachable indexer must not produce one: the operation would sit in
+    // `indexing` until it timed out, blaming Photon for a network fault.
+    expect(error).not.toBeNull();
   });
 
   // Loopback rather than the real Helius host: this asserts the gateway's own

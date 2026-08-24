@@ -116,6 +116,15 @@ async function seedAuth(): Promise<void> {
   });
 }
 
+/**
+ * Seeded by 0057, so it passes the allowlist check. Every money flow needs an
+ * explicit asset — an absent one is a 400 rather than a default to SOL.
+ */
+const SHIELD_ASSET = {
+  mint: "So11111111111111111111111111111111111111112",
+  amountRaw: "1000000",
+};
+
 function authHeaders() {
   return {
     Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -196,7 +205,7 @@ describe("Helius Rings routes", () => {
     const res = await post("/v1/helius-rings/operations", {
       walletId: ringsWalletId,
       opType: "shield",
-      asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+      asset: SHIELD_ASSET,
       clientNonce: "route-nonce-1",
     });
     expect(res.status).toBe(201);
@@ -222,6 +231,7 @@ describe("Helius Rings routes", () => {
     const input = {
       walletId: ringsWalletId,
       opType: "shield",
+      asset: SHIELD_ASSET,
       clientNonce: "route-nonce-2",
     };
     const first = (await (await post("/v1/helius-rings/operations", input)).json()) as {
@@ -251,6 +261,7 @@ describe("Helius Rings routes", () => {
       await post("/v1/helius-rings/operations", {
         walletId: ringsWalletId,
         opType: "shield",
+        asset: SHIELD_ASSET,
         clientNonce: "route-nonce-3",
       })
     ).json()) as { data: { operation: { id: string } } };
@@ -272,6 +283,7 @@ describe("Helius Rings routes", () => {
       await post("/v1/helius-rings/operations", {
         walletId: ringsWalletId,
         opType: "shield",
+        asset: SHIELD_ASSET,
         clientNonce: "route-nonce-4",
       })
     ).json()) as { data: { operation: { id: string; state: string } } };

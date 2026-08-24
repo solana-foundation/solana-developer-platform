@@ -44,6 +44,16 @@ export interface HeliusRingsOperationRow {
   retry_of_operation_id: string | null;
   /** Denormalized from `helius_rings_timelocks`; that table stays the authority. */
   timelock_unlock_at: string | null;
+  /**
+   * The note commitments this operation's build committed to spending. Null
+   * before the first build, and for a shield, which creates notes instead.
+   */
+  input_notes: string[] | null;
+  /** base64 signed outer transaction; the exact bytes a recovery resubmits. */
+  signed_transaction: string | null;
+  /** uint64 as a string. Past this height the signed bytes can never land. */
+  last_valid_block_height: string | null;
+  submission_started_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -101,6 +111,23 @@ export interface HeliusRingsOperationTransitionPatch {
   proofRef?: string | null;
   outerTxSignature?: string | null;
   photonIndexedAt?: string | null;
+  /** The notes the build committed to; recorded on the way out of `proving`. */
+  inputNotes?: string[] | null;
+}
+
+/**
+ * Records the signed bytes before they are broadcast.
+ *
+ * Separate from a transition because the ordering is the point: the signature
+ * is derivable from the bytes without the network, so it is knowable before the
+ * RPC call and must be durable before it. Broadcasting first would leave a live
+ * transaction whose bytes were never recorded, and nothing sweeps for those.
+ */
+export interface PersistHeliusRingsSignedInput extends HeliusRingsProjectScope {
+  id: string;
+  signature: string;
+  signedTransaction: string;
+  lastValidBlockHeight: string;
 }
 
 export interface TransitionHeliusRingsOperationInput extends HeliusRingsProjectScope {
@@ -125,6 +152,12 @@ export interface ListHeliusRingsOperationsByWalletInput extends HeliusRingsProje
 }
 
 export interface ListHeliusRingsOperationsByProjectInput extends HeliusRingsProjectScope {
+  limit?: number;
+}
+
+export interface HeliusRingsExpiredSubmissionsInput {
+  /** Current chain height; a row is expired once its expiry is below this. */
+  blockHeight: string;
   limit?: number;
 }
 
@@ -171,6 +204,26 @@ export interface HeliusRingsOperationRepository {
   transitionState(
     input: TransitionHeliusRingsOperationInput
   ): Promise<HeliusRingsOperationRow | null>;
+  /**
+   * Writes the signature and exact bytes, refusing if any are already there.
+   *
+   * The refusal is what makes it safe to call on a retried execution: a second
+   * signing of the same operation would produce different bytes for the same
+   * intent, and whichever set was broadcast second could land alongside the
+   * first.
+   */
+  persistSigned(input: PersistHeliusRingsSignedInput): Promise<HeliusRingsOperationRow | null>;
+  /** Marks the broadcast durably begun. Null unless signed bytes are present. */
+  markSubmissionStarted(
+    input: HeliusRingsProjectScope & { id: string; at: string }
+  ): Promise<HeliusRingsOperationRow | null>;
+  /**
+   * Submitted operations whose signed bytes can no longer land, for the sweep
+   * that escalates them to `manual_reconciliation_required`.
+   */
+  listExpiredSubmissions(
+    input: HeliusRingsExpiredSubmissionsInput
+  ): Promise<HeliusRingsOperationRow[]>;
   /** Terminal failure. Writes the full failure triple the DB CHECK requires. */
   failOperation(input: FailHeliusRingsOperationInput): Promise<HeliusRingsOperationRow | null>;
   /** Resume sweep feed: non-terminal operations, oldest touched first. */

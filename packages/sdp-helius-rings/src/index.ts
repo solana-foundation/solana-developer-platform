@@ -20,7 +20,6 @@ export type {
   KnownAsset,
   ProvisionIdentityInput,
   ProvisionIdentityResult,
-  RequestProofInput,
   RingsGatewayPort,
   ShieldedIdentity,
   SyncPhotonInput,

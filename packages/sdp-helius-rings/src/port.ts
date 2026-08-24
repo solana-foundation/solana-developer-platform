@@ -1,4 +1,3 @@
-import type { SecretRef } from "./secrets";
 import type {
   AssetBalance,
   MaterialTag,
@@ -80,6 +79,16 @@ export interface SyncPhotonInput {
    * hiding a holding would be worse than labelling it unknown.
    */
   knownAssets?: KnownAsset[];
+  /**
+   * The indexer position this read must reach before its answer is used, as a
+   * uint64 slot string.
+   *
+   * Photon is a separate service reading the chain, so it always trails it.
+   * Without this, a read taken shortly after a transaction lands answers
+   * completely and truthfully about a moment before it existed — no error, just
+   * the past. Absent for a wallet nothing has touched yet.
+   */
+  requireSlot?: string;
 }
 
 export interface KnownAsset {
@@ -103,29 +112,72 @@ export interface SyncPhotonResult {
    * whichever stream was behind.
    */
   observedAt: string;
+  /**
+   * Highest slot this sync saw, as a uint64 string, or absent when the wallet
+   * has no history. Advances the wallet's read position so the next sync or
+   * spend can gate on it.
+   */
+  observedSlot?: string;
 }
 
 export interface BuildOperationInput {
   operation: PrivateOperation;
   /** base58 Solana address that owns the identity and signs the outer transaction. */
   owner: string;
+  /**
+   * The identity SDP persisted for this wallet, re-derived and checked before
+   * anything is built. A mismatch means this material no longer reproduces the
+   * wallet's identity, and building would spend from the wrong one.
+   */
+  expectedShieldedAddress?: string;
+  /**
+   * The exact notes a previous build of this operation committed to.
+   *
+   * Absent on a first build, where the gateway selects them. Present on a
+   * rebuild, and then binding: a spend cannot pin its inputs through the SDK's
+   * high-level builders, so re-selecting freely after a lost response could
+   * choose a disjoint set and land alongside the original, paying the recipient
+   * twice. Rebuilding against the same notes cannot — the second attempt is
+   * rejected for a spent nullifier.
+   */
+  pinnedInputs?: string[];
+  /** Labels the mints involved; the gateway holds no database handle. */
+  knownAssets?: KnownAsset[];
+  /** See `SyncPhotonInput.requireSlot`; note selection needs it most. */
+  requireSlot?: string;
 }
 
 export interface BuildOperationResult {
   outerUnsignedTxBase64: string;
+  /** Expected to be exactly the owner; the caller asserts it before signing. */
   requiredSigners: string[];
-  /** Opaque gateway state carried into requestProof; never logged or persisted raw. */
-  ringsMetadata: SecretRef<Record<string, unknown>>;
-}
-
-export interface RequestProofInput {
-  operationId: string;
-  ringsMetadata: SecretRef<Record<string, unknown>>;
+  /**
+   * The blockhash's expiry, as a uint64 string. Persisted with the signed bytes
+   * so a recovery can tell "not landed yet" from "can never land".
+   */
+  lastValidBlockHeight: string;
+  /**
+   * Note commitments this build spends, to be persisted and passed back as
+   * `pinnedInputs` on any rebuild. Empty for a shield, which creates notes
+   * rather than consuming them.
+   */
+  inputNotes: string[];
+  proof: ProofArtifact;
 }
 
 export interface VerifyIndexedResult {
   indexedAt: string;
   photonRef: string;
+  /**
+   * The slot Photon indexed it in, as a uint64 string.
+   *
+   * Recorded on the wallet so the next read can wait for the indexer to reach
+   * it. Photon trails the chain, so a read taken immediately after this
+   * transaction lands would answer completely and truthfully about a moment
+   * before it existed — which is how a spend comes to select a note that has
+   * already been consumed.
+   */
+  slot: string;
 }
 
 export interface RingsGatewayPort {
@@ -133,17 +185,17 @@ export interface RingsGatewayPort {
   provisionIdentity(input: ProvisionIdentityInput): Promise<ProvisionIdentityResult>;
   /** Always a full sync; see `SyncPhotonResult.observedAt` for why there is no cursor. */
   syncPhoton(input: SyncPhotonInput): Promise<SyncPhotonResult>;
-  buildOperation(input: BuildOperationInput): Promise<BuildOperationResult>;
   /**
-   * Attests the proof that `buildOperation` already produced.
+   * Selects notes, proves, and assembles the unsigned outer transaction.
    *
-   * The TypeScript builder proves and assembles in one call, so there is no
-   * separate proving step left to trigger. This stays on the port as a
-   * compatibility shim for the existing operation pipeline and its `proof_ref`
-   * column, and should be folded into `buildOperation` when that pipeline is
-   * next revisited.
+   * One method rather than the build-then-prove pair this port used to carry.
+   * Proving is a real separate call to the prover, but its inputs and its output
+   * are zolana-typed objects that cannot cross a Kit-neutral boundary, and the
+   * gateway is constructed per request and holds no state between calls. So the
+   * proof happens inside, and what crosses is the finished transaction plus the
+   * note commitments needed to reproduce it.
    */
-  requestProof(input: RequestProofInput): Promise<ProofArtifact>;
+  buildOperation(input: BuildOperationInput): Promise<BuildOperationResult>;
   /** Null while Photon has not indexed the signature yet. */
   verifyIndexed(signature: string): Promise<VerifyIndexedResult | null>;
 }

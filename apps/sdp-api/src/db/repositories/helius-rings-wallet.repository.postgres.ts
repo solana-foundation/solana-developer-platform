@@ -24,6 +24,12 @@ function mapRow(row: Record<string, unknown>): HeliusRingsWalletRow {
     shielded_address: (row.shielded_address ?? null) as string | null,
     owner_address: (row.owner_address ?? null) as string | null,
     sync_cursor: (row.sync_cursor ?? null) as string | null,
+    // NUMERIC comes back as a string from pg, which is what a uint64 slot needs:
+    // `number` would start rounding partway up the range the column allows.
+    last_indexed_slot:
+      row.last_indexed_slot === null || row.last_indexed_slot === undefined
+        ? null
+        : String(row.last_indexed_slot),
     custody_wallet_id: (row.custody_wallet_id ?? null) as string | null,
     material_tag: row.material_tag as HeliusRingsWalletRow["material_tag"],
     created_at: row.created_at as string,
@@ -146,6 +152,20 @@ export function createPostgresHeliusRingsWalletRepository(db: AppDb): HeliusRing
           RETURNING *`
         )
         .bind(input.status, input.id, input.organizationId, input.projectId)
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async advanceIndexedSlot(input: HeliusRingsProjectScope & { id: string; slot: string }) {
+      const row = await db
+        .prepare(
+          `UPDATE helius_rings_wallets
+              SET last_indexed_slot = GREATEST(COALESCE(last_indexed_slot, 0), ?::numeric),
+                  updated_at = sdp_iso_now()
+            WHERE id = ? AND organization_id = ? AND project_id = ?
+          RETURNING *`
+        )
+        .bind(input.slot, input.id, input.organizationId, input.projectId)
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;
     },

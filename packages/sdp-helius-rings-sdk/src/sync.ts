@@ -1,18 +1,11 @@
-import { SOL_MINT, Wallet } from "@heliuslabs/zolana";
 import type { ZolanaClient } from "@heliuslabs/zolana/client";
 import type {
   PrivateTransaction,
   PrivateTransactionDirection,
   PrivateTransactionKind,
   SyncReport as SdkSyncReport,
-  SyncWalletAuthority,
-  WalletAuthority,
 } from "@heliuslabs/zolana/transaction";
-import {
-  getPrivateTokenBalances,
-  getPrivateTransactions,
-  syncWallet,
-} from "@heliuslabs/zolana/wallet";
+import { getPrivateTokenBalances, getPrivateTransactions } from "@heliuslabs/zolana/wallet";
 import type {
   AssetBalance,
   KnownAsset,
@@ -23,7 +16,9 @@ import type {
   SyncPhotonResult,
   SyncReport,
 } from "@sdp/helius-rings";
+import { sdpMint } from "./flows/mint.js";
 import { assertShieldedIdentity, type ShieldedMaterialSource } from "./material.js";
+import { hydrateWallet, readOnlyAuthority } from "./wallet.js";
 
 /**
  * Reads a wallet's shielded state from Photon.
@@ -32,16 +27,6 @@ import { assertShieldedIdentity, type ShieldedMaterialSource } from "./material.
  * that reaching the tip of one says nothing about the others, so there is no
  * cursor to resume from and pretending otherwise would silently skip rows.
  */
-
-/**
- * SDP's pseudo-mint for native SOL is wrapped SOL; the protocol's is the system
- * program. Neither side is wrong, so the two are translated here, at the one
- * boundary that touches both, rather than teaching either side the other's
- * spelling.
- */
-// biome-ignore lint/security/noSecrets: the wrapped SOL mint, a public constant.
-const SDP_NATIVE_MINT = "So11111111111111111111111111111111111111112";
-const PROTOCOL_NATIVE_MINT: string = SOL_MINT;
 
 /**
  * Keyed on the SDK's own unions rather than on `string`, so a variant added
@@ -86,27 +71,14 @@ export async function syncRingsWallet(
         assertShieldedIdentity(material, input.expectedShieldedAddress);
       }
 
-      const wallet = new Wallet({ identity: material.shieldedAddress });
-
-      // `syncWallet` is typed against the full `WalletAuthority` but only ever
-      // calls `syncMaterial`, and the SDK names that narrower contract itself.
-      // Reading therefore gets an authority that can do nothing else; building
-      // a spending authority here would have meant inventing an approval for an
-      // operation that does not exist. The cast is to the wider parameter type,
-      // and a future SDK that really did spend during a sync would fail loudly
-      // on a missing method rather than sign something unapproved.
-      const readOnly: SyncWalletAuthority = {
-        syncMaterial: async () => ({
-          identity: material.shieldedAddress,
-          viewingKeys: [material.viewingKey],
-          nullifierKey: material.nullifierKey,
-        }),
-      };
-
-      const report = await syncWallet({
-        wallet,
-        authority: readOnly as WalletAuthority,
+      // Tolerant of an incomplete read, unlike the spend path: partial balances
+      // are still worth reporting as long as `degraded` says so.
+      const { wallet, report } = await hydrateWallet({
         client: deps.client,
+        material,
+        authority: readOnlyAuthority(material),
+        requireComplete: false,
+        ...(input.requireSlot ? { requireSlot: BigInt(input.requireSlot) } : {}),
       });
 
       const labels = assetLabels(input.knownAssets ?? []);
@@ -123,9 +95,26 @@ export async function syncRingsWallet(
         // reconstructed from.
         indexedOperationSignatures: [...new Set(transactions.map((entry) => entry.id.signature))],
         observedAt: new Date().toISOString(),
+        ...highestSlot(transactions),
       };
     }
   );
+}
+
+/**
+ * The furthest point this sync actually saw, for the next read to gate on.
+ *
+ * Absent for a wallet with no history: there is no position to wait for, and
+ * claiming one would make the next read wait for a slot nothing produced.
+ */
+function highestSlot(transactions: readonly PrivateTransaction[]): { observedSlot?: string } {
+  if (transactions.length === 0) return {};
+
+  const highest = transactions.reduce(
+    (max, entry) => (entry.id.slot > max ? entry.id.slot : max),
+    transactions[0].id.slot
+  );
+  return { observedSlot: highest.toString() };
 }
 
 function assetLabels(known: readonly KnownAsset[]): Map<string, KnownAsset> {
@@ -133,11 +122,11 @@ function assetLabels(known: readonly KnownAsset[]): Map<string, KnownAsset> {
 }
 
 function toAssetBalance(
-  protocolMint: string,
+  reportedMint: string,
   amount: bigint,
   labels: Map<string, KnownAsset>
 ): AssetBalance {
-  const mint = protocolMint === PROTOCOL_NATIVE_MINT ? SDP_NATIVE_MINT : protocolMint;
+  const mint = sdpMint(reportedMint);
   const label = labels.get(mint);
 
   return {
@@ -158,7 +147,7 @@ function toHistoryEntry(entry: PrivateTransaction): PrivateHistoryEntry {
     index: entry.id.index.toString(),
     kind: HISTORY_KINDS[entry.kind],
     direction: HISTORY_DIRECTIONS[entry.direction],
-    mint: entry.asset === PROTOCOL_NATIVE_MINT ? SDP_NATIVE_MINT : entry.asset,
+    mint: sdpMint(entry.asset),
     amountRaw: entry.amount.toString(),
   };
 }

@@ -28,6 +28,15 @@ export interface HeliusRingsWalletRow {
   /** Photon sync cursor; null before the first successful sync. */
   sync_cursor: string | null;
   /**
+   * Slot the indexer must have reached before a read of this wallet is trusted,
+   * as a uint64 string. Null until something has touched the wallet on chain.
+   *
+   * Not a resume position: every read is still a full sync. This only says how
+   * far behind is too far behind, because Photon trails the chain and a read
+   * taken too early describes a moment before the last operation existed.
+   */
+  last_indexed_slot: string | null;
+  /**
    * The custody_wallets row that signs for this identity. Null only on wallets
    * created before live provisioning existed; `sdp_wallet_id` is the provider's
    * id and can be reissued, so the immutable row id is what a signer resolves.
@@ -107,6 +116,17 @@ export interface HeliusRingsWalletRepository {
   updateStatus(input: UpdateHeliusRingsWalletStatusInput): Promise<HeliusRingsWalletRow | null>;
   updateSyncCursor(
     input: UpdateHeliusRingsWalletSyncCursorInput
+  ): Promise<HeliusRingsWalletRow | null>;
+  /**
+   * Moves the read position forward, never back.
+   *
+   * Monotonic because two things advance it — a completed operation and a
+   * sync — and they can report out of order. Taking the lower of the two would
+   * let a later read gate on a position the wallet has already passed, which is
+   * exactly the stale view this is meant to prevent.
+   */
+  advanceIndexedSlot(
+    input: HeliusRingsProjectScope & { id: string; slot: string }
   ): Promise<HeliusRingsWalletRow | null>;
 }
 

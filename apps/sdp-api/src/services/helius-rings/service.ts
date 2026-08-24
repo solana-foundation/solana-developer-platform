@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type {
   FailureCode,
+  KnownAsset,
   OperationEvent,
   OperationState,
   PrivateOperation,
@@ -12,6 +13,7 @@ import type {
 } from "@sdp/helius-rings";
 import {
   HeliusRingsError,
+  type HeliusRingsErrorCode,
   nextState,
   type RingsGatewayPort,
   RUNTIME_HEALTH_COMPONENTS,
@@ -224,6 +226,7 @@ export class HeliusRingsService {
     retryOfOperationId: string | null = null
   ): Promise<PrivateOperation> {
     const wallet = await this.requireWallet(input.walletId);
+    await this.assertAssetAllowed(input);
     const intentKey = computeIntentKey(input);
 
     const { operation, reserved } = await this.operations.reserveIntent({
@@ -364,16 +367,20 @@ export class HeliusRingsService {
       return this.toPrivateOperation(await this.runPipeline(proving));
     }
 
-    // submitted: the broadcast either landed or never left the process, and
-    // nothing here can tell the two apart — only the signature is persisted, not
-    // the signed bytes, so there is nothing to resubmit. Both readings resolve
-    // the same way: hand the signature to Photon and let the indexing budget
-    // settle it. A hit completes the operation; a miss times out as
-    // `indexing_timeout` (retryable). Without this, a crash between the RPC
-    // call and the submitted → indexing transition left a live transaction
-    // outside reconciliation forever — the poll skips non-`indexing` rows,
-    // execute ignored `submitted`, and retry requires `failed`.
+    // submitted: the broadcast either landed, or never left the process, and
+    // nothing here can tell the two apart. The signed bytes are persisted, so
+    // the answer is to send those exact bytes again rather than to guess: a
+    // duplicate of a transaction that already landed is rejected by the chain
+    // for a spent nullifier, while a first send of one that never left finally
+    // moves the money. Rebuilding would be the unsafe option — it could select
+    // different notes and land beside the original.
+    //
+    // Without this a crash between the RPC call and the submitted → indexing
+    // transition left a live transaction outside reconciliation forever: the
+    // poll skips non-`indexing` rows, execute ignored `submitted`, and retry
+    // requires `failed`.
     if (operation.state === "submitted") {
+      await this.resubmitPersistedBytes(operation);
       const resumed = await this.transition(operation.id, "submitted", "submitted");
       if (!resumed) return this.toPrivateOperation(await this.requireOperation(operation.id));
       operation = resumed;
@@ -395,6 +402,13 @@ export class HeliusRingsService {
         photonIndexedAt: indexed.indexedAt,
       });
       if (completed) {
+        // The wallet's state changed at this slot, so every later read of it
+        // has to reach here before it can be believed.
+        await this.wallets.advanceIndexedSlot({
+          ...this.tenant,
+          id: operation.wallet_id,
+          slot: indexed.slot,
+        });
         await this.events.append({
           operationId: operation.id,
           kind: "operation.completed",
@@ -404,6 +418,37 @@ export class HeliusRingsService {
       return this.toPrivateOperation(completed ?? (await this.requireOperation(operation.id)));
     } catch (error) {
       return this.toPrivateOperation(await this.failFromPortError(operation, error));
+    }
+  }
+
+  /**
+   * Sends the persisted bytes again, for an operation resumed in `submitted`.
+   *
+   * Best-effort on purpose. A duplicate of a landed transaction is rejected,
+   * and so is one whose blockhash has expired; neither is a reason to fail the
+   * operation, because Photon is the authority on whether it settled and the
+   * reconciliation sweep is what handles bytes that can no longer land. What
+   * this rules out is the case nothing else covers: bytes that were signed and
+   * recorded but never actually reached the network.
+   */
+  private async resubmitPersistedBytes(operation: HeliusRingsOperationRow): Promise<void> {
+    if (!operation.signed_transaction) return;
+
+    try {
+      await this.submitOuterTransaction({
+        env: this.env,
+        signedTxBase64: operation.signed_transaction,
+      });
+    } catch (error) {
+      await this.events.append({
+        operationId: operation.id,
+        kind: "transaction.submitted",
+        payload: {
+          signature: operation.outer_tx_signature,
+          resubmit: "rejected",
+          reason: error instanceof Error ? error.message : "unknown",
+        },
+      });
     }
   }
 
@@ -424,6 +469,17 @@ export class HeliusRingsService {
     }
     if (!failed.retryable) {
       throw new AppError("CONFLICT", "operation failure is not retryable");
+    }
+    // A retry files a *fresh* operation, which builds and selects notes again.
+    // That is safe right up until bytes exist: past that point the original may
+    // have landed, and a second transaction for the same intent would pay the
+    // recipient twice. The signed bytes are the line, not the state, because a
+    // failure can be recorded after signing.
+    if (failed.signed_transaction) {
+      throw new AppError(
+        "CONFLICT",
+        "this operation was already signed and may have landed; reconcile its signature on chain instead of retrying"
+      );
     }
     await this.assertRetryDepth(failed);
 
@@ -505,22 +561,46 @@ export class HeliusRingsService {
   private async runPipeline(operation: HeliusRingsOperationRow): Promise<HeliusRingsOperationRow> {
     let current = operation;
 
+    // Bytes already exist for this operation, so building again is both wasted
+    // and unsafe: a rebuild could select different notes, and whichever set was
+    // broadcast second could land beside the first. Recovery resends what was
+    // recorded, which is what the outbox is for.
+    if (current.signed_transaction) {
+      await this.resubmitPersistedBytes(current);
+      const resumed = await this.transition(current.id, current.state, "submitted");
+      return resumed ?? (await this.requireOperation(current.id));
+    }
+
     // proving: build the outer tx and request the proof.
     try {
       // The one address involved in both halves of this pipeline: it is what
       // the outer transaction is built for, and the key that must sign it.
       const owner = await this.requireOwner(current.wallet_id);
+      const wallet = await this.requireWallet(current.wallet_id);
       const built = await this.gateway.buildOperation({
         operation: this.toPrivateOperation(current),
         owner,
+        ...(wallet.shielded_address ? { expectedShieldedAddress: wallet.shielded_address } : {}),
+        // Binding on a rebuild. An operation that has been built once already
+        // committed to a set of notes, and choosing again could land a second
+        // transaction beside a first that may have settled.
+        ...(current.input_notes ? { pinnedInputs: current.input_notes } : {}),
+        // Wait for the indexer to catch up to whatever last touched this
+        // wallet. Selecting notes from a view older than that can pick one
+        // already consumed, and the chain rejects the transaction it goes into.
+        ...(wallet.last_indexed_slot ? { requireSlot: wallet.last_indexed_slot } : {}),
+        knownAssets: await this.knownAssets(),
       });
-      const proof = await this.gateway.requestProof({
-        operationId: current.id,
-        ringsMetadata: built.ringsMetadata,
-      });
+
+      // Proving and building are one call: the SDK proves inside the builder, so
+      // reaching here is what `proof_received` means.
+      const proof = built.proof;
       const ready = await this.transition(current.id, "proving", "proof_received", {
         proofSource: proof.source,
         proofRef: proof.ref.reveal("adapter"),
+        // Recorded before anything is signed, so a recovery knows what this
+        // operation committed to even if it never reaches submission.
+        inputNotes: built.inputNotes,
       });
       if (!ready) return this.requireOperation(current.id);
       current = ready;
@@ -531,12 +611,18 @@ export class HeliusRingsService {
         payload: { source: proof.source },
       });
 
-      // ready_to_sign → submitted: sign with custody, then persist the signature
-      // *before* broadcasting. The signature is a property of the signed
+      // ready_to_sign → submitted: sign with custody, then persist the exact
+      // bytes *before* broadcasting. The signature is a property of the signed
       // transaction, so it is knowable without the network — which is what makes
-      // `submitted` durable ahead of the RPC call. Broadcasting first would leave
-      // a live on-chain transaction whose signature was never recorded if the
-      // process died in between, and nothing sweeps `ready_to_sign` to find it.
+      // this durable ahead of the RPC call. Broadcasting first would leave a live
+      // on-chain transaction whose bytes were never recorded, and a spend cannot
+      // be safely rebuilt from scratch to find out what happened.
+      // The owner, and only the owner. A transaction needing a second signature
+      // would sit unlanded until its blockhash expired; one whose single signer
+      // is somebody else would move a wallet this operation never named. Both
+      // are cheap to detect here and expensive to diagnose after submission.
+      assertOwnerIsSoleSigner(built.requiredSigners, owner);
+
       const signed = await this.signOuterTransaction({
         env: this.env,
         organizationId: this.tenant.organizationId,
@@ -558,16 +644,66 @@ export class HeliusRingsService {
         });
       }
 
+      // The outbox, in the order that makes a lost response recoverable: the
+      // bytes and their expiry land first, then the state moves, then the
+      // submission is marked durably begun, and only then is anything sent.
+      const persisted = await this.operations.persistSigned({
+        ...this.tenant,
+        id: current.id,
+        signature,
+        signedTransaction: signed,
+        lastValidBlockHeight: built.lastValidBlockHeight,
+      });
+      if (!persisted) {
+        // Bytes are already recorded for this operation, so another worker is
+        // mid-submission. Signing a second set for the same intent is how the
+        // same payment lands twice.
+        throw new RingsAdapterError(
+          "submit_failed",
+          "this operation already has signed bytes recorded; refusing to sign a second set",
+          { retryable: false }
+        );
+      }
+
       const submitted = await this.transition(current.id, "ready_to_sign", "signed", {
         outerTxSignature: signature,
       });
       if (!submitted) return this.requireOperation(current.id);
       current = submitted;
 
+      const started = await this.operations.markSubmissionStarted({
+        ...this.tenant,
+        id: current.id,
+        at: this.now(),
+      });
+      if (!started) {
+        // Another worker already owns the broadcast. Not a failure — the bytes
+        // are identical, so a duplicate send is harmless — but it is recorded,
+        // because two workers on one operation is worth seeing in the feed.
+        await this.events.append({
+          operationId: current.id,
+          kind: "transaction.submitted",
+          payload: { signature, submissionAlreadyStarted: true },
+        });
+      }
+
       // Broadcast from inside `submitted`, so an RPC failure records
-      // `submit_failed` against the state the state machine declares it for. The
-      // intent key makes a resubmission safe.
-      await this.submitOuterTransaction({ env: this.env, signedTxBase64: signed });
+      // `submit_failed` against the state the state machine declares it for.
+      const broadcast = await this.submitOuterTransaction({
+        env: this.env,
+        signedTxBase64: signed,
+      });
+
+      // The signature was derived locally from these exact bytes, so a different
+      // one back means the RPC broadcast something else. Continuing would track
+      // the wrong transaction and report an unrelated one as this operation's.
+      if (broadcast !== signature) {
+        throw new RingsAdapterError(
+          "submit_failed",
+          `the RPC returned signature ${broadcast} for locally signed ${signature}`,
+          { retryable: false }
+        );
+      }
 
       await this.events.append({
         operationId: current.id,
@@ -686,6 +822,36 @@ export class HeliusRingsService {
     return wallet.owner_address;
   }
 
+  /**
+   * Refuses a mint the shielded pool is not known to support.
+   *
+   * Checked before the intent is reserved, so an unsupported mint never becomes
+   * an operation row. The allowlist is what the pool and the platform's token
+   * registry both support; building against anything else fails deep inside a
+   * proof, where the error names none of this.
+   */
+  private async assertAssetAllowed(input: PrivateOperationInput): Promise<void> {
+    if (!input.asset) return;
+
+    const allowed = await this.assets.listActiveAssets();
+    if (!allowed.some((asset) => asset.mint === input.asset?.mint)) {
+      throw new HeliusRingsError(
+        "invalid_input",
+        `${input.asset.mint} is not an asset Rings supports on this network`
+      );
+    }
+  }
+
+  /** The project's allowlisted mints, for labelling and validation. */
+  private async knownAssets(): Promise<KnownAsset[]> {
+    const allowlist = await this.assets.listActiveAssets();
+    return allowlist.map((asset) => ({
+      mint: asset.mint,
+      symbol: asset.symbol,
+      decimals: asset.decimals,
+    }));
+  }
+
   private async requireOperation(operationId: string): Promise<HeliusRingsOperationRow> {
     const operation = await this.operations.getOperationById({
       ...this.tenant,
@@ -757,6 +923,9 @@ export class HeliusRingsService {
       // Re-derived and compared inside the gateway. A wallet whose material no
       // longer reproduces its persisted identity must not report balances.
       expectedShieldedAddress: wallet.shielded_address,
+      // Balances read before the indexer has caught up would show the state as
+      // of the operation before last, which reads as money having vanished.
+      ...(wallet.last_indexed_slot ? { requireSlot: wallet.last_indexed_slot } : {}),
       knownAssets: allowlist.map((asset) => ({
         mint: asset.mint,
         symbol: asset.symbol,
@@ -770,6 +939,17 @@ export class HeliusRingsService {
       syncCursor: result.observedAt,
     });
 
+    // A sync sees the whole history, so it can carry the read position further
+    // than the last completed operation did — a note received from someone
+    // else's transfer arrives without an operation of ours behind it.
+    if (result.observedSlot) {
+      await this.wallets.advanceIndexedSlot({
+        ...this.tenant,
+        id: wallet.id,
+        slot: result.observedSlot,
+      });
+    }
+
     return result;
   }
 
@@ -778,6 +958,24 @@ export class HeliusRingsService {
     const row = await this.requireOperation(operationId);
     const events = await this.events.listByOperation({ operationId: row.id });
     return this.toPrivateOperation(row, events.map(mapHeliusRingsEventRow));
+  }
+}
+
+/**
+ * Refuses a built transaction whose signer set is not exactly the owner.
+ *
+ * Non-retryable: the gateway produced the wrong shape, and asking it again with
+ * the same inputs produces the same thing.
+ */
+function assertOwnerIsSoleSigner(requiredSigners: readonly string[], owner: string): void {
+  const unexpected = requiredSigners.filter((signer) => signer !== owner);
+
+  if (unexpected.length > 0 || !requiredSigners.includes(owner)) {
+    throw new RingsAdapterError(
+      "signer_failed",
+      `the built transaction requires [${requiredSigners.join(", ")}] to sign, not ${owner} alone`,
+      { retryable: false }
+    );
   }
 }
 
@@ -802,17 +1000,8 @@ function describeFailure(error: unknown): OperationFailure {
   }
 
   if (error instanceof HeliusRingsError) {
-    switch (error.code) {
-      // No amount of retrying supplies an environment variable.
-      case "config_error":
-        return { code: "config_error", message: error.message, retryable: false };
-      // The wallet has no identity to spend from. Not the gateway's fault and
-      // not fixed by waiting: the wallet has to be provisioned first.
-      case "conflict":
-        return { code: "invalid_input", message: error.message, retryable: false };
-      default:
-        return { code: "gateway_unavailable", message: error.message, retryable: true };
-    }
+    const { code, retryable } = GATEWAY_FAILURES[error.code];
+    return { code, message: error.message, retryable };
   }
 
   return {
@@ -821,6 +1010,33 @@ function describeFailure(error: unknown): OperationFailure {
     retryable: true,
   };
 }
+
+/**
+ * Every code the gateway can raise, and what it becomes on the row.
+ *
+ * A total map rather than a switch with a default: a default is what let
+ * `manual_reconciliation_required` be recorded as a retryable outage, which is
+ * the one failure that must never offer a retry. Adding a code upstream is now
+ * a build error here instead of a silent fallthrough.
+ */
+const GATEWAY_FAILURES: Record<HeliusRingsErrorCode, { code: FailureCode; retryable: boolean }> = {
+  // No amount of retrying supplies an environment variable.
+  config_error: { code: "config_error", retryable: false },
+  // The wallet has no identity to spend from — it has to be provisioned first.
+  conflict: { code: "invalid_input", retryable: false },
+  invalid_input: { code: "invalid_input", retryable: false },
+  not_found: { code: "invalid_input", retryable: false },
+  // The caller asked to move more than the wallet holds. Their input, and a
+  // second attempt with the same amount fails the same way.
+  insufficient_balance: { code: "insufficient_balance", retryable: false },
+  // The notes this operation committed to are gone, most likely because the
+  // attempt it is recovering already settled. Retrying could pay twice.
+  manual_reconciliation_required: {
+    code: "manual_reconciliation_required",
+    retryable: false,
+  },
+  gateway_unavailable: { code: "gateway_unavailable", retryable: true },
+};
 
 /**
  * The idempotency contract: one deterministic key per (wallet, op, canonical

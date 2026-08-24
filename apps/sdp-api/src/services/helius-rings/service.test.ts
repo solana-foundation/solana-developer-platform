@@ -5,6 +5,7 @@ import type { PolicyDecision } from "@sdp/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createHeliusRingsWalletRepository } from "@/db/repositories";
+import { createPostgresHeliusRingsOperationRepository } from "@/db/repositories/helius-rings-operation.repository.postgres";
 import { AppError } from "@/lib/errors";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { signedRingsTransaction } from "@/test/fixtures/rings-transactions";
@@ -229,6 +230,42 @@ describe("HeliusRingsService", () => {
       expect(knownAssets.map((asset) => asset.symbol).sort()).toEqual(["SOL", "USDC"]);
     });
 
+    it("makes the next read wait for the indexer to reach the last thing it saw", async () => {
+      const gateway = new InMemoryRingsGateway();
+      const syncPhoton = vi.spyOn(gateway, "syncPhoton");
+
+      // First sync: nothing has touched the wallet, so there is no position to
+      // wait for and asking for one would block on a slot nothing produced.
+      await service({ gateway }).syncWallet(walletId);
+      expect(syncPhoton.mock.calls[0]?.[0]).not.toHaveProperty("requireSlot");
+
+      const observed = (await createHeliusRingsWalletRepository(env).getWalletById({
+        ...tenant,
+        id: walletId,
+      })) as { last_indexed_slot: string | null };
+      expect(observed.last_indexed_slot).not.toBeNull();
+
+      // Second sync gates on it. Photon trails the chain, so without this the
+      // read could describe a moment before the first sync's history existed.
+      await service({ gateway }).syncWallet(walletId);
+      expect(syncPhoton.mock.calls[1]?.[0]).toMatchObject({
+        requireSlot: observed.last_indexed_slot,
+      });
+    });
+
+    it("never moves the read position backwards", async () => {
+      const wallets = createHeliusRingsWalletRepository(env);
+
+      await wallets.advanceIndexedSlot({ ...tenant, id: walletId, slot: "5000" });
+      // Two sources advance this — a completed operation and a sync — and they
+      // can report out of order. Taking the lower would let a later read gate
+      // on a position the wallet has already passed.
+      await wallets.advanceIndexedSlot({ ...tenant, id: walletId, slot: "100" });
+
+      const row = await wallets.getWalletById({ ...tenant, id: walletId });
+      expect(row?.last_indexed_slot).toBe("5000");
+    });
+
     it("refuses a wallet that has never been provisioned", async () => {
       const wallet = await createHeliusRingsWalletRepository(env).createWallet({
         ...tenant,
@@ -308,6 +345,84 @@ describe("HeliusRingsService", () => {
       // `gateway_unavailable` it had to borrow before 0067 added this one.
       expect(operation.failure).toMatchObject({ code: "config_error", retryable: false });
       expect(operation.failure?.message).toContain("HELIUS_RINGS_PROVER_URL");
+    });
+
+    it("resends the persisted bytes when resumed in submitted", async () => {
+      const sent: string[] = [];
+      const svc = () =>
+        liveishService({
+          gateway: new InMemoryRingsGateway({ indexingDelayMs: 60 * 60 * 1000 }),
+          submitOuterTransaction: async ({ signedTxBase64 }) => {
+            sent.push(signedTxBase64);
+            return OUTER_TX.signature;
+          },
+        });
+
+      const operation = await svc().prepareOperation(
+        operationInput({ clientNonce: "nonce-resubmit" }),
+        actorContext
+      );
+
+      // Exactly what a process that died between the RPC call and the
+      // submitted → indexing commit leaves behind.
+      await getDb(env)
+        .prepare("UPDATE helius_rings_operations SET state = 'submitted' WHERE id = ?")
+        .bind(operation.id)
+        .run();
+
+      await svc().executeOperation(operation.id);
+
+      // The same bytes, not a rebuild. A duplicate of a landed transaction is
+      // rejected by the chain; a rebuild could select other notes and settle
+      // twice.
+      expect(sent).toEqual([OUTER_TX.signedTxBase64, OUTER_TX.signedTxBase64]);
+    });
+
+    it("never offers a retry when the gateway says the notes are gone", async () => {
+      const gateway = new InMemoryRingsGateway();
+      gateway.buildOperation = () =>
+        Promise.reject(
+          new HeliusRingsError(
+            "manual_reconciliation_required",
+            "2 of 2 pinned notes are no longer spendable"
+          )
+        );
+
+      const operation = await service({ gateway }).prepareOperation(
+        operationInput({ clientNonce: "nonce-mrr" }),
+        actorContext
+      );
+
+      // The notes are gone most likely because the attempt this was recovering
+      // already settled. Offering a retry here is the double payment the
+      // pinning exists to prevent, so the code must survive the mapping.
+      expect(operation.failure).toMatchObject({
+        code: "manual_reconciliation_required",
+        retryable: false,
+      });
+    });
+
+    it("refuses to retry an operation that was already signed", async () => {
+      const operation = await liveishService().prepareOperation(
+        operationInput({ clientNonce: "nonce-signed-retry" }),
+        actorContext
+      );
+
+      // It reached submission, so bytes exist. Fail it from there and ask for a
+      // retry: rebuilding could select different notes and land beside a
+      // transaction that may already have settled.
+      await createPostgresHeliusRingsOperationRepository(getDb(env)).failOperation({
+        ...tenant,
+        id: operation.id,
+        expectedState: operation.state as "indexing",
+        code: "indexing_timeout",
+        message: "photon never caught up",
+        retryable: true,
+      });
+
+      await expect(
+        liveishService().retryOperation(operation.id, "nonce-retry-attempt", actorContext)
+      ).rejects.toMatchObject({ code: "CONFLICT" });
     });
 
     it("records a spend against an unprovisioned wallet as bad input, not an outage", async () => {
