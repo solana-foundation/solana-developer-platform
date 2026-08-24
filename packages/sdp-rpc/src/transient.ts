@@ -62,10 +62,6 @@ export function isUnauthorizedRpcError(error: unknown): boolean {
 
 const TRANSIENT_RPC_RETRY_DELAYS_MS = [250, 750, 1500];
 
-// Total wall-clock budget across all attempts. Fast transient failures (e.g. a
-// dropped SYN during NAT programming) get the whole schedule; attempts that
-// burn their full request timeout stop retrying once the budget is spent, so a
-// hard RPC outage cannot multiply a caller's worst case by the attempt count.
 const TRANSIENT_RPC_RETRY_BUDGET_MS = 45_000;
 
 /**
