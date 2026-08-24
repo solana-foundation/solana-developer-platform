@@ -376,15 +376,12 @@ export interface EarnVaultInstruction {
 /**
  * Unsigned work for a non-custodial vault, ready for the API to compile.
  *
- * `transactions` is a list of TRANSACTION-SIZED batches, not one flat list: a
- * multi-reserve vault exit emits several instructions each carrying the vault's
- * full reserve account list and can exceed Solana's 1232-byte packet. Returning
- * batches makes that the builder's problem, where the vault's shape is known,
- * rather than the caller's at compile time.
+ * `instructions` is one complete transaction. Vault execution rejects final
+ * signed bytes that exceed Solana's packet limit.
  */
 export interface EarnVaultTransactionPlan {
   cluster: SolanaCluster;
-  transactions: EarnVaultInstruction[][];
+  instructions: EarnVaultInstruction[];
   /** Address lookup tables the caller should apply when compiling. */
   lookupTables: string[];
   /**
@@ -456,6 +453,8 @@ export interface EarnVaultPositionSnapshot {
   owner: string;
   cluster: SolanaCluster;
   shares: string;
+  /** Unstaked shares the provider can redeem immediately. */
+  withdrawableShares: string;
   /** Value of those shares in the deposit token; omitted when unreadable. */
   tokenValue?: string;
   tokenMint: string;
@@ -499,13 +498,9 @@ export interface EarnVaultDirectProvider extends EarnVaultProvider {
  * Optional capability: the money-OUT half of the vault-direct model, kept
  * SEPARATE from money-in deliberately.
  *
- * Splitting it is not taxonomy for its own sake. A vault EXIT is the case that
- * genuinely needs several transactions — one withdraw instruction per reserve
- * the vault must draw from, each carrying the vault's full remaining-accounts
- * list — so `transactions` having more than one entry is normal here and
- * impossible on deposit. Folding both into one capability therefore made "can
- * build a deposit" silently assert "can build a correctly BATCHED exit", which
- * is a different and much harder claim.
+ * Splitting it is not taxonomy for its own sake. Deposit and withdrawal are
+ * independent provider capabilities: supporting money in does not prove that a
+ * client can construct, validate, and safely price the provider's exit path.
  *
  * Discovered via `supportsVaultWithdraw` (capabilities.ts). A provider may
  * implement `EarnVaultDirectProvider` alone, and an exit route must then refuse

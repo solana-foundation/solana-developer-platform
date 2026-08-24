@@ -30,9 +30,13 @@ Things that will bite:
 - **Every movement needs a holding, and a missing one must never fail a money
   write.** Resolve or open the holding before writing the movement. The custodial
   holding for a program is minted when its provider wallet is linked.
-- **Amounts carry a `denomination`** (`usd`, or the token mint); share counts live
-  only in share-named columns. No read may sum across rows without grouping by
-  denomination.
+- **Amounts carry a `denomination`** (`usd`, the token mint, or the SHARE mint
+  on a vault withdrawal, whose exact intent-time quantity is shares). No read
+  may sum across rows without grouping by denomination.
+- **A vault withdrawal is one signed movement.** The movement owns the requested
+  shares, actor, idempotency key, signature, signed bytes and blockhash window.
+  It is recorded before broadcast and reconciled through the same outbox path
+  as a vault deposit.
 - **Ids are heterogeneous by design.** History keeps the ids the projection
   preserved, so nothing may parse an id for its kind — read `execution_model`.
 
