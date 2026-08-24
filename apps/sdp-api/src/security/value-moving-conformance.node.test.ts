@@ -215,6 +215,36 @@ const contracts: ValueMovingContract[] = [
       },
     ],
   },
+  {
+    /**
+     * The exit half (PRO-1702). Registered WITH the route rather than after
+     * it, so this money-moving surface is born governed — the deposit above is
+     * the cautionary tale.
+     */
+    family: "earn",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/earn/handlers/vault.ts",
+      evidence: "const wallet = resolveEarnVaultCustodyWallet(wallets, position.custodyWalletId)",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/earn/index.ts",
+      section: '"/vault-withdrawals",',
+      before: "extract: extractEarnVaultWithdrawalPolicyCandidate",
+      after: "createEarnVaultWithdrawal",
+    },
+    replay: [
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/services/earn/vault-withdraw.service.test.ts",
+        evidence: "replays the original vault withdrawal for the same requestId and payload",
+      },
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/services/earn/vault-withdraw.service.test.ts",
+        evidence: "rejects the same requestId with a different payload",
+      },
+    ],
+  },
 ];
 
 const signingSinkInventory: Record<string, string[]> = {
@@ -307,9 +337,13 @@ function sectionSource(boundary: OrderedBoundary): string {
 
 describe("value-moving authorization and replay conformance", () => {
   it("covers every required value-moving family", () => {
+    // `earn` appears twice: money-in (vault deposits) and money-out (vault
+    // withdrawals) are separately gated routes, and each carries its own
+    // authorization boundary and replay evidence.
     expect(contracts.map((contract) => contract.family).sort()).toEqual([
       "batch",
       "custody",
+      "earn",
       "earn",
       "issuance",
       "payments",

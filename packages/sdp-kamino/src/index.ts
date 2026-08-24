@@ -40,12 +40,7 @@ export {
   kaminoClusterConfig,
   kaminoProgramAllowlist,
 } from "./programs";
-// `buildKaminoWithdrawPlan` is deliberately NOT re-exported. It builds a single
-// unsized batch with no lookup table, which does not honour
-// `KaminoInstructionPlan`'s transaction-sized-batch contract for a multi-reserve
-// exit — so it stays package-private (smoke tests only) until that lands, and
-// `KaminoVaultDirectClient` withholds the withdraw capability to match.
-export { buildKaminoDepositPlan, readKaminoPosition } from "./sdk";
+export { buildKaminoDepositPlan, buildKaminoWithdrawPlan, readKaminoPosition } from "./sdk";
 export type {
   KaminoAcceptedAmounts,
   KaminoDepositInput,
