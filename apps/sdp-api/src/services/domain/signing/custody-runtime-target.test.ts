@@ -4,6 +4,7 @@ import { PrivySigner } from "@solana/keychain-privy";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createTenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
+import { getLogger } from "@/runtime/logger";
 import type { SigningConfigRecord } from "@/services/adapters";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import { RuntimeEnvCredentialSecretStore } from "@/services/credential-secret-store";
@@ -120,6 +121,40 @@ describe("CustodyRuntimeTargets", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("logs an unavailable exact Config admission without Provider access", async () => {
+    const config = await seedConfig({ provider: "privy" });
+    const custodyWalletId = `cwlt_${config.id}`;
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
+      .bind(custodyWalletId)
+      .run();
+    const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    await expect(
+      targets.admitRuntimeExecution({
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        custodyWalletId,
+      })
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      details: { reason: "runtime_execution_unavailable" },
+    });
+    expect(warn).toHaveBeenCalledWith(
+      {
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        provider: "privy",
+        targetKind: "config",
+        targetId: config.id,
+        custodyWalletId,
+        reason: "runtime_execution_unavailable",
+      },
+      "custody_runtime_target_unavailable"
+    );
+  });
+
   it("exposes exact admission through the tenant-scoped SigningService", async () => {
     const config = await seedConfig({ provider: "privy" });
     const service = createSigningService(
@@ -185,6 +220,7 @@ describe("CustodyRuntimeTargets", () => {
   ])("hides a missing or foreign exact wallet", async (projectId, custodyWalletId) => {
     await seedConnection();
     const read = mockStoredCredentialRead();
+    const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
@@ -195,6 +231,38 @@ describe("CustodyRuntimeTargets", () => {
       })
     ).rejects.toMatchObject({ code: "NOT_FOUND", statusCode: 404 });
     expect(read).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      {
+        organizationId: ORGANIZATION_ID,
+        projectId,
+        custodyWalletId,
+        reason: "exact_wallet_not_found",
+      },
+      "custody_runtime_target_unavailable"
+    );
+  });
+
+  it("preserves the exact signer's WALLET_NOT_FOUND compatibility code", async () => {
+    const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    await expect(
+      targets.getTransactionSignerForWalletRecord(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        "cwlt_missing",
+        createConfigAdapterFactory()
+      )
+    ).rejects.toMatchObject({ code: "WALLET_NOT_FOUND" });
+    expect(warn).toHaveBeenCalledWith(
+      {
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        custodyWalletId: "cwlt_missing",
+        reason: "exact_wallet_not_found",
+      },
+      "custody_runtime_target_unavailable"
+    );
   });
 
   it.each(["wallet", "connection", "credential"] as const)(
@@ -222,6 +290,7 @@ describe("CustodyRuntimeTargets", () => {
           .run();
       }
       const read = mockStoredCredentialRead();
+      const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
       const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
       await expect(
@@ -236,6 +305,18 @@ describe("CustodyRuntimeTargets", () => {
         details: { reason: "runtime_execution_unavailable" },
       });
       expect(read).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        {
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+          provider: "privy",
+          targetKind: "connection",
+          targetId: connection.id,
+          custodyWalletId: `cwlt_${connection.id}`,
+          reason: "connection_unusable",
+        },
+        "custody_runtime_target_unavailable"
+      );
     }
   );
 

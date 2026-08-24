@@ -287,9 +287,10 @@ export class CustodyRuntimeTargets {
       params.custodyWalletId
     );
     if (!target) {
+      this.logMissingExactWallet(params);
       throw notFound("Custody wallet");
     }
-    this.assertRuntimeExecutionAllowed(target);
+    this.assertRuntimeExecutionAllowed(target, params.custodyWalletId);
   }
 
   async listWallets(params: {
@@ -547,9 +548,10 @@ export class CustodyRuntimeTargets {
       custodyWalletId
     );
     if (!target) {
-      throw notFound("Custody wallet");
+      this.logMissingExactWallet({ organizationId, projectId, custodyWalletId });
+      throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
     }
-    this.assertRuntimeExecutionAllowed(target);
+    this.assertRuntimeExecutionAllowed(target, custodyWalletId);
 
     if (target.kind === "config") {
       const adapter = await getConfigAdapter(organizationId, target.config);
@@ -1089,10 +1091,12 @@ export class CustodyRuntimeTargets {
   }
 
   private assertRuntimeExecutionAllowed(
-    target: CustodyRuntimeTarget
+    target: CustodyRuntimeTarget,
+    custodyWalletId: string
   ): asserts target is CustodyRuntimeTarget & { wallet: RuntimeWallet } {
     if (target.kind === "config") {
       if (!target.isRuntimeAvailable || !target.wallet) {
+        this.logUnavailable(target, RUNTIME_EXECUTION_UNAVAILABLE_REASON, custodyWalletId);
         throw conflict("Custody wallet is unavailable", {
           reason: RUNTIME_EXECUTION_UNAVAILABLE_REASON,
         });
@@ -1101,7 +1105,7 @@ export class CustodyRuntimeTargets {
     }
 
     if (!isCustodyConnectionRuntimeEnabled(this.env, target.provider)) {
-      this.logUnavailable(target, RUNTIME_EXECUTION_PAUSED_REASON);
+      this.logUnavailable(target, RUNTIME_EXECUTION_PAUSED_REASON, custodyWalletId);
       throw new AppError(
         "FORBIDDEN",
         "Wallet execution is paused. Retry after wallet execution is available.",
@@ -1109,7 +1113,7 @@ export class CustodyRuntimeTargets {
       );
     }
     if (!target.isRuntimeAvailable || !target.wallet) {
-      this.logUnavailable(target, "connection_unusable");
+      this.logUnavailable(target, "connection_unusable", custodyWalletId);
       throw conflict("Custody Connection is unavailable", {
         reason: RUNTIME_EXECUTION_UNAVAILABLE_REASON,
       });
@@ -1298,22 +1302,43 @@ export class CustodyRuntimeTargets {
     throw internalError();
   }
 
+  private logMissingExactWallet(params: {
+    organizationId: string;
+    projectId?: string;
+    custodyWalletId: string;
+  }): void {
+    getLogger().warn(
+      {
+        organizationId: params.organizationId,
+        projectId: params.projectId ?? null,
+        custodyWalletId: params.custodyWalletId,
+        reason: "exact_wallet_not_found",
+      },
+      "custody_runtime_target_unavailable"
+    );
+  }
+
   private logUnavailable(
-    target: ConnectionRuntimeTarget,
+    target: CustodyRuntimeTarget,
     reason:
       | "runtime_disabled"
       | "runtime_execution_paused"
+      | "runtime_execution_unavailable"
       | "connection_unusable"
       | "connection_changed"
       | "credential_secret_unavailable"
-      | "provider_account_mismatch"
+      | "provider_account_mismatch",
+    custodyWalletId?: string
   ): void {
     getLogger().warn(
       {
-        organizationId: target.organizationId,
-        projectId: target.projectId,
+        organizationId:
+          target.kind === "config" ? target.config.organizationId : target.organizationId,
+        projectId: target.kind === "config" ? target.config.projectId : target.projectId,
         provider: target.provider,
-        targetKind: "connection",
+        targetKind: target.kind,
+        targetId: target.kind === "config" ? target.config.id : target.connectionId,
+        ...(custodyWalletId ? { custodyWalletId } : {}),
         reason,
       },
       "custody_runtime_target_unavailable"
