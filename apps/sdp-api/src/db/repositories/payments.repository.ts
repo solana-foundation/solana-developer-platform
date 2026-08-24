@@ -49,6 +49,10 @@ export interface PaymentTransferRow {
   provider_data: Record<string, unknown>;
   signature: string | null;
   serialized_tx: string | null;
+  signed_transaction: string | null;
+  /** NUMERIC in Postgres, read as a string so uint64 round-trips exactly. */
+  last_valid_block_height: string | null;
+  submission_started_at: string | null;
   slot: number | null;
   block_time: string | null;
   fee: number | null;
@@ -182,6 +186,21 @@ export interface PaymentsRepository {
     idempotencyKey: string;
   }): Promise<PaymentTransferRow | null>;
   updateTransfer(input: UpdatePaymentTransferInput): Promise<PaymentTransferRow | null>;
+  persistSignedTransfer(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string | null;
+    signature: string;
+    signedTransaction: string;
+    lastValidBlockHeight: string;
+    updatedAt: string;
+  }): Promise<PaymentTransferRow | null>;
+  markTransferSubmissionStarted(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string | null;
+    startedAt: string;
+  }): Promise<PaymentTransferRow | null>;
   /**
    * Atomically transitions a transfer's status only if it is currently one of
    * `fromStatuses`, scoped to org/project. Returns the updated row, or null when

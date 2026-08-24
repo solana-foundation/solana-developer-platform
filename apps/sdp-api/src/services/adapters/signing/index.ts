@@ -179,7 +179,10 @@ export async function createSigningAdapterFromConfig(
     case "utila":
       return createUtilaAdapterFromRecord(record, env);
     case "local":
-      return createMemoryAdapterFromEnv(env);
+      throw new SigningError(
+        "Local signing cannot be built from a stored configuration record",
+        "PROVIDER_NOT_CONFIGURED"
+      );
     case "anchorage":
       throw new SigningError(
         "Anchorage does not support transaction signing in SDP",
