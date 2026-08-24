@@ -22,6 +22,13 @@ import type {
  * match the other major's brand and compile into a silent mismatch. Amounts and
  * slots are therefore decimal strings, and addresses and signatures are base58
  * strings.
+ *
+ * The tenant is not on any of these inputs. A gateway is built for one
+ * organization and project and cannot be asked about another, which is what
+ * stops a wallet id from one tenant deriving key material under another's
+ * path — a check that would otherwise have to be remembered at every call
+ * site. The owner address does cross, because it lives on the wallet row and
+ * only SDP can resolve it.
  */
 
 /** The public half of a shielded identity. No secret material crosses the port. */
@@ -53,6 +60,32 @@ export interface ProvisionIdentityResult {
 
 export interface SyncPhotonInput {
   walletId: string;
+  /**
+   * base58 Solana address that owns the identity. Every gateway call that
+   * touches key material needs it, and only SDP can resolve it: the gateway is
+   * scoped to a tenant at construction but knows nothing about wallet rows.
+   */
+  owner: string;
+  /**
+   * The identity SDP has persisted for this wallet, re-derived and checked
+   * before the sync reads anything. Absent only for a wallet that has never
+   * been provisioned. A mismatch means the material source's inputs moved, and
+   * syncing anyway would report another identity's balances as this wallet's.
+   */
+  expectedShieldedAddress?: string;
+  /**
+   * The mints this project recognises, used to label balances. Passed in rather
+   * than looked up, because the allowlist is SDP state and the gateway holds no
+   * database handle. Balances for anything absent here are still returned —
+   * hiding a holding would be worse than labelling it unknown.
+   */
+  knownAssets?: KnownAsset[];
+}
+
+export interface KnownAsset {
+  mint: string;
+  symbol: string;
+  decimals: number;
 }
 
 export interface SyncPhotonResult {
@@ -74,6 +107,8 @@ export interface SyncPhotonResult {
 
 export interface BuildOperationInput {
   operation: PrivateOperation;
+  /** base58 Solana address that owns the identity and signs the outer transaction. */
+  owner: string;
 }
 
 export interface BuildOperationResult {

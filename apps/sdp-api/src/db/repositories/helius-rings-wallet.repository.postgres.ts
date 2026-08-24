@@ -22,7 +22,9 @@ function mapRow(row: Record<string, unknown>): HeliusRingsWalletRow {
     network: row.network as string,
     status: row.status as HeliusRingsWalletRow["status"],
     shielded_address: (row.shielded_address ?? null) as string | null,
+    owner_address: (row.owner_address ?? null) as string | null,
     sync_cursor: (row.sync_cursor ?? null) as string | null,
+    custody_wallet_id: (row.custody_wallet_id ?? null) as string | null,
     material_tag: row.material_tag as HeliusRingsWalletRow["material_tag"],
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
@@ -41,13 +43,22 @@ export function createPostgresHeliusRingsWalletRepository(db: AppDb): HeliusRing
              project_id,
              sdp_wallet_id,
              name,
-             material_tag
-           ) VALUES (?, ?, ?, ?, ?, ?)
+             material_tag,
+             custody_wallet_id
+           ) VALUES (?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (project_id, sdp_wallet_id)
            -- Self-assignment so RETURNING * emits the row that already exists.
            -- DO NOTHING would return zero rows and make a retried provision
            -- look like a failure.
-           DO UPDATE SET updated_at = helius_rings_wallets.updated_at
+           DO UPDATE SET updated_at = helius_rings_wallets.updated_at,
+                         -- Fills in the link for a wallet created before this
+                         -- column existed, but never repoints one that is
+                         -- already bound: the identity on chain was registered
+                         -- to that custody wallet and cannot be moved.
+                         custody_wallet_id = COALESCE(
+                           helius_rings_wallets.custody_wallet_id,
+                           EXCLUDED.custody_wallet_id
+                         )
            RETURNING *`
         )
         .bind(
@@ -56,7 +67,8 @@ export function createPostgresHeliusRingsWalletRepository(db: AppDb): HeliusRing
           input.projectId,
           input.sdpWalletId,
           input.name,
-          input.materialTag
+          input.materialTag,
+          input.custodyWalletId ?? null
         )
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;
@@ -103,6 +115,7 @@ export function createPostgresHeliusRingsWalletRepository(db: AppDb): HeliusRing
           `UPDATE helius_rings_wallets
               SET status = 'ready',
                   shielded_address = ?,
+                  owner_address = ?,
                   material_tag = ?,
                   updated_at = sdp_iso_now()
             WHERE id = ?
@@ -113,6 +126,7 @@ export function createPostgresHeliusRingsWalletRepository(db: AppDb): HeliusRing
         )
         .bind(
           input.shieldedAddress,
+          input.ownerAddress,
           input.materialTag,
           input.id,
           input.organizationId,

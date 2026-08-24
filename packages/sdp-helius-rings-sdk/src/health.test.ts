@@ -152,6 +152,24 @@ describe("probeRingsHealth", () => {
     expect(health.detail?.rpc).toBe("timed out");
   });
 
+  // The abort signal normally does this, but a `fetch` that ignores it would
+  // otherwise hang the probe past its budget — the one thing a health endpoint
+  // must not do. Both upstreams get the same backstop the RPC probe has.
+  it.each(["photon", "prover"])(
+    "treats a %s fetch that ignores the abort as down",
+    async (component) => {
+      const health = await probeRingsHealth(
+        input({
+          timeoutMs: 10,
+          fetch: (async () => new Promise(() => {})) as unknown as typeof globalThis.fetch,
+        })
+      );
+
+      expect(health[component as "photon" | "prover"]).toBe("red");
+      expect(health.detail?.[component]).toBe("timed out");
+    }
+  );
+
   it("never leaks the RPC URL or its API key into the reported detail", async () => {
     const health = await probeRingsHealth(
       input({

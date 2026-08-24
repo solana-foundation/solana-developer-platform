@@ -11,6 +11,8 @@ const CONFIG: RingsGatewayConfig = {
   solanaRpcUrl: "http://127.0.0.1:1/rpc",
   indexerUrl: "http://127.0.0.1:1",
   proverUrl: "http://127.0.0.1:1",
+  organizationId: "org_1",
+  projectId: "proj_1",
   allowInsecureHttp: true,
   healthTimeoutMs: 50,
 };
@@ -42,10 +44,48 @@ describe("createRingsGateway", () => {
     expect(health.detail?.gateway).toContain("CLIENT_INVALID_CONFIG");
   });
 
-  const unwired: Array<[string, (gateway: RingsGatewayPort) => Promise<unknown>]> = [
+  const needsMaterial: Array<[string, (gateway: RingsGatewayPort) => Promise<unknown>]> = [
     ["provisionIdentity", (g) => g.provisionIdentity({ walletId: "hrw_1", sdpAddress: "addr" })],
-    ["syncPhoton", (g) => g.syncPhoton({ walletId: "hrw_1" })],
-    ["buildOperation", (g) => g.buildOperation({ operation: {} as never })],
+    ["syncPhoton", (g) => g.syncPhoton({ walletId: "hrw_1", owner: "addr" })],
+  ];
+
+  // `config_error` and not `gateway_unavailable`: a deployment with no seed
+  // configured is not going to start working on the next attempt, and the
+  // service turns the two codes into different advice for the operator.
+  it.each(needsMaterial)("%s refuses to run without key material", async (_method, call) => {
+    const error = await call(createRingsGateway(CONFIG)).then(
+      () => null,
+      (thrown: unknown) => thrown
+    );
+
+    expect(error).toBeInstanceOf(HeliusRingsError);
+    expect((error as HeliusRingsError).code).toBe("config_error");
+  });
+
+  // A seed that is present but unusable is the same operator problem as a
+  // missing one. Reporting it as anything retryable would send them to the
+  // retry button instead of to the environment.
+  it.each([
+    ["not base64 at all", "not-valid-base64!!"],
+    ["the right shape but too short", Buffer.alloc(16, 7).toString("base64")],
+    ["the all-zero placeholder", Buffer.alloc(32, 0).toString("base64")],
+  ])("refuses a derivation seed that is %s", async (_case, derivationSeed) => {
+    const error = await createRingsGateway({ ...CONFIG, derivationSeed })
+      .syncPhoton({ walletId: "hrw_1", owner: "addr" })
+      .then(
+        () => null,
+        (thrown: unknown) => thrown
+      );
+
+    expect(error).toBeInstanceOf(HeliusRingsError);
+    expect((error as HeliusRingsError).code).toBe("config_error");
+    // The reason travels, so the operator learns which way it is wrong; the
+    // seed itself never does.
+    expect((error as HeliusRingsError).message).not.toContain(derivationSeed);
+  });
+
+  const unwired: Array<[string, (gateway: RingsGatewayPort) => Promise<unknown>]> = [
+    ["buildOperation", (g) => g.buildOperation({ operation: {} as never, owner: "addr" })],
     ["requestProof", (g) => g.requestProof({ operationId: "hro_1", ringsMetadata: {} as never })],
     ["verifyIndexed", (g) => g.verifyIndexed("sig")],
   ];

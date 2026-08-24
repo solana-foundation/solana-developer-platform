@@ -68,7 +68,8 @@ describe("pollRingsIndexing", () => {
       .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
       .run();
 
-    const wallet = await createHeliusRingsWalletRepository(env).createWallet({
+    const wallets = createHeliusRingsWalletRepository(env);
+    const wallet = await wallets.createWallet({
       ...tenant,
       sdpWalletId: "wal_hr_job_test",
       name: "Treasury",
@@ -76,6 +77,17 @@ describe("pollRingsIndexing", () => {
     });
     if (!wallet) throw new Error("wallet fixture was not created");
     walletId = wallet.id;
+
+    // Provisioned, because every operation here is a spend and the pipeline
+    // needs the owner the shielded identity is published under.
+    await wallets.markProvisioned({
+      ...tenant,
+      id: wallet.id,
+      shieldedAddress: "rings1jobtestidentity",
+      ownerAddress: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
+      materialTag: "simulated",
+      expectedStatus: "pending",
+    });
   });
 
   it("stays dormant unless the flag and the live adapter are both set", async () => {

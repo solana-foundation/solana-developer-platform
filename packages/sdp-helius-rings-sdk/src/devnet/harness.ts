@@ -11,6 +11,7 @@ import {
   signTransaction,
   type Transaction,
 } from "@solana/kit";
+import { decodeSeed } from "../deterministic-ka/seed.js";
 
 /** Devnet's genesis hash. Checked before anything is signed. */
 // biome-ignore lint/security/noSecrets: public cluster identifier, not a secret.
@@ -63,17 +64,17 @@ export function readDevnetConfig(): DevnetConfig | undefined {
     throw new Error(`HELIUS_RINGS_DEVNET_E2E=1 requires: ${missing.join(", ")}.`);
   }
 
-  const seed = Buffer.from(required.seed as string, "base64");
-  if (seed.length !== 32) {
-    throw new Error("HELIUS_RINGS_E2E_SEED must be 32 base64-encoded bytes.");
-  }
+  // The production decoder, not a local length check. This harness exists to
+  // exercise the real flows against devnet, which it cannot do if it accepts
+  // seeds the deployed path would reject.
+  const seed = decodeSeed(required.seed);
 
   return {
     rpcUrl: required.rpcUrl as string,
     indexerUrl: required.indexerUrl as string,
     proverUrl: required.proverUrl as string,
     allowInsecureHttp: isTruthyFlag(process.env.HELIUS_RINGS_ALLOW_INSECURE_HTTP),
-    seed: new Uint8Array(seed),
+    seed,
     splMint: process.env.HELIUS_RINGS_E2E_SPL_MINT,
   };
 }

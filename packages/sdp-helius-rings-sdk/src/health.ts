@@ -43,6 +43,16 @@ function classify(error: unknown): ProbeOutcome {
   return { status: "red", reason: "unreachable" };
 }
 
+/**
+ * Rejects with a `TimeoutError` when `work` outlives the budget.
+ *
+ * Exported so the gateway can hold client construction to the same budget as
+ * the probes it precedes; a health answer is only bounded if every step is.
+ */
+export function withHealthTimeout<T>(work: Promise<T>, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
+  return withTimeout(work, timeoutMs);
+}
+
 function withTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -75,24 +85,34 @@ async function probePhoton(input: RingsHealthInput, timeoutMs: number): Promise<
   const send = input.fetch ?? globalThis.fetch;
 
   try {
-    const response = await send(input.indexerUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: INDEXER_HEALTH_METHOD }),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    // Wrapped for the same reason as the RPC probe, and covering the body read
+    // as well as the request: the budget has to bound the whole probe, not just
+    // the part a caller-supplied `fetch` chooses to honour the signal for.
+    return await withTimeout(
+      (async () => {
+        const response = await send(input.indexerUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: INDEXER_HEALTH_METHOD }),
+          signal: AbortSignal.timeout(timeoutMs),
+        });
 
-    if (!response.ok) {
-      return { status: "red", reason: `http ${response.status}` };
-    }
+        if (!response.ok) {
+          return { status: "red", reason: `http ${response.status}` } as const;
+        }
 
-    const body = (await response.json()) as { result?: unknown; error?: unknown };
-    if (body.error !== undefined) {
-      // Answering at all means the indexer is up; it is its state that is off.
-      return { status: "amber", reason: "reported unhealthy" };
-    }
+        const body = (await response.json()) as { result?: unknown; error?: unknown };
+        if (body.error !== undefined) {
+          // Answering at all means the indexer is up; its state is what is off.
+          return { status: "amber", reason: "reported unhealthy" } as const;
+        }
 
-    return body.result === "ok" ? { status: "green" } : { status: "amber", reason: "not ok" };
+        return body.result === "ok"
+          ? ({ status: "green" } as const)
+          : ({ status: "amber", reason: "not ok" } as const);
+      })(),
+      timeoutMs
+    );
   } catch (error) {
     return classify(error);
   }
@@ -110,10 +130,13 @@ async function probeProver(input: RingsHealthInput, timeoutMs: number): Promise<
   const send = input.fetch ?? globalThis.fetch;
 
   try {
-    const response = await send(proverHealthUrl(input.proverUrl), {
-      method: "GET",
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    const response = await withTimeout(
+      send(proverHealthUrl(input.proverUrl), {
+        method: "GET",
+        signal: AbortSignal.timeout(timeoutMs),
+      }),
+      timeoutMs
+    );
 
     return response.ok ? { status: "green" } : { status: "red", reason: `http ${response.status}` };
   } catch (error) {

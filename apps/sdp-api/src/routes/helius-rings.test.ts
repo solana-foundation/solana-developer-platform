@@ -92,15 +92,28 @@ async function seedAuth(): Promise<void> {
       .bind(),
   ]);
 
-  const wallet = await createHeliusRingsWalletRepository(env).createWallet({
-    organizationId: TEST_ORG.id,
-    projectId: TEST_PROJECT.id,
+  const wallets = createHeliusRingsWalletRepository(env);
+  const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id };
+  const wallet = await wallets.createWallet({
+    ...scope,
     sdpWalletId: "wal_hr_route",
     name: "Treasury",
     materialTag: "simulated",
   });
   if (!wallet) throw new Error("rings wallet fixture was not created");
   ringsWalletId = wallet.id;
+
+  // Provisioned, so the operations below reach the gateway. An unprovisioned
+  // wallet is rejected before that as bad input, which is correct but is not
+  // what these tests are about.
+  await wallets.markProvisioned({
+    ...scope,
+    id: wallet.id,
+    shieldedAddress: "rings1routetestidentity",
+    ownerAddress: "HrRouteTestPublicKey111111111111111111111111",
+    materialTag: "simulated",
+    expectedStatus: "pending",
+  });
 }
 
 function authHeaders() {
@@ -149,7 +162,7 @@ describe("Helius Rings routes", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { wallets: Array<{ id: string; status: string }> } };
     expect(body.data.wallets).toHaveLength(1);
-    expect(body.data.wallets[0]).toMatchObject({ id: ringsWalletId, status: "pending" });
+    expect(body.data.wallets[0]).toMatchObject({ id: ringsWalletId, status: "ready" });
   });
 
   it("POST /wallets 404s for an unknown custody wallet", async () => {

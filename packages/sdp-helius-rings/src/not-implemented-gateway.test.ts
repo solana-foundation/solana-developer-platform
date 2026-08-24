@@ -12,8 +12,8 @@ describe("NotImplementedRingsGateway", () => {
       "provisionIdentity",
       () => gateway.provisionIdentity({ walletId: "hrw_1", sdpAddress: "addr" }),
     ],
-    ["syncPhoton", () => gateway.syncPhoton({ walletId: "hrw_1" })],
-    ["buildOperation", () => gateway.buildOperation({ operation: {} as never })],
+    ["syncPhoton", () => gateway.syncPhoton({ walletId: "hrw_1", owner: "addr" })],
+    ["buildOperation", () => gateway.buildOperation({ operation: {} as never, owner: "addr" })],
     [
       "requestProof",
       () => gateway.requestProof({ operationId: "hro_1", ringsMetadata: {} as never }),

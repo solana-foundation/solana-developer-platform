@@ -19,8 +19,20 @@ export interface HeliusRingsWalletRow {
   status: WalletStatus;
   /** Null until the gateway provisions the shielded identity. */
   shielded_address: string | null;
+  /**
+   * The Solana address the shielded identity is published under, and which
+   * signs its spends. Stored with `shielded_address` because the identity is
+   * derived from it: verifying one without pinning the other proves nothing.
+   */
+  owner_address: string | null;
   /** Photon sync cursor; null before the first successful sync. */
   sync_cursor: string | null;
+  /**
+   * The custody_wallets row that signs for this identity. Null only on wallets
+   * created before live provisioning existed; `sdp_wallet_id` is the provider's
+   * id and can be reissued, so the immutable row id is what a signer resolves.
+   */
+  custody_wallet_id: string | null;
   material_tag: MaterialTag;
   created_at: string;
   updated_at: string;
@@ -39,11 +51,15 @@ export interface CreateHeliusRingsWalletInput extends HeliusRingsProjectScope {
   sdpWalletId: string;
   name: string;
   materialTag: MaterialTag;
+  /** Null where the caller could not resolve one, as legacy callers cannot. */
+  custodyWalletId?: string | null;
 }
 
 export interface MarkHeliusRingsWalletProvisionedInput extends HeliusRingsProjectScope {
   id: string;
   shieldedAddress: string;
+  /** The owner the identity was registered under; pinned with it. */
+  ownerAddress: string;
   materialTag: MaterialTag;
   /**
    * Compare-and-swap guard: only applies while the wallet is still in this

@@ -16,6 +16,7 @@ import {
   listRingsZones,
   prepareRingsOperation,
   retryRingsOperation,
+  syncRingsWallet,
 } from "./handlers";
 
 const heliusRings = new Hono<{ Bindings: Env }>();
@@ -41,6 +42,10 @@ heliusRings.get("/health", requirePermissions("payments:read"), getRingsHealth);
 heliusRings.get("/wallets", requirePermissions("payments:read"), listRingsWallets);
 heliusRings.post("/wallets", requirePermissions("payments:write"), createRingsWallet);
 heliusRings.get("/wallets/:walletId", requirePermissions("payments:read"), getRingsWallet);
+// A write permission for a read-only operation: syncing costs indexer and RPC
+// work on the caller's behalf, so it is gated like an action rather than like
+// a cached lookup.
+heliusRings.post("/wallets/:walletId/sync", requirePermissions("payments:write"), syncRingsWallet);
 heliusRings.get("/wallets/:walletId/zones", requirePermissions("payments:read"), listRingsZones);
 heliusRings.post("/wallets/:walletId/zones", requirePermissions("payments:write"), createRingsZone);
 

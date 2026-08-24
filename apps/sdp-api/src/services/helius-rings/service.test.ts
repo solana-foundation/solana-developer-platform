@@ -2,7 +2,7 @@ import { HeliusRingsError, type PrivateOperationInput } from "@sdp/helius-rings"
 import { InMemoryRingsGateway } from "@sdp/helius-rings/testing";
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { PolicyDecision } from "@sdp/types";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createHeliusRingsWalletRepository } from "@/db/repositories";
 import { AppError } from "@/lib/errors";
@@ -21,6 +21,8 @@ const TEST_PROJECT_ID = "prj_hrs_service_test";
 const tenant = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
 
 let walletId: string;
+
+const WALLET_OWNER = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
 
 function policyStub(
   decision: PolicyDecision,
@@ -99,7 +101,8 @@ describe("HeliusRingsService", () => {
       .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
       .run();
 
-    const wallet = await createHeliusRingsWalletRepository(env).createWallet({
+    const wallets = createHeliusRingsWalletRepository(env);
+    const wallet = await wallets.createWallet({
       ...tenant,
       sdpWalletId: "wal_hrs_service_test",
       name: "Treasury",
@@ -107,6 +110,18 @@ describe("HeliusRingsService", () => {
     });
     if (!wallet) throw new Error("wallet fixture was not created");
     walletId = wallet.id;
+
+    // Provisioned, because every operation test below spends from it and the
+    // pipeline needs the owner the identity is published under. A wallet with
+    // no identity has nothing to spend.
+    await wallets.markProvisioned({
+      ...tenant,
+      id: wallet.id,
+      shieldedAddress: "rings1testidentity",
+      ownerAddress: WALLET_OWNER,
+      materialTag: "simulated",
+      expectedStatus: "pending",
+    });
   });
 
   describe("devnet guard", () => {
@@ -144,6 +159,91 @@ describe("HeliusRingsService", () => {
         sdpWalletId: "wal_prov_2",
       });
       expect(rows?.status).toBe("pending");
+    });
+
+    it("records the custody wallet row the identity will sign through", async () => {
+      const db = getDb(env);
+      await db
+        .prepare(
+          `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted)
+           VALUES ('cc_prov_3', ?, ?, 'turnkey', '{}')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT_ID)
+        .run();
+      await db
+        .prepare(
+          `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key)
+           VALUES ('cw_prov_3', 'cc_prov_3', 'wal_prov_3', 'addr3')`
+        )
+        .run();
+
+      await service({ gateway: new InMemoryRingsGateway() }).provisionPrivateWallet({
+        sdpWalletId: "wal_prov_3",
+        sdpAddress: "addr3",
+        name: "Ops",
+        custodyWalletId: "cw_prov_3",
+      });
+
+      const row = await createHeliusRingsWalletRepository(env).getWalletBySdpWalletId({
+        ...tenant,
+        sdpWalletId: "wal_prov_3",
+      });
+      // The provider's own id can be reissued; this one cannot, and it is what
+      // resolves the key that signs.
+      expect(row?.custody_wallet_id).toBe("cw_prov_3");
+      expect(row?.owner_address).toBe("addr3");
+    });
+  });
+
+  describe("syncWallet", () => {
+    it("reads balances and records when the observation was made", async () => {
+      const result = await service({ gateway: new InMemoryRingsGateway() }).syncWallet(walletId);
+
+      expect(result.observedAt).toEqual(expect.any(String));
+
+      const row = await createHeliusRingsWalletRepository(env).getWalletById({
+        ...tenant,
+        id: walletId,
+      });
+      // Written for the dashboard to display, never read back as a resume
+      // position — the SDK keeps three independent read streams.
+      expect(row?.sync_cursor).toBe(result.observedAt);
+    });
+
+    it("tells the gateway which identity it expects, and what the mints are", async () => {
+      const gateway = new InMemoryRingsGateway();
+      const syncPhoton = vi.spyOn(gateway, "syncPhoton");
+
+      await service({ gateway }).syncWallet(walletId);
+
+      expect(syncPhoton).toHaveBeenCalledWith(
+        expect.objectContaining({
+          walletId,
+          owner: WALLET_OWNER,
+          expectedShieldedAddress: "rings1testidentity",
+        })
+      );
+      // Seeded by 0057; without them a real balance renders at the wrong
+      // magnitude or with no symbol at all.
+      const [{ knownAssets }] = syncPhoton.mock.calls[0] as [{ knownAssets: { symbol: string }[] }];
+      expect(knownAssets.map((asset) => asset.symbol).sort()).toEqual(["SOL", "USDC"]);
+    });
+
+    it("refuses a wallet that has never been provisioned", async () => {
+      const wallet = await createHeliusRingsWalletRepository(env).createWallet({
+        ...tenant,
+        sdpWalletId: "wal_unprovisioned",
+        name: "Fresh",
+        materialTag: "simulated",
+      });
+      if (!wallet) throw new Error("wallet fixture was not created");
+
+      // There is no identity to read balances for, and reporting an empty
+      // wallet would be indistinguishable from a provisioned one holding
+      // nothing.
+      await expect(
+        service({ gateway: new InMemoryRingsGateway() }).syncWallet(wallet.id)
+      ).rejects.toMatchObject({ code: "conflict" });
     });
   });
 
@@ -203,9 +303,33 @@ describe("HeliusRingsService", () => {
       );
 
       // No amount of retrying supplies an environment variable, so the retry
-      // affordance would send the operator back to the wrong lever.
-      expect(operation.failure).toMatchObject({ retryable: false });
+      // affordance would send the operator back to the wrong lever. The code
+      // says so too, rather than hiding behind the transient-sounding
+      // `gateway_unavailable` it had to borrow before 0067 added this one.
+      expect(operation.failure).toMatchObject({ code: "config_error", retryable: false });
       expect(operation.failure?.message).toContain("HELIUS_RINGS_PROVER_URL");
+    });
+
+    it("records a spend against an unprovisioned wallet as bad input, not an outage", async () => {
+      const wallets = createHeliusRingsWalletRepository(env);
+      const fresh = await wallets.createWallet({
+        ...tenant,
+        sdpWalletId: "wal_unprovisioned_op",
+        name: "Fresh",
+        materialTag: "simulated",
+      });
+      if (!fresh) throw new Error("wallet fixture was not created");
+
+      const operation = await liveishService().prepareOperation(
+        operationInput({ clientNonce: "nonce-unprovisioned", walletId: fresh.id }),
+        actorContext
+      );
+
+      // The wallet has no identity to spend from. Blaming the gateway would
+      // point the operator at an outage that is not happening, and offering a
+      // retry would never resolve it — the wallet has to be provisioned.
+      expect(operation.failure).toMatchObject({ code: "invalid_input", retryable: false });
+      expect(operation.failure?.message).toContain("no provisioned identity");
     });
 
     it("drives an allowed operation through sign and submit to indexing", async () => {

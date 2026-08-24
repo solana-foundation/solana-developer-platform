@@ -63,6 +63,9 @@ export async function createRingsWallet(c: AppContext) {
       sdpWalletId: custodyWallet.walletId,
       sdpAddress: custodyWallet.publicKey,
       name: parsed.data.name,
+      // The immutable row id, so later signing resolves this same wallet even
+      // if the custody provider reissues its own identifier for it.
+      custodyWalletId: custodyWallet.id,
     })
   );
   return success(c, { wallet }, 201);
@@ -85,6 +88,20 @@ export async function getRingsWallet(c: AppContext) {
   });
   if (!row) throw notFound("rings wallet");
   return success(c, { wallet: mapHeliusRingsWalletRow(row) });
+}
+
+/**
+ * POST /wallets/:walletId/sync — read the wallet's shielded state from Photon.
+ *
+ * Always a full sync, and the balances it returns are only complete when
+ * `report.degraded` is false; the caller is expected to surface that rather
+ * than round it away.
+ */
+export async function syncRingsWallet(c: AppContext) {
+  const { tenant } = tenantOf(c);
+  const service = getHeliusRingsService(c, tenant);
+  const result = await withRingsErrors(() => service.syncWallet(requireParam(c, "walletId")));
+  return success(c, result);
 }
 
 // --- zones ------------------------------------------------------------------

@@ -11,6 +11,7 @@ const TEST_PROJECT_ID = "prj_hrw_repo_test";
 const OTHER_PROJECT_ID = "prj_hrw_repo_other";
 
 const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+const OWNER_ADDRESS = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
 
 let repo: HeliusRingsWalletRepository;
 
@@ -96,6 +97,7 @@ describe("HeliusRingsWalletRepository (postgres)", () => {
         ...scope,
         id: wallet.id,
         shieldedAddress: "shielded-1",
+        ownerAddress: OWNER_ADDRESS,
         materialTag: "live",
         expectedStatus: "pending",
       });
@@ -117,6 +119,7 @@ describe("HeliusRingsWalletRepository (postgres)", () => {
         ...scope,
         id: wallet.id,
         shieldedAddress: "shielded-1",
+        ownerAddress: OWNER_ADDRESS,
         materialTag: "live",
         expectedStatus: "pending",
       });
@@ -164,6 +167,7 @@ describe("HeliusRingsWalletRepository (postgres)", () => {
         ...scope,
         id: wallet.id,
         shieldedAddress: "shielded-1",
+        ownerAddress: OWNER_ADDRESS,
         materialTag: "live",
         expectedStatus: "pending",
       });

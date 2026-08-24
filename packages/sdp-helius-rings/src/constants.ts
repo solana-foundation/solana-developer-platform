@@ -35,6 +35,13 @@ export const FAILURE_CODES = [
   "submit_failed",
   "indexing_timeout",
   "gateway_unavailable",
+  /**
+   * The deployment is missing something Rings needs — an endpoint, the API key
+   * or the derivation seed. Distinct from `gateway_unavailable` because it is
+   * never retryable: the fix is an environment variable, and offering a retry
+   * sends the operator to the wrong lever.
+   */
+  "config_error",
   "invalid_input",
   "insufficient_balance",
 ] as const;

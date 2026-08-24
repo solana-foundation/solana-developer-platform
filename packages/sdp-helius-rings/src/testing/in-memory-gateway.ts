@@ -154,11 +154,10 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
       this.buildUnsignedTx?.(input) ?? bytesToBase64(hexToBytes(hashHex(`${seed}:tx`, 64)));
     return {
       outerUnsignedTxBase64,
-      // The owner address that signs the outer transaction, falling back to a
-      // deterministic stand-in. A wallet id here would type-check and read as
-      // an address to anything downstream, which is exactly the confusion a
-      // test double should not introduce.
-      requiredSigners: [input.operation.input?.from ?? `addr${hashHex(`${seed}:signer`, 16)}`],
+      // The owner signs the outer transaction. A wallet id here would type-check
+      // and read as an address to everything downstream, which is exactly the
+      // confusion a test double should not introduce.
+      requiredSigners: [input.owner],
       ringsMetadata: new SecretRef({ seed: hashHex(`${seed}:metadata`, 16) }),
     };
   }

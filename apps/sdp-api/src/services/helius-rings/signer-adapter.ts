@@ -12,7 +12,9 @@ import {
   isTransactionPartialSigner,
   type TransactionSigner,
 } from "@solana/signers";
-import { createOrgSigner } from "@/services/solana/signer";
+import { getDb } from "@/db";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
+import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
 
@@ -36,8 +38,19 @@ export interface SignRingsOuterTransactionInput {
   env: Env;
   organizationId: string;
   projectId: string;
+  /**
+   * The address the transaction requires a signature from — the Rings wallet's
+   * owner, which is also the fee payer of every outer transaction.
+   *
+   * Named explicitly rather than left to the organization's default signer.
+   * Rings registers an identity *to* an owner and spends *from* it, so signing
+   * with whichever wallet the org config happens to default to would at best
+   * be rejected for a missing signature and at worst move the wrong wallet's
+   * money.
+   */
+  owner: string;
   unsignedTxBase64: string;
-  /** Test seam; production resolves the org signer. */
+  /** Test seam; production resolves the owner's custody wallet. */
   signer?: TransactionSigner;
 }
 
@@ -49,8 +62,7 @@ export async function signRingsOuterTransaction(
   let signer: TransactionSigner;
   let signed: Transaction;
   try {
-    signer =
-      input.signer ?? (await createOrgSigner(input.env, input.organizationId, input.projectId));
+    signer = input.signer ?? (await resolveOwnerSigner(input));
   } catch (error) {
     throw toSignerFailure(error);
   }
@@ -79,6 +91,47 @@ export async function signRingsOuterTransaction(
   }
 
   return base64.decode(getTransactionEncoder().encode(signed));
+}
+
+/**
+ * Resolves the custody wallet holding the owner's key.
+ *
+ * By public key rather than by the `custody_wallet_id` recorded on the rings
+ * wallet: that link is the durable audit trail, but the only thing that makes
+ * a signature valid is that it comes from the key the transaction names. The
+ * lookup is scoped to the organization and to active wallets, so an owner
+ * custody no longer controls fails here rather than at the chain.
+ */
+async function resolveOwnerSigner(
+  input: SignRingsOuterTransactionInput
+): Promise<TransactionSigner> {
+  const wallet = await new CustodyConfigStore(
+    getDb(input.env),
+    input.env
+  ).findActiveWalletByPublicKey(input.organizationId, input.projectId, input.owner);
+  if (!wallet) {
+    throw new SigningError(`custody does not control ${input.owner}`, "WALLET_NOT_FOUND");
+  }
+
+  const signer = await createOrgSignerForCustodyWallet(
+    input.env,
+    input.organizationId,
+    input.projectId,
+    wallet.id
+  );
+
+  // The row was found by public key, so this should be unreachable. It is here
+  // because the cost of being wrong is signing someone else's transfer, and a
+  // provider that resolves a row to a different key should stop the operation
+  // rather than produce a signature nobody asked for.
+  if (signer.address !== input.owner) {
+    throw new SigningError(
+      `custody resolved ${signer.address} for owner ${input.owner}`,
+      "WALLET_NOT_FOUND"
+    );
+  }
+
+  return signer;
 }
 
 function toSignerFailure(error: unknown): RingsAdapterError {

@@ -17,6 +17,7 @@ export { NotImplementedRingsGateway } from "./not-implemented-gateway";
 export type {
   BuildOperationInput,
   BuildOperationResult,
+  KnownAsset,
   ProvisionIdentityInput,
   ProvisionIdentityResult,
   RequestProofInput,

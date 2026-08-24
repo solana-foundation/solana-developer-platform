@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
 import type {
+  FailureCode,
   OperationEvent,
   OperationState,
   PrivateOperation,
   PrivateOperationInput,
   PrivateWallet,
   RuntimeHealth,
+  SyncPhotonResult,
   TransitionGuard,
 } from "@sdp/helius-rings";
 import {
@@ -18,11 +20,13 @@ import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { ApprovalRequestStatus, WalletOperationActor } from "@sdp/types";
 import { getBase64Codec, getSignatureFromTransaction, getTransactionDecoder } from "@solana/kit";
 import {
+  createHeliusRingsAssetRepository,
   createHeliusRingsEventRepository,
   createHeliusRingsHealthRepository,
   createHeliusRingsOperationRepository,
   createHeliusRingsWalletRepository,
   createPolicyRepository,
+  type HeliusRingsAssetRepository,
   type HeliusRingsEventRepository,
   type HeliusRingsHealthRepository,
   type HeliusRingsOperationRepository,
@@ -69,6 +73,7 @@ export interface HeliusRingsServiceDependencies {
   operations?: HeliusRingsOperationRepository;
   events?: HeliusRingsEventRepository;
   health?: HeliusRingsHealthRepository;
+  assets?: HeliusRingsAssetRepository;
   enforcePolicy?: typeof enforceWalletOperationPolicy;
   signOuterTransaction?: typeof signRingsOuterTransaction;
   submitOuterTransaction?: typeof submitRingsOuterTransaction;
@@ -88,6 +93,11 @@ export interface ProvisionPrivateWalletInput {
   /** The custody wallet's public address, handed to the gateway. */
   sdpAddress: string;
   name: string;
+  /**
+   * The immutable custody_wallets row id. Recorded at creation so later
+   * signing resolves the same wallet even if the provider reissues its own id.
+   */
+  custodyWalletId?: string | null;
 }
 
 export interface PrepareOperationContext extends HeliusRingsActor {
@@ -116,6 +126,7 @@ export class HeliusRingsService {
   private readonly operations: HeliusRingsOperationRepository;
   private readonly events: HeliusRingsEventRepository;
   private readonly health: HeliusRingsHealthRepository;
+  private readonly assets: HeliusRingsAssetRepository;
   private readonly enforcePolicy: typeof enforceWalletOperationPolicy;
   private readonly signOuterTransaction: typeof signRingsOuterTransaction;
   private readonly submitOuterTransaction: typeof submitRingsOuterTransaction;
@@ -134,11 +145,12 @@ export class HeliusRingsService {
     if ((env.SOLANA_NETWORK ?? "devnet") !== "devnet") {
       throw new AppError("SERVICE_UNAVAILABLE", "Helius Rings is devnet-only");
     }
-    this.gateway = dependencies.gateway ?? resolveRingsGateway(env);
+    this.gateway = dependencies.gateway ?? resolveRingsGateway(env, tenant);
     this.wallets = dependencies.wallets ?? createHeliusRingsWalletRepository(env);
     this.operations = dependencies.operations ?? createHeliusRingsOperationRepository(env);
     this.events = dependencies.events ?? createHeliusRingsEventRepository(env);
     this.health = dependencies.health ?? createHeliusRingsHealthRepository(env);
+    this.assets = dependencies.assets ?? createHeliusRingsAssetRepository(env);
     this.enforcePolicy = dependencies.enforcePolicy ?? enforceWalletOperationPolicy;
     this.signOuterTransaction = dependencies.signOuterTransaction ?? signRingsOuterTransaction;
     this.submitOuterTransaction =
@@ -175,6 +187,7 @@ export class HeliusRingsService {
       sdpWalletId: input.sdpWalletId,
       name: input.name,
       materialTag: "simulated",
+      custodyWalletId: input.custodyWalletId ?? null,
     });
     if (!wallet) {
       throw new AppError("INTERNAL_ERROR", "rings wallet reservation returned no row");
@@ -192,6 +205,7 @@ export class HeliusRingsService {
       ...this.tenant,
       id: wallet.id,
       shieldedAddress: provision.identity.shieldedAddress,
+      ownerAddress: provision.identity.owner,
       materialTag: provision.materialTag,
       expectedStatus: "pending",
     });
@@ -493,8 +507,12 @@ export class HeliusRingsService {
 
     // proving: build the outer tx and request the proof.
     try {
+      // The one address involved in both halves of this pipeline: it is what
+      // the outer transaction is built for, and the key that must sign it.
+      const owner = await this.requireOwner(current.wallet_id);
       const built = await this.gateway.buildOperation({
         operation: this.toPrivateOperation(current),
+        owner,
       });
       const proof = await this.gateway.requestProof({
         operationId: current.id,
@@ -523,6 +541,7 @@ export class HeliusRingsService {
         env: this.env,
         organizationId: this.tenant.organizationId,
         projectId: this.tenant.projectId,
+        owner,
         unsignedTxBase64: built.outerUnsignedTxBase64,
       });
       let signature: string;
@@ -568,26 +587,7 @@ export class HeliusRingsService {
     operation: HeliusRingsOperationRow,
     error: unknown
   ): Promise<HeliusRingsOperationRow> {
-    const failure =
-      error instanceof RingsAdapterError
-        ? { code: error.failureCode, message: error.message, retryable: error.retryable }
-        : // Missing configuration is not transient: no amount of retrying
-          // supplies an environment variable, and offering a retry that cannot
-          // succeed sends the operator back to the wrong lever. The code stays
-          // `gateway_unavailable` because `failure_code` is a CHECK-constrained
-          // vocabulary that has no `config_error` member yet; the message names
-          // the variables, and Phase 4's migration adds the accurate code.
-          error instanceof HeliusRingsError && error.code === "config_error"
-          ? { code: "gateway_unavailable" as const, message: error.message, retryable: false }
-          : error instanceof HeliusRingsError && error.code === "gateway_unavailable"
-            ? { code: "gateway_unavailable" as const, message: error.message, retryable: true }
-            : {
-                code: "gateway_unavailable" as const,
-                message: error instanceof Error ? error.message : "rings gateway failed",
-                retryable: true,
-              };
-
-    const failed = await this.fail(operation.id, operation.state, failure);
+    const failed = await this.fail(operation.id, operation.state, describeFailure(error));
     return failed ?? (await this.requireOperation(operation.id));
   }
 
@@ -671,6 +671,21 @@ export class HeliusRingsService {
     return wallet;
   }
 
+  /**
+   * The owner a provisioned wallet's identity is published under.
+   *
+   * A wallet with no owner recorded was never provisioned live, and every
+   * gateway call needing one also needs key material that cannot be derived
+   * without it, so this refuses rather than substituting anything.
+   */
+  private async requireOwner(walletId: string): Promise<string> {
+    const wallet = await this.requireWallet(walletId);
+    if (!wallet.owner_address) {
+      throw new HeliusRingsError("conflict", "this rings wallet has no provisioned identity yet");
+    }
+    return wallet.owner_address;
+  }
+
   private async requireOperation(operationId: string): Promise<HeliusRingsOperationRow> {
     const operation = await this.operations.getOperationById({
       ...this.tenant,
@@ -720,12 +735,91 @@ export class HeliusRingsService {
     };
   }
 
+  /**
+   * Reads a provisioned wallet's shielded state from Photon.
+   *
+   * Always a full sync — see `SyncPhotonResult.observedAt` for why there is no
+   * cursor to resume from. The observation time is recorded in `sync_cursor`
+   * for the dashboard to show, and deliberately never read back as a resume
+   * position.
+   */
+  async syncWallet(walletId: string): Promise<SyncPhotonResult> {
+    const wallet = await this.requireWallet(walletId);
+    if (!(wallet.owner_address && wallet.shielded_address)) {
+      throw new HeliusRingsError("conflict", "this rings wallet has no provisioned identity yet");
+    }
+
+    const allowlist = await this.assets.listActiveAssets();
+
+    const result = await this.gateway.syncPhoton({
+      walletId: wallet.id,
+      owner: wallet.owner_address,
+      // Re-derived and compared inside the gateway. A wallet whose material no
+      // longer reproduces its persisted identity must not report balances.
+      expectedShieldedAddress: wallet.shielded_address,
+      knownAssets: allowlist.map((asset) => ({
+        mint: asset.mint,
+        symbol: asset.symbol,
+        decimals: asset.decimals,
+      })),
+    });
+
+    await this.wallets.updateSyncCursor({
+      ...this.tenant,
+      id: wallet.id,
+      syncCursor: result.observedAt,
+    });
+
+    return result;
+  }
+
   /** The operation with its event feed joined in, for the detail panel. */
   async getOperationWithEvents(operationId: string): Promise<PrivateOperation> {
     const row = await this.requireOperation(operationId);
     const events = await this.events.listByOperation({ operationId: row.id });
     return this.toPrivateOperation(row, events.map(mapHeliusRingsEventRow));
   }
+}
+
+interface OperationFailure {
+  code: FailureCode;
+  message: string;
+  retryable: boolean;
+}
+
+/**
+ * Turns whatever the pipeline threw into the row's failure columns.
+ *
+ * `retryable` is the field that matters most: it decides whether the dashboard
+ * offers a retry button, so a failure that cannot possibly succeed on a second
+ * attempt must not claim it can.
+ */
+function describeFailure(error: unknown): OperationFailure {
+  // Adapters classify their own failures; they know whether a signer refused
+  // or merely timed out.
+  if (error instanceof RingsAdapterError) {
+    return { code: error.failureCode, message: error.message, retryable: error.retryable };
+  }
+
+  if (error instanceof HeliusRingsError) {
+    switch (error.code) {
+      // No amount of retrying supplies an environment variable.
+      case "config_error":
+        return { code: "config_error", message: error.message, retryable: false };
+      // The wallet has no identity to spend from. Not the gateway's fault and
+      // not fixed by waiting: the wallet has to be provisioned first.
+      case "conflict":
+        return { code: "invalid_input", message: error.message, retryable: false };
+      default:
+        return { code: "gateway_unavailable", message: error.message, retryable: true };
+    }
+  }
+
+  return {
+    code: "gateway_unavailable",
+    message: error instanceof Error ? error.message : "rings gateway failed",
+    retryable: true,
+  };
 }
 
 /**

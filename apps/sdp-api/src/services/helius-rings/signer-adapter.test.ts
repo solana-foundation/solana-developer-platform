@@ -15,11 +15,19 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import type { TransactionPartialSigner } from "@solana/signers";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
 import { submitRingsOuterTransaction } from "./rpc-adapter";
 import { signRingsOuterTransaction } from "./signer-adapter";
+
+vi.mock("@/db", () => ({ getDb: () => ({}) }));
+
+const { createOrgSignerForCustodyWallet } = vi.hoisted(() => ({
+  createOrgSignerForCustodyWallet: vi.fn(),
+}));
+vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
 
 const FEE_PAYER = "11111111111111111111111111111111" as Address;
 const BLOCKHASH = getBase58Codec().decode(new Uint8Array(32).fill(7)) as Blockhash;
@@ -46,6 +54,83 @@ function partialSigner(
   return { address: FEE_PAYER, signTransactions: sign };
 }
 
+/**
+ * Which key signs, when the caller does not hand one in.
+ *
+ * Rings registers an identity to an owner and spends from it, so the signature
+ * has to come from that owner rather than from whichever wallet the
+ * organization's custody config happens to default to.
+ */
+describe("signRingsOuterTransaction owner resolution", () => {
+  const walletByPublicKey = vi.spyOn(CustodyConfigStore.prototype, "findActiveWalletByPublicKey");
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("signs with the custody wallet holding the owner's key", async () => {
+    walletByPublicKey.mockResolvedValue({ id: "cw_owner", publicKey: FEE_PAYER } as never);
+    createOrgSignerForCustodyWallet.mockResolvedValue(
+      partialSigner(async () => [{ [FEE_PAYER]: new Uint8Array(64).fill(3) as SignatureBytes }])
+    );
+
+    await signRingsOuterTransaction({
+      env,
+      organizationId: "org_1",
+      projectId: "prj_1",
+      owner: FEE_PAYER,
+      unsignedTxBase64: unsignedTxBase64(),
+    });
+
+    expect(walletByPublicKey).toHaveBeenCalledWith("org_1", "prj_1", FEE_PAYER);
+    // The row id, which is what resolves a signer; the provider's own wallet id
+    // is not unique across retained project and organization targets.
+    expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(env, "org_1", "prj_1", "cw_owner");
+  });
+
+  it("refuses to sign for an owner custody does not control", async () => {
+    walletByPublicKey.mockResolvedValue(null);
+
+    const error = await signRingsOuterTransaction({
+      env,
+      organizationId: "org_1",
+      projectId: "prj_1",
+      owner: FEE_PAYER,
+      unsignedTxBase64: unsignedTxBase64(),
+    }).then(
+      () => null,
+      (thrown: unknown) => thrown
+    );
+
+    // Non-retryable: no amount of retrying makes custody hold a key it does
+    // not have, and falling back to the default signer would produce a
+    // signature for a wallet nobody named.
+    expect(error).toMatchObject({ failureCode: "signer_failed", retryable: false });
+    expect(createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
+  });
+
+  it("stops when custody resolves a different key than the owner", async () => {
+    walletByPublicKey.mockResolvedValue({ id: "cw_owner", publicKey: FEE_PAYER } as never);
+    createOrgSignerForCustodyWallet.mockResolvedValue({
+      address: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
+      signTransactions: async () => [],
+    });
+
+    const error = await signRingsOuterTransaction({
+      env,
+      organizationId: "org_1",
+      projectId: "prj_1",
+      owner: FEE_PAYER,
+      unsignedTxBase64: unsignedTxBase64(),
+    }).then(
+      () => null,
+      (thrown: unknown) => thrown
+    );
+
+    expect(error).toMatchObject({ failureCode: "signer_failed", retryable: false });
+  });
+});
+
 describe("signRingsOuterTransaction", () => {
   it("attaches the custody signature and returns base64 wire bytes", async () => {
     const signature = new Uint8Array(64).fill(7) as SignatureBytes;
@@ -55,6 +140,7 @@ describe("signRingsOuterTransaction", () => {
       env,
       organizationId: "org_1",
       projectId: "prj_1",
+      owner: FEE_PAYER,
       unsignedTxBase64: unsignedTxBase64(),
       signer,
     });
@@ -72,6 +158,7 @@ describe("signRingsOuterTransaction", () => {
       env,
       organizationId: "org_1",
       projectId: "prj_1",
+      owner: FEE_PAYER,
       unsignedTxBase64: unsignedTxBase64(),
       signer,
     }).then(
@@ -92,6 +179,7 @@ describe("signRingsOuterTransaction", () => {
       env,
       organizationId: "org_1",
       projectId: "prj_1",
+      owner: FEE_PAYER,
       unsignedTxBase64: unsignedTxBase64(),
       signer,
     }).then(
