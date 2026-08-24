@@ -42,6 +42,22 @@ export interface TreasuryAllocationPosition {
 }
 
 /**
+ * What the page can currently say about vault share mints.
+ *
+ * Two facts, bundled so a caller cannot pass one without the other: WHICH
+ * mints are known, and whether that knowledge is COMPLETE. They answer
+ * different questions. Hiding a receipt-token tile only needs the mint to be
+ * known; certifying a deployed total needs the vocabulary to be complete,
+ * because for a holding with no position row the strategy catalogue is the
+ * only witness that the token is a receipt at all.
+ */
+export interface VaultShareMintVocabulary {
+  known: ReadonlySet<string>;
+  /** False while the strategy catalogue is unavailable. */
+  complete: boolean;
+}
+
+/**
  * A position is open while it is not closed and its shares are not provably
  * zero. Shared with the Active-positions table so the summary and the rows
  * beneath it always describe the same set.
@@ -141,11 +157,11 @@ export function heldVaultShareMints(
  */
 function heldShareMintsRecorded({
   positions,
-  vaultShareMints,
+  shareMints,
   wallets,
 }: {
   positions: readonly TreasuryAllocationPosition[];
-  vaultShareMints: ReadonlySet<string>;
+  shareMints: ReadonlySet<string>;
   wallets: readonly TreasuryAllocationWallet[] | undefined;
 }): boolean {
   const recordedByWallet = new Map<string, Set<string>>();
@@ -155,7 +171,7 @@ function heldShareMintsRecorded({
     recordedByWallet.set(position.custodyWalletId, recorded);
   }
   return (wallets ?? []).every((wallet) =>
-    heldVaultShareMints(wallet, vaultShareMints).every(
+    heldVaultShareMints(wallet, shareMints).every(
       (mint) => recordedByWallet.get(wallet.id)?.has(mint) === true
     )
   );
@@ -182,15 +198,15 @@ export type WalletDeploymentDisplay =
  */
 export function walletDeployment({
   positions,
-  vaultShareMints,
+  shareMints,
   wallet,
 }: {
   /** Every position, or undefined when the read is unavailable. */
   positions: readonly TreasuryAllocationPosition[] | undefined;
-  vaultShareMints: ReadonlySet<string>;
+  shareMints: VaultShareMintVocabulary;
   wallet: TreasuryAllocationWallet;
 }): WalletDeploymentDisplay {
-  const heldShareMints = heldVaultShareMints(wallet, vaultShareMints);
+  const heldShareMints = heldVaultShareMints(wallet, shareMints.known);
   if (positions === undefined) {
     return heldShareMints.length > 0 ? { kind: "unavailable" } : { kind: "none" };
   }
@@ -198,6 +214,14 @@ export function walletDeployment({
   const open = positions.filter(
     (position) => position.custodyWalletId === wallet.id && isOpenVaultPosition(position)
   );
+  // An incomplete vocabulary cannot certify this wallet's deployment either,
+  // and must not disagree with the summary above it.
+  if (!shareMints.complete) {
+    return open.length > 0 || heldShareMints.length > 0
+      ? { kind: "unavailable" }
+      : { kind: "none" };
+  }
+
   const covered = new Set(open.map((position) => position.shareMint));
   // A held share mint no open position accounts for means the recorded total
   // is incomplete, so it must not be presented as this wallet's deployment.
@@ -230,22 +254,25 @@ function allocationShares(
 
 export function summarizeTreasuryAllocation({
   positions,
-  vaultShareMints,
+  shareMints,
   wallets,
 }: {
   positions: readonly TreasuryAllocationPosition[] | undefined;
-  /** Known vault share mints, so held-but-unrecorded shares can be detected. */
-  vaultShareMints?: ReadonlySet<string>;
+  shareMints: VaultShareMintVocabulary;
   wallets: readonly TreasuryAllocationWallet[] | undefined;
 }): TreasuryAllocationSummary {
   const availableCash = availableStableCash(wallets);
   // A wallet holding shares that no recorded position accounts for makes the
   // deployed TOTAL incomplete. Reporting the recorded sum as the total would
   // understate deployed money and overstate the idle share.
+  //
+  // An INCOMPLETE vocabulary poisons the figure rather than bypassing the
+  // check: without the catalogue a receipt token is indistinguishable from a
+  // plain balance, so completeness cannot be certified at all.
   const everyHeldShareRecorded =
-    positions === undefined ||
-    vaultShareMints === undefined ||
-    heldShareMintsRecorded({ positions, vaultShareMints, wallets });
+    positions !== undefined &&
+    shareMints.complete &&
+    heldShareMintsRecorded({ positions, shareMints: shareMints.known, wallets });
   const deployedValue = everyHeldShareRecorded ? deployedVaultValue(positions) : undefined;
   // Shares additionally require the float to be fully OBSERVED. The wallet
   // read serves active wallets only, so an open position custodied by a wallet

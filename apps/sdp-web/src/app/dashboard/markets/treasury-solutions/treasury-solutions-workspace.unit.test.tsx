@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   livePositionTokenValue: "125.25" as string | undefined,
   positionsError: false,
   positionsEmpty: false,
+  strategiesUnavailable: false,
 }));
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -59,45 +60,47 @@ vi.mock("../earn/deposit/earn-funding-wallets", () => ({
 
 vi.mock("../earn/earn-program-data", () => ({
   useEarnStrategies: () => ({
-    error: undefined,
+    error: mocks.strategiesUnavailable ? new Error("catalogue unavailable") : undefined,
     isLoading: false,
     refresh: mocks.refreshStrategies,
-    strategies: [
-      {
-        id: "earn_strategy_live",
-        provider: "kamino",
-        providerReference: "Kvault11111111111111111111111111111111111",
-        name: "Kamino USDC Vault",
-        sourceKind: "defi",
-        depositMints: [USDC_MINT],
-        shareMint: SHARE_MINT,
-        apyType: "variable",
-        currentApy: "0.062",
-        liquidityTerm: "instant",
-        status: "active",
-        hostCluster: "devnet",
-        fundable: true,
-        createdAt: "2026-08-18T00:00:00.000Z",
-        updatedAt: "2026-08-18T00:00:00.000Z",
-      },
-      {
-        id: "earn_strategy_catalogue_only",
-        provider: "kamino",
-        providerReference: "KvaultCatalogue1111111111111111111111111111",
-        name: "Kamino PYUSD Vault",
-        sourceKind: "defi",
-        depositMints: [USDC_MINT],
-        shareMint: CATALOGUE_SHARE_MINT,
-        apyType: "variable",
-        currentApy: "0.041",
-        liquidityTerm: "instant",
-        status: "active",
-        hostCluster: "devnet",
-        fundable: true,
-        createdAt: "2026-08-18T00:00:00.000Z",
-        updatedAt: "2026-08-18T00:00:00.000Z",
-      },
-    ],
+    strategies: mocks.strategiesUnavailable
+      ? undefined
+      : [
+          {
+            id: "earn_strategy_live",
+            provider: "kamino",
+            providerReference: "Kvault11111111111111111111111111111111111",
+            name: "Kamino USDC Vault",
+            sourceKind: "defi",
+            depositMints: [USDC_MINT],
+            shareMint: SHARE_MINT,
+            apyType: "variable",
+            currentApy: "0.062",
+            liquidityTerm: "instant",
+            status: "active",
+            hostCluster: "devnet",
+            fundable: true,
+            createdAt: "2026-08-18T00:00:00.000Z",
+            updatedAt: "2026-08-18T00:00:00.000Z",
+          },
+          {
+            id: "earn_strategy_catalogue_only",
+            provider: "kamino",
+            providerReference: "KvaultCatalogue1111111111111111111111111111",
+            name: "Kamino PYUSD Vault",
+            sourceKind: "defi",
+            depositMints: [USDC_MINT],
+            shareMint: CATALOGUE_SHARE_MINT,
+            apyType: "variable",
+            currentApy: "0.041",
+            liquidityTerm: "instant",
+            status: "active",
+            hostCluster: "devnet",
+            fundable: true,
+            createdAt: "2026-08-18T00:00:00.000Z",
+            updatedAt: "2026-08-18T00:00:00.000Z",
+          },
+        ],
   }),
   useEarnVaultPositions: () => ({
     // Real SWR keeps stale data alongside an error; the workspace guard is
@@ -283,6 +286,7 @@ beforeEach(() => {
   mocks.livePositionTokenValue = "125.25";
   mocks.positionsError = false;
   mocks.positionsEmpty = false;
+  mocks.strategiesUnavailable = false;
   vi.clearAllMocks();
 });
 
@@ -392,6 +396,28 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(screen.queryByText("$0.00")).toBeNull();
     expect(screen.queryByText("0.0%")).toBeNull();
     expect(screen.queryByText("100.0%")).toBeNull();
+
+    // The strategy row must not contradict them with "No active position".
+    const pyusdRow = screen.getByText("Kamino PYUSD Vault").closest("tr");
+    if (!pyusdRow) throw new Error("Expected the catalogue-only strategy row");
+    expect(pyusdRow.textContent).toContain("Live value unavailable");
+    expect(pyusdRow.textContent).not.toContain("No active position");
+  });
+
+  it("reports every money figure as unavailable while the strategy catalogue is not", () => {
+    // The catalogue is the only witness that a token with no position row is a
+    // receipt, so nothing deployed can be certified without it.
+    mocks.strategiesUnavailable = true;
+    renderWorkspace();
+
+    expect(screen.getByText("$2,500.00")).toBeTruthy();
+    expect(screen.getByText("A position value could not be read")).toBeTruthy();
+    expect(screen.getByText("Unavailable until every figure reads")).toBeTruthy();
+    expect(screen.queryByText("5.0%")).toBeNull();
+    expect(screen.queryByText("95.0%")).toBeNull();
+    expect(screen.queryByText("$130.50")).toBeNull();
+    // The wallet card must agree rather than showing a confident total.
+    expect(screen.getAllByText("Live value unavailable").length).toBeGreaterThan(0);
   });
 
   it("renders the empty-float caption for a readable empty treasury", () => {

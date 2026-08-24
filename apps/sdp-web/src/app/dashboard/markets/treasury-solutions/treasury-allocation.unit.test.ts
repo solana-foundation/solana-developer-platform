@@ -43,6 +43,7 @@ function openPosition(overrides: Partial<TreasuryAllocationPosition>): TreasuryA
 describe("summarizeTreasuryAllocation", () => {
   it("totals multi-wallet cash and multi-position value into shares summing to exactly 100%", () => {
     const summary = summarizeTreasuryAllocation({
+      shareMints: { known: new Set(), complete: true },
       wallets: [
         wallet([
           { mint: USDC_MINT, uiAmount: "1200.50" },
@@ -77,6 +78,7 @@ describe("summarizeTreasuryAllocation", () => {
 
   it("makes cash unavailable when any wallet balance cannot be read, never zero", () => {
     const summary = summarizeTreasuryAllocation({
+      shareMints: { known: new Set(), complete: true },
       wallets: [wallet([{ mint: USDC_MINT, uiAmount: "500" }]), wallet(undefined, "wallet-b")],
       positions: [openPosition({ tokenValue: "125.25" })],
     });
@@ -90,6 +92,7 @@ describe("summarizeTreasuryAllocation", () => {
 
   it("makes cash unavailable when a stable balance is malformed", () => {
     const summary = summarizeTreasuryAllocation({
+      shareMints: { known: new Set(), complete: true },
       wallets: [wallet([{ mint: USDC_MINT, uiAmount: "12,5" }])],
       positions: [],
     });
@@ -99,6 +102,7 @@ describe("summarizeTreasuryAllocation", () => {
 
   it("makes deployed unavailable when any open position cannot be hydrated, never zero", () => {
     const summary = summarizeTreasuryAllocation({
+      shareMints: { known: new Set(), complete: true },
       wallets: [wallet([{ mint: USDC_MINT, uiAmount: "500" }])],
       positions: [openPosition({ tokenValue: undefined }), openPosition({ tokenValue: "40" })],
     });
@@ -111,6 +115,7 @@ describe("summarizeTreasuryAllocation", () => {
 
   it("makes deployed unavailable when an open position value is malformed", () => {
     const summary = summarizeTreasuryAllocation({
+      shareMints: { known: new Set(), complete: true },
       wallets: [wallet([{ mint: USDC_MINT, uiAmount: "500" }])],
       positions: [openPosition({ tokenValue: "12,5" })],
     });
@@ -121,6 +126,7 @@ describe("summarizeTreasuryAllocation", () => {
 
   it("makes deployed unavailable rather than pricing a non-USD-stable position at $1", () => {
     const summary = summarizeTreasuryAllocation({
+      shareMints: { known: new Set(), complete: true },
       wallets: [wallet([])],
       positions: [openPosition({ tokenMint: SOL_MINT, tokenValue: "10" })],
     });
@@ -133,6 +139,7 @@ describe("summarizeTreasuryAllocation", () => {
     // side is unobserved: both dollar figures still render, but a percentage
     // split would be fabricated.
     const summary = summarizeTreasuryAllocation({
+      shareMints: { known: new Set(), complete: true },
       wallets: [wallet([{ mint: USDC_MINT, uiAmount: "50" }])],
       positions: [openPosition({ custodyWalletId: "wallet-deactivated", tokenValue: "100" })],
     });
@@ -154,7 +161,7 @@ describe("summarizeTreasuryAllocation", () => {
         ]),
       ],
       positions: [openPosition({ tokenValue: "100" })],
-      vaultShareMints: new Set([SHARE_MINT, UNRECORDED_SHARE_MINT]),
+      shareMints: { known: new Set([SHARE_MINT, UNRECORDED_SHARE_MINT]), complete: true },
     });
 
     expect(summary.availableCash).toBe("500");
@@ -176,7 +183,7 @@ describe("summarizeTreasuryAllocation", () => {
         wallet([{ mint: SHARE_MINT, uiAmount: "25" }], "wallet-b"),
       ],
       positions: [openPosition({ custodyWalletId: "wallet-a", tokenValue: "100" })],
-      vaultShareMints: new Set([SHARE_MINT]),
+      shareMints: { known: new Set([SHARE_MINT]), complete: true },
     });
 
     expect(summary.availableCash).toBe("500");
@@ -194,7 +201,7 @@ describe("summarizeTreasuryAllocation", () => {
         ]),
       ],
       positions: [openPosition({ tokenValue: "100" })],
-      vaultShareMints: new Set([SHARE_MINT]),
+      shareMints: { known: new Set([SHARE_MINT]), complete: true },
     });
 
     expect(summary.availableCash).toBe("300");
@@ -203,7 +210,11 @@ describe("summarizeTreasuryAllocation", () => {
   });
 
   it("propagates failed reads as unavailable on both sides", () => {
-    const summary = summarizeTreasuryAllocation({ wallets: undefined, positions: undefined });
+    const summary = summarizeTreasuryAllocation({
+      shareMints: { known: new Set(), complete: true },
+      wallets: undefined,
+      positions: undefined,
+    });
 
     expect(summary.availableCash).toBeUndefined();
     expect(summary.deployedValue).toBeUndefined();
@@ -211,7 +222,11 @@ describe("summarizeTreasuryAllocation", () => {
   });
 
   it("reports real zeros for a readable empty treasury without inventing an allocation", () => {
-    const summary = summarizeTreasuryAllocation({ wallets: [wallet([])], positions: [] });
+    const summary = summarizeTreasuryAllocation({
+      shareMints: { known: new Set(), complete: true },
+      wallets: [wallet([])],
+      positions: [],
+    });
 
     expect(summary.availableCash).toBe("0");
     expect(summary.deployedValue).toBe("0");
@@ -221,6 +236,7 @@ describe("summarizeTreasuryAllocation", () => {
 
   it("reads a fully idle float as 0% deployed and 100% remaining", () => {
     const summary = summarizeTreasuryAllocation({
+      shareMints: { known: new Set(), complete: true },
       wallets: [wallet([{ mint: USDC_MINT, uiAmount: "500" }])],
       positions: [],
     });
@@ -233,6 +249,7 @@ describe("summarizeTreasuryAllocation", () => {
 
   it("reads a fully deployed float as 100% deployed", () => {
     const summary = summarizeTreasuryAllocation({
+      shareMints: { known: new Set(), complete: true },
       wallets: [wallet([])],
       positions: [openPosition({ tokenValue: "800" })],
     });
@@ -245,6 +262,7 @@ describe("summarizeTreasuryAllocation", () => {
     // 1 of 2000 is exactly 0.05%, which rounds up to 0.1%; the remaining
     // share is the complement so the pair still totals exactly 100%.
     const summary = summarizeTreasuryAllocation({
+      shareMints: { known: new Set(), complete: true },
       wallets: [wallet([{ mint: USDC_MINT, uiAmount: "1999" }])],
       positions: [openPosition({ tokenValue: "1" })],
     });
@@ -261,7 +279,7 @@ describe("walletDeployment", () => {
     expect(
       walletDeployment({
         positions: undefined,
-        vaultShareMints: new Set([SHARE_MINT]),
+        shareMints: { known: new Set([SHARE_MINT]), complete: true },
         wallet: wallet([{ mint: SHARE_MINT, uiAmount: "60" }]),
       })
     ).toEqual({ kind: "unavailable" });
@@ -271,7 +289,7 @@ describe("walletDeployment", () => {
     expect(
       walletDeployment({
         positions: undefined,
-        vaultShareMints: new Set([SHARE_MINT]),
+        shareMints: { known: new Set([SHARE_MINT]), complete: true },
         wallet: wallet([{ mint: USDC_MINT, uiAmount: "10" }]),
       })
     ).toEqual({ kind: "none" });
@@ -283,7 +301,7 @@ describe("walletDeployment", () => {
     expect(
       walletDeployment({
         positions: [openPosition({ tokenValue: "40" })],
-        vaultShareMints: new Set([SHARE_MINT, UNRECORDED_SHARE_MINT]),
+        shareMints: { known: new Set([SHARE_MINT, UNRECORDED_SHARE_MINT]), complete: true },
         wallet: wallet([{ mint: UNRECORDED_SHARE_MINT, uiAmount: "5" }]),
       })
     ).toEqual({ kind: "unavailable" });
@@ -293,7 +311,7 @@ describe("walletDeployment", () => {
     expect(
       walletDeployment({
         positions: [openPosition({ tokenValue: "40" }), openPosition({ tokenValue: "2.5" })],
-        vaultShareMints: new Set([SHARE_MINT]),
+        shareMints: { known: new Set([SHARE_MINT]), complete: true },
         wallet: wallet([{ mint: SHARE_MINT, uiAmount: "60" }]),
       })
     ).toEqual({ kind: "value", value: "42.5" });
@@ -308,7 +326,7 @@ describe("walletDeployment", () => {
           openPosition({ custodyWalletId: "wallet-a", tokenValue: "100" }),
           openPosition({ custodyWalletId: "wallet-b", tokenValue: "500" }),
         ],
-        vaultShareMints: new Set([SHARE_MINT]),
+        shareMints: { known: new Set([SHARE_MINT]), complete: true },
         wallet: wallet([{ mint: SHARE_MINT, uiAmount: "60" }]),
       })
     ).toEqual({ kind: "value", value: "100" });
@@ -318,7 +336,7 @@ describe("walletDeployment", () => {
     expect(
       walletDeployment({
         positions: [openPosition({ shares: "0", tokenValue: "9" })],
-        vaultShareMints: new Set([SHARE_MINT]),
+        shareMints: { known: new Set([SHARE_MINT]), complete: true },
         wallet: wallet([]),
       })
     ).toEqual({ kind: "none" });
@@ -328,7 +346,7 @@ describe("walletDeployment", () => {
     expect(
       walletDeployment({
         positions: [openPosition({ tokenValue: undefined })],
-        vaultShareMints: new Set([SHARE_MINT]),
+        shareMints: { known: new Set([SHARE_MINT]), complete: true },
         wallet: wallet([{ mint: SHARE_MINT, uiAmount: "60" }]),
       })
     ).toEqual({ kind: "unavailable" });
@@ -343,6 +361,7 @@ describe("zero-balance share accounts", () => {
 
   it("is not a holding, so a fully exited treasury still totals", () => {
     const summary = summarizeTreasuryAllocation({
+      shareMints: { known: vaultShareMints, complete: true },
       wallets: [
         wallet([
           { mint: USDC_MINT, uiAmount: "500" },
@@ -350,7 +369,6 @@ describe("zero-balance share accounts", () => {
         ]),
       ],
       positions: [],
-      vaultShareMints,
     });
 
     expect(summary.availableCash).toBe("500");
@@ -363,7 +381,7 @@ describe("zero-balance share accounts", () => {
     expect(
       walletDeployment({
         positions: [],
-        vaultShareMints,
+        shareMints: { known: vaultShareMints, complete: true },
         wallet: wallet([{ mint: SHARE_MINT, uiAmount: "0" }]),
       })
     ).toEqual({ kind: "none" });
@@ -438,14 +456,14 @@ describe("summary and wallet lines never disagree", () => {
     it(`holds for: ${scenario.name}`, () => {
       const summary = summarizeTreasuryAllocation({
         positions: scenario.positions,
-        vaultShareMints,
+        shareMints: { known: vaultShareMints, complete: true },
         wallets: scenario.wallets,
       });
       const anyWalletUnavailable = scenario.wallets.some(
         (candidate) =>
           walletDeployment({
             positions: scenario.positions,
-            vaultShareMints,
+            shareMints: { known: vaultShareMints, complete: true },
             wallet: candidate,
           }).kind === "unavailable"
       );
@@ -462,4 +480,63 @@ describe("summary and wallet lines never disagree", () => {
       }
     });
   }
+});
+
+describe("an incomplete share-mint vocabulary", () => {
+  // The strategy catalogue is the only witness that a token with no position
+  // row is a receipt, so while it is unavailable no deployed figure can be
+  // certified. This must POISON the figure, never bypass the check.
+  const known = new Set([SHARE_MINT]);
+
+  it("makes the deployed figure unavailable even when every position reads", () => {
+    const summary = summarizeTreasuryAllocation({
+      wallets: [wallet([{ mint: USDC_MINT, uiAmount: "500" }])],
+      positions: [openPosition({ tokenValue: "100" })],
+      shareMints: { known, complete: false },
+    });
+
+    expect(summary.availableCash).toBe("500");
+    expect(summary.deployedValue).toBeUndefined();
+    expect(summary.deployedShare).toBeUndefined();
+    expect(summary.remainingShare).toBeUndefined();
+  });
+
+  it("never reports a fully deployed wallet as an idle float", () => {
+    // The exact fabrication this guards: positions read succeeds and is
+    // EMPTY, the catalogue is unavailable, and the wallet holds receipts.
+    const summary = summarizeTreasuryAllocation({
+      wallets: [
+        wallet([
+          { mint: USDC_MINT, uiAmount: "500" },
+          { mint: UNRECORDED_SHARE_MINT, uiAmount: "60" },
+        ]),
+      ],
+      positions: [],
+      shareMints: { known, complete: false },
+    });
+
+    expect(summary.deployedValue).toBeUndefined();
+    expect(summary.deployedShare).toBeUndefined();
+    expect(summary.remainingShare).toBeUndefined();
+  });
+
+  it("makes a wallet line with open positions unavailable, not a confident value", () => {
+    expect(
+      walletDeployment({
+        positions: [openPosition({ tokenValue: "100" })],
+        shareMints: { known, complete: false },
+        wallet: wallet([{ mint: SHARE_MINT, uiAmount: "60" }]),
+      })
+    ).toEqual({ kind: "unavailable" });
+  });
+
+  it("stays silent for a wallet with nothing deployed", () => {
+    expect(
+      walletDeployment({
+        positions: [],
+        shareMints: { known, complete: false },
+        wallet: wallet([{ mint: USDC_MINT, uiAmount: "500" }]),
+      })
+    ).toEqual({ kind: "none" });
+  });
 });
