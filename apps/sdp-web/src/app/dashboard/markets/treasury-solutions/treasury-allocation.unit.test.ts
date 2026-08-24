@@ -162,6 +162,28 @@ describe("summarizeTreasuryAllocation", () => {
     expect(summary.remainingShare).toBeUndefined();
   });
 
+  it("does not let one wallet's position cover another wallet's holding of the same mint", () => {
+    // Same vault, two wallets, one recorded position. A portfolio-wide mint set
+    // would accept wallet-b's shares as covered and publish a confident split
+    // over an incomplete total.
+    const summary = summarizeTreasuryAllocation({
+      wallets: [
+        wallet([
+          { mint: USDC_MINT, uiAmount: "500" },
+          { mint: SHARE_MINT, uiAmount: "60" },
+        ]),
+        wallet([{ mint: SHARE_MINT, uiAmount: "25" }], "wallet-b"),
+      ],
+      positions: [openPosition({ custodyWalletId: "wallet-a", tokenValue: "100" })],
+      vaultShareMints: new Set([SHARE_MINT]),
+    });
+
+    expect(summary.availableCash).toBe("500");
+    expect(summary.deployedValue).toBeUndefined();
+    expect(summary.deployedShare).toBeUndefined();
+    expect(summary.remainingShare).toBeUndefined();
+  });
+
   it("still totals deployed when every held share mint has an open position", () => {
     const summary = summarizeTreasuryAllocation({
       wallets: [

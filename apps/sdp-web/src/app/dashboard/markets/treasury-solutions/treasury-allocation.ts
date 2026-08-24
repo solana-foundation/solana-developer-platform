@@ -107,6 +107,10 @@ export function deployedVaultValue(
  * Does every vault share token any wallet holds have an open position behind
  * it? A wallet balance is the independent witness here: a position opened
  * outside SDP leaves shares in the wallet with no recorded row.
+ *
+ * Recorded mints are tracked PER WALLET. Two wallets can hold the same vault's
+ * shares while only one of them has a recorded position, and a portfolio-wide
+ * mint set would accept the other's holding as covered.
  */
 function heldShareMintsRecorded({
   positions,
@@ -117,12 +121,17 @@ function heldShareMintsRecorded({
   vaultShareMints: ReadonlySet<string>;
   wallets: readonly TreasuryAllocationWallet[] | undefined;
 }): boolean {
-  const recorded = new Set(
-    positions.filter(isOpenVaultPosition).map((position) => position.shareMint)
-  );
+  const recordedByWallet = new Map<string, Set<string>>();
+  for (const position of positions.filter(isOpenVaultPosition)) {
+    const recorded = recordedByWallet.get(position.custodyWalletId) ?? new Set<string>();
+    recorded.add(position.shareMint);
+    recordedByWallet.set(position.custodyWalletId, recorded);
+  }
   return (wallets ?? []).every((wallet) =>
     (wallet.balances ?? []).every(
-      (balance) => !vaultShareMints.has(balance.mint) || recorded.has(balance.mint)
+      (balance) =>
+        !vaultShareMints.has(balance.mint) ||
+        recordedByWallet.get(wallet.id)?.has(balance.mint) === true
     )
   );
 }
