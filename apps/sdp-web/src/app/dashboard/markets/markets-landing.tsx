@@ -50,8 +50,9 @@ function MarketsPathCard({
 
 /**
  * The Markets entry chooser: routes a visitor to the surface built for them
- * before either workspace loads. Static links only — the segment layout owns
- * the markets flag gate, and each destination keeps its own earn gate.
+ * before either workspace loads. Static links only. The segment layout gates
+ * markets and the page gates earn, so the cards never offer a destination the
+ * visitor cannot open.
  */
 export function MarketsLanding() {
   const t = useTranslations();
