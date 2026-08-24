@@ -127,28 +127,6 @@ ALTER TABLE helius_rings_operations
 
 
 -- --------------------------------------------------------------------------
--- One private spend at a time, per wallet
--- --------------------------------------------------------------------------
--- A transfer, withdrawal and merge all consume notes, and two in flight
--- together can choose overlapping inputs. Whichever lands second is rejected
--- for a spent nullifier after the money has already moved once. Serialising
--- them in the database is what makes that impossible rather than merely
--- unlikely; a shield has no such constraint because it creates notes instead
--- of consuming them.
---
--- Scoped to the states that have actually selected notes. Selection happens
--- when the outer transaction is built, on entry to `proving`; everything
--- earlier is a row describing an intent. Including `draft` or
--- `approval_required` here would mean one transfer awaiting a human approver
--- froze the whole wallet, and would block a second operation from even being
--- prepared — a restriction with no note collision behind it to justify it.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_helius_rings_operations_active_spend
-    ON helius_rings_operations(wallet_id)
-    WHERE op_type IN ('transfer_registered', 'withdraw', 'merge')
-      AND state IN ('proving', 'ready_to_sign', 'submitted', 'indexing');
-
-
--- --------------------------------------------------------------------------
 -- Exact-byte submission outbox
 -- --------------------------------------------------------------------------
 -- Mirrors 0066_payment_transfer_submission_outbox.sql, for the same reason and
@@ -181,6 +159,39 @@ ALTER TABLE helius_rings_operations
                 AND last_valid_block_height BETWEEN 0 AND 18446744073709551615
             )
         );
+
+
+-- --------------------------------------------------------------------------
+-- One private spend at a time, per wallet
+-- --------------------------------------------------------------------------
+-- A transfer, withdrawal and merge all consume notes, and two in flight
+-- together can choose overlapping inputs. Whichever lands second is rejected
+-- for a spent nullifier after the money has already moved once. Serialising
+-- them in the database is what makes that impossible rather than merely
+-- unlikely; a shield has no such constraint because it creates notes instead
+-- of consuming them.
+--
+-- Scoped to the states that have actually selected notes. Selection happens
+-- when the outer transaction is built, on entry to `proving`; everything
+-- earlier is a row describing an intent. Including `draft` or
+-- `approval_required` here would mean one transfer awaiting a human approver
+-- froze the whole wallet, and would block a second operation from even being
+-- prepared — a restriction with no note collision behind it to justify it.
+--
+-- A failed spend that got as far as signed bytes keeps the slot. Failing is not
+-- the same as not having happened: `submit_failed` and `indexing_timeout` both
+-- leave a transaction that may be sitting in the mempool or already settled.
+-- Releasing the slot there is what would let a second spend be filed under a
+-- fresh client nonce — past the retry guard, which only governs the retry
+-- endpoint — and pay the recipient again. Held until an operator resolves it;
+-- `completed`, and any failure from before signing, release it as they should.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_helius_rings_operations_active_spend
+    ON helius_rings_operations(wallet_id)
+    WHERE op_type IN ('transfer_registered', 'withdraw', 'merge')
+      AND (
+          state IN ('proving', 'ready_to_sign', 'submitted', 'indexing')
+          OR (state = 'failed' AND signed_transaction IS NOT NULL)
+      );
 
 
 -- --------------------------------------------------------------------------

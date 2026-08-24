@@ -42,7 +42,7 @@ import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { enforceWalletOperationPolicy } from "@/services/policy/enforcement.service";
 import type { Env } from "@/types/env";
-import { RingsAdapterError } from "./adapter-error";
+import { RingsAdapterError, redactAdapterMessage } from "./adapter-error";
 import { resolveRingsGateway } from "./gateway";
 import { buildRingsWalletOperationInput } from "./policy-envelope";
 import { submitRingsOuterTransaction } from "./rpc-adapter";
@@ -89,6 +89,9 @@ export interface HeliusRingsServiceDependencies {
  * is churn, not recovery, and the operator should look at the failure code.
  */
 export const RINGS_MAX_RETRY_DEPTH = 5;
+
+/** Op types that consume notes, and so can duplicate a payment. */
+const SPEND_OP_TYPES = new Set<string>(["transfer_registered", "withdraw", "merge"]);
 
 export interface ProvisionPrivateWalletInput {
   sdpWalletId: string;
@@ -227,6 +230,7 @@ export class HeliusRingsService {
   ): Promise<PrivateOperation> {
     const wallet = await this.requireWallet(input.walletId);
     await this.assertAssetAllowed(input);
+    await this.assertNoUnresolvedSpend(input);
     const intentKey = computeIntentKey(input);
 
     const { operation, reserved } = await this.operations.reserveIntent({
@@ -446,7 +450,7 @@ export class HeliusRingsService {
         payload: {
           signature: operation.outer_tx_signature,
           resubmit: "rejected",
-          reason: error instanceof Error ? error.message : "unknown",
+          reason: redactAdapterMessage(error instanceof Error ? error.message : "unknown"),
         },
       });
     }
@@ -842,6 +846,41 @@ export class HeliusRingsService {
     }
   }
 
+  /**
+   * Refuses a new spend while an earlier one is still unaccounted for.
+   *
+   * The database index enforces this too, but a unique violation surfaces as a
+   * 500 naming a constraint. The caller needs to be told the actual situation:
+   * a previous spend was signed and may have settled, and filing another could
+   * pay the recipient twice.
+   *
+   * Only spends. A shield creates notes rather than consuming them, so it
+   * cannot duplicate a payment and must stay available while an operator sorts
+   * the other operation out.
+   */
+  private async assertNoUnresolvedSpend(input: PrivateOperationInput): Promise<void> {
+    if (!SPEND_OP_TYPES.has(input.opType)) return;
+
+    const recent = await this.operations.listOperationsByWallet({
+      ...this.tenant,
+      walletId: input.walletId,
+    });
+
+    const unresolved = recent.find(
+      (operation) =>
+        SPEND_OP_TYPES.has(operation.op_type) &&
+        operation.signed_transaction !== null &&
+        operation.state !== "completed"
+    );
+
+    if (unresolved) {
+      throw new HeliusRingsError(
+        "conflict",
+        `operation ${unresolved.id} was already signed for this wallet and has not settled; reconcile it on chain before starting another spend`
+      );
+    }
+  }
+
   /** The project's allowlisted mints, for labelling and validation. */
   private async knownAssets(): Promise<KnownAsset[]> {
     const allowlist = await this.assets.listActiveAssets();
@@ -1004,9 +1043,11 @@ function describeFailure(error: unknown): OperationFailure {
     return { code, message: error.message, retryable };
   }
 
+  // An unrecognised throw is the one message nobody has vetted, so it gets the
+  // same scrubbing the adapters apply to theirs before it reaches the row.
   return {
     code: "gateway_unavailable",
-    message: error instanceof Error ? error.message : "rings gateway failed",
+    message: redactAdapterMessage(error instanceof Error ? error.message : "rings gateway failed"),
     retryable: true,
   };
 }

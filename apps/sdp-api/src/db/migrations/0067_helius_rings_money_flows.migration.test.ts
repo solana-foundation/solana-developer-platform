@@ -596,6 +596,78 @@ describe("one active private spend per wallet", () => {
     );
   });
 
+  it("keeps the slot held by a failed spend that was already signed", async () => {
+    const seed = await seedWallet("spend_failed_signed");
+    const common = {
+      organization_id: seed.organizationId,
+      project_id: seed.projectId,
+      wallet_id: seed.walletId,
+      op_type: "withdraw",
+    };
+
+    // Failed, but with bytes that may be in the mempool or already settled.
+    await insertOperation({
+      ...common,
+      id: "hro_fs_first",
+      intent_key: "sha256:fs_first",
+      state: "failed",
+      failure_code: "indexing_timeout",
+      failure_message: "photon never caught up",
+      retryable: true,
+      outer_tx_signature: "sig_fs",
+      signed_transaction: "AQAB",
+      last_valid_block_height: "100",
+    });
+
+    // Filing another under a fresh nonce is how a second payment gets made:
+    // the retry endpoint refuses, so this is the door a caller reaches for.
+    await expectSqlstate(
+      () =>
+        insertOperation({
+          ...common,
+          id: "hro_fs_second",
+          intent_key: "sha256:fs_second",
+          state: "proving",
+        }),
+      UNIQUE_VIOLATION
+    );
+  });
+
+  it("frees the slot for a spend that failed before it was signed", async () => {
+    const seed = await seedWallet("spend_failed_unsigned");
+    const common = {
+      organization_id: seed.organizationId,
+      project_id: seed.projectId,
+      wallet_id: seed.walletId,
+      op_type: "withdraw",
+    };
+
+    await insertOperation({
+      ...common,
+      id: "hro_fu_first",
+      intent_key: "sha256:fu_first",
+      state: "failed",
+      failure_code: "policy_denied",
+      failure_message: "denied by wallet policy",
+      retryable: false,
+    });
+
+    // Nothing was ever sent, so nothing can duplicate. Holding the slot here
+    // would freeze a wallet over a rejected request.
+    await insertOperation({
+      ...common,
+      id: "hro_fu_second",
+      intent_key: "sha256:fu_second",
+      state: "proving",
+    });
+
+    const { rows } = await client.query<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM helius_rings_operations WHERE wallet_id = $1",
+      [seed.walletId]
+    );
+    expect(Number(rows[0]?.count)).toBe(2);
+  });
+
   it("does not serialise shields, which create notes rather than consume them", async () => {
     const seed = await seedWallet("spend_shield");
     const common = {

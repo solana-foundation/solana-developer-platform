@@ -402,6 +402,60 @@ describe("HeliusRingsService", () => {
       });
     });
 
+    it("refuses a fresh spend while an earlier signed one is unaccounted for", async () => {
+      const operation = await liveishService().prepareOperation(
+        operationInput({ clientNonce: "nonce-unresolved-1", opType: "withdraw" }),
+        actorContext
+      );
+      // The precondition the whole test rests on: it got far enough to sign.
+      expect(operation.state).toBe("indexing");
+
+      // It reached submission, so bytes exist; then it failed the way a slow
+      // Photon makes it fail — retryable, which is what invites another go.
+      await createPostgresHeliusRingsOperationRepository(getDb(env)).failOperation({
+        ...tenant,
+        id: operation.id,
+        expectedState: operation.state as "indexing",
+        code: "indexing_timeout",
+        message: "photon never caught up",
+        retryable: true,
+      });
+
+      // The retry endpoint refuses, so the obvious next move is to file it
+      // again under a new nonce — the door the guard did not cover. That
+      // transaction may already have settled, so a second one pays twice.
+      await expect(
+        liveishService().prepareOperation(
+          operationInput({ clientNonce: "nonce-unresolved-2", opType: "withdraw" }),
+          actorContext
+        )
+      ).rejects.toMatchObject({ code: "conflict" });
+    });
+
+    it("still allows a shield while a spend is unresolved", async () => {
+      const operation = await liveishService().prepareOperation(
+        operationInput({ clientNonce: "nonce-shield-ok-1", opType: "withdraw" }),
+        actorContext
+      );
+      await createPostgresHeliusRingsOperationRepository(getDb(env)).failOperation({
+        ...tenant,
+        id: operation.id,
+        expectedState: operation.state as "indexing",
+        code: "indexing_timeout",
+        message: "photon never caught up",
+        retryable: true,
+      });
+
+      // A deposit creates notes rather than consuming them, so it cannot
+      // duplicate the stuck payment and must stay available.
+      await expect(
+        liveishService().prepareOperation(
+          operationInput({ clientNonce: "nonce-shield-ok-2", opType: "shield" }),
+          actorContext
+        )
+      ).resolves.toBeDefined();
+    });
+
     it("refuses to retry an operation that was already signed", async () => {
       const operation = await liveishService().prepareOperation(
         operationInput({ clientNonce: "nonce-signed-retry" }),
