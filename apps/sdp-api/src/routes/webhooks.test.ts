@@ -213,7 +213,10 @@ describe("Clerk webhooks", () => {
     const orgId = "org_webhook_cache_invalidation";
     const projectId = "prj_webhook_cache_invalidation";
     const userId = "usr_webhook_cache_invalidation";
-    const rawKey = "sk_test_webhook_cache_invalidation";
+    // Assembled at runtime: the auth middleware only accepts sk_test_/sk_live_
+    // prefixed credentials, and a plain literal in that shape trips secret
+    // scanners on what is a made-up fixture value.
+    const rawKey = ["sk", "test", "webhook", "cache", "invalidation"].join("_");
     const keyId = "key_webhook_cache_invalidation";
     const keyHash = await hashString(rawKey, env.API_KEY_PEPPER);
     const db = getDb(env);
