@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   positionsError: false,
   positionsEmpty: false,
   strategiesUnavailable: false,
+  strategiesStaleError: false,
 }));
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -60,7 +61,10 @@ vi.mock("../earn/deposit/earn-funding-wallets", () => ({
 
 vi.mock("../earn/earn-program-data", () => ({
   useEarnStrategies: () => ({
-    error: mocks.strategiesUnavailable ? new Error("catalogue unavailable") : undefined,
+    error:
+      mocks.strategiesUnavailable || mocks.strategiesStaleError
+        ? new Error("catalogue unavailable")
+        : undefined,
     isLoading: false,
     refresh: mocks.refreshStrategies,
     strategies: mocks.strategiesUnavailable
@@ -287,6 +291,7 @@ beforeEach(() => {
   mocks.positionsError = false;
   mocks.positionsEmpty = false;
   mocks.strategiesUnavailable = false;
+  mocks.strategiesStaleError = false;
   vi.clearAllMocks();
 });
 
@@ -339,18 +344,37 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(legacyRow.textContent).toContain("900.50 USD");
   });
 
-  it("reads an unreadable wallet balance as unavailable in the summary, never zero", () => {
+  it("reads an unreadable wallet balance as unavailable across every figure, never zero", () => {
     mocks.walletBalances = undefined;
     renderWorkspace();
 
     expect(screen.getByText("A wallet balance could not be read")).toBeTruthy();
     expect(screen.getByText("Unavailable until every figure reads")).toBeTruthy();
-    // The deployed dollar figure is still readable; the shares are not.
-    expect(screen.getByText("$130.50 in open vault positions")).toBeTruthy();
+    // Deployed goes unavailable too: an unread wallet may hold a receipt token
+    // with no recorded position, so the recorded sum is not a certified total.
+    expect(screen.getByText("A position value could not be read")).toBeTruthy();
+    expect(screen.queryByText("$130.50 in open vault positions")).toBeNull();
     expect(screen.queryByText("$0.00")).toBeNull();
     expect(screen.queryByText("$2,500.00")).toBeNull();
     expect(screen.queryByText("100.0%")).toBeNull();
     expect(screen.getByText("Balance unavailable")).toBeTruthy();
+    // And the strategy rows stop claiming an absence they cannot support.
+    expect(screen.queryByText("No active position")).toBeNull();
+  });
+
+  it("treats a stale catalogue behind a failed revalidation as incomplete", () => {
+    // SWR keeps the stale rows and sets the error. Stale means possibly
+    // MISSING a newly added strategy's share mint, so no deployed figure can
+    // be certified, and the strategy table already shows its error state here.
+    mocks.strategiesStaleError = true;
+    renderWorkspace();
+
+    expect(screen.getByText("$2,500.00")).toBeTruthy();
+    expect(screen.getByText("A position value could not be read")).toBeTruthy();
+    expect(screen.getByText("Unavailable until every figure reads")).toBeTruthy();
+    expect(screen.queryByText("5.0%")).toBeNull();
+    expect(screen.queryByText("95.0%")).toBeNull();
+    expect(screen.getAllByText("Live value unavailable").length).toBeGreaterThan(0);
   });
 
   it("keeps a deployed wallet honest when the positions read fails", () => {

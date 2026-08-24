@@ -331,7 +331,8 @@ function TreasuryWalletsCard({
 function strategyPositionValue(
   strategy: EarnStrategy,
   positions: readonly EarnVaultPosition[] | undefined,
-  heldShareMints: ReadonlySet<string>
+  /** Undefined when the held-share witness is unavailable. */
+  heldShareMints: ReadonlySet<string> | undefined
 ): { count: number; unrecorded?: boolean; value?: string } {
   const active = (positions ?? []).filter(
     (position) =>
@@ -343,7 +344,11 @@ function strategyPositionValue(
     // No row, yet the org demonstrably holds this vault's receipt token. Never
     // "no active position": that would contradict the summary and the wallet
     // card, which both read unavailable in exactly this state.
-    const unrecorded = strategy.shareMint !== undefined && heldShareMints.has(strategy.shareMint);
+    // Without the witness, "no active position" is unsupportable: this row
+    // cannot see a holding that would contradict it.
+    const unrecorded =
+      heldShareMints === undefined ||
+      (strategy.shareMint !== undefined && heldShareMints.has(strategy.shareMint));
     return unrecorded ? { count: 0, unrecorded } : { count: 0 };
   }
   const values = active.map((position) => position.tokenValue);
@@ -360,7 +365,7 @@ function StrategyTable({
   strategies,
 }: {
   environment: SdpEnvironment;
-  heldShareMints: ReadonlySet<string>;
+  heldShareMints: ReadonlySet<string> | undefined;
   onDeposit: (strategy: EarnStrategy) => void;
   positions: readonly EarnVaultPosition[] | undefined;
   providerAccess: EarnProviderAccess | null;
@@ -701,7 +706,7 @@ function TreasuryStrategiesCard({
 }: {
   environment: SdpEnvironment;
   error: unknown;
-  heldShareMints: ReadonlySet<string>;
+  heldShareMints: ReadonlySet<string> | undefined;
   isLoading: boolean;
   onDeposit: (strategy: EarnStrategy) => void;
   onRefresh: () => void;
@@ -932,15 +937,24 @@ export function TreasurySolutionsWorkspace({
         ...(strategies ?? []).flatMap((strategy) => strategy.shareMint ?? []),
       ].filter((mint) => !WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.isUsdStable)
     ),
-    complete: strategies !== undefined,
+    // A failed revalidation keeps stale rows, and stale means possibly MISSING
+    // a newly added strategy's share mint. The strategy table already renders
+    // its error state over stale data, so the vocabulary matches that posture.
+    complete: strategies !== undefined && !strategiesError,
   };
   // Every receipt token the org demonstrably holds, so a strategy with no
   // recorded row can say "unavailable" rather than "no active position".
-  const heldShareMints = new Set(
-    walletsError
-      ? []
-      : activeWallets.flatMap((wallet) => heldVaultShareMints(wallet, shareMints.known))
-  );
+  //
+  // UNDEFINED when the witness itself is unavailable: without it, "no active
+  // position" is a claim of absence nothing on this page can support.
+  const heldShareMints = walletsError
+    ? undefined
+    : activeWallets.reduce<Set<string> | undefined>((held, wallet) => {
+        const mints = heldVaultShareMints(wallet, shareMints.known);
+        if (held === undefined || mints === undefined) return undefined;
+        for (const mint of mints) held.add(mint);
+        return held;
+      }, new Set<string>());
   const programs = programsState?.kind === "ready" ? programsState.programs : [];
   // Recovery seeds durable component state. Do not derive tracker mounts
   // directly from the live list: the list can stop returning a movement just

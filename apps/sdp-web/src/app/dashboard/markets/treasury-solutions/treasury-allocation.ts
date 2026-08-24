@@ -120,11 +120,17 @@ export function deployedVaultValue(
 }
 
 /**
- * The vault share mints one wallet actually holds.
+ * The vault share mints one wallet actually holds, or `undefined` when its
+ * balances could not be read.
  *
  * THE single definition of "holds shares", shared by the summary and by the
  * per-wallet line, because two copies of this predicate is how the two
  * surfaces drift into contradicting each other.
+ *
+ * UNREADABLE IS NOT EMPTY, and that distinction is the whole reason this
+ * returns three states rather than a list. An unread wallet may hold a receipt
+ * token with no recorded position behind it, so reading it as "holds nothing"
+ * certifies a total on the strength of a read that never happened.
  *
  * A provably-zero balance is not a holding: an emptied share account can
  * outlive the position it belonged to (this payload appends the SOL row at
@@ -136,9 +142,10 @@ export function deployedVaultValue(
 export function heldVaultShareMints(
   wallet: TreasuryAllocationWallet,
   vaultShareMints: ReadonlySet<string>
-): string[] {
+): string[] | undefined {
+  if (wallet.balances === undefined) return undefined;
   const held: string[] = [];
-  for (const balance of wallet.balances ?? []) {
+  for (const balance of wallet.balances) {
     if (!vaultShareMints.has(balance.mint)) continue;
     if (compareUnsignedDecimals(balance.uiAmount, "0") === 0) continue;
     held.push(balance.mint);
@@ -170,11 +177,15 @@ function heldShareMintsRecorded({
     recorded.add(position.shareMint);
     recordedByWallet.set(position.custodyWalletId, recorded);
   }
-  return (wallets ?? []).every((wallet) =>
-    heldVaultShareMints(wallet, shareMints).every(
-      (mint) => recordedByWallet.get(wallet.id)?.has(mint) === true
-    )
-  );
+  // No wallet inventory at all is the same failure as one unreadable wallet,
+  // one level up: there is no witness, so nothing can be certified. `[].every`
+  // would have answered true here and published the recorded sum as the total.
+  if (wallets === undefined) return false;
+  return wallets.every((wallet) => {
+    const held = heldVaultShareMints(wallet, shareMints);
+    if (held === undefined) return false;
+    return held.every((mint) => recordedByWallet.get(wallet.id)?.has(mint) === true);
+  });
 }
 
 /**
@@ -207,6 +218,9 @@ export function walletDeployment({
   wallet: TreasuryAllocationWallet;
 }): WalletDeploymentDisplay {
   const heldShareMints = heldVaultShareMints(wallet, shareMints.known);
+  // Unreadable balances cannot rule OUT a deployment, and absence here would
+  // render a deployed wallet as idle.
+  if (heldShareMints === undefined) return { kind: "unavailable" };
   if (positions === undefined) {
     return heldShareMints.length > 0 ? { kind: "unavailable" } : { kind: "none" };
   }

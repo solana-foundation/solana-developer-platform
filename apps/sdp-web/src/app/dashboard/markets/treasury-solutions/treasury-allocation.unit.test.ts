@@ -76,18 +76,53 @@ describe("summarizeTreasuryAllocation", () => {
     expect(formatAllocationShare(summary.remainingShare, "en")).toBe("33.3%");
   });
 
-  it("makes cash unavailable when any wallet balance cannot be read, never zero", () => {
+  it("makes both figures unavailable when any wallet balance cannot be read, never zero", () => {
+    // Deployed goes too, not just cash: an unread wallet may hold a receipt
+    // token with no recorded position, so the recorded sum cannot be certified
+    // as the total. Unreadable is not empty.
     const summary = summarizeTreasuryAllocation({
-      shareMints: { known: new Set(), complete: true },
+      shareMints: { known: new Set([SHARE_MINT]), complete: true },
       wallets: [wallet([{ mint: USDC_MINT, uiAmount: "500" }]), wallet(undefined, "wallet-b")],
       positions: [openPosition({ tokenValue: "125.25" })],
     });
 
     expect(summary.availableCash).toBeUndefined();
-    expect(summary.deployedValue).toBe("125.25");
+    expect(summary.deployedValue).toBeUndefined();
     expect(summary.deployedShare).toBeUndefined();
     expect(summary.remainingShare).toBeUndefined();
     expect(formatAllocationShare(summary.deployedShare, "en")).toBe("—");
+  });
+
+  it("cannot certify a total with no wallet inventory at all", () => {
+    // The one-level-up form of the same gap: an absent list must not pass the
+    // coverage check vacuously.
+    const summary = summarizeTreasuryAllocation({
+      shareMints: { known: new Set([SHARE_MINT]), complete: true },
+      wallets: undefined,
+      positions: [openPosition({ tokenValue: "125.25" })],
+    });
+
+    expect(summary.availableCash).toBeUndefined();
+    expect(summary.deployedValue).toBeUndefined();
+    expect(summary.deployedShare).toBeUndefined();
+  });
+
+  it("reads an unreadable wallet's deployment as unavailable, never as idle", () => {
+    expect(
+      walletDeployment({
+        positions: [openPosition({ tokenValue: "100" })],
+        shareMints: { known: new Set([SHARE_MINT]), complete: true },
+        wallet: wallet(undefined),
+      })
+    ).toEqual({ kind: "unavailable" });
+    // Even with no recorded position: unreadable balances cannot rule out one.
+    expect(
+      walletDeployment({
+        positions: [],
+        shareMints: { known: new Set([SHARE_MINT]), complete: true },
+        wallet: wallet(undefined),
+      })
+    ).toEqual({ kind: "unavailable" });
   });
 
   it("makes cash unavailable when a stable balance is malformed", () => {
@@ -445,6 +480,11 @@ describe("summary and wallet lines never disagree", () => {
       positions: [openPosition({ tokenMint: SOL_MINT, tokenValue: "10" })],
     },
     { name: "positions unavailable", wallets: [wallet([cash, heldShare])], positions: undefined },
+    {
+      name: "one wallet's balances unreadable",
+      wallets: [wallet([cash, heldShare]), wallet(undefined, "wallet-b")],
+      positions: [openPosition({ tokenValue: "100" })],
+    },
     {
       name: "zero share account",
       wallets: [wallet([cash, { mint: SHARE_MINT, uiAmount: "0" }])],
