@@ -80,6 +80,10 @@ _Avoid_: Wallet Operation Envelope, Payment Transfer, generic email
 An SDP-owned outbound message for a product workflow.
 _Avoid_: Raw email, Clerk organization invitation, generic notification
 
+**Managed Reconciliation Cadence**:
+The deployment-owned frequency for one pass over SDP's managed background reconcilers. It is distinct from each reconciler's self-hosted cadence and from monitoring tolerance windows.
+_Avoid_: Hard-coded job interval, Sentry schedule, self-hosted cron cadence
+
 ## Relationships
 
 - An **Organization** has **Provider Availability** for each **Provider** in each **Provider Family**.
@@ -103,6 +107,7 @@ _Avoid_: Raw email, Clerk organization invitation, generic notification
 - **Archival** withdraws all API access to a **Project**; credentials issued before archival do not survive it.
 - **Archival** freezes every pending **Wallet Operation** on the **Project**; a frozen operation cannot later execute.
 - **Archival** is terminal: it is not a suspension of a **Project** for later resumption.
+- Every managed reconciler in one managed run follows the **Managed Reconciliation Cadence**, while its self-hosted equivalent may run at a different cadence.
 
 ## Example Dialogue
 
@@ -115,6 +120,9 @@ _Avoid_: Raw email, Clerk organization invitation, generic notification
 > **Dev:** "Can this API key policy let the key transfer from a wallet whose wallet policy denies transfers?"
 > **Domain expert:** "No. The wallet policy is the baseline; the API key policy can only narrow access or route the operation into approval."
 
+> **Dev:** "Should the API hard-code the production interval into its Sentry monitors?"
+> **Domain expert:** "No. Monitoring must consume the deployment-owned Managed Reconciliation Cadence so its expectation cannot drift from execution."
+
 ## Flagged Ambiguities
 
 - "Available" can mean access policy, environment configuration, runtime health, or project setup; resolved: **Provider Availability** means deployment configuration plus general availability or a **Manual Provider Activation**.
@@ -125,3 +133,4 @@ _Avoid_: Raw email, Clerk organization invitation, generic notification
 - "Payment request" can mean a low-level request payload or a payer-facing payments product; resolved: use **Payment Request** only for the payments v2 payer-facing flow.
 - "Email" can mean Clerk-owned organization invitation delivery or SDP-owned **Transactional Email**; resolved: only **Transactional Email** is owned by SDP.
 - "Archive" can mean hiding data, suspending a **Project**, or decommissioning it; resolved: **Archival** is terminal decommissioning that revokes API credentials. Archived **Project** data stays visible in the dashboard but has no API access.
+- "Reconciliation cadence" previously meant either the deployment's execution schedule or Sentry's expected schedule; resolved: the **Managed Reconciliation Cadence** is deployment-owned, and managed monitoring derives from it.

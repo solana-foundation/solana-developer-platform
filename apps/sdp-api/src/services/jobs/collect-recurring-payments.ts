@@ -230,10 +230,13 @@ export async function collectDueRecurringPayments(
           AND a.project_id = rp.project_id
           AND a.subscription_id = rp.subscription_id
           AND a.due_at = rp.next_collection_due_at
-        WHERE rp.status = 'active'
+        WHERE rp.status IN ('active', 'canceling', 'canceled')
           AND rp.next_collection_due_at IS NOT NULL
           AND a.status IN ('processing', 'confirmed')
-          AND (a.status = 'confirmed' OR a.updated_at <= ?)
+          AND (
+            (a.status = 'processing' AND a.updated_at <= ?)
+            OR (rp.status = 'active' AND a.status = 'confirmed')
+          )
        ) recoverable_attempts
       WHERE attempt_rank = 1
       ORDER BY attempt_updated_at ASC
