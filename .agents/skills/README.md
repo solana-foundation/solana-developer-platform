@@ -1,10 +1,12 @@
 # Ramp-provider integration skills
 
-A set of **agent skills** that walk an engineer through integrating a new fiat↔crypto on/off-ramp provider into the Solana Developer Platform (`apps/sdp-api`).
+Agent skills for a payment provider contributing its own fiat↔crypto ramp integration to SDP. Provider adapters live in `packages/sdp-payments`; API orchestration, persistence, availability, and webhooks live in `apps/sdp-api`; shared public response types live in `packages/sdp-types`.
 
 ## Who this is for
 
-**Partners and payment providers** who want to plug into SDP's ramps. Fork the repo, open it in your coding agent, and these skills guide the integration PR end to end — in SDP's architecture and conventions, so it compiles, follows the house rules, and reviews fast.
+**Partners and payment providers** who want to plug into SDP's ramps. Fork the repo, run the coding agent from the repo root, and use these skills to prepare the contribution.
+
+Before coding, complete the [ramp intake](https://solanafoundation.typeform.com/to/sxTGbwXt) and read the [public provider-onboarding guide](../../apps/sdp-docs/content/docs/reference/provider-onboarding.mdx). Maintainers need provider docs, sandbox credentials, supported Solana rails, rate limits, webhook setup, and known sandbox limitations to validate the PR.
 
 ## How agents pick them up
 
@@ -16,20 +18,27 @@ The canonical home is `.agents/skills/`. These workflows are explicit-only: disc
 
 ## Where to start
 
-Explicitly invoke **`integrate-ramp-provider`** first — the umbrella that sequences the work and lists the non-negotiable rules (no fallbacks, HTTP in the provider / DB in the handler, fully typed webhooks, env-var secrets). Pass it a **`docs`** parameter pointing at your provider's API documentation (e.g. `docs: https://docs.yourprovider.com`) so each step maps your endpoints accurately. Then work the steps:
+Explicitly invoke **`integrate-ramp-provider`** first. Pass the provider docs URL and state the supported directions, quote delivery mode, sandbox environment, rail-discovery source, counterparty/KYC flow, and settlement mechanism. Then invoke only the capability skills the provider needs:
 
 | Skill | Covers |
 |---|---|
-| `register-provider` | Step 1 — wire the provider id, client registry, dispatch switches, availability, and secrets. "Add the id, follow `tsc`." |
+| `register-provider` | Step 1 — wire the provider id, package client, API schemas/dispatch, availability, setup registry, secrets, and dashboard catalog |
 | `rail-discovery` | Declare supported fiat/crypto corridors and regenerate the support matrix |
 | `integrate-estimate` | Rate preview (`estimateOnramp` / `estimateOfframp`) |
-| `counterparty-requirements` | KYC / payout requirements (`validateCounterparty`) |
+| `counterparty-requirements` | Required readiness contract (`ready`, `unsupported`, KYC, or payout requirements) |
 | `integrate-onramp` | Fiat→crypto quote |
 | `integrate-offramp` | Crypto→fiat quote |
 | `integrate-webhook` | Signature verification + settlement events |
 
-Skip the flows you don't support — they're parallel capabilities, not a strict pipeline.
+Capability work is parallel after registration. For an unsupported direction, declare empty support and implement the required interface methods as typed rejections; only `createOnrampQuote` is optional in the current `RampProvider` contract.
 
-## Reference implementation
+## Choose the closest reference
 
-`apps/sdp-api/src/lib/ramps/providers/lightspark/client.ts` is the canonical example the skills point at. The type system is the checklist: adding your provider id to `RAMP_PROVIDERS` breaks compilation at every site you must wire.
+| Integration shape | Reference |
+|---|---|
+| Manual instructions + counterparty provisioning | `packages/sdp-payments/src/ramps/providers/lightspark/client.ts` |
+| Hosted redirect/widget | `packages/sdp-payments/src/ramps/providers/moonpay/client.ts` |
+| Embedded session widget | `packages/sdp-payments/src/ramps/providers/stripe/client.ts` |
+| Multi-step KYC, accounts, and provider-specific DB state | BVNK or Mural package client plus `apps/sdp-api/src/routes/payments/handlers/ramps/<provider>.ts` |
+
+The type system catches many missing registrations, but not every schema, public type, translation, or UI catalog. Use `register-provider` as the complete checklist.

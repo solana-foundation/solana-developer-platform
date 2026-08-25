@@ -535,16 +535,20 @@ export interface SignatureStatusInfo {
 export async function getSignatureStatuses(
   rpc: SolanaRpc,
   signatures: Signature[],
-  options: { searchTransactionHistory?: boolean } = {}
+  options: { searchTransactionHistory?: boolean; retryDelaysMs?: readonly number[] } = {}
 ): Promise<Array<SignatureStatusInfo | null>> {
   if (signatures.length === 0) {
     return [];
   }
 
-  const response = await (options.searchTransactionHistory
-    ? rpc.getSignatureStatuses(signatures, { searchTransactionHistory: true })
-    : rpc.getSignatureStatuses(signatures)
-  ).send();
+  const response = await withTransientRpcRetry(
+    () =>
+      (options.searchTransactionHistory
+        ? rpc.getSignatureStatuses(signatures, { searchTransactionHistory: true })
+        : rpc.getSignatureStatuses(signatures)
+      ).send(),
+    options.retryDelaysMs
+  );
 
   return response.value.map((item) =>
     item

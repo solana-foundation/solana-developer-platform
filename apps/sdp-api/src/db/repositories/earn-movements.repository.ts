@@ -99,6 +99,22 @@ export interface EarnPositionRow {
   updated_at: string;
   activated_at: string | null;
   closed_at: string | null;
+  /**
+   * Address owed this position's share-ATA rent back when the exit closes that
+   * account. Null means the custody wallet funded it and keeps it.
+   *
+   * A PROJECTION of `earn_movements` (migration 0067), not an independent fact:
+   * the funder named by the newest movement that claimed to create this share
+   * account and has not failed. That is what makes it self-repairing. A claim
+   * whose transaction never lands drops out when reconciliation fails the
+   * movement, falling back to the previous surviving claimant rather than
+   * outliving its own transaction, and a movement that lost its idempotency
+   * insert has no row to contribute at all.
+   *
+   * Authoritative WHENEVER THE SHARE ACCOUNT EXISTS, which is the only window
+   * anything reads it: a position with no share account has no shares to exit.
+   */
+  share_ata_rent_funder: string | null;
 }
 
 export interface EarnMovementRow {
@@ -143,6 +159,14 @@ export interface EarnMovementRow {
   initiated_by_key_id: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * Whether this movement was OBSERVED to create the owner's share token
+   * account, and so charged its rent. The position's funder projects from the
+   * newest non-failed movement carrying this (migration 0067).
+   */
+  creates_share_account: boolean;
+  /** Who this movement charged that rent to. Null means the custody wallet. */
+  share_ata_rent_funder: string | null;
 }
 
 /**
@@ -369,7 +393,7 @@ export interface EarnMovementsRepository {
   ): Promise<EarnMovementRow | null>;
 }
 
-export interface CreateSignedVaultDepositIntentInput {
+export interface CreateSignedVaultDepositIntentInput extends ShareAccountRentAttribution {
   organizationId: string;
   projectId: string;
   environment: SdpEnvironment;
@@ -399,6 +423,37 @@ export interface CreateSignedVaultDepositIntentInput {
   initiatedByKeyId?: string | null;
 }
 
+/**
+ * Share-ATA rent attribution, carried by BOTH money directions.
+ *
+ * Not deposit-only, and that asymmetry was a bug: an EXIT can create the share
+ * account too (consolidation emits an idempotent create, and klend interleaves
+ * its own ATA prerequisites into the withdraw bundle), so an exit that paid the
+ * rent has to say so or the position keeps naming whoever funded a previous
+ * instance of the account.
+ */
+export interface ShareAccountRentAttribution {
+  /**
+   * Whether these instructions CREATE the share token account, as OBSERVED by
+   * the builder against chain state rather than inferred from the instruction
+   * list. Creation is idempotent, so the instruction proves nothing on its own.
+   * True is what makes `shareAtaRentFunder` meaningful.
+   *
+   * Optional, and the default is the safe direction: omitted means "no rent was
+   * charged here", so the funder is left untouched and no refund can be
+   * misdirected. A caller that cannot observe creation gets the historical
+   * behaviour rather than a guess.
+   */
+  createsShareAccount?: boolean;
+  /**
+   * Who funds that creation: a sponsor address, or null when the custody wallet
+   * pays. Only consulted when `createsShareAccount` is true, and then it is
+   * written even if null, so a later entry under a different fee mode cannot
+   * inherit the previous one's funder.
+   */
+  shareAtaRentFunder?: string | null;
+}
+
 export interface AdvanceVaultMovementInput {
   movementId: string;
   organizationId: string;
@@ -409,7 +464,7 @@ export interface AdvanceVaultMovementInput {
   settledAt?: string | null;
 }
 
-export interface CreateSignedVaultWithdrawalIntentInput {
+export interface CreateSignedVaultWithdrawalIntentInput extends ShareAccountRentAttribution {
   organizationId: string;
   projectId: string;
   environment: SdpEnvironment;
@@ -539,6 +594,8 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
     initiated_by_key_id: row.initiated_by_key_id as string | null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
+    creates_share_account: row.creates_share_account === true,
+    share_ata_rent_funder: row.share_ata_rent_funder as string | null,
   };
 }
 
@@ -913,6 +970,11 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           };
         }
 
+        // AFTER the insert, because the projection reads the row the insert
+        // just wrote. A loser never reaches here, and would change nothing if it
+        // did: it has no movement row to project from.
+        await projectShareAccountRentFunder(transaction, claimed.id, input.organizationId);
+
         return { position: claimed, movement: inserted, replayed: false };
       });
     },
@@ -950,6 +1012,14 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           if (!winner) throw new Error("Failed to resolve concurrent earn vault withdrawal");
           return winner;
         }
+
+        // An exit that creates the share account funds its rent too, so it
+        // joins the same projection. Same ordering reason as the deposit above.
+        await projectShareAccountRentFunder(
+          transaction,
+          movement.position_id,
+          input.organizationId
+        );
         return {
           position: await requireMovementPosition(transaction, movement),
           movement,
@@ -1049,6 +1119,17 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
             )
             .bind(movement.position_id)
             .run();
+          // A failed movement charged no rent: an expired transaction never
+          // executed, and one that failed on chain had every effect reverted.
+          // Re-projecting drops its claim and hands the attribution back to the
+          // previous surviving claimant, so a close cannot refund a party whose
+          // transaction did not land. Without this the stale claim outlives the
+          // movement for as long as the position does.
+          await projectShareAccountRentFunder(
+            transaction,
+            movement.position_id,
+            input.organizationId
+          );
         } else if (candidate.direction === "deposit") {
           await transaction
             .prepare(
@@ -1259,9 +1340,10 @@ async function insertVaultWithdrawalMovement(
          custody_wallet_id, vault_address, source_address, destination_address,
          signature, signed_transaction, last_valid_block_height,
          request_id, idempotency_fingerprint,
-         created_by, initiated_by_key_id
+         created_by, initiated_by_key_id,
+         creates_share_account, share_ata_rent_funder
        ) VALUES (?, ?, ?, ?, ?, 'vault_direct', 'withdrawal', ?, 'requested',
-                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (organization_id, request_id) WHERE execution_model = 'vault_direct'
        DO NOTHING
        RETURNING *`
@@ -1287,7 +1369,8 @@ async function insertVaultWithdrawalMovement(
       input.requestId,
       input.idempotencyFingerprint,
       input.createdBy ?? null,
-      input.initiatedByKeyId ?? null
+      input.initiatedByKeyId ?? null,
+      ...shareAccountClaimBindings(input)
     )
     .first<Record<string, unknown>>();
   return row ? mapMovementRow(row) : null;
@@ -1332,6 +1415,78 @@ async function requireMovementPosition(
  * SQL. A mint-identity mismatch returns nothing and answers 409: the caller named a
  * holding whose asset identity is not the one being deposited.
  */
+/**
+ * The two claim columns every vault movement insert binds, in column order.
+ *
+ * A movement that did not create the share account records no funder, which the
+ * 0067 CHECK also enforces: a refund destination for rent that was never charged
+ * is not a weaker claim, it is a false one.
+ */
+function shareAccountClaimBindings(input: ShareAccountRentAttribution): [boolean, string | null] {
+  const creates = input.createsShareAccount === true;
+  return [creates, creates ? (input.shareAtaRentFunder ?? null) : null];
+}
+
+/**
+ * Recompute `earn_positions.share_ata_rent_funder` from the movements that
+ * claimed to create the share account (migration 0067).
+ *
+ * DERIVED, not remembered, and that is the whole design. The claim is written on
+ * the movement inside the pre-broadcast intent transaction, so it is a statement
+ * about a transaction that has not landed yet. Three failures fall out of
+ * projecting instead of assigning:
+ *
+ *   * a movement that never lands is FAILED by reconciliation and drops out
+ *     here, handing the attribution back to the previous surviving claimant
+ *     instead of naming a party that paid nothing for as long as the position
+ *     lives;
+ *   * a movement that lost its idempotency insert has no row, so it cannot
+ *     contribute at all, whatever fee mode it had resolved;
+ *   * a rolled-back intent takes its claim with it.
+ *
+ * Newest claimant wins, matching "the account is created at most once and the
+ * last creation is the live one". Callers hold the position row lock already:
+ * both intent creators take it through their claim upsert or their own
+ * transaction, and `advanceVaultMovement` takes it explicitly.
+ *
+ * ── The confirmed-fork tail, and why excluding only `failed` is enough ─────
+ * A claimant that reached `confirmed` and was then dropped by a fork can never
+ * be failed (the transition matrix forbids `confirmed -> failed` on purpose;
+ * see @sdp/types EARN_MOVEMENT_TRANSITIONS), so its claim stays selected here.
+ * That inherits the ledger's own accepted open question rather than adding a
+ * new reachable loss: the dropped create never landed, so the account is still
+ * missing, and an exit only reads this projection when the account EXISTS at
+ * its build (an exit that creates the account refunds its own rent payer and
+ * ignores the projection). Whoever re-created it was either a later SDP
+ * movement, whose newer claim supersedes the stale one, or an external actor,
+ * which is the already-documented external-create residual, reachable with or
+ * without any fork. Confirming the funder from the LANDED transaction at
+ * settlement closes both and is deliberately not attempted here.
+ */
+async function projectShareAccountRentFunder(
+  db: AppDb,
+  positionId: string,
+  organizationId: string
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE earn_positions position
+          SET share_ata_rent_funder = (
+                SELECT movement.share_ata_rent_funder
+                  FROM earn_movements movement
+                 WHERE movement.position_id = position.id
+                   AND movement.creates_share_account
+                   AND movement.status <> 'failed'
+                 ORDER BY movement.created_at DESC, movement.id DESC
+                 LIMIT 1
+              ),
+              updated_at = sdp_iso_now()
+        WHERE position.id = ? AND position.organization_id = ?`
+    )
+    .bind(positionId, organizationId)
+    .run();
+}
+
 async function claimVaultPosition(
   db: AppDb,
   input: CreateSignedVaultDepositIntentInput
@@ -1412,9 +1567,10 @@ async function insertVaultMovement(
          denomination, amount_requested, min_shares_out,
          custody_wallet_id, vault_address, source_address, destination_address,
          signature, signed_transaction, last_valid_block_height,
-         request_id, idempotency_fingerprint, created_by, initiated_by_key_id
+         request_id, idempotency_fingerprint, created_by, initiated_by_key_id,
+         creates_share_account, share_ata_rent_funder
        ) VALUES (?, ?, ?, ?, ?, 'vault_direct', 'deposit', ?, 'requested',
-                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (organization_id, request_id) WHERE execution_model = 'vault_direct'
        DO NOTHING
        RETURNING *`
@@ -1441,7 +1597,8 @@ async function insertVaultMovement(
       input.requestId,
       input.idempotencyFingerprint,
       input.createdBy ?? null,
-      input.initiatedByKeyId ?? null
+      input.initiatedByKeyId ?? null,
+      ...shareAccountClaimBindings(input)
     )
     .first<Record<string, unknown>>();
   return row ? mapMovementRow(row) : null;

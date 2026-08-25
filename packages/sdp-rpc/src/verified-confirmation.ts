@@ -43,7 +43,7 @@ export async function verifyTransactionLanded(
   signature: Signature,
   options: VerifyTransactionLandedOptions = {}
 ): Promise<VerifyTransactionLandedResult> {
-  const [status] = await withTransientRpcRetry(() => getSignatureStatuses(rpc, [signature]));
+  const [status] = await getSignatureStatuses(rpc, [signature]);
 
   if (!status || status.err !== null || status.confirmationStatus === "processed") {
     return { ok: false, reason: "not_confirmed" };

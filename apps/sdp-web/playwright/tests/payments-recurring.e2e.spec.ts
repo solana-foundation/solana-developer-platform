@@ -1,16 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
-import { getPlaywrightAdminSession } from "../support/auth-session";
 import { createLocalApiClient } from "../support/local-api-client";
 import {
-  ensureLinkedOrg,
+  getBootstrapApiBaseUrl,
+  provisionWithAdminSession,
   seedCounterpartyWithSolanaAccount,
   seedProjectCookie,
 } from "../support/local-dashboard-bootstrap";
-import {
-  bootstrapLocalPaymentFixtures,
-  getBootstrapApiBaseUrl,
-} from "../support/local-issuance-bootstrap";
+import { bootstrapLocalPaymentFixtures } from "../support/local-issuance-bootstrap";
 
 test.describe
   .serial("dashboard recurring payments", () => {
@@ -22,40 +19,43 @@ test.describe
     let recurringTokenSymbol = "";
 
     test.beforeAll(async ({ browser }) => {
-      const session = await getPlaywrightAdminSession(browser);
-      await ensureLinkedOrg(session.identity, { tier: "enterprise" });
-      const fixtures = await bootstrapLocalPaymentFixtures({
-        identity: session.identity,
-        bearerToken: session.getBearerToken,
-        tier: "enterprise",
-      });
-      const api = createLocalApiClient(
-        getBootstrapApiBaseUrl(),
-        session.getBearerToken,
-        fixtures.projectId
-      );
+      bootstrapProjectId = await provisionWithAdminSession(browser, async (session) => {
+        const fixtures = await bootstrapLocalPaymentFixtures({
+          identity: session.identity,
+          bearerToken: session.getBearerToken,
+          tier: "enterprise",
+        });
+        const api = createLocalApiClient(
+          getBootstrapApiBaseUrl(),
+          session.getBearerToken,
+          fixtures.projectId
+        );
 
-      await api.post(`/v1/issuance/tokens/${fixtures.token.id}/mint`, {
-        mint: {
-          destination: fixtures.wallets.treasury.publicKey,
-          amount: "25",
-        },
-      });
+        await api.post(`/v1/issuance/tokens/${fixtures.token.id}/mint`, {
+          mint: {
+            destination: fixtures.wallets.treasury.publicKey,
+            amount: "25",
+          },
+        });
 
-      const suffix = randomUUID().slice(0, 8);
-      recurringAccountLabel = `E2E Subscription ${suffix}`;
-      const seededCounterparty = await seedCounterpartyWithSolanaAccount(api, {
-        displayName: `E2E Recurring ${suffix}`,
-        email: `e2e-recurring-${suffix}@example.com`,
-        accountLabel: recurringAccountLabel,
-        destinationAddress: fixtures.wallets.treasury.publicKey,
-      });
+        const suffix = randomUUID().slice(0, 8);
+        recurringAccountLabel = `E2E Subscription ${suffix}`;
+        const seededCounterparty = await seedCounterpartyWithSolanaAccount(api, {
+          displayName: `E2E Recurring ${suffix}`,
+          email: `e2e-recurring-${suffix}@example.com`,
+          accountLabel: recurringAccountLabel,
+          destinationAddress: fixtures.wallets.treasury.publicKey,
+        });
 
-      bootstrapProjectId = fixtures.projectId;
-      recurringCounterpartyName = seededCounterparty.displayName;
-      recurringWalletLabel = fixtures.wallets.treasury.label ?? fixtures.wallets.treasury.publicKey;
-      recurringTokenSymbol = fixtures.token.symbol;
-      await session.page.close();
+        recurringCounterpartyName = seededCounterparty.displayName;
+        const treasuryLabel = fixtures.wallets.treasury.label;
+        if (!treasuryLabel) {
+          throw new Error("Recurring payment treasury wallet did not return its seeded label");
+        }
+        recurringWalletLabel = treasuryLabel;
+        recurringTokenSymbol = fixtures.token.symbol;
+        return fixtures.projectId;
+      });
     });
 
     test.beforeEach(async ({ page }) => {

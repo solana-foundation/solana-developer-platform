@@ -682,6 +682,10 @@ async function runMetadataScheduleUpdate(input: {
       });
       const instruction = await subscriptionsProgram.getUpdatePlanOverlayInstruction({
         endTs: onChainPlan.data.data.endTs,
+        expectedCreatedAt: onChainPlan.data.data.terms.createdAt,
+        expectedEndTs: onChainPlan.data.data.endTs,
+        expectedMetadataUri: onChainPlan.data.data.metadataUri,
+        expectedPullers: onChainPlan.data.data.pullers,
         metadataUri: input.resolved.metadataUri ?? "",
         owner: sourceSigner,
         planPda,
