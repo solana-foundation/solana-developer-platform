@@ -279,6 +279,15 @@ export class RpcConnectionStore {
     organizationId: string;
     connectionId: string;
     scopeKeys: readonly string[];
+    /**
+     * The credential the caller read before it built the replacement. Matching
+     * on it makes this a compare-and-swap: two rotations racing each other both
+     * see the same previous credential, and without this both would commit. The
+     * last write would win while the other replacement stayed active with its
+     * secret stored, and the losing request would return a credential id the
+     * connection no longer used.
+     */
+    expectedCredentialId: string;
     nextCredentialId: string;
     nextCredentialScopeKey: string;
     executor?: DatabaseExecutor;
@@ -294,6 +303,7 @@ export class RpcConnectionStore {
           AND organization_id = ?
           AND scope_key IN (${params.scopeKeys.map(() => "?").join(", ")})
           AND status <> 'deactivated'
+          AND provider_credential_id = ?
         RETURNING ${CONNECTION_COLUMNS}`,
       [
         params.nextCredentialId,
@@ -301,6 +311,7 @@ export class RpcConnectionStore {
         params.connectionId,
         params.organizationId,
         ...params.scopeKeys,
+        params.expectedCredentialId,
       ]
     );
   }

@@ -87,17 +87,20 @@ export async function getRpcCredentialMode(
   c: AppContext
 ): Promise<{ mode: RpcCredentialMode; liveConnections: number }> {
   const auth = getAuth(c);
-  const row = await getDb(c.env)
-    .prepare(`SELECT rpc_credential_mode FROM organizations WHERE id = ?`)
-    .bind(auth.organizationId)
-    .first<{ rpc_credential_mode: string }>();
 
   // The count comes back with the mode because the two only mean something
   // together: `byok` with nothing live is an organization whose RPC is failing,
-  // and the dashboard has to be able to say so.
-  const liveConnections = await new RpcConnectionStore(
+  // and the dashboard has to be able to say so. Neither read depends on the
+  // other, so they go together rather than one after it.
+  const [row, liveConnections] = await Promise.all([
     getDb(c.env)
-  ).countLiveConnectionsForOrganization({ organizationId: auth.organizationId });
+      .prepare(`SELECT rpc_credential_mode FROM organizations WHERE id = ?`)
+      .bind(auth.organizationId)
+      .first<{ rpc_credential_mode: string }>(),
+    new RpcConnectionStore(getDb(c.env)).countLiveConnectionsForOrganization({
+      organizationId: auth.organizationId,
+    }),
+  ]);
 
   return {
     mode: row?.rpc_credential_mode === "byok" ? "byok" : "managed",
@@ -376,6 +379,17 @@ export async function submitRpcConnection(
       await secretStore
         .destroyVersion({ secretVersionRef: stored.secretVersionRef })
         .catch(() => {});
+    }
+
+    // The one-per-project check above is a read, so two saves racing each other
+    // both see an empty project and both try to become the default. The partial
+    // unique index rejects the loser, and without this it would surface as an
+    // unhandled database error rather than the same conflict the pre-check
+    // returns.
+    if (isDefaultConflict(error)) {
+      throw conflict(
+        "This project already has an RPC connection. Rotate its key, or deactivate it, before adding another."
+      );
     }
     throw error;
   }
@@ -661,6 +675,9 @@ export async function rotateRpcConnection(
         organizationId: auth.organizationId,
         connectionId,
         scopeKeys,
+        // Compare-and-swap against what this rotation read, so a second
+        // rotation racing it loses rather than silently overwriting.
+        expectedCredentialId: previous.id,
         nextCredentialId,
         nextCredentialScopeKey: next.scope_key,
         executor: tx,

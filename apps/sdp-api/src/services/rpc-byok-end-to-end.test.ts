@@ -8,6 +8,7 @@ import { createCredentialSecretStore } from "@/services/credential-secret-store"
 import {
   activateRpcConnection,
   deactivateRpcConnection,
+  rotateRpcConnection,
   submitRpcConnection,
 } from "@/services/rpc-connection.service";
 import { createTenantRpcConnectionLookup } from "@/services/rpc-connection-lookup";
@@ -379,6 +380,47 @@ describe("BYOK end to end", () => {
     expect(reactivated.status).toBe("active");
     const target = await resolveRpcTarget(relayInput());
     expect(target.connectionId).toBe(CONNECTION_ID);
+  });
+
+  it("swaps the key on rotation and keeps serving throughout", async () => {
+    seenKeys = [];
+    const rotated = await rotateRpcConnection(serviceContext(), CONNECTION_ID, {
+      endpointUrl: endpointBase,
+      apiKey: "rotated-key-2222",
+    });
+
+    // The new key was proven before anything was written.
+    expect(seenKeys).toEqual(["rotated-key-2222"]);
+    expect(rotated.status).toBe("active");
+    expect(rotated.providerCredential.id).not.toBe(CREDENTIAL_ID);
+    expect(JSON.stringify(rotated)).not.toContain("rotated-key-2222");
+
+    // The connection never stopped resolving, and it resolves on the new key.
+    seenKeys = [];
+    const target = await resolveRpcTarget(relayInput());
+    await fetch(target.endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...target.headers },
+      body: JSON.stringify({ jsonrpc: "2.0", id: "1", method: "getVersion", params: [] }),
+    });
+    expect(seenKeys).toEqual(["rotated-key-2222"]);
+  });
+
+  it("refuses a rotation whose credential has already been replaced", async () => {
+    // Two rotations racing each other read the same previous credential. The
+    // compare-and-swap is what stops the loser committing over the winner and
+    // leaving a live credential nothing points at.
+    const store = new RpcConnectionStore(getDb(appEnv));
+    const stale = await store.repointConnectionCredential({
+      organizationId: ORG_ID,
+      connectionId: CONNECTION_ID,
+      scopeKeys: [PROJECT_ID],
+      expectedCredentialId: CREDENTIAL_ID,
+      nextCredentialId: "pcred_should_never_land",
+      nextCredentialScopeKey: PROJECT_ID,
+    });
+
+    expect(stale).toBeNull();
   });
 
   it("stops using the tenant key the moment the connection is deactivated", async () => {

@@ -18,51 +18,44 @@ import {
 } from "@/services/rpc-connection.service";
 import type { Env } from "@/types/env";
 
-const connectionParamsSchema = z.object({ connectionId: z.string().trim().min(1) }).strict();
+const connectionParamsSchema = z.strictObject({ connectionId: z.string().trim().min(1) });
 
 // `organization` stays readable so connections made before HOO-1226 are still
 // listed and can be deactivated. Only creation is project-only.
-const listQuerySchema = z
-  .object({
-    scope: z.enum(["organization", "project"]).default("project"),
-    limit: z.coerce.number().int().min(1).max(50).default(20),
-    offset: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0),
-  })
-  .strict();
+const listQuerySchema = z.strictObject({
+  scope: z.enum(["organization", "project"]).default("project"),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+  offset: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0),
+});
 
 /**
  * The endpoint is supplied by the tenant, not derived from a built-in vendor
  * URL — see `@sdp/rpc/byok`. `apiKey` is write-only: it goes to
  * CredentialSecretStore and is never returned by any route here.
  */
-const createConnectionSchema = z
-  .object({
-    provider: z.enum(BYOK_RPC_PROVIDERS as unknown as [string, ...string[]]),
-    // No `network`: it comes from the project's environment (HOO-1221), so a
-    // caller cannot name one that disagrees with the project it lands on.
-    // One way to configure a connection (HOO-1226). Organization scope is not
-    // accepted here any more; the relay stopped resolving it.
-    scope: z.literal("project").default("project"),
-    credentialLabel: z.string().trim().min(1).max(100),
-    endpointUrl: z.string().trim().url().max(2048).optional(),
-    apiKey: z.string().min(1).max(4096),
-  })
-  .strict();
+const createConnectionSchema = z.strictObject({
+  provider: z.enum(BYOK_RPC_PROVIDERS as unknown as [string, ...string[]]),
+  // No `network`: it comes from the project's environment (HOO-1221), so a
+  // caller cannot name one that disagrees with the project it lands on.
+  // One way to configure a connection (HOO-1226). Organization scope is not
+  // accepted here any more; the relay stopped resolving it.
+  scope: z.literal("project").default("project"),
+  credentialLabel: z.string().trim().min(1).max(100),
+  endpointUrl: z.string().trim().url().max(2048).optional(),
+  apiKey: z.string().min(1).max(4096),
+});
 
-const credentialModeSchema = z.object({ mode: z.enum(["managed", "byok"]) }).strict();
+const credentialModeSchema = z.strictObject({ mode: z.enum(["managed", "byok"]) });
 
 // The label and the network stay as they were: this replaces a key, it does
 // not reconfigure the connection.
-const rotateConnectionSchema = z
-  .object({
-    endpointUrl: z.string().trim().url().max(2048).optional(),
-    apiKey: z.string().min(1).max(4096),
-  })
-  .strict();
+const rotateConnectionSchema = z.strictObject({
+  endpointUrl: z.string().trim().url().max(2048).optional(),
+  apiKey: z.string().min(1).max(4096),
+});
 
 const activateSchema = z
-  .object({ makeDefault: z.boolean().default(true) })
-  .strict()
+  .strictObject({ makeDefault: z.boolean().default(true) })
   .default({ makeDefault: true });
 
 const internalRpc = new Hono<{ Bindings: Env }>();
