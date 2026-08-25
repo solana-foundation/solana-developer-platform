@@ -135,9 +135,13 @@ export function RpcConnectionPanel({
         !!result.resolvedProvider &&
         result.resolvedProvider !== result.requestedProvider;
 
-      toast.error(
+      // A mismatch is not a failure, and the result panel says so in amber
+      // beside a 200 OK. Raising a red error toast for the same event told the
+      // reader two different things at once.
+      const notify = isProviderMismatch ? toast.warning : toast.error;
+      notify(
         isProviderMismatch
-          ? t("DashboardCustody.providerMismatch")
+          ? t("DashboardCustody.rpcDetailMismatch")
           : t("DashboardCustody.rpcCheckFailed"),
         {
           id: toastId,

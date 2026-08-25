@@ -231,7 +231,6 @@
     "tryAgainSoon": "Try again in a moment.",
     "checkingRpcProvider": "Checking RPC provider.",
     "rpcCheckPassed": "RPC check passed.",
-    "providerMismatch": "Provider mismatch.",
     "rpcCheckFailed": "RPC check failed.",
     "anotherProvider": "another provider",
     "failedToSaveRpcSettings": "Failed to save RPC settings.",

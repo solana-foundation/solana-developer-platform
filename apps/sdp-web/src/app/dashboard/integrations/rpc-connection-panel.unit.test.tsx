@@ -20,6 +20,7 @@ vi.mock("sonner", () => ({
     error: vi.fn(),
     loading: vi.fn(),
     success: vi.fn(),
+    warning: vi.fn(),
   }),
 }));
 // The relay probe is shared code exercised by the settings form; the panel only
@@ -33,8 +34,10 @@ vi.mock("@/lib/rpc-connection", () => ({
   })),
 }));
 
+import { toast } from "sonner";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { runRpcProviderTest } from "@/lib/rpc-connection";
 import { RpcConnectionPanel } from "./rpc-connection-panel";
 
 function renderPanel(props: Partial<ComponentProps<typeof RpcConnectionPanel>> = {}) {
@@ -59,6 +62,8 @@ function renderPanel(props: Partial<ComponentProps<typeof RpcConnectionPanel>> =
 
 beforeEach(() => {
   refresh.mockClear();
+  vi.mocked(toast.warning).mockClear();
+  vi.mocked(toast.error).mockClear();
   updateOrganizationRpcSettingsAction.mockReset();
   updateOrganizationRpcSettingsAction.mockResolvedValue({
     status: "success",
@@ -75,6 +80,42 @@ describe("RpcConnectionPanel", () => {
     expect(screen.getByRole("button", { name: "Test connection" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Use this provider" })).toBeNull();
     expect(screen.getByText(/runs through this provider/)).toBeTruthy();
+  });
+
+  it("warns rather than errors when another provider answered the test", async () => {
+    // The result panel renders this in amber next to a 200 OK. A red error
+    // toast for the same event put two severities on screen at once.
+    vi.mocked(runRpcProviderTest).mockResolvedValueOnce({
+      status: "error",
+      reason: "mismatch",
+      message: "Alchemy answered this test, not Helius.",
+      requestedProvider: "helius",
+      resolvedProvider: "alchemy",
+      upstreamStatus: 200,
+    });
+
+    renderPanel();
+    await userEvent.click(screen.getByRole("button", { name: "Test connection" }));
+
+    expect(toast.warning).toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("still raises an error toast when the upstream genuinely failed", async () => {
+    vi.mocked(runRpcProviderTest).mockResolvedValueOnce({
+      status: "error",
+      reason: "upstream",
+      message: "RPC upstream returned 502 Bad Gateway.",
+      requestedProvider: "helius",
+      resolvedProvider: "helius",
+      upstreamStatus: 502,
+    });
+
+    renderPanel();
+    await userEvent.click(screen.getByRole("button", { name: "Test connection" }));
+
+    expect(toast.error).toHaveBeenCalled();
+    expect(toast.warning).not.toHaveBeenCalled();
   });
 
   it("does not claim traffic runs here when the project's own connection wins", () => {
