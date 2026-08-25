@@ -83,13 +83,26 @@ export type RpcCredentialMode = "managed" | "byok";
  * spending SDP's. Reading it is separate from setting it because the relay
  * needs it on every request and the dashboard only on a settings page.
  */
-export async function getRpcCredentialMode(c: AppContext): Promise<RpcCredentialMode> {
+export async function getRpcCredentialMode(
+  c: AppContext
+): Promise<{ mode: RpcCredentialMode; liveConnections: number }> {
+  const auth = getAuth(c);
   const row = await getDb(c.env)
     .prepare(`SELECT rpc_credential_mode FROM organizations WHERE id = ?`)
-    .bind(getAuth(c).organizationId)
+    .bind(auth.organizationId)
     .first<{ rpc_credential_mode: string }>();
 
-  return row?.rpc_credential_mode === "byok" ? "byok" : "managed";
+  // The count comes back with the mode because the two only mean something
+  // together: `byok` with nothing live is an organization whose RPC is failing,
+  // and the dashboard has to be able to say so.
+  const liveConnections = await new RpcConnectionStore(
+    getDb(c.env)
+  ).countLiveConnectionsForOrganization({ organizationId: auth.organizationId });
+
+  return {
+    mode: row?.rpc_credential_mode === "byok" ? "byok" : "managed",
+    liveConnections,
+  };
 }
 
 /**

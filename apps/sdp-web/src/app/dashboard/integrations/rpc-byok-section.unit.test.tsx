@@ -264,6 +264,34 @@ describe("RpcByokSection", () => {
     expect(sent.get("mode")).toBe("byok");
   });
 
+  it("says so when the organization is on its own keys with nothing serving", () => {
+    // Deleting the last connection while the toggle is on leaves every RPC
+    // call failing, and nothing else on the page would say why.
+    renderSection({ connections: [], credentialMode: "byok", liveConnectionCount: 0 });
+    expect(screen.getByText(/Every RPC call for this organization is failing/)).toBeTruthy();
+  });
+
+  it("warns that deactivating the last one stops RPC rather than falling back", () => {
+    renderSection({
+      connections: [connection()],
+      credentialMode: "byok",
+      liveConnectionCount: 1,
+    });
+    expect(screen.getByText(/stops RPC rather than falling back/)).toBeTruthy();
+  });
+
+  it("drops a check result once the row is acted on", async () => {
+    const user = userEvent.setup();
+    renderSection({ connections: [connection({ status: "pending", isDefault: false })] });
+
+    await user.click(screen.getByRole("button", { name: "Test" }));
+    expect(await screen.findByText(/Reached the provider just now/)).toBeTruthy();
+
+    // The check described the connection as it was; activating changes it.
+    await user.click(screen.getByRole("button", { name: "Use this connection" }));
+    expect(screen.queryByText(/Reached the provider just now/)).toBeNull();
+  });
+
   it("hides the credential mode control when it could not be read", () => {
     // Showing "SDP-managed" at an organization that is actually on its own
     // keys is the kind of wrong somebody acts on.

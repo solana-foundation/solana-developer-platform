@@ -42,6 +42,7 @@ type TestOutcome = { ok: boolean; failureCode: string | null };
 function ConnectionList({
   canManage,
   connections,
+  failsClosed,
   pendingId,
   onAction,
   onTest,
@@ -53,6 +54,8 @@ function ConnectionList({
 }: {
   canManage: boolean;
   connections: SafeRpcConnection[];
+  /** The organization runs on its own keys, so losing this one stops RPC. */
+  failsClosed: boolean;
   pendingId: string | null;
   onAction: (action: ConnectionAction, connectionId: string) => void;
   onTest: (connectionId: string) => void;
@@ -81,6 +84,7 @@ function ConnectionList({
             connection.scope !== "organization"
           }
           isRotating={rotatingId === connection.id}
+          failsClosed={failsClosed}
           pendingId={pendingId}
           onAction={onAction}
           onTest={onTest}
@@ -106,6 +110,7 @@ function ConnectionRow({
   connection,
   isLastActive,
   isRotating,
+  failsClosed,
   pendingId,
   onAction,
   onTest,
@@ -118,6 +123,7 @@ function ConnectionRow({
   connection: SafeRpcConnection;
   isLastActive: boolean;
   isRotating: boolean;
+  failsClosed: boolean;
   pendingId: string | null;
   onAction: (action: ConnectionAction, connectionId: string) => void;
   onTest: (connectionId: string) => void;
@@ -173,7 +179,11 @@ function ConnectionRow({
             </p>
           ) : null}
           {isLastActive ? (
-            <p className="text-xs text-warning">{t("Shared.integrations.rpcByokLastActive")}</p>
+            <p className="text-xs text-warning">
+              {failsClosed
+                ? t("Shared.integrations.rpcByokLastActiveByok")
+                : t("Shared.integrations.rpcByokLastActive")}
+            </p>
           ) : null}
           {/* Only ever the answer to the click that asked for it: nothing
                   about a check is stored any more (HOO-1228). */}
@@ -303,11 +313,14 @@ function ConnectionsUnavailable({
  */
 function CredentialModeCard({
   mode,
+  stranded,
   saving,
   onChange,
   t,
 }: {
   mode: "managed" | "byok";
+  /** On its own keys with nothing live: every RPC call is failing right now. */
+  stranded: boolean;
   saving: boolean;
   onChange: (next: "managed" | "byok") => void;
   t: ReturnType<typeof useTranslations>;
@@ -321,6 +334,11 @@ function CredentialModeCard({
             ? t("Shared.integrations.rpcModeByokHint")
             : t("Shared.integrations.rpcModeManagedHint")}
         </p>
+        {stranded ? (
+          <p className="max-w-2xl text-xs leading-5 text-error">
+            {t("Shared.integrations.rpcModeStranded")}
+          </p>
+        ) : null}
       </div>
       <ToggleSwitch
         checked={mode === "byok"}
@@ -415,12 +433,15 @@ export function RpcByokSection({
   canManage,
   connections,
   credentialMode,
+  liveConnectionCount = 0,
   projectConnectionProvider,
   provider,
 }: {
   canManage: boolean;
   /** `null` when it could not be read; the control is hidden rather than guessed. */
   credentialMode?: "managed" | "byok" | null;
+  /** Live connections across the whole organization, not just this provider. */
+  liveConnectionCount?: number;
   /** The provider this project already routes through, when it is not this one. */
   projectConnectionProvider?: string | null;
   /**
@@ -459,8 +480,16 @@ export function RpcByokSection({
   // provider holding it closes this page's form too.
   const takenByAnotherProvider = Boolean(projectConnectionProvider);
 
+  /** A check describes the connection as it was; any change makes it a lie. */
+  const forgetTest = (connectionId: string) =>
+    setTestResults((current) => {
+      const { [connectionId]: _dropped, ...rest } = current;
+      return rest;
+    });
+
   const runConnectionAction = async (action: ConnectionAction, connectionId: string) => {
     setPendingId(connectionId);
+    forgetTest(connectionId);
     const formData = new FormData();
     formData.set("connectionId", connectionId);
     formData.set("provider", provider);
@@ -480,6 +509,7 @@ export function RpcByokSection({
 
   const runTest = async (connectionId: string) => {
     setPendingId(connectionId);
+    forgetTest(connectionId);
     const formData = new FormData();
     formData.set("connectionId", connectionId);
     try {
@@ -523,6 +553,7 @@ export function RpcByokSection({
     formData.set("provider", provider);
     formData.set("apiKey", apiKey);
     formData.set("endpointUrl", endpointUrl);
+    forgetTest(connectionId);
     try {
       const result = await rotateRpcConnectionAction(formData);
       if (result.status === "success") {
@@ -578,6 +609,7 @@ export function RpcByokSection({
         <ConnectionList
           canManage={canManage}
           connections={connections}
+          failsClosed={mode === "byok"}
           pendingId={pendingId}
           onAction={(action, id) => {
             void runConnectionAction(action, id);
@@ -600,6 +632,7 @@ export function RpcByokSection({
       {canManage && credentialMode ? (
         <CredentialModeCard
           mode={mode}
+          stranded={mode === "byok" && liveConnectionCount === 0}
           saving={isSavingMode}
           onChange={(next) => {
             void saveMode(next);

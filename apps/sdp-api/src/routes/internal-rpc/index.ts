@@ -73,7 +73,7 @@ internalRpc.use("*", projectContextMiddleware());
 // Whose credentials this organization runs on. Organization-wide, so it sits
 // beside the connections rather than on one of them.
 internalRpc.get("/credential-mode", async (c) => {
-  return success(c, { mode: await getRpcCredentialMode(c) });
+  return success(c, await getRpcCredentialMode(c));
 });
 
 internalRpc.put("/credential-mode", async (c) => {

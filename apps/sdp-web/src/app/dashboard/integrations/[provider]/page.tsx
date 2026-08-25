@@ -126,17 +126,18 @@ function resolveByokProps(result: Awaited<ReturnType<typeof getByokConnections>>
  * "SDP-managed" at an organization that is actually on its own keys is the
  * kind of wrong that gets acted on.
  */
-async function getRpcCredentialMode(canManage: boolean): Promise<"managed" | "byok" | null> {
+async function getRpcCredentialMode(
+  canManage: boolean
+): Promise<{ mode: "managed" | "byok"; liveConnections: number } | null> {
   if (!canManage) {
     return null;
   }
 
   try {
     const client = await createSdpApiClient();
-    const payload = await client.fetch<{ mode: "managed" | "byok" }>(
+    return await client.fetch<{ mode: "managed" | "byok"; liveConnections: number }>(
       "/internal/dashboard/rpc/credential-mode"
     );
-    return payload.mode;
   } catch {
     return null;
   }
@@ -196,9 +197,10 @@ export default async function IntegrationDetailPage({
   }
   const organizationId = onboarding.organization.id;
 
-  const [availability, connectedProviders] = await Promise.all([
+  const [availability, connectedProviders, credentialModeState] = await Promise.all([
     fetchProviderAvailability(projectClient.request, organizationId),
     getConnectedCustodyProviders(projectClient.request).catch(() => null),
+    getRpcCredentialMode(dashboardAccess.capabilities.canManageOrgSettings),
   ]);
 
   // The shell only routes here after onboarding, so a missing setting means
@@ -243,9 +245,8 @@ export default async function IntegrationDetailPage({
                   dashboardAccess.capabilities.canManageOrgSettings
                 )
               ),
-              credentialMode: await getRpcCredentialMode(
-                dashboardAccess.capabilities.canManageOrgSettings
-              ),
+              credentialMode: credentialModeState?.mode ?? null,
+              liveConnectionCount: credentialModeState?.liveConnections ?? 0,
             }
           : undefined
       }

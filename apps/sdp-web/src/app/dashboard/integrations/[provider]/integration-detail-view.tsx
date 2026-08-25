@@ -31,6 +31,8 @@ export interface RpcConnectionContext {
   byokConnections?: SafeRpcConnection[] | null | "restricted";
   /** `null` when it could not be read, or the viewer may not manage it. */
   credentialMode?: "managed" | "byok" | null;
+  /** Live connections across the whole organization, for the fail-closed warning. */
+  liveConnectionCount?: number;
   /**
    * Set when the project already routes through a different provider. A
    * project takes one connection whatever the provider, so this page must not
@@ -201,6 +203,7 @@ export async function IntegrationDetailView({
             canManage={rpc.canManage}
             connections={rpc.byokConnections}
             credentialMode={rpc.credentialMode ?? null}
+            liveConnectionCount={rpc.liveConnectionCount ?? 0}
             projectConnectionProvider={rpc.projectConnectionProvider ?? null}
             provider={detail.provider}
           />
