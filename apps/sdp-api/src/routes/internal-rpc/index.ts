@@ -1,5 +1,4 @@
 import { BYOK_RPC_PROVIDERS } from "@sdp/rpc/byok";
-import { RPC_CONNECTION_NETWORKS } from "@sdp/types";
 import { Hono } from "hono";
 import { z } from "zod";
 import { badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
@@ -9,16 +8,21 @@ import { projectContextMiddleware } from "@/middleware/project-context";
 import {
   activateRpcConnection,
   deactivateRpcConnection,
+  deleteRpcConnection,
   listRpcConnections,
+  rotateRpcConnection,
   submitRpcConnection,
+  testRpcConnection,
 } from "@/services/rpc-connection.service";
 import type { Env } from "@/types/env";
 
 const connectionParamsSchema = z.object({ connectionId: z.string().trim().min(1) }).strict();
 
+// `organization` stays readable so connections made before HOO-1226 are still
+// listed and can be deactivated. Only creation is project-only.
 const listQuerySchema = z
   .object({
-    scope: z.enum(["organization", "project"]).default("organization"),
+    scope: z.enum(["organization", "project"]).default("project"),
     limit: z.coerce.number().int().min(1).max(50).default(20),
     offset: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0),
   })
@@ -32,9 +36,21 @@ const listQuerySchema = z
 const createConnectionSchema = z
   .object({
     provider: z.enum(BYOK_RPC_PROVIDERS as unknown as [string, ...string[]]),
-    network: z.enum(RPC_CONNECTION_NETWORKS as unknown as [string, ...string[]]),
-    scope: z.enum(["organization", "project"]).default("organization"),
+    // No `network`: it comes from the project's environment (HOO-1221), so a
+    // caller cannot name one that disagrees with the project it lands on.
+    // One way to configure a connection (HOO-1226). Organization scope is not
+    // accepted here any more; the relay stopped resolving it.
+    scope: z.literal("project").default("project"),
     credentialLabel: z.string().trim().min(1).max(100),
+    endpointUrl: z.string().trim().url().max(2048).optional(),
+    apiKey: z.string().min(1).max(4096),
+  })
+  .strict();
+
+// The label and the network stay as they were: this replaces a key, it does
+// not reconfigure the connection.
+const rotateConnectionSchema = z
+  .object({
     endpointUrl: z.string().trim().url().max(2048).optional(),
     apiKey: z.string().min(1).max(4096),
   })
@@ -98,6 +114,44 @@ internalRpc.post("/connections/:connectionId/deactivate", async (c) => {
   }
 
   return success(c, await deactivateRpcConnection(c, params.data.connectionId));
+});
+
+// Swap the key without a gap where the project routes nothing (HOO-1229).
+internalRpc.post("/connections/:connectionId/rotate", async (c) => {
+  const params = connectionParamsSchema.safeParse(c.req.param());
+  if (!params.success) {
+    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+  }
+
+  const body = await c.req.json().catch(() => null);
+  const parsed = rotateConnectionSchema.safeParse(body);
+  if (!parsed.success) {
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
+    });
+  }
+
+  return success(c, await rotateRpcConnection(c, params.data.connectionId, parsed.data));
+});
+
+// Checks the stored credential and writes nothing (HOO-1228).
+internalRpc.post("/connections/:connectionId/test", async (c) => {
+  const params = connectionParamsSchema.safeParse(c.req.param());
+  if (!params.success) {
+    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+  }
+
+  return success(c, await testRpcConnection(c, params.data.connectionId));
+});
+
+internalRpc.delete("/connections/:connectionId", async (c) => {
+  const params = connectionParamsSchema.safeParse(c.req.param());
+  if (!params.success) {
+    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+  }
+
+  await deleteRpcConnection(c, params.data.connectionId);
+  return success(c, { deleted: true });
 });
 
 export default internalRpc;

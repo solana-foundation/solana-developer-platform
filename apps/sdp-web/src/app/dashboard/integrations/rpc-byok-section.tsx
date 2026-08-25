@@ -6,14 +6,29 @@ import { useId, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import {
   activateRpcConnectionAction,
   deactivateRpcConnectionAction,
+  deleteRpcConnectionAction,
+  rotateRpcConnectionAction,
   submitRpcConnectionAction,
+  testRpcConnectionAction,
 } from "./rpc-connection-actions";
+
+/**
+ * Every row control posts a connection id and reads back a status. Delete
+ * answers `deleted` rather than a connection, so the shared handler is typed on
+ * what they have in common rather than on one of them.
+ */
+type ConnectionAction = (
+  formData: FormData
+) => Promise<{ status: string; message?: string } | { status: "deleted" }>;
+
+/** What a manual check answered, held per row and never persisted. */
+type TestOutcome = { ok: boolean; failureCode: string | null };
 
 /**
  * The stored-credential rows.
@@ -27,78 +42,305 @@ function ConnectionList({
   connections,
   pendingId,
   onAction,
+  onTest,
+  onRotateToggle,
+  onRotate,
+  rotatingId,
+  testResults,
   t,
 }: {
   canManage: boolean;
   connections: SafeRpcConnection[];
   pendingId: string | null;
-  onAction: (action: typeof activateRpcConnectionAction, connectionId: string) => void;
+  onAction: (action: ConnectionAction, connectionId: string) => void;
+  onTest: (connectionId: string) => void;
+  onRotateToggle: (connectionId: string | null) => void;
+  onRotate: (connectionId: string, apiKey: string, endpointUrl: string) => void;
+  rotatingId: string | null;
+  testResults: Record<string, TestOutcome>;
   t: ReturnType<typeof useTranslations>;
 }) {
+  // Deactivating the last one puts the project back on SDP's keys, and the
+  // relay says nothing when it happens, so the warning has to be here.
+  const activeCount = connections.filter(
+    (item) => item.status === "active" && item.scope === "project"
+  ).length;
+
   return (
     <ul className="space-y-2">
       {connections.map((connection) => (
-        <li
+        <ConnectionRow
           key={connection.id}
-          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border-default bg-fill-subtle px-4 py-3"
-        >
-          <div className="min-w-0 space-y-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-medium text-primary">
-                {connection.providerCredential.label}
-              </span>
-              {connection.isDefault && connection.status === "active" ? (
-                <Badge variant="success">{t("Shared.integrations.rpcByokServing")}</Badge>
-              ) : (
-                <Badge variant="outline">{connection.status}</Badge>
-              )}
-            </div>
-            <p className="text-xs text-tertiary">
-              {connection.network}
-              {typeof connection.displayMetadata.endpointHost === "string"
-                ? ` · ${connection.displayMetadata.endpointHost}`
-                : ""}
-              {typeof connection.displayMetadata.apiKeySuffix === "string"
-                ? ` · ····${connection.displayMetadata.apiKeySuffix}`
-                : ""}
-            </p>
-            {connection.lastCheck?.failureCode ? (
-              <p className="text-xs text-error">{connection.lastCheck.failureCode}</p>
-            ) : null}
-          </div>
-
-          {canManage ? (
-            <div className="flex flex-wrap gap-2">
-              {connection.status !== "active" ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={pendingId === connection.id}
-                  onClick={() => {
-                    onAction(activateRpcConnectionAction, connection.id);
-                  }}
-                >
-                  {t("Shared.integrations.rpcByokUse")}
-                </Button>
-              ) : null}
-              {connection.status !== "deactivated" ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  disabled={pendingId === connection.id}
-                  onClick={() => {
-                    onAction(deactivateRpcConnectionAction, connection.id);
-                  }}
-                >
-                  {t("Shared.integrations.rpcByokDeactivate")}
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
-        </li>
+          canManage={canManage}
+          connection={connection}
+          isLastActive={
+            activeCount === 1 &&
+            connection.status === "active" &&
+            connection.scope !== "organization"
+          }
+          isRotating={rotatingId === connection.id}
+          pendingId={pendingId}
+          onAction={onAction}
+          onTest={onTest}
+          onRotateToggle={onRotateToggle}
+          onRotate={onRotate}
+          testResult={testResults[connection.id]}
+          t={t}
+        />
       ))}
     </ul>
+  );
+}
+
+/**
+ * One stored credential and the things that can be done to it.
+ *
+ * Split out from the list so each row's branching is counted on its own: the
+ * controls a row offers depend on scope, lifecycle and whether a rotation is
+ * open, and the combined function tripped the repository's complexity limit.
+ */
+function ConnectionRow({
+  canManage,
+  connection,
+  isLastActive,
+  isRotating,
+  pendingId,
+  onAction,
+  onTest,
+  onRotateToggle,
+  onRotate,
+  testResult,
+  t,
+}: {
+  canManage: boolean;
+  connection: SafeRpcConnection;
+  isLastActive: boolean;
+  isRotating: boolean;
+  pendingId: string | null;
+  onAction: (action: ConnectionAction, connectionId: string) => void;
+  onTest: (connectionId: string) => void;
+  onRotateToggle: (connectionId: string | null) => void;
+  onRotate: (connectionId: string, apiKey: string, endpointUrl: string) => void;
+  testResult: TestOutcome | undefined;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  // Pre-HOO-1226 rows. The relay no longer resolves them, so activating
+  // one would report success and route nothing.
+  const isOrganizationScoped = connection.scope === "organization";
+  // Deactivation destroys the secret, so the API refuses to reactivate
+  // (409). Offering the control anyway was a button that could only ever
+  // produce an error (HOO-1219).
+  const isDeactivated = connection.status === "deactivated";
+  const canActivate = connection.status !== "active" && !isDeactivated && !isOrganizationScoped;
+  // A withdrawn or stranded row has nothing worth checking or replacing.
+  const isLive = !isDeactivated && !isOrganizationScoped;
+
+  return (
+    <li className="space-y-3 rounded-xl border border-border-default bg-fill-subtle px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium text-primary">
+              {connection.providerCredential.label}
+            </span>
+            {connection.isDefault && connection.status === "active" && !isOrganizationScoped ? (
+              <Badge variant="success">{t("Shared.integrations.rpcByokServing")}</Badge>
+            ) : (
+              <Badge variant="outline">{connection.status}</Badge>
+            )}
+          </div>
+          <p className="text-xs text-tertiary">
+            {connection.network}
+            {typeof connection.displayMetadata.endpointHost === "string"
+              ? ` · ${connection.displayMetadata.endpointHost}`
+              : ""}
+            {typeof connection.displayMetadata.apiKeySuffix === "string"
+              ? ` · ····${connection.displayMetadata.apiKeySuffix}`
+              : ""}
+          </p>
+          {isOrganizationScoped ? (
+            <p className="text-xs text-warning">
+              {t("Shared.integrations.rpcByokOrganizationScoped")}
+            </p>
+          ) : null}
+          {/* "What does deactivated mean?" was the question on the mock, so
+                  the answer sits on the row rather than in a badge. */}
+          {isDeactivated ? (
+            <p className="text-xs text-tertiary">
+              {t("Shared.integrations.rpcByokDeactivatedMeaning")}
+            </p>
+          ) : null}
+          {isLastActive ? (
+            <p className="text-xs text-warning">{t("Shared.integrations.rpcByokLastActive")}</p>
+          ) : null}
+          {/* Only ever the answer to the click that asked for it: nothing
+                  about a check is stored any more (HOO-1228). */}
+          {testResult ? (
+            <p className={`text-xs ${testResult.ok ? "text-success" : "text-error"}`}>
+              {testResult.ok
+                ? t("Shared.integrations.rpcByokTestPassed")
+                : (testResult.failureCode ?? t("Shared.integrations.rpcByokTestFailed"))}
+            </p>
+          ) : null}
+        </div>
+
+        {canManage ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {canActivate ? (
+              <Button
+                type="button"
+                size="sm"
+                disabled={pendingId === connection.id}
+                onClick={() => {
+                  onAction(activateRpcConnectionAction, connection.id);
+                }}
+              >
+                {t("Shared.integrations.rpcByokUse")}
+              </Button>
+            ) : null}
+            {/* Live connections can be re-checked whenever somebody wants
+                    to know, rather than reading a stored verdict. */}
+            {isLive ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={pendingId === connection.id}
+                onClick={() => {
+                  onTest(connection.id);
+                }}
+              >
+                {t("Shared.integrations.rpcByokTest")}
+              </Button>
+            ) : null}
+            {/* Rotation asks for the replacement up front rather than
+                    leaving people to deactivate and re-add (HOO-1229). */}
+            {isLive ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                aria-expanded={isRotating}
+                disabled={pendingId === connection.id}
+                onClick={() => {
+                  onRotateToggle(isRotating ? null : connection.id);
+                }}
+              >
+                {isRotating
+                  ? t("Shared.integrations.rpcByokCancel")
+                  : t("Shared.integrations.rpcByokRotate")}
+              </Button>
+            ) : null}
+            {isDeactivated ? (
+              // Nothing left to destroy, so an ordinary button is enough.
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={pendingId === connection.id}
+                onClick={() => {
+                  onAction(deleteRpcConnectionAction, connection.id);
+                }}
+              >
+                {t("Shared.integrations.rpcByokDelete")}
+              </Button>
+            ) : (
+              // Held rather than clicked: this destroys the stored key and
+              // there is no way back (HOO-1230).
+              <HoldToConfirmButton
+                label={t("Shared.integrations.rpcByokDeactivate")}
+                holdingLabel={t("Shared.integrations.rpcByokDeactivateHolding")}
+                disabled={pendingId === connection.id}
+                onConfirm={() => {
+                  onAction(deactivateRpcConnectionAction, connection.id);
+                }}
+              />
+            )}
+          </div>
+        ) : null}
+      </div>
+
+      {isRotating ? (
+        <RotateForm
+          connectionId={connection.id}
+          needsEndpoint={rpcProviderNeedsEndpoint(connection.provider)}
+          pending={pendingId === connection.id}
+          onRotate={onRotate}
+          t={t}
+        />
+      ) : null}
+    </li>
+  );
+}
+
+/**
+ * The replacement key, asked for in place.
+ *
+ * Its own component so the value lives and dies with the open form: a key
+ * typed here must not survive the row being collapsed, and per-row state in
+ * the list would outlive it.
+ */
+function RotateForm({
+  connectionId,
+  needsEndpoint,
+  pending,
+  onRotate,
+  t,
+}: {
+  connectionId: string;
+  needsEndpoint: boolean;
+  pending: boolean;
+  onRotate: (connectionId: string, apiKey: string, endpointUrl: string) => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const [apiKey, setApiKey] = useState("");
+  const [endpointUrl, setEndpointUrl] = useState("");
+  const keyFieldId = useId();
+  const endpointFieldId = useId();
+
+  return (
+    <form
+      className="grid gap-3 border-t border-border-default pt-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onRotate(connectionId, apiKey, endpointUrl);
+      }}
+    >
+      <p className="text-xs text-tertiary">{t("Shared.integrations.rpcByokRotateHint")}</p>
+      {needsEndpoint ? (
+        <label className="grid gap-1.5 text-sm" htmlFor={endpointFieldId}>
+          <span className="font-medium text-primary">
+            {t("Shared.integrations.rpcByokEndpoint")}
+          </span>
+          <Input
+            id={endpointFieldId}
+            required
+            type="url"
+            value={endpointUrl}
+            onChange={(event) => setEndpointUrl(event.target.value)}
+            placeholder="https://your-endpoint.example"
+          />
+        </label>
+      ) : null}
+      <label className="grid gap-1.5 text-sm" htmlFor={keyFieldId}>
+        <span className="font-medium text-primary">
+          {t("Shared.integrations.rpcByokNewApiKey")}
+        </span>
+        <Input
+          id={keyFieldId}
+          required
+          type="password"
+          autoComplete="off"
+          value={apiKey}
+          onChange={(event) => setApiKey(event.target.value)}
+        />
+      </label>
+      <div>
+        <Button type="submit" size="sm" disabled={pending}>
+          {t("Shared.integrations.rpcByokRotateSave")}
+        </Button>
+      </div>
+    </form>
   );
 }
 
@@ -129,19 +371,22 @@ export function RpcByokSection({
   const [credentialLabel, setCredentialLabel] = useState("");
   const [endpointUrl, setEndpointUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
-  const [network, setNetwork] = useState("devnet");
   const [showKey, setShowKey] = useState(false);
+  const [testResults, setTestResults] = useState<Record<string, TestOutcome>>({});
+  const [rotatingId, setRotatingId] = useState<string | null>(null);
   const apiKeyHintId = useId();
   const endpointHintId = useId();
   const labelFieldId = useId();
   const endpointFieldId = useId();
   const apiKeyFieldId = useId();
   const needsEndpoint = rpcProviderNeedsEndpoint(provider);
+  // A stranded organization row is not a connection this project can use, so
+  // it must not be what stops a project connection being added.
+  const hasLiveConnection =
+    Array.isArray(connections) &&
+    connections.some((item) => item.scope === "project" && item.status !== "deactivated");
 
-  const runConnectionAction = async (
-    action: typeof activateRpcConnectionAction,
-    connectionId: string
-  ) => {
+  const runConnectionAction = async (action: ConnectionAction, connectionId: string) => {
     setPendingId(connectionId);
     const formData = new FormData();
     formData.set("connectionId", connectionId);
@@ -150,9 +395,52 @@ export function RpcByokSection({
       const result = await action(formData);
       if (result.status === "success") {
         toast.success(t("Shared.integrations.rpcByokUpdated"), { position: "bottom-right" });
+      } else if (result.status === "deleted") {
+        toast.success(t("Shared.integrations.rpcByokDeleted"), { position: "bottom-right" });
       } else {
-        toast.error(result.message, { position: "bottom-right" });
+        toast.error("message" in result ? result.message : undefined, { position: "bottom-right" });
       }
+    } finally {
+      setPendingId(null);
+    }
+  };
+
+  const runTest = async (connectionId: string) => {
+    setPendingId(connectionId);
+    const formData = new FormData();
+    formData.set("connectionId", connectionId);
+    try {
+      const result = await testRpcConnectionAction(formData);
+      if (result.status === "tested") {
+        setTestResults((current) => ({
+          ...current,
+          [connectionId]: { ok: result.ok, failureCode: result.failureCode },
+        }));
+        return;
+      }
+      toast.error(result.message, { position: "bottom-right" });
+    } finally {
+      setPendingId(null);
+    }
+  };
+
+  const runRotate = async (connectionId: string, apiKey: string, endpointUrl: string) => {
+    setPendingId(connectionId);
+    const formData = new FormData();
+    formData.set("connectionId", connectionId);
+    formData.set("provider", provider);
+    formData.set("apiKey", apiKey);
+    formData.set("endpointUrl", endpointUrl);
+    try {
+      const result = await rotateRpcConnectionAction(formData);
+      if (result.status === "success") {
+        // Closed before the toast: the field holding the new key must not
+        // stay mounted once it has been accepted.
+        setRotatingId(null);
+        toast.success(t("Shared.integrations.rpcByokRotated"), { position: "bottom-right" });
+        return;
+      }
+      toast.error(result.message, { position: "bottom-right" });
     } finally {
       setPendingId(null);
     }
@@ -162,8 +450,7 @@ export function RpcByokSection({
     setIsSubmitting(true);
     const formData = new FormData();
     formData.set("provider", provider);
-    formData.set("network", network);
-    formData.set("scope", "organization");
+    formData.set("scope", "project");
     formData.set("credentialLabel", credentialLabel);
     formData.set("endpointUrl", endpointUrl);
     formData.set("apiKey", apiKey);
@@ -210,13 +497,28 @@ export function RpcByokSection({
           onAction={(action, id) => {
             void runConnectionAction(action, id);
           }}
+          onTest={(id) => {
+            void runTest(id);
+          }}
+          onRotateToggle={setRotatingId}
+          onRotate={(id, key, endpoint) => {
+            void runRotate(id, key, endpoint);
+          }}
+          rotatingId={rotatingId}
+          testResults={testResults}
           t={t}
         />
       ) : (
         <p className="text-sm leading-6 text-tertiary">{t("Shared.integrations.rpcByokEmpty")}</p>
       )}
 
-      {canManage ? (
+      {canManage && hasLiveConnection ? (
+        // One per project for now (HOO-1227). Saying so is better than an Add
+        // button that only ever comes back with a conflict.
+        <p className="text-sm leading-6 text-tertiary">{t("Shared.integrations.rpcByokOnlyOne")}</p>
+      ) : null}
+
+      {canManage && !hasLiveConnection ? (
         <div className="space-y-3">
           {/* Collapsed by default: most visits are to read what is connected,
               not to add a credential, and a permanently open secret field is
@@ -242,35 +544,22 @@ export function RpcByokSection({
               void submit();
             }}
           >
-            <div className="grid gap-2 sm:grid-cols-2">
-              <label className="grid gap-1.5 text-sm" htmlFor={labelFieldId}>
-                <span className="font-medium text-primary">
-                  {t("Shared.integrations.rpcByokLabel")}
-                </span>
-                <Input
-                  id={labelFieldId}
-                  required
-                  value={credentialLabel}
-                  onChange={(event) => setCredentialLabel(event.target.value)}
-                  placeholder={t("Shared.integrations.rpcByokLabelPlaceholder")}
-                />
-              </label>
-              <div className="grid gap-1.5 text-sm">
-                <span className="font-medium text-primary">
-                  {t("Shared.integrations.rpcByokNetwork")}
-                </span>
-                <Select
-                  ariaLabel={t("Shared.integrations.rpcByokNetwork")}
-                  value={network}
-                  onValueChange={(value) => {
-                    if (value) setNetwork(value);
-                  }}
-                >
-                  <SelectItem value="devnet">devnet</SelectItem>
-                  <SelectItem value="mainnet-beta">mainnet-beta</SelectItem>
-                </Select>
-              </div>
-            </div>
+            {/* No network field: the project decides it (HOO-1221). A sandbox
+                project is devnet and a production one is mainnet, and the key
+                itself is the same either way, so asking only created a way for
+                the two to disagree. */}
+            <label className="grid gap-1.5 text-sm" htmlFor={labelFieldId}>
+              <span className="font-medium text-primary">
+                {t("Shared.integrations.rpcByokLabel")}
+              </span>
+              <Input
+                id={labelFieldId}
+                required
+                value={credentialLabel}
+                onChange={(event) => setCredentialLabel(event.target.value)}
+                placeholder={t("Shared.integrations.rpcByokLabelPlaceholder")}
+              />
+            </label>
 
             {/* Only providers that issue an account-specific host make the
                 tenant type one; for the rest the published endpoint is used. */}

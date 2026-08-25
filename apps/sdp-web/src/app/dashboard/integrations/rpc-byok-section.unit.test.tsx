@@ -9,15 +9,36 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const submitRpcConnectionAction = vi.fn();
 const activateRpcConnectionAction = vi.fn();
 const deactivateRpcConnectionAction = vi.fn();
+const deleteRpcConnectionAction = vi.fn();
+const testRpcConnectionAction = vi.fn();
+const rotateRpcConnectionAction = vi.fn();
 
 vi.mock("./rpc-connection-actions", () => ({
   submitRpcConnectionAction: (fd: FormData) => submitRpcConnectionAction(fd),
   activateRpcConnectionAction: (fd: FormData) => activateRpcConnectionAction(fd),
   deactivateRpcConnectionAction: (fd: FormData) => deactivateRpcConnectionAction(fd),
+  deleteRpcConnectionAction: (fd: FormData) => deleteRpcConnectionAction(fd),
+  testRpcConnectionAction: (fd: FormData) => testRpcConnectionAction(fd),
+  rotateRpcConnectionAction: (fd: FormData) => rotateRpcConnectionAction(fd),
 }));
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { error: vi.fn(), loading: vi.fn(), success: vi.fn() }),
 }));
+
+// jsdom ships no matchMedia, and the deactivate control is a hold-to-confirm
+// button that asks about reduced motion on mount.
+if (typeof window !== "undefined" && !window.matchMedia) {
+  window.matchMedia = ((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+}
 
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
@@ -27,13 +48,12 @@ function connection(overrides: Partial<SafeRpcConnection> = {}): SafeRpcConnecti
   return {
     id: "rconn_1",
     provider: "helius",
-    scope: "organization",
-    projectId: null,
+    scope: "project",
+    projectId: "prj_1",
     network: "devnet",
     status: "active",
     isDefault: true,
     displayMetadata: { endpointHost: "tenant.example", apiKeySuffix: "1234" },
-    lastCheck: null,
     createdAt: "2026-08-16T00:00:00.000Z",
     activatedAt: "2026-08-16T00:00:00.000Z",
     deactivatedAt: null,
@@ -57,9 +77,15 @@ beforeEach(() => {
   submitRpcConnectionAction.mockReset();
   activateRpcConnectionAction.mockReset();
   deactivateRpcConnectionAction.mockReset();
+  deleteRpcConnectionAction.mockReset();
+  testRpcConnectionAction.mockReset();
+  rotateRpcConnectionAction.mockReset();
+  rotateRpcConnectionAction.mockResolvedValue({ status: "success", connection: connection() });
   submitRpcConnectionAction.mockResolvedValue({ status: "success", connection: connection() });
   activateRpcConnectionAction.mockResolvedValue({ status: "success", connection: connection() });
   deactivateRpcConnectionAction.mockResolvedValue({ status: "success", connection: connection() });
+  deleteRpcConnectionAction.mockResolvedValue({ status: "deleted" });
+  testRpcConnectionAction.mockResolvedValue({ status: "tested", ok: true, failureCode: null });
 });
 
 afterEach(cleanup);
@@ -111,7 +137,10 @@ describe("RpcByokSection", () => {
     const sent = submitRpcConnectionAction.mock.calls[0][0] as FormData;
     expect(sent.get("apiKey")).toBe("tenant-key-9999");
     expect(sent.get("provider")).toBe("helius");
-    expect(sent.get("network")).toBe("devnet");
+    expect(sent.get("scope")).toBe("project");
+    // The project decides the network now, so the form must not send one
+    // that could disagree with it (HOO-1221).
+    expect(sent.get("network")).toBeNull();
   });
 
   it("clears the key field after a successful save so it is never re-shown", async () => {
@@ -173,23 +202,106 @@ describe("RpcByokSection", () => {
     expect(activateRpcConnectionAction).toHaveBeenCalledTimes(1);
   });
 
+  it("tells the tenant an organization-scoped connection is not routing", () => {
+    // Made before HOO-1226. The relay refuses to resolve it, so offering
+    // activation here would report success over a connection carrying nothing.
+    renderSection({
+      connections: [connection({ scope: "organization", projectId: null, isDefault: false })],
+    });
+
+    expect(screen.getByText(/not routing traffic/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Use this connection" })).toBeNull();
+  });
+
+  it("still lets a stranded organization connection be deactivated", () => {
+    // The hold-to-confirm behaviour itself is covered by the button's own
+    // tests; what matters here is that the way out is still offered.
+    renderSection({
+      connections: [connection({ scope: "organization", projectId: null, isDefault: false })],
+    });
+
+    expect(screen.getByRole("button", { name: /Deactivate/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Test" })).toBeNull();
+  });
+
+  it("offers delete on a deactivated connection and nothing that would error", async () => {
+    const user = userEvent.setup();
+    renderSection({
+      connections: [connection({ status: "deactivated", isDefault: false })],
+    });
+
+    expect(screen.queryByRole("button", { name: "Use this connection" })).toBeNull();
+    expect(screen.getByText(/stored key was destroyed/)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    expect(deleteRpcConnectionAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks for the replacement key instead of making people re-add", async () => {
+    const user = userEvent.setup();
+    renderSection({ connections: [connection()] });
+
+    await user.click(screen.getByRole("button", { name: "Rotate key" }));
+    await user.type(screen.getByLabelText("New API key"), "tenant-key-rotated");
+    await user.click(screen.getByRole("button", { name: "Rotate" }));
+
+    const sent = rotateRpcConnectionAction.mock.calls[0][0] as FormData;
+    expect(sent.get("apiKey")).toBe("tenant-key-rotated");
+    expect(sent.get("connectionId")).toBe("rconn_1");
+  });
+
+  it("hides the add form once the project already has a connection", () => {
+    // One per project for now (HOO-1227), so the way to change it is rotation.
+    renderSection({ connections: [connection()] });
+
+    expect(screen.queryByRole("button", { name: "Add connection" })).toBeNull();
+    expect(screen.getByText(/A project routes through one connection/)).toBeTruthy();
+  });
+
+  it("still offers add when the only rows are stranded or withdrawn", () => {
+    renderSection({
+      connections: [
+        connection({ scope: "organization", projectId: null, isDefault: false }),
+        connection({ id: "rconn_2", status: "deactivated", isDefault: false }),
+      ],
+    });
+
+    expect(screen.getByRole("button", { name: "Add connection" })).toBeTruthy();
+  });
+
+  it("warns when the connection about to be deactivated is the only one", () => {
+    renderSection({ connections: [connection()] });
+    expect(screen.getByText(/only connection routing this project/)).toBeTruthy();
+  });
+
   it("gives a non-admin the connections but no controls", () => {
     renderSection({ canManage: false, connections: [connection()] });
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.getByText(/Only organization administrators/)).toBeTruthy();
   });
 
-  it("surfaces a redacted failure code rather than a provider response", () => {
-    renderSection({
-      connections: [
-        connection({
-          status: "failed",
-          isDefault: false,
-          lastCheck: { status: "failed", at: null, failureCode: "provider_rejected_credentials" },
-        }),
-      ],
+  it("surfaces a redacted failure code from a manual test, not a provider response", async () => {
+    const user = userEvent.setup();
+    testRpcConnectionAction.mockResolvedValue({
+      status: "tested",
+      ok: false,
+      failureCode: "provider_rejected_credentials",
     });
-    expect(screen.getByText("provider_rejected_credentials")).toBeTruthy();
+    renderSection({ connections: [connection({ status: "failed", isDefault: false })] });
+
+    await user.click(screen.getByRole("button", { name: "Test" }));
+
+    expect(await screen.findByText("provider_rejected_credentials")).toBeTruthy();
+  });
+
+  it("reports a passing check without writing anything down", async () => {
+    const user = userEvent.setup();
+    testRpcConnectionAction.mockResolvedValue({ status: "tested", ok: true, failureCode: null });
+    renderSection({ connections: [connection()] });
+
+    await user.click(screen.getByRole("button", { name: "Test" }));
+
+    expect(await screen.findByText(/Reached the provider just now/)).toBeTruthy();
   });
 
   it("says the credentials could not be read rather than claiming there are none", () => {

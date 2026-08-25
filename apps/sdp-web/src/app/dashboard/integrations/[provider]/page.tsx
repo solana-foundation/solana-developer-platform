@@ -74,27 +74,45 @@ async function getByokConnections(provider: string, canManage: boolean) {
 
   try {
     const client = await createSdpApiClient();
-    const collected: RpcConnectionListResponse["connections"] = [];
-    let offset = 0;
-    let total = 0;
+    // Both scopes: connections are made on the project now (HOO-1226), but the
+    // organization-scoped ones made before that still exist and the relay
+    // refuses to route while one is sitting there. Hiding them would leave the
+    // tenant reading an error with nothing on screen to act on.
+    const [projectScoped, organizationScoped] = await Promise.all([
+      collectConnections(client, "project"),
+      collectConnections(client, "organization"),
+    ]);
 
-    do {
-      const payload = await client.fetch<RpcConnectionListResponse>(
-        `/internal/dashboard/rpc/connections?scope=organization&limit=${CONNECTION_PAGE_SIZE}&offset=${offset}`
-      );
-      collected.push(...payload.connections);
-      total = payload.pagination.total;
-      offset += CONNECTION_PAGE_SIZE;
-      // A page that comes back short means the list ended, whatever total says.
-      if (payload.connections.length < CONNECTION_PAGE_SIZE) {
-        break;
-      }
-    } while (collected.length < total);
-
-    return collected.filter((connection) => connection.provider === provider);
+    return [...projectScoped, ...organizationScoped].filter(
+      (connection) => connection.provider === provider
+    );
   } catch {
     return null;
   }
+}
+
+async function collectConnections(
+  client: Awaited<ReturnType<typeof createSdpApiClient>>,
+  scope: "project" | "organization"
+): Promise<RpcConnectionListResponse["connections"]> {
+  const collected: RpcConnectionListResponse["connections"] = [];
+  let offset = 0;
+  let total = 0;
+
+  do {
+    const payload = await client.fetch<RpcConnectionListResponse>(
+      `/internal/dashboard/rpc/connections?scope=${scope}&limit=${CONNECTION_PAGE_SIZE}&offset=${offset}`
+    );
+    collected.push(...payload.connections);
+    total = payload.pagination.total;
+    offset += CONNECTION_PAGE_SIZE;
+    // A page that comes back short means the list ended, whatever total says.
+    if (payload.connections.length < CONNECTION_PAGE_SIZE) {
+      break;
+    }
+  } while (collected.length < total);
+
+  return collected;
 }
 
 export default async function IntegrationDetailPage({

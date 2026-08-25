@@ -6,7 +6,12 @@ import {
   resolveTenantEndpoint,
   type TenantRpcCredential,
 } from "@sdp/rpc/byok";
-import type { RpcConnectionNetwork, SafeRpcConnection } from "@sdp/types";
+import type {
+  ProjectEnvironment,
+  RpcConnectionNetwork,
+  RpcConnectionTestResult,
+  SafeRpcConnection,
+} from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
@@ -31,8 +36,11 @@ type AppContext = Context<{ Bindings: Env }>;
 
 export interface SubmitRpcConnectionInput {
   provider: ByokRpcProvider;
-  network: RpcConnectionNetwork;
-  scope: "organization" | "project";
+  /**
+   * Project-only since HOO-1226. Listing still accepts `organization` so rows
+   * created before the cutover stay visible, but nothing new lands there.
+   */
+  scope: "project";
   credentialLabel: string;
   /** Omitted for providers whose endpoint is the same for every account. */
   endpointUrl?: string;
@@ -54,13 +62,6 @@ export function mapRpcConnection(row: RpcConnectionListRow): SafeRpcConnection {
     status: row.status,
     isDefault: row.is_default,
     displayMetadata: parsePostgresJsonOr<Record<string, unknown>>(row.display_metadata, {}),
-    lastCheck: row.last_check_status
-      ? {
-          status: row.last_check_status,
-          at: row.last_check_at,
-          failureCode: row.last_check_failure_code,
-        }
-      : null,
     createdAt: row.created_at,
     activatedAt: row.activated_at,
     deactivatedAt: row.deactivated_at,
@@ -70,6 +71,31 @@ export function mapRpcConnection(row: RpcConnectionListRow): SafeRpcConnection {
       status: row.credential_status,
     },
   };
+}
+
+/**
+ * The network is the project's, not a choice the form offers (HOO-1221).
+ *
+ * A sandbox project is devnet and a production project is mainnet, so picking
+ * one separately only ever created the chance to disagree with the project the
+ * connection hangs off. Deriving it is safe because a provider key is the same
+ * on both networks -- only the URL differs -- so nothing about the credential
+ * depends on which one is chosen.
+ */
+async function resolveProjectNetwork(
+  c: AppContext,
+  projectId: string
+): Promise<RpcConnectionNetwork> {
+  const project = await getDb(c.env)
+    .prepare(`SELECT environment FROM projects WHERE id = ? AND organization_id = ?`)
+    .bind(projectId, getAuth(c).organizationId)
+    .first<{ environment: ProjectEnvironment }>();
+
+  if (!project) {
+    throw notFound("Project");
+  }
+
+  return project.environment === "production" ? "mainnet-beta" : "devnet";
 }
 
 function resolveScope(
@@ -150,11 +176,34 @@ export async function submitRpcConnection(
   const auth = getAuth(c);
   const userId = requireUserId(c);
   const { projectId, scopeKey } = resolveScope(c, input.scope);
+  if (!projectId) {
+    // `resolveScope` already throws for a project scope with no project; this
+    // is the type-level half of the same rule.
+    throw badRequest("An RPC connection requires a selected project");
+  }
+
+  const network = await resolveProjectNetwork(c, projectId);
+
+  // One connection per project for now (HOO-1227). The schema still models
+  // several for fallback, so lifting this later is a change to this check
+  // rather than a migration. Checked before the probe so a project that
+  // already has one is told immediately instead of after a round trip to the
+  // provider.
+  const live = await new RpcConnectionStore(getDb(c.env)).countLiveConnections({
+    organizationId: auth.organizationId,
+    scopeKey,
+    network,
+  });
+  if (live > 0) {
+    throw conflict(
+      "This project already has an RPC connection. Rotate its key, or deactivate it, before adding another."
+    );
+  }
 
   const credential: TenantRpcCredential = {
     // A tenant only types an endpoint when their account has its own; for the
     // rest the provider's published host is used.
-    endpointUrl: resolveTenantEndpoint(input.provider, input.network, input.endpointUrl),
+    endpointUrl: resolveTenantEndpoint(input.provider, network, input.endpointUrl),
     apiKey: input.apiKey,
   };
 
@@ -162,7 +211,17 @@ export async function submitRpcConnection(
   // before anything is written -- no secret stored for a connection that can
   // never run, and no row that would point the relay at a private address.
   assertReachableTenantEndpoint(credential.endpointUrl);
-  buildTenantRpcTarget(input.provider, credential);
+  const target = buildTenantRpcTarget(input.provider, credential);
+
+  // Saving runs the check (HOO-1228). A key that does not work never becomes a
+  // row, so there is no draft state to explain and nothing to activate
+  // afterwards: what gets saved is already known to serve traffic.
+  const probe = await runConnectionProbe(target);
+  if (!probe.ok) {
+    throw conflict("The RPC provider rejected this connection", {
+      failureCode: probe.failureCode,
+    });
+  }
 
   const providerCredentialId = `pcred_${crypto.randomUUID()}`;
   const connectionId = `rconn_${crypto.randomUUID()}`;
@@ -205,18 +264,43 @@ export async function submitRpcConnection(
         provider: input.provider,
         providerCredentialId,
         providerCredentialScopeKey: providerCredential.scope_key,
-        network: input.network,
+        network,
         displayMetadata: buildTenantDisplayMetadata(credential),
         createdBy: userId,
         executor: tx,
       });
 
+      // The probe above is the evidence, so the pair goes live here rather
+      // than waiting for a separate activation. Both rows have to agree or the
+      // relay's effective lookup reads healthy and still routes to SDP, which
+      // is why this shares the insert's transaction.
+      await connectionStore.clearDefault({
+        organizationId: auth.organizationId,
+        scopeKey,
+        network,
+        exceptConnectionId: connectionId,
+        executor: tx,
+      });
+      await connectionStore.activateConnectionCredential({
+        organizationId: auth.organizationId,
+        connectionId,
+        scopeKeys: [scopeKey],
+        executor: tx,
+      });
+      const activated = await connectionStore.activateConnection({
+        organizationId: auth.organizationId,
+        connectionId,
+        scopeKeys: [scopeKey],
+        makeDefault: true,
+        executor: tx,
+      });
+
       return mapRpcConnection({
-        ...connection,
+        ...(activated ?? connection),
         scope_key: scopeKey,
         credential_id: providerCredential.id,
         credential_label: providerCredential.label,
-        credential_status: providerCredential.status,
+        credential_status: "active",
       });
     });
   } catch (error) {
@@ -229,6 +313,81 @@ export async function submitRpcConnection(
     }
     throw error;
   }
+}
+
+/**
+ * One probe, one shape.
+ *
+ * Saving, activating and the on-demand test all ask the same question, and all
+ * three must answer it without letting an upstream body through: the status is
+ * reduced to a redacted code here so no caller can be handed a provider's own
+ * words about a key.
+ */
+async function runConnectionProbe(
+  target: ReturnType<typeof buildTenantRpcTarget>
+): Promise<RpcConnectionTestResult> {
+  try {
+    // The endpoint came from the tenant, so it resolves under the egress
+    // guard: the host passed the literal check when it was submitted, and this
+    // is what stops the name resolving somewhere internal now.
+    const { upstream } = await probeRpcEndpoint(target, { enforcePublicEgress: true });
+    return upstream.ok
+      ? { ok: true, failureCode: null }
+      : { ok: false, failureCode: toRedactedFailureCode(upstream.status) };
+  } catch {
+    return { ok: false, failureCode: "provider_unreachable" };
+  }
+}
+
+/**
+ * Read the stored secret for a connection and rebuild the target the relay
+ * would use. Shared by activation and the on-demand test so neither can drift
+ * into probing something the relay would not.
+ */
+async function loadConnectionTarget(c: AppContext, connectionId: string) {
+  const { auth, store, connection, scopeKeys } = await loadConnectionWithSecret(c, connectionId);
+
+  const credential = await store.findConnectionSecret({
+    organizationId: auth.organizationId,
+    connectionId,
+    scopeKeys,
+  });
+  if (!credential) {
+    throw notFound("Provider credential");
+  }
+
+  const storageBackend = credential.storage_backend as CredentialSecretStorageBackend;
+  const payload = await createCredentialSecretStore(c.env, storageBackend).read({
+    orgId: auth.organizationId,
+    stored: {
+      storageBackend,
+      secretRef: credential.secret_ref ?? undefined,
+      secretVersionRef: credential.secret_version_ref ?? undefined,
+      encryptedSecretPayload: credential.encrypted_secret_payload ?? undefined,
+    },
+  });
+
+  const target = buildTenantRpcTarget(connection.provider as ByokRpcProvider, {
+    endpointUrl: String(payload.endpointUrl ?? ""),
+    apiKey: String(payload.apiKey ?? ""),
+  });
+
+  return { auth, store, connection, scopeKeys, credential, target };
+}
+
+/**
+ * Check a stored connection on demand (HOO-1228).
+ *
+ * Nothing is written. Zach asked for "a subtle connection test afterwards
+ * that's on trigger", and a test that quietly changed the connection's
+ * lifecycle would be neither subtle nor a test.
+ */
+export async function testRpcConnection(
+  c: AppContext,
+  connectionId: string
+): Promise<RpcConnectionTestResult> {
+  const { target } = await loadConnectionTarget(c, connectionId);
+  return runConnectionProbe(target);
 }
 
 async function loadConnectionWithSecret(c: AppContext, connectionId: string) {
@@ -244,71 +403,40 @@ async function loadConnectionWithSecret(c: AppContext, connectionId: string) {
 
 /**
  * Activation probes the tenant's own endpoint before the relay is allowed to
- * depend on it. A failed probe records a redacted code and leaves the
- * connection unusable rather than silently falling back to platform keys.
+ * depend on it. A failed probe marks the connection unusable rather than
+ * silently falling back to platform keys.
+ *
+ * Saving now activates on its own (HOO-1228), so this is the recovery path: a
+ * connection that failed its check later, and is being tried again.
  */
 export async function activateRpcConnection(
   c: AppContext,
   connectionId: string,
   options: { makeDefault: boolean }
 ): Promise<SafeRpcConnection> {
-  const { auth, store, connection, scopeKeys } = await loadConnectionWithSecret(c, connectionId);
-
-  if (connection.status === "deactivated") {
+  // Checked before the secret is read: deactivation destroys it, so loading
+  // the target first would surface a missing-secret error instead of the
+  // reason it is missing.
+  const existing = await loadConnectionWithSecret(c, connectionId);
+  if (existing.connection.status === "deactivated") {
     throw conflict("A deactivated RPC connection cannot be reactivated; create a new one");
   }
 
-  const credential = await store.findConnectionSecret({
-    organizationId: auth.organizationId,
-    connectionId,
-    scopeKeys,
-  });
-  if (!credential) {
-    throw notFound("Provider credential");
-  }
+  const { auth, store, connection, scopeKeys, credential, target } = await loadConnectionTarget(
+    c,
+    connectionId
+  );
 
-  // provider_credentials_storage_backend_check constrains this column to the
-  // same three values, so narrowing once here is safe for both uses below.
-  const storageBackend = credential.storage_backend as CredentialSecretStorageBackend;
-  const secretStore = createCredentialSecretStore(c.env, storageBackend);
-  const payload = await secretStore.read({
-    orgId: auth.organizationId,
-    stored: {
-      storageBackend,
-      secretRef: credential.secret_ref ?? undefined,
-      secretVersionRef: credential.secret_version_ref ?? undefined,
-      encryptedSecretPayload: credential.encrypted_secret_payload ?? undefined,
-    },
-  });
-
-  const target = buildTenantRpcTarget(connection.provider as ByokRpcProvider, {
-    endpointUrl: String(payload.endpointUrl ?? ""),
-    apiKey: String(payload.apiKey ?? ""),
-  });
-
-  let probeOk = false;
-  let failureCode = "provider_unreachable";
-  try {
-    // The endpoint came from the tenant, so the probe resolves it under the
-    // egress guard: the stored host passed the literal check at submit time,
-    // and this is what stops the name resolving somewhere internal now.
-    const { upstream } = await probeRpcEndpoint(target, { enforcePublicEgress: true });
-    probeOk = upstream.ok;
-    if (!upstream.ok) {
-      failureCode = toRedactedFailureCode(upstream.status);
-    }
-  } catch {
-    probeOk = false;
-  }
-
-  if (!probeOk) {
-    await store.recordCheckFailure({
+  const probe = await runConnectionProbe(target);
+  if (!probe.ok) {
+    await store.markCheckFailed({
       organizationId: auth.organizationId,
       connectionId,
       scopeKeys,
-      failureCode,
     });
-    throw conflict("The RPC provider rejected this connection", { failureCode });
+    throw conflict("The RPC provider rejected this connection", {
+      failureCode: probe.failureCode,
+    });
   }
 
   const db = getDb(c.env);
@@ -372,6 +500,138 @@ export async function activateRpcConnection(
   return toSafeWithCredential(activated, { ...credential, status: "active" });
 }
 
+export interface RotateRpcConnectionInput {
+  /** Omitted for providers whose endpoint is the same for every account. */
+  endpointUrl?: string;
+  apiKey: string;
+}
+
+/**
+ * Swap the key behind a connection without ever leaving the project dark
+ * (HOO-1229).
+ *
+ * The old way was deactivate, add, activate: three steps, and the middle one
+ * destroyed the working key before the replacement had been proven. Here the
+ * new key is probed first and the old credential is only retired once the
+ * replacement is committed, so the project is on one working key or the other
+ * throughout.
+ */
+export async function rotateRpcConnection(
+  c: AppContext,
+  connectionId: string,
+  input: RotateRpcConnectionInput
+): Promise<SafeRpcConnection> {
+  const auth = getAuth(c);
+  const userId = requireUserId(c);
+  const { store, connection, scopeKeys } = await loadConnectionWithSecret(c, connectionId);
+
+  if (connection.status === "deactivated") {
+    throw conflict("A deactivated RPC connection cannot be rotated; create a new one");
+  }
+
+  const previous = await store.findConnectionSecret({
+    organizationId: auth.organizationId,
+    connectionId,
+    scopeKeys,
+  });
+  if (!previous) {
+    throw notFound("Provider credential");
+  }
+
+  const provider = connection.provider as ByokRpcProvider;
+  const candidate: TenantRpcCredential = {
+    endpointUrl: resolveTenantEndpoint(provider, connection.network, input.endpointUrl),
+    apiKey: input.apiKey,
+  };
+
+  assertReachableTenantEndpoint(candidate.endpointUrl);
+  const target = buildTenantRpcTarget(provider, candidate);
+
+  const probe = await runConnectionProbe(target);
+  if (!probe.ok) {
+    // Nothing is touched. The connection carries on with the key it had.
+    throw conflict("The RPC provider rejected the new key", { failureCode: probe.failureCode });
+  }
+
+  const nextCredentialId = `pcred_${crypto.randomUUID()}`;
+  const secretStore = createCredentialSecretStore(c.env);
+  const stored = await secretStore.write({
+    orgId: auth.organizationId,
+    provider,
+    providerCredentialId: nextCredentialId,
+    payload: { endpointUrl: candidate.endpointUrl, apiKey: input.apiKey },
+  });
+
+  let rotated: Awaited<ReturnType<RpcConnectionStore["repointConnectionCredential"]>>;
+  try {
+    rotated = await getDb(c.env).transaction(async (tx) => {
+      const credentialStore = new ProviderCredentialStore(tx);
+      const txStore = new RpcConnectionStore(tx);
+
+      const next = await credentialStore.insertCredential({
+        id: nextCredentialId,
+        organizationId: auth.organizationId,
+        projectId: connection.project_id,
+        provider,
+        label: previous.label,
+        scope: connection.scope,
+        source: "stored",
+        stored,
+        displayMetadata: buildTenantDisplayMetadata(candidate),
+        version: (previous.credential_version ?? 1) + 1,
+        rotatedFromId: previous.id,
+        idempotencyKey: nextCredentialId,
+        idempotencyFingerprint: nextCredentialId,
+        createdBy: userId,
+      });
+
+      await txStore.activateCredentialById({
+        organizationId: auth.organizationId,
+        providerCredentialId: nextCredentialId,
+        executor: tx,
+      });
+
+      const row = await txStore.repointConnectionCredential({
+        organizationId: auth.organizationId,
+        connectionId,
+        scopeKeys,
+        nextCredentialId,
+        nextCredentialScopeKey: next.scope_key,
+        executor: tx,
+      });
+      if (!row) {
+        throw conflict("The RPC connection changed while it was being rotated");
+      }
+
+      await txStore.retireCredential({
+        organizationId: auth.organizationId,
+        providerCredentialId: previous.id,
+        executor: tx,
+      });
+
+      return row;
+    });
+  } catch (error) {
+    if (stored.secretVersionRef) {
+      await secretStore
+        .destroyVersion({ secretVersionRef: stored.secretVersionRef })
+        .catch(() => {});
+    }
+    throw error;
+  }
+
+  // Committed, so the old key is no longer reachable through any row. Dropping
+  // the version is cleanup rather than part of the swap, and a failure here
+  // must not undo a rotation that already succeeded.
+  await destroyConnectionSecretBestEffort(c, previous);
+
+  return toSafeWithCredential(rotated, {
+    id: nextCredentialId,
+    label: previous.label,
+    status: "active",
+  });
+}
+
 export async function deactivateRpcConnection(
   c: AppContext,
   connectionId: string
@@ -418,6 +678,46 @@ export async function deactivateRpcConnection(
     deactivated,
     credential ? { ...credential, status: "deactivated" } : null
   );
+}
+
+/**
+ * Clear a deactivated connection out of the list (HOO-1219).
+ *
+ * Deactivation is terminal and already destroyed the secret, so these rows
+ * could only accumulate: they cannot be reactivated and nothing routes through
+ * them. Deleting takes the credential with it, in one transaction, so a crash
+ * cannot leave a credential row pointing at a connection that is gone.
+ */
+export async function deleteRpcConnection(c: AppContext, connectionId: string): Promise<void> {
+  const auth = getAuth(c);
+  const scopeKeys = actingScopeKeys(c);
+
+  await getDb(c.env).transaction(async (tx) => {
+    const txStore = new RpcConnectionStore(tx);
+    const deleted = await txStore.deleteDeactivatedConnection({
+      organizationId: auth.organizationId,
+      connectionId,
+      scopeKeys,
+      executor: tx,
+    });
+
+    if (!deleted) {
+      // Either it does not exist for this caller or it is still live. The
+      // second is the interesting one, and it is a conflict rather than a 404.
+      const store = new RpcConnectionStore(tx);
+      const existing = await store.findConnection(auth.organizationId, connectionId, scopeKeys);
+      if (existing) {
+        throw conflict("Deactivate this RPC connection before deleting it");
+      }
+      throw notFound("RPC connection");
+    }
+
+    await txStore.deleteOrphanedCredential({
+      organizationId: auth.organizationId,
+      providerCredentialId: deleted.provider_credential_id,
+      executor: tx,
+    });
+  });
 }
 
 async function destroyConnectionSecretBestEffort(

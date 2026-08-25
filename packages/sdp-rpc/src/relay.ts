@@ -636,9 +636,13 @@ const ORGANIZATION_SCOPE_KEY = "__organization__";
 /**
  * Tenant connections outrank every platform-managed selection (HOO-1093).
  *
- * A scope that holds a connection which is not live fails closed rather than
+ * A project that holds a connection which is not live fails closed rather than
  * falling through: an organization that has said "use my key" must never have
  * its traffic quietly moved onto credentials SDP pays for.
+ *
+ * Only the project scope resolves (HOO-1226). Organization-scoped connections
+ * are no longer a rail, but they are still checked, because ignoring one is
+ * the silent downgrade this whole path exists to prevent.
  */
 async function resolveTenantConnection(
   input: ResolveRpcTargetInput,
@@ -649,23 +653,18 @@ async function resolveTenantConnection(
   }
 
   const network = input.env.SOLANA_NETWORK ?? "devnet";
-  const scopes: Array<{ scopeKey: string; mode: RpcSelectionMode }> = [];
-  if (projectId) {
-    scopes.push({ scopeKey: projectId, mode: "project_connection" });
-  }
-  scopes.push({ scopeKey: ORGANIZATION_SCOPE_KEY, mode: "organization_connection" });
 
-  for (const scope of scopes) {
+  if (projectId) {
     const resolution = await input.connections.resolve({
       organizationId: input.organizationId,
-      scopeKey: scope.scopeKey,
+      scopeKey: projectId,
       network,
     });
 
     if (resolution.kind === "unusable") {
       throw new SdpRpcError(
         "SOLANA_RPC_ERROR",
-        `The RPC connection for this ${scope.mode === "project_connection" ? "project" : "organization"} is not active (${resolution.reason})`
+        `The RPC connection for this project is not active (${resolution.reason})`
       );
     }
 
@@ -676,18 +675,51 @@ async function resolveTenantConnection(
         endpoint: resolution.endpoint,
         endpointLabel: resolution.endpointLabel,
         headers: resolution.headers,
-        selectionMode: scope.mode,
+        selectionMode: "project_connection",
         connectionId: resolution.connectionId,
       };
     }
   }
 
+  await assertNoStrandedOrganizationConnection(input, network);
   return null;
 }
 
+/**
+ * Connections were organization-scoped until HOO-1226, and the dashboard only
+ * ever created them that way, so every connection made before the cutover sits
+ * on a scope the relay no longer reads.
+ *
+ * Falling through to a platform provider here would answer the request on SDP's
+ * keys and say nothing, which is precisely the outcome the tenant paid their
+ * own provider to avoid. Refusing is the loud version of the same failure: the
+ * connection is visible in the dashboard, and recreating it on a project fixes
+ * it.
+ */
+async function assertNoStrandedOrganizationConnection(
+  input: ResolveRpcTargetInput,
+  network: string
+): Promise<void> {
+  const resolution = await input.connections?.resolve({
+    organizationId: input.organizationId,
+    scopeKey: ORGANIZATION_SCOPE_KEY,
+    network,
+  });
+
+  // `none` is the ordinary case: no organization connection was ever made.
+  if (!resolution || resolution.kind === "none") {
+    return;
+  }
+
+  throw new SdpRpcError(
+    "SOLANA_RPC_ERROR",
+    "This organization has an RPC connection that is no longer used. Recreate it on a project to route through your own provider."
+  );
+}
+
 export async function resolveRpcTarget(input: ResolveRpcTargetInput): Promise<ResolvedRpcTarget> {
-  // Precedence 1 and 2: an explicit tenant connection, project before
-  // organization, ahead of anything platform-managed.
+  // Precedence 1: an explicit tenant connection on the project, ahead of
+  // anything platform-managed.
   const tenantTarget = await resolveTenantConnection(
     input,
     getEffectiveProjectId(input.authProjectId, input.requestedProjectId)

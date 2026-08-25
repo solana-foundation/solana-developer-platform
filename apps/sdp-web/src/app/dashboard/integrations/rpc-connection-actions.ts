@@ -42,8 +42,7 @@ export async function submitRpcConnectionAction(
   formData: FormData
 ): Promise<RpcConnectionActionResult> {
   const provider = String(formData.get("provider") ?? "").trim();
-  const network = String(formData.get("network") ?? "").trim();
-  const scope = String(formData.get("scope") ?? "organization").trim();
+  const scope = String(formData.get("scope") ?? "project").trim();
   const credentialLabel = String(formData.get("credentialLabel") ?? "").trim();
   const endpointUrl = String(formData.get("endpointUrl") ?? "").trim();
   const apiKey = String(formData.get("apiKey") ?? "");
@@ -51,7 +50,7 @@ export async function submitRpcConnectionAction(
   // Trimmed-empty passes the browser's `required` check but is a known reject.
   // The endpoint is deliberately absent: providers that publish one host for
   // every account resolve it server-side, and only the rest are asked for it.
-  if (!provider || !network || !credentialLabel || !apiKey.trim()) {
+  if (!provider || !credentialLabel || !apiKey.trim()) {
     return { status: "invalid", message: "A name and an API key are required." };
   }
 
@@ -63,7 +62,6 @@ export async function submitRpcConnectionAction(
         method: "POST",
         body: JSON.stringify({
           provider,
-          network,
           scope,
           credentialLabel,
           // Omitted, not empty: the API validates this as a URL when present.
@@ -96,6 +94,93 @@ export async function activateRpcConnectionAction(
     );
     revalidateProvider(provider);
     return { status: "success", connection };
+  } catch (error) {
+    return { status: "error", message: extractApiMessage(error) };
+  }
+}
+
+/**
+ * Replace the key behind a connection (HOO-1229). The old key stays in place
+ * until the new one has been checked, so a rejected key changes nothing.
+ */
+export async function rotateRpcConnectionAction(
+  formData: FormData
+): Promise<RpcConnectionActionResult> {
+  const connectionId = String(formData.get("connectionId") ?? "").trim();
+  const provider = String(formData.get("provider") ?? "").trim();
+  const endpointUrl = String(formData.get("endpointUrl") ?? "").trim();
+  const apiKey = String(formData.get("apiKey") ?? "");
+
+  if (!connectionId || !apiKey.trim()) {
+    return { status: "invalid", message: "A new API key is required." };
+  }
+
+  try {
+    const client = await createSdpApiClient();
+    const connection = await client.fetch<SafeRpcConnection>(
+      `/internal/dashboard/rpc/connections/${encodeURIComponent(connectionId)}/rotate`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          ...(endpointUrl ? { endpointUrl } : {}),
+          apiKey,
+        }),
+      }
+    );
+    revalidateProvider(provider);
+    return { status: "success", connection };
+  } catch (error) {
+    return { status: "error", message: extractApiMessage(error) };
+  }
+}
+
+/**
+ * Check a stored connection on demand (HOO-1228). Nothing is persisted, so the
+ * answer is only ever as old as the click that asked for it.
+ */
+export async function testRpcConnectionAction(
+  formData: FormData
+): Promise<
+  | { status: "tested"; ok: boolean; failureCode: string | null }
+  | { status: "error"; message: string }
+> {
+  const connectionId = String(formData.get("connectionId") ?? "").trim();
+  if (!connectionId) {
+    return { status: "error", message: "A connection is required." };
+  }
+
+  try {
+    const client = await createSdpApiClient();
+    const result = await client.fetch<{ ok: boolean; failureCode: string | null }>(
+      `/internal/dashboard/rpc/connections/${encodeURIComponent(connectionId)}/test`,
+      { method: "POST" }
+    );
+    return { status: "tested", ok: result.ok, failureCode: result.failureCode };
+  } catch (error) {
+    return { status: "error", message: extractApiMessage(error) };
+  }
+}
+
+/**
+ * Clear a deactivated connection out of the list (HOO-1219). Nothing comes
+ * back but the outcome, so the result carries no connection.
+ */
+export async function deleteRpcConnectionAction(
+  formData: FormData
+): Promise<RpcConnectionActionResult | { status: "deleted" }> {
+  const connectionId = String(formData.get("connectionId") ?? "").trim();
+  const provider = String(formData.get("provider") ?? "").trim();
+  if (!connectionId) {
+    return { status: "invalid", message: "A connection is required." };
+  }
+
+  try {
+    const client = await createSdpApiClient();
+    await client.fetch(`/internal/dashboard/rpc/connections/${encodeURIComponent(connectionId)}`, {
+      method: "DELETE",
+    });
+    revalidateProvider(provider);
+    return { status: "deleted" };
   } catch (error) {
     return { status: "error", message: extractApiMessage(error) };
   }

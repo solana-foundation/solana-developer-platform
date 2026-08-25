@@ -24,18 +24,13 @@ export type RpcConnectionScope = (typeof RPC_CONNECTION_SCOPES)[number];
 export const RPC_CONNECTION_NETWORKS = ["devnet", "mainnet-beta"] as const;
 export type RpcConnectionNetwork = (typeof RPC_CONNECTION_NETWORKS)[number];
 
-export const RPC_CONNECTION_CHECK_STATUSES = [
-  "pending",
-  "running",
-  "success",
-  "failed",
-  "retry_unknown",
-] as const;
-export type RpcConnectionCheckStatus = (typeof RPC_CONNECTION_CHECK_STATUSES)[number];
-
-export interface RpcConnectionCheck {
-  status: RpcConnectionCheckStatus;
-  at: string | null;
+/**
+ * The outcome of a connectivity probe, returned to the caller and never
+ * stored (HOO-1228). A connection is checked when it is saved and again on
+ * demand, so a persisted copy could only go stale.
+ */
+export interface RpcConnectionTestResult {
+  ok: boolean;
   /** Redacted code only — never an upstream provider response. */
   failureCode: string | null;
 }
@@ -55,7 +50,6 @@ export interface SafeRpcConnection {
   /** The connection the relay picks for this scope and network. */
   isDefault: boolean;
   displayMetadata: Record<string, unknown>;
-  lastCheck: RpcConnectionCheck | null;
   createdAt: string;
   activatedAt: string | null;
   deactivatedAt: string | null;
