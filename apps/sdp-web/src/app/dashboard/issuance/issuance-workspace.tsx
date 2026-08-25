@@ -1,21 +1,17 @@
 "use client";
 
+import { Popover } from "@base-ui/react/popover";
 import type { PaymentsDashboardWallet } from "@sdp/types";
-import {
-  ChevronsDownUp,
-  ChevronsUpDown,
-  Clock,
-  Coins,
-  LayoutGrid,
-  List,
-  Plus,
-  ShieldCheck,
-} from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { Info, PlusIcon } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  WalletMetadataCopyButton,
+  WalletMetaValue,
+} from "@/app/dashboard/custody/wallet-address-copy-button";
+import { formatWalletMeta } from "@/app/dashboard/custody/wallet-format-utils";
 import {
   dashboardWorkspaceOverviewPanelClassName,
   dashboardWorkspacePlaygroundPanelClassName,
@@ -24,12 +20,10 @@ import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab
 import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Button } from "@/components/ui/button";
 import { SearchInput } from "@/components/ui/search-input";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { cn } from "@/lib/utils";
-import { AuthoritiesGlyph } from "./asset-overview-hero";
 import { CreateIssuanceTokenModal } from "./create-token-modal";
 import { IssuanceFilterPopover } from "./issuance-filter-popover";
 import { IssuanceLegacyOverview } from "./issuance-legacy-overview";
@@ -37,18 +31,13 @@ import type { IssuanceFilterState, IssuanceListQuery } from "./issuance-list-que
 import { IssuanceListSkeleton } from "./issuance-list-skeleton";
 import { IssuancePlaygroundLoading } from "./issuance-playground-loading";
 import {
-  buildOverviewHeroData,
   buildSmartDate,
   deploymentStatusBadge,
-  formatSupply,
   getDeploymentStatus,
-  getTokenChips,
   getTokenTypeLabel,
   type IssuanceTokenView,
   tokenMarkInitial,
 } from "./issuance-token-fields";
-import { IssuanceTokenList, ManageKebab, StatHint } from "./issuance-token-list";
-import type { TokenView } from "./issuance-token-view";
 import type { IssuanceTokenFacets } from "./issuance-tokens.data";
 import { useIssuancePlaygroundTokens, useIssuanceTokenList } from "./use-issuance-token-list";
 
@@ -95,12 +84,6 @@ interface IssuanceWorkspaceProps {
   signerWalletsError: string | null;
 }
 
-// Grid ⇄ list cross-fade. Matches the workspace tab-shell transition so the two
-// views dissolve into each other rather than hard-swapping. `mode="wait"` lets
-// the outgoing layout leave before the (differently-sized) incoming one mounts,
-// avoiding a stacked-height jump mid-animation.
-const viewTransition = { duration: 0.18, ease: "easeOut" } as const;
-
 // Classes for the scrolling overview panel (the tab shell's `overflow-y-auto` div —
 // the shell locks the viewport, so that inner panel is what actually scrolls).
 //
@@ -133,13 +116,11 @@ const PINNED_HEADER_BG =
 // ever painted on a see-through backdrop; and at rest it fades over the same composite
 // color it starts from, so it is invisible until something scrolls behind it.
 //
-// Keep in step with the header's `pb-*`: the two are the same length (see the class).
-// That coupling is also the ceiling on how long the fade can be — the band cannot hang
-// below the header's box, because at rest the box's bottom edge is exactly the first
-// row's top edge, and the header paints above the rows (z-20). Any overhang would
-// wash out that row's top border while it is sitting still. So the fade is as long as
-// the gap under the asset-count row and no longer; smoothstep is what buys the
-// remaining softness back at this length.
+// The header's `pb-*` is the ceiling on how long the fade can be — the band cannot
+// hang below the header's box, because at rest the box's bottom edge is exactly the
+// first card's top edge, and the header paints above the cards (z-20). Any overhang
+// would wash out that card's top border while it is sitting still. Smoothstep is
+// what buys the softness back at this length.
 const PINNED_HEADER_FADE_PX = 12;
 
 // A *linear* alpha ramp still reads as an edge. Alpha falls fastest right where the
@@ -162,50 +143,70 @@ function buildPinnedHeaderBackdrop(): string {
 
 const PINNED_HEADER_STYLE = { backgroundImage: buildPinnedHeaderBackdrop() } as const;
 
-// One asset tile in the grid view. Its own component so the workspace function
-// stays readable — and so the grid's per-token derivations sit next to the markup
-// that uses them.
+// The (i) beside the grid tile's date label. Needs `relative z-10` because the
+// card's full-bleed link is an `absolute inset-0` sibling that otherwise paints
+// over the label and swallows its pointer events — which is why a plain `title`
+// attribute here would never fire. Clicking the icon therefore does not follow
+// the card's link; the rest of the card still does.
+function StatHint({ hint }: { hint: { label: string; value: string } }) {
+  return (
+    <Popover.Root>
+      <Popover.Trigger
+        openOnHover
+        delay={100}
+        closeDelay={140}
+        aria-label={hint.label}
+        onClick={(event) => event.stopPropagation()}
+        // `p-0.5 -m-0.5` keeps the glyph subordinate to the label while giving the
+        // hit area back the pixels the padding adds — the negative margin cancels it
+        // out, so the icon takes exactly as much room in the label row as before.
+        className="relative z-10 -m-0.5 inline-flex shrink-0 cursor-default items-center justify-center rounded-full p-0.5 text-tertiary outline-none transition-colors hover:text-secondary focus-visible:text-secondary"
+      >
+        <Info className="h-2.5 w-2.5" />
+      </Popover.Trigger>
+      <Popover.Portal>
+        {/* Above the workspace's pinned header (z-20) — it opens upward from a
+            scrolling card. */}
+        <Popover.Positioner side="top" align="center" sideOffset={8} className="z-30">
+          <Popover.Popup className="overflow-hidden rounded-xl border border-border-default bg-surface-raised outline-none">
+            <div className="px-3 py-2 text-left text-[12px] leading-snug">
+              <p className="text-tertiary">{hint.label}</p>
+              <p className="mt-0.5 font-medium text-primary">{hint.value}</p>
+            </div>
+          </Popover.Popup>
+        </Popover.Positioner>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
 function IssuanceTokenGridCard({
   token,
-  signerWallets,
   t,
   locale,
 }: {
   token: IssuanceTokenView;
-  signerWallets: PaymentsDashboardWallet[];
   t: ReturnType<typeof useTranslations>;
   locale: ReturnType<typeof useLocale>;
 }) {
-  const deploymentStatus = getDeploymentStatus(token);
-  const deployed = deploymentStatus !== "draft";
-  const chips = getTokenChips(token, t);
+  const statusBadge = deploymentStatusBadge(getDeploymentStatus(token), t);
   const smartDate = buildSmartDate(token, t, locale);
-  // The same hero derivation the list's expanded card runs — the tile only reads its
-  // authority rows, access mode and signer off it. Memoized because the workspace
-  // re-renders this card on every keystroke in the search box.
-  const heroData = useMemo(
-    () => buildOverviewHeroData(token, signerWallets, t, locale),
-    [token, signerWallets, t, locale]
-  );
 
   return (
     <article
-      key={token.id}
       data-testid={`token-card-${token.id}`}
-      className="relative flex min-h-[240px] flex-col rounded-2xl border border-border-default bg-surface-raised p-5 transition-colors hover:border-primary/40"
+      className="relative flex flex-col rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)] transition hover:border-primary/30 hover:shadow-[0_4px_16px_rgba(28,28,29,0.08)]"
     >
-      {/* Full-bleed overlay link makes the whole tile navigate; the
-          kebab sits above it (z-10) so its menu stays clickable. */}
       <Link
         href={`/dashboard/issuance/${token.id}`}
         aria-label={t("DashboardIssuance.workspace.manageAsset", {
           name: token.name,
         })}
-        className="absolute inset-0 z-0 cursor-pointer rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-[var(--button-focus-ring)] focus-visible:ring-inset"
+        className="absolute inset-0 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default"
       />
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-center justify-between gap-4">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="h-11 w-11 shrink-0 overflow-hidden rounded-full border border-border-default bg-fill-subtle">
+          <div className="h-12 w-12 shrink-0 overflow-hidden rounded-2xl border border-border-subtle bg-fill-subtle">
             {token.imageUrl ? (
               // biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here.
               <img
@@ -216,14 +217,14 @@ function IssuanceTokenGridCard({
                 className="h-full w-full object-cover"
               />
             ) : (
-              <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-tertiary">
+              <div className="flex h-full w-full items-center justify-center text-lg font-semibold text-tertiary">
                 {tokenMarkInitial(token.symbol)}
               </div>
             )}
           </div>
           <div className="min-w-0">
-            <p className="text-xs font-medium tracking-wide text-tertiary">{token.symbol}</p>
-            <h3 className="mt-0.5 truncate text-lg font-medium leading-tight text-primary">
+            <p className="text-sm font-medium tracking-wide text-tertiary">{token.symbol}</p>
+            <h3 className="mt-0.5 truncate text-2xl leading-tight font-medium tracking-tight text-primary">
               {token.name}
             </h3>
           </div>
@@ -231,128 +232,76 @@ function IssuanceTokenGridCard({
         <span
           data-testid={`token-card-status-${token.id}`}
           className={cn(
-            "inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium capitalize",
-            deploymentStatusBadge(deploymentStatus, t).badge
+            "inline-flex shrink-0 items-center self-start rounded-full px-2.5 py-1 text-xs font-medium capitalize",
+            statusBadge.badge
           )}
         >
-          {deploymentStatusBadge(deploymentStatus, t).label}
+          {statusBadge.label}
         </span>
       </div>
 
-      {chips.length > 0 ? (
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          {chips.map((chip) => {
-            const Icon = chip.icon;
-            return (
-              <span
-                key={chip.label}
-                className="inline-flex max-w-full items-center gap-1 rounded-full border border-border-subtle bg-fill-subtle px-2 py-0.5 text-xs text-secondary"
-              >
-                {Icon ? (
-                  <Icon className="h-3.5 w-3.5 shrink-0 text-tertiary" aria-hidden="true" />
-                ) : null}
-                <span className="truncate">{chip.label}</span>
-              </span>
-            );
-          })}
+      <div className="mt-5 space-y-1.5">
+        <div className="flex h-6 items-center justify-between gap-3 text-xs">
+          <span className="text-tertiary">{t("DashboardIssuance.list.mintAddress")}</span>
+          {token.mintAddress !== null ? (
+            <div className="relative z-10 flex min-w-0 items-center gap-1">
+              <WalletMetaValue
+                value={token.mintAddress}
+                displayValue={formatWalletMeta(token.mintAddress)}
+              />
+              <WalletMetadataCopyButton
+                value={token.mintAddress}
+                label={t("DashboardIssuance.list.mintAddress")}
+                tooltip={token.mintAddress}
+              />
+            </div>
+          ) : (
+            <span className="text-tertiary italic">
+              {t("DashboardIssuance.header.notDeployed")}
+            </span>
+          )}
         </div>
-      ) : null}
-
-      {/* Control shares the first row with Supply, deliberately lopsided: it holds at
-          least half the row and never shrinks, so its marks and policy pills always have
-          the width they need, and past that it takes only what its own content asks for.
-          Whatever is left goes to Supply, which is why its column no longer ends up
-          pinned to the card's right edge. The date keeps the bottom row with the kebab,
-          so the tile reads identity → classification → control → when. */}
-      <div className="mt-6 flex items-start gap-x-5">
-        <div className="min-w-[50%] shrink-0">
-          {/* "Control", not "Authorities": this tile keeps the policy pills in the
-              marks row at every state (it has no second tile to promote them into), so
-              the slot always states more than who holds the authorities. */}
-          <p className="flex items-center gap-1 text-xs text-tertiary">
-            <ShieldCheck className="h-3 w-3 shrink-0" aria-hidden="true" />
-            <span className="truncate">{t("DashboardIssuance.overview.control")}</span>
-          </p>
-          {/* A row of marks is a box, not a line of text, so it needs the ~6px of
-              optical air text gets free from its half-leading — same rule as the
-              hero's `framed` tiles. `relative z-10` keeps the marks above the tile's
-              full-bleed overlay link, which would otherwise swallow their popovers. */}
-          <div className="relative z-10 mt-1.5">
-            <AuthoritiesGlyph
-              rows={heroData.authorityRows}
-              accessMode={heroData.accessMode}
-              verifiedHolders={heroData.verifiedHolders}
-              deployed={deployed}
-              // The tile has no policy tile to promote the pills into, so they stay in
-              // the marks row for deployed tokens too.
-              keepAccessBadge
-              // Cross-route from the grid, so a real link.
-              permissionsHref={`/dashboard/issuance/${token.id}?tab=permissions`}
+        <div className="flex h-6 items-center justify-between gap-3 text-xs">
+          <span className="text-tertiary">{t("DashboardIssuance.header.tokenId")}</span>
+          <div className="relative z-10 flex min-w-0 items-center gap-1">
+            <WalletMetaValue value={token.id} displayValue={formatWalletMeta(token.id, 10, 6)} />
+            <WalletMetadataCopyButton
+              value={token.id}
+              label={t("DashboardIssuance.header.tokenId")}
+              tooltip={token.id}
             />
           </div>
         </div>
-        {/* Supply takes the rest of the row. Its text never wraps — a compact supply is
-            short by construction — so the extra width is breathing room, not filler. */}
-        <div className="min-w-0 flex-1">
-          <p className="flex items-center gap-1 whitespace-nowrap text-xs text-tertiary">
-            <Coins className="h-3 w-3 shrink-0" aria-hidden="true" />
-            {t("DashboardIssuance.workspace.supply")}
-          </p>
-          <p className="mt-0.5 whitespace-nowrap text-sm font-normal text-primary">
-            {formatSupply(token.totalSupply, locale)}
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-auto flex items-end justify-between gap-3 pt-6">
-        <div className="min-w-0">
-          {/* Smart date, same rule as the list row: the deploy date once deployed, with
-              the draft-created date behind the (i) so both stay reachable from one
-              cell. */}
-          <p className="flex items-center gap-1 text-xs text-tertiary">
-            <Clock className="h-3 w-3 shrink-0" aria-hidden="true" />
+        <div className="flex h-6 items-center justify-between gap-3 text-xs">
+          <span className="flex min-w-0 items-center gap-1 text-tertiary">
             <span className="truncate">{smartDate.label}</span>
             {smartDate.hint ? <StatHint hint={smartDate.hint} /> : null}
-          </p>
-          <p className="mt-0.5 truncate text-sm font-normal text-primary">{smartDate.value}</p>
-        </div>
-        <div className="relative z-10">
-          <ManageKebab token={token} triggerVariant="outline" />
+          </span>
+          <span className="shrink-0 text-secondary">{smartDate.value}</span>
         </div>
       </div>
     </article>
   );
 }
 
-// The results area: placeholders, the list, or the grid — one of the three.
+// The results area: placeholders or the grid.
 //
-// Extracted from the workspace so the loading branches don't push that function
-// over the complexity budget, and so the two views' loading behaviour is decided
-// in one place.
+// Extracted from the workspace so the loading branch doesn't push that function
+// over the complexity budget.
 function IssuanceResults({
-  view,
-  reduceMotion,
   isLoadingNewResults,
   isLoadingAnotherPage,
   skeletonCount,
   tokens,
-  signerWallets,
-  openTokenIds,
-  onToggleRow,
   onCreate,
   pagination,
   t,
   locale,
 }: {
-  view: TokenView;
-  reduceMotion: boolean;
   isLoadingNewResults: boolean;
   isLoadingAnotherPage: boolean;
   skeletonCount: number;
   tokens: IssuanceTokenView[];
-  signerWallets: PaymentsDashboardWallet[];
-  openTokenIds: ReadonlySet<string>;
-  onToggleRow: (id: string) => void;
   onCreate: () => void;
   pagination: ReactNode;
   t: ReturnType<typeof useTranslations>;
@@ -361,22 +310,16 @@ function IssuanceResults({
   const grid = (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
       {tokens.map((token) => (
-        <IssuanceTokenGridCard
-          key={token.id}
-          token={token}
-          signerWallets={signerWallets}
-          t={t}
-          locale={locale}
-        />
+        <IssuanceTokenGridCard key={token.id} token={token} t={t} locale={locale} />
       ))}
 
       <button
         type="button"
         onClick={onCreate}
         data-testid="token-add-card"
-        className="flex min-h-[240px] flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border-strong bg-surface-raised text-tertiary transition-colors hover:border-primary/40 hover:text-secondary"
+        className="flex min-h-36 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border-strong bg-surface-raised text-tertiary transition-colors hover:border-primary/40 hover:text-secondary"
       >
-        <Plus className="h-6 w-6" />
+        <PlusIcon className="h-6 w-6" />
         <span className="text-sm font-medium">{t("DashboardIssuance.workspace.addNewToken")}</span>
       </button>
     </div>
@@ -385,53 +328,25 @@ function IssuanceResults({
   return (
     <>
       {/* One announcement for every kind of load, so a screen reader hears that the
-          list is working whether the rows were replaced or only dimmed. */}
+          grid is working whether the tiles were replaced or only dimmed. */}
       <span className="sr-only" role="status" aria-live="polite">
         {isLoadingNewResults || isLoadingAnotherPage
           ? t("DashboardIssuance.workspace.loadingAssets")
           : ""}
       </span>
 
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.div
-          key={view}
-          initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
-          transition={viewTransition}
-          // Paging keeps the rows on screen (keepPreviousData) because they are a
-          // neighbouring slice of the same list; the dim is what marks them as the
-          // previous ones. A new result set gets placeholders instead — those rows
-          // answer a question that is no longer being asked.
-          aria-busy={isLoadingNewResults || isLoadingAnotherPage}
-          className={isLoadingAnotherPage ? "opacity-60 transition-opacity" : "transition-opacity"}
-        >
-          {isLoadingNewResults ? (
-            <IssuanceListSkeleton view={view} count={skeletonCount} />
-          ) : view === "list" ? (
-            <IssuanceTokenList
-              tokens={tokens}
-              signerWallets={signerWallets}
-              openIds={openTokenIds}
-              onToggle={onToggleRow}
-              onCreate={onCreate}
-              // Handed to the list rather than rendered after it: expanding a row
-              // displaces the rows by transform without growing the list's box, so a
-              // pager outside it would be left stranded mid-list under the panel.
-              // Inside, it rides the same displacement.
-              footer={pagination}
-            />
-          ) : (
-            grid
-          )}
-        </motion.div>
-      </AnimatePresence>
+      <div
+        // Paging keeps the tiles on screen (keepPreviousData) because they are a
+        // neighbouring slice of the same list; the dim is what marks them as the
+        // previous ones. A new result set gets placeholders instead — those tiles
+        // answer a question that is no longer being asked.
+        aria-busy={isLoadingNewResults || isLoadingAnotherPage}
+        className={isLoadingAnotherPage ? "opacity-60 transition-opacity" : "transition-opacity"}
+      >
+        {isLoadingNewResults ? <IssuanceListSkeleton count={skeletonCount} /> : grid}
+      </div>
 
-      {/* Grid view only — cards don't expand, so the pager can simply follow the
-          grid. In list view it lives inside IssuanceTokenList (see `footer`), and
-          while placeholders are up there is no pager: its range would describe the
-          result set being replaced. */}
-      {view === "list" || isLoadingNewResults ? null : pagination}
+      {isLoadingNewResults ? null : pagination}
     </>
   );
 }
@@ -452,13 +367,7 @@ export function IssuanceWorkspace({
 }: IssuanceWorkspaceProps) {
   const t = useTranslations();
   const locale = useLocale();
-  const {
-    issuanceTab,
-    issuanceTokenView: view,
-    setIssuanceTokenView,
-    selectedPlaygroundApiKeyId,
-    setPlaygroundApiKeys,
-  } = useDashboardWorkspace();
+  const { issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
   const router = useRouter();
   const [isCreateTokenModalOpen, setIsCreateTokenModalOpen] = useState(false);
   const isPlaygroundTab = issuanceTab === "playground";
@@ -490,33 +399,6 @@ export function IssuanceWorkspace({
   // The playground's picker must see the project, not the filtered page; falls
   // back to the visible rows so it is never empty while loading.
   const playgroundTokens = useIssuancePlaygroundTokens(isPlaygroundTab) ?? tokens;
-
-  const reduceMotion = useReducedMotion();
-
-  // Expanded list rows. Held here rather than in IssuanceTokenList because
-  // expand-all works off the filtered set, which lives in this component.
-  const [openTokenIds, setOpenTokenIds] = useState<ReadonlySet<string>>(() => new Set());
-  const toggleTokenRow = useCallback((id: string) => {
-    setOpenTokenIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  }, []);
-  const collapseAllTokenRows = useCallback(() => setOpenTokenIds(new Set()), []);
-
-  // The view itself is owned by the workspace context (seeded from a cookie so the
-  // server paints the right one — see issuance-token-view.ts); only the expanded
-  // rows are local. The list unmounts on a view switch and re-measures its panels
-  // on mount, so carrying them across would replay the slide. Start collapsed.
-  const changeView = (next: TokenView) => {
-    setIssuanceTokenView(next);
-    collapseAllTokenRows();
-  };
 
   // Asset Profiles UI flag: on → full-page wizard; off → legacy modal.
   const startTokenCreation = () => {
@@ -580,13 +462,6 @@ export function IssuanceWorkspace({
     (changes: Partial<IssuanceFilterState>) => updateQuery(changes),
     [updateQuery]
   );
-
-  // Which way the expand/collapse-all control points. Counts only rows that are on
-  // screen, so an expanded row on another page can't leave the control claiming
-  // "collapse" with nothing visibly open.
-  const hasOpenTokenRows = tokens.some((token) => openTokenIds.has(token.id));
-  // Expand-all covers the current page — the rows you can see are the rows it opens.
-  const expandAllTokenRows = () => setOpenTokenIds(new Set(tokens.map((token) => token.id)));
 
   const playgroundContent = (
     <IssuancePlayground
@@ -690,23 +565,20 @@ export function IssuanceWorkspace({
           className: cn(dashboardWorkspaceOverviewPanelClassName, ISSUANCE_OVERVIEW_PANEL_CLASS),
           content: (
             <>
-              {/* Pinned header — same in both views. Negative margins bleed the backdrop
-              across the panel's horizontal padding so nothing shows through at the
-              edges as content scrolls behind it.
+              {/* Pinned header. Negative margins bleed the backdrop across the panel's
+              horizontal padding so nothing shows through at the edges as content
+              scrolls behind it.
 
               Issuance z ladder: header z-20 < this feature's popovers z-30 < the DS
               popup layer z-50 (Select, DropdownMenu, Combobox, Modal — all portalled
               to body). Keeping the whole ladder under 50 is what lets a Select opened
-              inside the filter popover paint above that popover's panel, and a row
-              kebab menu paint above this header. The list's per-row rungs stay out of
-              the comparison because the list isolates them (see IssuanceTokenList). */}
+              inside the filter popover paint above that popover's panel. */}
               <div
-                // `pb-3` == PINNED_HEADER_FADE_PX: the fade owns the whole bottom padding
-                // and nothing more, so the asset-count row and the expand/collapse control
-                // sit close to the rows they label. Smoothstep holds the band near-opaque
-                // through its first few px, so that row still reads as being on solid
-                // backdrop without reserving separate air for it.
-                className="sticky top-0 z-20 -mx-3 space-y-4 px-3 pt-6 pb-3 md:-mx-6 md:px-6"
+                // Even `py-6` around the toolbar. The 12px fade band sits entirely
+                // inside the bottom padding (it must never hang below the header's
+                // box — at rest that edge is the first card's top), so the toolbar
+                // always reads as being on solid backdrop.
+                className="sticky top-0 z-20 -mx-3 space-y-4 px-3 py-6 md:-mx-6 md:px-6"
                 style={PINNED_HEADER_STYLE}
               >
                 {tokensNotice && tokens.length > 0 ? (
@@ -721,22 +593,23 @@ export function IssuanceWorkspace({
                 {/* Toolbar: stacks into two rows below sm, one row from sm up. The
               breakpoint is the viewport, not the toolbar width — at ≥sm the sidebar
               is hidden below xl, so even iPad portrait has room for a single row. */}
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                  <div className="flex items-center gap-3 sm:flex-1">
-                    <div className="flex-1">
-                      <SearchInput
-                        value={search}
-                        onChange={(event) => {
-                          const value = event.currentTarget.value;
-                          setSearch(value);
-                        }}
-                        placeholder={t("DashboardIssuance.workspace.search")}
-                        // Keystrokes are debounced and answered by the server, so the
-                        // input says so — otherwise typing has no acknowledgement at
-                        // all until the rows change.
-                        pending={isSearchPending}
-                      />
-                    </div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="w-full sm:max-w-md">
+                    <SearchInput
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      placeholder={t("DashboardIssuance.workspace.search")}
+                      // Keystrokes are debounced and answered by the server, so the
+                      // input says so — otherwise typing has no acknowledgement at
+                      // all until the rows change.
+                      pending={isSearchPending}
+                      clear={{
+                        label: t("DashboardIssuance.workspace.clearSearch"),
+                        onClear: () => setSearch(""),
+                      }}
+                    />
+                  </div>
+                  <div className="flex items-center gap-3">
                     {/* Filter & sort — icon-only trigger opening a popover. */}
                     <IssuanceFilterPopover
                       filters={query}
@@ -744,95 +617,15 @@ export function IssuanceWorkspace({
                       onClear={clearFilters}
                       templateOptions={templateOptions}
                     />
-                    {/* Grid ⇄ list toggle — icon shows the view it switches to (grid
-                  shows the list icon, and vice versa). */}
-                    <button
+                    <Button
                       type="button"
-                      aria-label={t(
-                        view === "grid"
-                          ? "DashboardIssuance.workspace.viewSwitchToList"
-                          : "DashboardIssuance.workspace.viewSwitchToGrid"
-                      )}
-                      onClick={() => changeView(view === "grid" ? "list" : "grid")}
-                      className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] border border-border-default bg-surface-raised text-secondary outline-none transition-colors hover:border-border-strong hover:text-primary focus-visible:ring-2 focus-visible:ring-[var(--button-focus-ring)]"
+                      className="h-10 w-full rounded-[10px] bg-primary px-4 text-on-primary hover:opacity-90 sm:w-auto"
+                      onClick={startTokenCreation}
+                      iconLeft={<PlusIcon className="h-4 w-4" />}
                     >
-                      {view === "grid" ? (
-                        <List className="h-4 w-4" />
-                      ) : (
-                        <LayoutGrid className="h-4 w-4" />
-                      )}
-                    </button>
+                      {t("DashboardIssuance.workspace.createDraft")}
+                    </Button>
                   </div>
-                  <Button
-                    type="button"
-                    className="h-10 w-full rounded-[10px] bg-primary px-4 text-on-primary hover:opacity-90 sm:w-auto"
-                    onClick={startTokenCreation}
-                    iconLeft={<Plus className="h-4 w-4" />}
-                  >
-                    {t("DashboardIssuance.workspace.createDraft")}
-                  </Button>
-                </div>
-
-                {/* Asset count, and — in list view — the expand/collapse-all control.
-                Fixed height and always mounted, so the header's height never
-                changes as rows open and close. */}
-                <div className="flex h-6 items-center justify-between px-1">
-                  {/* Range over the filtered total, not the loaded rows — with paging,
-                  "24 assets" would be a lie about a project holding 400.
-                  While a new result set is loading the count belongs to the old
-                  one, so it gives way to a placeholder rather than asserting a
-                  number that is about to change. */}
-                  {isLoadingNewResults ? (
-                    <SkeletonBlock className="h-3 w-28" />
-                  ) : (
-                    <p className="text-xs text-tertiary">
-                      {total > 0 && pageCount > 1
-                        ? t("DashboardIssuance.pagination.rangeAssets", {
-                            start: rangeStart,
-                            end: rangeEnd,
-                            total,
-                          })
-                        : t("DashboardIssuance.list.assetsCount", { count: total })}
-                    </p>
-                  )}
-                  {/* Mirrors the grid ⇄ list cross-fade below: same key, same
-                  `mode="wait"`, same transition. Both presences are driven by the
-                  one `view` change in the same render, so the control fades out
-                  with the outgoing view and in with the incoming one instead of
-                  popping the moment the toggle is clicked. Grid renders an empty
-                  placeholder rather than nothing so there is always a child to
-                  wait on — that wait is what puts the fade-in on the list's beat
-                  rather than a third of a second ahead of it. */}
-                  <AnimatePresence mode="wait" initial={false}>
-                    <motion.div
-                      key={view}
-                      initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
-                      transition={viewTransition}
-                      className="flex items-center"
-                    >
-                      {view === "list" ? (
-                        <button
-                          type="button"
-                          data-testid="token-collapse-all"
-                          onClick={hasOpenTokenRows ? collapseAllTokenRows : expandAllTokenRows}
-                          className="-mr-1.5 inline-flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-xs font-medium text-secondary outline-none transition-colors hover:bg-fill hover:text-primary focus-visible:ring-2 focus-visible:ring-[var(--button-focus-ring)]"
-                        >
-                          {hasOpenTokenRows ? (
-                            <ChevronsDownUp className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                          ) : (
-                            <ChevronsUpDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                          )}
-                          {t(
-                            hasOpenTokenRows
-                              ? "DashboardIssuance.workspace.collapseAll"
-                              : "DashboardIssuance.workspace.expandAll"
-                          )}
-                        </button>
-                      ) : null}
-                    </motion.div>
-                  </AnimatePresence>
                 </div>
               </div>
 
@@ -844,15 +637,10 @@ export function IssuanceWorkspace({
               {emptyResultsNotice}
 
               <IssuanceResults
-                view={view}
-                reduceMotion={Boolean(reduceMotion)}
                 isLoadingNewResults={isLoadingNewResults}
                 isLoadingAnotherPage={isLoadingAnotherPage}
                 skeletonCount={skeletonCount}
                 tokens={tokens}
-                signerWallets={signerWallets}
-                openTokenIds={openTokenIds}
-                onToggleRow={toggleTokenRow}
                 onCreate={startTokenCreation}
                 pagination={pagination}
                 t={t}

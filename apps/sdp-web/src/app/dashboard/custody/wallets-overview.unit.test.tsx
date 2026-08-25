@@ -25,6 +25,7 @@ vi.mock("@/app/dashboard/custody/wallet-label-inline-editor", () => ({
 vi.mock("@/app/dashboard/custody/wallet-address-copy-button", () => ({
   WalletAddressCopyButton: () => null,
   WalletMetadataCopyButton: () => null,
+  WalletMetaValue: ({ displayValue }: { displayValue: string }) => <span>{displayValue}</span>,
 }));
 
 vi.mock("next/link", () => ({
