@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env } from "@/test/helpers/env";
@@ -5,6 +8,14 @@ import { env } from "@/test/helpers/env";
 // The test database is already fully migrated by src/test/node-global-setup.ts,
 // so these assertions are behavioural: every test inserts real rows against the
 // real schema inside a transaction and rolls back.
+
+const migrationSql = readFileSync(
+  path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "postgres/0067_helius_rings_money_flows.sql"
+  ),
+  "utf8"
+);
 
 const CHECK_VIOLATION = "23514";
 const UNIQUE_VIOLATION = "23505";
@@ -213,6 +224,27 @@ describe("custody_wallet_id", () => {
     await expectSqlstate(
       () => client.query("DELETE FROM custody_wallets WHERE id = $1", [custodyWalletId]),
       FK_VIOLATION
+    );
+  });
+});
+
+describe("re-applying the migration", () => {
+  it("is a no-op", async () => {
+    // This file was iterated on before it shipped, and the runner keys
+    // `schema_migrations` on the file name — so a database carrying an earlier
+    // draft will run it again. Every constraint and index it creates is dropped
+    // first for that reason; a bare `ADD CONSTRAINT` would abort here on a
+    // duplicate name and leave the migration half-applied.
+    await expect(client.query(migrationSql)).resolves.toBeDefined();
+
+    // Still enforcing afterwards, rather than merely not throwing.
+    const seed = await seedWallet("reapply");
+    await expectSqlstate(
+      () =>
+        client.query("UPDATE helius_rings_wallets SET shielded_address = 'rings1x' WHERE id = $1", [
+          seed.walletId,
+        ]),
+      CHECK_VIOLATION
     );
   });
 });

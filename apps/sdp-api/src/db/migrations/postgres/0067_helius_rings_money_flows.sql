@@ -56,6 +56,13 @@ ALTER TABLE helius_rings_wallets
 -- The constraint still governs every insert and update from here on, which is
 -- what the invariant is for. It is deliberately never validated afterwards:
 -- the legacy rows stay non-conforming until a live provision overwrites them.
+-- Dropped first, like every other constraint in this file. The whole migration
+-- has to be re-runnable: it was iterated on before it shipped, and a bare
+-- `ADD CONSTRAINT` against a name that already exists aborts the file after the
+-- index drops further down have already been planned.
+ALTER TABLE helius_rings_wallets
+    DROP CONSTRAINT IF EXISTS helius_rings_wallets_owner_identity_pair_check;
+
 ALTER TABLE helius_rings_wallets
     ADD CONSTRAINT helius_rings_wallets_owner_identity_pair_check
         CHECK ((owner_address IS NULL) = (shielded_address IS NULL)) NOT VALID;
@@ -79,6 +86,9 @@ ALTER TABLE helius_rings_wallets
 -- whole range; it is read and written as a string.
 ALTER TABLE helius_rings_wallets
     ADD COLUMN IF NOT EXISTS last_indexed_slot NUMERIC;
+
+ALTER TABLE helius_rings_wallets
+    DROP CONSTRAINT IF EXISTS helius_rings_wallets_last_indexed_slot_check;
 
 ALTER TABLE helius_rings_wallets
     ADD CONSTRAINT helius_rings_wallets_last_indexed_slot_check
@@ -213,6 +223,12 @@ ALTER TABLE helius_rings_operations
     ADD COLUMN IF NOT EXISTS submission_started_at TEXT;
 
 ALTER TABLE helius_rings_operations
+    DROP CONSTRAINT IF EXISTS helius_rings_operations_signed_outbox_pair_check,
+    DROP CONSTRAINT IF EXISTS helius_rings_operations_signed_outbox_signature_check,
+    DROP CONSTRAINT IF EXISTS helius_rings_operations_submission_started_check,
+    DROP CONSTRAINT IF EXISTS helius_rings_operations_last_valid_block_height_check;
+
+ALTER TABLE helius_rings_operations
     -- Signed bytes without an expiry cannot be retired, and an expiry without
     -- bytes cannot be acted on; neither half is useful alone.
     ADD CONSTRAINT helius_rings_operations_signed_outbox_pair_check
@@ -324,6 +340,9 @@ CREATE UNIQUE INDEX idx_helius_rings_operations_unsettled_shield
 -- "not yet built" is why this is nullable rather than defaulting to '[]'.
 ALTER TABLE helius_rings_operations
     ADD COLUMN IF NOT EXISTS input_notes JSONB;
+
+ALTER TABLE helius_rings_operations
+    DROP CONSTRAINT IF EXISTS helius_rings_operations_input_notes_array_check;
 
 ALTER TABLE helius_rings_operations
     -- An object or a bare string here would be a serialization bug, and it

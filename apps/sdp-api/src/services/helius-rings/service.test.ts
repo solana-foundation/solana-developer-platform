@@ -12,6 +12,7 @@ import { signedRingsTransaction } from "@/test/fixtures/rings-transactions";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { RingsAdapterError } from "./adapter-error";
+import type { RingsSignatureInspection } from "./rpc-adapter";
 import {
   computeIntentKey,
   createHeliusRingsService,
@@ -512,21 +513,42 @@ describe("HeliusRingsService", () => {
     });
 
     describe("reconcile", () => {
-      /** A signed withdrawal sitting in `failed`, the only reconcilable shape. */
-      async function strandedSpend(nonce: string) {
+      /**
+       * A signed withdrawal sitting in `failed`, the only reconcilable shape,
+       * and old enough that absence may be concluded about it.
+       *
+       * Backdated because the pipeline writes `updated_at` from the database
+       * clock: a row that failed seconds ago is refused, since both history
+       * sources can still legitimately miss a transaction that landed.
+       */
+      async function strandedSpend(nonce: string, agedMinutes = 30) {
         const operation = await liveishService().prepareOperation(
           operationInput({ clientNonce: nonce, opType: "withdraw" }),
           actorContext
         );
         expect(operation.state).toBe("indexing");
         await failSigned(operation.id, operation.state);
+
+        await getDb(env)
+          .prepare(
+            `UPDATE helius_rings_operations
+                SET updated_at = to_char(now() - ($1 || ' minutes')::interval,
+                                         'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+              WHERE id = $2`
+          )
+          .bind(String(agedMinutes), operation.id)
+          .run();
+
         return operation.id;
       }
 
-      const chain = (landedSlot: string | null, blockhashValid: boolean) => async () => ({
-        landedSlot,
-        blockhashValid,
-      });
+      const chain =
+        (landedSlot: string | null, blockhashValid: boolean) =>
+        async (): Promise<RingsSignatureInspection> => ({
+          landedSlot,
+          blockhashValid,
+          evidence: { statusSlot: landedSlot, transactionSlot: landedSlot, blockhashValid },
+        });
 
       it("completes and releases the wallet when Photon turns out to hold it", async () => {
         const id = await strandedSpend("nonce-rec-landed");
@@ -567,6 +589,60 @@ describe("HeliusRingsService", () => {
             actorContext
           )
         ).resolves.toBeDefined();
+      });
+
+      it("refuses to declare absence about a failure that is minutes old", async () => {
+        // Failed just now. Both history sources can still miss a transaction
+        // that landed moments ago, so concluding absence here would release the
+        // wallet for a payment that already happened.
+        const id = await strandedSpend("nonce-rec-fresh", 0);
+
+        await expect(
+          liveishService({ inspectSignature: chain(null, false) }).reconcileOperation(id)
+        ).rejects.toMatchObject({ code: "conflict" });
+
+        const row = await createPostgresHeliusRingsOperationRepository(getDb(env)).getOperationById(
+          {
+            ...tenant,
+            id,
+          }
+        );
+        expect(row?.state).toBe("failed");
+      });
+
+      it("refuses to void when either history source still has it", async () => {
+        const id = await strandedSpend("nonce-rec-one-source");
+
+        // The second source missing is not evidence while the first has it —
+        // `getTransaction` returning null only means this node has no record.
+        await expect(
+          liveishService({
+            inspectSignature: async () => ({
+              landedSlot: "4242",
+              blockhashValid: false,
+              evidence: { statusSlot: "4242", transactionSlot: null, blockhashValid: false },
+            }),
+          }).reconcileOperation(id)
+        ).rejects.toMatchObject({ code: "conflict" });
+      });
+
+      it("reports an unreachable oracle as retryable rather than a crash", async () => {
+        const id = await strandedSpend("nonce-rec-503");
+
+        const error = await liveishService({
+          inspectSignature: async () => {
+            throw new Error("rpc unreachable");
+          },
+        })
+          .reconcileOperation(id)
+          .then(
+            () => null,
+            (thrown: unknown) => thrown
+          );
+
+        // Not knowing is not absence, and the caller needs "ask again later"
+        // rather than a 500 that reads as a bug in SDP.
+        expect(error).toMatchObject({ code: "gateway_unavailable" });
       });
 
       it("refuses to void a transaction that can still land", async () => {

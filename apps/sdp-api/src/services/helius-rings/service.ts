@@ -93,6 +93,17 @@ export interface HeliusRingsServiceDependencies {
  */
 export const RINGS_MAX_RETRY_DEPTH = 5;
 
+/**
+ * How long a signed failure must have sat before it can be declared absent.
+ *
+ * A blockhash dies about ninety seconds after signing, but the two history
+ * methods can miss a transaction for longer than that while it propagates into
+ * block and archival storage. Voiding inside that window would release the
+ * wallet for a payment that had in fact landed, so absence is only ever
+ * concluded well after it.
+ */
+export const RINGS_RECONCILE_MIN_AGE_MS = 5 * 60 * 1000;
+
 /** Op types that consume notes, and so can duplicate a payment. */
 const SPEND_OP_TYPES = new Set<string>(["transfer_registered", "withdraw", "merge"]);
 
@@ -498,16 +509,35 @@ export class HeliusRingsService {
       );
     }
 
-    const indexed = await this.gateway.verifyIndexed(operation.outer_tx_signature);
+    // Oracles are wrapped so a throw becomes a 503 rather than a 500. Not
+    // knowing is not absence, and the difference between "ask again later" and
+    // "something is broken" is the whole of what the caller needs to hear.
+    const indexed = await this.observe("photon", () =>
+      this.gateway.verifyIndexed(operation.outer_tx_signature as string)
+    );
     if (indexed) {
       return this.toPrivateOperation(await this.settleReconciled(operation, indexed));
     }
 
-    const chain = await this.inspectSignature({
-      env: this.env,
-      signature: operation.outer_tx_signature,
-      signedTxBase64: operation.signed_transaction,
-    });
+    // Nothing may be voided until history has had time to catch up. Both
+    // history methods can legitimately miss a transaction that landed moments
+    // ago, and voiding on that would release the wallet for a payment that
+    // already happened.
+    const failedFor = Date.parse(this.now()) - Date.parse(operation.updated_at);
+    if (failedFor < RINGS_RECONCILE_MIN_AGE_MS) {
+      throw new HeliusRingsError(
+        "conflict",
+        `${operation.outer_tx_signature} failed too recently to declare absent; retry the reconcile in a few minutes`
+      );
+    }
+
+    const chain = await this.observe("rpc", () =>
+      this.inspectSignature({
+        env: this.env,
+        signature: operation.outer_tx_signature as string,
+        signedTxBase64: operation.signed_transaction as string,
+      })
+    );
 
     if (chain.landedSlot !== null) {
       throw new HeliusRingsError(
@@ -531,12 +561,34 @@ export class HeliusRingsService {
       payload: {
         signature: operation.outer_tx_signature,
         photon: false,
-        rpc: "notFound",
-        blockhashValid: false,
+        // Every answer that led here, because this is the one write that
+        // releases a money-safety hold and a later dispute will ask what it
+        // was based on.
+        ...chain.evidence,
       },
     });
 
     return this.toPrivateOperation(voided);
+  }
+
+  /**
+   * Runs one oracle, turning any failure into a retryable gateway error.
+   *
+   * Without this a raw throw escapes `withRingsErrors` untouched and the route
+   * answers 500, which reads as a bug in SDP rather than as "ask again when the
+   * indexer or the RPC is back". The operation is left exactly as it was either
+   * way, so the wallet stays held.
+   */
+  private async observe<T>(oracle: string, read: () => Promise<T>): Promise<T> {
+    try {
+      return await read();
+    } catch (error) {
+      throw new HeliusRingsError(
+        "gateway_unavailable",
+        `the ${oracle} oracle could not be reached, so this operation cannot be reconciled yet`,
+        { cause: error }
+      );
+    }
   }
 
   /**

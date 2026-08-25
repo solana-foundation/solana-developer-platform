@@ -3,7 +3,14 @@
  * in `./types.ts` — one source of truth per set.
  */
 
-/** Operation state, ordered along the happy path (draft → completed). `failed` is terminal from any non-terminal state. */
+/**
+ * Operation state, ordered along the happy path (draft → completed).
+ *
+ * Three terminals, not two: `completed`, `failed`, and `voided`. `failed` is
+ * reachable from any non-terminal state, and is the only one that is not
+ * absolutely final — see `state-machine.ts` for the two reconcile moves out of
+ * it and why they are not transitions.
+ */
 export const OPERATION_STATES = [
   "draft",
   "preparing",

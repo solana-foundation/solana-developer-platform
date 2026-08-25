@@ -43,12 +43,18 @@ export async function submitRingsOuterTransaction(
 /**
  * What the chain says about one signed transaction.
  *
- * Two independent questions, because either answer alone is not enough to
- * declare a transaction dead: whether a finalized node has it, and whether the
- * blockhash it carries could still be accepted.
+ * Absence is the hard question. A transaction's presence can be established by
+ * one positive answer, but no single RPC response proves it never existed:
+ * `getTransaction` returning null means "not in this node's store", which is
+ * also what a node without transaction history, or one backend of a
+ * load-balanced pair, says about a transaction that did land. So both history
+ * methods are asked, and both must miss.
  */
 export interface RingsSignatureInspection {
-  /** Slot a finalized node reports, or null when it has no record. */
+  /**
+   * Slot the transaction landed in, from whichever history source found it, or
+   * null when neither has any record of it.
+   */
   readonly landedSlot: string | null;
   /**
    * Whether the transaction could still be included.
@@ -60,6 +66,12 @@ export interface RingsSignatureInspection {
    * check exists to avoid.
    */
   readonly blockhashValid: boolean;
+  /** The raw answers, recorded on the event so a later dispute has them. */
+  readonly evidence: Readonly<{
+    statusSlot: string | null;
+    transactionSlot: string | null;
+    blockhashValid: boolean;
+  }>;
 }
 
 export interface InspectRingsSignatureInput {
@@ -78,24 +90,46 @@ export async function inspectRingsSignature(
   const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
   const lifetime = message.lifetimeToken;
 
-  // Finalized, because a lesser commitment can still be dropped, and the whole
-  // point of the question is whether this is irreversible.
-  const [landed, blockhash] = await Promise.all([
-    // `base64` because only the slot is read; asking for a parsed transaction
-    // would make the node do work nobody looks at.
-    rpc
-      .getTransaction(input.signature as Signature, {
-        commitment: "finalized",
-        encoding: "base64",
-        maxSupportedTransactionVersion: 0,
-      })
-      .send(),
-    rpc.isBlockhashValid(lifetime as Blockhash, { commitment: "finalized" }).send(),
-  ]);
+  // Serialized rather than concurrent. Two calls to one URL can be answered by
+  // different backends, and these two questions read different state: the
+  // blockhash comes from the bank, which every node has, while history may be
+  // absent on the node that answers. Asking them together invites an answer
+  // pair that no single node would have given.
+  const blockhash = await rpc
+    .isBlockhashValid(lifetime as Blockhash, { commitment: "finalized" })
+    .send();
+
+  // The method built for this question: with history search on, it proceeds
+  // into local block storage and then archival storage, rather than only the
+  // recent status cache.
+  const statuses = await rpc
+    .getSignatureStatuses([input.signature as Signature], { searchTransactionHistory: true })
+    .send();
+  const statusSlot = statuses.value[0]?.slot ?? null;
+
+  // A second, independent history source. `base64` because only the slot is
+  // read; a parsed transaction would make the node work for nobody.
+  const landed = await rpc
+    .getTransaction(input.signature as Signature, {
+      commitment: "finalized",
+      encoding: "base64",
+      maxSupportedTransactionVersion: 0,
+    })
+    .send();
+  const transactionSlot = landed === null ? null : String(landed.slot);
+
+  const evidence = {
+    statusSlot: statusSlot === null ? null : String(statusSlot),
+    transactionSlot,
+    blockhashValid: blockhash.value,
+  } as const;
 
   return {
-    landedSlot: landed === null ? null : String(landed.slot),
+    // Either source finding it is enough to say it landed; only both missing
+    // can support the opposite conclusion.
+    landedSlot: evidence.statusSlot ?? evidence.transactionSlot,
     blockhashValid: blockhash.value,
+    evidence,
   };
 }
 
