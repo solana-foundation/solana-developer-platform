@@ -1,6 +1,5 @@
-import { redirect } from "next/navigation";
-import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import { MarketsLanding } from "./markets-landing";
 
 export default function MarketsPage() {
-  redirect(DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions);
+  return <MarketsLanding />;
 }

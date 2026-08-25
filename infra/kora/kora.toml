@@ -46,6 +46,28 @@ allowed_programs = [
     "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",   # Memo Program
     "AddressLookupTab1e1111111111111111111111111",   # Address Lookup Table
     "ComputeBudget111111111111111111111111111111",   # Compute Budget
+
+    # ── Earn provider programs ──────────────────────────────────────────────
+    # Sponsored Earn vault execution: SDP compiles a provider's instructions
+    # with the Kora signer as fee payer, so every program a provider emits an
+    # instruction for must appear here or Kora rejects the whole transaction.
+    #
+    # SOURCE OF TRUTH is code, not this file: each executing provider client
+    # declares its programs (Kamino: `kaminoProgramAllowlist` in
+    # packages/sdp-kamino/src/programs.ts, from the verified address table in
+    # packages/sdp-types/src/kamino-programs.ts).
+    # `vault-sponsorship-allowlist.test.ts` asserts THIS list is a superset of
+    # every declaration on every CI run. The live Kora smoke suite makes the
+    # same assertion against the DEPLOYED allowlist, and stays opt-in until
+    # sdp-infra#64 puts the ids on devnet Kora. Add a provider's programs here
+    # and to both configs in sdp-infra.
+    #
+    # Kamino. Note kvault is PER-CLUSTER: this harness runs devnet, and the
+    # mainnet id must not be pasted here (see kamino-programs.ts on why the
+    # wrong one fails silently rather than loudly).
+    "devkRngFnfp4gBc5a3LsadgbQKdPo8MSZ4prFiNSVmY",   # Kamino K-Vault (devnet)
+    "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD",   # Kamino Lending (both clusters)
+    "FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr",  # Kamino Farms (both clusters)
 ]
 
 # Native SOL (wrapped) is required for fee payment

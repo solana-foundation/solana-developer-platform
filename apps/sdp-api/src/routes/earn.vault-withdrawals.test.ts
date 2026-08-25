@@ -197,6 +197,8 @@ function movementRow(overrides: Partial<EarnMovementRow> = {}): EarnMovementRow 
     initiated_by_key_id: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
+    creates_share_account: false,
+    share_ata_rent_funder: null,
     ...overrides,
   };
 }

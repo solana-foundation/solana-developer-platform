@@ -352,6 +352,13 @@ function getMarketsRoutePageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
+  if (pathname === "/dashboard/markets") {
+    return {
+      title: t("Shared.dashboardShell.markets"),
+      titlePosition: "center",
+      contentWidthClass: "max-w-none",
+    };
+  }
   if (pathname === "/dashboard/markets/treasury-solutions") {
     return {
       title: t("Shared.dashboardShell.treasurySolutions"),

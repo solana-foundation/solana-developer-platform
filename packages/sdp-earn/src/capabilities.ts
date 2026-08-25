@@ -70,6 +70,12 @@ export function supportsWithdrawalApprovals(
 const VAULT_DIRECT_METHODS = [
   "buildVaultDeposit",
   "readVaultPositions",
+  // Required, not optional, and that is the point: a client that can build a
+  // deposit but cannot say which programs it touches cannot be sponsored
+  // safely, because the paymaster allowlist could not have been checked
+  // against it. Such a client answers false here and its route returns 501,
+  // which is loud, rather than silently executing unsponsored.
+  "sponsoredPrograms",
 ] as const satisfies readonly Exclude<keyof EarnVaultDirectProvider, keyof EarnVaultProvider>[];
 
 /**
