@@ -305,6 +305,173 @@ function ConnectionsUnavailable({
 }
 
 /**
+ * Adding a credential.
+ *
+ * Its own component so the fields, and the key in particular, live and die with
+ * the open form: collapsing it must not leave a secret sitting in a mounted
+ * input, and the parent holding that state made it the largest component in
+ * the file.
+ */
+function AddConnectionForm({
+  needsEndpoint,
+  onAdd,
+  t,
+}: {
+  needsEndpoint: boolean;
+  /** Resolves true when the connection was stored, so the form can clear. */
+  onAdd: (label: string, endpointUrl: string, apiKey: string) => Promise<boolean>;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [credentialLabel, setCredentialLabel] = useState("");
+  const [endpointUrl, setEndpointUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [showKey, setShowKey] = useState(false);
+  const apiKeyHintId = useId();
+  const endpointHintId = useId();
+  const labelFieldId = useId();
+  const endpointFieldId = useId();
+  const apiKeyFieldId = useId();
+
+  const submit = async () => {
+    setIsSubmitting(true);
+    try {
+      const stored = await onAdd(credentialLabel, endpointUrl, apiKey);
+      if (!stored) {
+        return;
+      }
+      // Clear the secret first: a failed re-render must not leave it sitting
+      // in a mounted input.
+      setApiKey("");
+      setCredentialLabel("");
+      setEndpointUrl("");
+      setIsFormOpen(false);
+      setShowKey(false);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* Collapsed by default: most visits are to read what is connected,
+              not to add a credential, and a permanently open secret field is
+              noise on a page that is mostly status. */}
+      <Button
+        type="button"
+        variant={isFormOpen ? "secondary" : "default"}
+        aria-expanded={isFormOpen}
+        aria-controls="rpc-byok-form"
+        onClick={() => setIsFormOpen((open) => !open)}
+      >
+        {isFormOpen ? t("Shared.integrations.rpcByokCancel") : t("Shared.integrations.rpcByokAdd")}
+      </Button>
+
+      <form
+        id="rpc-byok-form"
+        hidden={!isFormOpen}
+        className="grid gap-4 rounded-xl border border-border-default p-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submit();
+        }}
+      >
+        {/* No network field: the project decides it (HOO-1221). A sandbox
+                project is devnet and a production one is mainnet, and the key
+                itself is the same either way, so asking only created a way for
+                the two to disagree. */}
+        <label className="grid gap-1.5 text-sm" htmlFor={labelFieldId}>
+          <span className="font-medium text-primary">{t("Shared.integrations.rpcByokLabel")}</span>
+          <Input
+            id={labelFieldId}
+            required
+            value={credentialLabel}
+            onChange={(event) => setCredentialLabel(event.target.value)}
+            placeholder={t("Shared.integrations.rpcByokLabelPlaceholder")}
+          />
+        </label>
+
+        {/* Only providers that issue an account-specific host make the
+                tenant type one; for the rest the published endpoint is used. */}
+        {needsEndpoint ? (
+          <label className="grid gap-1.5 text-sm" htmlFor={endpointFieldId}>
+            <span className="font-medium text-primary">
+              {t("Shared.integrations.rpcByokEndpoint")}
+            </span>
+            <Input
+              id={endpointFieldId}
+              required
+              type="url"
+              aria-describedby={endpointHintId}
+              value={endpointUrl}
+              onChange={(event) => setEndpointUrl(event.target.value)}
+              placeholder="https://your-endpoint.example"
+            />
+            {/* Described by, not labelled by: hint text inside the label
+                    becomes part of the field's accessible name. */}
+            <span id={endpointHintId} className="text-xs text-tertiary">
+              {t("Shared.integrations.rpcByokEndpointHint")}{" "}
+              {/* Rendered as an element, not copy: translate() reads braces
+                    in a message as an interpolation slot and throws on render. */}
+              <code className="rounded bg-fill-subtle px-1 font-mono">{"{API_KEY}"}</code>
+            </span>
+          </label>
+        ) : null}
+
+        <label className="grid gap-1.5 text-sm" htmlFor={apiKeyFieldId}>
+          <span className="font-medium text-primary">{t("Shared.integrations.rpcByokApiKey")}</span>
+          <div className="flex items-center gap-2">
+            <Input
+              id={apiKeyFieldId}
+              required
+              className="flex-1"
+              type={showKey ? "text" : "password"}
+              autoComplete="off"
+              aria-describedby={apiKeyHintId}
+              value={apiKey}
+              onChange={(event) => setApiKey(event.target.value)}
+            />
+            {/* A typo in a masked field is the usual reason a first
+                    activation fails, so the value is checkable before saving. */}
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              aria-pressed={showKey}
+              // The icon carries no text, so the control needs its own name.
+              aria-label={
+                showKey
+                  ? t("Shared.integrations.rpcByokHideKey")
+                  : t("Shared.integrations.rpcByokShowKey")
+              }
+              onClick={() => setShowKey((shown) => !shown)}
+            >
+              {showKey ? (
+                <EyeOffIcon aria-hidden className="size-4" />
+              ) : (
+                <EyeIcon aria-hidden className="size-4" />
+              )}
+            </Button>
+          </div>
+          <span id={apiKeyHintId} className="text-xs text-tertiary">
+            {t("Shared.integrations.rpcByokApiKeyHint")}
+          </span>
+        </label>
+
+        <div>
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting
+              ? t("Shared.integrations.rpcByokAdding")
+              : t("Shared.integrations.rpcByokSave")}
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/**
  * Whose credentials the whole organization runs on.
  *
  * Organization-wide rather than per connection, so it sits above the list and
@@ -452,24 +619,13 @@ export function RpcByokSection({
   provider: string;
 }) {
   const t = useTranslations();
-  const [isFormOpen, setIsFormOpen] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [pendingId, setPendingId] = useState<string | null>(null);
-  const [credentialLabel, setCredentialLabel] = useState("");
-  const [endpointUrl, setEndpointUrl] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [showKey, setShowKey] = useState(false);
   const [testResults, setTestResults] = useState<Record<string, TestOutcome>>({});
   const [rotatingId, setRotatingId] = useState<string | null>(null);
   // Held locally so the switch reflects the change straight away; the server
   // action revalidates the page behind it.
   const [mode, setMode] = useState(credentialMode ?? "managed");
   const [isSavingMode, setIsSavingMode] = useState(false);
-  const apiKeyHintId = useId();
-  const endpointHintId = useId();
-  const labelFieldId = useId();
-  const endpointFieldId = useId();
-  const apiKeyFieldId = useId();
   const needsEndpoint = rpcProviderNeedsEndpoint(provider);
   // A stranded organization row is not a connection this project can use, so
   // it must not be what stops a project connection being added.
@@ -569,32 +725,22 @@ export function RpcByokSection({
     }
   };
 
-  const submit = async () => {
-    setIsSubmitting(true);
+  /** Returns whether the connection was stored, so the form knows to clear. */
+  const handleAdd = async (label: string, endpoint: string, key: string) => {
     const formData = new FormData();
     formData.set("provider", provider);
     formData.set("scope", "project");
-    formData.set("credentialLabel", credentialLabel);
-    formData.set("endpointUrl", endpointUrl);
-    formData.set("apiKey", apiKey);
+    formData.set("credentialLabel", label);
+    formData.set("endpointUrl", endpoint);
+    formData.set("apiKey", key);
 
-    try {
-      const result = await submitRpcConnectionAction(formData);
-      if (result.status === "success") {
-        // Clear the secret first: a failed re-render must not leave it sitting
-        // in a mounted input.
-        setApiKey("");
-        setCredentialLabel("");
-        setEndpointUrl("");
-        setIsFormOpen(false);
-        setShowKey(false);
-        toast.success(t("Shared.integrations.rpcByokAdded"), { position: "bottom-right" });
-        return;
-      }
-      toast.error(result.message, { position: "bottom-right" });
-    } finally {
-      setIsSubmitting(false);
+    const result = await submitRpcConnectionAction(formData);
+    if (result.status === "success") {
+      toast.success(t("Shared.integrations.rpcByokAdded"), { position: "bottom-right" });
+      return true;
     }
+    toast.error(result.message, { position: "bottom-right" });
+    return false;
   };
 
   return (
@@ -652,126 +798,7 @@ export function RpcByokSection({
       ) : null}
 
       {canManage && !hasLiveConnection && !takenByAnotherProvider ? (
-        <div className="space-y-3">
-          {/* Collapsed by default: most visits are to read what is connected,
-              not to add a credential, and a permanently open secret field is
-              noise on a page that is mostly status. */}
-          <Button
-            type="button"
-            variant={isFormOpen ? "secondary" : "default"}
-            aria-expanded={isFormOpen}
-            aria-controls="rpc-byok-form"
-            onClick={() => setIsFormOpen((open) => !open)}
-          >
-            {isFormOpen
-              ? t("Shared.integrations.rpcByokCancel")
-              : t("Shared.integrations.rpcByokAdd")}
-          </Button>
-
-          <form
-            id="rpc-byok-form"
-            hidden={!isFormOpen}
-            className="grid gap-4 rounded-xl border border-border-default p-4"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void submit();
-            }}
-          >
-            {/* No network field: the project decides it (HOO-1221). A sandbox
-                project is devnet and a production one is mainnet, and the key
-                itself is the same either way, so asking only created a way for
-                the two to disagree. */}
-            <label className="grid gap-1.5 text-sm" htmlFor={labelFieldId}>
-              <span className="font-medium text-primary">
-                {t("Shared.integrations.rpcByokLabel")}
-              </span>
-              <Input
-                id={labelFieldId}
-                required
-                value={credentialLabel}
-                onChange={(event) => setCredentialLabel(event.target.value)}
-                placeholder={t("Shared.integrations.rpcByokLabelPlaceholder")}
-              />
-            </label>
-
-            {/* Only providers that issue an account-specific host make the
-                tenant type one; for the rest the published endpoint is used. */}
-            {needsEndpoint ? (
-              <label className="grid gap-1.5 text-sm" htmlFor={endpointFieldId}>
-                <span className="font-medium text-primary">
-                  {t("Shared.integrations.rpcByokEndpoint")}
-                </span>
-                <Input
-                  id={endpointFieldId}
-                  required
-                  type="url"
-                  aria-describedby={endpointHintId}
-                  value={endpointUrl}
-                  onChange={(event) => setEndpointUrl(event.target.value)}
-                  placeholder="https://your-endpoint.example"
-                />
-                {/* Described by, not labelled by: hint text inside the label
-                    becomes part of the field's accessible name. */}
-                <span id={endpointHintId} className="text-xs text-tertiary">
-                  {t("Shared.integrations.rpcByokEndpointHint")}{" "}
-                  {/* Rendered as an element, not copy: translate() reads braces
-                    in a message as an interpolation slot and throws on render. */}
-                  <code className="rounded bg-fill-subtle px-1 font-mono">{"{API_KEY}"}</code>
-                </span>
-              </label>
-            ) : null}
-
-            <label className="grid gap-1.5 text-sm" htmlFor={apiKeyFieldId}>
-              <span className="font-medium text-primary">
-                {t("Shared.integrations.rpcByokApiKey")}
-              </span>
-              <div className="flex items-center gap-2">
-                <Input
-                  id={apiKeyFieldId}
-                  required
-                  className="flex-1"
-                  type={showKey ? "text" : "password"}
-                  autoComplete="off"
-                  aria-describedby={apiKeyHintId}
-                  value={apiKey}
-                  onChange={(event) => setApiKey(event.target.value)}
-                />
-                {/* A typo in a masked field is the usual reason a first
-                    activation fails, so the value is checkable before saving. */}
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  aria-pressed={showKey}
-                  // The icon carries no text, so the control needs its own name.
-                  aria-label={
-                    showKey
-                      ? t("Shared.integrations.rpcByokHideKey")
-                      : t("Shared.integrations.rpcByokShowKey")
-                  }
-                  onClick={() => setShowKey((shown) => !shown)}
-                >
-                  {showKey ? (
-                    <EyeOffIcon aria-hidden className="size-4" />
-                  ) : (
-                    <EyeIcon aria-hidden className="size-4" />
-                  )}
-                </Button>
-              </div>
-              <span id={apiKeyHintId} className="text-xs text-tertiary">
-                {t("Shared.integrations.rpcByokApiKeyHint")}
-              </span>
-            </label>
-
-            <div>
-              <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting
-                  ? t("Shared.integrations.rpcByokAdding")
-                  : t("Shared.integrations.rpcByokSave")}
-              </Button>
-            </div>
-          </form>
-        </div>
+        <AddConnectionForm needsEndpoint={needsEndpoint} onAdd={handleAdd} t={t} />
       ) : (
         <p className="text-sm leading-6 text-tertiary">
           {t("Shared.integrations.rpcByokAdminOnly")}
