@@ -41,6 +41,7 @@ export type DashboardLoadingRoute =
   | "issuance-create"
   | "issuance-detail"
   | "payments-overview"
+  | "markets-landing"
   | "treasury-solutions"
   | "earn-program"
   | "payments-transactions"
@@ -91,10 +92,10 @@ function resolveWalletLoadingRoute(pathname: string): DashboardLoadingRoute | nu
 }
 
 function resolveMarketsLoadingRoute(pathname: string): DashboardLoadingRoute | null {
-  if (
-    pathname === DASHBOARD_SIDE_NAV_HREFS.markets ||
-    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions
-  ) {
+  if (pathname === DASHBOARD_SIDE_NAV_HREFS.markets) {
+    return "markets-landing";
+  }
+  if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions) {
     return "treasury-solutions";
   }
   if (

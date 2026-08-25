@@ -1,10 +1,21 @@
+import { createHash } from "node:crypto";
 import * as feePaymentAdapters from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { type CachedApiKey, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { getBase58Codec } from "@solana/codecs";
-import type { Signature } from "@solana/kit";
-import { address, createNoopSigner } from "@solana/kit";
+import {
+  address,
+  createNoopSigner,
+  getSignatureFromTransaction,
+  getTransactionDecoder,
+  getTransactionEncoder,
+  type Signature,
+  type SignatureBytes,
+  SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
+  SolanaError,
+} from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { afterEach, beforeEach, vi } from "vitest";
@@ -27,6 +38,8 @@ export const confirmTransactionMock = vi.spyOn(solanaRpc, "confirmTransaction");
 export const getTransactionMock = vi.spyOn(solanaRpc, "getTransaction");
 
 export const sendAndConfirmTransactionMock = vi.spyOn(solanaRpc, "sendAndConfirmTransaction");
+
+export const sendTransactionMock = vi.spyOn(solanaRpc, "sendTransaction");
 
 export const getSignaturesForAddressMock = vi.spyOn(solanaRpc, "getSignaturesForAddress");
 
@@ -89,6 +102,45 @@ export const TEST_SPONSORSHIP_PROVIDER_CONFIG = {
   feePayerMayTransferLamports: false,
   feePayerPolicy: { test: "zero-outflow" },
 } satisfies feePaymentAdapters.SponsorshipProviderConfiguration;
+
+export function sendTransactionPreflightError(customProgramErrorCode?: number): SolanaError {
+  const cause =
+    customProgramErrorCode === undefined
+      ? undefined
+      : new SolanaError(SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM, {
+          code: customProgramErrorCode,
+          index: 0,
+        });
+  return new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE, {
+    accounts: null,
+    fee: null,
+    loadedAccountsDataSize: null,
+    loadedAddresses: null,
+    logs: null,
+    postBalances: null,
+    postTokenBalances: null,
+    preBalances: null,
+    preTokenBalances: null,
+    replacementBlockhash: null,
+    returnData: null,
+    unitsConsumed: null,
+    ...(cause === undefined ? {} : { cause }),
+  });
+}
+
+export function fullySignTestTransaction(transactionBytes: Uint8Array): Uint8Array {
+  const transaction = getTransactionDecoder().decode(transactionBytes);
+  const signatureSeed = createHash("sha512")
+    .update(new Uint8Array(transaction.messageBytes))
+    .digest();
+  const signatures = Object.fromEntries(
+    Object.entries(transaction.signatures).map(([signer, signature], index) => [
+      signer,
+      signature ?? (new Uint8Array(signatureSeed.map((byte) => byte ^ index)) as SignatureBytes),
+    ])
+  ) as typeof transaction.signatures;
+  return new Uint8Array(getTransactionEncoder().encode({ ...transaction, signatures }));
+}
 
 const TEST_CACHED_API_KEY: CachedApiKey = {
   id: TEST_API_KEY.id,
@@ -505,6 +557,9 @@ export function installPaymentsRouteTestHooks(): void {
       confirmationStatus: "confirmed",
       err: null,
     });
+    sendTransactionMock.mockImplementation(async (_rpc, transactionBytes) =>
+      getSignatureFromTransaction(getTransactionDecoder().decode(transactionBytes))
+    );
     getSignaturesForAddressMock.mockResolvedValue([]);
     getSplTokenBalancesMock.mockResolvedValue([]);
     getSplTokenAccountAddressesMock.mockResolvedValue([]);
@@ -515,6 +570,7 @@ export function installPaymentsRouteTestHooks(): void {
         status: subscriptionsProgram.PlanStatus.Active,
         data: {
           endTs: 0n,
+          metadataUri: "",
           pullers: [address(TEST_SOLANA_ADDRESSES.wallet1)],
           terms: { createdAt: 1_770_000_000n },
         },
@@ -528,7 +584,7 @@ export function installPaymentsRouteTestHooks(): void {
     fetchMaybeSubscriptionDelegationMock.mockResolvedValue({
       exists: true,
       address: address(TEST_SOLANA_ADDRESSES.wallet3),
-      data: {},
+      data: { expiresAtTs: 1_800_000_000n },
     } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>>);
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
@@ -537,7 +593,7 @@ export function installPaymentsRouteTestHooks(): void {
         ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
         signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
       }),
-      signAsFeePayer: vi.fn(),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: vi
         .fn()
         .mockResolvedValue(

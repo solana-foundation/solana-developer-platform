@@ -1,6 +1,7 @@
 import { sumDecimalAmounts } from "@sdp/payments/decimal";
 import type { Address, Instruction, TransactionSigner } from "@solana/kit";
 import {
+  address,
   addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
   compileTransaction,
@@ -23,6 +24,9 @@ import { badRequest } from "@/lib/errors";
 import type { RecentBlockhash, ResolvedRecipient, TokenContext } from "./types";
 
 export const DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION = 20;
+
+// biome-ignore lint/security/noSecrets: Solana Memo program id constant, not a secret.
+const MEMO_PROGRAM_ADDRESS = address("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
 
 export interface RecipientInstructionGroup extends ResolvedRecipient {
   instructions: Instruction[];
@@ -151,7 +155,15 @@ function buildCandidateChunk(
     lifetime: RecentBlockhash;
   }
 ): TransactionChunk {
-  const instructions = groups.flatMap((group) => group.instructions);
+  const instructions = [
+    ...groups.flatMap((group) => group.instructions),
+    // Identical chunks sharing a blockhash still need distinct transaction signatures.
+    {
+      programAddress: MEMO_PROGRAM_ADDRESS,
+      accounts: [],
+      data: new TextEncoder().encode(crypto.randomUUID()),
+    },
+  ];
   return {
     recipientIndexes: groups.map((group) => group.index),
     instructions,
