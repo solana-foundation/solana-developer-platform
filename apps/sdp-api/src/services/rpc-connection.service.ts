@@ -11,7 +11,8 @@ import type { Context } from "hono";
 import { getDb } from "@/db";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
 import { getAuth } from "@/lib/auth";
-import { badRequest, conflict, forbidden, notFound } from "@/lib/errors";
+import { badRequest, conflict, forbidden, internalError, notFound } from "@/lib/errors";
+import { getLogger } from "@/runtime/logger";
 import {
   type CredentialSecretStorageBackend,
   createCredentialSecretStore,
@@ -377,22 +378,75 @@ export async function deactivateRpcConnection(
 ): Promise<SafeRpcConnection> {
   const { auth, store, scopeKeys } = await loadConnectionWithSecret(c, connectionId);
 
-  const deactivated = await store.deactivateConnection({
-    organizationId: auth.organizationId,
-    connectionId,
-    scopeKeys,
-  });
-  if (!deactivated) {
-    throw conflict("The RPC connection is already deactivated");
-  }
-
   const credential = await store.findConnectionSecret({
     organizationId: auth.organizationId,
     connectionId,
     scopeKeys,
   });
 
-  return toSafeWithCredential(deactivated, credential);
+  // The connection and credential flips share one transaction: a crash
+  // between them would leave a deactivated connection whose retry 409s while
+  // the withdrawn credential silently stays active — the exact retention this
+  // endpoint exists to end. The Secret Manager destroy stays outside; it is
+  // best effort and must not roll back the committed deactivation.
+  const deactivated = await getDb(c.env).transaction(async (tx) => {
+    const txStore = new RpcConnectionStore(tx);
+    const row = await txStore.deactivateConnection({
+      organizationId: auth.organizationId,
+      connectionId,
+      scopeKeys,
+      executor: tx,
+    });
+    if (!row) {
+      throw conflict("The RPC connection is already deactivated");
+    }
+    const credentialFlips = await txStore.deactivateConnectionCredential({
+      organizationId: auth.organizationId,
+      connectionId,
+      scopeKeys,
+      executor: tx,
+    });
+    if (credentialFlips !== 1) {
+      throw internalError("The credential behind this RPC connection did not deactivate");
+    }
+    return row;
+  });
+
+  await destroyConnectionSecretBestEffort(c, credential);
+
+  return toSafeWithCredential(
+    deactivated,
+    credential ? { ...credential, status: "deactivated" } : null
+  );
+}
+
+async function destroyConnectionSecretBestEffort(
+  c: AppContext,
+  credential: Awaited<ReturnType<RpcConnectionStore["findConnectionSecret"]>>
+): Promise<void> {
+  if (credential?.storage_backend !== "gcp_secret_manager" || !credential.secret_version_ref) {
+    return;
+  }
+
+  try {
+    // SAFETY: the guard above narrows storage_backend to "gcp_secret_manager".
+    const store = createCredentialSecretStore(
+      c.env,
+      credential.storage_backend as CredentialSecretStorageBackend
+    );
+    await store.destroyVersion({ secretVersionRef: credential.secret_version_ref });
+  } catch (err) {
+    getLogger().error(
+      {
+        provider_credential_id: credential.id,
+        storage_backend: credential.storage_backend,
+        request_id: c.get("requestId"),
+        reason: "secret_cleanup_failed",
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "rpc_connection_secret_orphan_risk"
+    );
+  }
 }
 
 function isDefaultConflict(error: unknown): boolean {

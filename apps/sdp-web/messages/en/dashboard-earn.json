@@ -1,5 +1,13 @@
 {
   "DashboardMarkets": {
+    "landing": {
+      "eyebrow": "Choose a path",
+      "description": "Deposit your organization's own treasury, or offer earn to your customers.",
+      "treasuryAudience": "For corporate treasury",
+      "treasuryDescription": "Deposit from your custody wallets into provider strategies, and track positions and yield in one place.",
+      "programAudience": "For payments platforms",
+      "programDescription": "Let your customers earn inside your product. Pick a strategy, style the button, integrate the API."
+    },
     "treasury": {
       "eyebrow": "Portfolio overview",
       "description": "Review custody balances for the selected project, provider strategies for its environment, and organization-wide custodial positions.",
@@ -113,10 +121,10 @@
       "back": "Back",
       "done": "Done",
       "missingStrategyTitle": "Choose a strategy first",
-      "missingStrategyDescription": "Return to Earn Program and select a live strategy this integration should fund.",
+      "missingStrategyDescription": "Return to Earn and select a live strategy this integration should fund.",
       "unavailableStrategyTitle": "Strategy deposits unavailable",
-      "unavailableStrategyDescription": "This strategy cannot be funded by the selected organization and environment. Return to Earn Program and choose an enabled strategy.",
-      "returnToEarn": "Return to Earn Program"
+      "unavailableStrategyDescription": "This strategy cannot be funded by the selected organization and environment. Return to Earn and choose an enabled strategy.",
+      "returnToEarn": "Return to Earn"
     }
   },
   "DashboardEarn": {

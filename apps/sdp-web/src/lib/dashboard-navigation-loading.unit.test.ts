@@ -30,6 +30,7 @@ describe("dashboard loading route", () => {
     ["/dashboard/payments/recurring", "recurring-payments"],
     ["/dashboard/payments/recurring/create", "recurring-payment-create"],
     ["/dashboard/payments/recurring/payment-1", "recurring-payment-detail"],
+    ["/dashboard/markets", "markets-landing"],
     ["/dashboard/markets/treasury-solutions", "treasury-solutions"],
     ["/dashboard/markets/earn", "earn-program"],
     ["/dashboard/markets/earn/button-builder", "earn-program"],

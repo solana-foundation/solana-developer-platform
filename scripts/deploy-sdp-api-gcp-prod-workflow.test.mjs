@@ -73,6 +73,20 @@ test("candidate traffic tag is always removed", () => {
   assert.ok(promotion !== -1 && promotion < cleanup);
 });
 
+test("managed cadence parity is verified before production promotion", () => {
+  const promotionStep = workflow.indexOf("- name: Promote service and cron with rollback");
+  const cadenceVerification = workflow.indexOf(
+    "verify-managed-reconciliation-cadence.mjs",
+    promotionStep
+  );
+  const trafficPromotion = workflow.indexOf("--to-revisions", promotionStep);
+  const cronUpdate = workflow.indexOf("gcloud run jobs update", promotionStep);
+
+  assert.ok(promotionStep !== -1 && promotionStep < cadenceVerification);
+  assert.ok(cadenceVerification < trafficPromotion);
+  assert.ok(cadenceVerification < cronUpdate);
+});
+
 test("cancellation-safe rollback restores resolved traffic and cron together", () => {
   assert.match(workflow, /if: >-\n\s+always\(\) &&/);
   assert.match(workflow, /PREVIOUS_TRAFFIC=/);

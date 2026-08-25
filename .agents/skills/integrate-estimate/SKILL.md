@@ -1,6 +1,6 @@
 ---
 name: integrate-estimate
-description: Implement a ramp provider's estimateOnramp / estimateOfframp → PaymentRampEstimate, the fiat↔crypto rate preview. The cheapest live call — no DB, no counterparty, no KYC — so build it first to prove your config and auth work. Use when opening a PR against apps/sdp-api to add ramp rate estimates for a provider.
+description: Implement a ramp provider's estimateOnramp / estimateOfframp → PaymentRampEstimate in @sdp/payments. The cheapest live provider call, with no DB, counterparty, or KYC.
 disable-model-invocation: true
 ---
 
@@ -8,18 +8,18 @@ disable-model-invocation: true
 
 An estimate is a rate preview: "how much USDC for 100 EUR?" It hits the provider's live rate API and nothing else — no counterparty, no wallet, no DB. That makes it the first capability to build: if `estimateOnramp` works, your `register-provider` config reader and credentials are correct.
 
-Canonical example: `estimateOnramp` / `estimateOfframp` in `lib/ramps/providers/lightspark/client.ts`.
+Choose the closest implementation in `packages/sdp-payments/src/ramps/providers/`: Lightspark for decimal/minor-unit conversion, MoonPay for hosted-provider quote APIs, Stripe for on-ramp-only support, or BVNK for POST-based estimates.
 
 ## Contract
 
-Both methods are required on `RampProvider` (`lib/ramps/types.ts`):
+Both methods are required on `RampProvider` (`packages/sdp-payments/src/ramps/types.ts`), even when one direction is unsupported:
 
 ```ts
 estimateOnramp(ctx: RampRuntimeContext, input: RampEstimateOnrampInput): Promise<PaymentRampEstimate>
 estimateOfframp(ctx: RampRuntimeContext, input: RampEstimateOfframpInput): Promise<PaymentRampEstimate>
 ```
 
-Inputs (`lib/ramps/types.ts`):
+Inputs (`packages/sdp-payments/src/ramps/types.ts`):
 - onramp: `{ assetRail: CryptoRailId, fiatCurrency: RampFiatCurrency, fiatAmount: string }`
 - offramp: `{ assetRail: CryptoRailId, fiatCurrency: RampFiatCurrency, cryptoAmount: string }`
 
@@ -36,7 +36,7 @@ Output `PaymentRampEstimate` (`@sdp/types`, `packages/sdp-types/src/payments.ts`
 
 ## How to build it
 
-`ctx` is `{ env, mode }` — read your config with the mode-keyed reader from `register-provider`, then HTTP only. Convert the asset rail to the provider's currency code with `getCryptoRailAssetLabel(input.assetRail)`; convert amounts to/from the provider's minor units with `parseDecimalAmount(str, decimals)` / `formatDecimalAmount(bigint, decimals)` (`lib/amount.ts`).
+`ctx` is `{ env, mode }` — read your config with the mode-keyed reader from `register-provider`, then HTTP only. Convert the asset rail with `getCryptoRailAssetLabel` from `@sdp/types/payment-rails`; convert minor units with `parseDecimalAmount` / `formatDecimalAmount` from `@sdp/solana/amount`.
 
 Lightspark's shape: GET the corridor's `exchange-rates` once to learn decimals, again with the amount to get the quote, then map into `PaymentRampEstimate`.
 
@@ -50,11 +50,11 @@ if (rate.receivingAmount <= 0) {
 }
 ```
 
-The **only** soft signal allowed here is declaring a pair genuinely unsupported: throw `new AppError("ESTIMATE_NOT_AVAILABLE", …)`. The estimate fan-out (`estimateAcrossProviders` in `routes/payments/handlers/ramps.ts`) catches that one code and reports the provider as `unsupported`; every other error surfaces. That's a typed signal, not a `?? 0`.
+For an unsupported pair/direction, or a provider whose price exists only at hosted-quote time, throw `estimateNotAvailable(...)` from `@sdp/payments/errors`. The API fan-out maps that code to `{ status: "unsupported" }`; it maps every other provider exception to `{ status: "error", error }` for that provider, so one failed provider does not fail the whole fan-out.
 
 ## Dispatch + route
 
-Estimates fan out across all entitled providers at `POST /v1/ramps/{onramp|offramp}/estimate` (`routes/payments/handlers/ramps.ts` → `estimateAcrossProviders`, gated by `assertRampProviderAvailable`). You don't touch the fan-out — it calls `RAMP_PROVIDER_CLIENTS[provider].estimate*` for each provider that passes `filterProviders`.
+The dashboard runtime routes are `POST /v1/payments/ramps/{onramp|offramp}/estimate` (`apps/sdp-api/src/routes/payments/handlers/ramps.ts` → `estimateAcrossProviders`). They are availability-gated and metered. They are not currently part of the public OpenAPI surface, so do not advertise them as public endpoints unless the OpenAPI policy changes.
 
 ## Variety
 
@@ -71,4 +71,4 @@ Shared rules live in `integrate-ramp-provider`. Hot here:
 - No fallbacks — non-positive/empty rate throws; never substitute a default amount or rate.
 - HTTP only; no DB, no counterparty lookups in estimate.
 - Strong typing — status/type maps are `as const satisfies Record<…>`; no `any`.
-- Verify with `tsc --noEmit` + `biome check`. Provider calls 503 when credentials aren't present in the environment, so unit-test the mapping with mocked fetch, like `providers/lightspark/client.test.ts`.
+- Verify with `pnpm --filter @sdp/payments typecheck`, `lint`, and `test`, plus focused API fan-out tests when orchestration changes. Unit-test provider mapping with mocked fetch and cover unsupported directions and missing credentials.

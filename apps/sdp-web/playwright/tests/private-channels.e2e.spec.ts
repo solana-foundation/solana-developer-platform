@@ -1,11 +1,11 @@
 import { expect, test } from "@playwright/test";
-import { getPlaywrightAdminSession } from "../support/auth-session";
 import {
   ensureLinkedOrg,
+  getBootstrapApiBaseUrl,
+  provisionWithAdminSession,
   resolvePlaywrightProjectId,
   seedProjectCookie,
 } from "../support/local-dashboard-bootstrap";
-import { getBootstrapApiBaseUrl } from "../support/local-issuance-bootstrap";
 
 // The dashboard gates on the `private-channels` Vercel flag, whose default falls
 // back to PRIVATE_CHANNELS_ENABLED. Local Playwright runs have no Vercel provider,
@@ -20,13 +20,10 @@ test.describe
     let bootstrapProjectId = "";
 
     test.beforeAll(async ({ browser }) => {
-      const session = await getPlaywrightAdminSession(browser);
-      await ensureLinkedOrg(session.identity, { tier: "enterprise" });
-      bootstrapProjectId = await resolvePlaywrightProjectId(
-        getBootstrapApiBaseUrl(),
-        session.getBearerToken
-      );
-      await session.page.close();
+      bootstrapProjectId = await provisionWithAdminSession(browser, async (session) => {
+        await ensureLinkedOrg(session.identity, { tier: "enterprise" });
+        return resolvePlaywrightProjectId(getBootstrapApiBaseUrl(), session.getBearerToken);
+      });
     });
 
     test.beforeEach(async ({ page }) => {

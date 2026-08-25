@@ -20,6 +20,10 @@ import { createTokenRepository } from "@/db/repositories";
 import { AppError, badRequest } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { isNativePaymentToken, normalizePaymentToken } from "@/services/payment-operation.service";
+import {
+  type SignedSubmissionStore,
+  submitSignedPaymentTransaction,
+} from "@/services/payments/signed-submission";
 import * as solanaServices from "@/services/solana";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -86,6 +90,7 @@ export async function sendSubscriptionInstructions(input: {
   sourceSigner?: TransactionSigner;
   instructions: Instruction[];
   feePayer?: Address;
+  submissionStore?: SignedSubmissionStore;
 }): Promise<Signature> {
   const signer =
     input.sourceSigner ??
@@ -117,7 +122,15 @@ export async function sendSubscriptionInstructions(input: {
   );
   const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
   const txBytes = new Uint8Array(getTransactionEncoder().encode(partiallySigned));
-  return feePayment.signAndSend(txBytes);
+  return input.submissionStore
+    ? submitSignedPaymentTransaction({
+        feePayment,
+        rpc,
+        transaction: txBytes,
+        lastValidBlockHeight,
+        store: input.submissionStore,
+      })
+    : feePayment.signAndSend(txBytes);
 }
 
 export async function confirmSubscriptionSignature(

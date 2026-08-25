@@ -13,6 +13,7 @@ import type {
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
 import { type Address, address, createNoopSigner } from "@solana/kit";
 import { SdpKaminoError } from "./errors";
+import { permittedPlanPrograms } from "./guards";
 import { createKaminoRpc } from "./rpc";
 import {
   buildKaminoDepositPlan,
@@ -89,6 +90,9 @@ export function toEarnVaultTransactionPlan(plan: KaminoInstructionPlan): EarnVau
     // These are the mint-scale amounts the instructions actually encode. The
     // API ledgers this shape; dropping it reintroduces raw-request drift.
     accepted: { ...plan.accepted },
+    ...(plan.createsShareAccount === undefined
+      ? {}
+      : { createsShareAccount: plan.createsShareAccount }),
   };
 }
 
@@ -156,14 +160,27 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
   }
 
   /**
-   * The owner arrives as an ADDRESS, not a signer — custody lives in the API and
+   * Participants arrive as ADDRESSES, not signers: custody lives in the API and
    * a private key must never reach a provider client. klend-sdk needs a signer
-   * shaped object to place the account correctly, so a noop signer stands in: it
-   * contributes the right address and role and signs nothing. The API attaches
-   * the real custody signer at compile time, where kit matches by address.
+   * shaped object to place the account correctly, so a noop signer stands in.
+   * It contributes the right address and role and signs nothing; the API
+   * attaches the real signature later, where kit matches by address.
+   *
+   * Used for the owner AND for a sponsored rent payer. The rent payer's
+   * signature is supplied by the paymaster after compilation, so a noop signer
+   * is not a placeholder there but the correct final shape.
    */
-  private owner(value: string) {
+  private participant(value: string) {
     return createNoopSigner(address(value));
+  }
+
+  /**
+   * See `EarnVaultDirectProvider.sponsoredPrograms`. Returns the same set
+   * `assertPlanTargetsCluster` enforces on this client's output, so what is
+   * declared to a paymaster cannot drift from what is actually emitted.
+   */
+  sponsoredPrograms(cluster: SolanaCluster): readonly string[] {
+    return [...permittedPlanPrograms(cluster)];
   }
 
   async buildVaultDeposit(
@@ -178,8 +195,11 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
           runtime,
           {
             vault: address(input.providerReference),
-            owner: this.owner(input.owner),
+            owner: this.participant(input.owner),
             amount: input.amount,
+            ...(input.rentPayer === undefined
+              ? {}
+              : { rentPayer: this.participant(input.rentPayer) }),
             ...(input.minSharesOut === undefined ? {} : { minSharesOut: input.minSharesOut }),
           },
           assertActive
@@ -212,8 +232,14 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
           runtime,
           {
             vault: address(input.providerReference),
-            owner: this.owner(input.owner),
+            owner: this.participant(input.owner),
             shares: input.shares,
+            ...(input.rentPayer === undefined
+              ? {}
+              : { rentPayer: this.participant(input.rentPayer) }),
+            ...(input.rentRefundTo === undefined
+              ? {}
+              : { rentRefundTo: address(input.rentRefundTo) }),
             slot,
           },
           assertActive

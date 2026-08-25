@@ -53,6 +53,16 @@ DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm db:seed:local
   no dev-only default-on: `MARKETS_ENABLED=true` and `EARN_ENABLED=true`, needed
   by **both** apps (same unprefixed names). Under the Doppler wrapper, plain
   shell exports are ignored unless named in `DOPPLER_PRESERVE_ENV`.
+- **Sponsored vault movements** (`EARN_VAULT_FEE_SPONSORSHIP_ENABLED=true`, API
+  only) additionally need a Kora to sign against: `pnpm kora:up`, then point
+  `KORA_RPC_URL` at it. `infra/kora/kora.toml` already carries the Kamino program
+  ids and `allow_create_account = true`, so the harness needs no edit, and the
+  harness is the only option today: deployed devnet Kora matches on the policy
+  flag but not on the allowlist, which lands with sdp-infra#64. Its
+  `SIGNER_PRIVATE_KEY` does need devnet SOL, because it pays the fee AND the
+  share-ATA rent for real. The flag fails CLOSED, so a value
+  the wrapper drops looks like "sponsorship silently did nothing" rather than an
+  error — if deposits still come out `wallet-pays`, check that first.
 
 ### 3. Run it
 
@@ -62,6 +72,10 @@ DOPPLER_PRESERVE_ENV=DATABASE_URL,REDIS_URL,MARKETS_ENABLED,EARN_ENABLED \
   REDIS_URL=redis://127.0.0.1:6380 \
   MARKETS_ENABLED=true EARN_ENABLED=true \
   pnpm dev:api:local          # API on :8787
+# add EARN_VAULT_FEE_SPONSORSHIP_ENABLED to BOTH the preserve list and the
+# exports above to sponsor vault movements, or put it in
+# apps/sdp-api/.env.local, which run-with-config.sh overlays on top of Doppler
+# and which its own comment calls the intended local override path.
 
 DOPPLER_PRESERVE_ENV=NEXT_PUBLIC_SDP_API_BASE_URL,MARKETS_ENABLED,EARN_ENABLED \
   NEXT_PUBLIC_SDP_API_BASE_URL=http://127.0.0.1:8787 \
@@ -333,6 +347,15 @@ rates come from the same paged endpoint the catalogue uses.
 - Optional capabilities so far: portfolio wallets, withdrawal approvals, and
   live metrics. All three are method-presence guards in capabilities.ts, and a
   provider may implement any subset — Kamino has only the third.
+- **`sponsoredPrograms(cluster)` is a REQUIRED member of
+  `EarnVaultDirectProvider`, not an optional capability** (PRO-1736). It returns
+  every program the client may emit an instruction for, as plain base58 strings,
+  so a paymaster allowlist in another repository can be asserted a superset of it.
+  Consequence worth knowing before you add a provider: a client that implements
+  `buildVaultDeposit` and `readVaultPositions` but omits this one answers FALSE
+  to `supportsVaultDirect`, and its deposit route returns 501. That is deliberate.
+  A client that cannot say which programs it touches cannot be sponsored safely,
+  and failing loudly beats executing unsponsored by surprise.
 
 ## Hard invariants (ADR 0002)
 
