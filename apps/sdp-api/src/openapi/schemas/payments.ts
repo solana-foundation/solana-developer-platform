@@ -418,6 +418,11 @@ export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
         },
       ],
     }),
+    expectedRevisionId: withOpenApi(updateWalletPolicySchemaBase.shape.expectedRevisionId, {
+      description:
+        "Optimistic-concurrency precondition. When set, the update only applies if this matches the wallet's active control-profile revision id (use null to require that no profile is active); otherwise the request fails with 409. Omit to skip the check and overwrite unconditionally.",
+      example: "wcpr_example",
+    }),
   })
   .openapi({
     description:

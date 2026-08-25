@@ -174,6 +174,9 @@ export const updateWalletPolicyBaseSchema = z.object({
   commitMessage: z.string().trim().min(1).max(500).optional(),
   defaultAction: z.enum(["allow", "deny", "approval_required", "review"]),
   rules: z.array(walletPolicyRuleSchema).max(100),
+  // Stale-write guard. Every update activates a revision, so the active
+  // revision id versions the whole policy; null means "expect no profile yet".
+  expectedRevisionId: z.string().min(1).max(120).nullable().optional(),
 });
 
 /**

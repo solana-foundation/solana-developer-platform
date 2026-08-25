@@ -171,7 +171,7 @@ export class MosaicService {
     this.env = env;
     this.signer = signer;
     this.feePayment = feePayment;
-    this.rpc = createRpcForSdk<MosaicSdkRpc>(env);
+    this.rpc = createRpcForSdk<MosaicSdkRpc>(env) as unknown as Rpc<SolanaRpcApi> & MosaicSdkRpc;
     this.transactionFailedError =
       options?.transactionFailedError ?? ((message: string) => new Error(message));
   }
