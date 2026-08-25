@@ -39,6 +39,12 @@ export interface RpcConnectionContext {
    * offer to add a second.
    */
   projectConnectionProvider?: string | null;
+  /**
+   * The provider whose connection the relay would actually route this project
+   * through, whichever provider that is. `null` when nothing of the tenant's
+   * own serves it and the platform selection still decides.
+   */
+  servingProvider?: string | null;
 }
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
@@ -191,8 +197,9 @@ export async function IntegrationDetailView({
             canManage={rpc.canManage}
             isEnabledInDeployment={rpc.isEnabledInDeployment}
             organizationId={rpc.organizationId}
-            projectConnectionProvider={rpc.projectConnectionProvider ?? null}
+            credentialMode={rpc.credentialMode ?? null}
             provider={detail.provider as OrganizationRpcProvider}
+            servingProvider={rpc.servingProvider ?? null}
             status={detail.status}
           />
         </Section>

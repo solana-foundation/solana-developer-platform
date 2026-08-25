@@ -12,6 +12,45 @@ import { rpcProviderLabel } from "@/lib/rpc-providers";
 import type { IntegrationStatus } from "./integrations-status";
 
 /**
+ * What is serving this project, in one sentence, most specific first.
+ *
+ * Six answers rather than the original two, because the organization's
+ * selection and the project's own connection are different questions and the
+ * page used to answer only the first while claiming to answer both.
+ */
+function serviceSummary(
+  input: {
+    isActive: boolean;
+    isStrandedDefault: boolean;
+    orgProvider: OrganizationRpcProvider;
+    provider: OrganizationRpcProvider;
+    servingProvider?: string | null;
+  },
+  t: ReturnType<typeof useTranslations>
+): string {
+  const { isActive, isStrandedDefault, orgProvider, provider, servingProvider } = input;
+
+  if (isStrandedDefault) {
+    return t("Shared.integrations.rpcActiveSelectedOnly");
+  }
+  if (servingProvider === provider) {
+    return t("Shared.integrations.rpcActiveOwnCredential");
+  }
+  if (servingProvider) {
+    return isActive
+      ? t("Shared.integrations.rpcActiveOverridden", {
+          provider: rpcProviderLabel(servingProvider),
+        })
+      : t("Shared.integrations.rpcServedByProject", {
+          provider: rpcProviderLabel(servingProvider),
+        });
+  }
+  return isActive
+    ? t("Shared.integrations.rpcActiveHere")
+    : t("Shared.integrations.rpcActiveElsewhere", { provider: rpcProviderLabel(orgProvider) });
+}
+
+/**
  * The RPC half of HOO-787: an organization used to have to leave the
  * integration it was reading about and go find the provider dropdown in
  * Settings. The controls live on the provider's own page now.
@@ -23,21 +62,26 @@ import type { IntegrationStatus } from "./integrations-status";
 export function RpcConnectionPanel({
   activeProvider,
   canManage,
+  credentialMode,
   isEnabledInDeployment,
   organizationId,
-  projectConnectionProvider,
   provider,
+  servingProvider,
   status,
 }: {
   activeProvider: OrganizationRpcProvider;
   canManage: boolean;
   /**
-   * The provider this project's own connection routes through, when it is not
-   * the one on this page. A tenant connection outranks the organization's
-   * selection, so this panel cannot claim traffic runs through the selected
-   * provider without knowing about it.
+   * `byok` means the relay refuses rather than falling back, so SDP's
+   * providers serve nothing and picking one here decides nothing.
    */
-  projectConnectionProvider?: string | null;
+  credentialMode?: "managed" | "byok" | null;
+  /**
+   * The provider actually routing this project, whichever one that is. A
+   * tenant connection outranks the organization's selection, so this panel
+   * cannot describe what serves the project without it.
+   */
+  servingProvider?: string | null;
   /**
    * Whether this deployment actually holds an endpoint for the provider. The
    * catalog marks the organization's saved provider `active` whatever the
@@ -63,9 +107,15 @@ export function RpcConnectionPanel({
   }, [activeProvider]);
 
   const isActive = provider === currentProvider;
-  // Selected for the organization, but this project's own connection wins, so
-  // nothing on this page is serving it.
-  const isOverriddenByProject = isActive && Boolean(projectConnectionProvider);
+  /**
+   * The platform selection only decides what serves a project that has no
+   * connection of its own, and every organization has exactly one reachable
+   * project. So once this project is on its own key -- or the organization is
+   * fail-closed on BYOK, where the relay refuses instead of falling back --
+   * choosing a provider here changes nothing anyone can reach. Offering the
+   * control anyway is a button that reports success and does nothing.
+   */
+  const platformChoiceDecidesThisProject = !servingProvider && credentialMode !== "byok";
   // Saved here, but unserviceable: the relay is falling back to another
   // provider, so there is nothing honest to test on this page.
   const isStrandedDefault = isActive && !isEnabledInDeployment;
@@ -171,17 +221,16 @@ export function RpcConnectionPanel({
           <p className="text-sm leading-6 text-secondary">
             {/* A stranded default is selected but not serving, so it must not
                 also claim traffic runs through it. */}
-            {isStrandedDefault
-              ? t("Shared.integrations.rpcActiveSelectedOnly")
-              : isOverriddenByProject
-                ? t("Shared.integrations.rpcActiveOverridden", {
-                    provider: rpcProviderLabel(projectConnectionProvider ?? ""),
-                  })
-                : isActive
-                  ? t("Shared.integrations.rpcActiveHere")
-                  : t("Shared.integrations.rpcActiveElsewhere", {
-                      provider: rpcProviderLabel(currentProvider),
-                    })}
+            {serviceSummary(
+              {
+                isActive,
+                isStrandedDefault,
+                orgProvider: currentProvider,
+                provider,
+                servingProvider,
+              },
+              t
+            )}
           </p>
         </div>
 
@@ -196,7 +245,7 @@ export function RpcConnectionPanel({
           >
             {isTesting ? t("DashboardCustody.testing") : t("Shared.integrations.rpcTestConnection")}
           </Button>
-        ) : status === "available" && canManage ? (
+        ) : status === "available" && canManage && platformChoiceDecidesThisProject ? (
           <Button
             type="button"
             disabled={isSwitching}
@@ -210,6 +259,18 @@ export function RpcConnectionPanel({
           </Button>
         ) : null}
       </div>
+
+      {/* Say why the choice is not on offer, rather than leaving a provider
+          page with no control and no reason. */}
+      {status === "available" && canManage && !platformChoiceDecidesThisProject ? (
+        <p className="max-w-2xl text-sm leading-6 text-tertiary">
+          {servingProvider
+            ? t("Shared.integrations.rpcPlatformChoiceMoot", {
+                provider: rpcProviderLabel(servingProvider),
+              })
+            : t("Shared.integrations.rpcPlatformChoiceMootByok")}
+        </p>
+      ) : null}
 
       {isStrandedDefault ? (
         <p className="max-w-2xl text-sm leading-6 text-warning">

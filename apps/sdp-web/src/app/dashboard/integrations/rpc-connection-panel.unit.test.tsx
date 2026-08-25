@@ -118,11 +118,64 @@ describe("RpcConnectionPanel", () => {
     expect(toast.warning).not.toHaveBeenCalled();
   });
 
+  it("does not offer the platform choice once this project runs its own connection", () => {
+    // Every organization has exactly one reachable project, so a platform
+    // provider chosen here would decide nothing: the project connection wins
+    // and production is locked in the switcher.
+    renderPanel({
+      provider: "helius",
+      activeProvider: "alchemy",
+      servingProvider: "alchemy",
+      status: "available",
+    });
+
+    expect(screen.queryByRole("button", { name: "Use this provider" })).toBeNull();
+    expect(screen.getByText(/would not change what serves it/)).toBeTruthy();
+  });
+
+  it("does not offer the platform choice when the organization is fail-closed on BYOK", () => {
+    // In byok mode the relay throws rather than falling back, so SDP's
+    // providers serve nothing at all.
+    renderPanel({
+      provider: "helius",
+      activeProvider: "alchemy",
+      servingProvider: null,
+      credentialMode: "byok",
+      status: "available",
+    });
+
+    expect(screen.queryByRole("button", { name: "Use this provider" })).toBeNull();
+    expect(screen.getByText(/serve nothing/)).toBeTruthy();
+  });
+
+  it("still offers the platform choice when nothing of the tenant's own serves the project", () => {
+    renderPanel({
+      provider: "helius",
+      activeProvider: "alchemy",
+      servingProvider: null,
+      credentialMode: "managed",
+      status: "available",
+    });
+
+    expect(screen.getByRole("button", { name: "Use this provider" })).toBeTruthy();
+  });
+
+  it("names the tenant's own key when this provider serves on it", () => {
+    // Org selection and project connection can name the same vendor. Same
+    // logo, different bill, and the page used to claim SDP's account.
+    renderPanel({ provider: "alchemy", activeProvider: "alchemy", servingProvider: "alchemy" });
+
+    expect(screen.queryByText(/runs through this provider/)).toBeNull();
+    expect(screen.getByText(/your own connection with this provider/)).toBeTruthy();
+  });
+
   it("does not claim traffic runs here when the project's own connection wins", () => {
     // A tenant connection outranks the organization's selection, so the
     // selected provider can be serving nothing at all. Claiming otherwise is
     // what made a healthy Alchemy connection read as a broken Helius one.
-    renderPanel({ projectConnectionProvider: "alchemy" });
+    // Keyed on what actually routes: a pending row elsewhere does not take
+    // the project off the platform selection, an active one does.
+    renderPanel({ servingProvider: "alchemy" });
 
     expect(screen.queryByText(/runs through this provider/)).toBeNull();
     expect(screen.getByText(/runs on your own Alchemy connection instead/)).toBeTruthy();

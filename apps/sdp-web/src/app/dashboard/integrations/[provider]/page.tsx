@@ -96,9 +96,18 @@ async function getByokConnections(provider: string, canManage: boolean) {
         connection.status !== "deactivated"
     );
 
+    // What the relay would actually route through: the same test the row's
+    // "Serving traffic" badge uses. A pending or stranded row is not serving,
+    // so the platform choice still decides this project.
+    const serving = all.find(
+      (connection) =>
+        connection.scope === "project" && connection.status === "active" && connection.isDefault
+    );
+
     return {
       connections: all.filter((connection) => connection.provider === provider),
       projectConnectionProvider: elsewhere?.provider ?? null,
+      servingProvider: serving?.provider ?? null,
     };
   } catch {
     return null;
@@ -112,11 +121,12 @@ async function getByokConnections(provider: string, canManage: boolean) {
  */
 function resolveByokProps(result: Awaited<ReturnType<typeof getByokConnections>>) {
   if (result === undefined || result === null || result === "restricted") {
-    return { byokConnections: result, projectConnectionProvider: null };
+    return { byokConnections: result, projectConnectionProvider: null, servingProvider: null };
   }
   return {
     byokConnections: result.connections,
     projectConnectionProvider: result.projectConnectionProvider,
+    servingProvider: result.servingProvider,
   };
 }
 
