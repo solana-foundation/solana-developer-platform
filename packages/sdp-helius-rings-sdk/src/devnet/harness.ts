@@ -17,7 +17,15 @@ import { decodeSeed } from "../deterministic-ka/seed.js";
 // biome-ignore lint/security/noSecrets: public cluster identifier, not a secret.
 const DEVNET_GENESIS_HASH = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
 
-const OWNER_SEED_SALT = "sdp/helius-rings/devnet-e2e/v1";
+/**
+ * Bump whenever the shielded-material derivation used by the devnet gate
+ * changes. A Solana owner can publish only one Shielded Address; reusing the
+ * owner under different viewing/nullifier keys creates a permanent registry
+ * conflict and leaves old Photon outputs undecryptable.
+ */
+export const DEVNET_IDENTITY_VERSION = "v2";
+
+const OWNER_SEED_SALT = `sdp/helius-rings/devnet-e2e/${DEVNET_IDENTITY_VERSION}`;
 
 export interface DevnetConfig {
   readonly rpcUrl: string;

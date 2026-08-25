@@ -32,6 +32,7 @@ import { canonicalShieldedIdentity, type ShieldedMaterial } from "../material.js
 import {
   assertDevnet,
   assertFunded,
+  DEVNET_IDENTITY_VERSION,
   type DevnetConfig,
   type DevnetOwner,
   deriveDevnetOwner,
@@ -74,7 +75,7 @@ const MINIMUM_OWNER_LAMPORTS = 200_000_000n;
 const SOL = address(SOL_MINT);
 const DERIVATION_SCOPE = {
   organizationId: "devnet-e2e",
-  projectId: "default-flows",
+  projectId: `default-flows-${DEVNET_IDENTITY_VERSION}`,
 } as const;
 
 function walletId(index: number): string {
