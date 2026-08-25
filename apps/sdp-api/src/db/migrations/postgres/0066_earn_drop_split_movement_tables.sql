@@ -23,11 +23,11 @@
 --    any DROP when a legacy holding or movement is missing its unified identity,
 --    or when a terminal legacy observation would be lost. Unified rows may be
 --    newer because the previous release moved their lifecycle forward.
--- 3. `pg_dump` these three tables to the archived-artifact bucket. They are money
---    history feeding an audit and, later, tax and accounting records; database
---    backups age out on a retention window and audit questions do not. Restoring
---    a table-scoped dump into a scratch database is one command, and the volume
---    is small.
+-- 3. Optional: `pg_dump` these three tables to the archived-artifact bucket.
+--    Nice-to-have, not a gate. They hold devnet test activity only (fake funds,
+--    internal testing; no customer or mainnet money), so there is no real-money
+--    history to protect. A dump just keeps a later look at the old rows one
+--    command away, and the volume is small. Skipping it is fine.
 --
 -- ── What goes, and what deliberately stays ───────────────────────────────
 -- The four `earn_projected_*` views go WITH the tables: each one reads a table
