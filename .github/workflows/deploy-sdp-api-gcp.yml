@@ -79,8 +79,14 @@ jobs:
 
       - name: Update worker image
         run: |
+          describe_err="$(mktemp)"
           if gcloud run services describe "${WORKER_SERVICE}" \
-            --region "${REGION}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
+            --region "${REGION}" --project "${PROJECT_ID}" >/dev/null 2>"${describe_err}"; then
             gcloud run services update "${WORKER_SERVICE}" \
               --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
+          elif grep -qiE "NOT_FOUND|could not be found" "${describe_err}"; then
+            echo "worker service ${WORKER_SERVICE} not created yet; skipping image update"
+          else
+            cat "${describe_err}" >&2
+            exit 1
           fi
