@@ -19,6 +19,7 @@ const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
 const simulateVaultPlan = vi.hoisted(() => vi.fn());
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 const resolveVaultDirectClient = vi.hoisted(() => vi.fn());
+const resolveVaultSponsorship = vi.hoisted(() => vi.fn());
 
 vi.mock("./execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./execution-registry")>()),
@@ -36,6 +37,13 @@ vi.mock("./vault-execution.service", async (importOriginal) => ({
 vi.mock("@/services/solana", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/solana")>()),
   createOrgSignerForCustodyWallet,
+}));
+
+// `vaultRentPayer` stays real: it is the thing under test in the rent-funder
+// cases below, and it only reads whatever this mock returns.
+vi.mock("./vault-sponsorship", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./vault-sponsorship")>()),
+  resolveVaultSponsorship,
 }));
 
 const { depositIntoVault } = await import("./vault-deposit.service");
@@ -132,6 +140,9 @@ beforeEach(async () => {
   vi.clearAllMocks();
   resolveVaultDirectClient.mockReturnValue({ buildVaultDeposit });
   buildVaultDeposit.mockResolvedValue(plan());
+  // Matches the real resolver with the flag unset, which is the default in every
+  // existing case here.
+  resolveVaultSponsorship.mockResolvedValue({ kind: "wallet-pays" });
   simulateVaultPlan.mockResolvedValue({ ok: true });
   createOrgSignerForCustodyWallet.mockResolvedValue({ address: WALLET_ADDRESS });
   signVaultPlan.mockResolvedValue({
@@ -168,6 +179,9 @@ describe("depositIntoVault — idempotency", () => {
     expect(resolveVaultDirectClient).not.toHaveBeenCalled();
     expect(buildVaultDeposit).not.toHaveBeenCalled();
     expect(signVaultPlan).not.toHaveBeenCalled();
+    // A replay is a durable read. Resolving sponsorship first would 5xx every
+    // retry of an already-signed movement during a paymaster outage.
+    expect(resolveVaultSponsorship).not.toHaveBeenCalled();
   });
 
   it("treats insignificant decimal zeroes as the same on-chain intent", async () => {
@@ -968,5 +982,211 @@ describe("earn vault project attribution", () => {
       .all<{ project_id: string | null }>();
     expect(position?.project_id).toBeNull();
     expect(movements.results.map((row) => row.project_id)).toEqual([null, otherProject]);
+  });
+
+  /**
+   * Who is owed the share-ATA rent back. Recorded at DEPOSIT time because the
+   * exit that closes the account may be months later and under a different fee
+   * mode, and nothing on chain records who paid.
+   */
+  describe("share-ATA rent funder", () => {
+    const SPONSOR = "4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q";
+
+    /**
+     * Read by POSITION ID, not `LIMIT 1`. An unscoped read makes the two
+     * expect-null cases pass vacuously if the row is ever absent, which is the
+     * failure they exist to catch.
+     */
+    async function recordedFunder(positionId: string): Promise<string | null> {
+      const row = await getDb(env)
+        .prepare("SELECT share_ata_rent_funder FROM earn_positions WHERE id = ?")
+        .bind(positionId)
+        .first<{ share_ata_rent_funder: string | null }>();
+      if (!row) throw new Error(`missing position fixture ${positionId}`);
+      return row.share_ata_rent_funder ?? null;
+    }
+
+    function sponsored() {
+      resolveVaultSponsorship.mockResolvedValue({
+        kind: "sponsored",
+        sponsor: SPONSOR,
+        feePayment: { getFeePayer: vi.fn(), signAsFeePayer: vi.fn(), signAndSend: vi.fn() },
+      });
+    }
+
+    it("records the sponsor when this deposit creates the account", async () => {
+      sponsored();
+      buildVaultDeposit.mockResolvedValue(plan({ createsShareAccount: true }));
+
+      const result = await depositIntoVault(env, depositInput());
+
+      expect(await recordedFunder(result.position.id)).toBe(SPONSOR);
+    });
+
+    /**
+     * The actual bug this feature fixed. Fees were already sponsorable; the
+     * `rentPayer` inside the instructions still defaulted to the owner, so a
+     * wallet holding zero SOL could not make a first deposit. Nothing else
+     * asserts that the resolved sponsor reaches the builder.
+     */
+    it("hands the sponsor to the builder as the rent payer", async () => {
+      sponsored();
+
+      await depositIntoVault(env, depositInput());
+
+      expect(buildVaultDeposit.mock.calls[0]?.[1]).toMatchObject({ rentPayer: SPONSOR });
+    });
+
+    it("names no rent payer when the wallet pays its own fees", async () => {
+      await depositIntoVault(env, depositInput());
+
+      expect(buildVaultDeposit.mock.calls[0]?.[1]).not.toHaveProperty("rentPayer");
+    });
+
+    /**
+     * The case that protects the customer. Account creation is idempotent, so a
+     * sponsored deposit into a vault the wallet already holds pays no rent.
+     * Recording a funder here would later refund a sponsor with lamports the
+     * customer had put up.
+     */
+    it("records nothing when the account already existed", async () => {
+      sponsored();
+      buildVaultDeposit.mockResolvedValue(plan({ createsShareAccount: false }));
+
+      const result = await depositIntoVault(env, depositInput());
+
+      expect(await recordedFunder(result.position.id)).toBeNull();
+    });
+
+    it("records nothing when the wallet funds its own rent", async () => {
+      buildVaultDeposit.mockResolvedValue(plan({ createsShareAccount: true }));
+
+      const result = await depositIntoVault(env, depositInput());
+
+      expect(await recordedFunder(result.position.id)).toBeNull();
+    });
+
+    async function failMovement(movementId: string): Promise<void> {
+      await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultMovement({
+        movementId,
+        organizationId: ORG,
+        toStatus: "failed",
+        failureReason: "Transaction blockhash expired before confirmation",
+      });
+    }
+
+    /**
+     * The attribution is a PROJECTION, so it repairs itself. A movement that
+     * observed the account missing and then never landed charged no rent, and
+     * leaving its claim standing would send the close's 2,039,280 lamports to a
+     * party that paid nothing, for as long as the position lives.
+     */
+    it("drops the claim when the creating movement fails", async () => {
+      sponsored();
+      buildVaultDeposit.mockResolvedValue(plan({ createsShareAccount: true }));
+      const result = await depositIntoVault(env, depositInput());
+      expect(await recordedFunder(result.position.id)).toBe(SPONSOR);
+
+      await failMovement(result.movement.id);
+
+      expect(await recordedFunder(result.position.id)).toBeNull();
+    });
+
+    /**
+     * And it falls back rather than to a guess: an earlier surviving claim is
+     * the truth once a later one fails, because the account it created is the
+     * one still on chain.
+     */
+    it("falls back to the earlier surviving claim", async () => {
+      const SPONSOR_LATER = "8pPyFjmDGXnstD9Yg8H1jd1CyJcCPHwRvUBhZ4NRLPMe";
+      buildVaultDeposit.mockResolvedValue(plan({ createsShareAccount: true }));
+      resolveVaultSponsorship.mockResolvedValue({
+        kind: "sponsored",
+        sponsor: SPONSOR,
+        feePayment: { getFeePayer: vi.fn(), signAsFeePayer: vi.fn(), signAndSend: vi.fn() },
+      });
+      const first = await depositIntoVault(env, depositInput());
+
+      resolveVaultSponsorship.mockResolvedValue({
+        kind: "sponsored",
+        sponsor: SPONSOR_LATER,
+        feePayment: { getFeePayer: vi.fn(), signAsFeePayer: vi.fn(), signAndSend: vi.fn() },
+      });
+      signVaultPlan.mockResolvedValue({
+        bytes: new Uint8Array([2]),
+        signature: "sig_second_claim",
+        lastValidBlockHeight: "12345",
+      });
+      const second = await depositIntoVault(
+        env,
+        depositInput({ requestId: "22222222-2222-4222-8222-222222222222" })
+      );
+      expect(second.position.id).toBe(first.position.id);
+      expect(await recordedFunder(first.position.id)).toBe(SPONSOR_LATER);
+
+      await failMovement(second.movement.id);
+
+      expect(await recordedFunder(first.position.id)).toBe(SPONSOR);
+    });
+
+    /**
+     * The loser of the insert race must not attribute rent. Its bytes never
+     * broadcast, so it pays nothing, and it is not merely sometimes-last: the
+     * claim upsert holds the position row's lock, so the loser is serialised
+     * second and its funder would overwrite the winner's every time.
+     *
+     * Reachable because the idempotency fingerprint omits the fee mode, so two
+     * same-key requests that resolved different sponsors replay-match instead
+     * of conflicting. A rolling deploy (the flag is per-revision) or a
+     * round-robin Kora signer pool is enough to skew them.
+     */
+    it("keeps the winner's funder when identical requests race under different fee modes", async () => {
+      const SPONSOR_ROTATED = "8pPyFjmDGXnstD9Yg8H1jd1CyJcCPHwRvUBhZ4NRLPMe";
+      let releaseBuilds: (() => void) | undefined;
+      const bothBuilding = new Promise<void>((resolve) => {
+        releaseBuilds = resolve;
+      });
+      let resolvedCount = 0;
+      resolveVaultSponsorship.mockImplementation(async () => {
+        resolvedCount += 1;
+        return {
+          kind: "sponsored",
+          sponsor: resolvedCount === 1 ? SPONSOR : SPONSOR_ROTATED,
+          feePayment: { getFeePayer: vi.fn(), signAsFeePayer: vi.fn(), signAndSend: vi.fn() },
+        };
+      });
+      let buildCount = 0;
+      buildVaultDeposit.mockImplementation(async () => {
+        buildCount += 1;
+        if (buildCount === 2) releaseBuilds?.();
+        await bothBuilding;
+        return plan({ createsShareAccount: true });
+      });
+      const sponsorBySignature = new Map<string, string>();
+      signVaultPlan.mockImplementation(
+        async (_env: unknown, input: { fee: { sponsor: string } }) => {
+          const signature = `sig_fee_mode_${sponsorBySignature.size + 1}`;
+          sponsorBySignature.set(signature, input.fee.sponsor);
+          return { bytes: new Uint8Array([1]), signature, lastValidBlockHeight: "12345" };
+        }
+      );
+
+      const results = await Promise.all([
+        depositIntoVault(env, depositInput()),
+        depositIntoVault(env, depositInput()),
+      ]);
+
+      // One insert won, both callers see that movement, and only it broadcast.
+      expect(results.map((result) => result.replayed).sort()).toEqual([false, true]);
+      expect(await tableCount("earn_movements")).toBe(1);
+      expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+      // Two sponsors were resolved, so the assertion below is not vacuous.
+      expect(new Set(sponsorBySignature.values()).size).toBe(2);
+      // The refund is owed to whoever signed the bytes that can land.
+      const winner = results.find((result) => !result.replayed);
+      expect(await recordedFunder(results[0].position.id)).toBe(
+        sponsorBySignature.get(winner?.movement.signature ?? "")
+      );
+    });
   });
 });

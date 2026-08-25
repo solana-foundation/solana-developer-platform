@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { getPlaywrightAdminSession } from "../support/auth-session";
 import {
   ensureLinkedOrg,
   getBootstrapApiBaseUrl,
+  provisionWithAdminSession,
   resolvePlaywrightProjectId,
   seedProjectCookie,
 } from "../support/local-dashboard-bootstrap";
@@ -11,10 +11,10 @@ test.describe("payments command center and transaction ledger", () => {
   let projectId = "";
 
   test.beforeAll(async ({ browser }) => {
-    const session = await getPlaywrightAdminSession(browser);
-    await ensureLinkedOrg(session.identity, { tier: "enterprise" });
-    projectId = await resolvePlaywrightProjectId(getBootstrapApiBaseUrl(), session.getBearerToken);
-    await session.page.close();
+    projectId = await provisionWithAdminSession(browser, async (session) => {
+      await ensureLinkedOrg(session.identity, { tier: "enterprise" });
+      return resolvePlaywrightProjectId(getBootstrapApiBaseUrl(), session.getBearerToken);
+    });
   });
 
   test.beforeEach(async ({ page }) => {
