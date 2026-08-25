@@ -1,4 +1,5 @@
 import { pathToFileURL } from "node:url";
+import * as solanaRpc from "@sdp/rpc/solana";
 
 import * as Sentry from "@sentry/node";
 import { runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
@@ -25,6 +26,7 @@ import { initNodeSentry, nodeObservability } from "@/runtime/observability-node"
 import { assertSigningProviderAllowed } from "@/services/adapters/signing";
 import { assertCustodyEncryptionScheme } from "@/services/custody-cipher/cipher-router";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
+import { waitForEgress } from "@/services/jobs/egress-warmup";
 import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
@@ -119,6 +121,32 @@ export async function runCronJob(): Promise<void> {
   assertSigningProviderAllowed(env);
 
   initNodeSentry(getSentryOptions(env));
+
+  let probeRpc: ReturnType<typeof solanaRpc.createRpc> | null = null;
+  try {
+    probeRpc = solanaRpc.createRpc(env, { requestTimeoutMs: 5_000 });
+  } catch {
+    // No RPC endpoint configured (some self-hosted setups): nothing to probe.
+  }
+  if (probeRpc) {
+    const rpc = probeRpc;
+    const egress = await waitForEgress({
+      probe: () => rpc.getBlockHeight({ commitment: "confirmed" }).send(),
+      deadlineMs: 180_000,
+      intervalMs: 5_000,
+    });
+    if (egress.ready) {
+      getLogger().info(
+        { elapsed_ms: egress.elapsedMs, attempts: egress.attempts },
+        "reconciliation job: egress ready"
+      );
+    } else {
+      getLogger().error(
+        { elapsed_ms: egress.elapsedMs, attempts: egress.attempts },
+        "reconciliation job: egress warmup deadline reached, running ticks anyway"
+      );
+    }
+  }
 
   const sentryEnabled = isSentryEnabled(env);
   const monitored = async (monitor: string, work: () => Promise<unknown>) => {
