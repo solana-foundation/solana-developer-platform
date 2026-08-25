@@ -11,8 +11,16 @@
 
 import { isCredentialKey, REDACTED } from "./policy";
 
+// `(?:[A-Za-z0-9]+[-_ ])*` mirrors, for the serialized-string form, the suffix
+// matching that `isCredentialKey` already does on object keys: the quoted key
+// has to *end* with a denied name, not equal one. Without it `x-api-key` — the
+// spelling that actually arrives, and exactly what a stringified
+// `request.headers` blob holds — slips past, because the closing `\1`
+// backreference anchors the alternation to the whole quoted key. The separator
+// is mandatory each repetition, so the group cannot split a run two ways and
+// the pattern stays linear.
 const SENSITIVE_JSON_FIELD_PATTERN =
-  /(["'])(app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|password|pem|token|secret|credential)\1\s*:\s*(["'])(.*?)\3/gi;
+  /(["'])((?:[A-Za-z0-9]+[-_ ])*(?:app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|password|pem|token|secret|credential))\1\s*:\s*(["'])(.*?)\3/gi;
 const SENSITIVE_ASSIGNMENT_PATTERN =
   /\b(app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|password|pem|token|secret|credential)\b(\s*[:=]\s*)[^,\s}]+/gi;
 // Quantified parts all exclude "-" so the pattern cannot backtrack across the

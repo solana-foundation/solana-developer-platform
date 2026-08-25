@@ -99,6 +99,36 @@ describe("sentryScrubbingHooks", () => {
     assert.equal(sentryScrubbingHooks.beforeSend(hostile), null);
   });
 
+  it("reports a scrub failure without echoing the thrown message", () => {
+    // The failure log is the one line written on the path that exists to fail
+    // closed, and the thrown message is the one string nothing has vouched for:
+    // a validator or a throwing getter can quote the value that broke the walker.
+    const hostile = {
+      get email(): string {
+        throw new TypeError("invalid address: jane.doe@example.com");
+      },
+    };
+
+    const original = console.error;
+    const reported: unknown[][] = [];
+    console.error = (...args: unknown[]) => {
+      reported.push(args);
+    };
+    try {
+      sentryScrubbingHooks.beforeSend(hostile);
+    } finally {
+      console.error = original;
+    }
+
+    const serialized = JSON.stringify(reported);
+    assert.ok(!serialized.includes("jane.doe@example.com"), serialized);
+    assert.ok(!serialized.includes("invalid address"), serialized);
+    // Still diagnosable: which hook failed, and on what class of error.
+    assert.deepEqual(reported, [
+      ["sdp_telemetry_scrub_failed", { kind: "event", errorType: "TypeError" }],
+    ]);
+  });
+
   it("reduces a span to its skeleton when scrubbing throws, since a span must be returned", () => {
     const hostile = {
       span_id: "span_1",

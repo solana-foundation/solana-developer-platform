@@ -16,8 +16,15 @@ import { isSensitiveKey, REDACTED, REDACTED_EMAIL } from "./policy";
 
 export type EmailMode = "redact" | "mask";
 
+// The leading lookbehind is load-bearing, not cosmetic. Without it the local
+// part `[A-Za-z0-9._%+-]+` can start at every offset inside one unbroken run of
+// local-part characters, so a long run that never reaches an `@` is rescanned
+// once per offset — quadratic. This walker sits on an attacker-reachable path (a
+// webhook body is scrubbed before anything else reads it), where that is a DoS:
+// 160KB of "%" took ~41s before this, ~1ms after. The lookbehind makes a match
+// attempt at any offset other than the start of a run fail immediately.
 const EMAIL_PATTERN =
-  /[A-Za-z0-9._%+-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*\.[A-Za-z]{2,}/g;
+  /(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*\.[A-Za-z]{2,}/g;
 
 // The identifying fields as they appear *inside* a string rather than as an
 // object key: a query string, a URL, a serialized body echoed by a provider.
@@ -27,8 +34,12 @@ const EMAIL_PATTERN =
 const PII_FIELD_NAMES =
   // biome-ignore lint/security/noSecrets: an alternation of PII field names, not a credential.
   "e[-_ ]?mail(?:[-_ ]?address)?|phone(?:[-_ ]?number)?|first[-_ ]?name|last[-_ ]?name|full[-_ ]?name|date[-_ ]?of[-_ ]?birth|dob|tax[-_ ]?id|ssn|account[-_ ]?number|routing[-_ ]?number|iban|postal[-_ ]?code|zip[-_ ]?code";
+// The prefix group mirrors `isPiiKey`'s suffix matching for the serialized form,
+// the same way the credential pattern does: `"counterparty-email"` has to be
+// caught, not just `"email"`, since the backreference anchors the alternation to
+// the entire quoted key.
 const PII_JSON_FIELD_PATTERN = new RegExp(
-  `(["'])(${PII_FIELD_NAMES})\\1\\s*:\\s*(["'])(.*?)\\3`,
+  `(["'])((?:[A-Za-z0-9]+[-_ ])*(?:${PII_FIELD_NAMES}))\\1\\s*:\\s*(["'])(.*?)\\3`,
   "gi"
 );
 const PII_ASSIGNMENT_PATTERN = new RegExp(

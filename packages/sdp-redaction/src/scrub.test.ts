@@ -117,9 +117,64 @@ describe("scrubTelemetryString", () => {
   });
 });
 
+describe("scrubTelemetryString — prefixed keys in a serialized body", () => {
+  // The object-key rules match by suffix (`isPiiKey`), so the string rules have
+  // to as well, or the same field leaks purely by having been stringified first.
+  it("redacts a prefixed PII key, not just the bare name", () => {
+    const scrubbed = scrubTelemetryString('{"counterparty-email":"jane.doe@example.com"}');
+
+    assert.ok(!scrubbed.includes("jane.doe@example.com"));
+  });
+
+  it("redacts a prefixed credential key in its quoted form", () => {
+    const scrubbed = scrubTelemetryString('{"x-api-key":"sk_live_supersecret"}');
+
+    assert.ok(!scrubbed.includes("sk_live_supersecret"));
+    assert.ok(scrubbed.includes("x-api-key"));
+  });
+
+  it("keeps a key that merely contains a denied name as a prefix", () => {
+    // `tokenName` ends in `name`, which is deliberately never denied, and the
+    // prefix group must not reach across the `:` into the next field either.
+    const scrubbed = scrubTelemetryString(`{"tokenName":"USD Coin","mint":"${SOLANA_ADDRESS}"}`);
+
+    assert.ok(scrubbed.includes("USD Coin"));
+    assert.ok(scrubbed.includes(SOLANA_ADDRESS));
+  });
+});
+
+describe("scrubTelemetryString — pathological input", () => {
+  // Regression guard for a quadratic rescan (CodeQL js/polynomial-redos): the
+  // email pattern's local part used to be retried at every offset inside one
+  // unbroken run. A webhook body reaches this walker before anything else reads
+  // it, so 160KB of "%" was ~41s of blocked event loop.
+  it("scrubs a long run of local-part characters in linear time", () => {
+    const payload = "%".repeat(200_000);
+
+    const startedAt = process.hrtime.bigint();
+    scrubTelemetryString(payload);
+    const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+
+    assert.ok(
+      elapsedMs < 1_000,
+      `expected a linear scan, took ${elapsedMs.toFixed(0)}ms (quadratic regression)`
+    );
+  });
+});
+
 describe("maskEmail", () => {
   it("keeps the first character and the domain", () => {
     assert.equal(maskEmail("jane.doe@example.com"), "j***@example.com");
+  });
+
+  it("still finds an address that is not at a word boundary the lookbehind rejects", () => {
+    // The anti-backtracking lookbehind must not make a real address unmatchable
+    // when it is butted up against surrounding punctuation.
+    assert.equal(maskEmail("<jane@example.com>"), "<j***@example.com>");
+    assert.equal(
+      maskEmail("jane+tag@sub.example.com,bob@other.org"),
+      "j***@sub.example.com,b***@other.org"
+    );
   });
 
   it("leaves a value that is not an address untouched", () => {

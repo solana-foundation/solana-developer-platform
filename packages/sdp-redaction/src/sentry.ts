@@ -11,7 +11,6 @@
  * `@sentry/node` and `@sentry/nextjs` alike.
  */
 
-import { redactCredentialString } from "./credentials";
 import { REDACTED } from "./policy";
 import { scrubTelemetry } from "./scrub";
 
@@ -33,13 +32,20 @@ const SPAN_SKELETON_KEYS = [
   "timestamp",
 ];
 
+/**
+ * Reports only the *type* of failure, never the thrown message.
+ *
+ * The message is unusable here: this runs because scrubbing did not complete, so
+ * nothing has vouched for that string. It can quote the value that broke the
+ * walker — a throwing getter, a validator naming its input — which would route
+ * unscrubbed PII to stderr from inside the path whose whole job is to fail
+ * closed. The constructor name is what a scrubber crash is actually diagnosed
+ * from, and it cannot carry a payload.
+ */
 function reportScrubFailure(kind: string, error: unknown): void {
-  const message = error instanceof Error ? error.message : String(error);
+  const type = error instanceof Error ? error.constructor?.name || error.name : typeof error;
   // Cannot route this through Sentry — we are inside its send path.
-  console.error("sdp_telemetry_scrub_failed", {
-    kind,
-    error: redactCredentialString(message),
-  });
+  console.error("sdp_telemetry_scrub_failed", { kind, errorType: type });
 }
 
 /**
