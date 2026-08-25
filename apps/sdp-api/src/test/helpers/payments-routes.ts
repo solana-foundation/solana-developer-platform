@@ -113,8 +113,14 @@ export function sendTransactionPreflightError(customProgramErrorCode?: number): 
         });
   return new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE, {
     accounts: null,
+    fee: null,
     loadedAccountsDataSize: null,
+    loadedAddresses: null,
     logs: null,
+    postBalances: null,
+    postTokenBalances: null,
+    preBalances: null,
+    preTokenBalances: null,
     replacementBlockhash: null,
     returnData: null,
     unitsConsumed: null,
@@ -564,6 +570,7 @@ export function installPaymentsRouteTestHooks(): void {
         status: subscriptionsProgram.PlanStatus.Active,
         data: {
           endTs: 0n,
+          metadataUri: "",
           pullers: [address(TEST_SOLANA_ADDRESSES.wallet1)],
           terms: { createdAt: 1_770_000_000n },
         },
@@ -577,7 +584,7 @@ export function installPaymentsRouteTestHooks(): void {
     fetchMaybeSubscriptionDelegationMock.mockResolvedValue({
       exists: true,
       address: address(TEST_SOLANA_ADDRESSES.wallet3),
-      data: {},
+      data: { expiresAtTs: 1_800_000_000n },
     } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>>);
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
