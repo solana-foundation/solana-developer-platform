@@ -141,7 +141,7 @@ export async function runCronJob(): Promise<void> {
     const rpc = probeRpc;
     const egress = await waitForEgress({
       probe: () => rpc.getBlockHeight({ commitment: "confirmed" }).send(),
-      deadlineMs: 180_000,
+      deadlineMs: 120_000,
       intervalMs: 5_000,
     });
     if (egress.ready) {
