@@ -49,6 +49,7 @@ import type { Env } from "@/types/env";
 
 const MAX_MANAGED_SCHEDULER_GAP_MINUTES = 5;
 const MANAGED_CATALOGUE_CHECKIN_MARGIN_MINUTES = 10;
+const MANAGED_CHECKIN_MARGIN_MINUTES = 4;
 
 /**
  * One-shot reconciliation entrypoint for the managed Cloud Run Job — the only
@@ -273,7 +274,11 @@ function createManagedTickRunner({
       const monitorSlug = getManagedMonitorSlug(monitor);
       const checkInId = observability.captureCheckIn(
         { monitorSlug, status: "in_progress" },
-        { schedule: { type: "crontab", value: cadence }, maxRuntime: maxRuntimeMinutes }
+        {
+          schedule: { type: "crontab", value: cadence },
+          checkinMargin: MANAGED_CHECKIN_MARGIN_MINUTES,
+          maxRuntime: maxRuntimeMinutes,
+        }
       );
       checkIns.set(monitor, { checkInId, monitorSlug });
     }
@@ -325,7 +330,11 @@ function createManagedTaskObservability(
               checkinMargin: MANAGED_CATALOGUE_CHECKIN_MARGIN_MINUTES,
               maxRuntime: maxRuntimeMinutes,
             }
-          : { ...options, maxRuntime: maxRuntimeMinutes };
+          : {
+              ...options,
+              checkinMargin: MANAGED_CHECKIN_MARGIN_MINUTES,
+              maxRuntime: maxRuntimeMinutes,
+            };
       return observability.withMonitor(getManagedMonitorSlug(monitor), work, managedOptions);
     },
   };
