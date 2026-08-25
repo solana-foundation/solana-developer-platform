@@ -101,7 +101,9 @@ function readApiKey(rpcUrl: string): string | null {
  * The live gateway, running the Rings SDK in this process.
  *
  * Every port method is wired: an identity can be registered, its balances read,
- * and the four default money flows built, signed and confirmed as indexed.
+ * and the default money flows built, signed and confirmed as indexed. The
+ * adapter retains merge support for upstream testing, but sdp-api temporarily
+ * rejects new merges because a fresh Wallet cannot replay merged state.
  * Flows this integration does not implement — anonymous transfers, splits,
  * zones, timelocks — are refused at request validation rather than here, so a
  * caller learns they are unsupported before an approval is requested for them.

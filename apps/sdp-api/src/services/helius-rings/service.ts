@@ -107,6 +107,15 @@ export const RINGS_RECONCILE_MIN_AGE_MS = 5 * 60 * 1000;
 /** Op types that consume notes, and so can duplicate a payment. */
 const SPEND_OP_TYPES = new Set<string>(["transfer_registered", "withdraw", "merge"]);
 
+function assertOperationEnabled(opType: PrivateOperationInput["opType"]): void {
+  if (opType === "merge") {
+    throw new HeliusRingsError(
+      "invalid_input",
+      "merge is temporarily disabled until fresh wallet sync can replay merged state safely"
+    );
+  }
+}
+
 export interface ProvisionPrivateWalletInput {
   sdpWalletId: string;
   /** The custody wallet's public address, handed to the gateway. */
@@ -254,6 +263,7 @@ export class HeliusRingsService {
     context: PrepareOperationContext,
     retryOfOperationId: string | null = null
   ): Promise<PrivateOperation> {
+    assertOperationEnabled(input.opType);
     const wallet = await this.requireWallet(input.walletId);
     await this.assertAssetAllowed(input);
     await this.assertNoUnresolvedOperation(input);
@@ -366,6 +376,7 @@ export class HeliusRingsService {
     if (!EXECUTABLE_STATES.has(operation.state)) {
       return this.toPrivateOperation(operation);
     }
+    assertOperationEnabled(operation.op_type);
 
     if (operation.state === "approval_required") {
       // The approval verdict is read from the approval request itself — never

@@ -16,7 +16,7 @@ export const createRingsWalletSchema = z.object({
  * flow nothing can build has already consumed a policy evaluation and possibly
  * a human approval, and it tells the caller far less than a 400 does.
  */
-const SUPPORTED_OP_TYPES = ["shield", "transfer_registered", "withdraw", "merge"] as const;
+const ENABLED_OP_TYPES = ["shield", "transfer_registered", "withdraw"] as const;
 
 /**
  * Base units, as a string.
@@ -58,15 +58,6 @@ const operationFields = {
 
 const mint = z.string().min(1);
 const assetAmount = z.strictObject({ mint, amountRaw });
-const mergeAsset = z.strictObject(
-  { mint },
-  {
-    error: (issue) =>
-      issue.code === "unrecognized_keys" && issue.keys.includes("amountRaw")
-        ? "a merge consolidates every note of the mint, so it takes no amount"
-        : undefined,
-  }
-);
 
 export const prepareRingsOperationSchema = z
   .discriminatedUnion(
@@ -99,14 +90,9 @@ export const prepareRingsOperationSchema = z
         }),
         to: z.string().min(1),
       }),
-      z.strictObject({
-        ...operationFields,
-        opType: z.literal("merge"),
-        asset: mergeAsset,
-      }),
     ],
     {
-      error: `opType must be one of ${SUPPORTED_OP_TYPES.join(", ")}`,
+      error: `opType must be one of ${ENABLED_OP_TYPES.join(", ")}`,
     }
   )
   .transform((value) => {

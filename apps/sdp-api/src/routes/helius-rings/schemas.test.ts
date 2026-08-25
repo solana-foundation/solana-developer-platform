@@ -21,9 +21,17 @@ function parse(body: Record<string, unknown>) {
 }
 
 describe("prepareRingsOperationSchema", () => {
-  it("accepts the four supported flows", () => {
+  it("temporarily refuses merge until a fresh wallet can replay merged state", () => {
+    const result = parse({ opType: "merge", asset: { mint: USDC } });
+
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(result.error?.issues)).toContain(
+      "opType must be one of shield, transfer_registered, withdraw"
+    );
+  });
+
+  it("accepts the three enabled flows", () => {
     expect(parse({ opType: "shield", asset: { mint: SOL, amountRaw: "1000" } }).success).toBe(true);
-    expect(parse({ opType: "merge", asset: { mint: USDC } }).success).toBe(true);
     expect(
       parse({ opType: "withdraw", asset: { mint: SOL, amountRaw: "1000" }, to: RECIPIENT }).success
     ).toBe(true);
@@ -74,16 +82,6 @@ describe("prepareRingsOperationSchema", () => {
         clientNonce: CLIENT_NONCE,
       },
     ],
-    [
-      "merge",
-      { opType: "merge", asset: { mint: USDC } },
-      {
-        walletId: WALLET_ID,
-        opType: "merge",
-        asset: { mint: USDC },
-        clientNonce: CLIENT_NONCE,
-      },
-    ],
   ])("returns the exact %s operation payload", (_opType, body, expected) => {
     const result = parse(body);
 
@@ -110,11 +108,6 @@ describe("prepareRingsOperationSchema", () => {
       "withdraw",
       { opType: "withdraw", asset: { mint: SOL, amountRaw: "1" }, to: RECIPIENT },
       ["from", "zoneId", "transferMode", "timelock", "unexpected"],
-    ],
-    [
-      "merge",
-      { opType: "merge", asset: { mint: USDC } },
-      ["from", "to", "zoneId", "transferMode", "timelock", "unexpected"],
     ],
   ])("rejects fields outside the exact %s shape", (_opType, body, fields) => {
     const values: Record<string, unknown> = {
@@ -149,19 +142,8 @@ describe("prepareRingsOperationSchema", () => {
         to: RECIPIENT,
       },
     ],
-    ["merge", { opType: "merge", asset: { mint: USDC, ticker: "USDC" } }],
   ])("rejects unknown keys inside the %s asset", (_opType, body) => {
     expect(parse(body).success).toBe(false);
-  });
-
-  it("refuses an amount on a merge", () => {
-    // A merge consolidates every note of the mint. An amount would sit on the
-    // row and be read as real by policy and the activity feed while the builder
-    // ignores it entirely.
-    const result = parse({ opType: "merge", asset: { mint: USDC, amountRaw: "1000" } });
-
-    expect(result.success).toBe(false);
-    expect(JSON.stringify(result.error?.issues)).toContain("takes no amount");
   });
 
   it("refuses an SPL withdrawal at the edge", () => {
@@ -201,7 +183,6 @@ describe("prepareRingsOperationSchema", () => {
       { asset: { mint: SOL, amountRaw: "1" }, to: RECIPIENT, transferMode: "registered" },
     ],
     ["shield", { asset: { mint: SOL, amountRaw: "1" }, transferMode: "registered" }],
-    ["merge", { asset: { mint: SOL }, transferMode: "registered" }],
   ])("refuses a transfer mode on a %s", (opType, body) => {
     // The same constraint from the other side: a mode on these op types is a
     // violation, not a hint.
@@ -223,7 +204,6 @@ describe("prepareRingsOperationSchema", () => {
   it("refuses an absent asset rather than defaulting to SOL", () => {
     // Defaulting would move a token the caller never named.
     expect(parse({ opType: "shield" }).success).toBe(false);
-    expect(parse({ opType: "merge" }).success).toBe(false);
   });
 
   it.each(["transfer_anonymous", "split", "zone_create", "timelock_create"])(

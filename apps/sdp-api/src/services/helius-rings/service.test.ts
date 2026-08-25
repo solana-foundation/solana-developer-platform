@@ -827,28 +827,25 @@ describe("HeliusRingsService", () => {
       expect(operation.outerTxSignature).toBe(OUTER_TX.signature);
     });
 
-    it("preserves a mint-only merge through prepareOperation to indexing", async () => {
-      const mint = "So11111111111111111111111111111111111111112";
-      let builtAsset: PrivateOperationInput["asset"];
-      const gateway = new InMemoryRingsGateway({
-        buildUnsignedTx: ({ operation }) => {
-          builtAsset = operation.input.asset;
-          return "c2lnbmFibGU=";
-        },
+    it("refuses merge before policy, proving, or persistence", async () => {
+      const gateway = new InMemoryRingsGateway();
+      const buildOperation = vi.spyOn(gateway, "buildOperation");
+
+      await expect(
+        liveishService({ gateway }).prepareOperation(
+          operationInput({
+            opType: "merge",
+            asset: { mint: "So11111111111111111111111111111111111111112" },
+            clientNonce: "nonce-merge-disabled",
+          }),
+          actorContext
+        )
+      ).rejects.toMatchObject({
+        code: "invalid_input",
+        message: expect.stringContaining("temporarily disabled"),
       });
 
-      const operation = await liveishService({ gateway }).prepareOperation(
-        operationInput({
-          opType: "merge",
-          asset: { mint },
-          clientNonce: "nonce-merge-mint-only",
-        }),
-        actorContext
-      );
-
-      expect(operation.state).toBe("indexing");
-      expect(builtAsset).toEqual({ mint });
-      expect(operation.input.asset).toEqual({ mint });
+      expect(buildOperation).not.toHaveBeenCalled();
     });
 
     it("persists the outer signature before broadcasting", async () => {
@@ -887,6 +884,33 @@ describe("HeliusRingsService", () => {
   });
 
   describe("executeOperation", () => {
+    it("refuses an existing merge row instead of resuming it", async () => {
+      const operations = createPostgresHeliusRingsOperationRepository(getDb(env));
+      const reserved = await operations.reserveIntent({
+        ...tenant,
+        walletId,
+        opType: "merge",
+        intentKey: "sha256:existing-merge",
+        assetMint: "So11111111111111111111111111111111111111112",
+        amountRaw: null,
+        fromAddr: null,
+        toAddr: null,
+        zoneId: null,
+        transferMode: null,
+        retryOfOperationId: null,
+        timelock: null,
+      });
+      await getDb(env)
+        .prepare("UPDATE helius_rings_operations SET state = 'proving' WHERE id = ?")
+        .bind(reserved.operation.id)
+        .run();
+
+      await expect(service().executeOperation(reserved.operation.id)).rejects.toMatchObject({
+        code: "invalid_input",
+        message: expect.stringContaining("temporarily disabled"),
+      });
+    });
+
     it("advances only once the stored approval reads approved", async () => {
       let approvalStatus: "pending" | "approved" = "pending";
       const svc = liveishService({
@@ -999,34 +1023,39 @@ describe("HeliusRingsService", () => {
       expect(detail.events.map((event) => event.kind)).toContain("operation.retried");
     });
 
-    it("preserves a mint-only merge when retrying an unsigned failure", async () => {
+    it("refuses to retry a historical merge operation", async () => {
       const mint = "So11111111111111111111111111111111111111112";
-      const failed = await service().prepareOperation(
-        operationInput({
-          opType: "merge",
-          asset: { mint },
-          clientNonce: "nonce-merge-retry",
-        }),
-        actorContext
-      );
-      expect(failed).toMatchObject({ state: "failed", outerTxSignature: null });
-
-      let builtAsset: PrivateOperationInput["asset"];
-      const gateway = new InMemoryRingsGateway({
-        buildUnsignedTx: ({ operation }) => {
-          builtAsset = operation.input.asset;
-          return "c2lnbmFibGU=";
-        },
+      const operations = createPostgresHeliusRingsOperationRepository(getDb(env));
+      const reserved = await operations.reserveIntent({
+        ...tenant,
+        walletId,
+        opType: "merge",
+        intentKey: "sha256:historical-merge",
+        assetMint: mint,
+        amountRaw: null,
+        fromAddr: null,
+        toAddr: null,
+        zoneId: null,
+        transferMode: null,
+        retryOfOperationId: null,
+        timelock: null,
       });
-      const retry = await liveishService({ gateway }).retryOperation(
-        failed.id,
-        "nonce-merge-retry-2",
-        actorContext
-      );
+      const failed = await operations.failOperation({
+        ...tenant,
+        id: reserved.operation.id,
+        expectedState: "draft",
+        code: "gateway_unavailable",
+        message: "historical merge failed",
+        retryable: true,
+      });
+      if (!failed) throw new Error("failed merge fixture was not created");
 
-      expect(retry.state).toBe("indexing");
-      expect(builtAsset).toEqual({ mint });
-      expect(retry.input.asset).toEqual({ mint });
+      await expect(
+        service().retryOperation(failed.id, "nonce-merge-retry-disabled", actorContext)
+      ).rejects.toMatchObject({
+        code: "invalid_input",
+        message: expect.stringContaining("temporarily disabled"),
+      });
     });
 
     it("refuses to retry a non-retryable failure", async () => {

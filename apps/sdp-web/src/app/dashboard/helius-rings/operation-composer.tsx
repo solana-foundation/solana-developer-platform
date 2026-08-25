@@ -25,7 +25,6 @@ const OP_TYPES: RingsOpType[] = [
   "transfer_registered",
   "transfer_anonymous",
   "withdraw",
-  "merge",
   "timelock_create",
 ];
 

@@ -9,6 +9,7 @@ import {
   buildTransferTransaction,
   buildWithdrawalTransaction,
   fetchUserRecord,
+  getPrivateTransactions,
   syncWallet,
 } from "@heliuslabs/zolana/wallet";
 import type { PrivateOperation } from "@sdp/helius-rings";
@@ -105,9 +106,9 @@ function authorityFor(identity: Identity, operationId: string): CustodyWalletAut
 }
 
 /**
- * Rebuilds wallet state from the indexer. Nothing is cached between steps on
- * purpose: this mirrors how the service will read, and it means a balance
- * assertion cannot pass on stale local state.
+ * Refreshes one Wallet from the indexer. The suite intentionally retains that
+ * Wallet between flow tests; the explicit fresh-wallet test below covers the
+ * restart behavior that this helper alone cannot.
  */
 async function sync(identity: Identity): Promise<void> {
   const authority = authorityFor(identity, "sync");
@@ -379,7 +380,27 @@ gate("Rings default flows on devnet", () => {
     expect(await client.getBalance(recipient.owner.address)).toBeGreaterThan(publicBefore);
   });
 
-  it("merges notes without changing total value", async () => {
+  it("reconstructs transfer and withdrawal history in a fresh wallet", async () => {
+    await sync(recipient);
+    const restored = await buildIdentity(recipient.owner.index);
+
+    try {
+      await sync(restored);
+
+      expect(solBalance(restored)).toBe(solBalance(recipient));
+      expect(getPrivateTransactions(restored.wallet).map((entry) => entry.kind)).toEqual(
+        expect.arrayContaining(["privateTransfer", "publicWithdrawal"])
+      );
+    } finally {
+      restored.material.destroy();
+    }
+  });
+
+  // Zolana 0.1.1-alpha reconstructs ciphertext-free merge outputs from input
+  // UTXOs retained on the in-memory Wallet. A fresh API Wallet cannot replay
+  // that output after restart, so the product flow stays disabled until wallet
+  // snapshots are persisted or upstream full-history replay is fixed.
+  it.skip("merges notes without changing total value", async () => {
     await shield(sender, SHIELD_LAMPORTS, "shield/sol-merge-input");
     await sync(sender);
 
