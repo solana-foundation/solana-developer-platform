@@ -32,6 +32,7 @@ import {
 import DashboardLoading from "@/app/dashboard/loading";
 import {
   EarnProgramSkeleton,
+  MarketsLandingSkeleton,
   TreasurySolutionsSkeleton,
 } from "@/app/dashboard/markets/markets-route-skeletons";
 import {
@@ -157,6 +158,8 @@ function resolvePageLoadingComponent(
       return IssuanceDetailSkeleton;
     case "payments-overview":
       return PaymentsPageSkeleton;
+    case "markets-landing":
+      return MarketsLandingSkeleton;
     case "treasury-solutions":
       return TreasurySolutionsSkeleton;
     case "earn-program":

@@ -71,6 +71,8 @@ jobs:
 
       - name: Update cron job image
         run: |
+          node .github/scripts/verify-managed-reconciliation-cadence.mjs \
+            "${JOB}" "${REGION}" "${PROJECT_ID}"
           gcloud run jobs update "${JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
           gcloud run jobs update "${PII_MIGRATE_JOB}" \

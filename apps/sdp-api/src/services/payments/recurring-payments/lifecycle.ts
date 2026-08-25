@@ -4,8 +4,9 @@ import {
   getRecurringPaymentOperationStaleBefore,
   type RecurringPaymentLifecycleOperation,
 } from "@sdp/payments/recurring-payment-lifecycle";
+import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { Address, Signature } from "@solana/kit";
+import type { Address, Instruction, Signature, TransactionSigner } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { getDb } from "@/db";
 import {
@@ -48,6 +49,40 @@ function lifecycleConfirmationMessage(operation: RecurringPaymentLifecycleOperat
 
 function lifecycleErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function buildLifecycleInstruction(input: {
+  env: Env;
+  operation: RecurringPaymentLifecycleOperation;
+  planPda: Address;
+  subscriber: TransactionSigner;
+  subscriptionPda: Address;
+  tokenMint: Address;
+}): Promise<Instruction> {
+  if (input.operation === "cancel") {
+    return subscriptionsProgram.getCancelSubscriptionOverlayInstructionAsync({
+      planPda: input.planPda,
+      subscriber: input.subscriber,
+      subscriptionPda: input.subscriptionPda,
+    });
+  }
+
+  const onChainSubscription = await subscriptionsProgram.fetchMaybeSubscriptionDelegation(
+    solanaRpc.createRpc(input.env),
+    input.subscriptionPda,
+    { commitment: "confirmed" }
+  );
+  if (!onChainSubscription.exists) {
+    throw new AppError("CONFLICT", "Subscription was not found on-chain");
+  }
+
+  return subscriptionsProgram.getResumeSubscriptionOverlayInstructionAsync({
+    expectedExpiresAtTs: onChainSubscription.data.expiresAtTs,
+    planPda: input.planPda,
+    subscriber: input.subscriber,
+    subscriptionPda: input.subscriptionPda,
+    tokenMint: input.tokenMint,
+  });
 }
 
 function assertLifecyclePreconditions(input: {
@@ -438,19 +473,14 @@ async function runRecurringPaymentLifecycle(input: {
         updatedAt: new Date().toISOString(),
       });
 
-      const instruction =
-        input.operation === "cancel"
-          ? await subscriptionsProgram.getCancelSubscriptionOverlayInstructionAsync({
-              planPda,
-              subscriber: sourceSigner,
-              subscriptionPda,
-            })
-          : await subscriptionsProgram.getResumeSubscriptionOverlayInstructionAsync({
-              planPda,
-              subscriber: sourceSigner,
-              subscriptionPda,
-              tokenMint,
-            });
+      const instruction = await buildLifecycleInstruction({
+        env: input.env,
+        operation: input.operation,
+        planPda,
+        subscriber: sourceSigner,
+        subscriptionPda,
+        tokenMint,
+      });
 
       signature = await sendSubscriptionInstructions({
         env: input.env,

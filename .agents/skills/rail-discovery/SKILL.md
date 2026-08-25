@@ -1,6 +1,6 @@
 ---
 name: rail-discovery
-description: Declare which fiat↔crypto rails a ramp provider supports. Implement _discoverRails + distillRailSupport, declare a <PROVIDER>_DECLARED_RAIL_SUPPORT const, and add a RAMP_RAIL_DUMPS entry, then regenerate the committed support snapshot + matrix. Use when opening a PR against apps/sdp-api to add or update a ramp provider's supported currencies/corridors.
+description: Declare which fiat↔crypto rails a ramp provider supports. Implement discovery or an explicit static distiller in @sdp/payments, then regenerate the committed provider snapshot and shared support matrix.
 disable-model-invocation: true
 ---
 
@@ -8,14 +8,12 @@ disable-model-invocation: true
 
 The platform serves a generated support matrix — which `(fiat, crypto)` pairs each provider can on/off-ramp — from `packages/sdp-types/src/generated/ramp-support.generated.ts` (`ONRAMP_SUPPORT`, `OFFRAMP_SUPPORT`, `RAMP_FIAT_CURRENCIES`). You do **not** hand-edit that file. You teach your provider to report its rails, then a script distills live provider responses into a committed per-provider snapshot and merges every provider's snapshot into the matrix.
 
-You implement four things; the codegen (`apps/sdp-api/scripts/discover-ramp-rails.ts`) does the rest:
+Implement rail support in `packages/sdp-payments`; the codegen (`apps/sdp-api/scripts/discover-ramp-rails.ts`) owns snapshots and the generated matrix. Choose one source:
 
-1. a `RAMP_RAIL_DUMPS.<id>` entry in `lib/ramps/shared.ts`
-2. `_discoverRails` — HTTP → raw response dumps
-3. `distillRailSupport` — dumps → a `ProviderRailSupportSnapshot`, reporting any codes it drops
-4. a `<PROVIDER>_DECLARED_RAIL_SUPPORT` const — entity types, plus country support for whichever direction your snapshot doesn't discover it for
+1. **Upstream discovery API:** add `RAMP_RAIL_DUMPS.<id>` in `packages/sdp-payments/src/ramps/shared.ts`; `_discoverRails` writes raw responses; `distillRailSupport` reads and normalizes them.
+2. **No discovery API:** make `_discoverRails` a no-op and return an explicit, tested snapshot from `distillRailSupport`. Do not invent a network endpoint or dump.
 
-**Canonical example: `lib/ramps/providers/lightspark/client.ts`** (one dump, declares country support as unreported on both directions). For a multi-endpoint provider, copy `bvnk/client.ts` (three dumps). For discovered — not declared — country support, copy `mural/client.ts`.
+Both paths declare `<PROVIDER>_DECLARED_RAIL_SUPPORT` for entity types and country support not discovered in the snapshot. Reference Lightspark for one dump, BVNK for multiple endpoints, Mural for discovered country support, and Stripe for static support; all live under `packages/sdp-payments/src/ramps/providers/`.
 
 ## The data flow
 
@@ -27,9 +25,9 @@ rails:generate ──merge snapshots + declared consts──▶ ramp-support.gen
 
 Raw dumps under `.ramp-rails/raw/` are gitignored — network scratch, safe to delete and re-fetch. The snapshot (`.ramp-rails/<id>.support.json`) and the generated `.ts` are both committed and must be regenerated together when your support changes.
 
-## Step 1 — declare your dumps
+## Step 1 — choose the source
 
-Add an entry to `RAMP_RAIL_DUMPS` in `lib/ramps/shared.ts`, one per upstream response you need:
+For discovery-backed support, add an entry to `RAMP_RAIL_DUMPS` in `packages/sdp-payments/src/ramps/shared.ts`, one per upstream response:
 
 ```ts
 <id>: {
@@ -37,11 +35,11 @@ Add an entry to `RAMP_RAIL_DUMPS` in `lib/ramps/shared.ts`, one per upstream res
 },
 ```
 
-`name` is what `_discoverRails` writes; `file` is what `distillRailSupport` reads back.
+`name` is what `_discoverRails` writes; `file` is what `distillRailSupport` reads back. For static support, skip the dump entry.
 
 ## Step 2 — `_discoverRails`
 
-HTTP only. Read **sandbox** creds from the passed `env` with `requireEnv` (it throws on a missing key — don't add a presence check), fetch each upstream endpoint with the injected `fetchJson`, and `writeDump` the raw response. No parsing, no mapping here — just capture.
+HTTP only. Read **sandbox** creds from the passed `env` with `requireEnv`, fetch each upstream endpoint with the injected `fetchJson`, and `writeDump` the raw response. No parsing or mapping here. For static support, use a no-op method and read no credentials.
 
 ```ts
 async _discoverRails({ env, fetchJson, writeDump }: Parameters<RampProvider["_discoverRails"]>[0]) {
@@ -57,7 +55,7 @@ Use the provider's most public/anonymous discovery endpoints where possible (see
 
 ## Step 3 — `distillRailSupport`
 
-Pure: given a `readDump` function, read the dump(s) back with `readDump(RAMP_RAIL_DUMPS.<id>.<key>.file)` and map into a `ProviderRailSupportSnapshot`:
+Pure: map the dump(s), or an explicit static declaration, into the types from `packages/sdp-payments/src/ramps/types.ts`:
 
 ```ts
 interface ProviderRailSupportSnapshot {
@@ -97,10 +95,13 @@ Every provider needs a `<PROVIDER>_DECLARED_RAIL_SUPPORT` const satisfying `Prov
 
 ```ts
 export const <PROVIDER>_DECLARED_RAIL_SUPPORT = {
-  onramp: { entityTypes: ["individual"] },
+  onramp: {
+    countrySupport: { coverage: "unreported" },
+    entityTypes: ["individual"],
+  },
   offramp: {
     countrySupport: { coverage: "unreported" },
-    entityTypes: ["individual", "business"],
+    entityTypes: [],
   },
 } as const satisfies ProviderDeclaredRailSupport;
 ```
@@ -116,8 +117,8 @@ Fetching raw dumps hits live sandbox APIs, so it runs under Doppler. Regeneratin
 pnpm --filter @sdp/api rails:discover
 # just your provider
 pnpm --filter @sdp/api rails:discover -- <id>
-# re-distill from the existing raw dumps only — no network, no creds
-pnpm --filter @sdp/api rails:discover -- <id> --offline
+# re-distill existing dumps, or generate a static-provider snapshot whose distiller ignores dumps
+pnpm --filter @sdp/api exec tsx scripts/discover-ramp-rails.ts discover <id> --offline
 
 # regenerate ramp-support.generated.ts from the committed snapshots + declared consts
 pnpm --filter @sdp/api rails:generate
@@ -135,3 +136,4 @@ Commit `.ramp-rails/<id>.support.json` and the regenerated `ramp-support.generat
 - No fallbacks: a missing cred throws via `requireEnv`.
 - Strong typing: the declared-support const is `as const satisfies ProviderDeclaredRailSupport`; no `any`.
 - Your provider must already be registered (`register-provider`) — the codegen iterates `RAMP_PROVIDERS` and will fail if a client is missing.
+- Verify with `pnpm --filter @sdp/api rails:drift`, plus `@sdp/payments` typecheck, lint, and tests.

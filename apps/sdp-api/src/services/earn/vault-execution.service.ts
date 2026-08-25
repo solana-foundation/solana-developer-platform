@@ -8,6 +8,7 @@ import {
   addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
   type Blockhash,
+  bytesEqual,
   compressTransactionMessageUsingAddressLookupTables,
   createTransactionMessage,
   fetchAddressesForLookupTables,
@@ -27,10 +28,10 @@ import {
   partiallySignTransactionMessageWithSigners,
   signTransactionMessageWithSigners,
 } from "@solana/signers";
-import type { FeePaymentPort } from "@/services/ports";
 import type { Env } from "@/types/env";
 import { assertClusterEndpoint } from "./execution-registry";
 import type { VaultDeadline } from "./vault-deadline";
+import type { VaultFeeMode } from "./vault-sponsorship";
 
 /**
  * Turn a provider's unsigned plan into a landed transaction, signed by an SDP
@@ -53,10 +54,6 @@ function toKitInstruction(instruction: EarnVaultTransactionPlan["instructions"][
     data: Uint8Array.from(Buffer.from(instruction.data, "base64")),
   } as unknown as Instruction;
 }
-
-export type VaultFeeMode =
-  | { kind: "sponsored"; feePayment: FeePaymentPort }
-  | { kind: "wallet-pays" };
 
 // biome-ignore lint/security/noSecrets: public Solana Memo program address.
 const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
@@ -209,6 +206,29 @@ function applyLookupTables<TMessage>(
  */
 const SOLANA_TRANSACTION_SIZE_LIMIT_BYTES = 1232;
 
+/**
+ * Refuse an oversized transaction, and on the sponsored path refuse it BEFORE
+ * the paymaster is contacted.
+ *
+ * Safe to check on partially-signed bytes because the compiled message header
+ * fixes `numRequiredSignatures`, so kit writes that many 64-byte slots whether
+ * they are filled or not: the owner-signed encoding and the fully-signed
+ * encoding of one message are byte-identical. Checking after the round trip
+ * would spend a budget reservation (`signAsFeePayer` admits before it signs, and
+ * nothing after that releases it) on a plan that can never be sent.
+ */
+function assertVaultTransactionFits(bytes: Uint8Array, sponsored: boolean): void {
+  if (bytes.length <= SOLANA_TRANSACTION_SIZE_LIMIT_BYTES) return;
+  throw new Error(
+    `Vault transaction is ${bytes.length} bytes; Solana allows at most ` +
+      `${SOLANA_TRANSACTION_SIZE_LIMIT_BYTES}` +
+      (sponsored
+        ? ". Sponsorship adds 96 bytes (one signature slot plus one account key) " +
+          "that the provider did not know about when it sized this plan."
+        : "")
+  );
+}
+
 /** Sign exactly one complete vault transaction without broadcasting it. */
 export async function signVaultPlan(
   env: Env,
@@ -235,10 +255,11 @@ export async function signVaultPlan(
 
   let signedBytes: Uint8Array;
   if (input.fee.kind === "sponsored") {
-    const { feePayment } = input.fee;
-    const feePayer = await input.deadline.run("Resolving the sponsored fee payer", () =>
-      feePayment.getFeePayer()
-    );
+    // The sponsor was resolved before the provider built, because its address
+    // also had to travel into the instructions as the rent payer. Reusing it
+    // here is not just a saved round trip: re-reading it could hand signing a
+    // DIFFERENT address than the one the instructions already name.
+    const { feePayment, sponsor: feePayer } = input.fee;
     const message = pipe(
       createTransactionMessage({ version: 0 }),
       (m) => setTransactionMessageFeePayer(feePayer, m),
@@ -251,9 +272,33 @@ export async function signVaultPlan(
       partiallySignTransactionMessageWithSigners(message)
     );
     const ownerSignedBytes = new Uint8Array(getTransactionEncoder().encode(ownerSigned));
+    assertVaultTransactionFits(ownerSignedBytes, true);
     signedBytes = await input.deadline.run("Signing the sponsored vault fee", () =>
       feePayment.signAsFeePayer(ownerSignedBytes)
     );
+    // A paymaster returns BYTES, not a signature, so nothing about the call
+    // constrains it to return the message SDP just signed. Both checks belong
+    // HERE, before the bytes are persisted: past that point a sigverify
+    // rejection at broadcast is indistinguishable from a lost response, and the
+    // movement parks reconcilable until its blockhash expires.
+    //
+    // Message equality is the check that catches a swap, because the cheaper
+    // ones do not. The owner slot still carries a signature (over the OLD
+    // message), and a SUBSTITUTED fee payer still satisfies
+    // `getSignatureFromTransaction` below, which reads whatever sits in slot
+    // zero. It also means Kora may not rewrite the plan: a relayer that injects
+    // its own compute-budget or fee-transfer instruction fails here, loudly,
+    // rather than sending bytes that were never simulated or size-checked.
+    const sponsorSigned = getTransactionDecoder().decode(signedBytes);
+    if (!bytesEqual(sponsorSigned.messageBytes, ownerSigned.messageBytes)) {
+      throw new Error("Sponsored vault transaction came back over a different message");
+    }
+    if (
+      sponsorSigned.signatures[feePayer] === null ||
+      sponsorSigned.signatures[feePayer] === undefined
+    ) {
+      throw new Error("Vault transaction is missing the sponsor fee-payer signature");
+    }
   } else {
     const message = pipe(
       createTransactionMessage({ version: 0 }),
@@ -269,11 +314,7 @@ export async function signVaultPlan(
     signedBytes = new Uint8Array(getTransactionEncoder().encode(signed));
   }
 
-  if (signedBytes.length > SOLANA_TRANSACTION_SIZE_LIMIT_BYTES) {
-    throw new Error(
-      `Vault transaction is ${signedBytes.length} bytes; Solana allows at most ${SOLANA_TRANSACTION_SIZE_LIMIT_BYTES}`
-    );
-  }
+  assertVaultTransactionFits(signedBytes, input.fee.kind === "sponsored");
   const signed = getTransactionDecoder().decode(signedBytes);
   if (
     signed.signatures[input.owner.address] === null ||
@@ -330,6 +371,14 @@ export async function simulateVaultPlan(
     plan: EarnVaultTransactionPlan;
     owner: Address;
     rpcUrl: string;
+    /**
+     * The SAME fee mode signing will use. Simulation enforces that the fee
+     * payer can cover the fee, so simulating as the owner while signing as a
+     * sponsor asks the chain a question about a transaction SDP never sends: a
+     * custody wallet holding zero SOL is rejected here, with `AccountNotFound`
+     * and no logs, and never reaches the signing it would have passed.
+     */
+    fee: VaultFeeMode;
   }
 ): Promise<
   | { ok: true; prepared: PreparedVaultPlanExecution }
@@ -358,9 +407,14 @@ export async function simulateVaultPlan(
       solanaRpc.getRecentBlockhash(rpc, "confirmed")
     ),
   ]);
+  // The owner stays a writable signer through the plan's own instruction
+  // accounts either way, so the sponsored shape simulates as it will be sent:
+  // funded sponsor as fee payer, owner unfunded, both signature slots still
+  // empty (`sigVerify: false` is what makes that legal).
+  const feePayer = input.fee.kind === "sponsored" ? input.fee.sponsor : input.owner;
   const message = pipe(
     createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayer(input.owner, m),
+    (m) => setTransactionMessageFeePayer(feePayer, m),
     (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
     (m) => appendTransactionMessageInstructions(instructions.map(toKitInstruction), m),
     (m) => applyLookupTables(m, lookupTables)
