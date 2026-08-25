@@ -10,6 +10,7 @@ import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button";
 import { Input } from "@/components/ui/input";
 import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { useTranslations } from "@/i18n/provider";
+import { rpcProviderLabel } from "@/lib/rpc-providers";
 import {
   activateRpcConnectionAction,
   deactivateRpcConnectionAction,
@@ -772,7 +773,16 @@ export function RpcByokSection({
           t={t}
         />
       ) : (
-        <p className="text-sm leading-6 text-tertiary">{t("Shared.integrations.rpcByokEmpty")}</p>
+        <p className="text-sm leading-6 text-tertiary">
+          {/* "Running on SDP's" is only true when nothing of the tenant's own
+              serves this project. Another provider holding the project
+              connection is exactly the case where it is false. */}
+          {takenByAnotherProvider
+            ? t("Shared.integrations.rpcByokEmptyRoutedElsewhere", {
+                provider: rpcProviderLabel(projectConnectionProvider ?? ""),
+              })
+            : t("Shared.integrations.rpcByokEmpty")}
+        </p>
       )}
 
       {canManage && credentialMode ? (
@@ -792,14 +802,21 @@ export function RpcByokSection({
         // button that only ever comes back with a conflict.
         <p className="text-sm leading-6 text-tertiary">
           {takenByAnotherProvider
-            ? `${t("Shared.integrations.rpcByokTakenElsewhere")} ${projectConnectionProvider}.`
+            ? t("Shared.integrations.rpcByokTakenElsewhere", {
+                provider: rpcProviderLabel(projectConnectionProvider ?? ""),
+              })
             : t("Shared.integrations.rpcByokOnlyOne")}
         </p>
       ) : null}
 
       {canManage && !hasLiveConnection && !takenByAnotherProvider ? (
         <AddConnectionForm needsEndpoint={needsEndpoint} onAdd={handleAdd} t={t} />
-      ) : (
+      ) : null}
+
+      {/* Only a viewer who cannot manage needs telling why there is no form.
+          An admin already read the reason above, and being told they are not
+          an admin is worse than silence. */}
+      {canManage ? null : (
         <p className="text-sm leading-6 text-tertiary">
           {t("Shared.integrations.rpcByokAdminOnly")}
         </p>

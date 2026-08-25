@@ -191,6 +191,7 @@ export async function IntegrationDetailView({
             canManage={rpc.canManage}
             isEnabledInDeployment={rpc.isEnabledInDeployment}
             organizationId={rpc.organizationId}
+            projectConnectionProvider={rpc.projectConnectionProvider ?? null}
             provider={detail.provider as OrganizationRpcProvider}
             status={detail.status}
           />

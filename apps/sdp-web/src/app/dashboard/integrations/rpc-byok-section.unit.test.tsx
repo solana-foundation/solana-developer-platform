@@ -313,7 +313,26 @@ describe("RpcByokSection", () => {
     renderSection({ connections: [], projectConnectionProvider: "helius" });
 
     expect(screen.queryByRole("button", { name: "Add connection" })).toBeNull();
-    expect(screen.getByText(/already routes through helius/)).toBeTruthy();
+    // The display name, not the raw id: the page showed "alchemy" beside its
+    // own "Alchemy" row before this went through rpcProviderLabel.
+    expect(screen.getByText(/already routes through Helius/)).toBeTruthy();
+  });
+
+  it("does not claim the organization runs on SDP's when the project has its own connection", () => {
+    // The empty state is provider-scoped, so "running on SDP's" was false
+    // exactly when another provider held this project's connection.
+    renderSection({ connections: [], projectConnectionProvider: "alchemy" });
+
+    expect(screen.queryByText(/running on SDP's/)).toBeNull();
+    expect(screen.getByText(/runs on your own Alchemy connection/)).toBeTruthy();
+  });
+
+  it("does not tell an admin that only admins can add credentials", () => {
+    // canManage is true here, so the admin-only note is addressed to the
+    // wrong reader; the reason the form is closed is stated above it.
+    renderSection({ connections: [], projectConnectionProvider: "alchemy" });
+
+    expect(screen.queryByText(/Only organization administrators/)).toBeNull();
   });
 
   it("still offers add when the only rows are stranded or withdrawn", () => {

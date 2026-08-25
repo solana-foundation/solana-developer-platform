@@ -25,11 +25,19 @@ export function RpcConnectionPanel({
   canManage,
   isEnabledInDeployment,
   organizationId,
+  projectConnectionProvider,
   provider,
   status,
 }: {
   activeProvider: OrganizationRpcProvider;
   canManage: boolean;
+  /**
+   * The provider this project's own connection routes through, when it is not
+   * the one on this page. A tenant connection outranks the organization's
+   * selection, so this panel cannot claim traffic runs through the selected
+   * provider without knowing about it.
+   */
+  projectConnectionProvider?: string | null;
   /**
    * Whether this deployment actually holds an endpoint for the provider. The
    * catalog marks the organization's saved provider `active` whatever the
@@ -55,6 +63,9 @@ export function RpcConnectionPanel({
   }, [activeProvider]);
 
   const isActive = provider === currentProvider;
+  // Selected for the organization, but this project's own connection wins, so
+  // nothing on this page is serving it.
+  const isOverriddenByProject = isActive && Boolean(projectConnectionProvider);
   // Saved here, but unserviceable: the relay is falling back to another
   // provider, so there is nothing honest to test on this page.
   const isStrandedDefault = isActive && !isEnabledInDeployment;
@@ -158,11 +169,15 @@ export function RpcConnectionPanel({
                 also claim traffic runs through it. */}
             {isStrandedDefault
               ? t("Shared.integrations.rpcActiveSelectedOnly")
-              : isActive
-                ? t("Shared.integrations.rpcActiveHere")
-                : t("Shared.integrations.rpcActiveElsewhere", {
-                    provider: rpcProviderLabel(currentProvider),
-                  })}
+              : isOverriddenByProject
+                ? t("Shared.integrations.rpcActiveOverridden", {
+                    provider: rpcProviderLabel(projectConnectionProvider ?? ""),
+                  })
+                : isActive
+                  ? t("Shared.integrations.rpcActiveHere")
+                  : t("Shared.integrations.rpcActiveElsewhere", {
+                      provider: rpcProviderLabel(currentProvider),
+                    })}
           </p>
         </div>
 

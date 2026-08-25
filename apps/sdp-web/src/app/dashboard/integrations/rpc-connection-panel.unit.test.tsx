@@ -77,6 +77,16 @@ describe("RpcConnectionPanel", () => {
     expect(screen.getByText(/runs through this provider/)).toBeTruthy();
   });
 
+  it("does not claim traffic runs here when the project's own connection wins", () => {
+    // A tenant connection outranks the organization's selection, so the
+    // selected provider can be serving nothing at all. Claiming otherwise is
+    // what made a healthy Alchemy connection read as a broken Helius one.
+    renderPanel({ projectConnectionProvider: "alchemy" });
+
+    expect(screen.queryByText(/runs through this provider/)).toBeNull();
+    expect(screen.getByText(/runs on your own Alchemy connection instead/)).toBeTruthy();
+  });
+
   it("names the active provider on a page for a different one", () => {
     renderPanel({ provider: "alchemy", status: "available" });
     // Reading Alchemy's page must not leave you guessing what is live.
