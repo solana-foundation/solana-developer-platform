@@ -9,7 +9,7 @@
       "members": "Members",
       "events": "Events",
       "apiPlayground": "API Playground",
-      "instance": "Instance"
+      "instance": "Setup"
     },
     "playground": {
       "productName": "Private Channels",
@@ -356,6 +356,9 @@
     "instance": {
       "title": "Connect Private Channel",
       "description": "Point SDP at a Solana Private Channels instance.",
+      "setupEyebrow": "Privacy integration",
+      "setupDetailsTitle": "Connection details",
+      "setupDetailsDescription": "Enter the endpoints and deployed program addresses for this project. Test the connection before connecting it to SDP.",
       "gatewayUrl": "Gateway URL",
       "gatewayPlaceholder": "http://gateway.example:8899",
       "chainRpcUrl": "Chain RPC URL",
@@ -377,6 +380,9 @@
       "statusDegraded": "Degraded",
       "statusUnreachable": "Unreachable",
       "statusFailed": "Failed",
+      "gatewayNotReady": "Gateway responded but is not ready",
+      "connectionTestFailed": "Some endpoints could not be reached. Check the highlighted connection details and try again.",
+      "connectionRequestFailed": "We couldn't test the connection. Check the connection details and try again.",
       "latency": "{ms} ms",
       "latencyWithVersion": "{ms} ms · v{version}",
       "connectSuccess": "Private channel connected.",
