@@ -13,7 +13,7 @@ holdings table behind it. Migrations `0062`-`0065`; ADR 0002's 2026-08-19 addend
 holds the decisions.
 
 The tables it replaced (`earn_program_withdrawals`, `earn_vault_movements`,
-`earn_vault_positions`) are gone, dropped by `0066` along with the
+`earn_vault_positions`) are gone, dropped by `0068` along with the
 `earn_projected_*` views that carried their history across.
 **`earn_provider_wallets` is NOT one of them**: it models an ACCOUNT at a provider
 — the custodial twin of `custody_wallets` — and an account is not a holding. A

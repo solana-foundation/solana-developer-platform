@@ -17,7 +17,7 @@ import { conflict } from "@/lib/errors";
  *
  * This is the ONLY writer and the only reader. The mechanism-split tables it
  * replaced (`earn_program_withdrawals`, `earn_vault_movements`,
- * `earn_vault_positions`) are gone, dropped by migration 0066 along with the
+ * `earn_vault_positions`) are gone, dropped by migration 0068 along with the
  * projection views that carried their history across.
  *
  * `earn_provider_wallets` is deliberately NOT among them: it models an ACCOUNT at

@@ -7,7 +7,7 @@ import { env } from "@/test/helpers/env";
 
 const migrationPath = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
-  "postgres/0066_earn_drop_split_movement_tables.sql"
+  "postgres/0068_earn_drop_split_movement_tables.sql"
 );
 const migrationSql = readFileSync(migrationPath, "utf8");
 
@@ -209,7 +209,7 @@ afterEach(async () => {
   await client.query("ROLLBACK");
 });
 
-describe("0066 Earn split-table contract gate", () => {
+describe("0068 Earn split-table contract gate", () => {
   it("blocks the irreversible drop when a legacy holding has no unified projection", async () => {
     await seedProviderPosition();
     await client.query("DELETE FROM earn_positions WHERE id = 'position_provider'");
