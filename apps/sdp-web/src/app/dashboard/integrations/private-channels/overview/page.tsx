@@ -98,7 +98,7 @@ export default async function PrivateChannelsOverviewPage() {
           connected={isConnected}
           loadError={!wallets.ok}
         />
-        <AllowedTokensPanel instance={instance} />
+        <AllowedTokensPanel connected={isConnected} />
       </div>
 
       {/* Activity only exists once an instance is connected — hide the panel until then. */}

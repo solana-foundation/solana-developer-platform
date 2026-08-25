@@ -29,6 +29,6 @@ export async function requirePrivateChannelsAccess(): Promise<void> {
 // The literals themselves live in an import-free module because client
 // components need them too — see private-channels-routes.ts.
 export {
-  PRIVATE_CHANNELS_SETUP_PATH,
   PRIVATE_CHANNELS_OVERVIEW_PATH,
+  PRIVATE_CHANNELS_SETUP_PATH,
 } from "./private-channels-routes";

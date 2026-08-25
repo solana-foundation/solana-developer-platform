@@ -1,5 +1,5 @@
 import type { PrivateChannelDto, PrivateChannelEventDto } from "@sdp/types";
-import { inferCluster, WELL_KNOWN_TOKEN_BY_MINT, wellKnownMint } from "@sdp/types";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import type { WalletChannelBalance } from "../private-channels-page.data";
 
 /** A mint the connected member holds a channel balance in. */
@@ -10,12 +10,6 @@ export interface MintBalance {
   /** Summed base-unit balance across the member's verified wallets. */
   base: bigint;
   decimals: number;
-}
-
-/** A mint the instance's escrow accepts. */
-export interface AllowedToken {
-  mint: string;
-  symbol: string;
 }
 
 /**
@@ -44,23 +38,6 @@ export function aggregateBalancesByMint(
     base: value.base,
     decimals: value.decimals,
   }));
-}
-
-/**
- * The mints this instance's escrow accepts.
- *
- * INTERIM: the escrow's allow-list lives only as on-chain `AllowedMint` PDAs and
- * no SDP API exposes it yet, so this mirrors the server's single-mint assumption
- * (USDC for the instance's cluster — see services/private-channels/mint.ts). When
- * an allowed-mints endpoint lands, swap this for its result.
- *
- * Cluster is derived with the shared `inferCluster` so the web and the API agree:
- * an unrecognized RPC URL is devnet (the sandbox default), never mainnet — a
- * mismatch here would advertise the wrong USDC mint against devnet balances.
- */
-export function allowedTokensForInstance(instance: { chainRpcUrl: string }): AllowedToken[] {
-  const usdc = wellKnownMint("USDC", inferCluster(instance.chainRpcUrl));
-  return usdc ? [{ mint: usdc, symbol: "USDC" }] : [];
 }
 
 /** Format a base-unit integer as a grouped decimal string (trailing zeros trimmed). */

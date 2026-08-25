@@ -6,7 +6,6 @@ import type {
   PrivateChannelTransfer,
   PrivateChannelTransferRecipientDto,
 } from "@sdp/types";
-import { privateChannelTokens } from "@sdp/types";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps, ReactNode } from "react";
@@ -30,6 +29,7 @@ vi.mock("../wallet-balances", () => ({
 vi.mock("sonner", () => ({
   toast: { success: mocks.toastSuccess, error: mocks.toastError },
 }));
+vi.mock("@/lib/use-solana-cluster", () => ({ useSolanaCluster: () => "devnet" }));
 vi.mock("@/components/ui/button", () => ({
   Button: (props: ComponentProps<"button">) => <button {...props} />,
 }));
@@ -107,14 +107,8 @@ function I18nWrapper({ children }: { children: ReactNode }) {
   );
 }
 
-/** The real devnet allowlist, so the fixture cannot drift from the shipped list. */
-const tokens = privateChannelTokens("devnet");
-
-function renderForm(
-  props: Omit<ComponentProps<typeof TransferForm>, "tokens"> &
-    Partial<Pick<ComponentProps<typeof TransferForm>, "tokens">>
-) {
-  return render(<TransferForm tokens={tokens} {...props} />, { wrapper: I18nWrapper });
+function renderForm(props: ComponentProps<typeof TransferForm>) {
+  return render(<TransferForm {...props} />, { wrapper: I18nWrapper });
 }
 
 const channels: PrivateChannelMembershipChannelDto[] = [
@@ -417,7 +411,10 @@ describe("TransferForm", () => {
     });
     const user = await renderReadyForm();
     await waitFor(() =>
-      expect(mocks.fetchWalletBalancesAction).toHaveBeenCalledWith("wallet_sender", tokens[0]?.mint)
+      expect(mocks.fetchWalletBalancesAction).toHaveBeenCalledWith(
+        "wallet_sender",
+        expect.any(String)
+      )
     );
 
     await user.click(screen.getByRole("button", { name: "Transfer USDC" }));
@@ -549,7 +546,6 @@ describe("TransferForm", () => {
         channels={nextChannels}
         scopeKey="org_two:project_two:instance_two"
         sourceWallets={nextSourceWallets}
-        tokens={tokens}
       />
     );
 

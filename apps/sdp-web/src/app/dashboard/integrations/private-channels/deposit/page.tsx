@@ -1,4 +1,3 @@
-import { inferCluster, privateChannelTokens } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getTranslations } from "@/i18n/server";
@@ -27,8 +26,6 @@ export default async function PrivateChannelsDepositPage() {
 
   const wallets = await loadSignableWallets(client);
 
-  const tokens = privateChannelTokens(inferCluster(instance.data.chainRpcUrl));
-
   return (
     <div className="mx-auto w-full max-w-2xl">
       <Card>
@@ -38,7 +35,7 @@ export default async function PrivateChannelsDepositPage() {
         </CardHeader>
         <CardContent>
           {wallets.ok ? (
-            <DepositForm tokens={tokens} wallets={wallets.data} />
+            <DepositForm wallets={wallets.data} />
           ) : (
             <PrivateChannelsLoadError message={wallets.error} />
           )}

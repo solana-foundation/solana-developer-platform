@@ -3,10 +3,10 @@
 import type {
   CustodyWalletSummary,
   PrivateChannelMembershipChannelDto,
-  PrivateChannelToken,
   PrivateChannelTransfer,
   PrivateChannelTransferRecipientDto,
 } from "@sdp/types";
+import { privateChannelTokens } from "@sdp/types";
 import { Loader2Icon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { AmountField } from "../amount-field";
 import { getAmountError } from "../amount-validation";
 import { fetchWalletBalancesAction, type WalletBalanceView } from "../wallet-balances";
@@ -41,7 +42,6 @@ interface TransferFormProps {
   channels: PrivateChannelMembershipChannelDto[];
   scopeKey: string;
   sourceWallets: CustodyWalletSummary[];
-  tokens: PrivateChannelToken[];
 }
 
 function shortenPubkey(pubkey: string): string {
@@ -75,11 +75,8 @@ export function TransferForm({ scopeKey, ...props }: TransferFormProps) {
   return <TransferFormState key={scopeKey} {...props} />;
 }
 
-function TransferFormState({
-  channels,
-  sourceWallets,
-  tokens,
-}: Omit<TransferFormProps, "scopeKey">) {
+function TransferFormState({ channels, sourceWallets }: Omit<TransferFormProps, "scopeKey">) {
+  const tokens = privateChannelTokens(useSolanaCluster());
   const t = useTranslations();
   const [channelId, setChannelId] = useState(channels[0]?.id ?? "");
   const [walletId, setWalletId] = useState(sourceWallets[0]?.walletId ?? "");

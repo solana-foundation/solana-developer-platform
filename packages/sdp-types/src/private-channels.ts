@@ -42,19 +42,6 @@ export interface PrivateChannelToken {
 }
 
 /**
- * Infer the Solana cluster from an instance's chain RPC URL. The persisted
- * instance stores no explicit cluster, and the sandbox is devnet, so an
- * unrecognized URL is treated as devnet.
- *
- * Lives here rather than in the API so the web derives the cluster the SAME way
- * the API does. `useSolanaCluster()` resolves from the selected project's
- * environment instead, which can disagree with the instance's own RPC URL.
- */
-export function inferCluster(chainRpcUrl: string): SolanaCluster {
-  return /mainnet/i.test(chainRpcUrl) ? "mainnet-beta" : "devnet";
-}
-
-/**
  * The allowed tokens for one cluster, in allowlist order. Symbols not deployed
  * on the cluster are skipped rather than guessed at from the other cluster.
  */
@@ -83,7 +70,6 @@ export function privateChannelTokens(cluster: SolanaCluster): PrivateChannelToke
  */
 export interface PrivateChannelInstanceInput {
   gatewayUrl: string;
-  chainRpcUrl: string;
   escrowProgramId: string;
   withdrawProgramId: string;
   escrowInstanceAddr: string;
@@ -193,7 +179,6 @@ export type PrivateChannelTransferStatus =
  */
 export interface PrivateChannelTransferContext {
   gatewayUrl?: string;
-  chainRpcUrl?: string;
   escrowProgramId?: string;
   escrowInstanceAddr?: string;
   /** SDP user that created the intent. */

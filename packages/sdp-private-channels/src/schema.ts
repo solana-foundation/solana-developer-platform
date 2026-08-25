@@ -37,7 +37,6 @@ const base58Address = (label: string) =>
  */
 export const privateChannelInstanceInputSchema = z.object({
   gatewayUrl: httpUrl("Gateway URL"),
-  chainRpcUrl: httpUrl("Chain RPC URL"),
   escrowProgramId: base58Address("Escrow program ID"),
   withdrawProgramId: base58Address("Withdraw program ID"),
   escrowInstanceAddr: base58Address("Escrow instance address"),

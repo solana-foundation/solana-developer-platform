@@ -6,6 +6,11 @@ export type SolanaRpcProbeResult =
   | { ok: true; latencyMs: number; version: string }
   | { ok: false; latencyMs: number; error: string };
 
+export interface SolanaRpcProbeTarget {
+  endpoint: string;
+  headers?: Record<string, string>;
+}
+
 interface SolanaRpcVersionResponse {
   jsonrpc?: "2.0";
   id?: string | number;
@@ -30,9 +35,12 @@ function toErrorMessage(error: unknown): string {
  * Non-JSON, non-2xx, JSON-RPC errors, and network timeouts all resolve as
  * `{ ok: false }`; never throws.
  */
-export async function probeSolanaRpc(url: string): Promise<SolanaRpcProbeResult> {
+export async function probeSolanaRpc(
+  input: string | SolanaRpcProbeTarget
+): Promise<SolanaRpcProbeResult> {
   const startedAt = Date.now();
-  const parsed = parseHttpUrl(url, "Chain RPC URL");
+  const endpoint = typeof input === "string" ? input : input.endpoint;
+  const parsed = parseHttpUrl(endpoint, "Project RPC URL");
   if ("error" in parsed) {
     return { ok: false, latencyMs: 0, error: parsed.error };
   }
@@ -49,6 +57,7 @@ export async function probeSolanaRpc(url: string): Promise<SolanaRpcProbeResult>
         Accept: "application/json",
         "Cache-Control": "no-store",
         "User-Agent": "sdp-private-channels/0.1",
+        ...(typeof input === "string" ? {} : input.headers),
       },
       body: JSON.stringify({
         jsonrpc: "2.0",

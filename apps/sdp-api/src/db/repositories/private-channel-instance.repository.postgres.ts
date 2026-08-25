@@ -15,7 +15,6 @@ function mapRow(row: Record<string, unknown>): PrivateChannelInstanceRow {
     organization_id: row.organization_id as string,
     project_id: row.project_id as string,
     gateway_url: row.gateway_url as string,
-    chain_rpc_url: row.chain_rpc_url as string,
     escrow_program_id: row.escrow_program_id as string,
     withdraw_program_id: row.withdraw_program_id as string,
     escrow_instance_addr: row.escrow_instance_addr as string,
@@ -77,11 +76,11 @@ export function createPostgresPrivateChannelInstanceRepository(
         .prepare(
           `INSERT INTO private_channel_instances (
                id, organization_id, project_id,
-               gateway_url, chain_rpc_url,
+               gateway_url,
                escrow_program_id, withdraw_program_id, escrow_instance_addr,
                auth_url,
                is_active, created_by
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?)
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?)
           RETURNING *`
         )
         .bind(
@@ -89,7 +88,6 @@ export function createPostgresPrivateChannelInstanceRepository(
           input.organizationId,
           input.projectId,
           input.gatewayUrl,
-          input.chainRpcUrl,
           input.escrowProgramId,
           input.withdrawProgramId,
           input.escrowInstanceAddr,
@@ -104,8 +102,7 @@ export function createPostgresPrivateChannelInstanceRepository(
       const row = await db
         .prepare(
           `UPDATE private_channel_instances
-              SET chain_rpc_url = ?,
-                  escrow_program_id = ?,
+              SET escrow_program_id = ?,
                   withdraw_program_id = ?,
                   escrow_instance_addr = ?,
                   auth_url = ?,
@@ -115,7 +112,6 @@ export function createPostgresPrivateChannelInstanceRepository(
           RETURNING *`
         )
         .bind(
-          input.chainRpcUrl,
           input.escrowProgramId,
           input.withdrawProgramId,
           input.escrowInstanceAddr,

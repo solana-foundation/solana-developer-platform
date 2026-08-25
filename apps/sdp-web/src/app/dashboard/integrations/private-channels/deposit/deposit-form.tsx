@@ -1,6 +1,10 @@
 "use client";
 
-import type { CustodyWalletSummary, PrivateChannelDeposit, PrivateChannelToken } from "@sdp/types";
+import {
+  type CustodyWalletSummary,
+  type PrivateChannelDeposit,
+  privateChannelTokens,
+} from "@sdp/types";
 import { Loader2Icon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
@@ -10,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { AmountField } from "../amount-field";
 import { getAmountError } from "../amount-validation";
 import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "../private-channels-routes";
@@ -22,13 +27,8 @@ function walletLabel(wallet: CustodyWalletSummary): string {
   return wallet.label ? `${wallet.label} (${short})` : short;
 }
 
-export function DepositForm({
-  tokens,
-  wallets,
-}: {
-  tokens: PrivateChannelToken[];
-  wallets: CustodyWalletSummary[];
-}) {
+export function DepositForm({ wallets }: { wallets: CustodyWalletSummary[] }) {
+  const tokens = privateChannelTokens(useSolanaCluster());
   const [walletId, setWalletId] = useState<string>(wallets[0]?.walletId ?? "");
   const [mint, setMint] = useState<string>(tokens[0]?.mint ?? "");
   const [amount, setAmount] = useState("");

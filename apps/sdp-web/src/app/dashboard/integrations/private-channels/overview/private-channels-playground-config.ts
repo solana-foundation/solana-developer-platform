@@ -8,7 +8,6 @@ import type { MessageKey, TranslationValues } from "@/i18n/messages";
 // out of the box for a newly connected project — override in the form when the
 // operator points at a different instance.
 const SANDBOX_GATEWAY_URL = "http://34.71.147.163:8899";
-const SANDBOX_CHAIN_RPC_URL = "https://api.devnet.solana.com";
 const SANDBOX_AUTH_URL = "http://34.71.147.163:8903";
 const SANDBOX_ESCROW_PROGRAM_ID = "9tgHa1DcnaSSUtmMsst8ovKTe1Gfxzezn27KnH9xXYeU";
 const SANDBOX_WITHDRAW_PROGRAM_ID = "J231K9UEpS4y4KAPwGc4gsMNCjKFRMYcQBcjVW7vBhVi";
@@ -68,7 +67,6 @@ export function buildPrivateChannelsPlaygroundEndpointConfigs(
           instance: {
             id: "pci_01HXYZ",
             gatewayUrl: SANDBOX_GATEWAY_URL,
-            chainRpcUrl: SANDBOX_CHAIN_RPC_URL,
             escrowProgramId: SANDBOX_ESCROW_PROGRAM_ID,
             withdrawProgramId: SANDBOX_WITHDRAW_PROGRAM_ID,
             escrowInstanceAddr: SANDBOX_ESCROW_INSTANCE_ADDR,
@@ -89,12 +87,6 @@ export function buildPrivateChannelsPlaygroundEndpointConfigs(
           key: "gatewayUrl",
           label: "gatewayUrl",
           defaultValue: SANDBOX_GATEWAY_URL,
-          required: true,
-        },
-        {
-          key: "chainRpcUrl",
-          label: "chainRpcUrl",
-          defaultValue: SANDBOX_CHAIN_RPC_URL,
           required: true,
         },
         {
@@ -143,12 +135,6 @@ export function buildPrivateChannelsPlaygroundEndpointConfigs(
           key: "gatewayUrl",
           label: "gatewayUrl",
           defaultValue: SANDBOX_GATEWAY_URL,
-          required: true,
-        },
-        {
-          key: "chainRpcUrl",
-          label: "chainRpcUrl",
-          defaultValue: SANDBOX_CHAIN_RPC_URL,
           required: true,
         },
         {

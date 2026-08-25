@@ -1,18 +1,20 @@
-import type { PrivateChannelInstance } from "@sdp/types";
+"use client";
+
+import { privateChannelTokens } from "@sdp/types";
 import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getTranslations } from "@/i18n/server";
-import { allowedTokensForInstance } from "./overview-data";
+import { useTranslations } from "@/i18n/provider";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 
 interface Props {
-  /** The active instance, or null when nothing is connected. */
-  instance: PrivateChannelInstance | null;
+  connected: boolean;
 }
 
-export async function AllowedTokensPanel({ instance }: Props) {
-  const t = await getTranslations();
-  const tokens = instance ? allowedTokensForInstance(instance) : [];
+export function AllowedTokensPanel({ connected }: Props) {
+  const t = useTranslations();
+  const cluster = useSolanaCluster();
+  const tokens = connected ? privateChannelTokens(cluster) : [];
 
   return (
     <Card className="h-full">

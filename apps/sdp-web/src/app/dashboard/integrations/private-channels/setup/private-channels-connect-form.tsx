@@ -28,13 +28,7 @@ import {
 
 type FormValues = PrivateChannelInstanceInput;
 
-/**
- * Sandbox prefill for the connect form. `chainRpcUrl` is deliberately blank:
- * SANDBOX_DEFAULTS carries a documented placeholder (`?api-key=XXXXXXX`) rather than
- * a working endpoint, so prefilling it guarantees a failed probe on first Connect and
- * hides the field's own placeholder. The operator supplies their own keyed RPC URL.
- */
-const FORM_PREFILL: FormValues = { ...SANDBOX_DEFAULTS, chainRpcUrl: "" };
+const FORM_PREFILL: FormValues = { ...SANDBOX_DEFAULTS };
 
 interface Props {
   initialInstance: PrivateChannelInstance | null;
@@ -55,7 +49,6 @@ function toValues(instance: PrivateChannelInstance | null): FormValues {
   if (!instance) return { ...FORM_PREFILL };
   return {
     gatewayUrl: instance.gatewayUrl,
-    chainRpcUrl: instance.chainRpcUrl,
     escrowProgramId: instance.escrowProgramId,
     withdrawProgramId: instance.withdrawProgramId,
     escrowInstanceAddr: instance.escrowInstanceAddr,
@@ -69,7 +62,6 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [gatewayResult, setGatewayResult] = useState<ConnectionProbeResult["gateway"] | null>(null);
-  const [rpcResult, setRpcResult] = useState<ConnectionProbeResult["rpc"] | null>(null);
   const [authResult, setAuthResult] = useState<ConnectionProbeResult["auth"] | null>(null);
   const [isTesting, startTesting] = useTransition();
   const [isConnecting, startConnecting] = useTransition();
@@ -96,7 +88,6 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
     setFormError(null);
     // Any edit invalidates the last probe result.
     setGatewayResult(null);
-    setRpcResult(null);
     setAuthResult(null);
   };
 
@@ -107,7 +98,6 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
       setErrors({});
       setFormError(null);
       setGatewayResult(null);
-      setRpcResult(null);
       setAuthResult(null);
       toast.success(t("DashboardPrivateChannels.instance.connectSuccess"));
       // Match other integrations: successful setup returns to the provider detail.
@@ -121,7 +111,6 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
     }
     if (result.kind === "probe") {
       setGatewayResult(result.probe.gateway);
-      setRpcResult(result.probe.rpc);
       setAuthResult(result.probe.auth);
       setFormError(t("DashboardPrivateChannels.instance.connectionTestFailed"));
       return;
@@ -144,7 +133,6 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
     startTesting(async () => {
       const result = await testConnectionAction({
         gatewayUrl: values.gatewayUrl,
-        chainRpcUrl: values.chainRpcUrl,
         authUrl: values.authUrl,
       });
       if (result.kind === "validation") {
@@ -155,13 +143,11 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
       setErrors({});
       if (result.kind === "request-error") {
         setGatewayResult(null);
-        setRpcResult(null);
         setAuthResult(null);
         setFormError(t("DashboardPrivateChannels.instance.connectionRequestFailed"));
         return;
       }
       setGatewayResult(result.probe.gateway);
-      setRpcResult(result.probe.rpc);
       setAuthResult(result.probe.auth);
       setFormError(
         result.probe.ok ? null : t("DashboardPrivateChannels.instance.connectionTestFailed")
@@ -196,11 +182,11 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
         setInstance(null);
         setValues({ ...FORM_PREFILL });
         setGatewayResult(null);
-        setRpcResult(null);
         setAuthResult(null);
         setFormError(null);
         setShowDelete(false);
         toast.success(t("DashboardPrivateChannels.instance.deleteSuccess"));
+        router.push(PRIVATE_CHANNELS_INTEGRATION_PATH);
       } else {
         toast.error(result.message);
       }
@@ -218,17 +204,6 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
         disabled={isLocked}
         onChange={(v) => update("gatewayUrl", v)}
         status={gatewayStatus(t, gatewayResult)}
-      />
-
-      <UrlField
-        id="chain-rpc-url"
-        label={t("DashboardPrivateChannels.instance.chainRpcUrl")}
-        placeholder={t("DashboardPrivateChannels.instance.chainRpcPlaceholder")}
-        value={values.chainRpcUrl}
-        error={errors.chainRpcUrl}
-        disabled={isLocked}
-        onChange={(v) => update("chainRpcUrl", v)}
-        status={rpcStatus(t, rpcResult)}
       />
 
       <UrlField
@@ -280,7 +255,13 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
       ) : null}
 
       <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-        <Button type="button" variant="secondary" onClick={runTest} disabled={busy || isLocked}>
+        <Button
+          type="button"
+          variant="secondary"
+          className="min-w-36"
+          onClick={runTest}
+          disabled={busy || isLocked}
+        >
           {isTesting
             ? t("DashboardPrivateChannels.instance.testing")
             : t("DashboardPrivateChannels.instance.testConnection")}
@@ -356,29 +337,6 @@ function gatewayStatus(
   };
 }
 
-function rpcStatus(
-  t: Translate,
-  rpcResult: ConnectionProbeResult["rpc"] | null
-): StatusIndicator | null {
-  if (!rpcResult) return null;
-  if (rpcResult.ok) {
-    return {
-      label: t("DashboardPrivateChannels.instance.statusReady"),
-      dotClass: GATEWAY_DOT.ready,
-      textClass: GATEWAY_TEXT.ready,
-      detail: t("DashboardPrivateChannels.instance.latencyWithVersion", {
-        ms: rpcResult.latencyMs,
-        version: rpcResult.version,
-      }),
-    };
-  }
-  return {
-    label: t("DashboardPrivateChannels.instance.statusFailed"),
-    dotClass: GATEWAY_DOT.unreachable,
-    textClass: GATEWAY_TEXT.unreachable,
-  };
-}
-
 function authStatus(
   t: Translate,
   authResult: ConnectionProbeResult["auth"] | null
@@ -406,6 +364,25 @@ interface StatusIndicator {
   detail?: string;
 }
 
+function Status({ status }: { status?: StatusIndicator | null }) {
+  if (!status) return null;
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-sm",
+        status.textClass
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={cn("inline-block size-2 rounded-full", status.dotClass)}
+      />
+      <span>{status.label}</span>
+      {status.detail ? <span className="text-secondary">· {status.detail}</span> : null}
+    </span>
+  );
+}
+
 function UrlField(props: {
   id: string;
   label: string;
@@ -418,20 +395,9 @@ function UrlField(props: {
 }) {
   return (
     <div className="grid gap-2">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex min-h-5 items-center justify-between gap-2">
         <Label htmlFor={props.id}>{props.label}</Label>
-        {props.status ? (
-          <span className={cn("inline-flex items-center gap-1.5 text-sm", props.status.textClass)}>
-            <span
-              aria-hidden="true"
-              className={cn("inline-block size-2 rounded-full", props.status.dotClass)}
-            />
-            <span>{props.status.label}</span>
-            {props.status.detail ? (
-              <span className="text-secondary">· {props.status.detail}</span>
-            ) : null}
-          </span>
-        ) : null}
+        <Status status={props.status} />
       </div>
       <Input
         id={props.id}

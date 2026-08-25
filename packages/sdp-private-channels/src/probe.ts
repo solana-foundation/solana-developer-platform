@@ -1,13 +1,13 @@
 import { type GatewayHealthResult, probeGatewayHealth } from "./health";
-import { probeSolanaRpc, type SolanaRpcProbeResult } from "./rpc";
+import { probeSolanaRpc, type SolanaRpcProbeResult, type SolanaRpcProbeTarget } from "./rpc";
 
 /** Timeout for the auth `/health` probe. Matches the rest of the connect probes. */
 const AUTH_PROBE_TIMEOUT_MS = 5000;
 
 export interface ConnectionProbeInput {
   gatewayUrl: string;
-  chainRpcUrl: string;
   authUrl: string;
+  rpcTarget: SolanaRpcProbeTarget;
 }
 
 export type AuthProbeResult =
@@ -54,7 +54,7 @@ async function probeAuth(authUrl: string): Promise<AuthProbeResult> {
 export async function probeConnection(input: ConnectionProbeInput): Promise<ConnectionProbeResult> {
   const [gateway, rpc, auth] = await Promise.all([
     probeGatewayHealth(input.gatewayUrl),
-    probeSolanaRpc(input.chainRpcUrl),
+    probeSolanaRpc(input.rpcTarget),
     probeAuth(input.authUrl),
   ]);
   return { gateway, rpc, auth, ok: gateway.status === "ready" && rpc.ok && auth.ok };

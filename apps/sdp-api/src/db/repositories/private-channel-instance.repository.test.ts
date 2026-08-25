@@ -140,12 +140,10 @@ describe("PrivateChannelInstanceRepository (postgres)", () => {
     const reactivated = await repo.reactivateAndUpdate({
       id: created.id,
       ...SANDBOX_DEFAULTS,
-      chainRpcUrl: "https://mainnet.helius-rpc.com/?api-key=NEW",
       authUrl: "http://auth.example:8903",
     });
     expect(reactivated?.id).toBe(created.id);
     expect(reactivated?.is_active).toBe(true);
-    expect(reactivated?.chain_rpc_url).toBe("https://mainnet.helius-rpc.com/?api-key=NEW");
     expect(reactivated?.auth_url).toBe("http://auth.example:8903");
     // gateway_url is the identity key and must not change on reactivation.
     expect(reactivated?.gateway_url).toBe(created.gateway_url);

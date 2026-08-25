@@ -75,11 +75,10 @@ export type TestConnectionResult =
 // re-probe — a success here means Connect will not fail on the probe.
 export async function testConnectionAction(input: {
   gatewayUrl: string;
-  chainRpcUrl: string;
   authUrl: string;
 }): Promise<TestConnectionResult> {
   const parsed = privateChannelInstanceInputSchema
-    .pick({ gatewayUrl: true, chainRpcUrl: true, authUrl: true })
+    .pick({ gatewayUrl: true, authUrl: true })
     .safeParse(input);
   if (!parsed.success) {
     return { kind: "validation", fieldErrors: flattenFieldErrors(parsed.error) };
