@@ -2,9 +2,7 @@
 
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
-import { useIssuanceTokenView } from "@/contexts/dashboard-workspace-context";
 import { IssuanceListSkeleton } from "./issuance-list-skeleton";
-import type { TokenView } from "./issuance-token-view";
 
 const ISSUANCE_SKELETON_IDS = [
   "issuance-skeleton-1",
@@ -81,21 +79,11 @@ function LegacyIssuanceTokenCardSkeleton() {
 
 export function IssuancePageSkeleton({
   assetProfilesEnabled = false,
-  view,
 }: {
   assetProfilesEnabled?: boolean;
-  /** Overrides the stored preference; for tests and Storybook-style callers. */
-  view?: TokenView;
 }) {
-  // Grid and list are different enough that one skeleton can only be right for
-  // half the users — hence two, picked by the same preference the workspace
-  // itself reads. It comes from a cookie, so this is correct on the server too.
-  const storedView = useIssuanceTokenView();
-  const resolvedView = view ?? storedView;
-
   // Legacy list skeleton when the Asset Profiles UI flag is off, so the loading
-  // state matches the old grid instead of flashing the new one. The view toggle
-  // is part of the new overview only, so this branch is always a grid.
+  // state matches the old grid instead of flashing the new one.
   if (!assetProfilesEnabled) {
     return (
       <DashboardWorkspaceOverviewPanel
@@ -118,37 +106,23 @@ export function IssuancePageSkeleton({
   }
 
   return (
-    <DashboardWorkspaceOverviewPanel
-      data-loading-layout="issuance-overview"
-      data-loading-view={resolvedView}
-      aria-busy="true"
-    >
-      {/* Mirrors IssuanceWorkspace's pinned header — toolbar, then the asset-count
-          row — down to its spacing (`space-y-4` inside, `pb-3` below, matching the
-          header's fade band), so the content underneath starts on the same
-          baseline it will settle at. */}
-      <div className="space-y-4 pb-3">
+    <DashboardWorkspaceOverviewPanel data-loading-layout="issuance-overview" aria-busy="true">
+      {/* Mirrors IssuanceWorkspace's pinned header — the toolbar — down to its
+          spacing (`space-y-4` inside, `pb-6` below), so the content underneath
+          starts on the same baseline it will settle at. */}
+      <div className="space-y-4 pb-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="flex items-center gap-3 sm:flex-1">
             <SkeletonBlock className="h-10 flex-1 rounded-[10px]" />
             <SkeletonBlock className="h-10 w-10 shrink-0 rounded-[10px]" />
-            <SkeletonBlock className="h-10 w-10 shrink-0 rounded-[10px]" />
           </div>
           <SkeletonBlock className="h-10 w-full rounded-[10px] sm:w-32" />
         </div>
-
-        {/* Asset count (same width the workspace's own count placeholder takes),
-            and — list view only, as in the workspace — the expand/collapse-all
-            control opposite it. */}
-        <div className="flex h-6 items-center justify-between px-1">
-          <SkeletonBlock className="h-3 w-28" />
-          {resolvedView === "list" ? <SkeletonBlock className="h-3 w-20" /> : null}
-        </div>
       </div>
 
-      {/* The rows/tiles themselves live in issuance-list-skeleton.tsx, shared with
+      {/* The tiles themselves live in issuance-list-skeleton.tsx, shared with
           the workspace's in-place reload state so the two can't drift. */}
-      <IssuanceListSkeleton view={resolvedView} count={ISSUANCE_SKELETON_IDS.length} />
+      <IssuanceListSkeleton count={ISSUANCE_SKELETON_IDS.length} />
     </DashboardWorkspaceOverviewPanel>
   );
 }
