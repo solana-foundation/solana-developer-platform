@@ -112,6 +112,13 @@ function registerApiKeyAuth(registry: OpenAPIRegistry) {
 }
 
 function registerInternalSecuritySchemes(registry: OpenAPIRegistry) {
+  registry.registerComponent("securitySchemes", "clerkBearerAuth", {
+    type: "http",
+    scheme: "bearer",
+    bearerFormat: "JWT",
+    description: "Clerk JWT bearer token for dashboard authentication.",
+  });
+
   registry.registerComponent("securitySchemes", "sessionCookie", {
     type: "apiKey",
     in: "cookie",

@@ -54,11 +54,27 @@ describe("OpenAPI spec", () => {
 
     const current = internal.paths?.["/v1/earn/button-configurations/current"];
     expect(current?.get?.operationId).toBe("getEarnButtonConfiguration");
+    expect(current?.get?.security).toEqual([
+      { apiKeyAuth: [] },
+      { clerkBearerAuth: [] },
+      { sessionCookie: [] },
+    ]);
     expect(current?.get?.responses?.["400"]).toBeDefined();
     expect(current?.get?.responses?.["429"]).toBeDefined();
     expect(current?.put?.operationId).toBe("upsertEarnButtonConfiguration");
+    expect(current?.put?.security).toEqual([
+      { apiKeyAuth: [] },
+      { clerkBearerAuth: [] },
+      { sessionCookie: [] },
+    ]);
     expect(current?.put?.requestBody).toBeDefined();
     expect(current?.put?.responses?.["429"]).toBeDefined();
+
+    expect(internal.components?.securitySchemes?.clerkBearerAuth).toMatchObject({
+      type: "http",
+      scheme: "bearer",
+      bearerFormat: "JWT",
+    });
 
     const handoff = internal.paths?.["/v1/earn/button-configurations/public/{publicToken}"]?.get;
     expect(handoff?.operationId).toBe("getPublicEarnButtonConfiguration");
@@ -71,6 +87,7 @@ describe("OpenAPI spec", () => {
     expect(
       publicDocument.paths?.["/v1/earn/button-configurations/public/{publicToken}"]
     ).toBeUndefined();
+    expect(publicDocument.components?.securitySchemes?.clerkBearerAuth).toBeUndefined();
   });
 
   it("documents allowlist search/label filters and the labels endpoint", () => {

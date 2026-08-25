@@ -11,6 +11,12 @@ import {
 } from "../schemas/earn";
 import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 
+const earnConfigurationSecurity: Array<Record<string, string[]>> = [
+  { apiKeyAuth: [] },
+  { clerkBearerAuth: [] },
+  { sessionCookie: [] },
+];
+
 export function registerEarnPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
     method: "get",
@@ -40,7 +46,7 @@ export function registerEarnPaths(registry: OpenAPIRegistry) {
     operationId: "getEarnButtonConfiguration",
     description:
       "Gets the saved Earn button configuration for the active organization and project.",
-    security: [{ apiKeyAuth: [] }],
+    security: earnConfigurationSecurity,
     request: {
       headers: projectScopeHeaders,
     },
@@ -61,7 +67,7 @@ export function registerEarnPaths(registry: OpenAPIRegistry) {
     operationId: "upsertEarnButtonConfiguration",
     description:
       "Validates deposit availability before saving the selected strategy and appearance for the active organization and project.",
-    security: [{ apiKeyAuth: [] }],
+    security: earnConfigurationSecurity,
     request: {
       headers: projectScopeHeaders,
       body: {
