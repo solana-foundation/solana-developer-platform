@@ -118,10 +118,9 @@ describe("RpcConnectionPanel", () => {
     expect(toast.warning).not.toHaveBeenCalled();
   });
 
-  it("does not offer the platform choice once this project runs its own connection", () => {
-    // Every organization has exactly one reachable project, so a platform
-    // provider chosen here would decide nothing: the project connection wins
-    // and production is locked in the switcher.
+  it("keeps the platform choice settable while a connection is serving", () => {
+    // Deactivation destroys the secret and cannot be undone, so gating the
+    // switch on removing the connection first would strand the setting.
     renderPanel({
       provider: "helius",
       activeProvider: "alchemy",
@@ -129,13 +128,11 @@ describe("RpcConnectionPanel", () => {
       status: "available",
     });
 
-    expect(screen.queryByRole("button", { name: "Use this provider" })).toBeNull();
-    expect(screen.getByText(/would not change what serves it/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Use this provider" })).toBeTruthy();
+    expect(screen.getByText(/will not change what serves this project/)).toBeTruthy();
   });
 
-  it("does not offer the platform choice when the organization is fail-closed on BYOK", () => {
-    // In byok mode the relay throws rather than falling back, so SDP's
-    // providers serve nothing at all.
+  it("keeps it settable under fail-closed BYOK, and says when it applies", () => {
     renderPanel({
       provider: "helius",
       activeProvider: "alchemy",
@@ -144,11 +141,11 @@ describe("RpcConnectionPanel", () => {
       status: "available",
     });
 
-    expect(screen.queryByRole("button", { name: "Use this provider" })).toBeNull();
-    expect(screen.getByText(/serve nothing/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Use this provider" })).toBeTruthy();
+    expect(screen.getByText(/serve nothing until credential mode/)).toBeTruthy();
   });
 
-  it("still offers the platform choice when nothing of the tenant's own serves the project", () => {
+  it("says nothing extra when the choice takes effect immediately", () => {
     renderPanel({
       provider: "helius",
       activeProvider: "alchemy",
@@ -158,6 +155,7 @@ describe("RpcConnectionPanel", () => {
     });
 
     expect(screen.getByRole("button", { name: "Use this provider" })).toBeTruthy();
+    expect(screen.queryByText(/will not change what serves this project/)).toBeNull();
   });
 
   it("names the tenant's own key when this provider serves on it", () => {

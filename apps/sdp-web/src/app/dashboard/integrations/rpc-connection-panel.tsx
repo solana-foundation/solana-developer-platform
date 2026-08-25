@@ -108,14 +108,15 @@ export function RpcConnectionPanel({
 
   const isActive = provider === currentProvider;
   /**
-   * The platform selection only decides what serves a project that has no
-   * connection of its own, and every organization has exactly one reachable
-   * project. So once this project is on its own key -- or the organization is
-   * fail-closed on BYOK, where the relay refuses instead of falling back --
-   * choosing a provider here changes nothing anyone can reach. Offering the
-   * control anyway is a button that reports success and does nothing.
+   * The platform selection decides what serves a project with no connection of
+   * its own (`relay.ts` reaches `organization_provider` only after tenant
+   * resolution returns nothing). It stays settable while a connection is
+   * serving: deactivation destroys the secret and cannot be undone, so making
+   * the switch depend on removing the connection first would be a trap. What
+   * the page owes the reader is when the choice takes effect, not a missing
+   * control.
    */
-  const platformChoiceDecidesThisProject = !servingProvider && credentialMode !== "byok";
+  const platformChoicePending = Boolean(servingProvider) || credentialMode === "byok";
   // Saved here, but unserviceable: the relay is falling back to another
   // provider, so there is nothing honest to test on this page.
   const isStrandedDefault = isActive && !isEnabledInDeployment;
@@ -245,7 +246,7 @@ export function RpcConnectionPanel({
           >
             {isTesting ? t("DashboardCustody.testing") : t("Shared.integrations.rpcTestConnection")}
           </Button>
-        ) : status === "available" && canManage && platformChoiceDecidesThisProject ? (
+        ) : status === "available" && canManage ? (
           <Button
             type="button"
             disabled={isSwitching}
@@ -260,15 +261,16 @@ export function RpcConnectionPanel({
         ) : null}
       </div>
 
-      {/* Say why the choice is not on offer, rather than leaving a provider
-          page with no control and no reason. */}
-      {status === "available" && canManage && !platformChoiceDecidesThisProject ? (
+      {/* Say when the choice takes effect. Choosing a provider while a
+          connection is serving looks like it did nothing, which is what sent
+          a reader hunting for a bug that was not there. */}
+      {status === "available" && canManage && platformChoicePending ? (
         <p className="max-w-2xl text-sm leading-6 text-tertiary">
           {servingProvider
-            ? t("Shared.integrations.rpcPlatformChoiceMoot", {
+            ? t("Shared.integrations.rpcPlatformChoicePending", {
                 provider: rpcProviderLabel(servingProvider),
               })
-            : t("Shared.integrations.rpcPlatformChoiceMootByok")}
+            : t("Shared.integrations.rpcPlatformChoicePendingByok")}
         </p>
       ) : null}
 
