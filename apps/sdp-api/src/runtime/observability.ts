@@ -13,13 +13,31 @@ export interface ObservabilityScope {
 }
 
 export interface MonitorOptions {
-  schedule: { type: "crontab"; value: string };
+  schedule:
+    | { type: "crontab"; value: string }
+    | {
+        type: "interval";
+        value: number;
+        unit: "year" | "month" | "week" | "day" | "hour" | "minute";
+      };
+  /** Minutes after the expected check-in before Sentry marks it missed. */
+  checkinMargin?: number;
+  /** Minutes before Sentry considers an in-progress check-in timed out. */
+  maxRuntime?: number;
 }
+
+export type MonitorCheckIn =
+  | { monitorSlug: string; status: "in_progress" }
+  | { monitorSlug: string; status: "ok" | "error"; checkInId: string };
 
 export interface Observability {
   captureException(err: unknown): void;
   withScope(cb: (scope: ObservabilityScope) => void): void;
   withMonitor<T>(slug: string, fn: () => Promise<T>, opts: MonitorOptions): Promise<T>;
+}
+
+export interface CheckInObservability extends Observability {
+  captureCheckIn(checkIn: MonitorCheckIn, opts?: MonitorOptions): string;
 }
 
 export interface SentryOptions {

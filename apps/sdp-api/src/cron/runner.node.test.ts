@@ -172,7 +172,35 @@ describe("startCron", () => {
     startCron({ env, bg, observability });
 
     (scheduleMock.mock.calls[3][1] as () => void)();
-    expect(runWorkflowExecutions).toHaveBeenCalledWith({ env, bg, observability });
+    expect(runWorkflowExecutions).toHaveBeenCalledWith({
+      env,
+      bg,
+      observability: expect.anything(),
+    });
+  });
+
+  it("gives every tick monitor a check-in margin surviving instance restarts", async () => {
+    const bg = makeBg();
+    const env = {} as Env;
+    const observability = makeObservability();
+    startCron({ env, bg, observability });
+
+    (scheduleMock.mock.calls[3][1] as () => void)();
+    const passed = vi.mocked(runWorkflowExecutions).mock.calls[0][0].observability;
+    expect(passed).toBeDefined();
+    expect(passed).not.toBe(observability);
+
+    await passed?.withMonitor("sdp-api-run-workflow-executions", async () => undefined, {
+      schedule: { type: "crontab", value: "*/5 * * * *" },
+    });
+    expect(observability.withMonitor).toHaveBeenCalledExactlyOnceWith(
+      "sdp-api-run-workflow-executions",
+      expect.any(Function),
+      {
+        schedule: { type: "crontab", value: "*/5 * * * *" },
+        checkinMargin: 3,
+      }
+    );
   });
 
   // The engine is the one scheduled task behind a feature flag that defaults ON (asset
@@ -206,7 +234,7 @@ describe("startCron", () => {
     expect(runWorkflowSecretRetirements).toHaveBeenCalledWith({
       env: SELF_HOSTED_NO_PROFILES,
       bg,
-      observability,
+      observability: expect.anything(),
     });
   });
 
@@ -296,7 +324,11 @@ describe("startCron", () => {
     startCron({ env, bg, observability });
     const tick = scheduleMock.mock.calls[1][1] as () => void;
     tick();
-    expect(runPendingTransfersReconciliation).toHaveBeenCalledWith({ env, bg, observability });
+    expect(runPendingTransfersReconciliation).toHaveBeenCalledWith({
+      env,
+      bg,
+      observability: expect.anything(),
+    });
   });
 
   it("tick invokes approved wallet-operation recovery with the supplied deps", () => {
@@ -306,7 +338,11 @@ describe("startCron", () => {
     startCron({ env, bg, observability });
     const tick = scheduleMock.mock.calls[0][1] as () => void;
     tick();
-    expect(runApprovedWalletOperationRecovery).toHaveBeenCalledWith({ env, bg, observability });
+    expect(runApprovedWalletOperationRecovery).toHaveBeenCalledWith({
+      env,
+      bg,
+      observability: expect.anything(),
+    });
   });
 
   it("tick invokes vault-movement recovery outside the Earn feature gate", () => {
@@ -319,7 +355,7 @@ describe("startCron", () => {
     expect(runEarnVaultMovementsReconciliation).toHaveBeenCalledWith({
       env,
       bg,
-      observability,
+      observability: expect.anything(),
     });
   });
 
@@ -331,7 +367,11 @@ describe("startCron", () => {
     // recovery, transfers, recurring, workflow executions — recurring is third.
     const tick = scheduleMock.mock.calls[2][1] as () => void;
     tick();
-    expect(runRecurringPaymentsCollection).toHaveBeenCalledWith({ env, bg, observability });
+    expect(runRecurringPaymentsCollection).toHaveBeenCalledWith({
+      env,
+      bg,
+      observability: expect.anything(),
+    });
   });
 
   it("tick passes observability=undefined through when caller did not supply one", () => {
@@ -379,6 +419,10 @@ describe("startCron", () => {
     startCron({ env, bg, observability });
     const tick = scheduleMock.mock.calls[4][1] as () => void;
     tick();
-    expect(runRingsIndexingPoll).toHaveBeenCalledWith({ env, bg, observability });
+    expect(runRingsIndexingPoll).toHaveBeenCalledWith({
+      env,
+      bg,
+      observability: expect.anything(),
+    });
   });
 });
