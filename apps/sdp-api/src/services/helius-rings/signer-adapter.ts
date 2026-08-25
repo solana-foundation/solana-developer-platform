@@ -1,11 +1,16 @@
 import { SigningError } from "@sdp/custody/signing";
 import { getBase64Codec } from "@solana/codecs";
 import {
+  address,
+  getAddressEncoder,
+  getSignatureFromTransaction,
   getTransactionDecoder,
   getTransactionEncoder,
+  signatureBytes,
   type Transaction,
   type TransactionWithinSizeLimit,
   type TransactionWithLifetime,
+  verifySignature,
 } from "@solana/kit";
 import {
   isTransactionModifyingSigner,
@@ -52,6 +57,86 @@ export interface SignRingsOuterTransactionInput {
   unsignedTxBase64: string;
   /** Test seam; production resolves the owner's custody wallet. */
   signer?: TransactionSigner;
+}
+
+export interface AssertRingsSignedTransactionMatchesInput {
+  owner: string;
+  unsignedTxBase64: string;
+  signedTxBase64: string;
+}
+
+/**
+ * Binds signer output to the exact transaction that passed the wire policy.
+ *
+ * A modifying signer is allowed by the generic Solana signer interface, but
+ * Rings approves one immutable compiled message. The signed envelope must
+ * therefore contain that message unchanged and exactly one non-null signature
+ * in its sole owner slot.
+ */
+export async function assertRingsSignedTransactionMatches(
+  input: AssertRingsSignedTransactionMatchesInput
+): Promise<string> {
+  try {
+    const owner = address(input.owner);
+    const unsigned = decodeCanonicalTransaction(input.unsignedTxBase64);
+    const signed = decodeCanonicalTransaction(input.signedTxBase64);
+
+    if (!equalBytes(unsigned.messageBytes, signed.messageBytes)) {
+      throw new Error("signed message changed");
+    }
+
+    const unsignedSignatures = Object.entries(unsigned.signatures);
+    const signedSignatures = Object.entries(signed.signatures);
+    if (
+      unsignedSignatures.length !== 1 ||
+      unsignedSignatures[0]?.[0] !== owner ||
+      unsignedSignatures[0]?.[1] !== null ||
+      signedSignatures.length !== 1 ||
+      signedSignatures[0]?.[0] !== owner ||
+      signedSignatures[0]?.[1] === null
+    ) {
+      throw new Error("signed envelope has unexpected signatures");
+    }
+
+    const ownerSignature = signedSignatures[0][1];
+    const ownerPublicKey = await crypto.subtle.importKey(
+      "raw",
+      new Uint8Array(getAddressEncoder().encode(owner)),
+      { name: "Ed25519" },
+      false,
+      ["verify"]
+    );
+    if (
+      !(await verifySignature(ownerPublicKey, signatureBytes(ownerSignature), signed.messageBytes))
+    ) {
+      throw new Error("owner signature does not verify");
+    }
+
+    return getSignatureFromTransaction(signed);
+  } catch {
+    throw new RingsAdapterError(
+      "signer_failed",
+      "signer output does not match the approved transaction",
+      { retryable: false }
+    );
+  }
+}
+
+function decodeCanonicalTransaction(value: string): Transaction {
+  const bytes = new Uint8Array(getBase64Codec().encode(value));
+  const [transaction, offset] = getTransactionDecoder().read(bytes, 0);
+  if (offset !== bytes.length || !equalBytes(getTransactionEncoder().encode(transaction), bytes)) {
+    throw new Error("noncanonical transaction");
+  }
+  return transaction;
+}
+
+function equalBytes(left: ArrayLike<number>, right: ArrayLike<number>): boolean {
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
 }
 
 export async function signRingsOuterTransaction(

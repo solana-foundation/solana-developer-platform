@@ -21,7 +21,6 @@ import {
 } from "@sdp/helius-rings";
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { ApprovalRequestStatus, WalletOperationActor } from "@sdp/types";
-import { getBase64Codec, getSignatureFromTransaction, getTransactionDecoder } from "@solana/kit";
 import {
   createHeliusRingsAssetRepository,
   createHeliusRingsEventRepository,
@@ -44,10 +43,14 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { enforceWalletOperationPolicy } from "@/services/policy/enforcement.service";
 import type { Env } from "@/types/env";
 import { RingsAdapterError, redactAdapterMessage } from "./adapter-error";
-import { resolveRingsGateway } from "./gateway";
+import {
+  type RingsOuterTransactionPolicyInput,
+  resolveRingsGateway,
+  validateRingsOuterTransaction,
+} from "./gateway";
 import { buildRingsWalletOperationInput } from "./policy-envelope";
 import { inspectRingsSignature, submitRingsOuterTransaction } from "./rpc-adapter";
-import { signRingsOuterTransaction } from "./signer-adapter";
+import { assertRingsSignedTransactionMatches, signRingsOuterTransaction } from "./signer-adapter";
 
 /**
  * Orchestrates every Rings action: provisioning, prepare-through-policy,
@@ -78,6 +81,8 @@ export interface HeliusRingsServiceDependencies {
   health?: HeliusRingsHealthRepository;
   assets?: HeliusRingsAssetRepository;
   enforcePolicy?: typeof enforceWalletOperationPolicy;
+  /** Test seam; production always uses the SDK-backed local wrapper. */
+  validateOuterTransaction?: typeof validateRingsOuterTransaction;
   signOuterTransaction?: typeof signRingsOuterTransaction;
   submitOuterTransaction?: typeof submitRingsOuterTransaction;
   /** Test seam for the chain half of a reconcile. */
@@ -166,6 +171,7 @@ export class HeliusRingsService {
   private readonly health: HeliusRingsHealthRepository;
   private readonly assets: HeliusRingsAssetRepository;
   private readonly enforcePolicy: typeof enforceWalletOperationPolicy;
+  private readonly validateOuterTransaction: typeof validateRingsOuterTransaction;
   private readonly signOuterTransaction: typeof signRingsOuterTransaction;
   private readonly submitOuterTransaction: typeof submitRingsOuterTransaction;
   private readonly inspectSignature: typeof inspectRingsSignature;
@@ -191,6 +197,8 @@ export class HeliusRingsService {
     this.health = dependencies.health ?? createHeliusRingsHealthRepository(env);
     this.assets = dependencies.assets ?? createHeliusRingsAssetRepository(env);
     this.enforcePolicy = dependencies.enforcePolicy ?? enforceWalletOperationPolicy;
+    this.validateOuterTransaction =
+      dependencies.validateOuterTransaction ?? validateRingsOuterTransaction;
     this.signOuterTransaction = dependencies.signOuterTransaction ?? signRingsOuterTransaction;
     this.submitOuterTransaction =
       dependencies.submitOuterTransaction ?? submitRingsOuterTransaction;
@@ -852,17 +860,28 @@ export class HeliusRingsService {
         payload: { source: proof.source },
       });
 
+      // The unsigned bytes are authoritative. This runs after the proof and
+      // input-note commitment are durable, but before custody sees anything it
+      // could sign.
+      await this.validateOuterTransaction(
+        outerTransactionPolicyInput(
+          current,
+          owner,
+          wallet.shielded_address,
+          built.outerUnsignedTxBase64
+        )
+      );
+
       // ready_to_sign → submitted: sign with custody, then persist the exact
       // bytes *before* broadcasting. The signature is a property of the signed
       // transaction, so it is knowable without the network — which is what makes
       // this durable ahead of the RPC call. Broadcasting first would leave a live
       // on-chain transaction whose bytes were never recorded, and a spend cannot
       // be safely rebuilt from scratch to find out what happened.
-      // The owner, and only the owner. A transaction needing a second signature
-      // would sit unlanded until its blockhash expired; one whose single signer
-      // is somebody else would move a wallet this operation never named. Both
-      // are cheap to detect here and expensive to diagnose after submission.
-      assertOwnerIsSoleSigner(built.requiredSigners, owner);
+      // Useful gateway metadata consistency check. It is not the security
+      // boundary: the decoded wire policy above derives the signer set from the
+      // bytes custody will actually sign.
+      assertRequiredSignerMetadata(built.requiredSigners, owner);
 
       const signed = await this.signOuterTransaction({
         env: this.env,
@@ -871,19 +890,11 @@ export class HeliusRingsService {
         owner,
         unsignedTxBase64: built.outerUnsignedTxBase64,
       });
-      let signature: string;
-      try {
-        signature = getSignatureFromTransaction(
-          getTransactionDecoder().decode(getBase64Codec().encode(signed))
-        );
-      } catch (cause) {
-        // The signer returned something that is not a transaction. Retrying the
-        // same inputs cannot change that, so this is the signer's failure.
-        throw new RingsAdapterError("signer_failed", "signer returned undecodable bytes", {
-          retryable: false,
-          cause,
-        });
-      }
+      const signature = await assertRingsSignedTransactionMatches({
+        owner,
+        unsignedTxBase64: built.outerUnsignedTxBase64,
+        signedTxBase64: signed,
+      });
 
       // The outbox, in the order that makes a lost response recoverable: the
       // bytes and their expiry land first, then the state moves, then the
@@ -1244,13 +1255,72 @@ export class HeliusRingsService {
   }
 }
 
+function requiredOuterPolicyField(value: string | null): string {
+  if (!value) {
+    throw new HeliusRingsError(
+      "invalid_input",
+      "the persisted Rings operation is missing final-wire policy context"
+    );
+  }
+  return value;
+}
+
+function outerTransactionPolicyInput(
+  operation: HeliusRingsOperationRow,
+  owner: string,
+  shieldedAddress: string | null,
+  outerUnsignedTxBase64: string
+): RingsOuterTransactionPolicyInput {
+  const mint = requiredOuterPolicyField(operation.asset_mint);
+  const amountRaw = requiredOuterPolicyField(operation.amount_raw);
+  const common = { mint, amountRaw };
+
+  switch (operation.op_type) {
+    case "shield":
+      return {
+        outerUnsignedTxBase64,
+        owner,
+        intent: {
+          opType: "shield",
+          ...common,
+          expectedShieldedAddress: requiredOuterPolicyField(shieldedAddress),
+        },
+      };
+    case "transfer_registered":
+      return {
+        outerUnsignedTxBase64,
+        owner,
+        intent: {
+          opType: "transfer_registered",
+          ...common,
+        },
+      };
+    case "withdraw":
+      return {
+        outerUnsignedTxBase64,
+        owner,
+        intent: {
+          opType: "withdraw",
+          ...common,
+          to: requiredOuterPolicyField(operation.to_addr),
+        },
+      };
+    default:
+      throw new HeliusRingsError(
+        "invalid_input",
+        "this Rings operation type is not enabled for final-wire signing"
+      );
+  }
+}
+
 /**
- * Refuses a built transaction whose signer set is not exactly the owner.
+ * Refuses inconsistent gateway signer metadata after wire validation passed.
  *
- * Non-retryable: the gateway produced the wrong shape, and asking it again with
- * the same inputs produces the same thing.
+ * Advisory rather than authoritative: `validateRingsOuterTransaction` derives
+ * the fee payer and required signers from serialized bytes. This metadata still
+ * catches an internally inconsistent gateway result with a clearer failure.
  */
-function assertOwnerIsSoleSigner(requiredSigners: readonly string[], owner: string): void {
+function assertRequiredSignerMetadata(requiredSigners: readonly string[], owner: string): void {
   const unexpected = requiredSigners.filter((signer) => signer !== owner);
 
   if (unexpected.length > 0 || !requiredSigners.includes(owner)) {

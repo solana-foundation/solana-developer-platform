@@ -4,7 +4,9 @@ import {
   type Address,
   type Blockhash,
   compileTransaction,
+  createKeyPairFromPrivateKeyBytes,
   createTransactionMessage,
+  getAddressFromPublicKey,
   getBase58Codec,
   getBase64Codec,
   getTransactionDecoder,
@@ -13,6 +15,7 @@ import {
   type SignatureBytes,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
+  signBytes,
 } from "@solana/kit";
 import type { TransactionPartialSigner } from "@solana/signers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,7 +23,7 @@ import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
 import { submitRingsOuterTransaction } from "./rpc-adapter";
-import { signRingsOuterTransaction } from "./signer-adapter";
+import { assertRingsSignedTransactionMatches, signRingsOuterTransaction } from "./signer-adapter";
 
 vi.mock("@/db", () => ({ getDb: () => ({}) }));
 
@@ -35,23 +38,51 @@ const BLOCKHASH = getBase58Codec().decode(new Uint8Array(32).fill(7)) as Blockha
 const base64 = getBase64Codec();
 const env = {} as Env;
 
-function unsignedTxBase64(): string {
+function unsignedTxBase64For(feePayer: Address, blockhash = BLOCKHASH): string {
   const message = pipe(
     createTransactionMessage({ version: 0 }),
-    (current) => setTransactionMessageFeePayer(FEE_PAYER, current),
+    (current) => setTransactionMessageFeePayer(feePayer, current),
     (current) =>
       setTransactionMessageLifetimeUsingBlockhash(
-        { blockhash: BLOCKHASH, lastValidBlockHeight: 100n },
+        { blockhash, lastValidBlockHeight: 100n },
         current
       )
   );
   return base64.decode(getTransactionEncoder().encode(compileTransaction(message)));
 }
 
+function unsignedTxBase64(blockhash = BLOCKHASH): string {
+  return unsignedTxBase64For(FEE_PAYER, blockhash);
+}
+
 function partialSigner(
   sign: () => Promise<Array<Record<Address, SignatureBytes>>>
 ): TransactionPartialSigner {
   return { address: FEE_PAYER, signTransactions: sign };
+}
+
+function signedTxBase64(
+  unsigned = unsignedTxBase64(),
+  signatures: Record<Address, SignatureBytes | null> = {
+    [FEE_PAYER]: new Uint8Array(64).fill(7) as SignatureBytes,
+  }
+): string {
+  const transaction = getTransactionDecoder().decode(base64.encode(unsigned));
+  return base64.decode(getTransactionEncoder().encode({ ...transaction, signatures }));
+}
+
+const OWNER_KEYPAIR = await createKeyPairFromPrivateKeyBytes(new Uint8Array(32).fill(41));
+const OTHER_KEYPAIR = await createKeyPairFromPrivateKeyBytes(new Uint8Array(32).fill(42));
+const OWNER = await getAddressFromPublicKey(OWNER_KEYPAIR.publicKey);
+const OTHER = await getAddressFromPublicKey(OTHER_KEYPAIR.publicKey);
+
+async function cryptographicallySignedTxBase64(
+  unsigned = unsignedTxBase64(),
+  privateKey: CryptoKey = OWNER_KEYPAIR.privateKey
+): Promise<string> {
+  const transaction = getTransactionDecoder().decode(base64.encode(unsigned));
+  const signature = await signBytes(privateKey, transaction.messageBytes);
+  return signedTxBase64(unsigned, { [OWNER]: signature });
 }
 
 /**
@@ -188,6 +219,90 @@ describe("signRingsOuterTransaction", () => {
     );
 
     expect(error).toMatchObject({ failureCode: "signer_failed", retryable: false });
+  });
+});
+
+describe("assertRingsSignedTransactionMatches", () => {
+  it("accepts a real owner signature over the exact message bytes", async () => {
+    const unsigned = unsignedTxBase64For(OWNER);
+
+    await expect(
+      assertRingsSignedTransactionMatches({
+        owner: OWNER,
+        unsignedTxBase64: unsigned,
+        signedTxBase64: await cryptographicallySignedTxBase64(unsigned),
+      })
+    ).resolves.toEqual(expect.any(String));
+  });
+
+  it("rejects the same message with a byte-filled invalid signature", async () => {
+    const unsigned = unsignedTxBase64For(OWNER);
+
+    await expect(
+      assertRingsSignedTransactionMatches({
+        owner: OWNER,
+        unsignedTxBase64: unsigned,
+        signedTxBase64: signedTxBase64(unsigned, {
+          [OWNER]: new Uint8Array(64).fill(7) as SignatureBytes,
+        }),
+      })
+    ).rejects.toMatchObject({ failureCode: "signer_failed", retryable: false });
+  });
+
+  it("rejects a missing owner signature", async () => {
+    const unsigned = unsignedTxBase64For(OWNER);
+
+    await expect(
+      assertRingsSignedTransactionMatches({
+        owner: OWNER,
+        unsignedTxBase64: unsigned,
+        signedTxBase64: unsigned,
+      })
+    ).rejects.toMatchObject({ failureCode: "signer_failed", retryable: false });
+  });
+
+  it("rejects signatures outside the sole owner slot", async () => {
+    const unsigned = unsignedTxBase64For(OWNER);
+    const messageBytes = getTransactionDecoder().decode(base64.encode(unsigned)).messageBytes;
+
+    await expect(
+      assertRingsSignedTransactionMatches({
+        owner: OWNER,
+        unsignedTxBase64: unsigned,
+        signedTxBase64: signedTxBase64(unsigned, {
+          [OWNER]: await signBytes(OWNER_KEYPAIR.privateKey, messageBytes),
+          [OTHER]: await signBytes(OTHER_KEYPAIR.privateKey, messageBytes),
+        }),
+      })
+    ).rejects.toMatchObject({ failureCode: "signer_failed", retryable: false });
+  });
+
+  it("rejects a real signature produced by another key", async () => {
+    const unsigned = unsignedTxBase64For(OWNER);
+
+    await expect(
+      assertRingsSignedTransactionMatches({
+        owner: OWNER,
+        unsignedTxBase64: unsigned,
+        signedTxBase64: await cryptographicallySignedTxBase64(unsigned, OTHER_KEYPAIR.privateKey),
+      })
+    ).rejects.toMatchObject({ failureCode: "signer_failed", retryable: false });
+  });
+
+  it("rejects a real owner signature over changed message bytes", async () => {
+    const unsigned = unsignedTxBase64For(OWNER);
+    const changed = unsignedTxBase64For(
+      OWNER,
+      getBase58Codec().decode(new Uint8Array(32).fill(8)) as Blockhash
+    );
+
+    await expect(
+      assertRingsSignedTransactionMatches({
+        owner: OWNER,
+        unsignedTxBase64: unsigned,
+        signedTxBase64: await cryptographicallySignedTxBase64(changed),
+      })
+    ).rejects.toMatchObject({ failureCode: "signer_failed", retryable: false });
   });
 });
 

@@ -14,6 +14,7 @@ import {
 } from "@heliuslabs/zolana/wallet";
 import { HeliusRingsError } from "@sdp/helius-rings";
 import { type Address, address, type Instruction, type Transaction } from "@solana/kit";
+import { type PreparedSpendIntent, validatePreparedTransferIntent } from "../intent-validation.js";
 import type { ShieldedMaterial } from "../material.js";
 import { protocolMint } from "./mint.js";
 import { type NoteSelection, noteId, selectNotes } from "./notes.js";
@@ -102,7 +103,13 @@ export async function buildTransfer(deps: SpendDeps, input: TransferInput): Prom
         payer: deps.owner,
         inputTree: deps.client.tree,
         outputTree: deps.client.tree,
-        data: await prove(deps, transfer),
+        data: await prove(deps, transfer, {
+          kind: "transfer_registered",
+          owner: deps.owner,
+          recipient: recipient.address,
+          asset,
+          amount,
+        }),
       }),
     ],
     inputNotes: selection.ids,
@@ -149,7 +156,12 @@ export async function buildWithdrawal(deps: SpendDeps, input: WithdrawInput): Pr
         inputTree: deps.client.tree,
         outputTree: deps.client.tree,
         withdrawal: target,
-        data: await prove(deps, withdrawal),
+        data: await prove(deps, withdrawal, {
+          kind: "withdraw",
+          owner: deps.owner,
+          recipient: address(input.recipient),
+          amount,
+        }),
       }),
     ],
     inputNotes: selection.ids,
@@ -291,8 +303,13 @@ function confidentialTransfer(deps: SpendDeps, selection: NoteSelection): Confid
  * does all three in one call, which it can only do because it has the whole
  * keypair in process.
  */
-async function prove(deps: SpendDeps, transfer: ConfidentialTransfer) {
+async function prove(
+  deps: SpendDeps,
+  transfer: ConfidentialTransfer,
+  expectedIntent: PreparedSpendIntent
+) {
   const prepared = transfer.prepare();
+  validatePreparedTransferIntent(prepared, expectedIntent);
   const encrypted = await deps.authority.encryptConfidentialTransfer({
     firstNullifier: prepared.firstNullifier,
     outputs: prepared.outputs,

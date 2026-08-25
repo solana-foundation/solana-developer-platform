@@ -2,13 +2,36 @@ import { HeliusRingsError, type PrivateOperationInput } from "@sdp/helius-rings"
 import { InMemoryRingsGateway } from "@sdp/helius-rings/testing";
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { PolicyDecision } from "@sdp/types";
+import {
+  AccountRole,
+  type Address,
+  address,
+  appendTransactionMessageInstructions,
+  type Blockhash,
+  compileTransaction,
+  createKeyPairFromPrivateKeyBytes,
+  createTransactionMessage,
+  getAddressEncoder,
+  getAddressFromPublicKey,
+  getBase58Decoder,
+  getBase64Codec,
+  getSignatureFromTransaction,
+  getTransactionDecoder,
+  getTransactionEncoder,
+  type Instruction,
+  pipe,
+  type SignatureBytes,
+  setTransactionMessageFeePayer,
+  setTransactionMessageLifetimeUsingBlockhash,
+  signBytes,
+} from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createHeliusRingsWalletRepository } from "@/db/repositories";
+import type { HeliusRingsOperationRepository } from "@/db/repositories/helius-rings-operation.repository";
 import { createPostgresHeliusRingsOperationRepository } from "@/db/repositories/helius-rings-operation.repository.postgres";
 import { AppError } from "@/lib/errors";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
-import { signedRingsTransaction } from "@/test/fixtures/rings-transactions";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { RingsAdapterError } from "./adapter-error";
@@ -24,7 +47,12 @@ const tenant = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
 
 let walletId: string;
 
-const WALLET_OWNER = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+const WALLET_KEYPAIR = await createKeyPairFromPrivateKeyBytes(new Uint8Array(32).fill(51));
+const WALLET_OWNER = await getAddressFromPublicKey(WALLET_KEYPAIR.publicKey);
+const SHIELDED_OWNER_HASH = new Uint8Array(32).fill(3);
+const WALLET_SHIELDED_IDENTITY = getBase58Decoder().decode(
+  Uint8Array.from([...SHIELDED_OWNER_HASH, ...new Uint8Array(33).fill(5)])
+);
 
 function policyStub(
   decision: PolicyDecision,
@@ -44,10 +72,12 @@ function policyStub(
 }
 
 function operationInput(overrides: Partial<PrivateOperationInput> = {}): PrivateOperationInput {
+  const opType = overrides.opType ?? "shield";
   return {
     walletId,
-    opType: "shield",
+    opType,
     asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+    ...(opType === "withdraw" || opType === "transfer_registered" ? { to: WALLET_OWNER } : {}),
     clientNonce: "nonce-1",
     ...overrides,
   };
@@ -74,7 +104,103 @@ function service(deps: HeliusRingsServiceDependencies = {}) {
   });
 }
 
-const OUTER_TX = signedRingsTransaction(7);
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function u64(value: bigint): number[] {
+  return Array.from({ length: 8 }, (_, index) => Number((value >> BigInt(index * 8)) & 255n));
+}
+
+/**
+ * A Kit-6 encoding of the one shield shape the Kit-7 SDK policy accepts.
+ * Keeping the fixture on this side of the boundary proves the validator
+ * consumes wire bytes rather than relying on cross-major brands.
+ */
+function unsignedShieldTransaction(
+  amount: bigint,
+  blockhash: Blockhash = "5DjPMLBWWLbNw3TRUEbCwPFvpXqhkdVv2VUb3RJhZmpJ" as Blockhash
+): string {
+  const owner = address(WALLET_OWNER);
+  const pool = address("sppXZU59VoYodv9Accs4hHNTjYiuYmDFyFVjUjPxFsG");
+  const tree = address("trEEbaNobcTESNmtsPBj3FX27q5sDCQePV2kb12FYho");
+  const system = address("11111111111111111111111111111111");
+  const solInterface = getBase58Decoder().decode(
+    Uint8Array.from([
+      226, 231, 179, 96, 7, 216, 134, 74, 16, 116, 193, 73, 186, 110, 210, 48, 2, 97, 154, 130, 121,
+      53, 28, 232, 140, 221, 183, 236, 109, 212, 72, 117,
+    ])
+  ) as Address;
+  const deposit: Instruction = {
+    programAddress: pool,
+    accounts: [
+      { address: tree, role: AccountRole.WRITABLE },
+      { address: owner, role: AccountRole.WRITABLE_SIGNER },
+      { address: pool, role: AccountRole.READONLY },
+      { address: system, role: AccountRole.READONLY },
+      { address: solInterface, role: AccountRole.WRITABLE },
+    ],
+    data: Uint8Array.from([
+      11,
+      1,
+      0,
+      1,
+      0,
+      ...getAddressEncoder().encode(owner),
+      ...SHIELDED_OWNER_HASH,
+      ...new Uint8Array(32).fill(7),
+      ...u64(amount),
+      0,
+      0,
+    ]),
+  };
+  const transaction = compileTransaction(
+    pipe(
+      createTransactionMessage({ version: 0 }),
+      (message) => setTransactionMessageFeePayer(owner, message),
+      (message) =>
+        setTransactionMessageLifetimeUsingBlockhash(
+          {
+            blockhash,
+            lastValidBlockHeight: 100n,
+          },
+          message
+        ),
+      (message) => appendTransactionMessageInstructions([deposit], message)
+    )
+  );
+  return getBase64Codec().decode(getTransactionEncoder().encode(transaction));
+}
+
+async function signWalletTransaction(unsignedTxBase64: string): Promise<{
+  signedTxBase64: string;
+  signature: string;
+}> {
+  const transaction = getTransactionDecoder().decode(getBase64Codec().encode(unsignedTxBase64));
+  const ownerSignature = await signBytes(WALLET_KEYPAIR.privateKey, transaction.messageBytes);
+  const signed = {
+    ...transaction,
+    signatures: { [WALLET_OWNER]: ownerSignature as SignatureBytes },
+  };
+  return {
+    signedTxBase64: getBase64Codec().decode(getTransactionEncoder().encode(signed)),
+    signature: getSignatureFromTransaction(signed),
+  };
+}
+
+const OUTER_TX = await signWalletTransaction(unsignedShieldTransaction(1_000_000n));
+const CHANGED_OUTER_TX = await signWalletTransaction(
+  unsignedShieldTransaction(
+    1_000_000n,
+    getBase58Decoder().decode(new Uint8Array(32).fill(52)) as Blockhash
+  )
+);
 
 /**
  * A service whose gateway succeeds and whose sign/submit adapters are stubbed.
@@ -83,9 +209,16 @@ const OUTER_TX = signedRingsTransaction(7);
  */
 function liveishService(deps: HeliusRingsServiceDependencies = {}) {
   return service({
-    gateway: new InMemoryRingsGateway(),
-    signOuterTransaction: async () => OUTER_TX.signedTxBase64,
-    submitOuterTransaction: async () => OUTER_TX.signature,
+    gateway: new InMemoryRingsGateway({
+      buildUnsignedTx: () => unsignedShieldTransaction(1_000_000n),
+    }),
+    validateOuterTransaction: async () => undefined,
+    signOuterTransaction: async ({ unsignedTxBase64 }) =>
+      (await signWalletTransaction(unsignedTxBase64)).signedTxBase64,
+    submitOuterTransaction: async ({ signedTxBase64 }) =>
+      getSignatureFromTransaction(
+        getTransactionDecoder().decode(getBase64Codec().encode(signedTxBase64))
+      ),
     ...deps,
   });
 }
@@ -131,7 +264,7 @@ describe("HeliusRingsService", () => {
     await wallets.markProvisioned({
       ...tenant,
       id: wallet.id,
-      shieldedAddress: "rings1testidentity",
+      shieldedAddress: WALLET_SHIELDED_IDENTITY,
       ownerAddress: WALLET_OWNER,
       materialTag: "simulated",
       expectedStatus: "pending",
@@ -234,7 +367,7 @@ describe("HeliusRingsService", () => {
         expect.objectContaining({
           walletId,
           owner: WALLET_OWNER,
-          expectedShieldedAddress: "rings1testidentity",
+          expectedShieldedAddress: WALLET_SHIELDED_IDENTITY,
         })
       );
       // Seeded by 0057; without them a real balance renders at the wrong
@@ -396,7 +529,10 @@ describe("HeliusRingsService", () => {
       const sent: string[] = [];
       const svc = () =>
         liveishService({
-          gateway: new InMemoryRingsGateway({ indexingDelayMs: 60 * 60 * 1000 }),
+          gateway: new InMemoryRingsGateway({
+            indexingDelayMs: 60 * 60 * 1000,
+            buildUnsignedTx: () => unsignedShieldTransaction(1_000_000n),
+          }),
           submitOuterTransaction: async ({ signedTxBase64 }) => {
             sent.push(signedTxBase64);
             return OUTER_TX.signature;
@@ -420,7 +556,9 @@ describe("HeliusRingsService", () => {
       // The same bytes, not a rebuild. A duplicate of a landed transaction is
       // rejected by the chain; a rebuild could select other notes and settle
       // twice.
-      expect(sent).toEqual([OUTER_TX.signedTxBase64, OUTER_TX.signedTxBase64]);
+      const expected = (await signWalletTransaction(unsignedShieldTransaction(1_000_000n)))
+        .signedTxBase64;
+      expect(sent).toEqual([expected, expected]);
     });
 
     it("never offers a retry when the gateway says the notes are gone", async () => {
@@ -827,6 +965,71 @@ describe("HeliusRingsService", () => {
       expect(operation.outerTxSignature).toBe(OUTER_TX.signature);
     });
 
+    it("accepts policy-matching unsigned wire bytes before custody signing", async () => {
+      const sign = vi.fn(
+        async ({ unsignedTxBase64 }: { unsignedTxBase64: string }) =>
+          (await signWalletTransaction(unsignedTxBase64)).signedTxBase64
+      );
+      const gateway = new InMemoryRingsGateway({
+        buildUnsignedTx: () => unsignedShieldTransaction(1_000_000n),
+      });
+
+      const operation = await service({
+        gateway,
+        signOuterTransaction: sign,
+        submitOuterTransaction: async () => OUTER_TX.signature,
+      }).prepareOperation(operationInput({ clientNonce: "nonce-wire-valid" }), actorContext);
+
+      expect(operation.state).toBe("indexing");
+      expect(sign).toHaveBeenCalledOnce();
+    });
+
+    it("rejects changed signer message bytes before signed-byte persistence", async () => {
+      const sign = vi.fn(async () => CHANGED_OUTER_TX.signedTxBase64);
+      const submit = vi.fn(async () => OUTER_TX.signature);
+      const gateway = new InMemoryRingsGateway({
+        buildUnsignedTx: () => unsignedShieldTransaction(1_000_000n),
+      });
+
+      const operation = await service({
+        gateway,
+        signOuterTransaction: sign,
+        submitOuterTransaction: submit,
+      }).prepareOperation(operationInput({ clientNonce: "nonce-signer-modified" }), actorContext);
+
+      expect(operation.state).toBe("failed");
+      expect(operation.failure).toMatchObject({ code: "signer_failed", retryable: false });
+      expect(operation.outerTxSignature).toBeNull();
+      expect(submit).not.toHaveBeenCalled();
+      const stored = await getDb(env)
+        .prepare(
+          "SELECT signed_transaction, submission_started_at FROM helius_rings_operations WHERE id = ?"
+        )
+        .bind(operation.id)
+        .first<{ signed_transaction: string | null; submission_started_at: string | null }>();
+      expect(stored).toEqual({ signed_transaction: null, submission_started_at: null });
+    });
+
+    it("fails tampered wire bytes non-retryably before custody signer invocation", async () => {
+      const sign = vi.fn(async () => OUTER_TX.signedTxBase64);
+      const gateway = new InMemoryRingsGateway({
+        // The approved row says 1,000,000; only the encoded deposit amount was
+        // changed after build.
+        buildUnsignedTx: () => unsignedShieldTransaction(1_000_001n),
+      });
+
+      const operation = await service({
+        gateway,
+        signOuterTransaction: sign,
+        submitOuterTransaction: async () => OUTER_TX.signature,
+      }).prepareOperation(operationInput({ clientNonce: "nonce-wire-tampered" }), actorContext);
+
+      expect(operation.state).toBe("failed");
+      expect(operation.failure).toMatchObject({ code: "invalid_input", retryable: false });
+      expect(operation.outerTxSignature).toBeNull();
+      expect(sign).not.toHaveBeenCalled();
+    });
+
     it("refuses merge before policy, proving, or persistence", async () => {
       const gateway = new InMemoryRingsGateway();
       const buildOperation = vi.spyOn(gateway, "buildOperation");
@@ -884,6 +1087,131 @@ describe("HeliusRingsService", () => {
   });
 
   describe("executeOperation", () => {
+    it("does not persist or broadcast when recovery failure wins a deferred signing race", async () => {
+      const signerEntered = deferred<void>();
+      const signerResult = deferred<string>();
+      const submit = vi.fn(async () => OUTER_TX.signature);
+      const svc = liveishService({
+        signOuterTransaction: async () => {
+          signerEntered.resolve(undefined);
+          return signerResult.promise;
+        },
+        submitOuterTransaction: submit,
+      });
+
+      const original = svc.prepareOperation(
+        operationInput({ clientNonce: "nonce-sign-race-failure-wins" }),
+        actorContext
+      );
+      await signerEntered.promise;
+
+      const operations = createPostgresHeliusRingsOperationRepository(getDb(env));
+      const [ready] = await operations.listOperationsByWallet({ ...tenant, walletId });
+      if (!ready) throw new Error("deferred signing operation was not persisted");
+      expect(ready).toMatchObject({ state: "ready_to_sign", signed_transaction: null });
+
+      const recovered = await svc.executeOperation(ready.id);
+      expect(recovered).toMatchObject({
+        state: "failed",
+        failure: { code: "signer_failed", retryable: true },
+      });
+
+      signerResult.resolve(OUTER_TX.signedTxBase64);
+      const settledOriginal = await original;
+      expect(settledOriginal.state).toBe("failed");
+      expect(submit).not.toHaveBeenCalled();
+      expect(await operations.getOperationById({ ...tenant, id: ready.id })).toMatchObject({
+        state: "failed",
+        signed_transaction: null,
+        outer_tx_signature: null,
+      });
+    });
+
+    it("lets persisted bytes defeat a stale recovery failure and resume exact bytes", async () => {
+      const actual = createPostgresHeliusRingsOperationRepository(getDb(env));
+      const signerEntered = deferred<void>();
+      const signerResult = deferred<string>();
+      const failureEntered = deferred<void>();
+      const allowFailure = deferred<void>();
+      const signedPersisted = deferred<void>();
+      const allowOriginalTransition = deferred<void>();
+      const submit = vi.fn(async () => OUTER_TX.signature);
+
+      const operations: HeliusRingsOperationRepository = {
+        ...actual,
+        persistSigned: async (input) => {
+          const row = await actual.persistSigned(input);
+          signedPersisted.resolve(undefined);
+          return row;
+        },
+        failOperation: async (input) => {
+          if (input.expectedState === "ready_to_sign") {
+            failureEntered.resolve(undefined);
+            await allowFailure.promise;
+          }
+          return actual.failOperation(input);
+        },
+        transitionState: async (input) => {
+          if (input.expectedState === "ready_to_sign" && input.nextState === "submitted") {
+            await allowOriginalTransition.promise;
+          }
+          return actual.transitionState(input);
+        },
+      };
+      const svc = liveishService({
+        operations,
+        signOuterTransaction: async () => {
+          signerEntered.resolve(undefined);
+          return signerResult.promise;
+        },
+        submitOuterTransaction: submit,
+      });
+
+      const original = svc.prepareOperation(
+        operationInput({ clientNonce: "nonce-sign-race-signed-wins" }),
+        actorContext
+      );
+      await signerEntered.promise;
+      const [ready] = await actual.listOperationsByWallet({ ...tenant, walletId });
+      if (!ready) throw new Error("deferred signing operation was not persisted");
+
+      const staleRecovery = svc.executeOperation(ready.id);
+      await failureEntered.promise;
+      signerResult.resolve(OUTER_TX.signedTxBase64);
+      await signedPersisted.promise;
+      expect(await actual.getOperationById({ ...tenant, id: ready.id })).toMatchObject({
+        state: "ready_to_sign",
+        signed_transaction: OUTER_TX.signedTxBase64,
+      });
+
+      allowFailure.resolve(undefined);
+      const recoveryResult = await staleRecovery;
+      expect(recoveryResult).toMatchObject({
+        state: "ready_to_sign",
+        outerTxSignature: OUTER_TX.signature,
+        failure: null,
+      });
+      expect(submit).not.toHaveBeenCalled();
+
+      const resumed = await liveishService({
+        operations: actual,
+        submitOuterTransaction: submit,
+      }).executeOperation(ready.id);
+      expect(resumed.state).toBe("submitted");
+      expect(submit).toHaveBeenCalledOnce();
+      expect(submit).toHaveBeenCalledWith(
+        expect.objectContaining({ signedTxBase64: OUTER_TX.signedTxBase64 })
+      );
+
+      allowOriginalTransition.resolve(undefined);
+      expect((await original).state).toBe("submitted");
+      expect(await actual.getOperationById({ ...tenant, id: ready.id })).toMatchObject({
+        state: "submitted",
+        signed_transaction: OUTER_TX.signedTxBase64,
+        failure_code: null,
+      });
+    });
+
     it("refuses an existing merge row instead of resuming it", async () => {
       const operations = createPostgresHeliusRingsOperationRepository(getDb(env));
       const reserved = await operations.reserveIntent({
@@ -956,7 +1284,11 @@ describe("HeliusRingsService", () => {
 
     it("polls indexing idempotently and completes on the Photon hit", async () => {
       let now = "2026-08-18T00:00:00.000Z";
-      const gateway = new InMemoryRingsGateway({ now: () => now, indexingDelayMs: 1000 });
+      const gateway = new InMemoryRingsGateway({
+        now: () => now,
+        indexingDelayMs: 1000,
+        buildUnsignedTx: () => unsignedShieldTransaction(1_000_000n),
+      });
       const svc = liveishService({ gateway });
       const operation = await svc.prepareOperation(
         operationInput({ clientNonce: "nonce-index" }),
@@ -979,7 +1311,10 @@ describe("HeliusRingsService", () => {
     });
 
     it("resumes a broadcast stranded in submitted", async () => {
-      const gateway = new InMemoryRingsGateway({ indexingDelayMs: 0 });
+      const gateway = new InMemoryRingsGateway({
+        indexingDelayMs: 0,
+        buildUnsignedTx: () => unsignedShieldTransaction(1_000_000n),
+      });
       const svc = liveishService({ gateway });
       const operation = await svc.prepareOperation(
         operationInput({ clientNonce: "nonce-stranded" }),

@@ -4,7 +4,10 @@ import {
   type RingsGatewayPort,
   type RuntimeHealth,
 } from "@sdp/helius-rings";
-import { createRingsGateway } from "@sdp/helius-rings-sdk";
+import {
+  createRingsGateway,
+  validateOuterTransaction as validateSdkOuterTransaction,
+} from "@sdp/helius-rings-sdk";
 import { isRingsInsecureHttpAllowed } from "@/lib/feature-flags";
 import type { Env } from "@/types/env";
 import { submitRingsOuterTransaction } from "./rpc-adapter";
@@ -62,6 +65,40 @@ function misconfiguredGateway(missing: readonly string[]): RingsGatewayPort {
 export interface RingsGatewayTenant {
   organizationId: string;
   projectId: string;
+}
+
+export type RingsOuterTransactionPolicyInput = Readonly<{
+  outerUnsignedTxBase64: string;
+  owner: string;
+  intent:
+    | Readonly<{
+        opType: "shield";
+        mint: string;
+        amountRaw: string;
+        expectedShieldedAddress: string;
+      }>
+    | Readonly<{
+        opType: "transfer_registered";
+        mint: string;
+        amountRaw: string;
+      }>
+    | Readonly<{
+        opType: "withdraw";
+        mint: string;
+        amountRaw: string;
+        to: string;
+      }>;
+  expectedTree?: string;
+}>;
+
+/**
+ * Keeps final-wire validation on the same plain-string boundary as the gateway.
+ * No Kit-7 or Zolana brand reaches the Kit-6 service.
+ */
+export function validateRingsOuterTransaction(
+  input: RingsOuterTransactionPolicyInput
+): Promise<void> {
+  return validateSdkOuterTransaction(input);
 }
 
 export function resolveRingsGateway(env: Env, tenant: RingsGatewayTenant): RingsGatewayPort {

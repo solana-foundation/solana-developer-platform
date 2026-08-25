@@ -148,7 +148,10 @@ export interface BuildOperationInput {
 
 export interface BuildOperationResult {
   outerUnsignedTxBase64: string;
-  /** Expected to be exactly the owner; the caller asserts it before signing. */
+  /**
+   * Advisory signer metadata for diagnostics. The serialized message header,
+   * validated independently before custody signing, is authoritative.
+   */
   requiredSigners: string[];
   /**
    * The blockhash's expiry, as a uint64 string. Persisted with the signed bytes

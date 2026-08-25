@@ -207,7 +207,8 @@ export interface HeliusRingsOperationRepository {
     input: TransitionHeliusRingsOperationInput
   ): Promise<HeliusRingsOperationRow | null>;
   /**
-   * Writes the signature and exact bytes, refusing if any are already there.
+   * Writes the signature and exact bytes only while the row is ready to sign,
+   * refusing if any are already there.
    *
    * The refusal is what makes it safe to call on a retried execution: a second
    * signing of the same operation would produce different bytes for the same
@@ -263,7 +264,10 @@ export interface HeliusRingsOperationRepository {
   ): Promise<HeliusRingsOperationRow | null>;
   /** Signed failures, for the pass that completes the ones Photon now holds. */
   listSignedFailures(input: { limit?: number }): Promise<HeliusRingsOperationRow[]>;
-  /** Terminal failure. Writes the full failure triple the DB CHECK requires. */
+  /**
+   * Terminal failure. Writes the full failure triple the DB CHECK requires.
+   * A ready-to-sign failure loses if signed bytes won the row lock first.
+   */
   failOperation(input: FailHeliusRingsOperationInput): Promise<HeliusRingsOperationRow | null>;
   /** Resume sweep feed: non-terminal operations, oldest touched first. */
   listInFlightOperations(

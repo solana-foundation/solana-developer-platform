@@ -233,13 +233,11 @@ function assemble(
 }
 
 /**
- * Wraps a built transaction into the port's result, checking the one thing SDP
- * cannot check for itself.
+ * Wraps a built transaction into the port's plain DTO.
  *
- * The signer assertion belongs here rather than at the caller: only this side
- * knows what the SDK produced, and a transaction that needs a signature nobody
- * will provide fails at submission with an opaque error rather than at build
- * with a clear one.
+ * `requiredSigners` is advisory metadata for diagnostics. The caller validates
+ * the serialized message header before custody signing; metadata derived from
+ * this in-memory transaction is not the signing security boundary.
  */
 function finish(
   transaction: Transaction,

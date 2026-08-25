@@ -1,7 +1,6 @@
 import type { ZolanaClient } from "@heliuslabs/zolana/client";
 import {
   buildRegistrationTransaction,
-  buildSetMergingEnabledTransaction,
   fetchUserRecord,
   type UserRecord,
 } from "@heliuslabs/zolana/wallet";
@@ -20,13 +19,12 @@ import {
 } from "./material.js";
 
 /**
- * Registers a shielded identity on chain and turns merging on for it.
+ * Registers a shielded identity on chain.
  *
  * The gateway orchestrates but never signs: the owner's Ed25519 secret lives in
- * SDP custody, so both transactions go out through the injected sign and submit
- * callbacks. Everything here is idempotent, because provisioning is retried
- * after any partial failure and re-registering is not an option — a shielded
- * identity's nullifier key cannot be rotated once published.
+ * SDP custody, so registration goes through the injected sign and submit
+ * callbacks. Provisioning is idempotent because re-registering is not an option:
+ * a shielded identity's nullifier key cannot be rotated once published.
  */
 
 export interface ProvisionDeps {
@@ -66,38 +64,23 @@ export async function provisionRingsIdentity(
       // returns undefined for an already-registered owner without saying whose
       // keys are published there, so skipping this would let a conflicting
       // identity look like a clean idempotent replay.
-      const existing = await fetchUserRecord({ rpc: deps.client, owner });
-      if (existing) {
-        assertRecordMatchesMaterial(existing, material, input.owner);
-      }
-
+      let confirmed = await fetchUserRecord({ rpc: deps.client, owner });
       const signatures: string[] = [];
-
-      const registration = await buildRegistrationTransaction({
-        client: deps.client,
-        owner,
-        address: material.shieldedAddress,
-      });
-      if (registration) {
-        signatures.push(await landTransaction(deps, registration, input.owner));
-      }
-
-      // Merging is what lets a wallet consolidate its notes, and a wallet that
-      // cannot merge eventually cannot spend. Skipped when already on, so a
-      // retry does not pay for a second transaction.
-      if (!existing?.mergingEnabled) {
-        const enableMerging = await buildSetMergingEnabledTransaction({
+      if (!confirmed) {
+        const registration = await buildRegistrationTransaction({
           client: deps.client,
           owner,
-          enabled: true,
+          address: material.shieldedAddress,
         });
-        signatures.push(await landTransaction(deps, enableMerging, input.owner));
+        if (registration) {
+          signatures.push(await landTransaction(deps, registration, input.owner));
+        }
+
+        // Re-read rather than trust what was just sent. Confirmation says the
+        // transaction landed, not that the account holds what was intended.
+        confirmed = await fetchUserRecord({ rpc: deps.client, owner });
       }
 
-      // Re-read rather than trust what was just sent. Confirmation says the
-      // transaction landed, not that the account holds what was intended, and
-      // this is the last point before SDP marks the wallet spendable.
-      const confirmed = await fetchUserRecord({ rpc: deps.client, owner });
       if (!confirmed) {
         throw new HeliusRingsError(
           "gateway_unavailable",
@@ -105,12 +88,6 @@ export async function provisionRingsIdentity(
         );
       }
       assertRecordMatchesMaterial(confirmed, material, input.owner);
-      if (!confirmed.mergingEnabled) {
-        throw new HeliusRingsError(
-          "gateway_unavailable",
-          "merging is still disabled after a confirmed setMergingEnabled"
-        );
-      }
 
       return {
         identity: {
@@ -118,7 +95,7 @@ export async function provisionRingsIdentity(
           owner: input.owner,
         },
         registrationSignatures: signatures,
-        mergingEnabled: true,
+        mergingEnabled: confirmed.mergingEnabled,
         materialTag: "live",
       };
     }

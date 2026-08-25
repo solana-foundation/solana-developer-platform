@@ -1,5 +1,15 @@
-import { InMemoryRingsGateway } from "@sdp/helius-rings/testing";
+import { InMemoryRingsGateway, type InMemoryRingsGatewayOptions } from "@sdp/helius-rings/testing";
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
+import {
+  createKeyPairFromPrivateKeyBytes,
+  getAddressFromPublicKey,
+  getBase64Codec,
+  getSignatureFromTransaction,
+  getTransactionDecoder,
+  getTransactionEncoder,
+  type SignatureBytes,
+  signBytes,
+} from "@solana/kit";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import {
@@ -8,7 +18,7 @@ import {
 } from "@/db/repositories";
 import { createHeliusRingsService } from "@/services/helius-rings";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
-import { signedRingsTransaction } from "@/test/fixtures/rings-transactions";
+import { unsignedRingsTransaction } from "@/test/fixtures/rings-transactions";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { pollRingsIndexing, RINGS_INDEXING_TIMEOUT_MS } from "./poll-rings-indexing";
@@ -28,7 +38,33 @@ const allowPolicy = async () =>
     },
   }) as unknown as WalletOperationPolicyEnforcement;
 
-const OUTER_TX = signedRingsTransaction(9);
+const OWNER_KEYPAIR = await createKeyPairFromPrivateKeyBytes(new Uint8Array(32).fill(61));
+const OWNER = await getAddressFromPublicKey(OWNER_KEYPAIR.publicKey);
+const OUTER_UNSIGNED_TX = unsignedRingsTransaction(OWNER);
+
+async function signOuterTransaction(unsignedTxBase64: string) {
+  const transaction = getTransactionDecoder().decode(getBase64Codec().encode(unsignedTxBase64));
+  const ownerSignature = await signBytes(OWNER_KEYPAIR.privateKey, transaction.messageBytes);
+  const signed = {
+    ...transaction,
+    signatures: { [OWNER]: ownerSignature as SignatureBytes },
+  };
+  return {
+    signedTxBase64: getBase64Codec().decode(getTransactionEncoder().encode(signed)),
+    signature: getSignatureFromTransaction(signed),
+  };
+}
+
+const OUTER_TX = await signOuterTransaction(OUTER_UNSIGNED_TX);
+
+function ringsGateway(
+  options: Omit<InMemoryRingsGatewayOptions, "buildUnsignedTx"> = {}
+): InMemoryRingsGateway {
+  return new InMemoryRingsGateway({
+    ...options,
+    buildUnsignedTx: () => OUTER_UNSIGNED_TX,
+  });
+}
 
 /**
  * The reconciliation sweep sits in front of the indexing poll and asks the chain
@@ -44,7 +80,9 @@ function serviceWith(gateway: InMemoryRingsGateway) {
   return createHeliusRingsService(env, tenant, {
     gateway,
     enforcePolicy: allowPolicy,
-    signOuterTransaction: async () => OUTER_TX.signedTxBase64,
+    validateOuterTransaction: async () => {},
+    signOuterTransaction: async ({ unsignedTxBase64 }) =>
+      (await signOuterTransaction(unsignedTxBase64)).signedTxBase64,
     submitOuterTransaction: async () => OUTER_TX.signature,
   });
 }
@@ -91,16 +129,21 @@ describe("pollRingsIndexing", () => {
       ...tenant,
       id: wallet.id,
       shieldedAddress: "rings1jobtestidentity",
-      ownerAddress: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
+      ownerAddress: OWNER,
       materialTag: "simulated",
       expectedStatus: "pending",
     });
   });
 
   it("stays dormant unless the flag and the live adapter are both set", async () => {
-    const gateway = new InMemoryRingsGateway({ indexingDelayMs: 0 });
+    const gateway = ringsGateway({ indexingDelayMs: 0 });
     const operation = await serviceWith(gateway).prepareOperation(
-      { walletId, opType: "shield", clientNonce: "job-dormant" },
+      {
+        walletId,
+        opType: "shield",
+        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+        clientNonce: "job-dormant",
+      },
       { apiKeyId: null, actor: null, custodyWalletId: null }
     );
     expect(operation.state).toBe("indexing");
@@ -119,9 +162,14 @@ describe("pollRingsIndexing", () => {
   });
 
   it("completes an indexing operation once Photon reports it", async () => {
-    const gateway = new InMemoryRingsGateway({ indexingDelayMs: 0 });
+    const gateway = ringsGateway({ indexingDelayMs: 0 });
     const operation = await serviceWith(gateway).prepareOperation(
-      { walletId, opType: "shield", clientNonce: "job-complete" },
+      {
+        walletId,
+        opType: "shield",
+        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+        clientNonce: "job-complete",
+      },
       { apiKeyId: null, actor: null, custodyWalletId: null }
     );
     expect(operation.state).toBe("indexing");
@@ -140,9 +188,14 @@ describe("pollRingsIndexing", () => {
   });
 
   it("times out an operation stuck in indexing past the budget", async () => {
-    const gateway = new InMemoryRingsGateway({ indexingDelayMs: 60 * 60 * 1000 });
+    const gateway = ringsGateway({ indexingDelayMs: 60 * 60 * 1000 });
     const operation = await serviceWith(gateway).prepareOperation(
-      { walletId, opType: "shield", clientNonce: "job-timeout" },
+      {
+        walletId,
+        opType: "shield",
+        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+        clientNonce: "job-timeout",
+      },
       { apiKeyId: null, actor: null, custodyWalletId: null }
     );
     expect(operation.state).toBe("indexing");
@@ -168,9 +221,14 @@ describe("pollRingsIndexing", () => {
   });
 
   it("sweeps a broadcast stranded in submitted into reconciliation", async () => {
-    const gateway = new InMemoryRingsGateway({ indexingDelayMs: 0 });
+    const gateway = ringsGateway({ indexingDelayMs: 0 });
     const operation = await serviceWith(gateway).prepareOperation(
-      { walletId, opType: "shield", clientNonce: "job-stranded" },
+      {
+        walletId,
+        opType: "shield",
+        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+        clientNonce: "job-stranded",
+      },
       { apiKeyId: null, actor: null, custodyWalletId: null }
     );
     expect(operation.state).toBe("indexing");
@@ -203,7 +261,7 @@ describe("pollRingsIndexing", () => {
    */
   describe("reconciliation sweep", () => {
     /** Never reports indexed, so nothing completes out from under the sweep. */
-    const stalled = () => new InMemoryRingsGateway({ indexingDelayMs: 60 * 60 * 1000 });
+    const stalled = () => ringsGateway({ indexingDelayMs: 60 * 60 * 1000 });
 
     async function strand(opType: "shield" | "withdraw", nonce: string): Promise<string> {
       const gateway = stalled();
@@ -212,7 +270,7 @@ describe("pollRingsIndexing", () => {
           walletId,
           opType,
           asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
-          ...(opType === "withdraw" ? { to: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin" } : {}),
+          ...(opType === "withdraw" ? { to: OWNER } : {}),
           clientNonce: nonce,
         },
         { apiKeyId: null, actor: null, custodyWalletId: null }
@@ -275,7 +333,7 @@ describe("pollRingsIndexing", () => {
         retryable: true,
       });
 
-      const gateway = new InMemoryRingsGateway();
+      const gateway = ringsGateway();
       gateway.recordSubmission(OUTER_TX.signature);
 
       await pollRingsIndexing(jobEnv, {
@@ -331,7 +389,7 @@ describe("pollRingsIndexing", () => {
         nonce: string,
         keepBytes: boolean
       ) {
-        const gateway = new InMemoryRingsGateway({ indexingDelayMs: 0 });
+        const gateway = ringsGateway({ indexingDelayMs: 0 });
         const operation = await serviceWith(gateway).prepareOperation(
           {
             walletId,

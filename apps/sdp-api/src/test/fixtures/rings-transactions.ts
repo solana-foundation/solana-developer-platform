@@ -6,6 +6,7 @@ import {
   getBase58Codec,
   getBase64Codec,
   getSignatureFromTransaction,
+  getTransactionDecoder,
   getTransactionEncoder,
   pipe,
   type SignatureBytes,
@@ -29,10 +30,15 @@ export function signedRingsTransaction(fill: number): {
   signedTxBase64: string;
   signature: string;
 } {
+  return signRingsTransaction(unsignedRingsTransaction(), fill);
+}
+
+/** A minimal one-signer transaction for service-boundary fixtures. */
+export function unsignedRingsTransaction(feePayer: Address = FEE_PAYER): string {
   const compiled = compileTransaction(
     pipe(
       createTransactionMessage({ version: 0 }),
-      (message) => setTransactionMessageFeePayer(FEE_PAYER, message),
+      (message) => setTransactionMessageFeePayer(feePayer, message),
       (message) =>
         setTransactionMessageLifetimeUsingBlockhash(
           { blockhash: BLOCKHASH, lastValidBlockHeight: 100n },
@@ -40,9 +46,23 @@ export function signedRingsTransaction(fill: number): {
         )
     )
   );
+  return getBase64Codec().decode(getTransactionEncoder().encode(compiled));
+}
+
+/** Adds one test signature without changing the compiled message bytes. */
+export function signRingsTransaction(
+  unsignedTxBase64: string,
+  fill: number
+): {
+  signedTxBase64: string;
+  signature: string;
+} {
+  const transaction = getTransactionDecoder().decode(getBase64Codec().encode(unsignedTxBase64));
+  const signers = Object.keys(transaction.signatures);
+  if (signers.length !== 1) throw new Error("test transaction must require exactly one signer");
   const signed = {
-    ...compiled,
-    signatures: { [FEE_PAYER]: new Uint8Array(64).fill(fill) as SignatureBytes },
+    ...transaction,
+    signatures: { [signers[0] as Address]: new Uint8Array(64).fill(fill) as SignatureBytes },
   };
 
   return {

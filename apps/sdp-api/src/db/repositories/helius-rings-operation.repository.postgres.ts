@@ -318,6 +318,8 @@ export function createPostgresHeliusRingsOperationRepository(
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
+              AND state = 'ready_to_sign'
+              AND outer_tx_signature IS NULL
               AND signed_transaction IS NULL
               AND last_valid_block_height IS NULL
               AND submission_started_at IS NULL
@@ -456,14 +458,21 @@ export function createPostgresHeliusRingsOperationRepository(
       return db.transaction(async (tx) => {
         const locked = await tx
           .prepare(
-            `SELECT state FROM helius_rings_operations
+            `SELECT state, signed_transaction FROM helius_rings_operations
               WHERE id = ? AND organization_id = ? AND project_id = ?
               FOR UPDATE`
           )
           .bind(input.id, input.organizationId, input.projectId)
-          .first<{ state: string }>();
+          .first<{ state: string; signed_transaction: string | null }>();
 
         if (!locked || locked.state !== input.expectedState) return null;
+        // `ready_to_sign` is the only failure edge that can race a signer
+        // holding bytes in memory. The row lock arbitrates with persistSigned:
+        // if persistence committed first, recovery must leave the row resumable;
+        // if this failure commits first, persistSigned's state guard loses.
+        if (input.expectedState === "ready_to_sign" && locked.signed_transaction !== null) {
+          return null;
+        }
 
         // The failure triple moves together because the DB CHECK requires it:
         // a `failed` row without a code is unactionable in the recovery UI.

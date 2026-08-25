@@ -6,10 +6,15 @@
  * `ZolanaClient`, `CustodyWalletAuthority.solanaPublicKey()` returns a branded
  * `Address`. The only consumer is `@sdp/api`, which is on Kit 6, where those
  * brands are not assignable and, worse, can structurally match the wrong
- * major's type without any error. So the barrel exports one factory and its
- * config type, taking plain strings and returning a port whose types all come
- * from the Kit-free `@sdp/helius-rings`. Anything inside this package reaches
- * its siblings by
- * relative import; widening this file re-opens the hole.
+ * major's type without any error. So the barrel exports only the gateway and
+ * final-wire policy boundaries. Both take plain string DTOs; the gateway
+ * returns a port whose types all come from the Kit-free `@sdp/helius-rings`.
+ * Anything inside this package reaches its siblings by relative import;
+ * widening this file with branded SDK types re-opens the hole.
  */
 export { createRingsGateway, type RingsGatewayConfig } from "./gateway.js";
+export {
+  type OuterTransactionPolicyInput,
+  type OuterTransactionPolicyIntent,
+  validateOuterTransaction,
+} from "./outer-tx-policy.js";

@@ -37,22 +37,20 @@ export class RingsApprovalMismatchError extends Error {
 }
 
 /**
- * The decision this authority was constructed against. SDP resolves policy and
- * approval before any builder runs, so `requestUserApproval` verifies that the
- * transaction being built is the one that was authorized instead of prompting.
+ * Audit context for the decision this authority was constructed under.
+ *
+ * Only `owner` participates in `requestUserApproval`; `operationId` and
+ * `intentKey` correlate logs and persisted state. They do not semantically bind
+ * what Zolana builds. The low-level spend rail does not call
+ * `requestUserApproval`, so prepared-intent and final-wire validation provide
+ * that enforcement separately.
  */
 export interface OperationAuthorization {
   /** Base58 address of the owner SDP approved spending for. */
   readonly owner: string;
-  /** Correlates an approval callback with an SDP operation row. */
+  /** Correlates this authority instance with an SDP operation row for audit. */
   readonly operationId: string;
-  /**
-   * The approved operation's `intent_key`. Required so an authority cannot be
-   * constructed without naming the approval it stands for. It is not checked
-   * inside `requestUserApproval`, because the SDK's `ApprovalRequest` carries
-   * only an owner and a summary; the caller compares it against the persisted
-   * operation, and the built transaction is validated structurally.
-   */
+  /** The persisted intent key for audit correlation, not semantic enforcement. */
   readonly intentKey: string;
 }
 
@@ -97,12 +95,12 @@ export class CustodyWalletAuthority implements WalletAuthority {
     return [...this.#approvals];
   }
 
-  /** The SDP operation this authority was authorized for. */
+  /** Operation-row audit context carried by this authority. */
   operationId(): string {
     return this.#authorization.operationId;
   }
 
-  /** The approved intent this authority stands for. */
+  /** Persisted intent-key audit context carried by this authority. */
   intentKey(): string {
     return this.#authorization.intentKey;
   }
@@ -165,10 +163,9 @@ export class CustodyWalletAuthority implements WalletAuthority {
   }
 
   /**
-   * Builders call this for every private operation, so it must resolve for an
-   * authorized request. It verifies rather than prompts: SDP already collected
-   * the approval, and the check that matters is that the builder is spending
-   * under the owner that approval covered.
+   * High-level builders may call this rather than prompting after SDP already
+   * collected approval. The low-level spend rail used by this integration
+   * bypasses it, so this owner check is defense in depth, not the intent gate.
    */
   requestUserApproval(request: ApprovalRequest): Promise<void> {
     if (request.solanaPublicKey !== this.#owner) {

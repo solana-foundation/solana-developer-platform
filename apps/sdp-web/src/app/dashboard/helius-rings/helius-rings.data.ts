@@ -18,6 +18,44 @@ export interface RingsWallet {
   network: "devnet";
 }
 
+export interface RingsAssetBalance {
+  mint: string;
+  symbol: string;
+  amountRaw: string;
+  decimals: number;
+}
+
+export type RingsPrivateHistoryKind = "shield" | "transfer" | "withdraw" | "merge" | "split";
+export type RingsPrivateHistoryDirection = "inbound" | "outbound" | "self";
+
+export interface RingsPrivateHistoryEntry {
+  signature: string;
+  slot: string;
+  index: string;
+  kind: RingsPrivateHistoryKind;
+  direction: RingsPrivateHistoryDirection;
+  mint: string;
+  amountRaw: string;
+}
+
+export interface RingsSyncReport {
+  storedNotes: number;
+  unparsedTransactions: number;
+  undecryptableCandidates: number;
+  unknownAssetIds: number;
+  unknownAssetFields: number;
+  degraded: boolean;
+}
+
+export interface RingsSyncPhotonResult {
+  balances: RingsAssetBalance[];
+  history: RingsPrivateHistoryEntry[];
+  report: RingsSyncReport;
+  indexedOperationSignatures: string[];
+  observedAt: string;
+  observedSlot?: string;
+}
+
 export type RingsOperationState =
   | "draft"
   | "preparing"
@@ -96,6 +134,27 @@ export function fetchRingsHealth(fallbackError: string): Promise<{ health: Rings
 
 export function fetchRingsWallets(fallbackError: string): Promise<{ wallets: RingsWallet[] }> {
   return getJson("/api/dashboard/helius-rings/wallets", fallbackError);
+}
+
+export type SyncRingsWalletClientResult = { result: RingsSyncPhotonResult } | { error: string };
+
+export async function syncRingsWallet(
+  walletId: string,
+  fallbackError: string
+): Promise<SyncRingsWalletClientResult> {
+  try {
+    const response = await fetch(
+      `/api/dashboard/helius-rings/wallets/${encodeURIComponent(walletId)}/sync`,
+      {
+        method: "POST",
+        cache: "no-store",
+      }
+    );
+    const result = await readEnvelope<RingsSyncPhotonResult>(response);
+    return result.ok ? { result: result.data } : { error: result.error ?? fallbackError };
+  } catch {
+    return { error: fallbackError };
+  }
 }
 
 export function fetchRingsOperationDetail(

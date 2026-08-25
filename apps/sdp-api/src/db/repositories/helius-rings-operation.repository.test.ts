@@ -274,6 +274,148 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
     });
   });
 
+  describe("ready-to-sign arbitration", () => {
+    async function reserveReadyToSign(intentKey: string) {
+      const { operation } = await repo.reserveIntent(shieldIntent({ intentKey }));
+      const ready = await repo.transitionState({
+        ...scope,
+        id: operation.id,
+        expectedState: "draft",
+        nextState: "ready_to_sign",
+      });
+      if (!ready) throw new Error("ready-to-sign fixture was not created");
+      return ready;
+    }
+
+    const signed = {
+      signature: "signed-fixture-signature",
+      signedTransaction: "signed-fixture-bytes",
+      lastValidBlockHeight: "100",
+    };
+
+    it("does not persist signed bytes after a ready-to-sign failure wins", async () => {
+      const operation = await reserveReadyToSign("sha256:failure-wins");
+
+      const failed = await repo.failOperation({
+        ...scope,
+        id: operation.id,
+        expectedState: "ready_to_sign",
+        code: "signer_failed",
+        message: "recovery found no signed bytes",
+        retryable: true,
+      });
+      const persisted = await repo.persistSigned({ ...scope, id: operation.id, ...signed });
+
+      expect(failed?.state).toBe("failed");
+      expect(persisted).toBeNull();
+      expect(await repo.getOperationById({ ...scope, id: operation.id })).toMatchObject({
+        state: "failed",
+        signed_transaction: null,
+        outer_tx_signature: null,
+      });
+    });
+
+    it("does not fail ready-to-sign after signed bytes win", async () => {
+      const operation = await reserveReadyToSign("sha256:signed-wins");
+
+      const persisted = await repo.persistSigned({ ...scope, id: operation.id, ...signed });
+      const failed = await repo.failOperation({
+        ...scope,
+        id: operation.id,
+        expectedState: "ready_to_sign",
+        code: "signer_failed",
+        message: "stale recovery failure",
+        retryable: true,
+      });
+
+      expect(persisted).toMatchObject({
+        state: "ready_to_sign",
+        signed_transaction: signed.signedTransaction,
+      });
+      expect(failed).toBeNull();
+      expect(await repo.getOperationById({ ...scope, id: operation.id })).toMatchObject({
+        state: "ready_to_sign",
+        signed_transaction: signed.signedTransaction,
+        failure_code: null,
+      });
+    });
+
+    it("does not overwrite a signature-only ready-to-sign row", async () => {
+      const operation = await reserveReadyToSign("sha256:signature-only");
+      await getDb(env)
+        .prepare("UPDATE helius_rings_operations SET outer_tx_signature = ? WHERE id = ?")
+        .bind("preexisting-signature", operation.id)
+        .run();
+
+      const persisted = await repo.persistSigned({ ...scope, id: operation.id, ...signed });
+
+      expect(persisted).toBeNull();
+      expect(await repo.getOperationById({ ...scope, id: operation.id })).toMatchObject({
+        state: "ready_to_sign",
+        outer_tx_signature: "preexisting-signature",
+        signed_transaction: null,
+      });
+    });
+
+    it("commits exactly one coherent winner when persistence and failure race", async () => {
+      const operation = await reserveReadyToSign("sha256:concurrent-winner");
+
+      const [persisted, failed] = await Promise.all([
+        repo.persistSigned({ ...scope, id: operation.id, ...signed }),
+        repo.failOperation({
+          ...scope,
+          id: operation.id,
+          expectedState: "ready_to_sign",
+          code: "signer_failed",
+          message: "concurrent recovery failure",
+          retryable: true,
+        }),
+      ]);
+      const current = await repo.getOperationById({ ...scope, id: operation.id });
+
+      expect([persisted, failed].filter((result) => result !== null)).toHaveLength(1);
+      if (persisted) {
+        expect(current).toMatchObject({
+          state: "ready_to_sign",
+          signed_transaction: signed.signedTransaction,
+          failure_code: null,
+        });
+      } else {
+        expect(current).toMatchObject({
+          state: "failed",
+          signed_transaction: null,
+          failure_code: "signer_failed",
+        });
+      }
+    });
+
+    it("still permits failures from later signed states", async () => {
+      const operation = await reserveReadyToSign("sha256:submitted-failure");
+      await repo.persistSigned({ ...scope, id: operation.id, ...signed });
+      await repo.transitionState({
+        ...scope,
+        id: operation.id,
+        expectedState: "ready_to_sign",
+        nextState: "submitted",
+      });
+
+      const failed = await repo.failOperation({
+        ...scope,
+        id: operation.id,
+        expectedState: "submitted",
+        code: "submit_failed",
+        message: "rpc unavailable",
+        retryable: true,
+      });
+
+      expect(failed).toMatchObject({
+        state: "failed",
+        signed_transaction: signed.signedTransaction,
+        failure_code: "submit_failed",
+      });
+    });
+  });
+
   describe("failOperation", () => {
     it("records the whole failure triple", async () => {
       const { operation } = await repo.reserveIntent(shieldIntent());

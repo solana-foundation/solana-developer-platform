@@ -2,13 +2,10 @@ import { HeliusRingsError } from "@sdp/helius-rings";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const buildRegistrationTransaction = vi.fn();
-const buildSetMergingEnabledTransaction = vi.fn();
 const fetchUserRecord = vi.fn();
 
 vi.mock("@heliuslabs/zolana/wallet", () => ({
   buildRegistrationTransaction: (...args: unknown[]) => buildRegistrationTransaction(...args),
-  buildSetMergingEnabledTransaction: (...args: unknown[]) =>
-    buildSetMergingEnabledTransaction(...args),
   fetchUserRecord: (...args: unknown[]) => fetchUserRecord(...args),
 }));
 
@@ -63,53 +60,38 @@ function deps(overrides: Partial<Parameters<typeof provisionRingsIdentity>[0]> =
 describe("provisionRingsIdentity", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    buildSetMergingEnabledTransaction.mockResolvedValue({ kind: "merging" });
   });
 
-  it("registers, enables merging, and verifies the record it just wrote", async () => {
+  it("registers and verifies the record without enabling merging", async () => {
     buildRegistrationTransaction.mockResolvedValue({ kind: "registration" });
     fetchUserRecord
       .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce(await honestRecord(true));
+      .mockResolvedValueOnce(await honestRecord(false));
 
     const wiring = deps();
     const result = await provisionRingsIdentity(wiring, { walletId: "hrw_1", owner: OWNER });
 
-    expect(result.registrationSignatures).toHaveLength(2);
-    expect(result.mergingEnabled).toBe(true);
+    expect(result.registrationSignatures).toHaveLength(1);
+    expect(result.mergingEnabled).toBe(false);
     expect(result.materialTag).toBe("live");
     expect(result.identity.owner).toBe(OWNER);
-    // Custody signs both; the gateway never holds the owner's secret itself.
-    expect(wiring.signTransaction).toHaveBeenCalledTimes(2);
-    expect(wiring.submitTransaction).toHaveBeenCalledTimes(2);
+    // Custody signs only registration; product-disabled merge is not provisioned.
+    expect(wiring.signTransaction).toHaveBeenCalledTimes(1);
+    expect(wiring.submitTransaction).toHaveBeenCalledTimes(1);
   });
 
-  it("sends nothing when the identity is already registered and merging", async () => {
-    // What a retry after a fully successful provision looks like: the SDK
-    // declines to rebuild a registration, and merging is already on.
-    buildRegistrationTransaction.mockResolvedValue(undefined);
-    const record = await honestRecord(true);
+  it("sends nothing when the identity is already registered with merging disabled", async () => {
+    const record = await honestRecord(false);
     fetchUserRecord.mockResolvedValue(record);
 
     const wiring = deps();
     const result = await provisionRingsIdentity(wiring, { walletId: "hrw_1", owner: OWNER });
 
     expect(result.registrationSignatures).toEqual([]);
-    expect(result.mergingEnabled).toBe(true);
+    expect(result.mergingEnabled).toBe(false);
+    expect(buildRegistrationTransaction).not.toHaveBeenCalled();
+    expect(wiring.signTransaction).not.toHaveBeenCalled();
     expect(wiring.submitTransaction).not.toHaveBeenCalled();
-    expect(buildSetMergingEnabledTransaction).not.toHaveBeenCalled();
-  });
-
-  it("finishes a provision that registered but never enabled merging", async () => {
-    buildRegistrationTransaction.mockResolvedValue(undefined);
-    fetchUserRecord
-      .mockResolvedValueOnce(await honestRecord(false))
-      .mockResolvedValueOnce(await honestRecord(true));
-
-    const result = await provisionRingsIdentity(deps(), { walletId: "hrw_1", owner: OWNER });
-
-    expect(result.registrationSignatures).toHaveLength(1);
-    expect(buildSetMergingEnabledTransaction).toHaveBeenCalledTimes(1);
   });
 
   it("refuses to provision over a record publishing different keys", async () => {
@@ -133,20 +115,6 @@ describe("provisionRingsIdentity", () => {
     expect(wiring.submitTransaction).not.toHaveBeenCalled();
   });
 
-  it("does not report success when the record is still not merging after confirmation", async () => {
-    buildRegistrationTransaction.mockResolvedValue({ kind: "registration" });
-    fetchUserRecord
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce(await honestRecord(false));
-
-    const error = await provisionRingsIdentity(deps(), { walletId: "hrw_1", owner: OWNER }).catch(
-      (thrown: unknown) => thrown
-    );
-
-    expect(error).toBeInstanceOf(HeliusRingsError);
-    expect((error as HeliusRingsError).message).toContain("merging is still disabled");
-  });
-
   it("waits for confirmation before reading the record back", async () => {
     buildRegistrationTransaction.mockResolvedValue({ kind: "registration" });
 
@@ -159,7 +127,7 @@ describe("provisionRingsIdentity", () => {
       order.push("fetch");
       return order.filter((step) => step === "fetch").length === 1
         ? undefined
-        : await honestRecord(true);
+        : await honestRecord(false);
     });
 
     await provisionRingsIdentity(deps({ client: { confirmTransaction } as never }), {
