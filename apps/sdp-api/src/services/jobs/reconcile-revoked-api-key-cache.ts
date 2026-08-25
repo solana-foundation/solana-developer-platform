@@ -87,19 +87,44 @@ export async function reconcileRevokedApiKeyCache(
   // tick an unbounded row set: the freshest divergences — the ones with the
   // most cache TTL left to exploit — are always repaired first, and the
   // remainder rolls into later ticks.
-  const rows = await db
-    .prepare(
-      `SELECT key_hash FROM api_keys
+  // The two scans are independent, so they issue together. Their repair
+  // passes stay sequential below: each fans out to SWEEP_CONCURRENCY cache
+  // round-trips, and overlapping them would double the load this job is
+  // deliberately bounded to.
+  //
+  // Second scan: keys mid-grace (deadline ahead) or whose deadline passed
+  // inside the lookback. A cached entry written before the rotation still
+  // reports no deadline and would honor the old credential past it for the
+  // rest of the cache TTL. Newest deadlines first — they belong to the
+  // freshest rotations, whose stale entries have the most TTL left to
+  // exploit.
+  const [rows, rotatedRows] = await Promise.all([
+    db
+      .prepare(
+        `SELECT key_hash FROM api_keys
        WHERE status != 'active'
          AND revoked_at IS NOT NULL
          AND revoked_at::timestamptz > ?::timestamptz
        ORDER BY revoked_at::timestamptz DESC
        LIMIT ?`
-    )
-    .bind(cutoff, scanLimit)
-    .all<{ key_hash: string }>();
+      )
+      .bind(cutoff, scanLimit)
+      .all<{ key_hash: string }>(),
+    db
+      .prepare(
+        `SELECT key_hash, rotation_deadline FROM api_keys
+       WHERE status = 'active'
+         AND rotation_deadline IS NOT NULL
+         AND rotation_deadline::timestamptz > ?::timestamptz
+       ORDER BY rotation_deadline::timestamptz DESC
+       LIMIT ?`
+      )
+      .bind(cutoff, scanLimit)
+      .all<{ key_hash: string; rotation_deadline: string }>(),
+  ]);
 
   const recentlyRevoked = rows.results ?? [];
+  const recentlyRotated = rotatedRows.results ?? [];
 
   const repairedRevoked = await repairDivergentEntries(
     db,
@@ -109,25 +134,6 @@ export async function reconcileRevokedApiKeyCache(
     // an entry already terminal is converged.
     (cached) => cached !== null && TERMINAL_STATUSES.has(cached.status)
   );
-
-  // Keys mid-grace (deadline ahead) or whose deadline passed inside the
-  // lookback: a cached entry written before the rotation still reports no
-  // deadline and would honor the old credential past it for the rest of the
-  // cache TTL. Newest deadlines first — they belong to the freshest
-  // rotations, whose stale entries have the most TTL left to exploit.
-  const rotatedRows = await db
-    .prepare(
-      `SELECT key_hash, rotation_deadline FROM api_keys
-       WHERE status = 'active'
-         AND rotation_deadline IS NOT NULL
-         AND rotation_deadline::timestamptz > ?::timestamptz
-       ORDER BY rotation_deadline::timestamptz DESC
-       LIMIT ?`
-    )
-    .bind(cutoff, scanLimit)
-    .all<{ key_hash: string; rotation_deadline: string }>();
-
-  const recentlyRotated = rotatedRows.results ?? [];
 
   const repairedRotated = await repairDivergentEntries(
     db,

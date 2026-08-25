@@ -231,10 +231,8 @@ describe("API key update with contended cache refresh", () => {
     expect(await targetKeyListStatus()).toBe(403);
   });
 
-  it("delivers the rotation once even when the old key's cache refresh never lands", async () => {
-    kvContention.contendApiKeyCas = true;
-
-    const res = await app.request(
+  async function rotateTargetKey(): Promise<Response> {
+    return await app.request(
       `/v1/api-keys/${TARGET_KEY.id}/rotate`,
       {
         method: "POST",
@@ -246,6 +244,41 @@ describe("API key update with contended cache refresh", () => {
       },
       env
     );
+  }
+
+  it("refuses to mint a second live key when one replacement already exists", async () => {
+    // Rotation is a create: its secret exists only in the response that
+    // minted it. A repeated attempt — a retry after a lost response, or a
+    // concurrent duplicate — must not leave behind a second live key that
+    // nobody holds the secret for and nothing distinguishes from a real one.
+    const first = await rotateTargetKey();
+    expect(first.status).toBe(201);
+    const firstBody = (await first.json()) as { data: { apiKey: { id: string } } };
+
+    const retry = await rotateTargetKey();
+    expect(retry.status).toBe(409);
+    // The conflict names the replacement so an operator who never received
+    // the first secret can find and revoke that exact key.
+    expect(await retry.text()).toContain(firstBody.data.apiKey.id);
+
+    const replacements = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM api_keys WHERE rotated_from = ?")
+      .bind(TARGET_KEY.id)
+      .first<{ count: number }>();
+    expect(Number(replacements?.count)).toBe(1);
+
+    // Once that replacement is retired, rotating the key again is allowed.
+    await getDb(env)
+      .prepare("UPDATE api_keys SET status = 'revoked' WHERE id = ?")
+      .bind(firstBody.data.apiKey.id)
+      .run();
+    expect((await rotateTargetKey()).status).toBe(201);
+  });
+
+  it("delivers the rotation once even when the old key's cache refresh never lands", async () => {
+    kvContention.contendApiKeyCas = true;
+
+    const res = await rotateTargetKey();
 
     // The one-time secret must be delivered despite the failed refresh: a
     // 500 would push the caller into rotating again, minting a second live

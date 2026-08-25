@@ -20,7 +20,7 @@ import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
-import { ApiKeyService } from "@/services/api-key.service";
+import { ApiKeyService, isApiKeyAlreadyRotated } from "@/services/api-key.service";
 import {
   resolveCreateWalletScope,
   resolveUpdateWalletScope,
@@ -661,10 +661,21 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
     throw notFound("API key");
   }
 
-  // Refresh the old key's cache entry so its rotation deadline is enforced
-  // immediately instead of after the previous entry's TTL runs out. Best
-  // effort — see tryRefreshApiKeyCache: failing the request here would
-  // destroy the new secret and invite a duplicate rotation.
+  if (isApiKeyAlreadyRotated(rotation)) {
+    // A live replacement already exists, so an earlier attempt committed
+    // one. Its secret was delivered only in that attempt's response, so
+    // minting a second key here would leave a live credential nobody holds
+    // — name the replacement instead and let the caller decide.
+    throw new AppError(
+      "CONFLICT",
+      `This API key was already rotated; its replacement is ${rotation.alreadyRotatedTo}. Revoke that key and rotate again if its secret was never received.`
+    );
+  }
+
+  // Everything past this point is post-commit: the replacement key exists
+  // and its secret lives only in the response below. A throw here would
+  // send a 500 whose retry mints a second live key, so both remaining steps
+  // are best effort and their failures are logged, never raised.
   const oldKeyCacheRefreshed = await tryRefreshApiKeyCache(
     getDb(c.env),
     c.var.kv.apiKeys,
@@ -677,14 +688,19 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
     );
   }
 
-  // Audit log
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    action: "update",
-    resourceType: "api_key",
-    resourceId: keyId,
-    metadata: { action: "rotate", newKeyId: rotation.apiKey.id, gracePeriodHours },
-  });
+  try {
+    await new AuditService(getDb(c.env)).log(c, {
+      action: "update",
+      resourceType: "api_key",
+      resourceId: keyId,
+      metadata: { action: "rotate", newKeyId: rotation.apiKey.id, gracePeriodHours },
+    });
+  } catch (error) {
+    getLogger().error(
+      { error, keyId, newKeyId: rotation.apiKey.id },
+      "Failed to audit an API key rotation that already committed"
+    );
+  }
 
   const response: RotateApiKeyResponse = {
     apiKey: rotation.apiKey,
