@@ -47,6 +47,7 @@ export function ExternalDocsLink({
             }}
             className="launch-external-dialog"
             closedby="any"
+            aria-label={`Leaving the SDP docs for ${host}`}
             onClose={() => setOpen(false)}
           >
             <p className="launch-external-dialog-text">
