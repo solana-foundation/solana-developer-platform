@@ -220,6 +220,7 @@ async function syncNonProductionEnvironment(
 
   const ownReferences = new Set(ownRows.map((snapshot) => snapshot.providerReference));
   const mirrorRows: ProviderStrategySnapshot[] = [];
+  const collidedReferences: string[] = [];
   for (const snapshot of production.snapshots) {
     // The mirror carries the MAINNET shelf only — the catalogue this lane
     // exists to review. The literal names the shelf's identity; it is not a
@@ -231,7 +232,12 @@ async function syncNonProductionEnvironment(
     if (ownReferences.has(snapshot.providerReference)) {
       // The upsert key is (provider, reference, environment) with no cluster,
       // so a reference both sources list would flip one row between clusters
-      // on alternating lanes. The environment's own (fundable) shelf wins.
+      // on alternating lanes. The environment's own (fundable) shelf wins the
+      // WRITE — but the reference stays in the mirror's keep set below:
+      // production still lists it, and if the own lane's upsert failed this
+      // pass, the stored row is still on the mirror's cluster, where an
+      // unprotected delist would read that failed write as a delisting.
+      collidedReferences.push(snapshot.providerReference);
       getLogger().warn(
         { ...logContext, provider_reference: snapshot.providerReference },
         "syncEarnCatalogue: mirror row skipped — reference collides with the environment's own shelf"
@@ -245,6 +251,7 @@ async function syncNonProductionEnvironment(
     environment,
     snapshots: mirrorRows,
     delistScope: "mainnet-beta",
+    keepWithoutUpsert: collidedReferences,
   });
 }
 
@@ -315,6 +322,13 @@ interface CatalogueLane {
   environment: SdpEnvironment;
   snapshots: readonly ProviderStrategySnapshot[];
   delistScope: SolanaCluster | undefined;
+  /**
+   * References this lane's truth source lists but the lane must not WRITE —
+   * the mirror's collision-dropped rows. They still belong in the delist keep
+   * set: the source lists them, so deleting them would turn a skipped (or
+   * failed) write into a delisting.
+   */
+  keepWithoutUpsert?: readonly string[];
 }
 
 async function writeCatalogueLane(
@@ -329,11 +343,12 @@ async function writeCatalogueLane(
   };
 
   // The keep set for the delist pass below: references this lane accepts as
-  // currently-listed. Built from the accepted snapshots, not from upsert
-  // results, so a transient write failure never reads as a delisting — but any
-  // upsert failure still skips the pass entirely (`upsertFailed`), because a
-  // half-applied catalogue cannot say what the provider no longer lists.
-  const listedProviderReferences: string[] = [];
+  // currently-listed. Built from the accepted snapshots (plus any
+  // keep-without-upsert references), not from upsert results, so a transient
+  // write failure never reads as a delisting — but any upsert failure still
+  // skips the pass entirely (`upsertFailed`), because a half-applied catalogue
+  // cannot say what the provider no longer lists.
+  const listedProviderReferences: string[] = [...(lane.keepWithoutUpsert ?? [])];
   let upsertFailed = false;
 
   for (const snapshot of lane.snapshots) {

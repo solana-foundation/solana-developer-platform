@@ -559,10 +559,12 @@ describe("runEarnCatalogueSyncIfDue", () => {
       expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledTimes(1);
     });
 
-    it("drops a mirror row whose reference collides with the environment's own shelf", async () => {
+    it("never writes a mirror row whose reference collides with the environment's own shelf, but keeps it delisted-proof", async () => {
       // The upsert key is (provider, reference, environment) with no cluster:
       // a shared reference would flip one row between clusters every pass, so
-      // the environment's own (fundable) row wins.
+      // the environment's own (fundable) row wins the WRITE. The reference
+      // still rides in the mirror's keep set — production lists it, so the
+      // mirror delist must not treat it as delisted.
       const listStrategies = vi.fn(async (ctx: EarnRuntimeContext) =>
         ctx.environment === "production"
           ? [
@@ -586,8 +588,45 @@ describe("runEarnCatalogueSyncIfDue", () => {
         provider: "ground",
         environment: "sandbox",
         hostCluster: "mainnet-beta",
-        listedProviderReferences: ["mainnet-only"],
+        listedProviderReferences: ["shared-ref", "mainnet-only"],
       });
+    });
+
+    it("cannot turn a failed own-lane write into a mirror delisting of a collided reference", async () => {
+      // The review-flagged corner: a previously mirrored mainnet row whose
+      // reference newly appears on the own shelf, in the same pass where that
+      // own upsert transiently FAILS. The stored row is then still
+      // mainnet-beta, so the mirror delist would delete it off a keep set that
+      // dropped the reference as a collision — absent from both shelves until
+      // a later pass. The collided reference riding in the mirror keep set is
+      // what closes that.
+      const listStrategies = vi.fn(async (ctx: EarnRuntimeContext) =>
+        ctx.environment === "production"
+          ? [makeSnapshot("shared-ref", "mainnet-beta")]
+          : [makeSnapshot("shared-ref", "devnet")]
+      );
+      installProviders({ ground: makeProvider("ground", listStrategies) });
+      mocks.upsertStrategy.mockImplementation(async (input: { hostCluster: string }) => {
+        if (input.hostCluster === "devnet") {
+          throw new Error("write conflict");
+        }
+        return undefined;
+      });
+
+      expect(await runEarnCatalogueSyncIfDue(env)).toBe("synced");
+
+      // The own lane skipped its delist (upsertFailed) as ever, and the mirror
+      // delist ran with the collided reference protected in its keep set.
+      expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledTimes(2);
+      expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledWith({
+        provider: "ground",
+        environment: "sandbox",
+        hostCluster: "mainnet-beta",
+        listedProviderReferences: ["shared-ref"],
+      });
+      expect(mocks.deleteUnlistedStrategies).not.toHaveBeenCalledWith(
+        expect.objectContaining({ hostCluster: "devnet" })
+      );
     });
 
     it("drops an own-fetch snapshot on a foreign cluster — the mirror lane owns mainnet rows here", async () => {
