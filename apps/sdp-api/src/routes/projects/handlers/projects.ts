@@ -13,6 +13,34 @@ import type { updateProjectSchema } from "../schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
+export const PROJECT_ARCHIVE_CACHE_PURGE_TIMEOUT_MS = 2_000;
+
+async function withCachePurgeTimeout(operation: Promise<void>): Promise<void> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  // Redis does not expose an AbortSignal seam here. If it settles after the
+  // deadline, keep the abandoned rejection from surfacing as unhandled.
+  void operation.catch(() => undefined);
+
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_resolve, reject) => {
+        timeoutId = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `API key cache purge timed out after ${PROJECT_ARCHIVE_CACHE_PURGE_TIMEOUT_MS}ms`
+              )
+            ),
+          PROJECT_ARCHIVE_CACHE_PURGE_TIMEOUT_MS
+        );
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
 export const listProjects = async (c: AppContext) => {
   const auth = getAuth(c);
   const includeArchived = c.req.query("includeArchived") === "true";
@@ -101,7 +129,9 @@ export const archiveProject = async (c: AppContext) => {
   // This post-commit cleanup is best effort: a cache outage must not turn a
   // successful archive into a false 500 or prevent the audit record below.
   const purgeResults = await Promise.allSettled(
-    deactivatedKeyHashes.map((keyHash) => c.var.kv.apiKeys.delete(`key:${keyHash}`))
+    deactivatedKeyHashes.map((keyHash) =>
+      withCachePurgeTimeout(c.var.kv.apiKeys.delete(`key:${keyHash}`))
+    )
   );
   const purgeFailures = purgeResults.filter(
     (result): result is PromiseRejectedResult => result.status === "rejected"

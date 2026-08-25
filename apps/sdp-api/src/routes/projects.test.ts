@@ -6,6 +6,7 @@ import { hashString } from "@sdp/payments/hash";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { PROJECT_ARCHIVE_CACHE_PURGE_TIMEOUT_MS } from "@/routes/projects/handlers/projects";
 import { createKVStoreSet, RedisKVStore } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
@@ -366,7 +367,7 @@ describe("Projects Routes", () => {
       expect(followUp.status).toBe(401);
     });
 
-    it("completes archival and its audit log when one cache purge fails", async () => {
+    it("completes archival and its audit log when one cache purge never settles", async () => {
       const secondKeyHash = "hash_project_archive_second_key";
       const db = getDb(env);
       const kv = createKVStoreSet(env);
@@ -381,19 +382,25 @@ describe("Projects Routes", () => {
       await kv.apiKeys.put(`key:${secondKeyHash}`, JSON.stringify({ cached: true }));
 
       const originalDelete = RedisKVStore.prototype.delete;
+      let markPendingDeleteStarted: () => void = () => undefined;
+      const pendingDeleteStarted = new Promise<void>((resolve) => {
+        markPendingDeleteStarted = resolve;
+      });
       const deleteSpy = vi.spyOn(RedisKVStore.prototype, "delete").mockImplementation(function (
         this: RedisKVStore,
         key
       ) {
         if (key === `key:${apiKeyHash}`) {
-          return Promise.reject(new Error("redis unavailable"));
+          markPendingDeleteStarted();
+          return new Promise<void>(() => undefined);
         }
         return originalDelete.call(this, key);
       });
       const loggerSpy = vi.spyOn(getLogger(), "error").mockImplementation(() => undefined);
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 
       try {
-        const res = await app.request(
+        const response = app.request(
           `/v1/projects/${TEST_PROJECT.id}`,
           {
             method: "DELETE",
@@ -401,6 +408,9 @@ describe("Projects Routes", () => {
           },
           env
         );
+        await pendingDeleteStarted;
+        await vi.advanceTimersByTimeAsync(PROJECT_ARCHIVE_CACHE_PURGE_TIMEOUT_MS);
+        const res = await response;
 
         expect(res.status).toBe(204);
 
@@ -439,11 +449,14 @@ describe("Projects Routes", () => {
           {
             projectId: TEST_PROJECT.id,
             failedKeyCount: 1,
-            errors: ["redis unavailable"],
+            errors: [
+              `API key cache purge timed out after ${PROJECT_ARCHIVE_CACHE_PURGE_TIMEOUT_MS}ms`,
+            ],
           },
           "Failed to purge archived project API keys from cache"
         );
       } finally {
+        vi.useRealTimers();
         loggerSpy.mockRestore();
         deleteSpy.mockRestore();
       }
