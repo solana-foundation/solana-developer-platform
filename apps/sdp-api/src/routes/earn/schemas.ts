@@ -5,6 +5,7 @@ import {
   EARN_MOVEMENT_DIRECTIONS,
   EARN_PORTFOLIO_TOKENS,
   EARN_STRATEGY_SOURCE_KINDS,
+  SOLANA_CLUSTERS,
 } from "@sdp/types";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
 import { z } from "zod";
@@ -25,6 +26,10 @@ export const listEarnStrategiesQuerySchema = z.object({
   sourceKind: z.enum(EARN_STRATEGY_SOURCE_KINDS).optional(),
   apyType: z.enum(EARN_APY_TYPES).optional(),
   liquidityTerm: z.enum(EARN_LIQUIDITY_TERMS).optional(),
+  // Explicit cluster opt-in (PRO-1742). Omitted, the list answers the
+  // environment's own cluster — the shelf the caller can act on. Naming the
+  // foreign cluster browses its mirrored sub-shelf; rows stay fundable: false.
+  cluster: z.enum(SOLANA_CLUSTERS).optional(),
 });
 
 // ---------------------------------------------------------------------------

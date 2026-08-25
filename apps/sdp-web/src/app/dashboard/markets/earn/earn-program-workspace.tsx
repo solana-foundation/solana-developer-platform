@@ -1,6 +1,6 @@
 "use client";
 
-import { isVaultDirectDepositEnabled } from "@sdp/types";
+import { isVaultDirectDepositEnabled, SOLANA_CLUSTER_LABELS } from "@sdp/types";
 import {
   CheckIcon,
   Code2Icon,
@@ -91,6 +91,8 @@ function availabilityMessageKey(
       return "DashboardMarkets.earnProgram.accessUnavailable";
     case "provider_unavailable":
       return "DashboardMarkets.earnProgram.providerUnavailable";
+    // "cluster_unavailable" never reaches this keys-only map: the Badge renders
+    // it directly so the row's own hostCluster can be interpolated (PRO-1742).
     default:
       return "DashboardMarkets.earnProgram.unavailable";
   }
@@ -127,7 +129,11 @@ function StrategyRow({
       </TableCell>
       <TableCell>
         <Badge variant={supported ? "default" : "outline"}>
-          {t(availabilityMessageKey(availability))}
+          {availability === "cluster_unavailable"
+            ? t("DashboardMarkets.earnProgram.clusterUnavailable", {
+                cluster: SOLANA_CLUSTER_LABELS[strategy.hostCluster],
+              })
+            : t(availabilityMessageKey(availability))}
         </Badge>
       </TableCell>
       <TableCell align="right">

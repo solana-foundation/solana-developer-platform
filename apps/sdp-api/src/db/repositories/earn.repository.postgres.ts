@@ -244,16 +244,27 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         return [];
       }
 
+      // COALESCE mirrors mapStrategyRow's NULL rule: a row an older writer left
+      // unset means the environment's own cluster, so a delist scoped to that
+      // cluster governs it and a mainnet-scoped delist leaves it alone.
+      const clusterClause = input.hostCluster ? "AND COALESCE(host_cluster, ?) = ?" : "";
+      const clusterBindings = input.hostCluster
+        ? [CLUSTER_BY_SDP_ENVIRONMENT[input.environment], input.hostCluster]
+        : [];
+
       const rows = await db
         .prepare(
           `DELETE FROM earn_strategies
             WHERE provider = ?
               AND environment = ?
               AND status = 'active'
+              ${clusterClause}
               AND NOT (provider_reference = ANY(?))
             RETURNING provider_reference`
         )
-        .bind(input.provider, input.environment, [...input.listedProviderReferences])
+        .bind(input.provider, input.environment, ...clusterBindings, [
+          ...input.listedProviderReferences,
+        ])
         .all<{ provider_reference: string }>();
 
       return (rows.results ?? []).map((row) => row.provider_reference);
@@ -265,6 +276,13 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
 
       if (!input.includeInactive) {
         conditions.push("status = 'active'");
+      }
+      if (input.hostCluster) {
+        // COALESCE mirrors mapStrategyRow's NULL rule (a pre-0057 row means the
+        // environment's own cluster), so the default devnet view cannot drop a
+        // legacy row the read layer would report as devnet.
+        conditions.push("COALESCE(host_cluster, ?) = ?");
+        bindings.push(CLUSTER_BY_SDP_ENVIRONMENT[input.environment], input.hostCluster);
       }
       if (input.sourceKind) {
         conditions.push("source_kind = ?");

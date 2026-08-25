@@ -1,14 +1,19 @@
 "use client";
 
 import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
   type EarnProgramWithdrawalRecord,
   type EarnStrategy,
   type EarnVaultPosition,
   earnProgramSolanaPayoutTokens,
   isVaultDirectDepositEnabled,
   type SdpEnvironment,
+  SOLANA_CLUSTER_LABELS,
+  SOLANA_CLUSTERS,
+  type SolanaCluster,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
+import { SegmentedControl } from "@solana/design-system/segmented-control";
 import {
   ArrowDownToLineIcon,
   ArrowUpFromLineIcon,
@@ -67,7 +72,11 @@ import {
   useEarnVaultPositions,
   useEarnVaultWithdrawals,
 } from "../earn/earn-program-data";
-import { type EarnProviderAccess, earnVaultDepositAvailability } from "../earn/earn-surfacing";
+import {
+  type EarnProviderAccess,
+  type EarnVaultDepositAvailability,
+  earnVaultDepositAvailability,
+} from "../earn/earn-surfacing";
 import {
   EarnVaultDepositModal,
   EarnVaultDepositOutcomeTracker,
@@ -351,6 +360,44 @@ function strategyPositionValue(
   return { count: active.length, value: sumDecimalStrings(values as string[]) };
 }
 
+function DepositAvailabilityBadge({
+  availability,
+  strategy,
+}: {
+  availability: EarnVaultDepositAvailability;
+  strategy: EarnStrategy;
+}) {
+  const t = useTranslations();
+
+  if (availability === "cluster_unavailable") {
+    // The one reason with a subject: name the cluster the instrument lives on
+    // (PRO-1742) instead of a bare "Unavailable" — the server's `fundable`
+    // verdict, the row's own hostCluster, no comparison re-derived here.
+    return (
+      <Badge variant="outline">
+        {t("DashboardMarkets.treasury.clusterUnavailable", {
+          cluster: SOLANA_CLUSTER_LABELS[strategy.hostCluster],
+        })}
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant={availability === "available" ? "default" : "outline"}>
+      {t(
+        availability === "available"
+          ? "DashboardMarkets.treasury.depositAvailable"
+          : availability === "environment_unavailable"
+            ? "DashboardMarkets.treasury.productionUnavailable"
+            : availability === "access_unavailable"
+              ? "DashboardMarkets.treasury.accessUnavailable"
+              : availability === "provider_unavailable"
+                ? "DashboardMarkets.treasury.providerUnavailable"
+                : "DashboardMarkets.treasury.depositUnavailable"
+      )}
+    </Badge>
+  );
+}
+
 function StrategyTable({
   environment,
   onDeposit,
@@ -422,19 +469,7 @@ function StrategyTable({
                   ) : null}
                 </TableCell>
                 <TableCell>
-                  <Badge variant={canDeposit ? "default" : "outline"}>
-                    {t(
-                      availability === "available"
-                        ? "DashboardMarkets.treasury.depositAvailable"
-                        : availability === "environment_unavailable"
-                          ? "DashboardMarkets.treasury.productionUnavailable"
-                          : availability === "access_unavailable"
-                            ? "DashboardMarkets.treasury.accessUnavailable"
-                            : availability === "provider_unavailable"
-                              ? "DashboardMarkets.treasury.providerUnavailable"
-                              : "DashboardMarkets.treasury.depositUnavailable"
-                    )}
-                  </Badge>
+                  <DepositAvailabilityBadge availability={availability} strategy={strategy} />
                 </TableCell>
                 <TableCell align="right">
                   <div className="flex justify-end gap-2">
@@ -703,9 +738,11 @@ function withdrawalWatchKey(watch: EarnWithdrawalWatch): string {
 }
 
 function TreasuryStrategiesCard({
+  cluster,
   environment,
   error,
   isLoading,
+  onClusterChange,
   onDeposit,
   onRefresh,
   positions,
@@ -713,9 +750,12 @@ function TreasuryStrategiesCard({
   strategies,
   unrecordedShareMints,
 }: {
+  /** The cluster sub-shelf being browsed — the environment's own by default. */
+  cluster: SolanaCluster;
   environment: SdpEnvironment;
   error: unknown;
   isLoading: boolean;
+  onClusterChange: (cluster: SolanaCluster) => void;
   onDeposit: (strategy: EarnStrategy) => void;
   onRefresh: () => void;
   positions: readonly EarnVaultPosition[] | undefined;
@@ -732,15 +772,33 @@ function TreasuryStrategiesCard({
         <CardTitle>{t("DashboardMarkets.treasury.strategiesTitle")}</CardTitle>
         <CardDescription>{t("DashboardMarkets.treasury.strategiesDescription")}</CardDescription>
         <CardAction>
-          <Button
-            iconLeft={<RefreshCwIcon />}
-            onClick={onRefresh}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            {t("DashboardMarkets.treasury.refresh")}
-          </Button>
+          <div className="flex items-center gap-2">
+            {environment === "sandbox" ? (
+              // Sandbox only (PRO-1742): production has no other shelf to
+              // offer, so the control must not render there at all — reviewing
+              // the mainnet catalogue IS what production shows by default.
+              <SegmentedControl
+                aria-label={t("DashboardMarkets.treasury.clusterToggleLabel")}
+                items={SOLANA_CLUSTERS.map((option) => ({
+                  value: option,
+                  label: SOLANA_CLUSTER_LABELS[option],
+                }))}
+                value={cluster}
+                // Re-clicking the active segment can emit an empty value from
+                // the underlying toggle group; a shelf always has a selection.
+                onValueChange={(value) => value && onClusterChange(value as SolanaCluster)}
+              />
+            ) : null}
+            <Button
+              iconLeft={<RefreshCwIcon />}
+              onClick={onRefresh}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              {t("DashboardMarkets.treasury.refresh")}
+            </Button>
+          </div>
         </CardAction>
       </CardHeader>
       <CardContent className="px-0">
@@ -848,6 +906,21 @@ export function TreasurySolutionsWorkspace({
     isLoading: strategiesLoading,
     refresh: refreshStrategies,
   } = useEarnStrategies();
+  // PRO-1742: the strategies card's cluster opt-in, sandbox-only by
+  // construction — production always reads its default shelf. The card's read
+  // is SEPARATE from `strategies` above on purpose: that read doubles as the
+  // share-mint vocabulary behind the allocation summary, and browsing the
+  // mirrored mainnet shelf must not blank the devnet vocabulary under it. On
+  // the default shelf both hooks share one SWR key, so no second fetch happens
+  // until the toggle leaves it.
+  const [catalogueCluster, setCatalogueCluster] = useState<SolanaCluster | undefined>(undefined);
+  const strategiesCluster = sdpEnvironment === "sandbox" ? catalogueCluster : undefined;
+  const {
+    strategies: catalogueStrategies,
+    error: catalogueError,
+    isLoading: catalogueLoading,
+    refresh: refreshCatalogue,
+  } = useEarnStrategies({ cluster: strategiesCluster });
   const {
     positions,
     error: positionsError,
@@ -1040,19 +1113,22 @@ export function TreasurySolutionsWorkspace({
         />
 
         <TreasuryStrategiesCard
+          cluster={strategiesCluster ?? CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment]}
           environment={sdpEnvironment}
-          error={strategiesError}
-          isLoading={strategiesLoading}
+          error={catalogueError}
+          isLoading={catalogueLoading}
+          onClusterChange={setCatalogueCluster}
           onDeposit={setDepositStrategy}
           onRefresh={() => {
             refreshWallets();
             refreshStrategies();
+            refreshCatalogue();
             refreshPositions();
             refreshPrograms();
           }}
           positions={positionsError ? undefined : positions}
           providerAccess={providerAccess}
-          strategies={strategies}
+          strategies={catalogueStrategies}
           unrecordedShareMints={allocation.unrecordedShareMints}
         />
 

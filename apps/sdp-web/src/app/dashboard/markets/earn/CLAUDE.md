@@ -112,7 +112,14 @@ program create still sends the body `requestId` form.
   builder asserts its own options against that list at module load, so adding a
   style in one place and not the other throws instead of rendering a blank.
 - `earn-program-data.ts` — THE data seam, over the BFF proxies above.
-  `useEarnStrategies()` is what this module's pages read today; the program,
+  `useEarnStrategies()` is what this module's pages read today — it takes an
+  optional `{ cluster }` (PRO-1742), the explicit opt-in that browses the
+  mirrored mainnet shelf; the cluster is part of the SWR key. Treasury's
+  strategies card passes it from its sandbox-only toggle and deliberately keeps
+  a SECOND, default hook call alive: the default read doubles as the
+  allocation summary's share-mint vocabulary, and repointing it at mainnet
+  would blank the devnet vocabulary under the page (the two calls share one
+  SWR key until the toggle leaves the default). The program,
   vault-position and vault-deposit seams serve Treasury Solutions next door (see
   "Where these seams are consumed"). **No provider id is spelled in this file** — surfacing comes
   from `./earn-surfacing`, and reads are provider-agnostic on purpose so a
@@ -331,7 +338,8 @@ surface renders that reason:
 | Result | Means |
 |---|---|
 | `available` | this org can open this position, here, now |
-| `strategy_unavailable` | inactive / not fundable / not a `vault_direct` provider / provider not surfaced |
+| `cluster_unavailable` | the instrument lives on another cluster (`fundable: false`) — checked FIRST, and the badge names the row's `hostCluster` ("Mainnet only") instead of collapsing into a bare "Unavailable" (PRO-1742) |
+| `strategy_unavailable` | inactive / not a `vault_direct` provider / provider not surfaced |
 | `environment_unavailable` | the environment has no vault-direct deposits (`isVaultDirectDepositEnabled`) |
 | `access_unavailable` | provider access could not be resolved — **fails closed** |
 | `provider_unavailable` | resolved, but this org's provider entry is not enabled |

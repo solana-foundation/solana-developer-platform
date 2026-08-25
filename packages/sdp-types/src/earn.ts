@@ -125,13 +125,14 @@ export interface EarnStrategy {
    *
    * A provider may front instruments that do not exist on every cluster, so a
    * row can name a live mainnet vault while sitting in a sandbox catalogue:
-   * everything about it true, none of it fundable from devnet. Kamino was the
-   * original example and no longer is — it has a devnet deployment, so each
-   * environment now catalogues its own cluster, and the sync refuses to store a
-   * mainnet instrument outside production. The column stays because the
-   * mismatch is structural, not Kamino-shaped: rows written before that guard
-   * survive until a delist pass, and the next single-cluster provider brings it
-   * straight back.
+   * everything about it true, none of it fundable from devnet. Since PRO-1742
+   * that is a designed steady state rather than drift — a non-production
+   * environment stores a browse-only MIRROR of the production mainnet shelf
+   * beside its own cluster's rows, so the curated catalogue can be reviewed
+   * outside production. List reads default to the environment's own cluster
+   * and serve the mirrored shelf only on an explicit `?cluster=` opt-in;
+   * either way, this field plus `fundable` below are what keep a mirrored row
+   * honest.
    *
    * `status: "active"` cannot express that — it is the operator's stop switch,
    * and reusing it here would both lie about why and collide with the
