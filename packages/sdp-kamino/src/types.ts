@@ -49,6 +49,11 @@ export interface KaminoInstructionPlan {
   assetIdentity: KaminoVaultAssetIdentity;
   /** What the instructions above actually encode. See `KaminoAcceptedAmounts`. */
   accepted: KaminoAcceptedAmounts;
+  /**
+   * True when these instructions create the owner's share ATA, charging its
+   * rent to `rentPayer`. See `EarnVaultTransactionPlan.createsShareAccount`.
+   */
+  createsShareAccount?: boolean;
 }
 
 /** Live K-Vault asset identity carried with a built instruction plan. */
@@ -91,12 +96,33 @@ export interface KaminoDepositInput {
   /**
    * Rent payer for any associated token account this deposit has to create.
    *
-   * NOT the transaction fee payer. klend-sdk embeds this signer INSIDE the
-   * instruction accounts as writable+signer, so whoever is named here funds ATA
-   * rent — a real, separate spend. SDP's Kora path sets the fee payer at compile
-   * time and signs post-compile via `signAsFeePayer`, which is a different
-   * mechanism entirely; passing a sponsor signer here would quietly bill it for
-   * rent it never agreed to. Defaults to `owner` when omitted.
+   * STILL NOT the transaction fee payer, and the distinction is the reason this
+   * field has its own name: klend-sdk embeds this signer INSIDE the instruction
+   * accounts as writable+signer, so whoever is named here funds ATA rent, a real
+   * spend separate from the network fee. Defaults to `owner` when omitted.
+   *
+   * Naming SDP's Kora sponsor here IS now correct, on devnet, and deliberate.
+   * This comment previously argued the opposite, so here is what changed rather
+   * than a silent reversal. The objection was that a sponsor would be billed for
+   * rent (a) its `FeePayerPolicy` might refuse and (b) the sponsorship budget did
+   * not account for. Both were checked:
+   *
+   * - (a) Kora gates fee-payer-funded ATA creation on exactly one flag,
+   *   `fee_payer_policy.system.allow_create_account`, which devnet already sets
+   *   true and mainnet deliberately does not. Its own CI pins that asymmetry.
+   * - (b) The budget prices this correctly, because the SAME flag is one of the
+   *   authorities that makes the reservation `networkFee + max_allowed_lamports`
+   *   rather than the fee alone. On devnet that reserves ~9.9M lamports against
+   *   ~2.04M of actual ATA rent, so it over-reserves rather than under-accounts.
+   *
+   * The objection's remaining sting is answered by the exit rather than argued
+   * away: klend never closes the share ATA, so its rent used to sit locked in a
+   * zero-share account forever no matter who paid. `buildShareAccountCloseInstruction`
+   * now closes it on a full exit and names the RECORDED funder as the
+   * destination, which makes sponsored rent a float rather than a giveaway. The
+   * caller must persist that funder at deposit time, because the fee mode may
+   * differ by the time the position is exited. See
+   * docs/decisions/0002-earn-provider-pluggability.md.
    */
   rentPayer?: TransactionSigner;
   /** Deposit amount in the vault token's own units, as a decimal string. */
@@ -113,9 +139,28 @@ export interface KaminoDepositInput {
 export interface KaminoWithdrawInput {
   vault: Address;
   owner: TransactionSigner;
+  /**
+   * As on `KaminoDepositInput`, and in V1 a no-op worth passing anyway.
+   *
+   * klend's exit emits an idempotent create for the owner's deposit-token ATA,
+   * but that account must already exist for the deposit to have succeeded and
+   * nothing closes it, so the create costs no rent. Passing the sponsor keeps
+   * both directions reading the same and covers a provider whose exit DOES
+   * create an account without another change at the call site.
+   */
   rentPayer?: TransactionSigner;
   /** Shares to redeem, as a decimal string. */
   shares: string;
+  /**
+   * Where the share ATA's reclaimed rent goes when this exit empties it.
+   *
+   * klend's own exit never closes the account, so its rent would otherwise stay
+   * locked in an account holding zero shares forever. Defaults to `owner`, which
+   * is correct whenever the owner funded it. See
+   * `EarnVaultWithdrawInput.rentRefundTo` for why the caller must pass the
+   * RECORDED funder rather than a currently-configured sponsor.
+   */
+  rentRefundTo?: Address;
   /**
    * Slot the withdrawal is priced against. Required by klend-sdk and by the
    * reserve math; the caller reads it once so every reserve calculation uses

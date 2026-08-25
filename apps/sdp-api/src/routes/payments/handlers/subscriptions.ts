@@ -28,6 +28,7 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import {
+  fetchMaybeSubscriptionDelegation,
   findPlanPda,
   findSubscriptionAuthorityPda,
   findSubscriptionDelegationPda,
@@ -168,6 +169,21 @@ function assertSubscriptionTokenMint(token: string): Address {
   }
 
   return assertValidAddress(token, "token");
+}
+
+async function getExpectedSubscriptionExpiresAtTs(
+  c: AppContext,
+  subscriptionPda: Address
+): Promise<bigint> {
+  const onChainSubscription = await fetchMaybeSubscriptionDelegation(
+    solanaRpc.createRpc(c.env),
+    subscriptionPda,
+    { commitment: "confirmed" }
+  );
+  if (!onChainSubscription.exists) {
+    throw new AppError("CONFLICT", "Subscription was not found on-chain");
+  }
+  return onChainSubscription.data.expiresAtTs;
 }
 
 async function buildPreparedSubscriptionTransaction(
@@ -819,6 +835,7 @@ async function prepareSubscriptionLifecycle(
           subscriptionPda,
         })
       : await getResumeSubscriptionOverlayInstructionAsync({
+          expectedExpiresAtTs: await getExpectedSubscriptionExpiresAtTs(c, subscriptionPda),
           planPda,
           subscriber: subscriberSigner,
           subscriptionPda,

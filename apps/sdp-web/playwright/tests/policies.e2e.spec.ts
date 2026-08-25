@@ -1,12 +1,10 @@
 import { expect, test } from "@playwright/test";
 import { SOL_MINT } from "@sdp/types";
-import { getPlaywrightAdminSession } from "../support/auth-session";
 import { createLocalApiClient } from "../support/local-api-client";
 import {
   bootstrapLocalWalletFixtures,
-  ensureLinkedOrg,
   getBootstrapApiBaseUrl,
-  resolvePlaywrightProjectId,
+  provisionWithAdminSession,
   seedProjectCookie,
 } from "../support/local-dashboard-bootstrap";
 
@@ -16,10 +14,7 @@ test.describe("policies responsive table", () => {
   let projectId = "";
 
   test.beforeAll(async ({ browser }) => {
-    const session = await getPlaywrightAdminSession(browser);
-
-    try {
-      await ensureLinkedOrg(session.identity, { tier: "enterprise" });
+    projectId = await provisionWithAdminSession(browser, async (session) => {
       const fixtures = await bootstrapLocalWalletFixtures({
         identity: session.identity,
         bearerToken: session.getBearerToken,
@@ -33,11 +28,11 @@ test.describe("policies responsive table", () => {
         throw new Error("Failed to create a wallet for Policies responsive coverage");
       }
 
-      projectId = await resolvePlaywrightProjectId(
+      const api = createLocalApiClient(
         getBootstrapApiBaseUrl(),
-        session.getBearerToken
+        session.getBearerToken,
+        fixtures.projectId
       );
-      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.getBearerToken, projectId);
       await api.put(`/v1/payments/wallets/${encodeURIComponent(wallet.walletId)}/policies`, {
         defaultAction: "allow",
         rules: [
@@ -51,9 +46,8 @@ test.describe("policies responsive table", () => {
           },
         ],
       });
-    } finally {
-      await session.page.close();
-    }
+      return fixtures.projectId;
+    });
   });
 
   test.beforeEach(async ({ page }) => {

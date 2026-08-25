@@ -1,6 +1,7 @@
 import type { Address, Instruction, TransactionSigner } from "@solana/kit";
 import {
   findAssociatedTokenPda,
+  getCloseAccountInstruction,
   getCreateAssociatedTokenIdempotentInstruction,
   getTransferCheckedInstruction,
   TOKEN_PROGRAM_ADDRESS,
@@ -294,4 +295,61 @@ export function decodeKvaultWithdrawShares(
     value = (value << 8n) | BigInt(data[8 + index] as number);
   }
   return value;
+}
+
+/**
+ * Give the share ATA's rent back, when and only when this exit empties it.
+ *
+ * ── Why this exists at all ────────────────────────────────────────────────
+ * klend's `withdrawIxs` bundle carries no cleanup instructions, so nothing ever
+ * closed the share ATA. Its 2,039,280 lamports of rent-exemption stayed locked
+ * in an account holding zero shares, for every position ever exited, reclaimable
+ * by nobody. That was true before sponsorship and is not caused by it; sponsoring
+ * rent only changes who is out the lamports.
+ *
+ * ── Why the condition is exact and not optimistic ─────────────────────────
+ * SPL `CloseAccount` FAILS on a non-zero balance, and it rides in the same
+ * transaction as the redemptions, so a wrong guess here does not leave rent
+ * behind: it fails the customer's exit. The caller therefore passes the two
+ * quantities that settle it rather than a boolean. Equality means the account
+ * ends at zero, because the redemption instructions are separately asserted to
+ * encode exactly `redeemedBaseUnits`. A partial exit returns null and correctly
+ * leaves the account open, still holding shares and still holding its rent.
+ *
+ * `refundTo` must be whoever ACTUALLY funded the account, which for an account
+ * that pre-dates this exit is the value recorded when it was created and never a
+ * currently-configured sponsor: rent was paid then, the fee mode may have changed
+ * since, and refunding "whoever sponsors today" would sooner or later pay a
+ * sponsor with the customer's lamports. The caller resolves that; when the exit
+ * ITSELF creates the account, the caller passes its own rent payer instead (see
+ * `./sdk.ts`), because the recorded value then describes an older instance.
+ * Omitted means the owner funded it and keeps it, which is also the correct
+ * unsponsored default.
+ */
+export function buildShareAccountCloseInstruction(input: {
+  shareAta: Address;
+  owner: TransactionSigner;
+  refundTo?: Address;
+  /** What the ATA holds once consolidation has run, before any redemption. */
+  ataBaseUnitsBeforeExit: bigint;
+  /** Shares the redemption instructions are asserted to encode. */
+  redeemedBaseUnits: bigint;
+  /** Everything the owner holds of this share mint, across every account. */
+  ownerTotalBaseUnits: bigint;
+}): Instruction | null {
+  if (input.ataBaseUnitsBeforeExit !== input.redeemedBaseUnits) return null;
+  // A TRUE full exit, not merely an emptied ATA. If auxiliary accounts still
+  // hold shares, closing here would be closing an account the very next
+  // withdrawal has to recreate and pay rent for again, and the funder recorded
+  // against the position would by then describe a previous instance of the
+  // account. Leaving it open costs nothing and keeps the recorded funder true.
+  if (input.ownerTotalBaseUnits !== input.redeemedBaseUnits) return null;
+  return getCloseAccountInstruction(
+    {
+      account: input.shareAta,
+      destination: input.refundTo ?? input.owner.address,
+      owner: input.owner,
+    },
+    { programAddress: TOKEN_PROGRAM_ADDRESS }
+  );
 }

@@ -11,9 +11,8 @@ import {
   resolveTotalBalance,
 } from "../../src/app/dashboard/payments/payments-overview.utils";
 import { getE2EEnv } from "../env";
-import { getPlaywrightAdminSession } from "../support/auth-session";
 import { createLocalApiClient } from "../support/local-api-client";
-import { seedProjectCookie } from "../support/local-dashboard-bootstrap";
+import { provisionWithAdminSession, seedProjectCookie } from "../support/local-dashboard-bootstrap";
 
 interface ReadOnlyFixture {
   issuanceTransactions: TokenTransactionListItem[];
@@ -28,6 +27,25 @@ interface ReadOnlyFixture {
 interface PageFailureCapture {
   failures: string[];
   assertClean: () => void;
+}
+
+/**
+ * Resolves the required total balance returned by the read-only smoke API.
+ *
+ * @param wallet - The wallet whose populated balance is required.
+ * @returns The wallet's resolved total balance.
+ */
+function resolveRequiredTotalBalance(wallet: PaymentsDashboardWallet): number {
+  if (!wallet.balances) {
+    throw new Error(`Wallet ${wallet.walletId} did not return balances`);
+  }
+
+  const totalBalance = resolveTotalBalance(wallet.balances);
+  if (totalBalance === null) {
+    throw new Error(`Wallet ${wallet.walletId} did not return a resolvable balance`);
+  }
+
+  return totalBalance;
 }
 
 function capturePageFailures(page: Page): PageFailureCapture {
@@ -87,85 +105,102 @@ test.describe("GCP dev dashboard read-only smoke", () => {
     }
     expect(env.sdpApiBaseUrl).toBe("https://api-dev.solana.com");
 
-    const session = await getPlaywrightAdminSession(browser);
-    expect(session.identity.email).toBe(env.clerkTestEmail);
-    expect(session.identity.organizationId).toBe(env.clerkOrgId);
+    fixture = await provisionWithAdminSession(browser, async (session) => {
+      expect(session.identity.email).toBe(env.clerkTestEmail);
+      expect(session.identity.organizationId).toBe(env.clerkOrgId);
 
-    const orgApi = createLocalApiClient(env.sdpApiBaseUrl, session.getBearerToken);
-    const { projects } = await orgApi.get<ListProjectsResponse>("/v1/projects");
-    expect(projects.length, "the explicit test organization must have projects").toBeGreaterThan(0);
+      const orgApi = createLocalApiClient(env.sdpApiBaseUrl, session.getBearerToken);
+      const { projects } = await orgApi.get<ListProjectsResponse>("/v1/projects");
+      expect(projects.length, "the explicit test organization must have projects").toBeGreaterThan(
+        0
+      );
 
-    const project = projects.find((candidate) => candidate.id === env.expectedProjectId);
-    expect(project, "the exact GCP smoke project must belong to the test org").toBeDefined();
-    if (!project) throw new Error("Exact GCP smoke project was not returned by the API");
+      const project = projects.find((candidate) => candidate.id === env.expectedProjectId);
+      expect(project, "the exact GCP smoke project must belong to the test org").toBeDefined();
+      if (!project) throw new Error("Exact GCP smoke project was not returned by the API");
 
-    const api = createLocalApiClient(env.sdpApiBaseUrl, session.getBearerToken, project.id);
-    const walletsPath = `/v1/wallets?${new URLSearchParams({
-      includeBalances: "true",
-      includeAllProviders: "true",
-      view: "summary",
-    })}`;
-    const issuancePath = `/v1/issuance/transactions?${new URLSearchParams({
-      page: "1",
-      pageSize: "20",
-    })}`;
-    const transfersPath = `/v1/payments/transfers?${new URLSearchParams({
-      page: "1",
-      pageSize: "20",
-    })}`;
-    const [walletData, issuanceTransactions, transfers] = await Promise.all([
-      api.get<{ wallets: PaymentsDashboardWallet[] }>(walletsPath),
-      api.get<TokenTransactionListItem[]>(issuancePath),
-      api.get<PaymentTransferSummary[]>(transfersPath),
-    ]);
-    const transferMarker = transfers[0]?.token ?? transfers[0]?.amount;
-    if (!transferMarker) throw new Error("The known transfer needs a rendered token or amount");
-    const populatedWallet = walletData.wallets.find(
-      (wallet) => (resolveTotalBalance(wallet.balances ?? []) ?? 0) > 0
-    );
-    if (!populatedWallet) throw new Error("The exact test project needs a populated wallet");
-    const populatedWalletBalanceLabel = formatCurrencyAmount(
-      resolveTotalBalance(populatedWallet.balances ?? []),
-      "en-US"
-    );
-    expect(populatedWalletBalanceLabel, "the known populated wallet fixture changed").toBe(
-      "$10.00"
-    );
+      const api = createLocalApiClient(env.sdpApiBaseUrl, session.getBearerToken, project.id);
+      const walletsPath = `/v1/wallets?${new URLSearchParams({
+        includeBalances: "true",
+        includeAllProviders: "true",
+        view: "summary",
+      })}`;
+      const issuancePath = `/v1/issuance/transactions?${new URLSearchParams({
+        page: "1",
+        pageSize: "20",
+      })}`;
+      const transfersPath = `/v1/payments/transfers?${new URLSearchParams({
+        page: "1",
+        pageSize: "20",
+      })}`;
+      const [walletData, issuanceTransactions, transfers] = await Promise.all([
+        api.get<{ wallets: PaymentsDashboardWallet[] }>(walletsPath),
+        api.get<TokenTransactionListItem[]>(issuancePath),
+        api.get<PaymentTransferSummary[]>(transfersPath),
+      ]);
+      const firstTransfer = transfers[0];
+      if (!firstTransfer) throw new Error("The exact test project needs a known transfer");
+      // Either display field marks the row; the transfer only fails the smoke
+      // when it would render neither.
+      const transferMarker = firstTransfer.token ?? firstTransfer.amount;
+      if (!transferMarker) throw new Error("The known transfer needs a rendered token or amount");
+      // Candidates without a resolvable balance are skipped, not fatal — only the
+      // selected fixture wallet must resolve.
+      const populatedWallet = walletData.wallets.find((wallet) => {
+        if (!wallet.balances) return false;
+        const totalBalance = resolveTotalBalance(wallet.balances);
+        return totalBalance !== null && totalBalance > 0;
+      });
+      if (!populatedWallet) throw new Error("The exact test project needs a populated wallet");
+      const populatedWalletBalanceLabel = formatCurrencyAmount(
+        resolveRequiredTotalBalance(populatedWallet),
+        "en-US"
+      );
+      expect(populatedWalletBalanceLabel, "the known populated wallet fixture changed").toBe(
+        "$10.00"
+      );
 
-    fixture = {
-      issuanceTransactions,
-      populatedWallet,
-      populatedWalletBalanceLabel,
-      project,
-      transferMarker,
-      transfers,
-      wallets: walletData.wallets,
-    };
-    const knownRecordCount =
-      fixture.wallets.length + fixture.issuanceTransactions.length + fixture.transfers.length;
-    expect(knownRecordCount, "the exact test project must contain known records").toBeGreaterThan(
-      0
-    );
-    expect(fixture.wallets.length, "wallet hydration needs a real wallet fixture").toBeGreaterThan(
-      0
-    );
-    expect(
-      fixture.issuanceTransactions.length,
-      "home activity needs a real issuance transaction"
-    ).toBeGreaterThan(0);
-    expect(fixture.transfers.length, "payments needs a real transfer fixture").toBeGreaterThan(0);
+      const resolvedFixture = {
+        issuanceTransactions,
+        populatedWallet,
+        populatedWalletBalanceLabel,
+        project,
+        transferMarker,
+        transfers,
+        wallets: walletData.wallets,
+      } satisfies ReadOnlyFixture;
+      const knownRecordCount =
+        resolvedFixture.wallets.length +
+        resolvedFixture.issuanceTransactions.length +
+        resolvedFixture.transfers.length;
+      expect(knownRecordCount, "the exact test project must contain known records").toBeGreaterThan(
+        0
+      );
+      expect(
+        resolvedFixture.wallets.length,
+        "wallet hydration needs a real wallet fixture"
+      ).toBeGreaterThan(0);
+      expect(
+        resolvedFixture.issuanceTransactions.length,
+        "home activity needs a real issuance transaction"
+      ).toBeGreaterThan(0);
+      expect(
+        resolvedFixture.transfers.length,
+        "payments needs a real transfer fixture"
+      ).toBeGreaterThan(0);
 
-    console.info(
-      JSON.stringify({
-        event: "gcp_read_only_fixture",
-        projectId: fixture.project.id,
-        projectName: fixture.project.name,
-        wallets: fixture.wallets.length,
-        issuanceTransactions: fixture.issuanceTransactions.length,
-        transfers: fixture.transfers.length,
-      })
-    );
-    await session.page.close();
+      console.info(
+        JSON.stringify({
+          event: "gcp_read_only_fixture",
+          projectId: resolvedFixture.project.id,
+          projectName: resolvedFixture.project.name,
+          wallets: resolvedFixture.wallets.length,
+          issuanceTransactions: resolvedFixture.issuanceTransactions.length,
+          transfers: resolvedFixture.transfers.length,
+        })
+      );
+      return resolvedFixture;
+    });
   });
 
   test.beforeEach(async ({ page }) => {

@@ -11,6 +11,13 @@ type ClerkWindow = {
   };
 };
 
+export interface PlaywrightAdminSession {
+  identity: ClerkTestIdentity;
+  page: Page;
+  bearerToken: string;
+  getBearerToken: () => Promise<string>;
+}
+
 async function readClerkBearerToken(page: Page): Promise<string | null> {
   return page.evaluate(async () => {
     const clerkClient = (window as unknown as ClerkWindow).Clerk;
@@ -55,12 +62,7 @@ export function createClerkBearerTokenProvider(page: Page): () => Promise<string
   };
 }
 
-export async function getPlaywrightAdminSession(browser: Browser): Promise<{
-  identity: ClerkTestIdentity;
-  page: Page;
-  bearerToken: string;
-  getBearerToken: () => Promise<string>;
-}> {
+export async function getPlaywrightAdminSession(browser: Browser): Promise<PlaywrightAdminSession> {
   const identity = await resolveClerkTestIdentity();
   const page = await openAuthenticatedBootstrapPage(browser);
   const bearerToken = await getClerkBearerToken(page);

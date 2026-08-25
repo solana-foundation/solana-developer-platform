@@ -74,13 +74,54 @@ cycle *and* would drag a 13MB SDK into the hourly catalogue cron).
 
 ## `payer` is NOT the transaction fee payer
 
-klend-sdk's `payer?: TransactionSigner` is the **rent payer for created ATAs**,
-embedded in the instruction accounts as writable+signer. SDP's Kora path is
-different machinery: it sets the fee payer at compile time and signs post-compile
-via `signAsFeePayer(bytes)`. Naming a sponsor signer as `payer` would quietly bill
-it for share-ATA rent — a spend its `FeePayerPolicy` may refuse and which
-`sponsorship-budget.service.ts` does not account for. The field is `rentPayer`
-here for exactly that reason, and it defaults to the owner.
+klend-sdk's `payer?: TransactionSigner` is the **rent payer for created ATAs**
+(the 6th positional arg to `depositIxs`, 7th to `withdrawIxs`), embedded in the
+instruction accounts as writable+signer. SDP's Kora path is different machinery:
+it sets the fee payer at compile time and signs post-compile via
+`signAsFeePayer(bytes)`. The field is `rentPayer` here to keep the two apart, and
+it defaults to the owner.
+
+**The sponsor may be named here on devnet, and PRO-1736 does exactly that.** This
+section used to forbid it; the reversal is deliberate, so the reasoning is
+recorded rather than dropped. The objection was that a sponsor would be billed for
+rent its `FeePayerPolicy` might refuse and that `sponsorship-budget.service.ts`
+did not account for. Both were verified against the deployed configuration:
+
+- Kora gates fee-payer-funded ATA creation on one flag,
+  `fee_payer_policy.system.allow_create_account` (its
+  `validate_ata_create_instructions` returns early when true). devnet sets it
+  true; mainnet keeps it false and sdp-infra's `validate-policy.py` fails CI on
+  any `true` there.
+- The budget prices it, because that same flag is one of the authorities that
+  makes the per-transaction reservation `networkFee + max_allowed_lamports`
+  instead of the fee alone. devnet reserves ~9.9M lamports against ~2.04M of real
+  ATA rent, so it over-reserves.
+
+Rent is **recoverable, but only because this package makes it so.** klend's
+`withdrawIxs` bundle carries no cleanup instructions, so the share ATA was never
+closed and its 2,039,280 lamports stayed locked in a zero-share account on every
+exit, whoever had paid. `buildShareAccountCloseInstruction`
+(`./withdraw-instructions.ts`) closes it when the exit provably empties it and
+sends the rent to whoever actually funded it. Two rules that follow:
+
+- **Pass the recorded funder, never the current sponsor.** Rent is paid when the
+  account is created and the fee mode can flip before the exit, so `rentRefundTo`
+  must come from persisted state. Refunding today's sponsor for rent the customer
+  paid takes the customer's lamports. One exception, and `./sdk.ts` implements it:
+  when THIS exit creates the account (consolidation's idempotent create), its own
+  `rentPayer` funded it moments earlier in the same transaction and the recorded
+  value describes an older instance.
+- **The close condition is exact, not optimistic.** `CloseAccount` fails on a
+  non-zero balance and rides the same transaction as the redemptions, so guessing
+  wrong fails the customer's exit rather than merely stranding rent. It takes two
+  equalities: the redeemed quantity must match both what the ATA will hold and
+  the owner's total across every share account, because closing on an
+  emptied-but-not-exited position hands the next entry a stale funder.
+
+Still bounding the decision: `max_allowed_lamports` caps a sponsored transaction
+at 4 new ATAs on devnet, and a re-entry after a close pays rent again. Full
+rationale and the mainnet conditions live in
+`docs/decisions/0002-earn-provider-pluggability.md`.
 
 ## Withdrawals are one complete transaction
 

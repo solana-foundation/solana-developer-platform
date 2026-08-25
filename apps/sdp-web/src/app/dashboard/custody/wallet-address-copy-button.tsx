@@ -52,6 +52,23 @@ export function WalletMetadataCopyButton({ value, label, tooltip }: WalletMetada
   );
 }
 
+/**
+ * The truncated metadata value a copy button sits beside: the short form for
+ * sighted readers, the full value for screen readers.
+ *
+ * @param value - The full untruncated value, exposed to screen readers.
+ * @param displayValue - The truncated form rendered visually.
+ * @returns The twin-span value element.
+ */
+export function WalletMetaValue({ value, displayValue }: { value: string; displayValue: string }) {
+  return (
+    <span className="block truncate font-mono text-xs text-secondary">
+      <span aria-hidden="true">{displayValue}</span>
+      <span className="sr-only">{value}</span>
+    </span>
+  );
+}
+
 interface WalletAddressCopyButtonProps {
   address: string;
   tooltip?: string;
