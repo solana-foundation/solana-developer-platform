@@ -57,6 +57,15 @@ export interface RingsSignatureInspection {
    */
   readonly landedSlot: string | null;
   /**
+   * Whether it landed and then failed on chain.
+   *
+   * The distinction Photon cannot make: a transaction that reverted changed no
+   * shielded state, so the indexer will never report it, however long anyone
+   * waits. Treating that as "landed, awaiting the indexer" freezes the wallet
+   * for good. It also moved nothing, which is what makes voiding it safe.
+   */
+  readonly executionFailed: boolean;
+  /**
    * Whether the transaction could still be included.
    *
    * Read from the blockhash inside the signed bytes, never from the
@@ -69,7 +78,9 @@ export interface RingsSignatureInspection {
   /** The raw answers, recorded on the event so a later dispute has them. */
   readonly evidence: Readonly<{
     statusSlot: string | null;
+    statusConfirmation: string | null;
     transactionSlot: string | null;
+    executionFailed: boolean;
     blockhashValid: boolean;
   }>;
 }
@@ -100,27 +111,31 @@ export async function inspectRingsSignature(
     .send();
 
   // The method built for this question: with history search on, it proceeds
-  // into local block storage and then archival storage, rather than only the
-  // recent status cache.
+  // into local block storage and then archival storage rather than only the
+  // recent status cache. It also carries the execution error and the
+  // confirmation level, so one call answers all three parts of the question.
   const statuses = await rpc
     .getSignatureStatuses([input.signature as Signature], { searchTransactionHistory: true })
     .send();
-  const statusSlot = statuses.value[0]?.slot ?? null;
+  const status = statuses.value[0] ?? null;
 
-  // A second, independent history source. `base64` because only the slot is
-  // read; a parsed transaction would make the node work for nobody.
+  // A second, independent history source, at `confirmed` rather than
+  // `finalized`: a transaction that is included but not yet finalized has
+  // certainly landed, and asking only about finalized roots would report it
+  // absent and invite a duplicate.
   const landed = await rpc
     .getTransaction(input.signature as Signature, {
-      commitment: "finalized",
+      commitment: "confirmed",
       encoding: "base64",
       maxSupportedTransactionVersion: 0,
     })
     .send();
-  const transactionSlot = landed === null ? null : String(landed.slot);
 
   const evidence = {
-    statusSlot: statusSlot === null ? null : String(statusSlot),
-    transactionSlot,
+    statusSlot: status === null ? null : String(status.slot),
+    statusConfirmation: status?.confirmationStatus ?? null,
+    transactionSlot: landed === null ? null : String(landed.slot),
+    executionFailed: status?.err != null || landed?.meta?.err != null,
     blockhashValid: blockhash.value,
   } as const;
 
@@ -128,6 +143,7 @@ export async function inspectRingsSignature(
     // Either source finding it is enough to say it landed; only both missing
     // can support the opposite conclusion.
     landedSlot: evidence.statusSlot ?? evidence.transactionSlot,
+    executionFailed: evidence.executionFailed,
     blockhashValid: blockhash.value,
     evidence,
   };

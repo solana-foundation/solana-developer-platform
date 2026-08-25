@@ -42,6 +42,7 @@ function signedTxBase64(): string {
 function rpcWith(options: {
   blockhashValid: boolean;
   statusSlot?: bigint | null;
+  statusErr?: string;
   transactionSlot?: bigint | null;
 }): { rpc: SolanaRpc; calls: string[] } {
   const calls: string[] = [];
@@ -61,7 +62,15 @@ function rpcWith(options: {
         config?: { searchTransactionHistory?: boolean }
       ) => ({
         send: send(`getSignatureStatuses:history=${config?.searchTransactionHistory}`, {
-          value: [options.statusSlot == null ? null : { slot: options.statusSlot }],
+          value: [
+            options.statusSlot == null
+              ? null
+              : {
+                  slot: options.statusSlot,
+                  err: options.statusErr ?? null,
+                  confirmationStatus: "finalized",
+                },
+          ],
         }),
       }),
       getTransaction: () => ({
@@ -116,9 +125,31 @@ describe("inspectRingsSignature", () => {
     expect(result.landedSlot).toBeNull();
     expect(result.evidence).toEqual({
       statusSlot: null,
+      statusConfirmation: null,
       transactionSlot: null,
+      executionFailed: false,
       blockhashValid: false,
     });
+  });
+
+  it("reports a landed transaction that reverted", async () => {
+    const { rpc } = rpcWith({
+      blockhashValid: false,
+      statusSlot: 4242n,
+      statusErr: "InstructionError",
+    });
+
+    const result = await inspectRingsSignature({
+      env,
+      signature: "sig",
+      signedTxBase64: signedTxBase64(),
+      rpc,
+    });
+
+    // The distinction Photon cannot make: it landed, so it is not absent, but
+    // it changed no shielded state, so the indexer will never report it.
+    expect(result.landedSlot).toBe("4242");
+    expect(result.executionFailed).toBe(true);
   });
 
   it("searches transaction history rather than the recent status cache", async () => {

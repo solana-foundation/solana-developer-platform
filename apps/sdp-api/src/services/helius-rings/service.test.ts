@@ -543,11 +543,18 @@ describe("HeliusRingsService", () => {
       }
 
       const chain =
-        (landedSlot: string | null, blockhashValid: boolean) =>
+        (landedSlot: string | null, blockhashValid: boolean, executionFailed = false) =>
         async (): Promise<RingsSignatureInspection> => ({
           landedSlot,
+          executionFailed,
           blockhashValid,
-          evidence: { statusSlot: landedSlot, transactionSlot: landedSlot, blockhashValid },
+          evidence: {
+            statusSlot: landedSlot,
+            statusConfirmation: landedSlot === null ? null : "finalized",
+            transactionSlot: landedSlot,
+            executionFailed,
+            blockhashValid,
+          },
         });
 
       it("completes and releases the wallet when Photon turns out to hold it", async () => {
@@ -619,11 +626,31 @@ describe("HeliusRingsService", () => {
           liveishService({
             inspectSignature: async () => ({
               landedSlot: "4242",
+              executionFailed: false,
               blockhashValid: false,
-              evidence: { statusSlot: "4242", transactionSlot: null, blockhashValid: false },
+              evidence: {
+                statusSlot: "4242",
+                statusConfirmation: "finalized",
+                transactionSlot: null,
+                executionFailed: false,
+                blockhashValid: false,
+              },
             }),
           }).reconcileOperation(id)
         ).rejects.toMatchObject({ code: "conflict" });
+      });
+
+      it("voids a transaction that landed and then failed on chain", async () => {
+        const id = await strandedSpend("nonce-rec-reverted");
+
+        const result = await liveishService({
+          inspectSignature: chain("4242", false, true),
+        }).reconcileOperation(id);
+
+        // Photon will never report a reverted transaction, because it changed
+        // no shielded state — so waiting for the indexer would hold this wallet
+        // for ever. Nothing moved, which is what makes voiding it right.
+        expect(result.state).toBe("voided");
       });
 
       it("reports an unreachable oracle as retryable rather than a crash", async () => {

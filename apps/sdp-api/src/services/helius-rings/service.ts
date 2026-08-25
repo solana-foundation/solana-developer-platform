@@ -539,13 +539,17 @@ export class HeliusRingsService {
       })
     );
 
-    if (chain.landedSlot !== null) {
+    // Landed and reverted. Photon will never report it, because a failed
+    // transaction changed no shielded state — so waiting for the indexer would
+    // freeze this wallet permanently. It also moved nothing, which is what
+    // makes voiding it correct rather than merely convenient.
+    if (chain.landedSlot !== null && !chain.executionFailed) {
       throw new HeliusRingsError(
         "conflict",
         `${operation.outer_tx_signature} is on chain but Photon has not indexed it yet; it will complete on its own once the indexer catches up`
       );
     }
-    if (chain.blockhashValid) {
+    if (chain.landedSlot === null && chain.blockhashValid) {
       throw new HeliusRingsError(
         "conflict",
         `${operation.outer_tx_signature} can still land; do not file another until its blockhash expires`
