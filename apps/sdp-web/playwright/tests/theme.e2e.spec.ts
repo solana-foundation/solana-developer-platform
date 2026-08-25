@@ -1,6 +1,8 @@
 import { type Browser, expect, type Page, test } from "@playwright/test";
-import { getPlaywrightAdminSession } from "../support/auth-session";
-import { bootstrapLocalWalletFixtures } from "../support/local-dashboard-bootstrap";
+import {
+  bootstrapLocalWalletFixtures,
+  bootstrapProjectForPage,
+} from "../support/local-dashboard-bootstrap";
 
 const THEME_STORAGE_KEY = "sdp-theme";
 const THEME_TEST_INITIALIZED_KEY = "sdp-theme-test-initialized";
@@ -44,17 +46,20 @@ async function setThemePreference(page: Page, preference: ThemePreference) {
 }
 
 /** Only the toast test needs a wallet to copy an address from. Bootstrapping it for the
- *  whole suite meant one custody-provider hiccup failed every theme test with it. */
-async function bootstrapWalletForToasts(browser: Browser) {
-  const session = await getPlaywrightAdminSession(browser);
-  await bootstrapLocalWalletFixtures({
-    identity: session.identity,
-    bearerToken: session.getBearerToken,
-    provider: "privy",
-    walletCount: 1,
-    walletLabel: `Theme Toast ${Date.now().toString(36).toUpperCase()}`,
-    tier: "enterprise",
-  });
+ *  whole suite meant one custody-provider hiccup failed every theme test with it.
+ *  Bootstrapping replaces the org, so the page's project cookie must be reseeded
+ *  before it navigates — see seedProjectCookie. */
+async function bootstrapWalletForToasts(browser: Browser, page: Page) {
+  return bootstrapProjectForPage(browser, page, (session) =>
+    bootstrapLocalWalletFixtures({
+      identity: session.identity,
+      bearerToken: session.getBearerToken,
+      provider: "privy",
+      walletCount: 1,
+      walletLabel: `Theme Toast ${Date.now().toString(36).toUpperCase()}`,
+      tier: "enterprise",
+    })
+  );
 }
 
 test.describe("dashboard theme e2e", () => {
@@ -146,7 +151,7 @@ test.describe("dashboard theme e2e", () => {
   });
 
   test("themes rendered toasts in both modes", async ({ browser, page }) => {
-    await bootstrapWalletForToasts(browser);
+    await bootstrapWalletForToasts(browser, page);
     await clearThemePreferenceBeforeNavigation(page);
     await page.emulateMedia({ colorScheme: "light" });
     await page.goto("/dashboard/wallets");

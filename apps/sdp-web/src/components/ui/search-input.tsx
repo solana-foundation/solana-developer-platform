@@ -1,42 +1,61 @@
 "use client";
 
-import { Loader2, Search } from "lucide-react";
+import { Loader2, Search, XIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
 
-type SearchInputProps = Omit<ComponentProps<typeof Input>, "type" | "iconLeft" | "iconRight"> & {
+type SearchInputProps = Omit<ComponentProps<typeof Input>, "iconLeft" | "iconRight" | "action"> & {
   /** Shows a spinner while a debounced or server-answered search is in flight. */
   pending?: boolean;
+  /** Renders a clear button while the value is non-empty, and clears on Escape. */
+  clear?: { label: string; onClear: () => void };
 };
 
 /**
- * The one search field every workspace toolbar shares: outlined 40px field,
- * leading search icon, searchbox role, and an optional pending spinner for
- * server-driven lists. The aria-label falls back to the placeholder so a
- * bare usage stays labelled.
+ * The one search field every workspace toolbar shares: the DS filled field with
+ * a leading search icon, an optional pending spinner for server-driven lists,
+ * and an optional clear affordance (X button + Escape). The aria-label falls
+ * back to the placeholder so a bare usage stays labelled.
  */
 export function SearchInput({
   pending = false,
-  className,
+  clear,
+  value,
+  onKeyDown,
   placeholder,
   "aria-label": ariaLabel,
   ...props
 }: SearchInputProps) {
+  const hasValue = typeof value === "string" && value.length > 0;
+
   return (
     <Input
-      type="search"
+      // The searchbox role without type="search", so the browser's own clear
+      // affordance never doubles the component's X button.
+      role="searchbox"
+      value={value}
       placeholder={placeholder}
       aria-label={ariaLabel ?? placeholder}
       iconLeft={<Search />}
       iconRight={pending ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}
-      // The DS input paints its border on an inner span via --input-border-*,
-      // so border-* classes are inert — override the vars to 1px + shared
-      // tokens to match the filter and toggle buttons beside it.
-      className={cn(
-        "h-10 rounded-[10px] bg-surface-raised [--input-border-hover:var(--color-border-strong)] [--input-border-idle:var(--color-border-default)] [--input-border-width:1px]",
-        className
-      )}
+      onKeyDown={(event) => {
+        if (clear && hasValue && event.key === "Escape") {
+          clear.onClear();
+        }
+        onKeyDown?.(event);
+      }}
+      action={
+        clear && hasValue ? (
+          <button
+            type="button"
+            aria-label={clear.label}
+            onClick={clear.onClear}
+            className="rounded text-tertiary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default"
+          >
+            <XIcon className="size-5" />
+          </button>
+        ) : undefined
+      }
       {...props}
     />
   );

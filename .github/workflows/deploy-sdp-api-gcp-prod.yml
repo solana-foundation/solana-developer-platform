@@ -59,11 +59,10 @@ jobs:
           echo "DEPLOY_IMAGE_SHA=${DEPLOY_IMAGE_SHA}" >> "${GITHUB_ENV}"
 
       - name: Checkout
-        if: ${{ inputs.release_sha != '' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           fetch-depth: 0
-          ref: ${{ inputs.release_sha }}
+          ref: ${{ inputs.release_sha != '' && inputs.release_sha || github.sha }}
 
       - name: Verify release identity
         if: ${{ inputs.release_sha != '' }}
@@ -229,6 +228,9 @@ jobs:
         run: |
           set -euo pipefail
 
+          node .github/scripts/verify-managed-reconciliation-cadence.mjs \
+            "${JOB}" "${REGION}" "${PROJECT_ID}"
+
           gcloud run services update-traffic "${SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
             --to-revisions "${CANDIDATE_REVISION}=100"
@@ -257,6 +259,17 @@ jobs:
           gcloud run jobs update "${PII_MIGRATE_JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
           echo "ROLLOUT_COMPLETE=true" >> "${GITHUB_ENV}"
+
+      - name: Record managed monitor migration gate
+        if: ${{ env.ROLLOUT_COMPLETE == 'true' }}
+        run: |
+          {
+            echo "### Managed reconciliation monitor follow-up"
+            echo
+            echo "Do not close SDP-API-5/H/J/P/X yet. Observe two successful managed cadences, then retire the superseded monitors using:"
+            echo
+            echo 'docs/ops/managed-reconciliation-monitor-migration.md'
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Roll back incomplete rollout
         if: ${{ always() }}

@@ -16,6 +16,14 @@ export interface Env {
   // Node runtimes remain enabled by default and may opt out with "true"/"1".
   DISABLE_CRON?: string;
 
+  // Deployment-owned Cloud Scheduler cadence for the dedicated managed
+  // reconciliation job. The job requires a five-field crontab and uses the
+  // exact value for its managed Sentry monitor configuration.
+  SDP_MANAGED_RECONCILIATION_CRON?: string;
+  // Cloud Run job timeout, projected from the same infrastructure resource.
+  // Sentry's minute-based maxRuntime is the ceiling of this value.
+  SDP_MANAGED_RECONCILIATION_TIMEOUT_SECONDS?: string;
+
   // Environment variables
   ENVIRONMENT: "development" | "production";
   API_VERSION: string;
