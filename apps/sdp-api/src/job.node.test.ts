@@ -18,7 +18,12 @@ import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { trackPendingWithdrawals } from "@/services/jobs/track-pending-withdrawals";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
-import { describeCronFailure, runCronJob } from "./job";
+import {
+  describeCronFailure,
+  getManagedMonitorSlug,
+  getManagedReconciliationCron,
+  runCronJob,
+} from "./job";
 
 vi.mock("@sentry/node", () => ({
   close: vi.fn(async () => true),
@@ -248,6 +253,27 @@ describe("runCronJob", () => {
 
     expect(trackPendingTransfers).not.toHaveBeenCalled();
     expect(reconcileSponsorshipBudgets).not.toHaveBeenCalled();
+  });
+
+  it("accepts a managed cadence at the exact five-minute gap boundary", () => {
+    expect(getManagedReconciliationCron({ SDP_MANAGED_RECONCILIATION_CRON: "*/5 * * * *" })).toBe(
+      "*/5 * * * *"
+    );
+  });
+
+  it.each([
+    ["hour", "*/5 0 * * *"],
+    ["day of month", "*/5 * 1 * *"],
+    ["month", "*/5 * * 1 *"],
+    ["day of week", "*/5 * * * 1"],
+  ])("rejects a managed cadence restricted by %s", (_field, cron) => {
+    expect(() => getManagedReconciliationCron({ SDP_MANAGED_RECONCILIATION_CRON: cron })).toThrow(
+      /must run at least once every 5 minutes of every hour/
+    );
+  });
+
+  it("creates a managed slug for a monitor without the API prefix", () => {
+    expect(getManagedMonitorSlug("custom-reconciler")).toBe("sdp-api-managed-custom-reconciler");
   });
 
   it("fails fast when the managed job timeout is missing or invalid", async () => {

@@ -65,7 +65,9 @@ const MANAGED_CATALOGUE_CHECKIN_MARGIN_MINUTES = 10;
  * once everything has run (as an AggregateError when more than one failed, and
  * logged with full causes at the process exit below), failing the job loudly;
  * non-fatal ticks' failures are swallowed after their log. The next execution
- * retries everything.
+ * retries everything. Workflow secret retirements and Earn metrics refresh are
+ * intentionally the only ticks whose failures do not enter the final failure
+ * collection.
  *
  * The sequence:
  *
@@ -278,6 +280,7 @@ function createManagedTickRunner({
   }
 
   return async <T>(monitor: string, work: () => Promise<T>): Promise<T> => {
+    const monitorSlug = getManagedMonitorSlug(monitor);
     const checkIn = checkIns.get(monitor);
     try {
       const result = await work();
@@ -291,7 +294,7 @@ function createManagedTickRunner({
       }
       getLogger().error(
         {
-          monitor: checkIn?.monitorSlug ?? monitor,
+          monitor: monitorSlug,
           error: error instanceof Error ? error.message : String(error),
         },
         "reconciliation job: tick failed"
@@ -301,7 +304,7 @@ function createManagedTickRunner({
   };
 }
 
-function getManagedMonitorSlug(monitor: string): string {
+export function getManagedMonitorSlug(monitor: string): string {
   const prefix = "sdp-api-";
   return `sdp-api-managed-${monitor.startsWith(prefix) ? monitor.slice(prefix.length) : monitor}`;
 }
@@ -328,7 +331,9 @@ function createManagedTaskObservability(
   };
 }
 
-function getManagedReconciliationCron(env: Pick<Env, "SDP_MANAGED_RECONCILIATION_CRON">): string {
+export function getManagedReconciliationCron(
+  env: Pick<Env, "SDP_MANAGED_RECONCILIATION_CRON">
+): string {
   const value = env.SDP_MANAGED_RECONCILIATION_CRON?.trim();
   if (!value) {
     throw new Error("SDP_MANAGED_RECONCILIATION_CRON is required for the reconciliation job");
