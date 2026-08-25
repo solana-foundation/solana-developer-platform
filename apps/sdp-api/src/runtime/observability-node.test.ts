@@ -6,6 +6,7 @@ import { initNodeSentry, nodeObservability } from "./observability-node";
 vi.mock("@sentry/node", () => ({
   init: vi.fn(),
   captureException: vi.fn(),
+  captureCheckIn: vi.fn(() => "check-in-id"),
   withScope: vi.fn((cb: (scope: unknown) => void) => cb({ setTag: vi.fn(), setUser: vi.fn() })),
   withMonitor: vi.fn(async (_slug: string, fn: () => Promise<unknown>) => fn()),
 }));
@@ -31,6 +32,15 @@ describe("nodeObservability — guards before init", () => {
 
   it("withScope throws if called before initNodeSentry", () => {
     expect(() => nodeObservability.withScope(() => {})).toThrow(/before initNodeSentry/);
+  });
+
+  it("captureCheckIn throws if called before initNodeSentry", () => {
+    expect(() =>
+      nodeObservability.captureCheckIn(
+        { monitorSlug: "slug", status: "in_progress" },
+        { schedule: { type: "crontab", value: "* * * * *" } }
+      )
+    ).toThrow(/before initNodeSentry/);
   });
 
   it("withMonitor throws if called before initNodeSentry", () => {
@@ -64,6 +74,14 @@ describe("nodeObservability — after init", () => {
     const err = new Error("boom");
     nodeObservability.captureException(err);
     expect(Sentry.captureException).toHaveBeenCalledWith(err);
+  });
+
+  it("captureCheckIn forwards the check-in and monitor configuration", () => {
+    const checkIn = { monitorSlug: "slug", status: "in_progress" as const };
+    const options = { schedule: { type: "crontab" as const, value: "* * * * *" } };
+
+    expect(nodeObservability.captureCheckIn(checkIn, options)).toBe("check-in-id");
+    expect(Sentry.captureCheckIn).toHaveBeenCalledWith(checkIn, options);
   });
 
   it("withScope passes a scope to the callback", () => {
