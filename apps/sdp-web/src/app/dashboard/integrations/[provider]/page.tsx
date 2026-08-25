@@ -83,12 +83,41 @@ async function getByokConnections(provider: string, canManage: boolean) {
       collectConnections(client, "organization"),
     ]);
 
-    return [...projectScoped, ...organizationScoped].filter(
-      (connection) => connection.provider === provider
+    const all = [...projectScoped, ...organizationScoped];
+
+    // A project routes through one connection whatever the provider, so the
+    // page has to know about connections belonging to the other five. Without
+    // it every other provider's page still offered Add and the save came back
+    // 409 (HOO-1227).
+    const elsewhere = all.find(
+      (connection) =>
+        connection.provider !== provider &&
+        connection.scope === "project" &&
+        connection.status !== "deactivated"
     );
+
+    return {
+      connections: all.filter((connection) => connection.provider === provider),
+      projectConnectionProvider: elsewhere?.provider ?? null,
+    };
   } catch {
     return null;
   }
+}
+
+/**
+ * Flatten the loader's answer into the two props the view takes. The sentinels
+ * (`undefined` not an RPC provider, `"restricted"` not permitted, `null` the
+ * read failed) carry no sibling provider, so they pass straight through.
+ */
+function resolveByokProps(result: Awaited<ReturnType<typeof getByokConnections>>) {
+  if (result === undefined || result === null || result === "restricted") {
+    return { byokConnections: result, projectConnectionProvider: null };
+  }
+  return {
+    byokConnections: result.connections,
+    projectConnectionProvider: result.projectConnectionProvider,
+  };
 }
 
 /**
@@ -208,9 +237,11 @@ export default async function IntegrationDetailPage({
               isEnabledInDeployment:
                 availability.providers.rpc[provider as OrganizationRpcProvider]?.enabled ?? false,
               organizationId,
-              byokConnections: await getByokConnections(
-                provider,
-                dashboardAccess.capabilities.canManageOrgSettings
+              ...resolveByokProps(
+                await getByokConnections(
+                  provider,
+                  dashboardAccess.capabilities.canManageOrgSettings
+                )
               ),
               credentialMode: await getRpcCredentialMode(
                 dashboardAccess.capabilities.canManageOrgSettings

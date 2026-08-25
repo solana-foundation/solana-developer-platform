@@ -414,6 +414,7 @@
     "rpcModeManagedHint": "SDP's providers answer for any project without a connection of its own. Turn this on once every project you use has one.",
     "rpcModeByokHint": "SDP's providers will not answer for this organization. A project without a live connection fails instead of falling back to our keys.",
     "rpcModeSaved": "Credential mode updated.",
+    "rpcByokTakenElsewhere": "This project already routes through",
     "rpcByokOnlyOne": "A project routes through one connection. Rotate the key on the one above to change it, or deactivate it first to start over.",
     "rpcByokRotate": "Rotate key",
     "rpcByokRotateHint": "The connection keeps serving on the current key until the new one has been checked. If the new key is rejected, nothing changes.",

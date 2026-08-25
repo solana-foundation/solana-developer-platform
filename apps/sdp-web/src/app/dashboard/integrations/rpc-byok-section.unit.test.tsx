@@ -279,6 +279,15 @@ describe("RpcByokSection", () => {
     expect(screen.getByText(/A project routes through one connection/)).toBeTruthy();
   });
 
+  it("closes the form when another provider already holds this project", async () => {
+    // A project routes through one connection whatever the provider, so
+    // offering Add here produced a form that could only ever 409 (HOO-1227).
+    renderSection({ connections: [], projectConnectionProvider: "helius" });
+
+    expect(screen.queryByRole("button", { name: "Add connection" })).toBeNull();
+    expect(screen.getByText(/already routes through helius/)).toBeTruthy();
+  });
+
   it("still offers add when the only rows are stranded or withdrawn", () => {
     renderSection({
       connections: [

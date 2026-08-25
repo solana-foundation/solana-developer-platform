@@ -276,6 +276,64 @@ function ConnectionRow({
 }
 
 /**
+ * Why there is no list. Two different answers that must not be confused: not
+ * permitted is a settled fact, a failed read is not, so only the second gets a
+ * warning and an invitation to retry.
+ */
+function ConnectionsUnavailable({
+  reason,
+  t,
+}: {
+  reason: "restricted" | null;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  return reason === "restricted" ? (
+    <p className="text-sm leading-6 text-tertiary">{t("Shared.integrations.rpcByokRestricted")}</p>
+  ) : (
+    <p className="text-sm leading-6 text-warning">{t("Shared.integrations.rpcByokUnavailable")}</p>
+  );
+}
+
+/**
+ * Whose credentials the whole organization runs on.
+ *
+ * Organization-wide rather than per connection, so it sits above the list and
+ * not inside a row. Its own component to keep the section's branching under
+ * the repository's complexity limit.
+ */
+function CredentialModeCard({
+  mode,
+  saving,
+  onChange,
+  t,
+}: {
+  mode: "managed" | "byok";
+  saving: boolean;
+  onChange: (next: "managed" | "byok") => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border-default px-4 py-3">
+      <div className="min-w-0 space-y-1">
+        <p className="text-sm font-medium text-primary">{t("Shared.integrations.rpcModeTitle")}</p>
+        <p className="max-w-2xl text-xs leading-5 text-tertiary">
+          {mode === "byok"
+            ? t("Shared.integrations.rpcModeByokHint")
+            : t("Shared.integrations.rpcModeManagedHint")}
+        </p>
+      </div>
+      <ToggleSwitch
+        checked={mode === "byok"}
+        disabled={saving}
+        // The switch renders no text of its own, so it needs a name.
+        aria-label={t("Shared.integrations.rpcModeToggle")}
+        onChange={(next) => onChange(next ? "byok" : "managed")}
+      />
+    </div>
+  );
+}
+
+/**
  * The replacement key, asked for in place.
  *
  * Its own component so the value lives and dies with the open form: a key
@@ -357,11 +415,14 @@ export function RpcByokSection({
   canManage,
   connections,
   credentialMode,
+  projectConnectionProvider,
   provider,
 }: {
   canManage: boolean;
   /** `null` when it could not be read; the control is hidden rather than guessed. */
   credentialMode?: "managed" | "byok" | null;
+  /** The provider this project already routes through, when it is not this one. */
+  projectConnectionProvider?: string | null;
   /**
    * `null` when the read failed and `"restricted"` when the viewer may not make
    * it at all. Three different answers: unknown, not allowed, and none.
@@ -394,6 +455,9 @@ export function RpcByokSection({
   const hasLiveConnection =
     Array.isArray(connections) &&
     connections.some((item) => item.scope === "project" && item.status !== "deactivated");
+  // A project routes through one connection whatever the provider, so another
+  // provider holding it closes this page's form too.
+  const takenByAnotherProvider = Boolean(projectConnectionProvider);
 
   const runConnectionAction = async (action: ConnectionAction, connectionId: string) => {
     setPendingId(connectionId);
@@ -508,15 +572,8 @@ export function RpcByokSection({
         {t("Shared.integrations.rpcByokDescription")}
       </p>
 
-      {connections === "restricted" ? (
-        // Not a failure, so not a warning and no invitation to retry.
-        <p className="text-sm leading-6 text-tertiary">
-          {t("Shared.integrations.rpcByokRestricted")}
-        </p>
-      ) : connections === null ? (
-        <p className="text-sm leading-6 text-warning">
-          {t("Shared.integrations.rpcByokUnavailable")}
-        </p>
+      {connections === "restricted" || connections === null ? (
+        <ConnectionsUnavailable reason={connections} t={t} />
       ) : connections.length > 0 ? (
         <ConnectionList
           canManage={canManage}
@@ -541,36 +598,27 @@ export function RpcByokSection({
       )}
 
       {canManage && credentialMode ? (
-        <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border-default px-4 py-3">
-          <div className="min-w-0 space-y-1">
-            <p className="text-sm font-medium text-primary">
-              {t("Shared.integrations.rpcModeTitle")}
-            </p>
-            <p className="max-w-2xl text-xs leading-5 text-tertiary">
-              {mode === "byok"
-                ? t("Shared.integrations.rpcModeByokHint")
-                : t("Shared.integrations.rpcModeManagedHint")}
-            </p>
-          </div>
-          <ToggleSwitch
-            checked={mode === "byok"}
-            disabled={isSavingMode}
-            // The switch renders no text of its own, so it needs a name.
-            aria-label={t("Shared.integrations.rpcModeToggle")}
-            onChange={(next) => {
-              void saveMode(next ? "byok" : "managed");
-            }}
-          />
-        </div>
+        <CredentialModeCard
+          mode={mode}
+          saving={isSavingMode}
+          onChange={(next) => {
+            void saveMode(next);
+          }}
+          t={t}
+        />
       ) : null}
 
-      {canManage && hasLiveConnection ? (
+      {canManage && (hasLiveConnection || takenByAnotherProvider) ? (
         // One per project for now (HOO-1227). Saying so is better than an Add
         // button that only ever comes back with a conflict.
-        <p className="text-sm leading-6 text-tertiary">{t("Shared.integrations.rpcByokOnlyOne")}</p>
+        <p className="text-sm leading-6 text-tertiary">
+          {takenByAnotherProvider
+            ? `${t("Shared.integrations.rpcByokTakenElsewhere")} ${projectConnectionProvider}.`
+            : t("Shared.integrations.rpcByokOnlyOne")}
+        </p>
       ) : null}
 
-      {canManage && !hasLiveConnection ? (
+      {canManage && !hasLiveConnection && !takenByAnotherProvider ? (
         <div className="space-y-3">
           {/* Collapsed by default: most visits are to read what is connected,
               not to add a credential, and a permanently open secret field is

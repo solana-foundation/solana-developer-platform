@@ -31,6 +31,12 @@ export interface RpcConnectionContext {
   byokConnections?: SafeRpcConnection[] | null | "restricted";
   /** `null` when it could not be read, or the viewer may not manage it. */
   credentialMode?: "managed" | "byok" | null;
+  /**
+   * Set when the project already routes through a different provider. A
+   * project takes one connection whatever the provider, so this page must not
+   * offer to add a second.
+   */
+  projectConnectionProvider?: string | null;
 }
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
@@ -195,6 +201,7 @@ export async function IntegrationDetailView({
             canManage={rpc.canManage}
             connections={rpc.byokConnections}
             credentialMode={rpc.credentialMode ?? null}
+            projectConnectionProvider={rpc.projectConnectionProvider ?? null}
             provider={detail.provider}
           />
         </Section>
