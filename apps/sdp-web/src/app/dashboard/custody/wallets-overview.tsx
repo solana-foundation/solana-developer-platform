@@ -1,7 +1,7 @@
 "use client";
 
 import type { CustodyWalletSummary } from "@sdp/types";
-import { Plus, SearchIcon, XIcon } from "lucide-react";
+import { PlusIcon, SearchIcon } from "lucide-react";
 import Link from "next/link";
 import { type ReactNode, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -15,12 +15,13 @@ import {
 import {
   WalletAddressCopyButton,
   WalletMetadataCopyButton,
+  WalletMetaValue,
 } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { WalletCardBalanceValue } from "@/app/dashboard/custody/wallet-card-balance-value";
 import { formatPurpose, formatWalletMeta } from "@/app/dashboard/custody/wallet-format-utils";
 import { WalletLabelInlineEditor } from "@/app/dashboard/custody/wallet-label-inline-editor";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { useDebounce } from "@/lib/use-debounce";
@@ -70,7 +71,7 @@ function CreateWalletTile({ onClick }: { onClick: () => void }) {
       className="flex cursor-pointer items-center justify-center rounded-2xl border border-dashed border-border-strong bg-surface-raised text-tertiary transition-colors hover:border-primary/40 hover:text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default focus-visible:ring-offset-2"
       aria-label={t("DashboardCustody.createWallet")}
     >
-      <Plus className="h-6 w-6" />
+      <PlusIcon className="h-6 w-6" />
     </button>
   );
 }
@@ -374,28 +375,12 @@ export function WalletsOverview({
         data-wallet-search-toolbar
       >
         <div className="w-full sm:max-w-md">
-          <Input
+          <SearchInput
             value={searchValue}
             maxLength={WALLET_SEARCH_MAX_LENGTH}
             onChange={(event) => updateSearchValue(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape" && searchValue) clearSearch();
-            }}
             placeholder={t("DashboardCustody.walletSearchPlaceholder")}
-            aria-label={t("DashboardCustody.walletSearchPlaceholder")}
-            iconLeft={<SearchIcon />}
-            action={
-              searchValue ? (
-                <button
-                  type="button"
-                  aria-label={t("DashboardCustody.clearWalletSearch")}
-                  onClick={clearSearch}
-                  className="rounded text-tertiary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default"
-                >
-                  <XIcon className="size-5" />
-                </button>
-              ) : undefined
-            }
+            clear={{ label: t("DashboardCustody.clearWalletSearch"), onClear: clearSearch }}
           />
           {normalizedSearch ? (
             <p className="mt-2 text-xs text-secondary" aria-live="polite">
@@ -416,7 +401,12 @@ export function WalletsOverview({
             </Button>
           ) : null}
           {canManageCustody && enabledProviderEntries.length > 0 ? (
-            <Button type="button" className="w-full sm:w-auto" onClick={() => onCreateWallet(null)}>
+            <Button
+              type="button"
+              className="w-full sm:w-auto"
+              onClick={() => onCreateWallet(null)}
+              iconLeft={<PlusIcon className="h-4 w-4" />}
+            >
               {t("DashboardCustody.createWallet")}
             </Button>
           ) : null}
@@ -448,14 +438,5 @@ export function WalletsOverview({
         )}
       </div>
     </div>
-  );
-}
-
-function WalletMetaValue({ value, displayValue }: { value: string; displayValue: string }) {
-  return (
-    <span className="block truncate font-mono text-xs text-secondary">
-      <span aria-hidden="true">{displayValue}</span>
-      <span className="sr-only">{value}</span>
-    </span>
   );
 }
