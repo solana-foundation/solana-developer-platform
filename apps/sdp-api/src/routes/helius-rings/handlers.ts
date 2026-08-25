@@ -1,10 +1,11 @@
 import {
+  type HeliusRingsWalletRow,
   mapHeliusRingsOperationSummaryRow,
   mapHeliusRingsWalletRow,
   mapHeliusRingsZoneRow,
 } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { badRequest } from "@/lib/errors";
+import { badRequest, conflict, internalError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
@@ -37,6 +38,13 @@ function tenantOf(c: AppContext) {
   };
 }
 
+function policyCustodyWalletId(wallet: HeliusRingsWalletRow): string {
+  if (wallet.custody_wallet_id === null) {
+    throw conflict("Rings wallet is missing its custody wallet linkage");
+  }
+  return wallet.custody_wallet_id;
+}
+
 // --- health -----------------------------------------------------------------
 
 /** GET /health — probe the gateway and return the per-component status board. */
@@ -48,11 +56,7 @@ export async function getRingsHealth(c: AppContext) {
 
 // --- wallets ----------------------------------------------------------------
 
-/**
- * POST /wallets — bind a rings wallet to an SDP custody wallet and provision
- * its shielded identity. Until the live gateway lands this responds 503 with a
- * seam-marker message and the wallet stays `pending` — the wizard renders that.
- */
+/** POST /wallets — bind a Rings wallet to an SDP custody wallet and provision its identity. */
 export async function createRingsWallet(c: AppContext) {
   const parsed = createRingsWalletSchema.safeParse(await c.req.json());
   if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? "invalid body");
@@ -83,16 +87,19 @@ export async function createRingsWallet(c: AppContext) {
  * GET /wallets — the project's rings wallets, newest first.
  *
  * Filtered rather than refused: a wallet-scoped key asking for its wallets
- * wants the ones it holds, not a 403. Filtering here is also what stops the
- * list being used to discover ids the caller cannot otherwise touch.
+ * wants the ones it holds, not a 403. The repository applies the scope before
+ * the list limit so unauthorized rows cannot consume the page.
  */
 export async function listRingsWallets(c: AppContext) {
   const { tenant } = tenantOf(c);
   const limit = listLimitSchema.parse(c.req.query("limit"));
   const allowed = allowedRingsWalletIds(c, ["payments:read"]);
-  const rows = await getHeliusRingsWalletRepository(c).listWallets({ ...tenant, limit });
-  const visible = allowed ? rows.filter((row) => allowed.has(row.sdp_wallet_id)) : rows;
-  return success(c, { wallets: visible.map(mapHeliusRingsWalletRow) });
+  const rows = await getHeliusRingsWalletRepository(c).listWallets({
+    ...tenant,
+    limit,
+    ...(allowed ? { sdpWalletIds: [...allowed] } : {}),
+  });
+  return success(c, { wallets: rows.map(mapHeliusRingsWalletRow) });
 }
 
 /** GET /wallets/:walletId */
@@ -173,18 +180,14 @@ export async function prepareRingsOperation(c: AppContext) {
 
   const { auth, tenant } = tenantOf(c);
   const ringsWallet = await requireRingsWallet(c, tenant, parsed.data.walletId, ["payments:write"]);
-
-  // The policy envelope wants the custody wallet backing the rings wallet;
-  // absence is tolerated (the envelope's wallet id still scopes the policy).
-  const scope = await resolveScope(c);
-  const custodyWallet = scope.wallets.find((entry) => entry.walletId === ringsWallet.sdp_wallet_id);
+  const custodyWalletId = policyCustodyWalletId(ringsWallet);
 
   const service = getHeliusRingsService(c, tenant);
   const operation = await withRingsErrors(() =>
     service.prepareOperation(parsed.data, {
       apiKeyId: auth.apiKeyId,
       actor: walletOperationActorFromAuth(auth),
-      custodyWalletId: custodyWallet?.id ?? null,
+      custodyWalletId,
     })
   );
   return success(c, { operation }, 201);
@@ -202,23 +205,19 @@ export async function listRingsOperations(c: AppContext) {
   const limit = listLimitSchema.parse(c.req.query("limit"));
   const allowed = allowedRingsWalletIds(c, ["payments:read"]);
 
+  const walletIds = allowed
+    ? await getHeliusRingsWalletRepository(c).listWalletIdsBySdpWalletIds({
+        ...tenant,
+        sdpWalletIds: [...allowed],
+      })
+    : undefined;
   const rows = await getHeliusRingsOperationRepository(c).listOperationsByProject({
     ...tenant,
     limit,
+    ...(walletIds === undefined ? {} : { walletIds }),
   });
-  if (!allowed) {
-    return success(c, { operations: rows.map(mapHeliusRingsOperationSummaryRow) });
-  }
-
-  const wallets = await getHeliusRingsWalletRepository(c).listWallets({ ...tenant });
-  const visibleWalletIds = new Set(
-    wallets.filter((wallet) => allowed.has(wallet.sdp_wallet_id)).map((wallet) => wallet.id)
-  );
-
   return success(c, {
-    operations: rows
-      .filter((row) => visibleWalletIds.has(row.wallet_id))
-      .map(mapHeliusRingsOperationSummaryRow),
+    operations: rows.map(mapHeliusRingsOperationSummaryRow),
   });
 }
 
@@ -261,23 +260,21 @@ export async function retryRingsOperation(c: AppContext) {
   const failedId = requireParam(c, "operationId");
   const failed = await requireRingsOperation(c, tenant, failedId, ["payments:write"]);
 
-  const [ringsWallet, scope] = await Promise.all([
-    getHeliusRingsWalletRepository(c).getWalletById({
-      ...tenant,
-      id: failed.wallet_id,
-    }),
-    resolveScope(c),
-  ]);
-  const custodyWallet = ringsWallet
-    ? scope.wallets.find((entry) => entry.walletId === ringsWallet.sdp_wallet_id)
-    : undefined;
+  const ringsWallet = await getHeliusRingsWalletRepository(c).getWalletById({
+    ...tenant,
+    id: failed.wallet_id,
+  });
+  if (!ringsWallet) {
+    throw internalError("rings operation references a missing Rings wallet");
+  }
+  const custodyWalletId = policyCustodyWalletId(ringsWallet);
 
   const service = getHeliusRingsService(c, tenant);
   const operation = await withRingsErrors(() =>
     service.retryOperation(failedId, parsed.data.clientNonce, {
       apiKeyId: auth.apiKeyId,
       actor: walletOperationActorFromAuth(auth),
-      custodyWalletId: custodyWallet?.id ?? null,
+      custodyWalletId,
     })
   );
   return success(c, { operation }, 201);

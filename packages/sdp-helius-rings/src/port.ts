@@ -134,11 +134,10 @@ export interface BuildOperationInput {
    * The exact notes a previous build of this operation committed to.
    *
    * Absent on a first build, where the gateway selects them. Present on a
-   * rebuild, and then binding: a spend cannot pin its inputs through the SDK's
-   * high-level builders, so re-selecting freely after a lost response could
-   * choose a disjoint set and land alongside the original, paying the recipient
-   * twice. Rebuilding against the same notes cannot — the second attempt is
-   * rejected for a spent nullifier.
+   * rebuild, and then binding: this makes note selection deterministic and
+   * reproducible across pre-sign attempts. If a refreshed wallet view no longer
+   * contains one of these notes, the gateway refuses to substitute another and
+   * reports the stale/incomplete state instead.
    */
   pinnedInputs?: string[];
   /** Labels the mints involved; the gateway holds no database handle. */

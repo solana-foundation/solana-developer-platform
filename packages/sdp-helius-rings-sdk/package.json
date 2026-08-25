@@ -9,11 +9,6 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
-    "./deterministic-ka": {
-      "types": "./src/deterministic-ka/index.ts",
-      "import": "./src/deterministic-ka/index.ts",
-      "default": "./src/deterministic-ka/index.ts"
-    },
     "./testing": {
       "types": "./src/testing/index.ts",
       "import": "./src/testing/index.ts",
@@ -29,6 +24,7 @@
   "dependencies": {
     "@heliuslabs/zolana": "0.1.1-alpha",
     "@sdp/helius-rings": "workspace:*",
+    "@solana-program/compute-budget": "0.17.0",
     "@solana/kit": "7.1.1"
   },
   "devDependencies": {

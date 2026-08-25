@@ -19,8 +19,6 @@ import type { HeliusRingsEventRepository } from "./helius-rings-event.repository
 import { createPostgresHeliusRingsEventRepository } from "./helius-rings-event.repository.postgres";
 import type { HeliusRingsHealthRepository } from "./helius-rings-health.repository";
 import { createPostgresHeliusRingsHealthRepository } from "./helius-rings-health.repository.postgres";
-import type { HeliusRingsKeyRefRepository } from "./helius-rings-key-ref.repository";
-import { createPostgresHeliusRingsKeyRefRepository } from "./helius-rings-key-ref.repository.postgres";
 import type { HeliusRingsOperationRepository } from "./helius-rings-operation.repository";
 import { createPostgresHeliusRingsOperationRepository } from "./helius-rings-operation.repository.postgres";
 import type { HeliusRingsWalletRepository } from "./helius-rings-wallet.repository";
@@ -238,10 +236,6 @@ export function createHeliusRingsWalletRepository(env: Env): HeliusRingsWalletRe
 
 export function createHeliusRingsOperationRepository(env: Env): HeliusRingsOperationRepository {
   return createPostgresHeliusRingsOperationRepository(getDb(env));
-}
-
-export function createHeliusRingsKeyRefRepository(env: Env): HeliusRingsKeyRefRepository {
-  return createPostgresHeliusRingsKeyRefRepository(getDb(env));
 }
 
 export function createHeliusRingsZoneRepository(env: Env): HeliusRingsZoneRepository {

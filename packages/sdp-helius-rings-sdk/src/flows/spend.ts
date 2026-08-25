@@ -1,5 +1,5 @@
 import type { ZolanaClient } from "@heliuslabs/zolana/client";
-import { transactInstruction } from "@heliuslabs/zolana/interface";
+import { MERGE_INPUT_COUNT, transactInstruction } from "@heliuslabs/zolana/interface";
 import {
   ConfidentialTransfer,
   ProofInputUtxo,
@@ -7,7 +7,11 @@ import {
   type WalletAuthority,
   WithdrawalTarget,
 } from "@heliuslabs/zolana/transaction";
-import { buildMergeTransaction, resolveRegisteredAddress } from "@heliuslabs/zolana/wallet";
+import {
+  buildMergeTransaction,
+  resolveRegisteredAddress,
+  WalletError,
+} from "@heliuslabs/zolana/wallet";
 import { HeliusRingsError } from "@sdp/helius-rings";
 import { type Address, address, type Instruction, type Transaction } from "@solana/kit";
 import type { ShieldedMaterial } from "../material.js";
@@ -214,7 +218,7 @@ function select(
 }
 
 /**
- * Every unspent note of the asset, which is what a merge is for.
+ * Plain unspent notes of the asset, which is what Zolana's merge rail accepts.
  *
  * Capped at the circuit's input count. Merging the maximum each time is what
  * lets a badly fragmented wallet converge in a few operations rather than one
@@ -222,8 +226,26 @@ function select(
  */
 function mergeable(deps: SpendDeps, asset: Address): NoteSelection {
   const notes = [
-    ...deps.wallet.utxos().filter((note) => !note.spent && note.utxo.asset === asset),
-  ].sort((left, right) => noteId(left).localeCompare(noteId(right)));
+    ...deps.wallet
+      .utxos()
+      .filter(
+        (note) =>
+          !note.spent &&
+          note.utxo.asset === asset &&
+          note.utxo.zoneProgramId === undefined &&
+          note.dataHash === undefined &&
+          note.zoneDataHash === undefined &&
+          note.utxo.data.isEmpty()
+      ),
+  ];
+  const trees = new Set(notes.map((note) => note.outputContext.tree));
+  if (trees.size > 1) {
+    throw new WalletError("WALLET_MULTIPLE_INPUT_TREES");
+  }
+
+  notes.sort((left, right) =>
+    left.utxo.amount < right.utxo.amount ? -1 : left.utxo.amount > right.utxo.amount ? 1 : 0
+  );
 
   if (notes.length < 2) {
     throw new HeliusRingsError(
@@ -232,16 +254,13 @@ function mergeable(deps: SpendDeps, asset: Address): NoteSelection {
     );
   }
 
-  const chosen = notes.slice(0, MERGE_INPUT_LIMIT);
+  const chosen = notes.slice(0, MERGE_INPUT_COUNT);
   return {
     notes: chosen,
     ids: chosen.map(noteId),
     total: chosen.reduce((sum, note) => sum + note.utxo.amount, 0n),
   };
 }
-
-/** The merge circuit's padded input count. */
-const MERGE_INPUT_LIMIT = 8;
 
 function proofInputs(deps: SpendDeps, selection: NoteSelection): ProofInputUtxo[] {
   return selection.notes.map(

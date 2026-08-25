@@ -1,6 +1,5 @@
 export {
   FAILURE_CODES,
-  KEY_KINDS,
   MATERIAL_TAGS,
   OP_TYPES,
   OPERATION_STATES,
@@ -38,8 +37,6 @@ export {
 export type {
   AssetBalance,
   FailureCode,
-  KeyKind,
-  KeyRef,
   MaterialTag,
   OperationEvent,
   OperationFailure,

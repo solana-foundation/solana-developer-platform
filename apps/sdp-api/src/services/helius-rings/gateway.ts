@@ -5,10 +5,10 @@ import {
   type RuntimeHealth,
 } from "@sdp/helius-rings";
 import { createRingsGateway } from "@sdp/helius-rings-sdk";
-import { withHeliusApiKey } from "@sdp/rpc/relay";
 import { isRingsInsecureHttpAllowed } from "@/lib/feature-flags";
 import type { Env } from "@/types/env";
 import { submitRingsOuterTransaction } from "./rpc-adapter";
+import { resolveRingsHeliusRpcConfig } from "./rpc-config";
 import { signRingsOuterTransaction } from "./signer-adapter";
 
 /**
@@ -54,15 +54,6 @@ function misconfiguredGateway(missing: readonly string[]): RingsGatewayPort {
 }
 
 /**
- * The placeholder `SOLANA_RPC_HELIUS_URL` carries until an API key replaces it.
- * `withHeliusApiKey` returns the URL untouched when the key is absent, so a
- * surviving placeholder is how a missing key becomes visible — otherwise the
- * client is built against a literal `{API_KEY}` and the only symptom is an
- * unreachable RPC, which points at the wrong variable.
- */
-const API_KEY_PLACEHOLDER = "{API_KEY}";
-
-/**
  * The tenant a gateway answers for. Fixed at construction because key material
  * is derived per organization and project: passing the triple on every call
  * would make deriving under the wrong tenant a matter of argument discipline
@@ -80,23 +71,20 @@ export function resolveRingsGateway(env: Env, tenant: RingsGatewayTenant): Rings
 
   // Rings needs a Helius endpoint specifically — Photon and the prover are
   // Helius services — so this does not fall back to SOLANA_RPC_URL.
-  const rpcUrl = env.SOLANA_RPC_HELIUS_URL;
   const indexerUrl = env.HELIUS_RINGS_INDEXER_URL;
   const proverUrl = env.HELIUS_RINGS_PROVER_URL;
-  const solanaRpcUrl = rpcUrl ? withHeliusApiKey(rpcUrl, env.SOLANA_RPC_HELIUS_API_KEY) : undefined;
+  const { rpcUrl: solanaRpcUrl, missing: missingRpc } = resolveRingsHeliusRpcConfig(env);
 
   const derivationSeed = env.HELIUS_RINGS_DETERMINISTIC_KA_SEED;
 
   const missing = [
-    ["SOLANA_RPC_HELIUS_URL", rpcUrl],
-    ["HELIUS_RINGS_INDEXER_URL", indexerUrl],
-    ["HELIUS_RINGS_PROVER_URL", proverUrl],
-    ["HELIUS_RINGS_DETERMINISTIC_KA_SEED", derivationSeed],
-    [
-      "SOLANA_RPC_HELIUS_API_KEY",
-      solanaRpcUrl?.includes(API_KEY_PLACEHOLDER) ? undefined : solanaRpcUrl,
-    ],
-  ].flatMap(([name, value]) => (value ? [] : [name as string]));
+    ...missingRpc,
+    ...[
+      ["HELIUS_RINGS_INDEXER_URL", indexerUrl],
+      ["HELIUS_RINGS_PROVER_URL", proverUrl],
+      ["HELIUS_RINGS_DETERMINISTIC_KA_SEED", derivationSeed],
+    ].flatMap(([name, value]) => (value ? [] : [name as string])),
+  ];
 
   if (missing.length > 0 || !(solanaRpcUrl && indexerUrl && proverUrl)) {
     return misconfiguredGateway(missing);

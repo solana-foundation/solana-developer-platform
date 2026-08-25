@@ -71,8 +71,6 @@ export const FAILURE_CODES = [
   "manual_reconciliation_required",
 ] as const;
 
-export const KEY_KINDS = ["viewing", "nullifier"] as const;
-
 /**
  * What a synced history row says happened on chain.
  *

@@ -1,4 +1,5 @@
 import type { ZolanaClient } from "@heliuslabs/zolana/client";
+import { checkedTransactionSize } from "@heliuslabs/zolana/interface";
 import {
   type BuildOperationInput,
   type BuildOperationResult,
@@ -18,7 +19,12 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
   type Transaction,
 } from "@solana/kit";
+import {
+  getSetComputeUnitLimitInstruction,
+  MAX_COMPUTE_UNIT_LIMIT,
+} from "@solana-program/compute-budget";
 import { CustodyWalletAuthority } from "./authority.js";
+import { withZolanaErrorBridgeSync } from "./error-bridge.js";
 import { buildShieldTransaction } from "./flows/shield.js";
 import { buildMerge, buildTransfer, buildWithdrawal, type SpendDeps } from "./flows/spend.js";
 import { assertShieldedIdentity, type ShieldedMaterialSource } from "./material.js";
@@ -119,22 +125,35 @@ export async function buildRingsOperation(
       const mergeFloor =
         operation.opType === "merge" ? await deps.client.getLatestBlockhash() : undefined;
 
-      const built =
-        operation.opType === "merge"
-          ? await buildMerge(spend, { mint, ...pin })
-          : operation.opType === "withdraw"
-            ? await buildWithdrawal(spend, {
-                recipient: requireRecipient(input),
-                mint,
-                amountRaw: requireAmount(input),
-                ...pin,
-              })
-            : await buildTransfer(spend, {
-                recipient: requireRecipient(input),
-                mint,
-                amountRaw: requireAmount(input),
-                ...pin,
-              });
+      let built: Awaited<ReturnType<typeof buildMerge>>;
+      switch (operation.opType) {
+        case "merge":
+          built = await buildMerge(spend, { mint, ...pin });
+          break;
+        case "withdraw":
+          built = await buildWithdrawal(spend, {
+            recipient: requireRecipient(input),
+            mint,
+            amountRaw: requireAmount(input),
+            ...pin,
+          });
+          break;
+        case "transfer_registered":
+          built = await buildTransfer(spend, {
+            recipient: requireRecipient(input),
+            mint,
+            amountRaw: requireAmount(input),
+            ...pin,
+          });
+          break;
+        case "transfer_anonymous":
+        case "timelock_create":
+        case "timelock_settle":
+        case "zone_create":
+          return unsupportedOperation(operation.opType);
+        default:
+          return assertNever(operation.opType);
+      }
 
       if (built.instructions) {
         // Fetched now rather than before the wallet sync and the prover round
@@ -153,6 +172,14 @@ export async function buildRingsOperation(
       );
     }
   );
+}
+
+function unsupportedOperation(opType: string): never {
+  throw new HeliusRingsError("invalid_input", `unsupported Rings operation type: ${opType}`);
+}
+
+function assertNever(opType: never): never {
+  return unsupportedOperation(String(opType));
 }
 
 /** Only a merge reaches the transaction branch, and only it takes a floor. */
@@ -182,12 +209,25 @@ function assemble(
   instructions: readonly Instruction[],
   lifetime: Lifetime
 ): Transaction {
-  return compileTransaction(
-    pipe(
-      createTransactionMessage({ version: 0 }),
-      (message) => setTransactionMessageFeePayer(owner, message),
-      (message) => setTransactionMessageLifetimeUsingBlockhash(lifetime, message),
-      (message) => appendTransactionMessageInstructions(instructions, message)
+  return withZolanaErrorBridgeSync(() =>
+    checkedTransactionSize(
+      compileTransaction(
+        pipe(
+          createTransactionMessage({ version: 0 }),
+          (message) => setTransactionMessageFeePayer(owner, message),
+          (message) => setTransactionMessageLifetimeUsingBlockhash(lifetime, message),
+          (message) =>
+            appendTransactionMessageInstructions(
+              // Deliberately use Solana's 1.4M maximum rather than Zolana's 300K so this
+              // manual alpha path is not under-budgeted; no CU-price instruction means no priority fee.
+              [
+                getSetComputeUnitLimitInstruction({ units: MAX_COMPUTE_UNIT_LIMIT }),
+                ...instructions,
+              ],
+              message
+            )
+        )
+      )
     )
   );
 }

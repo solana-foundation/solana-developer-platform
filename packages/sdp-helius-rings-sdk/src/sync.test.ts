@@ -43,6 +43,8 @@ const CLEAN = {
   unknownAssetIds: [],
   unknownAssetFields: [],
 };
+const UNKNOWN_ASSET_IDS = [9n, 10n, 11n];
+const UNKNOWN_ASSET_FIELDS = [new Uint8Array(32).fill(1), new Uint8Array(32).fill(2)];
 
 describe("syncRingsWallet", () => {
   beforeEach(() => {
@@ -81,28 +83,54 @@ describe("syncRingsWallet", () => {
     expect(balance).toEqual({ mint: USDC, symbol: "UNKNOWN", decimals: 0, amountRaw: "42" });
   });
 
-  it("counts unspent notes and flags a sync that could not read everything", async () => {
-    syncWallet.mockResolvedValue({
-      ...CLEAN,
-      unparsedTransactions: 2,
-      undecryptableCandidates: 1,
-    });
+  it("counts unspent notes", async () => {
     utxos.mockReturnValue([{ spent: false }, { spent: true }, { spent: false }]);
 
     const { report } = await syncRingsWallet(DEPS, { walletId: "hrw_1", owner: OWNER });
 
+    expect(report.storedNotes).toBe(2);
+  });
+
+  it.each([
+    ["unparsed transactions", { unparsedTransactions: 2 }, { unparsedTransactions: 2 }],
+    ["undecryptable candidates", { undecryptableCandidates: 3 }, { undecryptableCandidates: 3 }],
+    [
+      "unknown asset ids",
+      { unknownAssetIds: UNKNOWN_ASSET_IDS },
+      { unknownAssetIds: UNKNOWN_ASSET_IDS.length },
+    ],
+    [
+      "unknown asset fields",
+      { unknownAssetFields: UNKNOWN_ASSET_FIELDS },
+      { unknownAssetFields: UNKNOWN_ASSET_FIELDS.length },
+    ],
+  ])("marks %s as degraded and returns its count", async (_name, anomaly, expected) => {
+    syncWallet.mockResolvedValue({ ...CLEAN, ...anomaly });
+
+    const { report } = await syncRingsWallet(DEPS, { walletId: "hrw_1", owner: OWNER });
+
     expect(report).toEqual({
-      storedNotes: 2,
-      unparsedTransactions: 2,
-      undecryptableCandidates: 1,
+      storedNotes: 0,
+      unparsedTransactions: 0,
+      undecryptableCandidates: 0,
+      unknownAssetIds: 0,
+      unknownAssetFields: 0,
+      ...expected,
       degraded: true,
     });
   });
 
-  it("is not degraded when nothing was missed", async () => {
+  it("returns zero anomaly counts and stays clean when nothing was missed", async () => {
     const { report } = await syncRingsWallet(DEPS, { walletId: "hrw_1", owner: OWNER });
 
-    expect(report.degraded).toBe(false);
+    expect(report).toEqual({
+      storedNotes: 0,
+      unparsedTransactions: 0,
+      undecryptableCandidates: 0,
+      unknownAssetIds: 0,
+      unknownAssetFields: 0,
+      degraded: false,
+    });
   });
 
   it("translates history rows into SDP's vocabulary", async () => {

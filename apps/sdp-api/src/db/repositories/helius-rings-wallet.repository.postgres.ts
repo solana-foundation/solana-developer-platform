@@ -103,16 +103,38 @@ export function createPostgresHeliusRingsWalletRepository(db: AppDb): HeliusRing
     },
 
     async listWallets(input: ListHeliusRingsWalletsInput) {
+      if (input.sdpWalletIds?.length === 0) return [];
+
+      const bindings: unknown[] = [input.organizationId, input.projectId];
+      const walletScope = input.sdpWalletIds ? " AND sdp_wallet_id = ANY(?)" : "";
+      if (input.sdpWalletIds) bindings.push([...input.sdpWalletIds]);
+      bindings.push(input.limit ?? DEFAULT_RINGS_WALLET_LIST_LIMIT);
+
       const result = await db
         .prepare(
           `SELECT * FROM helius_rings_wallets
-            WHERE organization_id = ? AND project_id = ?
+            WHERE organization_id = ? AND project_id = ?${walletScope}
             ORDER BY created_at DESC, id DESC
             LIMIT ?`
         )
-        .bind(input.organizationId, input.projectId, input.limit ?? DEFAULT_RINGS_WALLET_LIST_LIMIT)
+        .bind(...bindings)
         .all<Record<string, unknown>>();
       return result.results.map(mapRow);
+    },
+
+    async listWalletIdsBySdpWalletIds(input) {
+      if (input.sdpWalletIds.length === 0) return [];
+
+      const result = await db
+        .prepare(
+          `SELECT id FROM helius_rings_wallets
+            WHERE organization_id = ?
+              AND project_id = ?
+              AND sdp_wallet_id = ANY(?)`
+        )
+        .bind(input.organizationId, input.projectId, [...input.sdpWalletIds])
+        .all<{ id: string }>();
+      return result.results.map((row) => row.id);
     },
 
     async markProvisioned(input: MarkHeliusRingsWalletProvisionedInput) {

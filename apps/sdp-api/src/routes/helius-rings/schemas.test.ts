@@ -9,11 +9,13 @@ import { prepareRingsOperationSchema } from "./schemas";
 const SOL = "So11111111111111111111111111111111111111112";
 const USDC = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 const RECIPIENT = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+const WALLET_ID = "hrw_1";
+const CLIENT_NONCE = "nonce-1";
 
 function parse(body: Record<string, unknown>) {
   return prepareRingsOperationSchema.safeParse({
-    walletId: "hrw_1",
-    clientNonce: "nonce-1",
+    walletId: WALLET_ID,
+    clientNonce: CLIENT_NONCE,
     ...body,
   });
 }
@@ -32,6 +34,124 @@ describe("prepareRingsOperationSchema", () => {
         to: RECIPIENT,
       }).success
     ).toBe(true);
+  });
+
+  it.each([
+    [
+      "shield",
+      { opType: "shield", asset: { mint: SOL, amountRaw: "1000" } },
+      {
+        walletId: WALLET_ID,
+        opType: "shield",
+        asset: { mint: SOL, amountRaw: "1000" },
+        clientNonce: CLIENT_NONCE,
+      },
+    ],
+    [
+      "transfer_registered",
+      {
+        opType: "transfer_registered",
+        asset: { mint: USDC, amountRaw: "1000" },
+        to: RECIPIENT,
+      },
+      {
+        walletId: WALLET_ID,
+        opType: "transfer_registered",
+        asset: { mint: USDC, amountRaw: "1000" },
+        to: RECIPIENT,
+        clientNonce: CLIENT_NONCE,
+        transferMode: "registered",
+      },
+    ],
+    [
+      "withdraw",
+      { opType: "withdraw", asset: { mint: SOL, amountRaw: "1000" }, to: RECIPIENT },
+      {
+        walletId: WALLET_ID,
+        opType: "withdraw",
+        asset: { mint: SOL, amountRaw: "1000" },
+        to: RECIPIENT,
+        clientNonce: CLIENT_NONCE,
+      },
+    ],
+    [
+      "merge",
+      { opType: "merge", asset: { mint: USDC } },
+      {
+        walletId: WALLET_ID,
+        opType: "merge",
+        asset: { mint: USDC },
+        clientNonce: CLIENT_NONCE,
+      },
+    ],
+  ])("returns the exact %s operation payload", (_opType, body, expected) => {
+    const result = parse(body);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual(expected);
+  });
+
+  it.each([
+    [
+      "shield",
+      { opType: "shield", asset: { mint: SOL, amountRaw: "1" } },
+      ["from", "to", "zoneId", "transferMode", "timelock", "unexpected"],
+    ],
+    [
+      "transfer_registered",
+      {
+        opType: "transfer_registered",
+        asset: { mint: USDC, amountRaw: "1" },
+        to: RECIPIENT,
+      },
+      ["from", "zoneId", "timelock", "unexpected"],
+    ],
+    [
+      "withdraw",
+      { opType: "withdraw", asset: { mint: SOL, amountRaw: "1" }, to: RECIPIENT },
+      ["from", "zoneId", "transferMode", "timelock", "unexpected"],
+    ],
+    [
+      "merge",
+      { opType: "merge", asset: { mint: USDC } },
+      ["from", "to", "zoneId", "transferMode", "timelock", "unexpected"],
+    ],
+  ])("rejects fields outside the exact %s shape", (_opType, body, fields) => {
+    const values: Record<string, unknown> = {
+      from: RECIPIENT,
+      to: RECIPIENT,
+      zoneId: "zone_1",
+      transferMode: "registered",
+      timelock: { unlockAt: "2026-08-25T12:00:00.000Z", beneficiary: RECIPIENT },
+      unexpected: true,
+    };
+
+    for (const field of fields) {
+      expect(parse({ ...body, [field]: values[field] }).success, field).toBe(false);
+    }
+  });
+
+  it.each([
+    ["shield", { opType: "shield", asset: { mint: SOL, amountRaw: "1", ticker: "SOL" } }],
+    [
+      "transfer_registered",
+      {
+        opType: "transfer_registered",
+        asset: { mint: USDC, amountRaw: "1", ticker: "USDC" },
+        to: RECIPIENT,
+      },
+    ],
+    [
+      "withdraw",
+      {
+        opType: "withdraw",
+        asset: { mint: SOL, amountRaw: "1", ticker: "SOL" },
+        to: RECIPIENT,
+      },
+    ],
+    ["merge", { opType: "merge", asset: { mint: USDC, ticker: "USDC" } }],
+  ])("rejects unknown keys inside the %s asset", (_opType, body) => {
+    expect(parse(body).success).toBe(false);
   });
 
   it("refuses an amount on a merge", () => {
@@ -60,8 +180,7 @@ describe("prepareRingsOperationSchema", () => {
 
   it("normalises the transfer mode rather than demanding it", () => {
     // The database requires exactly `registered` for this op type, and a caller
-    // who named the flow has already said which mode they meant. Omitting it
-    // used to reach the constraint as a 500.
+    // who named the flow has already said which mode they meant.
     const result = parse({
       opType: "transfer_registered",
       asset: { mint: USDC, amountRaw: "1000" },
@@ -69,7 +188,11 @@ describe("prepareRingsOperationSchema", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.data?.transferMode).toBe("registered");
+    if (!result.success) throw result.error;
+    expect(result.data).toMatchObject({
+      opType: "transfer_registered",
+      transferMode: "registered",
+    });
   });
 
   it.each([

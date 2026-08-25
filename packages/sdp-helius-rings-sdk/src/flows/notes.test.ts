@@ -56,9 +56,8 @@ describe("selectNotes", () => {
     const forward = walletOf([note(1, 100n), note(2, 100n), note(3, 100n)]);
     const reversed = walletOf([note(3, 100n), note(2, 100n), note(1, 100n)]);
 
-    // The property the whole pinning design rests on. If selection depended on
-    // wallet order, a rebuild could pick a different set and land beside the
-    // original — paying the recipient twice.
+    // The property the pinning design rests on. Wallet ordering must not make
+    // repeated pre-sign builds choose different inputs.
     expect(selectNotes({ wallet: forward, asset: SOL, amount: 150n }).ids).toEqual(
       selectNotes({ wallet: reversed, asset: SOL, amount: 150n }).ids
     );
@@ -99,7 +98,7 @@ describe("selectNotes", () => {
       expect(selection.total).toBe(200n);
     });
 
-    it("refuses to substitute when a pinned note is already spent", async () => {
+    it("retries sync when a pre-sign pinned note is absent", async () => {
       const wallet = walletOf([note(1, 100n, SOL, true), note(2, 900n)]);
 
       const error = await Promise.resolve()
@@ -116,10 +115,12 @@ describe("selectNotes", () => {
           (thrown: unknown) => thrown
         );
 
-      // The note is gone most likely because the attempt this rebuild is
-      // recovering already landed. Choosing a replacement is the double payment
-      // the pinning exists to prevent, so it stops for a human instead.
-      expect((error as HeliusRingsError).code).toBe("manual_reconciliation_required");
+      // Builds run before signed bytes are persisted, so this cannot be evidence
+      // that this attempt settled. A refreshed indexer view may restore the note.
+      expect(error).toMatchObject({
+        code: "gateway_unavailable",
+        message: "pinned wallet notes are unavailable; refresh wallet state before rebuilding",
+      });
     });
 
     it("still refuses if the pinned notes no longer cover the amount", async () => {

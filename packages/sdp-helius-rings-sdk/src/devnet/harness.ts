@@ -149,10 +149,10 @@ export interface SubmittedTransaction {
 /**
  * Signs, simulates, submits, then waits for Photon to index the Rings event.
  *
- * Simulation runs before submission so a malformed build never reaches the
- * cluster. The service will simulate before asking custody to sign, which local
- * key pairs make pointless here. Confirmation goes through the client so a
- * transaction that failed on chain reports a chain error rather than an indexer
+ * This devnet harness simulates after local signing and before submission.
+ * Production does not currently simulate before custody signing; it relies on
+ * structural, signer, and serialized-size checks. Confirmation goes through the
+ * client so an on-chain failure reports a chain error rather than an indexer
  * timeout.
  */
 export async function submitAndConfirm(

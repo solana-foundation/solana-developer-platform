@@ -153,6 +153,8 @@ export interface ListHeliusRingsOperationsByWalletInput extends HeliusRingsProje
 
 export interface ListHeliusRingsOperationsByProjectInput extends HeliusRingsProjectScope {
   limit?: number;
+  /** Undefined is unrestricted; an explicit empty allowlist matches nothing. */
+  walletIds?: readonly string[];
 }
 
 export interface HeliusRingsExpiredSubmissionsInput {

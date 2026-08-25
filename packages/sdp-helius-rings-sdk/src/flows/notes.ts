@@ -7,11 +7,10 @@ import type { Address } from "@solana/kit";
  * be reproduced.
  *
  * The naming is the point. A transfer cannot pin its inputs through the SDK's
- * high-level builders, so a rebuild after a lost response is free to select a
- * different set, land alongside the original, and pay the recipient twice.
- * Recording what the first build chose turns a rebuild into a replay: the same
- * notes yield the same nullifiers, and whichever attempt arrives second is
- * rejected by the chain rather than settled.
+ * high-level builders, so repeated pre-sign builds could otherwise select a
+ * different set as the wallet view changes. Recording what the first build
+ * chose keeps every build of the operation deterministic before signed bytes
+ * are persisted.
  */
 
 /**
@@ -103,10 +102,9 @@ function cover(available: readonly WalletUtxo[], amount: bigint): readonly Walle
 /**
  * Re-selects exactly the notes a previous build committed to.
  *
- * A missing note means it has already been spent — most likely by the very
- * attempt this rebuild is trying to recover. Failing here is correct: the
- * operation may already have settled, and choosing replacements would be the
- * double-payment pinning exists to prevent.
+ * This rebuild runs before signed bytes exist, so a missing note cannot mean
+ * this operation settled. It indicates an incomplete/stale wallet view; the
+ * caller may safely refresh and rebuild, but must not substitute another note.
  */
 function repin(available: readonly WalletUtxo[], pinned: readonly string[]): readonly WalletUtxo[] {
   const byId = new Map(available.map((note) => [noteId(note), note]));
@@ -114,8 +112,8 @@ function repin(available: readonly WalletUtxo[], pinned: readonly string[]): rea
 
   if (missing.length > 0) {
     throw new HeliusRingsError(
-      "manual_reconciliation_required",
-      `${missing.length} of ${pinned.length} pinned notes are no longer spendable; this operation may already have settled`
+      "gateway_unavailable",
+      "pinned wallet notes are unavailable; refresh wallet state before rebuilding"
     );
   }
 

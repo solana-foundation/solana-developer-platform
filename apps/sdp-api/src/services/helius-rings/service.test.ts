@@ -291,6 +291,8 @@ describe("HeliusRingsService", () => {
           storedNotes: 0,
           unparsedTransactions: 3,
           undecryptableCandidates: 0,
+          unknownAssetIds: 0,
+          unknownAssetFields: 0,
           degraded: true,
         },
         indexedOperationSignatures: [],
@@ -825,6 +827,30 @@ describe("HeliusRingsService", () => {
       expect(operation.outerTxSignature).toBe(OUTER_TX.signature);
     });
 
+    it("preserves a mint-only merge through prepareOperation to indexing", async () => {
+      const mint = "So11111111111111111111111111111111111111112";
+      let builtAsset: PrivateOperationInput["asset"];
+      const gateway = new InMemoryRingsGateway({
+        buildUnsignedTx: ({ operation }) => {
+          builtAsset = operation.input.asset;
+          return "c2lnbmFibGU=";
+        },
+      });
+
+      const operation = await liveishService({ gateway }).prepareOperation(
+        operationInput({
+          opType: "merge",
+          asset: { mint },
+          clientNonce: "nonce-merge-mint-only",
+        }),
+        actorContext
+      );
+
+      expect(operation.state).toBe("indexing");
+      expect(builtAsset).toEqual({ mint });
+      expect(operation.input.asset).toEqual({ mint });
+    });
+
     it("persists the outer signature before broadcasting", async () => {
       const operation = await liveishService({
         submitOuterTransaction: async () => {
@@ -971,6 +997,36 @@ describe("HeliusRingsService", () => {
 
       const detail = await svc.getOperationWithEvents(retry.id);
       expect(detail.events.map((event) => event.kind)).toContain("operation.retried");
+    });
+
+    it("preserves a mint-only merge when retrying an unsigned failure", async () => {
+      const mint = "So11111111111111111111111111111111111111112";
+      const failed = await service().prepareOperation(
+        operationInput({
+          opType: "merge",
+          asset: { mint },
+          clientNonce: "nonce-merge-retry",
+        }),
+        actorContext
+      );
+      expect(failed).toMatchObject({ state: "failed", outerTxSignature: null });
+
+      let builtAsset: PrivateOperationInput["asset"];
+      const gateway = new InMemoryRingsGateway({
+        buildUnsignedTx: ({ operation }) => {
+          builtAsset = operation.input.asset;
+          return "c2lnbmFibGU=";
+        },
+      });
+      const retry = await liveishService({ gateway }).retryOperation(
+        failed.id,
+        "nonce-merge-retry-2",
+        actorContext
+      );
+
+      expect(retry.state).toBe("indexing");
+      expect(builtAsset).toEqual({ mint });
+      expect(retry.input.asset).toEqual({ mint });
     });
 
     it("refuses to retry a non-retryable failure", async () => {

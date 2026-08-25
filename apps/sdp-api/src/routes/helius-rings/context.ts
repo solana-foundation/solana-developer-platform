@@ -111,8 +111,6 @@ const RINGS_ERROR_CODES: Record<HeliusRingsError["code"], ErrorCode> = {
   invalid_input: "BAD_REQUEST",
   not_found: "NOT_FOUND",
   conflict: "CONFLICT",
-  // 503 with the seam-marker message: the wizard renders "external
-  // integration pending" from exactly this response.
   gateway_unavailable: "SERVICE_UNAVAILABLE",
   config_error: "SERVICE_UNAVAILABLE",
   // The caller asked to move more than the wallet holds. Their request, not

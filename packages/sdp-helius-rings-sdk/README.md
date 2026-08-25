@@ -27,11 +27,9 @@ package. That is a hard rule rather than a convention, because the failure it pr
 error: two majors' branded `Address` types can match structurally, so a leaked type would typecheck and
 then behave as the wrong major's value at runtime.
 
-Two subpaths sit outside that rule and are worth knowing about. `./testing` is Kit-neutral by design and
-exists to be imported from Kit 6. `./deterministic-ka` is **not** — it hands back `ShieldedMaterial`,
-which carries a `ViewingKey` and a `ShieldedAddress` — so it is for use inside this package and its own
-tests. When the seed is wired up, `@sdp/api` should pass it to `createRingsGateway` as a string rather
-than construct a material source itself.
+The `./testing` subpath sits outside that rule: it is Kit-neutral by design and exists to be imported
+from Kit 6. The deterministic key authority remains internal; `@sdp/api` passes its seed to
+`createRingsGateway` as a string rather than constructing a material source itself.
 
 Bytes still cross, since the port carries an encoded transaction. `apps/sdp-api` asserts from its own Kit 6
 that a transaction this package encoded under Kit 7 decodes and re-encodes byte-identically
@@ -51,10 +49,9 @@ persisted identity on every use and fails closed rather than silently addressing
 **The source is meant to be replaced, so it is quarantined.** The only one that exists today is
 `deterministic-ka`, which recomputes material from one master seed with HKDF and stores nothing at rest.
 What makes it interim is that the platform holds that seed and can therefore derive every tenant's viewing
-and nullifier keys — not that the derivation is deterministic. It lives behind its own entry point,
-`@sdp/helius-rings-sdk/deterministic-ka`, and the main barrel never re-exports it, so replacing it means
-adding another `ShieldedMaterialSource` and deleting one directory. Nothing downstream of the interface
-moves.
+and nullifier keys — not that the derivation is deterministic. It is imported only by package internals
+and tests, and the main barrel never re-exports it, so replacing it means adding another
+`ShieldedMaterialSource` and deleting one directory. Nothing downstream of the interface moves.
 
 A real key authority still has to put both secrets in this process, which is a constraint of the SDK
 rather than a shortcut: `WalletAuthority` returns concrete `ViewingKey` and `NullifierKey` instances, and

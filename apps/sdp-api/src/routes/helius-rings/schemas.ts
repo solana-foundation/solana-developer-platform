@@ -1,4 +1,4 @@
-import { TRANSFER_MODES, ZONE_KINDS } from "@sdp/helius-rings";
+import { type PrivateOperationInput, ZONE_KINDS } from "@sdp/helius-rings";
 import { z } from "zod";
 
 export const createRingsWalletSchema = z.object({
@@ -32,9 +32,6 @@ const amountRaw = z
   .refine((value) => BigInt(value) > 0n, "amountRaw must be greater than zero")
   .refine((value) => BigInt(value) <= 18_446_744_073_709_551_615n, "amountRaw exceeds u64");
 
-/** `amountRaw` is optional here and required per flow below; a merge has none. */
-const assetAmount = z.object({ mint: z.string().min(1), amountRaw: amountRaw.optional() });
-
 /**
  * Native SOL, spelled as SDP spells it.
  *
@@ -47,116 +44,79 @@ const assetAmount = z.object({ mint: z.string().min(1), amountRaw: amountRaw.opt
 const SDP_NATIVE_MINT = "So11111111111111111111111111111111111111112";
 
 /**
- * Per-flow shapes, because the fields are not interchangeable.
+ * Per-flow shapes, because accepting a field no builder honours would record a
+ * restriction or amount that policy and the activity feed read as real.
  *
- * One shared optional-everything object would let a shield through with no
- * asset — and an absent asset must never be read as native SOL by default,
- * because that moves a token the caller never named. It would also accept a
- * `zoneId` on a withdrawal, where nothing would honour it.
+ * The nested assets are strict too, so a misspelled or flow-incompatible field
+ * is refused rather than silently stripped.
  */
+const operationFields = {
+  walletId: z.string().min(1),
+  /** Caller-supplied; contributes to the intent key so retries are explicit. */
+  clientNonce: z.string().min(1).max(128),
+} as const;
+
+const mint = z.string().min(1);
+const assetAmount = z.strictObject({ mint, amountRaw });
+const mergeAsset = z.strictObject(
+  { mint },
+  {
+    error: (issue) =>
+      issue.code === "unrecognized_keys" && issue.keys.includes("amountRaw")
+        ? "a merge consolidates every note of the mint, so it takes no amount"
+        : undefined,
+  }
+);
+
 export const prepareRingsOperationSchema = z
-  .object({
-    walletId: z.string().min(1),
-    opType: z.enum(SUPPORTED_OP_TYPES, {
-      message: `opType must be one of ${SUPPORTED_OP_TYPES.join(", ")}`,
-    }),
-    asset: assetAmount.optional(),
-    from: z.string().min(1).optional(),
-    to: z.string().min(1).optional(),
-    zoneId: z.string().min(1).optional(),
-    transferMode: z.enum(TRANSFER_MODES).optional(),
-    timelock: z
-      .object({
-        unlockAt: z.iso.datetime(),
-        beneficiary: z.string().min(1),
-      })
-      .optional(),
-    /** Caller-supplied; contributes to the intent key so retries are explicit. */
-    clientNonce: z.string().min(1).max(128),
-  })
-  .superRefine((value, ctx) => {
-    const require = (field: "asset" | "to", why: string) => {
-      if (value[field] === undefined) {
-        ctx.addIssue({ code: "custom", path: [field], message: why });
-      }
-    };
-    const refuse = (field: "zoneId" | "timelock" | "transferMode", why: string) => {
-      if (value[field] !== undefined) {
-        ctx.addIssue({ code: "custom", path: [field], message: why });
-      }
-    };
-
-    // Zones and timelocks are SDP-side metadata with no builder behind them.
-    // Accepting one on a money flow would imply a restriction that is not
-    // enforced anywhere.
-    refuse("zoneId", "zones are not supported on a money flow");
-    refuse("timelock", "timelocks are not supported on a money flow");
-
-    const requireAmount = (why: string) => {
-      if (value.asset?.amountRaw === undefined) {
-        ctx.addIssue({ code: "custom", path: ["asset", "amountRaw"], message: why });
-      }
-    };
-
-    if (value.opType === "merge") {
-      require("asset", "a merge needs the mint whose notes to consolidate");
-      refuse("transferMode", "a merge has no transfer mode");
-      // A merge consolidates whatever notes of the mint the wallet holds. An
-      // amount here would be recorded on the row and read as real by policy and
-      // the activity feed while nothing honours it.
-      if (value.asset?.amountRaw !== undefined) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["asset", "amountRaw"],
-          message: "a merge consolidates every note of the mint, so it takes no amount",
-        });
-      }
-      return;
+  .discriminatedUnion(
+    "opType",
+    [
+      z.strictObject({
+        ...operationFields,
+        opType: z.literal("shield"),
+        asset: assetAmount,
+      }),
+      z.strictObject({
+        ...operationFields,
+        opType: z.literal("transfer_registered"),
+        asset: assetAmount,
+        to: z.string().min(1),
+        transferMode: z
+          .literal("registered", {
+            error: (issue) => `${String(issue.input)} transfers are not supported`,
+          })
+          .optional(),
+      }),
+      z.strictObject({
+        ...operationFields,
+        opType: z.literal("withdraw"),
+        asset: z.strictObject({
+          mint: z.literal(SDP_NATIVE_MINT, {
+            error: "only SOL withdrawals are supported",
+          }),
+          amountRaw,
+        }),
+        to: z.string().min(1),
+      }),
+      z.strictObject({
+        ...operationFields,
+        opType: z.literal("merge"),
+        asset: mergeAsset,
+      }),
+    ],
+    {
+      error: `opType must be one of ${SUPPORTED_OP_TYPES.join(", ")}`,
     }
+  )
+  .transform((value) => {
+    const normalized =
+      value.opType === "transfer_registered"
+        ? { ...value, transferMode: "registered" as const }
+        : value;
 
-    if (value.opType === "shield") {
-      require("asset", "a shield needs the mint and amount to deposit");
-      requireAmount("a shield needs the amount to deposit");
-      refuse("transferMode", "a shield has no transfer mode");
-      return;
-    }
-
-    require("asset", `a ${value.opType} needs the mint and amount to move`);
-    requireAmount(`a ${value.opType} needs the amount to move`);
-    require("to", `a ${value.opType} needs a recipient`);
-
-    if (value.opType === "withdraw") {
-      refuse("transferMode", "a withdrawal has no transfer mode");
-      if (value.asset && value.asset.mint !== SDP_NATIVE_MINT) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["asset", "mint"],
-          message: "only SOL withdrawals are supported",
-        });
-      }
-      return;
-    }
-
-    // `registered` is the only mode with a builder, and the database requires
-    // exactly that value for this op type — so anything else is a 400 here
-    // rather than a constraint violation later. An anonymous transfer is
-    // refused before an approval is ever requested for it.
-    if (value.transferMode !== undefined && value.transferMode !== "registered") {
-      ctx.addIssue({
-        code: "custom",
-        path: ["transferMode"],
-        message: `${value.transferMode} transfers are not supported`,
-      });
-    }
-  })
-  // Normalised rather than demanded: the database requires `registered` for
-  // this op type, and a caller who named the flow has already said which mode
-  // they meant.
-  .transform((value) =>
-    value.opType === "transfer_registered"
-      ? { ...value, transferMode: "registered" as const }
-      : value
-  );
+    return normalized satisfies PrivateOperationInput;
+  });
 
 export const retryRingsOperationSchema = z.object({
   clientNonce: z.string().min(1).max(128),

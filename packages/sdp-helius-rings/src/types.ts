@@ -1,6 +1,5 @@
 import type {
   FAILURE_CODES,
-  KEY_KINDS,
   MATERIAL_TAGS,
   OP_TYPES,
   OPERATION_STATES,
@@ -17,7 +16,6 @@ import type { SecretRef } from "./secrets";
 export type OperationState = (typeof OPERATION_STATES)[number];
 export type OpType = (typeof OP_TYPES)[number];
 export type FailureCode = (typeof FAILURE_CODES)[number];
-export type KeyKind = (typeof KEY_KINDS)[number];
 export type MaterialTag = (typeof MATERIAL_TAGS)[number];
 export type PrivateHistoryKind = (typeof PRIVATE_HISTORY_KINDS)[number];
 export type PrivateHistoryDirection = (typeof PRIVATE_HISTORY_DIRECTIONS)[number];
@@ -31,13 +29,6 @@ export interface ProofArtifact {
   source: MaterialTag;
   ref: SecretRef<string>;
   createdAt: string;
-}
-
-export interface KeyRef {
-  kind: KeyKind;
-  material: SecretRef<Uint8Array>;
-  materialTag: MaterialTag;
-  keyVersion: string;
 }
 
 export interface PrivateWallet {
@@ -98,6 +89,10 @@ export interface SyncReport {
   storedNotes: number;
   unparsedTransactions: number;
   undecryptableCandidates: number;
+  /** Compact asset ids Zolana could not resolve, reported as a JSON-safe count. */
+  unknownAssetIds: number;
+  /** Merge asset fields Zolana could not resolve, reported as a JSON-safe count. */
+  unknownAssetFields: number;
   degraded: boolean;
 }
 

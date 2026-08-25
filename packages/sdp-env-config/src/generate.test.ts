@@ -98,6 +98,17 @@ test("NEXT_PUBLIC_SOLANA_NETWORK is derived from SOLANA_NETWORK", () => {
   assert.match(env, /^NEXT_PUBLIC_SOLANA_NETWORK=mainnet-beta$/m);
 });
 
+test("dedicated Helius RPC configuration is emitted for Rings", () => {
+  const env = generateEnv({
+    ...defaultValues(),
+    SOLANA_RPC_HELIUS_URL: "https://devnet.helius-rpc.com/rpc/{API_KEY}",
+    SOLANA_RPC_HELIUS_API_KEY: "helius-test-key",
+  });
+
+  assert.match(env, /^SOLANA_RPC_HELIUS_URL=https:\/\/devnet\.helius-rpc\.com\/rpc\/\{API_KEY\}$/m);
+  assert.match(env, /^SOLANA_RPC_HELIUS_API_KEY=helius-test-key$/m);
+});
+
 test("Asset Profiles remains an explicit production opt-in", () => {
   const disabled = generateEnv(defaultValues());
   assert.match(disabled, /^SDP_FLAG_ASSET_PROFILES=false$/m);

@@ -398,9 +398,8 @@ export class HeliusRingsService {
     }
 
     // proving: the pipeline died mid-build. Nothing was signed, so building
-    // again is safe — and if a previous attempt got as far as recording its
-    // notes, `runPipeline` pins them so the rebuild is a replay rather than a
-    // fresh selection.
+    // again is safe. If a prior attempt recorded notes, `runPipeline` pins them
+    // to make selection reproducible and detect a stale wallet view.
     if (operation.state === "proving") {
       return this.toPrivateOperation(await this.runPipeline(operation));
     }
@@ -427,11 +426,8 @@ export class HeliusRingsService {
 
     // submitted: the broadcast either landed, or never left the process, and
     // nothing here can tell the two apart. The signed bytes are persisted, so
-    // the answer is to send those exact bytes again rather than to guess: a
-    // duplicate of a transaction that already landed is rejected by the chain
-    // for a spent nullifier, while a first send of one that never left finally
-    // moves the money. Rebuilding would be the unsafe option — it could select
-    // different notes and land beside the original.
+    // recovery sends those exact bytes again. This service never rebuilds an
+    // operation after signed bytes exist.
     //
     // Without this a crash between the RPC call and the submitted → indexing
     // transition left a live transaction outside reconciliation forever: the
@@ -721,10 +717,12 @@ export class HeliusRingsService {
     const input: PrivateOperationInput = {
       walletId: failed.wallet_id,
       opType: failed.op_type,
-      asset:
-        failed.asset_mint && failed.amount_raw
-          ? { mint: failed.asset_mint, amountRaw: failed.amount_raw }
-          : undefined,
+      asset: failed.asset_mint
+        ? {
+            mint: failed.asset_mint,
+            ...(failed.amount_raw ? { amountRaw: failed.amount_raw } : {}),
+          }
+        : undefined,
       from: failed.from_addr ?? undefined,
       to: failed.to_addr ?? undefined,
       zoneId: failed.zone_id ?? undefined,
@@ -792,10 +790,8 @@ export class HeliusRingsService {
   private async runPipeline(operation: HeliusRingsOperationRow): Promise<HeliusRingsOperationRow> {
     let current = operation;
 
-    // Bytes already exist for this operation, so building again is both wasted
-    // and unsafe: a rebuild could select different notes, and whichever set was
-    // broadcast second could land beside the first. Recovery resends what was
-    // recorded, which is what the outbox is for.
+    // Bytes already exist for this operation, so the build is immutable.
+    // Recovery resends what was recorded; it never returns to note selection.
     if (current.signed_transaction) {
       await this.resubmitPersistedBytes(current);
       // The guard depends on where the crash left it: `ready_to_sign` advances
@@ -816,9 +812,8 @@ export class HeliusRingsService {
         operation: this.toPrivateOperation(current),
         owner,
         ...(wallet.shielded_address ? { expectedShieldedAddress: wallet.shielded_address } : {}),
-        // Binding on a rebuild. An operation that has been built once already
-        // committed to a set of notes, and choosing again could land a second
-        // transaction beside a first that may have settled.
+        // Binding on a pre-sign rebuild: preserve deterministic note selection,
+        // and fail if the refreshed wallet view no longer contains those notes.
         ...(current.input_notes ? { pinnedInputs: current.input_notes } : {}),
         // Wait for the indexer to catch up to whatever last touched this
         // wallet. Selecting notes from a view older than that can pick one
@@ -1152,10 +1147,12 @@ export class HeliusRingsService {
       input: {
         walletId: row.wallet_id,
         opType: row.op_type,
-        asset:
-          row.asset_mint && row.amount_raw
-            ? { mint: row.asset_mint, amountRaw: row.amount_raw }
-            : undefined,
+        asset: row.asset_mint
+          ? {
+              mint: row.asset_mint,
+              ...(row.amount_raw ? { amountRaw: row.amount_raw } : {}),
+            }
+          : undefined,
         from: row.from_addr ?? undefined,
         to: row.to_addr ?? undefined,
         zoneId: row.zone_id ?? undefined,
@@ -1306,8 +1303,8 @@ const GATEWAY_FAILURES: Record<HeliusRingsErrorCode, { code: FailureCode; retrya
   // The caller asked to move more than the wallet holds. Their input, and a
   // second attempt with the same amount fails the same way.
   insufficient_balance: { code: "insufficient_balance", retryable: false },
-  // The notes this operation committed to are gone, most likely because the
-  // attempt it is recovering already settled. Retrying could pay twice.
+  // Reserved for post-sign recovery, where persisted signed bytes may already
+  // have settled and a fresh operation could pay twice.
   manual_reconciliation_required: {
     code: "manual_reconciliation_required",
     retryable: false,

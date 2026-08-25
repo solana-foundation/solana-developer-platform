@@ -234,8 +234,9 @@ export interface Env {
   // registered wallet cannot survive.
   HELIUS_RINGS_DETERMINISTIC_KA_SEED?: string;
 
-  // Photon indexer and prover endpoints for the Rings adapter. The RPC URL is
-  // reused from SOLANA_RPC_HELIUS_URL rather than duplicated here.
+  // Photon indexer and prover endpoints for the Rings adapter. Submission,
+  // block-height reads, and history-capable reconcile inspection reuse
+  // SOLANA_RPC_HELIUS_URL rather than a generic/default RPC.
   HELIUS_RINGS_INDEXER_URL?: string;
   HELIUS_RINGS_PROVER_URL?: string;
 

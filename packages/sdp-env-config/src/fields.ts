@@ -195,11 +195,20 @@ export const FIELDS: EnvField[] = [
     pattern: /^https:\/\//,
   },
   {
+    key: "SOLANA_RPC_HELIUS_URL",
+    section: "rpc",
+    kind: "url",
+    label: "Helius RPC URL",
+    pattern: /^https:\/\//,
+    help: "Dedicated Helius endpoint for Rings submission and history-capable reconciliation. May contain {API_KEY}.",
+  },
+  {
     key: "SOLANA_RPC_HELIUS_API_KEY",
     section: "rpc",
     kind: "password",
     label: "Helius API key",
-    visibleWhen: (v) => v.SOLANA_RPC_URL?.includes("helius") ?? false,
+    visibleWhen: (v) =>
+      Boolean(v.SOLANA_RPC_HELIUS_URL) || (v.SOLANA_RPC_URL?.includes("helius") ?? false),
   },
 
   // Clerk

@@ -44,6 +44,27 @@ describe("createRingsGateway", () => {
     expect(health.detail?.gateway).toContain("CLIENT_INVALID_CONFIG");
   });
 
+  it("classifies an invalid configured tree without exposing its value", async () => {
+    const configuredTree = "not-a-solana-address";
+    const error = await createRingsGateway({
+      ...CONFIG,
+      tree: configuredTree,
+      derivationSeed: Buffer.alloc(32, 7).toString("base64"),
+    })
+      .syncPhoton({ walletId: "hrw_1", owner: "owner" })
+      .then(
+        () => null,
+        (thrown: unknown) => thrown
+      );
+
+    expect(error).toBeInstanceOf(HeliusRingsError);
+    expect(error).toMatchObject({
+      code: "config_error",
+      message: "the Rings gateway configuration is invalid",
+    });
+    expect((error as Error).message).not.toContain(configuredTree);
+  });
+
   const needsMaterial: Array<[string, (gateway: RingsGatewayPort) => Promise<unknown>]> = [
     ["provisionIdentity", (g) => g.provisionIdentity({ walletId: "hrw_1", sdpAddress: "addr" })],
     ["syncPhoton", (g) => g.syncPhoton({ walletId: "hrw_1", owner: "addr" })],

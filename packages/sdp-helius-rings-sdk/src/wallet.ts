@@ -1,7 +1,7 @@
 import { Wallet } from "@heliuslabs/zolana";
 import type { ZolanaClient } from "@heliuslabs/zolana/client";
 import type {
-  SyncReport,
+  SyncReport as SdkSyncReport,
   SyncWalletAuthority,
   WalletAuthority,
 } from "@heliuslabs/zolana/transaction";
@@ -70,7 +70,27 @@ export interface HydrateWalletInput {
 
 export interface HydratedWallet {
   readonly wallet: Wallet;
-  readonly report: SyncReport;
+  readonly report: SdkSyncReport;
+}
+
+export type SdkSyncAnomaly = Exclude<keyof SdkSyncReport, "storedUtxos">;
+export type SyncAnomalyCounts = Record<SdkSyncAnomaly, number>;
+
+/**
+ * Keep every upstream anomaly in one exhaustive projection. A new Zolana
+ * report field fails typechecking here until its JSON-safe count is mapped.
+ */
+export function syncAnomalyCounts(report: SdkSyncReport): SyncAnomalyCounts {
+  return {
+    unparsedTransactions: report.unparsedTransactions,
+    undecryptableCandidates: report.undecryptableCandidates,
+    unknownAssetIds: report.unknownAssetIds.length,
+    unknownAssetFields: report.unknownAssetFields.length,
+  } satisfies SyncAnomalyCounts;
+}
+
+export function hasSyncAnomalies(anomalies: SyncAnomalyCounts): boolean {
+  return Object.values(anomalies).some((count) => count > 0);
 }
 
 export async function hydrateWallet(input: HydrateWalletInput): Promise<HydratedWallet> {
@@ -81,14 +101,12 @@ export async function hydrateWallet(input: HydrateWalletInput): Promise<Hydrated
     client: input.client,
     ...(input.requireSlot === undefined ? {} : { config: { requireSlot: input.requireSlot } }),
   });
+  const anomalies = syncAnomalyCounts(report);
 
-  if (
-    input.requireComplete &&
-    (report.unparsedTransactions > 0 || report.undecryptableCandidates > 0)
-  ) {
+  if (input.requireComplete && hasSyncAnomalies(anomalies)) {
     throw new HeliusRingsError(
       "gateway_unavailable",
-      `the wallet could not be read completely (${report.unparsedTransactions} unparsed, ${report.undecryptableCandidates} undecryptable); refusing to select notes`
+      `the wallet could not be read completely (${anomalies.unparsedTransactions} unparsed, ${anomalies.undecryptableCandidates} undecryptable, ${anomalies.unknownAssetIds} unknown asset ids, ${anomalies.unknownAssetFields} unknown asset fields); refusing to select notes`
     );
   }
 

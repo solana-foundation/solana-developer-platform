@@ -18,7 +18,7 @@ import type {
 } from "@sdp/helius-rings";
 import { sdpMint } from "./flows/mint.js";
 import { assertShieldedIdentity, type ShieldedMaterialSource } from "./material.js";
-import { hydrateWallet, readOnlyAuthority } from "./wallet.js";
+import { hasSyncAnomalies, hydrateWallet, readOnlyAuthority, syncAnomalyCounts } from "./wallet.js";
 
 /**
  * Reads a wallet's shielded state from Photon.
@@ -157,10 +157,11 @@ function toHistoryEntry(entry: PrivateTransaction): PrivateHistoryEntry {
  * is what stops those partial balances being read as a complete picture.
  */
 function toSyncReport(storedNotes: number, report: SdkSyncReport): SyncReport {
+  const anomalies = syncAnomalyCounts(report);
+
   return {
     storedNotes,
-    unparsedTransactions: report.unparsedTransactions,
-    undecryptableCandidates: report.undecryptableCandidates,
-    degraded: report.unparsedTransactions > 0 || report.undecryptableCandidates > 0,
+    ...anomalies,
+    degraded: hasSyncAnomalies(anomalies),
   };
 }

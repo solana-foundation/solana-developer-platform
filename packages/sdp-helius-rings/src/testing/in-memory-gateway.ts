@@ -147,6 +147,8 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
         storedNotes: next,
         unparsedTransactions: 0,
         undecryptableCandidates: 0,
+        unknownAssetIds: 0,
+        unknownAssetFields: 0,
         degraded: false,
       },
       indexedOperationSignatures: [],

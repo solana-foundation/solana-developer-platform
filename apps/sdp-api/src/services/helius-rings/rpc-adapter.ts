@@ -8,9 +8,15 @@ import {
 } from "@solana/kit";
 import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
+import { requireRingsHeliusRpcUrl } from "./rpc-config";
+
+function createRingsHeliusRpc(env: Env): { rpc: SolanaRpc; rpcUrl: string } {
+  const rpcUrl = requireRingsHeliusRpcUrl(env);
+  return { rpc: createRpc(env, { rpcUrl }), rpcUrl };
+}
 
 /**
- * Broadcasts the signed outer transaction over the existing SDP RPC path.
+ * Broadcasts the signed outer transaction through the configured Helius RPC.
  *
  * Submission failures are reported as retryable because the RPC cannot tell a
  * dropped transaction from a transient outage. What makes acting on that safe is
@@ -29,14 +35,31 @@ export interface SubmitRingsOuterTransactionInput {
 export async function submitRingsOuterTransaction(
   input: SubmitRingsOuterTransactionInput
 ): Promise<string> {
-  const rpc = input.rpc ?? createRpc(input.env);
+  let resolvedRpcUrl: string | undefined;
+  let rpc: SolanaRpc;
+  if (input.rpc) {
+    rpc = input.rpc;
+  } else {
+    const configuredRpc = createRingsHeliusRpc(input.env);
+    rpc = configuredRpc.rpc;
+    resolvedRpcUrl = configuredRpc.rpcUrl;
+  }
   const signedBytes = getBase64Codec().encode(input.signedTxBase64);
 
   try {
     return await sendTransaction(rpc, new Uint8Array(signedBytes));
   } catch (error) {
     const message = error instanceof Error ? error.message : "transaction submission failed";
-    throw new RingsAdapterError("submit_failed", message, { retryable: true, cause: error });
+    throw new RingsAdapterError("submit_failed", message, {
+      retryable: true,
+      cause: error,
+      // withHeliusApiKey can place the encoded credential in the URL path, so
+      // query-only URL redaction is not sufficient.
+      sensitiveValues: [input.env.SOLANA_RPC_HELIUS_API_KEY ?? ""],
+      // Pre-keyed URLs have no separate credential value to redact. Sanitize
+      // the exact endpoint while retaining its origin for diagnostics.
+      sensitiveUrls: resolvedRpcUrl && !input.env.SOLANA_RPC_HELIUS_API_KEY ? [resolvedRpcUrl] : [],
+    });
   }
 }
 
@@ -47,8 +70,10 @@ export async function submitRingsOuterTransaction(
  * one positive answer, but no single RPC response proves it never existed:
  * `getTransaction` returning null means "not in this node's store", which is
  * also what a node without transaction history, or one backend of a
- * load-balanced pair, says about a transaction that did land. So both history
- * methods are asked, and both must miss.
+ * load-balanced pair, says about a transaction that did land. Reconcile
+ * therefore requires a history-capable Helius endpoint supporting
+ * `getSignatureStatuses` with `searchTransactionHistory` and `getTransaction`;
+ * both methods are asked, and both must miss.
  */
 export interface RingsSignatureInspection {
   /**
@@ -95,7 +120,7 @@ export interface InspectRingsSignatureInput {
 export async function inspectRingsSignature(
   input: InspectRingsSignatureInput
 ): Promise<RingsSignatureInspection> {
-  const rpc = input.rpc ?? createRpc(input.env);
+  const rpc = input.rpc ?? createRingsHeliusRpc(input.env).rpc;
 
   const transaction = getTransactionDecoder().decode(getBase64Codec().encode(input.signedTxBase64));
   const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
@@ -161,9 +186,8 @@ export async function readRingsBlockHeight(input: {
   env: Env;
   rpc?: SolanaRpc;
 }): Promise<string | null> {
-  const rpc = input.rpc ?? createRpc(input.env);
-
   try {
+    const rpc = input.rpc ?? createRingsHeliusRpc(input.env).rpc;
     return (await rpc.getBlockHeight().send()).toString();
   } catch {
     // Null rather than throwing: not knowing the height means the sweep cannot

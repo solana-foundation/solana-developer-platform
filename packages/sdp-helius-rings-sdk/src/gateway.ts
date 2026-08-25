@@ -14,6 +14,7 @@ import {
 import { buildRingsOperation } from "./build.js";
 import { createRingsClient } from "./client.js";
 import { createDeterministicMaterialSource, decodeSeed } from "./deterministic-ka/index.js";
+import { withZolanaErrorBridge } from "./error-bridge.js";
 import { probeRingsHealth, withHealthTimeout } from "./health.js";
 import { verifyRingsIndexed } from "./indexed.js";
 import type { ShieldedMaterialSource } from "./material.js";
@@ -41,9 +42,7 @@ export interface RingsGatewayConfig {
   readonly organizationId: string;
   readonly projectId: string;
   /**
-   * Base64 master seed the deterministic key authority derives from. A string
-   * rather than a constructed material source, so callers never have to import
-   * the Kit-7-typed `./deterministic-ka` entry point to build one.
+   * Base64 master seed the deterministic key authority derives from.
    *
    * Omitted, the gateway still reports health but refuses anything needing
    * keys, which is what an environment with no seed configured should do.
@@ -198,45 +197,51 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
     },
 
     async provisionIdentity(input: ProvisionIdentityInput): Promise<ProvisionIdentityResult> {
-      return provisionRingsIdentity(
-        {
-          client: await client(),
-          material: requireMaterial(),
-          signTransaction: requireCustody(config.signTransaction, "signTransaction"),
-          submitTransaction: requireCustody(config.submitTransaction, "submitTransaction"),
-          organizationId: config.organizationId,
-          projectId: config.projectId,
-        },
-        { walletId: input.walletId, owner: input.sdpAddress }
+      return withZolanaErrorBridge(async () =>
+        provisionRingsIdentity(
+          {
+            client: await client(),
+            material: requireMaterial(),
+            signTransaction: requireCustody(config.signTransaction, "signTransaction"),
+            submitTransaction: requireCustody(config.submitTransaction, "submitTransaction"),
+            organizationId: config.organizationId,
+            projectId: config.projectId,
+          },
+          { walletId: input.walletId, owner: input.sdpAddress }
+        )
       );
     },
 
     async syncPhoton(input: SyncPhotonInput): Promise<SyncPhotonResult> {
-      return syncRingsWallet(
-        {
-          client: await client(),
-          material: requireMaterial(),
-          organizationId: config.organizationId,
-          projectId: config.projectId,
-        },
-        input
+      return withZolanaErrorBridge(async () =>
+        syncRingsWallet(
+          {
+            client: await client(),
+            material: requireMaterial(),
+            organizationId: config.organizationId,
+            projectId: config.projectId,
+          },
+          input
+        )
       );
     },
 
     async buildOperation(input: BuildOperationInput): Promise<BuildOperationResult> {
-      return buildRingsOperation(
-        {
-          client: await client(),
-          material: requireMaterial(),
-          organizationId: config.organizationId,
-          projectId: config.projectId,
-        },
-        input
+      return withZolanaErrorBridge(async () =>
+        buildRingsOperation(
+          {
+            client: await client(),
+            material: requireMaterial(),
+            organizationId: config.organizationId,
+            projectId: config.projectId,
+          },
+          input
+        )
       );
     },
 
     async verifyIndexed(signature: string): Promise<VerifyIndexedResult | null> {
-      return verifyRingsIndexed(await client(), signature);
+      return withZolanaErrorBridge(async () => verifyRingsIndexed(await client(), signature));
     },
   };
 }

@@ -252,18 +252,21 @@ export function createPostgresHeliusRingsOperationRepository(
     },
 
     async listOperationsByProject(input: ListHeliusRingsOperationsByProjectInput) {
+      if (input.walletIds?.length === 0) return [];
+
+      const bindings: unknown[] = [input.organizationId, input.projectId];
+      const walletScope = input.walletIds ? " AND wallet_id = ANY(?)" : "";
+      if (input.walletIds) bindings.push([...input.walletIds]);
+      bindings.push(input.limit ?? DEFAULT_RINGS_OPERATION_LIST_LIMIT);
+
       const result = await db
         .prepare(
           `SELECT * FROM helius_rings_operations
-            WHERE organization_id = ? AND project_id = ?
+            WHERE organization_id = ? AND project_id = ?${walletScope}
             ORDER BY created_at DESC, id DESC
             LIMIT ?`
         )
-        .bind(
-          input.organizationId,
-          input.projectId,
-          input.limit ?? DEFAULT_RINGS_OPERATION_LIST_LIMIT
-        )
+        .bind(...bindings)
         .all<Record<string, unknown>>();
       return result.results.map(mapRow);
     },

@@ -11,11 +11,23 @@ import {
   fetchUserRecord,
   syncWallet,
 } from "@heliuslabs/zolana/wallet";
-import { address } from "@solana/kit";
+import type { PrivateOperation } from "@sdp/helius-rings";
+import {
+  address,
+  getBase64Codec,
+  getCompiledTransactionMessageDecoder,
+  getTransactionDecoder,
+} from "@solana/kit";
+import {
+  getSetComputeUnitLimitInstruction,
+  MAX_COMPUTE_UNIT_LIMIT,
+} from "@solana-program/compute-budget";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CustodyWalletAuthority } from "../authority.js";
 import { createRingsClient } from "../client.js";
 import { deriveMaterial } from "../deterministic-ka/index.js";
+import { SDP_NATIVE_MINT } from "../flows/mint.js";
+import { createRingsGateway } from "../gateway.js";
 import { canonicalShieldedIdentity, type ShieldedMaterial } from "../material.js";
 import {
   assertDevnet,
@@ -60,6 +72,14 @@ const WITHDRAW_LAMPORTS = 2_000_000n;
 const MINIMUM_OWNER_LAMPORTS = 200_000_000n;
 
 const SOL = address(SOL_MINT);
+const DERIVATION_SCOPE = {
+  organizationId: "devnet-e2e",
+  projectId: "default-flows",
+} as const;
+
+function walletId(index: number): string {
+  return `owner-${index}`;
+}
 
 interface Identity {
   readonly owner: DevnetOwner;
@@ -113,9 +133,8 @@ async function buildIdentity(index: number): Promise<Identity> {
   const { seed } = requireConfig();
   const owner = await deriveDevnetOwner(seed, index);
   const material = await deriveMaterial(seed, {
-    organizationId: "devnet-e2e",
-    projectId: "default-flows",
-    walletId: `owner-${index}`,
+    ...DERIVATION_SCOPE,
+    walletId: walletId(index),
     owner: owner.address,
   });
 
@@ -272,25 +291,84 @@ gate("Rings default flows on devnet", () => {
     expect(solBalance(recipient)).toBe(recipientBefore + TRANSFER_LAMPORTS);
   });
 
-  it("withdraws to a public address", async () => {
+  it("builds and submits a withdrawal through the production gateway", async () => {
     await sync(recipient);
     const privateBefore = solBalance(recipient);
     const publicBefore = await client.getBalance(recipient.owner.address);
+    const devnet = requireConfig();
+    const operationWalletId = walletId(recipient.owner.index);
+    const now = new Date().toISOString();
+    const operation: PrivateOperation = {
+      id: "devnet-e2e:production-gateway-withdraw",
+      walletId: operationWalletId,
+      opType: "withdraw",
+      state: "proving",
+      approvalRequestId: null,
+      policyEvaluationId: null,
+      proof: null,
+      outerTxSignature: null,
+      photonIndexedAt: null,
+      failure: null,
+      input: {
+        walletId: operationWalletId,
+        opType: "withdraw",
+        asset: { mint: SDP_NATIVE_MINT, amountRaw: WITHDRAW_LAMPORTS.toString() },
+        to: recipient.owner.address,
+        clientNonce: "production-gateway-withdraw",
+      },
+      intentKey: "devnet-e2e:production-gateway-withdraw",
+      events: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const built = await createRingsGateway({
+      solanaRpcUrl: devnet.rpcUrl,
+      indexerUrl: devnet.indexerUrl,
+      proverUrl: devnet.proverUrl,
+      derivationSeed: Buffer.from(devnet.seed).toString("base64"),
+      allowInsecureHttp: devnet.allowInsecureHttp,
+      ...DERIVATION_SCOPE,
+    }).buildOperation({
+      operation,
+      owner: recipient.owner.address,
+      expectedShieldedAddress: canonicalShieldedIdentity(recipient.material.shieldedAddress),
+    });
+    const transaction = getTransactionDecoder().decode(
+      getBase64Codec().encode(built.outerUnsignedTxBase64)
+    );
+    const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+
+    if (message.version !== 0) {
+      throw new Error("Expected the production gateway to build a v0 Rings transaction.");
+    }
+
+    const [computeInstruction, protocolInstruction] = message.instructions;
+    if (!computeInstruction || !protocolInstruction) {
+      throw new Error("Expected compute-budget and Rings protocol instructions.");
+    }
+
+    const expectedComputeInstruction = getSetComputeUnitLimitInstruction({
+      units: MAX_COMPUTE_UNIT_LIMIT,
+    });
+    expect(message.instructions).toHaveLength(2);
+    expect(message.staticAccounts[computeInstruction.programAddressIndex]).toBe(
+      expectedComputeInstruction.programAddress
+    );
+    expect(computeInstruction.data).toEqual(expectedComputeInstruction.data);
+    expect(message.staticAccounts[protocolInstruction.programAddressIndex]).not.toBe(
+      expectedComputeInstruction.programAddress
+    );
+    expect(message.staticAccounts[0]).toBe(recipient.owner.address);
+    expect(Object.keys(transaction.signatures)).toEqual([recipient.owner.address]);
+    expect(built.requiredSigners).toEqual([recipient.owner.address]);
+    expect(built.inputNotes.length).toBeGreaterThan(0);
+    expect(built.proof.source).toBe("live");
+    expect(JSON.stringify(built.proof.ref)).toBe('"[REDACTED]"');
 
     log.record(
-      "withdraw/sol",
-      await submitAndConfirm(
-        client,
-        await buildWithdrawalTransaction({
-          client,
-          wallet: recipient.wallet,
-          authority: authorityFor(recipient, "withdraw"),
-          feePayer: recipient.owner.address,
-          recipient: recipient.owner.address,
-          amount: WITHDRAW_LAMPORTS,
-        }),
-        [recipient.owner.keyPair]
-      )
+      "withdraw/sol-production-gateway",
+      await submitAndConfirm(client, transaction, [recipient.owner.keyPair])
     );
 
     await sync(recipient);

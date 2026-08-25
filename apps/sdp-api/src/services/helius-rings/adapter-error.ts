@@ -13,17 +13,48 @@ import { REDACTION_CENSOR } from "@/runtime/log-redaction";
  * The event feed's redaction cannot cover this: it censors values under known
  * key names, and a key embedded in a sentence has no key name of its own.
  */
-export function redactAdapterMessage(message: string): string {
-  return (
-    message
-      // Any URL keeps its scheme, host and path and loses its query, which is
-      // where credentials travel. Written as one rule rather than a list of
-      // parameter names, so a host that spells its key differently is still
-      // covered.
-      .replace(/(https?:\/\/[^\s?]+)\?[^\s]*/gi, `$1?${REDACTION_CENSOR}`)
-      // The same parameter outside a URL — some clients quote just the query.
-      .replace(/\b(api[-_]?key|access[-_]?token|token)=[^\s&]+/gi, `$1=${REDACTION_CENSOR}`)
-  );
+export function redactAdapterMessage(
+  message: string,
+  sensitiveValues: readonly string[] = [],
+  sensitiveUrls: readonly string[] = []
+): string {
+  let redacted = message;
+  for (const sensitiveUrl of sensitiveUrls) {
+    try {
+      const parsed = new URL(sensitiveUrl);
+      // A pre-keyed URL does not identify which path segment is the credential,
+      // so retain the useful origin and censor the path as one unit.
+      const diagnosticPath =
+        parsed.pathname && parsed.pathname !== "/" ? `/${REDACTION_CENSOR}` : parsed.pathname;
+      const diagnosticUrl = `${parsed.origin}${diagnosticPath}${
+        parsed.search ? `?${REDACTION_CENSOR}` : ""
+      }`;
+      for (const candidate of new Set([sensitiveUrl, parsed.toString()])) {
+        redacted = redacted.replaceAll(candidate, diagnosticUrl);
+      }
+    } catch {
+      redacted = redacted.replaceAll(sensitiveUrl, REDACTION_CENSOR);
+    }
+  }
+
+  redacted = redacted
+    // Any URL keeps its scheme, host and path and loses its query, which is
+    // where credentials usually travel. Written as one rule rather than a list
+    // of parameter names, so a host that spells its key differently is covered.
+    .replace(/(https?:\/\/[^\s?]+)\?[^\s]*/gi, `$1?${REDACTION_CENSOR}`)
+    // The same parameter outside a URL — some clients quote just the query.
+    .replace(/\b(api[-_]?key|access[-_]?token|token)=[^\s&]+/gi, `$1=${REDACTION_CENSOR}`);
+
+  const concreteValues = new Set<string>();
+  for (const value of sensitiveValues) {
+    if (!value) continue;
+    concreteValues.add(value);
+    concreteValues.add(encodeURIComponent(value));
+  }
+  for (const value of [...concreteValues].sort((left, right) => right.length - left.length)) {
+    redacted = redacted.replaceAll(value, REDACTION_CENSOR);
+  }
+  return redacted;
 }
 
 /**
@@ -38,11 +69,18 @@ export class RingsAdapterError extends Error {
   constructor(
     failureCode: Extract<FailureCode, "signer_failed" | "submit_failed">,
     message: string,
-    options: { retryable: boolean; cause?: unknown }
+    options: {
+      retryable: boolean;
+      cause?: unknown;
+      sensitiveValues?: readonly string[];
+      sensitiveUrls?: readonly string[];
+    }
   ) {
     // Scrubbed here rather than at the two call sites that build these, so a
     // third one cannot be added without the protection.
-    super(redactAdapterMessage(message), { cause: options.cause });
+    super(redactAdapterMessage(message, options.sensitiveValues, options.sensitiveUrls), {
+      cause: options.cause,
+    });
     this.name = "RingsAdapterError";
     this.failureCode = failureCode;
     this.retryable = options.retryable;
