@@ -100,6 +100,33 @@ export async function activateRpcConnectionAction(
 }
 
 /**
+ * Move the organization between SDP-managed RPC and running entirely on its
+ * own credentials. Organization-wide, so it revalidates the whole section
+ * rather than one provider's rows.
+ */
+export async function setRpcCredentialModeAction(
+  formData: FormData
+): Promise<{ status: "saved"; mode: string } | { status: "error"; message: string }> {
+  const mode = String(formData.get("mode") ?? "").trim();
+  const provider = String(formData.get("provider") ?? "").trim();
+  if (mode !== "managed" && mode !== "byok") {
+    return { status: "error", message: "Pick a credential mode." };
+  }
+
+  try {
+    const client = await createSdpApiClient();
+    const result = await client.fetch<{ mode: string }>("/internal/dashboard/rpc/credential-mode", {
+      method: "PUT",
+      body: JSON.stringify({ mode }),
+    });
+    revalidateProvider(provider);
+    return { status: "saved", mode: result.mode };
+  } catch (error) {
+    return { status: "error", message: extractApiMessage(error) };
+  }
+}
+
+/**
  * Replace the key behind a connection (HOO-1229). The old key stays in place
  * until the new one has been checked, so a rejected key changes nothing.
  */

@@ -138,6 +138,29 @@ describe("tenant RPC connection precedence", () => {
     await expect(resolve(lookupReturning({}))).rejects.toThrow(FELL_THROUGH);
   });
 
+  it("refuses to answer on platform keys for an organization that is byok", async () => {
+    // The organization has said its RPC leaves on its own credentials. Reaching
+    // a platform provider here would be SDP paying for, and seeing, traffic
+    // somebody deliberately moved off us.
+    const connections = {
+      ...lookupReturning({}),
+      credentialMode: async () => "byok" as const,
+    };
+
+    await expect(resolve(connections, { authProjectId: "prj_1" })).rejects.toThrow(
+      /runs RPC on its own credentials/i
+    );
+  });
+
+  it("still falls through for an organization left on managed", async () => {
+    const connections = {
+      ...lookupReturning({}),
+      credentialMode: async () => "managed" as const,
+    };
+
+    await expect(resolve(connections, { authProjectId: "prj_1" })).rejects.toThrow(FELL_THROUGH);
+  });
+
   it("scopes every lookup to the caller's organization", async () => {
     const connections = lookupReturning({ prj_1: activeConnection("rconn_project") });
     await resolve(connections, { authProjectId: "prj_1" });

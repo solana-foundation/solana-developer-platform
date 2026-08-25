@@ -12,6 +12,7 @@ const deactivateRpcConnectionAction = vi.fn();
 const deleteRpcConnectionAction = vi.fn();
 const testRpcConnectionAction = vi.fn();
 const rotateRpcConnectionAction = vi.fn();
+const setRpcCredentialModeAction = vi.fn();
 
 vi.mock("./rpc-connection-actions", () => ({
   submitRpcConnectionAction: (fd: FormData) => submitRpcConnectionAction(fd),
@@ -20,6 +21,7 @@ vi.mock("./rpc-connection-actions", () => ({
   deleteRpcConnectionAction: (fd: FormData) => deleteRpcConnectionAction(fd),
   testRpcConnectionAction: (fd: FormData) => testRpcConnectionAction(fd),
   rotateRpcConnectionAction: (fd: FormData) => rotateRpcConnectionAction(fd),
+  setRpcCredentialModeAction: (fd: FormData) => setRpcCredentialModeAction(fd),
 }));
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { error: vi.fn(), loading: vi.fn(), success: vi.fn() }),
@@ -80,6 +82,8 @@ beforeEach(() => {
   deleteRpcConnectionAction.mockReset();
   testRpcConnectionAction.mockReset();
   rotateRpcConnectionAction.mockReset();
+  setRpcCredentialModeAction.mockReset();
+  setRpcCredentialModeAction.mockResolvedValue({ status: "saved", mode: "byok" });
   rotateRpcConnectionAction.mockResolvedValue({ status: "success", connection: connection() });
   submitRpcConnectionAction.mockResolvedValue({ status: "success", connection: connection() });
   activateRpcConnectionAction.mockResolvedValue({ status: "success", connection: connection() });
@@ -248,6 +252,23 @@ describe("RpcByokSection", () => {
     const sent = rotateRpcConnectionAction.mock.calls[0][0] as FormData;
     expect(sent.get("apiKey")).toBe("tenant-key-rotated");
     expect(sent.get("connectionId")).toBe("rconn_1");
+  });
+
+  it("offers the organization-wide credential mode to an admin", async () => {
+    const user = userEvent.setup();
+    renderSection({ connections: [connection()], credentialMode: "managed" });
+
+    await user.click(screen.getByRole("switch", { name: /own credentials/ }));
+
+    const sent = setRpcCredentialModeAction.mock.calls[0][0] as FormData;
+    expect(sent.get("mode")).toBe("byok");
+  });
+
+  it("hides the credential mode control when it could not be read", () => {
+    // Showing "SDP-managed" at an organization that is actually on its own
+    // keys is the kind of wrong somebody acts on.
+    renderSection({ connections: [connection()], credentialMode: null });
+    expect(screen.queryByRole("switch")).toBeNull();
   });
 
   it("hides the add form once the project already has a connection", () => {

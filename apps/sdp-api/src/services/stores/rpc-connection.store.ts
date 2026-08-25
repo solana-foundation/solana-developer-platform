@@ -348,6 +348,28 @@ export class RpcConnectionStore {
   }
 
   /**
+   * Live connections anywhere in the organization, across every project and
+   * network. Used to refuse a fail-closed switch that would have nothing to
+   * fall closed onto.
+   */
+  async countLiveConnectionsForOrganization(params: {
+    organizationId: string;
+    executor?: DatabaseExecutor;
+  }): Promise<number> {
+    const db = params.executor ?? this.db;
+    const row = await db.queryOne<{ live: number }>(
+      `SELECT COUNT(*)::int AS live
+         FROM rpc_connections c
+         JOIN provider_credentials pc ON pc.id = c.provider_credential_id
+        WHERE c.organization_id = ?
+          AND c.status = 'active'
+          AND pc.status = 'active'`,
+      [params.organizationId]
+    );
+    return row?.live ?? 0;
+  }
+
+  /**
    * How many connections a scope still has that are not withdrawn (HOO-1227).
    *
    * Deactivated rows are excluded because they are terminal: they hold no

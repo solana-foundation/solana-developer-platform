@@ -8,12 +8,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button";
 import { Input } from "@/components/ui/input";
+import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { useTranslations } from "@/i18n/provider";
 import {
   activateRpcConnectionAction,
   deactivateRpcConnectionAction,
   deleteRpcConnectionAction,
   rotateRpcConnectionAction,
+  setRpcCredentialModeAction,
   submitRpcConnectionAction,
   testRpcConnectionAction,
 } from "./rpc-connection-actions";
@@ -354,9 +356,12 @@ function RotateForm({
 export function RpcByokSection({
   canManage,
   connections,
+  credentialMode,
   provider,
 }: {
   canManage: boolean;
+  /** `null` when it could not be read; the control is hidden rather than guessed. */
+  credentialMode?: "managed" | "byok" | null;
   /**
    * `null` when the read failed and `"restricted"` when the viewer may not make
    * it at all. Three different answers: unknown, not allowed, and none.
@@ -374,6 +379,10 @@ export function RpcByokSection({
   const [showKey, setShowKey] = useState(false);
   const [testResults, setTestResults] = useState<Record<string, TestOutcome>>({});
   const [rotatingId, setRotatingId] = useState<string | null>(null);
+  // Held locally so the switch reflects the change straight away; the server
+  // action revalidates the page behind it.
+  const [mode, setMode] = useState(credentialMode ?? "managed");
+  const [isSavingMode, setIsSavingMode] = useState(false);
   const apiKeyHintId = useId();
   const endpointHintId = useId();
   const labelFieldId = useId();
@@ -421,6 +430,25 @@ export function RpcByokSection({
       toast.error(result.message, { position: "bottom-right" });
     } finally {
       setPendingId(null);
+    }
+  };
+
+  const saveMode = async (next: "managed" | "byok") => {
+    setIsSavingMode(true);
+    const formData = new FormData();
+    formData.set("mode", next);
+    formData.set("provider", provider);
+    try {
+      const result = await setRpcCredentialModeAction(formData);
+      if (result.status === "saved") {
+        setMode(next);
+        toast.success(t("Shared.integrations.rpcModeSaved"), { position: "bottom-right" });
+        return;
+      }
+      // Refused, so the switch must not look like it moved.
+      toast.error(result.message, { position: "bottom-right" });
+    } finally {
+      setIsSavingMode(false);
     }
   };
 
@@ -511,6 +539,30 @@ export function RpcByokSection({
       ) : (
         <p className="text-sm leading-6 text-tertiary">{t("Shared.integrations.rpcByokEmpty")}</p>
       )}
+
+      {canManage && credentialMode ? (
+        <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border-default px-4 py-3">
+          <div className="min-w-0 space-y-1">
+            <p className="text-sm font-medium text-primary">
+              {t("Shared.integrations.rpcModeTitle")}
+            </p>
+            <p className="max-w-2xl text-xs leading-5 text-tertiary">
+              {mode === "byok"
+                ? t("Shared.integrations.rpcModeByokHint")
+                : t("Shared.integrations.rpcModeManagedHint")}
+            </p>
+          </div>
+          <ToggleSwitch
+            checked={mode === "byok"}
+            disabled={isSavingMode}
+            // The switch renders no text of its own, so it needs a name.
+            aria-label={t("Shared.integrations.rpcModeToggle")}
+            onChange={(next) => {
+              void saveMode(next ? "byok" : "managed");
+            }}
+          />
+        </div>
+      ) : null}
 
       {canManage && hasLiveConnection ? (
         // One per project for now (HOO-1227). Saying so is better than an Add

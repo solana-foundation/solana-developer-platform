@@ -73,6 +73,59 @@ export function mapRpcConnection(row: RpcConnectionListRow): SafeRpcConnection {
   };
 }
 
+export type RpcCredentialMode = "managed" | "byok";
+
+/**
+ * Whose credentials this organization's RPC leaves on.
+ *
+ * `byok` is the Privy-shaped position: the organization is entirely on its own
+ * keys, so a project without a live connection fails rather than quietly
+ * spending SDP's. Reading it is separate from setting it because the relay
+ * needs it on every request and the dashboard only on a settings page.
+ */
+export async function getRpcCredentialMode(c: AppContext): Promise<RpcCredentialMode> {
+  const row = await getDb(c.env)
+    .prepare(`SELECT rpc_credential_mode FROM organizations WHERE id = ?`)
+    .bind(getAuth(c).organizationId)
+    .first<{ rpc_credential_mode: string }>();
+
+  return row?.rpc_credential_mode === "byok" ? "byok" : "managed";
+}
+
+/**
+ * Switching to `byok` is a fail-closed promise, so it is refused while the
+ * organization has nothing to fail closed onto: turning it on with no live
+ * connection anywhere would break every project at once, which is never what
+ * somebody means by the toggle.
+ */
+export async function setRpcCredentialMode(
+  c: AppContext,
+  mode: RpcCredentialMode
+): Promise<{ mode: RpcCredentialMode }> {
+  const auth = getAuth(c);
+  requireUserId(c);
+
+  if (mode === "byok") {
+    const live = await new RpcConnectionStore(getDb(c.env)).countLiveConnectionsForOrganization({
+      organizationId: auth.organizationId,
+    });
+    if (live === 0) {
+      throw conflict(
+        "Add a working RPC connection before moving this organization onto its own credentials"
+      );
+    }
+  }
+
+  await getDb(c.env)
+    .prepare(
+      `UPDATE organizations SET rpc_credential_mode = ?, updated_at = sdp_datetime_now() WHERE id = ?`
+    )
+    .bind(mode, auth.organizationId)
+    .run();
+
+  return { mode };
+}
+
 /**
  * The network is the project's, not a choice the form offers (HOO-1221).
  *

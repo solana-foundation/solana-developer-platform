@@ -84,12 +84,25 @@ export type TenantRpcConnectionResolution =
       headers: Record<string, string>;
     };
 
+/**
+ * Whose credentials an organization's RPC traffic leaves on.
+ *
+ * `managed` lets platform providers answer when the organization has no live
+ * connection of its own. `byok` says it never should.
+ */
+export type RpcCredentialMode = "managed" | "byok";
+
 export interface TenantRpcConnectionLookup {
   resolve(input: {
     organizationId: string;
     scopeKey: string;
     network: string;
   }): Promise<TenantRpcConnectionResolution>;
+  /**
+   * Optional so an injected stub can omit it; absent is read as `managed`,
+   * which is the behaviour that existed before the mode did.
+   */
+  credentialMode?(organizationId: string): Promise<RpcCredentialMode>;
 }
 
 export interface ResolveRpcTargetInput {
@@ -682,6 +695,17 @@ async function resolveTenantConnection(
   }
 
   await assertNoStrandedOrganizationConnection(input, network);
+
+  // Nothing of the tenant's own resolved. Whether that may fall through to a
+  // platform provider is the organization's call, not ours.
+  const mode = (await input.connections.credentialMode?.(input.organizationId)) ?? "managed";
+  if (mode === "byok") {
+    throw new SdpRpcError(
+      "SOLANA_RPC_ERROR",
+      "This organization runs RPC on its own credentials and this project has no live connection. Add one, or switch the organization back to SDP-managed RPC."
+    );
+  }
+
   return null;
 }
 

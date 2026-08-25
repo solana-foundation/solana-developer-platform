@@ -9,8 +9,10 @@ import {
   activateRpcConnection,
   deactivateRpcConnection,
   deleteRpcConnection,
+  getRpcCredentialMode,
   listRpcConnections,
   rotateRpcConnection,
+  setRpcCredentialMode,
   submitRpcConnection,
   testRpcConnection,
 } from "@/services/rpc-connection.service";
@@ -47,6 +49,8 @@ const createConnectionSchema = z
   })
   .strict();
 
+const credentialModeSchema = z.object({ mode: z.enum(["managed", "byok"]) }).strict();
+
 // The label and the network stay as they were: this replaces a key, it does
 // not reconfigure the connection.
 const rotateConnectionSchema = z
@@ -65,6 +69,24 @@ const internalRpc = new Hono<{ Bindings: Env }>();
 
 internalRpc.use("*", rpcAdminAuthMiddleware());
 internalRpc.use("*", projectContextMiddleware());
+
+// Whose credentials this organization runs on. Organization-wide, so it sits
+// beside the connections rather than on one of them.
+internalRpc.get("/credential-mode", async (c) => {
+  return success(c, { mode: await getRpcCredentialMode(c) });
+});
+
+internalRpc.put("/credential-mode", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const parsed = credentialModeSchema.safeParse(body);
+  if (!parsed.success) {
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
+    });
+  }
+
+  return success(c, await setRpcCredentialMode(c, parsed.data.mode));
+});
 
 internalRpc.get("/connections", async (c) => {
   const parsed = listQuerySchema.safeParse(c.req.query());

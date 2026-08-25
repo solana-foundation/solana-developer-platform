@@ -29,6 +29,8 @@ export interface RpcConnectionContext {
    * `null` when the read failed and we must not claim there are none.
    */
   byokConnections?: SafeRpcConnection[] | null | "restricted";
+  /** `null` when it could not be read, or the viewer may not manage it. */
+  credentialMode?: "managed" | "byok" | null;
 }
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
@@ -192,6 +194,7 @@ export async function IntegrationDetailView({
           <RpcByokSection
             canManage={rpc.canManage}
             connections={rpc.byokConnections}
+            credentialMode={rpc.credentialMode ?? null}
             provider={detail.provider}
           />
         </Section>

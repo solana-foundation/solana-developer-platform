@@ -91,6 +91,28 @@ async function getByokConnections(provider: string, canManage: boolean) {
   }
 }
 
+/**
+ * Whose credentials the organization runs on. `null` when it could not be
+ * read: the control is hidden rather than shown defaulted, because rendering
+ * "SDP-managed" at an organization that is actually on its own keys is the
+ * kind of wrong that gets acted on.
+ */
+async function getRpcCredentialMode(canManage: boolean): Promise<"managed" | "byok" | null> {
+  if (!canManage) {
+    return null;
+  }
+
+  try {
+    const client = await createSdpApiClient();
+    const payload = await client.fetch<{ mode: "managed" | "byok" }>(
+      "/internal/dashboard/rpc/credential-mode"
+    );
+    return payload.mode;
+  } catch {
+    return null;
+  }
+}
+
 async function collectConnections(
   client: Awaited<ReturnType<typeof createSdpApiClient>>,
   scope: "project" | "organization"
@@ -188,6 +210,9 @@ export default async function IntegrationDetailPage({
               organizationId,
               byokConnections: await getByokConnections(
                 provider,
+                dashboardAccess.capabilities.canManageOrgSettings
+              ),
+              credentialMode: await getRpcCredentialMode(
                 dashboardAccess.capabilities.canManageOrgSettings
               ),
             }
