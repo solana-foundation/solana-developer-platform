@@ -299,23 +299,42 @@ describe("RpcByokSection", () => {
     expect(screen.queryByRole("switch")).toBeNull();
   });
 
-  it("hides the add form once the project already has a connection", () => {
-    // One per project for now (HOO-1227), so the way to change it is rotation.
+  it("offers the switch on a proven connection that is not the one serving", () => {
+    // An active non-default connection is a key that works and routes
+    // nothing. It is the whole point of holding more than one, and it had no
+    // control at all because activation was gated on status alone.
+    renderSection({ connections: [connection({ status: "active", isDefault: false })] });
+
+    expect(screen.getByRole("button", { name: "Use this connection" })).toBeTruthy();
+    expect(screen.getByText("Ready")).toBeTruthy();
+    expect(screen.queryByText("Serving traffic")).toBeNull();
+  });
+
+  it("offers no switch on the connection that is already serving", () => {
+    renderSection({ connections: [connection({ status: "active", isDefault: true })] });
+
+    expect(screen.queryByRole("button", { name: "Use this connection" })).toBeNull();
+    expect(screen.getByText("Serving traffic")).toBeTruthy();
+  });
+
+  it("hides the add form once THIS provider already has a connection", () => {
+    // A second key for the same provider is a rotation: two credentials for
+    // one provider have no way to be told apart and no meaning in the relay.
     renderSection({ connections: [connection()] });
 
     expect(screen.queryByRole("button", { name: "Add connection" })).toBeNull();
-    expect(screen.getByText(/A project routes through one connection/)).toBeTruthy();
+    expect(screen.getByText(/already holds a key for this project/)).toBeTruthy();
   });
 
-  it("closes the form when another provider already holds this project", async () => {
-    // A project routes through one connection whatever the provider, so
-    // offering Add here produced a form that could only ever 409 (HOO-1227).
+  it("still offers the form when a DIFFERENT provider is serving the project", async () => {
+    // The point of the marketplace: keys in several providers, one serving,
+    // switching between them without throwing a working key away. Closing the
+    // form here was what made BYOK a one-provider decision.
     renderSection({ connections: [], projectConnectionProvider: "helius" });
 
-    expect(screen.queryByRole("button", { name: "Add connection" })).toBeNull();
-    // The display name, not the raw id: the page showed "alchemy" beside its
-    // own "Alchemy" row before this went through rpcProviderLabel.
-    expect(screen.getByText(/already routes through Helius/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add connection" })).toBeTruthy();
+    // ...and it says adding will not move traffic, so the switch stays explicit.
+    expect(screen.getByText(/traffic keeps running on Helius until you do/)).toBeTruthy();
   });
 
   it("does not claim the organization runs on SDP's when the project has its own connection", () => {

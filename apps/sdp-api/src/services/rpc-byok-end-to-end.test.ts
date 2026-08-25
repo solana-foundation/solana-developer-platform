@@ -284,8 +284,9 @@ describe("BYOK end to end", () => {
     expect(JSON.stringify(submitted)).not.toContain("submitted-key-9999");
   });
 
-  it("refuses a second connection while the project already has one", async () => {
-    // One per project for now (HOO-1227).
+  it("refuses a second key for the same provider, because that is a rotation", async () => {
+    // Two credentials for one provider on one project have no way to be told
+    // apart and no meaning in the relay, which reads the default.
     await expect(
       submitRpcConnection(serviceContext(PROJECT_ID_2), {
         provider: "helius",
@@ -294,7 +295,32 @@ describe("BYOK end to end", () => {
         endpointUrl: endpointBase,
         apiKey: "second-key-0000",
       })
-    ).rejects.toThrow(/already has an RPC connection/i);
+    ).rejects.toThrow(/already has a connection for this provider/i);
+  });
+
+  it("stores a second provider alongside, proven but not serving", async () => {
+    // The point of the marketplace: keys in several providers, one carrying
+    // traffic, switching without throwing a working key away.
+    const alongside = await submitRpcConnection(serviceContext(PROJECT_ID_2), {
+      provider: "alchemy",
+      scope: "project",
+      credentialLabel: "Alchemy alongside Helius",
+      endpointUrl: endpointBase,
+      apiKey: "alongside-key-1111",
+    });
+
+    // Proven on save like any other, so it can be switched to immediately.
+    expect(alongside.status).toBe("active");
+    expect(alongside.providerCredential.status).toBe("active");
+    // ...but it must not have taken traffic off the incumbent by appearing.
+    expect(alongside.isDefault).toBe(false);
+
+    const state = await new RpcConnectionStore(getDb(env)).findScopeConnectionState({
+      organizationId: ORG_ID,
+      scopeKey: PROJECT_ID_2,
+      network: "devnet",
+    });
+    expect(state.kind).toBe("active");
   });
 
   it("stores nothing when the provider rejects the key on save", async () => {

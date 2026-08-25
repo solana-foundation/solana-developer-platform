@@ -391,17 +391,31 @@ export class RpcConnectionStore {
     organizationId: string;
     scopeKey: string;
     network: RpcConnectionNetwork;
+    /**
+     * Narrow to one provider. A scope may hold a connection per provider now,
+     * so "does this project already have one" and "does this project already
+     * have an Alchemy one" are different questions and only the second blocks
+     * a save.
+     */
+    provider?: string;
     executor?: DatabaseExecutor;
   }): Promise<number> {
     const db = params.executor ?? this.db;
+    // Built rather than parameterised against NULL: an untyped placeholder
+    // compared to NULL leaves Postgres unable to infer the parameter type.
+    const providerClause = params.provider ? " AND provider = ?" : "";
+    const values: unknown[] = [params.organizationId, params.scopeKey, params.network];
+    if (params.provider) {
+      values.push(params.provider);
+    }
     const row = await db.queryOne<{ live: number }>(
       `SELECT COUNT(*)::int AS live
          FROM rpc_connections
         WHERE organization_id = ?
           AND scope_key = ?
           AND network = ?
-          AND status <> 'deactivated'`,
-      [params.organizationId, params.scopeKey, params.network]
+          AND status <> 'deactivated'${providerClause}`,
+      values
     );
     return row?.live ?? 0;
   }

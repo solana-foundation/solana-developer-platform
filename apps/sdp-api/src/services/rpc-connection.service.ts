@@ -253,21 +253,36 @@ export async function submitRpcConnection(
 
   const network = await resolveProjectNetwork(c, projectId);
 
-  // One connection per project for now (HOO-1227). The schema still models
-  // several for fallback, so lifting this later is a change to this check
-  // rather than a migration. Checked before the probe so a project that
-  // already has one is told immediately instead of after a round trip to the
-  // provider.
-  const live = await new RpcConnectionStore(getDb(c.env)).countLiveConnections({
+  // A project holds one connection per provider, and exactly one of them
+  // serves. That is what the partial unique index has always modelled --
+  // many rows, one `is_default AND active` -- so lifting HOO-1227's
+  // single-connection rule is this check rather than a migration.
+  //
+  // A second key on the *same* provider is still a rotation: two Alchemy
+  // credentials on one project have no way to be told apart in the UI and
+  // no meaning in the relay, which reads the default.
+  const store = new RpcConnectionStore(getDb(c.env));
+  const sameProvider = await store.countLiveConnections({
+    organizationId: auth.organizationId,
+    scopeKey,
+    network,
+    provider: input.provider,
+  });
+  if (sameProvider > 0) {
+    throw conflict(
+      "This project already has a connection for this provider. Rotate its key to replace it."
+    );
+  }
+
+  // Adding a key must not move traffic off whatever is already serving.
+  // Switching is a deliberate act on the connection, so a new one goes in
+  // proven and idle unless the project has nothing serving it.
+  const serving = await store.findScopeConnectionState({
     organizationId: auth.organizationId,
     scopeKey,
     network,
   });
-  if (live > 0) {
-    throw conflict(
-      "This project already has an RPC connection. Rotate its key, or deactivate it, before adding another."
-    );
-  }
+  const shouldServe = serving.kind !== "active";
 
   const credential: TenantRpcCredential = {
     // A tenant only types an endpoint when their account has its own; for the
@@ -343,13 +358,19 @@ export async function submitRpcConnection(
       // than waiting for a separate activation. Both rows have to agree or the
       // relay's effective lookup reads healthy and still routes to SDP, which
       // is why this shares the insert's transaction.
-      await connectionStore.clearDefault({
-        organizationId: auth.organizationId,
-        scopeKey,
-        network,
-        exceptConnectionId: connectionId,
-        executor: tx,
-      });
+      //
+      // Only the connection that is taking over clears the incumbent. A key
+      // added alongside a serving one is active and idle: proven, ready to be
+      // switched to, routing nothing until someone asks for it.
+      if (shouldServe) {
+        await connectionStore.clearDefault({
+          organizationId: auth.organizationId,
+          scopeKey,
+          network,
+          exceptConnectionId: connectionId,
+          executor: tx,
+        });
+      }
       await connectionStore.activateConnectionCredential({
         organizationId: auth.organizationId,
         connectionId,
@@ -360,7 +381,7 @@ export async function submitRpcConnection(
         organizationId: auth.organizationId,
         connectionId,
         scopeKeys: [scopeKey],
-        makeDefault: true,
+        makeDefault: shouldServe,
         executor: tx,
       });
 
@@ -381,14 +402,13 @@ export async function submitRpcConnection(
         .catch(() => {});
     }
 
-    // The one-per-project check above is a read, so two saves racing each other
-    // both see an empty project and both try to become the default. The partial
+    // The serving check above is a read, so two saves racing each other both
+    // see nothing serving and both try to become the default. The partial
     // unique index rejects the loser, and without this it would surface as an
-    // unhandled database error rather than the same conflict the pre-check
-    // returns.
+    // unhandled database error rather than something the caller can act on.
     if (isDefaultConflict(error)) {
       throw conflict(
-        "This project already has an RPC connection. Rotate its key, or deactivate it, before adding another."
+        "Another connection started serving this project at the same time. Add this one again, then switch to it."
       );
     }
     throw error;

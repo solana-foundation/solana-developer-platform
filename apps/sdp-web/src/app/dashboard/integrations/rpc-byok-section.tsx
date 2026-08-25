@@ -100,6 +100,36 @@ function ConnectionList({
 }
 
 /**
+ * Which of three things this row is: carrying traffic, proven and idle, or
+ * neither.
+ *
+ * Its own function because "active" and "serving" stopped being the same
+ * thing once a project could hold a key per provider, and the distinction is
+ * the first question anyone asks of this list.
+ */
+function ConnectionStatusBadge({
+  connection,
+  isLive,
+  isServing,
+  t,
+}: {
+  connection: SafeRpcConnection;
+  isLive: boolean;
+  isServing: boolean;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  if (isServing) {
+    return <Badge variant="success">{t("Shared.integrations.rpcByokServing")}</Badge>;
+  }
+  // Proven and idle: a key that works and routes nothing, waiting to be
+  // switched to. "active" alone read as though it were the one serving.
+  if (isLive && connection.status === "active") {
+    return <Badge variant="outline">{t("Shared.integrations.rpcByokReady")}</Badge>;
+  }
+  return <Badge variant="outline">{connection.status}</Badge>;
+}
+
+/**
  * One stored credential and the things that can be done to it.
  *
  * Split out from the list so each row's branching is counted on its own: the
@@ -140,7 +170,12 @@ function ConnectionRow({
   // (409). Offering the control anyway was a button that could only ever
   // produce an error (HOO-1219).
   const isDeactivated = connection.status === "deactivated";
-  const canActivate = connection.status !== "active" && !isDeactivated && !isOrganizationScoped;
+  // What the relay routes through: one default per project, not merely one
+  // that works. A project can hold a proven key per provider.
+  const isServing = connection.isDefault && connection.status === "active" && !isOrganizationScoped;
+  // Anything live that is not the one serving can be switched to, including a
+  // healthy connection sitting idle beside the incumbent.
+  const canActivate = !isServing && !isDeactivated && !isOrganizationScoped;
   // A withdrawn or stranded row has nothing worth checking or replacing.
   const isLive = !isDeactivated && !isOrganizationScoped;
 
@@ -152,11 +187,12 @@ function ConnectionRow({
             <span className="text-sm font-medium text-primary">
               {connection.providerCredential.label}
             </span>
-            {connection.isDefault && connection.status === "active" && !isOrganizationScoped ? (
-              <Badge variant="success">{t("Shared.integrations.rpcByokServing")}</Badge>
-            ) : (
-              <Badge variant="outline">{connection.status}</Badge>
-            )}
+            <ConnectionStatusBadge
+              connection={connection}
+              isLive={isLive}
+              isServing={isServing}
+              t={t}
+            />
           </div>
           <p className="text-xs text-tertiary">
             {connection.network}
@@ -797,20 +833,24 @@ export function RpcByokSection({
         />
       ) : null}
 
-      {canManage && (hasLiveConnection || takenByAnotherProvider) ? (
-        // One per project for now (HOO-1227). Saying so is better than an Add
-        // button that only ever comes back with a conflict.
-        <p className="text-sm leading-6 text-tertiary">
-          {takenByAnotherProvider
-            ? t("Shared.integrations.rpcByokTakenElsewhere", {
-                provider: rpcProviderLabel(projectConnectionProvider ?? ""),
-              })
-            : t("Shared.integrations.rpcByokOnlyOne")}
-        </p>
+      {/* A project holds a key per provider, so only this provider already
+          having one closes the form. Another provider serving is context, not
+          a blocker: adding here is how you get a second one to switch to. */}
+      {canManage && hasLiveConnection ? (
+        <p className="text-sm leading-6 text-tertiary">{t("Shared.integrations.rpcByokOnlyOne")}</p>
       ) : null}
 
-      {canManage && !hasLiveConnection && !takenByAnotherProvider ? (
-        <AddConnectionForm needsEndpoint={needsEndpoint} onAdd={handleAdd} t={t} />
+      {canManage && !hasLiveConnection ? (
+        <>
+          {takenByAnotherProvider ? (
+            <p className="text-sm leading-6 text-tertiary">
+              {t("Shared.integrations.rpcByokAddAlongside", {
+                provider: rpcProviderLabel(projectConnectionProvider ?? ""),
+              })}
+            </p>
+          ) : null}
+          <AddConnectionForm needsEndpoint={needsEndpoint} onAdd={handleAdd} t={t} />
+        </>
       ) : null}
 
       {/* Only a viewer who cannot manage needs telling why there is no form.
