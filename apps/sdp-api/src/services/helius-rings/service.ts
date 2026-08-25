@@ -125,8 +125,18 @@ export interface PrepareOperationContext extends HeliusRingsActor {
 }
 
 /** States `executeOperation` acts on; the rest return unchanged. */
+/**
+ * States `executeOperation` can move forward from.
+ *
+ * `proving` and `ready_to_sign` are here because a crash inside the pipeline
+ * leaves an operation in one of them, and both sit in the unique indexes — so
+ * without a way out they hold their wallet permanently, with retry refusing
+ * them for not being `failed`.
+ */
 const EXECUTABLE_STATES: ReadonlySet<OperationState> = new Set([
   "approval_required",
+  "proving",
+  "ready_to_sign",
   "submitted",
   "indexing",
 ]);
@@ -385,6 +395,34 @@ export class HeliusRingsService {
       const proving = await this.transition(operation.id, "approval_required", "approved");
       if (!proving) return this.toPrivateOperation(await this.requireOperation(operation.id));
       return this.toPrivateOperation(await this.runPipeline(proving));
+    }
+
+    // proving: the pipeline died mid-build. Nothing was signed, so building
+    // again is safe — and if a previous attempt got as far as recording its
+    // notes, `runPipeline` pins them so the rebuild is a replay rather than a
+    // fresh selection.
+    if (operation.state === "proving") {
+      return this.toPrivateOperation(await this.runPipeline(operation));
+    }
+
+    // ready_to_sign: the two halves of this state are not the same situation.
+    if (operation.state === "ready_to_sign") {
+      if (operation.signed_transaction) {
+        // Bytes exist but the transition to `submitted` never committed, so
+        // they may never have been broadcast at all. `runPipeline` short-
+        // circuits on bytes: it resends exactly these and advances.
+        return this.toPrivateOperation(await this.runPipeline(operation));
+      }
+
+      // No bytes, so nothing can have reached the chain. Failing it retryably
+      // is honest and lets a retry rebuild — the unsigned transaction was
+      // never persisted, so there is nothing here to sign.
+      const failed = await this.fail(operation.id, "ready_to_sign", {
+        code: "signer_failed",
+        message: "signing did not complete and no transaction bytes were recorded",
+        retryable: true,
+      });
+      return this.toPrivateOperation(failed ?? (await this.requireOperation(operation.id)));
     }
 
     // submitted: the broadcast either landed, or never left the process, and
@@ -760,7 +798,11 @@ export class HeliusRingsService {
     // recorded, which is what the outbox is for.
     if (current.signed_transaction) {
       await this.resubmitPersistedBytes(current);
-      const resumed = await this.transition(current.id, current.state, "submitted");
+      // The guard depends on where the crash left it: `ready_to_sign` advances
+      // on `signed`, `submitted` on `submitted`. One step per resume — the next
+      // sweep carries it the rest of the way.
+      const guard = current.state === "ready_to_sign" ? "signed" : "submitted";
+      const resumed = await this.transition(current.id, current.state, guard);
       return resumed ?? (await this.requireOperation(current.id));
     }
 
@@ -1170,7 +1212,12 @@ export class HeliusRingsService {
     // A sync sees the whole history, so it can carry the read position further
     // than the last completed operation did — a note received from someone
     // else's transfer arrives without an operation of ours behind it.
-    if (result.observedSlot) {
+    //
+    // Never from a degraded sync, though: `observedSlot` is the highest slot the
+    // sync could *parse*, which is not the same as having seen everything up to
+    // it. Advancing on that would make the next read gate on a position this
+    // wallet has not actually been read through, and report the result as fresh.
+    if (result.observedSlot && !result.report.degraded) {
       await this.wallets.advanceIndexedSlot({
         ...this.tenant,
         id: wallet.id,

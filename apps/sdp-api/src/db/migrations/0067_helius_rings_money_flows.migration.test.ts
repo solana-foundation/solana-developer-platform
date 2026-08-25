@@ -108,60 +108,13 @@ afterEach(async () => {
 });
 
 /**
- * The upgrade path, not the finished schema.
- *
- * Every other test here runs against a database this migration has already
- * been applied to, where `helius_rings_wallets` was empty at the time. That
- * says nothing about an environment that provisioned wallets under 0057 —
- * which is the only environment the migration actually has to survive.
+ * The pairing invariant: an identity without its owner cannot be verified, and
+ * an owner without an identity has nothing to verify.
  */
-describe("against rows that predate it", () => {
-  /** Recreates what 0057 left behind: an identity with no owner beside it. */
-  async function makeLegacyRow(tag: string): Promise<void> {
-    const { walletId } = await seedWallet(tag);
-    await client.query(
-      "ALTER TABLE helius_rings_wallets DROP CONSTRAINT helius_rings_wallets_owner_identity_pair_check"
-    );
-    await client.query(
-      "UPDATE helius_rings_wallets SET shielded_address = 'rings1legacy', owner_address = NULL WHERE id = $1",
-      [walletId]
-    );
-  }
+describe("owner and identity travel together", () => {
+  it("refuses an identity written without its owner", async () => {
+    const { walletId } = await seedWallet("pair_check");
 
-  it("would fail to apply if the pairing constraint validated existing rows", async () => {
-    await makeLegacyRow("legacy_strict");
-
-    // Why the shipped constraint carries NOT VALID. A plain ADD CONSTRAINT
-    // checks every existing row, and each simulated wallet already on disk
-    // violates it — so the migration would abort on exactly the deployments
-    // that have been running longest.
-    await expectSqlstate(
-      () =>
-        client.query(
-          `ALTER TABLE helius_rings_wallets
-               ADD CONSTRAINT helius_rings_wallets_owner_identity_pair_check
-                   CHECK ((owner_address IS NULL) = (shielded_address IS NULL))`
-        ),
-      CHECK_VIOLATION
-    );
-  });
-
-  it("applies to a wallet provisioned before owner_address existed", async () => {
-    await makeLegacyRow("legacy");
-
-    await expect(
-      client.query(
-        `ALTER TABLE helius_rings_wallets
-             ADD CONSTRAINT helius_rings_wallets_owner_identity_pair_check
-                 CHECK ((owner_address IS NULL) = (shielded_address IS NULL)) NOT VALID`
-      )
-    ).resolves.toBeDefined();
-  });
-
-  it("still refuses a new identity written without its owner", async () => {
-    const { walletId } = await seedWallet("legacy_new");
-
-    // NOT VALID grandfathers existing rows; it does not stop governing writes.
     await expectSqlstate(
       () =>
         client.query(

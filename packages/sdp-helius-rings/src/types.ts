@@ -122,7 +122,13 @@ export interface RingsWorkspace {
 export interface PrivateOperationInput {
   walletId: string;
   opType: OpType;
-  asset?: { mint: string; amountRaw: string };
+  /**
+   * The mint, and how much of it. `amountRaw` is absent for a merge, which
+   * consolidates whatever notes of that mint the wallet holds rather than a
+   * caller-chosen amount — recording one there would put a number on the row
+   * that policy and the activity feed read as real.
+   */
+  asset?: { mint: string; amountRaw?: string };
   from?: string;
   to?: string;
   zoneId?: string;

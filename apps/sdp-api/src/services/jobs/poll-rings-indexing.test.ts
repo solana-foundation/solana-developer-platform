@@ -320,6 +320,95 @@ describe("pollRingsIndexing", () => {
       expect(row?.state).toBe("failed");
     });
 
+    /**
+     * A crash inside the pipeline leaves an operation holding its wallet's
+     * slot, in a state retry refuses for not being `failed`. Without the sweep
+     * reaching these, the wallet is stuck for good.
+     */
+    describe("resuming a crashed pipeline", () => {
+      async function strandIn(
+        state: "proving" | "ready_to_sign",
+        nonce: string,
+        keepBytes: boolean
+      ) {
+        const gateway = new InMemoryRingsGateway({ indexingDelayMs: 0 });
+        const operation = await serviceWith(gateway).prepareOperation(
+          {
+            walletId,
+            opType: "shield",
+            asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+            clientNonce: nonce,
+          },
+          { apiKeyId: null, actor: null, custodyWalletId: null }
+        );
+
+        await getDb(env)
+          .prepare(
+            `UPDATE helius_rings_operations
+                SET state = ?,
+                    signed_transaction = CASE WHEN ? THEN signed_transaction ELSE NULL END,
+                    last_valid_block_height = CASE WHEN ? THEN last_valid_block_height ELSE NULL END,
+                    submission_started_at = NULL
+              WHERE id = ?`
+          )
+          .bind(state, keepBytes, keepBytes, operation.id)
+          .run();
+
+        return { id: operation.id, gateway };
+      }
+
+      it("broadcasts the recorded bytes for an operation stranded after signing", async () => {
+        const { id, gateway } = await strandIn("ready_to_sign", "job-strand-signed", true);
+
+        await pollRingsIndexing(jobEnv, {
+          createService: () => serviceWith(gateway),
+          readBlockHeight: NO_HEIGHT,
+        });
+
+        const row = await createHeliusRingsOperationRepository(env).getOperationById({
+          ...tenant,
+          id,
+        });
+        // Those exact bytes, never a rebuild: they may already be in the
+        // mempool, and a second build could differ.
+        expect(row?.state).not.toBe("ready_to_sign");
+      });
+
+      it("fails an operation stranded before signing, so it can be retried", async () => {
+        const { id, gateway } = await strandIn("ready_to_sign", "job-strand-unsigned", false);
+
+        await pollRingsIndexing(jobEnv, {
+          createService: () => serviceWith(gateway),
+          readBlockHeight: NO_HEIGHT,
+        });
+
+        const row = await createHeliusRingsOperationRepository(env).getOperationById({
+          ...tenant,
+          id,
+        });
+        // No bytes means nothing reached the chain, so a retry is safe and the
+        // failure must say so rather than leaving the wallet held.
+        expect(row?.state).toBe("failed");
+        expect(row?.retryable).toBe(true);
+      });
+
+      it("resumes the build for an operation stranded while proving", async () => {
+        const { id, gateway } = await strandIn("proving", "job-strand-proving", false);
+
+        await pollRingsIndexing(jobEnv, {
+          createService: () => serviceWith(gateway),
+          readBlockHeight: NO_HEIGHT,
+        });
+
+        const row = await createHeliusRingsOperationRepository(env).getOperationById({
+          ...tenant,
+          id,
+        });
+        // Nothing was signed, so building again is safe and no human is needed.
+        expect(row?.state).not.toBe("proving");
+      });
+    });
+
     it("leaves everything alone when the chain height is unknown", async () => {
       const id = await strand("withdraw", "job-strand-unknown");
 

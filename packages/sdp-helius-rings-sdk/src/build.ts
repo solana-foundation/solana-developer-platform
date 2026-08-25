@@ -66,22 +66,24 @@ export async function buildRingsOperation(
         assertShieldedIdentity(material, input.expectedShieldedAddress);
       }
 
-      const asset = requireAsset(input);
-      // One blockhash for the whole build, so the expiry SDP persists is the
-      // expiry of the bytes it persists rather than a second, later guess.
-      const lifetime = await deps.client.getLatestBlockhash();
+      const mint = requireMint(input);
 
       if (operation.opType === "shield") {
         // No wallet, no authority, no note selection: a deposit creates notes.
+        //
+        // The builder fetches its own blockhash, so the one taken here is only
+        // a floor for the recorded expiry — read immediately before the call to
+        // keep that floor as tight as possible.
+        const floor = await deps.client.getLatestBlockhash();
         return finish(
           await buildShieldTransaction(deps.client, {
             owner: input.owner,
             material,
-            mint: asset.mint,
-            amountRaw: asset.amountRaw,
+            mint,
+            amountRaw: requireAmount(input),
           }),
           [],
-          lifetime
+          floor
         );
       }
 
@@ -111,33 +113,57 @@ export async function buildRingsOperation(
       const pinned = input.pinnedInputs;
       const pin = pinned ? { pinnedInputs: pinned } : {};
 
+      // A merge is built by the SDK against a blockhash of its own, so this is
+      // a floor for the recorded expiry rather than the real one. Taken here,
+      // immediately before the call, for the same reason as the shield's.
+      const mergeFloor =
+        operation.opType === "merge" ? await deps.client.getLatestBlockhash() : undefined;
+
       const built =
         operation.opType === "merge"
-          ? await buildMerge(spend, { mint: asset.mint, ...pin })
+          ? await buildMerge(spend, { mint, ...pin })
           : operation.opType === "withdraw"
             ? await buildWithdrawal(spend, {
                 recipient: requireRecipient(input),
-                mint: asset.mint,
-                amountRaw: asset.amountRaw,
+                mint,
+                amountRaw: requireAmount(input),
                 ...pin,
               })
             : await buildTransfer(spend, {
                 recipient: requireRecipient(input),
-                mint: asset.mint,
-                amountRaw: asset.amountRaw,
+                mint,
+                amountRaw: requireAmount(input),
                 ...pin,
               });
 
-      // Instructions get assembled against the blockhash chosen above, so the
-      // recorded expiry is exactly this transaction's. A merge arrives already
-      // built and keeps its own; see `finish`.
-      const transaction = built.instructions
-        ? assemble(owner, built.instructions, lifetime)
-        : requireTransaction(built.transaction);
+      if (built.instructions) {
+        // Fetched now rather than before the wallet sync and the prover round
+        // trip, which together can burn a large part of a blockhash's ~90
+        // second life. Assembling against a hash chosen after that work means
+        // the transaction gets the full window, and the recorded expiry is
+        // exactly this transaction's rather than a floor.
+        const lifetime = await deps.client.getLatestBlockhash();
+        return finish(assemble(owner, built.instructions, lifetime), built.inputNotes, lifetime);
+      }
 
-      return finish(transaction, built.inputNotes, lifetime);
+      return finish(
+        requireTransaction(built.transaction),
+        built.inputNotes,
+        requireLifetime(mergeFloor)
+      );
     }
   );
+}
+
+/** Only a merge reaches the transaction branch, and only it takes a floor. */
+function requireLifetime(lifetime: Lifetime | undefined): Lifetime {
+  if (!lifetime) {
+    throw new HeliusRingsError(
+      "gateway_unavailable",
+      "a Rings flow returned a built transaction without a recorded blockhash"
+    );
+  }
+  return lifetime;
 }
 
 function requireTransaction(transaction: Transaction | undefined): Transaction {
@@ -201,18 +227,30 @@ function finish(
   };
 }
 
-function requireAsset(input: BuildOperationInput): { mint: string; amountRaw: string } {
-  const asset = input.operation.input?.asset;
-  if (!asset) {
+function requireMint(input: BuildOperationInput): string {
+  const mint = input.operation.input?.asset?.mint;
+  if (!mint) {
     // The route's schemas make this unreachable. It stays because an absent
     // asset must never be read as native SOL by default: that would move the
     // wrong token, and the caller never said which one they meant.
-    throw new HeliusRingsError(
-      "invalid_input",
-      `a ${input.operation.opType} needs an explicit asset and amount`
-    );
+    throw new HeliusRingsError("invalid_input", `a ${input.operation.opType} needs an asset`);
   }
-  return asset;
+  return mint;
+}
+
+/**
+ * The amount, for the flows that move a caller-chosen one.
+ *
+ * Separate from the mint because a merge has no amount: it consolidates
+ * whatever notes of that mint the wallet holds. Reading one there would put a
+ * figure on the row that nothing honours.
+ */
+function requireAmount(input: BuildOperationInput): string {
+  const amountRaw = input.operation.input?.asset?.amountRaw;
+  if (!amountRaw) {
+    throw new HeliusRingsError("invalid_input", `a ${input.operation.opType} needs an amount`);
+  }
+  return amountRaw;
 }
 
 function requireRecipient(input: BuildOperationInput): string {

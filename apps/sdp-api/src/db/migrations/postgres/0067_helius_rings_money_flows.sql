@@ -26,8 +26,8 @@
 -- wrong wallet's transaction is not a recoverable mistake, so the row id is
 -- recorded at provisioning and used from then on.
 --
--- Nullable because rows provisioned before this migration were simulated and
--- have no custody wallet behind them. New live provisioning always writes it.
+-- Nullable because the column is written by provisioning, and a row exists from
+-- the moment the intent is reserved. Every live provision sets it.
 ALTER TABLE helius_rings_wallets
     ADD COLUMN IF NOT EXISTS custody_wallet_id TEXT
         REFERENCES custody_wallets(id) ON DELETE RESTRICT;
@@ -47,25 +47,21 @@ ALTER TABLE helius_rings_wallets
 ALTER TABLE helius_rings_wallets
     ADD COLUMN IF NOT EXISTS owner_address TEXT;
 
--- NOT VALID, because every wallet provisioned under 0057 already breaks this:
--- those rows carry a simulated shielded_address and no owner, so validating
--- them would abort the migration on exactly the deployments that have been
--- running longest. They are not backfillable either — a simulated identity was
--- never derived from a real owner, so there is no correct value to write.
---
--- The constraint still governs every insert and update from here on, which is
--- what the invariant is for. It is deliberately never validated afterwards:
--- the legacy rows stay non-conforming until a live provision overwrites them.
 -- Dropped first, like every other constraint in this file. The whole migration
 -- has to be re-runnable: it was iterated on before it shipped, and a bare
 -- `ADD CONSTRAINT` against a name that already exists aborts the file after the
 -- index drops further down have already been planned.
+--
+-- Validated rather than NOT VALID. 0057 shipped but was never used to provision
+-- a wallet in any environment, so no row carries a simulated identity for this
+-- to grandfather — and a constraint that governs the rows already on disk as
+-- well as the ones to come is the stronger statement.
 ALTER TABLE helius_rings_wallets
     DROP CONSTRAINT IF EXISTS helius_rings_wallets_owner_identity_pair_check;
 
 ALTER TABLE helius_rings_wallets
     ADD CONSTRAINT helius_rings_wallets_owner_identity_pair_check
-        CHECK ((owner_address IS NULL) = (shielded_address IS NULL)) NOT VALID;
+        CHECK ((owner_address IS NULL) = (shielded_address IS NULL));
 
 
 -- --------------------------------------------------------------------------

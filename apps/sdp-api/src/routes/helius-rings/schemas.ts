@@ -32,7 +32,19 @@ const amountRaw = z
   .refine((value) => BigInt(value) > 0n, "amountRaw must be greater than zero")
   .refine((value) => BigInt(value) <= 18_446_744_073_709_551_615n, "amountRaw exceeds u64");
 
-const assetAmount = z.object({ mint: z.string().min(1), amountRaw });
+/** `amountRaw` is optional here and required per flow below; a merge has none. */
+const assetAmount = z.object({ mint: z.string().min(1), amountRaw: amountRaw.optional() });
+
+/**
+ * Native SOL, spelled as SDP spells it.
+ *
+ * A withdrawal must be SOL: the pool's SPL token-interface address is derived
+ * inside the SDK and not exported, so an SPL withdrawal cannot be assembled at
+ * all. Refusing it here rather than in the adapter means the caller learns
+ * before a policy evaluation and possibly a human approval are spent on it.
+ */
+// biome-ignore lint/security/noSecrets: the wrapped SOL mint, a public constant.
+const SDP_NATIVE_MINT = "So11111111111111111111111111111111111111112";
 
 /**
  * Per-flow shapes, because the fields are not interchangeable.
@@ -80,32 +92,71 @@ export const prepareRingsOperationSchema = z
     refuse("zoneId", "zones are not supported on a money flow");
     refuse("timelock", "timelocks are not supported on a money flow");
 
-    if (value.opType === "shield") {
-      require("asset", "a shield needs the mint and amount to deposit");
-      refuse("transferMode", "a shield has no transfer mode");
-      return;
-    }
+    const requireAmount = (why: string) => {
+      if (value.asset?.amountRaw === undefined) {
+        ctx.addIssue({ code: "custom", path: ["asset", "amountRaw"], message: why });
+      }
+    };
 
     if (value.opType === "merge") {
       require("asset", "a merge needs the mint whose notes to consolidate");
       refuse("transferMode", "a merge has no transfer mode");
+      // A merge consolidates whatever notes of the mint the wallet holds. An
+      // amount here would be recorded on the row and read as real by policy and
+      // the activity feed while nothing honours it.
+      if (value.asset?.amountRaw !== undefined) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["asset", "amountRaw"],
+          message: "a merge consolidates every note of the mint, so it takes no amount",
+        });
+      }
+      return;
+    }
+
+    if (value.opType === "shield") {
+      require("asset", "a shield needs the mint and amount to deposit");
+      requireAmount("a shield needs the amount to deposit");
+      refuse("transferMode", "a shield has no transfer mode");
       return;
     }
 
     require("asset", `a ${value.opType} needs the mint and amount to move`);
+    requireAmount(`a ${value.opType} needs the amount to move`);
     require("to", `a ${value.opType} needs a recipient`);
 
-    // `registered` is the only mode with a builder. An anonymous transfer is
-    // rejected here as well as by the authority, because the caller should
-    // learn it is unsupported before an approval is requested for it.
-    if (value.opType === "transfer_registered" && value.transferMode === "anonymous") {
+    if (value.opType === "withdraw") {
+      refuse("transferMode", "a withdrawal has no transfer mode");
+      if (value.asset && value.asset.mint !== SDP_NATIVE_MINT) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["asset", "mint"],
+          message: "only SOL withdrawals are supported",
+        });
+      }
+      return;
+    }
+
+    // `registered` is the only mode with a builder, and the database requires
+    // exactly that value for this op type — so anything else is a 400 here
+    // rather than a constraint violation later. An anonymous transfer is
+    // refused before an approval is ever requested for it.
+    if (value.transferMode !== undefined && value.transferMode !== "registered") {
       ctx.addIssue({
         code: "custom",
         path: ["transferMode"],
-        message: "anonymous transfers are not supported",
+        message: `${value.transferMode} transfers are not supported`,
       });
     }
-  });
+  })
+  // Normalised rather than demanded: the database requires `registered` for
+  // this op type, and a caller who named the flow has already said which mode
+  // they meant.
+  .transform((value) =>
+    value.opType === "transfer_registered"
+      ? { ...value, transferMode: "registered" as const }
+      : value
+  );
 
 export const retryRingsOperationSchema = z.object({
   clientNonce: z.string().min(1).max(128),

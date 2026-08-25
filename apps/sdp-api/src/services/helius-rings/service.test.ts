@@ -279,6 +279,36 @@ describe("HeliusRingsService", () => {
       expect(row?.last_indexed_slot).toBe("5000");
     });
 
+    it("does not move the read position from a degraded sync", async () => {
+      const gateway = new InMemoryRingsGateway();
+      // A sync that could not read everything still returns balances, and
+      // `observedSlot` is the highest slot it managed to parse — not evidence
+      // that everything up to it was seen.
+      vi.spyOn(gateway, "syncPhoton").mockResolvedValue({
+        balances: [],
+        history: [],
+        report: {
+          storedNotes: 0,
+          unparsedTransactions: 3,
+          undecryptableCandidates: 0,
+          degraded: true,
+        },
+        indexedOperationSignatures: [],
+        observedAt: new Date().toISOString(),
+        observedSlot: "9999",
+      });
+
+      await service({ gateway }).syncWallet(walletId);
+
+      const row = await createHeliusRingsWalletRepository(env).getWalletById({
+        ...tenant,
+        id: walletId,
+      });
+      // Advancing here would make the next read gate on a position this wallet
+      // has not been read through, and report the result as fresh.
+      expect(row?.last_indexed_slot).toBeNull();
+    });
+
     it("refuses a wallet that has never been provisioned", async () => {
       const wallet = await createHeliusRingsWalletRepository(env).createWallet({
         ...tenant,

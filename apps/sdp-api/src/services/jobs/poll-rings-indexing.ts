@@ -36,6 +36,9 @@ export const RINGS_INDEXING_TIMEOUT_MS = 30 * 60 * 1000;
 
 const MAX_PER_RUN = 100;
 
+/** In-flight states `executeOperation` can move forward from. */
+const RESUMABLE_STATES = new Set(["proving", "ready_to_sign", "submitted", "indexing"]);
+
 export interface PollRingsIndexingDependencies {
   /** Test seam: service per tenant; production builds the real one. */
   createService?: (tenant: { organizationId: string; projectId: string }) => HeliusRingsService;
@@ -102,7 +105,12 @@ export async function pollRingsIndexing(
     // indexing transition never committed. The timeout is deliberately not
     // applied to it — the budget measures how long Photon has been asked, and a
     // resumed operation has not been asked yet.
-    if (operation.state !== "indexing" && operation.state !== "submitted") continue;
+    // `proving` and `ready_to_sign` ride along with the two submitted states:
+    // a crash inside the pipeline leaves an operation in one of them, holding
+    // its wallet's slot, and nothing else would ever look at it again. The
+    // timeout below still applies only to `indexing`, since that is the only
+    // one measuring how long Photon has been asked.
+    if (!RESUMABLE_STATES.has(operation.state)) continue;
     try {
       const service = createService({
         organizationId: operation.organization_id,
