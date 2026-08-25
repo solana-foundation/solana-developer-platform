@@ -217,6 +217,155 @@ describe("custody_wallet_id", () => {
   });
 });
 
+describe("voided state", () => {
+  /** Signed bytes and their expiry travel together; the outbox CHECKs say so. */
+  const SIGNED = {
+    outer_tx_signature: "sig_reconcile",
+    signed_transaction: "AQAB",
+    last_valid_block_height: "100",
+  };
+
+  const FAILURE = {
+    failure_code: "manual_reconciliation_required",
+    failure_message: "expired without being indexed",
+    retryable: false,
+  };
+
+  it("accepts a voided row carrying the failure that put it in front of an operator", async () => {
+    const seed = await seedWallet("void_ok");
+
+    await insertOperation({
+      id: "hro_void_ok",
+      organization_id: seed.organizationId,
+      project_id: seed.projectId,
+      wallet_id: seed.walletId,
+      intent_key: "sha256:void_ok",
+      op_type: "withdraw",
+      state: "voided",
+      ...SIGNED,
+      ...FAILURE,
+    });
+
+    const { rows } = await client.query<{ state: string; failure_code: string }>(
+      "SELECT state, failure_code FROM helius_rings_operations WHERE id = 'hro_void_ok'"
+    );
+    // The triple survives: it is why the row was reconciled at all, and
+    // clearing it would erase that.
+    expect(rows[0]).toMatchObject({ state: "voided", failure_code: FAILURE.failure_code });
+  });
+
+  it("refuses a voided row with no failure recorded", async () => {
+    const seed = await seedWallet("void_bare");
+
+    await expectSqlstate(
+      () =>
+        insertOperation({
+          id: "hro_void_bare",
+          organization_id: seed.organizationId,
+          project_id: seed.projectId,
+          wallet_id: seed.walletId,
+          intent_key: "sha256:void_bare",
+          op_type: "withdraw",
+          state: "voided",
+          ...SIGNED,
+        }),
+      CHECK_VIOLATION
+    );
+  });
+
+  it("still refuses a completed row that carries a failure", async () => {
+    const seed = await seedWallet("done_failed");
+
+    // This is what forces the reconcile's landed path to null all three in the
+    // same UPDATE as the state change.
+    await expectSqlstate(
+      () =>
+        insertOperation({
+          id: "hro_done_failed",
+          organization_id: seed.organizationId,
+          project_id: seed.projectId,
+          wallet_id: seed.walletId,
+          intent_key: "sha256:done_failed",
+          op_type: "withdraw",
+          state: "completed",
+          ...SIGNED,
+          ...FAILURE,
+        }),
+      CHECK_VIOLATION
+    );
+  });
+
+  const HOLDS = [
+    ["failed", true],
+    ["voided", false],
+    ["completed", false],
+  ] as const;
+
+  it.each(HOLDS)("a %s spend with bytes: slot held = %s", async (state, holds) => {
+    const seed = await seedWallet(`slot_${state}`);
+    const common = {
+      organization_id: seed.organizationId,
+      project_id: seed.projectId,
+      wallet_id: seed.walletId,
+      op_type: "withdraw",
+    };
+
+    await insertOperation({
+      ...common,
+      id: `hro_slot_${state}`,
+      intent_key: `sha256:slot_${state}`,
+      state,
+      ...SIGNED,
+      ...(state === "completed" ? {} : FAILURE),
+    });
+
+    const fileAnother = () =>
+      insertOperation({
+        ...common,
+        id: `hro_slot_${state}_next`,
+        intent_key: `sha256:slot_${state}_next`,
+        state: "proving",
+      });
+
+    // The entire mechanism: `voided` is not a state either index names, so a
+    // reconciled row releases the wallet without the predicates knowing it
+    // exists.
+    if (holds) {
+      await expectSqlstate(fileAnother, UNIQUE_VIOLATION);
+    } else {
+      await expect(fileAnother()).resolves.toBeUndefined();
+    }
+  });
+
+  it("releases a deposit's slot the same way", async () => {
+    const seed = await seedWallet("slot_shield");
+    const common = {
+      organization_id: seed.organizationId,
+      project_id: seed.projectId,
+      wallet_id: seed.walletId,
+      op_type: "shield",
+    };
+
+    await insertOperation({
+      ...common,
+      id: "hro_slot_shield",
+      intent_key: "sha256:slot_shield",
+      state: "voided",
+      ...SIGNED,
+      ...FAILURE,
+    });
+
+    await expect(
+      insertOperation({
+        ...common,
+        id: "hro_slot_shield_next",
+        intent_key: "sha256:slot_shield_next",
+        state: "proving",
+      })
+    ).resolves.toBeUndefined();
+  });
+});
+
 describe("last_indexed_slot", () => {
   it("records how far the indexer must catch up before a read is trusted", async () => {
     const { walletId } = await seedWallet("slot_ok");

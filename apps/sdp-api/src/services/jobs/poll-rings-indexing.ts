@@ -79,6 +79,12 @@ export async function pollRingsIndexing(
   // depends on whether they consumed notes rather than on how long they waited.
   await escalateExpiredSubmissions(env, repository, dependencies, logger);
 
+  // Then the reverse case: a row failed on an RPC timeout whose transaction
+  // Photon has since indexed. Nothing else would ever look at it again, because
+  // `failed` is not in-flight work — so it would hold its wallet's slot forever
+  // over a payment that actually succeeded.
+  await completeIndexedFailures(env, repository, dependencies, logger);
+
   // Deliberately sequential. executeOperation makes one Photon call per
   // operation, so fanning MAX_PER_RUN out would put 100 unthrottled requests at
   // the indexer every tick. It would not even buy much: the pool caps at 10
@@ -180,6 +186,45 @@ async function escalateExpiredSubmissions(
       logger.warn(
         { operationId: operation.id, err: error },
         "rings reconciliation sweep failed for operation"
+      );
+    }
+  }
+}
+
+/**
+ * Completes a signed failure Photon turns out to hold.
+ *
+ * Safe to do without a human because Photon holding a transaction is positive
+ * evidence, and it is the same authority the happy path already trusts. The
+ * opposite conclusion is not symmetric: absence from an indexer is never proof
+ * a transaction is dead, so this pass never voids anything. That decision stays
+ * on the reconcile route, which checks the chain and the blockhash too.
+ */
+async function completeIndexedFailures(
+  env: Env,
+  repository: ReturnType<typeof createHeliusRingsOperationRepository>,
+  dependencies: PollRingsIndexingDependencies,
+  logger: ReturnType<typeof getLogger>
+): Promise<void> {
+  const createService =
+    dependencies.createService ??
+    ((tenant: { organizationId: string; projectId: string }) =>
+      createHeliusRingsService(env, tenant));
+
+  const signedFailures = await repository.listSignedFailures({ limit: MAX_PER_RUN });
+
+  for (const operation of signedFailures) {
+    try {
+      // The route's own idempotent path: a Photon hit completes it, and
+      // anything else leaves the row exactly as it is.
+      await createService({
+        organizationId: operation.organization_id,
+        projectId: operation.project_id,
+      }).completeIfIndexed(operation.id);
+    } catch (error) {
+      logger.warn(
+        { operationId: operation.id, err: error },
+        "rings signed-failure sweep failed for operation"
       );
     }
   }

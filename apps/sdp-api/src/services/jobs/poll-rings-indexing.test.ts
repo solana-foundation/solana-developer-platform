@@ -264,6 +264,62 @@ describe("pollRingsIndexing", () => {
       expect(row?.retryable).toBe(false);
     });
 
+    it("completes a signed failure once Photon holds it", async () => {
+      const id = await strand("withdraw", "job-failed-indexed");
+      await createHeliusRingsOperationRepository(env).failOperation({
+        ...tenant,
+        id,
+        expectedState: "indexing",
+        code: "submit_failed",
+        message: "rpc timed out",
+        retryable: true,
+      });
+
+      const gateway = new InMemoryRingsGateway();
+      gateway.recordSubmission(OUTER_TX.signature);
+
+      await pollRingsIndexing(jobEnv, {
+        createService: () => serviceWith(gateway),
+        readBlockHeight: NO_HEIGHT,
+      });
+
+      const row = await createHeliusRingsOperationRepository(env).getOperationById({
+        ...tenant,
+        id,
+      });
+      // Nothing else would ever look at this row again: `failed` is not
+      // in-flight work, so it would hold the wallet forever over a payment that
+      // actually succeeded.
+      expect(row?.state).toBe("completed");
+      expect(row?.failure_code).toBeNull();
+    });
+
+    it("never voids from the poll", async () => {
+      const id = await strand("withdraw", "job-failed-absent");
+      await createHeliusRingsOperationRepository(env).failOperation({
+        ...tenant,
+        id,
+        expectedState: "indexing",
+        code: "submit_failed",
+        message: "rpc timed out",
+        retryable: true,
+      });
+
+      // A gateway that reports nothing indexed. Absence from an indexer is
+      // never proof a transaction is dead, so this pass must leave it alone
+      // and wait for an operator to check the chain.
+      await pollRingsIndexing(jobEnv, {
+        createService: () => serviceWith(stalled()),
+        readBlockHeight: NO_HEIGHT,
+      });
+
+      const row = await createHeliusRingsOperationRepository(env).getOperationById({
+        ...tenant,
+        id,
+      });
+      expect(row?.state).toBe("failed");
+    });
+
     it("leaves everything alone when the chain height is unknown", async () => {
       const id = await strand("withdraw", "job-strand-unknown");
 

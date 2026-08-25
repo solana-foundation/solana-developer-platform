@@ -1,5 +1,11 @@
 import { createRpc, type SolanaRpc, sendTransaction } from "@sdp/rpc/solana";
 import { getBase64Codec } from "@solana/codecs";
+import {
+  type Blockhash,
+  getCompiledTransactionMessageDecoder,
+  getTransactionDecoder,
+  type Signature,
+} from "@solana/kit";
 import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
 
@@ -32,6 +38,65 @@ export async function submitRingsOuterTransaction(
     const message = error instanceof Error ? error.message : "transaction submission failed";
     throw new RingsAdapterError("submit_failed", message, { retryable: true, cause: error });
   }
+}
+
+/**
+ * What the chain says about one signed transaction.
+ *
+ * Two independent questions, because either answer alone is not enough to
+ * declare a transaction dead: whether a finalized node has it, and whether the
+ * blockhash it carries could still be accepted.
+ */
+export interface RingsSignatureInspection {
+  /** Slot a finalized node reports, or null when it has no record. */
+  readonly landedSlot: string | null;
+  /**
+   * Whether the transaction could still be included.
+   *
+   * Read from the blockhash inside the signed bytes, never from the
+   * `last_valid_block_height` column: that column is a floor for a shield and a
+   * merge, because those take their blockhash from the SDK's own builder. Using
+   * the column to declare absence is exactly the premature-expiry mistake this
+   * check exists to avoid.
+   */
+  readonly blockhashValid: boolean;
+}
+
+export interface InspectRingsSignatureInput {
+  env: Env;
+  signature: string;
+  signedTxBase64: string;
+  rpc?: SolanaRpc;
+}
+
+export async function inspectRingsSignature(
+  input: InspectRingsSignatureInput
+): Promise<RingsSignatureInspection> {
+  const rpc = input.rpc ?? createRpc(input.env);
+
+  const transaction = getTransactionDecoder().decode(getBase64Codec().encode(input.signedTxBase64));
+  const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+  const lifetime = message.lifetimeToken;
+
+  // Finalized, because a lesser commitment can still be dropped, and the whole
+  // point of the question is whether this is irreversible.
+  const [landed, blockhash] = await Promise.all([
+    // `base64` because only the slot is read; asking for a parsed transaction
+    // would make the node do work nobody looks at.
+    rpc
+      .getTransaction(input.signature as Signature, {
+        commitment: "finalized",
+        encoding: "base64",
+        maxSupportedTransactionVersion: 0,
+      })
+      .send(),
+    rpc.isBlockhashValid(lifetime as Blockhash, { commitment: "finalized" }).send(),
+  ]);
+
+  return {
+    landedSlot: landed === null ? null : String(landed.slot),
+    blockhashValid: blockhash.value,
+  };
 }
 
 /**

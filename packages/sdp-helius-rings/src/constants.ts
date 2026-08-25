@@ -14,6 +14,17 @@ export const OPERATION_STATES = [
   "indexing",
   "completed",
   "failed",
+  /**
+   * A signed failure an operator has confirmed never landed.
+   *
+   * Terminal, and reachable only from `failed` through the reconcile route —
+   * never through `nextState`. It exists so a wallet can be released without
+   * lying: marking such a row `completed` would claim money moved, and clearing
+   * its signed bytes would free the slot while the transaction could still
+   * land. Leaving the states the unique indexes name is what releases the
+   * wallet, exactly as `completed` does.
+   */
+  "voided",
 ] as const;
 
 export const OP_TYPES = [

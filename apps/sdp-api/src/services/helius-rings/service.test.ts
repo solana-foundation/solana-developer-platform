@@ -511,6 +511,132 @@ describe("HeliusRingsService", () => {
       ).rejects.toMatchObject({ code: "conflict" });
     });
 
+    describe("reconcile", () => {
+      /** A signed withdrawal sitting in `failed`, the only reconcilable shape. */
+      async function strandedSpend(nonce: string) {
+        const operation = await liveishService().prepareOperation(
+          operationInput({ clientNonce: nonce, opType: "withdraw" }),
+          actorContext
+        );
+        expect(operation.state).toBe("indexing");
+        await failSigned(operation.id, operation.state);
+        return operation.id;
+      }
+
+      const chain = (landedSlot: string | null, blockhashValid: boolean) => async () => ({
+        landedSlot,
+        blockhashValid,
+      });
+
+      it("completes and releases the wallet when Photon turns out to hold it", async () => {
+        const id = await strandedSpend("nonce-rec-landed");
+        const gateway = new InMemoryRingsGateway();
+        gateway.recordSubmission(OUTER_TX.signature);
+
+        const result = await liveishService({ gateway }).reconcileOperation(id);
+
+        expect(result.state).toBe("completed");
+        // The triple has to go: the schema forbids a completed row carrying one.
+        expect(result.failure).toBeNull();
+
+        // Released, so the wallet can spend again.
+        await expect(
+          liveishService().prepareOperation(
+            operationInput({ clientNonce: "nonce-rec-landed-2", opType: "withdraw" }),
+            actorContext
+          )
+        ).resolves.toBeDefined();
+      });
+
+      it("voids and releases the wallet when the transaction can never land", async () => {
+        const id = await strandedSpend("nonce-rec-void");
+
+        const result = await liveishService({
+          inspectSignature: chain(null, false),
+        }).reconcileOperation(id);
+
+        // An expired blockhash can never be included, which is the only
+        // evidence strong enough to declare a transaction dead.
+        expect(result.state).toBe("voided");
+        // Kept, because it is the reason the operator was ever involved.
+        expect(result.failure).toMatchObject({ code: "indexing_timeout" });
+
+        await expect(
+          liveishService().prepareOperation(
+            operationInput({ clientNonce: "nonce-rec-void-2", opType: "withdraw" }),
+            actorContext
+          )
+        ).resolves.toBeDefined();
+      });
+
+      it("refuses to void a transaction that can still land", async () => {
+        const id = await strandedSpend("nonce-rec-live");
+
+        await expect(
+          liveishService({ inspectSignature: chain(null, true) }).reconcileOperation(id)
+        ).rejects.toMatchObject({ code: "conflict" });
+
+        // Still held: voiding here would invite a second payment beside one
+        // that is still in the mempool.
+        await expect(
+          liveishService().prepareOperation(
+            operationInput({ clientNonce: "nonce-rec-live-2", opType: "withdraw" }),
+            actorContext
+          )
+        ).rejects.toMatchObject({ code: "conflict" });
+      });
+
+      it("refuses to settle from the chain alone when Photon has not caught up", async () => {
+        const id = await strandedSpend("nonce-rec-awaiting");
+
+        // Completing here would set the wallet's read position from a slot the
+        // indexer has not reached, so the next spend would wait on nothing.
+        await expect(
+          liveishService({ inspectSignature: chain("9000", false) }).reconcileOperation(id)
+        ).rejects.toMatchObject({ code: "conflict" });
+      });
+
+      it("writes nothing when an oracle is unavailable", async () => {
+        const id = await strandedSpend("nonce-rec-oracle");
+
+        await expect(
+          liveishService({
+            inspectSignature: async () => {
+              throw new Error("rpc unreachable");
+            },
+          }).reconcileOperation(id)
+        ).rejects.toThrow();
+
+        // Not knowing is not absence; an indexer or RPC blip must not release
+        // a wallet.
+        const row = await createPostgresHeliusRingsOperationRepository(getDb(env)).getOperationById(
+          { ...tenant, id }
+        );
+        expect(row?.state).toBe("failed");
+      });
+
+      it("is idempotent once settled", async () => {
+        const id = await strandedSpend("nonce-rec-replay");
+        await liveishService({ inspectSignature: chain(null, false) }).reconcileOperation(id);
+
+        // The operator cannot see the race, so replaying the poke is a 200.
+        const replay = await liveishService().reconcileOperation(id);
+        expect(replay.state).toBe("voided");
+      });
+
+      it("refuses an unsigned failure, which belongs to retry", async () => {
+        const operation = await service({ gateway: new InMemoryRingsGateway() }).prepareOperation(
+          operationInput({ clientNonce: "nonce-rec-unsigned" }),
+          actorContext
+        );
+        expect(operation.state).toBe("failed");
+
+        await expect(liveishService().reconcileOperation(operation.id)).rejects.toMatchObject({
+          code: "conflict",
+        });
+      });
+    });
+
     it("refuses to retry an operation that was already signed", async () => {
       const operation = await liveishService().prepareOperation(
         operationInput({ clientNonce: "nonce-signed-retry" }),

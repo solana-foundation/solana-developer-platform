@@ -10,6 +10,7 @@ import type {
   RuntimeHealth,
   SyncPhotonResult,
   TransitionGuard,
+  VerifyIndexedResult,
 } from "@sdp/helius-rings";
 import {
   HeliusRingsError,
@@ -45,7 +46,7 @@ import type { Env } from "@/types/env";
 import { RingsAdapterError, redactAdapterMessage } from "./adapter-error";
 import { resolveRingsGateway } from "./gateway";
 import { buildRingsWalletOperationInput } from "./policy-envelope";
-import { submitRingsOuterTransaction } from "./rpc-adapter";
+import { inspectRingsSignature, submitRingsOuterTransaction } from "./rpc-adapter";
 import { signRingsOuterTransaction } from "./signer-adapter";
 
 /**
@@ -79,6 +80,8 @@ export interface HeliusRingsServiceDependencies {
   enforcePolicy?: typeof enforceWalletOperationPolicy;
   signOuterTransaction?: typeof signRingsOuterTransaction;
   submitOuterTransaction?: typeof submitRingsOuterTransaction;
+  /** Test seam for the chain half of a reconcile. */
+  inspectSignature?: typeof inspectRingsSignature;
   /** Reads the approval verdict; defaults to the policy repository. */
   getApprovalStatus?: (approvalRequestId: string) => Promise<ApprovalRequestStatus | null>;
   now?: () => string;
@@ -135,6 +138,7 @@ export class HeliusRingsService {
   private readonly enforcePolicy: typeof enforceWalletOperationPolicy;
   private readonly signOuterTransaction: typeof signRingsOuterTransaction;
   private readonly submitOuterTransaction: typeof submitRingsOuterTransaction;
+  private readonly inspectSignature: typeof inspectRingsSignature;
   private readonly getApprovalStatus: (
     approvalRequestId: string
   ) => Promise<ApprovalRequestStatus | null>;
@@ -160,6 +164,7 @@ export class HeliusRingsService {
     this.signOuterTransaction = dependencies.signOuterTransaction ?? signRingsOuterTransaction;
     this.submitOuterTransaction =
       dependencies.submitOuterTransaction ?? submitRingsOuterTransaction;
+    this.inspectSignature = dependencies.inspectSignature ?? inspectRingsSignature;
     this.getApprovalStatus =
       dependencies.getApprovalStatus ??
       (async (approvalRequestId) => {
@@ -454,6 +459,134 @@ export class HeliusRingsService {
         },
       });
     }
+  }
+
+  /**
+   * Settles a signed failure by observing the chain, never by being told.
+   *
+   * The body is empty and there is no force flag on purpose: the caller is a
+   * poke, not a declaration. Releasing a wallet requires knowing the
+   * transaction is dead, and only the chain knows that.
+   *
+   * The order matters. Photon is the happy-path authority, so a hit there is a
+   * plain completion. A finalized node holding it while Photon does not is not
+   * grounds to complete — the wallet's read position advances from Photon's
+   * slot, and inventing one would send the next spend waiting for a position
+   * the indexer never reached. Only an expired blockhash proves absence, and it
+   * proves it absolutely: an expired blockhash can never be included.
+   *
+   * Any oracle that throws is a 503 with no write. Not knowing is not absence,
+   * and an indexer blip must not release a wallet.
+   */
+  async reconcileOperation(operationId: string): Promise<PrivateOperation> {
+    const operation = await this.requireOperation(operationId);
+
+    // Replaying a poke is not an error; the operator cannot see the race.
+    if (operation.state === "completed" || operation.state === "voided") {
+      return this.toPrivateOperation(operation);
+    }
+    if (operation.state !== "failed") {
+      throw new HeliusRingsError(
+        "conflict",
+        `operation ${operation.id} is ${operation.state}; only a signed failure can be reconciled`
+      );
+    }
+    if (!(operation.signed_transaction && operation.outer_tx_signature)) {
+      throw new HeliusRingsError(
+        "conflict",
+        `operation ${operation.id} was never signed, so there is nothing on chain to reconcile; retry it instead`
+      );
+    }
+
+    const indexed = await this.gateway.verifyIndexed(operation.outer_tx_signature);
+    if (indexed) {
+      return this.toPrivateOperation(await this.settleReconciled(operation, indexed));
+    }
+
+    const chain = await this.inspectSignature({
+      env: this.env,
+      signature: operation.outer_tx_signature,
+      signedTxBase64: operation.signed_transaction,
+    });
+
+    if (chain.landedSlot !== null) {
+      throw new HeliusRingsError(
+        "conflict",
+        `${operation.outer_tx_signature} is on chain but Photon has not indexed it yet; it will complete on its own once the indexer catches up`
+      );
+    }
+    if (chain.blockhashValid) {
+      throw new HeliusRingsError(
+        "conflict",
+        `${operation.outer_tx_signature} can still land; do not file another until its blockhash expires`
+      );
+    }
+
+    const voided = await this.operations.voidOperation({ ...this.tenant, id: operation.id });
+    if (!voided) return this.toPrivateOperation(await this.requireOperation(operation.id));
+
+    await this.events.append({
+      operationId: voided.id,
+      kind: "operation.voided",
+      payload: {
+        signature: operation.outer_tx_signature,
+        photon: false,
+        rpc: "notFound",
+        blockhashValid: false,
+      },
+    });
+
+    return this.toPrivateOperation(voided);
+  }
+
+  /**
+   * Completes a signed failure if Photon now holds it, and does nothing if not.
+   *
+   * The half of a reconcile that needs no operator. Never touches the chain or
+   * the blockhash, so it can never conclude absence — that is the whole reason
+   * the poll may call it unattended.
+   */
+  async completeIfIndexed(operationId: string): Promise<PrivateOperation> {
+    const operation = await this.requireOperation(operationId);
+    if (operation.state !== "failed" || !operation.outer_tx_signature) {
+      return this.toPrivateOperation(operation);
+    }
+
+    const indexed = await this.gateway.verifyIndexed(operation.outer_tx_signature);
+    if (!indexed) return this.toPrivateOperation(operation);
+
+    return this.toPrivateOperation(await this.settleReconciled(operation, indexed));
+  }
+
+  /**
+   * The landed half of a reconcile, shared with the poll.
+   *
+   * Identical writes to the indexing hit on the happy path, because it is the
+   * same fact arriving late.
+   */
+  private async settleReconciled(
+    operation: HeliusRingsOperationRow,
+    indexed: VerifyIndexedResult
+  ): Promise<HeliusRingsOperationRow> {
+    const completed = await this.operations.completeFromFailed({
+      ...this.tenant,
+      id: operation.id,
+      photonIndexedAt: indexed.indexedAt,
+    });
+    if (!completed) return this.requireOperation(operation.id);
+
+    await this.wallets.advanceIndexedSlot({
+      ...this.tenant,
+      id: completed.wallet_id,
+      slot: indexed.slot,
+    });
+    await this.events.append({
+      operationId: completed.id,
+      kind: "operation.completed",
+      payload: { photonRef: indexed.photonRef, reconciledFrom: "failed" },
+    });
+
+    return completed;
   }
 
   /**

@@ -390,6 +390,65 @@ export function createPostgresHeliusRingsOperationRepository(
       return row ? mapRow(row) : null;
     },
 
+    async completeFromFailed(
+      input: HeliusRingsProjectScope & { id: string; photonIndexedAt: string }
+    ) {
+      // Compare-and-swap on `failed`: losing it means another worker or a
+      // concurrent reconcile already moved the row, which is not an error.
+      const row = await db
+        .prepare(
+          `UPDATE helius_rings_operations
+              SET state = 'completed',
+                  failure_code = NULL,
+                  failure_message = NULL,
+                  retryable = NULL,
+                  photon_indexed_at = ?,
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND state = 'failed'
+          RETURNING *`
+        )
+        .bind(input.photonIndexedAt, input.id, input.organizationId, input.projectId)
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async voidOperation(input: HeliusRingsProjectScope & { id: string }) {
+      // Only from a signed failure. An unsigned one has nothing on chain to
+      // reconcile and belongs to retry instead.
+      const row = await db
+        .prepare(
+          `UPDATE helius_rings_operations
+              SET state = 'voided',
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND state = 'failed'
+              AND signed_transaction IS NOT NULL
+          RETURNING *`
+        )
+        .bind(input.id, input.organizationId, input.projectId)
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async listSignedFailures(input: { limit?: number }) {
+      const result = await db
+        .prepare(
+          `SELECT * FROM helius_rings_operations
+            WHERE state = 'failed'
+              AND signed_transaction IS NOT NULL
+            ORDER BY updated_at ASC
+            LIMIT ?`
+        )
+        .bind(input.limit ?? DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT)
+        .all<Record<string, unknown>>();
+      return result.results.map(mapRow);
+    },
+
     async failOperation(input: FailHeliusRingsOperationInput) {
       return db.transaction(async (tx) => {
         const locked = await tx

@@ -104,6 +104,23 @@ export async function syncRingsWallet(c: AppContext) {
   return success(c, result);
 }
 
+/**
+ * POST /operations/:operationId/reconcile — settle a signed failure.
+ *
+ * No body. The service observes Photon, then the chain, and decides; a caller
+ * cannot assert an outcome, because releasing a wallet requires knowing the
+ * transaction is dead and only the chain knows that. Replaying it on an
+ * already-settled operation returns 200 rather than conflicting.
+ */
+export async function reconcileRingsOperation(c: AppContext) {
+  const { tenant } = tenantOf(c);
+  const service = getHeliusRingsService(c, tenant);
+  const operation = await withRingsErrors(() =>
+    service.reconcileOperation(requireParam(c, "operationId"))
+  );
+  return success(c, { operation });
+}
+
 // --- zones ------------------------------------------------------------------
 
 /** GET /wallets/:walletId/zones — SDP-owned metadata; fully functional today. */

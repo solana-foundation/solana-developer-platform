@@ -236,6 +236,31 @@ export interface HeliusRingsOperationRepository {
   findBlockingOperation(
     input: HeliusRingsProjectScope & { walletId: string; opTypes: readonly string[] }
   ): Promise<HeliusRingsOperationRow | null>;
+  /**
+   * `failed` → `completed`, for a signed failure Photon turns out to hold.
+   *
+   * Deliberately not a `nextState` edge. `executeOperation` drives the state
+   * machine, and making `failed` a legal source there would let any worker
+   * complete a signed failure without having asked Photon first.
+   *
+   * Nulls the failure triple in the same statement because the schema requires
+   * it: those columns exist exactly for `failed` and `voided`.
+   */
+  completeFromFailed(
+    input: HeliusRingsProjectScope & { id: string; photonIndexedAt: string }
+  ): Promise<HeliusRingsOperationRow | null>;
+  /**
+   * `failed` → `voided`, for a signed failure confirmed never to have landed.
+   *
+   * Keeps the failure triple and the signed bytes: the triple is why an
+   * operator was involved, and the bytes are how a later dispute is answered.
+   * Releases the wallet purely by leaving the states the unique indexes name.
+   */
+  voidOperation(
+    input: HeliusRingsProjectScope & { id: string }
+  ): Promise<HeliusRingsOperationRow | null>;
+  /** Signed failures, for the pass that completes the ones Photon now holds. */
+  listSignedFailures(input: { limit?: number }): Promise<HeliusRingsOperationRow[]>;
   /** Terminal failure. Writes the full failure triple the DB CHECK requires. */
   failOperation(input: FailHeliusRingsOperationInput): Promise<HeliusRingsOperationRow | null>;
   /** Resume sweep feed: non-terminal operations, oldest touched first. */

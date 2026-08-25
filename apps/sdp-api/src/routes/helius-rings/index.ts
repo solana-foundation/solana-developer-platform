@@ -15,6 +15,7 @@ import {
   listRingsWallets,
   listRingsZones,
   prepareRingsOperation,
+  reconcileRingsOperation,
   retryRingsOperation,
   syncRingsWallet,
 } from "./handlers";
@@ -61,6 +62,13 @@ heliusRings.post(
   "/operations/:operationId/retry",
   requirePermissions("payments:write"),
   retryRingsOperation
+);
+// A write permission for what is really an observation, because its outcome
+// releases a wallet that the money-safety indexes are deliberately holding.
+heliusRings.post(
+  "/operations/:operationId/reconcile",
+  requirePermissions("payments:write"),
+  reconcileRingsOperation
 );
 
 export default heliusRings;

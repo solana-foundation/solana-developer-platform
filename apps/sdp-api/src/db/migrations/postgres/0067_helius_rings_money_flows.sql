@@ -7,8 +7,11 @@
 --
 --   * a durable link to the custody wallet that signs, and the owner address
 --     the shielded identity is published under
---   * two failure codes the pipeline can now actually produce
---   * a guard against two concurrent private spends on one wallet
+--   * two failure codes the pipeline can now actually produce, and a terminal
+--     `voided` state so a signed failure can be settled rather than freezing a
+--     wallet forever
+--   * a guard against two concurrent private spends on one wallet, and against
+--     a duplicate of a deposit that may already have landed
 --   * the exact-byte submission outbox that makes a lost RPC response
 --     recoverable, plus the notes a spend committed to
 --   * the indexer position a read must catch up to before it is trusted
@@ -84,6 +87,75 @@ ALTER TABLE helius_rings_wallets
             OR (
                 SCALE(last_indexed_slot) = 0
                 AND last_indexed_slot BETWEEN 0 AND 18446744073709551615
+            )
+        );
+
+
+-- --------------------------------------------------------------------------
+-- The `voided` state
+-- --------------------------------------------------------------------------
+-- The unique indexes below hold a wallet slot for any comparable operation that
+-- is in flight, or that failed after signing. That is the money-safety
+-- backstop, and on its own it is also a freeze: nothing would take a row out of
+-- those predicates except `completed`, and a failure cannot become that.
+--
+-- `voided` is the other way out — a signed failure an operator has confirmed
+-- never landed. It releases the wallet purely by not being a state the
+-- predicates name, exactly as `completed` does.
+--
+-- Deliberately a state rather than a column on `failed`. An
+-- `operator_resolved_at` flag would become a third conjunct in both unique
+-- indexes and in every future "is this wallet stuck" query, and one missed
+-- `AND` either re-opens the double-pay hole or keeps the wallet frozen.
+ALTER TABLE helius_rings_operations
+    DROP CONSTRAINT IF EXISTS helius_rings_operations_state_check;
+
+ALTER TABLE helius_rings_operations
+    ADD CONSTRAINT helius_rings_operations_state_check
+        CHECK (
+            state IN (
+                'draft',
+                'preparing',
+                'approval_required',
+                'proving',
+                'ready_to_sign',
+                'submitted',
+                'indexing',
+                'completed',
+                'failed',
+                'voided'
+            )
+        );
+
+
+-- --------------------------------------------------------------------------
+-- The failure triple survives a void
+-- --------------------------------------------------------------------------
+-- 0057 tied the failure columns to `state = 'failed'` exactly. A voided row
+-- keeps them, because they are why it was put in front of an operator at all;
+-- clearing them would erase the reason for the reconciliation. Retry requires
+-- `state = 'failed'`, so a voided row cannot be retried even where an older
+-- `submit_failed` still reads `retryable`.
+--
+-- `completed` still cannot carry them, which is what forces the reconcile's
+-- landed path to null all three in the same UPDATE as the state change.
+ALTER TABLE helius_rings_operations
+    DROP CONSTRAINT IF EXISTS helius_rings_operations_failure_check;
+
+ALTER TABLE helius_rings_operations
+    ADD CONSTRAINT helius_rings_operations_failure_check
+        CHECK (
+            (
+                state IN ('failed', 'voided')
+                AND failure_code IS NOT NULL
+                AND failure_message IS NOT NULL
+                AND retryable IS NOT NULL
+            )
+            OR (
+                state NOT IN ('failed', 'voided')
+                AND failure_code IS NULL
+                AND failure_message IS NULL
+                AND retryable IS NULL
             )
         );
 
@@ -192,6 +264,10 @@ ALTER TABLE helius_rings_operations
 -- That is precisely the version without the failed-and-signed clause, so the
 -- skip would leave the double-pay hole open on exactly the databases that have
 -- been running longest.
+--
+-- `voided` is absent from the predicate, which is the whole mechanism: a
+-- reconciled row releases the wallet without this index needing to know that
+-- state exists.
 DROP INDEX IF EXISTS idx_helius_rings_operations_active_spend;
 
 CREATE UNIQUE INDEX idx_helius_rings_operations_active_spend
