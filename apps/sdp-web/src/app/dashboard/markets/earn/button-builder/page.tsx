@@ -28,7 +28,7 @@ export default async function EarnButtonBuilderPage({
       key={configurationKey}
       projectId={projectId ?? null}
       providerAccess={providerAccess}
-      strategyId={typeof strategy === "string" ? strategy : undefined}
+      strategyId={typeof strategy === "string" && strategy !== "" ? strategy : undefined}
     />
   );
 }

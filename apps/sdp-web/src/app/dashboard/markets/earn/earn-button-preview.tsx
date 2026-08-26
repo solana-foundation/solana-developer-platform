@@ -1,17 +1,8 @@
 "use client";
 
-import {
-  DEFAULT_EARN_BUTTON_ACCENT_COLOR,
-  type EarnButtonStyle,
-  EARN_BUTTON_STYLES as SHARED_EARN_BUTTON_STYLES,
-} from "@sdp/types";
+import { DEFAULT_EARN_BUTTON_ACCENT_COLOR, type EarnButtonStyle } from "@sdp/types";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
-
-// Kept as the preview module's public contract so the builder can assert its
-// labelled options against the exact styles the renderer supports at startup.
-export const EARN_BUTTON_STYLES = SHARED_EARN_BUTTON_STYLES;
-export type { EarnButtonStyle } from "@sdp/types";
 
 export const EARN_BUTTON_STYLE_CLASS_NAMES = {
   ink: "bg-primary text-on-primary shadow-sm",

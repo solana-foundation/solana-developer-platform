@@ -1,4 +1,9 @@
-import { EARN_BUTTON_STYLES } from "@sdp/types";
+import {
+  EARN_BUTTON_ACCENT_COLOR_PATTERN,
+  EARN_BUTTON_PUBLIC_TOKEN_LENGTH,
+  EARN_BUTTON_PUBLIC_TOKEN_PATTERN,
+  EARN_BUTTON_STYLES,
+} from "@sdp/types";
 import { isoDateTimeSchema, successResponseSchema, z } from "./base";
 
 const earnButtonStyleSchema = z.enum(EARN_BUTTON_STYLES).openapi({
@@ -6,13 +11,10 @@ const earnButtonStyleSchema = z.enum(EARN_BUTTON_STYLES).openapi({
   example: "accent",
 });
 
-const earnButtonAccentColorSchema = z
-  .string()
-  .regex(/^#[0-9A-Fa-f]{6}$/)
-  .openapi({
-    description: "Six-digit hexadecimal accent color used by the accent treatment.",
-    example: "#9945FF",
-  });
+const earnButtonAccentColorSchema = z.string().regex(EARN_BUTTON_ACCENT_COLOR_PATTERN).openapi({
+  description: "Six-digit hexadecimal accent color used by the accent treatment.",
+  example: "#9945FF",
+});
 
 const earnButtonConfigurationSchema = z
   .object({
@@ -22,8 +24,8 @@ const earnButtonConfigurationSchema = z
     accentColor: earnButtonAccentColorSchema,
     publicToken: z
       .string()
-      .length(24)
-      .regex(/^[A-Za-z0-9_-]+$/)
+      .length(EARN_BUTTON_PUBLIC_TOKEN_LENGTH)
+      .regex(EARN_BUTTON_PUBLIC_TOKEN_PATTERN)
       .openapi({
         description: "Stable unguessable token used by the public engineering handoff.",
         example: "AbCdEfGhIjKlMnOpQrStUvWx",
@@ -40,6 +42,12 @@ const publicEarnButtonConfigurationSchema = z
     provider: z.string().nullable().openapi({ example: "kamino" }),
     style: earnButtonStyleSchema,
     accentColor: earnButtonAccentColorSchema,
+    strategyAvailable: z.boolean().openapi({
+      description:
+        "False when the configured strategy is hidden, delisted, or not active. " +
+        "Display metadata is withheld and the handoff should render a stale state.",
+      example: true,
+    }),
   })
   .openapi({
     description:

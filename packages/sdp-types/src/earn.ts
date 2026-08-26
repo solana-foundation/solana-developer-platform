@@ -169,6 +169,15 @@ export const DEFAULT_EARN_BUTTON_ACCENT_COLOR = "#14F195";
 export const EARN_BUTTON_ACCENT_COLOR_PATTERN = /^#[0-9A-F]{6}$/i;
 
 /**
+ * Shape of the public engineering-handoff token. The generator lives in the
+ * API repository (`customAlphabet(..., EARN_BUTTON_PUBLIC_TOKEN_LENGTH)`);
+ * every validator (API route params, OpenAPI, web client) must consume these
+ * rather than restating the shape.
+ */
+export const EARN_BUTTON_PUBLIC_TOKEN_LENGTH = 24;
+export const EARN_BUTTON_PUBLIC_TOKEN_PATTERN = /^[A-Za-z0-9_-]{24}$/;
+
+/**
  * One project's saved Earn integration handoff. The public token is safe to
  * share with an engineer: it resolves configuration only and never carries an
  * SDP API key.
@@ -194,6 +203,14 @@ export interface PublicEarnButtonConfiguration {
   provider: string | null;
   style: EarnButtonStyle;
   accentColor: string;
+  /**
+   * False when the configured strategy is no longer served by the catalogue
+   * read path (hidden, delisted, or not active). The handoff page must render
+   * a stale state instead of the integration snippet, and the display
+   * metadata above is withheld (`strategyName`/`provider` are null) so the
+   * unauthenticated route never names a strategy the catalogue hides.
+   */
+  strategyAvailable: boolean;
 }
 
 export interface PublicEarnButtonConfigurationResponse {

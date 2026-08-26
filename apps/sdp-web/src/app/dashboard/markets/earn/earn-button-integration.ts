@@ -7,9 +7,14 @@ export function earnButtonIntegrationPath(publicToken: string): string {
 /**
  * A server-only example by construction: the API key comes from process.env
  * and the browser/mobile button is expected to call this partner-owned backend.
+ * Callers that know the deployment's real API base (the handoff page resolves
+ * one for its own fetch) pass it so the snippet targets the same host.
  */
-export function buildEarnServerIntegration(strategy: Pick<EarnStrategy, "id">): string {
-  return `const SDP_API_URL = ${JSON.stringify(DEFAULT_SDP_API_URL)};
+export function buildEarnServerIntegration(
+  strategy: Pick<EarnStrategy, "id">,
+  apiBaseUrl?: string
+): string {
+  return `const SDP_API_URL = ${JSON.stringify(apiBaseUrl ?? DEFAULT_SDP_API_URL)};
 
 export async function depositIntoEarnVault({
   custodyWalletId,

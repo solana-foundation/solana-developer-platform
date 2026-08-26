@@ -1,28 +1,22 @@
-import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
 import type {
   EarnButtonConfiguration,
   EarnButtonConfigurationResponse,
   PublicEarnButtonConfigurationResponse,
 } from "@sdp/types";
-import { earnDepositStyle, isVaultDirectDepositEnabled } from "@sdp/types/provider-access";
-import { getDb } from "@/db";
+import { isVaultDirectDepositEnabled } from "@sdp/types/provider-access";
 import type { EarnButtonConfigurationRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { AppError, badRequest, notFound } from "@/lib/errors";
+import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import {
-  assertEarnProviderSurfaced,
-  assertProviderAvailable,
-} from "@/services/provider-availability.service";
 import { type AppContext, getEarnRepository, resolveSdpEnvironment } from "../context";
 import {
   earnButtonConfigurationPublicParamsSchema,
   type earnButtonConfigurationSchema,
 } from "../schemas";
-import { assertStrategyDepositable } from "./admission";
+import { assertVaultDepositAdmissible } from "./admission";
 import { parseParams } from "./shared";
-import { requireEarnStrategy } from "./strategies";
+import { isHiddenStrategy, requireEarnStrategy } from "./strategies";
 
 function mapConfiguration(row: EarnButtonConfigurationRow): EarnButtonConfiguration {
   return {
@@ -66,30 +60,11 @@ export async function upsertEarnButtonConfiguration(
 
   // The builder is a money-in handoff. Persisting a strategy that the deposit
   // route will refuse would create a polished dead end, so configuration runs
-  // the same visibility, execution-model, surfacing, entitlement, credential,
-  // status, and cluster gates before it writes anything.
+  // the exact gate sequence `POST /vault-deposits` runs — shared, not copied
+  // (handlers/admission.ts) — after resolving the row through the same
+  // visibility policy the catalogue reads apply.
   const strategy = await requireEarnStrategy(c, body.strategyId);
-  if (earnDepositStyle(strategy.provider) !== "vault_direct") {
-    throw badRequest(
-      `${strategy.provider} does not support the vault-deposit integration used by Earn buttons.`
-    );
-  }
-  if (!isEarnProviderId(strategy.provider)) {
-    throw providerNotConfigured(
-      `Earn provider ${strategy.provider} is not available in this deployment`
-    );
-  }
-
-  assertEarnProviderSurfaced(strategy.provider);
-  await assertProviderAvailable(
-    c.env,
-    getDb(c.env),
-    auth.organizationId,
-    "earn",
-    strategy.provider,
-    environment === "sandbox"
-  );
-  assertStrategyDepositable(strategy, environment);
+  await assertVaultDepositAdmissible(c, strategy);
 
   const row = await getEarnRepository(c).upsertButtonConfiguration({
     organizationId: auth.organizationId,
@@ -110,14 +85,24 @@ export async function getPublicEarnButtonConfiguration(c: AppContext) {
   const row = await repo.getButtonConfigurationByPublicToken(publicToken);
   if (!row) throw notFound("Earn button integration");
 
+  // The catalogue's visibility policy binds this read too — an unauthenticated
+  // detail route that drifted from the list route would leak a hidden row by
+  // id (routes/earn/CLAUDE.md). A strategy that is hidden, delisted (the sync's
+  // delete pass; 0068 has no FK on purpose), or no longer active is reported as
+  // unavailable with its display metadata withheld, so the handoff page renders
+  // an honest stale state instead of a polished snippet the deposit route
+  // would refuse.
   const strategy = await repo.getStrategyById(row.strategy_id);
+  const strategyAvailable =
+    strategy !== null && !isHiddenStrategy(strategy) && strategy.status === "active";
   const response: PublicEarnButtonConfigurationResponse = {
     configuration: {
       strategyId: row.strategy_id,
-      strategyName: strategy?.name ?? null,
-      provider: strategy?.provider ?? null,
+      strategyName: strategyAvailable ? strategy.name : null,
+      provider: strategyAvailable ? strategy.provider : null,
       style: row.style,
       accentColor: row.accent_color,
+      strategyAvailable,
     },
   };
   c.header("Cache-Control", "no-store");

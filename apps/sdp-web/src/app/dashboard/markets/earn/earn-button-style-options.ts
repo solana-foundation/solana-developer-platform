@@ -1,23 +1,22 @@
-import { DEFAULT_EARN_BUTTON_ACCENT_COLOR, type EarnButtonStyle } from "@sdp/types";
+import {
+  DEFAULT_EARN_BUTTON_ACCENT_COLOR,
+  EARN_BUTTON_STYLES,
+  type EarnButtonStyle,
+} from "@sdp/types";
 import type { MessageKey } from "@/i18n/messages";
 
-export const EARN_BUTTON_STYLE_OPTIONS = [
-  {
-    value: "ink",
-    labelKey: "DashboardMarkets.earnProgram.styleInk",
-  },
-  {
-    value: "light",
-    labelKey: "DashboardMarkets.earnProgram.styleLight",
-  },
-  {
-    value: "accent",
-    labelKey: "DashboardMarkets.earnProgram.styleAccent",
-  },
-] as const satisfies ReadonlyArray<{
-  value: EarnButtonStyle;
-  labelKey: MessageKey;
-}>;
+// Keyed by the shared style union so a style added in @sdp/types without a
+// label here fails to COMPILE — no runtime assertion needed.
+const EARN_BUTTON_STYLE_LABEL_KEYS = {
+  ink: "DashboardMarkets.earnProgram.styleInk",
+  light: "DashboardMarkets.earnProgram.styleLight",
+  accent: "DashboardMarkets.earnProgram.styleAccent",
+} as const satisfies Record<EarnButtonStyle, MessageKey>;
+
+export const EARN_BUTTON_STYLE_OPTIONS = EARN_BUTTON_STYLES.map((value) => ({
+  value,
+  labelKey: EARN_BUTTON_STYLE_LABEL_KEYS[value],
+}));
 
 export const EARN_BUTTON_ACCENT_COLOR_OPTIONS = [
   {

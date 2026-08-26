@@ -13,6 +13,7 @@ const responseSchema = z.object({
       provider: z.string().nullable(),
       style: z.enum(EARN_BUTTON_STYLES),
       accentColor: z.string().regex(EARN_BUTTON_ACCENT_COLOR_PATTERN),
+      strategyAvailable: z.boolean(),
     }),
   }),
 });
@@ -25,10 +26,11 @@ export async function loadPublicEarnButtonConfiguration(
     `${apiBaseUrl}/v1/earn/button-configurations/public/${encodeURIComponent(token)}`,
     { cache: "no-store" }
   );
-  if (response.status === 404) return null;
-  if (!response.ok) {
-    throw new Error(`Earn integration handoff request failed (${response.status})`);
-  }
+  // Any non-OK answer degrades to the not-found page, matching pay/[token]:
+  // this endpoint sits in the shared anonymous rate bucket, so a burst of
+  // opens (one team channel link) 429s — a hard 500 for every viewer is worse
+  // than a soft miss they can retry.
+  if (!response.ok) return null;
 
   let payload: unknown;
   try {

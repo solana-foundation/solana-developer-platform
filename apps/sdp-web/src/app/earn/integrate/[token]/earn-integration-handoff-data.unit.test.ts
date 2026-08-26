@@ -9,6 +9,7 @@ const validResponse = {
       provider: "kamino",
       style: "accent",
       accentColor: "#9945FF",
+      strategyAvailable: true,
     },
   },
 };
@@ -31,7 +32,7 @@ describe("loadPublicEarnButtonConfiguration", () => {
     );
   });
 
-  it("returns missing only for an actual 404", async () => {
+  it("returns missing for a 404", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(null, { status: 404 }))
@@ -42,16 +43,19 @@ describe("loadPublicEarnButtonConfiguration", () => {
     ).resolves.toBeNull();
   });
 
-  it.each([403, 429, 503])("preserves an operational %i response as an error", async (status) => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response(null, { status }))
-    );
+  it.each([403, 429, 503])(
+    "degrades an operational %i response to missing instead of crashing the page",
+    async (status) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response(null, { status }))
+      );
 
-    await expect(
-      loadPublicEarnButtonConfiguration("https://api.example.test", "valid-token")
-    ).rejects.toThrow(`Earn integration handoff request failed (${status})`);
-  });
+      await expect(
+        loadPublicEarnButtonConfiguration("https://api.example.test", "valid-token")
+      ).resolves.toBeNull();
+    }
+  );
 
   it("rejects a malformed successful response", async () => {
     vi.stubGlobal(

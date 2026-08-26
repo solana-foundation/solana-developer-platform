@@ -566,10 +566,101 @@ describe("Earn routes - button configurations", () => {
       provider: strategy.provider,
       style: "accent",
       accentColor: "#9945FF",
+      strategyAvailable: true,
     });
     expect(handoffBody.data.configuration).not.toHaveProperty("organizationId");
     expect(handoffBody.data.configuration).not.toHaveProperty("projectId");
     expect(handoffBody.data.configuration).not.toHaveProperty("apiKey");
+  });
+
+  async function savePublicToken(strategyId: string): Promise<string> {
+    const saved = await putConfiguration(strategyId);
+    expect(saved.status).toBe(200);
+    const savedBody = (await saved.json()) as {
+      data: { configuration: { publicToken: string } };
+    };
+    return savedBody.data.configuration.publicToken;
+  }
+
+  async function readHandoff(publicToken: string) {
+    const handoff = await app.request(
+      `/v1/earn/button-configurations/public/${publicToken}`,
+      {},
+      env
+    );
+    expect(handoff.status).toBe(200);
+    const body = (await handoff.json()) as {
+      data: {
+        configuration: {
+          strategyId: string;
+          strategyName: string | null;
+          provider: string | null;
+          strategyAvailable: boolean;
+        };
+      };
+    };
+    return body.data.configuration;
+  }
+
+  it("withholds display metadata once the configured strategy is hidden from the catalogue", async () => {
+    await seedAuth();
+    await enableKaminoForOrganization();
+    const strategy = await seedStrategy();
+    const publicToken = await savePublicToken(strategy.id);
+
+    // A later editorial hide (HIDDEN_STRATEGY_TERMS matches the name) must not
+    // keep leaking the row's name/provider through the unauthenticated route.
+    await getDb(env)
+      .prepare("UPDATE earn_strategies SET name = ? WHERE id = ?")
+      .bind("Aave Reserve Vault", strategy.id)
+      .run();
+
+    expect(await readHandoff(publicToken)).toEqual({
+      strategyId: strategy.id,
+      strategyName: null,
+      provider: null,
+      style: "accent",
+      accentColor: "#9945FF",
+      strategyAvailable: false,
+    });
+  });
+
+  it("reports a paused strategy as unavailable instead of serving a polished dead end", async () => {
+    await seedAuth();
+    await enableKaminoForOrganization();
+    const strategy = await seedStrategy();
+    const publicToken = await savePublicToken(strategy.id);
+    expect((await readHandoff(publicToken)).strategyAvailable).toBe(true);
+
+    // The operator stop switch: deposits against the strategy now 400, so the
+    // handoff must stop advertising a snippet that cannot work.
+    await getDb(env)
+      .prepare("UPDATE earn_strategies SET status = 'paused' WHERE id = ?")
+      .bind(strategy.id)
+      .run();
+
+    expect(await readHandoff(publicToken)).toMatchObject({
+      strategyName: null,
+      provider: null,
+      strategyAvailable: false,
+    });
+  });
+
+  it("survives a delisted strategy row without inventing a display name", async () => {
+    await seedAuth();
+    await enableKaminoForOrganization();
+    const strategy = await seedStrategy();
+    const publicToken = await savePublicToken(strategy.id);
+
+    // The delist pass deletes catalogue rows; 0068 has no FK by design.
+    await getDb(env).prepare("DELETE FROM earn_strategies WHERE id = ?").bind(strategy.id).run();
+
+    expect(await readHandoff(publicToken)).toMatchObject({
+      strategyId: strategy.id,
+      strategyName: null,
+      provider: null,
+      strategyAvailable: false,
+    });
   });
 
   it("refuses to configure a paused strategy and names the reason", async () => {

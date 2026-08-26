@@ -1,12 +1,13 @@
-import type {
-  EarnApyType,
-  EarnButtonStyle,
-  EarnLiquidityTerm,
-  EarnStrategyRiskMetadata,
-  EarnStrategySourceKind,
-  EarnStrategyStatus,
-  SdpEnvironment,
-  SolanaCluster,
+import {
+  EARN_BUTTON_PUBLIC_TOKEN_LENGTH,
+  type EarnApyType,
+  type EarnButtonStyle,
+  type EarnLiquidityTerm,
+  type EarnStrategyRiskMetadata,
+  type EarnStrategySourceKind,
+  type EarnStrategyStatus,
+  type SdpEnvironment,
+  type SolanaCluster,
 } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { customAlphabet } from "nanoid";
@@ -14,10 +15,15 @@ import { customAlphabet } from "nanoid";
 // URL-safe and deliberately longer than the existing payment-link token. This
 // is a public locator rather than an API credential, but guessing it must still
 // be impractical because possession is the only requirement to read the handoff.
+// Length and shape are pinned in @sdp/types (EARN_BUTTON_PUBLIC_TOKEN_*) so the
+// route, OpenAPI, and web validators cannot drift from this generator.
 const EARN_BUTTON_PUBLIC_TOKEN_ALPHABET =
   // biome-ignore lint/security/noSecrets: token alphabet constant, not a secret.
   "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_";
-const generateEarnButtonPublicToken = customAlphabet(EARN_BUTTON_PUBLIC_TOKEN_ALPHABET, 24);
+const generateEarnButtonPublicToken = customAlphabet(
+  EARN_BUTTON_PUBLIC_TOKEN_ALPHABET,
+  EARN_BUTTON_PUBLIC_TOKEN_LENGTH
+);
 
 export function generateEarnStrategyId(): string {
   return `earn_strategy_${crypto.randomUUID()}`;
