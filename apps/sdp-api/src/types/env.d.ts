@@ -304,6 +304,16 @@ export interface Env {
   MURAL_PAY_SANDBOX_TRANSFER_API_KEY?: string;
   MURAL_PAY_SANDBOX_WEBHOOK_PUBLIC_KEY?: string;
 
+  // Hercle ramps configuration (Signed Key v1; base URLs are provided at onboarding)
+  HERCLE_CLIENT_ID?: string;
+  HERCLE_CLIENT_SECRET?: string;
+  HERCLE_API_BASE_URL?: string;
+  HERCLE_WEBHOOK_PUBLIC_KEY?: string;
+  HERCLE_SANDBOX_CLIENT_ID?: string;
+  HERCLE_SANDBOX_CLIENT_SECRET?: string;
+  HERCLE_SANDBOX_API_BASE_URL?: string;
+  HERCLE_SANDBOX_WEBHOOK_PUBLIC_KEY?: string;
+
   // MoneyGram ramps configuration
   MONEYGRAM_SANDBOX_PUBLIC_KEY?: string;
   MONEYGRAM_SANDBOX_SECRET_KEY?: string;

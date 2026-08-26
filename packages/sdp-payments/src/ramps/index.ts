@@ -1,6 +1,7 @@
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { BvnkRampClient } from "./providers/bvnk/client";
 import { CoinbaseRampClient } from "./providers/coinbase/client";
+import { HercleRampClient } from "./providers/hercle/client";
 import { LightsparkRampClient } from "./providers/lightspark/client";
 import { MoneygramRampClient } from "./providers/moneygram/client";
 import { MoonpayRampClient } from "./providers/moonpay/client";
@@ -10,6 +11,7 @@ import type { RampProvider } from "./types";
 
 export { BvnkRampClient } from "./providers/bvnk/client";
 export { CoinbaseRampClient } from "./providers/coinbase/client";
+export { HercleRampClient } from "./providers/hercle/client";
 export { LightsparkRampClient } from "./providers/lightspark/client";
 export { MoneygramRampClient } from "./providers/moneygram/client";
 export { MoonpayRampClient } from "./providers/moonpay/client";
@@ -37,4 +39,5 @@ export const RAMP_PROVIDER_CLIENTS = {
   coinbase: new CoinbaseRampClient(),
   mural: new MuralRampClient(),
   stripe: new StripeRampClient(),
+  hercle: new HercleRampClient(),
 } as const satisfies Record<RampProviderId, RampProvider>;

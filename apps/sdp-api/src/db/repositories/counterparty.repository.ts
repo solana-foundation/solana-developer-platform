@@ -82,6 +82,7 @@ export interface CounterpartiesRepository {
     customerReference: string
   ): Promise<CounterpartyRow | null>;
   findCounterpartyByMuralOrganizationId(organizationId: string): Promise<CounterpartyRow | null>;
+  findCounterpartyByHercleAccountId(accountId: string): Promise<CounterpartyRow | null>;
   mutateProviderData(params: MutateCounterpartyProviderDataInput): Promise<CounterpartyRow | null>;
   upsertBvnkCustomerProviderData(params: UpsertBvnkCustomerProviderDataInput): Promise<void>;
   patchMuralOrganizationById(params: {

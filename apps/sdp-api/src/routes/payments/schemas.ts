@@ -726,6 +726,11 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
     }),
   ]),
   z.object({ provider: z.literal("stripe"), direction: rampDirectionSchema }),
+  z.object({
+    provider: z.literal("hercle"),
+    direction: rampDirectionSchema,
+    collectedData: collectedDataSchema,
+  }),
 ]);
 
 const offrampQuoteBaseShape = {
@@ -747,6 +752,11 @@ export const createOfframpQuoteSchema = z.discriminatedUnion("provider", [
     provider: z.enum(["moonpay", "bvnk", "moneygram", "mural", "coinbase", "stripe"]),
     ...offrampQuoteBaseShape,
     fiatCurrency: rampFiatCurrencySchema.optional(),
+  }),
+  z.object({
+    provider: z.literal("hercle"),
+    ...offrampQuoteBaseShape,
+    fiatCurrency: rampFiatCurrencySchema,
   }),
 ]);
 

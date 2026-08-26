@@ -121,6 +121,11 @@ import {
   ensureBvnkPaymentRule,
 } from "./ramps/bvnk";
 import {
+  advanceHercleCounterparty,
+  hercleAccountId,
+  isHercleCounterpartyReady,
+} from "./ramps/hercle";
+import {
   ensureLightsparkCustomer,
   ensureLightsparkPayoutAccount,
   ensureLightsparkPurposeOfPayment,
@@ -765,6 +770,13 @@ export async function advanceCounterpartyRequirements(
       return readyCounterparty("coinbase", input.direction);
     case "stripe":
       return readyCounterparty("stripe", input.direction);
+    case "hercle":
+      return advanceHercleCounterparty(c, {
+        counterparty: input.counterparty,
+        projectId: input.projectId,
+        direction: input.direction,
+        collectedData: input.collectedData,
+      });
     default: {
       const _exhaustive: never = input;
       throw internalError(`Unhandled ramp provider: ${_exhaustive}`);
@@ -1028,6 +1040,21 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       });
       break;
     }
+    case "hercle": {
+      const accountId = hercleAccountId(counterparty);
+      if (!accountId || !isHercleCounterpartyReady(counterparty)) {
+        throw counterpartyNotProvisioned("hercle", "onramp");
+      }
+      quote = await RAMP_PROVIDER_CLIENTS.hercle.createOnrampQuote(rampRuntime(c), {
+        cryptoToken: input.cryptoToken,
+        fiatCurrency: input.fiatCurrency,
+        fiatAmount: input.fiatAmount,
+        destinationWalletAddress,
+        // The Hercle sub-account id doubles as the on-behalf-of scope for the order.
+        externalCustomerId: accountId,
+      });
+      break;
+    }
     default: {
       const exhaustive: never = input.provider;
       throw new AppError(
@@ -1251,6 +1278,21 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       throw badRequest("Coinbase Onramp does not support off-ramp.");
     case "stripe":
       throw badRequest("Stripe off-ramp is not supported.");
+    case "hercle": {
+      const accountId = hercleAccountId(counterparty);
+      if (!accountId || !isHercleCounterpartyReady(counterparty)) {
+        throw counterpartyNotProvisioned("hercle", "offramp");
+      }
+      quote = await RAMP_PROVIDER_CLIENTS.hercle.createOfframpQuote(rampRuntime(c), {
+        cryptoToken: input.cryptoToken,
+        fiatCurrency: input.fiatCurrency,
+        cryptoAmount: input.cryptoAmount,
+        sourceWalletAddress,
+        // The Hercle sub-account id doubles as the on-behalf-of scope for the order.
+        externalCustomerId: accountId,
+      });
+      break;
+    }
     default: {
       const exhaustive: never = input;
       throw internalError(

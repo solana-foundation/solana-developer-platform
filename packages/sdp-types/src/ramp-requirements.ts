@@ -104,4 +104,7 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
   | { provider: "mural"; status: "customer_verifying" }
   | { provider: "mural"; status: "customer_verification_failed" }
   | { provider: "mural"; status: "funding_account_provisioning" }
+  | { provider: "hercle"; status: "customer_verification_required"; verificationUrl: string }
+  | { provider: "hercle"; status: "customer_verifying" }
+  | { provider: "hercle"; status: "customer_verification_failed" }
 );

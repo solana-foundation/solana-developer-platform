@@ -814,10 +814,40 @@ export interface MuralPaymentRampInstruction {
   bankDetails: Record<string, string>;
 }
 
+export interface HercleBankFundingDetails {
+  iban?: string;
+  bic?: string;
+  bankName?: string;
+  accountHolder?: string;
+  /** Wire reference the sender must include so Hercle can match the payment to the order. */
+  paymentReference?: string;
+}
+
+/** On-ramp: wire fiat to the Hercle-issued account to receive crypto. */
+export interface HercleFiatFundingInstruction {
+  provider: "hercle";
+  kind: "fiat_funding";
+  fiatCurrency: string;
+  bankAccount: HercleBankFundingDetails;
+  instructionsNotes: string;
+}
+
+/** Off-ramp: send crypto to a Hercle deposit address; Hercle converts and pays out fiat. */
+export interface HercleCryptoDepositInstruction extends CryptoDepositPaymentRampInstruction {
+  provider: "hercle";
+  fiatCurrency: RampFiatCurrency;
+  instructionsNotes: string;
+}
+
+export type HerclePaymentRampInstruction =
+  | HercleFiatFundingInstruction
+  | HercleCryptoDepositInstruction;
+
 export type PaymentRampInstruction =
   | LightsparkPaymentRampInstruction
   | BvnkPaymentRampInstruction
-  | MuralPaymentRampInstruction;
+  | MuralPaymentRampInstruction
+  | HerclePaymentRampInstruction;
 
 export type RampDirection = "onramp" | "offramp";
 
@@ -963,6 +993,13 @@ export type PaymentRampQuote =
       provider: "mural";
       deliveryMode: "manual_instructions";
       paymentInstructions: MuralPaymentRampInstruction[];
+    })
+  | (BasePaymentRampQuote & {
+      provider: "hercle";
+      deliveryMode: "manual_instructions";
+      paymentInstructions: HerclePaymentRampInstruction[];
+      /** ISO timestamp after which the order's locked terms are no longer valid. */
+      expiresAt?: string;
     })
   | (BasePaymentRampQuote & {
       provider: "moonpay" | "bvnk";
