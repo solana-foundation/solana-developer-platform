@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 Off-ramp = a counterparty sells crypto from an SDP wallet for fiat paid to a payout account. Implement `createOfframpQuote` and add a branch to the API dispatch. There is no `executeOfframp` method in the current provider contract.
 
-`createOfframpQuote` is **required** on `RampProvider` (unlike `createOnrampQuote`, which is optional).
+`createOfframpQuote` is **required** on `RampProvider` (unlike `createOnrampQuote`, which is optional) — even a provider that doesn't support off-ramp must implement it; the dispatch `case` for that provider can throw instead of calling it (Mural, Coinbase, and Stripe all currently throw "not supported" from the handler rather than reaching the client method).
 
 Choose the closest package client under `packages/sdp-payments/src/ramps/providers/`: Lightspark/BVNK for manual instructions and payout provisioning, or MoonPay for a hosted off-ramp.
 
@@ -37,6 +37,7 @@ Dashboard runtime route: `POST /v1/payments/ramps/offramp/quote`, gated by provi
 | Lightspark | `manual_instructions` | `REALTIME_FUNDING` quote: customer sends crypto to the instructions, the provider auto-executes into the payout account |
 | BVNK | `manual_instructions` | estimate → accept; carries `bvnkCompliance` (requester IP, etc.) |
 | MoonPay | `hosted` | signed `sell.moonpay.com` widget `hostedUrl` |
+| MoneyGram | `session_widget` | short-lived session JWT + `widgetUrl` |
 
 ## Rules + verify
 

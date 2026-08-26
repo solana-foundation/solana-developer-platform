@@ -29,12 +29,6 @@ type NavigationNodeProps = {
 
 export function NavigationNode({ node, depth = 0 }: NavigationNodeProps) {
   const pathname = usePathname();
-  const containsPath = useMemo(() => nodeContainsPath(node, pathname), [node, pathname]);
-  const [isOpen, setIsOpen] = useState(containsPath);
-
-  useEffect(() => {
-    if (containsPath) setIsOpen(true);
-  }, [containsPath]);
 
   if (node.type === "separator") {
     return node.name ? (
@@ -54,66 +48,88 @@ export function NavigationNode({ node, depth = 0 }: NavigationNodeProps) {
         className={cn("launch-docs-nav-item", isActive && "is-active")}
         style={{ paddingLeft: `${12 + depth * 14}px` }}
       >
+        {node.icon ? <span className="launch-docs-nav-icon">{node.icon}</span> : null}
         {node.name}
       </Link>
     );
   }
 
   if (node.type === "folder") {
-    const folderName = typeof node.name === "string" ? node.name : String(node.name ?? "");
-    const hasChildren = node.children.length > 0;
-    const isActive = node.index?.url === pathname;
-    const ChevronIcon = isOpen ? ChevronDown : ChevronRight;
-
-    return (
-      <div className="launch-docs-nav-folder">
-        <div className="launch-docs-nav-folder-row">
-          {node.index ? (
-            <>
-              <Link
-                href={node.index.url}
-                className={cn("launch-docs-nav-folder-link", isActive && "is-active")}
-                style={{ paddingLeft: `${12 + depth * 14}px` }}
-              >
-                {node.name}
-              </Link>
-              {hasChildren && (
-                <button
-                  type="button"
-                  className="launch-docs-nav-toggle"
-                  onClick={() => setIsOpen((v) => !v)}
-                  aria-label={isOpen ? `Collapse ${folderName}` : `Expand ${folderName}`}
-                >
-                  <ChevronIcon aria-hidden="true" />
-                </button>
-              )}
-            </>
-          ) : (
-            <button
-              type="button"
-              className="launch-docs-nav-folder-btn"
-              style={{ paddingLeft: `${12 + depth * 14}px` }}
-              onClick={() => setIsOpen((v) => !v)}
-              aria-label={isOpen ? `Collapse ${folderName}` : `Expand ${folderName}`}
-            >
-              <span>{node.name}</span>
-              {hasChildren && (
-                <ChevronIcon className="launch-docs-nav-toggle-icon" aria-hidden="true" />
-              )}
-            </button>
-          )}
-        </div>
-
-        {hasChildren && isOpen ? (
-          <div className="launch-docs-nav-children">
-            {node.children.map((child) => (
-              <NavigationNode key={getNodeKey(child)} node={child} depth={depth + 1} />
-            ))}
-          </div>
-        ) : null}
-      </div>
-    );
+    return <FolderNode node={node} depth={depth} pathname={pathname} />;
   }
 
   return null;
+}
+
+type FolderNodeProps = {
+  node: Extract<PageTreeNode, { type: "folder" }>;
+  depth: number;
+  pathname: string;
+};
+
+function FolderNode({ node, depth, pathname }: FolderNodeProps) {
+  const containsPath = useMemo(() => nodeContainsPath(node, pathname), [node, pathname]);
+  const [isOpen, setIsOpen] = useState(containsPath);
+
+  useEffect(() => {
+    if (containsPath) setIsOpen(true);
+  }, [containsPath]);
+
+  const folderName = typeof node.name === "string" ? node.name : String(node.name ?? "");
+  const hasChildren = node.children.length > 0;
+  const isActive = node.index?.url === pathname;
+  const ChevronIcon = isOpen ? ChevronDown : ChevronRight;
+
+  return (
+    <div className="launch-docs-nav-folder">
+      <div className="launch-docs-nav-folder-row">
+        {node.index ? (
+          <>
+            <Link
+              href={node.index.url}
+              className={cn("launch-docs-nav-folder-link", isActive && "is-active")}
+              style={{ paddingLeft: `${12 + depth * 14}px` }}
+            >
+              {node.icon ? <span className="launch-docs-nav-icon">{node.icon}</span> : null}
+              {node.name}
+            </Link>
+            {hasChildren && (
+              <button
+                type="button"
+                className="launch-docs-nav-toggle"
+                onClick={() => setIsOpen((v) => !v)}
+                aria-label={isOpen ? `Collapse ${folderName}` : `Expand ${folderName}`}
+              >
+                <ChevronIcon aria-hidden="true" />
+              </button>
+            )}
+          </>
+        ) : (
+          <button
+            type="button"
+            className="launch-docs-nav-folder-btn"
+            style={{ paddingLeft: `${12 + depth * 14}px` }}
+            onClick={() => setIsOpen((v) => !v)}
+            aria-label={isOpen ? `Collapse ${folderName}` : `Expand ${folderName}`}
+          >
+            <span>
+              {node.icon ? <span className="launch-docs-nav-icon">{node.icon}</span> : null}
+              {node.name}
+            </span>
+            {hasChildren && (
+              <ChevronIcon className="launch-docs-nav-toggle-icon" aria-hidden="true" />
+            )}
+          </button>
+        )}
+      </div>
+
+      {hasChildren && isOpen ? (
+        <div className="launch-docs-nav-children">
+          {node.children.map((child) => (
+            <NavigationNode key={getNodeKey(child)} node={child} depth={depth + 1} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }

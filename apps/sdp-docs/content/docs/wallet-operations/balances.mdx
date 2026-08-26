@@ -9,13 +9,13 @@ description: Per-wallet token balances with optional USD valuation via SDP.
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl https://api.solana.com/v1/payments/wallets/wal_abc123/balances \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="get-wallet-balances.ts"
 const response = await fetch(
   "https://api.solana.com/v1/payments/wallets/wal_abc123/balances",
   { headers: { Authorization: "Bearer sk_test_..." } }
@@ -25,7 +25,7 @@ const { data } = await response.json();
 ```
 </Tab>
 <Tab value="Java">
-```java
+```java title="GetWalletBalances.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/wallets/wal_abc123/balances"))
     .header("Authorization", "Bearer sk_test_...")
@@ -39,7 +39,7 @@ HttpRequest request = HttpRequest.newBuilder()
 
 The payload is wrapped in the standard `data` / `meta` envelope, with the balances under a `walletBalances` key:
 
-```json
+```json title="response.json"
 {
   "data": {
     "walletBalances": {
@@ -92,7 +92,7 @@ Per-balance fields:
 
 When USD valuation is populated, the price comes from SDP's configured price source and reflects the most recent quote available. The cadence and source depend on deployment configuration — do not rely on `usdValue` for downstream balance-sheet decisions without confirming the price source's freshness with your operations team. When in doubt, treat `amount` / `uiAmount` as authoritative and convert with your own price feed.
 
-If no price source is configured, the `usdPrice` and `usdValue` fields are simply absent rather than zero — falling back to "I don't know" rather than "$0.00" so downstream consumers can decide how to handle the gap.
+If no price source is configured, the `usdPrice` and `usdValue` fields are absent rather than zero — the omission signals "unknown," not "$0.00," so downstream consumers can decide how to handle the gap.
 
 ## Comparison to on-chain RPC
 

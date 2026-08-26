@@ -58,7 +58,7 @@ For the bundled database, set `POSTGRES_DB`, `POSTGRES_USER`, and
 from them. To use an external database, set `DATABASE_URL` to your own
 `postgresql://…` string and the API and migrations connect there instead. Note
 that `compose.yml` always starts the bundled `postgres` container — with an
-external `DATABASE_URL` it simply goes unused, and `POSTGRES_PASSWORD` is still
+external `DATABASE_URL` it goes unused, and `POSTGRES_PASSWORD` is still
 required for it to start.
 
 The configurator hides `POSTGRES_PASSWORD` once you select an external database
