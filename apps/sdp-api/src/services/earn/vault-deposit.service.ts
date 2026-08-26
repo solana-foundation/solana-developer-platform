@@ -88,7 +88,7 @@ async function replayResult(
   return { position, movement, replayed: true };
 }
 
-/** Shared with the end-user deposit build, whose plan must pass the same bar. */
+/** Shared with the external-wallet deposit build, whose plan must pass the same bar. */
 export function requireAcceptedPlan(
   plan: EarnVaultTransactionPlan,
   input: Pick<VaultDepositInput, "tokenMint" | "shareMint" | "amount" | "minSharesOut">

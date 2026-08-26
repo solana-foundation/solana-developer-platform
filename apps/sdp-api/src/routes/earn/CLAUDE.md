@@ -620,10 +620,11 @@ movement failed. Never rebuild a transaction during recovery.
 
 ### External-wallet (caller-signed) routes — the B2B2C money path (PRO-1722)
 
-A third signer, not a third model. The end user holds a NON-CUSTODIAL wallet
-the partner's platform connects (an *external wallet* — SDP holds no key for
-it), and its movements are `vault_direct` rows in the same ledger: one signed
-transaction, recorded before broadcast, settled by the same reconciler. The
+A third signer, not a third model. An *external wallet* is a NON-CUSTODIAL
+wallet the partner's platform connects — SDP holds no key for it and its owner
+is not an SDP tenant. Its movements are `vault_direct` rows in the same ledger:
+one signed transaction, recorded before broadcast, settled by the same
+reconciler. The
 signer distinction is a column pair — exactly one of `custody_wallet_id` and
 `owner_address` per vault row (migration 0070) — and every treasury read
 scopes by custody wallet, so external-wallet rows are structurally invisible
@@ -639,7 +640,7 @@ Each direction is BUILD then SUBMIT (`handlers/external-wallet.ts`,
   provider plan for the OWNER, simulates with the owner as fee payer (which is
   also the funds check), compiles one unsigned transaction and persists it
   (`earn_external_wallet_transactions`), returning
-  `{transactionId, transaction}` for the end user's wallet to sign. The memo
+  `{transactionId, transaction}` for the external wallet to sign. The memo
   binds the TRANSACTION id (the submit's key does not exist yet at build time).
   No idempotency key: a build moves no money and expires with its blockhash.
 - `POST /external-wallet/deposits` — **verify + record + broadcast.** Body
@@ -664,7 +665,7 @@ Each direction is BUILD then SUBMIT (`handlers/external-wallet.ts`,
 - **NO policyGate and no `wallets:read`, deliberately** — this is not the
   vault-deposit cautionary tale repeating. Wallet policy governs the org's own
   custody and stands between a request and `createOrgSigner`; these routes
-  never resolve a signer and never touch custody. The end user's own signature
+  never resolve a signer and never touch custody. The owner's own signature
   IS the authorization, and there is no signing sink here for
   `value-moving-conformance.node.test.ts` to inventory.
 - **Scoping is org AND project**, stricter than custody vault claims: the
@@ -675,7 +676,7 @@ Each direction is BUILD then SUBMIT (`handlers/external-wallet.ts`,
 - The owner pays fee and rent (Kora sponsorship for this surface is PRO-1744 —
   see the ADR addendum for why co-signing a stranger's transaction is its own
   decision, not a default), and the rent funder is recorded NULL so the exit's
-  refund defaults back to the end user.
+  refund defaults back to the owner.
 
 One gap remains around approvals, and it is narrower than it was. An approved
 deposit or withdrawal is now fully followable — the executor writes the

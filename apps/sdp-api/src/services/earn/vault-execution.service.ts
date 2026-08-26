@@ -333,7 +333,7 @@ export async function signVaultPlan(
 export interface CompileUnsignedVaultTransactionInput extends VaultPlanExecutionScope {
   plan: EarnVaultTransactionPlan;
   /**
-   * The end-user wallet: fee payer and required signer of the compiled
+   * The external wallet: fee payer and required signer of the compiled
    * message. A plain address on purpose — SDP holds no signer for it, which is
    * the whole point of the caller-signed flow (PRO-1722).
    */
@@ -342,7 +342,7 @@ export interface CompileUnsignedVaultTransactionInput extends VaultPlanExecution
    * The successful simulation's preparation, REQUIRED rather than optional:
    * the caller-signed flow always simulates before handing bytes out, and
    * compiling from the same preparation is what guarantees the message the
-   * end user signs is byte-for-byte the message that was simulated (same
+   * owner signs is byte-for-byte the message that was simulated (same
    * blockhash, same resolved lookup tables).
    */
   prepared: PreparedVaultPlanExecution;

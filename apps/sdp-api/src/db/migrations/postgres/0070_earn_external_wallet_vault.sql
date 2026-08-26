@@ -3,8 +3,9 @@
 -- vault movements").
 --
 -- ── The problem this closes ────────────────────────────────────────────────
--- The B2B2C motion assumes the end user holds a NON-CUSTODIAL wallet the
--- partner's platform connects. Every vault money path so far resolves an exact
+-- The B2B2C motion rests on an EXTERNAL WALLET: a non-custodial wallet the
+-- partner's platform connects, whose owner is not an SDP tenant. Every vault
+-- money path so far resolves an exact
 -- custody wallet and signs from it, so SDP could only move money it custodies;
 -- no such concept existed anywhere in the schema. The mechanism is named for
 -- the wallet: EXTERNAL, one SDP holds no key for. The contract decided for
@@ -25,13 +26,13 @@
 -- duplicated all of it for an identical lifecycle.
 --
 -- The signer distinction is a column pair instead: exactly ONE of
--- `custody_wallet_id` (SDP signs) and `owner_address` (the end user signs) is
+-- `custody_wallet_id` (SDP signs) and `owner_address` (the external wallet signs) is
 -- set, enforced by the reshaped constraints below. Every existing treasury
 -- read scopes by custody wallet, so external-wallet rows are structurally invisible
 -- to those surfaces rather than filtered out by convention.
 --
 -- ── Scoping ────────────────────────────────────────────────────────────────
--- The end user's wallet is modeled as an owner ADDRESS scoped to the partner org and
+-- The external wallet is modeled as an owner ADDRESS scoped to the partner org and
 -- project, never a key SDP holds. The claim key for an external-wallet position
 -- therefore includes `project_id`, unlike the custody claim where the project
 -- is forensic attribution only: a partner's sibling project is a different
@@ -116,7 +117,7 @@ CREATE INDEX IF NOT EXISTS idx_earn_positions_external_wallet_owner
     WHERE owner_address IS NOT NULL;
 
 -- ───────────────────────────────────────────────────────────────────────────
--- 2. Movements: a vault movement signed by the end user, not by SDP.
+-- 2. Movements: a vault movement signed by the external wallet, not by SDP.
 -- ───────────────────────────────────────────────────────────────────────────
 ALTER TABLE earn_movements
     ADD COLUMN IF NOT EXISTS owner_address TEXT;

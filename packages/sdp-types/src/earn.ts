@@ -373,9 +373,9 @@ export interface EarnVaultWithdrawalsPage {
 /**
  * External-wallet (caller-signed) vault flows — the B2B2C money path (PRO-1722).
  *
- * The end user holds a NON-CUSTODIAL wallet the partner's platform connects;
- * SDP holds no key for it and never signs. Each direction is two calls: a
- * BUILD returns an unsigned transaction for that wallet to sign, and a SUBMIT
+ * An external wallet is a NON-CUSTODIAL wallet the partner's platform
+ * connects; SDP holds no key for it and never signs. Each direction is two
+ * calls: a BUILD returns an unsigned transaction to sign, and a SUBMIT
  * takes the signed bytes back, records the movement, then broadcasts. These
  * surfaces postdate the unified ledger, so statuses are the ledger's own
  * vault vocabulary (`requested … finalized`), never the legacy deposit one.

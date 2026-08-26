@@ -45,17 +45,17 @@ import { assertStrategyDepositable } from "./admission";
 /**
  * External-wallet (caller-signed) vault flows — the B2B2C money path (PRO-1722).
  *
- * The end user holds a NON-CUSTODIAL wallet the partner's platform connects.
- * SDP holds no key for it, so each direction is two calls: a BUILD that
- * returns an unsigned transaction for that wallet to sign, and a SUBMIT that
- * takes the signed bytes back, records the movement, then broadcasts.
+ * An external wallet is a NON-CUSTODIAL wallet the partner's platform
+ * connects. SDP holds no key for it, so each direction is two calls: a BUILD
+ * that returns an unsigned transaction for that wallet to sign, and a SUBMIT
+ * that takes the signed bytes back, records the movement, then broadcasts.
  *
  * WHY NO POLICY GATE, stated here because its absence looks like the deposit
  * route's cautionary tale: wallet policy governs the organization's own
  * custody — every rule scopes to a custody wallet, and enforcement exists to
  * stand between a request and `createOrgSigner`. This path never resolves a
- * signer, never touches custody, and moves the END USER's money on the END
- * USER's signature, which IS the authorization. There is no signing sink here
+ * signer, never touches custody, and moves the OWNER's money on the OWNER's
+ * signature, which IS the authorization. There is no signing sink here
  * for the value-moving conformance inventory to find.
  *
  * WHY THE BUILD IS THE GATE MOMENT: the money-in gates below run when SDP

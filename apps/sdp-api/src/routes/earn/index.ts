@@ -178,7 +178,7 @@ earn.get(
 );
 
 // External-wallet (caller-signed) vault flows (PRO-1722): the B2B2C money
-// path, where the end user's non-custodial wallet signs. Each direction is a
+// path, where an external (non-custodial) wallet signs. Each direction is a
 // BUILD (returns an unsigned transaction; full money-in gates on the deposit,
 // exit-safety scoping only on the withdrawal) and a SUBMIT (verifies the
 // signature over the exact built message, records the movement, broadcasts).
@@ -186,7 +186,7 @@ earn.get(
 // Deliberately NO `policyGate` and NO `wallets:read`, and that is not the
 // deposit route's cautionary tale repeating: wallet policy governs the org's
 // own custody and stands between a request and `createOrgSigner`. These routes
-// never resolve a signer and never touch custody — the end user's own
+// never resolve a signer and never touch custody — the owner's own
 // signature is the authorization, and there is no signing sink here for the
 // value-moving conformance inventory to find. `earn:write` still gates all
 // four, because building and recording money movements is a write surface.

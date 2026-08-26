@@ -60,7 +60,7 @@ export interface VaultWithdrawalExecutionOptions {
   runIntentTransaction?: <T>(mutation: (db: AppDb) => Promise<T>) => Promise<T>;
 }
 
-/** Shared with the end-user withdrawal build, whose plan must pass the same bar. */
+/** Shared with the external-wallet withdrawal build, whose plan must pass the same bar. */
 export function requireAcceptedWithdrawalPlan(
   plan: EarnVaultTransactionPlan,
   input: Pick<VaultWithdrawalInput, "tokenMint" | "shareMint" | "shares">

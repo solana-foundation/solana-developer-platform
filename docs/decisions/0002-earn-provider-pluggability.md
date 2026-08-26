@@ -901,10 +901,11 @@ devnet.
 
 ## Addendum — 2026-08-26 External wallets: caller-signed vault movements (PRO-1722)
 
-The B2B2C money path ships. The end user holds a **non-custodial wallet** the
-partner's platform connects — an *external wallet*, one SDP holds no key for —
-and every prior vault money path resolved an exact custody wallet and signed
-from it. The contract decided here: **SDP builds and returns an unsigned
+The B2B2C money path ships. An *external wallet* is a **non-custodial wallet**
+the partner's platform connects — SDP holds no key for it, and its owner is
+not an SDP tenant. Every prior vault money path resolved an exact custody
+wallet and signed from it. The contract decided here: **SDP builds and returns
+an unsigned
 transaction for the external wallet to sign, and records the movement when the
 signed transaction is submitted back, before SDP broadcasts it.**
 
@@ -970,7 +971,7 @@ transaction is a different request and conflicts rather than silently replaying.
   SDP controls is what it will BUILD and what it records.
 - **No wallet policy, deliberately.** Wallet policy governs the organization's
   custody and stands between a request and `createOrgSigner`; this path never
-  resolves a signer and moves the END USER's money on the end user's own
+  resolves a signer and moves the OWNER's money on the owner's own
   signature, which IS the authorization. There is no signing sink for the
   value-moving conformance inventory to find.
 
@@ -989,7 +990,7 @@ carry the exact-claim FK onto (vault, owner) the way custody movements do onto
   sponsorship for caller-signed movements is PRO-1744 (p0, follows separately;
   co-signing a stranger's transaction is its own decision). The share-ATA rent
   funder is recorded as NULL (the signing wallet paid and keeps it), so the
-  exit's rent refund defaults back to the end user with no attribution to carry.
+  exit's rent refund defaults back to the owner with no attribution to carry.
 - **Live hydration of an external-wallet position reads the OWNER's balance in
   that vault**, which includes shares acquired outside SDP. That is the honest
   non-custodial answer — the chain cannot attribute fungible shares to SDP

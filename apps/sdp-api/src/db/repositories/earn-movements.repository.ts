@@ -88,7 +88,7 @@ export interface EarnPositionRow {
   /** vault_direct only, SDP-signed shape: the custody wallet holds the shares. */
   custody_wallet_id: string | null;
   /**
-   * vault_direct only, END-USER shape (PRO-1722): the non-custodial wallet
+   * vault_direct only, EXTERNAL-WALLET shape (PRO-1722): the non-custodial wallet
    * that signs and holds the shares. Exactly one of this and
    * `custody_wallet_id` is set on a vault row; SDP holds no key for it.
    */
@@ -558,7 +558,7 @@ export interface CreateSignedExternalWalletDepositIntentInput {
    * The builder's observation that this deposit creates the share account. The
    * funder is always recorded as the owner (NULL by the 0066/0067 convention:
    * the signing wallet paid its own rent and keeps it), so the exit's refund
-   * defaults back to the end user with no attribution to carry.
+   * defaults back to the owner with no attribution to carry.
    */
   createsShareAccount?: boolean;
   createdBy?: string | null;
@@ -1780,7 +1780,7 @@ async function consumeExternalWalletTransaction(
 }
 
 /**
- * Claim or refresh the END-USER vault holding: one per (org, project,
+ * Claim or refresh the EXTERNAL-WALLET vault holding: one per (org, project,
  * environment, provider, vault, owner). Tenancy comes FROM the project row
  * rather than from the input, like the custody claim below; there is no wallet
  * scope to validate because SDP holds nothing here — the owner address IS the
@@ -1868,7 +1868,7 @@ async function insertExternalWalletDepositMovement(
       input.acceptedMinSharesOut ?? null,
       input.ownerAddress,
       input.vaultAddress,
-      // The end user's wallet funds the deposit; the instrument receives it.
+      // The external wallet funds the deposit; the instrument receives it.
       input.ownerAddress,
       input.vaultAddress,
       input.signature,
@@ -1880,7 +1880,7 @@ async function insertExternalWalletDepositMovement(
       input.initiatedByKeyId ?? null,
       // The owner pays its own share-account rent, recorded as the NULL funder
       // (the 0066/0067 convention: the signing wallet keeps its own rent), so
-      // the exit's refund defaults back to the end user.
+      // the exit's refund defaults back to the owner.
       ...shareAccountClaimBindings({
         createsShareAccount: input.createsShareAccount,
         shareAtaRentFunder: null,
@@ -1921,7 +1921,7 @@ async function insertExternalWalletWithdrawalMovement(
       input.requestedShares,
       input.ownerAddress,
       input.vaultAddress,
-      // Money leaves the INSTRUMENT and returns to the end user's own wallet.
+      // Money leaves the INSTRUMENT and returns to the external wallet.
       input.vaultAddress,
       input.ownerAddress,
       input.signature,

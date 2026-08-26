@@ -62,8 +62,8 @@ import { requireAcceptedWithdrawalPlan } from "./vault-withdraw.service";
  * knowable simply moved from SDP's signer to the submit call. Past the durable
  * write the two flows share one tail and one reconciler.
  *
- * NOTHING here signs, resolves a signer, or touches custody: the end user's
- * own signature is the authorization to move the end user's money, which is
+ * NOTHING here signs, resolves a signer, or touches custody: the owner's
+ * own signature is the authorization to move the owner's money, which is
  * why these paths take no wallet policy gate.
  */
 
@@ -117,7 +117,7 @@ export async function buildExternalWalletDepositTransaction(
       owner: input.ownerAddress,
       amount: input.amount,
       minSharesOut: input.minSharesOut,
-      // No rentPayer: the end user funds its own accounts, fee and rent alike.
+      // No rentPayer: the owner funds its own accounts, fee and rent alike.
       // Kora sponsorship for caller-signed movements is PRO-1744, not wired
       // yet: the sponsor co-signs a transaction a wallet outside SDP custody
       // also signs, which is its own design decision.
@@ -138,7 +138,7 @@ export async function buildExternalWalletDepositTransaction(
   }
   const accepted = requireAcceptedPlan(plan, input);
 
-  // Simulate with the OWNER as fee payer — the shape the end user will sign.
+  // Simulate with the OWNER as fee payer — the shape the owner will sign.
   // This is also the funds check: an owner with no SOL or no tokens surfaces
   // here as a readable error at build time, before anyone signs anything.
   const simulation = await simulateVaultPlan(env, {
