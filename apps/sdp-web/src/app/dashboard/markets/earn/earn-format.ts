@@ -23,7 +23,7 @@ import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
  * exactly what `Intl`'s string overload takes, so this reaches the exact
  * formatter without an `as` cast.
  */
-function isIntlDecimalLiteral(value: string): value is Intl.StringNumericLiteral {
+export function isIntlDecimalLiteral(value: string): value is Intl.StringNumericLiteral {
   return isDecimalString(value);
 }
 
@@ -55,8 +55,12 @@ export function formatProviderAmount(
   return symbol ? `${amount} ${symbol}` : amount;
 }
 
-export function formatUsd(value: string | undefined, locale: string): string {
-  const amount = formatProviderAmount(value, locale, undefined, 6, 2);
+export function formatUsd(
+  value: string | undefined,
+  locale: string,
+  maximumFractionDigits = 6
+): string {
+  const amount = formatProviderAmount(value, locale, undefined, maximumFractionDigits, 2);
   return amount === "—" ? amount : `$${amount}`;
 }
 

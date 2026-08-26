@@ -92,21 +92,10 @@ describe("operations route loading states", () => {
     ).toBe(true);
   });
 
-  it("draws the issuance overview skeleton in the stored grid ⇄ list view", () => {
-    const grid = renderToStaticMarkup(<IssuancePageSkeleton assetProfilesEnabled view="grid" />);
-    const list = renderToStaticMarkup(<IssuancePageSkeleton assetProfilesEnabled view="list" />);
-
-    expect([...grid.matchAll(/data-loading-card="issuance-token"/g)]).toHaveLength(6);
-    expect(grid).not.toContain('data-loading-row="issuance-token"');
-    expect([...list.matchAll(/data-loading-row="issuance-token"/g)]).toHaveLength(6);
-    expect(list).not.toContain('data-loading-card="issuance-token"');
-    expect(list).toContain('data-loading-view="list"');
-  });
-
-  it("falls back to the grid skeleton when no view preference is stored", () => {
+  it("draws the issuance overview skeleton as a grid of cards", () => {
     const markup = renderToStaticMarkup(<IssuancePageSkeleton assetProfilesEnabled />);
 
-    expect(markup).toContain('data-loading-view="grid"');
+    expect([...markup.matchAll(/data-loading-card="issuance-token"/g)]).toHaveLength(6);
   });
 
   it("reserves the settled issuance-detail tab rail geometry", () => {

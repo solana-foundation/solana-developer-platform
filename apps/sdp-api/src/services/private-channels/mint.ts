@@ -1,20 +1,15 @@
 /**
  * Instance token resolution.
  *
- * The persisted `PrivateChannelInstance` stores no explicit cluster or mint, so
- * both are derived: the cluster from the chain RPC URL, and the token from the
- * project's allowlist (`PRIVATE_CHANNEL_TOKEN_SYMBOLS` in `@sdp/types`, which is
- * also what the dashboard's token selector renders). Shared by the balance read
- * and the deposit/withdraw/transfer flows.
+ * Private Channels uses the selected project's cluster and the product allowlist
+ * (`PRIVATE_CHANNEL_TOKEN_SYMBOLS` in `@sdp/types`), which is also what the
+ * dashboard token selector renders. Shared by the balance read and the
+ * deposit/withdraw/transfer flows.
  */
 
 import type { PrivateChannelToken, SolanaCluster } from "@sdp/types";
 import { privateChannelTokens, SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { badRequest } from "@/lib/errors";
-
-// Re-exported so the API and the dashboard derive the cluster identically; a
-// disagreement would mean one of them resolves the wrong cluster's mint.
-export { inferCluster } from "@sdp/types";
 
 /**
  * The channel token for a request: the caller's `mint` when the instance accepts

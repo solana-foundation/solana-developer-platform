@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Page } from "@playwright/test";
+import type { Browser, Page } from "@playwright/test";
 import type {
   CounterpartyAccountResponse,
   CounterpartyResponse,
@@ -24,6 +24,7 @@ import { KoraClient } from "@solana/kora";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { Client } from "pg";
 import { getE2EEnv } from "../env";
+import { getPlaywrightAdminSession, type PlaywrightAdminSession } from "./auth-session";
 import { type ClerkTestIdentity, setClerkOrganizationTier } from "./clerk-admin";
 import {
   type BearerTokenProvider,
@@ -98,6 +99,8 @@ export interface WalletBootstrapResult {
     slug: string;
     name: string;
   };
+  /** The freshly provisioned project, for seedProjectCookie. */
+  projectId: string;
   wallets: PlaywrightWalletFixture[];
 }
 
@@ -342,6 +345,45 @@ async function listWallets(api: LocalApiClient): Promise<PaymentsDashboardWallet
   return data.wallets;
 }
 
+/**
+ * Runs a provision callback inside an admin session that is always closed.
+ *
+ * `session.getBearerToken` depends on the session page and is only valid inside
+ * `provision`. Callers that need a token after this function returns must return
+ * the static `session.bearerToken` snapshot from the callback.
+ *
+ * @param browser - The Playwright browser to open the admin session in.
+ * @param provision - Provisions data while the admin session is open.
+ * @returns The provision result after the admin page is closed.
+ */
+export async function provisionWithAdminSession<T>(
+  browser: Browser,
+  provision: (session: PlaywrightAdminSession) => Promise<T>
+): Promise<T> {
+  const session = await getPlaywrightAdminSession(browser);
+
+  try {
+    return await provision(session);
+  } finally {
+    await session.page.close();
+  }
+}
+
+/**
+ * Points the test page at the project a bootstrap just provisioned.
+ *
+ * Every bootstrap helper here recreates the Playwright org — and with it the
+ * project — out-of-band, so whatever project cookie the page's context already
+ * holds now names a deleted project. Until the dashboard's cookie repair runs,
+ * project-scoped requests 403 ("Requested project is not accessible") and pages
+ * render their empty states. Any test that bootstraps fixtures must call this
+ * before its first navigation; skipping it is what the intermittent
+ * empty-page-then-timeout failures look like.
+ *
+ * @param page - The test page whose browser context gets the cookie.
+ * @param projectId - The project the bootstrap provisioned.
+ * @returns Resolves once the cookie is set.
+ */
 export async function seedProjectCookie(page: Page, projectId: string): Promise<void> {
   await page.context().addCookies([
     {
@@ -351,6 +393,30 @@ export async function seedProjectCookie(page: Page, projectId: string): Promise<
       sameSite: "Lax",
     },
   ]);
+}
+
+/**
+ * Runs `provision` inside a managed admin session, then points `page` at the
+ * project it provisioned. Owns the whole bootstrap ceremony: opens the admin
+ * session, closes it even when provisioning throws, and seeds the test page's
+ * project cookie before the caller can navigate — see seedProjectCookie for why
+ * seeding is mandatory.
+ *
+ * @param browser - The Playwright browser to open the admin session in.
+ * @param page - The test page whose context receives the project cookie.
+ * @param provision - Provisions fixtures with the admin session; must return the projectId to seed.
+ * @returns The provision result, after the cookie is seeded.
+ */
+export async function bootstrapProjectForPage<T extends { projectId: string }>(
+  browser: Browser,
+  page: Page,
+  provision: (session: PlaywrightAdminSession) => Promise<T>
+): Promise<T> {
+  return provisionWithAdminSession(browser, async (session) => {
+    const result = await provision(session);
+    await seedProjectCookie(page, result.projectId);
+    return result;
+  });
 }
 
 export async function resolvePlaywrightProjectId(
@@ -796,6 +862,7 @@ export async function bootstrapLocalWalletFixtures(input: {
       slug: organization.slug,
       name: organization.name,
     },
+    projectId,
     wallets,
   };
 }

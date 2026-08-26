@@ -19,8 +19,14 @@ const SIGNATURE =
 function preflightError(cause?: unknown) {
   return new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE, {
     accounts: null,
+    fee: null,
     loadedAccountsDataSize: null,
+    loadedAddresses: null,
     logs: null,
+    postBalances: null,
+    postTokenBalances: null,
+    preBalances: null,
+    preTokenBalances: null,
     replacementBlockhash: null,
     returnData: null,
     unitsConsumed: null,

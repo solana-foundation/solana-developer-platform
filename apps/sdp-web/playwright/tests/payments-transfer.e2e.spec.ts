@@ -1,16 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
-import { getPlaywrightAdminSession } from "../support/auth-session";
 import { createLocalApiClient } from "../support/local-api-client";
 import {
   bootstrapLocalWalletFixtures,
   createExternalSolanaAddress,
+  getBootstrapApiBaseUrl,
   getPlaywrightCustodyProvider,
-  resolvePlaywrightProjectId,
+  provisionWithAdminSession,
   seedCounterpartyWithSolanaAccount,
   seedProjectCookie,
 } from "../support/local-dashboard-bootstrap";
-import { getBootstrapApiBaseUrl } from "../support/local-issuance-bootstrap";
 
 test.describe
   .serial("dashboard payments e2e", () => {
@@ -26,65 +25,68 @@ test.describe
     let bootstrapProjectId = "";
 
     test.beforeAll(async ({ browser }) => {
-      const session = await getPlaywrightAdminSession(browser);
-      const walletBootstrap = await bootstrapLocalWalletFixtures({
-        identity: session.identity,
-        bearerToken: session.getBearerToken,
-        provider: getPlaywrightCustodyProvider(),
-        walletCount: 1,
-        fundSourceWallet: true,
-        fundSourceAmountSol: 0.05,
-        tier: "enterprise",
-      });
-      const projectId = await resolvePlaywrightProjectId(
-        getBootstrapApiBaseUrl(),
-        session.getBearerToken
-      );
-      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.getBearerToken, projectId);
-      const sourceWallet = walletBootstrap.wallets[0];
-      if (!sourceWallet) {
-        throw new Error("Payment bootstrap did not create a source wallet");
-      }
+      bootstrapProjectId = await provisionWithAdminSession(browser, async (session) => {
+        const walletBootstrap = await bootstrapLocalWalletFixtures({
+          identity: session.identity,
+          bearerToken: session.getBearerToken,
+          provider: getPlaywrightCustodyProvider(),
+          walletCount: 1,
+          fundSourceWallet: true,
+          fundSourceAmountSol: 0.05,
+          tier: "enterprise",
+        });
+        const api = createLocalApiClient(
+          getBootstrapApiBaseUrl(),
+          session.getBearerToken,
+          walletBootstrap.projectId
+        );
+        const sourceWallet = walletBootstrap.wallets[0];
+        if (!sourceWallet) {
+          throw new Error("Payment bootstrap did not create a source wallet");
+        }
 
-      sourceWalletLabel = sourceWallet.label ?? sourceWallet.publicKey;
-      sourceWalletId = sourceWallet.walletId;
-      transferTokenSymbol = "SOL";
-      bootstrapProjectId = projectId;
+        if (!sourceWallet.label) {
+          throw new Error("Payment bootstrap source wallet did not return its seeded label");
+        }
+        sourceWalletLabel = sourceWallet.label;
+        sourceWalletId = sourceWallet.walletId;
+        transferTokenSymbol = "SOL";
 
-      destinationAddress = await createExternalSolanaAddress();
-      const suffix = randomUUID().slice(0, 8);
-      counterpartyName = `E2E Payee ${suffix}`;
-      accountLabel = `E2E Solana ${suffix}`;
-      await seedCounterpartyWithSolanaAccount(api, {
-        displayName: counterpartyName,
-        email: `e2e-payee-${suffix}@example.com`,
-        accountLabel,
-        destinationAddress,
-      });
+        destinationAddress = await createExternalSolanaAddress();
+        const suffix = randomUUID().slice(0, 8);
+        counterpartyName = `E2E Payee ${suffix}`;
+        accountLabel = `E2E Solana ${suffix}`;
+        await seedCounterpartyWithSolanaAccount(api, {
+          displayName: counterpartyName,
+          email: `e2e-payee-${suffix}@example.com`,
+          accountLabel,
+          destinationAddress,
+        });
 
-      deniedDestinationAddress = await createExternalSolanaAddress();
-      deniedCounterpartyName = `E2E Blocked Payee ${suffix}`;
-      deniedAccountLabel = `E2E Blocked Solana ${suffix}`;
-      await seedCounterpartyWithSolanaAccount(api, {
-        displayName: deniedCounterpartyName,
-        email: `e2e-blocked-payee-${suffix}@example.com`,
-        accountLabel: deniedAccountLabel,
-        destinationAddress: deniedDestinationAddress,
-      });
+        deniedDestinationAddress = await createExternalSolanaAddress();
+        deniedCounterpartyName = `E2E Blocked Payee ${suffix}`;
+        deniedAccountLabel = `E2E Blocked Solana ${suffix}`;
+        await seedCounterpartyWithSolanaAccount(api, {
+          displayName: deniedCounterpartyName,
+          email: `e2e-blocked-payee-${suffix}@example.com`,
+          accountLabel: deniedAccountLabel,
+          destinationAddress: deniedDestinationAddress,
+        });
 
-      await api.put(`/v1/payments/wallets/${sourceWalletId}/policies`, {
-        defaultAction: "allow",
-        rules: [
-          {
-            id: "allowlist-destinations",
-            kind: "destination",
-            allowlist: [destinationAddress],
-            action: "allow",
-            name: "Allowed destinations",
-          },
-        ],
+        await api.put(`/v1/payments/wallets/${sourceWalletId}/policies`, {
+          defaultAction: "allow",
+          rules: [
+            {
+              id: "allowlist-destinations",
+              kind: "destination",
+              allowlist: [destinationAddress],
+              action: "allow",
+              name: "Allowed destinations",
+            },
+          ],
+        });
+        return walletBootstrap.projectId;
       });
-      await session.page.close();
     });
 
     test.beforeEach(async ({ page }) => {

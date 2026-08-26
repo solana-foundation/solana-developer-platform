@@ -26,7 +26,7 @@ Token creation defines your token's metadata, extensions, and operational rules.
 
 <Step number={1} title="Choose a template">
 
-Select the template that matches your asset model. Templates pre-fill extensions and constraints you can review before confirming.
+Select the **Tokenization Template** that matches your asset model. Templates pre-fill extensions and constraints you can review before confirming.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
@@ -49,12 +49,12 @@ Select a template and click **Continue**.
 
 List available templates to see what fields each one pre-configures:
 
-```bash
+```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/templates \
   -H "Authorization: Bearer sk_test_..."
 ```
 
-```typescript
+```typescript title="list-templates.ts"
 const res = await fetch("https://api.solana.com/v1/issuance/templates", {
   headers: { Authorization: "Bearer sk_test_..." },
 });
@@ -92,7 +92,7 @@ Click **Continue** when ready.
 
 Pass identity fields in the `POST /v1/issuance/tokens` body:
 
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -113,7 +113,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens \
 
 <Step number={3} title="Set operational settings">
 
-Choose the wallet that will sign token operations, and configure allowlist and supply controls.
+Choose the wallet that will sign token operations, and configure Token Access Control and supply controls.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
@@ -122,7 +122,7 @@ Choose the wallet that will sign token operations, and configure allowlist and s
 In step 3 of 3, configure:
 
 - **Main signer** — the SDP-controlled wallet for deploy and token actions
-- **Allowlist** — toggle on or off; required and locked for `tokenized-security`
+- **Allowlist** — Token Access Control's allowlist mode; toggle on or off, required and locked for `tokenized-security`
 
 Click **Create token** to save the draft.
 
@@ -133,7 +133,7 @@ Click **Create token** to save the draft.
 
 Add operational fields to the same body:
 
-```typescript
+```typescript title="create-token.ts"
 const res = await fetch("https://api.solana.com/v1/issuance/tokens", {
   method: "POST",
   headers: {
@@ -155,7 +155,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens", {
 
 For a custom token, omit `template` or set it to `"custom"` and pass `overrides.extensions`:
 
-```typescript
+```typescript title="create-custom-token.ts"
 body: JSON.stringify({
   name: "Game Coin",
   symbol: "GAME",
@@ -199,7 +199,7 @@ Open the token to see its detail page. The status shows **Not deployed** and a *
 
 A successful response returns the new token object:
 
-```typescript
+```typescript title="create-token.ts"
 const { data } = await res.json();
 // data.token.id     — save this; used in all subsequent calls
 // data.token.status — "pending"

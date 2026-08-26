@@ -26,15 +26,15 @@ import {
   testConnectionAction,
 } from "./actions";
 
-type FormValues = PrivateChannelInstanceInput;
+type FormValues = Omit<PrivateChannelInstanceInput, "chainRpcUrl">;
 
-/**
- * Sandbox prefill for the connect form. `chainRpcUrl` is deliberately blank:
- * SANDBOX_DEFAULTS carries a documented placeholder (`?api-key=XXXXXXX`) rather than
- * a working endpoint, so prefilling it guarantees a failed probe on first Connect and
- * hides the field's own placeholder. The operator supplies their own keyed RPC URL.
- */
-const FORM_PREFILL: FormValues = { ...SANDBOX_DEFAULTS, chainRpcUrl: "" };
+const FORM_PREFILL: FormValues = {
+  gatewayUrl: SANDBOX_DEFAULTS.gatewayUrl,
+  escrowProgramId: SANDBOX_DEFAULTS.escrowProgramId,
+  withdrawProgramId: SANDBOX_DEFAULTS.withdrawProgramId,
+  escrowInstanceAddr: SANDBOX_DEFAULTS.escrowInstanceAddr,
+  authUrl: SANDBOX_DEFAULTS.authUrl,
+};
 
 interface Props {
   initialInstance: PrivateChannelInstance | null;
@@ -55,7 +55,6 @@ function toValues(instance: PrivateChannelInstance | null): FormValues {
   if (!instance) return { ...FORM_PREFILL };
   return {
     gatewayUrl: instance.gatewayUrl,
-    chainRpcUrl: instance.chainRpcUrl,
     escrowProgramId: instance.escrowProgramId,
     withdrawProgramId: instance.withdrawProgramId,
     escrowInstanceAddr: instance.escrowInstanceAddr,
@@ -68,7 +67,6 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
   const [values, setValues] = useState<FormValues>(() => toValues(initialInstance));
   const [errors, setErrors] = useState<FieldErrors>({});
   const [gatewayResult, setGatewayResult] = useState<ConnectionProbeResult["gateway"] | null>(null);
-  const [rpcResult, setRpcResult] = useState<ConnectionProbeResult["rpc"] | null>(null);
   const [authResult, setAuthResult] = useState<ConnectionProbeResult["auth"] | null>(null);
   const [isTesting, startTesting] = useTransition();
   const [isConnecting, startConnecting] = useTransition();
@@ -94,7 +92,6 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
     setErrors((prev) => ({ ...prev, [key]: undefined }));
     // Any edit invalidates the last probe result.
     setGatewayResult(null);
-    setRpcResult(null);
     setAuthResult(null);
   };
 
@@ -104,7 +101,6 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
       setValues(toValues(result.instance));
       setErrors({});
       setGatewayResult(null);
-      setRpcResult(null);
       setAuthResult(null);
       toast.success(t("DashboardPrivateChannels.instance.connectSuccess"));
       // The instance is live now — take the operator to the Overview.
@@ -117,7 +113,6 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
     }
     if (result.kind === "probe") {
       setGatewayResult(result.probe.gateway);
-      setRpcResult(result.probe.rpc);
       setAuthResult(result.probe.auth);
       toast.error(result.message);
       return;
@@ -140,11 +135,9 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
     startTesting(async () => {
       const result = await testConnectionAction({
         gatewayUrl: values.gatewayUrl,
-        chainRpcUrl: values.chainRpcUrl,
         authUrl: values.authUrl,
       });
       setGatewayResult(result.gateway);
-      setRpcResult(result.rpc);
       setAuthResult(result.auth);
     });
   };
@@ -176,7 +169,6 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
         setInstance(null);
         setValues({ ...FORM_PREFILL });
         setGatewayResult(null);
-        setRpcResult(null);
         setAuthResult(null);
         setShowDelete(false);
         toast.success(t("DashboardPrivateChannels.instance.deleteSuccess"));
@@ -197,17 +189,6 @@ export function PrivateChannelsConnectForm({ initialInstance }: Props) {
         disabled={isLocked}
         onChange={(v) => update("gatewayUrl", v)}
         status={gatewayStatus(t, gatewayResult)}
-      />
-
-      <UrlField
-        id="chain-rpc-url"
-        label={t("DashboardPrivateChannels.instance.chainRpcUrl")}
-        placeholder={t("DashboardPrivateChannels.instance.chainRpcPlaceholder")}
-        value={values.chainRpcUrl}
-        error={errors.chainRpcUrl}
-        disabled={isLocked}
-        onChange={(v) => update("chainRpcUrl", v)}
-        status={rpcStatus(t, rpcResult)}
       />
 
       <UrlField
@@ -323,30 +304,6 @@ function gatewayStatus(
         : gatewayResult.status === "degraded"
           ? gatewayResult.reason
           : gatewayResult.error,
-  };
-}
-
-function rpcStatus(
-  t: Translate,
-  rpcResult: ConnectionProbeResult["rpc"] | null
-): StatusIndicator | null {
-  if (!rpcResult) return null;
-  if (rpcResult.ok) {
-    return {
-      label: t("DashboardPrivateChannels.instance.statusReady"),
-      dotClass: GATEWAY_DOT.ready,
-      textClass: GATEWAY_TEXT.ready,
-      detail: t("DashboardPrivateChannels.instance.latencyWithVersion", {
-        ms: rpcResult.latencyMs,
-        version: rpcResult.version,
-      }),
-    };
-  }
-  return {
-    label: t("DashboardPrivateChannels.instance.statusFailed"),
-    dotClass: GATEWAY_DOT.unreachable,
-    textClass: GATEWAY_TEXT.unreachable,
-    detail: rpcResult.error,
   };
 }
 
