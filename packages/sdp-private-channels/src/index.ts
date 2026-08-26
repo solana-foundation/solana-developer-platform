@@ -36,11 +36,7 @@ export {
   type ConnectionProbeResult,
   probeConnection,
 } from "./probe";
-export {
-  probeSolanaRpc,
-  type SolanaRpcProbeResult,
-  type SolanaRpcProbeTarget,
-} from "./rpc";
+export { probeSolanaRpc, type SolanaRpcProbeResult } from "./rpc";
 export {
   type PrivateChannelInstanceInputSchema,
   privateChannelInstanceInputSchema,

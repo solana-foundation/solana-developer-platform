@@ -15,10 +15,7 @@ export async function probePrivateChannelConnection(
     c,
     await verifyInstanceConnection({
       ...body,
-      rpcTarget: {
-        endpoint: projectRpc.target.endpoint,
-        headers: projectRpc.target.headers,
-      },
+      probeRpc: projectRpc.probe,
     })
   );
 }

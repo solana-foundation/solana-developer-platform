@@ -117,6 +117,8 @@ export interface GuardedFetchInit {
   method: string;
   headers: Record<string, string>;
   body: string;
+  /** Propagates the caller's transport timeout/cancellation to the socket. */
+  signal?: AbortSignal;
   /**
    * How many redirects to follow. Zero is the probe's existing `redirect:
    * "manual"`. The relay follows a few, because a provider answering on a
@@ -186,7 +188,7 @@ async function guardedRequest(target: URL, init: GuardedFetchInit): Promise<Resp
   return new Promise<Response>((resolve, reject) => {
     const req = httpsRequest(
       target,
-      { method: init.method, headers: init.headers, lookup: guardedLookup },
+      { method: init.method, headers: init.headers, lookup: guardedLookup, signal: init.signal },
       (res) => {
         const chunks: Buffer[] = [];
         res.on("data", (chunk: Buffer) => chunks.push(chunk));

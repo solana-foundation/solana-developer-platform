@@ -4,8 +4,9 @@ import {
   type GatewayHealthResult,
   probeConnection,
   probeGatewayHealth,
-  type SolanaRpcProbeTarget,
 } from "@sdp/private-channels";
+import type { SolanaRpc } from "@sdp/rpc/solana";
+import { assertValidAddress } from "@sdp/solana/address";
 import type {
   PrivateChannelHealth,
   PrivateChannelInstance,
@@ -83,18 +84,6 @@ function toError(reason: unknown): string {
   return "Request failed.";
 }
 
-interface AccountInfoResult {
-  context: { slot: number };
-  value: {
-    lamports: number;
-    owner: string;
-    executable: boolean;
-    data: [string, string];
-    rentEpoch: number;
-    space?: number;
-  } | null;
-}
-
 type OverviewInput = Pick<
   PrivateChannelInstance,
   "gatewayUrl" | "escrowProgramId" | "escrowInstanceAddr" | "authUrl"
@@ -108,9 +97,11 @@ function settledOrNull<T, U>(p: Promise<T>, map: (v: T) => U): Promise<U | null>
 // Solana L1 (where the escrow program + instance actually live).
 export async function getInstanceOverview(
   input: OverviewInput,
-  projectRpc: SolanaRpcProbeTarget
+  projectRpc: SolanaRpc
 ): Promise<PrivateChannelInstanceOverview> {
   const authBase = input.authUrl;
+  const escrowInstanceAddress = assertValidAddress(input.escrowInstanceAddr, "escrowInstanceAddr");
+  const escrowProgramAddress = assertValidAddress(input.escrowProgramId, "escrowProgramId");
 
   const [
     gatewayHealth,
@@ -130,25 +121,19 @@ export async function getInstanceOverview(
       ),
       (v) => v.value.blockhash
     ),
-    Promise.allSettled([
-      jsonRpc<{ "solana-core"?: string }>(
-        projectRpc.endpoint,
-        "getVersion",
-        [],
-        projectRpc.headers
-      ),
-    ]).then(([r]): PrivateChannelInstanceOverview["chainRpc"] =>
-      r.status === "fulfilled"
-        ? { ok: true, solanaVersion: r.value["solana-core"] ?? null }
-        : { ok: false, error: toError(r.reason) }
+    Promise.allSettled([projectRpc.getVersion().send()]).then(
+      ([r]): PrivateChannelInstanceOverview["chainRpc"] =>
+        r.status === "fulfilled"
+          ? { ok: true, solanaVersion: r.value["solana-core"] ?? null }
+          : { ok: false, error: toError(r.reason) }
     ),
     Promise.allSettled([
-      jsonRpc<AccountInfoResult>(
-        projectRpc.endpoint,
-        "getAccountInfo",
-        [input.escrowInstanceAddr, { encoding: "base64", dataSlice: { offset: 0, length: 0 } }],
-        projectRpc.headers
-      ),
+      projectRpc
+        .getAccountInfo(escrowInstanceAddress, {
+          encoding: "base64",
+          dataSlice: { offset: 0, length: 0 },
+        })
+        .send(),
     ]).then(([r]): PrivateChannelInstanceOverview["escrowInstance"] => {
       if (r.status === "rejected") return { present: false, error: toError(r.reason) };
       if (r.value.value === null) return { present: false, error: "Account not found on-chain." };
@@ -156,16 +141,16 @@ export async function getInstanceOverview(
         present: true,
         owner: r.value.value.owner,
         ownerMatchesProgram: r.value.value.owner === input.escrowProgramId,
-        lamports: r.value.value.lamports,
+        lamports: Number(r.value.value.lamports),
       };
     }),
     Promise.allSettled([
-      jsonRpc<AccountInfoResult>(
-        projectRpc.endpoint,
-        "getAccountInfo",
-        [input.escrowProgramId, { encoding: "base64", dataSlice: { offset: 0, length: 0 } }],
-        projectRpc.headers
-      ),
+      projectRpc
+        .getAccountInfo(escrowProgramAddress, {
+          encoding: "base64",
+          dataSlice: { offset: 0, length: 0 },
+        })
+        .send(),
     ]).then(([r]): PrivateChannelInstanceOverview["escrowProgram"] => {
       if (r.status === "rejected") return { present: false, error: toError(r.reason) };
       if (r.value.value === null)

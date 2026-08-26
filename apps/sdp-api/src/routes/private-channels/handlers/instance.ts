@@ -67,10 +67,7 @@ export const connectPrivateChannelInstance = async (
   const probe = await verifyInstanceConnection({
     gatewayUrl: input.gatewayUrl,
     authUrl: input.authUrl,
-    rpcTarget: {
-      endpoint: projectRpc.target.endpoint,
-      headers: projectRpc.target.headers,
-    },
+    probeRpc: projectRpc.probe,
   });
   if (!probe.ok) {
     // AppError responses are returned silently by app.onError; log diagnostics here.
