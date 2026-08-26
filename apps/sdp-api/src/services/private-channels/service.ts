@@ -4,6 +4,7 @@ import {
   type GatewayHealthResult,
   probeConnection,
   probeGatewayHealth,
+  type SolanaRpcProbeTarget,
 } from "@sdp/private-channels";
 import type {
   PrivateChannelHealth,
@@ -48,7 +49,12 @@ interface JsonRpcResponse<T> {
 }
 
 // Minimal JSON-RPC POST to the gateway. Throws on network / non-2xx / error.
-async function jsonRpc<T>(url: string, method: string, params: unknown[] = []): Promise<T> {
+async function jsonRpc<T>(
+  url: string,
+  method: string,
+  params: unknown[] = [],
+  headers: Record<string, string> = {}
+): Promise<T> {
   const res = await fetch(url, {
     method: "POST",
     signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
@@ -56,6 +62,7 @@ async function jsonRpc<T>(url: string, method: string, params: unknown[] = []): 
       "Content-Type": "application/json",
       Accept: "application/json",
       "User-Agent": "sdp-private-channels/0.1",
+      ...headers,
     },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
   });
@@ -90,17 +97,18 @@ interface AccountInfoResult {
 
 type OverviewInput = Pick<
   PrivateChannelInstance,
-  "gatewayUrl" | "chainRpcUrl" | "escrowProgramId" | "escrowInstanceAddr" | "authUrl"
+  "gatewayUrl" | "escrowProgramId" | "escrowInstanceAddr" | "authUrl"
 >;
 
 function settledOrNull<T, U>(p: Promise<T>, map: (v: T) => U): Promise<U | null> {
   return Promise.allSettled([p]).then(([r]) => (r.status === "fulfilled" ? map(r.value) : null));
 }
 
-// Post-connect overview. Gateway JSON-RPC = SPC channel chain; chainRpcUrl =
+// Post-connect overview. Gateway JSON-RPC = SPC channel chain; projectRpc =
 // Solana L1 (where the escrow program + instance actually live).
 export async function getInstanceOverview(
-  input: OverviewInput
+  input: OverviewInput,
+  projectRpc: SolanaRpcProbeTarget
 ): Promise<PrivateChannelInstanceOverview> {
   const authBase = input.authUrl;
 
@@ -122,17 +130,25 @@ export async function getInstanceOverview(
       ),
       (v) => v.value.blockhash
     ),
-    Promise.allSettled([jsonRpc<{ "solana-core"?: string }>(input.chainRpcUrl, "getVersion")]).then(
-      ([r]): PrivateChannelInstanceOverview["chainRpc"] =>
-        r.status === "fulfilled"
-          ? { ok: true, solanaVersion: r.value["solana-core"] ?? null }
-          : { ok: false, error: toError(r.reason) }
+    Promise.allSettled([
+      jsonRpc<{ "solana-core"?: string }>(
+        projectRpc.endpoint,
+        "getVersion",
+        [],
+        projectRpc.headers
+      ),
+    ]).then(([r]): PrivateChannelInstanceOverview["chainRpc"] =>
+      r.status === "fulfilled"
+        ? { ok: true, solanaVersion: r.value["solana-core"] ?? null }
+        : { ok: false, error: toError(r.reason) }
     ),
     Promise.allSettled([
-      jsonRpc<AccountInfoResult>(input.chainRpcUrl, "getAccountInfo", [
-        input.escrowInstanceAddr,
-        { encoding: "base64", dataSlice: { offset: 0, length: 0 } },
-      ]),
+      jsonRpc<AccountInfoResult>(
+        projectRpc.endpoint,
+        "getAccountInfo",
+        [input.escrowInstanceAddr, { encoding: "base64", dataSlice: { offset: 0, length: 0 } }],
+        projectRpc.headers
+      ),
     ]).then(([r]): PrivateChannelInstanceOverview["escrowInstance"] => {
       if (r.status === "rejected") return { present: false, error: toError(r.reason) };
       if (r.value.value === null) return { present: false, error: "Account not found on-chain." };
@@ -144,10 +160,12 @@ export async function getInstanceOverview(
       };
     }),
     Promise.allSettled([
-      jsonRpc<AccountInfoResult>(input.chainRpcUrl, "getAccountInfo", [
-        input.escrowProgramId,
-        { encoding: "base64", dataSlice: { offset: 0, length: 0 } },
-      ]),
+      jsonRpc<AccountInfoResult>(
+        projectRpc.endpoint,
+        "getAccountInfo",
+        [input.escrowProgramId, { encoding: "base64", dataSlice: { offset: 0, length: 0 } }],
+        projectRpc.headers
+      ),
     ]).then(([r]): PrivateChannelInstanceOverview["escrowProgram"] => {
       if (r.status === "rejected") return { present: false, error: toError(r.reason) };
       if (r.value.value === null)

@@ -23,7 +23,7 @@ const CHAIN_RPC_URL = "https://api.devnet.solana.com";
 const AUTH_URL = "http://auth.test:8903";
 
 function baseInput() {
-  return { gatewayUrl: GATEWAY_URL, chainRpcUrl: CHAIN_RPC_URL, authUrl: AUTH_URL };
+  return { gatewayUrl: GATEWAY_URL, rpcTarget: { endpoint: CHAIN_RPC_URL }, authUrl: AUTH_URL };
 }
 
 afterEach(() => {

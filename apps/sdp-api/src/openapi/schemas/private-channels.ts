@@ -13,7 +13,6 @@ export const privateChannelInstanceSchema = z
     organizationId: z.string(),
     projectId: z.string(),
     gatewayUrl: z.string().openapi({ example: "http://34.71.147.163:8899" }),
-    chainRpcUrl: z.string().openapi({ example: "https://devnet.helius-rpc.com/?api-key=…" }),
     escrowProgramId: solanaAddressSchema,
     withdrawProgramId: solanaAddressSchema,
     escrowInstanceAddr: solanaAddressSchema,
@@ -28,7 +27,6 @@ export const privateChannelInstanceSchema = z
 export const privateChannelInstanceInputSchema = z
   .object({
     gatewayUrl: z.string(),
-    chainRpcUrl: z.string(),
     escrowProgramId: solanaAddressSchema,
     withdrawProgramId: solanaAddressSchema,
     escrowInstanceAddr: solanaAddressSchema,
@@ -62,10 +60,12 @@ export const privateChannelHealthQuerySchema = z.object({
 export const privateChannelProbeBodySchema = z
   .object({
     gatewayUrl: z.string().min(1),
-    chainRpcUrl: z.string().min(1),
     authUrl: z.string().min(1),
   })
-  .openapi({ description: "Probe request body: the three URLs the connect flow re-probes." });
+  .openapi({
+    description:
+      "Probe request body. The selected project's configured RPC is probed automatically.",
+  });
 
 const gatewayProbeResponseSchema = z.object({
   status: z.number(),
