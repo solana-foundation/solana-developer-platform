@@ -1,3 +1,4 @@
+import { redactCredentialString } from "@sdp/custody";
 import { SdpPaymentsError } from "@sdp/payments";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
@@ -53,12 +54,16 @@ import {
   counterpartyNotProvisioned,
   internalError,
   notFound,
+  redactErrorForCapture,
   unsupportedRampCorridor,
 } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
+import { describeError, logEvent } from "@/runtime/money-path-events";
+import { isSentryEnabled } from "@/runtime/observability";
+import { nodeObservability } from "@/runtime/observability-node";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
@@ -537,7 +542,7 @@ export async function advanceCounterpartyRequirements(
 /** Ceiling on simultaneous live provider estimate calls per request. */
 export const RAMP_ESTIMATE_PROVIDER_CONCURRENCY = 3;
 
-async function estimateAcrossProviders(
+export async function estimateAcrossProviders(
   c: AppContext,
   providers: readonly RampProviderId[],
   runProvider: (provider: RampProviderId, ctx: RampRuntimeContext) => Promise<PaymentRampEstimate>
@@ -556,6 +561,24 @@ async function estimateAcrossProviders(
       } catch (error) {
         if (error instanceof SdpPaymentsError && error.code === "ESTIMATE_NOT_AVAILABLE") {
           return { provider, status: "unsupported" };
+        }
+        // The estimate contract stays HTTP 200 with a per-provider error
+        // entry, so this catch is the only place the failure is observable —
+        // log and capture it here or nowhere.
+        const cause = error instanceof Error ? error : new Error(String(error));
+        logEvent("error", {
+          event: "sdp_api_ramp_provider_error",
+          provider,
+          organization_id: scope.auth.organizationId,
+          error_message: redactCredentialString(cause.message),
+          ...describeError(error),
+        });
+        if (isSentryEnabled(c.env)) {
+          nodeObservability.withScope((sentryScope) => {
+            sentryScope.setTag("provider", provider);
+            sentryScope.setTag("organization_id", scope.auth.organizationId);
+            nodeObservability.captureException(redactErrorForCapture(cause));
+          });
         }
         return {
           provider,
