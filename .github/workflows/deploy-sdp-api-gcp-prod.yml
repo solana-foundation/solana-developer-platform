@@ -165,6 +165,12 @@ jobs:
           echo "PREVIOUS_TRAFFIC=${previous_traffic}" >> "${GITHUB_ENV}"
           echo "PREVIOUS_CRON_IMAGE=${previous_cron_image}" >> "${GITHUB_ENV}"
           echo "PREVIOUS_PII_MIGRATE_IMAGE=${previous_pii_migrate_image}" >> "${GITHUB_ENV}"
+          previous_worker_image="$(
+            gcloud run services describe "${WORKER_SERVICE}" \
+              --region "${REGION}" --project "${PROJECT_ID}" \
+              --format='value(spec.template.spec.containers[0].image)' 2>/dev/null || true
+          )"
+          echo "PREVIOUS_WORKER_IMAGE=${previous_worker_image}" >> "${GITHUB_ENV}"
 
       - name: Deploy candidate without production traffic
         timeout-minutes: 5
@@ -304,6 +310,11 @@ jobs:
           gcloud run jobs update "${PII_MIGRATE_JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
             --image "${PREVIOUS_PII_MIGRATE_IMAGE}" || rollback_failed=1
+          if [[ -n "${PREVIOUS_WORKER_IMAGE:-}" ]]; then
+            gcloud run services update "${WORKER_SERVICE}" \
+              --region "${REGION}" --project "${PROJECT_ID}" \
+              --image "${PREVIOUS_WORKER_IMAGE}" || rollback_failed=1
+          fi
           if [[ "${rollback_failed}" -ne 0 ]]; then
             echo "Automatic rollback was incomplete; escalate immediately." >&2
             exit 1
