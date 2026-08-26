@@ -136,6 +136,30 @@ export interface RedirectStep {
   body: string;
 }
 
+const CROSS_ORIGIN_REDIRECT_HEADERS = new Set(["accept", "content-type"]);
+
+/**
+ * Tenant RPC headers may use provider-specific names, so there is no complete
+ * denylist for credentials. Preserve them only within the same origin. A
+ * cross-origin redirect receives the protocol headers SDP owns, never the
+ * tenant-supplied authentication material.
+ */
+export function headersForRedirect(
+  from: string,
+  to: string,
+  headers: Record<string, string>
+): Record<string, string> {
+  if (new URL(from).origin === new URL(to).origin) {
+    return headers;
+  }
+
+  return Object.fromEntries(
+    Object.entries(headers).filter(([name]) =>
+      CROSS_ORIGIN_REDIRECT_HEADERS.has(name.toLowerCase())
+    )
+  );
+}
+
 /**
  * The next request a redirect asks for, or null when it is not a redirect we
  * follow. Method handling matches what `fetch` did before the guard existed:
@@ -178,6 +202,7 @@ export async function guardedFetch(url: string, init: GuardedFetchInit): Promise
 
   return guardedFetch(step.url, {
     ...init,
+    headers: headersForRedirect(url, step.url, init.headers),
     method: step.method,
     body: step.body,
     maxRedirects: init.maxRedirects - 1,
