@@ -34,7 +34,7 @@ import type {
   OnrampPairSupport,
   RampProviderDirectionSupport,
 } from "@sdp/types/payment-rails";
-import type { RampProviderId } from "@sdp/types/provider-access";
+import { isRampProviderSurfaced, type RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -66,7 +66,10 @@ import { isSentryEnabled } from "@/runtime/observability";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
-import { assertProviderAvailable } from "@/services/provider-availability.service";
+import {
+  assertProviderAvailable,
+  assertRampProviderSurfaced,
+} from "@/services/provider-availability.service";
 import {
   type AppContext,
   getPaymentsRepository,
@@ -121,10 +124,11 @@ function filterProviders(
   providers: readonly RampProviderId[],
   provider?: RampProviderId
 ): RampProviderId[] {
+  const surfaced = providers.filter(isRampProviderSurfaced);
   if (provider) {
-    return providers.includes(provider) ? [provider] : [];
+    return surfaced.includes(provider) ? [provider] : [];
   }
-  return [...providers];
+  return surfaced;
 }
 
 function uniqueSorted<T extends string>(values: readonly T[]): T[] {
@@ -191,7 +195,7 @@ function assertRampCorridorSupported(
     const fiatSide = direction === "onramp" ? pair.source : pair.dest;
     return railSide === rail && (fiat === undefined || fiatSide === fiat);
   });
-  const supportedProviders = providersFromPairs(matched);
+  const supportedProviders = providersFromPairs(matched).filter(isRampProviderSurfaced);
   if (!supportedProviders.includes(input.provider)) {
     throw unsupportedRampCorridor(input.provider, direction, {
       assetRail: rail,
@@ -264,6 +268,7 @@ async function resolveRampQuoteRequest(
   walletFieldName: "destinationWallet" | "sourceWallet",
   walletIdOrAddress: string
 ): Promise<RampQuotePolicyResolved> {
+  assertRampProviderSurfaced(input.provider);
   assertRampCorridorSupported(direction, input);
   const scope = await resolveScope(c);
   await assertRampProviderAvailable(c, input.provider, scope.auth.organizationId);
@@ -599,7 +604,7 @@ export async function estimateOnramp(c: ValidatedBodyContext<typeof estimateOnra
   const row = ONRAMP_SUPPORT.find(
     (pair) => pair.source === input.fiatCurrency && pair.dest === input.assetRail
   );
-  const providers = row ? row.providers : [];
+  const providers = row ? filterProviders(row.providers) : [];
 
   const estimates = await estimateAcrossProviders(c, providers, (provider, ctx) =>
     RAMP_PROVIDER_CLIENTS[provider].estimateOnramp(ctx, {
@@ -617,7 +622,7 @@ export async function estimateOfframp(c: ValidatedBodyContext<typeof estimateOff
   const row = OFFRAMP_SUPPORT.find(
     (pair) => pair.source === input.assetRail && pair.dest === input.fiatCurrency
   );
-  const providers = row ? row.providers : [];
+  const providers = row ? filterProviders(row.providers) : [];
 
   const estimates = await estimateAcrossProviders(c, providers, (provider, ctx) =>
     RAMP_PROVIDER_CLIENTS[provider].estimateOfframp(ctx, {

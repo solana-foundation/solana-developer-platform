@@ -7,6 +7,7 @@ import {
   EARN_PROVIDERS,
   type EarnProviderId,
   isEarnProviderSurfaced,
+  isRampProviderSurfaced,
   normalizeOrganizationTier,
   ORGANIZATION_RPC_PROVIDERS,
   type OrganizationProviderAvailabilityResponse,
@@ -759,6 +760,15 @@ export function assertEarnProviderSurfaced(providerId: EarnProviderId): void {
     throw new AppError(
       "FORBIDDEN",
       `${PROVIDER_AVAILABILITY_DEFINITIONS.earn[providerId].label} is not currently offered.`
+    );
+  }
+}
+
+export function assertRampProviderSurfaced(providerId: RampProviderId): void {
+  if (!isRampProviderSurfaced(providerId)) {
+    throw new AppError(
+      "FORBIDDEN",
+      `${PROVIDER_AVAILABILITY_DEFINITIONS.ramps[providerId].label} is not currently offered.`
     );
   }
 }

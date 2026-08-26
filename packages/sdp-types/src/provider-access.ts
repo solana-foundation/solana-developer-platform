@@ -238,6 +238,27 @@ export function isEarnProviderSurfaced(provider: string): boolean {
   );
 }
 
+export const RAMP_PROVIDER_SURFACING = {
+  moonpay: true,
+  lightspark: true,
+  bvnk: true,
+  moneygram: false,
+  coinbase: true,
+  mural: true,
+  stripe: true,
+} as const satisfies Record<RampProviderId, boolean>;
+
+export const SURFACED_RAMP_PROVIDERS: readonly RampProviderId[] = RAMP_PROVIDERS.filter(
+  (provider) => RAMP_PROVIDER_SURFACING[provider]
+);
+
+export function isRampProviderSurfaced(provider: string): boolean {
+  return (
+    Object.hasOwn(RAMP_PROVIDER_SURFACING, provider) &&
+    RAMP_PROVIDER_SURFACING[provider as RampProviderId]
+  );
+}
+
 export const ORGANIZATION_PROVIDER_FAMILIES = [
   "custody",
   "rpc",

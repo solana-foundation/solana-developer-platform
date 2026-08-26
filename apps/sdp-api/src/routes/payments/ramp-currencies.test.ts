@@ -1,3 +1,4 @@
+import { isRampProviderSurfaced, RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
@@ -121,5 +122,37 @@ describe("ramp currency provider details", () => {
 
     expect(data.pairs).toEqual([{ source: "usdc.solana", dest: "USD", providers: ["bvnk"] }]);
     expect(Object.keys(data.providerDetails).sort()).toEqual(["bvnk"]);
+  });
+
+  it("omits un-surfaced providers from listings even when the support matrix includes them", async () => {
+    for (const direction of ["onramp", "offramp"] as const) {
+      const response = await buildApp().request(
+        `/v1/payments/ramps/${direction}/currency`,
+        {},
+        env
+      );
+
+      expect(response.status).toBe(200);
+      const data = await responseData(response);
+
+      for (const unsurfaced of RAMP_PROVIDERS.filter((p) => !isRampProviderSurfaced(p))) {
+        expect(sortedProvidersFromPairs(data.pairs)).not.toContain(unsurfaced);
+        expect(data.providerDetails).not.toHaveProperty(unsurfaced);
+      }
+    }
+  });
+
+  it("returns no pairs when the provider query filter names an un-surfaced provider", async () => {
+    const response = await buildApp().request(
+      "/v1/payments/ramps/onramp/currency?provider=moneygram",
+      {},
+      env
+    );
+
+    expect(response.status).toBe(200);
+    const data = await responseData(response);
+
+    expect(data.pairs).toEqual([]);
+    expect(data.providerDetails).toEqual({});
   });
 });

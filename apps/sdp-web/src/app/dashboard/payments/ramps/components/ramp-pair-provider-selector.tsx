@@ -24,12 +24,12 @@ import {
   OFFRAMP_PAIRS,
   ONRAMP_PAIRS,
   RAMP_PROVIDER_LOGOS,
-  RAMP_PROVIDER_OPTIONS,
   type RampDirection,
   type RampPair,
   type RampProviderOption,
   rampPairKey,
   type SelectedRampPair,
+  SURFACED_RAMP_PROVIDER_OPTIONS,
 } from "@/lib/ramps";
 import { useRampEstimate } from "../hooks/use-ramp-estimate";
 import { CurrencyPairSelector } from "./currency-pair-selector";
@@ -252,7 +252,7 @@ export function RampPairProviderSelector({
   );
   const directionProviderOptions = useMemo(
     () =>
-      RAMP_PROVIDER_OPTIONS.filter(
+      SURFACED_RAMP_PROVIDER_OPTIONS.filter(
         (option) => Object.keys(getDirectionSupport(option.id, direction).currencies).length > 0
       ),
     [direction]

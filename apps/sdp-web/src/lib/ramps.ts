@@ -4,7 +4,7 @@ import {
   type RampFiatCurrency,
 } from "@sdp/types/generated/ramp-support";
 import type { CryptoRailId } from "@sdp/types/payment-rails";
-import type { RampProviderId } from "@sdp/types/provider-access";
+import { isRampProviderSurfaced, type RampProviderId } from "@sdp/types/provider-access";
 
 export type RampDirection = "onramp" | "offramp";
 
@@ -43,6 +43,10 @@ export const RAMP_PROVIDER_OPTIONS: RampProviderOption[] = [
   { id: "mural", title: "Mural Pay" },
   { id: "stripe", title: "Stripe" },
 ];
+
+export const SURFACED_RAMP_PROVIDER_OPTIONS: RampProviderOption[] = RAMP_PROVIDER_OPTIONS.filter(
+  (option) => isRampProviderSurfaced(option.id)
+);
 
 export const ONRAMP_PAIRS: RampPair[] = ONRAMP_SUPPORT.map(({ source, dest, providers }) => ({
   fiatCurrency: source,
