@@ -103,7 +103,7 @@ const CURATED_VAULTS: Partial<
  * still accepts it from the stored catalogue precisely because hiding a
  * customer's own position would hide their money.
  */
-function isHiddenStrategy(row: EarnStrategyRow): boolean {
+export function isHiddenStrategy(row: EarnStrategyRow): boolean {
   if (!isEarnProviderSurfaced(row.provider)) {
     return true;
   }

@@ -164,6 +164,136 @@ describe("EarnButtonBuilder", () => {
     );
   });
 
+  it("keeps an edit made while a save is in flight instead of reporting it saved", async () => {
+    const user = userEvent.setup();
+    let resolveSave: (value: unknown) => void = () => {};
+    mocks.saveEarnButtonConfiguration.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSave = resolve;
+      })
+    );
+    renderWithEnglish(
+      <EarnButtonBuilder
+        configurationLoad={{
+          kind: "ready",
+          configuration: { ...savedConfiguration, style: "accent", accentColor: "#9945FF" },
+        }}
+        earnHref="/dashboard/markets/earn"
+        projectId="project_original"
+        providerAccess={providerAccess}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Blue" }));
+    await user.click(screen.getByRole("button", { name: "Save configuration" }));
+    // The PUT is in flight; a newer edit lands before it resolves.
+    await user.click(screen.getByRole("button", { name: "Coral" }));
+    resolveSave({
+      ok: true,
+      status: 200,
+      data: { ...savedConfiguration, style: "accent", accentColor: "#4C6FFF" },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Save configuration" })).toHaveProperty(
+        "disabled",
+        false
+      );
+    });
+    // The footer must not claim the Coral selection was saved, and the local
+    // selection must survive the response.
+    expect(screen.queryByText("Configuration saved. The handoff link is current.")).toBeNull();
+    expect(screen.getByRole("button", { name: "Coral" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("selects the matching preset for a saved lowercase accent color", () => {
+    renderWithEnglish(
+      <EarnButtonBuilder
+        configurationLoad={{
+          kind: "ready",
+          configuration: { ...savedConfiguration, style: "accent", accentColor: "#9945ff" },
+        }}
+        earnHref="/dashboard/markets/earn"
+        projectId="project_original"
+        providerAccess={providerAccess}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Purple" }).getAttribute("aria-pressed")).toBe(
+      "true"
+    );
+    expect(screen.getByRole("button", { name: "Save configuration" })).toHaveProperty(
+      "disabled",
+      true
+    );
+  });
+
+  it("still renders the selected strategy when the saved configuration failed to load", () => {
+    renderWithEnglish(
+      <EarnButtonBuilder
+        configurationLoad={{ kind: "error" }}
+        earnHref="/dashboard/markets/earn"
+        projectId="project_original"
+        providerAccess={providerAccess}
+        strategyId={liveStrategy.id}
+      />
+    );
+
+    expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
+    expect(screen.getByRole("alert").textContent).toContain(
+      "The saved Earn button configuration could not be loaded"
+    );
+    expect(screen.getByRole("button", { name: "Save configuration" })).toHaveProperty(
+      "disabled",
+      false
+    );
+  });
+
+  it("dead-ends on a failed configuration load only when no strategy is selected", () => {
+    renderWithEnglish(
+      <EarnButtonBuilder
+        configurationLoad={{ kind: "error" }}
+        earnHref="/dashboard/markets/earn"
+        projectId="project_original"
+        providerAccess={providerAccess}
+      />
+    );
+
+    expect(screen.getByText("Button configuration unavailable")).toBeTruthy();
+    expect(screen.queryByText("Server integration")).toBeNull();
+  });
+
+  it("asks for a strategy when none is selected and nothing is saved", () => {
+    renderWithEnglish(
+      <EarnButtonBuilder
+        configurationLoad={noConfiguration}
+        earnHref="/dashboard/markets/earn"
+        projectId="project_original"
+        providerAccess={providerAccess}
+      />
+    );
+
+    expect(screen.getByText("Choose a strategy first")).toBeTruthy();
+    expect(screen.getByText(/select a live strategy/)).toBeTruthy();
+  });
+
+  it("falls through an empty strategy parameter to the saved configuration", () => {
+    renderWithEnglish(
+      <EarnButtonBuilder
+        configurationLoad={{ kind: "ready", configuration: savedConfiguration }}
+        earnHref="/dashboard/markets/earn"
+        projectId="project_original"
+        providerAccess={providerAccess}
+        strategyId=""
+      />
+    );
+
+    expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("link", { name: /earn\/integrate\/PublicEarnButtonToken123/ })
+    ).toBeTruthy();
+  });
+
   it("restores the saved strategy, style, and handoff link without a query parameter", () => {
     renderWithEnglish(
       <EarnButtonBuilder

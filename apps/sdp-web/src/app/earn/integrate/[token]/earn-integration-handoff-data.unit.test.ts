@@ -9,6 +9,7 @@ const validResponse = {
       provider: "kamino",
       style: "accent",
       accentColor: "#9945FF",
+      strategyAvailable: true,
     },
   },
 };
@@ -24,14 +25,14 @@ describe("loadPublicEarnButtonConfiguration", () => {
 
     await expect(
       loadPublicEarnButtonConfiguration("https://api.example.test", "public/token")
-    ).resolves.toEqual(validResponse.data.configuration);
+    ).resolves.toEqual({ kind: "found", configuration: validResponse.data.configuration });
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.example.test/v1/earn/button-configurations/public/public%2Ftoken",
       { cache: "no-store" }
     );
   });
 
-  it("returns missing only for an actual 404", async () => {
+  it("reports missing only for a definitive 404", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(null, { status: 404 }))
@@ -39,19 +40,22 @@ describe("loadPublicEarnButtonConfiguration", () => {
 
     await expect(
       loadPublicEarnButtonConfiguration("https://api.example.test", "missing-token")
-    ).resolves.toBeNull();
+    ).resolves.toEqual({ kind: "missing" });
   });
 
-  it.each([403, 429, 503])("preserves an operational %i response as an error", async (status) => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response(null, { status }))
-    );
+  it.each([403, 429, 503])(
+    "reports an operational %i as unavailable, neither missing nor a crash",
+    async (status) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response(null, { status }))
+      );
 
-    await expect(
-      loadPublicEarnButtonConfiguration("https://api.example.test", "valid-token")
-    ).rejects.toThrow(`Earn integration handoff request failed (${status})`);
-  });
+      await expect(
+        loadPublicEarnButtonConfiguration("https://api.example.test", "valid-token")
+      ).resolves.toEqual({ kind: "unavailable" });
+    }
+  );
 
   it("rejects a malformed successful response", async () => {
     vi.stubGlobal(

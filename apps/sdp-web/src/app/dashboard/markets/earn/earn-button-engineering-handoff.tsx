@@ -40,6 +40,7 @@ export function EarnButtonEngineeringHandoff({
             href={sharePath ?? undefined}
             rel="noreferrer"
             target="_blank"
+            title={shareLink ?? undefined}
           >
             {shareLink}
           </a>

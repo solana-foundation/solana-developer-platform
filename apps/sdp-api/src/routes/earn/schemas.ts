@@ -3,6 +3,8 @@ import {
   DEFAULT_EARN_BUTTON_ACCENT_COLOR,
   EARN_APY_TYPES,
   EARN_BUTTON_ACCENT_COLOR_PATTERN,
+  EARN_BUTTON_PUBLIC_TOKEN_LENGTH,
+  EARN_BUTTON_PUBLIC_TOKEN_PATTERN,
   EARN_BUTTON_STYLES,
   EARN_LIQUIDITY_TERMS,
   EARN_MOVEMENT_DIRECTIONS,
@@ -42,8 +44,8 @@ export const earnButtonConfigurationSchema = z.object({
 export const earnButtonConfigurationPublicParamsSchema = z.object({
   publicToken: z
     .string()
-    .length(24)
-    .regex(/^[A-Za-z0-9_-]+$/, "Invalid Earn button integration token"),
+    .length(EARN_BUTTON_PUBLIC_TOKEN_LENGTH)
+    .regex(EARN_BUTTON_PUBLIC_TOKEN_PATTERN, "Invalid Earn button integration token"),
 });
 
 // ---------------------------------------------------------------------------

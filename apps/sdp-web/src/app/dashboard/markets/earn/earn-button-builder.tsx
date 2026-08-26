@@ -3,6 +3,7 @@
 import {
   DEFAULT_EARN_BUTTON_ACCENT_COLOR,
   type EarnButtonConfiguration,
+  type EarnButtonStyle,
   type EarnStrategy,
 } from "@sdp/types";
 import { ArrowLeftIcon, Code2Icon, InfoIcon } from "lucide-react";
@@ -27,12 +28,11 @@ import { useTranslations } from "@/i18n/provider";
 import { EarnProgramSkeleton } from "../markets-route-skeletons";
 import { EarnButtonAppearanceControls } from "./earn-button-appearance-controls";
 import { EarnButtonBuilderFooter } from "./earn-button-builder-footer";
+import type { EarnButtonConfigurationLoad } from "./earn-button-configuration.server";
 import { saveEarnButtonConfiguration } from "./earn-button-configuration-data";
 import { EarnButtonDevicePreview } from "./earn-button-device-preview";
 import { EarnButtonEngineeringHandoff } from "./earn-button-engineering-handoff";
 import { buildEarnServerIntegration, earnButtonIntegrationPath } from "./earn-button-integration";
-import { EARN_BUTTON_STYLES, type EarnButtonStyle } from "./earn-button-preview";
-import { EARN_BUTTON_STYLE_OPTIONS } from "./earn-button-style-options";
 import { EarnStrategyIdentity } from "./earn-market-presentation";
 import { useEarnStrategies } from "./earn-program-data";
 import {
@@ -40,10 +40,6 @@ import {
   type EarnVaultDepositAvailability,
   earnVaultDepositAvailability,
 } from "./earn-surfacing";
-
-type EarnButtonConfigurationLoad =
-  | { kind: "ready"; configuration: EarnButtonConfiguration | null }
-  | { kind: "error" };
 
 type EarnButtonBuilderProps = {
   configurationLoad: EarnButtonConfigurationLoad;
@@ -69,10 +65,23 @@ type EarnButtonBuilderAction =
   | { type: "saveFailed"; error: string }
   | { type: "saveFinished" };
 
+/**
+ * The API and DB accept either hex case while the presets are uppercase, so a
+ * saved value is normalized on entry — otherwise a config saved as "#9945ff"
+ * renders the Purple swatch unselected and flips hasUnsavedChanges for a
+ * visually identical color.
+ */
+function normalizeSavedConfiguration(
+  configuration: EarnButtonConfiguration
+): EarnButtonConfiguration {
+  return { ...configuration, accentColor: configuration.accentColor.toUpperCase() };
+}
+
 function createBuilderState(
   configurationLoad: EarnButtonConfigurationLoad
 ): EarnButtonBuilderState {
-  const configuration = configurationLoad.kind === "ready" ? configurationLoad.configuration : null;
+  const loaded = configurationLoad.kind === "ready" ? configurationLoad.configuration : null;
+  const configuration = loaded ? normalizeSavedConfiguration(loaded) : null;
   return {
     savedConfiguration: configuration,
     style: configuration?.style ?? "ink",
@@ -94,11 +103,13 @@ function earnButtonBuilderReducer(
     case "saveStarted":
       return { ...state, isSaving: true, saveError: null };
     case "saveSucceeded":
+      // Only the saved snapshot updates. Local style/accent selections are
+      // deliberately NOT reset from the response: an edit made while the PUT
+      // was in flight must survive, and hasUnsavedChanges then keeps the
+      // footer honest about it instead of claiming the newer edit was saved.
       return {
         ...state,
-        savedConfiguration: action.configuration,
-        style: action.configuration.style,
-        accentColor: action.configuration.accentColor,
+        savedConfiguration: normalizeSavedConfiguration(action.configuration),
         saveError: null,
       };
     case "saveFailed":
@@ -106,14 +117,6 @@ function earnButtonBuilderReducer(
     case "saveFinished":
       return { ...state, isSaving: false };
   }
-}
-
-const styleOptionValues = new Set(EARN_BUTTON_STYLE_OPTIONS.map((option) => option.value));
-if (
-  styleOptionValues.size !== EARN_BUTTON_STYLES.length ||
-  !EARN_BUTTON_STYLES.every((style) => styleOptionValues.has(style))
-) {
-  throw new Error("Earn button style options do not match the preview renderer");
 }
 
 function unavailableDescriptionKey(
@@ -144,13 +147,16 @@ function builderEmptyState(input: {
       descriptionKey: "DashboardMarkets.earnProgram.catalogueErrorDescription",
     };
   }
-  if (input.configurationError) {
-    return {
-      messageKey: "DashboardMarkets.earnProgram.configurationErrorTitle",
-      descriptionKey: "DashboardMarkets.earnProgram.configurationErrorDescription",
-    };
-  }
   if (!input.strategy) {
+    // A failed configuration load dead-ends the page ONLY when it also removes
+    // the strategy selection. With ?strategy= present, the previews and the
+    // snippet need no saved configuration and keep rendering (with a warning).
+    if (input.configurationError && !input.selectedStrategyId) {
+      return {
+        messageKey: "DashboardMarkets.earnProgram.configurationErrorTitle",
+        descriptionKey: "DashboardMarkets.earnProgram.configurationErrorDescription",
+      };
+    }
     if (input.selectedStrategyId) {
       return {
         messageKey: "DashboardMarkets.earnProgram.unknownStrategyTitle",
@@ -193,7 +199,10 @@ export function EarnButtonBuilder({
 
   if (isLoading) return <EarnProgramSkeleton />;
 
-  const selectedStrategyId = strategyId ?? savedConfiguration?.strategyId;
+  // `||`, not `??`: page.tsx normalizes an empty ?strategy= away, but an empty
+  // string arriving here must still fall through to the saved strategy rather
+  // than suppressing a configuration that exists.
+  const selectedStrategyId = strategyId || savedConfiguration?.strategyId;
   const strategy = strategies?.find((entry) => entry.id === selectedStrategyId);
   const availability = strategy
     ? earnVaultDepositAvailability(strategy, sdpEnvironment, providerAccess)
@@ -285,6 +294,16 @@ export function EarnButtonBuilder({
             {t("DashboardMarkets.earnProgram.builderDescription")}
           </p>
         </div>
+
+        {configurationLoad.kind === "error" ? (
+          <div
+            className="flex items-start gap-2 rounded-xl border border-border-default bg-fill-subtle px-4 py-3 text-xs leading-5 text-secondary"
+            role="alert"
+          >
+            <InfoIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+            <p>{t("DashboardMarkets.earnProgram.configurationLoadWarning")}</p>
+          </div>
+        ) : null}
 
         <Card>
           <CardHeader>
