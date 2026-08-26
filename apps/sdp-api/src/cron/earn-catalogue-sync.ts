@@ -158,6 +158,15 @@ async function syncProviderCatalogue(
  * the environment's own shelf from converging, and a mirror pass must never
  * delist the own lane's rows — its keep set knows nothing about them. That is
  * what `delistScope` is for.
+ *
+ * A reference MIGRATING between lanes (collided last pass, devnet-delisted
+ * this pass) briefly leans on both: the own lane truthfully deletes its devnet
+ * row, and the mirror lane rewrites the reference as mainnet. If that mirror
+ * write fails, the row is simply ABSENT until a later pass succeeds — accepted
+ * staleness, chosen deliberately over protecting the devnet row from its own
+ * delist, which would keep a vault the provider DELISTED sitting
+ * `fundable: true` for an hour. An hour without a browse-only mirror row beats
+ * an hour offering a delisted vault a deposit path.
  */
 async function syncNonProductionEnvironment(
   repo: EarnRepository,
