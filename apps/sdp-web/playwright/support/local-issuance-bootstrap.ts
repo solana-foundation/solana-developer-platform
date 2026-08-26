@@ -17,7 +17,6 @@ import {
   getBootstrapApiBaseUrl,
   getPlaywrightCustodyProvider,
   type PlaywrightWalletFixture,
-  resolvePlaywrightProjectId,
   seedLocalClerkOrganizationMapping,
 } from "./local-dashboard-bootstrap";
 
@@ -89,7 +88,6 @@ async function createFixtureToken(
     symbol: input.symbol,
     template: "stablecoin",
     uri: input.uri,
-    imageUrl: "https://example.com/assets/sdp-e2e-token.png",
     description: `${input.name} description`,
     signingWalletId: input.signingWalletId,
     requiresAllowlist: input.requiresAllowlist,
@@ -163,7 +161,7 @@ export async function bootstrapLocalIssuanceFixtures({
     fundSourceWallet: true,
     fundSourceAmountSol: 0.05,
   });
-  const projectId = await resolvePlaywrightProjectId(getBootstrapApiBaseUrl(), bearerToken);
+  const projectId = walletBootstrap.projectId;
   const api = createLocalApiClient(getBootstrapApiBaseUrl(), bearerToken, projectId);
 
   const treasuryWallet = requireWallet(
@@ -256,7 +254,7 @@ export async function bootstrapLocalPaymentFixtures({
     fundSourceWallet: true,
     fundSourceAmountSol: 0.05,
   });
-  const projectId = await resolvePlaywrightProjectId(getBootstrapApiBaseUrl(), bearerToken);
+  const projectId = walletBootstrap.projectId;
   const api = createLocalApiClient(getBootstrapApiBaseUrl(), bearerToken, projectId);
   const treasuryWallet = requireWallet(
     walletBootstrap.wallets,

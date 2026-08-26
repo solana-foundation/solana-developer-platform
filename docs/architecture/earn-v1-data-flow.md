@@ -133,10 +133,13 @@ and are mirrored into the unified shape in the same transaction until a later
 release retires them, so the sources of truth in the table above are the unified
 ones for every READ.
 
-Still outstanding for that shape: the withdraw counterpart. The dashboard now
-hydrates and shows durable vault positions, but their SDP exit action stays
-disabled. Until the withdraw path lands, a vault position can be entered and not
-exited through SDP — so Kamino must not become creatable on mainnet.
+The withdraw counterpart landed with PRO-1702: `POST /v1/earn/vault-withdrawals`
+records one share-mint-denominated signed movement before broadcasting it, and
+the treasury dashboard's exit action drives it. The shared vault reconciliation
+sweep finishes an ambiguous or interrupted submission. Production vault
+deposits remain closed until PRO-1703 surfaces vault positions on the Active
+tab (`VAULT_DIRECT_DEPOSIT_ENVIRONMENTS`); the exit route itself takes no
+environment gate — money out beats money off.
 
 The original V1 note, still accurate for the custodial model: The execution-era design that
 used to be diagrammed here (per-strategy `createDeposit`/`createWithdrawal`,
@@ -156,7 +159,7 @@ guarded-CAS shape is the pattern to extend.
 | Org/project tenancy | `projectContextMiddleware` | Program + withdrawal-ledger scoping (rows carry org/project; every program lookup is scoped to org **and** environment, and the ledger anchors on the program wallet) | ✅ wired |
 | Provider entitlements | `services/provider-availability.service.ts` | Per-org enable/disable (override-only: every org needs an explicit `providerOverrides.earn.<id>`), env kill-switch, exit-safe gate | ✅ wired (`earn` family) |
 | Custody + signing | `services/solana`, `@sdp/custody` | Vault-direct deposits sign provider-built instructions with the admitted organization wallet after policy enforcement | ✅ vault deposits |
-| Fee sponsorship | `@sdp/payments/fee-payment` (Kora) | The execution runtime supports sign-only sponsorship, but Kamino deposits use the custody wallet as fee payer until kvault/klend programs are allow-listed | ✅ runtime · ⏸ Kamino route |
+| Fee sponsorship | `@sdp/payments/fee-payment` (Kora), `services/earn/vault-sponsorship.ts` | Sign-only sponsorship of the network fee **and** share-ATA rent, resolved once per request and applied to the fee payer, the provider's `rentPayer` and the simulation payer together. The exit closes the share ATA and refunds its rent to whoever funded it: `earn_positions.share_ata_rent_funder` (0066), written by whichever movement in either direction actually created the account, or this exit's own rent payer when the exit creates it. Cluster-gated to devnet and off by default: deployed devnet still needs the Kamino ids on its Kora allowlist (sdp-infra#64); mainnet additionally needs `allow_create_account` opened and `sbp_mainnet_global` enabled (PRO-1736) | ✅ code · ⏸ devnet deploy · ⏸ mainnet |
 | Solana RPC | `@sdp/rpc`, `services/earn/execution-registry.ts` | Cluster-proved provider build, simulation, broadcast, and live vault-position hydration | ✅ vault-direct paths |
 | Helius DAS | `services/helius-das.service.ts` | No V1 consumer — positions are live provider reads, nothing to reconcile | ⏸ none in V1 |
 | Webhook dispatch + signature verify | `routes/webhooks/handlers.ts`, `lib/webhook-signature.ts` | Provider settlement events land on the withdrawal ledger via the same applier the poll path uses (`earn-withdrawal-ledger.service.ts`) | ⏸ PRO-1631 (polling works today; the neutral event contract returns with it) |

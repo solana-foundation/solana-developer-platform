@@ -12,7 +12,7 @@
  */
 
 import * as Sentry from "@sentry/node";
-import type { MonitorOptions, Observability, SentryOptions } from "./observability";
+import type { CheckInObservability, MonitorOptions, SentryOptions } from "./observability";
 
 let initialized = false;
 
@@ -35,10 +35,14 @@ function ensureInitialized(): void {
   }
 }
 
-export const nodeObservability: Observability = {
+export const nodeObservability: CheckInObservability = {
   captureException(err) {
     ensureInitialized();
     Sentry.captureException(err);
+  },
+  captureCheckIn(checkIn, opts) {
+    ensureInitialized();
+    return Sentry.captureCheckIn(checkIn, opts);
   },
   withScope(cb) {
     ensureInitialized();

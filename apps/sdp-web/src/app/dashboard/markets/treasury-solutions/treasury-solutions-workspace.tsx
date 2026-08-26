@@ -7,6 +7,7 @@ import {
   earnProgramSolanaPayoutTokens,
   isVaultDirectDepositEnabled,
   type SdpEnvironment,
+  WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
 import {
   ArrowDownToLineIcon,
@@ -44,6 +45,7 @@ import {
   type EarnFundingWallet,
   useEarnFundingWallets,
 } from "../earn/deposit/earn-funding-wallets";
+import { formatUsd } from "../earn/earn-format";
 import {
   EarnStrategyIdentity,
   earnMintAsset,
@@ -57,20 +59,144 @@ import {
 import {
   type EarnProgram,
   isEarnVaultDepositInFlight,
+  isEarnVaultWithdrawalInFlight,
   useEarnPrograms,
   useEarnProgramWithdrawals,
   useEarnStrategies,
   useEarnVaultDeposits,
   useEarnVaultPositions,
+  useEarnVaultWithdrawals,
 } from "../earn/earn-program-data";
 import { type EarnProviderAccess, earnVaultDepositAvailability } from "../earn/earn-surfacing";
 import {
   EarnVaultDepositModal,
   EarnVaultDepositOutcomeTracker,
 } from "../earn/earn-vault-deposit-modal";
+import {
+  EarnVaultWithdrawalOutcomeTracker,
+  EarnVaultWithdrawModal,
+} from "../earn/earn-vault-withdraw-modal";
 import { EarnWithdrawalOutcomeTracker, EarnWithdrawModal } from "../earn/earn-withdraw-modal";
+import {
+  formatAllocationShare,
+  isOpenVaultPosition,
+  summarizeTreasuryAllocation,
+  type TreasuryAllocation,
+  type VaultShareMintVocabulary,
+} from "./treasury-allocation";
 
-function WalletBalanceList({ wallet }: { wallet: EarnFundingWallet }) {
+function AllocationFigure({
+  caption,
+  label,
+  value,
+}: {
+  caption: string;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs font-medium text-tertiary">{label}</dt>
+      {/* Numbers never truncate; a figure too wide for its column wraps
+       * instead of painting over the neighbour. */}
+      <dd className="mt-1.5 text-2xl leading-8 font-medium text-primary tabular-nums [overflow-wrap:anywhere]">
+        {value}
+      </dd>
+      <dd className="mt-1 text-xs text-tertiary">{caption}</dd>
+    </div>
+  );
+}
+
+function TreasuryAllocationCard({
+  allocation,
+  isLoading,
+}: {
+  allocation: TreasuryAllocation;
+  isLoading: boolean;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="grid gap-6 sm:grid-cols-3">
+          <SkeletonBlock className="h-20 rounded-xl" />
+          <SkeletonBlock className="h-20 rounded-xl" />
+          <SkeletonBlock className="h-20 rounded-xl" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const summary = allocation;
+
+  return (
+    <Card>
+      <CardContent>
+        <dl className="grid gap-x-6 gap-y-5 sm:grid-cols-3">
+          <AllocationFigure
+            caption={t(
+              summary.availableCash === undefined
+                ? "DashboardMarkets.treasury.summaryCashUnavailable"
+                : "DashboardMarkets.treasury.summaryCashCaption"
+            )}
+            label={t("DashboardMarkets.treasury.summaryCash")}
+            value={formatUsd(summary.availableCash, locale, 2)}
+          />
+          <AllocationFigure
+            caption={
+              summary.deployedValue !== undefined
+                ? t("DashboardMarkets.treasury.summaryDeployedCaption", {
+                    value: formatUsd(summary.deployedValue, locale, 2),
+                  })
+                : t(
+                    summary.deployedAbsence === "unreconciled"
+                      ? "DashboardMarkets.treasury.summaryDeployedUnreconciled"
+                      : "DashboardMarkets.treasury.summaryDeployedUnavailable"
+                  )
+            }
+            label={t("DashboardMarkets.treasury.summaryDeployed")}
+            value={formatAllocationShare(summary.deployedShare, locale)}
+          />
+          <AllocationFigure
+            caption={t(
+              summary.remainingShare !== undefined
+                ? "DashboardMarkets.treasury.summaryRemainingCaption"
+                : summary.sharesAbsence === "empty_float"
+                  ? "DashboardMarkets.treasury.summaryEmptyFloat"
+                  : "DashboardMarkets.treasury.summaryShareUnavailable"
+            )}
+            label={t("DashboardMarkets.treasury.summaryRemaining")}
+            value={formatAllocationShare(summary.remainingShare, locale)}
+          />
+        </dl>
+        {summary.deployedShare !== undefined ? (
+          /* The share stays a decimal string end to end; calc() does the
+           * width multiplication so no Number cast touches the amount. */
+          <div
+            aria-hidden="true"
+            className="mt-5 h-1.5 w-full overflow-hidden rounded-full bg-fill-strong"
+            data-testid="treasury-allocation-bar"
+          >
+            <div
+              className="h-full rounded-full bg-primary"
+              style={{ width: `calc(${summary.deployedShare} * 100%)` }}
+            />
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function WalletBalanceList({
+  vaultShareMints,
+  wallet,
+}: {
+  vaultShareMints: ReadonlySet<string>;
+  wallet: EarnFundingWallet;
+}) {
   const t = useTranslations();
   const locale = useLocale();
   if (wallet.balances === undefined) {
@@ -78,42 +204,51 @@ function WalletBalanceList({ wallet }: { wallet: EarnFundingWallet }) {
       <p className="text-sm text-tertiary">{t("DashboardMarkets.treasury.balanceUnavailable")}</p>
     );
   }
-  if (wallet.balances.length === 0) {
+  // Vault share (receipt) tokens are ownership, not cash: they render as the
+  // wallet's "deployed in vaults" line and as position rows below, never as a
+  // token tile with an unreadable mint-derived symbol.
+  const cashBalances = wallet.balances.filter((balance) => !vaultShareMints.has(balance.mint));
+  if (cashBalances.length === 0) {
     return (
       <p className="text-sm text-tertiary">{t("DashboardMarkets.treasury.noTokenBalances")}</p>
     );
   }
 
   return (
-    <dl className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      {wallet.balances.map((balance) => (
-        <div
+    <ul className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      {cashBalances.map((balance) => (
+        <li
           className="flex min-w-0 items-center gap-3 rounded-xl bg-fill-subtle px-4 py-3"
           key={`${wallet.id}:${balance.mint}`}
         >
           <TokenMark mint={balance.mint} size="sm" symbol={balance.token} />
           <div className="min-w-0">
-            <dt className="truncate text-xs text-tertiary">{balance.token}</dt>
-            <dd className="mt-0.5 truncate text-sm font-medium text-primary tabular-nums">
+            <p className="truncate text-xs text-tertiary">{balance.token}</p>
+            <p className="mt-0.5 truncate text-sm font-medium text-primary tabular-nums">
               {formatProviderAmount(balance.uiAmount, locale)}
-            </dd>
+            </p>
           </div>
-        </div>
+        </li>
       ))}
-    </dl>
+    </ul>
   );
 }
 
 function TreasuryWalletsCard({
+  allocation,
   error,
   isLoading,
+  shareMints,
   wallets,
 }: {
+  allocation: TreasuryAllocation;
   error: unknown;
   isLoading: boolean;
+  shareMints: VaultShareMintVocabulary;
   wallets: readonly EarnFundingWallet[];
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   return (
     <Card>
       <CardHeader>
@@ -142,27 +277,46 @@ function TreasuryWalletsCard({
           />
         ) : (
           <div className="grid gap-3 lg:grid-cols-2">
-            {wallets.map((wallet) => (
-              <section
-                className="rounded-xl border border-border-default px-4 py-4"
-                key={wallet.id}
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <h3 className="truncate text-sm font-medium text-primary">
-                      {wallet.label?.trim() || t("DashboardMarkets.treasury.unnamedWallet")}
-                    </h3>
-                    <p className="mt-1 text-xs text-tertiary" title={wallet.publicKey}>
-                      {shortenMarketAddress(wallet.publicKey)}
-                    </p>
+            {wallets.map((wallet) => {
+              // Straight from the same result the summary rendered, so the
+              // two cannot disagree about this wallet.
+              const deployment = allocation.deploymentByWalletId.get(wallet.id) ?? {
+                kind: "none" as const,
+              };
+              return (
+                <section
+                  className="rounded-xl border border-border-default px-4 py-4"
+                  key={wallet.id}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <h3 className="truncate text-sm font-medium text-primary">
+                        {wallet.label?.trim() || t("DashboardMarkets.treasury.unnamedWallet")}
+                      </h3>
+                      <p className="mt-1 text-xs text-tertiary" title={wallet.publicKey}>
+                        {shortenMarketAddress(wallet.publicKey)}
+                      </p>
+                    </div>
+                    <Badge variant={wallet.isRuntimeExecutionAllowed ? "success" : "outline"}>
+                      {wallet.provider ?? t("DashboardMarkets.treasury.walletProviderUnknown")}
+                    </Badge>
                   </div>
-                  <Badge variant={wallet.isRuntimeExecutionAllowed ? "success" : "outline"}>
-                    {wallet.provider ?? t("DashboardMarkets.treasury.walletProviderUnknown")}
-                  </Badge>
-                </div>
-                <WalletBalanceList wallet={wallet} />
-              </section>
-            ))}
+                  <WalletBalanceList vaultShareMints={shareMints.known} wallet={wallet} />
+                  {deployment.kind !== "none" ? (
+                    <div className="mt-3 flex items-center justify-between gap-4 border-t border-border-subtle pt-3">
+                      <span className="text-xs text-tertiary">
+                        {t("DashboardMarkets.treasury.walletDeployed")}
+                      </span>
+                      <span className="text-sm font-medium text-primary tabular-nums">
+                        {deployment.kind === "value"
+                          ? formatUsd(deployment.value, locale, 2)
+                          : t("DashboardMarkets.treasury.positionValueUnavailable")}
+                      </span>
+                    </div>
+                  ) : null}
+                </section>
+              );
+            })}
           </div>
         )}
       </CardContent>
@@ -172,14 +326,25 @@ function TreasuryWalletsCard({
 
 function strategyPositionValue(
   strategy: EarnStrategy,
-  positions: readonly EarnVaultPosition[] | undefined
-): { count: number; value?: string } {
+  positions: readonly EarnVaultPosition[] | undefined,
+  /** Undefined when the witness is unavailable, so nothing can be certified. */
+  unrecordedShareMints: ReadonlySet<string> | undefined
+): { count: number; unrecorded?: boolean; value?: string } {
   const active = (positions ?? []).filter(
     (position) =>
-      position.closedAt === null &&
+      isOpenVaultPosition(position) &&
       earnStrategyReferenceKey(position.provider, position.providerReference) ===
         earnStrategyReferenceKey(strategy.provider, strategy.providerReference)
   );
+  // Applies to a row WITH recorded positions too, not just an empty one: a
+  // second wallet holding this vault's shares with no row behind them makes
+  // the recorded figure a floor, and printing it would contradict the summary
+  // and that wallet's card, which both read unavailable here. Without the
+  // witness at all, "no active position" is equally unsupportable.
+  const unrecorded =
+    unrecordedShareMints === undefined ||
+    (strategy.shareMint !== undefined && unrecordedShareMints.has(strategy.shareMint));
+  if (unrecorded) return { count: active.length, unrecorded };
   if (active.length === 0) return { count: 0 };
   const values = active.map((position) => position.tokenValue);
   if (values.some((value) => value === undefined)) return { count: active.length };
@@ -192,12 +357,14 @@ function StrategyTable({
   positions,
   providerAccess,
   strategies,
+  unrecordedShareMints,
 }: {
   environment: SdpEnvironment;
   onDeposit: (strategy: EarnStrategy) => void;
   positions: readonly EarnVaultPosition[] | undefined;
   providerAccess: EarnProviderAccess | null;
   strategies: readonly EarnStrategy[];
+  unrecordedShareMints: ReadonlySet<string> | undefined;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -220,7 +387,9 @@ function StrategyTable({
         <TableBody>
           {strategies.map((strategy) => {
             const asset = earnStrategyAsset(strategy);
-            const position = positions ? strategyPositionValue(strategy, positions) : null;
+            const position = positions
+              ? strategyPositionValue(strategy, positions, unrecordedShareMints)
+              : null;
             const availability = earnVaultDepositAvailability(
               strategy,
               environment,
@@ -238,13 +407,15 @@ function StrategyTable({
                 </TableCell>
                 <TableCell>
                   <p className="text-sm text-primary tabular-nums">
-                    {position === null
+                    {position === null || position.unrecorded
                       ? "—"
                       : position.count === 0
                         ? t("DashboardMarkets.treasury.noBalance")
                         : formatProviderAmount(position.value, locale, asset?.symbol)}
                   </p>
-                  {position === null || (position.count > 0 && position.value === undefined) ? (
+                  {position === null ||
+                  position.unrecorded ||
+                  (position.count > 0 && position.value === undefined) ? (
                     <p className="mt-1 text-xs text-tertiary">
                       {t("DashboardMarkets.treasury.positionValueUnavailable")}
                     </p>
@@ -290,17 +461,21 @@ function StrategyTable({
 function ActiveVaultPositionsCard({
   error,
   isLoading,
+  onWithdraw,
   positions,
+  unrecordedShareMints,
   wallets,
 }: {
   error: unknown;
   isLoading: boolean;
+  onWithdraw: (position: EarnVaultPosition) => void;
   positions: readonly EarnVaultPosition[] | undefined;
+  unrecordedShareMints: ReadonlySet<string> | undefined;
   wallets: readonly EarnFundingWallet[];
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const activePositions = (positions ?? []).filter((position) => position.closedAt === null);
+  const activePositions = (positions ?? []).filter(isOpenVaultPosition);
   const walletById = new Map(wallets.map((wallet) => [wallet.id, wallet] as const));
 
   return (
@@ -324,94 +499,89 @@ function ActiveVaultPositionsCard({
             message={t("DashboardMarkets.treasury.vaultPositionsErrorTitle")}
           />
         ) : activePositions.length === 0 ? (
-          <ListEmptyState
-            description={t("DashboardMarkets.treasury.vaultPositionsEmptyDescription")}
-            icon={<WalletCardsIcon aria-hidden="true" className="size-5" />}
-            message={t("DashboardMarkets.treasury.vaultPositionsEmptyTitle")}
-          />
+          // "No positions" is a claim of ABSENCE, so it needs the same witness
+          // every other surface needs. Receipt tokens with no row behind them,
+          // or a witness that could not be built, mean holdings may exist that
+          // this list cannot show.
+          unrecordedShareMints === undefined || unrecordedShareMints.size > 0 ? (
+            <ListEmptyState
+              description={t("DashboardMarkets.treasury.vaultPositionsIncompleteDescription")}
+              icon={<InfoIcon aria-hidden="true" className="size-5" />}
+              message={t("DashboardMarkets.treasury.vaultPositionsIncompleteTitle")}
+            />
+          ) : (
+            <ListEmptyState
+              description={t("DashboardMarkets.treasury.vaultPositionsEmptyDescription")}
+              icon={<WalletCardsIcon aria-hidden="true" className="size-5" />}
+              message={t("DashboardMarkets.treasury.vaultPositionsEmptyTitle")}
+            />
+          )
         ) : (
-          <>
-            <div className="overflow-x-auto border-y border-border-subtle">
-              <Table className="table-fixed" style={{ minWidth: "58rem" }}>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[28%]">
-                      {t("DashboardMarkets.treasury.position")}
-                    </TableHead>
-                    <TableHead className="w-[12%]">
-                      {t("DashboardMarkets.treasury.asset")}
-                    </TableHead>
-                    <TableHead className="w-[16%]">
-                      {t("DashboardMarkets.treasury.balance")}
-                    </TableHead>
-                    <TableHead className="w-[14%]">
-                      {t("DashboardMarkets.treasury.shares")}
-                    </TableHead>
-                    <TableHead className="w-[18%]">
-                      {t("DashboardMarkets.treasury.custodyWallet")}
-                    </TableHead>
-                    <TableHead align="right" className="w-[12%]">
-                      {t("DashboardMarkets.treasury.actions")}
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {activePositions.map((position) => {
-                    const asset = earnMintAsset(position.tokenMint);
-                    const wallet = walletById.get(position.custodyWalletId);
-                    return (
-                      <TableRow key={position.id}>
-                        <TableCell>
-                          <p className="truncate text-sm text-primary" title={position.label}>
-                            {position.label || shortenMarketAddress(position.providerReference)}
-                          </p>
-                          <p className="mt-0.5 truncate text-xs text-tertiary">
-                            {position.provider}
-                          </p>
-                        </TableCell>
-                        <TableCell className="text-sm text-secondary">{asset.symbol}</TableCell>
-                        <TableCell className="text-sm text-primary tabular-nums">
-                          {formatProviderAmount(position.tokenValue, locale, asset.symbol)}
-                        </TableCell>
-                        <TableCell className="text-sm text-secondary tabular-nums">
-                          {formatProviderAmount(position.shares, locale)}
-                        </TableCell>
-                        <TableCell className="text-sm text-secondary">
-                          {wallet?.label?.trim() ||
-                            shortenMarketAddress(wallet?.publicKey ?? position.custodyWalletId)}
-                        </TableCell>
-                        <TableCell align="right">
-                          {/*
-                           * There is no vault-withdraw HTTP route or provider capability yet.
-                           * Keep the verb visible so the missing exit is explicit, but never
-                           * attach a client-only balance mutation or expose a raw vault address.
-                           */}
-                          <Button
-                            aria-describedby="earn-vault-withdraw-unavailable-note"
-                            disabled
-                            iconLeft={<ArrowUpFromLineIcon />}
-                            size="sm"
-                            title={t("DashboardMarkets.treasury.vaultWithdrawUnavailable")}
-                            type="button"
-                            variant="secondary"
-                          >
-                            {t("DashboardMarkets.treasury.withdraw")}
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-            <div
-              className="flex items-start gap-2 bg-fill-subtle px-6 py-3 text-xs leading-5 text-secondary"
-              id="earn-vault-withdraw-unavailable-note"
-            >
-              <InfoIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-              <p>{t("DashboardMarkets.treasury.vaultWithdrawUnavailable")}</p>
-            </div>
-          </>
+          <div className="overflow-x-auto border-y border-border-subtle">
+            <Table className="table-fixed" style={{ minWidth: "52rem" }}>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[32%]">
+                    {t("DashboardMarkets.treasury.position")}
+                  </TableHead>
+                  <TableHead className="w-[12%]">{t("DashboardMarkets.treasury.asset")}</TableHead>
+                  <TableHead className="w-[20%]">
+                    {t("DashboardMarkets.treasury.balance")}
+                  </TableHead>
+                  <TableHead className="w-[22%]">
+                    {t("DashboardMarkets.treasury.custodyWallet")}
+                  </TableHead>
+                  <TableHead align="right" className="w-[14%]">
+                    {t("DashboardMarkets.treasury.actions")}
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {activePositions.map((position) => {
+                  const asset = earnMintAsset(position.tokenMint);
+                  const wallet = walletById.get(position.custodyWalletId);
+                  return (
+                    <TableRow key={position.id}>
+                      <TableCell>
+                        <p className="truncate text-sm text-primary" title={position.label}>
+                          {position.label || shortenMarketAddress(position.providerReference)}
+                        </p>
+                        <p className="mt-0.5 truncate text-xs text-tertiary">{position.provider}</p>
+                      </TableCell>
+                      <TableCell className="text-sm text-secondary">{asset.symbol}</TableCell>
+                      <TableCell className="text-sm text-primary tabular-nums">
+                        {formatProviderAmount(position.tokenValue, locale, asset.symbol)}
+                      </TableCell>
+                      <TableCell className="text-sm text-secondary">
+                        {wallet?.label?.trim() ||
+                          shortenMarketAddress(wallet?.publicKey ?? position.custodyWalletId)}
+                      </TableCell>
+                      <TableCell align="right">
+                        {/*
+                         * The exit route (PRO-1702). Deliberately NOT gated on
+                         * availability, surfacing, or environment — money out
+                         * beats money off (ADR 0002), so the verb stays live
+                         * wherever a position exists. A provider whose exit
+                         * SDP cannot build yet answers 501 with a clear error
+                         * inside the modal rather than a silently dead button.
+                         */}
+                        <Button
+                          data-earn-vault-withdraw-focus-fallback={position.id}
+                          iconLeft={<ArrowUpFromLineIcon />}
+                          onClick={() => onWithdraw(position)}
+                          size="sm"
+                          type="button"
+                          variant="secondary"
+                        >
+                          {t("DashboardMarkets.treasury.withdraw")}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
         )}
       </CardContent>
     </Card>
@@ -532,6 +702,93 @@ function withdrawalWatchKey(watch: EarnWithdrawalWatch): string {
   return `${watch.programId}:${watch.withdrawalRef}`;
 }
 
+function TreasuryStrategiesCard({
+  environment,
+  error,
+  isLoading,
+  onDeposit,
+  onRefresh,
+  positions,
+  providerAccess,
+  strategies,
+  unrecordedShareMints,
+}: {
+  environment: SdpEnvironment;
+  error: unknown;
+  isLoading: boolean;
+  onDeposit: (strategy: EarnStrategy) => void;
+  onRefresh: () => void;
+  positions: readonly EarnVaultPosition[] | undefined;
+  providerAccess: EarnProviderAccess | null;
+  strategies: readonly EarnStrategy[] | undefined;
+  unrecordedShareMints: ReadonlySet<string> | undefined;
+}) {
+  const t = useTranslations();
+  const depositsEnabled = isVaultDirectDepositEnabled(environment);
+
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader>
+        <CardTitle>{t("DashboardMarkets.treasury.strategiesTitle")}</CardTitle>
+        <CardDescription>{t("DashboardMarkets.treasury.strategiesDescription")}</CardDescription>
+        <CardAction>
+          <Button
+            iconLeft={<RefreshCwIcon />}
+            onClick={onRefresh}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            {t("DashboardMarkets.treasury.refresh")}
+          </Button>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="px-0">
+        {isLoading ? (
+          <div className="grid gap-3 px-6 py-5">
+            <SkeletonBlock className="h-14 rounded-xl" />
+            <SkeletonBlock className="h-14 rounded-xl" />
+            <SkeletonBlock className="h-14 rounded-xl" />
+          </div>
+        ) : error ? (
+          <ListEmptyState
+            description={t("DashboardMarkets.treasury.strategiesErrorDescription")}
+            icon={<InfoIcon aria-hidden="true" className="size-5" />}
+            message={t("DashboardMarkets.treasury.strategiesErrorTitle")}
+          />
+        ) : (strategies ?? []).length === 0 ? (
+          <ListEmptyState
+            description={t("DashboardMarkets.treasury.strategiesEmptyDescription")}
+            icon={<InfoIcon aria-hidden="true" className="size-5" />}
+            message={t("DashboardMarkets.treasury.strategiesEmptyTitle")}
+          />
+        ) : (
+          <StrategyTable
+            environment={environment}
+            onDeposit={onDeposit}
+            positions={positions}
+            providerAccess={providerAccess}
+            strategies={strategies ?? []}
+            unrecordedShareMints={unrecordedShareMints}
+          />
+        )}
+        <div className="flex items-start gap-2 border-t border-border-subtle px-6 py-4 text-xs leading-5 text-tertiary">
+          <InfoIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          <p>
+            {t(
+              providerAccess === null
+                ? "DashboardMarkets.treasury.accessDisclosure"
+                : depositsEnabled
+                  ? "DashboardMarkets.treasury.rateDisclosure"
+                  : "DashboardMarkets.treasury.productionDisclosure"
+            )}
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 /**
  * Recover only provider-accepted withdrawals that can still change. A
  * `requested` ledger row has no accepted provider operation to poll, and a row
@@ -572,40 +829,6 @@ function EarnWithdrawalLedgerRecovery({
   return null;
 }
 
-/**
- * Re-derive in-flight deposits from the SERVER, the way
- * `EarnWithdrawalLedgerRecovery` does for withdrawals.
- *
- * This replaced a per-tab `sessionStorage` watch list, and the difference is
- * not just tidiness. Browser state could not see a deposit signed in another
- * tab, could not survive the tab closing, and — because it stored bare movement
- * ids — restored the previous project's watches after a workspace switch, which
- * then polled forever against a movement the new workspace cannot read. A
- * server list is workspace-scoped by construction, so none of those are
- * expressible.
- *
- * It also closes the approval-gated case for free: a policy hold creates no
- * movement, so there was nothing to watch, but once someone approves it the
- * executor writes the movement and this list finds it on the next pass.
- */
-function EarnVaultDepositLedgerRecovery({
-  onRecover,
-}: {
-  onRecover: (movementIds: readonly string[]) => void;
-}) {
-  const { deposits } = useEarnVaultDeposits();
-
-  useEffect(() => {
-    if (!deposits) return;
-    const inFlight = deposits
-      .filter(isEarnVaultDepositInFlight)
-      .map((deposit) => deposit.movementId);
-    if (inFlight.length > 0) onRecover(inFlight);
-  }, [deposits, onRecover]);
-
-  return null;
-}
-
 export function TreasurySolutionsWorkspace({
   providerAccess,
 }: {
@@ -637,30 +860,60 @@ export function TreasurySolutionsWorkspace({
     isLoading: programsLoading,
     refresh: refreshPrograms,
   } = useEarnPrograms();
+  const { deposits: discoveredVaultDeposits } = useEarnVaultDeposits();
+  const { withdrawals: discoveredVaultWithdrawals } = useEarnVaultWithdrawals();
   const [depositStrategy, setDepositStrategy] = useState<EarnStrategy | null>(null);
   const [withdrawProgram, setWithdrawProgram] = useState<EarnProgram | null>(null);
+  const [withdrawPosition, setWithdrawPosition] = useState<EarnVaultPosition | null>(null);
   const [withdrawalWatches, setWithdrawalWatches] = useState<readonly EarnWithdrawalWatch[]>([]);
   const settledWithdrawalKeys = useRef(new Set<string>());
   const [vaultDepositWatches, setVaultDepositWatches] = useState<readonly string[]>([]);
-  const settledVaultDepositIds = useRef(new Set<string>());
+  const [settledVaultDepositIds, setSettledVaultDepositIds] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
+  const [vaultWithdrawalWatches, setVaultWithdrawalWatches] = useState<readonly string[]>([]);
+  const [settledVaultWithdrawalIds, setSettledVaultWithdrawalIds] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
 
   // Pure updater: the recovery list re-asserts every 30s, so this runs often
   // and must not have side effects (StrictMode double-invokes it in dev).
-  const addVaultDepositWatches = useCallback((incoming: readonly string[]) => {
-    setVaultDepositWatches((current) => {
-      const known = new Set(current);
-      const additions = incoming.filter((movementId) => {
-        // `settledVaultDepositIds` is load-bearing, not defensive: the ledger
-        // list keeps re-asserting a row until the server marks it terminal, so
-        // without a tombstone a just-settled deposit would be resurrected on
-        // the next pass and announced again.
-        if (known.has(movementId) || settledVaultDepositIds.current.has(movementId)) return false;
-        known.add(movementId);
-        return true;
+  const addVaultDepositWatches = useCallback(
+    (incoming: readonly string[]) => {
+      setVaultDepositWatches((current) => {
+        const known = new Set(current);
+        const additions = incoming.filter((movementId) => {
+          // `settledVaultDepositIds` is load-bearing, not defensive: the ledger
+          // list keeps re-asserting a row until the server marks it terminal, so
+          // without a tombstone a just-settled deposit would be resurrected on
+          // the next pass and announced again.
+          if (known.has(movementId) || settledVaultDepositIds.has(movementId)) return false;
+          known.add(movementId);
+          return true;
+        });
+        return additions.length === 0 ? current : [...current, ...additions];
       });
-      return additions.length === 0 ? current : [...current, ...additions];
-    });
-  }, []);
+    },
+    [settledVaultDepositIds]
+  );
+
+  // Same pure-updater and tombstone rules as the deposit watches above.
+  const addVaultWithdrawalWatches = useCallback(
+    (incoming: readonly string[]) => {
+      setVaultWithdrawalWatches((current) => {
+        const known = new Set(current);
+        const additions = incoming.filter((movementId) => {
+          if (known.has(movementId) || settledVaultWithdrawalIds.has(movementId)) {
+            return false;
+          }
+          known.add(movementId);
+          return true;
+        });
+        return additions.length === 0 ? current : [...current, ...additions];
+      });
+    },
+    [settledVaultWithdrawalIds]
+  );
 
   const addWithdrawalWatches = useCallback((incoming: readonly EarnWithdrawalWatch[]) => {
     setWithdrawalWatches((current) => {
@@ -676,8 +929,67 @@ export function TreasurySolutionsWorkspace({
   }, []);
 
   const activeWallets = wallets ?? [];
+  // Every share mint the page knows about, from positions AND the catalogue:
+  // a wallet can hold receipt tokens for a strategy it has no recorded
+  // position in (deposited outside SDP), and those tiles are still not cash.
+  // A USD-stable mint can never be a share mint; a corrupt catalogue row
+  // claiming one must not hide real cash tiles the summary still counts.
+  //
+  // The known set stays best-effort in every state, because hiding a receipt
+  // tile only needs the mint to be known. `complete` is the stricter claim,
+  // and it needs three things:
+  //   - the catalogue landed at all (it is the only witness for a holding with
+  //     no position row),
+  //   - the read is not stale behind a failed revalidation, which would be
+  //     missing any strategy added since (the strategy table already renders
+  //     its error state over stale rows, so this matches that posture), and
+  //   - every row actually NAMED its share mint, since a row without one
+  //     contributes nothing and leaves a real vault unnameable.
+  const shareMints = {
+    known: new Set(
+      [
+        ...(positions ?? []).map((position) => position.shareMint),
+        ...(strategies ?? []).flatMap((strategy) => strategy.shareMint ?? []),
+      ].filter((mint) => !WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.isUsdStable)
+    ),
+    complete:
+      strategies !== undefined &&
+      !strategiesError &&
+      strategies.every((strategy) => strategy.shareMint !== undefined),
+  };
+  // Every figure on this page comes from here, so no two surfaces can compute
+  // the same thing differently.
+  const allocation = summarizeTreasuryAllocation({
+    positions: positionsError ? undefined : positions,
+    shareMints,
+    wallets: walletsError ? undefined : wallets,
+  });
   const programs = programsState?.kind === "ready" ? programsState.programs : [];
-  const depositsEnabled = isVaultDirectDepositEnabled(sdpEnvironment);
+  // Recovery seeds durable component state. Do not derive tracker mounts
+  // directly from the live list: the list can stop returning a movement just
+  // before its detail poll observes terminal state, which would unmount the
+  // tracker and skip `onSettled` balance refreshes and outcome messaging.
+  useEffect(() => {
+    addVaultDepositWatches(
+      (discoveredVaultDeposits ?? []).flatMap((deposit) =>
+        isEarnVaultDepositInFlight(deposit) ? [deposit.movementId] : []
+      )
+    );
+  }, [addVaultDepositWatches, discoveredVaultDeposits]);
+  useEffect(() => {
+    addVaultWithdrawalWatches(
+      (discoveredVaultWithdrawals ?? []).flatMap((withdrawal) =>
+        isEarnVaultWithdrawalInFlight(withdrawal) ? [withdrawal.movementId] : []
+      )
+    );
+  }, [addVaultWithdrawalWatches, discoveredVaultWithdrawals]);
+
+  const watchedVaultDepositIds = vaultDepositWatches.filter(
+    (movementId) => !settledVaultDepositIds.has(movementId)
+  );
+  const watchedVaultWithdrawalIds = vaultWithdrawalWatches.filter(
+    (movementId) => !settledVaultWithdrawalIds.has(movementId)
+  );
 
   return (
     <DashboardWorkspaceOverviewPanel>
@@ -696,84 +1008,53 @@ export function TreasurySolutionsWorkspace({
           </Badge>
         </div>
 
+        {/* Errors pass undefined so a stale SWR success never renders as a
+         * live figure: unavailable must read as unavailable, not as the last
+         * total that happened to load. */}
+        {/* The strategies read gates the skeleton too: it is the share-mint
+         * vocabulary, it pages sequentially so it usually lands last, and
+         * without it the summary can only report "unavailable". */}
+        <TreasuryAllocationCard
+          allocation={allocation}
+          isLoading={
+            !(walletsError || positionsError || strategiesError) &&
+            (walletsLoading || positionsLoading || strategiesLoading)
+          }
+        />
+
         <TreasuryWalletsCard
+          allocation={allocation}
           error={walletsError}
           isLoading={walletsLoading}
+          shareMints={shareMints}
           wallets={activeWallets}
         />
 
         <ActiveVaultPositionsCard
           error={positionsError}
           isLoading={positionsLoading}
-          positions={positions}
+          onWithdraw={setWithdrawPosition}
+          positions={positionsError ? undefined : positions}
+          unrecordedShareMints={allocation.unrecordedShareMints}
           wallets={activeWallets}
         />
 
-        <Card className="overflow-hidden">
-          <CardHeader>
-            <CardTitle>{t("DashboardMarkets.treasury.strategiesTitle")}</CardTitle>
-            <CardDescription>
-              {t("DashboardMarkets.treasury.strategiesDescription")}
-            </CardDescription>
-            <CardAction>
-              <Button
-                iconLeft={<RefreshCwIcon />}
-                onClick={() => {
-                  refreshWallets();
-                  refreshStrategies();
-                  refreshPositions();
-                  refreshPrograms();
-                }}
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                {t("DashboardMarkets.treasury.refresh")}
-              </Button>
-            </CardAction>
-          </CardHeader>
-          <CardContent className="px-0">
-            {strategiesLoading ? (
-              <div className="grid gap-3 px-6 py-5">
-                <SkeletonBlock className="h-14 rounded-xl" />
-                <SkeletonBlock className="h-14 rounded-xl" />
-                <SkeletonBlock className="h-14 rounded-xl" />
-              </div>
-            ) : strategiesError ? (
-              <ListEmptyState
-                description={t("DashboardMarkets.treasury.strategiesErrorDescription")}
-                icon={<InfoIcon aria-hidden="true" className="size-5" />}
-                message={t("DashboardMarkets.treasury.strategiesErrorTitle")}
-              />
-            ) : (strategies ?? []).length === 0 ? (
-              <ListEmptyState
-                description={t("DashboardMarkets.treasury.strategiesEmptyDescription")}
-                icon={<InfoIcon aria-hidden="true" className="size-5" />}
-                message={t("DashboardMarkets.treasury.strategiesEmptyTitle")}
-              />
-            ) : (
-              <StrategyTable
-                environment={sdpEnvironment}
-                onDeposit={setDepositStrategy}
-                positions={positions}
-                providerAccess={providerAccess}
-                strategies={strategies ?? []}
-              />
-            )}
-            <div className="flex items-start gap-2 border-t border-border-subtle px-6 py-4 text-xs leading-5 text-tertiary">
-              <InfoIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-              <p>
-                {t(
-                  providerAccess === null
-                    ? "DashboardMarkets.treasury.accessDisclosure"
-                    : depositsEnabled
-                      ? "DashboardMarkets.treasury.rateDisclosure"
-                      : "DashboardMarkets.treasury.productionDisclosure"
-                )}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        <TreasuryStrategiesCard
+          environment={sdpEnvironment}
+          error={strategiesError}
+          isLoading={strategiesLoading}
+          onDeposit={setDepositStrategy}
+          onRefresh={() => {
+            refreshWallets();
+            refreshStrategies();
+            refreshPositions();
+            refreshPrograms();
+          }}
+          positions={positionsError ? undefined : positions}
+          providerAccess={providerAccess}
+          strategies={strategies}
+          unrecordedShareMints={allocation.unrecordedShareMints}
+        />
 
         {programsLoading ? <SkeletonBlock className="h-48 rounded-xl" /> : null}
         {programsError || programsState?.kind === "unconfigured" ? (
@@ -816,6 +1097,20 @@ export function TreasurySolutionsWorkspace({
         />
       ) : null}
 
+      {withdrawPosition ? (
+        <EarnVaultWithdrawModal
+          environment={sdpEnvironment}
+          onClose={() => setWithdrawPosition(null)}
+          onWithdrawn={(withdrawal) => {
+            addVaultWithdrawalWatches([withdrawal.movementId]);
+            refreshPositions();
+            refreshWallets();
+          }}
+          position={withdrawPosition}
+          projectId={selectedProjectId}
+        />
+      ) : null}
+
       {programs.map((program) => (
         <EarnWithdrawalLedgerRecovery
           key={`withdrawal-ledger:${program.id}`}
@@ -824,14 +1119,29 @@ export function TreasurySolutionsWorkspace({
         />
       ))}
 
-      <EarnVaultDepositLedgerRecovery onRecover={addVaultDepositWatches} />
+      {watchedVaultWithdrawalIds.map((movementId) => (
+        <EarnVaultWithdrawalOutcomeTracker
+          key={`vault-withdrawal:${movementId}`}
+          movementId={movementId}
+          onSettled={() => {
+            setSettledVaultWithdrawalIds((current) => new Set(current).add(movementId));
+            // Only now did the exit change what the org holds: the shares are
+            // burned and the proceeds sit in the custody wallet.
+            refreshPositions();
+            refreshWallets();
+            setVaultWithdrawalWatches((current) =>
+              current.filter((candidate) => candidate !== movementId)
+            );
+          }}
+        />
+      ))}
 
-      {vaultDepositWatches.map((movementId) => (
+      {watchedVaultDepositIds.map((movementId) => (
         <EarnVaultDepositOutcomeTracker
           key={`vault-deposit:${movementId}`}
           movementId={movementId}
           onSettled={() => {
-            settledVaultDepositIds.current.add(movementId);
+            setSettledVaultDepositIds((current) => new Set(current).add(movementId));
             // Only NOW is the position real: the shares exist on chain and the
             // wallet balance reflects what left it.
             refreshPositions();

@@ -1,5 +1,5 @@
 import type { SolanaCluster } from "@sdp/types";
-import type { Address, Instruction } from "@solana/kit";
+import type { Address } from "@solana/kit";
 import { kaminoProgramAllowlist } from "./programs";
 import type { KaminoInstructionPlan } from "./types";
 
@@ -53,31 +53,42 @@ export class KaminoProgramMismatchError extends Error {
  * only the second one survives an SDK upgrade that reshuffles construction.
  */
 export function assertPlanTargetsCluster(plan: KaminoInstructionPlan): KaminoInstructionPlan {
-  const allowed = kaminoProgramAllowlist(plan.cluster);
-  const invariant = new Set<string>(CLUSTER_INVARIANT_PROGRAMS);
+  const permitted = permittedPlanPrograms(plan.cluster);
 
-  for (const batch of plan.instructions) {
-    for (const instruction of batch) {
-      const program = instruction.programAddress;
-      if (allowed.has(program) || invariant.has(program)) continue;
-      throw new KaminoProgramMismatchError(plan.cluster, program);
-    }
+  for (const instruction of plan.instructions) {
+    const program = instruction.programAddress;
+    if (permitted.has(program)) continue;
+    throw new KaminoProgramMismatchError(plan.cluster, program);
   }
   return plan;
 }
 
-/** Flatten a plan for callers that genuinely want one transaction's worth. */
+/**
+ * Every program a plan for `cluster` may legitimately contain: this cluster's
+ * Kamino programs plus the cluster-invariant ones.
+ *
+ * Shared with `EarnVaultDirectProvider.sponsoredPrograms` ON PURPOSE, so the
+ * set this package ENFORCES on its own output and the set it DECLARES to a
+ * paymaster are the same object rather than two lists that agree today. A
+ * sponsored transaction is rejected wholesale if it touches a program the
+ * paymaster does not allowlist, so a declaration that under-reported by one
+ * entry would fail only in production, on a real customer's first deposit.
+ * Deriving both from here makes that class of drift unrepresentable.
+ */
+export function permittedPlanPrograms(cluster: SolanaCluster): ReadonlySet<string> {
+  return new Set<string>([...kaminoProgramAllowlist(cluster), ...CLUSTER_INVARIANT_PROGRAMS]);
+}
+
+/** Count the instructions in the transaction plan. */
 export function planInstructionCount(plan: KaminoInstructionPlan): number {
-  return plan.instructions.reduce((total, batch) => total + batch.length, 0);
+  return plan.instructions.length;
 }
 
 /** Every distinct program a plan touches — useful for Kora allowlist assertions. */
 export function planProgramAddresses(plan: KaminoInstructionPlan): readonly Address[] {
   const seen = new Set<Address>();
-  for (const batch of plan.instructions) {
-    for (const instruction of batch as readonly Instruction[]) {
-      seen.add(instruction.programAddress);
-    }
+  for (const instruction of plan.instructions) {
+    seen.add(instruction.programAddress);
   }
   return [...seen];
 }

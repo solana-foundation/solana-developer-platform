@@ -1,8 +1,8 @@
 # @sdp/kamino — agent notes
 
-Kit-native deposit/withdraw **instruction building** for Kamino K-Vaults, plus
-the live position read. It builds unsigned plans and reads chain state; it never
-signs, never submits, never touches a database, and holds no credential —
+Kit-native deposit AND withdraw **instruction building** for Kamino K-Vaults,
+plus the live position read. It builds unsigned plans and reads chain state; it
+never signs, never submits, never touches a database, and holds no credential —
 Kamino's data surface is public. Signing and submission belong to the API, which
 owns custody and the Kora fee-payment path.
 
@@ -74,15 +74,56 @@ cycle *and* would drag a 13MB SDK into the hourly catalogue cron).
 
 ## `payer` is NOT the transaction fee payer
 
-klend-sdk's `payer?: TransactionSigner` is the **rent payer for created ATAs**,
-embedded in the instruction accounts as writable+signer. SDP's Kora path is
-different machinery: it sets the fee payer at compile time and signs post-compile
-via `signAsFeePayer(bytes)`. Naming a sponsor signer as `payer` would quietly bill
-it for share-ATA rent — a spend its `FeePayerPolicy` may refuse and which
-`sponsorship-budget.service.ts` does not account for. The field is `rentPayer`
-here for exactly that reason, and it defaults to the owner.
+klend-sdk's `payer?: TransactionSigner` is the **rent payer for created ATAs**
+(the 6th positional arg to `depositIxs`, 7th to `withdrawIxs`), embedded in the
+instruction accounts as writable+signer. SDP's Kora path is different machinery:
+it sets the fee payer at compile time and signs post-compile via
+`signAsFeePayer(bytes)`. The field is `rentPayer` here to keep the two apart, and
+it defaults to the owner.
 
-## Plans are transaction-sized BATCHES
+**The sponsor may be named here on devnet, and PRO-1736 does exactly that.** This
+section used to forbid it; the reversal is deliberate, so the reasoning is
+recorded rather than dropped. The objection was that a sponsor would be billed for
+rent its `FeePayerPolicy` might refuse and that `sponsorship-budget.service.ts`
+did not account for. Both were verified against the deployed configuration:
+
+- Kora gates fee-payer-funded ATA creation on one flag,
+  `fee_payer_policy.system.allow_create_account` (its
+  `validate_ata_create_instructions` returns early when true). devnet sets it
+  true; mainnet keeps it false and sdp-infra's `validate-policy.py` fails CI on
+  any `true` there.
+- The budget prices it, because that same flag is one of the authorities that
+  makes the per-transaction reservation `networkFee + max_allowed_lamports`
+  instead of the fee alone. devnet reserves ~9.9M lamports against ~2.04M of real
+  ATA rent, so it over-reserves.
+
+Rent is **recoverable, but only because this package makes it so.** klend's
+`withdrawIxs` bundle carries no cleanup instructions, so the share ATA was never
+closed and its 2,039,280 lamports stayed locked in a zero-share account on every
+exit, whoever had paid. `buildShareAccountCloseInstruction`
+(`./withdraw-instructions.ts`) closes it when the exit provably empties it and
+sends the rent to whoever actually funded it. Two rules that follow:
+
+- **Pass the recorded funder, never the current sponsor.** Rent is paid when the
+  account is created and the fee mode can flip before the exit, so `rentRefundTo`
+  must come from persisted state. Refunding today's sponsor for rent the customer
+  paid takes the customer's lamports. One exception, and `./sdk.ts` implements it:
+  when THIS exit creates the account (consolidation's idempotent create), its own
+  `rentPayer` funded it moments earlier in the same transaction and the recorded
+  value describes an older instance.
+- **The close condition is exact, not optimistic.** `CloseAccount` fails on a
+  non-zero balance and rides the same transaction as the redemptions, so guessing
+  wrong fails the customer's exit rather than merely stranding rent. It takes two
+  equalities: the redeemed quantity must match both what the ATA will hold and
+  the owner's total across every share account, because closing on an
+  emptied-but-not-exited position hands the next entry a stale funder.
+
+Still bounding the decision: `max_allowed_lamports` caps a sponsored transaction
+at 4 new ATAs on devnet, and a re-entry after a close pays rent again. Full
+rationale and the mainnet conditions live in
+`docs/decisions/0002-earn-provider-pluggability.md`.
+
+## Withdrawals are one complete transaction
 
 Every plan also carries required `assetIdentity` with the deposit-token mint and
 share mint read from the same live vault state used to build its instructions.
@@ -90,28 +131,20 @@ Catalogue metadata drives policy and ledger labels but is not builder truth; the
 API must compare both mints before signing so a stale or poisoned row cannot
 authorize one asset while the transaction moves another.
 
-`KaminoInstructionPlan.instructions` is `Instruction[][]`, one entry per
-transaction — not a flat list. A multi-reserve exit emits several withdraw
-instructions each carrying the vault's full reserve remaining-accounts list, and
-can exceed Solana's 1232-byte packet; Kamino publishes a per-vault lookup table
-(`SyncVaultLUTIxs`) precisely for this. Handing back a flat list would make the
-caller discover that at `compileTransaction`, far from the code that could fix it.
+`KaminoInstructionPlan.instructions` keeps the provider-neutral `Instruction[]`
+shape containing one complete ordered transaction instruction sequence.
+`KaminoVaultDirectClient` implements `buildVaultWithdrawal`, so
+`supportsVaultWithdraw` answers true.
 
-The unstake → withdraw → post sequence stays in ONE batch deliberately: it must
-land atomically, since unstaking without the withdraw leaves the position in a
-state nobody asked for. If that stops fitting, the fix is the lookup table, not
-splitting the batch.
-
-**`buildKaminoWithdrawPlan` does NOT yet honour this contract**, and that is why
-the WITHDRAW CAPABILITY IS WITHHELD. It flattens every instruction into one
-batch and returns no lookup table, while the pinned SDK documents that a
-multi-reserve exit "might have to be split in multiple transactions".
-`KaminoVaultDirectClient` therefore does not implement `buildVaultWithdrawal`,
-`supportsVaultWithdraw` answers false, and the builder is not re-exported from
-`index.ts` — its only callers are this package's smoke tests. Nothing is
-fund-trapped by that: the shares sit in the org's own custody wallet and
-Kamino's UI can redeem them. Implementing the method is the LAST step of the
-batching work, not the first (`client.test.ts` pins this).
+- The vault's published lookup table is loaded best-effort (`lookup-table.ts`,
+  via kit's `fetchAddressesForLookupTables`). When used, its address travels on
+  `lookupTables` so the API compiles the final message with compression.
+- The API appends the request memo, compiles and signs the final transaction,
+  then rejects signed bytes above Solana's 1232-byte limit.
+- **The total share quantity is decoded from the instruction bytes**
+  (`sharesAmount: u64` behind the `withdraw`/`withdraw_from_available` anchor
+  discriminators, pinned to their sha256 derivation by test). The decoded total
+  must equal the accepted request exactly or the plan is refused.
 
 ## Known gaps (deliberate, and owed to the caller)
 
@@ -125,9 +158,12 @@ batching work, not the first (`client.test.ts` pins this).
   the live exchange rate. Passing `"0"` would be the appearance of slippage
   protection without the substance, so the caller computes a floor or passes
   nothing. The API requires one in PRODUCTION for exactly that reason.
-- **`lookupTables` is always empty today.** The field exists so callers compile
-  against the right shape; populating it from Kamino's per-vault LUT is the fix
-  when a plan stops fitting.
+- **Withdrawals do not unstake farm-staked shares.** The withdraw builder
+  passes no farm state, matching the deposit builder (which never stakes), so
+  an SDP-managed position has nothing staked and nothing to unstake. Shares
+  staked OUTSIDE SDP must be unstaked outside SDP before they can exit through
+  it. The instruction planner still preserves unstake instructions for the day
+  farm support arrives.
 
 ## Amounts are checked against the MINT, not just parsed
 

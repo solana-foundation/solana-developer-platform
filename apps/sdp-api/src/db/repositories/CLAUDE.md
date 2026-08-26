@@ -27,12 +27,28 @@ Things that will bite:
   `shares_out` to the commitment states, so recording it could only succeed by
   erasing an observation SDP made. Do not add a transition without checking the
   constraint it would have to violate.
+- **`earn_positions.share_ata_rent_funder` is a PROJECTION, never assigned
+  directly** (migrations 0066 + 0067). Each vault movement records on its OWN row
+  whether it was observed to create the share account and who it charged
+  (`creates_share_account`, `share_ata_rent_funder`), and the position column is
+  recomputed by `projectShareAccountRentFunder`: the newest claim that has not
+  failed. Both directions claim (an exit consolidating auxiliary accounts can
+  create the ATA itself), a movement that lost its idempotency insert has no row
+  to contribute, and `advanceVaultMovement` re-projects on failure so a claim
+  cannot outlive a transaction that never landed. Do not write the position
+  column by hand: a direct write is exactly the unrepairable stale attribution
+  the projection exists to prevent. It is authoritative only while the share
+  account exists, which is the only window anything reads it.
 - **Every movement needs a holding, and a missing one must never fail a money
   write.** Resolve or open the holding before writing the movement. The custodial
   holding for a program is minted when its provider wallet is linked.
-- **Amounts carry a `denomination`** (`usd`, or the token mint); share counts live
-  only in share-named columns. No read may sum across rows without grouping by
-  denomination.
+- **Amounts carry a `denomination`** (`usd`, the token mint, or the SHARE mint
+  on a vault withdrawal, whose exact intent-time quantity is shares). No read
+  may sum across rows without grouping by denomination.
+- **A vault withdrawal is one signed movement.** The movement owns the requested
+  shares, actor, idempotency key, signature, signed bytes and blockhash window.
+  It is recorded before broadcast and reconciled through the same outbox path
+  as a vault deposit.
 - **Ids are heterogeneous by design.** History keeps the ids the projection
   preserved, so nothing may parse an id for its kind — read `execution_model`.
 

@@ -1,6 +1,17 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { createFeePaymentAdapter } from "@sdp/payments/fee-payment";
+import { createFeePaymentAdapter, type FeePaymentPort } from "@sdp/payments/fee-payment";
+import {
+  type Address,
+  type Blockhash,
+  compileTransaction,
+  createTransactionMessage,
+  getBase58Codec,
+  getTransactionEncoder,
+  pipe,
+  setTransactionMessageFeePayer,
+  setTransactionMessageLifetimeUsingBlockhash,
+} from "@solana/kit";
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -15,6 +26,22 @@ import type { Env } from "@/types/env";
 const projectMocks = vi.hoisted(() => ({
   getProject: vi.fn(),
 }));
+
+const FEE_PAYER = "11111111111111111111111111111111" as Address;
+const BLOCKHASH = getBase58Codec().decode(new Uint8Array(32).fill(7)) as Blockhash;
+
+function buildTransaction(): Uint8Array {
+  const message = pipe(
+    createTransactionMessage({ version: 0 }),
+    (current) => setTransactionMessageFeePayer(FEE_PAYER, current),
+    (current) =>
+      setTransactionMessageLifetimeUsingBlockhash(
+        { blockhash: BLOCKHASH, lastValidBlockHeight: 100n },
+        current
+      )
+  );
+  return new Uint8Array(getTransactionEncoder().encode(compileTransaction(message)));
+}
 
 vi.mock("@sdp/payments/fee-payment", () => ({
   createFeePaymentAdapter: vi.fn(() => ({ providerId: "kora" })),
@@ -70,6 +97,41 @@ describe("sponsorship identity boundary", () => {
     expect(createFeePaymentAdapter).toHaveBeenCalledWith(
       env,
       "sdp:v1:sandbox:org_1:project:project_1:user:user_1"
+    );
+  });
+
+  it("adapts self-hosted providers to the owned persist-before-marker lifecycle", async () => {
+    const signedTransaction = buildTransaction();
+    signedTransaction.fill(1, 1, 65);
+    const provider: FeePaymentPort = {
+      providerId: "kora",
+      getFeePayer: vi.fn().mockResolvedValue(FEE_PAYER),
+      signAsFeePayer: vi.fn().mockResolvedValue(signedTransaction),
+      signAndSend: vi.fn(),
+    };
+    vi.mocked(createFeePaymentAdapter).mockReturnValueOnce(provider);
+    const lifecycle = {
+      persistSigned: vi.fn().mockResolvedValue(undefined),
+      markStarted: vi.fn().mockResolvedValue(undefined),
+      hasStarted: vi.fn(),
+    };
+
+    const feePayment = createSponsorshipFeePayment({ SDP_DEPLOYMENT_MODE: "self_hosted" } as Env, {
+      environment: "sandbox",
+      organizationId: "org_1",
+      projectId: "project_1",
+      actor: { type: "user", id: "user_1" },
+    });
+    const submission = await feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle);
+
+    expect(submission.signedTransaction).toBe(signedTransaction);
+    expect(lifecycle.persistSigned).toHaveBeenCalledWith(submission);
+    expect(lifecycle.persistSigned.mock.invocationCallOrder[0]).toBeLessThan(
+      lifecycle.markStarted.mock.invocationCallOrder[0]
+    );
+    expect(lifecycle.hasStarted).not.toHaveBeenCalled();
+    await expect(submission.releaseDefinitelyUnbroadcast(new Error("preflight"))).resolves.toBe(
+      undefined
     );
   });
 

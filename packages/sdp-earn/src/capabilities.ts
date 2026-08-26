@@ -70,6 +70,12 @@ export function supportsWithdrawalApprovals(
 const VAULT_DIRECT_METHODS = [
   "buildVaultDeposit",
   "readVaultPositions",
+  // Required, not optional, and that is the point: a client that can build a
+  // deposit but cannot say which programs it touches cannot be sponsored
+  // safely, because the paymaster allowlist could not have been checked
+  // against it. Such a client answers false here and its route returns 501,
+  // which is loud, rather than silently executing unsponsored.
+  "sponsoredPrograms",
 ] as const satisfies readonly Exclude<keyof EarnVaultDirectProvider, keyof EarnVaultProvider>[];
 
 /**
@@ -96,12 +102,9 @@ const VAULT_WITHDRAW_METHODS = ["buildVaultWithdrawal"] as const satisfies reado
 /**
  * Capability discovery for the money-OUT half, asked SEPARATELY from money-in.
  *
- * `buildVaultDeposit` proves a provider can build one transaction; an exit may
- * legitimately need several, one per reserve the vault draws from, and getting
- * that batching right is the hard part. Keeping the question separate is what
- * stops "this provider supports vault deposits" from silently also asserting
- * "…and can build a correctly sized exit" — the exact conflation that let an
- * unsized single-batch withdrawal plan look shippable.
+ * `buildVaultDeposit` proves only that a provider can build a deposit. Keeping
+ * the exit capability separate stops "this provider supports vault deposits"
+ * from silently asserting that it can also build a valid withdrawal.
  *
  * A provider that answers false here has no SDP exit route. That is a statement
  * about SDP's plumbing, never about the customer's right to their money: the

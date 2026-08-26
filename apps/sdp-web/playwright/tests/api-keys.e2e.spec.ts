@@ -1,17 +1,27 @@
 import { expect, test } from "@playwright/test";
-import { getPlaywrightAdminSession } from "../support/auth-session";
-import { bootstrapLocalWalletFixtures } from "../support/local-dashboard-bootstrap";
+import {
+  bootstrapLocalWalletFixtures,
+  provisionWithAdminSession,
+  seedProjectCookie,
+} from "../support/local-dashboard-bootstrap";
 
 test.describe
   .serial("dashboard api keys e2e", () => {
+    let projectId = "";
+
     test.beforeAll(async ({ browser }) => {
-      const session = await getPlaywrightAdminSession(browser);
-      await bootstrapLocalWalletFixtures({
-        identity: session.identity,
-        bearerToken: session.getBearerToken,
-        walletCount: 1,
-      });
-      await session.page.close();
+      const fixtures = await provisionWithAdminSession(browser, (session) =>
+        bootstrapLocalWalletFixtures({
+          identity: session.identity,
+          bearerToken: session.getBearerToken,
+          walletCount: 1,
+        })
+      );
+      projectId = fixtures.projectId;
+    });
+
+    test.beforeEach(async ({ page }) => {
+      await seedProjectCookie(page, projectId);
     });
 
     test("user can create a selected-wallet API key and the secret is only shown once", async ({

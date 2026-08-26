@@ -82,6 +82,35 @@ async function seedMovement(lastValidBlockHeight = "100") {
   });
 }
 
+async function seedWithdrawal(lastValidBlockHeight = "100") {
+  const repository = createPostgresEarnMovementsRepository(getDb(env));
+  const deposit = await seedMovement();
+  await repository.advanceVaultMovement({
+    movementId: deposit.movement.id,
+    organizationId: ORG,
+    toStatus: "failed",
+    failureReason: "test setup",
+  });
+
+  return repository.createSignedVaultWithdrawalIntent({
+    organizationId: ORG,
+    projectId: PROJECT,
+    environment: "sandbox",
+    provider: "kamino",
+    positionId: deposit.position.id,
+    vaultAddress: deposit.position.vault_address as string,
+    custodyWalletId: WALLET,
+    shareMint: deposit.position.share_mint as string,
+    requestedShares: "1",
+    walletAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    signature: `sig_${crypto.randomUUID()}`,
+    signedTransaction: Buffer.from([4, 5, 6]).toString("base64"),
+    lastValidBlockHeight,
+    requestId: crypto.randomUUID(),
+    idempotencyFingerprint: crypto.randomUUID(),
+  });
+}
+
 /** The ledger row, which is where settlement now lives. */
 async function ledgerRow(movementId: string) {
   return createPostgresEarnMovementsRepository(getDb(env)).getMovementById({
@@ -91,6 +120,22 @@ async function ledgerRow(movementId: string) {
 }
 
 describe("reconcileEarnVaultMovements", () => {
+  it("reconciles withdrawals through the same movement queue", async () => {
+    const seeded = await seedWithdrawal();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+
+    await reconcileEarnVaultMovements(env);
+
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+      direction: "withdrawal",
+      status: "finalized",
+      amount_settled: "1",
+    });
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
   it("marks an observed successful signature confirmed", async () => {
     const seeded = await seedMovement();
     getSignatureStatuses.mockResolvedValue([

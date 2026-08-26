@@ -13,8 +13,8 @@ holdings table behind it. Migrations `0062`-`0065`; ADR 0002's 2026-08-19 addend
 holds the decisions.
 
 The tables it replaced (`earn_program_withdrawals`, `earn_vault_movements`,
-`earn_vault_positions`) take no reads and no writes, and a later migration drops
-them along with the `earn_projected_*` views that carried their history across.
+`earn_vault_positions`) are gone, dropped by `0068` along with the
+`earn_projected_*` views that carried their history across.
 **`earn_provider_wallets` is NOT one of them**: it models an ACCOUNT at a provider
 — the custodial twin of `custody_wallets` — and an account is not a holding. A
 custodial position is the link row between the two, minted when the program wallet
@@ -432,11 +432,33 @@ organization's own custody wallets.
     Only the insert winner broadcasts. A send error leaves that row `pending`
     and never `failed`, because a lost response does not prove the transaction
     did not land.
-  - Fee payer is the CUSTODY WALLET. Kora only sponsors allow-listed programs and
-    the kvault/klend ids are not on that list. The shared execution runtime can
-    add a sponsor signature without broadcasting, preserving record-before-send,
-    but this route deliberately selects `wallet-pays` until those programs are
-    eligible for sponsorship.
+  - **Who pays is configuration, not a literal** (PRO-1736). One
+    `resolveVaultSponsorship` call answers it for deposits and exits alike, and
+    the resolved value drives all three places that must agree: the compile-time
+    fee payer, the `rentPayer` inside the provider's instructions, and the fee
+    payer used to SIMULATE. Simulation matters as much as signing here, because
+    it enforces that the fee payer can pay: a zero-SOL wallet simulated as its
+    own fee payer dies with `AccountNotFound` and no logs, before signing.
+  - **Sponsorship is devnet-only, and the cluster gate is exit safety, not
+    caution.** One process serves both clusters and withdrawals are deliberately
+    NOT environment-gated, so a deployment-global flag would sponsor mainnet
+    exits the instant devnet deposits were enabled, against a mainnet Kora whose
+    `allow_create_account` is false and a disabled mainnet budget policy. That is
+    a 5xx on a customer's money-OUT path, the one failure ADR 0002 rules out.
+    `isEarnVaultSponsorshipEnabled` therefore takes the cluster.
+  - Sponsored signing stays sign-only, so record-before-broadcast survives
+    unchanged. Turning the flag off returns both routes to `wallet-pays` with no
+    code change.
+  - **The exit refunds the share-ATA rent to whoever actually paid it**, which
+    for an account that pre-dates the exit means `share_ata_rent_funder`
+    (migration 0066) and never the current fee mode. klend never closed that
+    account, so its rent used to stay locked in a zero-share account on every
+    exit; the exit now closes it when it provably empties it. Do not re-derive
+    the destination: sponsorship can be toggled between entering and exiting a
+    position, and refunding today's sponsor for rent the customer paid takes the
+    customer's lamports. The single exception is an exit that CREATES the account
+    itself while consolidating, where its own rent payer funded it seconds
+    earlier and the recorded value describes an older instance.
 - `GET /vault-deposits` — this workspace's recorded deposits, **DB only**,
   newest first, keyset-paged. The DISCOVERY tier: it is what lets a client
   re-derive which of its deposits are still in flight after losing local state,
@@ -550,19 +572,54 @@ recorded signature, confirms landed transactions, rebroadcasts the recorded
 signed bytes while the blockhash remains valid, and marks an expired, unlanded
 movement failed. Never rebuild a transaction during recovery.
 
-**Not built yet:** the withdraw counterpart. The dashboard now hydrates the
-durable vault-position record and shows it with a disabled exit action.
+### Vault withdrawals — the exit half (PRO-1702)
+
+- `POST /vault-withdrawals` — **build + simulate + sign ALL legs + record ALL
+  legs + broadcast in order**. Body `{positionId, shares}` and a required
+  `Idempotency-Key` header (body `requestId` rejected, same as deposits).
+  Registered `requirePermissions("earn:write", "wallets:read")` → `policyGate`
+  (extractor `extractEarnVaultWithdrawalPolicyCandidate`; family `program`,
+  type `earn_vault_withdrawal`; asset = the SHARE mint, the token actually
+  leaving the wallet) → handler. Registered as the second `earn` entry in
+  `value-moving-conformance.node.test.ts`.
+  - **The caller names its own POSITION, never a strategy and never a raw
+    vault address.** The position row carries the vault, the signing wallet
+    and both mints, so the exit has NO catalogue dependency — a delisted vault
+    stays exitable. `expectedAssetIdentity` is the position's stored mints.
+  - **Gates: 404 position scoping (org+environment+kind), wallet binding with
+    `earn:write`, wallet policy — and nothing else.** No surfacing, no
+    entitlement, no availability, no admission, no environment capability
+    (`isVaultDirectDepositEnabled` deliberately not consulted: an exit works in
+    production today, where deposits are closed). The only provider-shaped
+    answer is capability: `resolveVaultWithdrawClient` narrows on
+    `supportsVaultWithdraw` and a provider without it is a 501 — a statement
+    about SDP's plumbing, never permission. Pinned by the exit-safety describe
+    in `../earn.vault-withdrawals.test.ts`.
+  - **ONE TRANSACTION MODEL.** A vault exit is one `earn_movements` row,
+    denominated in the share mint, with one signature, signed transaction and
+    blockhash window. The complete Kamino instruction sequence is compiled with
+    its lookup table and idempotency memo; plans above Solana's packet limit are
+    rejected. The row is durable before broadcast and uses the same reconciler
+    as a deposit.
+  - The wire exposes the movement signature directly for explorer links.
+    `confirmed` remains non-terminal; only `finalized` and `failed` stop polling.
+- `GET /vault-withdrawals` / `GET /vault-withdrawals/:movementId` — the deposit
+  reads mirrored: DB only, NO provider gate (ADR 0002), same four 404 scoping
+  rules with `direction = 'withdrawal'`, same wallet-binding scope through
+  `listReadableEarnVaultWallets`. `?requestId=` serves the one logical
+  withdrawal, and `?settled=` uses the ledger terminal set
+  (`finalized|failed`), not the deposits' legacy one.
 
 One gap remains around approvals, and it is narrower than it was. An approved
-deposit is now fully followable — the executor writes the movement and
-`GET /vault-deposits` finds it — but a REJECTED approval never produces a
-movement, so nothing on this surface reports it. That outcome is observable via
-`GET /v1/wallets/approval-requests/:approvalRequestId`, whose `status` plus
-nested `operation.status` distinguish rejected/canceled from
-approved-and-executed. Wiring the dashboard to it is deliberately not done here. Until
-the withdrawal path lands, a vault position can be entered and not exited
-through SDP — which is why `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` fail-closes
-production rather than relying on anyone remembering ADR 0002.
+deposit or withdrawal is now fully followable — the executor writes the
+movement(s) and the list reads find them — but a REJECTED approval never
+produces a movement, so nothing on this surface reports it. That outcome is
+observable via `GET /v1/wallets/approval-requests/:approvalRequestId`, whose
+`status` plus nested `operation.status` distinguish rejected/canceled from
+approved-and-executed. Wiring the dashboard to it is deliberately not done
+here. `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` still fail-closes production
+DEPOSITS — the remaining blocker is PRO-1703 (vault positions on the Active
+tab), not the exit path.
 
 **Per-cluster RPC.** `resolveClusterRpcUrl` reads `SOLANA_DEVNET_RPC_URL` /
 `SOLANA_MAINNET_RPC_URL`, falling back to the canonical default only when its
@@ -592,6 +649,13 @@ kvault program id also resolves on devnet with no accounts under it.
   live read, so a de-registered or vault-only provider fails the list with a
   clean 503/501 instead of mid-fan-out — and once more up front for a
   `provider` filter so an empty list still 503s (see route map).
+- **The vault exit** (`POST /vault-withdrawals`): the strongest form of the
+  asymmetry — no provider gate of ANY kind, not even the credential check
+  (Kamino is keyless; a credentialed vault provider's own client throws
+  `PROVIDER_NOT_CONFIGURED` from inside its build). Capability (501) is the
+  only provider-shaped refusal, and wallet policy is the org's own custody
+  control, not a provider gate. It also ignores `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS`:
+  the environment fail-close guards the way IN only.
 - **The ledger list**: no provider gate at all (see route map).
 - Route tests in `../earn-program.test.ts` encode the asymmetry: the money-in
   half (create and re-target both refused when the organization is not entitled

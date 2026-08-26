@@ -17,8 +17,8 @@ import { conflict } from "@/lib/errors";
  *
  * This is the ONLY writer and the only reader. The mechanism-split tables it
  * replaced (`earn_program_withdrawals`, `earn_vault_movements`,
- * `earn_vault_positions`) no longer take writes, and a later migration drops
- * them along with the projection views that carried their history across.
+ * `earn_vault_positions`) are gone, dropped by migration 0068 along with the
+ * projection views that carried their history across.
  *
  * `earn_provider_wallets` is deliberately NOT among them: it models an ACCOUNT at
  * a provider — the custodial twin of `custody_wallets` — and an account is not a
@@ -99,6 +99,22 @@ export interface EarnPositionRow {
   updated_at: string;
   activated_at: string | null;
   closed_at: string | null;
+  /**
+   * Address owed this position's share-ATA rent back when the exit closes that
+   * account. Null means the custody wallet funded it and keeps it.
+   *
+   * A PROJECTION of `earn_movements` (migration 0067), not an independent fact:
+   * the funder named by the newest movement that claimed to create this share
+   * account and has not failed. That is what makes it self-repairing. A claim
+   * whose transaction never lands drops out when reconciliation fails the
+   * movement, falling back to the previous surviving claimant rather than
+   * outliving its own transaction, and a movement that lost its idempotency
+   * insert has no row to contribute at all.
+   *
+   * Authoritative WHENEVER THE SHARE ACCOUNT EXISTS, which is the only window
+   * anything reads it: a position with no share account has no shares to exit.
+   */
+  share_ata_rent_funder: string | null;
 }
 
 export interface EarnMovementRow {
@@ -143,6 +159,14 @@ export interface EarnMovementRow {
   initiated_by_key_id: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * Whether this movement was OBSERVED to create the owner's share token
+   * account, and so charged its rent. The position's funder projects from the
+   * newest non-failed movement carrying this (migration 0067).
+   */
+  creates_share_account: boolean;
+  /** Who this movement charged that rent to. Null means the custody wallet. */
+  share_ata_rent_funder: string | null;
 }
 
 /**
@@ -261,12 +285,19 @@ export interface EarnMovementsRepository {
     provider: string;
     providerReference: string;
   }): Promise<EarnMovementRow | null>;
-  /** One workspace's recorded vault DEPOSITS, newest first, as a keyset page. */
-  listVaultDeposits(params: {
+  /**
+   * One workspace's recorded vault movements of ONE direction, newest first, as
+   * a keyset page. The direction is a required parameter rather than two copies
+   * of this query: deposits and withdrawals share every scoping rule
+   * (organization, environment, exact project, wallet binding), and a shared
+   * builder is what keeps them from drifting apart.
+   */
+  listVaultMovements(params: {
     organizationId: string;
     environment: SdpEnvironment;
     projectId: string;
     custodyWalletIds: readonly string[];
+    direction: EarnMovementDirection;
     limit: number;
     before: EarnMovementCursor | null;
     settled?: boolean;
@@ -332,6 +363,19 @@ export interface EarnMovementsRepository {
     replayed: boolean;
   }>;
   /**
+   * Atomically record one signed vault withdrawal against an EXISTING holding.
+   * Never creates or activates a holding: an exit is only ever
+   * asked of a position the organization already holds, and the movement
+   * rows' composite FK onto that position is what refuses a claim whose vault
+   * or wallet does not match. A divergent idempotency loser throws so the
+   * transaction rolls back; an identical loser returns the winning movement.
+   */
+  createSignedVaultWithdrawalIntent(input: CreateSignedVaultWithdrawalIntentInput): Promise<{
+    position: EarnPositionRow;
+    movement: EarnMovementRow;
+    replayed: boolean;
+  }>;
+  /**
    * Guarded CAS on a vault movement. Legal source states come from the shared
    * transition matrix, so terminal regression is unrepresentable rather than
    * merely discouraged, and a lost race returns null rather than an error.
@@ -349,7 +393,7 @@ export interface EarnMovementsRepository {
   ): Promise<EarnMovementRow | null>;
 }
 
-export interface CreateSignedVaultDepositIntentInput {
+export interface CreateSignedVaultDepositIntentInput extends ShareAccountRentAttribution {
   organizationId: string;
   projectId: string;
   environment: SdpEnvironment;
@@ -379,6 +423,37 @@ export interface CreateSignedVaultDepositIntentInput {
   initiatedByKeyId?: string | null;
 }
 
+/**
+ * Share-ATA rent attribution, carried by BOTH money directions.
+ *
+ * Not deposit-only, and that asymmetry was a bug: an EXIT can create the share
+ * account too (consolidation emits an idempotent create, and klend interleaves
+ * its own ATA prerequisites into the withdraw bundle), so an exit that paid the
+ * rent has to say so or the position keeps naming whoever funded a previous
+ * instance of the account.
+ */
+export interface ShareAccountRentAttribution {
+  /**
+   * Whether these instructions CREATE the share token account, as OBSERVED by
+   * the builder against chain state rather than inferred from the instruction
+   * list. Creation is idempotent, so the instruction proves nothing on its own.
+   * True is what makes `shareAtaRentFunder` meaningful.
+   *
+   * Optional, and the default is the safe direction: omitted means "no rent was
+   * charged here", so the funder is left untouched and no refund can be
+   * misdirected. A caller that cannot observe creation gets the historical
+   * behaviour rather than a guess.
+   */
+  createsShareAccount?: boolean;
+  /**
+   * Who funds that creation: a sponsor address, or null when the custody wallet
+   * pays. Only consulted when `createsShareAccount` is true, and then it is
+   * written even if null, so a later entry under a different fee mode cannot
+   * inherit the previous one's funder.
+   */
+  shareAtaRentFunder?: string | null;
+}
+
 export interface AdvanceVaultMovementInput {
   movementId: string;
   organizationId: string;
@@ -387,6 +462,34 @@ export interface AdvanceVaultMovementInput {
   failureReason?: string | null;
   confirmedAt?: string | null;
   settledAt?: string | null;
+}
+
+export interface CreateSignedVaultWithdrawalIntentInput extends ShareAccountRentAttribution {
+  organizationId: string;
+  projectId: string;
+  environment: SdpEnvironment;
+  provider: string;
+  /** The EXISTING vault holding being exited; never created here. */
+  positionId: string;
+  /** Claim facts, FK-verified against the position row on insert. */
+  vaultAddress: string;
+  custodyWalletId: string;
+  /**
+   * The share mint: the exact quantity the transaction encodes is shares, and
+   * tokens received are decided by the chain.
+   */
+  shareMint: string;
+  /** Total caller intent in share units; stored on the withdrawal movement. */
+  requestedShares: string;
+  /** The custody wallet's public key: shares burn from it, tokens return to it. */
+  walletAddress: string;
+  signature: string;
+  signedTransaction: string;
+  lastValidBlockHeight: string;
+  requestId: string;
+  idempotencyFingerprint: string;
+  createdBy?: string | null;
+  initiatedByKeyId?: string | null;
 }
 
 export interface CreateCustodialMovementInput {
@@ -438,21 +541,22 @@ function allowedSourceStatuses(model: EarnExecutionModel, toStatus: string): rea
   return sources;
 }
 
-/**
- * The statuses a CLIENT of the legacy wire sees as final.
- *
- * `confirmed` is in it, and that is deliberate for as long as the legacy
- * vault-deposit DTO is served: that vocabulary has no `finalized`, so a client
- * reads chain commitment as the end of the story, and `?settled=` must keep
- * answering the question the client is actually asking. The ledger's own terminal
- * set (`EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct`) is narrower, and becomes
- * the filter when a caller reads the unified vocabulary directly.
- */
 /** Mirrors 0062's amount format checks, so app-layer refusals match the DB's. */
 const DECIMAL_STRING = /^\d+(?:\.\d+)?$/;
 const NON_ZERO_DIGIT = /[1-9]/;
 
-const WIRE_SETTLED_VAULT_STATUSES = ["confirmed", "finalized", "failed"] as const;
+/**
+ * Deposit and withdrawal routes expose different status vocabularies.
+ *
+ * The legacy deposit DTO ends at `confirmed`, while withdrawals expose the
+ * unified ledger where `confirmed` is optimistic and only `finalized` or
+ * `failed` is terminal. Keep this direction-aware or recovery can silently
+ * drop a confirmed withdrawal before finalization.
+ */
+const SETTLED_VAULT_STATUSES_BY_DIRECTION = {
+  deposit: ["confirmed", "finalized", "failed"],
+  withdrawal: ["finalized", "failed"],
+} as const satisfies Record<EarnMovementDirection, readonly EarnMovementStatus[]>;
 
 function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
   return {
@@ -490,6 +594,8 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
     initiated_by_key_id: row.initiated_by_key_id as string | null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
+    creates_share_account: row.creates_share_account === true,
+    share_ata_rent_funder: row.share_ata_rent_funder as string | null,
   };
 }
 
@@ -543,9 +649,11 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       return row ? mapMovementRow(row) : null;
     },
 
-    async listVaultDeposits(params) {
+    async listVaultMovements(params) {
       if (params.custodyWalletIds.length === 0) {
-        throw new Error("listVaultDeposits requires at least one project-scoped custody wallet id");
+        throw new Error(
+          "listVaultMovements requires at least one project-scoped custody wallet id"
+        );
       }
       const beforeClause = params.before ? "AND (created_at, id) < (?, ?)" : "";
       const beforeValues = params.before ? [params.before.createdAt, params.before.id] : [];
@@ -555,18 +663,21 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           : params.settled
             ? "AND status = ANY (?::text[])"
             : "AND NOT (status = ANY (?::text[]))";
-      const settledValues = params.settled === undefined ? [] : [[...WIRE_SETTLED_VAULT_STATUSES]];
+      const settledValues =
+        params.settled === undefined
+          ? []
+          : [[...SETTLED_VAULT_STATUSES_BY_DIRECTION[params.direction]]];
       const result = await db
         .prepare(
           // An EXACT project match. `project_id` is nullable only through
           // ON DELETE SET NULL, so a null means the project was deleted — and
-          // accepting it here would expose that project's deposits to every
+          // accepting it here would expose that project's movements to every
           // sibling project sharing an organization-level custody wallet.
           `SELECT * FROM earn_movements
              WHERE organization_id = ?
                AND environment = ?
                AND execution_model = 'vault_direct'
-               AND direction = 'deposit'
+               AND direction = ?
                AND custody_wallet_id = ANY (?::text[])
                AND project_id = ?
                ${settledClause}
@@ -577,6 +688,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .bind(
           params.organizationId,
           params.environment,
+          params.direction,
           params.custodyWalletIds,
           params.projectId,
           ...settledValues,
@@ -858,7 +970,61 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           };
         }
 
+        // AFTER the insert, because the projection reads the row the insert
+        // just wrote. A loser never reaches here, and would change nothing if it
+        // did: it has no movement row to project from.
+        await projectShareAccountRentFunder(transaction, claimed.id, input.organizationId);
+
         return { position: claimed, movement: inserted, replayed: false };
+      });
+    },
+
+    async createSignedVaultWithdrawalIntent(input) {
+      return db.transaction(async (executor) => {
+        const transaction = asTransactionalClient(executor);
+
+        const resolveReplay = async () => {
+          const prior = await findVaultMovementByRequest(
+            transaction,
+            input.organizationId,
+            input.requestId
+          );
+          if (!prior) return null;
+          assertMovementIsOwnReplay(prior, input);
+          if (prior.direction !== "withdrawal") {
+            throw conflict("Idempotency key already used with different request payload");
+          }
+          return {
+            position: await requireMovementPosition(transaction, prior),
+            movement: prior,
+            replayed: true,
+          };
+        };
+
+        const prior = await resolveReplay();
+        if (prior) return prior;
+
+        const movement = await insertVaultWithdrawalMovement(transaction, input);
+        if (!movement) {
+          // A concurrent identical request committed after the preflight. Its
+          // signed transaction, not ours, is the one that may be broadcast.
+          const winner = await resolveReplay();
+          if (!winner) throw new Error("Failed to resolve concurrent earn vault withdrawal");
+          return winner;
+        }
+
+        // An exit that creates the share account funds its rent too, so it
+        // joins the same projection. Same ordering reason as the deposit above.
+        await projectShareAccountRentFunder(
+          transaction,
+          movement.position_id,
+          input.organizationId
+        );
+        return {
+          position: await requireMovementPosition(transaction, movement),
+          movement,
+          replayed: false,
+        };
       });
     },
 
@@ -953,6 +1119,17 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
             )
             .bind(movement.position_id)
             .run();
+          // A failed movement charged no rent: an expired transaction never
+          // executed, and one that failed on chain had every effect reverted.
+          // Re-projecting drops its claim and hands the attribution back to the
+          // previous surviving claimant, so a close cannot refund a party whose
+          // transaction did not land. Without this the stale claim outlives the
+          // movement for as long as the position does.
+          await projectShareAccountRentFunder(
+            transaction,
+            movement.position_id,
+            input.organizationId
+          );
         } else if (candidate.direction === "deposit") {
           await transaction
             .prepare(
@@ -1141,6 +1318,64 @@ function assertVaultTransitionMetadata(input: AdvanceVaultMovementInput): void {
   }
 }
 
+/**
+ * One withdrawal movement, inserted before its signed bytes are broadcast.
+ *
+ * The two composite FKs onto `earn_positions` are the claim check: a movement whose
+ * (position, organization, environment, provider, vault, wallet) tuple does not
+ * exactly match the holding fails the INSERT rather than recording money
+ * against someone else's claim. Denomination is the SHARE MINT and
+ * `amount_requested` is the exact shares the transaction encodes.
+ */
+async function insertVaultWithdrawalMovement(
+  db: AppDb,
+  input: CreateSignedVaultWithdrawalIntentInput
+): Promise<EarnMovementRow | null> {
+  const row = await db
+    .prepare(
+      `INSERT INTO earn_movements (
+         id, organization_id, project_id, environment, provider,
+         execution_model, direction, position_id, status,
+         denomination, amount_requested,
+         custody_wallet_id, vault_address, source_address, destination_address,
+         signature, signed_transaction, last_valid_block_height,
+         request_id, idempotency_fingerprint,
+         created_by, initiated_by_key_id,
+         creates_share_account, share_ata_rent_funder
+       ) VALUES (?, ?, ?, ?, ?, 'vault_direct', 'withdrawal', ?, 'requested',
+                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (organization_id, request_id) WHERE execution_model = 'vault_direct'
+       DO NOTHING
+       RETURNING *`
+    )
+    .bind(
+      generateEarnMovementId(),
+      input.organizationId,
+      input.projectId,
+      input.environment,
+      input.provider,
+      input.positionId,
+      input.shareMint,
+      input.requestedShares,
+      input.custodyWalletId,
+      input.vaultAddress,
+      // Money leaves the INSTRUMENT and returns to the org's own wallet — the
+      // mirror image of a deposit's source/destination.
+      input.vaultAddress,
+      input.walletAddress,
+      input.signature,
+      input.signedTransaction,
+      input.lastValidBlockHeight,
+      input.requestId,
+      input.idempotencyFingerprint,
+      input.createdBy ?? null,
+      input.initiatedByKeyId ?? null,
+      ...shareAccountClaimBindings(input)
+    )
+    .first<Record<string, unknown>>();
+  return row ? mapMovementRow(row) : null;
+}
+
 async function findVaultMovementByRequest(
   db: AppDb,
   organizationId: string,
@@ -1180,6 +1415,78 @@ async function requireMovementPosition(
  * SQL. A mint-identity mismatch returns nothing and answers 409: the caller named a
  * holding whose asset identity is not the one being deposited.
  */
+/**
+ * The two claim columns every vault movement insert binds, in column order.
+ *
+ * A movement that did not create the share account records no funder, which the
+ * 0067 CHECK also enforces: a refund destination for rent that was never charged
+ * is not a weaker claim, it is a false one.
+ */
+function shareAccountClaimBindings(input: ShareAccountRentAttribution): [boolean, string | null] {
+  const creates = input.createsShareAccount === true;
+  return [creates, creates ? (input.shareAtaRentFunder ?? null) : null];
+}
+
+/**
+ * Recompute `earn_positions.share_ata_rent_funder` from the movements that
+ * claimed to create the share account (migration 0067).
+ *
+ * DERIVED, not remembered, and that is the whole design. The claim is written on
+ * the movement inside the pre-broadcast intent transaction, so it is a statement
+ * about a transaction that has not landed yet. Three failures fall out of
+ * projecting instead of assigning:
+ *
+ *   * a movement that never lands is FAILED by reconciliation and drops out
+ *     here, handing the attribution back to the previous surviving claimant
+ *     instead of naming a party that paid nothing for as long as the position
+ *     lives;
+ *   * a movement that lost its idempotency insert has no row, so it cannot
+ *     contribute at all, whatever fee mode it had resolved;
+ *   * a rolled-back intent takes its claim with it.
+ *
+ * Newest claimant wins, matching "the account is created at most once and the
+ * last creation is the live one". Callers hold the position row lock already:
+ * both intent creators take it through their claim upsert or their own
+ * transaction, and `advanceVaultMovement` takes it explicitly.
+ *
+ * ── The confirmed-fork tail, and why excluding only `failed` is enough ─────
+ * A claimant that reached `confirmed` and was then dropped by a fork can never
+ * be failed (the transition matrix forbids `confirmed -> failed` on purpose;
+ * see @sdp/types EARN_MOVEMENT_TRANSITIONS), so its claim stays selected here.
+ * That inherits the ledger's own accepted open question rather than adding a
+ * new reachable loss: the dropped create never landed, so the account is still
+ * missing, and an exit only reads this projection when the account EXISTS at
+ * its build (an exit that creates the account refunds its own rent payer and
+ * ignores the projection). Whoever re-created it was either a later SDP
+ * movement, whose newer claim supersedes the stale one, or an external actor,
+ * which is the already-documented external-create residual, reachable with or
+ * without any fork. Confirming the funder from the LANDED transaction at
+ * settlement closes both and is deliberately not attempted here.
+ */
+async function projectShareAccountRentFunder(
+  db: AppDb,
+  positionId: string,
+  organizationId: string
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE earn_positions position
+          SET share_ata_rent_funder = (
+                SELECT movement.share_ata_rent_funder
+                  FROM earn_movements movement
+                 WHERE movement.position_id = position.id
+                   AND movement.creates_share_account
+                   AND movement.status <> 'failed'
+                 ORDER BY movement.created_at DESC, movement.id DESC
+                 LIMIT 1
+              ),
+              updated_at = sdp_iso_now()
+        WHERE position.id = ? AND position.organization_id = ?`
+    )
+    .bind(positionId, organizationId)
+    .run();
+}
+
 async function claimVaultPosition(
   db: AppDb,
   input: CreateSignedVaultDepositIntentInput
@@ -1260,9 +1567,10 @@ async function insertVaultMovement(
          denomination, amount_requested, min_shares_out,
          custody_wallet_id, vault_address, source_address, destination_address,
          signature, signed_transaction, last_valid_block_height,
-         request_id, idempotency_fingerprint, created_by, initiated_by_key_id
+         request_id, idempotency_fingerprint, created_by, initiated_by_key_id,
+         creates_share_account, share_ata_rent_funder
        ) VALUES (?, ?, ?, ?, ?, 'vault_direct', 'deposit', ?, 'requested',
-                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (organization_id, request_id) WHERE execution_model = 'vault_direct'
        DO NOTHING
        RETURNING *`
@@ -1289,7 +1597,8 @@ async function insertVaultMovement(
       input.requestId,
       input.idempotencyFingerprint,
       input.createdBy ?? null,
-      input.initiatedByKeyId ?? null
+      input.initiatedByKeyId ?? null,
+      ...shareAccountClaimBindings(input)
     )
     .first<Record<string, unknown>>();
   return row ? mapMovementRow(row) : null;

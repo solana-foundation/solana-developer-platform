@@ -1,11 +1,11 @@
 ---
-title: Payments
+title: Overview
 description: Build payments on Solana with SDP — concepts, send, accept, and ramps.
 ---
 
 SDP provides a Solana-native payments stack: stablecoin transfers, fiat on-ramps and off-ramps, and reconciliation primitives. This section mirrors the structure of the [public Solana payments documentation](https://solana.com/docs/payments) and maps each workflow to the SDP APIs you call to ship it.
 
-If you have not yet provisioned a custody wallet or token, start with [Set Up Wallets](/docs/guides/setup-wallets) and [Tokenize an Asset](/docs/guides/tokenize-an-asset).
+If you have not yet provisioned a custody wallet or token, start with [Set Up Wallets](/docs/guides/setup-wallets) and [Tokenize an Asset](/docs/tokens/tokenize-an-asset).
 
 ## What's in this section
 
@@ -19,8 +19,8 @@ If you have not yet provisioned a custody wallet or token, start with [Set Up Wa
   - [Verifying a payment](/docs/payments/accept-verification) — transfer-status semantics and finality.
   - [Indexing and reconciliation](/docs/payments/accept-indexing) — listing inbound transfers for your ledger.
 - **Ramps** — fiat on-ramps and off-ramps.
-  - [Ramps overview](/docs/payments/ramps) — onramp and offramp request shape, KYC handoff, status states.
-  - [Ramp providers](/docs/payments/ramps-providers) — MoonPay, Lightspark, and BVNK configuration.
+  - [Ramps overview](/docs/payments/ramps) — corridor discovery, estimates, and the Ramp Quote request shape.
+  - [Ramp providers](/docs/payments/ramps-providers) — capability matrix and configuration for all seven ramp providers.
 
 Wallet-wide controls and balances are documented in [Wallet operations](/docs/wallet-operations).
 
@@ -31,4 +31,3 @@ Every page in this section links to specific endpoints in the auto-generated [Pa
 ## Related
 
 - [End-to-end payment flow](/docs/tutorials/end-to-end-payment-flow) — high-level tutorial covering quote through settlement.
-- [Prepare vs Execute](/docs/guides/prepare-vs-execute) — SDP's two signing modes (used throughout payments).

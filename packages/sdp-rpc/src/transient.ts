@@ -62,15 +62,21 @@ export function isUnauthorizedRpcError(error: unknown): boolean {
 
 const TRANSIENT_RPC_RETRY_DELAYS_MS = [250, 750, 1500];
 
+const TRANSIENT_RPC_RETRY_BUDGET_MS = 45_000;
+
 /**
  * Run an RPC operation, retrying transient failures (as classified by
- * `isTransientRpcError`) on a short backoff schedule. Persistent errors and
- * errors that survive the whole schedule are rethrown.
+ * `isTransientRpcError`) on a short backoff schedule, bounded by a total
+ * elapsed-time budget. Persistent errors, errors that survive the whole
+ * schedule, and errors past the budget are rethrown.
  */
 export async function withTransientRpcRetry<T>(
   operation: () => Promise<T>,
-  delaysMs: readonly number[] = TRANSIENT_RPC_RETRY_DELAYS_MS
+  delaysMs: readonly number[] = TRANSIENT_RPC_RETRY_DELAYS_MS,
+  options: { maxElapsedMs?: number } = {}
 ): Promise<T> {
+  const maxElapsedMs = options.maxElapsedMs ?? TRANSIENT_RPC_RETRY_BUDGET_MS;
+  const startedAt = Date.now();
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= delaysMs.length; attempt += 1) {
@@ -79,7 +85,11 @@ export async function withTransientRpcRetry<T>(
     } catch (error) {
       lastError = error;
 
-      if (attempt === delaysMs.length || !isTransientRpcError(error)) {
+      if (
+        attempt === delaysMs.length ||
+        !isTransientRpcError(error) ||
+        Date.now() - startedAt >= maxElapsedMs
+      ) {
         throw error;
       }
 
