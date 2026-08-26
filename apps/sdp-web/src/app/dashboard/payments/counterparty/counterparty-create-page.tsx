@@ -22,11 +22,6 @@ const stepMeta: Record<StepId, { label: MessageKey; title: MessageKey; descripti
       title: "DashboardPayments.counterparty.personalDetails",
       description: "DashboardPayments.counterparty.personalDetailsDescription",
     },
-    address: {
-      label: "DashboardPayments.counterparty.address",
-      title: "DashboardPayments.counterparty.location",
-      description: "DashboardPayments.counterparty.locationDescription",
-    },
     review: {
       label: "DashboardPayments.counterparty.review",
       title: "DashboardPayments.counterparty.reviewCreate",

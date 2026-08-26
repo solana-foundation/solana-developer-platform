@@ -1,10 +1,12 @@
 "use client";
 
-import type {
-  Counterparty,
-  PaymentRampQuote,
-  PaymentsDashboardWallet,
-  RampProviderId,
+import {
+  type Counterparty,
+  type CountryCode,
+  isCountryCode,
+  type PaymentRampQuote,
+  type PaymentsDashboardWallet,
+  type RampProviderId,
 } from "@sdp/types";
 import type { CollectedFieldData, RampDirection } from "@sdp/types/ramp-requirements";
 import { useRouter } from "next/navigation";
@@ -56,6 +58,7 @@ export interface RampQuotePayloadArgs {
   cryptoToken: string;
   collectedData: CollectedFieldData;
   rampsMemo: Record<string, string>;
+  country: CountryCode;
 }
 
 export interface RampWizardConfig<TId extends string = string> {
@@ -158,16 +161,18 @@ export function useRampWizard<TId extends string>(
     walletId: "",
     amount: "",
     provider: null,
+    country: "",
     counterpartyId: initialCounterpartyId,
   });
 
   const requirementsConfig = config.requirements;
   const requirements = useCounterpartyRequirements(
-    requirementsConfig
+    requirementsConfig && fields.country !== ""
       ? {
           counterpartyId: fields.counterpartyId,
           provider: fields.provider,
           direction: requirementsConfig.direction,
+          country: fields.country,
           cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
           fiatCurrency: selectedRampPair.fiatCurrency,
           destinationWallet: fields.walletId,
@@ -252,7 +257,11 @@ export function useRampWizard<TId extends string>(
   const isLastStep = stepIndex === steps.length - 1;
 
   const createQuoteAndAdvance = async () => {
-    if (!config.selectionSchema.safeParse(fields).success || !fields.provider) {
+    if (
+      !config.selectionSchema.safeParse(fields).success ||
+      !fields.provider ||
+      fields.country === ""
+    ) {
       return;
     }
 
@@ -271,6 +280,7 @@ export function useRampWizard<TId extends string>(
           cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
           collectedData: requirements.collectedData,
           rampsMemo: memoRowsToRecord(memoRows),
+          country: fields.country,
         }),
         t
       );
@@ -300,7 +310,11 @@ export function useRampWizard<TId extends string>(
   };
 
   const refreshQuote = async () => {
-    if (!config.selectionSchema.safeParse(fields).success || !fields.provider) {
+    if (
+      !config.selectionSchema.safeParse(fields).success ||
+      !fields.provider ||
+      fields.country === ""
+    ) {
       return;
     }
     try {
@@ -313,6 +327,7 @@ export function useRampWizard<TId extends string>(
           cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
           collectedData: requirements.collectedData,
           rampsMemo: memoRowsToRecord(memoRows),
+          country: fields.country,
         }),
         t
       );
@@ -334,7 +349,11 @@ export function useRampWizard<TId extends string>(
   );
 
   const advanceRequirementsAndProceed = async () => {
-    if (!config.selectionSchema.safeParse(fields).success || !fields.provider) {
+    if (
+      !config.selectionSchema.safeParse(fields).success ||
+      !fields.provider ||
+      fields.country === ""
+    ) {
       return;
     }
     setHostedQuoteLoading(true);
@@ -343,6 +362,7 @@ export function useRampWizard<TId extends string>(
     });
     try {
       const result = await requirements.submitRequirements({
+        country: fields.country,
         cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
         destinationWallet: fields.walletId,
         fiatCurrency: selectedRampPair.fiatCurrency,
@@ -452,6 +472,18 @@ export function useRampWizard<TId extends string>(
     }
   };
 
+  /**
+   * @param country - The selected uppercase ISO alpha-2 country code.
+   * @returns Nothing.
+   */
+  const handleCountryChange = (country: string): void => {
+    if (!isCountryCode(country)) {
+      throw new Error(`Invalid ramp country code: ${country}`);
+    }
+    setField("country", country);
+    setField("provider", null);
+  };
+
   const handleCounterpartyCreated = (created: Counterparty) => {
     setField("counterpartyId", created.id);
     void mutateCounterparties(
@@ -496,6 +528,7 @@ export function useRampWizard<TId extends string>(
     handleSecondary,
     finish,
     handlePairChange,
+    handleCountryChange,
     handleCounterpartyCreated,
   };
 }

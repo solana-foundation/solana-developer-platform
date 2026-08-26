@@ -16,20 +16,6 @@ const BASE_IDENTITY = {
   firstName: "Ada",
   lastName: "Lovelace",
   dateOfBirth: "1990-01-15",
-  phone: "+14155551234",
-  address: {
-    line1: "1 Market St",
-    city: "San Francisco",
-    countryCode: "US",
-  },
-} as const;
-
-const BASE_BUSINESS_IDENTITY = {
-  address: {
-    line1: "1 Market St",
-    city: "San Francisco",
-    countryCode: "US",
-  },
 } as const;
 
 describe("Counterparties Routes", () => {
@@ -145,7 +131,6 @@ describe("Counterparties Routes", () => {
           entityType: "business",
           displayName: "Acme Inc",
           email: "acme@example.com",
-          identity: BASE_BUSINESS_IDENTITY,
           ...body,
         }),
       },
@@ -219,6 +204,19 @@ describe("Counterparties Routes", () => {
       expect(stored?.pii_encrypted).toMatch(/^pii-local-v1\./);
       expect(stored?.pii_encrypted).not.toContain("alice@example.com");
       expect(stored?.provider_data_encrypted).toMatch(/^pii-local-v1\./);
+    });
+
+    it("creates a business counterparty without an identity", async () => {
+      const res = await createBusinessCounterparty({ externalId: "business_001" });
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.data.counterparty).toMatchObject({
+        entityType: "business",
+        displayName: "Acme Inc",
+        externalId: "business_001",
+      });
+      expect(body.data.counterparty).not.toHaveProperty("identity");
     });
 
     it("returns 409 on duplicate externalId", async () => {
@@ -385,7 +383,7 @@ describe("Counterparties Routes", () => {
       const cp = (await created.json()).data.counterparty;
 
       const res = await app.request(
-        `/v1/counterparties/${cp.id}/requirements?provider=moonpay&direction=onramp&cryptoToken=USDC&fiatCurrency=USD`,
+        `/v1/counterparties/${cp.id}/requirements?provider=moonpay&direction=onramp&country=US&cryptoToken=USDC&fiatCurrency=USD`,
         { headers: { Authorization: authHeader } },
         env
       );
@@ -403,6 +401,23 @@ describe("Counterparties Routes", () => {
         ])
       );
     });
+
+    it("returns 400 when country is missing", async () => {
+      const created = await createCounterparty();
+      const cp = (await created.json()).data.counterparty;
+
+      const res = await app.request(
+        `/v1/counterparties/${cp.id}/requirements?provider=moonpay&direction=onramp&cryptoToken=USDC&fiatCurrency=USD&destinationWallet=wallet_1`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.details.errors).toEqual(
+        expect.arrayContaining([expect.objectContaining({ path: ["country"] })])
+      );
+    });
   });
 
   describe("POST /v1/counterparties/:counterpartyId/requirements", () => {
@@ -412,6 +427,8 @@ describe("Counterparties Routes", () => {
       env.BVNK_SANDBOX_WALLET_ID = "bvnk_wallet_id";
       env.BVNK_SANDBOX_HAWK_AUTH_ID = "bvnk_hawk_auth_id";
       env.BVNK_SANDBOX_HAWK_SECRET_KEY = "bvnk_hawk_secret_key";
+      env.COINBASE_CDP_API_KEY_ID = "coinbase_key_id";
+      env.COINBASE_CDP_API_KEY_SECRET = "coinbase_key_secret";
     });
 
     afterEach(() => {
@@ -421,6 +438,8 @@ describe("Counterparties Routes", () => {
       env.BVNK_SANDBOX_WALLET_ID = undefined;
       env.BVNK_SANDBOX_HAWK_AUTH_ID = undefined;
       env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
+      env.COINBASE_CDP_API_KEY_ID = undefined;
+      env.COINBASE_CDP_API_KEY_SECRET = undefined;
     });
 
     it("persists the Lightspark customer pointer after advancing requirements", async () => {
@@ -436,7 +455,7 @@ describe("Counterparties Routes", () => {
         {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: authHeader },
-          body: JSON.stringify({ provider: "lightspark", direction: "onramp" }),
+          body: JSON.stringify({ provider: "lightspark", direction: "onramp", country: "US" }),
         },
         env
       );
@@ -473,11 +492,13 @@ describe("Counterparties Routes", () => {
         agreements: [],
       });
       vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "signAgreement").mockResolvedValue(undefined);
-      vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createBvnkCustomer").mockResolvedValue({
-        reference: "bvnk_customer_requirements_1",
-        status: "PENDING",
-        verificationStatus: "pending",
-      });
+      const createCustomerSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createBvnkCustomer")
+        .mockResolvedValue({
+          reference: "bvnk_customer_requirements_1",
+          status: "PENDING",
+          verificationStatus: "pending",
+        });
       vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getBvnkCustomer").mockResolvedValue({
         reference: "bvnk_customer_requirements_1",
         status: "PENDING",
@@ -492,10 +513,15 @@ describe("Counterparties Routes", () => {
           body: JSON.stringify({
             provider: "bvnk",
             direction: "onramp",
+            country: "US",
             cryptoToken: "USDC_SOLANA",
             destinationWallet: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
             fiatCurrency: "USD",
             collectedData: {
+              "address.line1": "1 Market St",
+              "address.city": "San Francisco",
+              "address.postalCode": "94105",
+              "address.subdivisionCode": "CA",
               "taxIdentification.number": "123-45-6789",
               "taxIdentification.taxResidenceCountryCode": "US",
               nationality: "US",
@@ -507,7 +533,6 @@ describe("Counterparties Routes", () => {
               "cdd.expectedMonthlyVolume.amount": "1000",
               "cdd.estimatedYearlyIncome": "INCOME_100K_TO_250K",
               "cdd.employmentIndustrySector": "INFORMATION",
-              "address.stateCode": "CA",
             },
           }),
         },
@@ -520,6 +545,18 @@ describe("Counterparties Routes", () => {
         direction: "onramp",
         status: "customer_verifying",
       });
+      expect(createCustomerSpy).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          individual: expect.objectContaining({
+            address: expect.objectContaining({
+              addressLine1: "1 Market St",
+              countryCode: "US",
+              stateCode: "CA",
+            }),
+          }),
+        })
+      );
 
       const stored = await createPostgresCounterpartiesRepository(
         getDb(env),
@@ -541,6 +578,45 @@ describe("Counterparties Routes", () => {
           },
         },
       });
+    });
+
+    it("accepts Coinbase collectedData phone without persisting it", async () => {
+      const created = await createCounterparty({ externalId: "requirements_coinbase" });
+      const counterparty = (await created.json()).data.counterparty;
+
+      const res = await app.request(
+        `/v1/counterparties/${counterparty.id}/requirements`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({
+            provider: "coinbase",
+            direction: "onramp",
+            country: "US",
+            collectedData: { phone: "+14155551234" },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).data).toEqual({
+        provider: "coinbase",
+        direction: "onramp",
+        status: "ready",
+      });
+      const stored = await createPostgresCounterpartiesRepository(
+        getDb(env),
+        env.counterpartyPiiCipher
+      ).getCounterpartyById({
+        counterpartyId: counterparty.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      });
+      if (stored?.entity_type !== "individual") {
+        throw new Error("Expected an individual Coinbase counterparty");
+      }
+      expect(stored.identity).toEqual(BASE_IDENTITY);
     });
   });
 
@@ -700,7 +776,7 @@ describe("Counterparties Routes", () => {
       expect(res.status).toBe(400);
     });
 
-    it("returns 400 when changing entityType without a matching identity", async () => {
+    it("changes an individual counterparty to business without an identity", async () => {
       const created = await createCounterparty({ externalId: "patch_entity_type_only" });
       const cp = (await created.json()).data.counterparty;
 
@@ -713,14 +789,13 @@ describe("Counterparties Routes", () => {
         },
         env
       );
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.error.message).toBe(
-        "Changing entityType requires a matching identity in the same request."
-      );
+      expect(body.data.counterparty.entityType).toBe("business");
+      expect(body.data.counterparty).not.toHaveProperty("identity");
     });
 
-    it("updates entityType and identity together", async () => {
+    it("rejects an identity when changing entityType to business", async () => {
       const created = await createCounterparty({ externalId: "patch_entity_type_with_identity" });
       const cp = (await created.json()).data.counterparty;
 
@@ -729,14 +804,13 @@ describe("Counterparties Routes", () => {
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json", Authorization: authHeader },
-          body: JSON.stringify({ entityType: "business", identity: BASE_BUSINESS_IDENTITY }),
+          body: JSON.stringify({ entityType: "business", identity: BASE_IDENTITY }),
         },
         env
       );
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(400);
       const body = await res.json();
-      expect(body.data.counterparty.entityType).toBe("business");
-      expect(body.data.counterparty.identity).toEqual(BASE_BUSINESS_IDENTITY);
+      expect(body.error.message).toBe("Business counterparties cannot have an identity payload.");
     });
 
     it("returns 400 when identity does not match the counterparty's entityType", async () => {
@@ -754,7 +828,7 @@ describe("Counterparties Routes", () => {
       );
       expect(res.status).toBe(400);
       const body = await res.json();
-      expect(body.error.message).toBe("identity does not match the counterparty's entityType.");
+      expect(body.error.message).toBe("Business counterparties cannot have an identity payload.");
     });
   });
 

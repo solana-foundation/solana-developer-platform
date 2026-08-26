@@ -1,12 +1,13 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import { readMuralOrganization } from "@sdp/payments/ramps/providers/mural/provider-data";
+import { parseCollectedFields } from "@sdp/payments/ramps/requirements";
 import {
   COUNTERPARTY_ENTITY_TYPES,
   COUNTRIES,
   type Counterparty,
   type CounterpartyEntityType,
   type CounterpartyFieldOptionsResponse,
-  type CounterpartyIdentity,
+  type CounterpartyIndividualIdentity,
   type CounterpartyResponse,
   type ListCounterpartiesResponse,
   type ListProjectCounterpartyAccountsResponse,
@@ -41,7 +42,6 @@ import {
   getCounterpartyAccountsRepository,
 } from "./context";
 import {
-  counterpartyBusinessIdentitySchema,
   counterpartyIdentitySchema,
   counterpartyIdParamsSchema,
   counterpartyRequirementsQuerySchema,
@@ -66,7 +66,7 @@ function mapToCounterparty(row: CounterpartyRow): Counterparty {
   };
   return row.entity_type === "individual"
     ? { ...base, entityType: "individual", identity: row.identity }
-    : { ...base, entityType: "business", identity: row.identity };
+    : { ...base, entityType: "business" };
 }
 
 export const getCounterpartyFieldOptions = async (c: AppContext) => {
@@ -209,7 +209,14 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
   if (query.data.provider === "mural" && readMuralOrganization(counterparty.provider_data).id) {
     return success(
       c,
-      await resolveMuralRequirements(c, counterparty, projectId, query.data.direction)
+      await resolveMuralRequirements(
+        c,
+        counterparty,
+        projectId,
+        query.data.direction,
+        query.data.country,
+        undefined
+      )
     );
   }
 
@@ -224,6 +231,7 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
       mapToCounterparty(counterparty),
       {
         direction: query.data.direction,
+        country: query.data.country,
         providerData: counterparty.provider_data,
         cryptoToken: query.data.cryptoToken,
         fiatCurrency: query.data.fiatCurrency,
@@ -237,6 +245,7 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     mapToCounterparty(counterparty),
     {
       direction: query.data.direction,
+      country: query.data.country,
       providerData: counterparty.provider_data,
       cryptoToken: query.data.cryptoToken,
       fiatCurrency: query.data.fiatCurrency,
@@ -282,11 +291,14 @@ export const submitCounterpartyRequirements = async (
       scope.auth
     );
   }
+  const submittedCollectedData = "collectedData" in input ? input.collectedData : undefined;
   const requirements = RAMP_PROVIDER_CLIENTS[input.provider].validateCounterparty(
     mapToCounterparty(counterparty),
     {
       direction: input.direction,
+      country: input.country,
       providerData: counterparty.provider_data,
+      collectedData: submittedCollectedData,
       ...("cryptoToken" in input ? { cryptoToken: input.cryptoToken } : {}),
       ...("fiatCurrency" in input ? { fiatCurrency: input.fiatCurrency } : {}),
       ...(destinationWalletAddress ? { destinationWalletAddress } : {}),
@@ -298,13 +310,22 @@ export const submitCounterpartyRequirements = async (
   }
 
   if (requirements.status === "collect") {
-    const collectedData = "collectedData" in input ? input.collectedData : undefined;
     const missing = requirements.fields.filter(
-      (field) => !collectedData || collectedData[field.key] === undefined
+      (field) =>
+        field.required &&
+        (submittedCollectedData === undefined || submittedCollectedData[field.key] === undefined)
     );
     if (missing.length > 0) {
       return success(c, { ...requirements, fields: missing });
     }
+    if (submittedCollectedData === undefined) {
+      throw badRequest("collectedData is required to submit counterparty requirements.");
+    }
+    parseCollectedFields(
+      requirements.fields,
+      submittedCollectedData,
+      `Missing or invalid fields required for ${requirements.provider}.`
+    );
   }
 
   const advanced = await advanceCounterpartyRequirements(c, {
@@ -337,16 +358,20 @@ export const createCounterparty = async (
 
   const createdBy = await resolveCreatorUserId(c);
 
-  const counterparty = await repo.createCounterparty({
+  const baseInput = {
     organizationId: auth.organizationId,
     projectId,
-    externalId: body.externalId ?? null,
-    entityType: body.entityType,
+    externalId: body.externalId === undefined ? null : body.externalId,
     displayName: body.displayName,
     email: body.email,
-    identity: body.identity,
+    providerData: {},
     createdBy,
-  });
+  };
+  const counterparty = await repo.createCounterparty(
+    body.entityType === "individual"
+      ? { ...baseInput, entityType: "individual", identity: body.identity }
+      : { ...baseInput, entityType: "business" }
+  );
 
   if (!counterparty) {
     throw internalError("Failed to create counterparty");
@@ -381,40 +406,36 @@ async function validateUpdatedIdentity(
     organizationId: string;
     projectId: string;
     entityType: CounterpartyEntityType | undefined;
-    identity: CounterpartyIdentity | undefined;
+    identity: CounterpartyIndividualIdentity | undefined;
   }
-): Promise<CounterpartyIdentity | undefined> {
+): Promise<CounterpartyIndividualIdentity | undefined> {
   if (input.identity === undefined && input.entityType === undefined) {
     return undefined;
   }
-  let entityType = input.entityType;
-  let identity: unknown = input.identity;
-  if (entityType === undefined || identity === undefined) {
-    const current = await repo.getCounterpartyById(input);
-    if (!current) {
-      throw notFound("Counterparty");
-    }
-    if (entityType === undefined) {
-      entityType = current.entity_type;
-    }
-    if (identity === undefined) {
-      identity = current.identity;
-    }
+  const current = await repo.getCounterpartyById(input);
+  if (!current) {
+    throw notFound("Counterparty");
   }
-  const identitySchemaForEntityType =
-    entityType === "individual" ? counterpartyIdentitySchema : counterpartyBusinessIdentitySchema;
-  const result = identitySchemaForEntityType.safeParse(identity);
-  if (!result.success) {
-    if (input.identity === undefined) {
-      throw badRequest("Changing entityType requires a matching identity in the same request.", {
-        errors: z.treeifyError(result.error),
-      });
+  const entityType = input.entityType === undefined ? current.entity_type : input.entityType;
+  if (entityType === "business") {
+    if (input.identity !== undefined) {
+      throw badRequest("Business counterparties cannot have an identity payload.");
     }
+    return undefined;
+  }
+  if (input.identity === undefined) {
+    if (current.entity_type === "business") {
+      throw badRequest("Changing entityType to individual requires identity in the same request.");
+    }
+    return undefined;
+  }
+  const result = counterpartyIdentitySchema.safeParse(input.identity);
+  if (!result.success) {
     throw badRequest("identity does not match the counterparty's entityType.", {
       errors: z.treeifyError(result.error),
     });
   }
-  return input.identity === undefined ? undefined : result.data;
+  return result.data;
 }
 
 export const updateCounterparty = async (

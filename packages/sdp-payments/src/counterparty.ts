@@ -1,5 +1,4 @@
 import type {
-  CounterpartyBusinessIdentity,
   CounterpartyIndividualIdentity,
   CounterpartyProviderData,
   CounterpartyStatus,
@@ -23,5 +22,5 @@ export type CounterpartyRow = {
   updated_at: string;
 } & (
   | { entity_type: "individual"; identity: CounterpartyIndividualIdentity }
-  | { entity_type: "business"; identity: CounterpartyBusinessIdentity }
+  | { entity_type: "business" }
 );

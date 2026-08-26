@@ -2,7 +2,7 @@ import type { CounterpartyRow } from "@sdp/payments";
 import type { BvnkCustomerResolution } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import type {
   CounterpartyEntityType,
-  CounterpartyIdentity,
+  CounterpartyIndividualIdentity,
   CounterpartyProviderData,
 } from "@sdp/types";
 import type { RepositoryDbClient } from "./base";
@@ -13,17 +13,21 @@ export function generateCounterpartyId(): string {
   return `counterparty_${crypto.randomUUID()}`;
 }
 
-export interface CreateCounterpartyInput {
+type CreateCounterpartyBaseInput = {
   organizationId: string;
   projectId: string;
   externalId: string | null;
-  entityType: CounterpartyEntityType;
   displayName: string;
   email: string;
-  identity: CounterpartyIdentity;
-  providerData?: CounterpartyProviderData;
+  providerData: CounterpartyProviderData;
   createdBy: string | null;
-}
+};
+
+export type CreateCounterpartyInput = CreateCounterpartyBaseInput &
+  (
+    | { entityType: "individual"; identity: CounterpartyIndividualIdentity }
+    | { entityType: "business" }
+  );
 
 export interface UpdateCounterpartyInput {
   counterpartyId: string;
@@ -33,7 +37,7 @@ export interface UpdateCounterpartyInput {
   entityType?: CounterpartyEntityType;
   displayName?: string;
   email?: string;
-  identity?: CounterpartyIdentity;
+  identity?: CounterpartyIndividualIdentity;
   providerData?: CounterpartyProviderData;
 }
 

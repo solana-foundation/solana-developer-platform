@@ -227,7 +227,20 @@ describe("OpenAPI spec", () => {
     const requirementsPath = doc.paths?.["/v1/counterparties/{counterpartyId}/requirements"]?.get;
     expect(requirementsPath).toBeDefined();
     expect(requirementsPath?.operationId).toBe("getCounterpartyRequirements");
+    const country = requirementsPath?.parameters?.find(
+      (parameter) => "name" in parameter && parameter.name === "country"
+    );
+    expect(country).toMatchObject({ name: "country", in: "query", required: true });
     expect(requirementsPath?.responses?.["200"]).toMatchSnapshot();
+  });
+
+  it("documents counterparty identity without persisted phone or address", () => {
+    const doc = createOpenApiDocument();
+    const createSchema = getJsonSchema(doc.paths?.["/v1/counterparties"]?.post?.requestBody);
+    const serialized = JSON.stringify(createSchema);
+
+    expect(serialized).not.toContain('"phone"');
+    expect(serialized).not.toContain('"address"');
   });
 
   it("documents every supported public wallet policy rule kind", () => {

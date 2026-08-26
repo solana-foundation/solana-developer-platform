@@ -4,13 +4,10 @@ import {
   type BvnkCustomerResolution,
   type BvnkOnrampPaymentRuleState,
   isBvnkCustomerVerified,
-  isBvnkWalletActive,
   parseBvnkOfframpWalletName,
   parseBvnkOnrampWalletName,
-  pendingBvnkOnrampPaymentRuleKeys,
   readBvnkCustomer,
   readBvnkOfframpReference,
-  readBvnkOnrampPaymentRuleState,
   withBvnkOfframpWalletStatus,
   withBvnkOnrampPaymentRuleState,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
@@ -25,9 +22,8 @@ import type {
   CounterpartiesRepository,
   CounterpartyRow,
 } from "@/db/repositories/counterparty.repository";
-import { AppError, badRequest, internalError, providerNotConfigured } from "@/lib/errors";
+import { badRequest, internalError, providerNotConfigured, unauthorized } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
-import { ensureBvnkPaymentRule } from "@/routes/payments/handlers/ramps/bvnk";
 import { getLogger } from "@/runtime/logger";
 import type { AppContext, WebhookProcessor } from "./processor";
 
@@ -308,52 +304,6 @@ async function applyBvnkCustomerRequirementWebhook(
   });
 }
 
-async function provisionPendingBvnkOnramps(
-  c: AppContext,
-  repo: CounterpartiesRepository,
-  environment: SdpEnvironment,
-  counterparty: CounterpartyRow
-): Promise<void> {
-  const ctx = webhookRampContext(c, environment);
-  const currentCounterparty = await repo.findActiveCounterpartyById(counterparty.id);
-  if (!currentCounterparty) {
-    throw internalError(
-      `BVNK webhook counterparty ${counterparty.id} was not found or is not active`
-    );
-  }
-  if (!isBvnkCustomerVerified(readBvnkCustomer(currentCounterparty.provider_data).status)) {
-    return;
-  }
-  const pendingKeys = pendingBvnkOnrampPaymentRuleKeys(currentCounterparty.provider_data);
-  for (const key of pendingKeys) {
-    const reloadedCounterparty = await repo.findActiveCounterpartyById(counterparty.id);
-    if (!reloadedCounterparty) {
-      throw internalError(
-        `BVNK webhook counterparty ${counterparty.id} was not found or is not active`
-      );
-    }
-    const entry = readBvnkOnrampPaymentRuleState(reloadedCounterparty.provider_data, key);
-    if (!entry.request || entry.ruleId) {
-      continue;
-    }
-    try {
-      await ensureBvnkPaymentRule(
-        c,
-        ctx,
-        reloadedCounterparty,
-        reloadedCounterparty.project_id,
-        readBvnkCustomer(reloadedCounterparty.provider_data),
-        entry.request,
-        repo
-      );
-    } catch (error) {
-      await updateBvnkOnrampPaymentRuleState(repo, reloadedCounterparty, key, {
-        provisioningError: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-}
-
 async function handleProviderOnrampCounterpartyRequirementWebhook(
   c: AppContext,
   environment: SdpEnvironment,
@@ -386,7 +336,6 @@ async function handleProviderOnrampCounterpartyRequirementWebhook(
         );
       }
       await applyBvnkCustomerRequirementWebhook(c, environment, repo, counterparty, event);
-      await provisionPendingBvnkOnramps(c, repo, environment, counterparty);
       return;
     }
   }
@@ -412,9 +361,6 @@ async function handleProviderOnrampCounterpartyRequirementWebhook(
     if (event.walletStatus) state.walletStatus = event.walletStatus;
     if (hasBankAccountNumber) state.bankAccount = bankAccount;
     await updateBvnkOnrampPaymentRuleState(repo, counterparty, wallet.onrampKey, state);
-  }
-  if (isBvnkWalletActive(event.walletStatus)) {
-    await provisionPendingBvnkOnramps(c, repo, environment, counterparty);
   }
 }
 
@@ -511,9 +457,7 @@ export class BvnkWebhookProcessor implements WebhookProcessor<unknown, BvnkWebho
     }
     const signature = context.headers.get("x-signature")?.trim();
     if (!signature) {
-      throw new AppError("UNAUTHORIZED", "BVNK webhook is missing the X-Signature header", {
-        provider: this.provider,
-      });
+      throw unauthorized("BVNK webhook is missing the X-Signature header");
     }
     let payload: Record<string, unknown>;
     try {

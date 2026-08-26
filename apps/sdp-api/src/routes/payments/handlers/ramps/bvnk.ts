@@ -38,7 +38,7 @@ import {
 import { buildRequirementSchema } from "@sdp/payments/ramps/requirements";
 import { rampId } from "@sdp/payments/ramps/shared";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
-import type { BvnkPaymentRampInstruction, PaymentRampQuote } from "@sdp/types";
+import type { BvnkPaymentRampInstruction, CountryCode, PaymentRampQuote } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
@@ -51,9 +51,13 @@ import type {
   PaymentTransferStatus,
 } from "@/db/repositories/payments.repository";
 import { getClientIp } from "@/lib/client-ip";
-import { AppError, badRequest, counterpartyNotProvisioned, internalError } from "@/lib/errors";
+import {
+  badRequest,
+  counterpartyNotProvisioned,
+  internalError,
+  providerUnavailable,
+} from "@/lib/errors";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
-import { getLogger } from "@/runtime/logger";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import {
   type AppContext,
@@ -325,7 +329,7 @@ export async function ensureBvnkOfframpBeneficiary(
 
   const parsed = buildRequirementSchema(bvnkOfframpFields(fiatCurrency)).safeParse(collected);
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Missing or invalid bank details for BVNK off-ramp.", {
+    throw badRequest("Missing or invalid bank details for BVNK off-ramp.", {
       errors: z.treeifyError(parsed.error),
     });
   }
@@ -357,17 +361,13 @@ export async function ensureBvnkCustomer(
   projectId: string,
   params: {
     fiatCurrency: string;
+    country: CountryCode;
     collectedData?: CollectedFieldData;
   }
 ): Promise<BvnkCustomerResolution> {
   if (counterparty.entity_type === "business") {
     throw badRequest("BVNK supports individual counterparties only.");
   }
-  const countryCode = counterparty.identity.address?.countryCode;
-  if (!countryCode) {
-    throw badRequest("Counterparty address country is required for BVNK.");
-  }
-
   const ctx = rampRuntime(c);
   const client = RAMP_PROVIDER_CLIENTS.bvnk;
   const repo = getCounterpartiesRepository(c);
@@ -379,11 +379,12 @@ export async function ensureBvnkCustomer(
     const individual = buildBvnkIndividualPayload(
       counterparty,
       params.collectedData,
-      params.fiatCurrency
+      params.fiatCurrency,
+      params.country
     );
     const session = await client.createAgreementSession(ctx, {
       customerType: "INDIVIDUAL",
-      countryCode,
+      countryCode: params.country,
       useCase: "EMBEDDED_FIAT_ACCOUNTS",
     });
     await client.signAgreement(ctx, {
@@ -441,6 +442,7 @@ export async function ensureBvnkPaymentRule(
   projectId: string,
   customer: BvnkCustomerResolution,
   params: BvnkOnrampRequestSpec,
+  jit: { country: CountryCode; collectedData?: CollectedFieldData },
   repository?: CounterpartiesRepository
 ): Promise<BvnkPaymentRuleResolution> {
   const client = RAMP_PROVIDER_CLIENTS.bvnk;
@@ -499,9 +501,7 @@ export async function ensureBvnkPaymentRule(
       idempotencyKey: await buildBvnkWalletIdempotencyKey(walletName),
     });
     if (wallet.name !== walletName) {
-      throw internalError(
-        `BVNK returned unexpected on-ramp wallet name: ${wallet.name ?? "<missing>"}`
-      );
+      throw internalError(`BVNK returned unexpected on-ramp wallet name: ${String(wallet.name)}`);
     }
     entry = {
       ...entry,
@@ -522,34 +522,32 @@ export async function ensureBvnkPaymentRule(
   }
 
   if (entry.walletId && !isBvnkWalletActive(entry.walletStatus)) {
-    try {
-      const wallet = await client.getFiatWallet(ctx, { walletId: entry.walletId });
-      entry = {
-        ...entry,
-        walletStatus: wallet.status ?? entry.walletStatus,
-        bankAccount: wallet.bankAccount ?? entry.bankAccount,
-      };
-      await persistBvnkOnrampState(
-        c,
-        counterparty,
-        projectId,
-        paymentRuleKey,
-        customer,
-        entry,
-        repository
-      );
-    } catch (error) {
-      getLogger().warn(
-        {
-          wallet_id: entry.walletId,
-          error: error instanceof Error ? error.message : String(error),
-        },
-        "[bvnk onramp] wallet status refresh failed; relying on webhook"
-      );
+    const wallet = await client.getFiatWallet(ctx, { walletId: entry.walletId });
+    if (wallet.status === undefined) {
+      throw providerUnavailable("BVNK wallet response is missing status.");
     }
+    entry = {
+      ...entry,
+      walletStatus: wallet.status,
+    };
+    if (wallet.bankAccount !== undefined) {
+      entry.bankAccount = wallet.bankAccount;
+    }
+    await persistBvnkOnrampState(
+      c,
+      counterparty,
+      projectId,
+      paymentRuleKey,
+      customer,
+      entry,
+      repository
+    );
   }
 
   if (!entry.ruleId && entry.walletId && isBvnkWalletActive(entry.walletStatus)) {
+    if (jit.collectedData === undefined) {
+      throw badRequest("BVNK on-ramp requires collectedData with an address.");
+    }
     const rule = await client.createOnrampRule(ctx, {
       reference: await bvnkRuleReference(counterparty.id, paymentRuleKey),
       walletId: entry.walletId,
@@ -557,11 +555,14 @@ export async function ensureBvnkPaymentRule(
       network: params.network,
       beneficiaryAddress: params.destinationWalletAddress,
       entity: {
-        ...buildBvnkRuleEntity(counterparty),
+        ...buildBvnkRuleEntity(counterparty, jit.country, jit.collectedData),
         customerIdentifier: customer.customerReference,
       },
     });
-    entry = { ...entry, ruleId: rule.id ?? entry.ruleId, ruleStatus: rule.status };
+    if (rule.id === undefined) {
+      throw providerUnavailable("BVNK payment-rule response is missing id.");
+    }
+    entry = { ...entry, ruleId: rule.id, ruleStatus: rule.status };
     await persistBvnkOnrampState(
       c,
       counterparty,

@@ -1,5 +1,6 @@
 import { StripeRampClient } from "@sdp/payments/ramps/providers/stripe/client";
 import type { RampOnrampQuoteInput } from "@sdp/payments/ramps/types";
+import type { Counterparty } from "@sdp/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const STRIPE_CONTEXT = {
@@ -57,6 +58,7 @@ function onrampInput(overrides?: Partial<RampOnrampQuoteInput>): RampOnrampQuote
     fiatCurrency: "USD",
     fiatAmount: "100",
     destinationWalletAddress: "WALLET123",
+    country: "US",
     externalCustomerId: "cp_1",
     customerIpAddress: "8.8.8.8",
     stripeCustomerInfo: {
@@ -217,19 +219,66 @@ describe("StripeRampClient", () => {
     ).rejects.toThrow(/did not return an on-ramp quote/);
   });
 
-  it("marks onramp counterparties ready and offramp unsupported", () => {
+  it("collects a JIT address before marking an onramp counterparty ready", () => {
     const client = new StripeRampClient();
-    const counterparty = {} as Parameters<StripeRampClient["validateCounterparty"]>[0];
+    const counterparty: Counterparty = {
+      id: "cp_1",
+      organizationId: "org_1",
+      projectId: "proj_1",
+      externalId: null,
+      entityType: "individual",
+      displayName: "John Doe",
+      email: "john@doe.com",
+      identity: {
+        firstName: "John",
+        lastName: "Doe",
+        dateOfBirth: "1990-07-04",
+      },
+      status: "active",
+      createdBy: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
 
-    expect(
-      client.validateCounterparty(counterparty, { direction: "onramp", providerData: {} })
-    ).toEqual({
+    const requirements = client.validateCounterparty(counterparty, {
+      direction: "onramp",
+      country: "US",
+      providerData: {},
+    });
+    expect(requirements).toMatchObject({
       provider: "stripe",
       direction: "onramp",
-      status: "ready",
+      status: "collect",
     });
+    if (requirements.status !== "collect") {
+      throw new Error("Expected Stripe address collection requirements");
+    }
+    expect(requirements.fields.map((field) => field.key)).toEqual([
+      "address.line1",
+      "address.line2",
+      "address.city",
+      "address.postalCode",
+      "address.subdivisionCode",
+    ]);
     expect(
-      client.validateCounterparty(counterparty, { direction: "offramp", providerData: {} })
+      client.validateCounterparty(counterparty, {
+        direction: "onramp",
+        country: "US",
+        providerData: {},
+        collectedData: {
+          "address.line1": "1 Market St",
+          "address.city": "SF",
+          "address.postalCode": "94080",
+          "address.subdivisionCode": "CA",
+        },
+      })
+    ).toEqual({ provider: "stripe", direction: "onramp", status: "ready" });
+    expect(
+      client.validateCounterparty(counterparty, {
+        direction: "offramp",
+        country: "US",
+        providerData: {},
+      })
     ).toMatchObject({ provider: "stripe", direction: "offramp", status: "unsupported" });
   });
 

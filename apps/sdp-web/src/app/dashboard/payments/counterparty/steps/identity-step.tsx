@@ -1,11 +1,11 @@
 "use client";
 
-import { PhoneIcon, UserIcon } from "lucide-react";
-import { DatePicker } from "@/components/ui/date-picker";
+import { CalendarIcon, UserIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
 import { useCounterpartyCreate } from "../counterparty-create-context";
+import { todayIsoDate } from "../counterparty-create-schemas";
 
 export function IdentityStep() {
   const t = useTranslations();
@@ -41,30 +41,18 @@ export function IdentityStep() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="dateOfBirth">{t("DashboardPayments.counterparty.dateOfBirth")}</Label>
-          <DatePicker
-            size="xl"
-            id="dateOfBirth"
-            value={values.dateOfBirth}
-            onChange={(value) => setField("dateOfBirth", value)}
-          />
-          {errors.dateOfBirth && <p className="mt-1 text-xs text-error">{errors.dateOfBirth}</p>}
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="phone">{t("DashboardPayments.counterparty.phone")}</Label>
-          <Input
-            size="xl"
-            id="phone"
-            type="tel"
-            iconLeft={<PhoneIcon />}
-            placeholder={t("DashboardPayments.counterparty.phonePlaceholder")}
-            value={values.phone}
-            onChange={(e) => setField("phone", e.target.value)}
-          />
-          {errors.phone && <p className="mt-1 text-xs text-error">{errors.phone}</p>}
-        </div>
+      <div className="space-y-2">
+        <Label htmlFor="dateOfBirth">{t("DashboardPayments.counterparty.dateOfBirth")}</Label>
+        <Input
+          size="xl"
+          id="dateOfBirth"
+          type="date"
+          iconLeft={<CalendarIcon />}
+          max={todayIsoDate()}
+          value={values.dateOfBirth}
+          onChange={(e) => setField("dateOfBirth", e.target.value)}
+        />
+        {errors.dateOfBirth && <p className="mt-1 text-xs text-error">{errors.dateOfBirth}</p>}
       </div>
     </div>
   );

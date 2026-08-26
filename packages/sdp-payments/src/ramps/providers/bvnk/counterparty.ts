@@ -1,4 +1,4 @@
-import type { Counterparty, CounterpartyIndividualIdentity } from "@sdp/types";
+import type { Counterparty, CounterpartyIndividualIdentity, CountryCode } from "@sdp/types";
 import {
   COUNTERPARTY_EMPLOYMENT_STATUSES,
   COUNTERPARTY_INDUSTRY_SECTORS,
@@ -7,7 +7,6 @@ import {
   COUNTERPARTY_SOURCE_OF_FUNDS,
   COUNTERPARTY_YEARLY_INCOME,
   COUNTRIES,
-  US_STATES,
 } from "@sdp/types";
 import type {
   CollectedFieldData,
@@ -18,8 +17,10 @@ import { z } from "zod";
 import type { CounterpartyRow } from "../../../counterparty";
 import { badRequest, SdpPaymentsError, unsupportedCounterparty } from "../../../errors";
 import {
+  addressFields,
   buildRequirementSchema,
   enumOptions,
+  parseCollectedAddress,
   readyCounterparty,
   selectField,
   textField,
@@ -40,7 +41,6 @@ interface BvnkOnrampField {
 }
 
 const COUNTRY_OPTIONS = COUNTRIES.map((country) => ({ value: country.code, label: country.name }));
-const US_STATE_OPTIONS = US_STATES.map((state) => ({ value: state.code, label: state.name }));
 
 const BVNK_ONRAMP_BASE_FIELDS: BvnkOnrampField[] = [
   {
@@ -149,21 +149,14 @@ const BVNK_ONRAMP_US_FIELDS: BvnkOnrampField[] = [
     }),
     read: () => undefined,
   },
-  {
-    descriptor: selectField({
-      key: "address.stateCode",
-      label: "State",
-      required: true,
-      options: US_STATE_OPTIONS,
-    }),
-    read: (id) => id.address?.subdivisionCode,
-  },
 ];
 
-export function bvnkOnrampFields(identity: CounterpartyIndividualIdentity): BvnkOnrampField[] {
-  return identity.address?.countryCode === "US"
-    ? [...BVNK_ONRAMP_BASE_FIELDS, ...BVNK_ONRAMP_US_FIELDS]
-    : BVNK_ONRAMP_BASE_FIELDS;
+export function bvnkOnrampFields(country: CountryCode): BvnkOnrampField[] {
+  const fields: BvnkOnrampField[] = [
+    ...addressFields(country).map((descriptor) => ({ descriptor, read: () => undefined })),
+    ...BVNK_ONRAMP_BASE_FIELDS,
+  ];
+  return country === "US" ? [...fields, ...BVNK_ONRAMP_US_FIELDS] : fields;
 }
 
 interface BvnkOfframpSpec {
@@ -222,13 +215,14 @@ export function bvnkOfframpFields(fiatCurrency: BvnkOfframpCurrency): Requiremen
 export function buildBvnkIndividualPayload(
   counterparty: CounterpartyRow,
   collectedData: CollectedFieldData | undefined,
-  expectedVolumeCurrency: string
+  expectedVolumeCurrency: string,
+  country: CountryCode
 ): Record<string, unknown> {
   if (counterparty.entity_type !== "individual") {
     throw badRequest("BVNK on-ramp requires an individual counterparty.");
   }
   const identity = counterparty.identity;
-  const fields = bvnkOnrampFields(identity);
+  const fields = bvnkOnrampFields(country);
   const missing = fields.filter((field) => field.read(identity) === undefined);
 
   let supplied: Record<string, unknown> = {};
@@ -262,14 +256,29 @@ export function buildBvnkIndividualPayload(
     return collected;
   };
 
-  const address = identity.address;
-  const isUnitedStates = address?.countryCode === "US";
+  const collectedAddress = parseCollectedAddress(
+    country,
+    collectedData,
+    "Missing or invalid address details required for BVNK on-ramp."
+  );
+  const address: Record<string, string> = {
+    addressLine1: collectedAddress.line1,
+    city: collectedAddress.city,
+    postalCode: collectedAddress.postalCode,
+    countryCode: country,
+  };
+  if (collectedAddress.line2 !== undefined) {
+    address.addressLine2 = collectedAddress.line2;
+  }
+  if (collectedAddress.subdivisionCode !== undefined) {
+    address.stateCode = normalizeBvnkStateCode(country, collectedAddress.subdivisionCode);
+  }
 
   return {
     description: "SDP onramp",
     firstName: identity.firstName,
     lastName: identity.lastName,
-    ...(identity.dateOfBirth ? { dateOfBirth: identity.dateOfBirth } : {}),
+    dateOfBirth: identity.dateOfBirth,
     emailAddress: counterparty.email,
     nationality: resolveField("nationality"),
     birthCountryCode: resolveField("birthCountryCode"),
@@ -277,25 +286,7 @@ export function buildBvnkIndividualPayload(
       number: resolveField("taxIdentification.number").replace(/\D/g, ""),
       taxResidenceCountryCode: resolveField("taxIdentification.taxResidenceCountryCode"),
     },
-    ...(address
-      ? {
-          address: {
-            addressLine1: address.line1,
-            ...(address.line2 ? { addressLine2: address.line2 } : {}),
-            city: address.city,
-            ...(address.postalCode ? { postalCode: address.postalCode } : {}),
-            countryCode: address.countryCode,
-            ...(isUnitedStates
-              ? {
-                  stateCode: normalizeBvnkStateCode(
-                    address.countryCode,
-                    resolveField("address.stateCode")
-                  ),
-                }
-              : {}),
-          },
-        }
-      : {}),
+    address,
     cdd: {
       employmentStatus: resolveField("cdd.employmentStatus"),
       sourceOfFunds: resolveField("cdd.sourceOfFunds"),
@@ -305,7 +296,7 @@ export function buildBvnkIndividualPayload(
         amount: resolveField("cdd.expectedMonthlyVolume.amount"),
         currency: expectedVolumeCurrency,
       },
-      ...(isUnitedStates
+      ...(country === "US"
         ? {
             estimatedYearlyIncome: resolveField("cdd.estimatedYearlyIncome"),
             employmentIndustrySector: resolveField("cdd.employmentIndustrySector"),
@@ -326,7 +317,9 @@ export function validateBvnkCounterparty(
   counterparty: Counterparty,
   {
     direction,
+    country,
     providerData,
+    collectedData,
     cryptoToken,
     fiatCurrency,
     destinationWalletAddress,
@@ -384,35 +377,21 @@ export function validateBvnkCounterparty(
   }
   const identity = counterparty.identity;
 
-  if (!identity.address?.countryCode) {
-    return unsupportedCounterparty(
-      "bvnk",
-      direction,
-      "Counterparty is missing a stored address country, required for BVNK on-ramp."
-    );
-  }
-
   const customer = readBvnkCustomer(providerData);
   if (customer.customerReference) {
-    return onrampConfiguredStatus();
+    const configuredStatus = onrampConfiguredStatus();
+    if (configuredStatus.status !== "funding_account_provisioning") {
+      return configuredStatus;
+    }
+    const fields = addressFields(country);
+    const suppliedAddress = buildRequirementSchema(fields).safeParse(collectedData);
+    if (suppliedAddress.success) {
+      return configuredStatus;
+    }
+    return { provider: "bvnk", direction, status: "collect", fields: [...fields] };
   }
 
-  const missingIdentity = [
-    identity.firstName ? null : "first name",
-    identity.lastName ? null : "last name",
-    identity.dateOfBirth ? null : "date of birth",
-    identity.address.line1 ? null : "address line 1",
-    identity.address.city ? null : "address city",
-  ].filter((entry): entry is string => entry !== null);
-  if (missingIdentity.length > 0) {
-    return unsupportedCounterparty(
-      "bvnk",
-      direction,
-      `Counterparty is missing details required for BVNK on-ramp: ${missingIdentity.join(", ")}.`
-    );
-  }
-
-  const missing = bvnkOnrampFields(identity)
+  const missing = bvnkOnrampFields(country)
     .filter((field) => field.read(identity) === undefined)
     .map((field) => field.descriptor);
   if (missing.length === 0) {

@@ -17,6 +17,7 @@ import {
   cutoverCounterpartyPii,
   purgeCounterpartyPii,
   restoreCounterpartyPiiPlaintext,
+  stripCounterpartyContactPii,
   verifyCounterpartyPii,
 } from "../../scripts/counterparty-pii-migrate";
 
@@ -155,7 +156,14 @@ describe("counterparty PII migration lifecycle", () => {
       projectId: PROJECT_ID,
     });
     expect(readable?.email).toBe("legacy@example.com");
-    expect(readable?.identity).toMatchObject({ firstName: "Legacy" });
+    if (readable?.entity_type !== "individual") {
+      throw new Error("Expected an individual counterparty");
+    }
+    expect(readable.identity).toEqual({
+      firstName: "Legacy",
+      lastName: "Recipient",
+      dateOfBirth: "1990-01-01",
+    });
     expect(readable?.provider_data).toMatchObject({
       bvnk: { customer: { customerReference: "bvnk-customer-1" } },
     });
@@ -189,6 +197,74 @@ describe("counterparty PII migration lifecycle", () => {
     await backfillAccounts(db, cipher);
 
     await expect(purgeCounterpartyPii(db, cipher)).rejects.toThrow(/cut over/i);
+  });
+
+  it("strips phone and address from encrypted identities and drops business identities", async () => {
+    const db = getDb(env);
+    const cipher = env.counterpartyPiiCipher;
+    const businessId = "counterparty_pii_strip_business";
+    await db
+      .prepare(
+        `INSERT INTO counterparties (
+           id, organization_id, project_id, external_id, entity_type, display_name,
+           email, identity, provider_data, status, created_by
+         ) VALUES (?, ?, ?, 'opaque-business', 'business', 'Migration Business',
+                   'business@example.com', ?, ?, 'active', ?)`
+      )
+      .bind(
+        businessId,
+        TEST_ORG.id,
+        PROJECT_ID,
+        { address: { line1: "2 Market St", city: "San Francisco", countryCode: "US" } },
+        {},
+        TEST_USER.id
+      )
+      .run();
+    await backfillCounterparties(db, cipher);
+    await backfillAccounts(db, cipher);
+
+    await expect(stripCounterpartyContactPii(db, cipher)).resolves.toBeUndefined();
+
+    const decryptPii = async (counterpartyId: string) => {
+      const row = await db
+        .prepare("SELECT pii_encrypted, identity FROM counterparties WHERE id = ?")
+        .bind(counterpartyId)
+        .first<{ pii_encrypted: string; identity: Record<string, unknown> | null }>();
+      if (!row) {
+        throw new Error("Expected a counterparty row");
+      }
+      const plaintext = await cipher.decrypt(
+        {
+          organizationId: TEST_ORG.id,
+          projectId: PROJECT_ID,
+          resourceType: "counterparty",
+          resourceId: counterpartyId,
+          field: "identity",
+        },
+        row.pii_encrypted
+      );
+      return { row, pii: JSON.parse(plaintext) as Record<string, unknown> };
+    };
+
+    const individual = await decryptPii(COUNTERPARTY_ID);
+    expect(individual.pii.identity).toEqual({
+      firstName: "Legacy",
+      lastName: "Recipient",
+      dateOfBirth: "1990-01-01",
+    });
+    expect(individual.row.identity).toEqual({
+      firstName: "Legacy",
+      lastName: "Recipient",
+      dateOfBirth: "1990-01-01",
+    });
+
+    const business = await decryptPii(businessId);
+    expect(business.pii).toEqual({ email: "business@example.com" });
+    expect(business.row.identity).toBeNull();
+
+    await expect(stripCounterpartyContactPii(db, cipher)).resolves.toBeUndefined();
+    const unchanged = await decryptPii(COUNTERPARTY_ID);
+    expect(unchanged.row.pii_encrypted).toBe(individual.row.pii_encrypted);
   });
 
   it("serializes concurrent encrypted provider-data mutations without losing either update", async () => {

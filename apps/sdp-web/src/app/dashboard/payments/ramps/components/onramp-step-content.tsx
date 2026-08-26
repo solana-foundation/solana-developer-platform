@@ -83,12 +83,14 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
           showWallet={true}
           selectedPair={selectedRampPair}
           selectedProvider={fields.provider}
+          selectedCountry={fields.country}
           amount={fields.amount}
           onAmountChange={(value) => setField("amount", value)}
           onAmountBlur={() => {}}
           onWalletChange={(walletId) => setField("walletId", walletId)}
           onPairChange={handlePairChange}
           onProviderSelect={(nextProvider) => setField("provider", nextProvider)}
+          onCountryChange={wizard.handleCountryChange}
         />
         {requirementsBlocker ? (
           <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">

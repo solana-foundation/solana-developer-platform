@@ -1,4 +1,3 @@
-import { SdpPaymentsError } from "@sdp/payments";
 import {
   buildBvnkCustomerExternalReference,
   buildBvnkOfframpWalletName,
@@ -249,13 +248,6 @@ function counterpartyRow(
       firstName: "Ada",
       lastName: "Lovelace",
       dateOfBirth: "1990-01-15",
-      phone: "+14155551234",
-      address: {
-        line1: "1 Market St",
-        city: "San Francisco",
-        countryCode: "US",
-        subdivisionCode: "US-TX",
-      },
     },
     provider_data: {},
     status: "active",
@@ -267,28 +259,36 @@ function counterpartyRow(
 }
 
 describe("buildBvnkRuleEntity", () => {
-  it("normalizes an ISO-prefixed stored subdivision code to BVNK's bare stateCode", () => {
-    const entity = buildBvnkRuleEntity(counterpartyRow());
-
-    expect(entity.address?.stateCode).toBe("TX");
-  });
-
-  it("throws for a non-US subdivision that does not resolve to 2 characters", () => {
-    const row = counterpartyRow({
-      identity: {
-        firstName: "Ada",
-        lastName: "Lovelace",
-        dateOfBirth: "1990-01-15",
-        phone: "+14155551234",
-        address: {
-          line1: "1 High St",
-          city: "London",
-          countryCode: "GB",
-          subdivisionCode: "GB-ENG",
-        },
-      },
+  it("builds a US rule address from collected fields and request country", () => {
+    const entity = buildBvnkRuleEntity(counterpartyRow(), "US", {
+      "address.line1": "1 Market St",
+      "address.city": "San Francisco",
+      "address.postalCode": "94105",
+      "address.subdivisionCode": "TX",
     });
 
-    expect(() => buildBvnkRuleEntity(row)).toThrowError(SdpPaymentsError);
+    expect(entity.address).toMatchObject({
+      addressLine1: "1 Market St",
+      city: "San Francisco",
+      postalCode: "94105",
+      countryCode: "US",
+      stateCode: "TX",
+    });
+  });
+
+  it("does not collect or send a subdivision for a non-US rule address", () => {
+    const entity = buildBvnkRuleEntity(counterpartyRow(), "GB", {
+      "address.line1": "1 High St",
+      "address.city": "London",
+      "address.postalCode": "SW1A 1AA",
+    });
+
+    expect(entity.address).toEqual({
+      addressLine1: "1 High St",
+      city: "London",
+      postalCode: "SW1A 1AA",
+      countryCode: "GB",
+      country: "GB",
+    });
   });
 });

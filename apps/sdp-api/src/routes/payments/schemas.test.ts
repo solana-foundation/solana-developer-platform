@@ -2,10 +2,12 @@ import { type PolicyRule, SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { z } from "zod";
 import {
+  createOnrampQuoteSchema,
   createRecurringPaymentSchema,
   createTransferSchema,
   listTransfersQuerySchema,
   PAYMENT_TOKEN_VALIDATION_MESSAGE,
+  submitCounterpartyRequirementsSchema,
   updateRecurringPaymentSchema,
   updateWalletPolicySchema,
   walletPolicyRuleSchema,
@@ -17,6 +19,64 @@ const VALID_DESTINATION = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
 const tokenSchema = createTransferSchema.shape.token;
 const destinationSchema = createTransferSchema.shape.destination;
 const recurringPaymentTokenSchema = createRecurringPaymentSchema.shape.token;
+
+describe("ramp JIT requirement schemas", () => {
+  it("requires country and accepts transient collectedData on on-ramp quotes", () => {
+    const quote = {
+      provider: "coinbase",
+      counterpartyId: "cp_1",
+      destinationWallet: "wallet_1",
+      cryptoToken: "USDC",
+      fiatCurrency: "USD",
+      fiatAmount: "100",
+      collectedData: { phone: "+14155551234" },
+    };
+
+    expect(createOnrampQuoteSchema.safeParse(quote).success).toBe(false);
+    expect(createOnrampQuoteSchema.safeParse({ ...quote, country: "US" }).success).toBe(true);
+  });
+
+  it.each([
+    {
+      provider: "bvnk",
+      direction: "onramp",
+      country: "US",
+      cryptoToken: "USDC",
+      destinationWallet: "wallet_1",
+      fiatCurrency: "USD",
+      collectedData: { phone: "+14155551234" },
+    },
+    {
+      provider: "lightspark",
+      direction: "onramp",
+      country: "US",
+      collectedData: { businessLegalName: "Acme" },
+    },
+    {
+      provider: "coinbase",
+      direction: "onramp",
+      country: "US",
+      collectedData: { phone: "+14155551234" },
+    },
+    {
+      provider: "mural",
+      direction: "onramp",
+      country: "US",
+      cryptoToken: "USDC",
+      destinationWallet: "wallet_1",
+      fiatCurrency: "USD",
+      collectedData: { "address.line1": "1 Main St" },
+    },
+    {
+      provider: "stripe",
+      direction: "onramp",
+      country: "US",
+      collectedData: { "address.line1": "1 Main St" },
+    },
+  ])("accepts collectedData for $provider submit", (input) => {
+    expect(submitCounterpartyRequirementsSchema.safeParse(input).success).toBe(true);
+  });
+});
 
 describe("payments schema inferred types", () => {
   it("destination infers as string and policy rules as PolicyRule[]", () => {

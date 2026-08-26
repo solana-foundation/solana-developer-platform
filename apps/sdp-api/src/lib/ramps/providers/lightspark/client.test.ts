@@ -208,6 +208,7 @@ describe("LightsparkRampClient", () => {
       customerId: "Customer:cus_123",
       externalCustomerId: "counterparty_123",
       destinationWalletAddress: "ExternalAccount:acc_destination_123",
+      country: "US",
       cryptoToken: "USDC",
       fiatCurrency: "USD",
       fiatAmount: "25",

@@ -1,6 +1,9 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import type { MuralCreateOrganizationRequest } from "@sdp/payments/ramps/providers/mural/client";
-import { muralOnboardingRequirements } from "@sdp/payments/ramps/providers/mural/counterparty";
+import {
+  buildMuralPhysicalAddress,
+  muralOnboardingRequirements,
+} from "@sdp/payments/ramps/providers/mural/counterparty";
 import {
   isMuralKycApproved,
   isMuralTosAccepted,
@@ -12,9 +15,13 @@ import {
 } from "@sdp/payments/ramps/providers/mural/provider-data";
 import { readyCounterparty } from "@sdp/payments/ramps/requirements";
 import { rampId } from "@sdp/payments/ramps/shared";
-import type { MuralPaymentRampInstruction, PaymentRampQuote } from "@sdp/types";
+import type { CountryCode, MuralPaymentRampInstruction, PaymentRampQuote } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
-import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
+import type {
+  CollectedFieldData,
+  CounterpartyRequirements,
+  RampDirection,
+} from "@sdp/types/ramp-requirements";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { badRequest, counterpartyNotProvisioned } from "@/lib/errors";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
@@ -39,18 +46,18 @@ async function mintOrReuseMuralLink(
   return url;
 }
 
-function buildMuralOrgRequest(counterparty: CounterpartyRow): MuralCreateOrganizationRequest {
+function buildMuralOrgRequest(
+  counterparty: CounterpartyRow,
+  country: CountryCode,
+  collectedData: CollectedFieldData | undefined
+): MuralCreateOrganizationRequest {
   const email = counterparty.email;
+  const physicalAddress = buildMuralPhysicalAddress(country, collectedData);
   if (counterparty.entity_type === "business") {
-    return { type: "business", businessName: counterparty.display_name, email };
+    return { type: "business", businessName: counterparty.display_name, email, physicalAddress };
   }
   const { firstName, lastName } = counterparty.identity;
-  if (!firstName || !lastName) {
-    throw badRequest(
-      "Mural individual organization requires the counterparty's first and last name."
-    );
-  }
-  return { type: "individual", firstName, lastName, email };
+  return { type: "individual", firstName, lastName, email, physicalAddress };
 }
 
 /** Merges Mural organization state into `counterparty.provider_data.mural.organization`. */
@@ -82,14 +89,19 @@ async function persistMuralOrganization(
 export async function ensureMuralOrganization(
   c: AppContext,
   counterparty: CounterpartyRow,
-  projectId: string
+  projectId: string,
+  country: CountryCode,
+  collectedData: CollectedFieldData | undefined
 ): Promise<MuralOrganizationResolution> {
   const ctx = rampRuntime(c);
   const client = RAMP_PROVIDER_CLIENTS.mural;
   let org = readMuralOrganization(counterparty.provider_data);
 
   if (!org.id) {
-    org = await client.createOrganization(ctx, buildMuralOrgRequest(counterparty));
+    org = await client.createOrganization(
+      ctx,
+      buildMuralOrgRequest(counterparty, country, collectedData)
+    );
     await persistMuralOrganization(c, counterparty, projectId, org);
   } else if (!isMuralKycApproved(org.kycStatus)) {
     const latest = await client.getOrganization(ctx, org.id);
@@ -160,9 +172,17 @@ export async function resolveMuralRequirements(
   c: AppContext,
   counterparty: CounterpartyRow,
   projectId: string,
-  direction: RampDirection
+  direction: RampDirection,
+  country: CountryCode,
+  collectedData: CollectedFieldData | undefined
 ): Promise<CounterpartyRequirements> {
-  const organization = await ensureMuralOrganization(c, counterparty, projectId);
+  const organization = await ensureMuralOrganization(
+    c,
+    counterparty,
+    projectId,
+    country,
+    collectedData
+  );
   if (direction === "onramp" && isMuralKycApproved(organization.kycStatus)) {
     return muralOnrampRequirements(c, organization);
   }

@@ -9,7 +9,6 @@ import {
   providerUnavailable,
 } from "../../../errors";
 import { providerFetchJson } from "../../fetch";
-import { readyCounterparty } from "../../requirements";
 import { basicAuthHeader, UNREPORTED_COUNTRY_SUPPORT, unreportedCurrencyLimit } from "../../shared";
 import type {
   ProviderDeclaredRailSupport,
@@ -23,6 +22,9 @@ import type {
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
+import { type StripeCustomerInfo, stripeCounterpartyRequirements } from "./counterparty";
+
+export type { StripeCustomerInfo } from "./counterparty";
 
 const STRIPE_API_BASE_URL = "https://api.stripe.com";
 const STRIPE_API_VERSION = "2026-05-27.dahlia";
@@ -43,21 +45,6 @@ export const STRIPE_DECLARED_RAIL_SUPPORT = {
 interface StripeConfig {
   secretKey: string;
   publishableKey: string;
-}
-
-export interface StripeCustomerInfo {
-  email?: string;
-  firstName?: string;
-  lastName?: string;
-  dob?: { year: number; month: number; day: number };
-  address?: {
-    line1?: string;
-    line2?: string;
-    city?: string;
-    state?: string;
-    postalCode?: string;
-    country?: string;
-  };
 }
 
 type StripeFormValue =
@@ -151,49 +138,30 @@ function encodeStripeForm(form: StripeForm): URLSearchParams {
 }
 
 function buildCustomerInformation(info: StripeCustomerInfo | undefined): StripeForm | undefined {
-  if (!info) {
+  if (info === undefined) {
     return undefined;
   }
 
-  const out: StripeForm = {};
-  if (info.email) {
-    out.email = info.email;
+  const address: StripeForm = {
+    line1: info.address.line1,
+    city: info.address.city,
+    postal_code: info.address.postalCode,
+    country: info.address.country,
+  };
+  if (info.address.line2 !== undefined) {
+    address.line2 = info.address.line2;
   }
-  if (info.firstName) {
-    out.first_name = info.firstName;
-  }
-  if (info.lastName) {
-    out.last_name = info.lastName;
-  }
-  if (info.dob) {
-    out.dob = { year: info.dob.year, month: info.dob.month, day: info.dob.day };
-  }
-  if (info.address) {
-    const address: StripeForm = {};
-    if (info.address.line1) {
-      address.line1 = info.address.line1;
-    }
-    if (info.address.line2) {
-      address.line2 = info.address.line2;
-    }
-    if (info.address.city) {
-      address.city = info.address.city;
-    }
-    if (info.address.state) {
-      address.state = info.address.state;
-    }
-    if (info.address.postalCode) {
-      address.postal_code = info.address.postalCode;
-    }
-    if (info.address.country) {
-      address.country = info.address.country;
-    }
-    if (Object.keys(address).length > 0) {
-      out.address = address;
-    }
+  if (info.address.state !== undefined) {
+    address.state = info.address.state;
   }
 
-  return Object.keys(out).length > 0 ? out : undefined;
+  return {
+    email: info.email,
+    first_name: info.firstName,
+    last_name: info.lastName,
+    dob: { year: info.dob.year, month: info.dob.month, day: info.dob.day },
+    address,
+  };
 }
 
 function assertSessionField(value: string | undefined, field: string): string {
@@ -252,18 +220,10 @@ export class StripeRampClient implements RampProvider {
   readonly declaredRailSupport = STRIPE_DECLARED_RAIL_SUPPORT;
 
   validateCounterparty(
-    _counterparty: Counterparty,
+    counterparty: Counterparty,
     options: ValidateCounterpartyOptions
   ): CounterpartyRequirements {
-    if (options.direction === "offramp") {
-      return {
-        provider: this.id,
-        direction: options.direction,
-        status: "unsupported",
-        reason: "Stripe supports on-ramp only.",
-      };
-    }
-    return readyCounterparty(this.id, options.direction);
+    return stripeCounterpartyRequirements(counterparty, options);
   }
 
   async _discoverRails(_context: Parameters<RampProvider["_discoverRails"]>[0]): Promise<void> {}

@@ -1,7 +1,5 @@
 import { COUNTERPARTY_ENTITY_TYPES, RAMP_PROVIDERS } from "@sdp/types";
 import {
-  counterpartyAddressSchema as counterpartyAddressSchemaBase,
-  counterpartyBusinessIdentitySchema as counterpartyBusinessIdentitySchemaBase,
   counterpartyEntityTypeSchema as counterpartyEntityTypeSchemaBase,
   counterpartyIdentitySchema as counterpartyIdentitySchemaBase,
   counterpartyIdParamsSchema as counterpartyIdParamsSchemaBase,
@@ -64,6 +62,11 @@ export const counterpartyRequirementsQuerySchema = z
       description: "Ramp direction.",
       example: "onramp",
     }),
+    country: withOpenApi(onrampRequirementsQuerySchema.shape.country, {
+      description:
+        "The counterparty's ISO 3166-1 alpha-2 country for this ramp. Drives provider requirement fields and provider payloads.",
+      example: "US",
+    }),
     cryptoToken: withOpenApi(onrampRequirementsQuerySchema.shape.cryptoToken, {
       description: "Crypto asset symbol.",
       example: "USDC",
@@ -82,7 +85,7 @@ export const counterpartyRequirementsQuerySchema = z
   })
   .openapi({
     description:
-      "Ramp provider, direction, asset pair, and (for onramps) destination wallet used to evaluate counterparty requirements.",
+      "Ramp provider, direction, country, asset pair, and (for onramps) destination wallet used to evaluate counterparty requirements.",
   });
 
 const requirementFieldSchema = z.discriminatedUnion("kind", [
@@ -184,37 +187,6 @@ export const counterpartyAccountStatusSchema = z
   .enum(["active", "archived"])
   .openapi({ description: "Counterparty account status.", example: "active" });
 
-export const counterpartyAddressSchema = withOpenApi(
-  counterpartyAddressSchemaBase.extend({
-    line1: withOpenApi(counterpartyAddressSchemaBase.shape.line1, {
-      description: "Street address line 1.",
-      example: "123 Main St",
-    }),
-    line2: withOpenApi(counterpartyAddressSchemaBase.shape.line2, {
-      description: "Street address line 2.",
-      example: "Apt 4B",
-    }),
-    city: withOpenApi(counterpartyAddressSchemaBase.shape.city, {
-      description: "City.",
-      example: "San Francisco",
-    }),
-    postalCode: withOpenApi(counterpartyAddressSchemaBase.shape.postalCode, {
-      description: "Postal or ZIP code.",
-      example: "94105",
-    }),
-    countryCode: withOpenApi(counterpartyAddressSchemaBase.shape.countryCode, {
-      description: "ISO 3166-1 country code.",
-      example: "US",
-    }),
-    subdivisionCode: withOpenApi(counterpartyAddressSchemaBase.shape.subdivisionCode, {
-      description:
-        "Subdivision code (state, province, region) — bare 2-letter code (e.g. `CA`); ISO 3166-2 (`US-CA`) is also accepted, but some providers require the bare form.",
-      example: "CA",
-    }),
-  }),
-  { description: "Postal address for a counterparty." }
-);
-
 export const counterpartyIdentitySchema = withOpenApi(
   counterpartyIdentitySchemaBase.extend({
     firstName: withOpenApi(counterpartyIdentitySchemaBase.shape.firstName, {
@@ -237,65 +209,55 @@ export const counterpartyIdentitySchema = withOpenApi(
       description: "Date of birth (YYYY-MM-DD).",
       example: "1990-01-15",
     }),
-    phone: withOpenApi(counterpartyIdentitySchemaBase.shape.phone, {
-      description: "Contact phone number in E.164 format.",
-      example: "+14155551234",
-    }),
-    address: counterpartyAddressSchema,
   }),
   {
     description: "Personal identity details for an individual counterparty.",
   }
 );
 
-export const counterpartyBusinessIdentitySchema = withOpenApi(
-  counterpartyBusinessIdentitySchemaBase.extend({
-    address: counterpartyAddressSchema,
+const counterpartyDocFields = {
+  id: counterpartyIdParamSchema,
+  organizationId: orgIdParamSchema,
+  projectId: withOpenApi(projectIdParamSchema.nullable(), {
+    description: "Project scope when the counterparty is project-scoped.",
   }),
-  {
-    description: "Business identity details: the registered address.",
-  }
-);
+  externalId: withOpenApi(z.string().nullable(), {
+    description:
+      "Caller-supplied opaque identifier for cross-system reference. Do not place personal data in this indexed field.",
+    example: "customer_42",
+  }),
+  displayName: withOpenApi(z.string(), {
+    description:
+      "Human-readable, searchable display name. Keep it minimal because this indexed field is not application-encrypted.",
+    example: "Jane Doe",
+  }),
+  email: withOpenApi(z.string(), {
+    description: "Primary contact email.",
+    example: "jane@example.com",
+  }),
+  status: counterpartyStatusSchema,
+  createdBy: withOpenApi(userIdSchema.nullable(), {
+    description: "User who created the counterparty. Null when created via API key.",
+  }),
+  createdAt: withOpenApi(isoDateTimeSchema, {
+    description: "Creation timestamp.",
+    example: "2025-01-01T00:00:00.000Z",
+  }),
+  updatedAt: withOpenApi(isoDateTimeSchema, {
+    description: "Last update timestamp.",
+    example: "2025-01-02T00:00:00.000Z",
+  }),
+};
 
 export const counterpartySchema = withOpenApi(
-  z.object({
-    id: counterpartyIdParamSchema,
-    organizationId: orgIdParamSchema,
-    projectId: withOpenApi(projectIdParamSchema.nullable(), {
-      description: "Project scope when the counterparty is project-scoped.",
+  z.discriminatedUnion("entityType", [
+    z.object({
+      ...counterpartyDocFields,
+      entityType: z.literal("individual"),
+      identity: counterpartyIdentitySchema,
     }),
-    externalId: withOpenApi(z.string().nullable(), {
-      description:
-        "Caller-supplied opaque identifier for cross-system reference. Do not place personal data in this indexed field.",
-      example: "customer_42",
-    }),
-    entityType: counterpartyEntityTypeSchema,
-    displayName: withOpenApi(z.string(), {
-      description:
-        "Human-readable, searchable display name. Keep it minimal because this indexed field is not application-encrypted.",
-      example: "Jane Doe",
-    }),
-    email: withOpenApi(z.string(), {
-      description: "Primary contact email.",
-      example: "jane@example.com",
-    }),
-    identity: withOpenApi(
-      z.union([counterpartyIdentitySchema, counterpartyBusinessIdentitySchema]),
-      { description: "Identity details; shape depends on entityType." }
-    ),
-    status: counterpartyStatusSchema,
-    createdBy: withOpenApi(userIdSchema.nullable(), {
-      description: "User who created the counterparty. Null when created via API key.",
-    }),
-    createdAt: withOpenApi(isoDateTimeSchema, {
-      description: "Creation timestamp.",
-      example: "2025-01-01T00:00:00.000Z",
-    }),
-    updatedAt: withOpenApi(isoDateTimeSchema, {
-      description: "Last update timestamp.",
-      example: "2025-01-02T00:00:00.000Z",
-    }),
-  }),
+    z.object({ ...counterpartyDocFields, entityType: z.literal("business") }),
+  ]),
   { description: "Counterparty record." }
 );
 
@@ -510,9 +472,6 @@ export const createCounterpartyRequestSchema = withOpenApi(
         description: "Counterparty entity type.",
         example: "business",
       }),
-      identity: withOpenApi(counterpartyBusinessIdentitySchema, {
-        description: "Business identity details: the registered address.",
-      }),
     }),
   ]),
   { description: "Create counterparty request body." }
@@ -565,13 +524,10 @@ export const updateCounterpartyRequestSchema = withOpenApi(
       description: "Updated contact email.",
       example: "jane.doe@example.com",
     }),
-    identity: withOpenApi(
-      z.union([counterpartyIdentitySchema, counterpartyBusinessIdentitySchema]).optional(),
-      {
-        description:
-          "Updated identity details. Replaces the existing identity object and must match the counterparty's entityType.",
-      }
-    ),
+    identity: withOpenApi(counterpartyIdentitySchema.optional(), {
+      description:
+        "Updated individual identity details. Replaces the existing identity object and is rejected for business counterparties.",
+    }),
   }),
   {
     description: "Update counterparty request body. At least one field must be provided.",

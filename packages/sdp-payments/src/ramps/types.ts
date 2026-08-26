@@ -1,6 +1,7 @@
 import type {
   Counterparty,
   CounterpartyProviderData,
+  CountryCode,
   PaymentRampEstimate,
   PaymentRampQuote,
   RampTransferSettlement,
@@ -15,10 +16,14 @@ import {
   SOLANA_CRYPTO_RAILS,
 } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
-import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
+import type {
+  CollectedFieldData,
+  CounterpartyRequirements,
+  RampDirection,
+} from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import type { BvnkComplianceInput } from "./providers/bvnk/provider-data";
-import type { StripeCustomerInfo } from "./providers/stripe/client";
+import type { StripeCustomerInfo } from "./providers/stripe/counterparty";
 
 export type {
   BvnkComplianceInput,
@@ -34,7 +39,7 @@ export type {
   MuralPayinMethod,
   MuralTosStatus,
 } from "./providers/mural/provider-data";
-export type { StripeCustomerInfo } from "./providers/stripe/client";
+export type { StripeCustomerInfo } from "./providers/stripe/counterparty";
 
 export interface ProviderDirectionSupportSnapshot {
   currencies: Readonly<Record<string, RampCurrencyLimit>>;
@@ -168,6 +173,7 @@ export interface RampOnrampQuoteInput {
   fiatCurrency?: RampFiatCurrency;
   fiatAmount: string;
   destinationWalletAddress: string;
+  country: CountryCode;
   /** Handler-resolved id for the provider's external customer reference (MoonPay). */
   externalCustomerId: string;
   /** Handler-resolved Grid customer id (Lightspark); resolved via DB + getOrCreateCustomer. */
@@ -204,7 +210,9 @@ export interface RampOfframpQuoteInput {
 
 export interface ValidateCounterpartyOptions {
   direction: RampDirection;
+  country: CountryCode;
   providerData: CounterpartyProviderData;
+  collectedData?: CollectedFieldData;
   cryptoToken?: string;
   fiatCurrency?: RampFiatCurrency;
   destinationWalletAddress?: string;

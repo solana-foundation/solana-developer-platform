@@ -3,6 +3,7 @@
 import type {
   Counterparty,
   CounterpartyAccount,
+  CounterpartyIndividualIdentity,
   PaymentTransferSummary,
   RampProviderId,
   RampTransferSettlement,
@@ -21,8 +22,6 @@ import {
   HashIcon,
   LoaderCircleIcon,
   MailIcon,
-  MapPinIcon,
-  PhoneIcon,
   PlusIcon,
   ReceiptTextIcon,
   ShieldCheckIcon,
@@ -846,61 +845,35 @@ function FieldList({ rows }: { rows: InfoRowData[] }) {
   );
 }
 
+/**
+ * @param identity - The individual counterparty identity to display.
+ * @param t - The active message translator.
+ * @returns Detail rows for the individual identity section.
+ */
 function buildPersonalInfoRows(
-  counterparty: Counterparty,
+  identity: CounterpartyIndividualIdentity,
   t: ReturnType<typeof useTranslations>
 ): InfoRowData[] {
-  const rows: InfoRowData[] = [];
-
-  if (counterparty.entityType === "individual") {
-    const identity = counterparty.identity;
-    const fullName = [
-      identity.firstName,
-      identity.middleName,
-      identity.lastName,
-      identity.secondLastName,
-    ]
-      .filter((part): part is string => Boolean(part?.trim()))
-      .join(" ");
-    if (fullName)
-      rows.push({
-        label: t("DashboardPayments.counterparty.fullName"),
-        value: fullName,
-        icon: <UserIcon />,
-      });
-    rows.push({
+  const fullName = [
+    identity.firstName,
+    identity.middleName,
+    identity.lastName,
+    identity.secondLastName,
+  ]
+    .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
+    .join(" ");
+  return [
+    {
+      label: t("DashboardPayments.counterparty.fullName"),
+      value: fullName,
+      icon: <UserIcon />,
+    },
+    {
       label: t("DashboardPayments.counterparty.dateOfBirth"),
       value: identity.dateOfBirth,
       icon: <CakeIcon />,
-    });
-    rows.push({
-      label: t("DashboardPayments.counterparty.phone"),
-      value: identity.phone,
-      icon: <PhoneIcon />,
-    });
-  }
-
-  const address = counterparty.identity.address;
-  if (address) {
-    const formatted = [
-      address.line1,
-      address.line2,
-      address.city,
-      address.subdivisionCode,
-      address.postalCode,
-      address.countryCode,
-    ]
-      .filter((part): part is string => Boolean(part?.trim()))
-      .join(", ");
-    if (formatted)
-      rows.push({
-        label: t("DashboardPayments.counterparty.address"),
-        value: formatted,
-        icon: <MapPinIcon />,
-      });
-  }
-
-  return rows;
+    },
+  ];
 }
 
 export function CounterpartyDetailWorkspace({
@@ -917,7 +890,10 @@ export function CounterpartyDetailWorkspace({
   const [addOpen, setAddOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"details" | "transactions">("details");
-  const personalInfoRows = buildPersonalInfoRows(counterparty, t);
+  const personalInfoRows =
+    counterparty.entityType === "individual"
+      ? buildPersonalInfoRows(counterparty.identity, t)
+      : null;
 
   async function confirmDelete() {
     const result = await dashboardFetch(
@@ -996,7 +972,7 @@ export function CounterpartyDetailWorkspace({
             <div className="grid gap-6 lg:grid-cols-2">
               <section className="space-y-3">
                 <h3 className="text-2xl font-medium text-primary">
-                  {t("DashboardPayments.counterparty.identity")}
+                  {t("DashboardPayments.counterparty.details")}
                 </h3>
                 <div className="rounded-lg border border-border-default bg-surface-raised p-5">
                   <FieldList
@@ -1040,20 +1016,16 @@ export function CounterpartyDetailWorkspace({
                 </div>
               </section>
 
-              <section className="space-y-3">
-                <h3 className="text-2xl font-medium text-primary">
-                  {t("DashboardPayments.counterparty.personalInformation")}
-                </h3>
-                <div className="rounded-lg border border-border-default bg-surface-raised p-5">
-                  {personalInfoRows.length > 0 ? (
+              {personalInfoRows !== null ? (
+                <section className="space-y-3">
+                  <h3 className="text-2xl font-medium text-primary">
+                    {t("DashboardPayments.counterparty.personalInformation")}
+                  </h3>
+                  <div className="rounded-lg border border-border-default bg-surface-raised p-5">
                     <FieldList rows={personalInfoRows} />
-                  ) : (
-                    <p className="text-sm text-tertiary">
-                      {t("DashboardPayments.counterparty.noPersonalInformation")}
-                    </p>
-                  )}
-                </div>
-              </section>
+                  </div>
+                </section>
+              ) : null}
             </div>
 
             <section className="space-y-3">

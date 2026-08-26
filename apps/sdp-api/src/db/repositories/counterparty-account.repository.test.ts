@@ -71,12 +71,11 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
       entityType: "individual",
       displayName: "Acme Recipient",
       email: "acme@example.com",
+      providerData: {},
       identity: {
         firstName: "Acme",
         lastName: "Recipient",
         dateOfBirth: "1990-01-15",
-        phone: "+14155551234",
-        address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
       },
       createdBy: TEST_USER.id,
     });
@@ -587,12 +586,11 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
         entityType: "individual",
         displayName,
         email: `${externalId}@example.com`,
+        providerData: {},
         identity: {
           firstName: displayName,
           lastName: "Recipient",
           dateOfBirth: "1990-01-15",
-          phone: "+14155551234",
-          address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
         },
         createdBy: TEST_USER.id,
       });

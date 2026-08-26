@@ -36,7 +36,10 @@ import type {
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
-import { muralCounterpartyRequirements } from "./counterparty";
+import { type MuralPhysicalAddress, muralCounterpartyRequirements } from "./counterparty";
+
+export type { MuralPhysicalAddress } from "./counterparty";
+
 import {
   MURAL_KYC_STATUSES,
   MURAL_TOS_STATUSES,
@@ -281,8 +284,19 @@ const muralTosLinkSchema = z.object({ tosLink: z.string().min(1) });
 const muralKycLinkSchema = z.object({ kycLink: z.string().min(1) });
 
 export type MuralCreateOrganizationRequest =
-  | { type: "individual"; firstName: string; lastName: string; email: string }
-  | { type: "business"; businessName: string; email: string };
+  | {
+      type: "individual";
+      firstName: string;
+      lastName: string;
+      email: string;
+      physicalAddress: MuralPhysicalAddress;
+    }
+  | {
+      type: "business";
+      businessName: string;
+      email: string;
+      physicalAddress: MuralPhysicalAddress;
+    };
 
 const muralPayinMethodSchema = z.object({
   status: z.string(),
@@ -297,14 +311,6 @@ const muralAccountSchema = z.object({
 });
 
 const muralAccountsResponseSchema = z.array(muralAccountSchema);
-
-export interface MuralPhysicalAddress {
-  address1: string;
-  country: string;
-  state: string;
-  city: string;
-  zip: string;
-}
 
 export type MuralPayoutRecipientInfo =
   | {

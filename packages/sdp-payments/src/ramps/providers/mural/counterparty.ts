@@ -1,13 +1,58 @@
-import type { Counterparty } from "@sdp/types";
-import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
+import type { Counterparty, CountryCode } from "@sdp/types";
+import type {
+  CollectedFieldData,
+  CounterpartyRequirements,
+  RampDirection,
+} from "@sdp/types/ramp-requirements";
 import { badRequest, unsupportedCounterparty } from "../../../errors";
-import { readyCounterparty } from "../../requirements";
+import {
+  addressFields,
+  buildRequirementSchema,
+  parseCollectedAddress,
+  readyCounterparty,
+} from "../../requirements";
 import type { ValidateCounterpartyOptions } from "../../types";
 import {
   isMuralTosAccepted,
   type MuralOrganizationResolution,
   readMuralOrganization,
 } from "./provider-data";
+
+export interface MuralPhysicalAddress {
+  address1: string;
+  country: CountryCode;
+  state?: string;
+  city: string;
+  zip: string;
+}
+
+/**
+ * Builds Mural's physical address from transient ramp fields.
+ *
+ * @param country Counterparty country supplied for the ramp.
+ * @param collectedData Transient address values supplied for the ramp.
+ * @returns Mural's physical-address payload without persisting collected values.
+ */
+export function buildMuralPhysicalAddress(
+  country: CountryCode,
+  collectedData: CollectedFieldData | undefined
+): MuralPhysicalAddress {
+  const collected = parseCollectedAddress(
+    country,
+    collectedData,
+    "Missing or invalid physical address required for Mural."
+  );
+  const address: MuralPhysicalAddress = {
+    address1: collected.line1,
+    country,
+    city: collected.city,
+    zip: collected.postalCode,
+  };
+  if (collected.subdivisionCode !== undefined) {
+    address.state = collected.subdivisionCode;
+  }
+  return address;
+}
 
 export function muralOnboardingRequirements(
   org: MuralOrganizationResolution,
@@ -49,7 +94,7 @@ export function muralOnboardingRequirements(
 
 export function muralCounterpartyRequirements(
   _counterparty: Counterparty,
-  { direction, providerData, fiatCurrency }: ValidateCounterpartyOptions
+  { direction, country, providerData, fiatCurrency, collectedData }: ValidateCounterpartyOptions
 ): CounterpartyRequirements {
   if (direction === "offramp") {
     if (!fiatCurrency) {
@@ -63,5 +108,13 @@ export function muralCounterpartyRequirements(
       );
     }
   }
-  return muralOnboardingRequirements(readMuralOrganization(providerData), direction);
+  const organization = readMuralOrganization(providerData);
+  if (!organization.id) {
+    const fields = addressFields(country);
+    const parsed = buildRequirementSchema(fields).safeParse(collectedData);
+    if (!parsed.success) {
+      return { provider: "mural", direction, status: "collect", fields: [...fields] };
+    }
+  }
+  return muralOnboardingRequirements(organization, direction);
 }

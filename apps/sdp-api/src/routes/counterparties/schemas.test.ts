@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createCounterpartySchema, updateCounterpartyObjectSchema } from "./schemas";
+import {
+  counterpartyRequirementsQuerySchema,
+  createCounterpartySchema,
+  updateCounterpartyObjectSchema,
+} from "./schemas";
 
 const BASE_COUNTERPARTY = {
   entityType: "individual",
@@ -11,12 +15,6 @@ const BASE_IDENTITY = {
   firstName: "Jane",
   lastName: "Doe",
   dateOfBirth: "1990-01-15",
-  phone: "+14155551234",
-  address: {
-    line1: "1 Market St",
-    city: "San Francisco",
-    countryCode: "US",
-  },
 } as const;
 
 function futureIsoDate(): string {
@@ -66,41 +64,85 @@ describe("counterpartyIdentitySchema dateOfBirth", () => {
   });
 });
 
-describe("counterpartyIdentitySchema phone", () => {
-  it("rejects a non-E.164 short number", () => {
+describe("counterparty identity JIT fields", () => {
+  it("strips phone and address from create payloads", () => {
     const result = createCounterpartySchema.safeParse({
       ...BASE_COUNTERPARTY,
-      identity: { ...BASE_IDENTITY, phone: "12345" },
+      identity: {
+        ...BASE_IDENTITY,
+        phone: "+14155551234",
+        address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
+      },
     });
 
-    expect(result.success).toBe(false);
+    expect(result).toMatchObject({ success: true });
+    if (!result.success) throw new Error("Expected create payload to parse");
+    if (result.data.entityType !== "individual") {
+      throw new Error("Expected individual payload");
+    }
+    expect(result.data.identity).toEqual(BASE_IDENTITY);
   });
 
-  it("accepts a valid E.164 number", () => {
-    const result = createCounterpartySchema.safeParse({
-      ...BASE_COUNTERPARTY,
-      identity: { ...BASE_IDENTITY, phone: "+14155551234" },
+  it("strips phone and address from update payloads", () => {
+    const result = updateCounterpartyObjectSchema.safeParse({
+      identity: {
+        ...BASE_IDENTITY,
+        phone: "+14155551234",
+        address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
+      },
     });
 
-    expect(result.success).toBe(true);
+    expect(result).toMatchObject({ success: true });
+    if (!result.success) throw new Error("Expected update payload to parse");
+    expect(result.data.identity).toEqual(BASE_IDENTITY);
   });
 
-  it("rejects a number missing the leading plus", () => {
+  it("strips identity from business create payloads", () => {
     const result = createCounterpartySchema.safeParse({
-      ...BASE_COUNTERPARTY,
-      identity: { ...BASE_IDENTITY, phone: "14155551234" },
+      entityType: "business",
+      displayName: "Acme Inc.",
+      email: "ops@acme.example",
+      identity: {
+        address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
+      },
     });
 
-    expect(result.success).toBe(false);
+    expect(result).toMatchObject({ success: true });
+    if (!result.success) throw new Error("Expected business payload to parse");
+    expect(result.data).not.toHaveProperty("identity");
+  });
+});
+
+describe("counterpartyRequirementsQuerySchema country", () => {
+  const ONRAMP_QUERY = {
+    provider: "coinbase",
+    direction: "onramp",
+    cryptoToken: "USDC_SOLANA",
+    fiatCurrency: "USD",
+    destinationWallet: "wallet_1",
+  } as const;
+
+  it("requires a supported country for on-ramp requirements", () => {
+    expect(counterpartyRequirementsQuerySchema.safeParse(ONRAMP_QUERY).success).toBe(false);
+    expect(
+      counterpartyRequirementsQuerySchema.safeParse({ ...ONRAMP_QUERY, country: "US" }).success
+    ).toBe(true);
+    expect(
+      counterpartyRequirementsQuerySchema.safeParse({ ...ONRAMP_QUERY, country: "us" }).success
+    ).toBe(false);
   });
 
-  it("rejects an omitted phone", () => {
-    const result = createCounterpartySchema.safeParse({
-      ...BASE_COUNTERPARTY,
-      identity: { ...BASE_IDENTITY, phone: undefined },
-    });
-
-    expect(result.success).toBe(false);
+  it("requires a supported country for off-ramp requirements", () => {
+    const query = {
+      provider: "mural",
+      direction: "offramp",
+      cryptoToken: "USDC_SOLANA",
+      fiatCurrency: "USD",
+    } as const;
+    expect(counterpartyRequirementsQuerySchema.safeParse(query).success).toBe(false);
+    expect(counterpartyRequirementsQuerySchema.safeParse({ ...query, country: "GB" }).success).toBe(
+      true
+    );
   });
 });
 
@@ -135,40 +177,6 @@ describe("updateCounterpartyObjectSchema identity.dateOfBirth partial update", (
   it("rejects an omitted dateOfBirth when identity is provided", () => {
     const result = updateCounterpartyObjectSchema.safeParse({
       identity: { ...BASE_IDENTITY, dateOfBirth: undefined },
-    });
-
-    expect(result.success).toBe(false);
-  });
-});
-
-describe("updateCounterpartyObjectSchema identity.phone partial update", () => {
-  it("rejects a non-E.164 short number", () => {
-    const result = updateCounterpartyObjectSchema.safeParse({
-      identity: { ...BASE_IDENTITY, phone: "12345" },
-    });
-
-    expect(result.success).toBe(false);
-  });
-
-  it("accepts a valid E.164 number", () => {
-    const result = updateCounterpartyObjectSchema.safeParse({
-      identity: { ...BASE_IDENTITY, phone: "+14155551234" },
-    });
-
-    expect(result.success).toBe(true);
-  });
-
-  it("rejects a number missing the leading plus", () => {
-    const result = updateCounterpartyObjectSchema.safeParse({
-      identity: { ...BASE_IDENTITY, phone: "14155551234" },
-    });
-
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects an omitted phone when identity is provided", () => {
-    const result = updateCounterpartyObjectSchema.safeParse({
-      identity: { ...BASE_IDENTITY, phone: undefined },
     });
 
     expect(result.success).toBe(false);

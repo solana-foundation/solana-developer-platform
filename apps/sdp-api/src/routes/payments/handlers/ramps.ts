@@ -10,6 +10,7 @@ import {
   readBvnkOfframpWallet,
   readBvnkOnrampPaymentRuleState,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import { resolveCoinbasePhone } from "@sdp/payments/ramps/providers/coinbase/counterparty";
 import {
   isLightsparkExternalAccountActive,
   latestLightsparkPayoutAccount,
@@ -46,11 +47,11 @@ import { requireProjectId } from "@/lib/auth";
 import { getClientIp } from "@/lib/client-ip";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import {
-  AppError,
   badRequest,
   badRequestQuery,
   conflict,
   counterpartyNotProvisioned,
+  forbidden,
   internalError,
   notFound,
   unsupportedRampCorridor,
@@ -271,7 +272,7 @@ async function resolveRampQuoteRequest(
     projectId,
   });
   if (!counterparty) {
-    throw new AppError("NOT_FOUND", "Counterparty not found");
+    throw notFound("Counterparty");
   }
 
   const walletAddress = resolveWalletAddress(
@@ -439,7 +440,7 @@ async function persistRampQuoteTransfer(
   });
 
   if (!created) {
-    throw new AppError("INTERNAL_ERROR", "Failed to create ramp transfer record");
+    throw internalError("Failed to create ramp transfer record");
   }
 }
 
@@ -501,6 +502,7 @@ export async function advanceCounterpartyRequirements(
       }
       const customer = await ensureBvnkCustomer(c, input.counterparty, input.projectId, {
         fiatCurrency: input.fiatCurrency,
+        country: input.country,
         collectedData: input.collectedData,
       });
       const scope = await resolveScope(c);
@@ -517,13 +519,22 @@ export async function advanceCounterpartyRequirements(
         input.counterparty,
         input.projectId,
         customer,
-        { currency, network, destinationWalletAddress, fiatCurrency: input.fiatCurrency }
+        { currency, network, destinationWalletAddress, fiatCurrency: input.fiatCurrency },
+        { country: input.country, collectedData: input.collectedData }
       );
       return bvnkOnboardingRequirements(resolution, input.direction);
     }
     case "mural":
-      return resolveMuralRequirements(c, input.counterparty, input.projectId, input.direction);
+      return resolveMuralRequirements(
+        c,
+        input.counterparty,
+        input.projectId,
+        input.direction,
+        input.country,
+        input.collectedData
+      );
     case "coinbase":
+      resolveCoinbasePhone(input.collectedData);
       return readyCounterparty("coinbase", input.direction);
     case "stripe":
       return readyCounterparty("stripe", input.direction);
@@ -629,6 +640,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
         destinationWalletAddress,
+        country: input.country,
         externalCustomerId: counterparty.external_id ?? counterparty.id,
         redirectUrl: input.redirectUrl,
       });
@@ -644,6 +656,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
         destinationWalletAddress,
+        country: input.country,
         externalCustomerId: counterparty.external_id ?? counterparty.id,
         customerId,
         redirectUrl: input.redirectUrl,
@@ -683,6 +696,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
         destinationWalletAddress,
+        country: input.country,
         externalCustomerId: counterparty.external_id ?? counterparty.id,
       });
       break;
@@ -693,9 +707,10 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
         destinationWalletAddress,
+        country: input.country,
         externalCustomerId: counterparty.id,
         email: counterparty.email,
-        phone: counterparty.entity_type === "individual" ? counterparty.identity.phone : undefined,
+        phone: resolveCoinbasePhone(input.collectedData),
         domain: input.domain,
       });
       break;
@@ -703,6 +718,8 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
     case "stripe": {
       quote = await stripeOnrampQuote(c, {
         counterparty,
+        country: input.country,
+        collectedData: input.collectedData,
         destinationWalletAddress,
         cryptoToken: input.cryptoToken,
         fiatCurrency: input.fiatCurrency,
@@ -713,10 +730,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
     }
     default: {
       const exhaustive: never = input.provider;
-      throw new AppError(
-        "INTERNAL_ERROR",
-        `On-ramp quotes are not implemented for provider: ${String(exhaustive)}`
-      );
+      throw internalError(`On-ramp quotes are not implemented for provider: ${String(exhaustive)}`);
     }
   }
 
@@ -825,7 +839,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
           sourceWalletAddress,
           paymentTransferId: pendingTransfer.id,
           externalCustomerId: counterparty.external_id ?? counterparty.id,
-          bvnkCompliance: buildBvnkPartyDetails(counterparty, "ORIGINATOR"),
+          bvnkCompliance: buildBvnkPartyDetails(counterparty, "ORIGINATOR", input.country),
           bvnkOfframpWalletId: wallet.id,
         });
       } catch (error) {
@@ -859,8 +873,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       throw badRequest("Stripe off-ramp is not supported.");
     default: {
       const exhaustive: never = input.provider;
-      throw new AppError(
-        "INTERNAL_ERROR",
+      throw internalError(
         `Off-ramp quotes are not implemented for provider: ${String(exhaustive)}`
       );
     }
@@ -991,10 +1004,7 @@ export async function simulateSandboxTransfer(
   c: ValidatedBodyContext<typeof simulateSandboxTransferSchema>
 ) {
   if (resolveSdpEnvironment(c) !== "sandbox") {
-    throw new AppError(
-      "FORBIDDEN",
-      "Sandbox transfer simulation is only available in sandbox mode"
-    );
+    throw forbidden("Sandbox transfer simulation is only available in sandbox mode");
   }
 
   const body = c.req.valid("json");
@@ -1017,7 +1027,7 @@ export async function simulateSandboxTransfer(
         projectId,
       });
       if (!counterparty) {
-        throw new AppError("NOT_FOUND", "Counterparty not found");
+        throw notFound("Counterparty");
       }
       const destinationWalletAddress = resolveWalletAddress(
         scope.wallets,
@@ -1035,16 +1045,10 @@ export async function simulateSandboxTransfer(
       );
       const entry = readBvnkOnrampPaymentRuleState(counterparty.provider_data, key);
       if (!entry.walletId) {
-        throw new AppError(
-          "BAD_REQUEST",
-          "BVNK funding wallet is not provisioned yet for this destination."
-        );
+        throw badRequest("BVNK funding wallet is not provisioned yet for this destination.");
       }
       if (!isBvnkWalletActive(entry.walletStatus)) {
-        throw new AppError(
-          "BAD_REQUEST",
-          "BVNK funding wallet is not active for this destination."
-        );
+        throw badRequest("BVNK funding wallet is not active for this destination.");
       }
       transaction = await RAMP_PROVIDER_CLIENTS.bvnk.simulatePayin(rampRuntime(c), {
         walletId: entry.walletId,
@@ -1065,7 +1069,7 @@ export async function simulateSandboxTransfer(
         projectId,
       });
       if (!counterparty) {
-        throw new AppError("NOT_FOUND", "Counterparty not found");
+        throw notFound("Counterparty");
       }
       const org = readMuralOrganization(counterparty.provider_data);
       if (!org.id) {

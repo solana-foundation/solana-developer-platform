@@ -6,7 +6,6 @@ import { z } from "zod";
 import { divideDecimalAmounts, sumDecimalAmounts } from "../../../decimal";
 import { badRequest, providerNotConfigured, providerUnavailable } from "../../../errors";
 import { providerFetchJson } from "../../fetch";
-import { readyCounterparty } from "../../requirements";
 import {
   isSolanaCryptoAsset,
   RAMP_RAIL_DUMPS,
@@ -26,6 +25,7 @@ import type {
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
+import { coinbaseCounterpartyRequirements } from "./counterparty";
 
 // v1 API (Bearer JWT): buy options, buy quote — used for rail discovery + estimates.
 const CDP_V1_API_BASE_URL = "https://api.developer.coinbase.com";
@@ -170,18 +170,10 @@ export class CoinbaseRampClient implements RampProvider {
   readonly declaredRailSupport = COINBASE_DECLARED_RAIL_SUPPORT;
 
   validateCounterparty(
-    _counterparty: Counterparty,
+    counterparty: Counterparty,
     options: ValidateCounterpartyOptions
   ): CounterpartyRequirements {
-    if (options.direction !== "onramp") {
-      return {
-        provider: this.id,
-        direction: options.direction,
-        status: "unsupported",
-        reason: "Coinbase Onramp supports on-ramp only.",
-      };
-    }
-    return readyCounterparty(this.id, options.direction);
+    return coinbaseCounterpartyRequirements(counterparty, options);
   }
 
   async _discoverRails({
@@ -297,31 +289,35 @@ export class CoinbaseRampClient implements RampProvider {
         { provider: this.id }
       );
     }
-    if (!input.email || !input.phone) {
-      throw badRequest(
-        "Coinbase Onramp requires the counterparty to have an email and phone number.",
-        { provider: this.id }
-      );
+    if (!input.email) {
+      throw badRequest("Coinbase Onramp requires the counterparty email.", {
+        provider: this.id,
+      });
+    }
+    if (!input.phone) {
+      throw badRequest("Coinbase Onramp requires a collected phone number.", {
+        provider: this.id,
+      });
+    }
+    if (!input.fiatCurrency) {
+      throw badRequest("Coinbase Onramp requires fiatCurrency.", { provider: this.id });
     }
 
     const now = new Date().toISOString();
     const partnerUserRef = `sandbox-${input.externalCustomerId}`;
-    // Coinbase wants strict E.164; strip any formatting the counterparty phone was stored with.
-    const phoneNumber = input.phone.replace(/[\s()-]/g, "");
-
     const { order, paymentLink } = await this.request<CoinbaseCreateOrderResponse>(
       env,
       "POST",
       CDP_V2_ORDERS_URL,
       {
-        paymentCurrency: input.fiatCurrency ?? "USD",
+        paymentCurrency: input.fiatCurrency,
         purchaseCurrency: input.cryptoToken,
         paymentMethod: ONRAMP_PAYMENT_METHOD,
         destinationAddress: input.destinationWalletAddress,
         destinationNetwork: SOLANA_NETWORK,
         paymentAmount: input.fiatAmount,
         email: input.email,
-        phoneNumber,
+        phoneNumber: input.phone,
         agreementAcceptedAt: now,
         phoneNumberVerifiedAt: now,
         partnerUserRef,

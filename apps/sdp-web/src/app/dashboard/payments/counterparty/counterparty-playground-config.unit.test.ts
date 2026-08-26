@@ -15,8 +15,43 @@ describe("buildCounterpartyPlaygroundEndpointConfigs", () => {
 
     const configs = buildCounterpartyPlaygroundEndpointConfigs(counterparties, t);
 
-    expect(configs.find(({ id }) => id === "get-counterparty")?.pathFields[0]?.label).toBe(
-      "{counterpartyId}"
+    expect(configs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "get-counterparty",
+          pathFields: [expect.objectContaining({ label: "{counterpartyId}" })],
+        }),
+      ])
+    );
+  });
+
+  it("keeps removed identity fields out of create requests and business responses", () => {
+    const messages = getMessages("en");
+    const t = (
+      key: Parameters<typeof translate<typeof messages>>[1],
+      values?: Record<string, string | number>
+    ) => translate(messages, key, values);
+
+    const configs = buildCounterpartyPlaygroundEndpointConfigs([], t);
+
+    expect(configs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "create-counterparty",
+          bodyFields: [
+            expect.objectContaining({ key: "displayName" }),
+            expect.objectContaining({ key: "email" }),
+            expect.objectContaining({ key: "entityType" }),
+            expect.objectContaining({ key: "identity.firstName" }),
+            expect.objectContaining({ key: "identity.lastName" }),
+            expect.objectContaining({ key: "identity.dateOfBirth" }),
+            expect.objectContaining({ key: "externalId" }),
+          ],
+          expectedResponse: {
+            counterparty: expect.not.objectContaining({ identity: expect.anything() }),
+          },
+        }),
+      ])
     );
   });
 });

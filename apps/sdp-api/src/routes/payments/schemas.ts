@@ -1,6 +1,7 @@
 import { isAddress } from "@sdp/solana/address";
 import { isDecimalString } from "@sdp/solana/amount";
 import {
+  COUNTRY_CODES,
   type CoinbaseRampEvent,
   isWellKnownTokenSymbol,
   type MoneygramRampEvent,
@@ -661,10 +662,14 @@ export const rampsMemoSchema = z
     message: `rampsMemo must contain at most ${RAMPS_MEMO_LIMITS.maxEntries} key-value pairs`,
   });
 
+const rampCountrySchema = z.enum(COUNTRY_CODES);
+const collectedDataSchema = z.record(z.string(), z.string()).optional();
+
 export const createOnrampQuoteSchema = z.object({
   provider: rampProviderSchema,
   counterpartyId: z.string().min(1),
   destinationWallet: z.string().min(1),
+  country: rampCountrySchema,
   cryptoToken: rampCurrencyCodeSchema,
   fiatCurrency: rampFiatCurrencySchema,
   fiatAmount: paymentAmountSchema,
@@ -672,17 +677,25 @@ export const createOnrampQuoteSchema = z.object({
   rampsMemo: rampsMemoSchema.optional(),
   // Embedding domain for Coinbase's Apple Pay payment link (browser origin host).
   domain: z.string().min(1).optional(),
+  collectedData: collectedDataSchema,
 });
 
-const collectedDataSchema = z.record(z.string(), z.string()).optional();
-
 export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provider", [
-  z.object({ provider: z.literal("moonpay"), direction: rampDirectionSchema }),
-  z.object({ provider: z.literal("moneygram"), direction: rampDirectionSchema }),
+  z.object({
+    provider: z.literal("moonpay"),
+    direction: rampDirectionSchema,
+    country: rampCountrySchema,
+  }),
+  z.object({
+    provider: z.literal("moneygram"),
+    direction: rampDirectionSchema,
+    country: rampCountrySchema,
+  }),
   z.discriminatedUnion("direction", [
     z.object({
       provider: z.literal("bvnk"),
       direction: z.literal("onramp"),
+      country: rampCountrySchema,
       cryptoToken: rampCurrencyCodeSchema,
       destinationWallet: z.string().min(1),
       fiatCurrency: rampFiatCurrencySchema,
@@ -691,6 +704,7 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
     z.object({
       provider: z.literal("bvnk"),
       direction: z.literal("offramp"),
+      country: rampCountrySchema,
       cryptoToken: rampCurrencyCodeSchema,
       fiatCurrency: rampFiatCurrencySchema,
       collectedData: collectedDataSchema,
@@ -700,38 +714,55 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
     z.object({
       provider: z.literal("lightspark"),
       direction: z.literal("onramp"),
+      country: rampCountrySchema,
       collectedData: collectedDataSchema,
     }),
     z.object({
       provider: z.literal("lightspark"),
       direction: z.literal("offramp"),
+      country: rampCountrySchema,
       fiatCurrency: rampFiatCurrencySchema,
       collectedData: collectedDataSchema,
     }),
   ]),
-  z.object({ provider: z.literal("coinbase"), direction: rampDirectionSchema }),
+  z.object({
+    provider: z.literal("coinbase"),
+    direction: rampDirectionSchema,
+    country: rampCountrySchema,
+    collectedData: collectedDataSchema,
+  }),
   z.discriminatedUnion("direction", [
     z.object({
       provider: z.literal("mural"),
       direction: z.literal("onramp"),
+      country: rampCountrySchema,
       cryptoToken: rampCurrencyCodeSchema,
       destinationWallet: z.string().min(1),
       fiatCurrency: rampFiatCurrencySchema,
+      collectedData: collectedDataSchema,
     }),
     z.object({
       provider: z.literal("mural"),
       direction: z.literal("offramp"),
+      country: rampCountrySchema,
       cryptoToken: rampCurrencyCodeSchema,
       fiatCurrency: rampFiatCurrencySchema,
+      collectedData: collectedDataSchema,
     }),
   ]),
-  z.object({ provider: z.literal("stripe"), direction: rampDirectionSchema }),
+  z.object({
+    provider: z.literal("stripe"),
+    direction: rampDirectionSchema,
+    country: rampCountrySchema,
+    collectedData: collectedDataSchema,
+  }),
 ]);
 
 export const createOfframpQuoteSchema = z.object({
   provider: rampProviderSchema,
   counterpartyId: z.string().min(1),
   sourceWallet: z.string().min(1),
+  country: rampCountrySchema,
   cryptoToken: rampCurrencyCodeSchema,
   fiatCurrency: rampFiatCurrencySchema.optional(),
   cryptoAmount: paymentAmountSchema,

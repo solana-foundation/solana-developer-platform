@@ -1,6 +1,6 @@
 "use client";
 
-import type { RampProviderId } from "@sdp/types";
+import type { CountryCode, RampProviderId } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import type {
   CollectedFieldData,
@@ -27,6 +27,7 @@ async function fetchCounterpartyRequirements(
   const params = new URLSearchParams({
     provider,
     direction,
+    country: corridor.country,
     cryptoToken: corridor.cryptoToken,
     fiatCurrency: corridor.fiatCurrency,
   });
@@ -54,6 +55,7 @@ async function fetchCounterpartyRequirements(
 }
 
 export interface AdvanceRequirementsPayload {
+  country: CountryCode;
   cryptoToken: string;
   destinationWallet: string;
   fiatCurrency: RampFiatCurrency;
@@ -152,7 +154,9 @@ export function useCounterpartyRequirements(
   // the previous value during render (React's no-effect way to reset state on a change),
   // so stale KYC or bank details never leak into a different provider's payload.
   const subjectKey =
-    params === null ? "" : `${params.counterpartyId}:${params.provider}:${params.fiatCurrency}`;
+    params === null
+      ? ""
+      : `${params.counterpartyId}:${params.provider}:${params.country}:${params.fiatCurrency}`;
   const [trackedSubject, setTrackedSubject] = useState(subjectKey);
   const [onboarding, setOnboarding] = useState<CounterpartyRequirements | null>(null);
   const [lastAdvancePayload, setLastAdvancePayload] = useState<AdvanceRequirementsPayload | null>(
@@ -175,6 +179,7 @@ export function useCounterpartyRequirements(
           params.counterpartyId,
           params.provider,
           params.direction,
+          params.country,
           params.cryptoToken,
           params.fiatCurrency,
           params.direction === "onramp" ? params.destinationWallet : "",
@@ -185,12 +190,22 @@ export function useCounterpartyRequirements(
   // step list) can't flip out from under the user mid-flow.
   const { data, error } = useSWR(
     key,
-    ([, counterpartyId, provider, direction, cryptoToken, fiatCurrency, destinationWallet]) =>
+    ([
+      ,
+      counterpartyId,
+      provider,
+      direction,
+      country,
+      cryptoToken,
+      fiatCurrency,
+      destinationWallet,
+    ]) =>
       fetchCounterpartyRequirements(
         counterpartyId,
         provider,
         direction,
         {
+          country,
           cryptoToken,
           fiatCurrency,
           destinationWallet,

@@ -1,15 +1,92 @@
 import { SdpPaymentsError } from "@sdp/payments";
 import { MuralRampClient } from "@sdp/payments/ramps/providers/mural/client";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
-import type { SdpEnvironment } from "@sdp/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const client = new MuralRampClient();
 
 const RUNTIME: RampRuntimeContext = {
   env: { MURAL_PAY_SANDBOX_API_KEY: "mural_sandbox_key" },
-  mode: "sandbox" as SdpEnvironment,
+  mode: "sandbox",
 };
+
+describe("MuralRampClient.createOrganization", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("passes a transient physical address to Mural", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: "org_1",
+          type: "individual",
+          tosStatus: "NOT_ACCEPTED",
+          kycStatus: { type: "inactive" },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+
+    await client.createOrganization(RUNTIME, {
+      type: "individual",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      email: "ada@example.com",
+      physicalAddress: {
+        address1: "1 Market St",
+        city: "San Francisco",
+        zip: "94105",
+        state: "CA",
+        country: "US",
+      },
+    });
+
+    const request = fetchSpy.mock.calls[0];
+    expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({
+      physicalAddress: {
+        address1: "1 Market St",
+        city: "San Francisco",
+        zip: "94105",
+        state: "CA",
+        country: "US",
+      },
+    });
+  });
+
+  it("requires and sends a transient physical address for a business", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: "org_2",
+          type: "business",
+          tosStatus: "NOT_ACCEPTED",
+          kycStatus: { type: "inactive" },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+
+    await client.createOrganization(RUNTIME, {
+      type: "business",
+      businessName: "Acme Inc.",
+      email: "ops@acme.example",
+      physicalAddress: {
+        address1: "1 Market St",
+        city: "San Francisco",
+        zip: "94105",
+        state: "CA",
+        country: "US",
+      },
+    });
+
+    const request = fetchSpy.mock.calls[0];
+    expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({
+      type: "business",
+      physicalAddress: { address1: "1 Market St", country: "US" },
+    });
+  });
+});
 
 describe("MuralRampClient.parseMuralWebhookEvent", () => {
   it("maps verification_status_changed to a kyc_status event", () => {

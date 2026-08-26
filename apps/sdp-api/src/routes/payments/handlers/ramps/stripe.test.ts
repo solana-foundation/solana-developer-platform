@@ -1,7 +1,7 @@
+import { buildStripeCustomerInfo } from "@sdp/payments/ramps/providers/stripe/counterparty";
 import type { CounterpartyIndividualIdentity } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { buildStripeCustomerInfo } from "./stripe";
 
 function counterparty(identity: CounterpartyIndividualIdentity, email?: string): CounterpartyRow {
   return {
@@ -22,22 +22,21 @@ function counterparty(identity: CounterpartyIndividualIdentity, email?: string):
 }
 
 describe("buildStripeCustomerInfo", () => {
-  it("maps identity, parses ISO dob, and strips the ISO-3166-2 subdivision prefix", () => {
+  it("maps stored identity and a transient US address", () => {
     const info = buildStripeCustomerInfo(
       counterparty({
         firstName: "Jane",
         lastName: "Doe",
         dateOfBirth: "1990-07-04",
-        phone: "+15555550123",
-        address: {
-          line1: "1 Market St",
-          line2: "Suite 5",
-          city: "SF",
-          postalCode: "94080",
-          countryCode: "US",
-          subdivisionCode: "US-CA",
-        },
-      })
+      }),
+      "US",
+      {
+        "address.line1": "1 Market St",
+        "address.line2": "Suite 5",
+        "address.city": "SF",
+        "address.postalCode": "94080",
+        "address.subdivisionCode": "CA",
+      }
     );
 
     expect(info).toEqual({
@@ -62,37 +61,34 @@ describe("buildStripeCustomerInfo", () => {
         firstName: "Jane",
         lastName: "Doe",
         dateOfBirth: "1990-07-04",
-        phone: "+15555550123",
-        address: { line1: "1 A St", city: "SF", countryCode: "US", subdivisionCode: "CA" },
-      })
+      }),
+      "US",
+      {
+        "address.line1": "1 A St",
+        "address.city": "SF",
+        "address.postalCode": "94080",
+        "address.subdivisionCode": "CA",
+      }
     );
 
     expect(info.address).toMatchObject({ state: "CA" });
   });
 
-  it("drops a malformed date of birth instead of sending NaN parts to Stripe", () => {
-    expect(
+  it("rejects a malformed stored date of birth", () => {
+    expect(() =>
       buildStripeCustomerInfo(
         counterparty({
           firstName: "Jane",
           lastName: "Doe",
           dateOfBirth: "not-a-date",
-          phone: "+15555550123",
-          address: { line1: "1 A St", city: "SF", countryCode: "US" },
-        })
-      ).dob
-    ).toBeUndefined();
-
-    expect(
-      buildStripeCustomerInfo(
-        counterparty({
-          firstName: "Jane",
-          lastName: "Doe",
-          dateOfBirth: "1990-07",
-          phone: "+15555550123",
-          address: { line1: "1 A St", city: "SF", countryCode: "US" },
-        })
-      ).dob
-    ).toBeUndefined();
+        }),
+        "GB",
+        {
+          "address.line1": "1 A St",
+          "address.city": "London",
+          "address.postalCode": "SW1A 1AA",
+        }
+      )
+    ).toThrow(/dateOfBirth/);
   });
 });

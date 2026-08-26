@@ -902,8 +902,6 @@ describe("BVNK ramp webhook", () => {
           firstName: "Webhook",
           lastName: "Buyer",
           dateOfBirth: "1990-01-15",
-          phone: "+14155551234",
-          address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
         },
         {
           bvnk: {
@@ -995,7 +993,7 @@ describe("BVNK ramp webhook", () => {
     expect((await readBvnk())?.customer?.status).toBe("VERIFIED");
   });
 
-  it("provisions the funding wallet and payment rule after customer verification succeeds", async () => {
+  it("records customer verification without replaying transient JIT address data", async () => {
     await getDb(env)
       .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")
       .bind(
@@ -1022,23 +1020,9 @@ describe("BVNK ramp webhook", () => {
       )
       .run();
 
-    const getProfile = vi
-      .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getFiatWalletProfile")
-      .mockResolvedValue("profile_webhook_1");
-    const createWallet = vi
-      .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createFiatWallet")
-      .mockResolvedValue({
-        id: WALLET_ID,
-        name: ONRAMP_WALLET_NAME,
-        status: "ACTIVE",
-        bankAccount: {
-          accountNumber: "900473221558",
-          bankName: "LEAD BANK",
-        },
-      });
-    const createRule = vi
-      .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOnrampRule")
-      .mockResolvedValue({ id: "rule_webhook_verified_1", status: "ACTIVE" });
+    const getProfile = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getFiatWalletProfile");
+    const createWallet = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createFiatWallet");
+    const createRule = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOnrampRule");
 
     const res = await sendBvnkWebhook({
       event: "bvnk:customers:status-change",
@@ -1050,13 +1034,13 @@ describe("BVNK ramp webhook", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(getProfile).toHaveBeenCalledTimes(1);
-    expect(createWallet).toHaveBeenCalledTimes(1);
-    expect(createRule).toHaveBeenCalledTimes(1);
+    expect(getProfile).not.toHaveBeenCalled();
+    expect(createWallet).not.toHaveBeenCalled();
+    expect(createRule).not.toHaveBeenCalled();
 
     const entry = (await readBvnk())?.wallets?.[ONRAMP_PAYMENT_RULE_KEY];
-    expect(entry?.walletId).toBe(WALLET_ID);
-    expect(entry?.ruleId).toBe("rule_webhook_verified_1");
+    expect(entry?.walletId).toBeUndefined();
+    expect(entry?.ruleId).toBeUndefined();
 
     getProfile.mockRestore();
     createWallet.mockRestore();
@@ -1114,7 +1098,7 @@ describe("BVNK ramp webhook", () => {
     expect(entry?.bankAccount?.bankName).toBe("LEAD BANK");
   });
 
-  it("creates the payment rule when a wallet activates for a verified customer", async () => {
+  it("records an active wallet without replaying transient JIT address data", async () => {
     await getDb(env)
       .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")
       .bind(
@@ -1143,9 +1127,7 @@ describe("BVNK ramp webhook", () => {
       )
       .run();
 
-    const createRule = vi
-      .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOnrampRule")
-      .mockResolvedValue({ id: "rule_webhook_1", status: "ACTIVE" });
+    const createRule = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOnrampRule");
 
     const res = await sendBvnkWebhook({
       event: "ledger:v2:wallet:status-change",
@@ -1165,7 +1147,7 @@ describe("BVNK ramp webhook", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(createRule).toHaveBeenCalledTimes(1);
+    expect(createRule).not.toHaveBeenCalled();
 
     const row = await getDb(env)
       .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
@@ -1178,7 +1160,7 @@ describe("BVNK ramp webhook", () => {
         };
       }>();
     const entry = row?.provider_data.bvnk?.wallets?.[ONRAMP_PAYMENT_RULE_KEY];
-    expect(entry?.ruleId).toBe("rule_webhook_1");
+    expect(entry?.ruleId).toBeUndefined();
     expect(entry?.bankAccount?.accountNumber).toBe("900473221558");
 
     createRule.mockRestore();
@@ -1229,7 +1211,7 @@ describe("BVNK ramp webhook", () => {
     expect(row?.provider_data.bvnk?.offramp?.wallets?.USD?.status).toBe("ACTIVE");
   });
 
-  it("clears a stale provisioningError when a retry makes forward progress", async () => {
+  it("leaves a stale provisioning error for the next JIT submit retry", async () => {
     await getDb(env)
       .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")
       .bind(
@@ -1259,10 +1241,6 @@ describe("BVNK ramp webhook", () => {
       )
       .run();
 
-    const getWallet = vi
-      .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getFiatWallet")
-      .mockResolvedValue({ id: WALLET_ID, status: "PENDING" });
-
     const res = await sendBvnkWebhook({
       event: "bvnk:customers:status-change",
       data: {
@@ -1282,10 +1260,8 @@ describe("BVNK ramp webhook", () => {
         };
       }>();
     const entry = row?.provider_data.bvnk?.wallets?.[ONRAMP_PAYMENT_RULE_KEY];
-    expect(entry?.provisioningError).toBeUndefined();
+    expect(entry?.provisioningError).toBe("BVNK rule creation failed");
     expect(entry?.ruleId).toBeUndefined();
-
-    getWallet.mockRestore();
   });
 
   it("completes an on-ramp transfer from a payment webhook using the SDP customer reference", async () => {

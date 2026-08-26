@@ -1,5 +1,6 @@
 import { SdpPaymentsError } from "@sdp/payments";
 import {
+  buildMuralPhysicalAddress,
   muralCounterpartyRequirements,
   muralOnboardingRequirements,
 } from "@sdp/payments/ramps/providers/mural/counterparty";
@@ -23,13 +24,6 @@ function counterparty(overrides?: Partial<IndividualCounterparty>): IndividualCo
       firstName: "Ada",
       lastName: "Lovelace",
       dateOfBirth: "1990-01-15",
-      phone: "+14155551234",
-      address: {
-        line1: "1 Market St",
-        city: "San Francisco",
-        countryCode: "US",
-        subdivisionCode: "CA",
-      },
     },
     status: "active",
     createdBy: null,
@@ -43,19 +37,41 @@ function providerData(organization: MuralOrganizationResolution): CounterpartyPr
   return { mural: { organization } };
 }
 
-const USD = "USD" as RampFiatCurrency;
+const USD: RampFiatCurrency = "USD";
+const COLLECTED_ADDRESS = {
+  "address.line1": "1 Market St",
+  "address.city": "San Francisco",
+  "address.postalCode": "94105",
+  "address.subdivisionCode": "CA",
+} as const;
 
 describe("muralCounterpartyRequirements", () => {
-  it("starts onboarding for onramp without a fiat currency gate", () => {
-    expect(
-      muralCounterpartyRequirements(counterparty(), { direction: "onramp", providerData: {} })
-    ).toEqual({ provider: "mural", direction: "onramp", status: "onboarding_not_started" });
+  it("collects a physical address before starting onboarding", () => {
+    const requirements = muralCounterpartyRequirements(counterparty(), {
+      direction: "onramp",
+      country: "US",
+      providerData: {},
+    });
+    expect(requirements).toMatchObject({
+      provider: "mural",
+      direction: "onramp",
+      status: "collect",
+    });
+    if (requirements.status !== "collect") throw new Error("Expected collect requirements");
+    expect(requirements.fields.map((field) => field.key)).toEqual([
+      "address.line1",
+      "address.line2",
+      "address.city",
+      "address.postalCode",
+      "address.subdivisionCode",
+    ]);
   });
 
   it("is ready for onramp once the org is approved", () => {
     expect(
       muralCounterpartyRequirements(counterparty(), {
         direction: "onramp",
+        country: "US",
         providerData: providerData({ id: "org_1", tosStatus: "ACCEPTED", kycStatus: "approved" }),
       }).status
     ).toBe("ready");
@@ -63,7 +79,11 @@ describe("muralCounterpartyRequirements", () => {
 
   it("requires fiatCurrency for offramp", () => {
     expect(() =>
-      muralCounterpartyRequirements(counterparty(), { direction: "offramp", providerData: {} })
+      muralCounterpartyRequirements(counterparty(), {
+        direction: "offramp",
+        country: "US",
+        providerData: {},
+      })
     ).toThrow(SdpPaymentsError);
   });
 
@@ -71,6 +91,7 @@ describe("muralCounterpartyRequirements", () => {
     expect(
       muralCounterpartyRequirements(counterparty(), {
         direction: "offramp",
+        country: "US",
         providerData: {},
         fiatCurrency: "EUR" as RampFiatCurrency,
       }).status
@@ -81,8 +102,10 @@ describe("muralCounterpartyRequirements", () => {
     expect(
       muralCounterpartyRequirements(counterparty(), {
         direction: "offramp",
+        country: "US",
         providerData: {},
         fiatCurrency: USD,
+        collectedData: COLLECTED_ADDRESS,
       })
     ).toEqual({ provider: "mural", direction: "offramp", status: "onboarding_not_started" });
   });
@@ -91,6 +114,7 @@ describe("muralCounterpartyRequirements", () => {
     expect(
       muralCounterpartyRequirements(counterparty(), {
         direction: "offramp",
+        country: "US",
         providerData: providerData({
           id: "org_1",
           tosStatus: "ACCEPTED",
@@ -104,6 +128,18 @@ describe("muralCounterpartyRequirements", () => {
       direction: "offramp",
       status: "customer_verification_required",
       verificationUrl: "https://kyc.example/abc",
+    });
+  });
+});
+
+describe("buildMuralPhysicalAddress", () => {
+  it("builds a physical address from transient values and request country", () => {
+    expect(buildMuralPhysicalAddress("US", COLLECTED_ADDRESS)).toEqual({
+      address1: "1 Market St",
+      city: "San Francisco",
+      zip: "94105",
+      state: "CA",
+      country: "US",
     });
   });
 });

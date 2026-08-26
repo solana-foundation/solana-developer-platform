@@ -26,8 +26,6 @@ function counterparty(overrides?: Partial<IndividualCounterparty>): IndividualCo
       firstName: "Ada",
       lastName: "Lovelace",
       dateOfBirth: "1990-01-15",
-      phone: "+14155551234",
-      address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
     },
     status: "active",
     createdBy: null,
@@ -52,8 +50,6 @@ function counterpartyRow(
       firstName: "Ada",
       lastName: "Lovelace",
       dateOfBirth: "1990-01-15",
-      phone: "+14155551234",
-      address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
     },
     provider_data: {},
     status: "active",
@@ -65,12 +61,18 @@ function counterpartyRow(
 }
 
 function businessCounterparty(): BusinessCounterparty {
-  const base = counterparty();
   return {
-    ...base,
+    id: "cp_123",
+    organizationId: "org_123",
+    projectId: "proj_123",
+    externalId: null,
     entityType: "business",
     displayName: "Acme Corp",
-    identity: { address: base.identity.address },
+    email: "ops@acme.example",
+    status: "active",
+    createdBy: null,
+    createdAt: "2026-06-11T00:00:00.000Z",
+    updatedAt: "2026-06-11T00:00:00.000Z",
   };
 }
 
@@ -79,6 +81,7 @@ describe("lightsparkCounterpartyRequirements", () => {
     expect(
       lightsparkCounterpartyRequirements(counterparty(), {
         direction: "onramp",
+        country: "US",
         providerData: {},
       })
     ).toEqual({ provider: "lightspark", direction: "onramp", status: "ready" });
@@ -88,6 +91,7 @@ describe("lightsparkCounterpartyRequirements", () => {
     expect(() =>
       lightsparkCounterpartyRequirements(counterparty(), {
         direction: "offramp",
+        country: "US",
         providerData: {},
       })
     ).toThrowError(SdpPaymentsError);
@@ -96,6 +100,7 @@ describe("lightsparkCounterpartyRequirements", () => {
   it("collects USD payout bank fields including the rail select", () => {
     const requirements = lightsparkCounterpartyRequirements(counterparty(), {
       direction: "offramp",
+      country: "US",
       providerData: {},
       fiatCurrency: "USD",
     });
@@ -124,6 +129,7 @@ describe("lightsparkCounterpartyRequirements", () => {
   it("omits the rail select for single-rail currencies", () => {
     const requirements = lightsparkCounterpartyRequirements(counterparty(), {
       direction: "offramp",
+      country: "GB",
       providerData: {},
       fiatCurrency: "GBP",
     });
@@ -137,6 +143,7 @@ describe("lightsparkCounterpartyRequirements", () => {
   it("returns ready once a payout account is stored for the currency", () => {
     const requirements = lightsparkCounterpartyRequirements(counterparty(), {
       direction: "offramp",
+      country: "US",
       providerData: {
         lightspark: {
           customerId: "Customer:cus_123",
@@ -158,6 +165,7 @@ describe("lightsparkCounterpartyRequirements", () => {
   it("returns unsupported for currencies without a Grid payout account type", () => {
     const requirements = lightsparkCounterpartyRequirements(counterparty(), {
       direction: "offramp",
+      country: "US",
       providerData: {},
       fiatCurrency: "TRY",
     });
@@ -168,6 +176,7 @@ describe("lightsparkCounterpartyRequirements", () => {
   it("collects businessInfo fields for a business on-ramp without a Grid customer", () => {
     const requirements = lightsparkCounterpartyRequirements(businessCounterparty(), {
       direction: "onramp",
+      country: "US",
       providerData: {},
     });
 
@@ -184,6 +193,7 @@ describe("lightsparkCounterpartyRequirements", () => {
   it("returns ready for a business on-ramp once the Grid customer exists", () => {
     const requirements = lightsparkCounterpartyRequirements(businessCounterparty(), {
       direction: "onramp",
+      country: "US",
       providerData: { lightspark: { customerId: "Customer:cus_123" } },
     });
 
@@ -193,6 +203,7 @@ describe("lightsparkCounterpartyRequirements", () => {
   it("collects businessInfo fields before the payout fields for a business without a Grid customer", () => {
     const requirements = lightsparkCounterpartyRequirements(businessCounterparty(), {
       direction: "offramp",
+      country: "US",
       providerData: {},
       fiatCurrency: "USD",
     });
@@ -213,6 +224,7 @@ describe("lightsparkCounterpartyRequirements", () => {
   it("collects only payout fields once the business has a Grid customer", () => {
     const requirements = lightsparkCounterpartyRequirements(businessCounterparty(), {
       direction: "offramp",
+      country: "US",
       providerData: { lightspark: { customerId: "Customer:cus_123" } },
       fiatCurrency: "USD",
     });
@@ -289,23 +301,11 @@ describe("lightsparkPayoutCollectedData", () => {
 
 describe("buildLightsparkAccountInfo", () => {
   it("builds USD accountInfo with the selected rail and beneficiary", () => {
-    const accountInfo = buildLightsparkAccountInfo(
-      counterpartyRow({
-        identity: {
-          firstName: "Ada",
-          lastName: "Lovelace",
-          dateOfBirth: "1990-01-15",
-          phone: "+14155551234",
-          address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
-        },
-      }),
-      "USD",
-      {
-        paymentRails: "ACH",
-        routingNumber: "021000021",
-        accountNumber: "12345678901",
-      }
-    );
+    const accountInfo = buildLightsparkAccountInfo(counterpartyRow(), "USD", {
+      paymentRails: "ACH",
+      routingNumber: "021000021",
+      accountNumber: "12345678901",
+    });
 
     expect(accountInfo).toEqual({
       accountType: "USD_ACCOUNT",
@@ -342,12 +342,19 @@ describe("buildLightsparkAccountInfo", () => {
   });
 
   it("uses a business legal name for business counterparties", () => {
-    const individualRow = counterpartyRow();
     const businessRow: CounterpartyRow = {
-      ...individualRow,
+      id: "cp_123",
+      organization_id: "org_123",
+      project_id: "proj_123",
+      external_id: null,
       entity_type: "business",
       display_name: "Acme Corp",
-      identity: { address: individualRow.identity.address },
+      email: "ops@acme.example",
+      provider_data: {},
+      status: "active",
+      created_by: null,
+      created_at: "2026-06-11T00:00:00.000Z",
+      updated_at: "2026-06-11T00:00:00.000Z",
     };
     const accountInfo = buildLightsparkAccountInfo(businessRow, "GBP", {
       sortCode: "12-34-56",

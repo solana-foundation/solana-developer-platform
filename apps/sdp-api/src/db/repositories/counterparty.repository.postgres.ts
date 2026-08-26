@@ -1,6 +1,4 @@
 import type {
-  CounterpartyBusinessIdentity,
-  CounterpartyIdentity,
   CounterpartyIndividualIdentity,
   CounterpartyProviderData,
   CounterpartyStatus,
@@ -28,7 +26,7 @@ import {
 
 interface CounterpartyPiiPayload {
   email: string;
-  identity: CounterpartyIdentity;
+  identity?: CounterpartyIndividualIdentity;
 }
 
 function assertString(value: unknown, field: string): string {
@@ -36,6 +34,44 @@ function assertString(value: unknown, field: string): string {
     throw new Error(`Counterparty ${field} is missing`);
   }
   return value;
+}
+
+/**
+ * Requires the individual identity carried by a counterparty PII payload.
+ *
+ * @param identity Individual identity from encrypted or dual-write storage.
+ * @returns The required individual identity.
+ */
+function requireIndividualIdentity(
+  identity: CounterpartyIndividualIdentity | undefined
+): CounterpartyIndividualIdentity {
+  if (identity === undefined) {
+    throw new Error("Individual counterparty identity is missing");
+  }
+  return identity;
+}
+
+/**
+ * Projects a permissively parsed identity onto the supported public contract.
+ *
+ * @param identity Identity that may contain legacy extra keys.
+ * @returns The supported individual identity fields.
+ */
+function supportedIndividualIdentity(
+  identity: CounterpartyIndividualIdentity
+): CounterpartyIndividualIdentity {
+  const supported: CounterpartyIndividualIdentity = {
+    firstName: identity.firstName,
+    lastName: identity.lastName,
+    dateOfBirth: identity.dateOfBirth,
+  };
+  if (identity.middleName !== undefined) {
+    supported.middleName = identity.middleName;
+  }
+  if (identity.secondLastName !== undefined) {
+    supported.secondLastName = identity.secondLastName;
+  }
+  return supported;
 }
 
 function parseObject<T extends object>(value: string, field: string): T {
@@ -81,7 +117,10 @@ async function mapCounterpartyRow(
     usedFallback = true;
     pii = {
       email: assertString(row.email, "email"),
-      identity: row.identity as CounterpartyIdentity,
+      identity:
+        row.entity_type === "individual"
+          ? (row.identity as CounterpartyIndividualIdentity)
+          : undefined,
     };
   }
 
@@ -118,12 +157,11 @@ async function mapCounterpartyRow(
     ? {
         ...base,
         entity_type: "individual",
-        identity: pii.identity as CounterpartyIndividualIdentity,
+        identity: supportedIndividualIdentity(requireIndividualIdentity(pii.identity)),
       }
     : {
         ...base,
         entity_type: "business",
-        identity: pii.identity as CounterpartyBusinessIdentity,
       };
 }
 
@@ -149,15 +187,16 @@ async function encryptCounterpartyData(
     organizationId: string;
     projectId: string;
     email: string;
-    identity: CounterpartyIdentity;
+    identity: CounterpartyIndividualIdentity | undefined;
     providerData: CounterpartyProviderData;
   }
 ): Promise<{ piiEncrypted: string; providerDataEncrypted: string }> {
+  const piiPayload: CounterpartyPiiPayload = { email: input.email };
+  if (input.identity !== undefined) {
+    piiPayload.identity = input.identity;
+  }
   const [piiEncrypted, providerDataEncrypted] = await Promise.all([
-    cipher.encrypt(
-      piiContext({ ...input, field: "identity" }),
-      JSON.stringify({ email: input.email, identity: input.identity })
-    ),
+    cipher.encrypt(piiContext({ ...input, field: "identity" }), JSON.stringify(piiPayload)),
     cipher.encrypt(
       piiContext({ ...input, field: "provider_data" }),
       JSON.stringify(input.providerData)
@@ -248,6 +287,31 @@ async function mutateProviderDataLocked(
   });
 }
 
+/**
+ * Resolves the identity stored after a counterparty update.
+ *
+ * @param input Validated repository update input.
+ * @param current Current persisted counterparty.
+ * @param entityType Entity type after the update.
+ * @returns The individual identity, or undefined for a business.
+ */
+function updatedIdentity(
+  input: UpdateCounterpartyInput,
+  current: CounterpartyRow,
+  entityType: "individual" | "business"
+): CounterpartyIndividualIdentity | undefined {
+  if (entityType === "business") {
+    return undefined;
+  }
+  if (input.identity !== undefined) {
+    return input.identity;
+  }
+  if (current.entity_type === "individual") {
+    return current.identity;
+  }
+  throw new Error("Individual counterparty identity is required");
+}
+
 export function createPostgresCounterpartiesRepository(
   db: AppDb,
   cipher: PiiCipher
@@ -255,13 +319,14 @@ export function createPostgresCounterpartiesRepository(
   return {
     async createCounterparty(input: CreateCounterpartyInput) {
       const id = generateCounterpartyId();
-      const providerData = input.providerData ?? {};
+      const providerData = input.providerData;
+      const identity = input.entityType === "individual" ? input.identity : undefined;
       const encrypted = await encryptCounterpartyData(cipher, {
         counterpartyId: id,
         organizationId: input.organizationId,
         projectId: input.projectId,
         email: input.email,
-        identity: input.identity,
+        identity,
         providerData,
       });
       const refs = providerLookupReferences(providerData);
@@ -286,7 +351,7 @@ export function createPostgresCounterpartiesRepository(
             input.entityType,
             input.displayName,
             phase === "dual_write" ? input.email : null,
-            phase === "dual_write" ? input.identity : null,
+            phase === "dual_write" && identity !== undefined ? identity : null,
             phase === "dual_write" ? providerData : null,
             encrypted.piiEncrypted,
             encrypted.providerDataEncrypted,
@@ -323,9 +388,11 @@ export function createPostgresCounterpartiesRepository(
           return null;
         }
         const current = await mapCounterpartyRow(tx, cipher, row);
-        const email = input.email ?? current.email;
-        const identity = input.identity ?? current.identity;
-        const providerData = input.providerData ?? current.provider_data;
+        const email = input.email === undefined ? current.email : input.email;
+        const entityType = input.entityType === undefined ? current.entity_type : input.entityType;
+        const identity = updatedIdentity(input, current, entityType);
+        const providerData =
+          input.providerData === undefined ? current.provider_data : input.providerData;
         const encrypted = await encryptCounterpartyData(cipher, {
           counterpartyId: current.id,
           organizationId: current.organization_id,
@@ -354,9 +421,9 @@ export function createPostgresCounterpartiesRepository(
           )
           .bind(
             input.externalId !== undefined,
-            input.externalId ?? null,
-            input.entityType ?? current.entity_type,
-            input.displayName ?? current.display_name,
+            input.externalId === undefined ? null : input.externalId,
+            entityType,
+            input.displayName === undefined ? current.display_name : input.displayName,
             phase === "dual_write" ? email : null,
             phase === "dual_write" ? identity : null,
             phase === "dual_write" ? providerData : null,

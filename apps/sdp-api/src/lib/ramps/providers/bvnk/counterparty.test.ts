@@ -9,12 +9,18 @@ import { describe, expect, it } from "vitest";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 
 const ONRAMP_REQUIREMENTS_OPTIONS = {
+  country: "US",
   cryptoToken: "USDC_SOLANA",
   fiatCurrency: "USD",
   destinationWalletAddress: "dest",
 } as const;
 
 const BVNK_CDD_COLLECTED_DATA = {
+  "address.line1": "1 Market St",
+  "address.line2": "Suite 5",
+  "address.city": "San Francisco",
+  "address.postalCode": "94105",
+  "address.subdivisionCode": "TX",
   "taxIdentification.number": "123-45-6789",
   "taxIdentification.taxResidenceCountryCode": "US",
   nationality: "US",
@@ -44,13 +50,6 @@ function counterparty(overrides?: Partial<IndividualCounterparty>): IndividualCo
       firstName: "Ada",
       lastName: "Lovelace",
       dateOfBirth: "1990-01-15",
-      phone: "+14155551234",
-      address: {
-        line1: "1 Market St",
-        city: "San Francisco",
-        countryCode: "US",
-        subdivisionCode: "CA",
-      },
     },
     status: "active",
     createdBy: null,
@@ -86,6 +85,7 @@ describe("validateBvnkCounterparty", () => {
     const requirements = validateBvnkCounterparty(counterparty(), {
       direction: "onramp",
       ...ONRAMP_REQUIREMENTS_OPTIONS,
+      collectedData: BVNK_CDD_COLLECTED_DATA,
       providerData: {
         bvnk: {
           customer: { customerReference: "cust_123", status: "VERIFIED" },
@@ -111,6 +111,11 @@ describe("validateBvnkCounterparty", () => {
     expect(requirements).toMatchObject({ provider: "bvnk", direction: "onramp" });
     if (requirements.status !== "collect") throw new Error("Expected collect requirements");
     expect(requirements.fields.map((field) => field.key)).toEqual([
+      "address.line1",
+      "address.line2",
+      "address.city",
+      "address.postalCode",
+      "address.subdivisionCode",
       "taxIdentification.number",
       "taxIdentification.taxResidenceCountryCode",
       "nationality",
@@ -123,6 +128,20 @@ describe("validateBvnkCounterparty", () => {
       "cdd.estimatedYearlyIncome",
       "cdd.employmentIndustrySector",
     ]);
+  });
+
+  it("uses request country rather than stored identity to choose subdivision fields", () => {
+    const requirements = validateBvnkCounterparty(counterparty(), {
+      direction: "onramp",
+      ...ONRAMP_REQUIREMENTS_OPTIONS,
+      country: "GB",
+      providerData: {},
+    });
+
+    if (requirements.status !== "collect") {
+      throw new Error("Expected collect requirements");
+    }
+    expect(requirements.fields.map((field) => field.key)).not.toContain("address.subdivisionCode");
   });
 });
 
@@ -140,34 +159,36 @@ describe("normalizeBvnkStateCode", () => {
   });
 
   it("throws when the stripped remainder is not 2 characters", () => {
-    expect(() => normalizeBvnkStateCode("GB", "GB-ENG")).toThrowError(SdpPaymentsError);
+    expect(() => normalizeBvnkStateCode("GB", "GB-ENG")).toThrow(SdpPaymentsError);
   });
 
   it("does not strip a prefix that does not match the country code", () => {
-    expect(() => normalizeBvnkStateCode("US", "XX-TX")).toThrowError(SdpPaymentsError);
+    expect(() => normalizeBvnkStateCode("US", "XX-TX")).toThrow(SdpPaymentsError);
   });
 
   it("throws for a 1-character code", () => {
-    expect(() => normalizeBvnkStateCode("US", "X")).toThrowError(SdpPaymentsError);
+    expect(() => normalizeBvnkStateCode("US", "X")).toThrow(SdpPaymentsError);
   });
 });
 
 describe("buildBvnkIndividualPayload", () => {
-  it("normalizes an ISO-prefixed stored subdivision code to BVNK's bare stateCode", () => {
-    const row = counterpartyRow({
-      identity: {
-        ...counterparty().identity,
-        address: {
-          line1: "1 Market St",
-          city: "San Francisco",
-          countryCode: "US",
-          subdivisionCode: "US-TX",
-        },
+  it("builds the address from collected fields plus request country", () => {
+    const payload = buildBvnkIndividualPayload(
+      counterpartyRow(),
+      BVNK_CDD_COLLECTED_DATA,
+      "USD",
+      "US"
+    );
+
+    expect(payload).toMatchObject({
+      address: {
+        addressLine1: "1 Market St",
+        addressLine2: "Suite 5",
+        city: "San Francisco",
+        postalCode: "94105",
+        countryCode: "US",
+        stateCode: "TX",
       },
     });
-
-    const payload = buildBvnkIndividualPayload(row, BVNK_CDD_COLLECTED_DATA, "USD");
-
-    expect(payload.address).toMatchObject({ countryCode: "US", stateCode: "TX" });
   });
 });

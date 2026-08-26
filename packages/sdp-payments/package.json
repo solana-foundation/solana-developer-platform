@@ -99,6 +99,11 @@
       "import": "./src/ramps/providers/coinbase/client.ts",
       "default": "./src/ramps/providers/coinbase/client.ts"
     },
+    "./ramps/providers/coinbase/counterparty": {
+      "types": "./src/ramps/providers/coinbase/counterparty.ts",
+      "import": "./src/ramps/providers/coinbase/counterparty.ts",
+      "default": "./src/ramps/providers/coinbase/counterparty.ts"
+    },
     "./ramps/providers/lightspark/client": {
       "types": "./src/ramps/providers/lightspark/client.ts",
       "import": "./src/ramps/providers/lightspark/client.ts",
@@ -143,6 +148,11 @@
       "types": "./src/ramps/providers/stripe/client.ts",
       "import": "./src/ramps/providers/stripe/client.ts",
       "default": "./src/ramps/providers/stripe/client.ts"
+    },
+    "./ramps/providers/stripe/counterparty": {
+      "types": "./src/ramps/providers/stripe/counterparty.ts",
+      "import": "./src/ramps/providers/stripe/counterparty.ts",
+      "default": "./src/ramps/providers/stripe/counterparty.ts"
     }
   },
   "scripts": {

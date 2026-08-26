@@ -2,7 +2,8 @@ import { pathToFileURL } from "node:url";
 import type {
   CounterpartyAccountDetails,
   CounterpartyAccountProviderData,
-  CounterpartyIdentity,
+  CounterpartyEntityType,
+  CounterpartyIndividualIdentity,
   CounterpartyProviderData,
 } from "@sdp/types";
 import { type AppDb, closeDatabasePools, type DatabaseExecutor, getDb } from "../src/db";
@@ -23,14 +24,15 @@ import type { Env } from "../src/types/env";
 const BATCH_SIZE = 50;
 const CONCURRENCY = 5;
 
-type Phase = "backfill" | "verify" | "cutover" | "purge" | "restore-plaintext";
+type Phase = "backfill" | "verify" | "cutover" | "purge" | "restore-plaintext" | "strip-contact";
 
 interface CounterpartyStorageRow {
   id: string;
   organization_id: string;
   project_id: string;
+  entity_type: CounterpartyEntityType;
   email: string | null;
-  identity: CounterpartyIdentity | null;
+  identity: CounterpartyIndividualIdentity | Record<string, unknown> | null;
   provider_data: CounterpartyProviderData | null;
   pii_encrypted: string | null;
   provider_data_encrypted: string | null;
@@ -91,7 +93,7 @@ export async function backfillCounterparties(
   let total = 0;
   while (true) {
     const rows = await db.queryMany<CounterpartyStorageRow>(
-      `SELECT id, organization_id, project_id, email, identity, provider_data,
+      `SELECT id, organization_id, project_id, entity_type, email, identity, provider_data,
               pii_encrypted, provider_data_encrypted,
               bvnk_customer_reference, mural_organization_id
          FROM counterparties
@@ -126,7 +128,7 @@ export async function backfillCounterparties(
             identity: row.identity,
           })
         ));
-      if (row.email === null || row.identity === null) {
+      if (row.email === null || (row.entity_type === "individual" && row.identity === null)) {
         if (row.pii_encrypted === null) {
           throw new Error("Legacy counterparty PII is missing before backfill");
         }
@@ -259,7 +261,7 @@ export async function verifyCounterpartyPii(
   let counterpartyCursor = "";
   while (true) {
     const rows = await db.queryMany<CounterpartyStorageRow>(
-      `SELECT id, organization_id, project_id, email, identity, provider_data,
+      `SELECT id, organization_id, project_id, entity_type, email, identity, provider_data,
               pii_encrypted, provider_data_encrypted,
               bvnk_customer_reference, mural_organization_id
          FROM counterparties
@@ -272,17 +274,26 @@ export async function verifyCounterpartyPii(
       break;
     }
     await mapLimit(rows, async (row) => {
-      const pii = parseObject<{ email: string; identity: CounterpartyIdentity }>(
-        await cipher.decrypt(context(row, "counterparty", "identity"), row.pii_encrypted as string),
+      if (row.pii_encrypted === null || row.provider_data_encrypted === null) {
+        throw new Error("Counterparty PII ciphertext is incomplete");
+      }
+      const pii = parseObject<{
+        email: string;
+        identity?: CounterpartyIndividualIdentity | Record<string, unknown>;
+      }>(
+        await cipher.decrypt(context(row, "counterparty", "identity"), row.pii_encrypted),
         "counterparty PII"
       );
-      if (typeof pii.email !== "string" || !pii.identity) {
+      if (
+        typeof pii.email !== "string" ||
+        (row.entity_type === "individual" && pii.identity === undefined)
+      ) {
         throw new Error("Counterparty PII ciphertext is incomplete");
       }
       const providerData = parseObject<CounterpartyProviderData>(
         await cipher.decrypt(
           context(row, "counterparty", "provider_data"),
-          row.provider_data_encrypted as string
+          row.provider_data_encrypted
         ),
         "counterparty provider data"
       );
@@ -420,6 +431,88 @@ export async function purgeCounterpartyPii(db: AppDb, cipher: PiiCipher): Promis
   console.info(JSON.stringify({ phase: "purge", ...result, result: "ok" }));
 }
 
+/**
+ * Removes the JIT-only contact fields from a decrypted counterparty PII payload:
+ * individual identities lose `phone` and `address`; business rows lose their
+ * identity entirely (it only ever held an address).
+ *
+ * @param entityType - The counterparty's entity type.
+ * @param pii - The decrypted PII payload.
+ * @returns The stripped payload, or null when the payload holds nothing to strip.
+ */
+function stripContactFields(
+  entityType: CounterpartyEntityType,
+  pii: { email: string; identity?: Record<string, unknown> }
+): { email: string; identity?: Record<string, unknown> } | null {
+  if (entityType === "business") {
+    if (pii.identity === undefined) {
+      return null;
+    }
+    return { email: pii.email };
+  }
+  if (pii.identity === undefined) {
+    throw new Error("Individual counterparty PII is missing an identity");
+  }
+  if (!("phone" in pii.identity) && !("address" in pii.identity)) {
+    return null;
+  }
+  const { phone: _phone, address: _address, ...identity } = pii.identity;
+  return { email: pii.email, identity };
+}
+
+export async function stripCounterpartyContactPii(db: AppDb, cipher: PiiCipher): Promise<void> {
+  const result = await db.transaction(async (tx) => {
+    await acquireCounterpartyPiiLifecycleLock(tx);
+    let stripped = 0;
+    let cursor = "";
+    while (true) {
+      const rows = await tx.queryMany<CounterpartyStorageRow>(
+        `SELECT id, organization_id, project_id, entity_type, email, identity, provider_data,
+                pii_encrypted, provider_data_encrypted,
+                bvnk_customer_reference, mural_organization_id
+           FROM counterparties
+          WHERE id > ?
+          ORDER BY id
+          LIMIT ${BATCH_SIZE}`,
+        [cursor]
+      );
+      if (rows.length === 0) {
+        break;
+      }
+      await mapLimit(rows, async (row) => {
+        if (!row.pii_encrypted) {
+          throw new Error("Cannot strip contact PII from a row without ciphertext");
+        }
+        const pii = parseObject<{ email: string; identity?: Record<string, unknown> }>(
+          await cipher.decrypt(context(row, "counterparty", "identity"), row.pii_encrypted),
+          "counterparty PII"
+        );
+        const strippedPii = stripContactFields(row.entity_type, pii);
+        if (strippedPii === null) {
+          return;
+        }
+        const encrypted = await cipher.encrypt(
+          context(row, "counterparty", "identity"),
+          JSON.stringify(strippedPii)
+        );
+        let plaintextIdentity: Record<string, unknown> | null = null;
+        if (row.identity !== null && strippedPii.identity !== undefined) {
+          plaintextIdentity = strippedPii.identity;
+        }
+        stripped += await tx.execute(
+          `UPDATE counterparties
+              SET pii_encrypted = ?, identity = ?
+            WHERE id = ?`,
+          [encrypted, plaintextIdentity, row.id]
+        );
+      });
+      cursor = rows.at(-1)?.id ?? cursor;
+    }
+    return { stripped };
+  });
+  console.info(JSON.stringify({ phase: "strip-contact", ...result, result: "ok" }));
+}
+
 export async function restoreCounterpartyPiiPlaintext(db: AppDb, cipher: PiiCipher): Promise<void> {
   if (!process.argv.includes("--confirm-security-regression")) {
     throw new Error(
@@ -433,7 +526,7 @@ export async function restoreCounterpartyPiiPlaintext(db: AppDb, cipher: PiiCiph
     let counterpartyCursor = "";
     while (true) {
       const rows = await tx.queryMany<CounterpartyStorageRow>(
-        `SELECT id, organization_id, project_id, email, identity, provider_data,
+        `SELECT id, organization_id, project_id, entity_type, email, identity, provider_data,
                 pii_encrypted, provider_data_encrypted,
                 bvnk_customer_reference, mural_organization_id
            FROM counterparties
@@ -449,7 +542,10 @@ export async function restoreCounterpartyPiiPlaintext(db: AppDb, cipher: PiiCiph
         if (!row.pii_encrypted || !row.provider_data_encrypted) {
           throw new Error("Cannot restore plaintext from an incomplete encrypted row");
         }
-        const pii = parseObject<{ email: string; identity: CounterpartyIdentity }>(
+        const pii = parseObject<{
+          email: string;
+          identity?: CounterpartyIndividualIdentity | Record<string, unknown>;
+        }>(
           await cipher.decrypt(context(row, "counterparty", "identity"), row.pii_encrypted),
           "counterparty PII"
         );
@@ -460,11 +556,20 @@ export async function restoreCounterpartyPiiPlaintext(db: AppDb, cipher: PiiCiph
           ),
           "counterparty provider data"
         );
+        let identity: CounterpartyIndividualIdentity | Record<string, unknown> | null;
+        if (pii.identity === undefined) {
+          if (row.entity_type === "individual") {
+            throw new Error("Cannot restore plaintext without an individual identity");
+          }
+          identity = null;
+        } else {
+          identity = pii.identity;
+        }
         counterparties += await tx.execute(
           `UPDATE counterparties
               SET email = ?, identity = ?, provider_data = ?
             WHERE id = ?`,
-          [pii.email, pii.identity, providerData, row.id]
+          [pii.email, identity, providerData, row.id]
         );
       });
       counterpartyCursor = rows.at(-1)?.id ?? counterpartyCursor;
@@ -537,9 +642,12 @@ function requestedPhase(): Phase {
     phase !== "verify" &&
     phase !== "cutover" &&
     phase !== "purge" &&
-    phase !== "restore-plaintext"
+    phase !== "restore-plaintext" &&
+    phase !== "strip-contact"
   ) {
-    throw new Error("Expected phase: backfill | verify | cutover | purge | restore-plaintext");
+    throw new Error(
+      "Expected phase: backfill | verify | cutover | purge | restore-plaintext | strip-contact"
+    );
   }
   return phase;
 }
@@ -565,6 +673,10 @@ async function main(env: Env): Promise<void> {
   }
   if (phase === "purge") {
     await purgeCounterpartyPii(db, cipher);
+    return;
+  }
+  if (phase === "strip-contact") {
+    await stripCounterpartyContactPii(db, cipher);
     return;
   }
   await restoreCounterpartyPiiPlaintext(db, cipher);

@@ -1,6 +1,11 @@
 "use client";
 
-import type { Counterparty, CounterpartyEntityType, PaymentsDashboardWallet } from "@sdp/types";
+import type {
+  Counterparty,
+  CounterpartyEntityType,
+  CountryCode,
+  PaymentsDashboardWallet,
+} from "@sdp/types";
 import {
   RAMP_PROVIDER_SUPPORT_DETAILS,
   type RampFiatCurrency,
@@ -13,9 +18,11 @@ import {
   rampProviderServesCountry,
 } from "@sdp/types/payment-rails";
 import type { ProviderAvailabilityEntry, RampProviderId } from "@sdp/types/provider-access";
+import { GlobeIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import Image from "next/image";
 import { useCallback, useMemo, useState } from "react";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import type { RampProviderAccess } from "@/lib/provider-availability";
@@ -31,6 +38,8 @@ import {
   rampPairKey,
   type SelectedRampPair,
 } from "@/lib/ramps";
+import { cn } from "@/lib/utils";
+import { useCounterpartyMetadata } from "../../counterparty/use-counterparty-metadata";
 import { useRampEstimate } from "../hooks/use-ramp-estimate";
 import { CurrencyPairSelector } from "./currency-pair-selector";
 import { ProviderCard } from "./provider-card";
@@ -46,12 +55,14 @@ interface RampPairProviderSelectorProps {
   showWallet: boolean;
   selectedPair: SelectedRampPair;
   selectedProvider: RampProviderId | null;
+  selectedCountry: CountryCode | "";
   amount: string;
   onAmountChange: (amount: string) => void;
   onAmountBlur: () => void;
   onWalletChange: (walletId: string) => void;
   onPairChange: (pair: SelectedRampPair) => void;
   onProviderSelect: (provider: RampProviderId) => void;
+  onCountryChange: (country: string) => void;
 }
 
 interface ProviderExclusion {
@@ -82,13 +93,6 @@ function pairsForDirection(direction: RampDirection): readonly RampPair[] {
       return exhaustive;
     }
   }
-}
-
-function getCounterpartyCountry(counterparty: Counterparty | null): string | null {
-  if (counterparty === null) {
-    return null;
-  }
-  return counterparty.identity.address.countryCode;
 }
 
 function providerAccessReason(access: ProviderAvailabilityEntry): string | null {
@@ -163,7 +167,7 @@ function buildProviderExclusion(args: {
   selectedPairSupport: RampPair | null;
   selectedPair: SelectedRampPair;
   selectedCounterparty: Counterparty | null;
-  selectedCountry: string | null;
+  selectedCountry: CountryCode;
   amount: string;
 }): ProviderExclusion | null {
   const {
@@ -196,15 +200,13 @@ function buildProviderExclusion(args: {
     reasons.push(unsupportedPairReason(direction, selectedPair));
   }
 
-  if (selectedCountry !== null) {
-    const countryServed = rampProviderServesCountry(
-      support.countrySupport,
-      selectedCountry,
-      selectedPair.fiatCurrency
-    );
-    if (countryServed === false) {
-      reasons.push(`Not available in ${countryDisplayName(selectedCountry)}`);
-    }
+  const countryServed = rampProviderServesCountry(
+    support.countrySupport,
+    selectedCountry,
+    selectedPair.fiatCurrency
+  );
+  if (countryServed === false) {
+    reasons.push(`Not available in ${countryDisplayName(selectedCountry)}`);
   }
 
   if (selectedCounterparty !== null && support.entityTypes.length > 0) {
@@ -232,23 +234,33 @@ export function RampPairProviderSelector({
   showWallet,
   selectedPair,
   selectedProvider,
+  selectedCountry,
   amount,
   onAmountChange,
   onAmountBlur,
   onWalletChange,
   onPairChange,
   onProviderSelect,
+  onCountryChange,
 }: RampPairProviderSelectorProps) {
   const t = useTranslations();
+  const { metadata, loading: metadataLoading, error: metadataError } = useCounterpartyMetadata();
   const [unavailableDialogOpen, setUnavailableDialogOpen] = useState(false);
   const pairs = pairsForDirection(direction);
   const selectedPairSupport = useMemo(
     () => findRampPair(pairs, selectedPair),
     [pairs, selectedPair]
   );
-  const selectedCountry = useMemo(
-    () => getCounterpartyCountry(selectedCounterparty),
-    [selectedCounterparty]
+  const countryOptions = useMemo<ComboboxOption[]>(
+    () =>
+      metadata === null
+        ? []
+        : metadata.countries.map((country) => ({
+            value: country.code,
+            label: country.name,
+            description: country.code,
+          })),
+    [metadata]
   );
   const directionProviderOptions = useMemo(
     () =>
@@ -257,40 +269,43 @@ export function RampPairProviderSelector({
       ),
     [direction]
   );
-  const providerExclusions = useMemo(
-    () =>
-      directionProviderOptions.flatMap((option) => {
-        const exclusion = buildProviderExclusion({
-          option,
-          direction,
-          rampProviderAccess,
-          selectedPairSupport,
-          selectedPair,
-          selectedCounterparty,
-          selectedCountry,
-          amount,
-        });
-        return exclusion ? [exclusion] : [];
-      }),
-    [
-      amount,
-      direction,
-      directionProviderOptions,
-      rampProviderAccess,
-      selectedCounterparty,
-      selectedCountry,
-      selectedPair,
-      selectedPairSupport,
-    ]
-  );
+  const providerExclusions = useMemo<ProviderExclusion[]>(() => {
+    if (selectedCountry === "") {
+      return [];
+    }
+    return directionProviderOptions.flatMap((option) => {
+      const exclusion = buildProviderExclusion({
+        option,
+        direction,
+        rampProviderAccess,
+        selectedPairSupport,
+        selectedPair,
+        selectedCounterparty,
+        selectedCountry,
+        amount,
+      });
+      return exclusion ? [exclusion] : [];
+    });
+  }, [
+    amount,
+    direction,
+    directionProviderOptions,
+    rampProviderAccess,
+    selectedCounterparty,
+    selectedCountry,
+    selectedPair,
+    selectedPairSupport,
+  ]);
   const excludedProviderSet = useMemo(
     () => new Set(providerExclusions.map((exclusion) => exclusion.option.id)),
     [providerExclusions]
   );
-  const availableProviders = useMemo(
-    () => directionProviderOptions.filter((option) => !excludedProviderSet.has(option.id)),
-    [directionProviderOptions, excludedProviderSet]
-  );
+  const availableProviders = useMemo<RampProviderOption[]>(() => {
+    if (selectedCountry === "") {
+      return [];
+    }
+    return directionProviderOptions.filter((option) => !excludedProviderSet.has(option.id));
+  }, [directionProviderOptions, excludedProviderSet, selectedCountry]);
   const { estimatesByProvider, loading: estimatesLoading } = useRampEstimate({
     direction,
     selectedPair,
@@ -392,59 +407,77 @@ export function RampPairProviderSelector({
 
   return (
     <div className="space-y-7">
+      <Combobox
+        label={t("DashboardPayments.counterparty.country")}
+        value={selectedCountry === "" ? null : selectedCountry}
+        onChange={onCountryChange}
+        options={countryOptions}
+        placeholder={t("DashboardPayments.counterparty.selectCountry")}
+        searchPlaceholder={t("DashboardPayments.counterparty.searchCountries")}
+        icon={<GlobeIcon />}
+        required
+        isLoading={metadataLoading}
+        error={metadataError === null ? undefined : metadataError}
+        className={cn(
+          "border-[var(--input-border-idle)] bg-[var(--input-bg-idle)] hover:border-[var(--input-border-hover)] hover:bg-[var(--input-bg-hover)] focus-visible:border-[var(--input-border-focus)]"
+        )}
+      />
+
       <RampSelectionProvider value={selectionContextValue}>
         <div className="flex flex-col gap-2">
           <CurrencyPairSelector />
         </div>
       </RampSelectionProvider>
 
-      <div className="space-y-2.5">
-        <div className="flex items-center gap-3">
-          <p className="shrink-0 text-xl font-medium text-primary">
-            {t("DashboardPayments.ramps.chooseProvider")}
-          </p>
-          {providerExclusions.length > 0 ? (
-            <button
-              type="button"
-              onClick={() => setUnavailableDialogOpen(true)}
-              className="rounded-full bg-fill-subtle px-2 py-0.5 text-xs leading-none font-medium text-tertiary transition-colors hover:bg-fill-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tertiary focus-visible:ring-offset-2"
-            >
-              {t("DashboardPayments.ramps.unavailableCount", {
-                count: providerExclusions.length,
-              })}
-            </button>
-          ) : null}
-          <div className="h-px flex-1 bg-fill-strong" />
-        </div>
-
-        <div className="-mx-1.5 h-96 overflow-y-auto px-1.5 py-1">
-          <motion.div layout className="space-y-2">
-            <AnimatePresence mode="popLayout" initial={false}>
-              {availableProviders.map((option) => (
-                <ProviderCard
-                  key={option.id}
-                  option={option}
-                  active={selectedProvider === option.id}
-                  estimate={estimatesByProvider.get(option.id)}
-                  estimateLoading={estimatesLoading}
-                  onSelect={() => onProviderSelect(option.id)}
-                />
-              ))}
-            </AnimatePresence>
-
-            {availableProviders.length === 0 ? (
-              <motion.p
-                layout
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="py-2 text-sm text-tertiary"
+      {selectedCountry !== "" ? (
+        <div className="space-y-2.5">
+          <div className="flex items-center gap-3">
+            <p className="shrink-0 text-xl font-medium text-primary">
+              {t("DashboardPayments.ramps.chooseProvider")}
+            </p>
+            {providerExclusions.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setUnavailableDialogOpen(true)}
+                className="rounded-full bg-fill-subtle px-2 py-0.5 text-xs leading-none font-medium text-tertiary transition-colors hover:bg-fill-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tertiary focus-visible:ring-offset-2"
               >
-                {t("DashboardPayments.ramps.noProvidersAvailable")}
-              </motion.p>
+                {t("DashboardPayments.ramps.unavailableCount", {
+                  count: providerExclusions.length,
+                })}
+              </button>
             ) : null}
-          </motion.div>
+            <div className="h-px flex-1 bg-fill-strong" />
+          </div>
+
+          <div className="-mx-1.5 h-96 overflow-y-auto px-1.5 py-1">
+            <motion.div layout className="space-y-2">
+              <AnimatePresence mode="popLayout" initial={false}>
+                {availableProviders.map((option) => (
+                  <ProviderCard
+                    key={option.id}
+                    option={option}
+                    active={selectedProvider === option.id}
+                    estimate={estimatesByProvider.get(option.id)}
+                    estimateLoading={estimatesLoading}
+                    onSelect={() => onProviderSelect(option.id)}
+                  />
+                ))}
+              </AnimatePresence>
+
+              {availableProviders.length === 0 ? (
+                <motion.p
+                  layout
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="py-2 text-sm text-tertiary"
+                >
+                  {t("DashboardPayments.ramps.noProvidersAvailable")}
+                </motion.p>
+              ) : null}
+            </motion.div>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <Modal
         isOpen={unavailableDialogOpen && providerExclusions.length > 0}

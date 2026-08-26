@@ -1,3 +1,4 @@
+import { COUNTRY_CODES } from "@sdp/types";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import type { RequirementField } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
@@ -6,6 +7,7 @@ const providerField = z
   .enum(RAMP_PROVIDERS)
   .nullable()
   .refine((v): v is RampProviderId => v !== null, "Choose a provider.");
+const countryField = z.enum(COUNTRY_CODES, { error: "Choose a country." });
 
 /**
  * Builds a direction's full selection schema. Only the wallet copy and the amount
@@ -16,6 +18,7 @@ function makeRampSelectionSchema(walletMessage: string, amount: z.ZodType<number
     walletId: z.string().min(1, walletMessage),
     amount,
     provider: providerField,
+    country: countryField,
     counterpartyId: z.string().min(1, "Select a counterparty."),
   });
 }
@@ -53,11 +56,13 @@ export const depositAmountSchema = depositSelectionSchema.pick({
   walletId: true,
   amount: true,
   provider: true,
+  country: true,
 });
 export const sourceWalletSchema = withdrawSelectionSchema.pick({ walletId: true });
 export const withdrawAmountSchema = withdrawSelectionSchema.pick({
   amount: true,
   provider: true,
+  country: true,
 });
 
 /**
@@ -69,6 +74,7 @@ export const rampSelectionSchema = z.object({
   walletId: z.string(),
   amount: z.string(),
   provider: z.enum(RAMP_PROVIDERS).nullable(),
+  country: z.union([z.enum(COUNTRY_CODES), z.literal("")]),
   counterpartyId: z.string(),
 });
 

@@ -1,16 +1,7 @@
-import type { Country, CountryCode } from "./countries";
+import type { Country } from "./countries";
 
 export const COUNTERPARTY_ENTITY_TYPES = ["individual", "business"] as const;
 export type CounterpartyEntityType = (typeof COUNTERPARTY_ENTITY_TYPES)[number];
-
-export interface CounterpartyAddress {
-  line1: string;
-  line2?: string;
-  city: string;
-  postalCode?: string;
-  countryCode: CountryCode;
-  subdivisionCode?: string;
-}
 
 export const COUNTERPARTY_EMPLOYMENT_STATUSES = [
   "SELF_EMPLOYED",
@@ -104,21 +95,13 @@ export const COUNTERPARTY_INDUSTRY_SECTORS = [
   "WEAPONS",
 ] as const;
 
-export interface CounterpartyBusinessIdentity {
-  address: CounterpartyAddress;
-}
-
 export interface CounterpartyIndividualIdentity {
   firstName: string;
   middleName?: string;
   lastName: string;
   secondLastName?: string;
   dateOfBirth: string;
-  phone: string;
-  address: CounterpartyAddress;
 }
-
-export type CounterpartyIdentity = CounterpartyIndividualIdentity | CounterpartyBusinessIdentity;
 
 export type CounterpartyStatus = "active" | "archived";
 
@@ -127,7 +110,7 @@ export type CounterpartyProviderData = Record<string, unknown>;
 /** entityType discriminates the identity shape: checking it narrows `identity`. */
 export type CounterpartyEntityIdentity =
   | { entityType: "individual"; identity: CounterpartyIndividualIdentity }
-  | { entityType: "business"; identity: CounterpartyBusinessIdentity };
+  | { entityType: "business" };
 
 export type Counterparty = {
   id: string;
@@ -153,7 +136,7 @@ export interface UpdateCounterpartyRequest {
   entityType?: CounterpartyEntityType;
   displayName?: string;
   email?: string;
-  identity?: CounterpartyIdentity;
+  identity?: CounterpartyIndividualIdentity;
 }
 
 export interface CounterpartyResponse {

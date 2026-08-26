@@ -8,16 +8,8 @@ import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useZodForm, type ZodFormApi } from "@/lib/use-zod-form";
+import { defaultBasics, defaultIdentity, getSteps } from "./counterparty-create-defaults";
 import {
-  defaultAddress,
-  defaultBasics,
-  defaultIdentity,
-  getSteps,
-} from "./counterparty-create-defaults";
-import {
-  type AddressClean,
-  type AddressData,
-  addressSchema,
   type BasicsClean,
   type BasicsData,
   basicsSchema,
@@ -31,7 +23,6 @@ import {
 interface CounterpartyCreateContextValue {
   basics: ZodFormApi<BasicsData, BasicsClean>;
   identity: ZodFormApi<IdentityData, IdentityClean>;
-  address: ZodFormApi<AddressData, AddressClean>;
 
   step: number;
   steps: StepId[];
@@ -71,7 +62,6 @@ export function CounterpartyCreateProvider({
   );
   const basics = useZodForm(basicsSchema, defaultBasics, resolveValidationMessage);
   const identity = useZodForm(identitySchema, defaultIdentity, resolveValidationMessage);
-  const address = useZodForm(addressSchema, defaultAddress, resolveValidationMessage);
 
   const [step, setStep] = useState(0);
   const [direction, setDirection] = useState<1 | -1>(1);
@@ -88,8 +78,6 @@ export function CounterpartyCreateProvider({
         return basics.validate().ok;
       case "identity":
         return identity.validate().ok;
-      case "address":
-        return address.validate().ok;
       case "review":
         return true;
     }
@@ -113,9 +101,8 @@ export function CounterpartyCreateProvider({
 
     try {
       const basicsResult = basics.validate();
-      const addressResult = address.validate();
 
-      if (!basicsResult.ok || !addressResult.ok) {
+      if (!basicsResult.ok) {
         throw new Error("Invalid form state");
       }
 
@@ -133,13 +120,12 @@ export function CounterpartyCreateProvider({
         body = {
           ...commonFields,
           entityType: "individual",
-          identity: { ...identityResult.data, address: addressResult.data },
+          identity: identityResult.data,
         };
       } else {
         body = {
           ...commonFields,
           entityType: "business",
-          identity: { address: addressResult.data },
         };
       }
 
@@ -187,7 +173,6 @@ export function CounterpartyCreateProvider({
       value={{
         basics,
         identity,
-        address,
         step,
         steps,
         currentStepId,

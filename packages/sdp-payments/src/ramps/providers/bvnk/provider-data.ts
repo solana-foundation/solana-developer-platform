@@ -3,23 +3,28 @@ import type {
   BvnkOnboardingStatus,
   BvnkPaymentRampInstruction,
   CounterpartyEntityType,
+  CountryCode,
   SdpEnvironment,
 } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
 import type { CryptoAssetSymbol } from "@sdp/types/payment-rails";
-import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
+import type {
+  CollectedFieldData,
+  CounterpartyRequirements,
+  RampDirection,
+} from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import type { CounterpartyRow } from "../../../counterparty";
 import { badRequest, internalError } from "../../../errors";
 import { hashString } from "../../../hash";
 import { readRecord } from "../../../json";
-import { readyCounterparty } from "../../requirements";
+import { parseCollectedAddress, readyCounterparty } from "../../requirements";
 
 export interface BvnkRuleEntityAddress {
   addressLine1: string;
   addressLine2?: string;
-  postalCode?: string;
+  postalCode: string;
   city: string;
   countryCode: string;
   /** ISO 3166-1 alpha-2 country; BVNK rule validation rejects a blank `country`. */
@@ -179,7 +184,7 @@ export function normalizeBvnkStateCode(countryCode: string, subdivisionCode: str
       : subdivisionCode.toUpperCase();
   if (candidate.length !== 2) {
     throw badRequest("BVNK requires a 2-letter state/subdivision code.", {
-      field: "identity.address.subdivisionCode",
+      field: "address.subdivisionCode",
       value: subdivisionCode,
     });
   }
@@ -661,8 +666,44 @@ export async function bvnkRuleReference(
   return (await hashString(`bvnk-rule:${counterpartyId}:${onrampKey}`)).slice(0, 36);
 }
 
-export function buildBvnkRuleEntity(counterparty: CounterpartyRow): BvnkRuleEntity {
-  const address = counterparty.identity.address;
+/**
+ * Builds BVNK's address from transient ramp fields and request country.
+ *
+ * @param country Counterparty country supplied for the ramp.
+ * @param collectedData Transient address values supplied for this ramp.
+ * @returns BVNK's address payload without persisting collected values.
+ */
+export function buildBvnkAddress(
+  country: CountryCode,
+  collectedData: CollectedFieldData
+): BvnkRuleEntityAddress {
+  const collected = parseCollectedAddress(
+    country,
+    collectedData,
+    "Missing or invalid address details required for BVNK."
+  );
+  const address: BvnkRuleEntityAddress = {
+    addressLine1: collected.line1,
+    city: collected.city,
+    postalCode: collected.postalCode,
+    countryCode: country,
+    country,
+  };
+  if (collected.line2 !== undefined) {
+    address.addressLine2 = collected.line2;
+  }
+  if (collected.subdivisionCode !== undefined) {
+    address.stateCode = normalizeBvnkStateCode(country, collected.subdivisionCode);
+  }
+  return address;
+}
+
+export function buildBvnkRuleEntity(
+  counterparty: CounterpartyRow,
+  country: CountryCode,
+  collectedData: CollectedFieldData
+): BvnkRuleEntity {
+  const address = buildBvnkAddress(country, collectedData);
 
   return {
     type: BVNK_ENTITY_TYPE[counterparty.entity_type],
@@ -675,23 +716,14 @@ export function buildBvnkRuleEntity(counterparty: CounterpartyRow): BvnkRuleEnti
           dateOfBirth: counterparty.identity.dateOfBirth,
         }
       : { legalName: counterparty.display_name }),
-    address: {
-      addressLine1: address.line1,
-      ...(address.line2 ? { addressLine2: address.line2 } : {}),
-      ...(address.postalCode ? { postalCode: address.postalCode } : {}),
-      city: address.city,
-      countryCode: address.countryCode,
-      country: address.countryCode,
-      ...(address.subdivisionCode
-        ? { stateCode: normalizeBvnkStateCode(address.countryCode, address.subdivisionCode) }
-        : {}),
-    },
+    address,
   };
 }
 
 export function buildBvnkPartyDetails(
   counterparty: CounterpartyRow,
-  role: "ORIGINATOR" | "BENEFICIARY"
+  role: "ORIGINATOR" | "BENEFICIARY",
+  country: CountryCode
 ): BvnkComplianceInput {
   return {
     partyDetails: [
@@ -706,7 +738,7 @@ export function buildBvnkPartyDetails(
               dateOfBirth: counterparty.identity.dateOfBirth,
             }
           : {}),
-        countryCode: counterparty.identity.address.countryCode,
+        countryCode: country,
       },
     ],
   };

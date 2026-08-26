@@ -1613,6 +1613,10 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
         "Destination wallet (`walletId` from GET /v1/wallets) or Solana address for purchased crypto.",
       example: "privy_wallet_123",
     }),
+    country: withOpenApi(createOnrampQuoteSchemaBase.shape.country, {
+      description: "Counterparty country for this ramp as an uppercase ISO 3166-1 alpha-2 code.",
+      example: "US",
+    }),
     cryptoToken: withOpenApi(createOnrampQuoteSchemaBase.shape.cryptoToken, {
       description: "Crypto token symbol or provider currency code.",
       example: "USDC",
@@ -1633,6 +1637,11 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
       description: "Optional key-value memo stored on the resulting transfer.",
       example: { invoice: "INV-123", po: "PO-9" },
     }),
+    collectedData: withOpenApi(createOnrampQuoteSchemaBase.shape.collectedData, {
+      description:
+        "Provider requirement values collected just in time. SDP passes these to the provider and does not persist them.",
+      example: { phone: "+14155551234", "address.line1": "123 Main St" },
+    }),
   })
   .openapi({
     description:
@@ -1641,6 +1650,7 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
       provider: "moonpay",
       counterpartyId: "counterparty_example",
       destinationWallet: "privy_wallet_123",
+      country: "US",
       cryptoToken: "USDC",
       fiatCurrency: "USD",
       fiatAmount: "100.00",

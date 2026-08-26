@@ -416,6 +416,7 @@ describe("Payments routes — ramps", () => {
         },
         body: JSON.stringify({
           provider: "moonpay",
+          country: "US",
           counterpartyId,
           destinationWallet: TEST_WALLET_ID,
           cryptoToken: "SOL",
@@ -504,6 +505,7 @@ describe("Payments routes — ramps", () => {
         },
         body: JSON.stringify({
           provider: "moonpay",
+          country: "US",
           counterpartyId,
           destinationWallet: TEST_WALLET_ID,
           cryptoToken: "SOL",
@@ -545,6 +547,7 @@ describe("Payments routes — ramps", () => {
         },
         body: JSON.stringify({
           provider: "moonpay",
+          country: "US",
           counterpartyId,
           sourceWallet: TEST_WALLET_ID,
           cryptoToken: "SOL",
@@ -605,6 +608,7 @@ describe("Payments routes — ramps", () => {
         },
         body: JSON.stringify({
           provider: "moonpay",
+          country: "US",
           counterpartyId,
           destinationWallet: TEST_WALLET_ID,
           cryptoToken: "SOL",
@@ -638,6 +642,7 @@ describe("Payments routes — ramps", () => {
         },
         body: JSON.stringify({
           provider: "moonpay",
+          country: "US",
           counterpartyId,
           destinationWallet: TEST_WALLET_ID,
           cryptoToken: "SOL",
@@ -667,6 +672,7 @@ describe("Payments routes — ramps", () => {
         },
         body: JSON.stringify({
           provider: "moonpay",
+          country: "US",
           counterpartyId,
           destinationWallet: TEST_WALLET_ID,
           cryptoToken: "USDC",
@@ -691,6 +697,7 @@ describe("Payments routes — ramps", () => {
         },
         body: JSON.stringify({
           provider: "moonpay",
+          country: "US",
           counterpartyId,
           sourceWallet: TEST_WALLET_ID,
           cryptoToken: "USDC",
@@ -710,7 +717,7 @@ describe("Payments routes — ramps", () => {
     const depositAddress = TEST_SOLANA_ADDRESSES.wallet3;
     const counterpartyId = await seedCounterparty({
       externalId: "customer_456",
-      identity: { firstName: "Test", lastName: "User", address: { countryCode: "US" } },
+      identity: { firstName: "Test", lastName: "User", dateOfBirth: "1990-01-15" },
       providerData: {
         bvnk: {
           customer: { customerReference: "customer_456", status: "VERIFIED" },
@@ -753,6 +760,7 @@ describe("Payments routes — ramps", () => {
         },
         body: JSON.stringify({
           provider: "bvnk",
+          country: "US",
           counterpartyId,
           sourceWallet: TEST_WALLET_ID,
           cryptoToken: "USDC",
@@ -834,7 +842,7 @@ describe("Payments routes — ramps", () => {
   it("rejects a BVNK off-ramp quote until the payout beneficiary is provisioned", async () => {
     const counterpartyId = await seedCounterparty({
       externalId: "customer_456",
-      identity: { firstName: "Test", lastName: "User", address: { countryCode: "US" } },
+      identity: { firstName: "Test", lastName: "User", dateOfBirth: "1990-01-15" },
       providerData: {
         bvnk: {
           customer: { customerReference: "customer_456", status: "VERIFIED" },
@@ -853,6 +861,7 @@ describe("Payments routes — ramps", () => {
         },
         body: JSON.stringify({
           provider: "bvnk",
+          country: "US",
           counterpartyId,
           sourceWallet: TEST_WALLET_ID,
           cryptoToken: "USDC",
@@ -1126,6 +1135,7 @@ describe("Payments routes — ramps", () => {
           },
           body: JSON.stringify({
             provider: "bvnk",
+            country: "US",
             cryptoToken: "USDC",
             fiatCurrency: "EUR",
             fiatAmount: "100",

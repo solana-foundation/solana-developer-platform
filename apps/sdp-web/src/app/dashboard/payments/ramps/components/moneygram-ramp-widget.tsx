@@ -15,44 +15,6 @@ import { MONEYGRAM_SDK_URL } from "@/lib/moneygram-sdk";
 
 const SESSION_REFRESH_MS = 50 * 60 * 1000;
 
-const MONEYGRAM_DESTINATION_BY_FIAT = {
-  USD: "USA",
-  MXN: "MEX",
-} as const satisfies Partial<Record<RampFiatCurrency, string>>;
-
-const MONEYGRAM_ALPHA3_BY_ALPHA2 = {
-  US: "USA",
-  MX: "MEX",
-  CA: "CAN",
-} as const;
-
-function toMoneygramAlpha3(alpha2: string): string | undefined {
-  return MONEYGRAM_ALPHA3_BY_ALPHA2[alpha2 as keyof typeof MONEYGRAM_ALPHA3_BY_ALPHA2];
-}
-
-function toMoneygramSubdivision(alpha2CountryCode: string, subdivisionCode: string): string {
-  return subdivisionCode.includes("-")
-    ? subdivisionCode.toUpperCase()
-    : `${alpha2CountryCode.toUpperCase()}-${subdivisionCode.toUpperCase()}`;
-}
-
-function resolveDestinationSubdivision(
-  destinationCountry: string | undefined,
-  counterparty: Counterparty | null
-): string | undefined {
-  if (!destinationCountry || !counterparty) {
-    return undefined;
-  }
-  const address = counterparty.identity.address;
-  if (!address?.subdivisionCode) {
-    return undefined;
-  }
-  if (toMoneygramAlpha3(address.countryCode) !== destinationCountry) {
-    return undefined;
-  }
-  return toMoneygramSubdivision(address.countryCode, address.subdivisionCode);
-}
-
 interface MoneygramOnChainTransaction {
   chain: string;
   to: string;
@@ -92,18 +54,10 @@ interface MoneygramRampsConfig {
     lastName?: string;
     secondLastName?: string;
     email?: string;
-    phone?: string;
     dateOfBirth?: string;
-    addressLine1?: string;
-    city?: string;
-    postalCode?: string;
-    countryCode?: string;
-    countrySubdivisionCode?: string;
   };
   transaction?: {
     type: "off-ramp" | "on-ramp";
-    destinationCountry?: string;
-    destinationSubdivision?: string;
     destinationCurrency?: string;
     amount?: number;
     asset?: CryptoAssetSymbol;
@@ -173,53 +127,42 @@ function compactStrings(fields: Record<string, unknown>): Record<string, string>
   return result;
 }
 
+/**
+ * @param counterparty - The selected counterparty, when available.
+ * @returns Non-address customer fields that can safely prefill the hosted widget.
+ */
 function buildCustomerPrefill(counterparty: Counterparty | null): MoneygramRampsConfig["customer"] {
-  if (!counterparty) {
+  if (counterparty === null) {
     return undefined;
   }
-  const address = counterparty.identity.address;
+  if (counterparty.entityType === "business") {
+    return { email: counterparty.email };
+  }
   return {
-    ...(counterparty.entityType === "individual"
-      ? compactStrings({
-          firstName: counterparty.identity.firstName,
-          middleName: counterparty.identity.middleName,
-          lastName: counterparty.identity.lastName,
-          secondLastName: counterparty.identity.secondLastName,
-          dateOfBirth: counterparty.identity.dateOfBirth,
-          phone: counterparty.identity.phone,
-        })
-      : {}),
+    ...compactStrings({
+      firstName: counterparty.identity.firstName,
+      middleName: counterparty.identity.middleName,
+      lastName: counterparty.identity.lastName,
+      secondLastName: counterparty.identity.secondLastName,
+      dateOfBirth: counterparty.identity.dateOfBirth,
+    }),
     email: counterparty.email,
-    ...(address
-      ? {
-          addressLine1: address.line1,
-          city: address.city,
-          ...compactStrings({
-            postalCode: address.postalCode,
-            countryCode: toMoneygramAlpha3(address.countryCode),
-            countrySubdivisionCode: address.subdivisionCode
-              ? toMoneygramSubdivision(address.countryCode, address.subdivisionCode)
-              : undefined,
-          }),
-        }
-      : {}),
   };
 }
 
+/**
+ * @param fiatCurrency - The payout currency selected in the wizard.
+ * @param cryptoAsset - The crypto asset sent into the off-ramp.
+ * @param cryptoAmount - The crypto amount entered in the wizard.
+ * @returns The transaction fields used to initialize an off-ramp widget.
+ */
 function buildOfframpTransactionPrefill(
   fiatCurrency: RampFiatCurrency,
   cryptoAsset: CryptoAssetSymbol,
-  cryptoAmount: string,
-  counterparty: Counterparty | null
+  cryptoAmount: string
 ): MoneygramRampsConfig["transaction"] {
-  const destinationCountry =
-    MONEYGRAM_DESTINATION_BY_FIAT[fiatCurrency as keyof typeof MONEYGRAM_DESTINATION_BY_FIAT];
-  const destinationSubdivision = resolveDestinationSubdivision(destinationCountry, counterparty);
   return {
     type: "off-ramp",
-    ...(destinationCountry && destinationSubdivision
-      ? { destinationCountry, destinationSubdivision }
-      : {}),
     destinationCurrency: fiatCurrency,
     amount: toNumberAmount(cryptoAmount),
     asset: cryptoAsset,
@@ -327,12 +270,7 @@ export function MoneygramRampWidget({
           transaction:
             direction === "onramp"
               ? buildOnrampTransactionPrefill(cryptoAmount, cryptoAsset)
-              : buildOfframpTransactionPrefill(
-                  fiatCurrency,
-                  cryptoAsset,
-                  cryptoAmount,
-                  counterparty
-                ),
+              : buildOfframpTransactionPrefill(fiatCurrency, cryptoAsset, cryptoAmount),
           onSignTransaction: async (tx) => {
             if (tx.chain !== "solana" || tx.asset !== cryptoAsset) {
               throw new Error(
