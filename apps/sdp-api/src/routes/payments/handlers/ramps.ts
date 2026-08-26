@@ -562,9 +562,6 @@ export async function estimateAcrossProviders(
         if (error instanceof SdpPaymentsError && error.code === "ESTIMATE_NOT_AVAILABLE") {
           return { provider, status: "unsupported" };
         }
-        // The estimate contract stays HTTP 200 with a per-provider error
-        // entry, so this catch is the only place the failure is observable —
-        // log and capture it here or nowhere.
         const cause = error instanceof Error ? error : new Error(String(error));
         logEvent("error", {
           event: "sdp_api_ramp_provider_error",

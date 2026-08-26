@@ -309,12 +309,6 @@ export async function nullOnExpected<T>(
   }
 }
 
-/**
- * Clone an error with credential material scrubbed from its message, stack,
- * `context`, and `cause`, so it is safe to hand to the error tracker. Shared
- * by the global error handler and any handler that captures an exception it
- * intends to swallow (e.g. per-provider ramp estimate failures).
- */
 export function redactErrorForCapture(err: Error): Error {
   const sanitized = new Error(redactCredentialString(err.message));
   sanitized.name = err.name;
