@@ -12,6 +12,7 @@
  * Platform targets keep the ordinary fetch: they come from deployment config
  * and are legitimately private in local development and in the Surfpool suites.
  */
+import type { RpcTransport } from "@solana/kit";
 import { guardedFetch } from "@/services/guarded-egress";
 
 /**
@@ -32,6 +33,7 @@ export interface RpcEgressTarget {
 export interface RpcEgressInit {
   headers: Record<string, string>;
   body: string;
+  signal?: AbortSignal;
 }
 
 /** Whether the endpoint came from a customer and so has to be address-checked. */
@@ -53,6 +55,7 @@ export async function fetchRpcRelayTarget(
       method: "POST",
       headers: init.headers,
       body: init.body,
+      signal: init.signal,
       maxRedirects: RELAY_MAX_REDIRECTS,
     });
   }
@@ -61,5 +64,36 @@ export async function fetchRpcRelayTarget(
     method: "POST",
     headers: init.headers,
     body: init.body,
+    signal: init.signal,
   });
+}
+
+/**
+ * Adapt the canonical relay egress executor to a Solana Kit transport.
+ * Customer/BYOK targets therefore receive the same DNS and redirect guards as
+ * `/v1/rpc`, while managed platform targets keep their existing direct path.
+ */
+export function createRpcTransportForTarget(
+  target: RpcEgressTarget & { headers?: Record<string, string> }
+): RpcTransport {
+  return async function rpcTransport<TResponse>({
+    payload,
+    signal,
+  }: Parameters<RpcTransport>[0]): Promise<TResponse> {
+    const upstream = await fetchRpcRelayTarget(target, {
+      headers: {
+        ...target.headers,
+        Accept: "application/json",
+        "Content-Type": "application/json; charset=utf-8",
+      },
+      body: JSON.stringify(payload),
+      signal,
+    });
+
+    if (!upstream.ok) {
+      throw new Error(`RPC request failed with HTTP ${upstream.status}`);
+    }
+
+    return (await upstream.json()) as TResponse;
+  };
 }

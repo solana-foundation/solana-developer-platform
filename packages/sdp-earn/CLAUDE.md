@@ -152,7 +152,7 @@ pattern are in `docs/contributing/earn-pluggability-playbook.md` §6 and ADR 000
 |---|---|
 | Sandbox Kamino rows name devnet vaults you do not recognise | correct — they are the real devnet shelf (Allez, Steakhouse, RockawayX, Gauntlet Frontier and friends), read on-chain from `devkRng…`, not the mainnet names |
 | Catalogue shows only Kamino rows; no Ground strategies anywhere | correct — Ground is un-surfaced (`EARN_PROVIDER_SURFACING`, §5b). The rows are still in the DB; only the reads hide them |
-| No "Set up Earn"/"Add strategy"/"Change strategy" buttons; `/deposit` shows a notice | same cause: no surfaced provider can hold a program, so the dashboard is browse-only (§5b) |
+| No "Set up Earn"/"Add strategy"/"Change strategy" buttons; `/deposit` shows a notice | same cause: no surfaced provider can hold a program, so the custodial (program) affordances hide (§5b). The `vault_direct` deposit path is separate and unaffected |
 | `POST /v1/earn/programs` → 403 "is not currently offered" | the surfacing gate, not entitlement — no `providerOverrides` lifts it (§5b) |
 | Every request 500s | Redis missing/wrong port (rate limiter) |
 | `/v1/earn/*` → 403 | `MARKETS_ENABLED` or `EARN_ENABLED` unset/false |
@@ -167,7 +167,7 @@ pattern are in `docs/contributing/earn-pluggability-playbook.md` §6 and ADR 000
 | `POST /v1/earn/programs` → 400 "needs an idempotency key" | creation is key-REQUIRED since PRO-1670: send exactly one of body `requestId` (UUIDv4) or the `Idempotency-Key` header — never both |
 | Local total ≠ Ground console total | Ground sums the whole shared account; SDP shows only the wallets your org holds (§4b) |
 | Catalogue empty right after boot | sync cron runs on the hour; verify flags, provider credentials, and scheduler registration, then wait for a live pass |
-| Kamino rows appear disabled in the dashboard | expected, but NOT for a cluster reason any more — sandbox now catalogues real devnet vaults, so they are `fundable: true`. They stay browse-only because SDP has no deposit path for a `vault_direct` provider (`no-sdp-route`) |
+| Kamino rows appear disabled in the dashboard | read the row's badge: since PRO-1692 SDP HAS a `vault_direct` deposit path (`POST /v1/earn/vault-deposits`, signed from an org custody wallet), so sandbox devnet rows are depositable once the org holds the earn override (§5). `earnVaultDepositAvailability` (sdp-web `earn-surfacing.ts`) names the gate per row; locally it is usually entitlement (§5), and production stays `environment_unavailable` until PRO-1703 lands (`VAULT_DIRECT_DEPOSIT_ENVIRONMENTS`, @sdp/types) |
 | Kamino APY is blank in sandbox | correct: the metrics endpoint is mainnet's and 404s for devnet pubkeys, so `listStrategyMetrics` returns `[]` outside production and the row renders "—" rather than a fabricated rate |
 | Kamino APY looks stale in production | the 5-minute metrics refresh is a separate cron — check it registered (`isEarnEnabled`), not the hourly sync |
 | Local API boots on 8787 despite `PORT=…` | the dev wrapper reads **`SDP_API_PORT`**, not `PORT` (scripts/dev-local.mjs) |

@@ -4,7 +4,7 @@
  * Moves USDC from a custody wallet into the instance escrow on the instance's
  * chain (devnet). The tx is server-signed by the custody wallet, which is BOTH
  * the escrow `user` (moves the tokens) and the escrow `payer` / tx fee payer
- * (pays rent + the SOL fee). Broadcast targets `instance.chainRpcUrl`, NOT the
+ * (pays rent + the SOL fee). Broadcast uses the project's configured RPC, NOT the
  * default RPC or the gateway.
  *
  * TODO(gasless): switch to the Kora/native sponsored fee-payer model (the
@@ -53,13 +53,14 @@ import type { Env } from "@/types/env";
 import type { SpcAuthContext } from "./auth/gateway-auth";
 import { confirmAndPersistDeposit } from "./deposit-confirm";
 import { emitDepositEvent } from "./deposit-events";
-import { inferCluster, resolveChannelToken } from "./mint";
+import { resolveChannelToken } from "./mint";
+import type { PrivateChannelProjectRpcClient } from "./project-rpc";
 import { describeTxError } from "./tx-error";
 
 /** The instance fields the deposit needs. */
 type DepositInstance = Pick<
   PrivateChannelInstance,
-  "id" | "gatewayUrl" | "chainRpcUrl" | "escrowProgramId" | "escrowInstanceAddr"
+  "id" | "gatewayUrl" | "escrowProgramId" | "escrowInstanceAddr"
 >;
 
 export interface CreateChannelDepositInput {
@@ -82,6 +83,7 @@ export interface CreateChannelDepositInput {
    * `pcUserId` is recorded on the audit context.
    */
   gatewayAuth: SpcAuthContext;
+  projectRpc: PrivateChannelProjectRpcClient;
 }
 
 /**
@@ -100,6 +102,7 @@ async function broadcastDeposit(
     tokenProgram: Address;
     recipient: Address;
     amountBaseUnits: bigint;
+    projectRpc: PrivateChannelProjectRpcClient;
   }
 ): Promise<Signature> {
   const signer = await solanaServices.createOrgSigner(
@@ -118,22 +121,18 @@ async function broadcastDeposit(
   // `tokenProgram` is passed explicitly rather than left to the generated client's
   // classic-SPL default: it is an ATA seed, so the default would derive the wrong
   // `userAta`/`instanceAta` for a token-2022 mint.
-  const depositIx = await getDepositInstructionAsync({
-    payer: signer,
-    user: signer,
-    instance: address(input.instance.escrowInstanceAddr),
-    mint: input.mint,
-    tokenProgram: input.tokenProgram,
-    amount: input.amountBaseUnits,
-    recipient: input.recipient,
-  });
-
-  // Blockhash + broadcast + confirm all target the instance chain (devnet).
-  const chainRpc = solanaRpc.createRpc(env, { rpcUrl: input.instance.chainRpcUrl });
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(
-    chainRpc,
-    "confirmed"
-  );
+  const [depositIx, { blockhash, lastValidBlockHeight }] = await Promise.all([
+    getDepositInstructionAsync({
+      payer: signer,
+      user: signer,
+      instance: address(input.instance.escrowInstanceAddr),
+      mint: input.mint,
+      tokenProgram: input.tokenProgram,
+      amount: input.amountBaseUnits,
+      recipient: input.recipient,
+    }),
+    solanaRpc.getRecentBlockhash(input.projectRpc.rpc, "confirmed"),
+  ]);
 
   const message = pipe(
     createTransactionMessage({ version: 0 }),
@@ -145,7 +144,7 @@ async function broadcastDeposit(
   // The custody wallet is the only signer (payer + user); fully sign and broadcast.
   const signed = await signTransactionMessageWithSigners(message);
   const signedBytes = new Uint8Array(getTransactionEncoder().encode(signed));
-  return solanaRpc.sendTransaction(chainRpc, signedBytes);
+  return solanaRpc.sendTransaction(input.projectRpc.rpc, signedBytes);
 }
 
 /** Create a deposit intent: persist, broadcast to devnet, confirm on-chain. */
@@ -164,8 +163,10 @@ export async function createChannelDeposit(
     );
   }
 
-  const cluster = inferCluster(instance.chainRpcUrl);
-  const { mint, decimals, tokenProgram } = resolveChannelToken(cluster, input.mint);
+  const { mint, decimals, tokenProgram } = resolveChannelToken(
+    input.projectRpc.cluster,
+    input.mint
+  );
   const depositor = wallet.publicKey;
   const recipient = input.recipient ?? depositor;
 
@@ -187,7 +188,6 @@ export async function createChannelDeposit(
     // Audit-only snapshot; the oracle always reads the current instance row.
     context: {
       gatewayUrl: instance.gatewayUrl,
-      chainRpcUrl: instance.chainRpcUrl,
       escrowProgramId: instance.escrowProgramId,
       escrowInstanceAddr: instance.escrowInstanceAddr,
       actingUserId: input.userId,
@@ -212,6 +212,7 @@ export async function createChannelDeposit(
       tokenProgram: address(tokenProgram),
       recipient: address(recipient),
       amountBaseUnits,
+      projectRpc: input.projectRpc,
     });
   } catch (error) {
     const failureReason = describeTxError(error, "Deposit submission failed.");
@@ -242,9 +243,9 @@ export async function createChannelDeposit(
   // Confirm on the instance chain and persist the outcome. A transport/timeout
   // error here leaves the deposit `submitted` (the reconciler finalizes it); only
   // a real on-chain error marks it `failed`. See `confirmAndPersistDeposit`.
-  const settled = await confirmAndPersistDeposit(env, repo, {
+  const settled = await confirmAndPersistDeposit(repo, {
     depositId: created.id,
-    chainRpcUrl: instance.chainRpcUrl,
+    rpc: input.projectRpc.rpc,
     signature,
   });
   if (settled) {
