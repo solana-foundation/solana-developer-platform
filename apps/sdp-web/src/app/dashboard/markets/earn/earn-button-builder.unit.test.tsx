@@ -148,7 +148,8 @@ describe("EarnButtonBuilder", () => {
     // transaction, the customer's wallet signs, submit the signed bytes. The
     // treasury route (vault-deposits + custodyWalletId) must not reappear
     // here — a B2B2C partner cannot name a custody wallet.
-    const code = screen.getByText(/v1\/earn\/external-wallet\/deposit-transactions/).textContent ?? "";
+    const code =
+      screen.getByText(/v1\/earn\/external-wallet\/deposit-transactions/).textContent ?? "";
     expect(code).toContain("/v1/earn/external-wallet/deposits");
     expect(code).toContain('"Idempotency-Key": idempotencyKey');
     expect(code).not.toContain("crypto.randomUUID()");
