@@ -20,7 +20,7 @@ import {
   errorResponses,
   jsonContent,
   projectScopeHeaders,
-  projectScopeWithIdempotencyHeaders,
+  projectScopeWithRequiredIdempotencyHeaders,
 } from "./helpers";
 
 const earnConfigurationSecurity: Array<Record<string, string[]>> = [
@@ -140,7 +140,7 @@ export function registerEarnPaths(registry: OpenAPIRegistry) {
       "built transaction is consumable exactly once.",
     security: earnConfigurationSecurity,
     request: {
-      headers: projectScopeWithIdempotencyHeaders,
+      headers: projectScopeWithRequiredIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(earnExternalWalletSubmitRequest),
@@ -194,7 +194,7 @@ export function registerEarnPaths(registry: OpenAPIRegistry) {
       "transaction.",
     security: earnConfigurationSecurity,
     request: {
-      headers: projectScopeWithIdempotencyHeaders,
+      headers: projectScopeWithRequiredIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(earnExternalWalletSubmitRequest),
