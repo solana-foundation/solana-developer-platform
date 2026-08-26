@@ -79,7 +79,10 @@ const earnOwnerAddressSchema = z
   .openapi({
     description:
       "The external wallet: the customer's own Solana address. It signs, owns the shares, " +
-      "and pays the fee; SDP holds no key for it.",
+      "and pays the fee; SDP holds no key for it. The pattern is necessary but not " +
+      "sufficient — the string must additionally decode to a 32-byte public key, which no " +
+      "pattern can express, so a well-shaped base58 string that does not decode still " +
+      "answers 400.",
     example: solanaAddressExample,
   });
 
