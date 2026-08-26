@@ -1,0 +1,47 @@
+---
+title: Overview
+description: The interfaces, environments, and conventions you build against.
+---
+
+SDP exposes two interfaces that operate over the same backend and enforce the same permissions, policies, and audit trails:
+
+- **Dashboard** — browser-based UI for setup, token management, and compliance operations. Sign in with email, Google, or GitHub.
+- **REST API** — programmatic access for backend integrations. Authenticate with an API key in the `Authorization` header.
+
+Everything the dashboard does is available through the API. Build against the API for automation and integrations; use the dashboard to set up your organization, inspect state, and perform one-off operations.
+
+## Environments
+
+Environments are a property of the **project**, not of individual requests. Every resource — and every API key — belongs to a project, and inherits that project's environment.
+
+| Environment  | Network      | API key prefix |
+| ------------ | ------------ | -------------- |
+| `sandbox`    | devnet       | `sk_test_`     |
+| `production` | mainnet-beta | `sk_live_`     |
+
+Both environments expose identical APIs. Develop and test against a sandbox project, then switch to production by swapping your API key.
+
+## Response conventions
+
+Every successful response wraps its payload in a `data` envelope with request metadata:
+
+```json
+{
+  "data": { ... },
+  "meta": { "requestId": "req_...", "timestamp": "2026-07-31T12:00:00.000Z" }
+}
+```
+
+Errors return a machine-readable `code` alongside a human-readable `message`:
+
+```json
+{
+  "error": { "code": "INVALID_API_KEY", "message": "Invalid API key" }
+}
+```
+
+Include the `requestId` when reporting an issue — it links your request to our internal traces and audit records.
+
+## Execution model
+
+SDP executes every operation: it builds the transaction, signs it with the custody wallet's key, and submits it to Solana.

@@ -20,7 +20,7 @@ validateCounterparty(counterparty: Counterparty, options: ValidateCounterpartyOp
 
 `options` = `{ direction, providerData, cryptoToken?, fiatCurrency?, destinationWalletAddress? }`. Trivial bodies (`readyCounterparty(...)`, or an `unsupported` guard) stay inline in the client; non-trivial decisions delegate to `providers/<id>/counterparty.ts`.
 
-`CounterpartyRequirements` is discriminated by `provider`; the `status` union (`packages/sdp-types/src/ramp-requirements.ts`):
+`CounterpartyRequirements` is discriminated by `provider`; the `status` union (`packages/sdp-types/src/ramp-requirements.ts`). Every provider gets these three:
 
 - `{ status: "ready" }` — good to quote.
 - `{ status: "collect"; fields: RequirementField[] }` — need input first.

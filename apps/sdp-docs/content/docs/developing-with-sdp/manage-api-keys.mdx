@@ -1,9 +1,11 @@
 ---
 title: Manage API Keys
-description: Create, rotate, and revoke API keys with role-based access and environment scoping.
+description: Create, rotate, and revoke API keys with role-based access, wallet bindings, and zero-downtime rotation.
 ---
 
-API keys authenticate every request to the SDP API. Each key is scoped to an environment (sandbox or production) and assigned a role that determines what operations it can perform.
+Create, rotate, and revoke the API keys that authenticate SDP API requests. Each key belongs to a project, inherits its environment, and carries a role plus optional fine-grained controls — see [Authentication](/docs/developing-with-sdp/authentication) for how those layers are enforced.
+
+The full secret is returned exactly once — at creation and at rotation. SDP stores only a salted hash and a display prefix; a lost key cannot be recovered, only rotated or replaced. Every key tracks `lastUsedAt` so you can identify stale credentials before revoking them.
 
 ## Key format
 
@@ -20,57 +22,56 @@ API keys authenticate every request to the SDP API. Each key is scoped to an env
 | `api_developer` | Read/write access, excludes custody actions |
 | `api_readonly` | Read-only access to all resources |
 
+A key can also carry explicit `permissions` that override the role's defaults. A key can only be granted permissions its creator holds.
+
 ## Create a key
 
 <Tabs items={["Dashboard", "API"]}>
 <Tab value="Dashboard">
 
-Navigate to **API keys** in the sidebar. You'll start with an empty list.
+1. Navigate to **API keys** in the sidebar. You start with an empty list.
 
-![API keys page with no keys yet](/images/getting-started/api-keys-empty.png)
+   ![API keys page with no keys yet](/images/getting-started/api-keys-empty.png)
 
-Click **New API key** in the top right. Fill in the key details:
+2. Click **New API key** in the top right, then fill in the key details:
+   - **Name** — a descriptive label (e.g., "CI deploy key")
+   - **Role** — Admin, Developer, or Read only
+   - **Wallet access** — All wallets or Selected wallets
+   - **Expiration (optional)** — date/time picker
 
-- **Name** — a descriptive label (e.g., "CI deploy key")
-- **Role** — Admin, Developer, or Read only
-- **Environment** — Sandbox or Production
-- **Wallet access** — All wallets or Selected wallets
-- **Expiration (optional)** — date/time picker
+   ![Create API key modal](/images/getting-started/api-key-create.png)
 
-![Create API key modal](/images/getting-started/api-key-create.png)
+3. Click **Continue**, review the summary, and click **Create key**.
 
-Click **Continue**. Review the summary and click **Create key**.
+   ![Review API key modal](/images/getting-started/api-key-review.png)
 
-![Review API key modal](/images/getting-started/api-key-review.png)
+4. Click **Copy** on the **API key generated** modal and save the key — it will not be shown again.
 
-The full key appears once in the **API key generated** modal. Click **Copy** and save it — it will not be shown again.
+   ![API key generated modal showing the full key](/images/getting-started/api-key-generated.png)
 
-![API key generated modal showing the full key](/images/getting-started/api-key-generated.png)
+5. Dismiss the modal. The key now appears in the table with its prefix, role, environment, and status.
 
-After dismissing, the key appears in the table with its prefix, role, environment, and status.
-
-![API keys list with one active key](/images/getting-started/api-keys-list.png)
+   ![API keys list with one active key](/images/getting-started/api-keys-list.png)
 
 </Tab>
 <Tab value="API">
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/api-keys \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
     "name": "CI deploy key",
     "role": "api_developer",
-    "environment": "sandbox",
     "walletScope": "all",
     "expiresAt": "2026-12-31T23:59:59Z"
   }'
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="create-api-key.ts"
 const response = await fetch("https://api.solana.com/v1/api-keys", {
   method: "POST",
   headers: {
@@ -80,7 +81,6 @@ const response = await fetch("https://api.solana.com/v1/api-keys", {
   body: JSON.stringify({
     name: "CI deploy key",
     role: "api_developer",
-    environment: "sandbox",
     walletScope: "all",
     expiresAt: "2026-12-31T23:59:59Z",
   }),
@@ -90,7 +90,7 @@ const { data } = await response.json();
 ```
 </Tab>
 <Tab value="Java">
-```java
+```java title="CreateApiKey.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/api-keys"))
     .header("Authorization", "Bearer sk_test_...")
@@ -99,7 +99,6 @@ HttpRequest request = HttpRequest.newBuilder()
         {
           "name": "CI deploy key",
           "role": "api_developer",
-          "environment": "sandbox",
           "walletScope": "all",
           "expiresAt": "2026-12-31T23:59:59Z"
         }"""))
@@ -108,30 +107,32 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-The response includes the full `key` value — **save it, it is only returned once**.
+The new key belongs to the project of the key that created it and inherits that project's environment — there is no environment field on the request. The response includes the full `key` value — **save it, it is only returned once**.
 
-Optional fields: `allowedIps` (CIDR ranges), `permissions` (fine-grained), `signingWalletId`, `walletBindings`.
+Optional fields: `description`, `permissions` (fine-grained overrides), `allowedIps` (IPv4/IPv6/CIDR ranges), `signingWalletId` / `signingWalletIds`, `walletBindings` (per-wallet permission lists).
 
 </Tab>
 </Tabs>
 
 ## Rotate a key
 
+Rotation replaces the secret without an availability gap: the new key is a fresh record that clones the old key's role, permissions, IP allowlist, wallet bindings, and policy profiles, while the old key keeps working until its grace deadline. During the grace period both keys are valid; after it, the old key fails with `EXPIRED_API_KEY`.
+
 <Tabs items={["Dashboard", "API"]}>
 <Tab value="Dashboard">
 
-In the API keys table, open the **Actions** dropdown next to the key and click **Rotate key (24h grace)**. The dashboard always uses a 24-hour grace period — use the API if you need a custom value (0–168h).
+1. In the API keys table, open the **Actions** dropdown next to the key and click **Rotate key (24h grace)**. The dashboard always uses a 24-hour grace period — use the API for a custom value (0–168h).
 
-![Actions dropdown showing Rotate key and Delete key options](/images/getting-started/api-key-rotate.png)
+   ![Actions dropdown showing Rotate key and Delete key options](/images/getting-started/api-key-rotate.png)
 
-During the grace period both the old and new key are valid. The new key value appears once in the generated key modal — save it immediately.
+2. Copy the new key value from the generated key modal — it is shown once.
 
 </Tab>
 <Tab value="API">
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/api-keys/key_abc123/rotate \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -139,7 +140,7 @@ curl -X POST https://api.solana.com/v1/api-keys/key_abc123/rotate \
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="rotate-api-key.ts"
 const response = await fetch(
   "https://api.solana.com/v1/api-keys/key_abc123/rotate",
   {
@@ -152,11 +153,12 @@ const response = await fetch(
   }
 );
 const { data } = await response.json();
-// data.apiKey — the new key
+// data.apiKey — the new key, only shown once
+// data.previousKey.rotationDeadline — when the old key stops working
 ```
 </Tab>
 <Tab value="Java">
-```java
+```java title="RotateApiKey.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/api-keys/key_abc123/rotate"))
     .header("Authorization", "Bearer sk_test_...")
@@ -168,7 +170,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-The old key remains valid for the grace period (0–168 hours).
+`gracePeriodHours` accepts 0–168 (default 24). A key cannot rotate itself — authenticate the rotation with a different key or a dashboard session.
 
 </Tab>
 </Tabs>
@@ -185,7 +187,7 @@ Open the **Actions** dropdown next to the key and click **Delete key**. The key 
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
-```bash
+```bash title="Terminal"
 curl -X DELETE https://api.solana.com/v1/api-keys/key_abc123 \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -193,7 +195,7 @@ curl -X DELETE https://api.solana.com/v1/api-keys/key_abc123 \
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript
+```typescript title="revoke-api-key.ts"
 await fetch("https://api.solana.com/v1/api-keys/key_abc123", {
   method: "DELETE",
   headers: {
@@ -205,7 +207,7 @@ await fetch("https://api.solana.com/v1/api-keys/key_abc123", {
 ```
 </Tab>
 <Tab value="Java">
-```java
+```java title="RevokeApiKey.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/api-keys/key_abc123"))
     .header("Authorization", "Bearer sk_test_...")
@@ -217,7 +219,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-The `confirmation` field must match the key's **name**. The key stops working immediately.
+The `confirmation` field must match the key's **name**. Revocation takes effect immediately, is idempotent (revoking an already-revoked key succeeds), and cannot be undone. As with rotation, a key cannot revoke itself.
 
 </Tab>
 </Tabs>
