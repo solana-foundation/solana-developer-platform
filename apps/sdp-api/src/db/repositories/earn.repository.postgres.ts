@@ -314,21 +314,39 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       // so `NOT` admits everything) and delete the provider's whole shelf.
       // "The provider listed nothing" is indistinguishable from a misconfigured
       // account or a silently-empty response, so it can never trigger a
-      // catalogue-wide teardown.
-      if (input.listedProviderReferences.length === 0) {
+      // catalogue-wide teardown, unless the caller explicitly authorizes it
+      // (`allowEmptyKeepSet`), which the mirror lane does when its truth source
+      // reliably answered "nothing is listed". Even then the delist must be
+      // cluster-scoped: an authorized empty pass tears down one sub-shelf, never
+      // an environment.
+      if (input.listedProviderReferences.length === 0 && !input.allowEmptyKeepSet) {
         return [];
+      }
+      if (input.allowEmptyKeepSet && !input.hostCluster) {
+        throw new Error("deleteUnlistedStrategies: allowEmptyKeepSet requires a cluster scope");
+      }
+
+      const conditions = ["provider = ?", "environment = ?", "status = 'active'"];
+      const bindings: unknown[] = [input.provider, input.environment];
+      if (input.hostCluster) {
+        // COALESCE mirrors mapStrategyRow's NULL rule: a row an older writer left
+        // unset means the environment's own cluster, so a delist scoped to that
+        // cluster governs it and a mainnet-scoped delist leaves it alone.
+        conditions.push("COALESCE(host_cluster, ?) = ?");
+        bindings.push(CLUSTER_BY_SDP_ENVIRONMENT[input.environment], input.hostCluster);
+      }
+      if (input.listedProviderReferences.length > 0) {
+        conditions.push("NOT (provider_reference = ANY(?))");
+        bindings.push([...input.listedProviderReferences]);
       }
 
       const rows = await db
         .prepare(
           `DELETE FROM earn_strategies
-            WHERE provider = ?
-              AND environment = ?
-              AND status = 'active'
-              AND NOT (provider_reference = ANY(?))
+            WHERE ${conditions.join("\n              AND ")}
             RETURNING provider_reference`
         )
-        .bind(input.provider, input.environment, [...input.listedProviderReferences])
+        .bind(...bindings)
         .all<{ provider_reference: string }>();
 
       return (rows.results ?? []).map((row) => row.provider_reference);
@@ -340,6 +358,13 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
 
       if (!input.includeInactive) {
         conditions.push("status = 'active'");
+      }
+      if (input.hostCluster) {
+        // COALESCE mirrors mapStrategyRow's NULL rule (a pre-0057 row means the
+        // environment's own cluster), so the default devnet view cannot drop a
+        // legacy row the read layer would report as devnet.
+        conditions.push("COALESCE(host_cluster, ?) = ?");
+        bindings.push(CLUSTER_BY_SDP_ENVIRONMENT[input.environment], input.hostCluster);
       }
       if (input.sourceKind) {
         conditions.push("source_kind = ?");

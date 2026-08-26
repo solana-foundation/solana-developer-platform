@@ -430,9 +430,10 @@ export function distillKaminoVault(
  *   every other environment reads the devnet kvault program on-chain
  *   (`./devnet.ts`, `hostCluster: "devnet"`). Non-production issues no request
  *   to api.kamino.finance at all, which is stronger than fetching and
- *   filtering — and the catalogue sync independently refuses to persist a
- *   mainnet instrument outside production, so a bug here cannot put one in a
- *   sandbox database.
+ *   filtering — and the catalogue sync independently drops any own-fetch
+ *   snapshot on a foreign cluster (since PRO-1742, mainnet rows reach a
+ *   sandbox catalogue only through the sync's mirror of the production pass),
+ *   so a bug here still cannot smuggle one into a sandbox database.
  *
  * The predecessor of this comment said "mainnet only … `ctx.environment` is
  * deliberately unused for data selection". Treat that as the cautionary tale it

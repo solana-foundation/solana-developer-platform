@@ -512,6 +512,100 @@ describe("EarnRepository (postgres)", () => {
       expect(deleted).toEqual([]);
       expect((await repo.getStrategyById(row.id))?.status).toBe("active");
     });
+
+    it("tears down exactly one cluster sub-shelf on an AUTHORIZED empty keep set", async () => {
+      // The mirror lane's convergence path (PRO-1742): when its truth source
+      // reliably answers "nothing is listed", the browse-only mainnet sub-shelf
+      // empties rather than serving orphaned rows forever. The devnet shelf and
+      // operator-stopped rows stay untouched.
+      const devnetRow = await seedStrategy({
+        provider: "ground",
+        providerReference: "devnet-vault",
+      });
+      const mirroredMainnet = await seedStrategy({
+        provider: "ground",
+        providerReference: "orphaned-mainnet-vault",
+        hostCluster: "mainnet-beta",
+      });
+      const pausedMainnet = await seedStrategy({
+        provider: "ground",
+        providerReference: "paused-mainnet-vault",
+        hostCluster: "mainnet-beta",
+        status: "paused",
+      });
+
+      const deleted = await repo.deleteUnlistedStrategies({
+        provider: "ground",
+        environment: "sandbox",
+        hostCluster: "mainnet-beta",
+        listedProviderReferences: [],
+        allowEmptyKeepSet: true,
+      });
+
+      expect(deleted).toEqual(["orphaned-mainnet-vault"]);
+      expect(await repo.getStrategyById(mirroredMainnet.id)).toBeNull();
+      expect((await repo.getStrategyById(devnetRow.id))?.status).toBe("active");
+      expect((await repo.getStrategyById(pausedMainnet.id))?.status).toBe("paused");
+    });
+
+    it("refuses an authorized-empty delist without a cluster scope", async () => {
+      // An empty keep set may tear down one sub-shelf, never an environment.
+      await expect(
+        repo.deleteUnlistedStrategies({
+          provider: "ground",
+          environment: "sandbox",
+          listedProviderReferences: [],
+          allowEmptyKeepSet: true,
+        })
+      ).rejects.toThrow("allowEmptyKeepSet requires a cluster scope");
+    });
+
+    it("scopes a cluster-lane delist to its sub-shelf, counting NULL host_cluster as the environment's own", async () => {
+      // The PRO-1742 shape: a sandbox environment holds its own devnet shelf
+      // plus the mirrored mainnet one, each converged by its own lane.
+      const devnetKept = await seedStrategy({
+        provider: "ground",
+        providerReference: "devnet-kept",
+      });
+      const devnetStale = await seedStrategy({
+        provider: "ground",
+        providerReference: "devnet-stale",
+      });
+      const mirroredMainnet = await seedStrategy({
+        provider: "ground",
+        providerReference: "mainnet-vault",
+        hostCluster: "mainnet-beta",
+      });
+      // A row a pre-0057 writer left unset reads as the environment's own
+      // cluster (mapStrategyRow), so the devnet lane must govern it too.
+      await getDb(env)
+        .prepare(`UPDATE earn_strategies SET host_cluster = NULL WHERE id = ?`)
+        .bind(devnetStale.id)
+        .run();
+
+      const deleted = await repo.deleteUnlistedStrategies({
+        provider: "ground",
+        environment: "sandbox",
+        hostCluster: "devnet",
+        listedProviderReferences: ["devnet-kept"],
+      });
+
+      // The devnet lane deletes its own stale row — the NULL one included —
+      // and never reaches the mirrored shelf its keep set knows nothing about.
+      expect(deleted).toEqual(["devnet-stale"]);
+      expect((await repo.getStrategyById(devnetKept.id))?.status).toBe("active");
+      expect((await repo.getStrategyById(mirroredMainnet.id))?.status).toBe("active");
+
+      // And the mirror lane converges its own shelf without touching devnet.
+      const mirrorDeleted = await repo.deleteUnlistedStrategies({
+        provider: "ground",
+        environment: "sandbox",
+        hostCluster: "mainnet-beta",
+        listedProviderReferences: ["a-mainnet-ref-still-listed"],
+      });
+      expect(mirrorDeleted).toEqual(["mainnet-vault"]);
+      expect((await repo.getStrategyById(devnetKept.id))?.status).toBe("active");
+    });
   });
 
   describe("listStrategies pagination", () => {
@@ -552,6 +646,72 @@ describe("EarnRepository (postgres)", () => {
         offset: 0,
       });
       expect(all.total).toBe(2);
+    });
+  });
+
+  /**
+   * The PRO-1742 read scope: a non-production environment stores two cluster
+   * sub-shelves, and the strategies route lists exactly one per request —
+   * the environment's own by default, the mirrored one on explicit opt-in.
+   */
+  describe("listStrategies cluster scope", () => {
+    it("restricts to one cluster's sub-shelf, and total moves with the rows", async () => {
+      const devnet = await seedStrategy({ providerReference: "devnet-vault" });
+      const mainnet = await seedStrategy({
+        providerReference: "mainnet-vault",
+        hostCluster: "mainnet-beta",
+      });
+
+      const devnetView = await repo.listStrategies({
+        environment: "sandbox",
+        hostCluster: "devnet",
+        limit: 10,
+        offset: 0,
+      });
+      expect(devnetView.total).toBe(1);
+      expect(devnetView.rows.map((row) => row.id)).toEqual([devnet.id]);
+
+      const mainnetView = await repo.listStrategies({
+        environment: "sandbox",
+        hostCluster: "mainnet-beta",
+        limit: 10,
+        offset: 0,
+      });
+      expect(mainnetView.total).toBe(1);
+      expect(mainnetView.rows.map((row) => row.id)).toEqual([mainnet.id]);
+
+      // Omitted, the filter is off — the program-create keep set reads the
+      // whole environment and applies fundability itself.
+      const unfiltered = await repo.listStrategies({
+        environment: "sandbox",
+        limit: 10,
+        offset: 0,
+      });
+      expect(unfiltered.total).toBe(2);
+    });
+
+    it("counts a NULL host_cluster row as the environment's own cluster, matching the read rule", async () => {
+      const legacy = await seedStrategy({ providerReference: "legacy-vault" });
+      await getDb(env)
+        .prepare(`UPDATE earn_strategies SET host_cluster = NULL WHERE id = ?`)
+        .bind(legacy.id)
+        .run();
+
+      const devnetView = await repo.listStrategies({
+        environment: "sandbox",
+        hostCluster: "devnet",
+        limit: 10,
+        offset: 0,
+      });
+      expect(devnetView.rows.map((row) => row.id)).toEqual([legacy.id]);
+
+      const mainnetView = await repo.listStrategies({
+        environment: "sandbox",
+        hostCluster: "mainnet-beta",
+        limit: 10,
+        offset: 0,
+      });
+      expect(mainnetView.total).toBe(0);
     });
   });
 

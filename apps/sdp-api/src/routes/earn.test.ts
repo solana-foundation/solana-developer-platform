@@ -459,7 +459,12 @@ describe("Earn routes — session-caller environment resolution", () => {
     await seedAuth();
     await seedSessionAuth();
     const sandbox = await seedStrategy();
-    const production = await seedStrategy({ environment: "production" });
+    // On its own cluster, so the production default view (which lists the
+    // environment's own cluster since PRO-1742) includes it.
+    const production = await seedStrategy({
+      environment: "production",
+      hostCluster: "mainnet-beta",
+    });
 
     // A production-project session sees the production catalogue…
     const productionList = await getEarnAsSession(
@@ -702,37 +707,63 @@ describe("Earn routes — strategy catalogue", () => {
 
   /**
    * `fundable` is derived per request, so the SAME row answers differently to a
-   * sandbox and a production caller. This is the wire-level warning a partner
-   * reads before treating a listed strategy as depositable. Kamino used to be
-   * the live example (mainnet vaults listed in sandbox) and no longer is — each
-   * environment catalogues its own cluster, and the sync refuses to store a
-   * mainnet instrument outside production. The derivation still matters for
-   * Ground, for rows written before that guard, and for the next single-cluster
-   * provider, which is why this seeds the cluster directly.
+   * sandbox and a production caller — the wire-level warning a partner reads
+   * before treating a listed strategy as depositable. Since PRO-1742 a sandbox
+   * environment deliberately stores the mirrored mainnet shelf BESIDE its own,
+   * so the list defaults to the environment's own cluster: an integrator's
+   * default view stays a catalogue it can act on, and the mirrored rows are an
+   * explicit `?cluster=` opt-in whose rows arrive `fundable: false`.
    */
-  it("derives fundable from hostCluster against the caller's environment", async () => {
+  it("lists the environment's own cluster by default and the mirrored shelf on explicit opt-in", async () => {
     await seedAuth();
     const local = await seedStrategy({ hostCluster: "devnet" });
-    const elsewhere = await seedStrategy({ hostCluster: "mainnet-beta" });
+    const mirrored = await seedStrategy({ hostCluster: "mainnet-beta" });
 
-    const res = await getEarn("/v1/earn/strategies");
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
+    const defaults = await getEarn("/v1/earn/strategies");
+    expect(defaults.status).toBe(200);
+    const defaultBody = (await defaults.json()) as {
       data: {
         strategies: Array<{ id: string; hostCluster: string; fundable: boolean }>;
+        total: number;
       };
     };
-    const byId = new Map(body.data.strategies.map((s) => [s.id, s]));
-    expect(byId.get(local.id)).toMatchObject({ hostCluster: "devnet", fundable: true });
+    expect(defaultBody.data.strategies.map((s) => s.id)).toEqual([local.id]);
+    expect(defaultBody.data.strategies[0]).toMatchObject({
+      hostCluster: "devnet",
+      fundable: true,
+    });
+    // The filter runs in SQL: the total describes the default view, not the
+    // store, so pagination never walks a reader into hidden rows.
+    expect(defaultBody.data.total).toBe(1);
+
+    const optIn = await getEarn("/v1/earn/strategies?cluster=mainnet-beta");
+    expect(optIn.status).toBe(200);
+    const optInBody = (await optIn.json()) as {
+      data: {
+        strategies: Array<{ id: string; hostCluster: string; fundable: boolean }>;
+        total: number;
+      };
+    };
+    expect(optInBody.data.strategies.map((s) => s.id)).toEqual([mirrored.id]);
     // Listed, and explicitly not fundable — the row is honest about both.
-    expect(byId.get(elsewhere.id)).toMatchObject({
+    expect(optInBody.data.strategies[0]).toMatchObject({
       hostCluster: "mainnet-beta",
       fundable: false,
     });
+    expect(optInBody.data.total).toBe(1);
+  });
+
+  it("rejects a cluster value outside the Solana cluster vocabulary", async () => {
+    await seedAuth();
+
+    const res = await getEarn("/v1/earn/strategies?cluster=testnet");
+
+    expect(res.status).toBe(400);
   });
 
   it("carries hostCluster and fundable on the single-strategy read too", async () => {
+    // Deliberate asymmetry with the list default above: an explicitly
+    // addressed row is served whatever its cluster — honest, never hidden.
     await seedAuth();
     const strategy = await seedStrategy({ hostCluster: "mainnet-beta" });
 

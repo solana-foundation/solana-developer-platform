@@ -134,14 +134,18 @@ balance with a live one.
     existing program pointed at a curated-away vault keeps working.
   - Each row carries `hostCluster` (the cluster the INSTRUMENT lives on, stored)
     and `fundable` (derived per request from `hostCluster` against the caller's
-    environment, never stored). **Catalogued is not the same as fundable**:
-    a provider may front instruments that do not exist on every cluster, and the
-    sync REFUSES to store a `mainnet-beta` instrument outside production. (Kamino
-    was the original example of the opposite — catalogued mainnet-into-sandbox
-    because we believed it had no devnet deployment; it does, and each
-    environment now catalogues its own cluster.) `fundable` is the wire-level
-    warning — partners must branch on it rather than assume a listed strategy
-    takes deposits.
+    environment, never stored). **Catalogued is not the same as fundable**, and
+    since PRO-1742 that is a designed steady state: the sync MIRRORS the
+    production mainnet shelf into every non-production environment, written as
+    two cluster-scoped lanes per environment so each sub-shelf converges
+    independently (`cron/earn-catalogue-sync.ts`), so curation can be reviewed
+    outside production. The LIST defaults to the environment's own cluster and
+    takes an explicit `?cluster=` opt-in for the mirrored shelf; the DETAIL
+    read serves an addressed row whatever its cluster. The per-vault curation
+    lists below are keyed by CLUSTER, so the sandbox mirror inherits exactly
+    the curation production applies. `fundable` is the wire-level warning —
+    partners must branch on it rather than assume a listed strategy takes
+    deposits.
   - **`fundable` answers the CLUSTER question only, and its two sides are not
     symmetric.** `false` is definitive (the instrument does not exist on your
     cluster). `true` is necessary but not sufficient: a deposit additionally

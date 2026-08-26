@@ -1,11 +1,13 @@
 import { isClusterFundableInEnvironment } from "@sdp/earn";
 import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
   type EarnProviderId,
   type EarnStrategy,
   type EarnStrategyResponse,
   isEarnProviderSurfaced,
   type ListEarnStrategiesResponse,
   type SdpEnvironment,
+  type SolanaCluster,
   SURFACED_EARN_PROVIDERS,
 } from "@sdp/types";
 import type { EarnStrategyRow } from "@/db/repositories";
@@ -34,13 +36,18 @@ const HIDDEN_STRATEGY_TERMS = ["aave", "morpho"] as const;
  * needs to change, and both take effect on the next request (no sync, no
  * migration, no cache to bust).
  *
- * **Keyed by environment, and that is not tidiness — a flat list is a trap.**
+ * **Keyed by CLUSTER, and that is not tidiness — a flat list is a trap.**
  * A vault is identified by its ADDRESS, and addresses are cluster-specific:
  * Kamino's mainnet shelf and its devnet shelf share no references at all. A
  * single `CURATED_VAULTS.kamino` holding mainnet addresses would therefore act
- * as an allowlist that matches NOTHING in sandbox and blank the entire devnet
- * shelf — a curation choice about production silently deleting sandbox.
- * Splitting by environment makes that impossible to express by accident.
+ * as an allowlist that matches NOTHING on devnet and blank the entire devnet
+ * shelf — a curation choice about mainnet silently deleting the sandbox one.
+ * Keying by the cluster the address lives on makes that impossible to express
+ * by accident. (These were environment-keyed until PRO-1742. Now that a
+ * non-production environment also carries the mirrored mainnet shelf, cluster
+ * keying is also what makes the sandbox mirror inherit exactly the curation
+ * production applies — the mirror exists to REVIEW that curation, so the two
+ * views must never diverge.)
  *
  * **Always key on the vault ADDRESS, never the name.** Kamino's registry is
  * permissionless and the name is free text chosen by whoever created the vault,
@@ -68,22 +75,22 @@ const HIDDEN_STRATEGY_TERMS = ["aave", "morpho"] as const;
  * working — hiding a shelf is a browse decision, and freezing a customer's own
  * position over it would not be.
  */
-const HIDDEN_VAULTS: Partial<Record<SdpEnvironment, readonly `${EarnProviderId}:${string}`[]>> = {
-  production: [
+const HIDDEN_VAULTS: Partial<Record<SolanaCluster, readonly `${EarnProviderId}:${string}`[]>> = {
+  "mainnet-beta": [
     // "kamino:8F2mL9wLbYcQ1t2WcTgAsD5nDgQ1XjqK8kY7z4Q9example",
   ],
-  sandbox: [
+  devnet: [
     // "kamino:7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
   ],
 };
 
 const CURATED_VAULTS: Partial<
-  Record<SdpEnvironment, Partial<Record<EarnProviderId, readonly string[]>>>
+  Record<SolanaCluster, Partial<Record<EarnProviderId, readonly string[]>>>
 > = {
-  production: {
+  "mainnet-beta": {
     // kamino: ["<mainnet vault address>"],
   },
-  sandbox: {
+  devnet: {
     // kamino: ["<devnet vault address>"],
   },
 };
@@ -108,13 +115,12 @@ export function isHiddenStrategy(row: EarnStrategyRow): boolean {
     return true;
   }
 
-  const environment = row.environment as SdpEnvironment;
-  const hidden = HIDDEN_VAULTS[environment] ?? [];
+  const hidden = HIDDEN_VAULTS[row.host_cluster] ?? [];
   if (hidden.includes(`${row.provider}:${row.provider_reference}` as never)) {
     return true;
   }
 
-  const curated = CURATED_VAULTS[environment]?.[row.provider as EarnProviderId];
+  const curated = CURATED_VAULTS[row.host_cluster]?.[row.provider as EarnProviderId];
   if (curated !== undefined && !curated.includes(row.provider_reference)) {
     return true;
   }
@@ -182,8 +188,16 @@ export const listEarnStrategies = async (c: AppContext) => {
 
   const repo = getEarnRepository(c);
   const environment = resolveSdpEnvironment(c);
+  // The shelf a caller can act on is the default; `?cluster=` is the explicit
+  // opt-in that browses another cluster's sub-shelf — in practice a sandbox
+  // reader reviewing the mirrored mainnet catalogue (PRO-1742). Opting in
+  // changes what is LISTED, never what can take a deposit: a foreign-cluster
+  // row still arrives `fundable: false` and every provider mutation re-asserts
+  // the same predicate.
+  const cluster = query.cluster ?? CLUSTER_BY_SDP_ENVIRONMENT[environment];
   const { rows, total } = await repo.listStrategies({
     environment,
+    hostCluster: cluster,
     sourceKind: query.sourceKind,
     apyType: query.apyType,
     liquidityTerm: query.liquidityTerm,
@@ -191,8 +205,8 @@ export const listEarnStrategies = async (c: AppContext) => {
     // the rows the caller can see. `isHiddenStrategy` applies the same two rules
     // to the detail route, which has no query to push them into.
     providers: SURFACED_EARN_PROVIDERS,
-    excludeProviderKeys: HIDDEN_VAULTS[environment] ?? [],
-    allowedProviderReferences: CURATED_VAULTS[environment] ?? {},
+    excludeProviderKeys: HIDDEN_VAULTS[cluster] ?? [],
+    allowedProviderReferences: CURATED_VAULTS[cluster] ?? {},
     excludeRelatedTerms: HIDDEN_STRATEGY_TERMS,
     ...pageWindow(query),
   });
