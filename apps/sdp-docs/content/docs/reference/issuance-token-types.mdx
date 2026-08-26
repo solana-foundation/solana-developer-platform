@@ -1,17 +1,19 @@
 ---
-title: Issuance Token Types
+title: Tokenization Templates
 description: How to choose a token template, and the default controls each one applies.
 ---
 
-The public issuance surface currently exposes three token templates:
+The public issuance surface currently exposes three **Tokenization Templates**:
 
 | Template | Defaults | Notes |
 | --- | --- | --- |
 | `stablecoin` | 6 decimals, permanent delegate + pausable extensions, default account state initialized | Intended for fiat-backed token patterns with compliance controls. |
 | `tokenized-security` | 8 decimals, allowlist required, permanent delegate + pausable + scaled UI amount extensions, default account state frozen | Regulated asset flows with stronger defaults. |
-| `custom` | 9 decimals default (up to 18 max), extension set is fully configurable | Use when your requirements do not match preset templates. |
+| `custom` | 9 decimals default (up to 18 max), extension set is fully configurable | Use when your requirements do not match the stablecoin or tokenized-security templates. |
 
 These defaults are sourced from the API implementation in `apps/sdp-api/src/services/issuance/templates/definitions.ts`.
+
+Each template also sets the token's **Token Access Control** mode — `allowlist`, `blocklist`, or `disabled` — enforced on-chain over who may hold or receive the token. This is distinct from a wallet's own destination allowlist, which is a wallet-policy concern.
 
 ## Selecting a template
 
@@ -46,8 +48,8 @@ template.
 Corresponds to the **Non-Security Digital Asset** classification in the issuance interface —
 assets that are neither fiat stablecoins nor regulated securities, such as commodities, real
 estate, or collectibles. The template exposes the full Token-2022 extension set (transfer fees,
-transfer hooks, non-transferable behaviour, interest, and others) and applies where the preset
-templates do not match the instrument.
+transfer hooks, non-transferable behaviour, interest, and others) and applies where the stablecoin
+and tokenized-security templates do not match the instrument.
 
 ### Summary
 
@@ -55,7 +57,7 @@ templates do not match the instrument.
 | --- | --- |
 | Pegged to a fiat currency, redeemable 1:1, with no yield | `stablecoin` |
 | Regulated security (equity, debt, or fund), or an instrument that pays a return | `tokenized-security` |
-| Any other asset, or one requiring extensions the presets do not offer | `custom` (Non-Security Digital Asset) |
+| Any other asset, or one requiring extensions the other templates do not offer | `custom` (Non-Security Digital Asset) |
 
 <Callout type="warn">
 Token-2022 extensions are set when the mint is created and cannot be changed afterward. The

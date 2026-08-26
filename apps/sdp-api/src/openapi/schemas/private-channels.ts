@@ -13,7 +13,11 @@ export const privateChannelInstanceSchema = z
     organizationId: z.string(),
     projectId: z.string(),
     gatewayUrl: z.string().openapi({ example: "http://34.71.147.163:8899" }),
-    chainRpcUrl: z.string().openapi({ example: "https://devnet.helius-rpc.com/?api-key=…" }),
+    chainRpcUrl: z.string().openapi({
+      description:
+        "Deprecated compatibility field. Private Channels execution uses the project's RPC integration.",
+      example: "https://devnet.helius-rpc.com/?api-key=…",
+    }),
     escrowProgramId: solanaAddressSchema,
     withdrawProgramId: solanaAddressSchema,
     escrowInstanceAddr: solanaAddressSchema,
@@ -28,7 +32,10 @@ export const privateChannelInstanceSchema = z
 export const privateChannelInstanceInputSchema = z
   .object({
     gatewayUrl: z.string(),
-    chainRpcUrl: z.string(),
+    chainRpcUrl: z.string().optional().openapi({
+      description:
+        "Deprecated and ignored for execution. Configure RPC on the SDP project instead.",
+    }),
     escrowProgramId: solanaAddressSchema,
     withdrawProgramId: solanaAddressSchema,
     escrowInstanceAddr: solanaAddressSchema,
@@ -62,10 +69,12 @@ export const privateChannelHealthQuerySchema = z.object({
 export const privateChannelProbeBodySchema = z
   .object({
     gatewayUrl: z.string().min(1),
-    chainRpcUrl: z.string().min(1),
     authUrl: z.string().min(1),
   })
-  .openapi({ description: "Probe request body: the three URLs the connect flow re-probes." });
+  .openapi({
+    description:
+      "Probe request body. The selected project's configured RPC is probed automatically.",
+  });
 
 const gatewayProbeResponseSchema = z.object({
   status: z.number(),

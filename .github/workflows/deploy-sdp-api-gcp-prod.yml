@@ -44,6 +44,7 @@ jobs:
       REPO: sdp-prod
       SERVICE: sdp-prod-api-public
       JOB: sdp-prod-api-public-cron
+      WORKER_SERVICE: sdp-prod-worker
       MIGRATE_JOB: sdp-prod-api-public-migrate
       PII_MIGRATE_JOB: sdp-prod-counterparty-pii-migrate
     steps:
@@ -164,6 +165,20 @@ jobs:
           echo "PREVIOUS_TRAFFIC=${previous_traffic}" >> "${GITHUB_ENV}"
           echo "PREVIOUS_CRON_IMAGE=${previous_cron_image}" >> "${GITHUB_ENV}"
           echo "PREVIOUS_PII_MIGRATE_IMAGE=${previous_pii_migrate_image}" >> "${GITHUB_ENV}"
+          worker_describe_err="$(mktemp)"
+          previous_worker_image="$(
+            gcloud run services describe "${WORKER_SERVICE}" \
+              --region "${REGION}" --project "${PROJECT_ID}" \
+              --format='value(spec.template.spec.containers[0].image)' 2>"${worker_describe_err}"
+          )" || {
+            if grep -qiE "NOT_FOUND|could not be found" "${worker_describe_err}"; then
+              previous_worker_image=""
+            else
+              cat "${worker_describe_err}" >&2
+              exit 1
+            fi
+          }
+          echo "PREVIOUS_WORKER_IMAGE=${previous_worker_image}" >> "${GITHUB_ENV}"
 
       - name: Deploy candidate without production traffic
         timeout-minutes: 5
@@ -258,6 +273,18 @@ jobs:
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
           gcloud run jobs update "${PII_MIGRATE_JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
+
+          describe_err="$(mktemp)"
+          if gcloud run services describe "${WORKER_SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" >/dev/null 2>"${describe_err}"; then
+            gcloud run services update "${WORKER_SERVICE}" \
+              --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
+          elif grep -qiE "NOT_FOUND|could not be found" "${describe_err}"; then
+            echo "worker service ${WORKER_SERVICE} not created yet; skipping image update"
+          else
+            cat "${describe_err}" >&2
+            exit 1
+          fi
           echo "ROLLOUT_COMPLETE=true" >> "${GITHUB_ENV}"
 
       - name: Record managed monitor migration gate
@@ -291,6 +318,11 @@ jobs:
           gcloud run jobs update "${PII_MIGRATE_JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
             --image "${PREVIOUS_PII_MIGRATE_IMAGE}" || rollback_failed=1
+          if [[ -n "${PREVIOUS_WORKER_IMAGE:-}" ]]; then
+            gcloud run services update "${WORKER_SERVICE}" \
+              --region "${REGION}" --project "${PROJECT_ID}" \
+              --image "${PREVIOUS_WORKER_IMAGE}" || rollback_failed=1
+          fi
           if [[ "${rollback_failed}" -ne 0 ]]; then
             echo "Automatic rollback was incomplete; escalate immediately." >&2
             exit 1

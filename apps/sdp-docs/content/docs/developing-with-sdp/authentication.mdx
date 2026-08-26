@@ -1,0 +1,55 @@
+---
+title: Authentication
+description: Authenticate API requests with project-scoped API keys, layered with roles, wallet bindings, and network controls.
+---
+
+SDP layers independent controls onto a single API key — role, per-key permissions, wallet bindings, policy profiles, and IP allowlist — so a key grants exactly the access its integration needs, and no more.
+
+Every API request carries an API key in the `Authorization` header:
+
+```bash title="Terminal"
+curl https://api.solana.com/v1/wallets \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+The `Bearer` prefix is optional — a raw key in the `Authorization` header is also accepted.
+
+## Key scope
+
+Keys are issued per **project** and inherit that project's environment: `sk_test_` keys belong to sandbox projects (devnet), `sk_live_` keys to production projects (mainnet-beta). A key can only reach the wallets, tokens, and payments of the project it was issued for; there is no cross-project or organization-wide key.
+
+## Authorization layers
+
+A request must clear every layer that is configured on its key:
+
+| Layer | What it controls |
+| --- | --- |
+| **Role** | Baseline permission set — see the table below |
+| **Per-key permissions** | Optional fine-grained overrides of the role's defaults. A key can only grant permissions its creator holds |
+| **Wallet bindings** | Restrict which custody wallets the key can operate, each binding with its own permission list |
+| **Policy profiles** | Rule sets (destination controls, amount limits, approval requirements) evaluated before a bound wallet moves funds |
+| **IP allowlist** | Optional IPv4/IPv6/CIDR ranges the key may be used from |
+
+| Role | Description |
+| --- | --- |
+| `api_admin` | Full access including custody and platform operations |
+| `api_developer` | Read/write access to tokens, payments, counterparties, wallets, and webhooks; excludes custody administration |
+| `api_readonly` | Read-only access to all resources, including audit records |
+
+## Errors
+
+Authentication and authorization failures are always machine-distinguishable:
+
+| Condition | Status | Code |
+| --- | --- | --- |
+| No API key on the request | 401 | `UNAUTHORIZED` |
+| Malformed or unknown key | 401 | `INVALID_API_KEY` |
+| Key has been revoked | 401 | `REVOKED_API_KEY` |
+| Key past its expiry or rotation deadline | 401 | `EXPIRED_API_KEY` |
+| Request origin not in the key's IP allowlist | 403 | `FORBIDDEN` |
+| Key lacks a required permission | 403 | `INSUFFICIENT_PERMISSIONS` |
+| Per-key rate limit exceeded | 429 | `RATE_LIMITED` |
+
+Requests are rate limited per key; the standard tier allows 100 requests per minute.
+
+See [Manage API Keys](/docs/developing-with-sdp/manage-api-keys) for creating, rotating, and revoking keys.

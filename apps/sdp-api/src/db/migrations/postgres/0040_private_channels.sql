@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS private_channel_instances (
     project_id TEXT NOT NULL,
 
     gateway_url TEXT NOT NULL,
-    chain_rpc_url TEXT NOT NULL,
+    chain_rpc_url TEXT NOT NULL DEFAULT '',
     escrow_program_id TEXT NOT NULL,
     withdraw_program_id TEXT NOT NULL,
     escrow_instance_addr TEXT NOT NULL,

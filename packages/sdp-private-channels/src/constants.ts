@@ -4,9 +4,8 @@ import type { PrivateChannelInstanceConfig } from "./types";
  * Public sandbox instance operated by the Solana Private Channels project. All identifiers
  * are on-chain public keys, not secrets.
  *
- * `chainRpcUrl` is a template, not a working endpoint: devnet's public RPC is
- * heavily rate-limited and the escrow deposit/withdraw path submits real
- * transactions, so operators supply their own API key.
+ * `chainRpcUrl` remains only for compatibility with the dashboard currently on
+ * `main`; the API ignores it for execution and uses the project's RPC provider.
  */
 export const SANDBOX_DEFAULTS: PrivateChannelInstanceConfig = {
   gatewayUrl: "http://34.71.147.163:8899",
