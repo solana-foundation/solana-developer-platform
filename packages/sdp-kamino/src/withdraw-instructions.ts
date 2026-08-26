@@ -386,6 +386,6 @@ const CLOSE_ACCOUNT_OPCODE = 9;
 export function isShareAtaCloseInstruction(instruction: Instruction, shareAta: Address): boolean {
   if (instruction.programAddress !== TOKEN_PROGRAM_ADDRESS) return false;
   const data = instruction.data;
-  if (!data || data.length !== 1 || data[0] !== CLOSE_ACCOUNT_OPCODE) return false;
+  if (data?.length !== 1 || data[0] !== CLOSE_ACCOUNT_OPCODE) return false;
   return instruction.accounts?.[0]?.address === shareAta;
 }

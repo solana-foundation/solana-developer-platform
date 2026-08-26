@@ -321,12 +321,17 @@ describe("isShareAtaCloseInstruction", () => {
 
   it("ignores other token instructions on the share ATA", () => {
     expect(
-      isShareAtaCloseInstruction(sdkClose({ data: Uint8Array.from([3, 0, 0, 0, 0, 0, 0, 0, 0]) }), SHARE_ATA)
+      isShareAtaCloseInstruction(
+        sdkClose({ data: Uint8Array.from([3, 0, 0, 0, 0, 0, 0, 0, 0]) }),
+        SHARE_ATA
+      )
     ).toBe(false);
   });
 
   it("ignores a CloseAccount-shaped instruction from another program", () => {
-    expect(isShareAtaCloseInstruction(sdkClose({ programAddress: KVAULT_PROGRAM }), SHARE_ATA)).toBe(false);
+    expect(
+      isShareAtaCloseInstruction(sdkClose({ programAddress: KVAULT_PROGRAM }), SHARE_ATA)
+    ).toBe(false);
   });
 
   it("ignores an instruction with no data", () => {
