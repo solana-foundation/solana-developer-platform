@@ -1,7 +1,7 @@
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrivateChannelDepositRepository, PrivateChannelDepositRow } from "@/db/repositories";
-import type { Env } from "@/types/env";
 
 // Mock the RPC transport so we can simulate confirm outcomes + transport errors.
 const { createRpc, confirmTransaction } = vi.hoisted(() => ({
@@ -12,8 +12,8 @@ vi.mock("@sdp/rpc/solana", () => ({ createRpc, confirmTransaction }));
 
 import { confirmAndPersistDeposit } from "./deposit-confirm";
 
-const env = {} as Env;
 const SIGNATURE = "sig-123" as Signature;
+const RPC = {} as SolanaRpc;
 
 function makeRepo() {
   const updateDeposit = vi.fn(
@@ -35,9 +35,9 @@ describe("confirmAndPersistDeposit", () => {
     const repo = makeRepo();
     confirmTransaction.mockRejectedValueOnce(new Error("network timeout"));
 
-    const result = await confirmAndPersistDeposit(env, repo, {
+    const result = await confirmAndPersistDeposit(repo, {
       depositId: "dep_1",
-      chainRpcUrl: "https://devnet",
+      rpc: RPC,
       signature: SIGNATURE,
     });
 
@@ -50,9 +50,9 @@ describe("confirmAndPersistDeposit", () => {
     const repo = makeRepo();
     confirmTransaction.mockResolvedValueOnce({ err: null });
 
-    await confirmAndPersistDeposit(env, repo, {
+    await confirmAndPersistDeposit(repo, {
       depositId: "dep_1",
-      chainRpcUrl: "https://devnet",
+      rpc: RPC,
       signature: SIGNATURE,
     });
 
@@ -65,9 +65,9 @@ describe("confirmAndPersistDeposit", () => {
     const repo = makeRepo();
     confirmTransaction.mockResolvedValueOnce({ err: { InstructionError: [0, "Custom"] } });
 
-    await confirmAndPersistDeposit(env, repo, {
+    await confirmAndPersistDeposit(repo, {
       depositId: "dep_1",
-      chainRpcUrl: "https://devnet",
+      rpc: RPC,
       signature: SIGNATURE,
     });
 

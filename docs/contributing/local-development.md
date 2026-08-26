@@ -55,7 +55,7 @@ SOLANA_RPC_URL=https://api.devnet.solana.com
 Start the local Postgres and Redis services, then the apps:
 
 ```bash
-pnpm db:postgres:up
+pnpm infra:up
 pnpm --filter @sdp/api db:postgres:bootstrap
 pnpm dev
 ```

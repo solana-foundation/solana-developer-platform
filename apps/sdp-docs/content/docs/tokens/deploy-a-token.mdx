@@ -37,7 +37,7 @@ The **Deploy** button appears in the token header and in the fund management pan
 
 You need the `tokenId` returned when you created the token. If you don't have it, list your tokens:
 
-```bash
+```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/tokens \
   -H "Authorization: Bearer sk_test_..."
 ```
@@ -52,7 +52,7 @@ Note the `id` field (e.g., `tok_abc123`) — required for all deploy and post-de
 
 <Step number={2} title="Deploy the token">
 
-Use **execute mode** when SDP controls the signing wallet, or **prepare mode** when you need to sign externally.
+SDP signs and submits the deploy transaction using the token's configured signer wallet.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
@@ -71,15 +71,13 @@ SDP submits the transaction to Solana and polls for confirmation. The page updat
 </Tab>
 <Tab value="API">
 
-**Execute mode** — SDP signs and submits:
-
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy \
   -H "Authorization: Bearer sk_test_..." \
   -H "Idempotency-Key: deploy-acme-001"
 ```
 
-```typescript
+```typescript title="deploy-token.ts"
 const res = await fetch(
   "https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy",
   {
@@ -93,15 +91,6 @@ const res = await fetch(
 const { data } = await res.json();
 // data.token.mintAddress — the onchain mint address
 ```
-
-**Prepare mode** — returns an unsigned transaction:
-
-```bash
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy/prepare \
-  -H "Authorization: Bearer sk_test_..."
-```
-
-Sign `data.transaction.serialized` with your private key and submit to Solana. See [Prepare vs Execute](/docs/tokens/prepare-vs-execute).
 
 Always pass an `Idempotency-Key` — retrying with the same key after a network error prevents double-deployment.
 
@@ -128,14 +117,14 @@ The token status badge changes from `Not deployed` to the onchain mint address. 
 
 The deploy response includes the confirmed state:
 
-```typescript
+```typescript title="deploy-token.ts"
 // data.token.status      — "active"
 // data.token.mintAddress — e.g., "AcMeXYZ..."
 ```
 
 Fetch the token at any time to verify:
 
-```bash
+```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/tokens/tok_abc123 \
   -H "Authorization: Bearer sk_test_..."
 ```

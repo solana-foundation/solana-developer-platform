@@ -120,14 +120,13 @@ describe("getLockSupplyDisabledReason", () => {
     );
   });
 
-  it.each([
-    "pending",
-    "paused",
-    "revoked",
-  ] as const)("blocks on a %s token via the mint lifecycle gate", (status) => {
-    // Leg 1 is a real mint, so lock-supply inherits mint's lifecycle rules.
-    expect(getLockSupplyDisabledReason(makeToken({ status }), t)).not.toBeNull();
-  });
+  it.each(["pending", "paused", "revoked"] as const)(
+    "blocks on a %s token via the mint lifecycle gate",
+    (status) => {
+      // Leg 1 is a real mint, so lock-supply inherits mint's lifecycle rules.
+      expect(getLockSupplyDisabledReason(makeToken({ status }), t)).not.toBeNull();
+    }
+  );
 });
 
 // Gates whether the cap is still editable in the asset-management Details tab.

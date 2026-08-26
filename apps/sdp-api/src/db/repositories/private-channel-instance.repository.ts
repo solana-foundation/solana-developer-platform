@@ -10,6 +10,7 @@ export interface PrivateChannelInstanceRow {
   organization_id: string;
   project_id: string;
   gateway_url: string;
+  /** Legacy response compatibility only; never used for RPC execution. */
   chain_rpc_url: string;
   escrow_program_id: string;
   withdraw_program_id: string;

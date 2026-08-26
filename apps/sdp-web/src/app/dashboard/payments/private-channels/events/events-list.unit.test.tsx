@@ -493,19 +493,21 @@ describe("EventsList", () => {
       }),
       buttonName: "View details for Withdrawal submitted",
     },
-  ])("keeps the full $name signature without a public explorer link", async ({
-    event,
-    buttonName,
-  }) => {
-    const user = userEvent.setup();
-    renderEvents({ initialEvents: [event] });
+  ])(
+    "keeps the full $name signature without a public explorer link",
+    async ({ event, buttonName }) => {
+      const user = userEvent.setup();
+      renderEvents({ initialEvents: [event] });
 
-    await user.click(screen.getByRole("button", { name: buttonName }));
+      await user.click(screen.getByRole("button", { name: buttonName }));
 
-    expect(await screen.findByRole("dialog")).toBeTruthy();
-    expect(screen.getByText(SIGNATURE)).toBeTruthy();
-    expect(screen.queryByRole("link", { name: "View transaction on Solana Explorer" })).toBeNull();
-  });
+      expect(await screen.findByRole("dialog")).toBeTruthy();
+      expect(screen.getByText(SIGNATURE)).toBeTruthy();
+      expect(
+        screen.queryByRole("link", { name: "View transaction on Solana Explorer" })
+      ).toBeNull();
+    }
+  );
 
   it.each([
     {
