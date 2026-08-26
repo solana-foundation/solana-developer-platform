@@ -112,6 +112,10 @@ export async function connectPrivateChannelAction(
     return { ok: false, kind: "validation", fieldErrors: flattenFieldErrors(parsed.error) };
   }
   const confirmReactivate = readConfirmReactivate(input);
+  // The shared compatibility schema defaults an omitted legacy RPC URL to an
+  // empty string for persistence. Do not turn that default back into a request
+  // field: the API accepts omission while an explicitly empty URL is invalid.
+  const { chainRpcUrl: _legacyChainRpcUrl, ...connectInput } = parsed.data;
 
   try {
     const client = await createSdpApiClient();
@@ -119,7 +123,7 @@ export async function connectPrivateChannelAction(
       "/v1/private-channels/instance",
       {
         method: "POST",
-        body: JSON.stringify({ ...parsed.data, confirmReactivate }),
+        body: JSON.stringify({ ...connectInput, confirmReactivate }),
       }
     );
     // Connecting flips the active instance, which changes the Overview, the header
