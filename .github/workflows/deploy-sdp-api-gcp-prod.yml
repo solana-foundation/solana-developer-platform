@@ -44,6 +44,7 @@ jobs:
       REPO: sdp-prod
       SERVICE: sdp-prod-api-public
       JOB: sdp-prod-api-public-cron
+      WORKER_SERVICE: sdp-prod-worker
       MIGRATE_JOB: sdp-prod-api-public-migrate
       PII_MIGRATE_JOB: sdp-prod-counterparty-pii-migrate
     steps:
@@ -258,6 +259,18 @@ jobs:
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
           gcloud run jobs update "${PII_MIGRATE_JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
+
+          describe_err="$(mktemp)"
+          if gcloud run services describe "${WORKER_SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" >/dev/null 2>"${describe_err}"; then
+            gcloud run services update "${WORKER_SERVICE}" \
+              --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
+          elif grep -qiE "NOT_FOUND|could not be found" "${describe_err}"; then
+            echo "worker service ${WORKER_SERVICE} not created yet; skipping image update"
+          else
+            cat "${describe_err}" >&2
+            exit 1
+          fi
           echo "ROLLOUT_COMPLETE=true" >> "${GITHUB_ENV}"
 
       - name: Record managed monitor migration gate
