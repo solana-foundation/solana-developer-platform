@@ -70,7 +70,6 @@ export type TestConnectionResult = ConnectionProbeResult;
 // re-probe — a success here means Connect will not fail on the probe.
 export async function testConnectionAction(input: {
   gatewayUrl: string;
-  chainRpcUrl: string;
   authUrl: string;
 }): Promise<TestConnectionResult> {
   try {
