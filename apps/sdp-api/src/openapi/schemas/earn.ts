@@ -74,6 +74,8 @@ const earnOwnerAddressSchema = z
   .string()
   .min(32)
   .max(44)
+  // Base58 shape, matching the runtime's trim + isAddress refusal.
+  .regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/)
   .openapi({
     description:
       "The external wallet: the customer's own Solana address. It signs, owns the shares, " +
@@ -83,9 +85,12 @@ const earnOwnerAddressSchema = z
 
 const earnDecimalAmountSchema = z
   .string()
-  .regex(/^\d+(\.\d+)?$/)
+  .max(128)
+  // The runtime additionally refuses an all-zero value; the lookahead encodes
+  // that same non-zero rule in the published pattern.
+  .regex(/^(?=.*[1-9])\d+(\.\d+)?$/)
   .openapi({
-    description: "Positive decimal string; never a float.",
+    description: "Positive decimal string with at least one non-zero digit; never a float.",
     example: "25",
   });
 
@@ -129,6 +134,9 @@ export const earnExternalWalletSubmitRequest = z
       .string()
       .min(1)
       .max(1700)
+      // Base64 only, matching the runtime schema; anything else could never
+      // decode into a transaction.
+      .regex(/^[A-Za-z0-9+/]+={0,2}$/)
       .openapi({
         description:
           "Base64 wire bytes of the signed transaction. They must be byte-for-byte the built " +
