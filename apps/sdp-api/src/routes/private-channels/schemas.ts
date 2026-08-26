@@ -17,10 +17,9 @@ export type ConnectPrivateChannelInstanceInput = z.infer<
   typeof connectPrivateChannelInstanceSchema
 >;
 
-/** Body for `POST /probe`: the three URLs the connect flow re-probes. */
+/** Body for `POST /probe`: SPC-owned URLs; Solana RPC comes from the project. */
 export const probeConnectionSchema = z.object({
   gatewayUrl: z.string().min(1),
-  chainRpcUrl: z.string().min(1),
   authUrl: z.string().min(1),
 });
 

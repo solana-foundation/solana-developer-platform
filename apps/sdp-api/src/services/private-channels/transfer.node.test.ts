@@ -45,7 +45,6 @@ const CHANNEL_ID = "pch_transfer_test";
 const RECIPIENT_PC_USER_ID = "pcu_transfer_recipient";
 const RECIPIENT_VERIFIED_WALLET_ID = "pcvw_transfer_recipient";
 const GATEWAY_URL = "https://gateway.example";
-const CHAIN_RPC_URL = "https://api.devnet.solana.com";
 const MINT = address("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
 const SIGNATURE = "1".repeat(64) as Signature;
 const GATEWAY_RPC = { kind: "gateway-rpc" };
@@ -88,7 +87,6 @@ function makeInput(overrides: Partial<Parameters<typeof createChannelTransfer>[1
     instance: {
       id: INSTANCE_ID,
       gatewayUrl: GATEWAY_URL,
-      chainRpcUrl: CHAIN_RPC_URL,
     },
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
@@ -104,6 +102,7 @@ function makeInput(overrides: Partial<Parameters<typeof createChannelTransfer>[1
     },
     amount: "1.25",
     gatewayAuth: auth,
+    cluster: "devnet" as const,
     ...overrides,
   };
 }
