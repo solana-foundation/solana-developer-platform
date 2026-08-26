@@ -1,4 +1,5 @@
 import type { OrganizationRpcProvider, SafeRpcConnection } from "@sdp/types";
+import { VenetianMaskIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { CUSTODY_CAPABILITY_LABEL_KEYS } from "@/app/dashboard/custody/provider-catalog";
@@ -57,6 +58,7 @@ function familyKey(family: IntegrationDetail["family"]): Parameters<Translate>[0
       rpc: "Shared.integrations.rpcTitle",
       ramps: "Shared.integrations.rampsTitle",
       compliance: "Shared.integrations.complianceTitle",
+      privacy: "Shared.integrations.privacyTitle",
     } as const
   )[family];
 }
@@ -67,6 +69,9 @@ function DetailMark({ detail }: { detail: IntegrationDetail }) {
   }
   if (detail.family === "rpc") {
     return <RpcProviderMark provider={detail.provider as OrganizationRpcProvider} />;
+  }
+  if (detail.family === "privacy") {
+    return <VenetianMaskIcon aria-hidden className="size-5 text-secondary" strokeWidth={1.8} />;
   }
   const src =
     detail.family === "ramps"

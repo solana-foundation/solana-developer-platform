@@ -15,7 +15,6 @@ import {
   ShieldCheckIcon,
   TrendingUpIcon,
   UsersIcon,
-  VenetianMaskIcon,
   WalletIcon,
 } from "lucide-react";
 import type { useTranslations } from "@/i18n/provider";
@@ -72,7 +71,7 @@ export function dashboardSubnavStorageKey(key: DashboardSubnavKey): string {
 
 export function getPaymentsActions(
   t: ReturnType<typeof useTranslations>,
-  privateChannelsEnabled: boolean
+  _privateChannelsEnabled: boolean
 ): SubNavItem[] {
   return [
     {
@@ -105,15 +104,6 @@ export function getPaymentsActions(
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.recurring,
       icon: RepeatIcon,
     },
-    ...(privateChannelsEnabled
-      ? [
-          {
-            label: t("Shared.dashboardShell.privateChannels"),
-            href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.privateChannels,
-            icon: VenetianMaskIcon,
-          },
-        ]
-      : []),
   ];
 }
 

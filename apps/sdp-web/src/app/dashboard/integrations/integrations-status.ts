@@ -40,7 +40,10 @@ export type IntegrationStatus =
   | "available"
   | "enabled"
   | "request_access"
-  | "not_configured";
+  | "not_configured"
+  | "unknown";
+
+export type PrivacyProviderId = "private-channels";
 
 export interface IntegrationEntry<TProvider extends string = string> {
   provider: TProvider;
@@ -183,4 +186,25 @@ export function resolveComplianceIntegrations(
       descriptionKey: COMPLIANCE_DESCRIPTION_KEYS[provider],
     };
   });
+}
+
+/**
+ * Private Channels keeps its existing deployment feature gate and project-scoped
+ * instance. The catalog only needs the active instance read: no active row means
+ * the integration is ready to configure, while a failed read must stay unknown.
+ */
+export function resolvePrivacyIntegrations(input: {
+  enabled: boolean;
+  active: boolean | null;
+  label: string;
+}): IntegrationEntry<PrivacyProviderId>[] {
+  if (!input.enabled) return [];
+  return [
+    {
+      provider: "private-channels",
+      label: input.label,
+      status: input.active === null ? "unknown" : input.active ? "active" : "available",
+      descriptionKey: "Shared.integrations.privateChannelsDescription",
+    },
+  ];
 }
