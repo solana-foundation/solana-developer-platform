@@ -265,6 +265,11 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // Global Middleware
   // ═══════════════════════════════════════════════════════════════════════════
 
+  app.use("*", async (c, next) => {
+    c.set("observability", deps.observability);
+    await next();
+  });
+
   // Request ID for tracing
   app.use("*", requestIdMiddleware());
 

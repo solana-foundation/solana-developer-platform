@@ -4,6 +4,7 @@ import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import type { PolicyGateContext } from "@/middleware/policy-gate";
 import type { KVStoreSet } from "@/runtime/kv";
+import type { Observability } from "@/runtime/observability";
 import type { ApiKeyEnvironment, CachedSession, OrganizationRpcProvider, Permission } from "@sdp/types";
 
 export interface Env {
@@ -326,6 +327,8 @@ export interface Env {
 // Extend Hono's context with our bindings
 declare module "hono" {
   interface ContextVariableMap {
+    // Injected by createApp so handlers use the same implementation as tests
+    observability?: Observability;
     // API key auth context set by middleware
     projectId?: string;
     projectEnvironment?: ApiKeyEnvironment;

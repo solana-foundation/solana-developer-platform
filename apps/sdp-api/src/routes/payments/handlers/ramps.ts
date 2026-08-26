@@ -63,7 +63,6 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { isSentryEnabled } from "@/runtime/observability";
-import { nodeObservability } from "@/runtime/observability-node";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
@@ -570,12 +569,17 @@ export async function estimateAcrossProviders(
           error_message: redactCredentialString(cause.message),
           ...describeError(error),
         });
-        if (isSentryEnabled(c.env)) {
-          nodeObservability.withScope((sentryScope) => {
-            sentryScope.setTag("provider", provider);
-            sentryScope.setTag("organization_id", scope.auth.organizationId);
-            nodeObservability.captureException(redactErrorForCapture(cause));
-          });
+        const observability = c.get("observability");
+        if (observability && isSentryEnabled(c.env)) {
+          try {
+            observability.withScope((sentryScope) => {
+              sentryScope.setTag("provider", provider);
+              sentryScope.setTag("organization_id", scope.auth.organizationId);
+              observability.captureException(redactErrorForCapture(cause));
+            });
+          } catch {
+            // never let telemetry change the per-provider error contract
+          }
         }
         return {
           provider,

@@ -21,18 +21,26 @@ vi.mock("../wallets", async (importOriginal) => ({
 
 import type { PaymentRampEstimate } from "@sdp/types";
 import { logEvent } from "@/runtime/money-path-events";
+import type { Observability } from "@/runtime/observability";
 import type { AppContext } from "../context";
 import { estimateAcrossProviders } from "./ramps";
 
-const c = { env: {} } as unknown as AppContext;
+function buildContext(options?: { sentryDsn?: string; observability?: Observability }) {
+  const vars = new Map<string, unknown>([["observability", options?.observability]]);
+  return {
+    env: options?.sentryDsn ? { SENTRY_DSN: options.sentryDsn } : {},
+    get: (key: string) => vars.get(key),
+  } as unknown as AppContext;
+}
 
 describe("estimateAcrossProviders", () => {
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it("keeps the per-provider error contract but emits a structured log event", async () => {
-    const results = await estimateAcrossProviders(c, ["moonpay"], async () => {
+    const results = await estimateAcrossProviders(buildContext(), ["moonpay"], async () => {
       throw new Error("provider exploded");
     });
 
@@ -52,9 +60,55 @@ describe("estimateAcrossProviders", () => {
 
   it("does not log when a provider succeeds or is merely unsupported", async () => {
     const estimate = { provider: "moonpay" } as unknown as PaymentRampEstimate;
-    const results = await estimateAcrossProviders(c, ["moonpay"], async () => estimate);
+    const results = await estimateAcrossProviders(
+      buildContext(),
+      ["moonpay"],
+      async () => estimate
+    );
 
     expect(results).toEqual([{ provider: "moonpay", status: "ok", estimate }]);
     expect(logEvent).not.toHaveBeenCalled();
+  });
+
+  it("captures through the injected observability when Sentry is enabled", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const captureException = vi.fn();
+    const observability: Observability = {
+      captureException,
+      withScope: (cb) => cb({ setTag: vi.fn(), setUser: vi.fn() }),
+      withMonitor: (_slug, fn) => fn(),
+    };
+
+    const results = await estimateAcrossProviders(
+      buildContext({ sentryDsn: "https://sentry.example/1", observability }),
+      ["moonpay"],
+      async () => {
+        throw new Error("provider exploded");
+      }
+    );
+
+    expect(results).toEqual([{ provider: "moonpay", status: "error", error: "provider exploded" }]);
+    expect(captureException).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the error contract when the observability capture itself throws", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const observability: Observability = {
+      captureException: vi.fn(),
+      withScope: () => {
+        throw new Error("sentry not initialized");
+      },
+      withMonitor: (_slug, fn) => fn(),
+    };
+
+    const results = await estimateAcrossProviders(
+      buildContext({ sentryDsn: "https://sentry.example/1", observability }),
+      ["moonpay"],
+      async () => {
+        throw new Error("provider exploded");
+      }
+    );
+
+    expect(results).toEqual([{ provider: "moonpay", status: "error", error: "provider exploded" }]);
   });
 });
