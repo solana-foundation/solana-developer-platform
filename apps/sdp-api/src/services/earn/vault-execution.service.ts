@@ -9,6 +9,7 @@ import {
   appendTransactionMessageInstructions,
   type Blockhash,
   bytesEqual,
+  compileTransaction,
   compressTransactionMessageUsingAddressLookupTables,
   createTransactionMessage,
   fetchAddressesForLookupTables,
@@ -70,7 +71,7 @@ const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
  */
 export function appendVaultRequestMemo(
   plan: EarnVaultTransactionPlan,
-  kind: "vault-deposit" | "vault-withdrawal",
+  kind: "vault-deposit" | "vault-withdrawal" | "external-deposit" | "external-withdrawal",
   requestId: string
 ): EarnVaultTransactionPlan {
   const memo = {
@@ -327,6 +328,64 @@ export async function signVaultPlan(
     signature: getSignatureFromTransaction(signed),
     lastValidBlockHeight: String(lastValidBlockHeight),
   };
+}
+
+export interface CompileUnsignedVaultTransactionInput extends VaultPlanExecutionScope {
+  plan: EarnVaultTransactionPlan;
+  /**
+   * The end-user wallet: fee payer and required signer of the compiled
+   * message. A plain address on purpose — SDP holds no signer for it, which is
+   * the whole point of the caller-signed flow (PRO-1722).
+   */
+  owner: Address;
+  /**
+   * The successful simulation's preparation, REQUIRED rather than optional:
+   * the caller-signed flow always simulates before handing bytes out, and
+   * compiling from the same preparation is what guarantees the message the
+   * end user signs is byte-for-byte the message that was simulated (same
+   * blockhash, same resolved lookup tables).
+   */
+  prepared: PreparedVaultPlanExecution;
+}
+
+export interface UnsignedVaultTransaction {
+  /** Wire bytes with every signature slot zeroed, ready for the owner to sign. */
+  bytes: Uint8Array;
+  /** Inclusive block height after which these exact bytes cannot land. */
+  lastValidBlockHeight: string;
+}
+
+/**
+ * Compile exactly one complete vault transaction WITHOUT any signature — the
+ * caller-signed twin of `signVaultPlan`.
+ *
+ * The message shape must stay identical to the wallet-pays branch of
+ * `signVaultPlan` (fee payer, lifetime, instructions, lookup-table
+ * compression, in that order): the submit step later proves a signed
+ * transaction is one SDP built by comparing MESSAGE bytes, so any divergence
+ * here is a refused submit, not a subtle drift. Signature slots encode as
+ * zeroed 64-byte runs, which means the unsigned encoding and the signed one
+ * are the same length and the size check below is exact.
+ */
+export function compileUnsignedVaultTransaction(
+  input: CompileUnsignedVaultTransactionInput
+): UnsignedVaultTransaction {
+  assertExpectedPlan(input.plan, input.cluster, input.expectedAssetIdentity);
+  if (input.prepared.plan !== input.plan) {
+    throw new Error("Vault execution preparation belongs to a different plan");
+  }
+  const { lookupTables, blockhash, lastValidBlockHeight } = input.prepared;
+  const instructions = planInstructions(input.plan).map(toKitInstruction);
+  const message = pipe(
+    createTransactionMessage({ version: 0 }),
+    (m) => setTransactionMessageFeePayer(input.owner, m),
+    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+    (m) => appendTransactionMessageInstructions(instructions, m),
+    (m) => applyLookupTables(m, lookupTables)
+  );
+  const bytes = new Uint8Array(getTransactionEncoder().encode(compileTransaction(message)));
+  assertVaultTransactionFits(bytes, false);
+  return { bytes, lastValidBlockHeight: String(lastValidBlockHeight) };
 }
 
 /**

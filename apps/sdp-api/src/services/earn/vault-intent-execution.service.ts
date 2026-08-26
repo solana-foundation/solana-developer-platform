@@ -123,37 +123,74 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
   const result = await runIntentTransaction((db) => input.persist(db, signed));
   if (result.replayed) return result;
 
+  const movement = await broadcastRecordedVaultMovement(env, {
+    operation,
+    organizationId: input.organizationId,
+    cluster: input.cluster,
+    deadline: input.deadline,
+    rpcUrl: input.rpcUrl,
+    bytes: signed.bytes,
+    signature: signed.signature,
+    movement: result.movement,
+  });
+  return { ...result, movement };
+}
+
+/**
+ * The invariant tail past the durable write, shared by every vault money
+ * mover: broadcast the recorded bytes, then reconcile the optimistic
+ * `submitted` transition. A broadcast error is ambiguous and leaves the
+ * durable `requested` row for the shared reconciler; it is never a failure.
+ *
+ * Split out of `executeSignedVaultIntent` for the caller-signed external-wallet flow
+ * (PRO-1722), which records a movement it never signed and so has no
+ * simulate/sign head — but past the durable write the two paths must not
+ * differ at all.
+ */
+export async function broadcastRecordedVaultMovement(
+  env: Env,
+  input: {
+    operation: string;
+    organizationId: string;
+    cluster: SolanaCluster;
+    deadline: VaultDeadline;
+    rpcUrl: string;
+    bytes: Uint8Array;
+    signature: string;
+    movement: EarnMovementRow;
+  }
+): Promise<EarnMovementRow> {
   try {
     await broadcastVaultTransaction(env, {
       cluster: input.cluster,
       deadline: input.deadline,
-      bytes: signed.bytes,
+      bytes: input.bytes,
       rpcUrl: input.rpcUrl,
     });
   } catch (error) {
     getLogger().error(
-      { movementId: result.movement.id, signature: signed.signature, error },
-      `vault ${operation}: broadcast outcome unknown; left reconcilable`
+      { movementId: input.movement.id, signature: input.signature, error },
+      `vault ${input.operation}: broadcast outcome unknown; left reconcilable`
     );
-    return result;
+    return input.movement;
   }
 
   const ledger = createPostgresEarnMovementsRepository(getDb(env));
   const advanced = await ledger.advanceVaultMovement({
-    movementId: result.movement.id,
+    movementId: input.movement.id,
     organizationId: input.organizationId,
     toStatus: "submitted",
   });
-  if (advanced) return { ...result, movement: advanced };
+  if (advanced) return advanced;
 
   const observed = await ledger.getMovementById({
-    movementId: result.movement.id,
+    movementId: input.movement.id,
     organizationId: input.organizationId,
   });
-  if (observed?.signature === signed.signature) {
-    return { ...result, movement: observed };
+  if (observed?.signature === input.signature) {
+    return observed;
   }
   throw internalError(
-    `Vault ${operation} was broadcast but its ledger transition could not be verified`
+    `Vault ${input.operation} was broadcast but its ledger transition could not be verified`
   );
 }
