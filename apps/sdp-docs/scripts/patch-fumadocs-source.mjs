@@ -8,16 +8,6 @@ const sourceFileCandidates = [
   path.resolve(__dirname, "../.source/server.ts"),
   path.resolve(__dirname, "../.source/index.ts"),
 ];
-const sourceConfigShimPath = path.resolve(__dirname, "../.source/source.config.mjs");
-const sourceConfigShim = `import { defineDocs } from "fumadocs-mdx/config";
-
-export const docs = defineDocs({
-  dir: "content/docs",
-});
-
-export default docs;
-`;
-
 const run = async () => {
   let content;
   let sourceFilePath;
@@ -49,7 +39,6 @@ const run = async () => {
     {
       pattern: /export const defaultCollection =/g,
       localName: "_defaultCollection",
-      // biome-ignore lint/security/noSecrets: Generated Fumadocs export identifier, not a secret.
       exportName: "defaultCollection",
     },
   ];
@@ -78,8 +67,6 @@ const run = async () => {
   } else {
     console.log("No Fumadocs source patch required");
   }
-
-  await fs.writeFile(sourceConfigShimPath, sourceConfigShim, "utf8");
 };
 
 run().catch((error) => {

@@ -7,7 +7,6 @@
     "mint-and-burn",
     "allowlists",
     "freeze-and-compliance",
-    "manage-token-settings",
-    "prepare-vs-execute"
+    "manage-token-settings"
   ]
 }

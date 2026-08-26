@@ -43,6 +43,7 @@ For `hosted`, decide whether the upstream permits iframe embedding or requires a
 |---|---|---|
 | Lightspark | `manual_instructions` | `REALTIME_FUNDING` quote; funding `paymentInstructions` |
 | BVNK | `manual_instructions` | bank pay-in instructions built from the provisioned rule |
+| Mural | `manual_instructions` | pay-in instructions for the resolved account |
 | MoonPay | `hosted` | signed `buy.moonpay.com` widget `hostedUrl` |
 | Stripe / MoneyGram | `session_widget` | embedded provider session credentials |
 
