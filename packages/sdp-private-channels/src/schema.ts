@@ -37,6 +37,10 @@ const base58Address = (label: string) =>
  */
 export const privateChannelInstanceInputSchema = z.object({
   gatewayUrl: httpUrl("Gateway URL"),
+  // Transitional expand/contract compatibility: current `main` still sends
+  // this field, while the migrated UI omits it. It is persisted only so the old
+  // response contract remains intact and is never used for RPC execution.
+  chainRpcUrl: httpUrl("Chain RPC URL").optional().default(""),
   escrowProgramId: base58Address("Escrow program ID"),
   withdrawProgramId: base58Address("Withdraw program ID"),
   escrowInstanceAddr: base58Address("Escrow instance address"),

@@ -10,6 +10,8 @@ export interface PrivateChannelInstanceRow {
   organization_id: string;
   project_id: string;
   gateway_url: string;
+  /** Legacy response compatibility only; never used for RPC execution. */
+  chain_rpc_url: string;
   escrow_program_id: string;
   withdraw_program_id: string;
   escrow_instance_addr: string;
@@ -67,6 +69,7 @@ export function mapPrivateChannelInstanceRow(
     organizationId: row.organization_id,
     projectId: row.project_id,
     gatewayUrl: row.gateway_url,
+    chainRpcUrl: row.chain_rpc_url,
     escrowProgramId: row.escrow_program_id,
     withdrawProgramId: row.withdraw_program_id,
     escrowInstanceAddr: row.escrow_instance_addr,

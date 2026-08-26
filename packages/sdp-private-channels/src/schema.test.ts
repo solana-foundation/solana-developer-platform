@@ -22,6 +22,24 @@ describe("privateChannelInstanceInputSchema", () => {
     expect(fieldErrors.gatewayUrl?.[0]).toMatch(/required/i);
   });
 
+  it("accepts an omitted legacy chain RPC URL", () => {
+    const { chainRpcUrl: _legacyChainRpcUrl, ...input } = SANDBOX_DEFAULTS;
+    const result = privateChannelInstanceInputSchema.safeParse(input);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.chainRpcUrl).toBe("");
+  });
+
+  it("rejects a non-http legacy chain RPC URL", () => {
+    const result = privateChannelInstanceInputSchema.safeParse({
+      ...SANDBOX_DEFAULTS,
+      chainRpcUrl: "ftp://example.com",
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.flatten().fieldErrors.chainRpcUrl?.[0]).toMatch(/http\/https/i);
+  });
+
   it("rejects an escrow program ID that is not base58", () => {
     const result = privateChannelInstanceInputSchema.safeParse({
       ...SANDBOX_DEFAULTS,
