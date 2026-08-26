@@ -3,15 +3,13 @@ title: How payments work on SDP
 description: Wallets, tokens, server-side signing, fees, and the data model that backs SDP payments.
 ---
 
-SDP payments move value between Solana accounts: a custody wallet sends tokens to a destination address, SDP records the transfer, and the rest of the section describes how to send those, accept incoming ones, ramp into and out of fiat, and reconcile activity against your product database.
-
-This page introduces the building blocks the rest of the section assumes.
+SDP payments move value between Solana accounts: a custody wallet sends tokens to a destination address and SDP records the resulting transfer. This page introduces the building blocks — wallets, tokens, execution, fees, and the data model — that the rest of the section assumes.
 
 ## Custody wallets
 
-Every SDP payment is anchored to a **custody wallet** — a Solana keypair whose private key SDP holds, scoped to an organization and (optionally) a project. Wallets sign outbound transfers on your behalf and contribute to balances and policies for the addresses you control.
+Every SDP payment is anchored to a **custody wallet** — an SDP-managed Solana wallet, scoped to an organization and (optionally) a project. The wallet's key is held and signed for by a custody provider; SDP presents a stable Solana address and routes signing to whichever provider holds the key. Wallets sign outbound transfers on your behalf and contribute to balances and policies for the addresses you control.
 
-You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)) and reference them by their SDP `wallet_id` (`wal_…`). Transfer endpoints expect the **source** as a custody wallet ID — the wallet is resolved server-side from the caller's custody-wallet list — and the **destination** as the on-chain Solana address of the recipient. Ramp endpoints vary by provider: MoonPay and BVNK accept either a wallet ID or a Solana address for `sourceWallet` / `destinationWallet`; Lightspark uses its own `ExternalAccount:…` identifiers (onramp `destinationWallet` also accepts a Solana address, offramp `sourceWallet` does not).
+You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)) and reference them by their SDP `wallet_id` (`wal_…`). Transfer endpoints expect the **source** as a custody wallet ID — the wallet is resolved server-side from the caller's custody-wallet list — and the **destination** as the on-chain Solana address of the recipient. Ramp quote endpoints use the same shape for every provider: `destinationWallet` (onramp) or `sourceWallet` (offramp) is a custody wallet you control, passed as its wallet ID or its Solana address. Provider-specific identifiers (customer id, payout account) are resolved server-side from the **Counterparty**'s Provider Requirements, not passed on the request — see [Ramps](/docs/payments/ramps).
 
 ## Tokens and token accounts
 
@@ -36,7 +34,7 @@ Every successful or attempted transfer creates a `Transfer` record. The fields t
 | Field | Meaning |
 | --- | --- |
 | `id` | SDP-internal transfer identifier (use this in API URLs). |
-| `status` | One of `pending`, `processing`, `confirmed`, `finalized`, `failed`. See [Verifying a payment](/docs/payments/accept-verification). |
+| `status` | Wallet transfers: `processing`, `confirmed`, `finalized`, `failed`. Ramp transfers: `pending`, `awaiting_payment`, `settling`, `completed`, `canceled`, `expired`, `failed`. See [Verifying a payment](/docs/payments/accept-verification). |
 | `direction` | `inbound` (someone paid you) or `outbound` (you paid someone). |
 | `source`, `destination` | On-chain addresses. |
 | `token`, `amount` | What moved and how much. `amount` is a UI-unit decimal string (e.g. `"100.00"`). |

@@ -34,7 +34,7 @@ The **Permissions** tab lists every authority and which wallet currently holds i
 
 ![Permissions tab showing Mint Authority, Freeze Authority, Metadata Authority, and Permanent Delegate Authority with Edit buttons](/images/tokens/token-settings-permissions.png)
 
-The **Extensions** tab shows the template and each operational flag — allowlist status, mintable, freezable, and default account state.
+The **Extensions** tab shows the template and each operational flag — Token Access Control (allowlist) status, mintable, freezable, and default account state.
 
 ![Extensions tab showing template, allowlist, mintable, freezable, and default account state settings](/images/tokens/token-settings-extensions.png)
 
@@ -43,12 +43,12 @@ The **Extensions** tab shows the template and each operational flag — allowlis
 
 Fetch the current token state:
 
-```bash
+```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/tokens/tok_abc123 \
   -H "Authorization: Bearer sk_test_..."
 ```
 
-```typescript
+```typescript title="get-token-settings.ts"
 const { data } = await res.json();
 // data.token.authorities — { mintAuthority, freezeAuthority, permanentDelegate }
 // data.token.extensions  — active extensions on the token
@@ -73,32 +73,18 @@ On the token detail page, go to **Permissions**. Click **Edit** next to the auth
 
 ![Mint Authority modal showing current authority wallet, new authority dropdown with controlled wallets, and Save authority button](/images/tokens/token-authority-edit.png)
 
-> Once an authority is rotated to an external wallet, SDP can no longer sign on its behalf. Use execute flows with the external wallet or prepare flows for signing outside SDP.
+> Once an authority is rotated to an external wallet, SDP can no longer sign operations that require it. Rotate the authority back to a controlled wallet to resume using SDP's deploy, mint, and compliance actions.
 
 </Tab>
 <Tab value="API">
 
-**Execute mode** — SDP signs the authority rotation:
+SDP signs the authority rotation:
 
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: rotate-001" \
-  -d '{
-    "authority": {
-      "type": "mintAuthority",
-      "newAuthority": "9aBCd...4eEf"
-    }
-  }'
-```
-
-**Prepare mode** — returns unsigned transaction for external signing:
-
-```bash
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority/prepare \
-  -H "Authorization: Bearer sk_test_..." \
-  -H "Content-Type: application/json" \
   -d '{
     "authority": {
       "type": "mintAuthority",
@@ -130,7 +116,7 @@ In **Settings → Authorities**, click **Revoke** next to the authority and conf
 
 Set `newAuthority` to `null` to revoke:
 
-```typescript
+```typescript title="revoke-authority.ts"
 body: JSON.stringify({
   authority: {
     type: "mintAuthority",
