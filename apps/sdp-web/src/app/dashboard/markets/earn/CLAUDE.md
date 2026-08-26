@@ -19,6 +19,10 @@ api/dashboard/markets/earn/
   provider-query.ts                  allowlisted query passthrough — lives at
                                      the earn/ ROOT because its importers sit
                                      at several depths under programs/
+  button-configuration/route.ts      PUT project configuration (reads happen
+                                     server-side via createSdpApiClient — no
+                                     GET proxy, so nothing can call it without
+                                     the PUT's expectedProjectId guard)
   strategies/route.ts
   programs/route.ts                  GET list (page window) · POST create
   programs/[programId]/route.ts      GET one · PUT re-target
@@ -70,7 +74,9 @@ program create still sends the body `requestId` form.
   from the live catalogue, then continue to the button builder.
 - `button-builder/page.tsx` → `EarnButtonBuilder` — the customer-facing button
   preview plus a generated **server-side** integration snippet for
-  `POST /v1/earn/vault-deposits`.
+  `POST /v1/earn/vault-deposits`. It also loads the saved project configuration.
+- `/earn/integrate/[token]` is the public, no-index engineering handoff. It is
+  intentionally outside the dashboard route and does not require Clerk auth.
 - Both are `dynamic = "force-dynamic"` and resolve `loadEarnProviderAccess()`
   server-side per request. Provider access is organization-scoped; caching it
   would hand one org's entitlement to another.
@@ -103,10 +109,26 @@ program create still sends the body `requestId` form.
   routes to the builder with `?strategy=<id>`.
 - `earn-button-builder.tsx` — re-checks availability itself rather than trusting
   the referrer, and refuses with a named empty state for each way in that can
-  fail (catalogue error / unknown strategy / strategy not available). The style
-  controls are **rendered disabled**: SDP has no button-configuration resource
-  or client export yet, so they show the intended shape without pretending to
-  save. The generated snippet is server-only and says so — it carries a secret
+  fail (catalogue error / unknown strategy / environment, access, provider, or
+  strategy unavailable). A FAILED configuration load dead-ends the page only
+  when it also removes the strategy selection: with `?strategy=` present the
+  previews and snippet need no saved configuration, so the builder renders with
+  an inline warning instead. The live style controls persist one configuration
+  per organization and project through `/v1/earn/button-configurations/current`;
+  a save response never overwrites local style/accent state (an edit made while
+  the PUT was in flight must survive, and `hasUnsavedChanges` stays honest), and
+  saved accent colors are uppercased on entry so lowercase-hex API writes still
+  match the preset swatches. Saving produces a stable public
+  `/earn/integrate/:token` handoff for partner engineers. That page needs no
+  dashboard sign-in and never exposes tenant data or an API key; when the
+  configured strategy is hidden, delisted, or paused the API reports
+  `strategyAvailable: false` and the page renders a stale notice instead of the
+  snippet. The public read is three-way: only a definitive 404 renders
+  `notFound()`; any other non-OK answer (the endpoint shares the anonymous rate
+  bucket, so a burst of opens 429s) renders a retryable "temporarily
+  unavailable" notice — a valid link must never present as dead, and an
+  operational failure must never 500 the page. The
+  generated snippet remains server-only and says so because it carries a secret
   API key.
 - `earn-button-preview.tsx` — `EARN_BUTTON_STYLES` and the preview chip. The
   builder asserts its own options against that list at module load, so adding a

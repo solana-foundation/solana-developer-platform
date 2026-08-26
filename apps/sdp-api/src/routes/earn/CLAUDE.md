@@ -88,6 +88,22 @@ record, not state: a route may resolve which provider wallet a program is and
 then read all of its money live — what it may never do is mix a persisted
 balance with a live one.
 
+- `GET|PUT /button-configurations/current`: **DB**, scoped to organization and
+  project. PUT runs the SAME vault money-in gate sequence as
+  `POST /vault-deposits` — shared as `assertVaultDepositAdmissible`
+  (`handlers/admission.ts`), never copied — after resolving the strategy through
+  `requireEarnStrategy` (browse visibility applies to NEW configurations). The
+  stable public token is preserved across updates.
+- `GET /button-configurations/public/:publicToken`: **DB** plus catalogue
+  display metadata, registered before auth for the engineering handoff. Its
+  response is deliberately limited to strategy and style, and it never returns
+  organization, project, actor, or API-key data. The catalogue visibility
+  policy binds this read too: a strategy that is hidden (`isHiddenStrategy`),
+  delisted, or not active is served with `strategyAvailable: false` and
+  `strategyName`/`provider` withheld, so the unauthenticated route cannot leak
+  a hidden row's metadata and the handoff page can render an honest stale state
+  instead of a snippet the deposit route would refuse.
+
 - `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Rows are
   admitted only by the hourly sync cron; the 5-minute metrics refresh
   (`cron/earn-metrics-refresh.ts`) updates figures only and can never insert.

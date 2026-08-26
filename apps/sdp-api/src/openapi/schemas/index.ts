@@ -6,6 +6,7 @@ export * from "./base";
 export * from "./compliance";
 export * from "./counterparties";
 export * from "./custody";
+export * from "./earn";
 export * from "./health";
 export * from "./issuance";
 export * from "./onboarding";
