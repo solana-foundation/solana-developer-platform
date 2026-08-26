@@ -165,11 +165,19 @@ jobs:
           echo "PREVIOUS_TRAFFIC=${previous_traffic}" >> "${GITHUB_ENV}"
           echo "PREVIOUS_CRON_IMAGE=${previous_cron_image}" >> "${GITHUB_ENV}"
           echo "PREVIOUS_PII_MIGRATE_IMAGE=${previous_pii_migrate_image}" >> "${GITHUB_ENV}"
+          worker_describe_err="$(mktemp)"
           previous_worker_image="$(
             gcloud run services describe "${WORKER_SERVICE}" \
               --region "${REGION}" --project "${PROJECT_ID}" \
-              --format='value(spec.template.spec.containers[0].image)' 2>/dev/null || true
-          )"
+              --format='value(spec.template.spec.containers[0].image)' 2>"${worker_describe_err}"
+          )" || {
+            if grep -qiE "NOT_FOUND|could not be found" "${worker_describe_err}"; then
+              previous_worker_image=""
+            else
+              cat "${worker_describe_err}" >&2
+              exit 1
+            fi
+          }
           echo "PREVIOUS_WORKER_IMAGE=${previous_worker_image}" >> "${GITHUB_ENV}"
 
       - name: Deploy candidate without production traffic
