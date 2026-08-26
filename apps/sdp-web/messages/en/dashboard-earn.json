@@ -155,6 +155,8 @@
       "handoffApiKeyDescription": "Create or retrieve the project API key in SDP, store it in your server environment as SDP_API_KEY, and have the web or mobile button call your own backend.",
       "handoffStaleTitle": "This integration handoff is stale",
       "handoffStaleDescription": "The strategy configured for this Earn button is no longer available for new deposits, so the integration example is withheld. Ask the workspace owner to open the Earn button builder and choose a live strategy.",
+      "handoffUnavailableTitle": "Handoff temporarily unavailable",
+      "handoffUnavailableDescription": "The integration details could not be loaded right now. The link is still valid; refresh in a minute to try again.",
       "buttonPreview": "Customer button",
       "copyLink": "Copy link",
       "copiedLink": "Copied",

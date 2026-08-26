@@ -1,5 +1,5 @@
 import type { PublicEarnButtonConfiguration } from "@sdp/types";
-import { Code2Icon, InfoIcon, ShieldCheckIcon } from "lucide-react";
+import { Code2Icon, InfoIcon, RefreshCwIcon, ShieldCheckIcon } from "lucide-react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { buildEarnServerIntegration } from "@/app/dashboard/markets/earn/earn-button-integration";
@@ -26,10 +26,12 @@ export default async function EarnIntegrationHandoffPage({
   const apiBaseUrl = resolvePlaygroundApiBaseUrl();
   if (!apiBaseUrl) throw new Error("SDP API base URL is not configured");
 
-  const configuration = await loadPublicEarnButtonConfiguration(apiBaseUrl, token);
-  if (!configuration) notFound();
-
-  const integrationCode = buildEarnServerIntegration({ id: configuration.strategyId }, apiBaseUrl);
+  // Only a definitive 404 may render as not-found: "unavailable" (a 429 from
+  // the shared anonymous rate bucket, a transient 5xx) says nothing about the
+  // token, and telling a partner their valid link is dead would be a lie.
+  const load = await loadPublicEarnButtonConfiguration(apiBaseUrl, token);
+  if (load.kind === "missing") notFound();
+  const configuration = load.kind === "found" ? load.configuration : null;
 
   return (
     <main className="min-h-screen bg-surface-sunken px-4 py-10 sm:px-6">
@@ -49,7 +51,24 @@ export default async function EarnIntegrationHandoffPage({
           </p>
         </div>
 
-        {!configuration.strategyAvailable ? (
+        {configuration === null ? (
+          // Operationally unavailable (rate limited, transient upstream
+          // failure): the token may be perfectly valid, so the page says
+          // "try again" — never not-found, never a hard 500.
+          <div className="rounded-2xl border border-border-default bg-surface-raised px-6 py-8 sm:px-8">
+            <div className="flex items-start gap-3">
+              <RefreshCwIcon aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-secondary" />
+              <div>
+                <h2 className="text-lg font-medium text-primary">
+                  {t("DashboardMarkets.earnProgram.handoffUnavailableTitle")}
+                </h2>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-secondary">
+                  {t("DashboardMarkets.earnProgram.handoffUnavailableDescription")}
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : !configuration.strategyAvailable ? (
           // The configured strategy is hidden, delisted, or paused: the deposit
           // route refuses it, so an honest stale notice replaces a polished
           // snippet that could only 400.
@@ -67,7 +86,13 @@ export default async function EarnIntegrationHandoffPage({
             </div>
           </div>
         ) : (
-          <HandoffContent configuration={configuration} integrationCode={integrationCode} />
+          <HandoffContent
+            configuration={configuration}
+            integrationCode={buildEarnServerIntegration(
+              { id: configuration.strategyId },
+              apiBaseUrl
+            )}
+          />
         )}
       </div>
     </main>

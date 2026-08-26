@@ -123,8 +123,11 @@ program create still sends the body `requestId` form.
   dashboard sign-in and never exposes tenant data or an API key; when the
   configured strategy is hidden, delisted, or paused the API reports
   `strategyAvailable: false` and the page renders a stale notice instead of the
-  snippet, and any non-OK public read degrades to `notFound()` (the endpoint
-  shares the anonymous rate bucket, so a 429 must not 500 the page). The
+  snippet. The public read is three-way: only a definitive 404 renders
+  `notFound()`; any other non-OK answer (the endpoint shares the anonymous rate
+  bucket, so a burst of opens 429s) renders a retryable "temporarily
+  unavailable" notice — a valid link must never present as dead, and an
+  operational failure must never 500 the page. The
   generated snippet remains server-only and says so because it carries a secret
   API key.
 - `earn-button-preview.tsx` — `EARN_BUTTON_STYLES` and the preview chip. The
