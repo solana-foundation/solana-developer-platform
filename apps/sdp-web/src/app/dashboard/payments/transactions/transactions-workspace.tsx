@@ -26,7 +26,7 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { downloadResponseBlob } from "@/lib/download";
-import { SURFACED_RAMP_PROVIDER_OPTIONS } from "@/lib/ramps";
+import { RAMP_PROVIDER_OPTIONS } from "@/lib/ramps";
 import { useDebounce } from "@/lib/use-debounce";
 import { cn } from "@/lib/utils";
 import {
@@ -299,7 +299,7 @@ function AdvancedFilters({
         ariaLabel={t("DashboardPayments.transactions.allProviders")}
         onChange={(provider) => updateFilters({ provider })}
       >
-        {SURFACED_RAMP_PROVIDER_OPTIONS.map((provider) => (
+        {RAMP_PROVIDER_OPTIONS.map((provider) => (
           <SelectItem key={provider.id} value={provider.id}>
             {provider.title}
           </SelectItem>

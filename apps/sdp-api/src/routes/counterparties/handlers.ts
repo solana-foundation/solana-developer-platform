@@ -35,6 +35,7 @@ import { resolveMuralRequirements } from "@/routes/payments/handlers/ramps/mural
 import type { submitCounterpartyRequirementsSchema } from "@/routes/payments/schemas";
 import { resolveScope, resolveWalletAddress } from "@/routes/payments/wallets";
 import { AuditService } from "@/services/audit.service";
+import { assertRampProviderSurfaced } from "@/services/provider-availability.service";
 import {
   type AppContext,
   getCounterpartiesRepository,
@@ -195,6 +196,8 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     });
   }
 
+  assertRampProviderSurfaced(query.data.provider);
+
   const repo = getCounterpartiesRepository(c);
   const counterparty = await repo.getCounterpartyById({
     counterpartyId: params.data.counterpartyId,
@@ -258,6 +261,7 @@ export const submitCounterpartyRequirements = async (
 
   const body = c.req.valid("json");
 
+  assertRampProviderSurfaced(body.provider);
   await assertRampProviderAvailable(c, body.provider, auth.organizationId);
 
   const repo = getCounterpartiesRepository(c);

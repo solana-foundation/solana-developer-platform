@@ -48,19 +48,19 @@ export const SURFACED_RAMP_PROVIDER_OPTIONS: RampProviderOption[] = RAMP_PROVIDE
   (option) => isRampProviderSurfaced(option.id)
 );
 
-export const ONRAMP_PAIRS: RampPair[] = ONRAMP_SUPPORT.map(({ source, dest, providers }) => ({
-  fiatCurrency: source,
-  assetRail: dest,
-  providers,
-}));
+export const ONRAMP_PAIRS: RampPair[] = ONRAMP_SUPPORT.flatMap(({ source, dest, providers }) => {
+  const surfaced = providers.filter(isRampProviderSurfaced);
+  if (surfaced.length === 0) return [];
+  return [{ fiatCurrency: source, assetRail: dest, providers: surfaced }];
+});
 
 // Offramp support is keyed crypto -> fiat (source is the asset rail, dest is the fiat
 // currency), the reverse of onramp. Normalize into the same RampPair shape.
-export const OFFRAMP_PAIRS: RampPair[] = OFFRAMP_SUPPORT.map(({ source, dest, providers }) => ({
-  fiatCurrency: dest,
-  assetRail: source,
-  providers,
-}));
+export const OFFRAMP_PAIRS: RampPair[] = OFFRAMP_SUPPORT.flatMap(({ source, dest, providers }) => {
+  const surfaced = providers.filter(isRampProviderSurfaced);
+  if (surfaced.length === 0) return [];
+  return [{ fiatCurrency: dest, assetRail: source, providers: surfaced }];
+});
 
 export const DEFAULT_RAMP_PAIR: SelectedRampPair = {
   fiatCurrency: "USD",
