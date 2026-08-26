@@ -141,6 +141,17 @@ export interface DeleteUnlistedEarnStrategiesInput {
    */
   hostCluster?: SolanaCluster;
   listedProviderReferences: readonly string[];
+  /**
+   * Authorizes a delist whose keep set is EMPTY, normally refused because
+   * "the provider listed nothing" is indistinguishable from a broken read.
+   * The mirror lane sets it when its truth source answered reliably (a
+   * successful production fetch with no mainnet rows, or a steady-state "no
+   * production catalogue"), so previously mirrored rows converge away instead
+   * of being served forever as a catalogue production no longer vouches for.
+   * Requires `hostCluster`: an authorized-empty delist may tear down one
+   * cluster sub-shelf, never a whole environment.
+   */
+  allowEmptyKeepSet?: true;
 }
 
 export interface ListEarnStrategiesInput {

@@ -430,6 +430,53 @@ describe("EarnRepository (postgres)", () => {
       expect((await repo.getStrategyById(row.id))?.status).toBe("active");
     });
 
+    it("tears down exactly one cluster sub-shelf on an AUTHORIZED empty keep set", async () => {
+      // The mirror lane's convergence path (PRO-1742): when its truth source
+      // reliably answers "nothing is listed", the browse-only mainnet sub-shelf
+      // empties rather than serving orphaned rows forever. The devnet shelf and
+      // operator-stopped rows stay untouched.
+      const devnetRow = await seedStrategy({
+        provider: "ground",
+        providerReference: "devnet-vault",
+      });
+      const mirroredMainnet = await seedStrategy({
+        provider: "ground",
+        providerReference: "orphaned-mainnet-vault",
+        hostCluster: "mainnet-beta",
+      });
+      const pausedMainnet = await seedStrategy({
+        provider: "ground",
+        providerReference: "paused-mainnet-vault",
+        hostCluster: "mainnet-beta",
+        status: "paused",
+      });
+
+      const deleted = await repo.deleteUnlistedStrategies({
+        provider: "ground",
+        environment: "sandbox",
+        hostCluster: "mainnet-beta",
+        listedProviderReferences: [],
+        allowEmptyKeepSet: true,
+      });
+
+      expect(deleted).toEqual(["orphaned-mainnet-vault"]);
+      expect(await repo.getStrategyById(mirroredMainnet.id)).toBeNull();
+      expect((await repo.getStrategyById(devnetRow.id))?.status).toBe("active");
+      expect((await repo.getStrategyById(pausedMainnet.id))?.status).toBe("paused");
+    });
+
+    it("refuses an authorized-empty delist without a cluster scope", async () => {
+      // An empty keep set may tear down one sub-shelf, never an environment.
+      await expect(
+        repo.deleteUnlistedStrategies({
+          provider: "ground",
+          environment: "sandbox",
+          listedProviderReferences: [],
+          allowEmptyKeepSet: true,
+        })
+      ).rejects.toThrow("allowEmptyKeepSet requires a cluster scope");
+    });
+
     it("scopes a cluster-lane delist to its sub-shelf, counting NULL host_cluster as the environment's own", async () => {
       // The PRO-1742 shape: a sandbox environment holds its own devnet shelf
       // plus the mirrored mainnet one, each converged by its own lane.

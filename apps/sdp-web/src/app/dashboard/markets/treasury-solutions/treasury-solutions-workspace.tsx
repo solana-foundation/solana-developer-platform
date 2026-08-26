@@ -45,6 +45,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import {
   type EarnFundingWallet,
@@ -52,6 +53,7 @@ import {
 } from "../earn/deposit/earn-funding-wallets";
 import { formatUsd } from "../earn/earn-format";
 import {
+  EarnDepositAvailabilityBadge,
   EarnStrategyIdentity,
   earnMintAsset,
   earnStrategyAsset,
@@ -360,43 +362,17 @@ function strategyPositionValue(
   return { count: active.length, value: sumDecimalStrings(values as string[]) };
 }
 
-function DepositAvailabilityBadge({
-  availability,
-  strategy,
-}: {
-  availability: EarnVaultDepositAvailability;
-  strategy: EarnStrategy;
-}) {
-  const t = useTranslations();
-
-  if (availability === "cluster_unavailable") {
-    // The one reason with a subject: name the cluster the instrument lives on
-    // (PRO-1742) instead of a bare "Unavailable" — the server's `fundable`
-    // verdict, the row's own hostCluster, no comparison re-derived here.
-    return (
-      <Badge variant="outline">
-        {t("DashboardMarkets.treasury.clusterUnavailable", {
-          cluster: SOLANA_CLUSTER_LABELS[strategy.hostCluster],
-        })}
-      </Badge>
-    );
-  }
-  return (
-    <Badge variant={availability === "available" ? "default" : "outline"}>
-      {t(
-        availability === "available"
-          ? "DashboardMarkets.treasury.depositAvailable"
-          : availability === "environment_unavailable"
-            ? "DashboardMarkets.treasury.productionUnavailable"
-            : availability === "access_unavailable"
-              ? "DashboardMarkets.treasury.accessUnavailable"
-              : availability === "provider_unavailable"
-                ? "DashboardMarkets.treasury.providerUnavailable"
-                : "DashboardMarkets.treasury.depositUnavailable"
-      )}
-    </Badge>
-  );
-}
+// Exhaustive by construction (EarnDepositAvailabilityBadge): a new
+// availability variant fails this map's compile instead of collapsing to a
+// bare "Unavailable".
+const TREASURY_AVAILABILITY_LABELS = {
+  available: "DashboardMarkets.treasury.depositAvailable",
+  cluster_unavailable: "DashboardMarkets.treasury.clusterUnavailable",
+  strategy_unavailable: "DashboardMarkets.treasury.depositUnavailable",
+  environment_unavailable: "DashboardMarkets.treasury.productionUnavailable",
+  access_unavailable: "DashboardMarkets.treasury.accessUnavailable",
+  provider_unavailable: "DashboardMarkets.treasury.providerUnavailable",
+} as const satisfies Readonly<Record<EarnVaultDepositAvailability, MessageKey>>;
 
 function StrategyTable({
   environment,
@@ -469,7 +445,11 @@ function StrategyTable({
                   ) : null}
                 </TableCell>
                 <TableCell>
-                  <DepositAvailabilityBadge availability={availability} strategy={strategy} />
+                  <EarnDepositAvailabilityBadge
+                    availability={availability}
+                    labels={TREASURY_AVAILABILITY_LABELS}
+                    strategy={strategy}
+                  />
                 </TableCell>
                 <TableCell align="right">
                   <div className="flex justify-end gap-2">
@@ -912,9 +892,13 @@ export function TreasurySolutionsWorkspace({
   // share-mint vocabulary behind the allocation summary, and browsing the
   // mirrored mainnet shelf must not blank the devnet vocabulary under it. On
   // the default shelf both hooks share one SWR key, so no second fetch happens
-  // until the toggle leaves it.
+  // until the toggle leaves it. `undefined` means "the default shelf", and the
+  // toggle handler below normalizes the environment's own cluster back to it,
+  // so toggling away and back re-joins the shared key instead of keeping a
+  // second, permanently distinct cache entry of the identical shelf.
   const [catalogueCluster, setCatalogueCluster] = useState<SolanaCluster | undefined>(undefined);
   const strategiesCluster = sdpEnvironment === "sandbox" ? catalogueCluster : undefined;
+  const environmentCluster = CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment];
   const {
     strategies: catalogueStrategies,
     error: catalogueError,
@@ -1113,16 +1097,26 @@ export function TreasurySolutionsWorkspace({
         />
 
         <TreasuryStrategiesCard
-          cluster={strategiesCluster ?? CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment]}
+          cluster={strategiesCluster ?? environmentCluster}
           environment={sdpEnvironment}
           error={catalogueError}
-          isLoading={catalogueLoading}
-          onClusterChange={setCatalogueCluster}
+          // keepPreviousData holds the outgoing shelf's rows through a toggle
+          // flip, so skeletons are for the true first load only.
+          isLoading={catalogueLoading && catalogueStrategies === undefined}
+          onClusterChange={(cluster) =>
+            setCatalogueCluster(cluster === environmentCluster ? undefined : cluster)
+          }
           onDeposit={setDepositStrategy}
           onRefresh={() => {
             refreshWallets();
             refreshStrategies();
-            refreshCatalogue();
+            // On the default shelf both strategy hooks share one SWR key, and
+            // refreshing it twice would run the paged catalogue fetch twice
+            // per click; the mirror shelf only needs its own refresh once the
+            // toggle has left the default.
+            if (strategiesCluster !== undefined) {
+              refreshCatalogue();
+            }
             refreshPositions();
             refreshPrograms();
           }}

@@ -901,4 +901,38 @@ describe("TreasurySolutionsWorkspace — catalogue cluster toggle (PRO-1742)", (
     // Production reads its default shelf; the opt-in never reaches the seam.
     expect(mocks.strategiesClusterRequests).not.toContain("mainnet-beta");
   });
+
+  it("normalizes toggling back to the environment's own cluster into the shared default key", async () => {
+    // Selecting Devnet after Mainnet must re-join the environment-default SWR
+    // key (cluster: undefined) rather than pinning a second, permanently
+    // distinct cache entry of the identical shelf under the literal "devnet".
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    const toggle = screen.getByLabelText("Catalogue cluster");
+    await user.click(within(toggle).getByRole("button", { name: "Mainnet" }));
+    expect(mocks.strategiesClusterRequests).toContain("mainnet-beta");
+
+    await user.click(within(toggle).getByRole("button", { name: "Devnet" }));
+    expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
+    expect(mocks.strategiesClusterRequests).not.toContain("devnet");
+  });
+
+  it("refreshes the shared default shelf ONCE per click, and the mirror separately once toggled", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    // On the default shelf both strategy hooks share one SWR key: one click,
+    // one revalidation of it (the paged fetch must not run twice).
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(mocks.refreshStrategies).toHaveBeenCalledTimes(1);
+
+    // Once the toggle leaves the default, the mirror shelf is a second key and
+    // earns its own refresh.
+    const toggle = screen.getByLabelText("Catalogue cluster");
+    await user.click(within(toggle).getByRole("button", { name: "Mainnet" }));
+    mocks.refreshStrategies.mockClear();
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(mocks.refreshStrategies).toHaveBeenCalledTimes(2);
+  });
 });

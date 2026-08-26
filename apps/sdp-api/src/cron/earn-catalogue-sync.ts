@@ -167,6 +167,14 @@ async function syncProviderCatalogue(
  * delist, which would keep a vault the provider DELISTED sitting
  * `fundable: true` for an hour. An hour without a browse-only mirror row beats
  * an hour offering a delisted vault a deposit path.
+ *
+ * The mirror carries the provider SNAPSHOT, not production's stored row: an
+ * operator `paused`/`deprecated` set on the production row does not propagate
+ * here (the sandbox mirror row stays visibly active while production hides
+ * its own). Curation-by-hiding does propagate (the cluster-keyed hidden and
+ * curated vault sets ride the accepted snapshots), and safety holds regardless
+ * (`fundable: false` throughout), so this is a known fidelity gap of the
+ * review surface, not a deposit path.
  */
 async function syncNonProductionEnvironment(
   repo: EarnRepository,
@@ -178,47 +186,65 @@ async function syncNonProductionEnvironment(
   const logContext = { provider: client.provider, environment };
 
   const own = await fetchAcceptedSnapshots(client, { env, environment });
-  if (!own.ok) {
+  if (!own.ok && !own.steadyState) {
     // No reliable read of the environment's own shelf: write nothing here. The
     // mirror lane needs the own reference set too (collision rule below), so it
     // skips along with it — one hour of staleness, never a wrong write.
     return;
   }
+  // A steady-state own skip (stub, or no credentials for THIS environment) is
+  // a reliable "this environment has no own shelf", not an outage: the own
+  // lane writes nothing, and the mirror lane proceeds with an empty reference
+  // set. That is what lets a MAINNET-ONLY provider (arguably the provider
+  // class the mirror exists for) be mirrored at all.
 
   const environmentCluster = CLUSTER_BY_SDP_ENVIRONMENT[environment];
 
-  // Successor of the old "mainnet instruments never enter a non-production
-  // catalogue" guard: mainnet rows now DO enter (PRO-1742), but only through
-  // the mirror lane below, which carries production's accepted shelf verbatim.
-  // An own-fetch snapshot on a foreign cluster is therefore provider drift —
-  // flag it and let the lane that owns that cluster state the row.
   const ownRows: ProviderStrategySnapshot[] = [];
-  for (const snapshot of own.snapshots) {
-    if (snapshot.hostCluster !== environmentCluster) {
-      getLogger().warn(
-        {
-          ...logContext,
-          provider_reference: snapshot.providerReference,
-          host_cluster: snapshot.hostCluster,
-        },
-        "syncEarnCatalogue: dropped an own-catalogue snapshot on a foreign cluster (the mirror lane owns it)"
-      );
-      continue;
+  if (own.ok) {
+    // Successor of the old "mainnet instruments never enter a non-production
+    // catalogue" guard: mainnet rows now DO enter (PRO-1742), but only through
+    // the mirror lane below, which carries production's accepted shelf verbatim.
+    // An own-fetch snapshot on a foreign cluster is therefore provider drift —
+    // flag it and let the lane that owns that cluster state the row.
+    for (const snapshot of own.snapshots) {
+      if (snapshot.hostCluster !== environmentCluster) {
+        getLogger().warn(
+          {
+            ...logContext,
+            provider_reference: snapshot.providerReference,
+            host_cluster: snapshot.hostCluster,
+          },
+          "syncEarnCatalogue: dropped an own-catalogue snapshot on a foreign cluster (the mirror lane owns it)"
+        );
+        continue;
+      }
+      ownRows.push(snapshot);
     }
-    ownRows.push(snapshot);
+
+    await writeCatalogueLane(repo, client, {
+      environment,
+      snapshots: ownRows,
+      delistScope: environmentCluster,
+    });
   }
 
-  await writeCatalogueLane(repo, client, {
-    environment,
-    snapshots: ownRows,
-    delistScope: environmentCluster,
-  });
-
   if (!production.ok) {
-    // A steady-state skip (stub provider, no production credentials) is quiet:
-    // there is no mainnet shelf to mirror and nothing goes stale. A transient
-    // failure is worth a line — the mirrored shelf keeps last hour's rows.
-    if (!production.steadyState) {
+    if (production.steadyState) {
+      // A steady-state skip (stub provider, production credentials absent or
+      // revoked) is a reliable "no production catalogue exists", so the mirror
+      // converges to EMPTY rather than serving rows production no longer
+      // vouches for. This is the only delist path a previously mirrored
+      // mainnet row has once the production fetch stops succeeding.
+      await writeCatalogueLane(repo, client, {
+        environment,
+        snapshots: [],
+        delistScope: "mainnet-beta",
+        allowEmptyKeepSet: true,
+      });
+    } else {
+      // A transient failure is worth a line — the mirrored shelf keeps last
+      // hour's rows until a pass can prove what production currently lists.
       getLogger().warn(
         logContext,
         "syncEarnCatalogue: mainnet mirror lane skipped — production catalogue unavailable this pass"
@@ -246,6 +272,15 @@ async function syncNonProductionEnvironment(
       // production still lists it, and if the own lane's upsert failed this
       // pass, the stored row is still on the mirror's cluster, where an
       // unprotected delist would read that failed write as a delisting.
+      //
+      // Accepted cap, recorded in ADR 0002 (PRO-1742 addendum): this skip
+      // means the mirror only fully materializes for providers whose
+      // references are cluster-distinct (address-keyed, like Kamino). A
+      // provider keying both catalogues by a shared slug (Ground's source ids)
+      // collides on every pass and its mirror under-reports by exactly those
+      // references. Deliberate: extending the upsert key to the cluster would
+      // double-write every bare-triple consumer (updateStrategyMetrics above
+      // all).
       collidedReferences.push(snapshot.providerReference);
       getLogger().warn(
         { ...logContext, provider_reference: snapshot.providerReference },
@@ -261,6 +296,13 @@ async function syncNonProductionEnvironment(
     snapshots: mirrorRows,
     delistScope: "mainnet-beta",
     keepWithoutUpsert: collidedReferences,
+    // Production answered reliably this pass, so an empty mainnet shelf is a
+    // real all-gone delisting, not an unreadable one. The delete asymmetry
+    // flips on this lane: its rows are browse-only and re-mirrored hourly, so
+    // a wrong delete costs an hour of a missing browse row, while refusing to
+    // delete costs serving a "production catalogue" forever that production
+    // no longer lists.
+    allowEmptyKeepSet: true,
   });
 }
 
@@ -338,6 +380,14 @@ interface CatalogueLane {
    * failed) write into a delisting.
    */
   keepWithoutUpsert?: readonly string[];
+  /**
+   * Authorizes this lane's delist to run with an EMPTY keep set. Own lanes
+   * never set it (an empty own read is indistinguishable from a broken one,
+   * and their rows are fundable). The mirror lane sets it because its truth
+   * source can reliably answer "nothing is listed" and its rows are
+   * browse-only; without it, orphaned mirror rows have no convergence path.
+   */
+  allowEmptyKeepSet?: true;
 }
 
 async function writeCatalogueLane(
@@ -424,7 +474,9 @@ async function writeCatalogueLane(
  * - `upsertFailed`: a partial write pass cannot distinguish "not listed" from
  *   "listed but not persisted".
  * - empty keep set: never tear down a whole shelf off one empty response (the
- *   repository refuses this too; the log here is what makes it visible).
+ *   repository refuses this too; the log here is what makes it visible),
+ *   unless the lane declared its empty read reliable (`allowEmptyKeepSet`,
+ *   the mirror lane), where the pass converges the sub-shelf to empty.
  *
  * A skip costs one hour of staleness. Deleting wrongly costs a customer a
  * vault they were mid-deposit into, so the asymmetry decides the default.
@@ -445,7 +497,7 @@ async function deleteUnlistedFromCatalogue(
 ): Promise<void> {
   const { listedProviderReferences, upsertFailed, logContext } = args;
 
-  if (upsertFailed || listedProviderReferences.length === 0) {
+  if (upsertFailed || (listedProviderReferences.length === 0 && !lane.allowEmptyKeepSet)) {
     getLogger().warn(
       {
         ...logContext,
@@ -463,6 +515,7 @@ async function deleteUnlistedFromCatalogue(
       environment: lane.environment,
       hostCluster: lane.delistScope,
       listedProviderReferences,
+      allowEmptyKeepSet: lane.allowEmptyKeepSet,
     });
     if (deleted.length > 0) {
       getLogger().info(

@@ -476,9 +476,14 @@ export function useEarnStrategies(options?: { cluster?: SolanaCluster }) {
   // The cluster is part of the key: two views of different shelves must never
   // serve each other's cache entry, while the default view keeps deduping with
   // every other default caller.
+  //
+  // keepPreviousData → a cluster-toggle key flip keeps the current rows on
+  // screen while the full paged fetch reruns, instead of tearing the table to
+  // skeletons (same pattern as activity-tab and wallet-card-balance-value).
   const { data, error, isLoading, mutate } = useSWR(
     ["dashboard-earn-strategies", cluster ?? "environment-default"],
-    () => fetchEarnStrategies(cluster)
+    () => fetchEarnStrategies(cluster),
+    { keepPreviousData: true }
   );
   return { strategies: data, error, isLoading, refresh: () => void mutate() };
 }

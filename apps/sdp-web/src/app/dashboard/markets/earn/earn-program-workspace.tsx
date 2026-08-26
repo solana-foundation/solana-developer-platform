@@ -1,6 +1,6 @@
 "use client";
 
-import { isVaultDirectDepositEnabled, SOLANA_CLUSTER_LABELS } from "@sdp/types";
+import { isVaultDirectDepositEnabled } from "@sdp/types";
 import {
   CheckIcon,
   Code2Icon,
@@ -12,7 +12,6 @@ import {
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
@@ -30,12 +29,17 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { EarnProgramSkeleton } from "../markets-route-skeletons";
 import {
+  EarnDepositAvailabilityBadge,
   EarnStrategyIdentity,
   earnStrategyAsset,
   formatProviderApy,
 } from "./earn-market-presentation";
 import { useEarnStrategies } from "./earn-program-data";
-import { type EarnProviderAccess, earnVaultDepositAvailability } from "./earn-surfacing";
+import {
+  type EarnProviderAccess,
+  type EarnVaultDepositAvailability,
+  earnVaultDepositAvailability,
+} from "./earn-surfacing";
 
 const FLOW_STEPS = [
   { icon: ListChecksIcon, key: "DashboardMarkets.earnProgram.flowSelect" },
@@ -79,24 +83,17 @@ function ProgramIntro() {
   );
 }
 
-function availabilityMessageKey(
-  availability: ReturnType<typeof earnVaultDepositAvailability>
-): MessageKey {
-  switch (availability) {
-    case "available":
-      return "DashboardMarkets.earnProgram.sandboxReady";
-    case "environment_unavailable":
-      return "DashboardMarkets.earnProgram.productionUnavailable";
-    case "access_unavailable":
-      return "DashboardMarkets.earnProgram.accessUnavailable";
-    case "provider_unavailable":
-      return "DashboardMarkets.earnProgram.providerUnavailable";
-    // "cluster_unavailable" never reaches this keys-only map: the Badge renders
-    // it directly so the row's own hostCluster can be interpolated (PRO-1742).
-    default:
-      return "DashboardMarkets.earnProgram.unavailable";
-  }
-}
+// Exhaustive by construction (EarnDepositAvailabilityBadge): a new
+// availability variant fails this map's compile instead of collapsing to a
+// bare "Unavailable".
+const PROGRAM_AVAILABILITY_LABELS = {
+  available: "DashboardMarkets.earnProgram.sandboxReady",
+  cluster_unavailable: "DashboardMarkets.earnProgram.clusterUnavailable",
+  strategy_unavailable: "DashboardMarkets.earnProgram.unavailable",
+  environment_unavailable: "DashboardMarkets.earnProgram.productionUnavailable",
+  access_unavailable: "DashboardMarkets.earnProgram.accessUnavailable",
+  provider_unavailable: "DashboardMarkets.earnProgram.providerUnavailable",
+} as const satisfies Readonly<Record<EarnVaultDepositAvailability, MessageKey>>;
 
 function StrategyRow({
   locale,
@@ -128,13 +125,11 @@ function StrategyRow({
         {formatProviderApy(strategy.currentApy, locale)}
       </TableCell>
       <TableCell>
-        <Badge variant={supported ? "default" : "outline"}>
-          {availability === "cluster_unavailable"
-            ? t("DashboardMarkets.earnProgram.clusterUnavailable", {
-                cluster: SOLANA_CLUSTER_LABELS[strategy.hostCluster],
-              })
-            : t(availabilityMessageKey(availability))}
-        </Badge>
+        <EarnDepositAvailabilityBadge
+          availability={availability}
+          labels={PROGRAM_AVAILABILITY_LABELS}
+          strategy={strategy}
+        />
       </TableCell>
       <TableCell align="right">
         <Button
