@@ -84,6 +84,25 @@ export const DEFAULT_TENANT_ENDPOINTS: Partial<
   },
 };
 
+/**
+ * The genesis hash each cluster reports, which is what makes a connection's
+ * network claim checkable.
+ *
+ * The probe used to ask `getVersion`, which every cluster answers alike, so an
+ * endpoint on the wrong cluster passed. A project's network comes from its
+ * environment rather than a field precisely so the two cannot disagree, and
+ * without this the disagreement simply moved into the endpoint: a sandbox
+ * project could be pointed at mainnet and read `devnet` in its own row.
+ *
+ * Read from the public clusters rather than transcribed.
+ */
+export const SOLANA_GENESIS_HASHES: Record<"devnet" | "mainnet-beta", string> = {
+  // biome-ignore lint/security/noSecrets: Public cluster genesis hash, not a credential.
+  devnet: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+  // biome-ignore lint/security/noSecrets: Public cluster genesis hash, not a credential.
+  "mainnet-beta": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+};
+
 /** Whether the tenant must supply an endpoint because we cannot know theirs. */
 export function requiresExplicitEndpoint(provider: ByokRpcProvider): boolean {
   return rpcProviderNeedsEndpoint(provider);

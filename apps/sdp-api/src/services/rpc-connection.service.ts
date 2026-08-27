@@ -4,6 +4,7 @@ import {
   buildTenantDisplayMetadata,
   buildTenantRpcTarget,
   resolveTenantEndpoint,
+  SOLANA_GENESIS_HASHES,
   type TenantRpcCredential,
 } from "@sdp/rpc/byok";
 import type {
@@ -360,8 +361,10 @@ export async function submitRpcConnection(
 
   // Saving runs the check (HOO-1228). A key that does not work never becomes a
   // row, so there is no draft state to explain and nothing to activate
-  // afterwards: what gets saved is already known to serve traffic.
-  const probe = await runConnectionProbe(target);
+  // afterwards: what gets saved is already known to serve traffic. The network
+  // goes in so an endpoint on the wrong cluster is refused here rather than
+  // recorded under a network it does not serve.
+  const probe = await runConnectionProbe(target, network);
   if (!probe.ok) {
     throw conflict("The RPC provider rejected this connection", {
       failureCode: probe.failureCode,
@@ -485,16 +488,38 @@ export async function submitRpcConnection(
  * words about a key.
  */
 async function runConnectionProbe(
-  target: ReturnType<typeof buildTenantRpcTarget>
+  target: ReturnType<typeof buildTenantRpcTarget>,
+  network?: RpcConnectionNetwork
 ): Promise<RpcConnectionTestResult> {
   try {
     // The endpoint came from the tenant, so it resolves under the egress
     // guard: the host passed the literal check when it was submitted, and this
     // is what stops the name resolving somewhere internal now.
-    const { upstream } = await probeRpcEndpoint(target, { enforcePublicEgress: true });
-    return upstream.ok
+    //
+    // `getGenesisHash` rather than `getVersion`: it proves reachability just
+    // as well and also says which cluster answered. Every cluster answers
+    // `getVersion` alike, so a mainnet endpoint passed on a sandbox project
+    // and the row recorded `devnet` over it.
+    const { upstream, upstreamBody } = await probeRpcEndpoint(target, {
+      enforcePublicEgress: true,
+      method: network ? "getGenesisHash" : "getVersion",
+    });
+    if (!upstream.ok) {
+      return { ok: false, failureCode: toRedactedFailureCode(upstream.status) };
+    }
+    if (!network) {
+      return { ok: true, failureCode: null };
+    }
+
+    const genesisHash = (upstreamBody as { result?: unknown } | null)?.result;
+    if (typeof genesisHash !== "string") {
+      // A 200 that carries no genesis hash is not this cluster answering, so
+      // it cannot stand in for one.
+      return { ok: false, failureCode: "provider_unreachable" };
+    }
+    return genesisHash === SOLANA_GENESIS_HASHES[network]
       ? { ok: true, failureCode: null }
-      : { ok: false, failureCode: toRedactedFailureCode(upstream.status) };
+      : { ok: false, failureCode: "network_mismatch" };
   } catch {
     return { ok: false, failureCode: "provider_unreachable" };
   }
@@ -547,8 +572,8 @@ export async function testRpcConnection(
   c: AppContext,
   connectionId: string
 ): Promise<RpcConnectionTestResult> {
-  const { target } = await loadConnectionTarget(c, connectionId);
-  return runConnectionProbe(target);
+  const { connection, target } = await loadConnectionTarget(c, connectionId);
+  return runConnectionProbe(target, connection.network);
 }
 
 async function loadConnectionWithSecret(c: AppContext, connectionId: string) {
@@ -588,11 +613,15 @@ export async function activateRpcConnection(
     connectionId
   );
 
-  const probe = await runConnectionProbe(target);
+  const probe = await runConnectionProbe(target, connection.network);
   if (!probe.ok) {
+    // Qualified by the credential that was probed. A rotation can commit while
+    // this probe is in flight, and writing the old verdict onto the connection
+    // would fail a project closed over a key that has already been replaced.
     await store.markCheckFailed({
       organizationId: auth.organizationId,
       connectionId,
+      providerCredentialId: credential.id,
       scopeKeys,
     });
     throw conflict("The RPC provider rejected this connection", {
@@ -708,7 +737,7 @@ export async function rotateRpcConnection(
   assertReachableTenantEndpoint(candidate.endpointUrl);
   const target = buildTenantRpcTarget(provider, candidate);
 
-  const probe = await runConnectionProbe(target);
+  const probe = await runConnectionProbe(target, connection.network);
   if (!probe.ok) {
     // Nothing is touched. The connection carries on with the key it had.
     throw conflict("The RPC provider rejected the new key", { failureCode: probe.failureCode });

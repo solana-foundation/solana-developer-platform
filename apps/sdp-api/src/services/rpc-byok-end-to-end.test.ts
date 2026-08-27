@@ -1,5 +1,6 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { SOLANA_GENESIS_HASHES } from "@sdp/rpc/byok";
 import { resolveRpcTarget } from "@sdp/rpc/relay";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -159,7 +160,16 @@ beforeAll(async () => {
       return;
     }
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ jsonrpc: "2.0", id: "1", result: { "solana-core": "2.0.0" } }));
+    // The probe asks `getGenesisHash` so it can tell which cluster answered,
+    // and this stub stands in for a devnet endpoint. Answering `getVersion`
+    // would pass reachability and prove nothing about the network.
+    res.end(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: "1",
+        result: SOLANA_GENESIS_HASHES.devnet,
+      })
+    );
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   endpointBase = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -379,7 +389,7 @@ describe("BYOK end to end", () => {
     const upstream = await fetch(target.endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...target.headers },
-      body: JSON.stringify({ jsonrpc: "2.0", id: "1", method: "getVersion", params: [] }),
+      body: JSON.stringify({ jsonrpc: "2.0", id: "1", method: "getGenesisHash", params: [] }),
     });
 
     expect(upstream.ok).toBe(true);
@@ -389,13 +399,40 @@ describe("BYOK end to end", () => {
   it("fails closed once a live connection stops passing its check", async () => {
     // Not a draft: this organization's traffic was on its own key, so moving it
     // back onto SDP's without saying so is the thing being prevented.
-    await new RpcConnectionStore(getDb(appEnv)).markCheckFailed({
+    const failed = await new RpcConnectionStore(getDb(appEnv)).markCheckFailed({
       organizationId: ORG_ID,
       connectionId: CONNECTION_ID,
+      providerCredentialId: CREDENTIAL_ID,
       scopeKeys: [PROJECT_ID],
     });
 
+    expect(failed).toBe(1);
     await expect(resolveRpcTarget(relayInput())).rejects.toThrow(/not active/i);
+  });
+
+  it("drops a probe verdict that lost a race with a rotation", async () => {
+    // A probe is a network call, so a rotation can commit while one is in
+    // flight. Writing the old verdict onto the connection anyway marked a
+    // freshly rotated, working key failed and cleared it out of the default
+    // slot, which fails the project closed over a key that no longer exists.
+    // This suite is a narrative on one row, so put it back to serving first.
+    await getDb(appEnv)
+      .prepare(`UPDATE rpc_connections SET status = 'active', is_default = TRUE WHERE id = ?`)
+      .bind(CONNECTION_ID)
+      .run();
+
+    const store = new RpcConnectionStore(getDb(appEnv));
+    const failed = await store.markCheckFailed({
+      organizationId: ORG_ID,
+      connectionId: CONNECTION_ID,
+      providerCredentialId: "pcred_rotated_away",
+      scopeKeys: [PROJECT_ID],
+    });
+
+    expect(failed).toBe(0);
+    // Still serving, because the verdict was about a credential this
+    // connection no longer points at.
+    await expect(resolveRpcTarget(relayInput())).resolves.toBeTruthy();
   });
 
   it("recovers on re-activation rather than requiring a new connection", async () => {
@@ -427,7 +464,7 @@ describe("BYOK end to end", () => {
     await fetch(target.endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...target.headers },
-      body: JSON.stringify({ jsonrpc: "2.0", id: "1", method: "getVersion", params: [] }),
+      body: JSON.stringify({ jsonrpc: "2.0", id: "1", method: "getGenesisHash", params: [] }),
     });
     expect(seenKeys).toEqual(["rotated-key-2222"]);
   });

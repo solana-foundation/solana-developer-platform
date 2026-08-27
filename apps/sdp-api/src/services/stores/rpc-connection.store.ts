@@ -539,22 +539,37 @@ export class RpcConnectionStore {
    * quietly answering on platform keys. The redacted code is reported to the
    * caller and deliberately not written down.
    */
+  /**
+   * Record that a probe rejected this connection.
+   *
+   * Matched on the credential the probe actually tested, not on the connection
+   * alone. A probe is a network call, so a rotation can land while one is in
+   * flight: the connection then points at a new, proven key, and writing the
+   * old verdict onto it would mark a working connection failed and clear it out
+   * of the default slot, failing the project closed over a key that no longer
+   * exists. The compare-and-swap makes the stale write miss instead.
+   *
+   * Returns the rows changed so a caller can tell a real failure from a verdict
+   * that arrived too late to mean anything.
+   */
   async markCheckFailed(params: {
     organizationId: string;
     connectionId: string;
+    providerCredentialId: string;
     scopeKeys: readonly string[];
     executor?: DatabaseExecutor;
-  }): Promise<void> {
+  }): Promise<number> {
     const db = params.executor ?? this.db;
-    await db.execute(
+    return db.execute(
       `UPDATE rpc_connections
           SET status = 'failed',
               is_default = FALSE,
               updated_at = sdp_iso_now()
         WHERE id = ?
           AND organization_id = ?
+          AND provider_credential_id = ?
           AND scope_key IN (${params.scopeKeys.map(() => "?").join(", ")})`,
-      [params.connectionId, params.organizationId, ...params.scopeKeys]
+      [params.connectionId, params.organizationId, params.providerCredentialId, ...params.scopeKeys]
     );
   }
 
