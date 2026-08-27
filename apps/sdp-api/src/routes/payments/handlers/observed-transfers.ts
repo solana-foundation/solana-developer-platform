@@ -48,14 +48,14 @@ interface RpcTokenBalanceAmount {
   uiAmountString?: string | null;
 }
 
-interface RpcTokenBalanceRecord {
+export interface RpcTokenBalanceRecord {
   accountIndex?: number;
   mint?: string;
   owner?: string;
   uiTokenAmount?: RpcTokenBalanceAmount;
 }
 
-interface ParsedTransactionResponse {
+export interface ParsedTransactionResponse {
   error?: {
     message?: string;
   };
@@ -291,7 +291,7 @@ export async function resolveWalletTokenAccountAddresses(
   }
 }
 
-async function fetchParsedTransaction(
+export async function fetchParsedTransaction(
   env: Env,
   signature: string
 ): Promise<ParsedTransactionResponse["result"]> {
@@ -445,6 +445,12 @@ function buildObservedTransferRows(
         idempotency_fingerprint: null,
         confirmed_at: null,
         finalization_last_polled_at: null,
+        settlement_signature: null,
+        settlement_verified_slot: null,
+        settlement_verified_at: null,
+        settlement_verification_method: null,
+        verification_last_polled_at: null,
+        verification_attempts: 0,
         created_at: timestamp,
         updated_at: timestamp,
       });
@@ -530,6 +536,12 @@ function buildObservedTransferRows(
         idempotency_fingerprint: null,
         confirmed_at: null,
         finalization_last_polled_at: null,
+        settlement_signature: null,
+        settlement_verified_slot: null,
+        settlement_verified_at: null,
+        settlement_verification_method: null,
+        verification_last_polled_at: null,
+        verification_attempts: 0,
         created_at: timestamp,
         updated_at: timestamp,
       });
@@ -624,6 +636,12 @@ function buildObservedTransferRows(
       idempotency_fingerprint: null,
       confirmed_at: null,
       finalization_last_polled_at: null,
+      settlement_signature: null,
+      settlement_verified_slot: null,
+      settlement_verified_at: null,
+      settlement_verification_method: null,
+      verification_last_polled_at: null,
+      verification_attempts: 0,
       created_at: timestamp,
       updated_at: timestamp,
     });

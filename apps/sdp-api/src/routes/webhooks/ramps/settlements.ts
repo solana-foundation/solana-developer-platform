@@ -1,7 +1,9 @@
 import type { RampSettlementEvent } from "@sdp/payments/ramps";
+import type { RampTransferSettlement } from "@sdp/types";
 import type { Context } from "hono";
 import type { PaymentTransferStatus } from "@/db/repositories";
 import { createSystemPaymentsRepository, isRampTransferType } from "@/db/repositories";
+import { getLogger } from "@/runtime/logger";
 import { emitRampSettled } from "@/services/workflows/payment-events";
 import type { Env } from "@/types/env";
 
@@ -35,6 +37,24 @@ const ALLOWED_RAMP_SETTLEMENT_SOURCE_STATUSES = {
 
 function isTerminalRampTransferStatus(status: PaymentTransferStatus): boolean {
   return (TERMINAL_RAMP_TRANSFER_STATUSES as readonly PaymentTransferStatus[]).includes(status);
+}
+
+/**
+ * Pull an on-chain signature out of a provider's settlement payload, where the provider
+ * reports one we can trust to be a Solana signature (#559).
+ *
+ * Deliberately narrow. Coinbase's `txHash` on a successful on-ramp is a Solana signature.
+ * MoonPay reports `cryptoTransactionId`, whose format is not established, and Lightspark
+ * reports no chain identifier at all, so neither is collected here.
+ *
+ * Collecting a signature is not the same as advertising a guarantee. Nothing recorded here
+ * changes what a transfer reports until the verifier proves the transaction moved the expected
+ * amount to the expected wallet, and until the pair is listed in RAMP_ONCHAIN_VERIFIED_PAIRS.
+ * The cost of collecting a wrong value is bounded: the verifier records "transaction not found"
+ * and the attempt cap stops it.
+ */
+function settlementSignatureFrom(settlement: RampTransferSettlement | undefined): string | null {
+  return settlement?.provider === "coinbase" ? (settlement.txHash ?? null) : null;
 }
 
 export async function applyRampSettlementEvent(c: AppContext, event: RampSettlementEvent) {
@@ -86,6 +106,26 @@ export async function applyRampSettlementEvent(c: AppContext, event: RampSettlem
     event.settlement
   ) {
     update.providerData = { settlement: event.settlement };
+  }
+
+  // Record the provider's claimed signature so the verifier can check it against the chain.
+  // Storing it does not make the transfer verified: settlement_verified_at stays null until
+  // the transaction is proven to have moved the expected amount to the expected wallet.
+  if (event.kind === "settled") {
+    const settlementSignature = settlementSignatureFrom(event.settlement);
+    if (settlementSignature) {
+      update.settlementSignature = settlementSignature;
+    } else if (event.settlement) {
+      // #559 W4. We have no confirmed chain identifier for this provider, and the question is
+      // whether one is present at all. Logging the payload's KEY NAMES, never its values, turns
+      // the next sandbox settlement into the answer without anyone capturing payloads by hand.
+      // Values are withheld deliberately: they carry amounts and provider references.
+      getLogger().info({
+        event: "ramp_settlement_payload_shape",
+        provider: event.settlement.provider,
+        keys: Object.keys(event.settlement).sort(),
+      });
+    }
   }
 
   await repo.updateTransferStatusGuarded(update);

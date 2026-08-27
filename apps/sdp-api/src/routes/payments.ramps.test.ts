@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { RAMP_PROVIDERS, rampSettlementAssurance } from "@sdp/types";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
@@ -1081,6 +1082,299 @@ describe("Payments routes — ramps", () => {
       .bind("xfr_moneygram_amount_guard")
       .first<{ status: string }>();
     expect(transfer?.status).toBe("pending");
+  });
+
+  // #559: MoneyGram's completed event verifies the crypto leg on chain and previously left the
+  // transfer at `settling`, making a proven settlement indistinguishable from one in flight.
+  describe("MoneyGram off-ramp completion", () => {
+    async function seedCryptoLeg(params: {
+      id: string;
+      status: string;
+      amount?: string;
+      signature?: string;
+    }): Promise<void> {
+      const now = new Date().toISOString();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO payment_transfers (
+             id, organization_id, project_id, wallet_id, source_address, destination_address,
+             token, amount, type, direction, status, signature, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          params.id,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          TEST_WALLET_ID,
+          TEST_SOLANA_ADDRESSES.wallet1,
+          TEST_SOLANA_ADDRESSES.wallet2,
+          "USDC",
+          params.amount ?? "25",
+          "transfer",
+          "outbound",
+          params.status,
+          params.signature ?? `sig-${params.id}`,
+          now,
+          now
+        )
+        .run();
+    }
+
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+
+    function completedBody(sessionId: string, cryptoTransferId: string) {
+      return JSON.stringify({
+        kind: "completed",
+        sessionId,
+        cryptoTransferId,
+        transactionId: "mgi_tx_1",
+        payoutAmount: 25,
+        payoutStatus: "completed",
+      });
+    }
+
+    async function statusOf(id: string): Promise<string | undefined> {
+      const row = await getDb(env)
+        .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+        .bind(id)
+        .first<{ status: string }>();
+      return row?.status;
+    }
+
+    it("advances a verified off-ramp from settling to completed", async () => {
+      await seedRampEventTransfer({
+        id: "xfr_mg_complete_ok",
+        provider: "moneygram",
+        providerReference: "mg_session_complete_ok",
+        type: "offramp",
+      });
+      await seedCryptoLeg({ id: "xfr_mg_leg_ok", status: "confirmed" });
+
+      const signed = await app.request(
+        "/v1/payments/ramps/moneygram/events",
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            kind: "signed",
+            sessionId: "mg_session_complete_ok",
+            cryptoTransferId: "xfr_mg_leg_ok",
+          }),
+        },
+        env
+      );
+      expect(signed.status).toBe(200);
+      expect(await statusOf("xfr_mg_complete_ok")).toBe("settling");
+
+      const completed = await app.request(
+        "/v1/payments/ramps/moneygram/events",
+        { method: "POST", headers, body: completedBody("mg_session_complete_ok", "xfr_mg_leg_ok") },
+        env
+      );
+      expect(completed.status).toBe(200);
+      expect(await statusOf("xfr_mg_complete_ok")).toBe("completed");
+
+      // The proof must reach the caller, not just the database (#559).
+      const body = (await completed.json()) as {
+        data: { transfer: { settlementVerification: Record<string, unknown> } };
+      };
+      expect(body.data.transfer.settlementVerification).toMatchObject({
+        status: "verified",
+        // The strong path: bound to a specific transfer row, not to a provider's claim.
+        method: "linked_crypto_leg",
+        signature: "sig-xfr_mg_leg_ok",
+      });
+      expect(body.data.transfer.settlementVerification.verifiedAt).toEqual(expect.any(String));
+    });
+
+    it("does not report verified from a provider's claimed signature alone", async () => {
+      await seedRampEventTransfer({
+        id: "xfr_claim_only",
+        provider: "coinbase",
+        providerReference: "cb_claim_only",
+        type: "onramp",
+      });
+      // A settlement webhook records the provider's claimed hash immediately. Nothing has
+      // checked it against the chain yet, so it must NOT read as verified (#559).
+      await getDb(env)
+        .prepare("UPDATE payment_transfers SET settlement_signature = ? WHERE id = ?")
+        .bind("ClaimedButUnverifiedSignature1111111111111111", "xfr_claim_only")
+        .run();
+
+      const res = await app.request(
+        "/v1/payments/transfers/xfr_claim_only",
+        { method: "GET", headers },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { transfer: { settlementVerification: Record<string, unknown> } };
+      };
+      expect(body.data.transfer.settlementVerification.status).not.toBe("verified");
+      // The unverified claim must not leak out as if it were proof either.
+      expect(body.data.transfer.settlementVerification.signature).toBeNull();
+    });
+
+    it("reports a provider-attested ramp as unsupported rather than implying verification", async () => {
+      await seedRampEventTransfer({
+        id: "xfr_cb_unverified",
+        provider: "coinbase",
+        providerReference: "cb_session_unverified",
+        type: "onramp",
+      });
+
+      const res = await app.request(
+        "/v1/payments/transfers/xfr_cb_unverified",
+        { method: "GET", headers },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { transfer: { settlementVerification: Record<string, unknown> } };
+      };
+      // Coinbase on-ramp is not chain-verified today, so claiming anything else would be a lie.
+      expect(body.data.transfer.settlementVerification).toEqual({
+        status: "unsupported",
+        method: null,
+        signature: null,
+        slot: null,
+        verifiedAt: null,
+      });
+    });
+
+    it("refuses to complete when the crypto leg is not confirmed on chain", async () => {
+      await seedRampEventTransfer({
+        id: "xfr_mg_complete_unconfirmed",
+        provider: "moneygram",
+        providerReference: "mg_session_unconfirmed",
+        type: "offramp",
+      });
+      await seedCryptoLeg({ id: "xfr_mg_leg_unconfirmed", status: "pending" });
+
+      const res = await app.request(
+        "/v1/payments/ramps/moneygram/events",
+        {
+          method: "POST",
+          headers,
+          body: completedBody("mg_session_unconfirmed", "xfr_mg_leg_unconfirmed"),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      expect(await statusOf("xfr_mg_complete_unconfirmed")).toBe("pending");
+    });
+
+    it("treats a redelivered completed event as idempotent", async () => {
+      await seedRampEventTransfer({
+        id: "xfr_mg_complete_replay",
+        provider: "moneygram",
+        providerReference: "mg_session_replay",
+        type: "offramp",
+      });
+      await seedCryptoLeg({ id: "xfr_mg_leg_replay", status: "finalized" });
+
+      const first = await app.request(
+        "/v1/payments/ramps/moneygram/events",
+        { method: "POST", headers, body: completedBody("mg_session_replay", "xfr_mg_leg_replay") },
+        env
+      );
+      expect(first.status).toBe(200);
+      expect(await statusOf("xfr_mg_complete_replay")).toBe("completed");
+
+      const second = await app.request(
+        "/v1/payments/ramps/moneygram/events",
+        { method: "POST", headers, body: completedBody("mg_session_replay", "xfr_mg_leg_replay") },
+        env
+      );
+      expect(second.status).toBe(200);
+      expect(await statusOf("xfr_mg_complete_replay")).toBe("completed");
+    });
+
+    it("rejects a completed event naming a different crypto leg than the one settling", async () => {
+      await seedRampEventTransfer({
+        id: "xfr_mg_complete_swap",
+        provider: "moneygram",
+        providerReference: "mg_session_swap",
+        type: "offramp",
+      });
+      await seedCryptoLeg({ id: "xfr_mg_leg_a", status: "confirmed" });
+      await seedCryptoLeg({ id: "xfr_mg_leg_b", status: "confirmed" });
+
+      await app.request(
+        "/v1/payments/ramps/moneygram/events",
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            kind: "signed",
+            sessionId: "mg_session_swap",
+            cryptoTransferId: "xfr_mg_leg_a",
+          }),
+        },
+        env
+      );
+      expect(await statusOf("xfr_mg_complete_swap")).toBe("settling");
+
+      const res = await app.request(
+        "/v1/payments/ramps/moneygram/events",
+        { method: "POST", headers, body: completedBody("mg_session_swap", "xfr_mg_leg_b") },
+        env
+      );
+
+      expect(res.status).toBe(409);
+      expect(await statusOf("xfr_mg_complete_swap")).toBe("settling");
+    });
+  });
+
+  describe("settlement assurance on estimates", () => {
+    it("stamps every provider outcome with what it can prove about settlement", async () => {
+      const res = await app.request(
+        "/v1/payments/ramps/onramp/estimate",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            fiatCurrency: "USD",
+            assetRail: "usdc.solana",
+            fiatAmount: "100",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { estimates: { provider: string; status: string; settlementAssurance?: string }[] };
+      };
+      expect(body.data.estimates.length).toBeGreaterThan(0);
+      // Present on failed and unsupported outcomes too: the caller is choosing a provider here,
+      // and a provider that errored on rate still has a knowable settlement guarantee (#559).
+      for (const estimate of body.data.estimates) {
+        expect(["onchain", "provider_attested"]).toContain(estimate.settlementAssurance);
+      }
+    });
+
+    it("advertises onchain only for pairs the code actually verifies", () => {
+      // Guards the table against drifting ahead of the implementation. MoneyGram off-ramp is the
+      // only flow that proves its crypto leg on chain before completing; everything else rests on
+      // the provider's word. Adding a pair here without a verifier would advertise a guarantee
+      // nothing enforces.
+      expect(rampSettlementAssurance("moneygram", "offramp")).toBe("onchain");
+      expect(rampSettlementAssurance("moneygram", "onramp")).toBe("provider_attested");
+      for (const provider of RAMP_PROVIDERS.filter((p) => p !== "moneygram")) {
+        expect(rampSettlementAssurance(provider, "onramp")).toBe("provider_attested");
+        expect(rampSettlementAssurance(provider, "offramp")).toBe("provider_attested");
+      }
+    });
   });
 
   describe("metered quotas", () => {

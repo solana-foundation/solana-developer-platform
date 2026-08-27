@@ -11,6 +11,7 @@ import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
+import { verifyRampSettlements } from "@/services/jobs/verify-ramp-settlements";
 import type { Env } from "@/types/env";
 
 export const PENDING_TRANSFERS_MONITOR = "sdp-api-track-pending-transfers";
@@ -24,7 +25,12 @@ export interface PendingTransfersReconciliationDeps {
 
 export function runPendingTransfersReconciliation(deps: PendingTransfersReconciliationDeps): void {
   const work = async () => {
-    await Promise.all([trackPendingTransfers(deps.env), reconcileSponsorshipBudgets(deps.env)]);
+    await Promise.all([
+      trackPendingTransfers(deps.env),
+      reconcileSponsorshipBudgets(deps.env),
+      // No-ops unless RAMP_SETTLEMENT_VERIFICATION_ENABLED is set (#559).
+      verifyRampSettlements(deps.env),
+    ]);
   };
 
   // Both branches must hand bg.run() a promise — never invoke `work` eagerly,

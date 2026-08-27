@@ -178,6 +178,52 @@ export type RampTransferSettlement =
   | LightsparkRampSettlement
   | CoinbaseRampSettlement;
 
+/**
+ * Whether a ramp transfer's settlement was proven on chain, reported uniformly across
+ * every provider (#559).
+ *
+ * `completed` on a ramp means a provider reported success, which is a different claim
+ * from money having moved. Provider choice is made per transaction at estimate time, so
+ * an integrator cannot hold static knowledge of which providers can be verified; the
+ * guarantee has to travel with the transfer.
+ *
+ * `verified` is only ever set from proof: a signature that was checked on chain. A
+ * settlement inferred by correlation, for example a matching balance change in a time
+ * window, is deliberately NOT verified, because any coincident transfer would satisfy it.
+ */
+export interface RampSettlementVerification {
+  /**
+   * `verified`: proven on chain, `signature` is populated and independently checkable.
+   * `pending`: this provider and direction carry an advertised on-chain guarantee and it has not
+   * been established yet.
+   * `unsupported`: this provider and direction carry no advertised guarantee. A settlement may
+   * still be proven opportunistically if the provider reports a usable signature, so this is a
+   * statement about what is promised, not a promise that it can never be verified.
+   */
+  status: "verified" | "pending" | "unsupported";
+  /**
+   * How the settlement was established. Null unless `status` is `verified`.
+   *
+   * `linked_crypto_leg`: a transaction SDP submitted from the customer's own wallet, matched to
+   * this transfer by row id and validated field by field. Settlement identity is proven. Safe as
+   * an accounting primary key and as the sole trigger for releasing value.
+   *
+   * `provider_signature`: a hash the provider reported, checked on chain for success, correct mint,
+   * this transfer's own wallet, correct direction, exact amount and a block time at or after this
+   * transfer was created. Strong enough to render a chain link and strong enough that failure to
+   * verify is a real alert. Not bound to this specific order, because a hosted delivery carries
+   * nothing on chain referencing it, so pair it with independent reconciliation before releasing
+   * value on it alone.
+   */
+  method: "linked_crypto_leg" | "provider_signature" | null;
+  signature: string | null;
+  slot: number | null;
+  verifiedAt: string | null;
+}
+
+/** What a provider and direction can prove about settlement, known before you commit. */
+export type RampSettlementAssurance = "onchain" | "provider_attested";
+
 export interface MoneygramTransferDetails {
   transactionId?: string;
   referenceNumber?: string;
@@ -209,6 +255,8 @@ export interface PaymentTransferSummary {
   fiatCurrency?: string;
   fiatAmount?: string;
   settlement?: RampTransferSettlement;
+  /** Present on every ramp transfer; absent on wallet transfers. See RampSettlementVerification. */
+  settlementVerification?: RampSettlementVerification;
   moneygram?: MoneygramTransferDetails;
   createdAt?: string;
   updatedAt?: string;
@@ -831,6 +879,8 @@ export interface PaymentRampEstimate {
 export interface RampProviderEstimateSuccess {
   provider: RampProviderId;
   status: "ok";
+  /** What this provider and direction can prove about settlement. See RampSettlementVerification. */
+  settlementAssurance: RampSettlementAssurance;
   estimate: PaymentRampEstimate;
 }
 
@@ -838,11 +888,13 @@ export interface RampProviderEstimateSuccess {
 export interface RampProviderEstimateUnsupported {
   provider: RampProviderId;
   status: "unsupported";
+  settlementAssurance: RampSettlementAssurance;
 }
 
 export interface RampProviderEstimateError {
   provider: RampProviderId;
   status: "error";
+  settlementAssurance: RampSettlementAssurance;
   error: string;
 }
 

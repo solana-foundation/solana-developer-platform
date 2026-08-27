@@ -1958,6 +1958,54 @@
           }
         },
         {
+          "name": "Estimate on-ramp across providers",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/ramps/onramp/estimate",
+            "description": "Estimates an on-ramp across every provider serving the corridor, returning one entry per provider so the caller can compare. Providers that fail or do not support the pair are reported with a status rather than omitted. Note the request takes assetRail (for example usdc.solana), which is not the cryptoToken value the quote endpoints accept.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"assetRail\": \"usdc.solana\",\n  \"fiatCurrency\": \"AED\",\n  \"fiatAmount\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Estimate off-ramp across providers",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/ramps/offramp/estimate",
+            "description": "Estimates an off-ramp across every provider serving the corridor, returning one entry per provider so the caller can compare. Providers that fail or do not support the pair are reported with a status rather than omitted.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"assetRail\": \"usdc.solana\",\n  \"fiatCurrency\": \"AED\",\n  \"cryptoAmount\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
           "name": "Create on-ramp quote",
           "request": {
             "method": "POST",
@@ -1973,6 +2021,54 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationWallet\": \"privy_wallet_123\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\",\n  \"redirectUrl\": \"https://example.com/onramp/complete\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Create off-ramp quote",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/ramps/offramp/quote",
+            "description": "Creates a provider-specific off-ramp quote and the ramp transfer record that tracks it through settlement. Takes cryptoToken (a symbol such as USDC), which is not the assetRail value the estimate endpoints accept.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"moneygram\",\n  \"counterpartyId\": \"counterparty_example\",\n  \"sourceWallet\": \"privy_wallet_123\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"AED\",\n  \"cryptoAmount\": \"25\",\n  \"redirectUrl\": \"https://example.com\",\n  \"rampsMemo\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Record a MoneyGram ramp event",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/ramps/moneygram/events",
+            "description": "Records a MoneyGram client event against a ramp transfer. MoneyGram has no server-to-server webhook, so this is the only channel that advances a MoneyGram transfer. `signed` links the on-chain crypto leg and moves the transfer to settling; `completed` re-verifies that leg is confirmed on chain and moves the transfer to completed. All other kinds are advisory and never change status. Events on an already-terminal transfer return the transfer unchanged.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"kind\": \"onramp_completed\",\n  \"sessionId\": \"\",\n  \"transactionId\": \"\",\n  \"status\": \"\",\n  \"amount\": 0,\n  \"referenceNumber\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

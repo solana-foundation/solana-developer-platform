@@ -21,7 +21,12 @@ import { readyCounterparty } from "@sdp/payments/ramps/requirements";
 import { isSolanaCryptoAsset, SOLANA_ASSET_TO_RAIL } from "@sdp/payments/ramps/shared";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import type { PaymentRampEstimate, PaymentRampQuote, RampProviderEstimateResult } from "@sdp/types";
+import {
+  type PaymentRampEstimate,
+  type PaymentRampQuote,
+  type RampProviderEstimateResult,
+  rampSettlementAssurance,
+} from "@sdp/types";
 import {
   OFFRAMP_SUPPORT,
   ONRAMP_SUPPORT,
@@ -544,6 +549,7 @@ export const RAMP_ESTIMATE_PROVIDER_CONCURRENCY = 3;
 export async function estimateAcrossProviders(
   c: AppContext,
   providers: readonly RampProviderId[],
+  direction: "onramp" | "offramp",
   runProvider: (provider: RampProviderId, ctx: RampRuntimeContext) => Promise<PaymentRampEstimate>
 ): Promise<RampProviderEstimateResult[]> {
   const scope = await resolveScope(c);
@@ -553,13 +559,17 @@ export async function estimateAcrossProviders(
     [...providers],
     RAMP_ESTIMATE_PROVIDER_CONCURRENCY,
     async (provider): Promise<RampProviderEstimateResult> => {
+      // Provider choice is made here, per transaction, usually on rate. Reporting what each
+      // provider can prove about settlement is the only point at which that choice can be
+      // informed, so it is stamped on every outcome, not just the successful ones (#559).
+      const settlementAssurance = rampSettlementAssurance(provider, direction);
       try {
         await assertRampProviderAvailable(c, provider, scope.auth.organizationId);
         const estimate = await runProvider(provider, ctx);
-        return { provider, status: "ok", estimate };
+        return { provider, status: "ok", settlementAssurance, estimate };
       } catch (error) {
         if (error instanceof SdpPaymentsError && error.code === "ESTIMATE_NOT_AVAILABLE") {
-          return { provider, status: "unsupported" };
+          return { provider, status: "unsupported", settlementAssurance };
         }
         const cause = error instanceof Error ? error : new Error(String(error));
         logEvent("error", {
@@ -584,6 +594,7 @@ export async function estimateAcrossProviders(
         return {
           provider,
           status: "error",
+          settlementAssurance,
           error: error instanceof Error ? error.message : String(error),
         };
       }
@@ -601,7 +612,7 @@ export async function estimateOnramp(c: ValidatedBodyContext<typeof estimateOnra
   );
   const providers = row ? row.providers : [];
 
-  const estimates = await estimateAcrossProviders(c, providers, (provider, ctx) =>
+  const estimates = await estimateAcrossProviders(c, providers, "onramp", (provider, ctx) =>
     RAMP_PROVIDER_CLIENTS[provider].estimateOnramp(ctx, {
       assetRail: input.assetRail,
       fiatCurrency: input.fiatCurrency,
@@ -619,7 +630,7 @@ export async function estimateOfframp(c: ValidatedBodyContext<typeof estimateOff
   );
   const providers = row ? row.providers : [];
 
-  const estimates = await estimateAcrossProviders(c, providers, (provider, ctx) =>
+  const estimates = await estimateAcrossProviders(c, providers, "offramp", (provider, ctx) =>
     RAMP_PROVIDER_CLIENTS[provider].estimateOfframp(ctx, {
       assetRail: input.assetRail,
       fiatCurrency: input.fiatCurrency,

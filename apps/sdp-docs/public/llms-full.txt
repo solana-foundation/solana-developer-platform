@@ -5567,8 +5567,12 @@ Source: https://platform.solana.com/docs/reference/api/payments
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
+| `POST` | `/v1/payments/ramps/moneygram/events` | Record a MoneyGram ramp event |
 | `GET` | `/v1/payments/ramps/offramp/currency` | List off-ramp currency support |
+| `POST` | `/v1/payments/ramps/offramp/estimate` | Estimate off-ramp across providers |
+| `POST` | `/v1/payments/ramps/offramp/quote` | Create off-ramp quote |
 | `GET` | `/v1/payments/ramps/onramp/currency` | List on-ramp currency support |
+| `POST` | `/v1/payments/ramps/onramp/estimate` | Estimate on-ramp across providers |
 | `POST` | `/v1/payments/ramps/onramp/quote` | Create on-ramp quote |
 | `POST` | `/v1/payments/ramps/sandbox/simulate` | Simulate sandbox transfer |
 | `GET` | `/v1/payments/recurring-payments` | List recurring payments |

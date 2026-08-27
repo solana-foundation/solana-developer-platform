@@ -62,6 +62,12 @@ export interface PaymentTransferRow {
   idempotency_fingerprint: string | null;
   confirmed_at: string | null;
   finalization_last_polled_at: string | null;
+  settlement_signature: string | null;
+  settlement_verified_slot: number | null;
+  settlement_verified_at: string | null;
+  settlement_verification_method: string | null;
+  verification_last_polled_at: string | null;
+  verification_attempts: number;
   created_at: string;
   updated_at: string;
 }
@@ -217,6 +223,10 @@ export interface PaymentsRepository {
     fiatAmount?: string | null;
     providerData?: Record<string, unknown>;
     error?: string | null;
+    settlementSignature?: string | null;
+    settlementVerifiedSlot?: number | null;
+    settlementVerifiedAt?: string | null;
+    settlementVerificationMethod?: string | null;
   }): Promise<PaymentTransferRow | null>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
   /**
@@ -227,6 +237,37 @@ export interface PaymentsRepository {
    * @param params - The confirmed_at eligibility floor and the page size.
    * @returns The next page of the finalization poll queue.
    */
+  /**
+   * Ramp rows carrying a provider-reported settlement signature that has not been
+   * proven on chain yet, least-recently-polled first. Separate from the wallet
+   * finalization queue on purpose; see migration 0069. System-only.
+   */
+  /**
+   * Atomically CLAIMS the next page of the queue. Stamping the polling cursor inside the same
+   * statement as the select is what stops two replicas verifying the same row and burning its
+   * attempt allowance twice.
+   *
+   * Deliberately does NOT increment `verification_attempts`: a worker that dies between claim and
+   * completion would otherwise burn an attempt having done nothing, and ten of those permanently
+   * report a real settlement as unverified. Attempts are consumed by work, not by intent.
+   */
+  claimRampTransfersToVerify(params: {
+    maxAttempts: number;
+    limit: number;
+    claimedAt: string;
+  }): Promise<PaymentTransferRow[]>;
+  /**
+   * Records the outcome of one verification attempt. `verifiedAt` and `slot` are
+   * written only on proof; every other outcome just advances the polling cursor and
+   * the attempt count, so a failure can never mark a transfer verified.
+   */
+  advanceRampVerification(params: {
+    transferId: string;
+    polledAt: string;
+    verifiedAt?: string | null;
+    slot?: number | null;
+    method?: string | null;
+  }): Promise<void>;
   listConfirmedTransfersToPoll(params: {
     confirmedAfter: string;
     limit: number;

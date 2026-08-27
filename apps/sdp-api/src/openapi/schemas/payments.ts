@@ -8,12 +8,15 @@ import {
   WALLET_OPERATION_FAMILIES,
 } from "@sdp/types";
 import {
+  createOfframpQuoteSchema as createOfframpQuoteSchemaBase,
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
   createRecurringPaymentSchema as createRecurringPaymentSchemaBase,
   createSubscriptionPlanSchema as createSubscriptionPlanSchemaBase,
   createSubscriptionSchema as createSubscriptionSchemaBase,
   createTransferBatchSchema as createTransferBatchSchemaBase,
   createTransferSchema as createTransferSchemaBase,
+  estimateOfframpSchema as estimateOfframpSchemaBase,
+  estimateOnrampSchema as estimateOnrampSchemaBase,
   estimateTransferBatchSchema as estimateTransferBatchSchemaBase,
   listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase,
   listOnrampCurrenciesQuerySchema as listOnrampCurrenciesQuerySchemaBase,
@@ -23,6 +26,7 @@ import {
   listSubscriptionsQuerySchema as listSubscriptionsQuerySchemaBase,
   listTransferBatchesQuerySchema as listTransferBatchesQuerySchemaBase,
   listTransfersQuerySchema as listTransfersQuerySchemaBase,
+  moneygramRampEventSchema as moneygramRampEventSchemaBase,
   paymentRecurringPaymentStatusSchema as paymentRecurringPaymentStatusSchemaBase,
   paymentSubscriptionCollectionAttemptStatusSchema as paymentSubscriptionCollectionAttemptStatusSchemaBase,
   paymentSubscriptionPlanStatusSchema as paymentSubscriptionPlanStatusSchemaBase,
@@ -655,6 +659,106 @@ export const moneygramTransferDetailsSchema = z
   })
   .openapi({ description: "MoneyGram-specific transfer metadata." });
 
+const lightsparkGridAmountSchema = z
+  .object({
+    amount: z
+      .number()
+      .openapi({ description: "Amount in the currency's smallest unit.", example: 10000 }),
+    currencyCode: z.string().openapi({ description: "Currency code.", example: "USD" }),
+    decimals: z.number().openapi({ description: "Decimal places for the currency.", example: 2 }),
+  })
+  .openapi({ description: "Lightspark Grid amount." });
+
+const moonpayRampSettlementSchema = z.object({
+  provider: z.literal("moonpay"),
+  status: z.enum(["completed", "failed"]),
+  baseCurrencyCode: z.string().openapi({ example: "usd" }),
+  baseCurrencyAmount: z.number().openapi({ example: 100 }),
+  quoteCurrencyCode: z.string().openapi({ example: "usdc_sol" }),
+  quoteCurrencyAmount: z.number().openapi({ example: 98.5 }),
+  feeAmount: z.number().openapi({ example: 1.5 }),
+  extraFeeAmount: z.number().openapi({ example: 0 }),
+  networkFeeAmount: z.number().openapi({ example: 0.01 }),
+  areFeesIncluded: z.boolean().openapi({ example: true }),
+  usdRate: z.number().openapi({ example: 1 }),
+  cryptoTransactionId: z.string().optional().openapi({
+    description:
+      "MoonPay's identifier for the crypto leg. Not guaranteed to be a Solana transaction signature.",
+  }),
+  failureReason: z.string().optional(),
+});
+
+const lightsparkRampSettlementSchema = z.object({
+  provider: z.literal("lightspark"),
+  status: z.enum(["COMPLETED", "FAILED", "EXPIRED", "REFUND_FAILED"]),
+  sentAmount: lightsparkGridAmountSchema,
+  receivedAmount: lightsparkGridAmountSchema,
+  exchangeRate: z.number().openapi({ example: 1 }),
+  fees: z.number().openapi({ example: 0.5 }),
+  failureReason: z.string().optional(),
+});
+
+const coinbaseRampFeeSchema = z.object({
+  feeAmount: z.string().openapi({ example: "1.50" }),
+  feeCurrency: z.string().openapi({ example: "USD" }),
+  feeType: z.string().openapi({ example: "coinbase_fee" }),
+});
+
+const coinbaseRampSettlementSchema = z.object({
+  provider: z.literal("coinbase"),
+  status: z.enum(["completed", "failed"]),
+  paymentCurrency: z.string().openapi({ example: "USD" }),
+  paymentSubtotal: z.string().openapi({ example: "100.00" }),
+  paymentTotal: z.string().openapi({ example: "101.50" }),
+  purchaseCurrency: z.string().openapi({ example: "USDC" }),
+  purchaseAmount: z.string().openapi({ example: "100.00" }),
+  exchangeRate: z.string().openapi({ example: "1.00" }),
+  fees: z.array(coinbaseRampFeeSchema),
+  txHash: z.string().optional().openapi({
+    description:
+      "On-chain transaction hash reported by Coinbase. Reported by the provider and not independently verified.",
+  }),
+  failureReason: z.string().optional(),
+});
+
+const rampTransferSettlementSchema = z
+  .discriminatedUnion("provider", [
+    moonpayRampSettlementSchema,
+    lightsparkRampSettlementSchema,
+    coinbaseRampSettlementSchema,
+  ])
+  .openapi({
+    description:
+      "Provider-reported settlement economics, captured verbatim from a terminal webhook. Present only for providers that report them (moonpay, lightspark, coinbase).",
+  });
+
+const rampSettlementVerificationSchema = z
+  .object({
+    status: z.enum(["verified", "pending", "unsupported"]).openapi({
+      description:
+        "`verified`: settlement was proven on chain and `signature` is populated. `pending`: this provider and direction carry an advertised on-chain guarantee that has not been established yet, so keep polling. `unsupported`: this provider and direction carry no advertised guarantee; a settlement may still be proven opportunistically if the provider reports a usable signature, so this describes what is promised rather than what is possible.",
+      example: "unsupported",
+    }),
+    method: z.enum(["linked_crypto_leg", "provider_signature"]).nullable().openapi({
+      description:
+        "How the settlement was established, null unless verified. `linked_crypto_leg`: a transaction SDP submitted from the customer's own wallet, matched to this transfer by id and validated field by field, so settlement identity is proven and it is safe to release value on alone. `provider_signature`: a hash the provider reported, checked on chain for success, mint, this transfer's own wallet, direction, exact amount and a block time at or after the transfer was created, but not bound to this specific order because a hosted delivery carries nothing on chain referencing it; pair it with independent reconciliation before releasing value on it alone.",
+      example: null,
+    }),
+    signature: z.string().nullable().openapi({
+      description:
+        "Solana transaction signature proving settlement. Null unless status is verified.",
+    }),
+    slot: z
+      .number()
+      .nullable()
+      .openapi({ description: "Slot the settlement transaction landed in." }),
+    verifiedAt: z.string().nullable().openapi({ description: "When verification was recorded." }),
+  })
+  .openapi({
+    description:
+      "Whether this ramp transfer's settlement was proven on chain. `completed` on its own only means a provider reported success, and providers differ, so this reports the guarantee uniformly. Only ever `verified` from a real on-chain signature, never from inference.",
+  });
+
 export const transferSchema = z
   .object({
     id: transferIdParamSchema,
@@ -748,6 +852,14 @@ export const transferSchema = z
     risk: transferRiskSchema
       .optional()
       .openapi({ description: "Optional risk evaluation for the transfer." }),
+    settlementVerification: rampSettlementVerificationSchema.optional().openapi({
+      description:
+        "Present on every ramp transfer, absent on wallet transfers, which carry `signature` and the confirmed/finalized lifecycle instead.",
+    }),
+    settlement: rampTransferSettlementSchema.optional().openapi({
+      description:
+        "Provider-reported settlement economics for a ramp transfer, recorded at the terminal webhook. Absent for providers that do not report them and for transfers that settled before this was captured.",
+    }),
     moneygram: moneygramTransferDetailsSchema.optional().openapi({
       description: "MoneyGram-specific details for MoneyGram ramp transfers.",
     }),
@@ -2187,11 +2299,154 @@ export const transferBatchEstimateResponseSchema = z
   })
   .openapi({ description: "Transfer batch estimate response payload." });
 
+export const estimateOnrampRequestSchema = estimateOnrampSchemaBase
+  .extend({
+    assetRail: withOpenApi(estimateOnrampSchemaBase.shape.assetRail, {
+      description:
+        "Crypto rail to receive on, for example usdc.solana. This is NOT the cryptoToken value the quote endpoints take: forwarding a rail into a quote is rejected.",
+      example: "usdc.solana",
+    }),
+  })
+  .openapi({
+    description: "On-ramp estimate request. Fans out one live call per provider on the corridor.",
+  });
+
+export const estimateOfframpRequestSchema = estimateOfframpSchemaBase
+  .extend({
+    assetRail: withOpenApi(estimateOfframpSchemaBase.shape.assetRail, {
+      description:
+        "Crypto rail to sell from, for example usdc.solana. This is NOT the cryptoToken value the quote endpoints take: forwarding a rail into a quote is rejected.",
+      example: "usdc.solana",
+    }),
+  })
+  .openapi({
+    description: "Off-ramp estimate request. Fans out one live call per provider on the corridor.",
+  });
+
+export const createOfframpQuoteRequestSchema = createOfframpQuoteSchemaBase
+  .extend({
+    provider: withOpenApi(createOfframpQuoteSchemaBase.shape.provider, {
+      description: "Ramp provider to quote with. Providers differ in how settlement is delivered.",
+      example: "moneygram",
+    }),
+    counterpartyId: withOpenApi(createOfframpQuoteSchemaBase.shape.counterpartyId, {
+      description:
+        "SDP counterparty receiving the fiat payout. Provider-native customer records may be resolved or created from it.",
+      example: "counterparty_example",
+    }),
+    sourceWallet: withOpenApi(createOfframpQuoteSchemaBase.shape.sourceWallet, {
+      description: "Wallet the crypto leg is sent from.",
+      example: "privy_wallet_123",
+    }),
+    cryptoToken: withOpenApi(createOfframpQuoteSchemaBase.shape.cryptoToken, {
+      description:
+        "Token symbol, for example USDC. This is NOT the assetRail value the estimate endpoints take: a rail such as usdc.solana is rejected here.",
+      example: "USDC",
+    }),
+    cryptoAmount: withOpenApi(createOfframpQuoteSchemaBase.shape.cryptoAmount, {
+      description: "Amount of crypto to sell, in whole units.",
+      example: "25",
+    }),
+  })
+  .openapi({
+    description:
+      "Create an off-ramp quote. Creates the ramp transfer record that subsequently tracks settlement.",
+  });
+
+export const moneygramRampEventRequestSchema = withOpenApi(moneygramRampEventSchemaBase, {
+  description:
+    "MoneyGram client event. Only `signed` and `completed` advance the transfer: `signed` moves it to settling, and `completed` verifies the crypto leg on chain and moves it to completed. Every other kind is advisory and never derives status.",
+});
+
+const rampEstimateFeesSchema = z
+  .object({
+    currency: z
+      .string()
+      .openapi({ description: "Currency the total fee is denominated in.", example: "USD" }),
+    total: z.string().openapi({ description: "Total fee.", example: "1.50" }),
+    network: z.string().optional().openapi({ description: "Network fee component." }),
+    networkCurrency: z.string().optional().openapi({ description: "Currency of the network fee." }),
+    provider: z.string().optional().openapi({ description: "Provider fee component." }),
+    providerCurrency: z
+      .string()
+      .optional()
+      .openapi({ description: "Currency of the provider fee." }),
+  })
+  .openapi({ description: "Fee breakdown for a ramp estimate." });
+
+const rampEstimateSchema = z
+  .object({
+    provider: z.enum(RAMP_PROVIDERS),
+    direction: z.enum(["onramp", "offramp"]),
+    fiatCurrency: z.string().openapi({ example: "USD" }),
+    assetRail: z.string().openapi({
+      description:
+        "Crypto rail identifier, for example usdc.solana. This is NOT the token symbol accepted by the quote endpoints.",
+      example: "usdc.solana",
+    }),
+    fiatAmount: z.string().openapi({ example: "100.00" }),
+    cryptoAmount: z.string().openapi({ example: "98.50" }),
+    exchangeRate: z.string().openapi({ example: "1.00" }),
+    fees: rampEstimateFeesSchema,
+    minFiatAmount: z.string().optional(),
+    maxFiatAmount: z.string().optional(),
+    expiresAt: z
+      .string()
+      .optional()
+      .openapi({ description: "When this estimate stops being valid." }),
+  })
+  .openapi({ description: "A single provider's ramp estimate." });
+
+const settlementAssuranceSchema = z.enum(["onchain", "provider_attested"]).openapi({
+  description:
+    "What this provider and direction can prove about settlement. `onchain`: the crypto leg is verified against the chain before the transfer completes. `provider_attested`: completion rests on the provider reporting success, with no independent check. Providers are chosen per transaction here, so this is where that difference is visible.",
+  example: "provider_attested",
+});
+
+const rampProviderEstimateResultSchema = z
+  .discriminatedUnion("status", [
+    z.object({
+      provider: z.enum(RAMP_PROVIDERS),
+      status: z.literal("ok"),
+      settlementAssurance: settlementAssuranceSchema,
+      estimate: rampEstimateSchema,
+    }),
+    z.object({
+      provider: z.enum(RAMP_PROVIDERS),
+      status: z.literal("unsupported"),
+      settlementAssurance: settlementAssuranceSchema,
+    }),
+    z.object({
+      provider: z.enum(RAMP_PROVIDERS),
+      status: z.literal("error"),
+      settlementAssurance: settlementAssuranceSchema,
+      error: z.string().openapi({ description: "Why this provider could not be estimated." }),
+    }),
+  ])
+  .openapi({
+    description:
+      "Per-provider estimate outcome. A provider that fails or does not support the corridor is reported rather than omitted, so the caller sees the full roster.",
+  });
+
+export const rampEstimateResponseSchema = z
+  .object({
+    estimates: z.array(rampProviderEstimateResultSchema).openapi({
+      description: "One entry per provider on the requested corridor.",
+    }),
+  })
+  .openapi({ description: "Ramp estimate response payload." });
+
 export const onrampQuoteResponseSchema = z
   .object({
     quote: onrampQuoteSchema.openapi({ description: "On-ramp quote details." }),
   })
   .openapi({ description: "On-ramp quote response payload." });
+
+export const offrampQuoteResponseSchema = z
+  .object({
+    quote: onrampQuoteSchema.openapi({ description: "Off-ramp quote details." }),
+  })
+  .openapi({ description: "Off-ramp quote response payload." });
 
 export const sandboxTransferSimulationResponseSchema = z
   .object({

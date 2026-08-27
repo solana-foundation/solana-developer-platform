@@ -1,4 +1,9 @@
-import type { RampTransferSettlement } from "@sdp/types";
+import {
+  type RampProviderId,
+  type RampSettlementVerification,
+  type RampTransferSettlement,
+  rampSettlementAssurance,
+} from "@sdp/types";
 import {
   isRampTransferType,
   type PaymentTransferRow as TransferRow,
@@ -52,6 +57,33 @@ export function mapTransferRow(row: TransferRow) {
   }
 
   const settlement = row.provider_data.settlement as RampTransferSettlement | undefined;
+  const direction = row.type === "offramp" ? "offramp" : "onramp";
+  // Always present on ramp transfers so callers branch on a value, never on absence (#559).
+  // `verified` is only ever reported from a recorded on-chain signature; a provider simply
+  // saying it settled leaves this `unsupported`, which is the honest report of what we know.
+  // Keyed off settlement_verified_at, NOT settlement_signature. The signature is a provider's
+  // CLAIM, recorded the moment a webhook arrives; settlement_verified_at is only written after
+  // the transaction has been checked on chain. Reading the claim as proof would report
+  // "verified on-chain" for something nothing has verified, which is the exact failure this
+  // field exists to prevent (#559).
+  const settlementVerification: RampSettlementVerification = row.settlement_verified_at
+    ? {
+        status: "verified",
+        method: row.settlement_verification_method as RampSettlementVerification["method"],
+        signature: row.settlement_signature,
+        slot: row.settlement_verified_slot,
+        verifiedAt: row.settlement_verified_at,
+      }
+    : {
+        status:
+          rampSettlementAssurance(row.provider as RampProviderId, direction) === "onchain"
+            ? "pending"
+            : "unsupported",
+        method: null,
+        signature: null,
+        slot: null,
+        verifiedAt: null,
+      };
   const moneygram = mapMoneygramTransferDetails(row);
   return {
     ...base,
@@ -61,6 +93,7 @@ export function mapTransferRow(row: TransferRow) {
     ...(row.fiat_currency ? { fiatCurrency: row.fiat_currency } : {}),
     ...(row.fiat_amount ? { fiatAmount: row.fiat_amount } : {}),
     ...(settlement ? { settlement } : {}),
+    settlementVerification,
     ...(moneygram ? { moneygram } : {}),
   };
 }
