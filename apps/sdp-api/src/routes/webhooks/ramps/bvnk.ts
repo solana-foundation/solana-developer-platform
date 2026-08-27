@@ -472,11 +472,19 @@ async function handleProviderOfframpSettlementWebhook(
   if (status === "completed") {
     fiatAmount = event.walletAmount ?? event.displayAmount;
   }
+  // Keep the chain hash BVNK reports on the channel transaction. It was previously parsed and
+  // dropped. Storing it does not assert the settlement is verified: BVNK is absent from
+  // RAMP_ONCHAIN_VERIFIED_PAIRS, so these transfers still report provider_attested, and the
+  // verifier only marks a row proven after checking the transaction moved the expected amount.
+  // Whether this value is a Solana signature or a BVNK-internal id is still open (#559 W4); if
+  // it is the latter the verifier records "transaction not found" and the attempt cap stops it.
+  const settlementSignature = status === "completed" ? (event.transactionHash ?? null) : null;
   await getDb(c.env)
     .prepare(
       `UPDATE payment_transfers
        SET status = ?,
            fiat_amount = CASE WHEN ?::boolean THEN ? ELSE fiat_amount END,
+           settlement_signature = COALESCE(?, settlement_signature),
            updated_at = ?
        WHERE id = ?
          AND provider = 'bvnk'
@@ -487,6 +495,7 @@ async function handleProviderOfframpSettlementWebhook(
       status,
       fiatAmount !== undefined,
       fiatAmount ?? null,
+      settlementSignature,
       new Date().toISOString(),
       event.transferId
     )

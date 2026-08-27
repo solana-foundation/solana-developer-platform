@@ -103,6 +103,31 @@ describe("trackPendingTransfers", () => {
     );
   });
 
+  // Regression guard for #559. The ramp verifier deliberately runs its own queue rather than
+  // widening this poller, because listConfirmedTransfersToPoll writes `finalized` and ramps
+  // never enter the wallet lifecycle. Migration 0068/0069 added columns to the same table, which
+  // is exactly the moment someone might be tempted to reuse this query for ramps.
+  describe("ramp exclusion", () => {
+    it("never finalizes a ramp transfer, even one that looks pollable", async () => {
+      await insertTransfer({
+        id: "xfr_ramp_not_finalized",
+        // Deliberately dressed to match every other condition the poller filters on.
+        status: "confirmed",
+        type: "onramp",
+        signature: "ramp-signature-that-must-be-ignored",
+        confirmedAt: minutesAgo(1),
+        createdAt: minutesAgo(10),
+        updatedAt: minutesAgo(10),
+      });
+
+      await trackPendingTransfers(env);
+
+      const transfer = await getTransfer("xfr_ramp_not_finalized");
+      expect(transfer?.status).toBe("confirmed");
+      expect(transfer?.finalization_last_polled_at).toBeNull();
+    });
+  });
+
   describe("recoverStuckProcessingTransfers", () => {
     it("marks stuck processing transfers (no signature, > 5 min stale) as failed", async () => {
       await insertTransfer({

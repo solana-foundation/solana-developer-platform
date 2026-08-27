@@ -65,6 +65,17 @@ export function isMarketsEnabled(env: Pick<Env, "MARKETS_ENABLED">): boolean {
   return isTruthyFlag(env.MARKETS_ENABLED);
 }
 
+/**
+ * Gates the background ramp settlement verifier (#559). The verifier reads the chain to prove
+ * a provider-reported settlement really happened; it writes only verification fields and never
+ * a transfer status, so a failure leaves rows unproven rather than mis-stated.
+ */
+export function isRampSettlementVerificationEnabled(
+  env: Pick<Env, "RAMP_SETTLEMENT_VERIFICATION_ENABLED">
+): boolean {
+  return isTruthyFlag(env.RAMP_SETTLEMENT_VERIFICATION_ENABLED);
+}
+
 // Earn is a sub-module of Markets, so the parent flag gates it: clearing
 // MARKETS_ENABLED disables every Markets API surface in one move. Callers must
 // not add a second markets check — this hierarchy is the single source of truth.

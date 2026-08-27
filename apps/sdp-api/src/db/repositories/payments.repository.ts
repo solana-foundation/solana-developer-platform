@@ -65,6 +65,8 @@ export interface PaymentTransferRow {
   settlement_signature: string | null;
   settlement_verified_slot: number | null;
   settlement_verified_at: string | null;
+  verification_last_polled_at: string | null;
+  verification_attempts: number;
   created_at: string;
   updated_at: string;
 }
@@ -233,6 +235,26 @@ export interface PaymentsRepository {
    * @param params - The confirmed_at eligibility floor and the page size.
    * @returns The next page of the finalization poll queue.
    */
+  /**
+   * Ramp rows carrying a provider-reported settlement signature that has not been
+   * proven on chain yet, least-recently-polled first. Separate from the wallet
+   * finalization queue on purpose; see migration 0069. System-only.
+   */
+  listRampTransfersToVerify(params: {
+    maxAttempts: number;
+    limit: number;
+  }): Promise<PaymentTransferRow[]>;
+  /**
+   * Records the outcome of one verification attempt. `verifiedAt` and `slot` are
+   * written only on proof; every other outcome just advances the polling cursor and
+   * the attempt count, so a failure can never mark a transfer verified.
+   */
+  advanceRampVerification(params: {
+    transferId: string;
+    polledAt: string;
+    verifiedAt?: string | null;
+    slot?: number | null;
+  }): Promise<void>;
   listConfirmedTransfersToPoll(params: {
     confirmedAfter: string;
     limit: number;

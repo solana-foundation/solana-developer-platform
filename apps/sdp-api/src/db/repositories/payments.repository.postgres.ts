@@ -171,6 +171,9 @@ function mapTransferRow(row: Record<string, unknown>): PaymentTransferRow {
     settlement_signature: (row.settlement_signature as string | null | undefined) ?? null,
     settlement_verified_slot: (row.settlement_verified_slot as number | null | undefined) ?? null,
     settlement_verified_at: (row.settlement_verified_at as string | null | undefined) ?? null,
+    verification_last_polled_at:
+      (row.verification_last_polled_at as string | null | undefined) ?? null,
+    verification_attempts: (row.verification_attempts as number | null | undefined) ?? 0,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -727,6 +730,51 @@ export function createPostgresPaymentsRepository(
         .all<Record<string, unknown>>();
 
       return rows.results.map(mapTransferRow);
+    },
+
+    async listRampTransfersToVerify({ maxAttempts, limit }) {
+      if (tenantScope) {
+        throw new TenantScopeViolationError(
+          "PaymentsRepository.listRampTransfersToVerify is system-only"
+        );
+      }
+      const rows = await db
+        .prepare(
+          `SELECT *
+           FROM payment_transfers
+           WHERE type IN ('onramp', 'offramp')
+             AND settlement_signature IS NOT NULL
+             AND settlement_verified_at IS NULL
+             AND verification_attempts < ?
+           ORDER BY verification_last_polled_at ASC NULLS FIRST, id ASC
+           LIMIT ?`
+        )
+        .bind(maxAttempts, limit)
+        .all<Record<string, unknown>>();
+
+      return rows.results.map(mapTransferRow);
+    },
+
+    async advanceRampVerification({ transferId, polledAt, verifiedAt, slot }) {
+      if (tenantScope) {
+        throw new TenantScopeViolationError(
+          "PaymentsRepository.advanceRampVerification is system-only"
+        );
+      }
+      // The attempt counter advances on every outcome including success, so a row can
+      // never be re-served indefinitely. settlement_verified_at is the only field that
+      // decides whether a transfer reads as verified, and it is written from proof alone.
+      await db
+        .prepare(
+          `UPDATE payment_transfers
+              SET verification_last_polled_at = ?,
+                  verification_attempts = verification_attempts + 1,
+                  settlement_verified_at = COALESCE(?, settlement_verified_at),
+                  settlement_verified_slot = COALESCE(?, settlement_verified_slot)
+            WHERE id = ?`
+        )
+        .bind(polledAt, verifiedAt ?? null, slot ?? null, transferId)
+        .run();
     },
 
     async listConfirmedTransfersToPoll({ confirmedAfter, limit }) {

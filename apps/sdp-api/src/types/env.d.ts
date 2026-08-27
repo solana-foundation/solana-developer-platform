@@ -307,6 +307,15 @@ export interface Env {
   // needs both; clearing MARKETS_ENABLED dark-launches the whole module.
   MARKETS_ENABLED?: string;
   EARN_ENABLED?: string;
+
+  // Ramp settlement verification (#559). Off by default: the verifier only ever upgrades a
+  // transfer from unverified to verified and never touches status, so enabling it cannot
+  // break a payment, but it does spend RPC per outstanding ramp. Enable in sandbox first.
+  //
+  // Turning this on for an environment must land in the same change as adding the newly
+  // verified (provider, direction) pairs to RAMP_ONCHAIN_VERIFIED_PAIRS, or the API will
+  // keep advertising provider_attested for flows it now actually proves.
+  RAMP_SETTLEMENT_VERIFICATION_ENABLED?: string;
   // Whether Kora pays fees AND share-ATA rent for Earn vault movements.
   // Narrowed to devnet by `isEarnVaultSponsorshipEnabled`, never global: one
   // process serves both clusters and withdrawals are not environment-gated.
