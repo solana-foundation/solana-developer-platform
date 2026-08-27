@@ -22,7 +22,15 @@ describe("privateChannelInstanceInputSchema", () => {
     expect(fieldErrors.gatewayUrl?.[0]).toMatch(/required/i);
   });
 
-  it("rejects a non-http protocol for the devnet RPC URL", () => {
+  it("accepts an omitted legacy chain RPC URL", () => {
+    const { chainRpcUrl: _legacyChainRpcUrl, ...input } = SANDBOX_DEFAULTS;
+    const result = privateChannelInstanceInputSchema.safeParse(input);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.chainRpcUrl).toBe("");
+  });
+
+  it("rejects a non-http legacy chain RPC URL", () => {
     const result = privateChannelInstanceInputSchema.safeParse({
       ...SANDBOX_DEFAULTS,
       chainRpcUrl: "ftp://example.com",

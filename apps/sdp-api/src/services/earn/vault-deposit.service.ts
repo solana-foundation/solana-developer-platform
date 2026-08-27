@@ -23,6 +23,7 @@ import {
 import { createVaultDeadline } from "./vault-deadline";
 import { appendVaultRequestMemo } from "./vault-execution.service";
 import { executeSignedVaultIntent } from "./vault-intent-execution.service";
+import { resolveVaultSponsorship, vaultRentPayer } from "./vault-sponsorship";
 
 /**
  * Deposit ordering is deliberately `build → simulate → sign → record → send`.
@@ -176,6 +177,19 @@ export async function depositIntoVault(
   }
   const cluster = earnClusterFor(input.environment);
   const rpcUrl = resolveClusterRpcUrl(env, cluster);
+
+  // Resolved here, AFTER the replay reads above and BEFORE the provider builds.
+  // Both halves of that sentence matter: a replay must still answer during a
+  // paymaster outage, and a sponsor's address has to be inside the instructions
+  // this build is about to produce.
+  const fee = await resolveVaultSponsorship(env, {
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    walletId: input.wallet.id,
+    cluster,
+    deadline,
+  });
+  const rentPayer = vaultRentPayer(fee);
   const expectedAssetIdentity = {
     depositTokenMint: input.tokenMint,
     shareMint: input.shareMint,
@@ -192,6 +206,9 @@ export async function depositIntoVault(
       owner: input.wallet.publicKey,
       amount: input.amount,
       minSharesOut: input.minSharesOut,
+      // The share ATA a first deposit creates is the reason a zero-SOL wallet
+      // could not deposit even when its fees were sponsored.
+      ...(rentPayer === undefined ? {} : { rentPayer }),
     });
     plan = appendVaultRequestMemo(built, "vault-deposit", input.requestId);
   } catch (error) {
@@ -222,6 +239,7 @@ export async function depositIntoVault(
     expectedAssetIdentity,
     plan,
     rpcUrl,
+    fee,
     runIntentTransaction: options.runIntentTransaction,
     persist: (db, signed) =>
       createPostgresEarnMovementsRepository(db).createSignedVaultDepositIntent({
@@ -244,6 +262,12 @@ export async function depositIntoVault(
         idempotencyFingerprint: fingerprint,
         createdBy: input.userId ?? null,
         initiatedByKeyId: input.apiKeyId ?? null,
+        // Only the builder, which read the chain, knows whether this deposit
+        // creates the share account and therefore pays its rent. Recording the
+        // funder now is what lets the exit give it back to the right party,
+        // possibly months later and under a different fee mode.
+        createsShareAccount: plan.createsShareAccount === true,
+        shareAtaRentFunder: rentPayer ?? null,
       }),
   });
 }

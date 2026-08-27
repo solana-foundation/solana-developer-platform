@@ -31,6 +31,7 @@ export { SdpKaminoError, type SdpKaminoErrorCode } from "./errors";
 export {
   assertPlanTargetsCluster,
   KaminoProgramMismatchError,
+  permittedPlanPrograms,
   planInstructionCount,
   planProgramAddresses,
 } from "./guards";
@@ -50,3 +51,4 @@ export type {
   KaminoVaultAssetIdentity,
   KaminoWithdrawInput,
 } from "./types";
+export { buildShareAccountCloseInstruction } from "./withdraw-instructions";

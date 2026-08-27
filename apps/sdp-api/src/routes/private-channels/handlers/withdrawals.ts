@@ -12,7 +12,10 @@ import {
 } from "@/services/private-channels";
 import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
 import type { AppContext } from "../context";
-import { getPrivateChannelInstanceRepository } from "../context";
+import {
+  getPrivateChannelInstanceRepository,
+  loadPrivateChannelProjectRpcClient,
+} from "../context";
 import { type createWithdrawalBodySchema, withdrawalIdParamSchema } from "../schemas";
 
 async function loadActiveInstance(c: AppContext, organizationId: string, projectId: string) {
@@ -47,6 +50,7 @@ export async function createPrivateChannelWithdrawal(
     }
     const projectId = requireProjectId(c);
     const instance = await loadActiveInstance(c, auth.organizationId, projectId);
+    const projectRpc = await loadPrivateChannelProjectRpcClient(c);
 
     // Source wallet must be a custody wallet we can sign for (the burn owner).
     const ownerPubkey = resolveWalletAddress(wallets, body.walletId, "walletId", auth, [
@@ -80,6 +84,7 @@ export async function createPrivateChannelWithdrawal(
       mint: body.mint,
       destination,
       gatewayAuth,
+      cluster: projectRpc.cluster,
     });
     return success(c, withdrawal);
   } catch (error) {

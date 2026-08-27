@@ -94,12 +94,23 @@ PRO-1634 owns whatever returns.
 > The catalogue may list instruments that do not exist on every cluster.
 > Kamino was the original example — believed mainnet-only and catalogued into
 > both environments — but it has a devnet deployment, and non-production now
-> catalogues devnet vaults while the sync refuses to STORE a `mainnet-beta`
-> instrument outside production. `host_cluster` states where the instrument
-> lives, and the derived
+> catalogues devnet vaults on its own lane. `host_cluster` states where the
+> instrument lives, and the derived
 > `fundable` answers the caller's actual question. Three gates read the one
 > predicate — `assertKnownYieldSources` before any provider mutation, the wire
 > field, and the dashboard's strategy filter.
+>
+> **Sandbox mirrors the mainnet shelf (2026-08-26, PRO-1742).** The sync's old
+> refusal to STORE a `mainnet-beta` instrument outside production is now
+> scoped to the OWN lanes: every non-production environment additionally
+> carries a browse-only MIRROR of production's accepted mainnet shelf, written
+> by the same single writer, delisted within its own cluster sub-shelf, and
+> served only on an explicit `?cluster=` opt-in (the dashboard's sandbox-only
+> toggle). Mirrored rows derive `fundable: false` and every provider mutation
+> refuses them, so the gates above are unchanged: the curated mainnet
+> catalogue became REVIEWABLE outside production, never fundable there. Full
+> rationale, the collision cap, and the convergence rules: ADR 0002, PRO-1742
+> addendum.
 
 **No new indexer.** V1 needs no event-sourced chain indexer: the catalogue
 comes from provider APIs and position truth is the live provider snapshot.
@@ -159,7 +170,7 @@ guarded-CAS shape is the pattern to extend.
 | Org/project tenancy | `projectContextMiddleware` | Program + withdrawal-ledger scoping (rows carry org/project; every program lookup is scoped to org **and** environment, and the ledger anchors on the program wallet) | ✅ wired |
 | Provider entitlements | `services/provider-availability.service.ts` | Per-org enable/disable (override-only: every org needs an explicit `providerOverrides.earn.<id>`), env kill-switch, exit-safe gate | ✅ wired (`earn` family) |
 | Custody + signing | `services/solana`, `@sdp/custody` | Vault-direct deposits sign provider-built instructions with the admitted organization wallet after policy enforcement | ✅ vault deposits |
-| Fee sponsorship | `@sdp/payments/fee-payment` (Kora) | The execution runtime supports sign-only sponsorship, but Kamino deposits use the custody wallet as fee payer until kvault/klend programs are allow-listed | ✅ runtime · ⏸ Kamino route |
+| Fee sponsorship | `@sdp/payments/fee-payment` (Kora), `services/earn/vault-sponsorship.ts` | Sign-only sponsorship of the network fee **and** share-ATA rent, resolved once per request and applied to the fee payer, the provider's `rentPayer` and the simulation payer together. The exit closes the share ATA and refunds its rent to whoever funded it: `earn_positions.share_ata_rent_funder` (0066), written by whichever movement in either direction actually created the account, or this exit's own rent payer when the exit creates it. Cluster-gated to devnet and off by default: deployed devnet still needs the Kamino ids on its Kora allowlist (sdp-infra#64); mainnet additionally needs `allow_create_account` opened and `sbp_mainnet_global` enabled (PRO-1736) | ✅ code · ⏸ devnet deploy · ⏸ mainnet |
 | Solana RPC | `@sdp/rpc`, `services/earn/execution-registry.ts` | Cluster-proved provider build, simulation, broadcast, and live vault-position hydration | ✅ vault-direct paths |
 | Helius DAS | `services/helius-das.service.ts` | No V1 consumer — positions are live provider reads, nothing to reconcile | ⏸ none in V1 |
 | Webhook dispatch + signature verify | `routes/webhooks/handlers.ts`, `lib/webhook-signature.ts` | Provider settlement events land on the withdrawal ledger via the same applier the poll path uses (`earn-withdrawal-ledger.service.ts`) | ⏸ PRO-1631 (polling works today; the neutral event contract returns with it) |

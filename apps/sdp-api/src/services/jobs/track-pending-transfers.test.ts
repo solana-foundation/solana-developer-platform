@@ -236,6 +236,29 @@ describe("trackPendingTransfers", () => {
       expect(getSignatureStatusesMock).toHaveBeenCalledOnce();
     });
 
+    it("retries a transient getBlockHeight failure instead of rotating the row", async () => {
+      getSignatureStatusesMock.mockResolvedValueOnce([null]);
+      getBlockHeightMock
+        .mockRejectedValueOnce(new TypeError("fetch failed"))
+        .mockResolvedValueOnce(101n);
+
+      await insertTransfer({
+        id: "xfr_blockheight_transient",
+        status: "processing",
+        signature: String(TEST_SIG_1),
+        signedTransaction: "AQ==",
+        lastValidBlockHeight: "100",
+        createdAt: minutesAgo(1),
+        updatedAt: minutesAgo(1),
+      });
+
+      await trackPendingTransfers(env);
+
+      const failed = await getTransfer("xfr_blockheight_transient");
+      expect(failed?.status).toBe("failed");
+      expect(getBlockHeightMock).toHaveBeenCalledTimes(2);
+    });
+
     it("fails an expired signed submission whose broadcast never started", async () => {
       getSignatureStatusesMock.mockResolvedValueOnce([null]);
       getBlockHeightMock.mockResolvedValueOnce(101n);

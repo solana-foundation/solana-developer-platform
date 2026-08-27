@@ -1,13 +1,8 @@
 import { expect, type Page, test } from "@playwright/test";
 import { address, getAddressEncoder, getProgramDerivedAddress } from "@solana/kit";
 import { formatDisplayLabel } from "@/lib/utils";
-import { getPlaywrightAdminSession } from "../support/auth-session";
-import {
-  clearIssuanceFixtures,
-  type IssuanceFixtures,
-  readIssuanceFixtures,
-} from "../support/issuance-fixtures";
-import { seedProjectCookie } from "../support/local-dashboard-bootstrap";
+import { clearIssuanceFixtures, type IssuanceFixtures } from "../support/issuance-fixtures";
+import { provisionWithAdminSession, seedProjectCookie } from "../support/local-dashboard-bootstrap";
 import { bootstrapLocalIssuanceFixtures } from "../support/local-issuance-bootstrap";
 
 // biome-ignore lint/security/noSecrets: Solana associated token program ID, not a secret.
@@ -322,13 +317,12 @@ test.describe
 
     test.beforeAll(async ({ browser }) => {
       clearIssuanceFixtures();
-      const session = await getPlaywrightAdminSession(browser);
-      await bootstrapLocalIssuanceFixtures({
-        identity: session.identity,
-        bearerToken: session.getBearerToken,
-      });
-      fixtures = readIssuanceFixtures();
-      await session.page.close();
+      fixtures = await provisionWithAdminSession(browser, (session) =>
+        bootstrapLocalIssuanceFixtures({
+          identity: session.identity,
+          bearerToken: session.getBearerToken,
+        })
+      );
     });
 
     test.beforeEach(async ({ page }) => {

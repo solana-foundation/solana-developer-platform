@@ -24,6 +24,18 @@ _Avoid_: Customer tier, runtime health, selected provider, project setup
 A **Payment Transfer** whose transaction is built by a private-transfer **Provider** and executed through provider-specific routing metadata before final settlement.
 _Avoid_: Confidential transfer, shielded transfer
 
+**Private Channels Integration**:
+A **Privacy Integration** that connects an SDP project to Solana Private Channels and enables private capabilities within existing SDP product flows.
+_Avoid_: Private Channels product, Private Channels workspace, standalone Payments module
+
+**Privacy Integration**:
+A provider integration that adds private execution or settlement capabilities to existing SDP product flows.
+_Avoid_: Privacy product, private workspace, private payment rail
+
+**Private Channel Instance**:
+The external Private Channels environment connected to an SDP project for its private operations.
+_Avoid_: Private channel, SDP project, provider account
+
 **Counterparty Account**:
 A payment destination or payout instrument owned by a **Counterparty**. A Solana crypto-wallet **Counterparty Account** stores the recipient wallet owner address; token accounts are derived during payment execution.
 _Avoid_: Custody wallet, token account, provider account data
@@ -72,6 +84,10 @@ _Avoid_: Wallet Operation Envelope, Payment Transfer, generic email
 An SDP-owned outbound message for a product workflow.
 _Avoid_: Raw email, Clerk organization invitation, generic notification
 
+**Managed Reconciliation Cadence**:
+The deployment-owned frequency for one pass over SDP's managed background reconcilers. It is distinct from each reconciler's self-hosted cadence and from monitoring tolerance windows.
+_Avoid_: Hard-coded job interval, Sentry schedule, self-hosted cron cadence
+
 ## Relationships
 
 - An **Organization** has **Provider Availability** for each **Provider** in each **Provider Family**.
@@ -81,6 +97,9 @@ _Avoid_: Raw email, Clerk organization invitation, generic notification
 - **Provider Availability** is distinct from provider runtime health.
 - **Provider Availability** is distinct from whether a **Project** has selected or initialized a **Provider**.
 - A **Private Transfer** is still a **Payment Transfer**; privacy changes how the transfer is prepared and submitted, not the wallet permission model.
+- A **Private Channels Integration** contributes private capabilities to existing SDP product flows instead of creating a separate product surface.
+- A **Private Channels Integration** belongs to the **Privacy Integration** provider family.
+- A **Private Channels Integration** connects an SDP project to a **Private Channel Instance**.
 - A **Counterparty** may have one or more **Counterparty Accounts**.
 - A **Recurring Payment** pays a **Counterparty Account** from an SDP custody source wallet.
 - A **Wallet Operation Envelope** describes exactly one **Wallet Operation**.
@@ -91,6 +110,7 @@ _Avoid_: Raw email, Clerk organization invitation, generic notification
 - A **Provider Control Mapping** can make provider-native controls match an SDP policy revision, partially match it, or remain inapplicable.
 - A **Payment Request** may be delivered by email, but the email is not the **Payment Request**.
 - A **Transactional Email** may deliver a **Payment Request**, but does not own payment lifecycle or settlement matching.
+- Every managed reconciler in one managed run follows the **Managed Reconciliation Cadence**, while its self-hosted equivalent may run at a different cadence.
 
 ## Example Dialogue
 
@@ -103,6 +123,9 @@ _Avoid_: Raw email, Clerk organization invitation, generic notification
 > **Dev:** "Can this API key policy let the key transfer from a wallet whose wallet policy denies transfers?"
 > **Domain expert:** "No. The wallet policy is the baseline; the API key policy can only narrow access or route the operation into approval."
 
+> **Dev:** "Should the API hard-code the production interval into its Sentry monitors?"
+> **Domain expert:** "No. Monitoring must consume the deployment-owned Managed Reconciliation Cadence so its expectation cannot drift from execution."
+
 ## Flagged Ambiguities
 
 - "Available" can mean access policy, environment configuration, runtime health, or project setup; resolved: **Provider Availability** means deployment configuration plus general availability or a **Manual Provider Activation**.
@@ -112,3 +135,4 @@ _Avoid_: Raw email, Clerk organization invitation, generic notification
 - "Approval" can mean an SDP **Approval Request** or a provider-native approval flow; resolved: SDP creates the **Approval Request**, while provider-native approval is reached through **Provider Control Mapping**.
 - "Payment request" can mean a low-level request payload or a payer-facing payments product; resolved: use **Payment Request** only for the payments v2 payer-facing flow.
 - "Email" can mean Clerk-owned organization invitation delivery or SDP-owned **Transactional Email**; resolved: only **Transactional Email** is owned by SDP.
+- "Reconciliation cadence" previously meant either the deployment's execution schedule or Sentry's expected schedule; resolved: the **Managed Reconciliation Cadence** is deployment-owned, and managed monitoring derives from it.

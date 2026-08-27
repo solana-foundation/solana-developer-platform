@@ -145,9 +145,8 @@ export function createCounterpartiesRepository(
   env: Env,
   scope: TenantScope
 ): CounterpartiesRepository {
-  const testCipher = (env as Env & { counterpartyPiiCipher?: PiiCipher }).counterpartyPiiCipher;
   return bindRepositoryToTenant(
-    createPostgresCounterpartiesRepository(getDb(env), testCipher ?? createPiiCipher(env)),
+    createPostgresCounterpartiesRepository(getDb(env)),
     scope,
     "CounterpartiesRepository",
     [
@@ -160,8 +159,7 @@ export function createCounterpartiesRepository(
 }
 
 export function createSystemCounterpartiesRepository(env: Env): CounterpartiesRepository {
-  const testCipher = (env as Env & { counterpartyPiiCipher?: PiiCipher }).counterpartyPiiCipher;
-  return createPostgresCounterpartiesRepository(getDb(env), testCipher ?? createPiiCipher(env));
+  return createPostgresCounterpartiesRepository(getDb(env));
 }
 
 export function createCounterpartyAccountsRepository(

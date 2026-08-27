@@ -483,7 +483,15 @@ export async function updateWalletPolicy(
   walletId: string,
   policy: Pick<WalletPolicy, "defaultAction" | "rules">,
   t: Translate,
-  commitMessage?: string
+  commitMessage?: string,
+  options?: {
+    /**
+     * Active revision id of the server-read policy this edit was based on
+     * (null when no profile was active). Omit only without a server-read
+     * base — the API then skips the stale-write check.
+     */
+    expectedRevisionId?: string | null;
+  }
 ): Promise<WalletPolicy> {
   const trimmedCommitMessage = commitMessage?.trim();
 
@@ -498,6 +506,9 @@ export async function updateWalletPolicy(
         defaultAction: policy.defaultAction,
         rules: policy.rules,
         ...(trimmedCommitMessage ? { commitMessage: trimmedCommitMessage } : {}),
+        ...(options?.expectedRevisionId !== undefined
+          ? { expectedRevisionId: options.expectedRevisionId }
+          : {}),
       }),
     }
   );

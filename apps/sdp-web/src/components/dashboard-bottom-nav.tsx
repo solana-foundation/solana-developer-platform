@@ -39,9 +39,11 @@ const itemBase =
  */
 export function DashboardBottomNav({
   pathname,
+  paymentsEnabled,
   onOpenMore,
 }: {
   pathname: string;
+  paymentsEnabled: boolean;
   onOpenMore: () => void;
 }) {
   const t = useTranslations();
@@ -57,11 +59,15 @@ export function DashboardBottomNav({
       href: DASHBOARD_SIDE_NAV_HREFS.wallets,
       icon: WalletIcon,
     },
-    {
-      label: t("Shared.dashboardShell.payments"),
-      href: DASHBOARD_SIDE_NAV_HREFS.payments,
-      icon: ArrowLeftRightIcon,
-    },
+    ...(paymentsEnabled
+      ? [
+          {
+            label: t("Shared.dashboardShell.payments"),
+            href: DASHBOARD_SIDE_NAV_HREFS.payments,
+            icon: ArrowLeftRightIcon,
+          },
+        ]
+      : []),
     {
       label: t("Shared.dashboardShell.issuance"),
       href: DASHBOARD_SIDE_NAV_HREFS.issuance,

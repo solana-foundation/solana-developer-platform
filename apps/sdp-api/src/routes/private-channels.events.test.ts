@@ -127,7 +127,6 @@ async function connectInstance(): Promise<void> {
       headers: authHeaders(),
       body: JSON.stringify({
         gatewayUrl: SANDBOX_DEFAULTS.gatewayUrl,
-        chainRpcUrl: SANDBOX_DEFAULTS.chainRpcUrl,
         escrowProgramId: SANDBOX_DEFAULTS.escrowProgramId,
         withdrawProgramId: SANDBOX_DEFAULTS.withdrawProgramId,
         escrowInstanceAddr: SANDBOX_DEFAULTS.escrowInstanceAddr,

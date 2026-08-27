@@ -18,6 +18,7 @@ import {
   signVaultPlan,
   simulateVaultPlan,
 } from "./vault-execution.service";
+import type { VaultFeeMode } from "./vault-sponsorship";
 
 interface SignedVaultIntentResult {
   movement: EarnMovementRow;
@@ -37,6 +38,12 @@ export interface ExecuteSignedVaultIntentInput<TResult extends SignedVaultIntent
   expectedAssetIdentity: EarnVaultAssetIdentity;
   plan: EarnVaultTransactionPlan;
   rpcUrl: string;
+  /**
+   * Who pays, resolved by the caller BEFORE it built the plan, because a
+   * sponsor also has to be named inside the instructions as the rent payer.
+   * The same value reaches simulation and signing so they cannot disagree.
+   */
+  fee: VaultFeeMode;
   runIntentTransaction?: <T>(mutation: (db: AppDb) => Promise<T>) => Promise<T>;
   persist: (db: AppDb, signed: SignedVaultTransaction) => Promise<TResult>;
 }
@@ -63,6 +70,7 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
       plan: input.plan,
       owner: address(input.walletPublicKey),
       rpcUrl: input.rpcUrl,
+      fee: input.fee,
     });
     if (!simulation.ok) {
       getLogger().error(
@@ -101,7 +109,7 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
       plan: input.plan,
       owner: signer,
       rpcUrl: input.rpcUrl,
-      fee: { kind: "wallet-pays" },
+      fee: input.fee,
       prepared,
     });
   } catch (error) {
