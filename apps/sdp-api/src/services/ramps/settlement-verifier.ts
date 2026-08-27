@@ -28,10 +28,12 @@ function notVerified(reason: string): RampVerificationOutcome {
 /**
  * Resolve the mint this transfer is denominated in.
  *
- * Ramp rows store a symbol (`USDC`) because that is what the provider quoted, while wallet rows
- * store a mint address. Both shapes reach here, so try the catalogue first and fall back to
- * treating the value as an address. Returning null is a refusal, not a default: verifying against
- * an unknown mint would accept a transfer of the wrong asset.
+ * Ramp rows observed in practice store the mint address, not the symbol, even though the quote
+ * request takes a symbol (`cryptoToken: "USDC"`). The symbol branch is kept because that
+ * conversion happens upstream and is not guaranteed, so both shapes can reach here.
+ *
+ * Returning null is a refusal, not a default: verifying against an unknown mint would accept a
+ * transfer of the wrong asset.
  */
 function resolveExpectedMint(token: string, cluster: SolanaCluster): string | null {
   if (isWellKnownTokenSymbol(token)) {

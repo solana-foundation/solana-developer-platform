@@ -721,7 +721,7 @@ const coinbaseRampSettlementSchema = z.object({
   failureReason: z.string().optional(),
 });
 
-export const rampTransferSettlementSchema = z
+const rampTransferSettlementSchema = z
   .discriminatedUnion("provider", [
     moonpayRampSettlementSchema,
     lightsparkRampSettlementSchema,
@@ -732,7 +732,7 @@ export const rampTransferSettlementSchema = z
       "Provider-reported settlement economics, captured verbatim from a terminal webhook. Present only for providers that report them (moonpay, lightspark, coinbase).",
   });
 
-export const rampSettlementVerificationSchema = z
+const rampSettlementVerificationSchema = z
   .object({
     status: z.enum(["verified", "pending", "unsupported"]).openapi({
       description:
