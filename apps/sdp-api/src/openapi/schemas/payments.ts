@@ -722,7 +722,7 @@ export const transferSchema = z
     }),
     counterpartyId: z.string().optional().openapi({
       description: "Counterparty tied to the transfer record, when available.",
-      example: "counterparty_example",
+      example: "cpty_example",
     }),
     counterpartyDisplayName: z.string().optional().openapi({
       description: "Current display name of the counterparty tied to the transfer.",
@@ -828,7 +828,7 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
       example: [
         {
           externalId: "payroll_row_001",
-          counterpartyId: "cp_example",
+          counterpartyId: "cpty_example",
           counterpartyAccountId: "cpa_example",
           amount: "25.00",
         },
@@ -898,7 +898,7 @@ export const transferBatchRecipientSchema = z
     }),
     counterpartyId: z.string().openapi({
       description: "Counterparty identifier for the recipient.",
-      example: "cp_example",
+      example: "cpty_example",
     }),
     counterpartyAccountId: z.string().openapi({
       description: "Counterparty account identifier for the recipient.",
@@ -1048,7 +1048,7 @@ export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaB
     }),
     counterpartyId: withOpenApi(createRecurringPaymentSchemaBase.shape.counterpartyId, {
       description: "Counterparty receiving the recurring payment.",
-      example: "cp_example",
+      example: "cpty_example",
     }),
     counterpartyAccountId: withOpenApi(
       createRecurringPaymentSchemaBase.shape.counterpartyAccountId,
@@ -1093,7 +1093,7 @@ export const updateRecurringPaymentRequestSchema = updateRecurringPaymentSchemaB
     counterpartyId: withOpenApi(updateRecurringPaymentSchemaBase.shape.counterpartyId, {
       description:
         "Optional replacement counterparty. When provided, counterpartyAccountId is also required.",
-      example: "cp_example",
+      example: "cpty_example",
     }),
     counterpartyAccountId: withOpenApi(
       updateRecurringPaymentSchemaBase.shape.counterpartyAccountId,
@@ -1142,7 +1142,7 @@ export const paymentListRecurringPaymentsQuerySchema = listRecurringPaymentsQuer
   .extend({
     counterpartyId: withOpenApi(listRecurringPaymentsQuerySchemaBase.shape.counterpartyId, {
       description: "Filter recurring payments by counterparty.",
-      example: "cp_example",
+      example: "cpty_example",
     }),
     status: paymentRecurringPaymentStatusSchema.optional(),
   })
@@ -1159,7 +1159,9 @@ export const paymentRecurringPaymentSchema = z
     sourceAddress: solanaAddressSchema.openapi({
       description: "Source wallet address.",
     }),
-    counterpartyId: z.string().openapi({ description: "Counterparty ID.", example: "cp_example" }),
+    counterpartyId: z
+      .string()
+      .openapi({ description: "Counterparty ID.", example: "cpty_example" }),
     counterpartyAccountId: z
       .string()
       .openapi({ description: "Counterparty account ID.", example: "cpa_example" }),
@@ -1401,7 +1403,7 @@ export const createSubscriptionRequestSchema = createSubscriptionSchemaBase
     }),
     counterpartyId: withOpenApi(createSubscriptionSchemaBase.shape.counterpartyId, {
       description: "Counterparty being billed for the recurring payment.",
-      example: "counterparty_example",
+      example: "cpty_example",
     }),
     subscriberAddress: withOpenApi(createSubscriptionSchemaBase.shape.subscriberAddress, {
       description: "Customer wallet address that authorizes the subscription.",
@@ -1606,7 +1608,7 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
     counterpartyId: withOpenApi(createOnrampQuoteSchemaBase.shape.counterpartyId, {
       description:
         "SDP counterparty ID. Provider-native customer records may be resolved or created from this counterparty.",
-      example: "counterparty_example",
+      example: "cpty_example",
     }),
     destinationWallet: withOpenApi(createOnrampQuoteSchemaBase.shape.destinationWallet, {
       description:
@@ -1639,7 +1641,7 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
       "Create an on-ramp quote. The response uses `deliveryMode` to indicate whether the client should display manual instructions, open a hosted provider flow, or mount a provider session widget.",
     example: {
       provider: "moonpay",
-      counterpartyId: "counterparty_example",
+      counterpartyId: "cpty_example",
       destinationWallet: "privy_wallet_123",
       cryptoToken: "USDC",
       fiatCurrency: "USD",
@@ -1690,7 +1692,7 @@ export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
     }),
     counterpartyId: withOpenApi(listTransfersQuerySchemaBase.shape.counterpartyId, {
       description: "Filter transfers tied to a specific counterparty.",
-      example: "counterparty_example",
+      example: "cpty_example",
     }),
     provider: withOpenApi(listTransfersQuerySchemaBase.shape.provider, {
       description: "Filter ramp transfers by provider.",

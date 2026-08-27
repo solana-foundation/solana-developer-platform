@@ -5,7 +5,7 @@ import { buildStripeCustomerInfo } from "./stripe";
 
 function counterparty(identity: CounterpartyIndividualIdentity, email?: string): CounterpartyRow {
   return {
-    id: "counterparty_1",
+    id: "cpty_1",
     organization_id: "org_1",
     project_id: "proj_1",
     external_id: null,

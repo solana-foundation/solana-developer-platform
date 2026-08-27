@@ -17,13 +17,39 @@ import type {
   UpsertBvnkCustomerProviderDataInput,
 } from "./counterparty.repository";
 import { generateCounterpartyId } from "./counterparty.repository";
-import { providerLookupReferences } from "./counterparty-pii.repository";
 
 function assertString(value: unknown, field: string): string {
   if (typeof value !== "string") {
     throw new Error(`Counterparty ${field} is missing`);
   }
   return value;
+}
+
+function nestedString(value: unknown, path: readonly string[]): string | null {
+  let current = value;
+  for (const part of path) {
+    if (!current || typeof current !== "object") {
+      return null;
+    }
+    current = (current as Record<string, unknown>)[part];
+  }
+  return typeof current === "string" && current.length > 0 ? current : null;
+}
+
+/**
+ * Extracts the denormalized provider reverse-lookup columns from provider data.
+ *
+ * @param providerData - The counterparty provider data JSON.
+ * @returns The BVNK customer reference and Mural organization id, or null when absent.
+ */
+function providerLookupReferences(providerData: CounterpartyProviderData): {
+  bvnkCustomerReference: string | null;
+  muralOrganizationId: string | null;
+} {
+  return {
+    bvnkCustomerReference: nestedString(providerData, ["bvnk", "customer", "customerReference"]),
+    muralOrganizationId: nestedString(providerData, ["mural", "organization", "id"]),
+  };
 }
 
 function mapCounterpartyRow(row: Record<string, unknown>): CounterpartyRow {
