@@ -8,10 +8,7 @@ import type {
 import type { RepositoryDbClient } from "./base";
 
 export type { CounterpartyRow } from "@sdp/payments";
-
-export function generateCounterpartyId(): string {
-  return `counterparty_${crypto.randomUUID()}`;
-}
+export { generateCounterpartyId } from "@sdp/payments";
 
 export interface CreateCounterpartyInput {
   organizationId: string;

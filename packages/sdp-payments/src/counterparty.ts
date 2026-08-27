@@ -25,3 +25,19 @@ export type CounterpartyRow = {
   | { entity_type: "individual"; identity: CounterpartyIndividualIdentity }
   | { entity_type: "business"; identity: CounterpartyBusinessIdentity }
 );
+
+/**
+ * Generates a new SDP counterparty primary key.
+ *
+ * @returns A counterparty id in `cpty_<uuid>` format.
+ */
+export function generateCounterpartyId(): string {
+  return `cpty_${crypto.randomUUID()}`;
+}
+
+/**
+ * Matches the uuid segments of an SDP counterparty id. Prefix-agnostic so ids
+ * issued before and after the `cpty_` prefix change both match.
+ */
+export const SDP_COUNTERPARTY_ID_PATTERN =
+  /_([0-9a-f]{8})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{12})$/i;

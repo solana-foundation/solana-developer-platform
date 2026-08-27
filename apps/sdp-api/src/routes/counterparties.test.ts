@@ -189,7 +189,7 @@ describe("Counterparties Routes", () => {
       const res = await createCounterparty({ externalId: "ext_001" });
       expect(res.status).toBe(201);
       const body = await res.json();
-      expect(body.data.counterparty.id).toMatch(/^counterparty_/);
+      expect(body.data.counterparty.id).toMatch(/^cpty_/);
       expect(body.data.counterparty.organizationId).toBe(TEST_ORG.id);
       expect(body.data.counterparty.entityType).toBe("individual");
       expect(body.data.counterparty.displayName).toBe("Alice");

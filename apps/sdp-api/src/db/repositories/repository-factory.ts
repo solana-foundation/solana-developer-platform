@@ -1,7 +1,6 @@
 // biome-ignore-all lint/security/noSecrets: repository and method identifiers are not credentials
 import { getDb } from "@/db";
 import { bindRepositoryToTenant, type TenantScope } from "@/lib/tenant-scope";
-import { createPiiCipher, type PiiCipher } from "@/services/pii-cipher/pii-cipher";
 import type { Env } from "@/types/env";
 import type { AssetProfilesRepository } from "./asset-profile.repository";
 import { createPostgresAssetProfilesRepository } from "./asset-profile.repository.postgres";
@@ -166,9 +165,8 @@ export function createCounterpartyAccountsRepository(
   env: Env,
   scope: TenantScope
 ): CounterpartyAccountsRepository {
-  const testCipher = (env as Env & { counterpartyPiiCipher?: PiiCipher }).counterpartyPiiCipher;
   return bindRepositoryToTenant(
-    createPostgresCounterpartyAccountsRepository(getDb(env), testCipher ?? createPiiCipher(env)),
+    createPostgresCounterpartyAccountsRepository(getDb(env)),
     scope,
     "CounterpartyAccountsRepository"
   );
