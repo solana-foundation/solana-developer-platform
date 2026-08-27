@@ -501,8 +501,7 @@ browser pass on `/dashboard/markets/earn` and
   `document` needs a `// @vitest-environment jsdom` docblock. Mock the data-hook
   seam (`./earn-program-data`), not fetch. Run:
   `pnpm --filter sdp-web exec vitest run src/app/dashboard/markets/earn`.
-  CI does **not** run these: the root `pnpm test` is `turbo run test` and
-  sdp-web declares `test:unit`, not `test`. Run them yourself.
+  CI runs them via the root `pnpm test` (`turbo run test` includes sdp-web).
 
 ## Running this locally
 

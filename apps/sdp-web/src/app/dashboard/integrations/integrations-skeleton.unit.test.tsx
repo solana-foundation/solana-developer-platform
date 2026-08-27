@@ -44,11 +44,13 @@ describe("integration detail skeleton", () => {
   it("reserves a card per provider the catalog actually lists", () => {
     // Four per section left the placeholder 22% shorter than the page: custody
     // alone renders ten. Measured at 1832px page against 1820px skeleton.
+    const privacyCards = 1;
     const expected =
       CUSTODY_PROVIDER_CATALOG.filter((entry) => entry.visible).length +
       (ORGANIZATION_RPC_PROVIDERS.length - 1) +
       RAMP_PROVIDERS.length +
-      COMPLIANCE_PROVIDERS.length;
+      COMPLIANCE_PROVIDERS.length +
+      privacyCards;
 
     const markup = renderToStaticMarkup(<IntegrationsSkeleton />);
     expect(markup.match(/h-\[120px\]/g)).toHaveLength(expected);
