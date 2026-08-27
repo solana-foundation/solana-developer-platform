@@ -24,7 +24,6 @@ export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
   deposit: "/dashboard/payments/deposit",
   requests: "/dashboard/payments/requests",
   recurring: "/dashboard/payments/recurring",
-  privateChannels: "/dashboard/payments/private-channels",
 } as const;
 
 export type DashboardLoadingRoute =
@@ -147,6 +146,9 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
   if (/^\/dashboard\/approvals\/[^/]+$/.test(pathname)) return "approval-detail";
   if (pathname === "/dashboard/settings") return "settings";
   if (pathname === "/dashboard/integrations") return "integrations";
+  if (pathname.startsWith("/dashboard/integrations/private-channels")) {
+    return "integration-detail";
+  }
   if (/^\/dashboard\/integrations\/[^/]+$/.test(pathname)) return "integration-detail";
   if (pathname === "/dashboard/allowlist") return "allowlist";
 

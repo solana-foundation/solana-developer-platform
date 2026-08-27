@@ -88,6 +88,22 @@ record, not state: a route may resolve which provider wallet a program is and
 then read all of its money live — what it may never do is mix a persisted
 balance with a live one.
 
+- `GET|PUT /button-configurations/current`: **DB**, scoped to organization and
+  project. PUT runs the SAME vault money-in gate sequence as
+  `POST /vault-deposits` — shared as `assertVaultDepositAdmissible`
+  (`handlers/admission.ts`), never copied — after resolving the strategy through
+  `requireEarnStrategy` (browse visibility applies to NEW configurations). The
+  stable public token is preserved across updates.
+- `GET /button-configurations/public/:publicToken`: **DB** plus catalogue
+  display metadata, registered before auth for the engineering handoff. Its
+  response is deliberately limited to strategy and style, and it never returns
+  organization, project, actor, or API-key data. The catalogue visibility
+  policy binds this read too: a strategy that is hidden (`isHiddenStrategy`),
+  delisted, or not active is served with `strategyAvailable: false` and
+  `strategyName`/`provider` withheld, so the unauthenticated route cannot leak
+  a hidden row's metadata and the handoff page can render an honest stale state
+  instead of a snippet the deposit route would refuse.
+
 - `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Rows are
   admitted only by the hourly sync cron; the 5-minute metrics refresh
   (`cron/earn-metrics-refresh.ts`) updates figures only and can never insert.
@@ -118,14 +134,18 @@ balance with a live one.
     existing program pointed at a curated-away vault keeps working.
   - Each row carries `hostCluster` (the cluster the INSTRUMENT lives on, stored)
     and `fundable` (derived per request from `hostCluster` against the caller's
-    environment, never stored). **Catalogued is not the same as fundable**:
-    a provider may front instruments that do not exist on every cluster, and the
-    sync REFUSES to store a `mainnet-beta` instrument outside production. (Kamino
-    was the original example of the opposite — catalogued mainnet-into-sandbox
-    because we believed it had no devnet deployment; it does, and each
-    environment now catalogues its own cluster.) `fundable` is the wire-level
-    warning — partners must branch on it rather than assume a listed strategy
-    takes deposits.
+    environment, never stored). **Catalogued is not the same as fundable**, and
+    since PRO-1742 that is a designed steady state: the sync MIRRORS the
+    production mainnet shelf into every non-production environment, written as
+    two cluster-scoped lanes per environment so each sub-shelf converges
+    independently (`cron/earn-catalogue-sync.ts`), so curation can be reviewed
+    outside production. The LIST defaults to the environment's own cluster and
+    takes an explicit `?cluster=` opt-in for the mirrored shelf; the DETAIL
+    read serves an addressed row whatever its cluster. The per-vault curation
+    lists below are keyed by CLUSTER, so the sandbox mirror inherits exactly
+    the curation production applies. `fundable` is the wire-level warning —
+    partners must branch on it rather than assume a listed strategy takes
+    deposits.
   - **`fundable` answers the CLUSTER question only, and its two sides are not
     symmetric.** `false` is definitive (the instrument does not exist on your
     cluster). `true` is necessary but not sufficient: a deposit additionally

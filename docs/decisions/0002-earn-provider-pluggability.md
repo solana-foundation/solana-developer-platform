@@ -569,7 +569,9 @@ about cluster deployment. Check the chain for a per-cluster program id.
   production.** Provider-neutral, at the single writer of `earn_strategies`. It
   does not trust a client to get this right, and it is independent of the
   delist pass — which would otherwise leave stale mainnet rows behind whenever a
-  devnet read failed.
+  devnet read failed. *(Superseded 2026-08-26, PRO-1742 addendum below: mainnet
+  rows now DO enter non-production, but only through the sync's browse-only
+  mirror lane; the refusal survives as the own-lane foreign-cluster drop.)*
 - **No metrics outside production.** The bulk metrics endpoint is mainnet's, so
   `listStrategyMetrics` returns `[]` elsewhere and sandbox rows render no rate.
   A devnet APY would mean blending devnet Klend reserve rates — SDK-sized work
@@ -898,3 +900,60 @@ need a live `getConfig`, because only the running service knows what it was
 deployed with, so that assertion ships here behind
 `EARN_KORA_SPONSORSHIP_SMOKE` and goes unconditional once sdp-infra#64 reaches
 devnet.
+
+## Addendum (2026-08-26) — sandbox mirrors the mainnet catalogue behind a cluster toggle (PRO-1742)
+
+This reverses one rule of the 2026-08-14 addendum: "the catalogue sync refuses
+to STORE a mainnet instrument outside production". Reviewing the curated
+mainnet catalogue (what SDP actually offers customers) previously required
+doing that review IN production; now the surface that offers a review
+affordance, sandbox, can show the real shelf without being able to fund it.
+
+**Two lanes per non-production environment.** The hourly sync writes each
+non-production environment twice: the provider's OWN catalogue for that
+environment (the fundable shelf, exactly as before), plus a browse-only MIRROR
+of the production pass's accepted mainnet shelf. One fetch per data source per
+pass; the mirror is a second WRITE, never a second provider read. Reads default
+to the environment's own cluster; the mirror is an explicit `?cluster=` opt-in
+(the Treasury strategies card's toggle, sandbox-only). Mirrored rows derive
+`fundable: false` on every read and every provider mutation refuses them
+(`isClusterFundableInEnvironment`), so the honesty the old persistence refusal
+protected lives in the read model and the UI. The refusal itself survives as
+the own-lane foreign-cluster drop: a provider's non-production source reporting
+mainnet instruments is still drift, warned and skipped.
+
+**Each lane delists only the cluster sub-shelf it is the truth for**
+(`deleteUnlistedStrategies` gained a `hostCluster` scope), so one lane's keep
+set can never tear down the other lane's rows. The mirror lane additionally
+converges to EMPTY on a reliable "nothing is listed" answer: a successful
+production fetch with no accepted mainnet rows, or a steady-state skip (stub
+provider, production credentials absent or revoked). The usual empty-keep-set
+refusal stays absolute for fundable own shelves, where a wrong delete costs a
+customer a vault mid-deposit; the asymmetry flips for the mirror because its
+rows are browse-only and re-mirrored hourly, while refusing would serve
+orphaned "production catalogue" rows forever after production stopped vouching
+for them. The repository enforces that an authorized-empty delist is
+cluster-scoped, never environment-wide.
+
+**Accepted cap: the mirror is faithful only for cluster-distinct references.**
+The upsert key stays (provider, provider_reference, environment) with no
+cluster, so a reference listed by BOTH of an environment's truth sources
+collides; the environment's own (fundable) row wins the write and the mirror
+under-reports exactly those references (warned hourly, and the collided
+reference stays in the mirror's delist keep set so a failed own-lane write can
+never read as a delisting). Kamino's address-keyed references never collide. A
+provider keying both catalogues by a shared slug (Ground's `source.id`) would
+collide on every shared slug once surfaced. Decision: keep the bare triple.
+Extending the key to the cluster would make every bare-triple consumer
+(`updateStrategyMetrics` above all) hit both rows; revisit only if a slug-keyed
+provider ever needs a faithful mirror.
+
+**Accepted staleness, and one fidelity gap.** Mirrored rows refresh at the
+HOURLY catalogue cadence: the mirror upsert carries the snapshot's
+`currentApy` and `riskMetadata`, and the five-minute metrics pass deliberately
+does not cross environments (it matches the bare triple, so it would need the
+collision protection above). And the mirror carries the provider SNAPSHOT, not
+production's stored row, so an operator `paused`/`deprecated` on the
+production row does not propagate to the sandbox mirror row. Both are
+review-surface fidelity gaps, not deposit paths: `fundable: false` holds
+throughout.
