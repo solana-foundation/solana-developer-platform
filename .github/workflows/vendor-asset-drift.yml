@@ -26,13 +26,18 @@ jobs:
         id: check
         run: |
           set -euo pipefail
+          assets="$(jq -r '.[] | [.name, .url, .sha256] | @tsv' .github/vendor-assets.json)"
+          if [[ -z "${assets}" ]]; then
+            echo "vendor-assets.json is empty or unreadable" >&2
+            exit 1
+          fi
           drifted=()
           while IFS=$'\t' read -r name url sha; do
             actual="$(curl -fsSL --max-time 60 --retry 2 "${url}" | sha256sum | cut -d' ' -f1)" || actual="fetch-failed"
             if [[ "${actual}" != "${sha}" ]]; then
               drifted+=("${name}: pinned ${sha:0:12}…, upstream ${actual:0:12}…")
             fi
-          done < <(jq -r '.[] | [.name, .url, .sha256] | @tsv' .github/vendor-assets.json)
+          done <<< "${assets}"
 
           if [[ "${#drifted[@]}" -gt 0 ]]; then
             printf '%s\n' "${drifted[@]}" | tee -a "${GITHUB_STEP_SUMMARY}"
@@ -44,6 +49,10 @@ jobs:
             exit 1
           fi
           echo "All pinned vendor assets match upstream." >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Install Doppler CLI
+        if: failure()
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
       - name: Notify Slack on drift
         if: failure()
