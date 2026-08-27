@@ -81,14 +81,7 @@ describe("Unified earn movement ledger (postgres)", () => {
   beforeEach(async () => {
     const db = getDb(env);
 
-    for (const table of [
-      "earn_movements",
-      "earn_positions",
-      "earn_vault_movements",
-      "earn_vault_positions",
-      "earn_program_withdrawals",
-      "earn_provider_wallets",
-    ]) {
+    for (const table of ["earn_movements", "earn_positions", "earn_provider_wallets"]) {
       await db
         .prepare(`DELETE FROM ${table} WHERE organization_id IN (?, ?)`)
         .bind(ORG, ORG_OTHER)
@@ -477,7 +470,7 @@ describe("Unified earn movement ledger (postgres)", () => {
       // A closed holding that is re-entered reuses its row, and the mirror has to
       // follow the reopening rather than leave a stale closed_at behind.
       await db
-        .prepare("UPDATE earn_vault_positions SET closed_at = sdp_iso_now() WHERE id = ?")
+        .prepare("UPDATE earn_positions SET closed_at = sdp_iso_now() WHERE id = ?")
         .bind(first.position.id)
         .run();
       await ledger.advanceVaultMovement({
@@ -549,11 +542,11 @@ describe("Unified earn movement ledger (postgres)", () => {
         .bind(ORG_OTHER)
         .run();
       await db
-        .prepare("DELETE FROM earn_vault_movements WHERE organization_id = ?")
+        .prepare("DELETE FROM earn_movements WHERE organization_id = ?")
         .bind(ORG_OTHER)
         .run();
       await db
-        .prepare("DELETE FROM earn_vault_positions WHERE organization_id = ?")
+        .prepare("DELETE FROM earn_positions WHERE organization_id = ?")
         .bind(ORG_OTHER)
         .run();
       await db.prepare("DELETE FROM custody_wallets WHERE id = 'cw_earn_mv_other'").run();
@@ -753,7 +746,8 @@ describe("Unified earn movement ledger (postgres)", () => {
       // The state a program reaches when it was linked by a revision that
       // predates the ledger, or during a rollout or rollback window: the wallet
       // exists and has no holding. Failing here would take the program's whole
-      // withdrawal endpoint down permanently, so the projection opens one.
+      // withdrawal endpoint down permanently, so the writer opens one and
+      // retries. It still fails loudly when the program wallet itself is absent.
       await db
         .prepare("DELETE FROM earn_positions WHERE provider_wallet_id = ?")
         .bind(wallet.id)

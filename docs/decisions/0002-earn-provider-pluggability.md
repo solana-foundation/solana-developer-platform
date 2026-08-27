@@ -569,7 +569,9 @@ about cluster deployment. Check the chain for a per-cluster program id.
   production.** Provider-neutral, at the single writer of `earn_strategies`. It
   does not trust a client to get this right, and it is independent of the
   delist pass — which would otherwise leave stale mainnet rows behind whenever a
-  devnet read failed.
+  devnet read failed. *(Superseded 2026-08-26, PRO-1742 addendum below: mainnet
+  rows now DO enter non-production, but only through the sync's browse-only
+  mirror lane; the refusal survives as the own-lane foreign-cluster drop.)*
 - **No metrics outside production.** The bulk metrics endpoint is mainnet's, so
   `listStrategyMetrics` returns `[]` elsewhere and sandbox rows render no rate.
   A devnet APY would mean blending devnet Klend reserve rates — SDK-sized work
@@ -749,3 +751,209 @@ code or child-record schema for that hypothetical path.
 - **The withdrawal wire speaks the ledger's own vocabulary** (`requested …
   finalized`) and exposes the movement signature directly. This surface
   postdates the unification, so there is no legacy client to translate for.
+
+## Addendum — 2026-08-21 Kora sponsors vault movements, rent included (PRO-1736)
+
+Sponsorship stops being a literal. `resolveVaultSponsorship`
+(`services/earn/vault-sponsorship.ts`) answers "who pays" once per request and
+the resolved value drives all three places that have to agree, which is the
+whole design:
+
+1. the compile-time transaction fee payer,
+2. the `rentPayer` handed to the provider's builder, which lands **inside** the
+   instruction accounts and funds the share ATA a first deposit creates,
+3. the fee payer used to **simulate**.
+
+Passing one value to all three makes the actual bug unrepresentable. Fees were
+already sponsorable, but `rentPayer` defaulted to the owner, so a wallet holding
+zero SOL still could not make a first deposit. And (3) is not bookkeeping:
+simulation enforces that the fee payer can pay, so a zero-SOL wallet simulated as
+its own fee payer is rejected with `AccountNotFound` and no logs, before the
+signing it would have passed. Verified on devnet against agave 4.2.1.
+
+**Kora pays the ATA rent.** This reverses a prohibition that was written down in
+three places (`@sdp/kamino` CLAUDE.md and `types.ts`, this route family's
+CLAUDE.md), so the reasoning that changed is recorded rather than quietly
+deleted. The objection was that a sponsor would be billed for rent (a) its
+`FeePayerPolicy` might refuse and (b) the sponsorship budget did not account
+for. Both were checked against the pinned Kora build and the deployed configs:
+
+- (a) Kora gates fee-payer-funded ATA creation on exactly one flag,
+  `fee_payer_policy.system.allow_create_account`; its
+  `validate_ata_create_instructions` returns early when that is true. The
+  `spl_token.allow_initialize_account = false` next to it is irrelevant, because
+  Kora validates a pre-execution transaction and the token init is a runtime CPI
+  it never sees. devnet already sets the flag true, CI-sanctioned via
+  `validate-policy.py --allow-spend system.allow_transfer,system.allow_create_account`.
+- (b) The budget prices it, because that same flag is one of the authorities that
+  makes the per-transaction reservation `networkFee + max_allowed_lamports`
+  rather than the fee alone. devnet reserves ~9,905,000 lamports against
+  ~2,039,280 of real ATA rent: a ~5x over-reserve, not an accounting hole.
+
+The mechanism is precedent, not invention: `routes/pay.ts` and the transfer-batch
+and recurring-payment paths already make the Kora signer both the ATA rent payer
+and the fee payer against deployed Kora. Solana deduplicates account keys, so one
+address filling both roles occupies **one** signature slot and a single
+`signAsFeePayer` satisfies both. One sponsor identity takes both roles or
+neither: a sponsor rent payer without a sponsor fee payer would need a second
+real signature SDP cannot produce.
+
+### The exit gives the rent back, and had to be taught how
+
+Sponsoring rent surfaced a leak that predates sponsorship. SDP builds its exit
+through klend's `withdrawIxs`, whose `WithdrawIxs` shape carries no cleanup
+instructions, so **the share ATA was never closed**: its 2,039,280 lamports of
+rent-exemption stayed locked in an account holding zero shares, on every position
+ever exited, reclaimable by nobody. The custody wallet was already stranding that
+before any of this; sponsorship only changes who is out the lamports.
+
+So the exit now closes the account and returns the rent to whoever paid it:
+
+- **The funder is recorded when the account is created**, on
+  `earn_positions.share_ata_rent_funder` (migration 0066). It cannot be
+  re-derived at exit: nothing on chain records who funded rent, and the fee mode
+  may have flipped in between, so refunding "whoever sponsors today" would
+  eventually pay a sponsor with the customer's lamports. The stored value is a
+  PROJECTION (migration 0067): each movement that actually creates the account,
+  in EITHER direction (an exit consolidating auxiliary share accounts can create
+  the ATA itself), records the claim on its own ledger row, and the position
+  carries the newest claim that has not failed. A loser of the idempotency race
+  has no row to contribute, and a movement whose transaction never lands loses
+  its claim when reconciliation fails it, so a refund cannot be directed by a
+  transaction that did not land. The one exception to reading it: when the
+  exit itself creates the account, the party owed the refund is that exit's own
+  rent payer, who funded it moments earlier in the same transaction. The recorded
+  funder is authoritative only for an account that pre-dates the exit.
+- **Creation is observed, not inferred.** `createAtasIdempotent` emits the same
+  instruction whether or not the account exists and charges nothing when it does,
+  so only a chain read distinguishes them. The builder reports
+  `createsShareAccount` on the plan; absent means no rent was charged and nothing
+  is recorded.
+- **The close condition is exact.** `CloseAccount` fails on a non-zero balance and
+  rides the same transaction as the redemptions, so a wrong guess fails the
+  customer's exit rather than merely stranding rent. Two equalities, not one: the
+  redeemed quantity must equal what the ATA will hold (which the separate
+  share-encoding assertion already pins) AND the owner's total holding of the
+  share mint across every account. An emptied ATA with auxiliary accounts still
+  holding shares is not a full exit, and closing there hands the next entry a
+  funder describing a previous instance of the account.
+
+### Accepted costs, stated so they are not rediscovered
+
+- **Rent is a float, not a subsidy, only for positions that fully exit.** A
+  partial exit correctly leaves the account open and its rent parked, and a
+  position never exited never returns it. Exposure is bounded by open positions
+  at ~0.00204 SOL each.
+- **A re-entry pays rent again**, because the close is real. Net still far better
+  than never recovering, but it is a per-cycle cost for a wallet that moves in and
+  out of the same vault.
+- **`max_allowed_lamports` caps a sponsored transaction at 4 new ATAs** on devnet
+  (9,900,000 / 2,039,280). Real plans create one, or two for a wSOL vault.
+- **Sponsorship costs 96 bytes** (one 64-byte signature slot, one 32-byte account
+  key; no instruction account index is added, the payer index just points
+  elsewhere) against the 1232-byte limit, and providers size plans without knowing
+  a sponsor is coming. The guard runs on the owner-signed bytes, BEFORE the
+  paymaster is called: the compiled header fixes the signature count, so those
+  bytes are already final length, and checking after would spend a budget
+  reservation on a plan that can never be sent.
+- **No farm rent.** SDP passes `farmState: null, flcFarmState: null`, so klend's
+  farm-stake instructions are always empty and no farm user-state account is
+  created. (That also means V1 forfeits farm rewards, which is a separate
+  question from who pays.)
+
+### Devnet only, and the cluster gate is exit safety
+
+`isEarnVaultSponsorshipEnabled(env, cluster)` takes the cluster rather than
+reading one deployment-global boolean, because a global flag would be unsafe
+here. One API process serves both clusters, and vault **withdrawals are
+deliberately not environment-gated** under the exit-safety rule above. A global
+flag would therefore flip mainnet exits to sponsored at the instant devnet
+deposits were enabled, against a mainnet Kora whose
+`fee_payer_policy.system.allow_create_account` is false and a mainnet budget
+policy that is seeded disabled: a 5xx on a customer's money-OUT path, the one
+failure this ADR rules out. The policy flag is the durable leg of that argument,
+not the allowlist: sdp-infra#64 puts the mainnet Kamino ids in place while
+leaving the policy shut.
+
+**To open mainnet**, three things land together and none is a flag flip: the
+Kamino ids reach `kora.mainnet.toml`'s `allowed_programs`
+([sdp-infra#64](https://github.com/solana-foundation/sdp-infra/pull/64), open as
+of this addendum, and it writes both cluster configs at once so the two cannot
+drift); `allow_create_account` is opened there, deferred until compensated
+pricing ships; and `sbp_mainnet_global.enabled` is turned on. One
+trap worth naming: opening the mainnet policy **without** lowering
+`max_allowed_lamports` from 10,000,000 would push the reservation to 10,005,000,
+past the seeded per-transaction budget, and deny **all** sponsorship, payments
+and issuance included. devnet's 9,900,000 exists precisely to leave that
+headroom.
+
+### How a future provider inherits this
+
+`EarnVaultDirectProvider.sponsoredPrograms(cluster)` is a required method, so a
+client that can build a deposit but cannot say which programs it touches fails
+capability detection and returns 501 rather than silently executing unsponsored.
+Kamino's implementation returns the set `assertPlanTargetsCluster` already
+enforces on its own output, so what is declared to a paymaster cannot drift from
+what is emitted. A unit test asserts the local harness allowlist covers every
+provider the execution registry can build a client for. The deployed allowlists
+need a live `getConfig`, because only the running service knows what it was
+deployed with, so that assertion ships here behind
+`EARN_KORA_SPONSORSHIP_SMOKE` and goes unconditional once sdp-infra#64 reaches
+devnet.
+
+## Addendum (2026-08-26) — sandbox mirrors the mainnet catalogue behind a cluster toggle (PRO-1742)
+
+This reverses one rule of the 2026-08-14 addendum: "the catalogue sync refuses
+to STORE a mainnet instrument outside production". Reviewing the curated
+mainnet catalogue (what SDP actually offers customers) previously required
+doing that review IN production; now the surface that offers a review
+affordance, sandbox, can show the real shelf without being able to fund it.
+
+**Two lanes per non-production environment.** The hourly sync writes each
+non-production environment twice: the provider's OWN catalogue for that
+environment (the fundable shelf, exactly as before), plus a browse-only MIRROR
+of the production pass's accepted mainnet shelf. One fetch per data source per
+pass; the mirror is a second WRITE, never a second provider read. Reads default
+to the environment's own cluster; the mirror is an explicit `?cluster=` opt-in
+(the Treasury strategies card's toggle, sandbox-only). Mirrored rows derive
+`fundable: false` on every read and every provider mutation refuses them
+(`isClusterFundableInEnvironment`), so the honesty the old persistence refusal
+protected lives in the read model and the UI. The refusal itself survives as
+the own-lane foreign-cluster drop: a provider's non-production source reporting
+mainnet instruments is still drift, warned and skipped.
+
+**Each lane delists only the cluster sub-shelf it is the truth for**
+(`deleteUnlistedStrategies` gained a `hostCluster` scope), so one lane's keep
+set can never tear down the other lane's rows. The mirror lane additionally
+converges to EMPTY on a reliable "nothing is listed" answer: a successful
+production fetch with no accepted mainnet rows, or a steady-state skip (stub
+provider, production credentials absent or revoked). The usual empty-keep-set
+refusal stays absolute for fundable own shelves, where a wrong delete costs a
+customer a vault mid-deposit; the asymmetry flips for the mirror because its
+rows are browse-only and re-mirrored hourly, while refusing would serve
+orphaned "production catalogue" rows forever after production stopped vouching
+for them. The repository enforces that an authorized-empty delist is
+cluster-scoped, never environment-wide.
+
+**Accepted cap: the mirror is faithful only for cluster-distinct references.**
+The upsert key stays (provider, provider_reference, environment) with no
+cluster, so a reference listed by BOTH of an environment's truth sources
+collides; the environment's own (fundable) row wins the write and the mirror
+under-reports exactly those references (warned hourly, and the collided
+reference stays in the mirror's delist keep set so a failed own-lane write can
+never read as a delisting). Kamino's address-keyed references never collide. A
+provider keying both catalogues by a shared slug (Ground's `source.id`) would
+collide on every shared slug once surfaced. Decision: keep the bare triple.
+Extending the key to the cluster would make every bare-triple consumer
+(`updateStrategyMetrics` above all) hit both rows; revisit only if a slug-keyed
+provider ever needs a faithful mirror.
+
+**Accepted staleness, and one fidelity gap.** Mirrored rows refresh at the
+HOURLY catalogue cadence: the mirror upsert carries the snapshot's
+`currentApy` and `riskMetadata`, and the five-minute metrics pass deliberately
+does not cross environments (it matches the bare triple, so it would need the
+collision protection above). And the mirror carries the provider SNAPSHOT, not
+production's stored row, so an operator `paused`/`deprecated` on the
+production row does not propagate to the sandbox mirror row. Both are
+review-surface fidelity gaps, not deposit paths: `fundable: false` holds
+throughout.

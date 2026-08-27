@@ -1,5 +1,5 @@
 /**
- * Coverage ratchet for database-enforced tenant isolation (migration 0067).
+ * Coverage ratchet for database-enforced tenant isolation (migration 0073).
  *
  * Every table in the live schema must either carry forced row-level security
  * with at least one policy, or be registered here as a deliberately shared
@@ -17,7 +17,6 @@ const SHARED_TABLES: Record<string, string> = {
   auth_user_identities: "global Clerk identity map keyed by user",
   allowlist: "platform-operator allowlist, deliberately cross-tenant",
   earn_strategies: "shared yield catalog partitioned by environment",
-  counterparty_pii_migration_state: "singleton migration phase flag",
   sponsorship_reconciliation_state: "singleton per-network failure counter",
   private_channel_settlement_observations:
     "on-chain oracle observations, deliberately unlinked from tenant intents",

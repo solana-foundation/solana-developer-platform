@@ -2,7 +2,7 @@
  * Cross-tenant access through the full HTTP stack under the plain
  * NOSUPERUSER/NOBYPASSRLS runtime role: API-key resolution runs under the
  * system database identity, the request narrows to the key's organization,
- * and row-level security (migration 0067) keeps one tenant's key from
+ * and row-level security (migration 0073) keeps one tenant's key from
  * reading another tenant's records even if a handler forgot its scoping.
  */
 
@@ -88,9 +88,11 @@ describe("tenant isolation through the HTTP stack", () => {
           .bind(tenant.keyId, tenant.org, tenant.project, USER_ID, keyHashes.get(tenant.keyId)),
         db
           .prepare(
+            // provider_data is explicit: 0036 dropped its NOT NULL/DEFAULT, and
+            // the repository rejects a NULL as invalid provider data.
             `INSERT INTO counterparties
-               (id, organization_id, project_id, entity_type, display_name, email, status)
-             VALUES (?, ?, ?, 'individual', ?, 'holder@example.com', 'active')`
+               (id, organization_id, project_id, entity_type, display_name, status, provider_data)
+             VALUES (?, ?, ?, 'individual', ?, 'active', '{}'::jsonb)`
           )
           .bind(tenant.counterparty, tenant.org, tenant.project, tenant.displayName),
       ]);

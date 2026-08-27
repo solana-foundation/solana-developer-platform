@@ -56,24 +56,14 @@ describe("PaymentRequestsRepository (postgres)", () => {
   });
 
   async function seedCounterparty(externalId: string | null = null) {
-    const counterpartiesRepo = createPostgresCounterpartiesRepository(
-      getDb(env),
-      env.counterpartyPiiCipher
-    );
+    const counterpartiesRepo = createPostgresCounterpartiesRepository(getDb(env));
     const row = await counterpartiesRepo.createCounterparty({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       externalId,
       entityType: "individual",
       displayName: "Acme Payer",
-      email: "acme@example.com",
-      identity: {
-        firstName: "Acme",
-        lastName: "Payer",
-        dateOfBirth: "1990-01-15",
-        phone: "+14155551234",
-        address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
-      },
+      providerData: {},
       createdBy: TEST_USER.id,
     });
     if (!row) {

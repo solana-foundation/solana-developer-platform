@@ -173,9 +173,9 @@ describe("MuralWebhookProcessor.process", () => {
       getDb(env)
         .prepare(
           `INSERT INTO counterparties (
-             id, organization_id, project_id, entity_type, display_name, email,
-             identity, status, created_by, mural_organization_id, provider_data
-           ) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?::jsonb)`
+             id, organization_id, project_id, entity_type, display_name,
+             status, created_by, mural_organization_id, provider_data
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)`
         )
         .bind(
           counterpartyId,
@@ -183,8 +183,6 @@ describe("MuralWebhookProcessor.process", () => {
           projectId,
           "business",
           "Mural Buyer",
-          "mural-buyer@example.com",
-          { businessName: "Mural Buyer" },
           "active",
           userId,
           muralOrganizationId,
@@ -275,7 +273,7 @@ describe("MuralWebhookProcessor.process", () => {
   it("refuses a second counterparty claiming the same organization reference", async () => {
     // The two-claimant state this webhook's exactly-one guard used to detect
     // at read time can no longer be created: the effective-key unique index
-    // from 0066_counterparty_provider_lookup_integrity rejects a second
+    // from 0072_counterparty_provider_lookup_integrity rejects a second
     // active claim whether it arrives denormalized or only in provider_data
     // JSON. The read-time guard remains as defense in depth; here the
     // database refuses the write and the webhook keeps resolving the sole
@@ -284,9 +282,9 @@ describe("MuralWebhookProcessor.process", () => {
       getDb(env)
         .prepare(
           `INSERT INTO counterparties (
-             id, organization_id, project_id, entity_type, display_name, email,
-             identity, status, created_by, provider_data
-           ) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb)`
+             id, organization_id, project_id, entity_type, display_name,
+             status, created_by, provider_data
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb)`
         )
         .bind(
           "cp_mural_ambiguous_tenant",
@@ -294,8 +292,6 @@ describe("MuralWebhookProcessor.process", () => {
           projectId,
           "business",
           "Other Mural Buyer",
-          "other-mural-buyer@example.com",
-          { businessName: "Other Mural Buyer" },
           "active",
           userId,
           { mural: { organization: { id: muralOrganizationId } } }

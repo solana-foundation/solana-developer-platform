@@ -1,6 +1,6 @@
 # Database-enforced tenant isolation
 
-Migration `0067_tenant_isolation_rls.sql` puts forced row-level security on
+Migration `0073_tenant_isolation_rls.sql` puts forced row-level security on
 every tenant-owned table in the SDP API database, so an application query or
 scoping mistake cannot cross an organization boundary. This is
 defense-in-depth beneath the application layer's `TenantScope` repository
@@ -51,7 +51,7 @@ or an explicit entry there.
 
 Provider webhooks resolve tenants from provider references
 (`bvnk_customer_reference`, `mural_organization_id`). Migration
-`0066_counterparty_provider_lookup_integrity.sql` makes the *effective*
+`0072_counterparty_provider_lookup_integrity.sql` makes the *effective*
 lookup key — `COALESCE(denormalized column, provider_data JSON path)` —
 unique among active counterparties, so a reference resolves to at most one
 tenant in every PII-migration phase (dual-write included). Tenant-scoped
@@ -60,7 +60,7 @@ repository paths keep writing provider data through
 claim the same reference get a unique-violation failure instead of a silent
 cross-tenant resolution.
 
-### If migration 0066 refuses to apply
+### If migration 0072 refuses to apply
 
 The migration pre-checks for active counterparties that already share an
 effective reference (one row claiming it in the denormalized column, another

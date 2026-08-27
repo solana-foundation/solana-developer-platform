@@ -40,6 +40,25 @@ describe("earnVaultDepositAvailability", () => {
       earnVaultDepositAvailability({ ...strategy, fundable: false }, "sandbox", {
         kamino: { entitled: true, configured: true, enabled: true },
       })
-    ).toBe("strategy_unavailable");
+    ).toBe("cluster_unavailable");
+  });
+
+  it("answers the cluster reason first — the one fact that cannot change under the row", () => {
+    // A mirrored mainnet row (PRO-1742) that is ALSO paused still names the
+    // cluster: the pause is transient, the instrument's home cluster is not.
+    expect(
+      earnVaultDepositAvailability(
+        { ...strategy, fundable: false, hostCluster: "mainnet-beta", status: "paused" },
+        "sandbox",
+        { kamino: { entitled: true, configured: true, enabled: true } }
+      )
+    ).toBe("cluster_unavailable");
+    // And it outranks the environment gate too: a non-fundable row in
+    // production is cluster-shaped, not environment-shaped.
+    expect(
+      earnVaultDepositAvailability({ ...strategy, fundable: false }, "production", {
+        kamino: { entitled: true, configured: true, enabled: true },
+      })
+    ).toBe("cluster_unavailable");
   });
 });

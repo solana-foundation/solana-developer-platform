@@ -1,5 +1,6 @@
 export { assertValidAddress } from "@sdp/solana/address";
 export type { CounterpartyRow } from "./counterparty";
+export { generateCounterpartyId } from "./counterparty";
 export {
   badRequest,
   estimateNotAvailable,

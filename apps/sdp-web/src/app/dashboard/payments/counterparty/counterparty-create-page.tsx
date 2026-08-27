@@ -17,16 +17,6 @@ const stepMeta: Record<StepId, { label: MessageKey; title: MessageKey; descripti
       title: "DashboardPayments.counterparty.basicInfo",
       description: "DashboardPayments.counterparty.basicInfoDescription",
     },
-    identity: {
-      label: "DashboardPayments.counterparty.personal",
-      title: "DashboardPayments.counterparty.personalDetails",
-      description: "DashboardPayments.counterparty.personalDetailsDescription",
-    },
-    address: {
-      label: "DashboardPayments.counterparty.address",
-      title: "DashboardPayments.counterparty.location",
-      description: "DashboardPayments.counterparty.locationDescription",
-    },
     review: {
       label: "DashboardPayments.counterparty.review",
       title: "DashboardPayments.counterparty.reviewCreate",
@@ -72,7 +62,7 @@ export function CounterpartyCreatePage({
       footer={<StepFooter onCancel={onCancel} />}
       maxWidthClassName="max-w-xl"
     >
-      <div className="relative min-h-[20rem] overflow-hidden">
+      <div className="relative min-h-80 overflow-hidden">
         <AnimatePresence mode="wait" custom={direction}>
           <motion.div
             key={currentStepId}

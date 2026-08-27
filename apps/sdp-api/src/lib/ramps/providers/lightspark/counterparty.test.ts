@@ -9,11 +9,7 @@ import type { Counterparty } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 
-type IndividualCounterparty = Extract<Counterparty, { entityType: "individual" }>;
-type BusinessCounterparty = Extract<Counterparty, { entityType: "business" }>;
-type IndividualCounterpartyRow = Extract<CounterpartyRow, { entity_type: "individual" }>;
-
-function counterparty(overrides?: Partial<IndividualCounterparty>): IndividualCounterparty {
+function counterparty(overrides?: Partial<Counterparty>): Counterparty {
   return {
     id: "cp_123",
     organizationId: "org_123",
@@ -21,14 +17,6 @@ function counterparty(overrides?: Partial<IndividualCounterparty>): IndividualCo
     externalId: null,
     entityType: "individual",
     displayName: "Ada Lovelace",
-    email: "ada@example.com",
-    identity: {
-      firstName: "Ada",
-      lastName: "Lovelace",
-      dateOfBirth: "1990-01-15",
-      phone: "+14155551234",
-      address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
-    },
     status: "active",
     createdBy: null,
     createdAt: "2026-06-11T00:00:00.000Z",
@@ -37,9 +25,7 @@ function counterparty(overrides?: Partial<IndividualCounterparty>): IndividualCo
   };
 }
 
-function counterpartyRow(
-  overrides?: Partial<IndividualCounterpartyRow>
-): IndividualCounterpartyRow {
+function counterpartyRow(overrides?: Partial<CounterpartyRow>): CounterpartyRow {
   return {
     id: "cp_123",
     organization_id: "org_123",
@@ -47,14 +33,6 @@ function counterpartyRow(
     external_id: null,
     entity_type: "individual",
     display_name: "Ada Lovelace",
-    email: "ada@example.com",
-    identity: {
-      firstName: "Ada",
-      lastName: "Lovelace",
-      dateOfBirth: "1990-01-15",
-      phone: "+14155551234",
-      address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
-    },
     provider_data: {},
     status: "active",
     created_by: null,
@@ -64,13 +42,11 @@ function counterpartyRow(
   };
 }
 
-function businessCounterparty(): BusinessCounterparty {
-  const base = counterparty();
+function businessCounterparty(): Counterparty {
   return {
-    ...base,
+    ...counterparty(),
     entityType: "business",
     displayName: "Acme Corp",
-    identity: { address: base.identity.address },
   };
 }
 
@@ -289,23 +265,11 @@ describe("lightsparkPayoutCollectedData", () => {
 
 describe("buildLightsparkAccountInfo", () => {
   it("builds USD accountInfo with the selected rail and beneficiary", () => {
-    const accountInfo = buildLightsparkAccountInfo(
-      counterpartyRow({
-        identity: {
-          firstName: "Ada",
-          lastName: "Lovelace",
-          dateOfBirth: "1990-01-15",
-          phone: "+14155551234",
-          address: { line1: "1 Market St", city: "San Francisco", countryCode: "US" },
-        },
-      }),
-      "USD",
-      {
-        paymentRails: "ACH",
-        routingNumber: "021000021",
-        accountNumber: "12345678901",
-      }
-    );
+    const accountInfo = buildLightsparkAccountInfo(counterpartyRow(), "USD", {
+      paymentRails: "ACH",
+      routingNumber: "021000021",
+      accountNumber: "12345678901",
+    });
 
     expect(accountInfo).toEqual({
       accountType: "USD_ACCOUNT",
@@ -315,7 +279,6 @@ describe("buildLightsparkAccountInfo", () => {
       beneficiary: {
         beneficiaryType: "INDIVIDUAL",
         fullName: "Ada Lovelace",
-        birthDate: "1990-01-15",
       },
     });
   });
@@ -336,7 +299,6 @@ describe("buildLightsparkAccountInfo", () => {
       beneficiary: {
         beneficiaryType: "INDIVIDUAL",
         fullName: "Ada Lovelace",
-        birthDate: "1990-01-15",
       },
     });
   });
@@ -347,7 +309,6 @@ describe("buildLightsparkAccountInfo", () => {
       ...individualRow,
       entity_type: "business",
       display_name: "Acme Corp",
-      identity: { address: individualRow.identity.address },
     };
     const accountInfo = buildLightsparkAccountInfo(businessRow, "GBP", {
       sortCode: "12-34-56",

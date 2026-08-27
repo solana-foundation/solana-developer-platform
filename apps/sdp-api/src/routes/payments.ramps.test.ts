@@ -6,15 +6,12 @@ import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import {
-  DEVNET_USDC_MINT,
   getAccountInfoMock,
   getSplTokenBalancesMock,
   installPaymentsRouteTestHooks,
   seedCachedKey,
   seedCounterparty,
   TEST_API_KEY,
-  TEST_BVNK_API_BASE_URL,
-  TEST_BVNK_HAWK_AUTH_ID,
   TEST_CONFIG_ID,
   TEST_MOONPAY_API_KEY,
   TEST_MOONPAY_ONRAMP_URL,
@@ -706,11 +703,9 @@ describe("Payments routes — ramps", () => {
     expect(offrampBody.error.code).toBe("UNSUPPORTED_CORRIDOR");
   });
 
-  it("creates a BVNK off-ramp channel quote with crypto-deposit instructions", async () => {
-    const depositAddress = TEST_SOLANA_ADDRESSES.wallet3;
+  it("fails loudly when a BVNK off-ramp quote reaches the unwired JIT seam", async () => {
     const counterpartyId = await seedCounterparty({
       externalId: "customer_456",
-      identity: { firstName: "Test", lastName: "User", address: { countryCode: "US" } },
       providerData: {
         bvnk: {
           customer: { customerReference: "customer_456", status: "VERIFIED" },
@@ -728,20 +723,7 @@ describe("Payments routes — ramps", () => {
         },
       },
     });
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          uuid: "bvnk_channel_uuid_123",
-          reference: "bvnk_channel_reference",
-          status: "OPEN",
-          alternatives: [
-            { network: "ETHEREUM", address: "0xdeadbeef", uri: "ethereum:0xdeadbeef" },
-            { network: "SOLANA", address: depositAddress, uri: `solana:${depositAddress}` },
-          ],
-        }),
-        { status: 201, headers: { "Content-Type": "application/json" } }
-      )
-    );
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
 
     const res = await app.request(
       "/v1/payments/ramps/offramp/quote",
@@ -764,77 +746,19 @@ describe("Payments routes — ramps", () => {
       env
     );
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      data: {
-        quote: {
-          id: string;
-          provider: string;
-          status: string;
-          deliveryMode: string;
-          paymentInstructions: {
-            kind: string;
-            destinationAddress: string;
-            network: string;
-            cryptoCurrency: string;
-            fiatCurrency: string;
-          }[];
-        };
-      };
-    };
-
-    expect(body.data.quote.provider).toBe("bvnk");
-    expect(body.data.quote.deliveryMode).toBe("manual_instructions");
-    expect(body.data.quote.id).toBe("bvnk_channel_uuid_123");
-    expect(body.data.quote.status).toBe("pending");
-    const instruction = body.data.quote.paymentInstructions[0];
-    expect(instruction?.kind).toBe("crypto_deposit");
-    expect(instruction?.destinationAddress).toBe(depositAddress);
-    expect(instruction?.network).toBe("SOLANA");
-    expect(instruction?.cryptoCurrency).toBe("USDC");
-    expect(instruction?.fiatCurrency).toBe("USD");
-
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const channelUrl = String(fetchSpy.mock.calls[0]?.[0]);
-    expect(channelUrl).toBe(`${TEST_BVNK_API_BASE_URL}/api/v2/channel`);
-    const channelHeaders = fetchSpy.mock.calls[0]?.[1]?.headers as Record<string, string>;
-    expect(channelHeaders.Authorization).toContain(`Hawk id="${TEST_BVNK_HAWK_AUTH_ID}"`);
-
-    const channelPayload = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body)) as {
-      walletId: string;
-      payCurrency: string;
-      displayCurrency: string;
-      customerId: string;
-      complianceDetails: { partyDetails: Record<string, unknown>[] };
-    };
-    expect(channelPayload.walletId).toBe(TEST_BVNK_OFFRAMP_WALLET_ID);
-    expect(channelPayload.payCurrency).toBe("USDC");
-    expect(channelPayload.displayCurrency).toBe("USD");
-    expect(channelPayload.customerId).toBe("customer_456");
-    expect(channelPayload.complianceDetails.partyDetails).toHaveLength(1);
-
-    const transfersRes = await app.request(
-      `/v1/payments/transfers?provider=bvnk&providerReference=${body.data.quote.id}`,
-      {
-        headers: {
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-      },
-      env
-    );
-    expect(transfersRes.status).toBe(200);
-    const transfersBody = (await transfersRes.json()) as {
-      data: [{ rampsMemo: Record<string, string>; token: string }];
-    };
-    expect(transfersBody.data[0].rampsMemo).toEqual({ invoice: "INV-123", po: "PO-9" });
-    expect(transfersBody.data[0].token).toBe(DEVNET_USDC_MINT);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error).toEqual({
+      code: "BAD_REQUEST",
+      message: `BVNK offramp requires identity fields for counterparty ${counterpartyId} that are no longer stored; JIT collection is not wired yet`,
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
 
   it("rejects a BVNK off-ramp quote until the payout beneficiary is provisioned", async () => {
     const counterpartyId = await seedCounterparty({
       externalId: "customer_456",
-      identity: { firstName: "Test", lastName: "User", address: { countryCode: "US" } },
       providerData: {
         bvnk: {
           customer: { customerReference: "customer_456", status: "VERIFIED" },

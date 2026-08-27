@@ -53,6 +53,16 @@ DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm db:seed:local
   no dev-only default-on: `MARKETS_ENABLED=true` and `EARN_ENABLED=true`, needed
   by **both** apps (same unprefixed names). Under the Doppler wrapper, plain
   shell exports are ignored unless named in `DOPPLER_PRESERVE_ENV`.
+- **Sponsored vault movements** (`EARN_VAULT_FEE_SPONSORSHIP_ENABLED=true`, API
+  only) additionally need a Kora to sign against: `pnpm kora:up`, then point
+  `KORA_RPC_URL` at it. `infra/kora/kora.toml` already carries the Kamino program
+  ids and `allow_create_account = true`, so the harness needs no edit, and the
+  harness is the only option today: deployed devnet Kora matches on the policy
+  flag but not on the allowlist, which lands with sdp-infra#64. Its
+  `SIGNER_PRIVATE_KEY` does need devnet SOL, because it pays the fee AND the
+  share-ATA rent for real. The flag fails CLOSED, so a value
+  the wrapper drops looks like "sponsorship silently did nothing" rather than an
+  error — if deposits still come out `wallet-pays`, check that first.
 
 ### 3. Run it
 
@@ -62,6 +72,10 @@ DOPPLER_PRESERVE_ENV=DATABASE_URL,REDIS_URL,MARKETS_ENABLED,EARN_ENABLED \
   REDIS_URL=redis://127.0.0.1:6380 \
   MARKETS_ENABLED=true EARN_ENABLED=true \
   pnpm dev:api:local          # API on :8787
+# add EARN_VAULT_FEE_SPONSORSHIP_ENABLED to BOTH the preserve list and the
+# exports above to sponsor vault movements, or put it in
+# apps/sdp-api/.env.local, which run-with-config.sh overlays on top of Doppler
+# and which its own comment calls the intended local override path.
 
 DOPPLER_PRESERVE_ENV=NEXT_PUBLIC_SDP_API_BASE_URL,MARKETS_ENABLED,EARN_ENABLED \
   NEXT_PUBLIC_SDP_API_BASE_URL=http://127.0.0.1:8787 \
@@ -137,8 +151,9 @@ pattern are in `docs/contributing/earn-pluggability-playbook.md` §6 and ADR 000
 | Symptom | Cause |
 |---|---|
 | Sandbox Kamino rows name devnet vaults you do not recognise | correct — they are the real devnet shelf (Allez, Steakhouse, RockawayX, Gauntlet Frontier and friends), read on-chain from `devkRng…`, not the mainnet names |
+| Sandbox shows mainnet vaults, badged "Mainnet only" | correct — the PRO-1742 mirror: the Treasury strategies card's cluster toggle opted into the mirrored production shelf. Rows are browse-only (`fundable: false`); the default view stays devnet |
 | Catalogue shows only Kamino rows; no Ground strategies anywhere | correct — Ground is un-surfaced (`EARN_PROVIDER_SURFACING`, §5b). The rows are still in the DB; only the reads hide them |
-| No "Set up Earn"/"Add strategy"/"Change strategy" buttons; `/deposit` shows a notice | same cause: no surfaced provider can hold a program, so the dashboard is browse-only (§5b) |
+| No "Set up Earn"/"Add strategy"/"Change strategy" buttons; `/deposit` shows a notice | same cause: no surfaced provider can hold a program, so the custodial (program) affordances hide (§5b). The `vault_direct` deposit path is separate and unaffected |
 | `POST /v1/earn/programs` → 403 "is not currently offered" | the surfacing gate, not entitlement — no `providerOverrides` lifts it (§5b) |
 | Every request 500s | Redis missing/wrong port (rate limiter) |
 | `/v1/earn/*` → 403 | `MARKETS_ENABLED` or `EARN_ENABLED` unset/false |
@@ -153,7 +168,7 @@ pattern are in `docs/contributing/earn-pluggability-playbook.md` §6 and ADR 000
 | `POST /v1/earn/programs` → 400 "needs an idempotency key" | creation is key-REQUIRED since PRO-1670: send exactly one of body `requestId` (UUIDv4) or the `Idempotency-Key` header — never both |
 | Local total ≠ Ground console total | Ground sums the whole shared account; SDP shows only the wallets your org holds (§4b) |
 | Catalogue empty right after boot | sync cron runs on the hour; verify flags, provider credentials, and scheduler registration, then wait for a live pass |
-| Kamino rows appear disabled in the dashboard | expected, but NOT for a cluster reason any more — sandbox now catalogues real devnet vaults, so they are `fundable: true`. They stay browse-only because SDP has no deposit path for a `vault_direct` provider (`no-sdp-route`) |
+| Kamino rows appear disabled in the dashboard | read the row's badge: since PRO-1692 SDP HAS a `vault_direct` deposit path (`POST /v1/earn/vault-deposits`, signed from an org custody wallet), so sandbox devnet rows are depositable once the org holds the earn override (§5). `earnVaultDepositAvailability` (sdp-web `earn-surfacing.ts`) names the gate per row; locally it is usually entitlement (§5), and production stays `environment_unavailable` until PRO-1703 lands (`VAULT_DIRECT_DEPOSIT_ENVIRONMENTS`, @sdp/types) |
 | Kamino APY is blank in sandbox | correct: the metrics endpoint is mainnet's and 404s for devnet pubkeys, so `listStrategyMetrics` returns `[]` outside production and the row renders "—" rather than a fabricated rate |
 | Kamino APY looks stale in production | the 5-minute metrics refresh is a separate cron — check it registered (`isEarnEnabled`), not the hourly sync |
 | Local API boots on 8787 despite `PORT=…` | the dev wrapper reads **`SDP_API_PORT`**, not `PORT` (scripts/dev-local.mjs) |
@@ -256,9 +271,15 @@ shelf in production, `devnet` from the on-chain read elsewhere — and the secon
 is MEASURED (genesis hash) before a single vault is returned, not inferred from
 the environment.
 
-A sandbox Kamino row therefore names a live DEVNET vault and a devnet mint.
-Everything about it is true and none of it is fundable from devnet, so ONE
-predicate decides — `isClusterFundableInEnvironment` (src/support.ts) — and
+Since PRO-1742 a sandbox catalogue holds BOTH kinds of row on purpose: its own
+cluster's shelf (fundable) plus a browse-only MIRROR of the production mainnet
+shelf, written by the sync as two cluster-scoped lanes so each sub-shelf
+converges independently (`apps/sdp-api/src/cron/earn-catalogue-sync.ts`). List
+reads default to the environment's own cluster; the mirrored shelf is an
+explicit `?cluster=` opt-in (the Treasury strategies card's toggle). A mirrored
+row names a live mainnet vault and a mainnet mint — everything about it true,
+none of it fundable from devnet — so ONE predicate decides —
+`isClusterFundableInEnvironment` (src/support.ts) — and
 three gates enforce its answer, none of which may re-derive the comparison:
 
 1. `assertKnownYieldSources` in the API **calls it**, the last gate before a
@@ -333,6 +354,15 @@ rates come from the same paged endpoint the catalogue uses.
 - Optional capabilities so far: portfolio wallets, withdrawal approvals, and
   live metrics. All three are method-presence guards in capabilities.ts, and a
   provider may implement any subset — Kamino has only the third.
+- **`sponsoredPrograms(cluster)` is a REQUIRED member of
+  `EarnVaultDirectProvider`, not an optional capability** (PRO-1736). It returns
+  every program the client may emit an instruction for, as plain base58 strings,
+  so a paymaster allowlist in another repository can be asserted a superset of it.
+  Consequence worth knowing before you add a provider: a client that implements
+  `buildVaultDeposit` and `readVaultPositions` but omits this one answers FALSE
+  to `supportsVaultDirect`, and its deposit route returns 501. That is deliberate.
+  A client that cannot say which programs it touches cannot be sponsored safely,
+  and failing loudly beats executing unsponsored by surprise.
 
 ## Hard invariants (ADR 0002)
 

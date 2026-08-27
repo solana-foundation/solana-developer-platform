@@ -1,5 +1,5 @@
 /**
- * Database-enforced tenant isolation (migration 0067) under the plain
+ * Database-enforced tenant isolation (migration 0073) under the plain
  * NOSUPERUSER/NOBYPASSRLS runtime role. These tests prove the RLS floor holds
  * even when the application layer is bypassed entirely: raw SQL under a
  * tenant identity cannot read or write another organization, identity-less
@@ -68,16 +68,18 @@ async function seedTwoTenants(): Promise<void> {
       .bind(PROJECT_B, ORG_B, "tenant-isolation-b", USER_ID),
     db
       .prepare(
+        // provider_data is explicit: 0036 dropped its NOT NULL/DEFAULT, and the
+        // repository rejects a NULL as invalid provider data.
         `INSERT INTO counterparties
-           (id, organization_id, project_id, entity_type, display_name, email, status)
-         VALUES (?, ?, ?, 'individual', 'Alice', 'alice@example.com', 'active')`
+           (id, organization_id, project_id, entity_type, display_name, status, provider_data)
+         VALUES (?, ?, ?, 'individual', 'Alice', 'active', '{}'::jsonb)`
       )
       .bind(COUNTERPARTY_A, ORG_A, PROJECT_A),
     db
       .prepare(
         `INSERT INTO counterparties
-           (id, organization_id, project_id, entity_type, display_name, email, status)
-         VALUES (?, ?, ?, 'individual', 'Bob', 'bob@example.com', 'active')`
+           (id, organization_id, project_id, entity_type, display_name, status, provider_data)
+         VALUES (?, ?, ?, 'individual', 'Bob', 'active', '{}'::jsonb)`
       )
       .bind(COUNTERPARTY_B, ORG_B, PROJECT_B),
   ]);
@@ -150,9 +152,9 @@ describe("database-enforced tenant isolation", () => {
       runWithTenantDatabaseIdentity({ organizationId: ORG_A }, () =>
         getDb(env).execute(
           `INSERT INTO counterparties
-             (id, organization_id, project_id, entity_type, display_name, email, status)
-           VALUES ('ctp_tenant_isolation_smuggled', ?, ?, 'individual', 'Mallory',
-                   'mallory@example.com', 'active')`,
+             (id, organization_id, project_id, entity_type, display_name, status, provider_data)
+           VALUES ('ctp_tenant_isolation_smuggled', ?, ?, 'individual', 'Mallory', 'active',
+                   '{}'::jsonb)`,
           [ORG_B, PROJECT_B]
         )
       )

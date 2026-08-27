@@ -2,7 +2,7 @@
  * Audited break-glass access across tenant boundaries.
  *
  * `runWithOperatorDatabaseAccess` is the only way to obtain the `operator`
- * database identity (the RLS policies from migration 0067 treat it like
+ * database identity (the RLS policies from migration 0073 treat it like
  * `system`). It refuses to run the callback until the bypass is durably
  * recorded in the append-only, hash-chained audit ledger — the ledger's
  * external Redis checkpoint means neither the operator nor the database alone
@@ -19,7 +19,7 @@ import { AuditService } from "@/services/audit.service";
 import type { Env } from "@/types/env";
 
 export interface OperatorAccessGrant {
-  /** Who is operating — a person or the invoking script, e.g. "ops:jane" or "script:counterparty-pii-migrate". */
+  /** Who is operating — a person or the invoking script, e.g. "ops:jane" or "script:migrate-custody-encryption". */
   actor: string;
   /** Why the tenant boundary must be crossed. Recorded verbatim in the audit ledger. */
   reason: string;

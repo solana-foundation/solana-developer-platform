@@ -43,6 +43,7 @@ export type {
 export { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 export type {
   DeleteUnlistedEarnStrategiesInput,
+  EarnButtonConfigurationRow,
   EarnProviderWalletRow,
   EarnRepository,
   EarnStrategyRow,
@@ -50,10 +51,21 @@ export type {
   ListEarnStrategiesInput,
   ListEarnStrategiesResult,
   UpdateEarnStrategyMetricsInput,
+  UpsertEarnButtonConfigurationInput,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
-export { generateEarnStrategyId } from "./earn.repository";
+export {
+  generateEarnButtonConfigurationId,
+  generateEarnButtonConfigurationPublicToken,
+  generateEarnStrategyId,
+} from "./earn.repository";
 export { createPostgresEarnRepository } from "./earn.repository.postgres";
+export type {
+  HeliusRingsAssetAllowlistRow,
+  HeliusRingsAssetRepository,
+  HeliusRingsAssetRepositoryContext,
+} from "./helius-rings-asset.repository";
+export { createPostgresHeliusRingsAssetRepository } from "./helius-rings-asset.repository.postgres";
 export type {
   AppendHeliusRingsEventInput,
   HeliusRingsEventRepository,
@@ -412,6 +424,7 @@ export {
   createCounterpartiesRepository,
   createCounterpartyAccountsRepository,
   createEarnRepository,
+  createHeliusRingsAssetRepository,
   createHeliusRingsEventRepository,
   createHeliusRingsHealthRepository,
   createHeliusRingsKeyRefRepository,

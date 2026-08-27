@@ -92,7 +92,7 @@ export async function runPostgresMigrations({ databaseUrl, migrationsDir }) {
   try {
     await client.connect();
     // Data migrations must cross tenant boundaries. FORCE ROW LEVEL SECURITY
-    // (migration 0067) binds even a non-superuser table owner, so stamp the
+    // (migration 0073) binds even a non-superuser table owner, so stamp the
     // privileged system identity for this migration session.
     await client.query("SELECT set_config('app.tenant_isolation_identity', 'system', false)");
     await client.query(`

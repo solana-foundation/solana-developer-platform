@@ -19,6 +19,7 @@ import {
   getPrivateChannelUserRepository,
   getPrivateChannelWithdrawalRepository,
   getProjectUserRepository,
+  loadPrivateChannelProjectRpcClient,
 } from "../context";
 import { emitLifecycle, emitMember } from "../helpers";
 import type { connectPrivateChannelInstanceSchema } from "../schemas";
@@ -47,6 +48,7 @@ export const connectPrivateChannelInstance = async (
 
   const body = c.req.valid("json");
   const { confirmReactivate, ...input } = body;
+  const projectRpc = await loadPrivateChannelProjectRpcClient(c);
 
   const repo = getPrivateChannelInstanceRepository(c);
   const scope = { organizationId: auth.organizationId, projectId };
@@ -64,20 +66,19 @@ export const connectPrivateChannelInstance = async (
   // Re-probe server-side: a tampered client could otherwise POST unreachable config.
   const probe = await verifyInstanceConnection({
     gatewayUrl: input.gatewayUrl,
-    chainRpcUrl: input.chainRpcUrl,
     authUrl: input.authUrl,
+    probeRpc: projectRpc.probe,
   });
   if (!probe.ok) {
     // AppError responses are returned silently by app.onError; log diagnostics here.
-    // Redacted: chainRpcUrl carries the operator's provider API key as a query
-    // parameter (see SANDBOX_DEFAULTS), so the raw URLs must not reach the log.
+    // The resolved RPC endpoint and credentials never reach logs or persistence.
     getLogger().warn(
       redactCredentialSecrets({
         organizationId: auth.organizationId,
         projectId,
         gatewayUrl: input.gatewayUrl,
-        chainRpcUrl: input.chainRpcUrl,
         authUrl: input.authUrl,
+        rpcProvider: projectRpc.target.providerId,
         gateway: probe.gateway,
         rpc: probe.rpc,
         auth: probe.auth,
@@ -144,52 +145,67 @@ export const connectPrivateChannelInstance = async (
   // Auto-onboard the human connector as the workspace's founding SPC member and
   // add them to the default channel. Skipped for API-key auth (no user identity
   // to attribute — the API key's owner can still invite themselves via /users).
+  // This is follow-up provisioning after the instance and channel are durable;
+  // it must not turn a successful connection into a false 500 response.
   if (auth.userId) {
-    const projectUser = await getProjectUserRepository(c).getByProjectAndUserId(
-      projectId,
-      auth.userId
-    );
-    if (projectUser) {
-      const userRepo = getPrivateChannelUserRepository(c);
-      const existingOwner = await userRepo.findByProjectAndUser(scope, auth.userId);
-      const owner =
-        existingOwner ??
-        (
-          await inviteMember(c.env, userRepo, {
-            ...scope,
-            authUrl: row.auth_url,
-            targetUserId: auth.userId,
-            targetUserEmail: projectUser.email,
-            invitedBy: auth.userId,
-          })
-        ).member;
+    try {
+      const projectUser = await getProjectUserRepository(c).getByProjectAndUserId(
+        projectId,
+        auth.userId
+      );
+      if (projectUser) {
+        const userRepo = getPrivateChannelUserRepository(c);
+        const existingOwner = await userRepo.findByProjectAndUser(scope, auth.userId);
+        const owner =
+          existingOwner ??
+          (
+            await inviteMember(c.env, userRepo, {
+              ...scope,
+              authUrl: row.auth_url,
+              targetUserId: auth.userId,
+              targetUserEmail: projectUser.email,
+              invitedBy: auth.userId,
+            })
+          ).member;
 
-      const memberships = await userRepo.listMembershipsForUser(owner.id);
-      const alreadyMember = memberships.some((m) => m.channel_id === defaultChannel.id);
-      const membership = await userRepo.addMembership({
-        channelId: defaultChannel.id,
-        privateChannelUserId: owner.id,
-        addedBy: auth.userId,
-      });
-      if (!alreadyMember) {
-        await emitMember(
-          c,
-          {
-            organizationId: row.organization_id,
-            projectId: row.project_id,
-            instanceId: row.id,
-          },
-          PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_ADDED,
-          {
-            channelId: defaultChannel.id,
-            payload: {
-              privateChannelUserId: owner.id,
-              targetUserId: owner.user_id,
-              membershipId: membership.id,
+        const memberships = await userRepo.listMembershipsForUser(owner.id);
+        const alreadyMember = memberships.some((m) => m.channel_id === defaultChannel.id);
+        const membership = await userRepo.addMembership({
+          channelId: defaultChannel.id,
+          privateChannelUserId: owner.id,
+          addedBy: auth.userId,
+        });
+        if (!alreadyMember) {
+          await emitMember(
+            c,
+            {
+              organizationId: row.organization_id,
+              projectId: row.project_id,
+              instanceId: row.id,
             },
-          }
-        );
+            PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_ADDED,
+            {
+              channelId: defaultChannel.id,
+              payload: {
+                privateChannelUserId: owner.id,
+                targetUserId: owner.user_id,
+                membershipId: membership.id,
+              },
+            }
+          );
+        }
       }
+    } catch (error) {
+      getLogger().error(
+        {
+          organizationId: row.organization_id,
+          projectId: row.project_id,
+          instanceId: row.id,
+          userId: auth.userId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        "connectPrivateChannelInstance: connected but owner bootstrap failed"
+      );
     }
   }
 

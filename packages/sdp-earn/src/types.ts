@@ -406,6 +406,38 @@ export interface EarnVaultTransactionPlan {
    * what moved on chain.
    */
   accepted?: EarnVaultAcceptedAmounts;
+  /**
+   * True when these instructions CREATE the owner's share token account, so its
+   * rent-exemption is charged to `rentPayer` on this transaction.
+   *
+   * Reported rather than assumed. Account creation is idempotent, so the
+   * presence of a create instruction proves nothing: a plan for an owner who
+   * already holds the account emits the same instruction and pays no rent. Only
+   * the builder, which read the chain, can say which happened, and the caller
+   * needs to know because it must remember who to give the rent back to when
+   * the account is closed. Absent or false means no rent was charged here.
+   *
+   * KNOWN RESIDUAL: this is a pre-execution read, so it can be wrong in BOTH
+   * directions if chain state moves between the read and the broadcast. True
+   * when no rent was charged (someone else created the account first), and false
+   * when rent WAS charged (the account was closed in between, so the idempotent
+   * create fires for real and nothing records it). Either way one ATA's rent,
+   * 2,039,280 lamports, is later credited to a party that did not pay it, and
+   * only on a full exit.
+   *
+   * Concurrency does not make this safe: the fee mode is per PROCESS, so a
+   * rolling deploy has both answers live at once, and a create from outside SDP
+   * needs no concurrency at all. A claim whose transaction never lands does NOT
+   * persist, though: the attribution is a ledger projection that drops a failed
+   * movement's claim (SDP migration 0067), so this residual is bounded by the
+   * build-to-broadcast window plus reconciliation lag, not by the position's
+   * lifetime.
+   *
+   * Closing it entirely needs the funder confirmed from the LANDED transaction
+   * at settlement rather than predicted at build; that is deliberately not in
+   * this change.
+   */
+  createsShareAccount?: boolean;
 }
 
 /** Solana asset identity bound to an unsigned vault transaction plan. */
@@ -432,6 +464,19 @@ export interface EarnVaultDepositInput {
   amount: string;
   /** Minimum shares to accept, as a decimal string — slippage floor. */
   minSharesOut?: string;
+  /**
+   * Who funds rent for any account this plan must create, typically the share
+   * ATA a first deposit needs.
+   *
+   * NOT the transaction fee payer. A provider SDK embeds this account INSIDE
+   * the instruction accounts as writable+signer, so whoever is named here pays
+   * a real, separate cost; the fee payer is set when SDP compiles the message.
+   * Omitted means the `owner` funds it, which is what an unsponsored deposit
+   * wants. SDP passes its sponsor here only when sponsorship is on, and then
+   * the SAME address is also the fee payer, so one sponsor signature covers
+   * both roles. See docs/decisions/0002-earn-provider-pluggability.md.
+   */
+  rentPayer?: string;
 }
 
 export interface EarnVaultWithdrawInput {
@@ -439,6 +484,30 @@ export interface EarnVaultWithdrawInput {
   owner: string;
   /** Shares to redeem, as a decimal string. */
   shares: string;
+  /**
+   * Where to send rent reclaimed by closing accounts this exit empties, when it
+   * empties them. Omitted means the `owner` keeps it.
+   *
+   * The caller supplies the address it RECORDED when the account was created,
+   * never a currently-configured sponsor: whoever funded the rent is a fact
+   * about the deposit, and refunding anyone else moves lamports away from the
+   * party that actually paid. A provider that empties no closable account
+   * ignores this.
+   */
+  rentRefundTo?: string;
+  /**
+   * Who funds rent for any account this plan must create, typically the share
+   * ATA a first deposit needs.
+   *
+   * NOT the transaction fee payer. A provider SDK embeds this account INSIDE
+   * the instruction accounts as writable+signer, so whoever is named here pays
+   * a real, separate cost; the fee payer is set when SDP compiles the message.
+   * Omitted means the `owner` funds it, which is what an unsponsored deposit
+   * wants. SDP passes its sponsor here only when sponsorship is on, and then
+   * the SAME address is also the fee payer, so one sponsor signature covers
+   * both roles. See docs/decisions/0002-earn-provider-pluggability.md.
+   */
+  rentPayer?: string;
 }
 
 export interface EarnVaultPositionInput {
@@ -492,6 +561,27 @@ export interface EarnVaultDirectProvider extends EarnVaultProvider {
     ctx: EarnRuntimeContext,
     input: EarnVaultPositionInput
   ): Promise<EarnVaultPositionSnapshot[]>;
+  /**
+   * Every on-chain program this client may emit an instruction for on
+   * `cluster`, as plain base58 strings.
+   *
+   * Exists so sponsorship is inheritable rather than bespoke. A sponsored
+   * transaction is rejected outright by the paymaster unless every program it
+   * touches is allowlisted in the paymaster's own config, which lives in
+   * another repository and cannot import this one. Declaring the set HERE, next
+   * to the code that emits the instructions, lets an allowlist be asserted a
+   * superset of every provider's declaration: the local harness config on every
+   * CI run, and the deployed config through the live Kora smoke suite. A new
+   * provider is covered by both the moment it implements this method, so a
+   * forgotten allowlist entry surfaces in a test rather than in a customer's
+   * first deposit.
+   *
+   * Synchronous and pure: this is a static declaration about code, never a
+   * chain read. Cluster-parameterised because a program id may differ per
+   * cluster, and naming the other cluster's id is a silent-failure class of its
+   * own (see @sdp/types/kamino-programs).
+   */
+  sponsoredPrograms(cluster: SolanaCluster): readonly string[];
 }
 
 /**

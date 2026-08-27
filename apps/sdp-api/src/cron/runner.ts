@@ -78,10 +78,28 @@ function isCronDisabled(env: Env): boolean {
   );
 }
 
+const IN_PROCESS_CHECKIN_MARGIN_MINUTES = 3;
+
+function withCheckinMargin(observability: Observability): Observability {
+  return {
+    captureException: (error) => observability.captureException(error),
+    withScope: (callback) => observability.withScope(callback),
+    withMonitor: (slug, work, options) =>
+      observability.withMonitor(slug, work, {
+        checkinMargin: IN_PROCESS_CHECKIN_MARGIN_MINUTES,
+        ...options,
+      }),
+  };
+}
+
 export function startCron(deps: CronDeps): CronHandle | null {
   if (isCronDisabled(deps.env)) {
     return null;
   }
+  deps = {
+    ...deps,
+    observability: deps.observability ? withCheckinMargin(deps.observability) : undefined,
+  };
 
   // node-cron's `task.stop()` halts future scheduling but doesn't promise
   // to interrupt a tick already mid-flight. A `stopping` flag short-circuits
@@ -92,7 +110,7 @@ export function startCron(deps: CronDeps): CronHandle | null {
   const tasks: ScheduledTask[] = [];
 
   // Every tick runs under a named system database identity: reconciliation is
-  // inherently cross-tenant, and row-level security (migration 0067) denies
+  // inherently cross-tenant, and row-level security (migration 0073) denies
   // database access to any workload that never declared one.
   const scheduleSystemTask = (
     cronExpression: string,

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { probeConnection } from "./probe";
+import { probeSolanaRpc } from "./rpc";
 
 function stubFetch(impl: (url: string, init?: RequestInit) => Promise<Response>): void {
   vi.stubGlobal(
@@ -23,7 +24,11 @@ const CHAIN_RPC_URL = "https://api.devnet.solana.com";
 const AUTH_URL = "http://auth.test:8903";
 
 function baseInput() {
-  return { gatewayUrl: GATEWAY_URL, chainRpcUrl: CHAIN_RPC_URL, authUrl: AUTH_URL };
+  return {
+    gatewayUrl: GATEWAY_URL,
+    probeRpc: () => probeSolanaRpc(CHAIN_RPC_URL),
+    authUrl: AUTH_URL,
+  };
 }
 
 afterEach(() => {

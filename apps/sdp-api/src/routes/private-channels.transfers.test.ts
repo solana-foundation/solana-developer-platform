@@ -195,9 +195,9 @@ async function seedRouteState(): Promise<void> {
     db
       .prepare(
         `INSERT INTO private_channel_instances
-           (id, organization_id, project_id, gateway_url, chain_rpc_url,
+           (id, organization_id, project_id, gateway_url,
             escrow_program_id, withdraw_program_id, escrow_instance_addr, auth_url, is_active)
-         VALUES (?, ?, ?, 'https://gateway.example', 'https://api.devnet.solana.com',
+         VALUES (?, ?, ?, 'https://gateway.example',
                  ?, ?, ?, 'https://auth.example', true)`
       )
       .bind(

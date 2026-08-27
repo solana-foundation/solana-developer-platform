@@ -114,9 +114,9 @@ describe("Private Channels event references handler", () => {
     await db
       .prepare(
         `INSERT INTO private_channel_instances
-           (id, organization_id, project_id, gateway_url, chain_rpc_url,
+           (id, organization_id, project_id, gateway_url,
             escrow_program_id, withdraw_program_id, escrow_instance_addr, auth_url, is_active)
-         VALUES (?, ?, ?, 'http://gw', 'http://rpc', 'prog1', 'prog2', 'escrow1', 'http://auth', true)`
+         VALUES (?, ?, ?, 'http://gw', 'prog1', 'prog2', 'escrow1', 'http://auth', true)`
       )
       .bind(INSTANCE_ID, ORGANIZATION_ID, PROJECT_ID)
       .run();

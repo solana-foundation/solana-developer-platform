@@ -7,7 +7,7 @@ Use this page when you want to issue a stablecoin, tokenized security, loyalty t
 
 ## Choose a token model
 
-Pick the template that matches your asset's compliance and operational requirements:
+Pick the **Tokenization Template** that matches your asset's compliance and operational requirements:
 
 | Asset model | Template | Typical controls |
 | --- | --- | --- |
@@ -16,20 +16,20 @@ Pick the template that matches your asset's compliance and operational requireme
 | Loyalty, rewards, or utility token | `custom` | Manually selected extensions |
 | Non-standard asset | `custom` | Manually selected extensions |
 
-Use SDP-controlled custody wallets for your main authorities when you expect SDP execute flows to work without external signing.
+**Custody wallets** hold your token's authorities by default, so SDP can execute deploy, mint, and compliance actions without external signing.
 
 ## Implementation sequence
 
 Each step links to its own guide with UI and API instructions:
 
-1. [Set Up Your Organization](/docs/guides/setup-organization)
+1. [Set Up Your Organization & Projects](/docs/guides/setup-organization)
 2. [Set Up Wallets](/docs/guides/setup-wallets)
-3. [Manage API Keys](/docs/guides/manage-api-keys)
+3. [Manage API Keys](/docs/developing-with-sdp/manage-api-keys)
 4. [Create a Token](/docs/tokens/create-a-token)
 5. [Deploy a Token](/docs/tokens/deploy-a-token)
 6. [Mint and Burn](/docs/tokens/mint-and-burn)
 7. [Basic payment](/docs/payments/send-basic-payment) — transfer tokens between wallets
-8. [Allowlists](/docs/tokens/allowlists) — required for `tokenized-security`
+8. [Allowlists](/docs/tokens/allowlists) — Token Access Control, required for `tokenized-security`
 9. [Manage Token Settings](/docs/tokens/manage-token-settings) — freeze, pause, seize for compliance workflows
 
 ## Core API endpoints
@@ -41,7 +41,7 @@ Each step links to its own guide with UI and API instructions:
 | `POST` | `/v1/issuance/tokens/{tokenId}/deploy` | Deploy to Solana |
 | `POST` | `/v1/issuance/tokens/{tokenId}/mint` | Mint new supply |
 | `POST` | `/v1/issuance/tokens/{tokenId}/burn` | Reduce supply |
-| `POST` | `/v1/issuance/tokens/{tokenId}/allowlist` | Add an allowed address |
+| `POST` | `/v1/issuance/tokens/{tokenId}/allowlist` | Add a Token Access Control entry |
 | `POST` | `/v1/issuance/tokens/{tokenId}/freeze` | Freeze an account |
 | `POST` | `/v1/issuance/tokens/{tokenId}/pause` | Pause all transfers |
 | `POST` | `/v1/payments/transfers` | Transfer tokens |
@@ -53,8 +53,8 @@ See the full schema in the [Issuance API reference](/docs/reference/api/issuance
 - A token must be **created** before deployment, and **deployed** before minting or transfer.
 - If the token is paused, minting and transfer operations are unavailable until it is unpaused.
 - Freeze and unfreeze flows accept a holder wallet address; SDP derives the associated token account automatically.
-- If a relevant authority is held outside SDP, prefer prepare flows or rotate the authority to a controlled wallet first.
+- SDP operations require the relevant authority on a custody wallet. If an authority has been rotated outside SDP, rotate it back to a controlled wallet before deploying, minting, or running compliance actions.
 
 ## For AI agents
 
-If you are driving SDP through an agent workflow, start from [AI Consumption](/docs/reference/ai-consumption). That page links the machine-readable SDP discovery files and keeps AI-facing guidance grounded in the supported public API surface.
+If you are driving SDP through an agent workflow, start from [Documentation for AI](/docs/reference/docs-for-ai). That page links the machine-readable SDP discovery files and keeps AI-facing guidance grounded in the supported public API surface.

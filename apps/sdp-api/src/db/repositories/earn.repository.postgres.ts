@@ -1,5 +1,6 @@
 import type {
   EarnApyType,
+  EarnButtonStyle,
   EarnLiquidityTerm,
   EarnStrategyRiskMetadata,
   EarnStrategySourceKind,
@@ -9,8 +10,10 @@ import type {
 } from "@sdp/types";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
 import { type AppDb, asTransactionalClient } from "@/db";
+import { internalError } from "@/lib/errors";
 import type {
   DeleteUnlistedEarnStrategiesInput,
+  EarnButtonConfigurationRow,
   EarnProviderWalletRow,
   EarnRepository,
   EarnStrategyRow,
@@ -20,9 +23,15 @@ import type {
   ListEarnStrategiesInput,
   ListEarnStrategiesResult,
   UpdateEarnStrategyMetricsInput,
+  UpsertEarnButtonConfigurationInput,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
-import { generateEarnProviderWalletId, generateEarnStrategyId } from "./earn.repository";
+import {
+  generateEarnButtonConfigurationId,
+  generateEarnButtonConfigurationPublicToken,
+  generateEarnProviderWalletId,
+  generateEarnStrategyId,
+} from "./earn.repository";
 import { mintEarnPositionForProviderWallet } from "./earn-movements.repository";
 
 /**
@@ -78,6 +87,21 @@ function mapProviderWalletRow(row: Record<string, unknown>): EarnProviderWalletR
   };
 }
 
+function mapButtonConfigurationRow(row: Record<string, unknown>): EarnButtonConfigurationRow {
+  return {
+    id: row.id as string,
+    public_token: row.public_token as string,
+    organization_id: row.organization_id as string,
+    project_id: row.project_id as string,
+    strategy_id: row.strategy_id as string,
+    style: row.style as EarnButtonStyle,
+    accent_color: row.accent_color as string,
+    created_by: row.created_by as string,
+    created_at: row.created_at as string,
+    updated_at: row.updated_at as string,
+  };
+}
+
 /**
  * Shared count+page read for the earn list methods (same shape as the
  * payments-family where-builder idiom). Ordering is fixed at newest-first with
@@ -126,6 +150,57 @@ async function selectPage<Row>(
 
 export function createPostgresEarnRepository(db: AppDb): EarnRepository {
   return {
+    async getButtonConfiguration(params) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM earn_button_configurations
+             WHERE organization_id = ? AND project_id = ?`
+        )
+        .bind(params.organizationId, params.projectId)
+        .first<Record<string, unknown>>();
+      return row ? mapButtonConfigurationRow(row) : null;
+    },
+
+    async getButtonConfigurationByPublicToken(publicToken) {
+      const row = await db
+        .prepare(`SELECT * FROM earn_button_configurations WHERE public_token = ?`)
+        .bind(publicToken)
+        .first<Record<string, unknown>>();
+      return row ? mapButtonConfigurationRow(row) : null;
+    },
+
+    async upsertButtonConfiguration(input: UpsertEarnButtonConfigurationInput) {
+      const row = await db
+        .prepare(
+          `INSERT INTO earn_button_configurations (
+             id, public_token, organization_id, project_id,
+             strategy_id, style, accent_color, created_by
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (organization_id, project_id) DO UPDATE SET
+             strategy_id = EXCLUDED.strategy_id,
+             style = EXCLUDED.style,
+             accent_color = EXCLUDED.accent_color,
+             updated_at = sdp_iso_now()
+           RETURNING *`
+        )
+        .bind(
+          generateEarnButtonConfigurationId(),
+          generateEarnButtonConfigurationPublicToken(),
+          input.organizationId,
+          input.projectId,
+          input.strategyId,
+          input.style,
+          input.accentColor,
+          input.actorId
+        )
+        .first<Record<string, unknown>>();
+
+      if (!row) {
+        throw internalError("earn_button_configurations upsert returned no row");
+      }
+      return mapButtonConfigurationRow(row);
+    },
+
     async upsertStrategy(input: UpsertEarnStrategyInput) {
       const id = generateEarnStrategyId();
 
@@ -239,21 +314,39 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       // so `NOT` admits everything) and delete the provider's whole shelf.
       // "The provider listed nothing" is indistinguishable from a misconfigured
       // account or a silently-empty response, so it can never trigger a
-      // catalogue-wide teardown.
-      if (input.listedProviderReferences.length === 0) {
+      // catalogue-wide teardown, unless the caller explicitly authorizes it
+      // (`allowEmptyKeepSet`), which the mirror lane does when its truth source
+      // reliably answered "nothing is listed". Even then the delist must be
+      // cluster-scoped: an authorized empty pass tears down one sub-shelf, never
+      // an environment.
+      if (input.listedProviderReferences.length === 0 && !input.allowEmptyKeepSet) {
         return [];
+      }
+      if (input.allowEmptyKeepSet && !input.hostCluster) {
+        throw new Error("deleteUnlistedStrategies: allowEmptyKeepSet requires a cluster scope");
+      }
+
+      const conditions = ["provider = ?", "environment = ?", "status = 'active'"];
+      const bindings: unknown[] = [input.provider, input.environment];
+      if (input.hostCluster) {
+        // COALESCE mirrors mapStrategyRow's NULL rule: a row an older writer left
+        // unset means the environment's own cluster, so a delist scoped to that
+        // cluster governs it and a mainnet-scoped delist leaves it alone.
+        conditions.push("COALESCE(host_cluster, ?) = ?");
+        bindings.push(CLUSTER_BY_SDP_ENVIRONMENT[input.environment], input.hostCluster);
+      }
+      if (input.listedProviderReferences.length > 0) {
+        conditions.push("NOT (provider_reference = ANY(?))");
+        bindings.push([...input.listedProviderReferences]);
       }
 
       const rows = await db
         .prepare(
           `DELETE FROM earn_strategies
-            WHERE provider = ?
-              AND environment = ?
-              AND status = 'active'
-              AND NOT (provider_reference = ANY(?))
+            WHERE ${conditions.join("\n              AND ")}
             RETURNING provider_reference`
         )
-        .bind(input.provider, input.environment, [...input.listedProviderReferences])
+        .bind(...bindings)
         .all<{ provider_reference: string }>();
 
       return (rows.results ?? []).map((row) => row.provider_reference);
@@ -265,6 +358,13 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
 
       if (!input.includeInactive) {
         conditions.push("status = 'active'");
+      }
+      if (input.hostCluster) {
+        // COALESCE mirrors mapStrategyRow's NULL rule (a pre-0057 row means the
+        // environment's own cluster), so the default devnet view cannot drop a
+        // legacy row the read layer would report as devnet.
+        conditions.push("COALESCE(host_cluster, ?) = ?");
+        bindings.push(CLUSTER_BY_SDP_ENVIRONMENT[input.environment], input.hostCluster);
       }
       if (input.sourceKind) {
         conditions.push("source_kind = ?");

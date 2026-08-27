@@ -18,7 +18,7 @@ import { logger } from "hono/logger";
 import { prettyJSON } from "hono/pretty-json";
 import { secureHeaders } from "hono/secure-headers";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { AppError, badRequest } from "@/lib/errors";
+import { AppError, badRequest, redactErrorForCapture } from "@/lib/errors";
 import { corsMiddleware } from "@/middleware/cors";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";
 import { dryRunMiddleware } from "@/middleware/dry-run";
@@ -259,35 +259,17 @@ function captureUnexpectedError(
   });
 }
 
-function redactErrorForCapture(err: Error): Error {
-  const sanitized = new Error(redactCredentialString(err.message));
-  sanitized.name = err.name;
-  sanitized.stack = err.stack ? redactCredentialString(err.stack) : undefined;
-
-  const source = err as Error & {
-    context?: unknown;
-    cause?: unknown;
-  };
-  const target = sanitized as Error & {
-    context?: unknown;
-    cause?: unknown;
-  };
-  if (source.context !== undefined) {
-    target.context = redactCredentialSecrets(source.context);
-  }
-  if (source.cause !== undefined) {
-    target.cause = redactCredentialSecrets(source.cause);
-  }
-
-  return sanitized;
-}
-
 export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   const app = new Hono<{ Bindings: Env }>();
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Global Middleware
   // ═══════════════════════════════════════════════════════════════════════════
+
+  app.use("*", async (c, next) => {
+    c.set("observability", deps.observability);
+    await next();
+  });
 
   // Request ID for tracing
   app.use("*", requestIdMiddleware());
