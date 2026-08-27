@@ -12,6 +12,8 @@ import type { CounterpartyAccountsRepository } from "./counterparty-account.repo
 import { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 import type { EarnRepository } from "./earn.repository";
 import { createPostgresEarnRepository } from "./earn.repository.postgres";
+import type { HeliusRingsAssetRepository } from "./helius-rings-asset.repository";
+import { createPostgresHeliusRingsAssetRepository } from "./helius-rings-asset.repository.postgres";
 import type { HeliusRingsEventRepository } from "./helius-rings-event.repository";
 import { createPostgresHeliusRingsEventRepository } from "./helius-rings-event.repository.postgres";
 import type { HeliusRingsHealthRepository } from "./helius-rings-health.repository";
@@ -248,6 +250,10 @@ export function createHeliusRingsEventRepository(env: Env): HeliusRingsEventRepo
 
 export function createHeliusRingsHealthRepository(env: Env): HeliusRingsHealthRepository {
   return createPostgresHeliusRingsHealthRepository(getDb(env));
+}
+
+export function createHeliusRingsAssetRepository(env: Env): HeliusRingsAssetRepository {
+  return createPostgresHeliusRingsAssetRepository(getDb(env));
 }
 
 export function createPrivateChannelInstanceRepository(env: Env): PrivateChannelInstanceRepository {

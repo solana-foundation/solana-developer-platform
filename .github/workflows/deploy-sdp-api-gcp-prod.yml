@@ -11,6 +11,9 @@ on:
         description: "Version tag that must resolve to release_sha"
         type: string
         required: true
+    secrets:
+      DOPPLER_TOKEN_CI:
+        required: true
   workflow_dispatch:
     inputs:
       image_sha:
@@ -27,10 +30,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  smoke:
+    name: Gate on dev smoke
+    if: >-
+      github.repository == 'solana-foundation/solana-developer-platform' &&
+      github.event_name != 'workflow_dispatch'
+    uses: ./.github/workflows/sdp-dev-smoke.yml
+    secrets:
+      DOPPLER_TOKEN_CI: ${{ secrets.DOPPLER_TOKEN_CI }}
+    permissions:
+      contents: read
+
   deploy:
     name: Deploy production image
+    needs: smoke
     if: >-
       always() &&
+      (needs.smoke.result == 'success' ||
+       (github.event_name == 'workflow_dispatch' && needs.smoke.result == 'skipped')) &&
       github.repository == 'solana-foundation/solana-developer-platform' &&
       github.ref == 'refs/heads/main' &&
       ((inputs.release_sha != '' && inputs.release_tag != '') ||
@@ -63,6 +80,24 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ inputs.release_sha != '' && inputs.release_sha || github.sha }}
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
+
+      - name: Notify Slack — deploy started
+        continue-on-error: true
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          DOPPLER_PROJECT: solana-developer-platform
+          DOPPLER_CONFIG: dev_ci
+          SERVICE: sdp-api
+          ENV: production
+          STATUS: started
+          VERSION: ${{ inputs.release_tag != '' && inputs.release_tag || inputs.image_sha }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_ID: ${{ github.run_id }}
+        run: ./scripts/notify-slack.sh
 
       - name: Verify release identity
         if: ${{ inputs.release_sha != '' }}
@@ -323,3 +358,19 @@ jobs:
           gcloud run services update-traffic "${SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
             --remove-tags "${CANDIDATE_TAG}"
+
+      - name: Notify Slack — deploy result
+        if: ${{ always() }}
+        continue-on-error: true
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          DOPPLER_PROJECT: solana-developer-platform
+          DOPPLER_CONFIG: dev_ci
+          SERVICE: sdp-api
+          ENV: production
+          STATUS: ${{ job.status }}
+          VERSION: ${{ inputs.release_tag != '' && inputs.release_tag || inputs.image_sha }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_ID: ${{ github.run_id }}
+        run: ./scripts/notify-slack.sh

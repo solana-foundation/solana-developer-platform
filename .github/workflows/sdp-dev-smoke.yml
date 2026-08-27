@@ -1,0 +1,97 @@
+name: SDP dev read-only smoke
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+  workflow_call:
+    secrets:
+      DOPPLER_TOKEN_CI:
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdp-dev-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: GCP dev dashboard smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.repository == 'solana-foundation/solana-developer-platform'
+    env:
+      DOPPLER_PRESERVE_ENV: PLAYWRIGHT_API_URL,PLAYWRIGHT_USE_EXTERNAL_API,PLAYWRIGHT_USE_NEXT_START,PLAYWRIGHT_NEXT_DIST_DIR,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,NEXT_PUBLIC_SENTRY_DSN,NODE_ENV
+      PLAYWRIGHT_API_URL: https://api-dev.solana.com
+      PLAYWRIGHT_USE_EXTERNAL_API: "1"
+      PLAYWRIGHT_USE_NEXT_START: "1"
+      PLAYWRIGHT_NEXT_DIST_DIR: .next-playwright
+      NEXT_PUBLIC_DISABLE_SENTRY: "1"
+      NEXT_PUBLIC_SENTRY_DSN: ""
+      PLAYWRIGHT_DISABLE_SENTRY: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          version: 10.16.0
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
+
+      - name: Install Playwright browser
+        run: pnpm --filter sdp-web exec playwright install --with-deps chromium
+
+      - name: Build web app against the dev API
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          DOPPLER_CONFIG: dev_ci
+          SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
+          NEXT_PUBLIC_SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
+          SOLANA_RPC_CI_PREFERRED_PROVIDER: quicknode
+        run: scripts/doppler/run-with-config.sh node scripts/run-with-healthy-solana-rpc.mjs pnpm --filter sdp-web build
+
+      - name: Run GCP read-only smoke
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          DOPPLER_CONFIG: dev_ci
+          NODE_ENV: production
+        run: scripts/doppler/run-with-config.sh pnpm --filter sdp-web run test:e2e:gcp-smoke
+
+      - name: Upload Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: playwright-artifacts-gcp-smoke-${{ github.run_id }}
+          path: |
+            apps/sdp-web/playwright-report
+            apps/sdp-web/test-results
+          if-no-files-found: ignore
+
+      - name: Notify Slack on failure
+        if: failure()
+        continue-on-error: true
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          DOPPLER_PROJECT: solana-developer-platform
+          DOPPLER_CONFIG: dev_ci
+          SERVICE: sdp-dev-smoke
+          ENV: dev
+          STATUS: failure
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_ID: ${{ github.run_id }}
+        run: ./scripts/notify-slack.sh
