@@ -301,11 +301,22 @@ export function decodeKvaultWithdrawShares(
  * Give the share ATA's rent back, when and only when this exit empties it.
  *
  * ── Why this exists at all ────────────────────────────────────────────────
- * klend's `withdrawIxs` bundle carries no cleanup instructions, so nothing ever
- * closed the share ATA. Its 2,039,280 lamports of rent-exemption stayed locked
- * in an account holding zero shares, for every position ever exited, reclaimable
- * by nobody. That was true before sponsorship and is not caused by it; sponsoring
- * rent only changes who is out the lamports.
+ * klend's `withdrawIxs` bundle historically carried no cleanup instructions,
+ * so nothing ever closed the share ATA. Its 2,039,280 lamports of
+ * rent-exemption stayed locked in an account holding zero shares, for every
+ * position ever exited, reclaimable by nobody. That was true before
+ * sponsorship and is not caused by it; sponsoring rent only changes who is out
+ * the lamports.
+ *
+ * The pinned SDK (klend-sdk 10.0.0) now emits its OWN CloseAccount on a full
+ * exit, in `postWithdrawIxs`, refunding the OWNER unconditionally. SDP still
+ * owns the close: the refund destination has to be attribution-aware (rent a
+ * sponsor funded goes back to the sponsor, never the owner — migrations
+ * 0066/0067), so the plan builder strips the SDK's copy with
+ * `isShareAtaCloseInstruction` and this builder appends the single close the
+ * plan carries. Two closes on one account cannot both land — SPL CloseAccount
+ * fails the second with InvalidAccountData and takes the whole exit with it,
+ * which is exactly how the duplication was found.
  *
  * ── Why the condition is exact and not optimistic ─────────────────────────
  * SPL `CloseAccount` FAILS on a non-zero balance, and it rides in the same
@@ -352,4 +363,29 @@ export function buildShareAccountCloseInstruction(input: {
     },
     { programAddress: TOKEN_PROGRAM_ADDRESS }
   );
+}
+
+/** SPL Token `CloseAccount` opcode: one byte, 9. */
+const CLOSE_ACCOUNT_OPCODE = 9;
+
+/**
+ * Is this the SDK's own close of the share ATA?
+ *
+ * klend-sdk 10.0.0 closes the emptied share ATA itself on a full exit
+ * (`postWithdrawIxs`), refunding the owner unconditionally. SDP owns that
+ * close instead (see `buildShareAccountCloseInstruction` above), so the plan
+ * builder removes every instruction this predicate matches before appending
+ * its own — a plan carrying both would fail on chain, because the second
+ * CloseAccount finds an account that no longer exists.
+ *
+ * Deliberately shape-based and narrow: the token program, the one-byte
+ * CloseAccount opcode, and the share ATA as the account being closed. A close
+ * of any OTHER account is left alone — it is not SDP's to own, and stripping
+ * it would silently change what the SDK asked the chain to do.
+ */
+export function isShareAtaCloseInstruction(instruction: Instruction, shareAta: Address): boolean {
+  if (instruction.programAddress !== TOKEN_PROGRAM_ADDRESS) return false;
+  const data = instruction.data;
+  if (data?.length !== 1 || data[0] !== CLOSE_ACCOUNT_OPCODE) return false;
+  return instruction.accounts?.[0]?.address === shareAta;
 }

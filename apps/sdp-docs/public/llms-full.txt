@@ -5424,6 +5424,7 @@ Source: https://platform.solana.com/docs/reference/api
 - [Policies](/docs/reference/api/policies)
 - [Compliance](/docs/reference/api/compliance)
 - [Asset Profiles](/docs/reference/api/asset-profiles)
+- [Earn](/docs/reference/api/earn)
 
 ---
 
@@ -5648,6 +5649,20 @@ Source: https://platform.solana.com/docs/reference/api/asset-profiles
 | `PATCH` | `/v1/issuance/asset-profiles/{profileId}` | Update asset profile |
 | `GET` | `/v1/issuance/asset-profiles/by-token/{tokenId}` | Get asset profile by token |
 | `GET` | `/v1/issuance/asset-profiles/field-options` | Get asset profile field options |
+
+---
+
+### Earn
+Source: https://platform.solana.com/docs/reference/api/earn
+
+> Caller-signed external-wallet vault deposit and exit transactions.
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `POST` | `/v1/earn/external-wallet/deposit-transactions` | Build an unsigned external-wallet deposit transaction |
+| `POST` | `/v1/earn/external-wallet/deposits` | Submit a signed external-wallet deposit |
+| `POST` | `/v1/earn/external-wallet/withdrawal-transactions` | Build an unsigned external-wallet exit transaction |
+| `POST` | `/v1/earn/external-wallet/withdrawals` | Submit a signed external-wallet withdrawal |
 
 ## Notes
 - Generated from docs source. Hidden or internal-only APIs are intentionally excluded.

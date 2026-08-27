@@ -73,8 +73,13 @@ program create still sends the body `requestId` form.
 - `page.tsx` → `EarnProgramWorkspace` — the Earn Program page: pick a strategy
   from the live catalogue, then continue to the button builder.
 - `button-builder/page.tsx` → `EarnButtonBuilder` — the customer-facing button
-  preview plus a generated **server-side** integration snippet for
-  `POST /v1/earn/vault-deposits`. It also loads the saved project configuration.
+  preview plus a generated **server-side** integration snippet for the
+  EXTERNAL-WALLET flow (PRO-1722): build via
+  `POST /v1/earn/external-wallet/deposit-transactions`, the customer's wallet
+  signs, submit via `POST /v1/earn/external-wallet/deposits`. The treasury
+  route (`/vault-deposits` + `custodyWalletId`) must not reappear in the
+  snippet — a B2B2C partner cannot name a custody wallet. It also loads the
+  saved project configuration.
 - `/earn/integrate/[token]` is the public, no-index engineering handoff. It is
   intentionally outside the dashboard route and does not require Clerk auth.
 - Both are `dynamic = "force-dynamic"` and resolve `loadEarnProviderAccess()`
