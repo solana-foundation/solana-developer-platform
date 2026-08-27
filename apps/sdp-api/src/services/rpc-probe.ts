@@ -29,6 +29,12 @@ export interface RpcProbeOptions {
    * the Surfpool suites.
    */
   enforcePublicEgress?: boolean;
+  /**
+   * The read-only method to call. `getVersion` proves reachability and nothing
+   * else; a tenant connection asks `getGenesisHash` instead, because that also
+   * answers which cluster it reached.
+   */
+  method?: "getVersion" | "getGenesisHash";
 }
 
 function tryParseJson(value: string): unknown {
@@ -51,7 +57,7 @@ export async function probeRpcEndpoint(
   const body = JSON.stringify({
     jsonrpc: "2.0",
     id: "rpc-connectivity-test",
-    method: "getVersion",
+    method: options.method ?? "getVersion",
     params: [],
   });
 

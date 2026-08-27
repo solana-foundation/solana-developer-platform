@@ -38,4 +38,16 @@ describe("HoldToConfirmButton", () => {
   it("includes a polite live region for screen-reader hold announcements", () => {
     expect(render()).toContain('aria-live="polite"');
   });
+
+  it("reserves room for both labels so a hold cannot resize the button", () => {
+    // Swapping the text outright grew the button mid-press, which tipped the
+    // surrounding flex-wrap and dropped the whole row of controls onto a
+    // second line while the reader was holding one of them.
+    const markup = render();
+    expect(markup).toContain("Hold to approve");
+    expect(markup).toContain("Keep holding…");
+    // Stacked in one grid cell, so the width is the wider of the two whatever
+    // state it is in.
+    expect(markup).toContain("col-start-1 row-start-1");
+  });
 });

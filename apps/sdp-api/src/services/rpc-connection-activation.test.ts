@@ -330,6 +330,42 @@ describe("RpcConnectionStore.findScopeConnectionState", () => {
     expect(state).toEqual({ kind: "none" });
   });
 
+  it("falls back to the platform when the tenant's keys are deliberately idle", async () => {
+    // Choosing a provider the project holds no key for stands the incumbent
+    // down: the key survives, nothing points at it, and SDP's account answers.
+    //
+    // `markCheckFailed` also clears `is_default`, so absence of a default was
+    // never evidence of a fault. Reading it as one made every switch onto a
+    // platform provider refuse with "no active default connection" while the
+    // page said the organization was running on SDP's.
+    await seedPendingConnection("rconn_state_idle", "pcred_state_idle", {
+      connectionStatus: "active",
+      credentialStatus: "active",
+      isDefault: false,
+    });
+
+    const state = await new RpcConnectionStore(getDb(env)).findScopeConnectionState(scope);
+    expect(state).toEqual({ kind: "none" });
+  });
+
+  it("still fails closed when a broken key sits beside an idle one", async () => {
+    // The guarantee that must survive the change above: the tenant last saw
+    // this key serving, so answering on SDP's without saying so is exactly
+    // what they pay their own provider to avoid.
+    await seedPendingConnection("rconn_state_idle_ok", "pcred_state_idle_ok", {
+      connectionStatus: "active",
+      credentialStatus: "active",
+      isDefault: false,
+    });
+    await seedPendingConnection("rconn_state_idle_bad", "pcred_state_idle_bad", {
+      connectionStatus: "failed",
+      credentialStatus: "active",
+    });
+
+    const state = await new RpcConnectionStore(getDb(env)).findScopeConnectionState(scope);
+    expect(state).toEqual({ kind: "unusable" });
+  });
+
   it("does not call a scope live that the effective lookup would not resolve", async () => {
     await seedPendingConnection("rconn_state_split", "pcred_state_split", {
       connectionStatus: "active",
