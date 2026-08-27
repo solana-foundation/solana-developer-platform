@@ -6,14 +6,13 @@ import type { ComponentProps, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const refresh = vi.fn();
-const updateOrganizationRpcSettingsAction = vi.fn();
+const switchRpcProviderAction = vi.fn();
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh }),
 }));
-vi.mock("@/app/dashboard/settings/actions", () => ({
-  updateOrganizationRpcSettingsAction: (formData: FormData) =>
-    updateOrganizationRpcSettingsAction(formData),
+vi.mock("./rpc-connection-actions", () => ({
+  switchRpcProviderAction: (formData: FormData) => switchRpcProviderAction(formData),
 }));
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), {
@@ -64,11 +63,12 @@ beforeEach(() => {
   refresh.mockClear();
   vi.mocked(toast.warning).mockClear();
   vi.mocked(toast.error).mockClear();
-  updateOrganizationRpcSettingsAction.mockReset();
-  updateOrganizationRpcSettingsAction.mockResolvedValue({
+  vi.mocked(toast.success).mockClear();
+  switchRpcProviderAction.mockReset();
+  switchRpcProviderAction.mockResolvedValue({
     status: "success",
-    message: "saved",
-    savedRpcProvider: "alchemy",
+    provider: "alchemy",
+    usesOwnCredential: false,
   });
 });
 
@@ -118,9 +118,9 @@ describe("RpcConnectionPanel", () => {
     expect(toast.warning).not.toHaveBeenCalled();
   });
 
-  it("keeps the platform choice settable while a connection is serving", () => {
-    // Deactivation destroys the secret and cannot be undone, so gating the
-    // switch on removing the connection first would strand the setting.
+  it("offers the switch while another provider's own key is serving, and disclaims nothing", () => {
+    // The switch moves the credential too now, so the note that used to warn
+    // it would change nothing describes behaviour the button no longer has.
     renderPanel({
       provider: "helius",
       activeProvider: "alchemy",
@@ -129,33 +129,32 @@ describe("RpcConnectionPanel", () => {
     });
 
     expect(screen.getByRole("button", { name: "Use this provider" })).toBeTruthy();
-    expect(screen.getByText(/will not change what serves this project/)).toBeTruthy();
-  });
-
-  it("keeps it settable under fail-closed BYOK, and says when it applies", () => {
-    renderPanel({
-      provider: "helius",
-      activeProvider: "alchemy",
-      servingProvider: null,
-      credentialMode: "byok",
-      status: "available",
-    });
-
-    expect(screen.getByRole("button", { name: "Use this provider" })).toBeTruthy();
-    expect(screen.getByText(/serve nothing until credential mode/)).toBeTruthy();
-  });
-
-  it("says nothing extra when the choice takes effect immediately", () => {
-    renderPanel({
-      provider: "helius",
-      activeProvider: "alchemy",
-      servingProvider: null,
-      credentialMode: "managed",
-      status: "available",
-    });
-
-    expect(screen.getByRole("button", { name: "Use this provider" })).toBeTruthy();
     expect(screen.queryByText(/will not change what serves this project/)).toBeNull();
+  });
+
+  it("offers no switch on the provider that is already serving", () => {
+    // The old gate asked whether this was the organization's selection, which
+    // a serving tenant key overrides. That put "Use this provider" on a page
+    // whose own badge read Connected.
+    renderPanel({ provider: "alchemy", activeProvider: "helius", servingProvider: "alchemy" });
+
+    expect(screen.queryByRole("button", { name: "Use this provider" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Test connection" })).toBeTruthy();
+  });
+
+  it("offers the switch for a provider this deployment holds no URL for, given their own key", () => {
+    // BYOK runs on the tenant's endpoint, so deployment availability decides
+    // nothing about whether they can move to it.
+    renderPanel({
+      provider: "nodit",
+      activeProvider: "helius",
+      servingProvider: "alchemy",
+      isEnabledInDeployment: false,
+      hasOwnKey: true,
+      status: "available",
+    });
+
+    expect(screen.getByRole("button", { name: "Use this provider" })).toBeTruthy();
   });
 
   it("names the tenant's own key when this provider serves on it", () => {
@@ -187,19 +186,40 @@ describe("RpcConnectionPanel", () => {
     expect(screen.queryByRole("button", { name: "Test connection" })).toBeNull();
   });
 
-  it("switches the organization onto the provider whose page this is", async () => {
+  it("switches the whole project onto the provider whose page this is", async () => {
     const user = userEvent.setup();
     renderPanel({ provider: "alchemy", status: "available" });
 
     await user.click(screen.getByRole("button", { name: "Use this provider" }));
 
-    expect(updateOrganizationRpcSettingsAction).toHaveBeenCalledTimes(1);
-    const formData = updateOrganizationRpcSettingsAction.mock.calls[0][0] as FormData;
-    expect(formData.get("rpcProvider")).toBe("alchemy");
+    // One action covering both halves. Writing only the organization setting
+    // left a tenant connection still serving the old provider, so the button
+    // reported success and changed nothing anyone could observe.
+    expect(switchRpcProviderAction).toHaveBeenCalledTimes(1);
+    const formData = switchRpcProviderAction.mock.calls[0][0] as FormData;
+    expect(formData.get("provider")).toBe("alchemy");
     expect(formData.get("organizationId")).toBe("org_1");
     // The server render owns the active provider; without a refresh the page
     // would keep claiming the old one is live.
     expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("says which account is answering after the switch", async () => {
+    switchRpcProviderAction.mockResolvedValue({
+      status: "success",
+      provider: "alchemy",
+      usesOwnCredential: true,
+    });
+    const user = userEvent.setup();
+    renderPanel({ provider: "alchemy", status: "available" });
+
+    await user.click(screen.getByRole("button", { name: "Use this provider" }));
+
+    // Same logo, different bill. "Switched to Alchemy" alone never said whose
+    // Alchemy account is about to be charged.
+    expect(vi.mocked(toast.success).mock.calls[0]?.[1]?.description).toMatch(
+      /your own Alchemy key/
+    );
   });
 
   it("offers the way back to SDP RPC from a vendor page", async () => {
@@ -212,8 +232,8 @@ describe("RpcConnectionPanel", () => {
     expect(screen.getByText("This organization currently runs on Helius.")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Use this provider" }));
 
-    const formData = updateOrganizationRpcSettingsAction.mock.calls[0][0] as FormData;
-    expect(formData.get("rpcProvider")).toBe("default");
+    const formData = switchRpcProviderAction.mock.calls[0][0] as FormData;
+    expect(formData.get("provider")).toBe("default");
   });
 
   it("gives a non-admin the state but no way to change it", () => {
@@ -242,13 +262,16 @@ describe("RpcConnectionPanel", () => {
   });
 
   it("explains an unconfigured provider instead of offering a dead switch", () => {
-    renderPanel({ provider: "triton", status: "not_configured" });
+    // `not_configured` is derived from the deployment holding no URL, so the
+    // two have to agree here; passing them apart described a page the loader
+    // cannot produce.
+    renderPanel({ provider: "triton", status: "not_configured", isEnabledInDeployment: false });
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.getByText(/holds no endpoint/)).toBeTruthy();
   });
 
   it("does not switch when the save fails", async () => {
-    updateOrganizationRpcSettingsAction.mockResolvedValue({
+    switchRpcProviderAction.mockResolvedValue({
       status: "error",
       message: "nope",
     });

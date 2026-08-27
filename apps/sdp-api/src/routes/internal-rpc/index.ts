@@ -13,6 +13,7 @@ import {
   listRpcConnections,
   rotateRpcConnection,
   setRpcCredentialMode,
+  setServingRpcProvider,
   submitRpcConnection,
   testRpcConnection,
 } from "@/services/rpc-connection.service";
@@ -47,6 +48,12 @@ const createConnectionSchema = z.strictObject({
 
 const credentialModeSchema = z.strictObject({ mode: z.enum(["managed", "byok"]) });
 
+// `default` is SDP's own rail and never has a tenant key, so it is accepted
+// here and simply stands down whatever is serving.
+const servingProviderSchema = z.strictObject({
+  provider: z.enum([...BYOK_RPC_PROVIDERS, "default"] as unknown as [string, ...string[]]),
+});
+
 // The label and the network stay as they were: this replaces a key, it does
 // not reconfigure the connection.
 const rotateConnectionSchema = z.strictObject({
@@ -79,6 +86,21 @@ internalRpc.put("/credential-mode", async (c) => {
   }
 
   return success(c, await setRpcCredentialMode(c, parsed.data.mode));
+});
+
+// Which provider answers this project. Paired with the organization's provider
+// setting by the dashboard so that choosing a provider switches the credential
+// too, rather than writing a setting the relay never reaches.
+internalRpc.put("/serving-provider", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const parsed = servingProviderSchema.safeParse(body);
+  if (!parsed.success) {
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
+    });
+  }
+
+  return success(c, await setServingRpcProvider(c, parsed.data.provider));
 });
 
 internalRpc.get("/connections", async (c) => {

@@ -2,6 +2,7 @@
 
 import type { SafeRpcConnection } from "@sdp/types";
 import { revalidatePath } from "next/cache";
+import { updateOrganizationRpcSettingsAction } from "@/app/dashboard/settings/actions";
 import { createSdpApiClient } from "@/lib/sdp-api";
 
 /**
@@ -77,26 +78,58 @@ export async function submitRpcConnectionAction(
   }
 }
 
-export async function activateRpcConnectionAction(
+/**
+ * Switch this project onto a provider, both halves of it.
+ *
+ * Choosing a provider and choosing whose credentials answer for it were two
+ * separate controls, and the credential always won. So pressing "Use this
+ * provider" wrote a setting the relay never reached: the page named the new
+ * provider, the old one kept answering, and the button looked broken.
+ *
+ * The credential goes first on purpose. It is the half that can be refused --
+ * an organization running only on its own keys cannot move to a provider it
+ * holds no key for -- and failing there must leave the selection as it was
+ * rather than pointing at a provider that is not serving.
+ */
+export async function switchRpcProviderAction(
   formData: FormData
-): Promise<RpcConnectionActionResult> {
-  const connectionId = String(formData.get("connectionId") ?? "").trim();
+): Promise<
+  | { status: "success"; provider: string; usesOwnCredential: boolean }
+  | { status: "error"; message: string }
+> {
   const provider = String(formData.get("provider") ?? "").trim();
-  if (!connectionId) {
-    return { status: "invalid", message: "A connection is required." };
+  const organizationId = String(formData.get("organizationId") ?? "").trim();
+  if (!provider || !organizationId) {
+    return { status: "error", message: "A provider is required." };
   }
 
+  let usesOwnCredential = false;
   try {
     const client = await createSdpApiClient();
-    const connection = await client.fetch<SafeRpcConnection>(
-      `/internal/dashboard/rpc/connections/${encodeURIComponent(connectionId)}/activate`,
-      { method: "POST", body: JSON.stringify({ makeDefault: true }) }
-    );
-    revalidateProvider(provider);
-    return { status: "success", connection };
+    const result = await client.fetch<{
+      servingProvider: string | null;
+      usesOwnCredential: boolean;
+    }>("/internal/dashboard/rpc/serving-provider", {
+      method: "PUT",
+      body: JSON.stringify({ provider }),
+    });
+    usesOwnCredential = result.usesOwnCredential;
   } catch (error) {
     return { status: "error", message: extractApiMessage(error) };
   }
+
+  // The selection still decides what answers once a tenant connection is gone,
+  // so it is written even when a key of their own is what serves today.
+  const settings = new FormData();
+  settings.set("organizationId", organizationId);
+  settings.set("rpcProvider", provider);
+  const saved = await updateOrganizationRpcSettingsAction(settings);
+  if (saved.status !== "success") {
+    return { status: "error", message: saved.message };
+  }
+
+  revalidateProvider(provider);
+  return { status: "success", provider, usesOwnCredential };
 }
 
 /**

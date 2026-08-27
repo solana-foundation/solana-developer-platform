@@ -143,6 +143,67 @@ export async function setRpcCredentialMode(
 }
 
 /**
+ * Make one provider the thing that answers this project, whatever that takes.
+ *
+ * Choosing a provider and choosing whose credentials serve it used to be two
+ * separate controls, and a tenant connection always outranked the platform
+ * selection. So "Use this provider" wrote a setting the relay would not reach
+ * and nothing observable changed: the page reported a different provider,
+ * `/v1/rpc/test` answered from the old one, and the button read as broken.
+ *
+ * One action now covers both halves:
+ *
+ * - the project holds a key for this provider, so that key takes over;
+ * - it does not, so nothing tenant-owned serves and SDP's account answers.
+ *
+ * The caller still writes the organization's selection. This decides only which
+ * credential the project routes through, which is the half that was unreachable.
+ */
+export async function setServingRpcProvider(
+  c: AppContext,
+  provider: string
+): Promise<{ servingProvider: string | null; usesOwnCredential: boolean }> {
+  const auth = getAuth(c);
+  requireUserId(c);
+  const { projectId, scopeKey } = resolveScope(c, "project");
+  if (!projectId) {
+    throw badRequest("Selecting an RPC provider requires a selected project");
+  }
+  const network = await resolveProjectNetwork(c, projectId);
+
+  const store = new RpcConnectionStore(getDb(c.env));
+  const own = await store.findLiveConnectionForProvider({
+    organizationId: auth.organizationId,
+    scopeKey,
+    network,
+    provider,
+  });
+
+  if (own) {
+    // Probes and promotes in one transaction, exactly as the row control did.
+    // Reusing it keeps a switch from ever pointing the project at a key that
+    // has stopped working since it was stored.
+    await activateRpcConnection(c, own.id, { makeDefault: true });
+    return { servingProvider: provider, usesOwnCredential: true };
+  }
+
+  // Nothing of the tenant's own for this provider. Standing down whatever is
+  // serving is the entire point of the switch, so it is not optional -- but on
+  // an organization that promised to run only on its own credentials it would
+  // stop RPC rather than fall back, so that is refused instead of silently
+  // stranding the project.
+  const { mode } = await getRpcCredentialMode(c);
+  if (mode === "byok") {
+    throw conflict(
+      "This organization runs entirely on its own credentials. Add a key for this provider before switching to it."
+    );
+  }
+
+  await store.clearDefault({ organizationId: auth.organizationId, scopeKey, network });
+  return { servingProvider: null, usesOwnCredential: false };
+}
+
+/**
  * The network is the project's, not a choice the form offers (HOO-1221).
  *
  * A sandbox project is devnet and a production project is mainnet, so picking

@@ -7,7 +7,7 @@ vi.mock("@/lib/sdp-api", () => ({
   createSdpApiClient: async () => ({ fetch: fetchMock }),
 }));
 
-import { activateRpcConnectionAction, submitRpcConnectionAction } from "./rpc-connection-actions";
+import { submitRpcConnectionAction } from "./rpc-connection-actions";
 
 /**
  * These actions were the one layer without tests, and the gap showed: the
@@ -80,21 +80,5 @@ describe("submitRpcConnectionAction", () => {
     const result = await submitRpcConnectionAction(form(BASE));
 
     expect(result).toEqual({ status: "error", message: "Provider rejected it" });
-  });
-});
-
-describe("activateRpcConnectionAction", () => {
-  it("asks for the connection to become the default", async () => {
-    await activateRpcConnectionAction(form({ connectionId: "rconn_1", provider: "helius" }));
-
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(body).toEqual({ makeDefault: true });
-  });
-
-  it("refuses without a connection id", async () => {
-    const result = await activateRpcConnectionAction(form({ provider: "helius" }));
-
-    expect(result.status).toBe("invalid");
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

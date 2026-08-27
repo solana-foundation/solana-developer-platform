@@ -4,12 +4,12 @@ import type { OrganizationRpcProvider } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { updateOrganizationRpcSettingsAction } from "@/app/dashboard/settings/actions";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { type RpcTestResult, RpcTestResultPanel, runRpcProviderTest } from "@/lib/rpc-connection";
 import { rpcProviderLabel } from "@/lib/rpc-providers";
 import type { IntegrationStatus } from "./integrations-status";
+import { switchRpcProviderAction } from "./rpc-connection-actions";
 
 /**
  * What is serving this project, in one sentence, most specific first.
@@ -62,7 +62,7 @@ function serviceSummary(
 export function RpcConnectionPanel({
   activeProvider,
   canManage,
-  credentialMode,
+  hasOwnKey = false,
   isEnabledInDeployment,
   organizationId,
   provider,
@@ -72,10 +72,11 @@ export function RpcConnectionPanel({
   activeProvider: OrganizationRpcProvider;
   canManage: boolean;
   /**
-   * `byok` means the relay refuses rather than falling back, so SDP's
-   * providers serve nothing and picking one here decides nothing.
+   * Whether this project holds a live key of its own for this provider. The
+   * switch runs on the tenant's endpoint in that case, so a provider this
+   * deployment has no URL for is still something they can move to.
    */
-  credentialMode?: "managed" | "byok" | null;
+  hasOwnKey?: boolean;
   /**
    * The provider actually routing this project, whichever one that is. A
    * tenant connection outranks the organization's selection, so this panel
@@ -107,28 +108,35 @@ export function RpcConnectionPanel({
   }, [activeProvider]);
 
   const isActive = provider === currentProvider;
-  /**
-   * The platform selection decides what serves a project with no connection of
-   * its own (`relay.ts` reaches `organization_provider` only after tenant
-   * resolution returns nothing). It stays settable while a connection is
-   * serving: deactivation destroys the secret and cannot be undone, so making
-   * the switch depend on removing the connection first would be a trap. What
-   * the page owes the reader is when the choice takes effect, not a missing
-   * control.
-   */
-  const platformChoicePending = Boolean(servingProvider) || credentialMode === "byok";
   // Saved here, but unserviceable: the relay is falling back to another
   // provider, so there is nothing honest to test on this page.
   const isStrandedDefault = isActive && !isEnabledInDeployment;
+  /**
+   * Whether this provider is what answers the project right now, which is what
+   * `status === "active"` encodes: a tenant connection first, the
+   * organization's selection when none serves.
+   */
+  const isServingProvider = status === "active";
+  /**
+   * Whether to offer the switch.
+   *
+   * A key of the tenant's own is enough on its own: it runs on their endpoint,
+   * so a provider this deployment holds no URL for is still switchable to when
+   * they hold a key for it.
+   */
+  const canSelect = !isServingProvider && canManage && (isEnabledInDeployment || hasOwnKey);
 
   const switchToProvider = async () => {
     setIsSwitching(true);
     const formData = new FormData();
     formData.set("organizationId", organizationId);
-    formData.set("rpcProvider", provider);
+    formData.set("provider", provider);
 
     try {
-      const result = await updateOrganizationRpcSettingsAction(formData);
+      // One action, both halves: the credential this project routes through and
+      // the selection that answers once no connection does. Writing only the
+      // second left the button with nothing to show for itself.
+      const result = await switchRpcProviderAction(formData);
       if (result.status !== "success") {
         toast.error(t("DashboardCustody.failedToSaveRpcSettings"), {
           description: result.message,
@@ -137,10 +145,14 @@ export function RpcConnectionPanel({
         return;
       }
 
-      setCurrentProvider(result.savedRpcProvider ?? provider);
+      setCurrentProvider(provider);
       setLastTest(null);
       toast.success(t("DashboardCustody.rpcSettingsSaved"), {
-        description: rpcProviderLabel(result.savedRpcProvider ?? provider),
+        description: result.usesOwnCredential
+          ? t("Shared.integrations.rpcSwitchedToOwnKey", { provider: rpcProviderLabel(provider) })
+          : t("Shared.integrations.rpcSwitchedToPlatform", {
+              provider: rpcProviderLabel(provider),
+            }),
         position: "bottom-right",
       });
       router.refresh();
@@ -235,7 +247,7 @@ export function RpcConnectionPanel({
           </p>
         </div>
 
-        {isActive && isEnabledInDeployment && canManage ? (
+        {isServingProvider && !isStrandedDefault && canManage ? (
           <Button
             type="button"
             variant="secondary"
@@ -246,7 +258,7 @@ export function RpcConnectionPanel({
           >
             {isTesting ? t("DashboardCustody.testing") : t("Shared.integrations.rpcTestConnection")}
           </Button>
-        ) : status === "available" && canManage ? (
+        ) : canSelect ? (
           <Button
             type="button"
             disabled={isSwitching}
@@ -261,26 +273,17 @@ export function RpcConnectionPanel({
         ) : null}
       </div>
 
-      {/* Say when the choice takes effect. Choosing a provider while a
-          connection is serving looks like it did nothing, which is what sent
-          a reader hunting for a bug that was not there. */}
-      {status === "available" && canManage && platformChoicePending ? (
-        <p className="max-w-2xl text-sm leading-6 text-tertiary">
-          {servingProvider
-            ? t("Shared.integrations.rpcPlatformChoicePending", {
-                provider: rpcProviderLabel(servingProvider),
-              })
-            : t("Shared.integrations.rpcPlatformChoicePendingByok")}
-        </p>
-      ) : null}
-
+      {/* The note that used to sit here explained that choosing a provider
+          would not change what serves the project. That is no longer true:
+          the switch moves the credential too, so the explanation would be
+          describing behaviour the button no longer has. */}
       {isStrandedDefault ? (
         <p className="max-w-2xl text-sm leading-6 text-warning">
           {t("Shared.integrations.rpcActiveUnavailable")}
         </p>
       ) : null}
 
-      {!isActive && status === "available" && !canManage ? (
+      {!isActive && isEnabledInDeployment && !canManage ? (
         <p className="max-w-2xl text-sm leading-6 text-tertiary">
           {t("DashboardCustody.viewOnlyRpcSettings")}
         </p>

@@ -153,6 +153,35 @@ export class RpcConnectionStore {
   }
 
   /**
+   * The connection this scope holds for one provider, if it still has one.
+   *
+   * Excludes `deactivated` rows because those are terminal: the secret is
+   * destroyed, so promoting one would report success and route nothing. Used to
+   * answer "does switching to this provider mean using their own key or ours".
+   */
+  async findLiveConnectionForProvider(params: {
+    organizationId: string;
+    scopeKey: string;
+    network: RpcConnectionNetwork;
+    provider: string;
+    executor?: DatabaseExecutor;
+  }): Promise<{ id: string; is_default: boolean } | null> {
+    const db = params.executor ?? this.db;
+    return db.queryOne<{ id: string; is_default: boolean }>(
+      `SELECT id, is_default
+         FROM rpc_connections
+        WHERE organization_id = ?
+          AND scope_key = ?
+          AND network = ?
+          AND provider = ?
+          AND status <> 'deactivated'
+        ORDER BY is_default DESC, created_at DESC
+        LIMIT 1`,
+      [params.organizationId, params.scopeKey, params.network, params.provider]
+    );
+  }
+
+  /**
    * Demote whatever currently holds the default slot for this scope and
    * network. Runs inside the activation transaction so the partial unique
    * index never sees two winners.
@@ -621,7 +650,30 @@ export class RpcConnectionStore {
     const live = rows.find(
       (row) => row.status === "active" && row.is_default && row.credential_status === "active"
     );
-    return live ? { kind: "active", connectionId: live.id } : { kind: "unusable" };
+    if (live) {
+      return { kind: "active", connectionId: live.id };
+    }
+
+    /**
+     * Only a connection that was *meant* to serve and cannot may fail requests
+     * closed. Holding keys that are deliberately idle is an ordinary state now:
+     * a project keeps a key per provider, and choosing a provider it holds none
+     * for stands them all down so SDP's account answers.
+     *
+     * The absence of a default used to be the test, which conflated the two.
+     * `markCheckFailed` also clears `is_default`, so a broken connection and a
+     * stood-down one are indistinguishable by that flag: every deliberate
+     * switch onto a platform provider read as a fault and the relay refused
+     * every call with "no active default connection".
+     *
+     * A failed row still fails closed even though nothing points at it. The
+     * tenant last saw it serving, and quietly moving their traffic onto keys
+     * SDP pays for is the outcome this whole feature exists to prevent.
+     */
+    const broken = rows.some(
+      (row) => row.status !== "active" || (row.is_default && row.credential_status !== "active")
+    );
+    return broken ? { kind: "unusable" } : { kind: "none" };
   }
 
   /**
