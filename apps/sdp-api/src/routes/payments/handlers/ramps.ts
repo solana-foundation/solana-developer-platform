@@ -457,11 +457,7 @@ export async function advanceCounterpartyRequirements(
     case "moneygram":
       return readyCounterparty("moneygram", input.direction);
     case "lightspark": {
-      const customer = await ensureLightsparkCustomer(c, {
-        counterparty: input.counterparty,
-        projectId: input.projectId,
-        collectedData: input.collectedData,
-      });
+      const customer = ensureLightsparkCustomer(input.counterparty);
       if (input.direction === "offramp") {
         await ensureLightsparkPayoutAccount(c, {
           counterparty: input.counterparty,
@@ -503,10 +499,7 @@ export async function advanceCounterpartyRequirements(
         }
         return readyCounterparty("bvnk", input.direction);
       }
-      const customer = await ensureBvnkCustomer(c, input.counterparty, input.projectId, {
-        fiatCurrency: input.fiatCurrency,
-        collectedData: input.collectedData,
-      });
+      const customer = await ensureBvnkCustomer(c, input.counterparty, input.projectId);
       const scope = await resolveScope(c);
       const destinationWalletAddress = resolveWalletAddress(
         scope.wallets,
@@ -718,8 +711,6 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         fiatAmount: input.fiatAmount,
         destinationWalletAddress,
         externalCustomerId: counterparty.id,
-        email: counterparty.email,
-        phone: counterparty.entity_type === "individual" ? counterparty.identity.phone : undefined,
         domain: input.domain,
       });
       break;
@@ -849,7 +840,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
           sourceWalletAddress,
           paymentTransferId: pendingTransfer.id,
           externalCustomerId: counterparty.external_id ?? counterparty.id,
-          bvnkCompliance: buildBvnkPartyDetails(counterparty, "ORIGINATOR"),
+          bvnkCompliance: buildBvnkPartyDetails(counterparty),
           bvnkOfframpWalletId: wallet.id,
         });
       } catch (error) {

@@ -172,9 +172,9 @@ describe("MuralWebhookProcessor.process", () => {
       getDb(env)
         .prepare(
           `INSERT INTO counterparties (
-             id, organization_id, project_id, entity_type, display_name, email,
-             identity, status, created_by, mural_organization_id, provider_data
-           ) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?::jsonb)`
+             id, organization_id, project_id, entity_type, display_name,
+             status, created_by, mural_organization_id, provider_data
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)`
         )
         .bind(
           counterpartyId,
@@ -182,8 +182,6 @@ describe("MuralWebhookProcessor.process", () => {
           projectId,
           "business",
           "Mural Buyer",
-          "mural-buyer@example.com",
-          { businessName: "Mural Buyer" },
           "active",
           userId,
           muralOrganizationId,
@@ -275,9 +273,9 @@ describe("MuralWebhookProcessor.process", () => {
     await getDb(env)
       .prepare(
         `INSERT INTO counterparties (
-           id, organization_id, project_id, entity_type, display_name, email,
-           identity, status, created_by, provider_data
-         ) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb)`
+           id, organization_id, project_id, entity_type, display_name,
+           status, created_by, provider_data
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb)`
       )
       .bind(
         "cp_mural_ambiguous_tenant",
@@ -285,8 +283,6 @@ describe("MuralWebhookProcessor.process", () => {
         projectId,
         "business",
         "Other Mural Buyer",
-        "other-mural-buyer@example.com",
-        { businessName: "Other Mural Buyer" },
         "active",
         userId,
         { mural: { organization: { id: muralOrganizationId } } }

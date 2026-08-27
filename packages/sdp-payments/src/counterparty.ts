@@ -1,6 +1,5 @@
 import type {
-  CounterpartyBusinessIdentity,
-  CounterpartyIndividualIdentity,
+  CounterpartyEntityType,
   CounterpartyProviderData,
   CounterpartyStatus,
 } from "@sdp/types";
@@ -14,17 +13,14 @@ export type CounterpartyRow = {
   organization_id: string;
   project_id: string;
   external_id: string | null;
+  entity_type: CounterpartyEntityType;
   display_name: string;
-  email: string;
   provider_data: CounterpartyProviderData;
   status: CounterpartyStatus;
   created_by: string | null;
   created_at: string;
   updated_at: string;
-} & (
-  | { entity_type: "individual"; identity: CounterpartyIndividualIdentity }
-  | { entity_type: "business"; identity: CounterpartyBusinessIdentity }
-);
+};
 
 /**
  * Generates a new SDP counterparty primary key.

@@ -1,5 +1,4 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
-import type { MuralCreateOrganizationRequest } from "@sdp/payments/ramps/providers/mural/client";
 import { muralOnboardingRequirements } from "@sdp/payments/ramps/providers/mural/counterparty";
 import {
   isMuralKycApproved,
@@ -39,20 +38,6 @@ async function mintOrReuseMuralLink(
   return url;
 }
 
-function buildMuralOrgRequest(counterparty: CounterpartyRow): MuralCreateOrganizationRequest {
-  const email = counterparty.email;
-  if (counterparty.entity_type === "business") {
-    return { type: "business", businessName: counterparty.display_name, email };
-  }
-  const { firstName, lastName } = counterparty.identity;
-  if (!firstName || !lastName) {
-    throw badRequest(
-      "Mural individual organization requires the counterparty's first and last name."
-    );
-  }
-  return { type: "individual", firstName, lastName, email };
-}
-
 /** Merges Mural organization state into `counterparty.provider_data.mural.organization`. */
 async function persistMuralOrganization(
   c: AppContext,
@@ -76,8 +61,13 @@ async function persistMuralOrganization(
 }
 
 /**
- * Creates or refreshes the counterparty's Mural organization and returns the
- * transient hosted link required for the next onboarding step.
+ * Refreshes an existing Mural organization and rejects first-time creation
+ * until transient identity collection is wired.
+ *
+ * @param c - Request context used for provider and repository access.
+ * @param counterparty - Counterparty whose Mural organization is resolved.
+ * @param projectId - Project that owns the counterparty.
+ * @returns The refreshed organization and any transient onboarding link.
  */
 export async function ensureMuralOrganization(
   c: AppContext,
@@ -89,8 +79,9 @@ export async function ensureMuralOrganization(
   let org = readMuralOrganization(counterparty.provider_data);
 
   if (!org.id) {
-    org = await client.createOrganization(ctx, buildMuralOrgRequest(counterparty));
-    await persistMuralOrganization(c, counterparty, projectId, org);
+    throw badRequest(
+      "Mural organization creation requires identity fields that are no longer stored; JIT collection is not wired yet"
+    );
   } else if (!isMuralKycApproved(org.kycStatus)) {
     const latest = await client.getOrganization(ctx, org.id);
     const changed = latest.tosStatus !== org.tosStatus || latest.kycStatus !== org.kycStatus;
