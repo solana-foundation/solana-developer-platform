@@ -151,6 +151,7 @@ pattern are in `docs/contributing/earn-pluggability-playbook.md` §6 and ADR 000
 | Symptom | Cause |
 |---|---|
 | Sandbox Kamino rows name devnet vaults you do not recognise | correct — they are the real devnet shelf (Allez, Steakhouse, RockawayX, Gauntlet Frontier and friends), read on-chain from `devkRng…`, not the mainnet names |
+| Sandbox shows mainnet vaults, badged "Mainnet only" | correct — the PRO-1742 mirror: the Treasury strategies card's cluster toggle opted into the mirrored production shelf. Rows are browse-only (`fundable: false`); the default view stays devnet |
 | Catalogue shows only Kamino rows; no Ground strategies anywhere | correct — Ground is un-surfaced (`EARN_PROVIDER_SURFACING`, §5b). The rows are still in the DB; only the reads hide them |
 | No "Set up Earn"/"Add strategy"/"Change strategy" buttons; `/deposit` shows a notice | same cause: no surfaced provider can hold a program, so the custodial (program) affordances hide (§5b). The `vault_direct` deposit path is separate and unaffected |
 | `POST /v1/earn/programs` → 403 "is not currently offered" | the surfacing gate, not entitlement — no `providerOverrides` lifts it (§5b) |
@@ -270,9 +271,15 @@ shelf in production, `devnet` from the on-chain read elsewhere — and the secon
 is MEASURED (genesis hash) before a single vault is returned, not inferred from
 the environment.
 
-A sandbox Kamino row therefore names a live DEVNET vault and a devnet mint.
-Everything about it is true and none of it is fundable from devnet, so ONE
-predicate decides — `isClusterFundableInEnvironment` (src/support.ts) — and
+Since PRO-1742 a sandbox catalogue holds BOTH kinds of row on purpose: its own
+cluster's shelf (fundable) plus a browse-only MIRROR of the production mainnet
+shelf, written by the sync as two cluster-scoped lanes so each sub-shelf
+converges independently (`apps/sdp-api/src/cron/earn-catalogue-sync.ts`). List
+reads default to the environment's own cluster; the mirrored shelf is an
+explicit `?cluster=` opt-in (the Treasury strategies card's toggle). A mirrored
+row names a live mainnet vault and a mainnet mint — everything about it true,
+none of it fundable from devnet — so ONE predicate decides —
+`isClusterFundableInEnvironment` (src/support.ts) — and
 three gates enforce its answer, none of which may re-derive the comparison:
 
 1. `assertKnownYieldSources` in the API **calls it**, the last gate before a
