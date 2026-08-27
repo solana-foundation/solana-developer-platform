@@ -106,6 +106,16 @@ describe("OpenAPI spec", () => {
         { sessionCookie: [] },
       ]);
     }
+
+    const submitRequest = getJsonSchema(
+      publicDocument.paths?.["/v1/earn/external-wallet/deposits"]?.post?.requestBody
+    );
+    const signedTransactionExample = submitRequest.properties?.signedTransaction?.example;
+    expect(signedTransactionExample).toEqual(expect.any(String));
+    expect(signedTransactionExample).toMatch(/^[A-Za-z0-9+/]+={0,2}$/);
+    expect(Buffer.from(signedTransactionExample as string, "base64").toString("base64")).toBe(
+      signedTransactionExample
+    );
   });
 
   it("documents allowlist search/label filters and the labels endpoint", () => {

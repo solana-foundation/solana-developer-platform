@@ -144,7 +144,8 @@ export const earnExternalWalletSubmitRequest = z
         description:
           "Base64 wire bytes of the signed transaction. They must be byte-for-byte the built " +
           "message with only signatures added.",
-        example: "AVXo...base64...",
+        example:
+          "AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOAAQABAvSV602SJ67iQCUGLwHzVtPnlMbZqL79wnV/nb+Mi9SJBUpTWpkpIQZNJOhxYNo4fHw1td28kruB5B+oQEEFRI0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEBAAtzZHAtZXhhbXBsZQA=",
       }),
   })
   .openapi({

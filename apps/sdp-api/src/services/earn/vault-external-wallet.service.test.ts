@@ -375,6 +375,27 @@ describe("submitExternalWalletDeposit", () => {
     expect(rows?.movements).toBe(1);
   });
 
+  it("prevents one movement from consuming more than one built transaction", async () => {
+    const first = await buildExternalWalletDepositTransaction(env, depositInput());
+    const second = await buildExternalWalletDepositTransaction(env, depositInput());
+    const result = await submitDeposit(
+      first,
+      await signBuiltTransaction(first),
+      crypto.randomUUID()
+    );
+
+    await expect(
+      getDb(env)
+        .prepare(
+          `UPDATE earn_external_wallet_transactions
+           SET movement_id = ?, consumed_at = sdp_iso_now()
+           WHERE id = ?`
+        )
+        .bind(result.movement.id, second.id)
+        .run()
+    ).rejects.toThrow(/earn_external_wallet_transactions_movement_id_key/i);
+  });
+
   it("rejects signed bytes whose message is not the built transaction", async () => {
     // Two builds of the SAME intent still differ by message: each carries its
     // own transaction id in the memo. Signing build B and submitting it as

@@ -27,6 +27,7 @@ import { resetClusterEndpointProofs } from "./execution-registry";
 import { createVaultDeadline } from "./vault-deadline";
 import {
   broadcastVaultTransaction,
+  compileUnsignedVaultTransaction,
   signVaultPlan,
   simulateVaultPlan,
 } from "./vault-execution.service";
@@ -117,6 +118,36 @@ afterEach(() => {
 });
 
 describe("vault execution validation", () => {
+  it("refuses caller-signed transactions that require any signer besides the owner", async () => {
+    const extraSigner = await generateKeyPairSigner();
+    const externalPlan: EarnVaultTransactionPlan = {
+      ...plan,
+      instructions: [
+        {
+          programAddress: "11111111111111111111111111111111",
+          accounts: [{ address: extraSigner.address, role: AccountRole.READONLY_SIGNER }],
+          data: "",
+        },
+      ],
+    };
+
+    expect(() =>
+      compileUnsignedVaultTransaction({
+        cluster: "devnet",
+        deadline: createVaultDeadline(),
+        expectedAssetIdentity: externalPlan.assetIdentity,
+        plan: externalPlan,
+        owner: ownerAddress,
+        prepared: {
+          plan: externalPlan,
+          lookupTables: {},
+          blockhash,
+          lastValidBlockHeight: 100n,
+        },
+      })
+    ).toThrow("must require only the owner signature");
+  });
+
   it("blocks every raw execution path before RPC or signing on wrong genesis", async () => {
     genesisSend.mockResolvedValue(GENESIS_HASH_BY_CLUSTER["mainnet-beta"]);
     const owner = createNoopSigner(ownerAddress);

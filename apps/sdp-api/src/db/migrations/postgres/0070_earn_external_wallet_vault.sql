@@ -205,6 +205,7 @@ ALTER TABLE earn_movements
 -- NOT a movement and never money: an unconsumed row records that SDP built a
 -- transaction nobody ever signed, which expires with its blockhash. One row is
 -- consumable at most once (movement_id, guarded under a row lock at submit),
+-- and one movement can consume at most one build (the unique movement_id),
 -- because one built transaction can land on chain at most once; the ledger's
 -- unique signature index backstops the same fact.
 -- ───────────────────────────────────────────────────────────────────────────
@@ -284,5 +285,7 @@ CREATE TABLE IF NOT EXISTS earn_external_wallet_transactions (
         ),
     -- Consumption is one fact with two columns; half-consumed is a lie.
     CONSTRAINT earn_external_wallet_transactions_consumed_shape_check
-        CHECK ((movement_id IS NULL) = (consumed_at IS NULL))
+        CHECK ((movement_id IS NULL) = (consumed_at IS NULL)),
+    CONSTRAINT earn_external_wallet_transactions_movement_id_key
+        UNIQUE (movement_id)
 );

@@ -383,7 +383,12 @@ export function compileUnsignedVaultTransaction(
     (m) => appendTransactionMessageInstructions(instructions, m),
     (m) => applyLookupTables(m, lookupTables)
   );
-  const bytes = new Uint8Array(getTransactionEncoder().encode(compileTransaction(message)));
+  const transaction = compileTransaction(message);
+  const requiredSignerAddresses = Object.keys(transaction.signatures);
+  if (requiredSignerAddresses.length !== 1 || requiredSignerAddresses[0] !== input.owner) {
+    throw new Error("External-wallet vault transactions must require only the owner signature");
+  }
+  const bytes = new Uint8Array(getTransactionEncoder().encode(transaction));
   assertVaultTransactionFits(bytes, false);
   return { bytes, lastValidBlockHeight: String(lastValidBlockHeight) };
 }

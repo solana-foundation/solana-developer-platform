@@ -1207,9 +1207,6 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
             throw new Error("Failed to resolve concurrent earn external-wallet withdrawal");
           }
           assertMovementIsOwnReplay(winner, input);
-          if (winner.direction !== "withdrawal") {
-            throw conflict("Idempotency key already used with different request payload");
-          }
           return {
             position: await requireMovementPosition(transaction, winner),
             movement: winner,
