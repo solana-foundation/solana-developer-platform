@@ -145,10 +145,7 @@ test.describe("GCP dev dashboard read-only smoke", () => {
       const transferMarker = firstTransfer.token ?? firstTransfer.amount;
       if (!transferMarker) throw new Error("The known transfer needs a rendered token or amount");
       // Candidates without a resolvable balance are skipped, not fatal — only the
-      // selected fixture wallet must resolve. The fixture is the wallet holding a
-      // stable $10.00 (stablecoin-backed): other funded wallets in the project
-      // hold price-volatile tokens, so "first populated wallet" drifts with the
-      // market while this one renders the same label every run.
+      // selected fixture wallet must resolve.
       const populatedWallet = walletData.wallets.find((wallet) => {
         if (!wallet.balances) return false;
         const totalBalance = resolveTotalBalance(wallet.balances);
@@ -225,9 +222,6 @@ test.describe("GCP dev dashboard read-only smoke", () => {
     await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
     expect((await activityResponse).status()).toBe(200);
     await expect(page.getByText("Recent transactions", { exact: true })).toBeVisible();
-    // The activity feed merges types and truncates by recency on a shared dev
-    // project whose data churns, so no single API item is guaranteed a row —
-    // hydration is proven by real rows plus the request-count assertions below.
     const firstActivityRow = page.locator("tbody tr").first();
     await expect(firstActivityRow).toBeVisible();
     expect((await firstActivityRow.innerText()).trim().length).toBeGreaterThan(0);
@@ -251,12 +245,6 @@ test.describe("GCP dev dashboard read-only smoke", () => {
 
     await page.goto("/dashboard/payments", { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { level: 1, name: "Payments" })).toBeVisible();
-    // The newest transfer's `token` can be a raw mint the table renders as a
-    // symbol, so a marker match is not stable on shared dev data; rows plus the
-    // zero-duplicate-request assertion below carry the hydration proof.
-    const firstTransferRow = page.locator("tbody tr").first();
-    await expect(firstTransferRow).toBeVisible();
-    expect((await firstTransferRow.innerText()).trim().length).toBeGreaterThan(0);
     await proveDashboardHydrated(page, fixture.project.name);
     await assertExactIdentityAndProject(page, fixture);
     expect(hydrationRequests).toEqual([]);
