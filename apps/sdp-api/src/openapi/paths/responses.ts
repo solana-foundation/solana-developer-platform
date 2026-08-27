@@ -75,6 +75,7 @@ import {
   prepareUpdateAuthorityResponseSchema,
   projectMemberResponseSchema,
   projectResponseSchema,
+  rampEstimateResponseSchema,
   revokeApiKeyResponseSchema,
   rotateApiKeyResponseSchema,
   rpcProvidersResponseSchema,
@@ -341,6 +342,7 @@ export const paymentSubscriptionCollectionAttemptListResponse = successResponseS
 export const onrampCurrenciesResponse = successResponseSchema(onrampCurrenciesResponseSchema);
 export const offrampCurrenciesResponse = successResponseSchema(offrampCurrenciesResponseSchema);
 export const onrampQuoteResponse = successResponseSchema(onrampQuoteResponseSchema);
+export const rampEstimateResponse = successResponseSchema(rampEstimateResponseSchema);
 export const sandboxTransferSimulationResponse = successResponseSchema(
   sandboxTransferSimulationResponseSchema
 );

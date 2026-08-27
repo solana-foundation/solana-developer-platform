@@ -14,6 +14,8 @@ import {
   createSubscriptionSchema as createSubscriptionSchemaBase,
   createTransferBatchSchema as createTransferBatchSchemaBase,
   createTransferSchema as createTransferSchemaBase,
+  estimateOfframpSchema as estimateOfframpSchemaBase,
+  estimateOnrampSchema as estimateOnrampSchemaBase,
   estimateTransferBatchSchema as estimateTransferBatchSchemaBase,
   listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase,
   listOnrampCurrenciesQuerySchema as listOnrampCurrenciesQuerySchemaBase,
@@ -655,6 +657,79 @@ export const moneygramTransferDetailsSchema = z
   })
   .openapi({ description: "MoneyGram-specific transfer metadata." });
 
+const lightsparkGridAmountSchema = z
+  .object({
+    amount: z
+      .number()
+      .openapi({ description: "Amount in the currency's smallest unit.", example: 10000 }),
+    currencyCode: z.string().openapi({ description: "Currency code.", example: "USD" }),
+    decimals: z.number().openapi({ description: "Decimal places for the currency.", example: 2 }),
+  })
+  .openapi({ description: "Lightspark Grid amount." });
+
+const moonpayRampSettlementSchema = z.object({
+  provider: z.literal("moonpay"),
+  status: z.enum(["completed", "failed"]),
+  baseCurrencyCode: z.string().openapi({ example: "usd" }),
+  baseCurrencyAmount: z.number().openapi({ example: 100 }),
+  quoteCurrencyCode: z.string().openapi({ example: "usdc_sol" }),
+  quoteCurrencyAmount: z.number().openapi({ example: 98.5 }),
+  feeAmount: z.number().openapi({ example: 1.5 }),
+  extraFeeAmount: z.number().openapi({ example: 0 }),
+  networkFeeAmount: z.number().openapi({ example: 0.01 }),
+  areFeesIncluded: z.boolean().openapi({ example: true }),
+  usdRate: z.number().openapi({ example: 1 }),
+  cryptoTransactionId: z.string().optional().openapi({
+    description:
+      "MoonPay's identifier for the crypto leg. Not guaranteed to be a Solana transaction signature.",
+  }),
+  failureReason: z.string().optional(),
+});
+
+const lightsparkRampSettlementSchema = z.object({
+  provider: z.literal("lightspark"),
+  status: z.enum(["COMPLETED", "FAILED", "EXPIRED", "REFUND_FAILED"]),
+  sentAmount: lightsparkGridAmountSchema,
+  receivedAmount: lightsparkGridAmountSchema,
+  exchangeRate: z.number().openapi({ example: 1 }),
+  fees: z.number().openapi({ example: 0.5 }),
+  failureReason: z.string().optional(),
+});
+
+const coinbaseRampFeeSchema = z.object({
+  feeAmount: z.string().openapi({ example: "1.50" }),
+  feeCurrency: z.string().openapi({ example: "USD" }),
+  feeType: z.string().openapi({ example: "coinbase_fee" }),
+});
+
+const coinbaseRampSettlementSchema = z.object({
+  provider: z.literal("coinbase"),
+  status: z.enum(["completed", "failed"]),
+  paymentCurrency: z.string().openapi({ example: "USD" }),
+  paymentSubtotal: z.string().openapi({ example: "100.00" }),
+  paymentTotal: z.string().openapi({ example: "101.50" }),
+  purchaseCurrency: z.string().openapi({ example: "USDC" }),
+  purchaseAmount: z.string().openapi({ example: "100.00" }),
+  exchangeRate: z.string().openapi({ example: "1.00" }),
+  fees: z.array(coinbaseRampFeeSchema),
+  txHash: z.string().optional().openapi({
+    description:
+      "On-chain transaction hash reported by Coinbase. Reported by the provider and not independently verified.",
+  }),
+  failureReason: z.string().optional(),
+});
+
+export const rampTransferSettlementSchema = z
+  .discriminatedUnion("provider", [
+    moonpayRampSettlementSchema,
+    lightsparkRampSettlementSchema,
+    coinbaseRampSettlementSchema,
+  ])
+  .openapi({
+    description:
+      "Provider-reported settlement economics, captured verbatim from a terminal webhook. Present only for providers that report them (moonpay, lightspark, coinbase).",
+  });
+
 export const transferSchema = z
   .object({
     id: transferIdParamSchema,
@@ -748,6 +823,10 @@ export const transferSchema = z
     risk: transferRiskSchema
       .optional()
       .openapi({ description: "Optional risk evaluation for the transfer." }),
+    settlement: rampTransferSettlementSchema.optional().openapi({
+      description:
+        "Provider-reported settlement economics for a ramp transfer, recorded at the terminal webhook. Absent for providers that do not report them and for transfers that settled before this was captured.",
+    }),
     moneygram: moneygramTransferDetailsSchema.optional().openapi({
       description: "MoneyGram-specific details for MoneyGram ramp transfers.",
     }),
@@ -2184,6 +2263,83 @@ export const transferBatchEstimateResponseSchema = z
     estimate: transferBatchEstimateSchema.openapi({ description: "Transfer batch estimate." }),
   })
   .openapi({ description: "Transfer batch estimate response payload." });
+
+export const estimateOnrampRequestSchema = estimateOnrampSchemaBase.openapi({
+  description: "On-ramp estimate request. Fans out one live call per provider on the corridor.",
+});
+
+export const estimateOfframpRequestSchema = estimateOfframpSchemaBase.openapi({
+  description: "Off-ramp estimate request. Fans out one live call per provider on the corridor.",
+});
+
+const rampEstimateFeesSchema = z
+  .object({
+    currency: z
+      .string()
+      .openapi({ description: "Currency the total fee is denominated in.", example: "USD" }),
+    total: z.string().openapi({ description: "Total fee.", example: "1.50" }),
+    network: z.string().optional().openapi({ description: "Network fee component." }),
+    networkCurrency: z.string().optional().openapi({ description: "Currency of the network fee." }),
+    provider: z.string().optional().openapi({ description: "Provider fee component." }),
+    providerCurrency: z
+      .string()
+      .optional()
+      .openapi({ description: "Currency of the provider fee." }),
+  })
+  .openapi({ description: "Fee breakdown for a ramp estimate." });
+
+const rampEstimateSchema = z
+  .object({
+    provider: z.enum(RAMP_PROVIDERS),
+    direction: z.enum(["onramp", "offramp"]),
+    fiatCurrency: z.string().openapi({ example: "USD" }),
+    assetRail: z.string().openapi({
+      description:
+        "Crypto rail identifier, for example usdc.solana. This is NOT the token symbol accepted by the quote endpoints.",
+      example: "usdc.solana",
+    }),
+    fiatAmount: z.string().openapi({ example: "100.00" }),
+    cryptoAmount: z.string().openapi({ example: "98.50" }),
+    exchangeRate: z.string().openapi({ example: "1.00" }),
+    fees: rampEstimateFeesSchema,
+    minFiatAmount: z.string().optional(),
+    maxFiatAmount: z.string().optional(),
+    expiresAt: z
+      .string()
+      .optional()
+      .openapi({ description: "When this estimate stops being valid." }),
+  })
+  .openapi({ description: "A single provider's ramp estimate." });
+
+const rampProviderEstimateResultSchema = z
+  .discriminatedUnion("status", [
+    z.object({
+      provider: z.enum(RAMP_PROVIDERS),
+      status: z.literal("ok"),
+      estimate: rampEstimateSchema,
+    }),
+    z.object({
+      provider: z.enum(RAMP_PROVIDERS),
+      status: z.literal("unsupported"),
+    }),
+    z.object({
+      provider: z.enum(RAMP_PROVIDERS),
+      status: z.literal("error"),
+      error: z.string().openapi({ description: "Why this provider could not be estimated." }),
+    }),
+  ])
+  .openapi({
+    description:
+      "Per-provider estimate outcome. A provider that fails or does not support the corridor is reported rather than omitted, so the caller sees the full roster.",
+  });
+
+export const rampEstimateResponseSchema = z
+  .object({
+    estimates: z.array(rampProviderEstimateResultSchema).openapi({
+      description: "One entry per provider on the requested corridor.",
+    }),
+  })
+  .openapi({ description: "Ramp estimate response payload." });
 
 export const onrampQuoteResponseSchema = z
   .object({

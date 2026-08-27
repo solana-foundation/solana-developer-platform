@@ -8,6 +8,8 @@ import {
   createTransferBatchRequestSchema,
   createTransferRequestSchema,
   errorResponseSchema,
+  estimateOfframpRequestSchema,
+  estimateOnrampRequestSchema,
   estimateTransferBatchRequestSchema,
   paymentListRecurringPaymentsQuerySchema,
   paymentListSubscriptionCollectionAttemptsQuerySchema,
@@ -56,6 +58,7 @@ import {
   preparePaymentSubscriptionCollectionResponse,
   preparePaymentSubscriptionLifecycleResponse,
   preparePaymentSubscriptionPlanResponse,
+  rampEstimateResponse,
   sandboxTransferSimulationResponse,
   transferBatchEstimateResponse,
   transferBatchListResponse,
@@ -916,6 +919,54 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(offrampCurrenciesResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/ramps/onramp/estimate",
+    tags: ["Payments"],
+    summary: "Estimate on-ramp across providers",
+    operationId: "estimatePaymentOnramp",
+    description:
+      "Estimates an on-ramp across every provider serving the corridor, returning one entry per provider so the caller can compare. Providers that fail or do not support the pair are reported with a status rather than omitted. Note the request takes assetRail (for example usdc.solana), which is not the cryptoToken value the quote endpoints accept.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      body: {
+        required: true,
+        content: jsonContent(estimateOnrampRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "On-ramp estimates",
+        content: jsonContent(rampEstimateResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/ramps/offramp/estimate",
+    tags: ["Payments"],
+    summary: "Estimate off-ramp across providers",
+    operationId: "estimatePaymentOfframp",
+    description:
+      "Estimates an off-ramp across every provider serving the corridor, returning one entry per provider so the caller can compare. Providers that fail or do not support the pair are reported with a status rather than omitted.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      body: {
+        required: true,
+        content: jsonContent(estimateOfframpRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Off-ramp estimates",
+        content: jsonContent(rampEstimateResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500]),
     },
   });
 
