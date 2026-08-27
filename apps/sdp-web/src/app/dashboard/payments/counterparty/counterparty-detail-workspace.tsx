@@ -594,6 +594,16 @@ function RampSettlementRows({ settlement }: { settlement: RampTransferSettlement
   );
 }
 
+/**
+ * Settlement verification wording (#559). `completed` alone only means a provider reported
+ * success, so this states whether anything was actually checked on chain.
+ */
+const SETTLEMENT_STATUS_MESSAGE_KEYS = {
+  verified: "DashboardPayments.transferDetails.settlementVerified",
+  pending: "DashboardPayments.transferDetails.settlementPending",
+  unsupported: "DashboardPayments.transferDetails.settlementUnsupported",
+} as const;
+
 function TransferDetailModal({
   transfer,
   counterpartyName,
@@ -618,7 +628,11 @@ function TransferDetailModal({
   const isInbound = transfer.type === "onramp" || transfer.direction === "inbound";
   const walletAddress = isInbound ? transfer.destination : transfer.source;
   const moneygram = transfer.moneygram;
-  const signature = transfer.signature ?? moneygram?.solanaTxSignature ?? null;
+  const verification = transfer.settlementVerification;
+  // Prefer the provider-neutral field. moneygram.solanaTxSignature stays as a fallback for rows
+  // that settled before verification was recorded, and is deprecated (#559).
+  const signature =
+    transfer.signature ?? verification?.signature ?? moneygram?.solanaTxSignature ?? null;
   const flow = resolveTransferFlow(transfer);
   const counterpartyParty = transfer.fiatCurrency
     ? `${counterpartyName} · ${transfer.fiatCurrency.toUpperCase()}`
@@ -767,12 +781,18 @@ function TransferDetailModal({
                 copyValue={moneygram.cryptoTransferId}
               />
             ) : null}
-            {moneygram?.solanaTxSignature ? (
+            {verification?.signature ? (
               <DetailRow
                 label={t("DashboardPayments.transferDetails.solanaSignature")}
-                value={shortenAddress(moneygram.solanaTxSignature)}
+                value={shortenAddress(verification.signature)}
                 mono
-                copyValue={moneygram.solanaTxSignature}
+                copyValue={verification.signature}
+              />
+            ) : null}
+            {verification ? (
+              <DetailRow
+                label={t("DashboardPayments.transferDetails.settlementStatus")}
+                value={t(SETTLEMENT_STATUS_MESSAGE_KEYS[verification.status])}
               />
             ) : null}
             {moneygram?.lastWidgetError ? (

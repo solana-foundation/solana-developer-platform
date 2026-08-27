@@ -718,6 +718,11 @@
       "payoutAmount": "Payout amount",
       "cryptoTransferId": "Crypto transfer ID",
       "solanaSignature": "Solana signature",
+      "settlementStatus": "Settlement",
+      "settlementVerified": "Settlement verified on-chain",
+      "settlementPending": "Awaiting on-chain verification",
+      "settlementUnsupported": "Not verified on-chain",
+      "settlementUnsupportedHint": "This provider reports completion without an on-chain check.",
       "moneygramError": "MoneyGram error",
       "lastUpdated": "Last updated",
       "copy": "Copy {label}"

@@ -3,6 +3,7 @@ import type { RampTransferSettlement } from "@sdp/types";
 import type { Context } from "hono";
 import type { PaymentTransferStatus } from "@/db/repositories";
 import { createSystemPaymentsRepository, isRampTransferType } from "@/db/repositories";
+import { getLogger } from "@/runtime/logger";
 import { emitRampSettled } from "@/services/workflows/payment-events";
 import type { Env } from "@/types/env";
 
@@ -114,6 +115,16 @@ export async function applyRampSettlementEvent(c: AppContext, event: RampSettlem
     const settlementSignature = settlementSignatureFrom(event.settlement);
     if (settlementSignature) {
       update.settlementSignature = settlementSignature;
+    } else if (event.settlement) {
+      // #559 W4. We have no confirmed chain identifier for this provider, and the question is
+      // whether one is present at all. Logging the payload's KEY NAMES, never its values, turns
+      // the next sandbox settlement into the answer without anyone capturing payloads by hand.
+      // Values are withheld deliberately: they carry amounts and provider references.
+      getLogger().info({
+        event: "ramp_settlement_payload_shape",
+        provider: event.settlement.provider,
+        keys: Object.keys(event.settlement).sort(),
+      });
     }
   }
 
