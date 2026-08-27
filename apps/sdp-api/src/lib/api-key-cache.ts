@@ -18,6 +18,24 @@
  * Terminal statuses are sticky: a cached revoked/deactivated/expired entry is
  * never replaced by an active one — only by another terminal state or TTL
  * expiry (after which fills re-read the authoritative row anyway).
+ *
+ * What this module guarantees, and where that guarantee stops
+ * -----------------------------------------------------------
+ * Guaranteed: a revocation never reports success until the terminal state is
+ * in the cache. No caller is ever told "revoked" while a cached entry can
+ * still authorize, and no cached entry outlives a revocation the caller has
+ * been told about.
+ *
+ * Not guaranteed, deliberately: atomicity between an authorization read and
+ * the request that read authorizes. A revocation committing after a
+ * request's authoritative read still admits that one in-flight request. Every
+ * check happens at an instant and the request continues after it, so there is
+ * always an "after the last check" — adding another read moves that boundary
+ * later, it never removes it. Closing it would require authorization to share
+ * a transaction or a lock with the work it authorizes, serializing ordinary
+ * traffic against revocations; that is a property of the request pipeline, not
+ * of this cache. Reviewers reaching for "check once more here" should read
+ * this paragraph first: the fences below are already that check.
  */
 
 import type { ApiKeyStatus, CachedApiKey } from "@sdp/types";
@@ -175,6 +193,9 @@ export async function fillApiKeyCache(
     if (fenced) {
       return fenced;
     }
+    // Same deliberate boundary as resolveContendedFill: fenced against a
+    // revocation already in the slot, open to one committing after it. See
+    // the module header.
     return entry;
   }
   // Installs go in marked pending: readers treat them as misses until the
@@ -258,6 +279,10 @@ async function resolveContendedFill(
         return fenced;
       }
     }
+    // Authoritative as of the read above, with the fence catching a
+    // revocation already in the slot. A revocation committing after both
+    // admits this one in-flight request — the deliberate boundary described
+    // in the module header, not a missing check.
     return authoritative;
   }
 
