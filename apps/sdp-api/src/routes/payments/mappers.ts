@@ -61,7 +61,12 @@ export function mapTransferRow(row: TransferRow) {
   // Always present on ramp transfers so callers branch on a value, never on absence (#559).
   // `verified` is only ever reported from a recorded on-chain signature; a provider simply
   // saying it settled leaves this `unsupported`, which is the honest report of what we know.
-  const settlementVerification: RampSettlementVerification = row.settlement_signature
+  // Keyed off settlement_verified_at, NOT settlement_signature. The signature is a provider's
+  // CLAIM, recorded the moment a webhook arrives; settlement_verified_at is only written after
+  // the transaction has been checked on chain. Reading the claim as proof would report
+  // "verified on-chain" for something nothing has verified, which is the exact failure this
+  // field exists to prevent (#559).
+  const settlementVerification: RampSettlementVerification = row.settlement_verified_at
     ? {
         status: "verified",
         signature: row.settlement_signature,

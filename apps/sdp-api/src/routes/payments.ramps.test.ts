@@ -1188,6 +1188,35 @@ describe("Payments routes — ramps", () => {
       expect(body.data.transfer.settlementVerification.verifiedAt).toEqual(expect.any(String));
     });
 
+    it("does not report verified from a provider's claimed signature alone", async () => {
+      await seedRampEventTransfer({
+        id: "xfr_claim_only",
+        provider: "coinbase",
+        providerReference: "cb_claim_only",
+        type: "onramp",
+      });
+      // A settlement webhook records the provider's claimed hash immediately. Nothing has
+      // checked it against the chain yet, so it must NOT read as verified (#559).
+      await getDb(env)
+        .prepare("UPDATE payment_transfers SET settlement_signature = ? WHERE id = ?")
+        .bind("ClaimedButUnverifiedSignature1111111111111111", "xfr_claim_only")
+        .run();
+
+      const res = await app.request(
+        "/v1/payments/transfers/xfr_claim_only",
+        { method: "GET", headers },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { transfer: { settlementVerification: Record<string, unknown> } };
+      };
+      expect(body.data.transfer.settlementVerification.status).not.toBe("verified");
+      // The unverified claim must not leak out as if it were proof either.
+      expect(body.data.transfer.settlementVerification.signature).toBeNull();
+    });
+
     it("reports a provider-attested ramp as unsupported rather than implying verification", async () => {
       await seedRampEventTransfer({
         id: "xfr_cb_unverified",
