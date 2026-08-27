@@ -112,13 +112,13 @@ jobs:
           set -euo pipefail
           fail=""
           if body=$(curl -fsSL --max-time 30 --retry 2 https://platform.solana.com); then
-            echo "$body" | grep -q "<title>Solana Developer Platform</title>" || fail="dashboard title marker missing"
+            grep -q "<title>Solana Developer Platform</title>" <<< "$body" || fail="dashboard title marker missing"
           else
             fail="dashboard unreachable"
           fi
           if [ -z "$fail" ]; then
             if health=$(curl -fsS --max-time 30 --retry 2 https://api.solana.com/health); then
-              echo "$health" | jq -e '.status == "ok" and .environment == "production"' >/dev/null || fail="api health degraded: $health"
+              jq -e '.status == "ok" and .environment == "production"' >/dev/null <<< "$health" || fail="api health degraded: $health"
             else
               fail="api health unreachable"
             fi
