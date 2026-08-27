@@ -1219,6 +1219,51 @@ describe("Payments routes — ramps", () => {
       expect(body.data.transfer.settlementVerification.signature).toBeNull();
     });
 
+    it("reports a provider-paired proof as chain_observed, never as verified", async () => {
+      // The distinction this whole feature turns on. A hash the provider paired with this order was
+      // checked on chain, but nothing binds it to THIS order, so a caller switching on status must
+      // not be told it is safe to act on alone (#559).
+      await seedRampEventTransfer({
+        id: "xfr_provider_proof",
+        provider: "coinbase",
+        providerReference: "cb_provider_proof",
+        type: "onramp",
+      });
+      await getDb(env)
+        .prepare(
+          `UPDATE payment_transfers
+              SET settlement_signature = ?, settlement_verified_at = ?,
+                  settlement_verified_slot = ?, settlement_verification_method = ?
+            WHERE id = ?`
+        )
+        .bind(
+          "ProviderPairedSignature111111111111",
+          new Date().toISOString(),
+          42,
+          "provider_signature",
+          "xfr_provider_proof"
+        )
+        .run();
+
+      const res = await app.request(
+        "/v1/payments/transfers/xfr_provider_proof",
+        { method: "GET", headers },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { transfer: { settlementVerification: Record<string, unknown> } };
+      };
+      expect(body.data.transfer.settlementVerification.status).toBe("chain_observed");
+      expect(body.data.transfer.settlementVerification.status).not.toBe("verified");
+      expect(body.data.transfer.settlementVerification.method).toBe("provider_signature");
+      // The evidence is still surfaced: this is a downgrade of the claim, not of the data.
+      expect(body.data.transfer.settlementVerification.signature).toBe(
+        "ProviderPairedSignature111111111111"
+      );
+    });
+
     it("reports a provider-attested ramp as unsupported rather than implying verification", async () => {
       await seedRampEventTransfer({
         id: "xfr_cb_unverified",

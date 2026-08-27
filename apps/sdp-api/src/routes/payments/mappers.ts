@@ -68,7 +68,14 @@ export function mapTransferRow(row: TransferRow) {
   // field exists to prevent (#559).
   const settlementVerification: RampSettlementVerification = row.settlement_verified_at
     ? {
-        status: "verified",
+        // Only a linked crypto leg is BOUND to this transfer: it names a specific row and was
+        // validated field by field. A provider-paired hash was genuinely checked on chain, but it
+        // could name another qualifying movement through the same wallet, so it must not read as
+        // `verified` to a caller that only switches on status (#559).
+        status:
+          row.settlement_verification_method === "linked_crypto_leg"
+            ? "verified"
+            : "chain_observed",
         method: row.settlement_verification_method as RampSettlementVerification["method"],
         signature: row.settlement_signature,
         slot: row.settlement_verified_slot,
