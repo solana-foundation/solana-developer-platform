@@ -233,9 +233,24 @@ export interface Env {
   // Helius Rings feature gate — devnet-only shielded wallet API routes.
   HELIUS_RINGS_ENABLED?: string;
 
-  // Rings gateway selector. Only "http" activates the live adapter and the
-  // indexing-poll job; anything else keeps NotImplementedRingsGateway.
+  // Rings gateway selector. Only "ts" activates the in-process SDK adapter and
+  // the indexing-poll job; anything else keeps NotImplementedRingsGateway.
   HELIUS_RINGS_ADAPTER?: string;
+
+  // Base64 32-byte master seed the Rings key material is derived from. Every
+  // shielded identity depends on it: changing it re-keys them, which a
+  // registered wallet cannot survive.
+  HELIUS_RINGS_DETERMINISTIC_KA_SEED?: string;
+
+  // Photon indexer and prover endpoints for the Rings adapter. Submission,
+  // block-height reads, and history-capable reconcile inspection reuse
+  // SOLANA_RPC_HELIUS_URL rather than a generic/default RPC.
+  HELIUS_RINGS_INDEXER_URL?: string;
+  HELIUS_RINGS_PROVER_URL?: string;
+
+  // Permits plain http to the two endpoints above, which the public devnet
+  // deployment requires. Never set this for an endpoint on the open internet.
+  HELIUS_RINGS_ALLOW_INSECURE_HTTP?: string;
 
   // Compliance providers
   RANGE_API_KEY?: string;

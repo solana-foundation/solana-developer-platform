@@ -1,20 +1,25 @@
 import {
+  type HeliusRingsWalletRow,
   mapHeliusRingsOperationSummaryRow,
   mapHeliusRingsWalletRow,
   mapHeliusRingsZoneRow,
 } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { badRequest, notFound } from "@/lib/errors";
+import { badRequest, conflict, internalError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
+import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import {
   type AppContext,
+  allowedRingsWalletIds,
   getHeliusRingsOperationRepository,
   getHeliusRingsService,
   getHeliusRingsWalletRepository,
   getHeliusRingsZoneRepository,
   requireParam,
+  requireRingsOperation,
+  requireRingsWallet,
   withRingsErrors,
 } from "./context";
 import {
@@ -33,6 +38,13 @@ function tenantOf(c: AppContext) {
   };
 }
 
+function policyCustodyWalletId(wallet: HeliusRingsWalletRow): string {
+  if (wallet.custody_wallet_id === null) {
+    throw conflict("Rings wallet is missing its custody wallet linkage");
+  }
+  return wallet.custody_wallet_id;
+}
+
 // --- health -----------------------------------------------------------------
 
 /** GET /health — probe the gateway and return the per-component status board. */
@@ -44,16 +56,16 @@ export async function getRingsHealth(c: AppContext) {
 
 // --- wallets ----------------------------------------------------------------
 
-/**
- * POST /wallets — bind a rings wallet to an SDP custody wallet and provision
- * its shielded identity. Until the live gateway lands this responds 503 with a
- * seam-marker message and the wallet stays `pending` — the wizard renders that.
- */
+/** POST /wallets — bind a Rings wallet to an SDP custody wallet and provision its identity. */
 export async function createRingsWallet(c: AppContext) {
   const parsed = createRingsWalletSchema.safeParse(await c.req.json());
   if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? "invalid body");
 
   const { tenant } = tenantOf(c);
+  // The custody wallet named in the body, not a rings wallet that exists yet —
+  // so the scope check goes straight to the provider id the key is bound to.
+  assertApiKeyWalletAccess(getAuth(c), parsed.data.walletId, ["payments:write"]);
+
   const scope = await resolveScope(c);
   const custodyWallet = resolveWallet(scope.wallets, parsed.data.walletId);
 
@@ -63,28 +75,71 @@ export async function createRingsWallet(c: AppContext) {
       sdpWalletId: custodyWallet.walletId,
       sdpAddress: custodyWallet.publicKey,
       name: parsed.data.name,
+      // The immutable row id, so later signing resolves this same wallet even
+      // if the custody provider reissues its own identifier for it.
+      custodyWalletId: custodyWallet.id,
     })
   );
   return success(c, { wallet }, 201);
 }
 
-/** GET /wallets — the project's rings wallets, newest first. */
+/**
+ * GET /wallets — the project's rings wallets, newest first.
+ *
+ * Filtered rather than refused: a wallet-scoped key asking for its wallets
+ * wants the ones it holds, not a 403. The repository applies the scope before
+ * the list limit so unauthorized rows cannot consume the page.
+ */
 export async function listRingsWallets(c: AppContext) {
   const { tenant } = tenantOf(c);
   const limit = listLimitSchema.parse(c.req.query("limit"));
-  const rows = await getHeliusRingsWalletRepository(c).listWallets({ ...tenant, limit });
+  const allowed = allowedRingsWalletIds(c, ["payments:read"]);
+  const rows = await getHeliusRingsWalletRepository(c).listWallets({
+    ...tenant,
+    limit,
+    ...(allowed ? { sdpWalletIds: [...allowed] } : {}),
+  });
   return success(c, { wallets: rows.map(mapHeliusRingsWalletRow) });
 }
 
 /** GET /wallets/:walletId */
 export async function getRingsWallet(c: AppContext) {
   const { tenant } = tenantOf(c);
-  const row = await getHeliusRingsWalletRepository(c).getWalletById({
-    ...tenant,
-    id: requireParam(c, "walletId"),
-  });
-  if (!row) throw notFound("rings wallet");
+  const row = await requireRingsWallet(c, tenant, requireParam(c, "walletId"), ["payments:read"]);
   return success(c, { wallet: mapHeliusRingsWalletRow(row) });
+}
+
+/**
+ * POST /wallets/:walletId/sync — read the wallet's shielded state from Photon.
+ *
+ * Always a full sync, and the balances it returns are only complete when
+ * `report.degraded` is false; the caller is expected to surface that rather
+ * than round it away.
+ */
+export async function syncRingsWallet(c: AppContext) {
+  const { tenant } = tenantOf(c);
+  await requireRingsWallet(c, tenant, requireParam(c, "walletId"), ["payments:write"]);
+  const service = getHeliusRingsService(c, tenant);
+  const result = await withRingsErrors(() => service.syncWallet(requireParam(c, "walletId")));
+  return success(c, result);
+}
+
+/**
+ * POST /operations/:operationId/reconcile — settle a signed failure.
+ *
+ * No body. The service observes Photon, then the chain, and decides; a caller
+ * cannot assert an outcome, because releasing a wallet requires knowing the
+ * transaction is dead and only the chain knows that. Replaying it on an
+ * already-settled operation returns 200 rather than conflicting.
+ */
+export async function reconcileRingsOperation(c: AppContext) {
+  const { tenant } = tenantOf(c);
+  await requireRingsOperation(c, tenant, requireParam(c, "operationId"), ["payments:write"]);
+  const service = getHeliusRingsService(c, tenant);
+  const operation = await withRingsErrors(() =>
+    service.reconcileOperation(requireParam(c, "operationId"))
+  );
+  return success(c, { operation });
 }
 
 // --- zones ------------------------------------------------------------------
@@ -93,8 +148,7 @@ export async function getRingsWallet(c: AppContext) {
 export async function listRingsZones(c: AppContext) {
   const { tenant } = tenantOf(c);
   const walletId = requireParam(c, "walletId");
-  const wallet = await getHeliusRingsWalletRepository(c).getWalletById({ ...tenant, id: walletId });
-  if (!wallet) throw notFound("rings wallet");
+  await requireRingsWallet(c, tenant, walletId, ["payments:read"]);
   const zones = await getHeliusRingsZoneRepository(c).listZonesByWallet({ walletId });
   return success(c, { zones: zones.map(mapHeliusRingsZoneRow) });
 }
@@ -106,8 +160,7 @@ export async function createRingsZone(c: AppContext) {
 
   const { tenant } = tenantOf(c);
   const walletId = requireParam(c, "walletId");
-  const wallet = await getHeliusRingsWalletRepository(c).getWalletById({ ...tenant, id: walletId });
-  if (!wallet) throw notFound("rings wallet");
+  await requireRingsWallet(c, tenant, walletId, ["payments:write"]);
 
   const zone = await getHeliusRingsZoneRepository(c).createZone({
     walletId,
@@ -126,42 +179,52 @@ export async function prepareRingsOperation(c: AppContext) {
   if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? "invalid body");
 
   const { auth, tenant } = tenantOf(c);
-  const ringsWallet = await getHeliusRingsWalletRepository(c).getWalletById({
-    ...tenant,
-    id: parsed.data.walletId,
-  });
-  if (!ringsWallet) throw notFound("rings wallet");
-
-  // The policy envelope wants the custody wallet backing the rings wallet;
-  // absence is tolerated (the envelope's wallet id still scopes the policy).
-  const scope = await resolveScope(c);
-  const custodyWallet = scope.wallets.find((entry) => entry.walletId === ringsWallet.sdp_wallet_id);
+  const ringsWallet = await requireRingsWallet(c, tenant, parsed.data.walletId, ["payments:write"]);
+  const custodyWalletId = policyCustodyWalletId(ringsWallet);
 
   const service = getHeliusRingsService(c, tenant);
   const operation = await withRingsErrors(() =>
     service.prepareOperation(parsed.data, {
       apiKeyId: auth.apiKeyId,
       actor: walletOperationActorFromAuth(auth),
-      custodyWalletId: custodyWallet?.id ?? null,
+      custodyWalletId,
     })
   );
   return success(c, { operation }, 201);
 }
 
-/** GET /operations — the project's activity feed, newest first. */
+/**
+ * GET /operations — the project's activity feed, newest first.
+ *
+ * Filtered to the wallets the key may read. Operations name their wallet by
+ * rings id, so the visible set is resolved through the wallet rows rather than
+ * assumed from the operation.
+ */
 export async function listRingsOperations(c: AppContext) {
   const { tenant } = tenantOf(c);
   const limit = listLimitSchema.parse(c.req.query("limit"));
+  const allowed = allowedRingsWalletIds(c, ["payments:read"]);
+
+  const walletIds = allowed
+    ? await getHeliusRingsWalletRepository(c).listWalletIdsBySdpWalletIds({
+        ...tenant,
+        sdpWalletIds: [...allowed],
+      })
+    : undefined;
   const rows = await getHeliusRingsOperationRepository(c).listOperationsByProject({
     ...tenant,
     limit,
+    ...(walletIds === undefined ? {} : { walletIds }),
   });
-  return success(c, { operations: rows.map(mapHeliusRingsOperationSummaryRow) });
+  return success(c, {
+    operations: rows.map(mapHeliusRingsOperationSummaryRow),
+  });
 }
 
 /** GET /operations/:operationId — full detail with the event timeline. */
 export async function getRingsOperation(c: AppContext) {
   const { tenant } = tenantOf(c);
+  await requireRingsOperation(c, tenant, requireParam(c, "operationId"), ["payments:read"]);
   const service = getHeliusRingsService(c, tenant);
   const operation = await withRingsErrors(() =>
     service.getOperationWithEvents(requireParam(c, "operationId"))
@@ -176,6 +239,7 @@ export async function getRingsOperation(c: AppContext) {
  */
 export async function executeRingsOperation(c: AppContext) {
   const { tenant } = tenantOf(c);
+  await requireRingsOperation(c, tenant, requireParam(c, "operationId"), ["payments:write"]);
   const service = getHeliusRingsService(c, tenant);
   const operation = await withRingsErrors(() =>
     service.executeOperation(requireParam(c, "operationId"))
@@ -194,29 +258,23 @@ export async function retryRingsOperation(c: AppContext) {
 
   const { auth, tenant } = tenantOf(c);
   const failedId = requireParam(c, "operationId");
-  const failed = await getHeliusRingsOperationRepository(c).getOperationById({
-    ...tenant,
-    id: failedId,
-  });
-  if (!failed) throw notFound("rings operation");
+  const failed = await requireRingsOperation(c, tenant, failedId, ["payments:write"]);
 
-  const [ringsWallet, scope] = await Promise.all([
-    getHeliusRingsWalletRepository(c).getWalletById({
-      ...tenant,
-      id: failed.wallet_id,
-    }),
-    resolveScope(c),
-  ]);
-  const custodyWallet = ringsWallet
-    ? scope.wallets.find((entry) => entry.walletId === ringsWallet.sdp_wallet_id)
-    : undefined;
+  const ringsWallet = await getHeliusRingsWalletRepository(c).getWalletById({
+    ...tenant,
+    id: failed.wallet_id,
+  });
+  if (!ringsWallet) {
+    throw internalError("rings operation references a missing Rings wallet");
+  }
+  const custodyWalletId = policyCustodyWalletId(ringsWallet);
 
   const service = getHeliusRingsService(c, tenant);
   const operation = await withRingsErrors(() =>
     service.retryOperation(failedId, parsed.data.clientNonce, {
       apiKeyId: auth.apiKeyId,
       actor: walletOperationActorFromAuth(auth),
-      custodyWalletId: custodyWallet?.id ?? null,
+      custodyWalletId,
     })
   );
   return success(c, { operation }, 201);

@@ -3,20 +3,22 @@ import type {
   BuildOperationResult,
   ProvisionIdentityInput,
   ProvisionIdentityResult,
-  RequestProofInput,
   RingsGatewayPort,
   SyncPhotonInput,
   SyncPhotonResult,
   VerifyIndexedResult,
 } from "../port";
 import { SecretRef } from "../secrets";
-import type { ProofArtifact, RuntimeHealth } from "../types";
+import type { RuntimeHealth } from "../types";
+
+/** Wrapped SOL, the mint SDP uses to mean native lamports. */
+// biome-ignore lint/security/noSecrets: wrapped SOL mint address, not a secret.
+const NATIVE_MINT = "So11111111111111111111111111111111111111112";
 
 /**
  * Test-only implementation of RingsGatewayPort. Never shipped: it lives under
  * src/testing/, is exported only via the `@sdp/helius-rings/testing` subpath,
- * and is not selectable by environment. Production uses
- * NotImplementedRingsGateway until Track B lands the live adapter.
+ * and is not selectable by environment.
  *
  * Deterministic by construction — outputs derive from a hash of the inputs,
  * and time comes from the injected clock — so the same test always sees the
@@ -32,7 +34,12 @@ export interface InMemoryRingsGatewayOptions {
   indexingDelayMs?: number;
   /** Override for tests that need a signable unsigned tx (A8/A9). */
   buildUnsignedTx?: (input: BuildOperationInput) => string;
+  /** Reported as the signed bytes' expiry, for the reconciliation sweep. */
+  blockHeight?: number;
 }
+
+/** Op types that consume notes, and so have inputs worth pinning. */
+const SPENDS = new Set<string>(["transfer_registered", "withdraw", "merge"]);
 
 const ALL_GREEN: RuntimeHealth = {
   rpc: "green",
@@ -85,6 +92,7 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
   private readonly health: RuntimeHealth;
   private readonly indexingDelayMs: number;
   private readonly buildUnsignedTx?: (input: BuildOperationInput) => string;
+  private readonly blockHeight: number;
   private readonly syncCounters = new Map<string, number>();
   private readonly submittedAt = new Map<string, number>();
 
@@ -93,6 +101,7 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
     this.health = options.health ?? ALL_GREEN;
     this.indexingDelayMs = options.indexingDelayMs ?? 0;
     this.buildUnsignedTx = options.buildUnsignedTx;
+    this.blockHeight = options.blockHeight ?? 1_000;
   }
 
   async probeHealth(): Promise<RuntimeHealth> {
@@ -102,31 +111,51 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
   async provisionIdentity(input: ProvisionIdentityInput): Promise<ProvisionIdentityResult> {
     const seed = `${input.walletId}:${input.sdpAddress}`;
     return {
-      shieldedAddress: `rings1${hashHex(`${seed}:address`, 16)}`,
-      keyRefs: (["viewing", "nullifier"] as const).map((kind) => ({
-        kind,
-        material: new SecretRef(hexToBytes(hashHex(`${seed}:${kind}`, 32))),
-        materialTag: "simulated",
-        keyVersion: "v1",
-      })),
+      identity: {
+        shieldedAddress: `rings1${hashHex(`${seed}:address`, 16)}`,
+        owner: input.sdpAddress,
+      },
+      registrationSignatures: [`sig:${hashHex(`${seed}:register`, 8)}`],
+      mergingEnabled: true,
+      materialTag: "simulated",
     };
   }
 
+  /**
+   * Each call reports one more shielded SOL note than the last, so a test can
+   * tell a second sync from a repeat of the first without reaching inside.
+   */
   async syncPhoton(input: SyncPhotonInput): Promise<SyncPhotonResult> {
     const next = (this.syncCounters.get(input.walletId) ?? 0) + 1;
     this.syncCounters.set(input.walletId, next);
+    const amountRaw = String(1_000_000_000 * next);
+
     return {
-      cursor: `slot:${next}`,
-      balances: [
+      balances: [{ mint: NATIVE_MINT, amountRaw, decimals: 9, symbol: "SOL" }],
+      history: [
         {
-          // biome-ignore lint/security/noSecrets: wrapped SOL mint address, not a secret.
-          mint: "So11111111111111111111111111111111111111112",
-          amountRaw: String(1_000_000_000 * next),
-          decimals: 9,
-          symbol: "SOL",
+          signature: `sig:${hashHex(`${input.walletId}:${next}`, 8)}`,
+          slot: String(next),
+          index: "0",
+          kind: "shield",
+          direction: "inbound",
+          mint: NATIVE_MINT,
+          amountRaw,
         },
       ],
+      report: {
+        storedNotes: next,
+        unparsedTransactions: 0,
+        undecryptableCandidates: 0,
+        unknownAssetIds: 0,
+        unknownAssetFields: 0,
+        degraded: false,
+      },
       indexedOperationSignatures: [],
+      observedAt: this.now(),
+      // The furthest slot this fake history reaches, so a caller that gates its
+      // next read on the position advances instead of asking for nothing.
+      observedSlot: String(next),
     };
   }
 
@@ -136,16 +165,21 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
       this.buildUnsignedTx?.(input) ?? bytesToBase64(hexToBytes(hashHex(`${seed}:tx`, 64)));
     return {
       outerUnsignedTxBase64,
-      requiredSigners: [input.operation.walletId],
-      ringsMetadata: new SecretRef({ seed: hashHex(`${seed}:metadata`, 16) }),
-    };
-  }
-
-  async requestProof(input: RequestProofInput): Promise<ProofArtifact> {
-    return {
-      source: "simulated",
-      ref: new SecretRef(hashHex(`${input.operationId}:proof`, 32)),
-      createdAt: this.now(),
+      // The owner signs the outer transaction. A wallet id here would type-check
+      // and read as an address to everything downstream, which is exactly the
+      // confusion a test double should not introduce.
+      requiredSigners: [input.owner],
+      lastValidBlockHeight: String(this.blockHeight),
+      // Honours pinned inputs, so a test can assert that a rebuild spends what
+      // the first build committed to rather than choosing again.
+      inputNotes: SPENDS.has(input.operation.opType)
+        ? (input.pinnedInputs ?? [`note:${hashHex(`${seed}:note`, 16)}`])
+        : [],
+      proof: {
+        source: "simulated",
+        ref: new SecretRef(hashHex(`${seed}:proof`, 32)),
+        createdAt: this.now(),
+      },
     };
   }
 
@@ -162,6 +196,9 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
     return {
       indexedAt: this.now(),
       photonRef: `photon:${hashHex(signature, 8)}`,
+      // Past the configured expiry, so a wallet gating its next read on this
+      // slot does not wait for a position the double will never report.
+      slot: String(this.blockHeight),
     };
   }
 }

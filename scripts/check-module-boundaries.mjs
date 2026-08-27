@@ -24,6 +24,7 @@ const MODULE_METADATA = [
       "@sdp/earn",
       "@sdp/env-config",
       "@sdp/helius-rings",
+      "@sdp/helius-rings-sdk",
       "@sdp/issuance",
       "@sdp/kamino",
       "@sdp/payments",
@@ -134,6 +135,13 @@ const MODULE_METADATA = [
     directory: "packages/sdp-helius-rings",
     purpose: "Helius Rings shielded-wallet domain types, state machine, and gateway port (devnet).",
     allowedDependencies: [],
+  },
+  {
+    name: "@sdp/helius-rings-sdk",
+    directory: "packages/sdp-helius-rings-sdk",
+    purpose:
+      "Rings (zolana) SDK adapter on @solana/kit 7; the only place that major lives. Exposes Kit-neutral DTOs so the rest of the workspace stays on Kit 6.",
+    allowedDependencies: ["@sdp/helius-rings"],
   },
   {
     name: "@sdp/private-channels",

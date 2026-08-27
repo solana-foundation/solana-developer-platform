@@ -22,6 +22,11 @@ test("generateSecret honors a field's secretEncoding", () => {
   // All cipher keys must be base64-32: EncryptionService rejects any other length.
   assert.equal(Buffer.from(generateSecret("SPC_CREDENTIAL_ENCRYPTION_KEY"), "base64").length, 32);
   assert.equal(Buffer.from(generateSecret("COUNTERPARTY_PII_ENCRYPTION_KEY"), "base64").length, 32);
+  // The Rings HKDF seed is read as exactly 32 bytes; a shorter one is rejected.
+  assert.equal(
+    Buffer.from(generateSecret("HELIUS_RINGS_DETERMINISTIC_KA_SEED"), "base64").length,
+    32
+  );
   assert.match(generateSecret("API_KEY_PEPPER"), /^[0-9a-f]{64}$/);
   assert.match(generateSecret("CREDENTIAL_FINGERPRINT_PEPPER"), /^[0-9a-f]{64}$/);
 });
@@ -32,8 +37,18 @@ test("autoSecretKeys without values lists only secret-kind fields", () => {
     "COUNTERPARTY_PII_ENCRYPTION_KEY",
     "CREDENTIAL_FINGERPRINT_PEPPER",
     "CUSTODY_ENCRYPTION_KEY",
+    "HELIUS_RINGS_DETERMINISTIC_KA_SEED",
     "SPC_CREDENTIAL_ENCRYPTION_KEY",
   ]);
+});
+
+test("autoSecretKeys only generates the Rings seed once the adapter selects it", () => {
+  const KEY = "HELIUS_RINGS_DETERMINISTIC_KA_SEED";
+  // A deployment that never turns Rings on should not be handed a permanent
+  // secret to look after, so this one follows its adapter like the three
+  // non-secret Rings settings do.
+  assert.ok(!autoSecretKeys(defaultValues()).has(KEY));
+  assert.ok(autoSecretKeys({ ...defaultValues(), HELIUS_RINGS_ADAPTER: "ts" }).has(KEY));
 });
 
 test("autoSecretKeys with default values includes the auto-mode Postgres password", () => {

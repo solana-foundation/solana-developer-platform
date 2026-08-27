@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { failEdgeFor, nextState, TRANSITIONS, type TransitionGuard } from "./state-machine";
 import type { OperationState } from "./types";
 
-const TERMINAL_STATES: OperationState[] = ["completed", "failed"];
+// `voided` included deliberately: it is reachable only through the reconcile
+// route, so `nextState` must refuse it exactly as it refuses the other two.
+const TERMINAL_STATES: OperationState[] = ["completed", "failed", "voided"];
 const NON_TERMINAL_WITHOUT_FAIL_EDGE: OperationState[] = ["draft"];
 
 describe("nextState", () => {

@@ -301,7 +301,7 @@ describe("runCronJob", () => {
     // Recurring payments are an always-on product surface: the collection tick
     // is deliberately behind no flag.
     expect(collectDueRecurringPayments).toHaveBeenCalledExactlyOnceWith(env);
-    // The rings poll gates itself on the flag plus the http adapter, so the job
+    // The rings poll gates itself on the flag plus the live adapter, so the job
     // hands it every tick — this is its only tick on a managed deployment.
     expect(pollRingsIndexing).toHaveBeenCalledExactlyOnceWith(env);
     expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);

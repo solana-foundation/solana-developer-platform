@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { FIELDS, SECTIONS } from "./fields";
+import { FIELDS, isFieldVisible, SECTIONS } from "./fields";
 import { defaultValues } from "./generate";
 import type { SectionId } from "./types";
 
@@ -40,4 +40,16 @@ test("multiselect default values are a subset of options", () => {
       assert.ok(allowed.has(v), `${f.key} default ${v} not in options`);
     }
   }
+});
+
+test("Helius API key is visible for the dedicated Helius RPC URL", () => {
+  const apiKey = FIELDS.find((field) => field.key === "SOLANA_RPC_HELIUS_API_KEY");
+  assert.ok(apiKey);
+  assert.equal(
+    isFieldVisible(apiKey, {
+      ...defaultValues(),
+      SOLANA_RPC_HELIUS_URL: "https://devnet.helius-rpc.com/rpc/{API_KEY}",
+    }),
+    true
+  );
 });

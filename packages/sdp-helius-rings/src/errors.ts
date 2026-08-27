@@ -9,7 +9,14 @@ export type HeliusRingsErrorCode =
   | "not_found"
   | "conflict"
   | "gateway_unavailable"
-  | "config_error";
+  | "config_error"
+  /** The wallet's spendable notes do not cover the requested amount. */
+  | "insufficient_balance"
+  /**
+   * A spend cannot be safely rebuilt or safely abandoned, because the notes it
+   * committed to are gone and it may already have settled. Never retried.
+   */
+  | "manual_reconciliation_required";
 
 export class HeliusRingsError extends Error {
   readonly code: HeliusRingsErrorCode;

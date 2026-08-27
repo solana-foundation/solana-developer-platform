@@ -91,7 +91,7 @@ vi.mock("./workflow-executions", () => ({
 
 // The rings poll pulls the rings service and through it the Solana signer stack;
 // mocked like the other wrappers. Registered unconditionally (the job itself
-// early-returns unless the rings flag and the http adapter are set), so it is
+// early-returns unless the rings flag and the live adapter are set), so it is
 // part of every schedule count below.
 vi.mock("./rings-indexing", () => ({
   RINGS_INDEXING_CRON: "* * * * *",

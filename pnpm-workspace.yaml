@@ -32,6 +32,9 @@ minimumReleaseAge: 10080
 # pnpm 10.16 matches minimumReleaseAgeExclude by exact dependency alias.
 # Keep @solana packages explicit until this workspace can rely on scoped wildcard exclusions.
 minimumReleaseAgeExclude:
+  # Alpha releases of the Rings SDK ship faster than the cooldown; the exact
+  # version is pinned instead, and changing it re-runs the devnet gate.
+  - '@heliuslabs/zolana'
   - '@solana/accounts'
   - '@solana/addresses'
   - '@solana/assertions'
@@ -100,5 +103,6 @@ minimumReleaseAgeExclude:
   - '@solana/sysvars'
   - '@solana/token-acl-gate-sdk'
   - '@solana/transaction-confirmation'
+  - '@solana/transaction-introspection'
   - '@solana/transaction-messages'
   - '@solana/transactions'

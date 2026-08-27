@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { createHeliusRingsWalletRepository } from "@/db/repositories";
 import app from "@/index";
+import { signedRingsTransaction } from "@/test/fixtures/rings-transactions";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
@@ -92,16 +93,39 @@ async function seedAuth(): Promise<void> {
       .bind(),
   ]);
 
-  const wallet = await createHeliusRingsWalletRepository(env).createWallet({
-    organizationId: TEST_ORG.id,
-    projectId: TEST_PROJECT.id,
+  const wallets = createHeliusRingsWalletRepository(env);
+  const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id };
+  const wallet = await wallets.createWallet({
+    ...scope,
     sdpWalletId: "wal_hr_route",
     name: "Treasury",
     materialTag: "simulated",
+    custodyWalletId: "cw_hr_route",
   });
   if (!wallet) throw new Error("rings wallet fixture was not created");
   ringsWalletId = wallet.id;
+
+  // Provisioned, so the operations below reach the gateway. An unprovisioned
+  // wallet is rejected before that as bad input, which is correct but is not
+  // what these tests are about.
+  await wallets.markProvisioned({
+    ...scope,
+    id: wallet.id,
+    shieldedAddress: "rings1routetestidentity",
+    ownerAddress: "HrRouteTestPublicKey111111111111111111111111",
+    materialTag: "simulated",
+    expectedStatus: "pending",
+  });
 }
+
+/**
+ * Seeded by 0057, so it passes the allowlist check. Every money flow needs an
+ * explicit asset — an absent one is a 400 rather than a default to SOL.
+ */
+const SHIELD_ASSET = {
+  mint: "So11111111111111111111111111111111111111112",
+  amountRaw: "1000000",
+};
 
 function authHeaders() {
   return {
@@ -149,7 +173,7 @@ describe("Helius Rings routes", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { wallets: Array<{ id: string; status: string }> } };
     expect(body.data.wallets).toHaveLength(1);
-    expect(body.data.wallets[0]).toMatchObject({ id: ringsWalletId, status: "pending" });
+    expect(body.data.wallets[0]).toMatchObject({ id: ringsWalletId, status: "ready" });
   });
 
   it("POST /wallets 404s for an unknown custody wallet", async () => {
@@ -183,7 +207,7 @@ describe("Helius Rings routes", () => {
     const res = await post("/v1/helius-rings/operations", {
       walletId: ringsWalletId,
       opType: "shield",
-      asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+      asset: SHIELD_ASSET,
       clientNonce: "route-nonce-1",
     });
     expect(res.status).toBe(201);
@@ -209,6 +233,7 @@ describe("Helius Rings routes", () => {
     const input = {
       walletId: ringsWalletId,
       opType: "shield",
+      asset: SHIELD_ASSET,
       clientNonce: "route-nonce-2",
     };
     const first = (await (await post("/v1/helius-rings/operations", input)).json()) as {
@@ -238,6 +263,7 @@ describe("Helius Rings routes", () => {
       await post("/v1/helius-rings/operations", {
         walletId: ringsWalletId,
         opType: "shield",
+        asset: SHIELD_ASSET,
         clientNonce: "route-nonce-3",
       })
     ).json()) as { data: { operation: { id: string } } };
@@ -259,6 +285,7 @@ describe("Helius Rings routes", () => {
       await post("/v1/helius-rings/operations", {
         walletId: ringsWalletId,
         opType: "shield",
+        asset: SHIELD_ASSET,
         clientNonce: "route-nonce-4",
       })
     ).json()) as { data: { operation: { id: string; state: string } } };
@@ -270,6 +297,75 @@ describe("Helius Rings routes", () => {
     expect(executed.status).toBe(200);
     const body = (await executed.json()) as { data: { operation: { state: string } } };
     expect(body.data.operation.state).toBe("failed");
+  });
+
+  it("returns 503 and preserves a failed signed row when Helius RPC is missing", async () => {
+    const operationId = "hro_route_missing_helius";
+    const transaction = signedRingsTransaction(11);
+    const db = getDb(env);
+    await db
+      .prepare(
+        `INSERT INTO helius_rings_operations
+           (id, organization_id, project_id, wallet_id, op_type, state, intent_key,
+            outer_tx_signature, failure_code, failure_message, retryable,
+            signed_transaction, last_valid_block_height, updated_at)
+         VALUES (?, ?, ?, ?, 'withdraw', 'failed', ?, ?, 'indexing_timeout',
+                 'photon never caught up', true, ?, '100', '2020-01-01T00:00:00.000Z')`
+      )
+      .bind(
+        operationId,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        ringsWalletId,
+        "sha256:route-missing-helius",
+        transaction.signature,
+        transaction.signedTxBase64
+      )
+      .run();
+
+    const snapshot = () =>
+      db
+        .prepare(
+          `SELECT state, failure_code, failure_message, retryable,
+                  signed_transaction, outer_tx_signature, updated_at
+             FROM helius_rings_operations
+            WHERE id = ?`
+        )
+        .bind(operationId)
+        .first<Record<string, unknown>>();
+    const before = await snapshot();
+    const previous = {
+      adapter: env.HELIUS_RINGS_ADAPTER,
+      indexerUrl: env.HELIUS_RINGS_INDEXER_URL,
+      proverUrl: env.HELIUS_RINGS_PROVER_URL,
+      seed: env.HELIUS_RINGS_DETERMINISTIC_KA_SEED,
+      rpcUrl: env.SOLANA_RPC_HELIUS_URL,
+      rpcKey: env.SOLANA_RPC_HELIUS_API_KEY,
+    };
+
+    try {
+      env.HELIUS_RINGS_ADAPTER = "ts";
+      env.HELIUS_RINGS_INDEXER_URL = "https://indexer.example.invalid";
+      env.HELIUS_RINGS_PROVER_URL = "https://prover.example.invalid";
+      env.HELIUS_RINGS_DETERMINISTIC_KA_SEED = Buffer.alloc(32, 7).toString("base64");
+      env.SOLANA_RPC_HELIUS_URL = undefined;
+      env.SOLANA_RPC_HELIUS_API_KEY = undefined;
+
+      const response = await post(`/v1/helius-rings/operations/${operationId}/reconcile`, {});
+
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "SERVICE_UNAVAILABLE" },
+      });
+      expect(await snapshot()).toEqual(before);
+    } finally {
+      env.HELIUS_RINGS_ADAPTER = previous.adapter;
+      env.HELIUS_RINGS_INDEXER_URL = previous.indexerUrl;
+      env.HELIUS_RINGS_PROVER_URL = previous.proverUrl;
+      env.HELIUS_RINGS_DETERMINISTIC_KA_SEED = previous.seed;
+      env.SOLANA_RPC_HELIUS_URL = previous.rpcUrl;
+      env.SOLANA_RPC_HELIUS_API_KEY = previous.rpcKey;
+    }
   });
 
   it("rejects an invalid operation body", async () => {

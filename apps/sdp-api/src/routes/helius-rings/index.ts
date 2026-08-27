@@ -15,14 +15,16 @@ import {
   listRingsWallets,
   listRingsZones,
   prepareRingsOperation,
+  reconcileRingsOperation,
   retryRingsOperation,
+  syncRingsWallet,
 } from "./handlers";
 
 const heliusRings = new Hono<{ Bindings: Env }>();
 
 /**
  * Router-wide gate: 403 unless the feature flag is on. The flag stays off in
- * every deployed environment until Track B lands the live gateway; the
+ * every deployed environment while the integration is incomplete; the
  * devnet-only guard inside HeliusRingsService is the second lock.
  */
 async function requireHeliusRingsFeature(c: Context<{ Bindings: Env }>, next: Next) {
@@ -41,6 +43,10 @@ heliusRings.get("/health", requirePermissions("payments:read"), getRingsHealth);
 heliusRings.get("/wallets", requirePermissions("payments:read"), listRingsWallets);
 heliusRings.post("/wallets", requirePermissions("payments:write"), createRingsWallet);
 heliusRings.get("/wallets/:walletId", requirePermissions("payments:read"), getRingsWallet);
+// A write permission for a read-only operation: syncing costs indexer and RPC
+// work on the caller's behalf, so it is gated like an action rather than like
+// a cached lookup.
+heliusRings.post("/wallets/:walletId/sync", requirePermissions("payments:write"), syncRingsWallet);
 heliusRings.get("/wallets/:walletId/zones", requirePermissions("payments:read"), listRingsZones);
 heliusRings.post("/wallets/:walletId/zones", requirePermissions("payments:write"), createRingsZone);
 
@@ -56,6 +62,13 @@ heliusRings.post(
   "/operations/:operationId/retry",
   requirePermissions("payments:write"),
   retryRingsOperation
+);
+// A write permission for what is really an observation, because its outcome
+// releases a wallet that the money-safety indexes are deliberately holding.
+heliusRings.post(
+  "/operations/:operationId/reconcile",
+  requirePermissions("payments:write"),
+  reconcileRingsOperation
 );
 
 export default heliusRings;

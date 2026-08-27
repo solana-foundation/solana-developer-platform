@@ -195,11 +195,20 @@ export const FIELDS: EnvField[] = [
     pattern: /^https:\/\//,
   },
   {
+    key: "SOLANA_RPC_HELIUS_URL",
+    section: "rpc",
+    kind: "url",
+    label: "Helius RPC URL",
+    pattern: /^https:\/\//,
+    help: "Dedicated Helius endpoint for Rings submission and history-capable reconciliation. May contain {API_KEY}.",
+  },
+  {
     key: "SOLANA_RPC_HELIUS_API_KEY",
     section: "rpc",
     kind: "password",
     label: "Helius API key",
-    visibleWhen: (v) => v.SOLANA_RPC_URL?.includes("helius") ?? false,
+    visibleWhen: (v) =>
+      Boolean(v.SOLANA_RPC_HELIUS_URL) || (v.SOLANA_RPC_URL?.includes("helius") ?? false),
   },
 
   // Clerk
@@ -733,9 +742,49 @@ export const FIELDS: EnvField[] = [
     defaultValue: "none",
     options: [
       { value: "none", label: "Not implemented (default)" },
-      { value: "http", label: "Live HTTP gateway" },
+      { value: "ts", label: "In-process Rings SDK" },
     ],
-    help: 'Only "http" activates the live Rings gateway and the indexing-poll job.',
+    help: 'Only "ts" activates the live Rings gateway and the indexing-poll job.',
+  },
+  {
+    key: "HELIUS_RINGS_INDEXER_URL",
+    section: "advanced",
+    kind: "url",
+    label: "Helius Rings indexer URL",
+    pattern: /^https?:\/\//,
+    visibleWhen: (v) => v.HELIUS_RINGS_ADAPTER === "ts",
+    help: "Photon indexer serving shielded state. Required by the in-process adapter.",
+  },
+  {
+    key: "HELIUS_RINGS_PROVER_URL",
+    section: "advanced",
+    kind: "url",
+    label: "Helius Rings prover URL",
+    pattern: /^https?:\/\//,
+    visibleWhen: (v) => v.HELIUS_RINGS_ADAPTER === "ts",
+    help: "Proving service for shielded transactions. Required by the in-process adapter.",
+  },
+  {
+    key: "HELIUS_RINGS_ALLOW_INSECURE_HTTP",
+    section: "advanced",
+    kind: "select",
+    label: "Allow plain http to Rings endpoints",
+    defaultValue: "false",
+    options: [
+      { value: "false", label: "Require https (default)" },
+      { value: "true", label: "Allow http" },
+    ],
+    visibleWhen: (v) => v.HELIUS_RINGS_ADAPTER === "ts",
+    help: "Needed only because the public devnet indexer and prover are plain http. In plaintext the indexer response reveals which notes an identity owns and the prover request carries the witness, so never enable this for an endpoint on the open internet.",
+  },
+  {
+    key: "HELIUS_RINGS_DETERMINISTIC_KA_SEED",
+    section: "secrets",
+    kind: "secret",
+    secretEncoding: "base64",
+    visibleWhen: (v) => v.HELIUS_RINGS_ADAPTER === "ts",
+    label: "Helius Rings derivation seed",
+    help: "Base64-encoded 256-bit master seed every shielded viewing and nullifier key is derived from. Changing it re-keys every identity, which a registered wallet cannot survive, so treat it as permanent once a wallet exists.",
   },
   {
     key: "SPC_CREDENTIAL_ENCRYPTION_KEY",
