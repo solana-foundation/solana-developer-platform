@@ -59,8 +59,18 @@ export const EARN_METRICS_REFRESH_MONITOR = "sdp-api-refresh-earn-metrics";
 export const EARN_METRICS_REFRESH_CRON = "*/5 * * * *";
 
 // Matches the catalogue sync: rows are environment-scoped, so each provider
-// refreshes once per environment. A mainnet-only provider is catalogued into
-// both, and its rows in both want the same fresh figures.
+// refreshes once per environment, reading that environment's OWN shelf.
+//
+// The mirrored mainnet rows a non-production environment holds since PRO-1742
+// are deliberately NOT covered by this pass: `updateStrategyMetrics` matches
+// the bare (provider, reference, environment) triple, so writing production's
+// figures into sandbox would need the same cluster-collision protection as the
+// sync's mirror lane. Accepted trade-off instead: the mirror lane re-upserts
+// production's accepted snapshots (currentApy and riskMetadata included) every
+// HOURLY pass, so a mirrored row's figures are up to an hour stale beside its
+// five-minute-fresh production twin, fine for a browse-only, fundable:false
+// review shelf. (A provider whose catalogue snapshots omit the optional
+// currentApy would mirror with no rate at all; none does today.)
 const REFRESHED_ENVIRONMENTS: readonly SdpEnvironment[] = ["sandbox", "production"];
 
 // Expected steady states, not incidents — same taxonomy as the catalogue sync.

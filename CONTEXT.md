@@ -24,6 +24,18 @@ _Avoid_: Customer tier, runtime health, selected provider, project setup
 A **Payment Transfer** whose transaction is built by a private-transfer **Provider** and executed through provider-specific routing metadata before final settlement.
 _Avoid_: Confidential transfer, shielded transfer
 
+**Private Channels Integration**:
+A **Privacy Integration** that connects an SDP project to Solana Private Channels and enables private capabilities within existing SDP product flows.
+_Avoid_: Private Channels product, Private Channels workspace, standalone Payments module
+
+**Privacy Integration**:
+A provider integration that adds private execution or settlement capabilities to existing SDP product flows.
+_Avoid_: Privacy product, private workspace, private payment rail
+
+**Private Channel Instance**:
+The external Private Channels environment connected to an SDP project for its private operations.
+_Avoid_: Private channel, SDP project, provider account
+
 **Counterparty Account**:
 A payment destination or payout instrument owned by a **Counterparty**. A Solana crypto-wallet **Counterparty Account** stores the recipient wallet owner address; token accounts are derived during payment execution.
 _Avoid_: Custody wallet, token account, provider account data
@@ -85,6 +97,9 @@ _Avoid_: Hard-coded job interval, Sentry schedule, self-hosted cron cadence
 - **Provider Availability** is distinct from provider runtime health.
 - **Provider Availability** is distinct from whether a **Project** has selected or initialized a **Provider**.
 - A **Private Transfer** is still a **Payment Transfer**; privacy changes how the transfer is prepared and submitted, not the wallet permission model.
+- A **Private Channels Integration** contributes private capabilities to existing SDP product flows instead of creating a separate product surface.
+- A **Private Channels Integration** belongs to the **Privacy Integration** provider family.
+- A **Private Channels Integration** connects an SDP project to a **Private Channel Instance**.
 - A **Counterparty** may have one or more **Counterparty Accounts**.
 - A **Recurring Payment** pays a **Counterparty Account** from an SDP custody source wallet.
 - A **Wallet Operation Envelope** describes exactly one **Wallet Operation**.

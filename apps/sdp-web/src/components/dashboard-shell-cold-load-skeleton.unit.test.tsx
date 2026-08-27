@@ -43,12 +43,16 @@ function renderColdLoad(pathname: string): string {
   pathnameMock.value = pathname;
   return renderToStaticMarkup(
     <DashboardShell
-      assetProfilesEnabled={false}
-      earnEnabled={false}
-      heliusRingsEnabled={false}
-      marketsEnabled={false}
+      flags={{
+        assetProfiles: false,
+        earn: false,
+        heliusRings: false,
+        markets: false,
+        organizationOnboarding: false,
+        payments: true,
+        privateChannels: false,
+      }}
       onboardingStatus={null}
-      privateChannelsEnabled={false}
     >
       <div>settled route content</div>
     </DashboardShell>
