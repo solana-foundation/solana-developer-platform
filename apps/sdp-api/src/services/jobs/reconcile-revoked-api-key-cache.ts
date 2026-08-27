@@ -126,27 +126,40 @@ export async function reconcileRevokedApiKeyCache(
   const recentlyRevoked = rows.results ?? [];
   const recentlyRotated = rotatedRows.results ?? [];
 
-  const repairedRevoked = await repairDivergentEntries(
-    db,
-    kv,
-    recentlyRevoked,
-    // Stale-active or unparseable entries need the terminal state written;
-    // an entry already terminal is converged.
-    (cached) => cached !== null && TERMINAL_STATUSES.has(cached.status)
-  );
+  // One pass over both scans rather than one pass each: the two row sets are
+  // disjoint (status != 'active' versus status = 'active'), so a single work
+  // list covers them without processing any key twice — and it holds the
+  // whole sweep to one SWEEP_CONCURRENCY budget instead of letting two
+  // passes overlap into double the cache round-trips. Revoked targets lead,
+  // so the freshest revocations are still repaired first under a truncating
+  // backlog.
+  const repairedTargets = await repairDivergentEntries(db, kv, [
+    ...recentlyRevoked.map(
+      (row): SweepTarget => ({
+        keyHash: row.key_hash,
+        kind: "revoked",
+        // Stale-active or unparseable entries need the terminal state
+        // written; an entry already terminal is converged.
+        isConverged: (cached) => cached !== null && TERMINAL_STATUSES.has(cached.status),
+      })
+    ),
+    ...recentlyRotated.map(
+      (row): SweepTarget => ({
+        keyHash: row.key_hash,
+        kind: "rotated",
+        // A terminal entry is stickier than any deadline; otherwise the
+        // entry is converged only when it carries the row's exact deadline.
+        isConverged: (cached) =>
+          cached !== null &&
+          (TERMINAL_STATUSES.has(cached.status) ||
+            cached.rotationDeadline === row.rotation_deadline),
+      })
+    ),
+  ]);
 
-  const repairedRotated = await repairDivergentEntries(
-    db,
-    kv,
-    recentlyRotated,
-    // A terminal entry is stickier than any deadline; otherwise the entry
-    // is converged only when it carries the row's exact deadline.
-    (cached, row) =>
-      cached !== null &&
-      (TERMINAL_STATUSES.has(cached.status) || cached.rotationDeadline === row.rotation_deadline)
-  );
-
-  const repaired = repairedRevoked + repairedRotated;
+  const repairedRevoked = repairedTargets.filter((target) => target.kind === "revoked").length;
+  const repairedRotated = repairedTargets.length - repairedRevoked;
+  const repaired = repairedTargets.length;
   const scanned = recentlyRevoked.length + recentlyRotated.length;
 
   if (repaired > 0) {
@@ -167,40 +180,46 @@ export async function reconcileRevokedApiKeyCache(
   return { scanned, repaired };
 }
 
+/** One key to check, and what "already converged" means for it. */
+interface SweepTarget {
+  keyHash: string;
+  kind: "revoked" | "rotated";
+  /** A null `cached` means the slot held a payload that did not parse. */
+  isConverged: (cached: CachedApiKey | null) => boolean;
+}
+
 /**
- * Read each row's cache entry and refresh the ones that diverge. An empty
- * slot is always converged (the next request misses and re-reads Postgres
- * through the verified fill path); a present entry is judged by
- * `isConverged`, with a null `cached` meaning the payload did not parse.
+ * Read each target's cache entry and refresh the ones that diverge,
+ * returning the targets repaired. An empty slot is always converged (the
+ * next request misses and re-reads Postgres through the verified fill path).
  *
  * Fixed-width chunks: bounded overlap keeps a large backlog from becoming
  * thousands of sequential round-trips, without unbounded fan-out starving
  * the connection pool that the payment/custody jobs share.
  */
-async function repairDivergentEntries<T extends { key_hash: string }>(
+async function repairDivergentEntries(
   db: ReturnType<typeof getDb>,
   kv: ReturnType<typeof createKVStoreSet>["apiKeys"],
-  rows: T[],
-  isConverged: (cached: CachedApiKey | null, row: T) => boolean
-): Promise<number> {
-  let repaired = 0;
+  targets: SweepTarget[]
+): Promise<SweepTarget[]> {
+  const repaired: SweepTarget[] = [];
 
-  for (let offset = 0; offset < rows.length; offset += SWEEP_CONCURRENCY) {
-    const chunk = rows.slice(offset, offset + SWEEP_CONCURRENCY);
+  for (let offset = 0; offset < targets.length; offset += SWEEP_CONCURRENCY) {
+    const chunk = targets.slice(offset, offset + SWEEP_CONCURRENCY);
     const outcomes = await Promise.all(
-      chunk.map(async (row) => {
-        const raw = await kv.get(apiKeyCacheKey(row.key_hash));
+      chunk.map(async (target) => {
+        const raw = await kv.get(apiKeyCacheKey(target.keyHash));
         if (raw === null) {
-          return false;
+          return null;
         }
-        if (isConverged(tryParseCachedEntry(raw), row)) {
-          return false;
+        if (target.isConverged(tryParseCachedEntry(raw))) {
+          return null;
         }
-        await refreshApiKeyCache(db, kv, row.key_hash);
-        return true;
+        await refreshApiKeyCache(db, kv, target.keyHash);
+        return target;
       })
     );
-    repaired += outcomes.filter(Boolean).length;
+    repaired.push(...outcomes.filter((target): target is SweepTarget => target !== null));
   }
 
   return repaired;
